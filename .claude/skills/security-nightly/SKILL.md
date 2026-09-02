@@ -329,12 +329,14 @@ DeepSec drives Claude through the Claude Agent SDK, and both it and `claude -p`
 prefer an Anthropic API key over the machine's claude.ai login whenever one is
 visible. This loop bills the operator's subscription only. Keep the model route
 at `ai: {mode: "local", provider: "local"}` in `deepsec.config.ts`, never
-provision `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` into `.deepsec/.env*` or
-the launch environment, and treat this stderr line as a FAILED stage, not a
+provision `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` / `CLAUDE_CODE_API_KEY`
+/ `CLAUDE_API_KEY` / Bedrock / Vertex reroutes into `.deepsec/.env*` or the
+launch environment, and treat this stderr line as a FAILED stage, not a
 warning: "claude.ai connectors are disabled because ANTHROPIC_API_KEY or
 another auth source is set and takes precedence over your claude.ai login".
-The wrapper strips the key variables and refuses when a key file is present,
-so a stage that reports API-key auth means the wrapper was bypassed.
+The wrapper unsets those variables and refuses when any of them is set in the
+environment or a key file, so a stage that reports API-key auth means the
+wrapper was bypassed.
 
 When the workspace IS bootstrapped and matches approved private runner state,
 require a clean tree, require `git rev-parse HEAD` to equal `HEAD_SHA`, verify

@@ -385,6 +385,32 @@ if [[ ! -f "$LOOP_MARKER" ]]; then
   fi
 fi
 
+# Subscription only. Claude Code prefers an API key / Bedrock / Vertex over
+# the claude.ai login whenever one is visible. Unset AND refuse: a hand-run
+# that inherited a key, or a gitignored env file the agent would reload,
+# would silently bill metered usage. Name the variable or file, never the value.
+BILLING_REROUTE_VARS="ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL CLAUDE_CODE_API_KEY CLAUDE_API_KEY CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX AWS_BEARER_TOKEN_BEDROCK"
+for _billing_var in $BILLING_REROUTE_VARS; do
+  if [[ -n "${!_billing_var:-}" ]]; then
+    echo "REFUSING: $_billing_var is set; this loop bills the claude.ai subscription only — unset it" >&2
+    report "REFUSED" "$_billing_var is set; the agent would bill metered API usage instead of the claude.ai subscription — unset it from the launch environment" || true
+    exit 2
+  fi
+done
+unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL \
+      CLAUDE_CODE_API_KEY CLAUDE_API_KEY \
+      CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX AWS_BEARER_TOKEN_BEDROCK
+unset _billing_var
+
+BILLING_REROUTE_ASSIGN='^[[:space:]]*(export[[:space:]]+)?(ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN|ANTHROPIC_BASE_URL|CLAUDE_CODE_API_KEY|CLAUDE_API_KEY|CLAUDE_CODE_USE_BEDROCK|CLAUDE_CODE_USE_VERTEX|AWS_BEARER_TOKEN_BEDROCK)[[:space:]]*=[[:space:]]*[^[:space:]#]'
+for key_file in .deepsec/.env .deepsec/.env.local .deepsec/.env.*.local .env.local; do
+  [[ -f "$key_file" ]] || continue
+  grep -qE "$BILLING_REROUTE_ASSIGN" "$key_file" || continue
+  echo "REFUSING: $key_file holds billing-reroute credentials; this loop bills the claude.ai subscription only — remove the key line" >&2
+  report "REFUSED" "$key_file holds billing-reroute credentials; the agent would bill metered API usage instead of the claude.ai subscription — remove the key line" || true
+  exit 2
+done
+
 RUNNER_LOCK="$REPO/.weekend-runner.lock"
 acquire_runner_lock "$RUNNER_LOCK" || {
   echo "REFUSING: another weekend run owns $REPO" >&2
@@ -486,16 +512,13 @@ fi
 ROUND_LOG_MARK=0
 MAX_ATTEMPTS=3
 RETRY_PAUSE_SECS=60
-# A subscription quota is per MODEL, so an exhausted one is a reason to drop a
-# rung, not to lose the night. 2026-09-01: `~/.claude/settings.json` carried
-# `model: claude-fable-5[1m]`, these wrappers passed no --model and inherited
-# it, that model's quota was gone, and `claude -p` printed one line and exited
-# 1 in under a second — the security loop's audit AND remediate both died that
-# way at 00:00 while `--model opus` and `--model sonnet` answered normally on
-# the same Max login. Pinning the model also takes the operator's global
-# default off the unattended path: an interactive session changing it must not
-# decide what tonight runs on.
-QUOTA_EXHAUSTED_MARKER="out of usage credits"
+# Credits, per-model rate limit, and provider capacity are per MODEL, so an
+# exhausted one is a reason to drop a rung, not to lose the night. 2026-09-01:
+# `~/.claude/settings.json` carried `model: claude-fable-5[1m]`, these wrappers
+# passed no --model and inherited it, that model's quota was gone, and
+# `claude -p` printed one line and exited 1. Pinning the model also takes the
+# operator's global default off the unattended path. Session/weekly caps are
+# shared across models and must not match here.
 MODEL_LADDER="${RADON_WEEKEND_MODEL_LADDER:-claude-fable-5[1m] claude-opus-5[1m] claude-opus-5 claude-sonnet-5}"
 read -r -a MODEL_RUNGS <<< "$MODEL_LADDER"
 MODEL_INDEX=0
@@ -505,7 +528,8 @@ ALL_MODELS_EXHAUSTED=0
 # is per phase and every round appends to it, so a whole-file grep would let
 # round 1's exhausted rung drop a model on every later round forever. R-426.
 is_quota_exhausted() {
-  tail -c "+$((ROUND_LOG_MARK + 1))" "$RUN_LOG" 2>/dev/null | grep -qF "$QUOTA_EXHAUSTED_MARKER"
+  tail -c "+$((ROUND_LOG_MARK + 1))" "$RUN_LOG" 2>/dev/null | grep -qiE \
+    'out of usage credits|You.ve hit your (Opus|Sonnet) limit|Request rejected \(429\)|rate.limit|rate_limit|overloaded|experiencing high load'
 }
 
 is_transient_network_failure() {
@@ -569,7 +593,7 @@ run_phase() {
     if (( RC != 0 )) && is_quota_exhausted; then
       if (( MODEL_INDEX + 1 < ${#MODEL_RUNGS[@]} )); then
         MODEL_INDEX=$((MODEL_INDEX + 1))
-        echo "[documentation-nightly] ${MODEL_RUNGS[$((MODEL_INDEX - 1))]} is out of usage credits; dropping to ${MODEL_RUNGS[$MODEL_INDEX]}" | tee -a "$RUN_LOG"
+        echo "[documentation-nightly] ${MODEL_RUNGS[$((MODEL_INDEX - 1))]} is exhausted; dropping to ${MODEL_RUNGS[$MODEL_INDEX]}" | tee -a "$RUN_LOG"
         continue
       fi
       ALL_MODELS_EXHAUSTED=1

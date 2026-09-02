@@ -415,27 +415,34 @@ for credential_file in .env .env.ib-mode web/.env; do
 done
 
 # Rail 5b: model spend rides the operator's claude.ai subscription, never an
-# Anthropic API key. Claude Code and the Claude Agent SDK subprocesses that
-# `deepsec process`/`revalidate` fan out both PREFER a key over the claude.ai
-# login whenever one is visible, and only whisper it on stderr ("claude.ai
-# connectors are disabled because ANTHROPIC_API_KEY or another auth source is
-# set and takes precedence over your claude.ai login"). On 2026-09-01 that put
-# an 83-finding process + revalidate round on metered API billing with nothing
-# in the run record to show for it. Strip the environment first: launchd hands
-# this job no key today, but a hand-run `cycle` from an operator shell inherits
-# the whole environment.
+# API key or Bedrock/Vertex reroute. Claude Code prefers any of these over
+# the claude.ai login whenever one is visible ("claude.ai connectors are
+# disabled because ANTHROPIC_API_KEY or another auth source is set"). Unset
+# AND refuse: a hand-run that inherited a key, or a gitignored env file the
+# scanners reload themselves, would silently bill metered usage. Name the
+# variable or file, never the value.
+BILLING_REROUTE_VARS="ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL CLAUDE_CODE_API_KEY CLAUDE_API_KEY CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX AWS_BEARER_TOKEN_BEDROCK"
+for _billing_var in $BILLING_REROUTE_VARS; do
+  if [[ -n "${!_billing_var:-}" ]]; then
+    echo "REFUSING: $_billing_var is set; this loop bills the claude.ai subscription only — unset it" >&2
+    report "REFUSED" "$_billing_var is set; the agent would bill metered API usage instead of the claude.ai subscription — unset it from the launch environment" || true
+    exit 2
+  fi
+done
 unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL \
+      CLAUDE_CODE_API_KEY CLAUDE_API_KEY \
       CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX AWS_BEARER_TOKEN_BEDROCK
+unset _billing_var
 
 # `unset` cannot reach a key the scanner loads for itself: deepsec reads
 # .deepsec/.env*.local out of its own workspace, which is gitignored and
-# survives every nightly `git clean`. Refuse rather than edit operator state —
-# and never echo the value, only the path the operator has to clear.
+# survives every nightly `git clean`. Refuse rather than edit operator state.
+BILLING_REROUTE_ASSIGN='^[[:space:]]*(export[[:space:]]+)?(ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN|ANTHROPIC_BASE_URL|CLAUDE_CODE_API_KEY|CLAUDE_API_KEY|CLAUDE_CODE_USE_BEDROCK|CLAUDE_CODE_USE_VERTEX|AWS_BEARER_TOKEN_BEDROCK)[[:space:]]*=[[:space:]]*[^[:space:]#]'
 for key_file in .deepsec/.env .deepsec/.env.local .deepsec/.env.*.local .env.local; do
   [[ -f "$key_file" ]] || continue
-  grep -qE '^[[:space:]]*(export[[:space:]]+)?ANTHROPIC_(API_KEY|AUTH_TOKEN)[[:space:]]*=[[:space:]]*[^[:space:]]' "$key_file" || continue
-  echo "REFUSING: $key_file holds Anthropic API key material; this loop bills the claude.ai subscription only — remove the key line" >&2
-  report "REFUSED" "$key_file holds Anthropic API key material; the scanners would bill metered API usage instead of the claude.ai subscription — remove the key line (rotate the key too, it has been used)" || true
+  grep -qE "$BILLING_REROUTE_ASSIGN" "$key_file" || continue
+  echo "REFUSING: $key_file holds billing-reroute credentials; this loop bills the claude.ai subscription only — remove the key line" >&2
+  report "REFUSED" "$key_file holds billing-reroute credentials; the agent would bill metered API usage instead of the claude.ai subscription — remove the key line" || true
   exit 2
 done
 
@@ -549,7 +556,6 @@ RETRY_PAUSE_SECS=60
 # the same Max login. Pinning the model also takes the operator's global
 # default off the unattended path: an interactive session changing it must not
 # decide what tonight runs on.
-QUOTA_EXHAUSTED_MARKER="out of usage credits"
 MODEL_LADDER="${RADON_WEEKEND_MODEL_LADDER:-claude-fable-5[1m] claude-opus-5[1m] claude-opus-5 claude-sonnet-5}"
 read -r -a MODEL_RUNGS <<< "$MODEL_LADDER"
 MODEL_INDEX=0
@@ -567,8 +573,11 @@ use_model_rung
 # Scoped to THIS round's slice of the log, like the ceiling detector: RUN_LOG
 # is per phase and every round appends to it, so a whole-file grep would let
 # round 1's exhausted rung drop a model on every later round forever. R-426.
+# Credits, per-model rate limit, and provider capacity are per MODEL; a
+# session/weekly cap is shared and must not match here.
 is_quota_exhausted() {
-  tail -c "+$((ROUND_LOG_MARK + 1))" "$RUN_LOG" 2>/dev/null | grep -qF "$QUOTA_EXHAUSTED_MARKER"
+  tail -c "+$((ROUND_LOG_MARK + 1))" "$RUN_LOG" 2>/dev/null | grep -qiE \
+    'out of usage credits|You.ve hit your (Opus|Sonnet) limit|Request rejected \(429\)|rate.limit|rate_limit|overloaded|experiencing high load'
 }
 
 is_transient_network_failure() {
@@ -633,7 +642,7 @@ run_phase() {
       if (( MODEL_INDEX + 1 < ${#MODEL_RUNGS[@]} )); then
         MODEL_INDEX=$((MODEL_INDEX + 1))
         use_model_rung
-        echo "[security-nightly] ${MODEL_RUNGS[$((MODEL_INDEX - 1))]} is out of usage credits; dropping to ${MODEL_RUNGS[$MODEL_INDEX]}" | tee -a "$RUN_LOG"
+        echo "[security-nightly] ${MODEL_RUNGS[$((MODEL_INDEX - 1))]} is exhausted; dropping to ${MODEL_RUNGS[$MODEL_INDEX]}" | tee -a "$RUN_LOG"
         continue
       fi
       ALL_MODELS_EXHAUSTED=1

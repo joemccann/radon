@@ -62,6 +62,8 @@ QUOTA_LINE = (
     "You're out of usage credits. Switch to another model, or manage usage "
     "credits at claude.ai/settings/usage?from=cc_cli_limit_message, to continue."
 )
+RATE_LIMIT_LINE = "Request rejected (429)"
+CAPACITY_LINE = "API Error: Repeated 529 Overloaded errors"
 # The security wrapper refuses to call a phase OK without this; harmless noise
 # for the other four.
 COMPLETION = "SECURITY-NIGHTLY PHASE COMPLETE: audit"
@@ -88,7 +90,13 @@ def _clone(tmp_path: Path, wrapper: Path) -> Path:
     return repo
 
 
-def _stub_bin(tmp_path: Path, models_log: Path, exhausted: Path, gh_log: Path) -> Path:
+def _stub_bin(
+    tmp_path: Path,
+    models_log: Path,
+    exhausted: Path,
+    gh_log: Path,
+    exhausted_line: str = QUOTA_LINE,
+) -> Path:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     # What the agent's OWN nested `claude` calls would inherit. The wrapper's
@@ -114,7 +122,7 @@ def _stub_bin(tmp_path: Path, models_log: Path, exhausted: Path, gh_log: Path) -
             f'printf "%s\\n" "$model" >> "{models_log}"\n'
             f'printf "%s\\n" "${{RADON_WEEKEND_MODEL:-<unset>}}" >> "{env_models}"\n'
             f'if grep -qxF -- "$model" "{exhausted}"; then\n'
-            f"  echo \"{QUOTA_LINE}\"\n"
+            f"  echo \"{exhausted_line}\"\n"
             "  exit 1\n"
             "fi\n"
             f'echo "{COMPLETION}"\n'
@@ -140,8 +148,16 @@ def _stub_bin(tmp_path: Path, models_log: Path, exhausted: Path, gh_log: Path) -
     return bin_dir
 
 
-def _audit(tmp_path: Path, loop: str, exhausted_models, ladder: str | None = None):
-    return _run(tmp_path, loop, "audit", exhausted_models, ladder)
+def _audit(
+    tmp_path: Path,
+    loop: str,
+    exhausted_models,
+    ladder: str | None = None,
+    exhausted_line: str = QUOTA_LINE,
+):
+    return _run(
+        tmp_path, loop, "audit", exhausted_models, ladder, exhausted_line=exhausted_line
+    )
 
 
 def _run(
@@ -150,13 +166,16 @@ def _run(
     phase: str,
     exhausted_models,
     ladder: str | None = None,
+    exhausted_line: str = QUOTA_LINE,
 ):
     wrapper = LOOPS[loop]
     models_log = tmp_path / "models.txt"
     gh_log = tmp_path / "gh.log"
     exhausted = tmp_path / "exhausted.txt"
     exhausted.write_text("".join(f"{m}\n" for m in exhausted_models), encoding="utf-8")
-    bin_dir = _stub_bin(tmp_path, models_log, exhausted, gh_log)
+    bin_dir = _stub_bin(
+        tmp_path, models_log, exhausted, gh_log, exhausted_line=exhausted_line
+    )
     repo = _clone(tmp_path, wrapper)
     env = {
         "PATH": f"{bin_dir}:/usr/bin:/bin",
@@ -234,6 +253,28 @@ class TestAnExhaustedQuotaDropsARung:
         assert "claude.ai/settings/usage" in calls, (
             f"{loop}: the dead-man must carry the one place this is fixed: {calls!r}"
         )
+
+    def test_a_rate_limit_drops_a_rung_instead_of_exit_1(self, tmp_path, loop):
+        proc, models, _calls = _audit(
+            tmp_path, loop, [LADDER[0]], exhausted_line=RATE_LIMIT_LINE
+        )
+        assert models[:2] == LADDER[:2], (
+            f"{loop}: a 429 rate limit on {LADDER[0]!r} must drop to "
+            f"{LADDER[1]!r}, not exit 1; models attempted: {models!r}\n"
+            f"{proc.stdout}{proc.stderr}"
+        )
+        assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
+
+    def test_a_capacity_overload_drops_a_rung_instead_of_exit_1(self, tmp_path, loop):
+        proc, models, _calls = _audit(
+            tmp_path, loop, [LADDER[0]], exhausted_line=CAPACITY_LINE
+        )
+        assert models[:2] == LADDER[:2], (
+            f"{loop}: a 529 overload on {LADDER[0]!r} must drop to "
+            f"{LADDER[1]!r}, not exit 1; models attempted: {models!r}\n"
+            f"{proc.stdout}{proc.stderr}"
+        )
+        assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
 
 
 # DOC-044 (2026-09-01): every case above runs `audit`, where MAX_ROUNDS=1, so
