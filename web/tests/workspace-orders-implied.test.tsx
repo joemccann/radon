@@ -8,7 +8,7 @@
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
-import WorkspaceSections, { groupExecutedOrders } from "../components/WorkspaceSections";
+import WorkspaceSections, { groupExecutedOrders, closedGroupReturnPct } from "../components/WorkspaceSections";
 import { bsCall, bsPut } from "../lib/blackScholes";
 import { yearsToExpiry } from "../lib/impliedValue";
 import type { ExecutedOrder, OrdersData, PriceData } from "../lib/types";
@@ -111,6 +111,22 @@ describe("WorkspaceSections orders — Implied column", () => {
       fill("b", "intent-b", "2026-08-13T14:31:00Z"),
     ]);
     expect(groups).toHaveLength(2);
+  });
+
+  it("classifies a stock SELL carrying realizedPNL as a close and surfaces its P&L", () => {
+    const groups = groupExecutedOrders([
+      {
+        execId: "s1", orderRef: "sell-avgo", symbol: "AVGO", side: "SLD",
+        quantity: 1000, avgPrice: 355, commission: 9.91, realizedPNL: 10650,
+        time: "2026-09-02T20:24:15Z", exchange: "SMART",
+        contract: { conId: 5, symbol: "AVGO", secType: "STK", strike: null, right: null, expiry: null },
+      },
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].isClosing).toBe(true);
+    expect(groups[0].totalPnL).toBeCloseTo(10650, 2);
+    // Return % uses the ×1 stock multiplier: 10650 / (355×1000 − 10650) ≈ 3.09%
+    expect(closedGroupReturnPct(groups[0])).toBeCloseTo(3.093, 2);
   });
 
   it("uses quantity-weighted BAG execution price and rejects incomplete aggregates", () => {
