@@ -440,6 +440,13 @@ class TestNotifyPhaseIsFenced:
         assert "0600" in curl, wrapper.name
         assert '--data-urlencode "token=${token}"' not in curl, wrapper.name
         assert '--data-urlencode "user=${user}"' not in curl, wrapper.name
+        # -q must be argv[1], immediately before --config.
+        assert '/usr/bin/curl -q --config' in curl, wrapper.name
+        invoke = [ln.strip() for ln in curl.splitlines() if "curl" in ln and "--config" in ln]
+        assert invoke, wrapper.name
+        first = invoke[-1].split()
+        curl_i = next(i for i, tok in enumerate(first) if tok.endswith("curl") or "/curl" in tok)
+        assert first[curl_i + 1] == "-q", (wrapper.name, first)
 
     @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
     def test_notify_cred_strips_cr_not_a_quoted_newline(self, wrapper: Path):
@@ -564,6 +571,7 @@ class TestNotifyPhaseIsFenced:
         assert py_calls == "", py_calls
         curl_calls = curl_log.read_text(encoding="utf-8") if curl_log.exists() else ""
         argv_line = curl_calls.splitlines()[0] if curl_calls.strip() else ""
+        assert argv_line.split()[0] == "-q", argv_line
         assert "api.pushover.net" in curl_calls, curl_calls
         assert "title=radon security audit" in curl_calls, curl_calls
         assert "test-token" not in argv_line, argv_line
@@ -641,6 +649,8 @@ class TestNotifyPhaseIsFenced:
         assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
         assert not tr_marker.exists(), "PATH tr must not run inside _notify_curl"
         curl_calls = curl_log.read_text(encoding="utf-8") if curl_log.exists() else ""
+        argv_line = curl_calls.splitlines()[0] if curl_calls.strip() else ""
+        assert argv_line.split()[0] == "-q", argv_line
         assert "api.pushover.net" in curl_calls, curl_calls
 
 

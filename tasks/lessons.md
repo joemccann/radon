@@ -1,5 +1,13 @@
 # Lessons
 
+## 2026-09-02 — curl -q must be argv[1] or curlrc intercepts the 0600 POST
+
+- `_notify_curl` `--config` still loads `$HOME/.curlrc` unless `-q` is
+  argv[1]. A skip-permissions agent can plant curlrc outside the clone.
+- REL-180 `_run` must copy the wrapper, rewrite `/usr/bin/curl` to a stub,
+  and drop host `PUSHOVER_*`. Inheriting `os.environ` plus pinned curl
+  fires a real page from CI.
+
 ## 2026-09-02 — Wrapper dead-man comments are not the three-section write-up
 
 - Captain: wrapper OK/runner-health comments stay a distinct PHASE status

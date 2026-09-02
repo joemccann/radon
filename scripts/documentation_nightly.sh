@@ -187,7 +187,8 @@ _notify_curl() {
     printf 'data-urlencode = "message=%s"\n' "$message"
     printf 'data-urlencode = "priority=0"\n'
   } >"$cfg"
-  /usr/bin/curl --config "$cfg" >/dev/null 2>&1 || true
+  # -q must be argv[1]: skip $HOME/.curlrc, $CURL_HOME/.curlrc, XDG curlrc.
+  /usr/bin/curl -q --config "$cfg" >/dev/null 2>&1 || true
   /usr/bin/rm -f "$cfg"
 }
 
