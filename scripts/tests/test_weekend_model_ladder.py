@@ -64,6 +64,13 @@ QUOTA_LINE = (
 )
 RATE_LIMIT_LINE = "Request rejected (429)"
 CAPACITY_LINE = "API Error: Repeated 529 Overloaded errors"
+# Claude Code tool-skip categories. Official docs say retry the SAME model.
+# Bare `overloaded` / `rate.limit` in is_quota_exhausted treated these as a
+# dead rung and walked the ladder, including on timeout 124 whose log merely
+# mentioned rate limits.
+TOOL_SKIP_OVERLOADED = "Claude Code skipped a tool (overloaded)"
+TOOL_SKIP_RATE_LIMITED = "Claude Code skipped a tool (rate-limited)"
+CASUAL_RATE_LIMITS = "the 500 mentioned rate limits in a timeout log"
 # The security wrapper refuses to call a phase OK without this; harmless noise
 # for the other four.
 COMPLETION = "SECURITY-NIGHTLY PHASE COMPLETE: audit"
@@ -275,6 +282,47 @@ class TestAnExhaustedQuotaDropsARung:
             f"{proc.stdout}{proc.stderr}"
         )
         assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
+
+    def test_quota_matcher_is_the_cli_strings_not_bare_words(self, loop):
+        body = LOOPS[loop].read_text(encoding="utf-8")
+        start = body.index("is_quota_exhausted()")
+        fn = body[start:body.index("\n}\n", start)]
+        assert "rate.limit" not in fn, (
+            f"{loop}: bare rate.limit matches tool-skip (rate-limited) and "
+            f"ordinary text: {fn}"
+        )
+        assert "rate_limit" not in fn, (
+            f"{loop}: bare rate_limit is wider than Request rejected (429): {fn}"
+        )
+        assert re.search(r"(?<!529 )overloaded", fn, re.I) is None, (
+            f"{loop}: bare overloaded matches tool-skip (overloaded); keep "
+            f"'529 Overloaded' only: {fn}"
+        )
+        assert "529 Overloaded" in fn, fn
+        assert "Request rejected \\(429\\)" in fn, fn
+        assert "out of usage credits" in fn, fn
+        assert "experiencing high load" in fn, fn
+
+    @pytest.mark.parametrize(
+        "line",
+        (TOOL_SKIP_OVERLOADED, TOOL_SKIP_RATE_LIMITED, CASUAL_RATE_LIMITS),
+    )
+    def test_a_tool_skip_or_casual_mention_does_not_drop_a_rung(
+        self, tmp_path, loop, line
+    ):
+        proc, models, calls = _audit(
+            tmp_path, loop, [LADDER[0]], exhausted_line=line
+        )
+        assert models == [LADDER[0]], (
+            f"{loop}: {line!r} on {LADDER[0]!r} must retry/fail that rung, "
+            f"not walk the ladder; models attempted: {models!r}\n"
+            f"{proc.stdout}{proc.stderr}"
+        )
+        assert proc.returncode != 0, (proc.returncode, proc.stdout, proc.stderr)
+        assert "all model quotas exhausted" not in calls, (
+            f"{loop}: a tool-skip or a log that merely mentions rate limits "
+            f"was reported as every quota gone: {calls!r}"
+        )
 
 
 # DOC-044 (2026-09-01): every case above runs `audit`, where MAX_ROUNDS=1, so

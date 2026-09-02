@@ -1,5 +1,19 @@
 # Lessons
 
+## 2026-09-02 — Quota drop matches CLI strings; USE_* flags are truthy-only
+
+- `is_quota_exhausted` must not grep bare `rate.limit` / `rate_limit` /
+  `overloaded`. Claude Code prints tool-skip categories `(rate-limited)`
+  and `(overloaded)` that retry the same model; ordinary agent text and a
+  500/timeout log that merely mentions rate limits also match. Drop only
+  on the CLI strings: credits, You've hit your Opus/Sonnet limit, Request
+  rejected (429), 529 Overloaded, experiencing high load. Quota is checked
+  before transient-network retry and on any RC != 0 including timeout 124.
+- `CLAUDE_CODE_USE_BEDROCK=0`/`false` is subscription-only (locks Bedrock
+  off). Refuse USE_* only for 1/true/yes; keep -n refuse for keys/tokens.
+  Match those with bash `case` character classes, never PATH `tr`. A
+  planted venv `tr` is the same class of skip as a planted `timeout`.
+
 ## 2026-09-02 — Snapshot Pushover creds before the agent; comment-only issue writes
 
 - `_notify_curl` read WEEKEND_ROOT/.env at page time. Launchd does not set

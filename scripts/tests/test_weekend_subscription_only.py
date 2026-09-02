@@ -32,16 +32,21 @@ LOOPS = {
 
 # Every var that reroutes Claude Code off the claude.ai subscription. The
 # security wrapper used to unset six of these and refuse only two in files.
-BILLING_REROUTE_VARS = (
+BILLING_REROUTE_KEYS = (
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_AUTH_TOKEN",
     "ANTHROPIC_BASE_URL",
     "CLAUDE_CODE_API_KEY",
     "CLAUDE_API_KEY",
-    "CLAUDE_CODE_USE_BEDROCK",
-    "CLAUDE_CODE_USE_VERTEX",
     "AWS_BEARER_TOKEN_BEDROCK",
 )
+BILLING_REROUTE_FLAGS = (
+    "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_VERTEX",
+)
+BILLING_REROUTE_VARS = BILLING_REROUTE_KEYS + BILLING_REROUTE_FLAGS
+TRUTHY_FLAG_VALUES = ("1", "true", "yes", "TRUE", "Yes")
+FALSY_FLAG_VALUES = ("0", "false", "no")
 
 KEY = "sk-ant-api03-CONTRACT-TEST-NOT-A-REAL-KEY"
 COMPLETION = "SECURITY-NIGHTLY PHASE COMPLETE: audit"
@@ -155,7 +160,7 @@ class TestTheWrapperUnsetsAndRefusesBillingReroutes:
 
 @pytest.mark.parametrize("loop", sorted(LOOPS))
 class TestAnApiKeyInTheEnvironmentRefusesTheRun:
-    @pytest.mark.parametrize("var", BILLING_REROUTE_VARS)
+    @pytest.mark.parametrize("var", BILLING_REROUTE_KEYS)
     def test_a_set_billing_reroute_var_refuses_before_the_agent(self, tmp_path, loop, var):
         proc, env_dump = _audit(tmp_path, loop, env_extra={var: KEY})
         out = proc.stdout + proc.stderr
@@ -168,6 +173,43 @@ class TestAnApiKeyInTheEnvironmentRefusesTheRun:
         assert KEY not in out, f"{loop}: the refusal echoed the secret: {out!r}"
         assert not env_dump.exists(), (
             f"{loop}: the agent ran after a billing-reroute var was set"
+        )
+
+
+@pytest.mark.parametrize("loop", sorted(LOOPS))
+class TestATruthyUseFlagRefusesTheRun:
+    @pytest.mark.parametrize("var", BILLING_REROUTE_FLAGS)
+    @pytest.mark.parametrize("value", TRUTHY_FLAG_VALUES)
+    def test_a_truthy_use_flag_refuses_before_the_agent(
+        self, tmp_path, loop, var, value
+    ):
+        proc, env_dump = _audit(tmp_path, loop, env_extra={var: value})
+        out = proc.stdout + proc.stderr
+        assert proc.returncode == 2, (proc.returncode, out)
+        assert "REFUSING" in out, out
+        assert var in out, (
+            f"{loop}: the refusal must name {var} so the operator knows "
+            f"what to unset: {out!r}"
+        )
+        assert not env_dump.exists(), (
+            f"{loop}: the agent ran after {var}={value} rerouted billing"
+        )
+
+
+@pytest.mark.parametrize("loop", sorted(LOOPS))
+class TestAFalsyUseFlagStillRuns:
+    @pytest.mark.parametrize("var", BILLING_REROUTE_FLAGS)
+    @pytest.mark.parametrize("value", FALSY_FLAG_VALUES)
+    def test_a_falsy_use_flag_is_subscription_only(self, tmp_path, loop, var, value):
+        proc, env_dump = _audit(tmp_path, loop, env_extra={var: value})
+        assert proc.returncode == 0, (
+            f"{loop}: {var}={value} locks Bedrock/Vertex OFF, which is "
+            f"subscription-only, so the run must proceed: "
+            f"{proc.returncode} {proc.stdout}{proc.stderr}"
+        )
+        assert env_dump.exists(), (
+            f"{loop}: {var}={value} refused the agent; a shell profile that "
+            "sets the flag to 0/false is not a billing reroute"
         )
 
 
@@ -206,3 +248,21 @@ class TestABillingRerouteInAnIgnoredEnvFileRefusesTheRun:
         )
         assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
         assert env_dump.exists(), "the agent never ran on a clean env file"
+
+    @pytest.mark.parametrize("var", BILLING_REROUTE_FLAGS)
+    @pytest.mark.parametrize("value", FALSY_FLAG_VALUES)
+    def test_a_falsy_use_flag_in_an_env_file_still_runs(
+        self, tmp_path, loop, var, value
+    ):
+        proc, env_dump = _audit(
+            tmp_path,
+            loop,
+            env_file=(".env.local", f"{var}={value}\n"),
+        )
+        assert proc.returncode == 0, (
+            f"{loop}: {var}={value} in .env.local is subscription-only: "
+            f"{proc.returncode} {proc.stdout}{proc.stderr}"
+        )
+        assert env_dump.exists(), (
+            f"{loop}: a file that locks Bedrock/Vertex off refused the run"
+        )

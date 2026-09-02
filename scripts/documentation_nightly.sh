@@ -389,26 +389,40 @@ fi
 # the claude.ai login whenever one is visible. Unset AND refuse: a hand-run
 # that inherited a key, or a gitignored env file the agent would reload,
 # would silently bill metered usage. Name the variable or file, never the value.
-BILLING_REROUTE_VARS="ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL CLAUDE_CODE_API_KEY CLAUDE_API_KEY CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX AWS_BEARER_TOKEN_BEDROCK"
-for _billing_var in $BILLING_REROUTE_VARS; do
+BILLING_REROUTE_KEYS="ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL CLAUDE_CODE_API_KEY CLAUDE_API_KEY AWS_BEARER_TOKEN_BEDROCK"
+BILLING_REROUTE_FLAGS="CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX"
+for _billing_var in $BILLING_REROUTE_KEYS; do
   if [[ -n "${!_billing_var:-}" ]]; then
     echo "REFUSING: $_billing_var is set; this loop bills the claude.ai subscription only — unset it" >&2
     report "REFUSED" "$_billing_var is set; the agent would bill metered API usage instead of the claude.ai subscription — unset it from the launch environment" || true
     exit 2
   fi
 done
+# 0/false/no lock Bedrock/Vertex OFF: that is subscription-only. Refuse only
+# a truthy value (1/true/yes), which is what actually reroutes billing.
+for _billing_var in $BILLING_REROUTE_FLAGS; do
+  case "${!_billing_var:-}" in
+    1|[Tt][Rr][Uu][Ee]|[Yy][Ee][Ss])
+      echo "REFUSING: $_billing_var is set; this loop bills the claude.ai subscription only — unset it" >&2
+      report "REFUSED" "$_billing_var is set; the agent would bill metered API usage instead of the claude.ai subscription — unset it from the launch environment" || true
+      exit 2
+      ;;
+  esac
+done
 unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL \
       CLAUDE_CODE_API_KEY CLAUDE_API_KEY \
       CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX AWS_BEARER_TOKEN_BEDROCK
 unset _billing_var
 
-BILLING_REROUTE_ASSIGN='^[[:space:]]*(export[[:space:]]+)?(ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN|ANTHROPIC_BASE_URL|CLAUDE_CODE_API_KEY|CLAUDE_API_KEY|CLAUDE_CODE_USE_BEDROCK|CLAUDE_CODE_USE_VERTEX|AWS_BEARER_TOKEN_BEDROCK)[[:space:]]*=[[:space:]]*[^[:space:]#]'
+BILLING_REROUTE_KEY_ASSIGN='^[[:space:]]*(export[[:space:]]+)?(ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN|ANTHROPIC_BASE_URL|CLAUDE_CODE_API_KEY|CLAUDE_API_KEY|AWS_BEARER_TOKEN_BEDROCK)[[:space:]]*=[[:space:]]*[^[:space:]#]'
+BILLING_REROUTE_FLAG_ASSIGN='^[[:space:]]*(export[[:space:]]+)?(CLAUDE_CODE_USE_BEDROCK|CLAUDE_CODE_USE_VERTEX)[[:space:]]*=[[:space:]]*(1|true|yes)([#[:space:]]|$)'
 for key_file in .deepsec/.env .deepsec/.env.local .deepsec/.env.*.local .env.local; do
   [[ -f "$key_file" ]] || continue
-  grep -qE "$BILLING_REROUTE_ASSIGN" "$key_file" || continue
-  echo "REFUSING: $key_file holds billing-reroute credentials; this loop bills the claude.ai subscription only — remove the key line" >&2
-  report "REFUSED" "$key_file holds billing-reroute credentials; the agent would bill metered API usage instead of the claude.ai subscription — remove the key line" || true
-  exit 2
+  if grep -qE "$BILLING_REROUTE_KEY_ASSIGN" "$key_file" || grep -qiE "$BILLING_REROUTE_FLAG_ASSIGN" "$key_file"; then
+    echo "REFUSING: $key_file holds billing-reroute credentials; this loop bills the claude.ai subscription only — remove the key line" >&2
+    report "REFUSED" "$key_file holds billing-reroute credentials; the agent would bill metered API usage instead of the claude.ai subscription — remove the key line" || true
+    exit 2
+  fi
 done
 
 RUNNER_LOCK="$REPO/.weekend-runner.lock"
@@ -529,7 +543,7 @@ ALL_MODELS_EXHAUSTED=0
 # round 1's exhausted rung drop a model on every later round forever. R-426.
 is_quota_exhausted() {
   tail -c "+$((ROUND_LOG_MARK + 1))" "$RUN_LOG" 2>/dev/null | grep -qiE \
-    'out of usage credits|You.ve hit your (Opus|Sonnet) limit|Request rejected \(429\)|rate.limit|rate_limit|overloaded|experiencing high load'
+    'out of usage credits|You.ve hit your (Opus|Sonnet) limit|Request rejected \(429\)|529 Overloaded|experiencing high load'
 }
 
 is_transient_network_failure() {
