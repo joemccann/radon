@@ -737,13 +737,26 @@ class TestTheLoopBillsTheSubscriptionNotTheApiKey:
     stderr: "claude.ai connectors are disabled because ANTHROPIC_API_KEY or
     another auth source is set and takes precedence over your claude.ai login".
     On 2026-09-01 that moved an 83-finding process + revalidate round onto
-    metered API billing without a line in any run record. Two halves: the
-    wrapper strips key material from the environment it hands its children, and
-    it refuses outright when a key sits in a file the scanners read themselves.
+    metered API billing without a line in any run record.     Two halves: the wrapper unsets every billing-reroute variable AND refuses
+    the run when one is set in the environment or sits in a file the scanners
+    read themselves. Unset alone left a gitignored .env file as a silent
+    reroute; refuse of only ANTHROPIC_API_KEY/AUTH_TOKEN left Bedrock/Vertex
+    and the CLAUDE_CODE_API_KEY alias as the same hole.
     """
 
     KEY = "sk-ant-api03-CONTRACT-TEST-NOT-A-REAL-KEY"
-    ENV_VARS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL")
+    KEY_VARS = (
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_AUTH_TOKEN",
+        "ANTHROPIC_BASE_URL",
+        "CLAUDE_CODE_API_KEY",
+        "CLAUDE_API_KEY",
+        "AWS_BEARER_TOKEN_BEDROCK",
+    )
+    FLAG_VARS = (
+        "CLAUDE_CODE_USE_BEDROCK",
+        "CLAUDE_CODE_USE_VERTEX",
+    )
 
     def _stub_bin(self, tmp_path: Path, env_dump: Path) -> Path:
         bin_dir = tmp_path / "bin"
@@ -799,22 +812,55 @@ class TestTheLoopBillsTheSubscriptionNotTheApiKey:
         )
         return proc, env_dump
 
-    @pytest.mark.parametrize("var", ENV_VARS)
-    def test_the_agent_child_never_inherits_api_key_material(self, tmp_path, var):
+    @pytest.mark.parametrize("var", KEY_VARS)
+    def test_a_billing_reroute_in_the_environment_refuses_the_run(self, tmp_path, var):
         proc, env_dump = self._audit(tmp_path, env_extra={var: self.KEY})
-        assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
-        dump = env_dump.read_text(encoding="utf-8") if env_dump.exists() else ""
-        assert dump, "the agent stub never ran, so the env it saw proves nothing"
-        assert f"{var}=" not in dump, (
-            f"{var} reached the agent; Claude Code prefers it over the "
-            "claude.ai login, so the whole night bills metered API usage"
+        out = proc.stdout + proc.stderr
+        assert proc.returncode == 2, (proc.returncode, out)
+        assert "REFUSING" in out, out
+        assert var in out, (
+            f"the refusal must name {var} so the operator knows what to unset"
         )
-        assert self.KEY not in dump, dump
+        assert self.KEY not in out, "the refusal echoed the secret it found"
+        assert not env_dump.exists(), "the agent ran anyway after the refusal"
 
-    def test_a_key_file_the_scanners_read_themselves_refuses_the_run(self, tmp_path):
-        proc, env_dump = self._audit(
-            tmp_path, deepsec_env=f"ANTHROPIC_API_KEY={self.KEY}\n"
+    @pytest.mark.parametrize("var", FLAG_VARS)
+    @pytest.mark.parametrize("value", ("1", "true", "yes"))
+    def test_a_truthy_use_flag_in_the_environment_refuses_the_run(
+        self, tmp_path, var, value
+    ):
+        proc, env_dump = self._audit(tmp_path, env_extra={var: value})
+        out = proc.stdout + proc.stderr
+        assert proc.returncode == 2, (proc.returncode, out)
+        assert "REFUSING" in out, out
+        assert var in out, out
+        assert not env_dump.exists(), "the agent ran anyway after the refusal"
+
+    @pytest.mark.parametrize("var", FLAG_VARS)
+    @pytest.mark.parametrize("value", ("0", "false"))
+    def test_a_falsy_use_flag_in_the_environment_still_runs(
+        self, tmp_path, var, value
+    ):
+        proc, env_dump = self._audit(tmp_path, env_extra={var: value})
+        assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
+        assert env_dump.exists(), (
+            f"{var}={value} locks Bedrock/Vertex off and must still run"
         )
+
+    @pytest.mark.parametrize(
+        "deepsec_env",
+        (
+            f"ANTHROPIC_API_KEY={KEY}\n",
+            "CLAUDE_CODE_USE_BEDROCK=1\n",
+            'CLAUDE_CODE_USE_BEDROCK="true"\n',
+            "CLAUDE_CODE_USE_VERTEX='1'\n",
+            "CLAUDE_CODE_API_KEY=sk-ant-alias\n",
+        ),
+    )
+    def test_a_key_file_the_scanners_read_themselves_refuses_the_run(
+        self, tmp_path, deepsec_env
+    ):
+        proc, env_dump = self._audit(tmp_path, deepsec_env=deepsec_env)
         out = proc.stdout + proc.stderr
         assert proc.returncode == 2, (proc.returncode, out)
         assert "REFUSING" in out, out
@@ -830,6 +876,28 @@ class TestTheLoopBillsTheSubscriptionNotTheApiKey:
             deepsec_env="# ANTHROPIC_API_KEY= (removed 2026-09-01)\nVERCEL_TOKEN=dummy\n",
         )
         assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
+
+    def test_a_falsy_use_flag_in_deepsec_env_still_runs(self, tmp_path):
+        proc, env_dump = self._audit(
+            tmp_path, deepsec_env="CLAUDE_CODE_USE_BEDROCK=0\n"
+        )
+        assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
+        assert env_dump.exists(), (
+            "CLAUDE_CODE_USE_BEDROCK=0 in .deepsec/.env.local is subscription-only"
+        )
+
+    @pytest.mark.parametrize(
+        "deepsec_env",
+        ('CLAUDE_CODE_USE_BEDROCK="0"\n', "CLAUDE_CODE_USE_VERTEX='false'\n"),
+    )
+    def test_a_quoted_falsy_use_flag_in_deepsec_env_still_runs(
+        self, tmp_path, deepsec_env
+    ):
+        proc, env_dump = self._audit(tmp_path, deepsec_env=deepsec_env)
+        assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
+        assert env_dump.exists(), (
+            f"{deepsec_env!r} is subscription-only after quote-strip"
+        )
 
     def test_the_skill_pins_subscription_auth_for_the_scanners(self):
         text = SKILL.read_text(encoding="utf-8")
