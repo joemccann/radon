@@ -540,3 +540,19 @@ fails ENOENT (`1 failed, 8259 passed` from `web/`).
   REL-167's acceptance case unreachable without touching the backlog row (R-478, REL-181). The two NF-10
   questions ("for how long?" and "what else does it swallow?") would have caught it in review. REL-021b
   remainder unchanged (all P2).
+- **NF triage 2026-09-02 (delta audit):** NF-1 (Gate-3 bankroll-% cap) still open and unchanged; no
+  order-path sizing change this range and the funnel sweeps hold. NF-2 (unpaginated journal reads)
+  unchanged, still carried by REL-108. **NF-3 (a stale feed presented as live) recurs at its widest
+  instance yet:** R-529 — 0f7e66bf moved the one realtime socket to root Providers, so reconnect
+  exhaustion (10 attempts, ~3.2 min) is now permanent for the tab's life and the never-cleared price map
+  renders last-known marks in every money surface all day; carried by REL-197. NF-4 unchanged. NF-5
+  unchanged. NF-6 (vendor failure classifiers): no new vendor this range; REL-174's RH classifier
+  verified HOLDS by execution (403 -> auth class). NF-7 unchanged. NF-8 stays CLOSED. **NF-9
+  (happy-path-only heartbeats) recurs for the SIXTH consecutive new timer:** R-555 — `ma_ratio_scan.py`
+  writes only the success `ok` row; gated/crash paths write nothing (P2 here because the 26h staleness
+  window still pages; the loss is diagnosis); carried by REL-195. **NF-10 (suppression without a dwell
+  bound) recurs twice:** R-559 (the exit-143 aperture keys on a shape any SIGTERM source produces and
+  inherits a 24h green-marker dwell that daily deploys keep warm) and R-558 (a >=60% ATS batch writes
+  `ok` and replaces the snapshot, so the dropped tail never pages); carried by REL-202 and REL-196.
+  REL-021b remainder unchanged (all P2). Cycle note: 2026-09-01 never ran (quota exhaustion, issue #81
+  07:19Z comments); REL-175…178 + REL-181…186 roll into the 2026-09-02 remediate.
