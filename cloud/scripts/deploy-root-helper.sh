@@ -1034,7 +1034,11 @@ resolve_trusted_main_tip() {
       return 76
     }
   fi
-  remote_sha="$(git_bounded ls-remote --refs "$UNIT_REMOTE" refs/heads/main | awk '{print $1}')" || {
+  # Protocol v1: the refs arrive in the info/refs GET. From this host an
+  # unauthenticated v2 ls-refs POST against the public repo answers 401
+  # ("could not read Username"), which failed every deploy at the first real
+  # sync-control-plane run (2026-09-02).
+  remote_sha="$(git_bounded -c protocol.version=1 ls-remote --refs "$UNIT_REMOTE" refs/heads/main | awk '{print $1}')" || {
     echo "could not read the GitHub main tip" >&2
     return 69
   }
@@ -1079,7 +1083,11 @@ resolve_fetched_main_tip() {
       return 76
     }
   fi
-  remote_sha="$(git_bounded ls-remote --refs "$UNIT_REMOTE" refs/heads/main | awk '{print $1}')" || {
+  # Protocol v1: the refs arrive in the info/refs GET. From this host an
+  # unauthenticated v2 ls-refs POST against the public repo answers 401
+  # ("could not read Username"), which failed every deploy at the first real
+  # sync-control-plane run (2026-09-02).
+  remote_sha="$(git_bounded -c protocol.version=1 ls-remote --refs "$UNIT_REMOTE" refs/heads/main | awk '{print $1}')" || {
     echo "could not read the GitHub main tip" >&2
     return 69
   }
