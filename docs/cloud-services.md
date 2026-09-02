@@ -620,6 +620,20 @@ approximation, `approximate=1`). Weekend runs are unchanged-day heartbeats.
 Heartbeat `div-yield`. Installed by the deploy's `install-units` verb from
 `installed-units.sha256`. Spec: [`indicators/divyield.md`](indicators/divyield.md).
 
+### MA RATIO (`radon-ma-ratio.timer`)
+
+Daily `22:45 UTC` (`RandomizedDelaySec=300`, five minutes behind
+`radon-divyield`'s 22:40 pass so the two SPX constituent sweeps never share
+a minute), oneshot `scripts/ma_ratio_scan.py`, `TimeoutStartSec=2100`.
+Percent of S&P 500 members whose close is strictly above their own 50-day
+SMA, over the percent strictly above their own 200-day SMA (the StockCharts
+`$SPXA50R:$SPXA200R` construction, computed from constituent closes, never
+a vendor series). Member closes ride the shared Turso `price_history_daily`
+store via `bpi_scan.ensure_member_history`. Weekend and holiday runs are
+unchanged-data heartbeats. Heartbeat `ma-ratio`. Installed by the deploy's
+`install-units` verb from `installed-units.sha256`. Spec:
+[`indicators/ma-ratio.md`](indicators/ma-ratio.md).
+
 ### HY AD (`radon-hyad.timer`)
 
 `Tue..Sat 11:00 UTC` (`RandomizedDelaySec=300`), oneshot `scripts/fetch_hyad.py`,
