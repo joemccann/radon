@@ -343,9 +343,13 @@ class TestAnExhaustedLadderIsAProviderSpendStop:
             "the skill says a provider budget/spend stop is never reported "
             f"failed: {calls!r}"
         )
-        assert "Top up at claude.ai/settings/usage, then let the next fire resume." in calls, (
-            "INCOMPLETE + quotas exhausted must use the top-up Next, not the "
-            f"generic resume sentence: {calls!r}"
+        assert "**audit**" in calls and "**INCOMPLETE" in calls, calls
+        assert "claude.ai/settings/usage" in calls, (
+            "the dead-man must name the top-up URL: {calls!r}"
+        )
+        assert "Top up at claude.ai/settings/usage, then let the next fire resume." not in calls, (
+            "wrapper comments are PHASE status, not the three-section Next: "
+            f"{calls!r}"
         )
         assert "Do not read this as a finished run" not in calls, calls
 
