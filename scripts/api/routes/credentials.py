@@ -47,6 +47,10 @@ logger = logging.getLogger("radon.credentials")
 
 router = APIRouter()
 
+# Names exported from the store into os.environ this process lifetime.
+# Distinguishes live exports from .env-file fallbacks after a delete (R-541).
+_SESSION_EXPORTED: set[str] = set()
+
 UPDATED_BY_MAX_LEN = 64
 
 
@@ -128,6 +132,9 @@ def _service_entry(
     fields = []
     for field in service.fields:
         row = stored.get(field.name)
+        env_present = bool(os.environ.get(field.name))
+        exported_only = row is None and env_present and field.name in _SESSION_EXPORTED
+        env_fallback = row is None and env_present and field.name not in _SESSION_EXPORTED
         fields.append(
             {
                 "name": field.name,
@@ -139,7 +146,8 @@ def _service_entry(
                 "version": row["version"] if row else 0,
                 "updated_at": row["updated_at"] if row else None,
                 "updated_by": row["updated_by"] if row else None,
-                "env_fallback": row is None and bool(os.environ.get(field.name)),
+                "env_fallback": env_fallback,
+                "exported_only": exported_only,
             }
         )
     return {
@@ -239,12 +247,14 @@ async def put_credentials(service_id: str, request: Request):
     if verdict.blocks_save:
         raise HTTPException(
             status_code=422,
-            detail={
-                "code": "CREDENTIAL_REJECTED",
-                "service": service_id,
-                "status": verdict.status,
-                "message": verdict.message,
-            },
+            detail=credential_validators.scrub_validation_message(
+                {
+                    "code": "CREDENTIAL_REJECTED",
+                    "service": service_id,
+                    "status": verdict.status,
+                    "message": verdict.message,
+                }
+            ),
         )
 
     def _save() -> None:
@@ -254,6 +264,7 @@ async def put_credentials(service_id: str, request: Request):
         store.set_secrets(submitted, actor=actor)
         for name, value in submitted.items():
             os.environ[name] = value
+            _SESSION_EXPORTED.add(name)
 
     try:
         await asyncio.to_thread(_save)
@@ -264,7 +275,7 @@ async def put_credentials(service_id: str, request: Request):
     stored = await asyncio.to_thread(_stored_by_name, store)
     return {
         "service": _service_entry(service, stored),
-        "validation": verdict.to_dict(),
+        "validation": credential_validators.scrub_validation_message(verdict.to_dict()),
     }
 
 
@@ -283,7 +294,7 @@ async def validate_credentials(service_id: str, request: Request):
     verdict = await asyncio.to_thread(
         credential_validators.validate, service_id, merged
     )
-    return {"validation": verdict.to_dict()}
+    return {"validation": credential_validators.scrub_validation_message(verdict.to_dict())}
 
 
 @router.delete("/credentials/{service_id}/{name}")
@@ -334,5 +345,6 @@ def bootstrap_exported_names() -> list:
             continue
         if value:
             os.environ[name] = value
+            _SESSION_EXPORTED.add(name)
             exported.append(name)
     return exported

@@ -125,6 +125,28 @@ class TestList:
         (field,) = uw["fields"]
         assert field["configured"] is False
         assert field["env_fallback"] is True
+        assert field["exported_only"] is False
+
+    def test_exported_only_after_delete(self, client, valid_verdict, monkeypatch):
+        monkeypatch.delenv("UW_TOKEN", raising=False)
+        client.put(
+            "/credentials/unusual_whales",
+            json={"values": {"UW_TOKEN": "uw-live-token"}, "updated_by": "op-1"},
+        )
+        client.delete("/credentials/unusual_whales/UW_TOKEN")
+        import os
+
+        assert os.environ.get("UW_TOKEN") == "uw-live-token"
+        response = client.get("/credentials")
+        uw = next(
+            service
+            for service in response.json()["services"]
+            if service["id"] == "unusual_whales"
+        )
+        (field,) = uw["fields"]
+        assert field["configured"] is False
+        assert field["exported_only"] is True
+        assert field["env_fallback"] is False
 
 
 class TestPut:

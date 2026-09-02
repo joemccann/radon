@@ -45,6 +45,7 @@ function serviceSlug(id: string): string {
 
 function fieldStatus(field: CredentialFieldEntry): string {
   if (field.configured) return `Stored ${field.hint}`;
+  if (field.exported_only) return "Active in this process until restart";
   if (field.env_fallback) return "Using the value from .env";
   return "Not configured";
 }

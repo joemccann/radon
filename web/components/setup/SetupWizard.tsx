@@ -45,7 +45,7 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
     cache: "no-store",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(110_000),
+    signal: AbortSignal.timeout(220_000),
   });
   const json = (await res.json().catch(() => null)) as
     | (T & { error?: string })

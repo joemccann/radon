@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useClerk, useUser } from "@clerk/nextjs";
 import { useProfile } from "@/lib/useProfile";
 import { useBookmarks, type Bookmark } from "@/lib/useBookmarks";
@@ -18,6 +19,13 @@ import type { PriceData } from "@/lib/pricesProtocol";
 const USERNAME_PATTERN = /^[A-Za-z0-9_\- ]{1,32}$/;
 
 type ProfileTab = "bookmarks" | "watchlist" | "preferences" | "credentials";
+
+const PROFILE_TABS = new Set<ProfileTab>(["bookmarks", "watchlist", "preferences", "credentials"]);
+
+function initialProfileTab(raw: string | null): ProfileTab {
+  if (raw && PROFILE_TABS.has(raw as ProfileTab)) return raw as ProfileTab;
+  return "bookmarks";
+}
 
 /** Defensive read of a bookmark snapshot. The snapshot is `unknown` per the
  *  Phase 1 contract; news posts shaped like MarketEarPost are the common case. */
@@ -87,7 +95,8 @@ function sourceDomain(source: string | null): string {
 export default function ProfileContent({ prices }: { prices?: Record<string, PriceData> }) {
   const { isMobile, hasMounted } = useViewport();
   const compact = hasMounted && isMobile;
-  const [tab, setTab] = useState<ProfileTab>("bookmarks");
+  const searchParams = useSearchParams();
+  const [tab, setTab] = useState<ProfileTab>(() => initialProfileTab(searchParams.get("tab")));
 
   const { profile, saveProfile } = useProfile();
   const { user } = useUser();

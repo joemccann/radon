@@ -178,7 +178,9 @@ SERVICES: Tuple[CredentialService, ...] = (
         ),
         note=(
             "Never live-validated: a login probe fires a real IBKR Mobile "
-            "2FA push. Verified by the Gateway itself on next start."
+            "2FA push. Saving here does NOT rotate the Gateway password on "
+            "the broker host — that still comes from TWS_PASSWORD_FILE / "
+            "docker secrets until wired separately."
         ),
     ),
     CredentialService(

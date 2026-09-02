@@ -249,3 +249,51 @@ class TestSlowLoginValidators:
             "menthorq", {"MENTHORQ_USER": "u", "MENTHORQ_PASS": "p"}
         )
         assert result.status == "error"
+
+
+class TestTursoHostPin:
+    def test_http_url_rejected(self, monkeypatch):
+        monkeypatch.delenv("TURSO_DB_URL", raising=False)
+        result = cv.validate(
+            "turso",
+            {
+                "TURSO_DB_URL": "http://evil.example/db",
+                "TURSO_AUTH_TOKEN": "tok",
+            },
+        )
+        assert result.status == "invalid"
+        assert "HTTPS" in result.message
+
+    def test_host_mismatch_rejected(self, monkeypatch):
+        monkeypatch.setenv(
+            "TURSO_DB_URL", "libsql://radon-joemccann.aws-us-west-2.turso.io"
+        )
+        result = cv.validate(
+            "turso",
+            {
+                "TURSO_DB_URL": "libsql://other-host.aws-us-west-2.turso.io",
+                "TURSO_AUTH_TOKEN": "tok",
+            },
+        )
+        assert result.status == "invalid"
+        assert "host" in result.message.lower()
+
+
+class TestValidatorRedaction:
+    def test_subprocess_stderr_token_redacted(self, monkeypatch):
+        monkeypatch.setattr(
+            cv.subprocess,
+            "run",
+            lambda *a, **k: cv.subprocess.CompletedProcess(
+                args=a[0],
+                returncode=1,
+                stdout="",
+                stderr="login failed token=sk-ant-api03-deadbeef",
+            ),
+        )
+        result = cv.validate(
+            "menthorq", {"MENTHORQ_USER": "u", "MENTHORQ_PASS": "p"}
+        )
+        assert result.status == "error"
+        assert "sk-ant-api03-deadbeef" not in result.message
+        assert "[redacted-key]" in result.message

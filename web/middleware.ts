@@ -14,7 +14,7 @@ import {
 } from "@/lib/publicShareRoutes";
 import { handleDemoGate } from "@/lib/demo/demoGate";
 import type { DemoPublicMetadata } from "@/lib/demo/demoRole";
-import { isSetupMode, isSetupPath, SETUP_PAGE_PATH } from "@/lib/setup/setupMode";
+import { isSetupMode, isSetupPath, isAuthMisconfigured, SETUP_PAGE_PATH } from "@/lib/setup/setupMode";
 
 // ── Enforced Content-Security-Policy (per-request nonce) ────────────────────
 //
@@ -427,6 +427,29 @@ export function handleSetupModeGate(request: NextRequest): NextResponse | null {
   return NextResponse.redirect(new URL(SETUP_PAGE_PATH, request.url));
 }
 
+/** Setup finished but Clerk keys are not loaded in this process — restart. */
+export function handleAuthMisconfiguredGate(request: NextRequest): NextResponse | null {
+  if (!isAuthMisconfigured()) return null;
+  const pathname = request.nextUrl.pathname;
+  const requestId = getRequestId();
+  const message =
+    "Radon setup is complete but authentication keys are not loaded. Restart the stack.";
+  if (isApiPath(pathname)) {
+    const response = jsonApiError({
+      message,
+      status: 503,
+      code: "AUTH_MISCONFIGURED",
+      requestId,
+    });
+    return setNoStoreResponseHeaders(response, requestId);
+  }
+  const response = new NextResponse(message, {
+    status: 503,
+    headers: { "content-type": "text/plain; charset=utf-8" },
+  });
+  return setNoStoreResponseHeaders(response, requestId);
+}
+
 export default async function middleware(
   request: NextRequest,
   event: NextFetchEvent,
@@ -435,6 +458,9 @@ export default async function middleware(
   // clerkMiddleware cannot run at all, and there is nothing to protect yet.
   const setupGate = handleSetupModeGate(request);
   if (setupGate) return setupGate;
+
+  const misconfiguredGate = handleAuthMisconfiguredGate(request);
+  if (misconfiguredGate) return misconfiguredGate;
 
   // Probe routes are bearer-gated EVERYWHERE — before the local-dev bypass —
   // so the gate behaves identically in dev, tests, and production.

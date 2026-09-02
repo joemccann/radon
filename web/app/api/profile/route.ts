@@ -85,6 +85,33 @@ function parseUiPreferences(raw: unknown): Record<string, unknown> | null {
   return null;
 }
 
+function mergeUiPreferencesJson(
+  existing: Record<string, unknown> | null,
+  incoming: Record<string, unknown>,
+): Record<string, unknown> {
+  const base = existing ? { ...existing } : {};
+  if ("theme" in incoming) {
+    base.theme = incoming.theme;
+  }
+  if (incoming.columns && typeof incoming.columns === "object" && !Array.isArray(incoming.columns)) {
+    const mergedColumns: Record<string, unknown> = {
+      ...(typeof base.columns === "object" && base.columns && !Array.isArray(base.columns)
+        ? (base.columns as Record<string, unknown>)
+        : {}),
+    };
+    for (const [tableId, table] of Object.entries(incoming.columns as Record<string, unknown>)) {
+      if (!table || typeof table !== "object" || Array.isArray(table)) continue;
+      const prior =
+        mergedColumns[tableId] && typeof mergedColumns[tableId] === "object"
+          ? (mergedColumns[tableId] as Record<string, unknown>)
+          : {};
+      mergedColumns[tableId] = { ...prior, ...(table as Record<string, unknown>) };
+    }
+    base.columns = mergedColumns;
+  }
+  return base;
+}
+
 async function readProfile(userId: string): Promise<ProfileRow> {
   const result = await dbExecute(
     {
@@ -173,7 +200,12 @@ export async function PUT(req: Request): Promise<Response> {
         requestId,
       );
     }
-    nextUiPreferences = uiResult.value;
+    const existing = await readProfile(userId);
+    const merged = mergeUiPreferencesJson(
+      existing.ui_preferences,
+      JSON.parse(uiResult.value ?? "{}") as Record<string, unknown>,
+    );
+    nextUiPreferences = JSON.stringify(merged);
   }
 
   let nextUsername: string | null = null;

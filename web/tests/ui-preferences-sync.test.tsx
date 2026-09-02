@@ -96,6 +96,32 @@ describe("profile route ui_preferences", () => {
     expect(body.ui_preferences).toEqual({ theme: "dark" });
   });
 
+  it("PUT ui_preferences merges per top-level key instead of replacing", async () => {
+    const route = await import("../app/api/profile/route");
+    await route.PUT(
+      new Request("http://x/api/profile", {
+        method: "PUT",
+        body: JSON.stringify({
+          ui_preferences: {
+            theme: "dark",
+            columns: { orders: { qty: false, status: true } },
+          },
+        }),
+      }),
+    );
+    await route.PUT(
+      new Request("http://x/api/profile", {
+        method: "PUT",
+        body: JSON.stringify({ ui_preferences: { theme: "light" } }),
+      }),
+    );
+    const body = await jsonOf(await route.GET());
+    expect(body.ui_preferences).toEqual({
+      theme: "light",
+      columns: { orders: { qty: false, status: true } },
+    });
+  });
+
   it("rejects unknown preference keys and bad theme values", async () => {
     const route = await import("../app/api/profile/route");
     const unknown = await route.PUT(
@@ -169,6 +195,62 @@ describe("uiPreferences client module", () => {
         columns: { "orders-open": { qty: false, status: true } },
       },
     });
+  });
+
+  it("mergeUiPreferences keeps local theme and adopts server columns", async () => {
+    const mod = await import("../lib/uiPreferences");
+    expect(
+      mod.mergeUiPreferences(
+        { theme: "dark" },
+        { theme: "light", columns: { orders: { qty: false } } },
+      ),
+    ).toEqual({
+      theme: "dark",
+      columns: { orders: { qty: false } },
+    });
+  });
+
+  it("theme toggle before hydrate settles still flushes server columns", async () => {
+    vi.useFakeTimers();
+    const calls = stubFetch({
+      ui_preferences: { theme: "light", columns: { orders: { qty: false } } },
+    });
+    const mod = await import("../lib/uiPreferences");
+    mod.__resetUiPreferencesForTests();
+    const pending = mod.hydrateUiPreferences();
+    mod.saveUiTheme("dark");
+    await pending;
+    await vi.advanceTimersByTimeAsync(1000);
+    const puts = calls.filter((c) => c.method === "PUT");
+    expect(puts).toHaveLength(1);
+    expect(puts[0].body).toEqual({
+      ui_preferences: { theme: "dark", columns: { orders: { qty: false } } },
+    });
+  });
+
+  it("failed hydrate does not poison cache with an empty object", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("", { status: 503 })),
+    );
+    const mod = await import("../lib/uiPreferences");
+    mod.__resetUiPreferencesForTests();
+    const prefs = await mod.hydrateUiPreferences();
+    expect(prefs).toEqual({});
+    mod.__seedUiPreferencesForTests({ theme: "dark" });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({ ui_preferences: { theme: "light" } }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    mod.__resetUiPreferencesForTests();
+    mod.__seedUiPreferencesForTests({ theme: "dark" });
+    const retry = await mod.hydrateUiPreferences();
+    expect(retry.theme).toBe("dark");
   });
 });
 

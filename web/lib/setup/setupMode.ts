@@ -1,21 +1,46 @@
 /**
- * First-run setup mode — active only when NO Clerk keys are configured.
+ * First-run setup mode — active only on an unconfigured clone that has NOT
+ * finished the wizard yet.
  *
- * A fresh clone has no auth to protect anything with, and nothing worth
- * protecting yet: setup mode locks the whole app down to /setup (plus its
- * API), where the wizard collects bootstrap + vendor credentials guarded by
- * a one-shot console token. The moment Clerk keys exist (the restart after
- * the wizard writes them), this returns false everywhere and the setup
- * surface hard-refuses with 404.
+ * After the wizard completes, a repo-root marker is written and mirrored into
+ * `RADON_SETUP_COMPLETE=1` (Edge-safe). A configured host that loses its
+ * Clerk env on a running process must NOT re-open /setup — that is the
+ * separate auth-misconfigured gate.
  *
  * Edge-safe: pure env reads, no node:* (the middleware imports this).
  */
 
-export function isSetupMode(
+import { isSetupCompleteFlagSet } from "@/lib/setup/setupCompleteFlag";
+
+function clerkKeysAbsent(
   publishableKey: string | undefined = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
   secretKey: string | undefined = process.env.CLERK_SECRET_KEY,
 ): boolean {
   return !(publishableKey || "").trim() && !(secretKey || "").trim();
+}
+
+export function isSetupComplete(
+  setupCompleteFlag: string | undefined = process.env.RADON_SETUP_COMPLETE,
+): boolean {
+  return isSetupCompleteFlagSet(setupCompleteFlag);
+}
+
+export function isSetupMode(
+  publishableKey: string | undefined = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
+  secretKey: string | undefined = process.env.CLERK_SECRET_KEY,
+  setupCompleteFlag: string | undefined = process.env.RADON_SETUP_COMPLETE,
+): boolean {
+  if (isSetupComplete(setupCompleteFlag)) return false;
+  return clerkKeysAbsent(publishableKey, secretKey);
+}
+
+/** Wizard finished but Clerk keys are not loaded in this process yet. */
+export function isAuthMisconfigured(
+  publishableKey: string | undefined = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
+  secretKey: string | undefined = process.env.CLERK_SECRET_KEY,
+  setupCompleteFlag: string | undefined = process.env.RADON_SETUP_COMPLETE,
+): boolean {
+  return isSetupComplete(setupCompleteFlag) && clerkKeysAbsent(publishableKey, secretKey);
 }
 
 export const SETUP_PAGE_PATH = "/setup";
