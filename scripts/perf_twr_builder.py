@@ -504,7 +504,7 @@ def _fetch_nav_document() -> Optional[FlexDocument]:
 def get_nav_snapshots(*, sendrequest: bool = False) -> NavResolution:
     """Resolve NAV. Live Flex only when ``sendrequest`` is true.
 
-    Default is disk then Turso. Page-driven and weekday jobs must not
+    Default is the fresher of disk and Turso. Page-driven and weekday jobs must not
     SendRequest. A saved statement uses ``build_and_persist(from_file=...)``.
     """
     document: Optional[FlexDocument] = None
@@ -519,10 +519,16 @@ def get_nav_snapshots(*, sendrequest: bool = False) -> NavResolution:
             _cache_nav_to_disk(entries)
             return NavResolution(entries, "flex_live", tuple(gap_dates), document)
 
+    # Fresher series wins; a tie stays on disk. "Disk then Turso" served the
+    # 08-21 disk cache for 18 days after the sFTP ingest had mirrored NAV
+    # through 09-01 into Turso, because nothing SendRequests any more and the
+    # cache only ages out at 30 days (2026-09-02).
     disk = load_nav_from_disk()
+    turso = load_nav_from_turso()
+    if disk and turso and max(turso) > max(disk):
+        return NavResolution(turso, "turso", (), document)
     if disk:
         return NavResolution(disk, "disk_cache", (), document)
-    turso = load_nav_from_turso()
     if turso:
         return NavResolution(turso, "turso", (), document)
     return NavResolution({}, "none", (), document)
