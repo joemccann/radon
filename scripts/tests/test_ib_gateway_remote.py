@@ -141,13 +141,17 @@ def _start(config: dict):
 
 
 def _ctx(certs: dict[str, Path], *, client: bool = True, rogue: bool = False) -> ssl.SSLContext:
-    ctx = ssl.create_default_context(cafile=str(certs["ca"] if not rogue else certs["rogue_ca"]))
+    # T-359: ALWAYS trust the real CA for server verification — including the
+    # rogue-client ctx. Trusting rogue_ca there made urlopen fail on the
+    # SERVER cert before the server ever evaluated the client cert, so a
+    # server that also trusted the rogue CA slipped past the rogue test.
+    ctx = ssl.create_default_context(cafile=str(certs["ca"]))
     ctx.check_hostname = False
     ctx.minimum_version = ssl.TLSVersion.TLSv1_2
-    if client and not rogue:
-        ctx.load_cert_chain(str(certs["client_cert"]), str(certs["client_key"]))
     if rogue:
         ctx.load_cert_chain(str(certs["rogue_cert"]), str(certs["rogue_key"]))
+    elif client:
+        ctx.load_cert_chain(str(certs["client_cert"]), str(certs["client_key"]))
     return ctx
 
 
@@ -312,7 +316,13 @@ class TestDaemon:
         certs = mint_mtls(tmp_path)
         httpd = _start(_config(tmp_path, certs))
         try:
-            with pytest.raises((ssl.SSLError, urllib.error.URLError)):
+            # The rogue ctx verifies the SERVER cert fine (real CA in its
+            # trust store), so the only failure left is the SERVER rejecting
+            # the rogue client cert at the handshake. SSLError ONLY: an
+            # HTTPError/URLError here would mean the handshake succeeded and
+            # the request reached the handler — a server trusting the rogue
+            # CA must fail this test.
+            with pytest.raises(ssl.SSLError):
                 _call(httpd, certs, "/restart", "POST", ctx=_ctx(certs, rogue=True))
         finally:
             httpd.shutdown()
