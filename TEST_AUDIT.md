@@ -8335,6 +8335,25 @@ newest **P2** stragglers (T-353…T-378) in value order. Evidence rows land in
   `/tmp/tw-2026-09-02/` (root-only host, never committed); operator MAY
   rotate the Pushover token if that residue is a concern.
 
+### Observations and notes for the next audit — recorded, not chased
+
+1. **vitest r1 exited 1 with 845 files / 8526 passed / 0 failed** — one
+   `EnvironmentTeardownError: Closing rpc while "onUserConsoleLog" was
+   pending`, attributed to `regime-dead-feed-degraded.test.ts`, under load
+   33 with the reliability loop concurrent; 3/3 clean in isolation. Load
+   class (T-062 family), but note the SHAPE: a teardown race reds the gate
+   EXIT CODE while every test passes, so a wrapper keying on exit alone
+   would call this a red round.
+2. **`npx next build` (default mode) fails prerendering `/cta` and
+   `/dashboard` at this HEAD** — only the repo's compile-mode `npm run
+   build` works. Surfaced by the T-369 e2e pre-flight, reproducible,
+   untriaged. The next audit should number it if it holds.
+3. **The T-380 retry interacts with every wrapper-inspecting suite** whose
+   stub `claude` exits 0 without moving HEAD — the model-ladder stubs had
+   to learn to "commit" (move a fake HEAD) or their exact model sequences
+   gain a duplicate final rung. Sibling loops adding the same retry will
+   hit the same fixture assumption.
+
 ## 11 · Audit ledger
 
 The weekend loop (`.claude/skills/testing-weekend/`) reads the last line
