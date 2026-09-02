@@ -185,6 +185,18 @@ class MonitorDaemon:
         if not self.respect_market_hours:
             return True
 
+        if getattr(handler, "session_window", "rth") == "equity_ext":
+            try:
+                from zoneinfo import ZoneInfo
+                from utils.market_calendar import is_equity_ext_session_et
+
+                now_et = datetime.now(ZoneInfo("America/New_York"))
+                if is_equity_ext_session_et(now_et):
+                    return True
+            except Exception:
+                pass
+            return self._market_was_open_within_grace(handler)
+
         if market_hours is None:
             market_hours = self.is_market_hours()
 

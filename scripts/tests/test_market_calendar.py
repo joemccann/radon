@@ -1,7 +1,7 @@
 """Holiday-aware market-open checks (the SoT the FastAPI loop + scans consult).
 
-scripts/api/server.py:_is_market_open_now_et delegates to is_market_open_et, so
-these cases pin the behavior that gates the orders-sync / portfolio-sync loop.
+scripts/api/server.py:_is_market_open_now_et delegates to is_market_open_et
+(portfolio-sync / RTH writers). orders-sync uses is_equity_ext_session_et.
 """
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from utils.market_calendar import (
     is_market_open_et,
+    is_equity_ext_session_et,
     load_holidays,
     market_state,
     parse_liquid_hours,
@@ -40,6 +41,22 @@ def test_before_open_and_after_close_closed():
     # 09:00 ET (13:00 UTC) and 16:30 ET (20:30 UTC) on a normal Thursday.
     assert is_market_open_et(_utc(2026, 6, 18, 13)) is False
     assert is_market_open_et(_utc(2026, 6, 18, 20, 30)) is False
+
+
+def test_equity_ext_covers_premarket_and_after_hours_not_overnight():
+    """RTH is closed at 16:30 ET; outsideRth stocks still fill until 20:00.
+
+    2026-09-02 AVGO SELL 1000 @ 355 filled 16:24 ET while orders-sync /
+    fill-monitor were RTH-gated, so /orders kept the row WORKING.
+    Overnight 20:00-03:50 is a different venue — do not treat it as EXT.
+    """
+    assert is_equity_ext_session_et(_utc(2026, 6, 18, 12)) is True   # 08:00 ET
+    assert is_equity_ext_session_et(_utc(2026, 6, 18, 17)) is True   # 13:00 ET RTH
+    assert is_equity_ext_session_et(_utc(2026, 6, 18, 20, 30)) is True  # 16:30 ET
+    assert is_equity_ext_session_et(_utc(2026, 6, 19, 0)) is False   # 20:00 ET overnight
+    assert is_equity_ext_session_et(_utc(2026, 6, 18, 7)) is False   # 03:00 ET
+    assert is_equity_ext_session_et(_utc(2026, 6, 20, 20, 30)) is False  # Saturday 16:30
+    assert is_equity_ext_session_et(_utc(2026, 6, 19, 17)) is False  # Juneteenth 13:00
 
 
 # ── parse_liquid_hours (IBKR liquidHours → per-date status) ──────────────

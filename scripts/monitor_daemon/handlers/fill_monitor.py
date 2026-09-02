@@ -8,6 +8,9 @@ Features:
 - Detects complete fills (order disappears from open orders)
 - Sends macOS notifications on fills
 - Upserts detected fills to the Turso journal
+- Mirrors the IB open+executed snapshot into Turso so /orders drops
+  WORKING rows on fill without waiting for the 5-min orders-sync loop
+- session_window=equity_ext (04:00-20:00 ET); outsideRth stocks fill after RTH
 """
 
 import subprocess
@@ -25,6 +28,22 @@ try:
     from db.writer import upsert_journal_entry  # type: ignore
 except ImportError:  # pragma: no cover — DB layer optional in unit tests
     upsert_journal_entry = None  # type: ignore[assignment]
+
+try:
+    # /orders reads open_orders + executed_orders, not the journal. Mirror
+    # the IB snapshot on fill so EXT fills drop from WORKING without
+    # waiting for the RTH-gated 5-min orders-sync loop.
+    from ib_orders import (  # type: ignore
+        build_orders_data as build_orders_data_for_mirror,
+        fetch_executed_orders as fetch_executed_orders_for_mirror,
+        fetch_open_orders as fetch_open_orders_for_mirror,
+        save_orders as save_orders_snapshot,
+    )
+except ImportError:  # pragma: no cover
+    build_orders_data_for_mirror = None  # type: ignore[assignment]
+    fetch_executed_orders_for_mirror = None  # type: ignore[assignment]
+    fetch_open_orders_for_mirror = None  # type: ignore[assignment]
+    save_orders_snapshot = None  # type: ignore[assignment]
 
 def _identity_int(value: Any) -> int:
     """Coerce an IB identity field (conId/permId) to int, else 0.
@@ -73,6 +92,7 @@ class FillMonitorHandler(BaseHandler):
     name = "fill_monitor"
     interval_seconds = 60  # Check every minute
     service_name = "fill-monitor"  # structural heartbeat via BaseHandler.run()
+    session_window = "equity_ext"
 
     def __init__(
         self,
@@ -249,6 +269,9 @@ class FillMonitorHandler(BaseHandler):
 
                 # Remove from tracking (gone either way)
                 del self.known_orders[order_id]
+
+            if result["fills"] or result.get("complete_fills"):
+                self._mirror_ib_orders_snapshot(client)
             
         except Exception as e:
             logger.error(f"Fill monitor error: {e}")
@@ -258,6 +281,27 @@ class FillMonitorHandler(BaseHandler):
             logger.debug("Disconnected from IB")
         
         return result
+
+    def _mirror_ib_orders_snapshot(self, client: Any) -> None:
+        """Replace Turso open_orders + executed_orders from this IB session.
+
+        Failures are logged and swallowed — the next orders-sync tick or
+        evening execution sweep is the recovery path. Never crash the
+        handler on a mirror miss.
+        """
+        if (
+            save_orders_snapshot is None
+            or fetch_open_orders_for_mirror is None
+            or fetch_executed_orders_for_mirror is None
+            or build_orders_data_for_mirror is None
+        ):
+            return
+        try:
+            open_orders = fetch_open_orders_for_mirror(client)
+            executed = fetch_executed_orders_for_mirror(client)
+            save_orders_snapshot(build_orders_data_for_mirror(open_orders, executed))
+        except Exception as exc:  # noqa: BLE001 — never crash on mirror failure
+            logger.warning("fill_monitor: orders snapshot mirror failed: %s", exc)
     
     @staticmethod
     def _side_to_action(side_label: str, sec_type: str, prior_qty: float = 0.0) -> str:
