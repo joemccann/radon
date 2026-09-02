@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import ssl
 import subprocess
 import sys
@@ -16,6 +17,43 @@ import pytest
 from ib_gateway_remote import serve
 
 REPO = Path(__file__).resolve().parents[2]
+
+
+def _openssl_unusable() -> str | None:
+    """Reason this host's openssl cannot mint the test PKI, else None (T-370)."""
+    if shutil.which("openssl") is None:
+        return "no `openssl` binary on PATH"
+    # Functional probe: actually exercise -addext (LibreSSL and OpenSSL < 1.1.1
+    # reject it), not a spoofable help-text grep.
+    probe = subprocess.run(
+        [
+            "openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+            "-days", "1", "-subj", "/CN=addext-probe",
+            "-addext", "basicConstraints=CA:TRUE",
+            "-keyout", os.devnull, "-out", os.devnull,
+        ],
+        capture_output=True, text=True, check=False,
+    )
+    if probe.returncode != 0:
+        first = (probe.stderr or probe.stdout).strip().splitlines()
+        return (
+            "`openssl req` cannot mint certs with -addext "
+            f"(LibreSSL / OpenSSL < 1.1.1?): {first[0] if first else 'no output'}"
+        )
+    return None
+
+
+@pytest.fixture(scope="session")
+def certs(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
+    """One RSA-2048 test PKI (CA, server, client, rogue) per session (T-370)."""
+    reason = _openssl_unusable()
+    if reason is not None:
+        pytest.skip(
+            f"cannot mint the mTLS test PKI: {reason}. Consequence: the IB "
+            "Gateway remote-control mTLS gate tests (rogue / missing client "
+            "cert, plaintext refusal, allowlist) did NOT run on this host."
+        )
+    return mint_mtls(tmp_path_factory.mktemp("mtls"))
 
 
 def _openssl(*args: str) -> None:
@@ -140,6 +178,12 @@ def _start(config: dict):
     return httpd
 
 
+def _stop(httpd) -> None:
+    """Stop serve_forever AND close the listening socket (T-370)."""
+    httpd.shutdown()
+    httpd.server_close()
+
+
 def _ctx(certs: dict[str, Path], *, client: bool = True, rogue: bool = False) -> ssl.SSLContext:
     # T-359: ALWAYS trust the real CA for server verification — including the
     # rogue-client ctx. Trusting rogue_ca there made urlopen fail on the
@@ -191,13 +235,11 @@ class TestStdlibOnlyIsolation:
 
 
 class TestConfig:
-    def test_refuses_unspecified_bind(self, tmp_path, monkeypatch):
-        certs = mint_mtls(tmp_path)
+    def test_refuses_unspecified_bind(self, tmp_path, monkeypatch, certs):
         with pytest.raises(serve.ConfigError, match="10.0.0.0/16"):
             _config(tmp_path, certs, RADON_IB_REMOTE_BIND="0.0.0.0")
 
-    def test_refuses_public_bind(self, tmp_path):
-        certs = mint_mtls(tmp_path)
+    def test_refuses_public_bind(self, tmp_path, certs):
         with pytest.raises(serve.ConfigError):
             _config(tmp_path, certs, RADON_IB_REMOTE_BIND="1.1.1.1")
 
@@ -207,13 +249,11 @@ class TestConfig:
         assert serve.bind_allowed("0.0.0.0") is False
         assert serve.bind_allowed("::") is False
 
-    def test_refuses_subnet_allowlist(self, tmp_path):
-        certs = mint_mtls(tmp_path)
+    def test_refuses_subnet_allowlist(self, tmp_path, certs):
         with pytest.raises(serve.ConfigError, match="host addresses"):
             _config(tmp_path, certs, RADON_IB_REMOTE_ALLOW="10.0.0.0/16")
 
-    def test_refuses_relative_helper(self, tmp_path):
-        certs = mint_mtls(tmp_path)
+    def test_refuses_relative_helper(self, tmp_path, certs):
         with pytest.raises(serve.ConfigError, match="absolute"):
             _config(tmp_path, certs, RADON_IB_GATEWAY_CONTROL="ib-gateway-control")
 
@@ -230,8 +270,7 @@ class TestConfig:
 
 
 class TestDaemon:
-    def test_status_and_restart_exec_helper_only(self, tmp_path):
-        certs = mint_mtls(tmp_path)
+    def test_status_and_restart_exec_helper_only(self, tmp_path, certs):
         helper = _helper_script(tmp_path)
         config = _config(tmp_path, certs, helper=helper)
         httpd = _start(config)
@@ -243,12 +282,11 @@ class TestDaemon:
             assert status == 200
             assert body["ok"] is True
         finally:
-            httpd.shutdown()
+            _stop(httpd)
         log = (tmp_path / "helper.log").read_text().splitlines()
         assert log == ["status", "restart"]
 
-    def test_unknown_verb_does_not_touch_helper(self, tmp_path):
-        certs = mint_mtls(tmp_path)
+    def test_unknown_verb_does_not_touch_helper(self, tmp_path, certs):
         helper = _helper_script(tmp_path)
         httpd = _start(_config(tmp_path, certs, helper=helper))
         try:
@@ -259,11 +297,10 @@ class TestDaemon:
                 _call(httpd, certs, "/docker", "POST")
             assert err.value.code == 404
         finally:
-            httpd.shutdown()
+            _stop(httpd)
         assert not (tmp_path / "helper.log").exists()
 
-    def test_lease_held_is_409(self, tmp_path):
-        certs = mint_mtls(tmp_path)
+    def test_lease_held_is_409(self, tmp_path, certs):
         helper = _helper_script(tmp_path, rc=75, stdout="held holder=watchdog")
         config = _config(tmp_path, certs, helper=helper)
         httpd = _start(config)
@@ -274,10 +311,9 @@ class TestDaemon:
             payload = json.loads(err.value.read().decode())
             assert payload["returncode"] == 75
         finally:
-            httpd.shutdown()
+            _stop(httpd)
 
-    def test_forwarded_for_cannot_spoof_allowlist(self, tmp_path):
-        certs = mint_mtls(tmp_path)
+    def test_forwarded_for_cannot_spoof_allowlist(self, tmp_path, certs):
         helper = _helper_script(tmp_path)
         config = _config(
             tmp_path, certs, helper=helper, RADON_IB_REMOTE_ALLOW="10.0.0.2"
@@ -299,21 +335,19 @@ class TestDaemon:
             if isinstance(err.value, urllib.error.HTTPError):
                 assert err.value.code == 403
         finally:
-            httpd.shutdown()
+            _stop(httpd)
         assert not (tmp_path / "helper.log").exists()
 
-    def test_missing_client_cert_is_tls_failure(self, tmp_path):
-        certs = mint_mtls(tmp_path)
+    def test_missing_client_cert_is_tls_failure(self, tmp_path, certs):
         httpd = _start(_config(tmp_path, certs))
         try:
             ctx = _ctx(certs, client=False)
             with pytest.raises(ssl.SSLError):
                 _call(httpd, certs, "/healthz", ctx=ctx)
         finally:
-            httpd.shutdown()
+            _stop(httpd)
 
-    def test_rogue_client_cert_is_tls_failure(self, tmp_path):
-        certs = mint_mtls(tmp_path)
+    def test_rogue_client_cert_is_tls_failure(self, tmp_path, certs):
         httpd = _start(_config(tmp_path, certs))
         try:
             # The rogue ctx verifies the SERVER cert fine (real CA in its
@@ -325,20 +359,18 @@ class TestDaemon:
             with pytest.raises(ssl.SSLError):
                 _call(httpd, certs, "/restart", "POST", ctx=_ctx(certs, rogue=True))
         finally:
-            httpd.shutdown()
+            _stop(httpd)
 
-    def test_plaintext_http_is_not_spoken(self, tmp_path):
-        certs = mint_mtls(tmp_path)
+    def test_plaintext_http_is_not_spoken(self, tmp_path, certs):
         httpd = _start(_config(tmp_path, certs))
         port = httpd.server_address[1]
         try:
             with pytest.raises((ssl.SSLError, urllib.error.URLError, OSError)):
                 urllib.request.urlopen(f"http://127.0.0.1:{port}/restart", timeout=2)
         finally:
-            httpd.shutdown()
+            _stop(httpd)
 
-    def test_healthz_does_not_exec_helper(self, tmp_path):
-        certs = mint_mtls(tmp_path)
+    def test_healthz_does_not_exec_helper(self, tmp_path, certs):
         helper = _helper_script(tmp_path)
         httpd = _start(_config(tmp_path, certs, helper=helper))
         try:
@@ -346,7 +378,7 @@ class TestDaemon:
             assert status == 200
             assert body["ok"] is True
         finally:
-            httpd.shutdown()
+            _stop(httpd)
         assert not (tmp_path / "helper.log").exists()
 
 
