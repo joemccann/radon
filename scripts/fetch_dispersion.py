@@ -281,8 +281,20 @@ def _fetch_yahoo_chart(symbol: str, period1: str, now: datetime) -> Closes:
     return parse_yahoo_chart(_yahoo_get(url)["chart"]["result"][0])
 
 
+# REL-184 (R-515): a Yahoo 429 storm must not be deepened — abandon the
+# sweep after this many CONSECUTIVE throttles (non-429 failures don't count).
+YAHOO_MAX_CONSECUTIVE_429 = 3
+
+
+def _is_http_429(exc: BaseException) -> bool:
+    import urllib.error
+
+    return isinstance(exc, urllib.error.HTTPError) and exc.code == 429
+
+
 def _fetch_yahoo_incremental(symbols: list[str], deadline: float, range_: str) -> dict[str, Closes]:
     fetched: dict[str, Closes] = {}
+    throttled = 0
     for start in range(0, len(symbols), YAHOO_SPARK_BATCH_SIZE):
         if time.monotonic() >= deadline:
             _log(f"Yahoo: sweep budget spent at {start}/{len(symbols)}")
@@ -290,13 +302,23 @@ def _fetch_yahoo_incremental(symbols: list[str], deadline: float, range_: str) -
         batch = symbols[start : start + YAHOO_SPARK_BATCH_SIZE]
         try:
             fetched.update(_fetch_yahoo_spark_batch(batch, range_))
+            throttled = 0
         except Exception as exc:  # noqa: BLE001 — the batch is reported as failed
             _log(f"Yahoo: spark batch at {start} failed: {exc}")
+            if _is_http_429(exc):
+                throttled += 1
+                if throttled >= YAHOO_MAX_CONSECUTIVE_429:
+                    _log(
+                        f"Yahoo: abandoning sweep after {throttled} consecutive "
+                        "429s (REL-184) — every further call deepens the throttle"
+                    )
+                    break
     return fetched
 
 
 def _fetch_yahoo_backfill(symbols: list[str], deadline: float) -> dict[str, Closes]:
     fetched: dict[str, Closes] = {}
+    throttled = 0
     now = datetime.now(timezone.utc)
     for index, symbol in enumerate(symbols):
         if time.monotonic() >= deadline:
@@ -304,8 +326,17 @@ def _fetch_yahoo_backfill(symbols: list[str], deadline: float) -> dict[str, Clos
             break
         try:
             fetched[symbol] = _fetch_yahoo_chart(symbol, YAHOO_BACKFILL_PERIOD1, now)
+            throttled = 0
         except Exception as exc:  # noqa: BLE001 — the symbol is reported as failed
             _log(f"Yahoo: {symbol} failed: {exc}")
+            if _is_http_429(exc):
+                throttled += 1
+                if throttled >= YAHOO_MAX_CONSECUTIVE_429:
+                    _log(
+                        f"Yahoo: abandoning sweep after {throttled} consecutive "
+                        "429s (REL-184) — every further call deepens the throttle"
+                    )
+                    break
     return fetched
 
 

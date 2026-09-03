@@ -285,6 +285,44 @@ export function summarizeOpenOrders(
   };
 }
 
+/** REL-203 (R-564): the header count derives from the same combo-grouped
+ * rows the table renders — `summarizeOpenOrders` iterated raw legs, so a
+ * split-leg structure showed "WORKING 2" over one WORKING chip. Combo rows
+ * classify from the aggregate status exactly like the table's chip. */
+export function summarizeOpenOrderRows(
+  rows: readonly (
+    | { kind: "single"; order: OpenOrder }
+    | { kind: "combo"; status: string; orders: readonly OpenOrder[] }
+  )[],
+  now: Date = new Date(),
+): OpenOrdersSummary {
+  let partialCount = 0;
+  let workingCount = 0;
+  for (const row of rows) {
+    let mapped;
+    if (row.kind === "combo") {
+      const partialLeg = row.orders.find((leg) => isPartialFill(leg));
+      mapped = mapOrderStatus(row.status, {
+        filled: partialLeg?.filled,
+        remaining: partialLeg?.remaining,
+        extendedFillLive: row.orders.some((leg) =>
+          isExtendedFillLive(classifyOrderSession(leg, now)),
+        ),
+      });
+    } else {
+      mapped = mapOrderStatus(row.order.status, {
+        filled: row.order.filled,
+        remaining: row.order.remaining,
+        extendedFillLive: isExtendedFillLive(classifyOrderSession(row.order, now)),
+      });
+    }
+    if (mapped.label === "Partial") partialCount += 1;
+    else if (mapped.label === "Working") workingCount += 1;
+  }
+  return { openCount: rows.length, partialCount, workingCount };
+}
+
+
 /** Format signed distance for table cells, e.g. +0.30 / -0.05 */
 export function formatDistanceDelta(delta: number): string {
   const abs = Math.abs(delta);

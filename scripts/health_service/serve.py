@@ -78,6 +78,12 @@ def run_probes() -> dict:
         "radon-nextjs": lambda: probes.probe_tcp(*NEXTJS),
         "ib-gateway": lambda: probes.probe_tcp(*IB_GATEWAY),
     }
+    # REL-194 (R-554): a hung-but-alive radon-mcp was invisible. Dependency
+    # probe (never collapses the edge to down); enabled only where the MCP
+    # runs, via the unit's RADON_MCP_PROBE_URL.
+    mcp_url = os.environ.get("RADON_MCP_PROBE_URL", "")
+    if mcp_url:
+        tasks["radon-mcp"] = lambda: probes.probe_http_alive(mcp_url, timeout=2.0)
     results: dict = {}
     with ThreadPoolExecutor(max_workers=len(tasks)) as ex:
         futures = {name: ex.submit(fn) for name, fn in tasks.items()}

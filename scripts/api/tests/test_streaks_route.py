@@ -49,7 +49,7 @@ async def _no_ib(request, symbol):  # pragma: no cover - trivial stub
 
 
 def test_uw_serves_when_ib_unavailable(client):
-    with patch("api.routes.streaks._read_cached_closes", return_value=None), patch(
+    with patch("api.routes.streaks._read_cached_envelope", return_value=None), patch(
         "api.routes.streaks._fetch_ib_closes", new=_no_ib
     ), patch(
         "api.routes.streaks._fetch_uw_closes", return_value=_closes(30)
@@ -76,7 +76,7 @@ def test_ib_wins_when_available(client):
         return _closes(25)
 
     uw = MagicMock()
-    with patch("api.routes.streaks._read_cached_closes", return_value=None), patch(
+    with patch("api.routes.streaks._read_cached_envelope", return_value=None), patch(
         "api.routes.streaks._fetch_ib_closes", new=_ib
     ), patch("api.routes.streaks._fetch_uw_closes", uw), patch(
         "api.routes.streaks._write_cached_closes"
@@ -89,7 +89,7 @@ def test_ib_wins_when_available(client):
 
 
 def test_short_sources_fall_through_to_yahoo(client):
-    with patch("api.routes.streaks._read_cached_closes", return_value=None), patch(
+    with patch("api.routes.streaks._read_cached_envelope", return_value=None), patch(
         "api.routes.streaks._fetch_ib_closes", new=_no_ib
     ), patch(
         "api.routes.streaks._fetch_uw_closes", return_value=_closes(3)
@@ -112,7 +112,7 @@ def test_robinhood_outranks_yahoo_when_it_serves_enough_bars(client):
     from api.routes.streaks import MIN_ACCEPT_BARS, RH_SOURCE
 
     yahoo = MagicMock()
-    with patch("api.routes.streaks._read_cached_closes", return_value=None), patch(
+    with patch("api.routes.streaks._read_cached_envelope", return_value=None), patch(
         "api.routes.streaks._fetch_ib_closes", new=_no_ib
     ), patch(
         "api.routes.streaks._fetch_uw_closes", return_value={}
@@ -133,7 +133,7 @@ def test_robinhood_outranks_yahoo_when_it_serves_enough_bars(client):
 
 
 def test_longest_short_result_used_when_every_source_is_short(client):
-    with patch("api.routes.streaks._read_cached_closes", return_value=None), patch(
+    with patch("api.routes.streaks._read_cached_envelope", return_value=None), patch(
         "api.routes.streaks._fetch_ib_closes", new=_no_ib
     ), patch(
         "api.routes.streaks._fetch_uw_closes", return_value=_closes(3)
@@ -153,19 +153,25 @@ def test_longest_short_result_used_when_every_source_is_short(client):
 
 
 def test_cache_hit_short_circuits_the_ladder(client):
+    # REL-177 (R-490) rewrote this pin: a cache hit now serves the STORED
+    # provenance (`source` + `fetched_at`, `cached: true`) instead of the
+    # source="cache" shape that hid a sticky Yahoo win behind a fresh clock.
     uw = MagicMock()
     with patch(
-        "api.routes.streaks._read_cached_closes", return_value=_closes(25)
+        "api.routes.streaks._read_cached_envelope",
+        return_value={"data": _closes(25), "source": "uw", "fetched_at": "2026-09-03T00:00:00"},
     ), patch("api.routes.streaks._fetch_uw_closes", uw):
         resp = client.get("/streaks/SPY")
 
     assert resp.status_code == 200
-    assert resp.json()["source"] == "cache"
+    body = resp.json()
+    assert body["source"] == "uw"
+    assert body["cached"] is True
     uw.assert_not_called()
 
 
 def test_all_sources_empty_is_missing_200(client):
-    with patch("api.routes.streaks._read_cached_closes", return_value=None), patch(
+    with patch("api.routes.streaks._read_cached_envelope", return_value=None), patch(
         "api.routes.streaks._fetch_ib_closes", new=_no_ib
     ), patch(
         "api.routes.streaks._fetch_uw_closes", return_value={}

@@ -87,14 +87,35 @@ const SEARCH_STOP = new Set([
 ]);
 
 let cached: CatalogOperation[] | null = null;
+// REL-183 (R-514): a pruned/standalone checkout has no pin sources on disk.
+// The failure is cached (one disk probe, one log line) and every consumer
+// gets an empty catalog with the marker instead of a throw per chat turn.
+let unavailable = false;
 
 function operations(): CatalogOperation[] {
-  if (!cached) cached = buildRuntimeCatalog(loadPinSourcesFromDisk());
+  if (cached) return cached;
+  if (unavailable) return [];
+  try {
+    cached = buildRuntimeCatalog(loadPinSourcesFromDisk());
+  } catch (error) {
+    unavailable = true;
+    console.error(
+      "[assistant] catalog pin sources unavailable — serving an empty catalog:",
+      error,
+    );
+    return [];
+  }
   return cached;
+}
+
+/** True when the pin sources could not be read (catalog_unavailable). */
+export function catalogUnavailable(): boolean {
+  return unavailable;
 }
 
 export function resetCatalogCache(): void {
   cached = null;
+  unavailable = false;
 }
 
 function fullyDecode(value: string): string {

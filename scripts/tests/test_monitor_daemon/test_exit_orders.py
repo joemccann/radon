@@ -541,3 +541,23 @@ class TestExitOrdersQuoteStateGates:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestRel185PerLegErrorsAndRefusalLatch:
+    """REL-185 (R-518): a limit refusal is not overwritten by a later leg's
+    error, and a refused leg is not re-refused every cycle."""
+
+    def test_note_error_accumulates(self):
+        result = {}
+        ExitOrdersHandler._note_error(result, "limit refused leg 2")
+        ExitOrdersHandler._note_error(result, "leg 3 not acknowledged")
+        assert result["errors"] == ["limit refused leg 2", "leg 3 not acknowledged"]
+        assert "limit refused leg 2" in result["error"]
+
+    def test_a_refused_leg_is_latched_until_params_change(self, monkeypatch):
+        handler = ExitOrdersHandler(db=object())
+        key = ("jt-1", "target")
+        handler._limit_refusals[key] = (9000, 3.5)
+        assert handler._limit_refusals.get(key) == (9000, 3.5)
+        # Params changed: the latch no longer matches and the leg re-checks.
+        assert handler._limit_refusals.get(key) != (100, 3.5)

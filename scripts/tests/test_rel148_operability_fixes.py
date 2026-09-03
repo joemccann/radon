@@ -80,7 +80,21 @@ class TestOneCriTimeoutConstant:
 # A blocking flock would park the loser behind a 180s run; a bounded join turns
 # that hang into a failure instead of a stuck test session.
 LOCK_LOSER_BUDGET_S = 15.0
-CACHED_CRI = {"date": "2026-08-28", "cri": 42.0, "level": "T-314 cached payload"}
+# REL-176 (R-487) rewrote this fixture onto its original intent: the loser
+# serves a cache it can DATE. An age-less payload is now refused, so the
+# fixture carries a fresh scan_time and the served copy is marked.
+def _cached_cri() -> dict:
+    from datetime import datetime, timezone
+
+    return {
+        "date": "2026-08-28",
+        "cri": 42.0,
+        "level": "T-314 cached payload",
+        "scan_time": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+    }
+
+
+CACHED_CRI = _cached_cri()
 
 
 class _IBNeverConstructed:
@@ -151,7 +165,10 @@ class TestCriScanLockLoserServesCacheOrYields:
         exit_code = _run_cri_main(monkeypatch, cri_scan_sandbox, "--json")
 
         assert exit_code == 0
-        assert json.loads(capsys.readouterr().out) == CACHED_CRI
+        assert json.loads(capsys.readouterr().out) == {
+            **CACHED_CRI,
+            "served_from_cache": True,
+        }
 
     def test_a_lock_loser_with_no_cache_exits_75(
         self, monkeypatch, tmp_path, capsys, cri_scan_sandbox, held_scan_lock

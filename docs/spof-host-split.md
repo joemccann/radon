@@ -150,6 +150,12 @@ Operator commands after the cut:
      `cloud/.env.example`). Then `radon restart` on the app: the API
      container mounts `/etc/radon/ib-remote` read-only only if the
      directory exists when the unit starts (`radon-app-runtime.sh`).
+  Rotation (REL-178/R-496): the pair is 825-day self-signed. Re-run the
+  mint script on the broker before expiry and re-copy the three files to the
+  app host, then restart `radon-ib-gateway-remote` (broker) and `radon-api`
+  (app). Expiry is surfaced as `ib_remote_cert_days_left` on the broker
+  `/healthz`, `ib_gateway.remote.cert_days_left` on the app `/health`, and
+  the ib-watchdog health row warns under 30 days / pages under 7.
   3. Broker: `systemctl enable --now radon-ib-gateway-remote.service`.
      `RADON_IB_REMOTE_ALLOW` is host addresses only (`10.0.0.2`); the
      daemon refuses to start on a subnet. `RADON_IB_REMOTE_CLIENT_NAMES` is

@@ -4,7 +4,7 @@ import { join } from "path";
 import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
 import { getDb } from "@/lib/db";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead, staleCollapse, isMissingPayload } from "@/lib/dbFirstRead";
-import { getFreshnessWindowMs } from "@/lib/serviceHealthWindows";
+import { getFreshnessWindowMs, getMarketStateFromDate } from "@/lib/serviceHealthWindows";
 // Disable Next.js static caching: this handler reads live disk state
 // (data/*.json, cache files). Without this, the framework freezes the
 // first response and serves stale data until the dev server restarts.
@@ -33,8 +33,12 @@ const MISSING_VOL_CONE = {
 // a private 48h budget here collapsed that healthy snapshot into the
 // "outage, not an empty result" banner every Sunday evening while the
 // watchdog's own window still read the writer as fine. Share the catalog's
-// closed window so the panel and the watchdog agree (R-450 pattern).
-const MAX_AGE_MS = getFreshnessWindowMs("vol-cone", "closed");
+// windows so the panel and the watchdog agree (R-450 pattern), and pick the
+// window MARKET-AWARE like the watchdog does (REL-181 / R-511): during RTH
+// the intraday writer refreshes the snapshot every 15m, so the 26h open
+// window applies — the unconditional 4d closed budget hid a Friday-dead
+// writer through Tuesday.
+const maxAgeMs = () => getFreshnessWindowMs("vol-cone", getMarketStateFromDate());
 
 async function readVolConeFromDb(): Promise<TimestampedRead<Record<string, unknown>> | null> {
   const db = getDb();
@@ -64,7 +68,7 @@ export async function GET(): Promise<Response> {
   const result = await dbFirstRead({
     fromDb: readVolConeFromDb,
     fromDisk: readVolConeFromDisk,
-    maxAgeMs: MAX_AGE_MS,
+    maxAgeMs: maxAgeMs(),
     label: "vol-cone",
     // R-193: a writer that ran, produced nothing and still stamped a
     // timestamped row would otherwise outrank an older row with a real

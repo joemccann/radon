@@ -341,8 +341,14 @@ on_signal() {
   local sig="$1"
   trap - INT TERM HUP ERR EXIT
   kill_round_group
-  report "KILLED (SIG${sig})" "the wrapper was signalled before the phase finished — launchd ExitTimeOut, a bootout, an operator kill or a reboot; partial work may exist on the weekend branch"
+  # REL-199 (R-531): launchd's default ExitTimeOut is ~20s and report()'s gh
+  # ladder is up to five 120s-bounded calls — a bootout produced NO page.
+  # Release the lock and fire the 10s-bounded Pushover FIRST, log locally,
+  # then give GitHub one short-bounded attempt.
   release_runner_lock "${RUNNER_LOCK:-}"
+  notify_phase "KILLED (SIG${sig})" || true
+  echo "[weekend] KILLED (SIG${sig}) $(date -u +%FT%TZ)" >> "${RUN_LOG:-/dev/null}" 2>/dev/null || true
+  NET_TIMEOUT_SECS=10 report "KILLED (SIG${sig})" "the wrapper was signalled before the phase finished — launchd ExitTimeOut, a bootout, an operator kill or a reboot; partial work may exist on the weekend branch" 0
   exit 143
 }
 
@@ -457,7 +463,7 @@ refuse_billing_reroute_files() {
     [[ " $BILLING_IGNORED " == *" web/.env "* ]] || BILLING_IGNORED="${BILLING_IGNORED:+$BILLING_IGNORED }web/.env"
   fi
 
-  for settings_file in "$HOME/.claude/settings.json" .claude/settings.json .claude/settings.local.json; do
+  for settings_file in "$HOME/.claude/settings.json" .claude/settings.json .claude/settings.local.json "/Library/Application Support/ClaudeCode/managed-settings.json" /etc/claude-code/managed-settings.json; do
     [[ -f "$settings_file" ]] || continue
     if grep -qE '"apiKeyHelper"[[:space:]]*:[[:space:]]*"[^"]' "$settings_file" \
        || grep -qE "$BILLING_REROUTE_SETTINGS_KEY" "$settings_file" \
@@ -514,6 +520,9 @@ begin_phase() {
   # Issue comments do not include a run-log tail.
   RUN_LOG="$LOG_DIR/$PHASE-$STAMP.log"
   RC=0
+  # REL-198 (R-533): rung carry across phases is intended; flag carry is
+  # not — an audit-phase exhaustion mislabelled a successful remediate.
+  ALL_MODELS_EXHAUSTED=0
 }
 
 # Fresh ground truth. Any leftover state from a killed prior run is
@@ -587,7 +596,12 @@ ALL_MODELS_EXHAUSTED=0
 # is per phase and every round appends to it, so a whole-file grep would let
 # round 1's exhausted rung drop a model on every later round forever. R-426.
 is_quota_exhausted() {
-  tail -c "+$((ROUND_LOG_MARK + 1))" "$RUN_LOG" 2>/dev/null | grep -qiE \
+  # REL-198 (R-530): the detector reads the agent's own transcript, so a
+  # crashing round that QUOTES a pattern mid-run must not read as quota
+  # exhaustion. The CLI prints its refusal in its FINAL lines: scan only the
+  # last 40 lines of the round slice, and never the wrapper's own markers.
+  tail -c "+$((ROUND_LOG_MARK + 1))" "$RUN_LOG" 2>/dev/null \
+    | grep -v '^\[' | tail -n 40 | grep -qiE \
     'out of usage credits|You.ve hit your (Opus|Sonnet) limit|Request rejected \(429\)|529 Overloaded|experiencing high load'
 }
 
@@ -643,7 +657,9 @@ run_phase() {
     round_start=$SECONDS
     wait "$ROUND_PID"
     RC=$?
-    ROUND_PID=""
+    # REL-198 (R-532): reap the round's process group BEFORE clearing the
+    # pid — the guard early-returns on an empty ROUND_PID, so the old order
+    # made orphan reaping after a normal exit dead code.
     kill_round_group
     # The exit code for a `-k` escalation is not portable: GNU coreutils 9.4
     # reports 137 when the SIGKILL is what actually ended the child, not 124.

@@ -33,6 +33,17 @@ const MISSING_IV_SPREAD = {
 // snapshot older than two days means the writer is down.
 const IV_SPREAD_MAX_AGE_MS = 48 * 60 * 60_000;
 
+// REL-214 (R-576): a stale_source re-serve refreshes scan_time on every run,
+// so freshness must ride the DATA age (as_of, a YYYY-MM-DD) or the 48h gate
+// can never trip during a long IB outage — machine consumers saw 10-day-old
+// data with a live scan_time. Non-stale payloads keep scan_time freshness.
+function ivSpreadContentTimestampMs(data: Record<string, unknown>, scanTime: unknown): number | null {
+  if (data.status === "stale_source" && typeof data.as_of === "string" && data.as_of) {
+    return contentTimestampMs(`${data.as_of}T22:15:00Z`);
+  }
+  return contentTimestampMs(scanTime as string);
+}
+
 async function readIvSpreadFromDb(): Promise<TimestampedRead<Record<string, unknown>> | null> {
   const db = getDb();
   const result = await db.execute({
@@ -42,16 +53,14 @@ async function readIvSpreadFromDb(): Promise<TimestampedRead<Record<string, unkn
   });
   if (result.rows.length === 0) return null;
   const row = result.rows[0] as unknown as { scan_time: string; payload: string };
-  return {
-    data: JSON.parse(row.payload) as Record<string, unknown>,
-    timestampMs: contentTimestampMs(row.scan_time),
-  };
+  const data = JSON.parse(row.payload) as Record<string, unknown>;
+  return { data, timestampMs: ivSpreadContentTimestampMs(data, row.scan_time) };
 }
 
 async function readIvSpreadFromDisk(): Promise<TimestampedRead<Record<string, unknown>> | null> {
   const raw = await readFile(CACHE_PATH, "utf-8");
   const data = JSON.parse(raw) as Record<string, unknown>;
-  return { data, timestampMs: contentTimestampMs(data.scan_time) };
+  return { data, timestampMs: ivSpreadContentTimestampMs(data, data.scan_time) };
 }
 
 export const radonCapability = "read";

@@ -255,6 +255,7 @@ class GatewayState:
     backoff_attempt_count: int = 0
     next_attempt_in_secs: float = 0.0
     probe_timed_out: bool = False
+    remote_cert_days_left: Optional[float] = None
 
     @classmethod
     def from_health_payload(cls, payload: dict) -> Optional["GatewayState"]:
@@ -272,6 +273,11 @@ class GatewayState:
             backoff_attempt_count=int(backoff.get("attempt_count", 0)) if isinstance(backoff, dict) else 0,
             next_attempt_in_secs=float(backoff.get("next_attempt_in_secs", 0.0)) if isinstance(backoff, dict) else 0.0,
             probe_timed_out=bool(gw.get("probe_timed_out", False)),
+            remote_cert_days_left=(
+                gw.get("remote", {}).get("cert_days_left")
+                if isinstance(gw.get("remote"), dict)
+                else None
+            ),
         )
 
 
@@ -682,6 +688,48 @@ def _release_preheld_lease() -> None:
 # --- service_health write ---------------------------------------------------
 
 
+# REL-178 (R-496): set by run_cycle from /health's remote.cert_days_left;
+# folded into every cycle's own health row so the footer shows the warning
+# and the error bucket pages once the cert is critical.
+_REMOTE_CERT_ALERT: dict = {}
+REMOTE_CERT_WARN_DAYS = 30.0
+REMOTE_CERT_CRITICAL_DAYS = 7.0
+
+
+def classify_remote_cert(days_left: Optional[float]) -> Optional[str]:
+    """None (fine/unknown), "warning" (<30d) or "critical" (<7d)."""
+    if days_left is None:
+        return None
+    if days_left < REMOTE_CERT_CRITICAL_DAYS:
+        return "critical"
+    if days_left < REMOTE_CERT_WARN_DAYS:
+        return "warning"
+    return None
+
+
+def note_remote_cert(days_left: Optional[float]) -> None:
+    band = classify_remote_cert(days_left)
+    _REMOTE_CERT_ALERT.clear()
+    if band is not None:
+        _REMOTE_CERT_ALERT.update({
+            "message": (
+                f"ib-remote mTLS cert expires in {days_left:.0f} day(s) — "
+                "re-mint via cloud/scripts/ib-gateway-remote-certs.sh and "
+                "copy ca/client certs to the app host"
+            ),
+            "critical": band == "critical",
+        })
+
+
+def _write_service_health_transport(state: str, error=None) -> None:
+    try:
+        from db.hrana_http import write_service_health_http
+    except ImportError:
+        from scripts.db.hrana_http import write_service_health_http
+
+    write_service_health_http("ib-watchdog", state, error=error)
+
+
 def _write_service_health(
     state_label: str,
     error_message: Optional[str],
@@ -692,13 +740,12 @@ def _write_service_health(
     post-Connection-refused 60s SIGTERM kills (148 timeout results in 7
     days). Module-level so tests can patch it directly; the import is lazy
     so dev environments without creds stay importable."""
-    try:
-        from db.hrana_http import write_service_health_http
-    except ImportError:
-        from scripts.db.hrana_http import write_service_health_http
-
-    write_service_health_http(
-        "ib-watchdog",
+    note = _REMOTE_CERT_ALERT.get("message")
+    if note:
+        if state_label == "ok" and _REMOTE_CERT_ALERT.get("critical"):
+            state_label = "error"
+        error_message = f"{error_message}; {note}" if error_message else note
+    _write_service_health_transport(
         state_label,
         error={"message": error_message} if error_message else None,
     )
@@ -1418,6 +1465,8 @@ def _run_cycle_steps(
 
     with _timed("probe"):
         health = fetch_health(health_url, health_timeout)
+    if health is not None:
+        note_remote_cert(health.remote_cert_days_left)
     if health is None:
         state.authenticated_recovery_count = 0
         # Primary sensor down — fall back to the direct gateway probe

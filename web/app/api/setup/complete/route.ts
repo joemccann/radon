@@ -4,7 +4,7 @@ import { getRequestId, jsonApiError, setNoStoreResponseHeaders } from "@/lib/api
 import { isSetupMode, isAuthMisconfigured } from "@/lib/setup/setupMode";
 import { setupTokenRejection, consumeSetupToken } from "@/lib/setup/setupToken";
 import { markSetupComplete, resolveRepoRoot } from "@/lib/setup/setupComplete";
-import { WEB_ENV_KEYS, writeSetupEnvFiles } from "@/lib/setup/envFiles";
+import { partitionEnvEncodable, WEB_ENV_KEYS, writeSetupEnvFiles } from "@/lib/setup/envFiles";
 
 /**
  * First-run wizard completion.
@@ -189,8 +189,19 @@ export async function POST(request: Request): Promise<Response> {
       requestId,
     );
   }
-  if (Object.keys(collected).length > 0) {
-    written = await writeSetupEnvFiles(collected, repoRoot);
+  // REL-216 (R-591): a value the env writer refuses is dropped and reported,
+  // never thrown — the credentials are already stored in the encrypted store,
+  // and an un-latched setup retries into the identical 500 forever.
+  const { encodable, refused } = partitionEnvEncodable(collected);
+  for (const { key, message } of refused) {
+    outcomes.push({
+      service: `env:${key}`,
+      stored: false,
+      validation: { status: "env_refused", message },
+    });
+  }
+  if (Object.keys(encodable).length > 0) {
+    written = await writeSetupEnvFiles(encodable, repoRoot);
   }
   await markSetupComplete(repoRoot);
   consumeSetupToken();

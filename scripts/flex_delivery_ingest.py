@@ -165,7 +165,24 @@ def _page_release_failure(digest: str, message: str) -> None:
         print(f"[flex-ingest] release-failure page non-fatal: {exc}", file=sys.stderr)
 
 
+# REL-210 (R-584): once an error heartbeat is written in this process, a later
+# duplicate's "ok" must not repaint the row green — the sftp batch iterates the
+# remote listing unsorted and delivered files are never removed remotely, so a
+# stale duplicate routinely sorts after a failing new statement.
+_CASH_FLOW_ERROR_LATCHED = False
+
+
 def _heartbeat_cash_flow_sync(state: str, error: Dict[str, Any] | None = None) -> None:
+    global _CASH_FLOW_ERROR_LATCHED
+    if state == "error":
+        _CASH_FLOW_ERROR_LATCHED = True
+    elif _CASH_FLOW_ERROR_LATCHED:
+        print(
+            "[flex-ingest] suppressing cash-flow-sync ok heartbeat: an error "
+            "was recorded earlier in this run (REL-210)",
+            file=sys.stderr,
+        )
+        return
     try:
         from db import writer  # noqa: PLC0415
 
@@ -213,6 +230,12 @@ def _apply_classified(kind: str, xml_text: str, digest: str, source_path: str) -
                 "error": f"cash_flow_sync failed (exit {cash_code}); TWR not rebuilt",
                 "source_path": source_path,
             }
+        # REL-220 (R-588): this ok deliberately precedes the TWR build — it
+        # reports the CASH-FLOW write, which is complete and (per R-329's
+        # id-keyed upsert) convergent under the retry a TWR failure triggers:
+        # the caller releases the claim, and re-ingesting the same bytes
+        # re-applies to identical rows. The TWR half reports through its own
+        # perf-twr surface. Pinned by test_rel220_twr_retry_convergence.
         _heartbeat_cash_flow_sync("ok")
         twr = perf_twr_builder.build_and_persist(from_file=source_path, persist=True)
         return {

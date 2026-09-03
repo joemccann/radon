@@ -28,7 +28,7 @@ function coalescedStreaks(symbol: string): Promise<Record<string, unknown>> {
   return pending;
 }
 
-export const radonCapability = "read";
+export const radonCapability = "read.spawn";
 
 export async function GET(request: Request): Promise<Response> {
   const access = await requireRouteAccess(undefined, {

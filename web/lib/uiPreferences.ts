@@ -61,7 +61,10 @@ export function mergeUiPreferences(
   if (server.columns) {
     const columns = { ...(local.columns ?? {}) };
     for (const [tableId, table] of Object.entries(server.columns)) {
-      columns[tableId] = { ...(columns[tableId] ?? {}), ...table };
+      // REL-222 (R-594): LOCAL wins per key, matching the theme half — the
+      // server copy fills gaps only. Server-wins reverted a column toggled
+      // before hydrate resolved (the clobber class the theme fix closed).
+      columns[tableId] = { ...table, ...(columns[tableId] ?? {}) };
     }
     merged.columns = columns;
   }

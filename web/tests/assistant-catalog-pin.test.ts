@@ -131,7 +131,7 @@ const PINNED: Record<string, PinnedCapability> = {
   "skew": "read",
   "skew2d": "read",
   "straddle": "read",
-  "streaks": "read",
+  "streaks": "read.spawn",
   "ticker/info": "read",
   "ticker/news": "read",
   "ticker/ratings": "read",
