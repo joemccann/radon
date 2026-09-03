@@ -37,12 +37,31 @@ async def test_orders_sync_tick_skips_when_test_mode():
 
 @pytest.mark.asyncio
 async def test_orders_sync_tick_skips_when_market_closed():
-    """tick() is a no-op outside 09:30-16:00 ET weekdays."""
+    """tick() is a no-op outside equity EXT (04:00-20:00 ET weekdays)."""
     with patch.object(srv, "test_mode", False):
-        with patch.object(srv, "_is_market_open_now_et", return_value=False):
+        with patch.object(srv, "_is_orders_session_live_now_et", return_value=False):
             with patch.object(srv, "_run_ib_script_with_recovery", new=AsyncMock()) as mock_run:
                 await srv._orders_sync_tick()
                 mock_run.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_orders_sync_tick_runs_during_extended_hours():
+    """RTH closed, equity EXT live → still sync. AVGO 16:24 ET 2026-09-02."""
+    ok_result = ScriptResult(ok=True, data={})
+    with patch.object(srv, "test_mode", False):
+        with patch.object(srv, "_is_market_open_now_et", return_value=False):
+            with patch.object(srv, "_is_orders_session_live_now_et", return_value=True):
+                with patch.object(srv, "_pool_has_any_connection", return_value=True):
+                    with patch.object(
+                        srv,
+                        "_run_ib_script_with_recovery",
+                        new=AsyncMock(return_value=ok_result),
+                    ) as mock_run:
+                        await srv._orders_sync_tick()
+                        mock_run.assert_called_once()
+                        assert mock_run.call_args[0][0] == "ib_orders.py"
+                        assert "--sync" in mock_run.call_args[0][1]
 
 
 @pytest.mark.asyncio
@@ -50,7 +69,7 @@ async def test_orders_sync_tick_skips_when_pool_disconnected():
     """tick() is a no-op when no pool connection is live (gateway unreachable /
     awaiting 2FA)."""
     with patch.object(srv, "test_mode", False):
-        with patch.object(srv, "_is_market_open_now_et", return_value=True):
+        with patch.object(srv, "_is_orders_session_live_now_et", return_value=True):
             with patch.object(srv, "_pool_has_any_connection", return_value=False):
                 with patch.object(srv, "_run_ib_script_with_recovery", new=AsyncMock()) as mock_run:
                     await srv._orders_sync_tick()
@@ -64,7 +83,7 @@ async def test_orders_sync_tick_runs_sync_during_market_hours():
     ok_result = ScriptResult(ok=True, data={})
 
     with patch.object(srv, "test_mode", False):
-        with patch.object(srv, "_is_market_open_now_et", return_value=True):
+        with patch.object(srv, "_is_orders_session_live_now_et", return_value=True):
             with patch.object(srv, "_pool_has_any_connection", return_value=True):
                 with patch.object(
                     srv,
@@ -88,7 +107,7 @@ async def test_orders_sync_tick_logs_warning_on_failure():
     fail_result = ScriptResult(ok=False, error="ECONNREFUSED")
 
     with patch.object(srv, "test_mode", False):
-        with patch.object(srv, "_is_market_open_now_et", return_value=True):
+        with patch.object(srv, "_is_orders_session_live_now_et", return_value=True):
             with patch.object(srv, "_pool_has_any_connection", return_value=True):
                 with patch.object(
                     srv,
@@ -124,7 +143,7 @@ async def test_orders_sync_tick_retries_capacity_shed_then_succeeds():
         return _ok_outcome()
 
     with patch.object(srv, "test_mode", False):
-        with patch.object(srv, "_is_market_open_now_et", return_value=True):
+        with patch.object(srv, "_is_orders_session_live_now_et", return_value=True):
             with patch.object(srv, "_pool_has_any_connection", return_value=True):
                 with patch.object(srv, "_coordinated_orders_sync", new=flaky):
                     with patch.object(srv.asyncio, "sleep", new=AsyncMock()):
@@ -155,7 +174,7 @@ async def test_orders_sync_tick_capacity_shed_heartbeats_without_claiming_ok():
         return []
 
     with patch.object(srv, "test_mode", False):
-        with patch.object(srv, "_is_market_open_now_et", return_value=True):
+        with patch.object(srv, "_is_orders_session_live_now_et", return_value=True):
             with patch.object(srv, "_pool_has_any_connection", return_value=True):
                 with patch.object(
                     srv,
@@ -184,7 +203,7 @@ async def test_orders_sync_tick_real_failure_does_not_skip_heartbeat():
     hrana = MagicMock()
 
     with patch.object(srv, "test_mode", False):
-        with patch.object(srv, "_is_market_open_now_et", return_value=True):
+        with patch.object(srv, "_is_orders_session_live_now_et", return_value=True):
             with patch.object(srv, "_pool_has_any_connection", return_value=True):
                 with patch.object(
                     srv, "_coordinated_orders_sync", new=AsyncMock(return_value=fail)

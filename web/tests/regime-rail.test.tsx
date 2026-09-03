@@ -41,11 +41,11 @@ describe("REGIME_RAIL_GROUPS — grouped registry covers every tab exactly once"
     ]);
   });
 
-  it("flattens to all 29 regime tabs with no duplicates", () => {
-    expect(REGIME_TABS).toHaveLength(29);
-    expect(new Set(REGIME_TABS).size).toBe(29);
+  it("flattens to all 30 regime tabs with no duplicates", () => {
+    expect(REGIME_TABS).toHaveLength(30);
+    expect(new Set(REGIME_TABS).size).toBe(30);
     expect([...REGIME_TABS].sort()).toEqual(
-      ["cri", "vcg", "gex", "grg", "breadth", "ma-ratio", "trin", "divyield", "hyad", "hhlev", "bpi", "margin", "credit", "iei-hyg", "straddle", "cor", "streaks", "vixcor", "vixts", "dispersion", "ivrank", "skew", "skew2d", "curve", "cot", "ats", "short", "llm", "backtest"].sort(),
+      ["cri", "vcg", "gex", "grg", "breadth", "ma-ratio", "trin", "divyield", "hyad", "hhlev", "bpi", "margin", "credit", "iei-hyg", "straddle", "cor", "streaks", "vixcor", "vixts", "dispersion", "ivrank", "iv-spread", "skew", "skew2d", "curve", "cot", "ats", "short", "llm", "backtest"].sort(),
     );
   });
 
@@ -60,6 +60,7 @@ describe("REGIME_RAIL_GROUPS — grouped registry covers every tab exactly once"
     expect(groupOf.vixts).toBe("Volatility");
     expect(groupOf.dispersion).toBe("Volatility");
     expect(groupOf.ivrank).toBe("Volatility");
+    expect(groupOf["iv-spread"]).toBe("Volatility");
     expect(groupOf.skew).toBe("Volatility");
     expect(groupOf.skew2d).toBe("Volatility");
     expect(groupOf.curve).toBe("Volatility");
@@ -91,6 +92,7 @@ describe("REGIME_RAIL_GROUPS — grouped registry covers every tab exactly once"
     expect(REGIME_TAB_LABEL.vixts).toBe("VIX TS");
     expect(REGIME_TAB_LABEL.dispersion).toBe("DISPERSION");
     expect(REGIME_TAB_LABEL.ivrank).toBe("IV RANK");
+    expect(REGIME_TAB_LABEL["iv-spread"]).toBe("IV SPREAD");
     expect(REGIME_TAB_LABEL.credit).toBe("CREDIT");
     expect(REGIME_TAB_LABEL.hyad).toBe("HY AD");
     expect(REGIME_TAB_LABEL.hhlev).toBe("HH LEV");
@@ -165,12 +167,12 @@ describe("RegimeRail — grouped rail rendering + navigation", () => {
     return { onSelect, ...utils };
   };
 
-  it("renders all five group headers and 29 items", () => {
+  it("renders all five group headers and 30 items", () => {
     const { container } = renderRail();
     for (const g of REGIME_RAIL_GROUPS) {
       expect(within(container).getByText(g.label)).toBeTruthy();
     }
-    expect(container.querySelectorAll("[data-tab]")).toHaveLength(29);
+    expect(container.querySelectorAll("[data-tab]")).toHaveLength(30);
   });
 
   it("marks the active tab with the active class and aria-current", () => {

@@ -115,14 +115,13 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // pattern above so the row only fires when the writer should have
   // run inside market hours but didn't.
   "journal-sync": { open: 10 * MIN, extended: 3 * DAY, closed: 3 * DAY, category: "scheduled", requires_ib: true },
-  // ``cash-flow-sync`` fires once per ET trading day at 17:00 ET and
-  // skips weekends + US holidays. The longest legitimate quiet period
-  // is Fri 17:00 ET → Mon 17:00 ET ≈ 72h. The prior 25h uniform
-  // window tripped every Saturday morning. ``closed`` and ``extended``
-  // are widened to 4 days to cover the weekend gap (Fri–Mon) plus one
-  // holiday-drift day; ``open`` stays at 25h to catch a missed weekday
-  // run quickly during trading hours.
-  "cash-flow-sync": { open: 25 * HOUR, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
+  // ``cash-flow-sync`` is written by the sFTP ingest (radon-flex-pull.timer,
+  // Tue..Sat 07:30 ET) when a NEW Activity statement is applied. The
+  // longest legitimate gap inside market hours is Sat 07:30 ET → Mon
+  // 16:00 ET ≈ 57h, so the 25h ``open`` window it had as a Mon-Fri daemon
+  // handler would trip every Monday. ``closed`` and ``extended`` stay at
+  // 4 days to cover the weekend gap plus one holiday-drift day.
+  "cash-flow-sync": { open: 3 * DAY, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
   // ``execution-sweep`` fires once per ET trading day at 20:30 ET (the
   // REL-012 evening after-hours fill sweep inside the monitor daemon)
   // and skips weekends + US holidays. The longest legitimate quiet
@@ -215,6 +214,12 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // matches its daily siblings. IB primary with a UW fallback, so the job
   // heartbeats through an IB outage: requires_ib stays false.
   "ivrank": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+
+  // ``iv-spread`` — radon-iv-spread.timer fires daily 22:15 UTC every calendar day
+  // (weekend runs are unchanged-data heartbeats), so a uniform 26h window matches
+  // its ivrank sibling. IB is the ONLY feed (no UW/Yahoo rung serves index 30d IV),
+  // so an IB outage is the one thing that explains a missing reading: requires_ib true.
+  "iv-spread": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: true },
 
   // ``iei-hyg`` — radon-iei-hyg.timer fires daily 21:55 UTC; IB → UW → Yahoo cascade, so requires_ib stays false.
   "iei-hyg": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },

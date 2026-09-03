@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { hydrateUiPreferences, saveUiColumns } from "@/lib/uiPreferences";
 
 /**
@@ -29,6 +29,7 @@ export function useColumnVisibility<K extends string>(
 ): ColumnVisibility<K> {
   const storageKey = `${STORAGE_PREFIX}${tableId}`;
   const alwaysOnSet = new Set<K>(alwaysOn);
+  const userEditedRef = useRef(false);
 
   const [visible, setVisible] = useState<Record<K, boolean>>(() => ({ ...defaults }));
   const [hydrated, setHydrated] = useState(false);
@@ -86,16 +87,16 @@ export function useColumnVisibility<K extends string>(
     }
   }, [hydrated, storageKey, visible]);
 
+  useEffect(() => {
+    if (!hydrated || !userEditedRef.current) return;
+    saveUiColumns(tableId, visible);
+  }, [hydrated, tableId, visible]);
+
   const toggle = useCallback(
     (key: K) => {
       if (alwaysOnSet.has(key)) return;
-      setVisible((prev) => {
-        const next = { ...prev, [key]: !prev[key] };
-        // Server sync happens ONLY on a user action, never on hydration —
-        // pushing hydrated defaults would clobber another device's choice.
-        saveUiColumns(tableId, next);
-        return next;
-      });
+      userEditedRef.current = true;
+      setVisible((prev) => ({ ...prev, [key]: !prev[key] }));
     },
     // alwaysOnSet is derived from the same `alwaysOn` array — referentially stable per render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -103,10 +104,10 @@ export function useColumnVisibility<K extends string>(
   );
 
   const reset = useCallback(() => {
+    userEditedRef.current = true;
     const reset: Record<K, boolean> = { ...defaults };
     for (const key of alwaysOnSet) reset[key] = true;
     setVisible(reset);
-    saveUiColumns(tableId, reset);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

@@ -97,6 +97,7 @@ Never make Yahoo the scheduled, primary, or only source for a series IB or UW ca
 | `.env` (root) | python-dotenv | MenthorQ creds, Clerk JWKS / issuer / allowlist, optional local archive keys |
 | `.env.ib-mode` (root, gitignored) | overlayed after `.env` | `IB_GATEWAY_MODE`, `IB_GATEWAY_HOST` — toggled by `scripts/ib mode local\|cloud` |
 | `web/.env` | Next.js | `ANTHROPIC_API_KEY`, `UW_TOKEN`, `EXA_API_KEY`, `CEREBRAS_API_KEY`, Clerk keys |
+| `~/.radon/secrets.db` + `secret_store.key` (host-local, never Turso) | FastAPI lifespan export — **store wins over `.env`** for registry names | Profile Credentials tab keys. Key loss = unrecoverable ciphertext. Runbook: `docs/operations.md` "Encrypted credential store" |
 
 **Clerk MFA (operator-scoped):** Clerk's MFA policy is "available/optional"; the operator account has TOTP enrolled, so Clerk challenges it on every sign-in, while demo trial users (same instance, no enrolled factor) sign in with the first factor only. Clerk enforces this server-side before minting a session JWT, so Next.js middleware and FastAPI Bearer auth need no MFA-specific code. Do NOT flip the instance policy to "required for all users" — that would force every demo signup through second-factor enrollment.
 

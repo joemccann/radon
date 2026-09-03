@@ -23,10 +23,11 @@ decrypting to the wrong credential. Every mutation writes an audit row FIRST
 
 from __future__ import annotations
 
+import functools
+import hashlib
 import os
 import re
 import sqlite3
-import stat
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -63,6 +64,10 @@ CREATE TABLE IF NOT EXISTS secret_events (
     actor TEXT NOT NULL,
     at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS key_binding (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    fingerprint TEXT NOT NULL
+);
 """
 
 
@@ -78,6 +83,39 @@ class SecretIntegrityError(SecretStoreError):
     """Ciphertext failed authentication: wrong key or tampered row."""
 
 
+class SecretKeyMismatchError(SecretStoreError):
+    """The DB is bound to a different master key than the one loaded.
+
+    Raised instead of silently minting a fresh key over rows encrypted under
+    a lost one (which would permanently orphan every stored credential), and
+    instead of writing new-key ciphertext into a DB whose rows the loaded
+    key cannot decrypt (which would split the store across two keys). The
+    operator must choose: restore the old key, or delete the DB.
+    """
+
+
+def _sqlite_guarded(fn):
+    """Raw sqlite failures (disk full, locked, read-only FS) become
+    SecretStoreError so callers' store-unavailable handling is reachable."""
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except sqlite3.Error as exc:
+            raise SecretStoreError(f"secret store I/O failed: {exc}") from exc
+
+    return wrapper
+
+
+def _ensure_private_file(path: Path) -> None:
+    if not path.is_file():
+        return
+    mode = path.stat().st_mode & 0o777
+    if mode != 0o600:
+        os.chmod(path, 0o600)
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -86,14 +124,6 @@ def _mask(value: str) -> str:
     if len(value) >= _HINT_MIN_LEN:
         return "\u2022" * 4 + value[-4:]
     return "\u2022" * 4
-
-
-def _check_owner_only(path: Path, what: str) -> None:
-    mode = stat.S_IMODE(os.stat(path).st_mode)
-    if mode & 0o077:
-        raise SecretStoreError(
-            f"{what} {path} is mode {mode:04o}; must be 0600 (owner-only)"
-        )
 
 
 class SecretStore:
@@ -112,7 +142,9 @@ class SecretStore:
             or os.environ.get("RADON_SECRET_STORE_KEY_FILE")
             or DEFAULT_KEY_PATH
         )
-        self._aesgcm = AESGCM(self._load_or_create_key())
+        key = self._load_or_create_key()
+        self._key_fingerprint = hashlib.sha256(key).hexdigest()
+        self._aesgcm = AESGCM(key)
 
     # -- key material ------------------------------------------------------
 
@@ -129,7 +161,7 @@ class SecretStore:
                     )
                 return key
         if self._key_path.is_file():
-            _check_owner_only(self._key_path, "key file")
+            _ensure_private_file(self._key_path)
             key = self._key_path.read_bytes()
             if len(key) != _KEY_BYTES:
                 raise SecretStoreError(
@@ -137,29 +169,124 @@ class SecretStore:
                     f"got {len(key)}"
                 )
             return key
+        # is_file said absent — re-read once before concluding the key is
+        # gone, so losing the first-use create race hands us the winner's key.
+        try:
+            key = self._key_path.read_bytes()
+        except OSError:
+            pass
+        else:
+            if len(key) != _KEY_BYTES:
+                raise SecretStoreError(
+                    f"key file {self._key_path} must be {_KEY_BYTES} bytes, "
+                    f"got {len(key)}"
+                )
+            return key
+        self._refuse_mint_over_existing_rows()
         key = os.urandom(_KEY_BYTES)
         self._key_path.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(
-            self._key_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600
-        )
+        try:
+            fd = os.open(
+                self._key_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600
+            )
+        except FileExistsError:
+            # Lost the first-use create race: read the winner's key instead
+            # of surfacing a raw FileExistsError (a 500 to the route).
+            key = self._key_path.read_bytes()
+            if len(key) != _KEY_BYTES:
+                raise SecretStoreError(
+                    f"key file {self._key_path} must be {_KEY_BYTES} bytes, "
+                    f"got {len(key)}"
+                )
+            return key
         try:
             os.write(fd, key)
         finally:
             os.close(fd)
         return key
 
+    def _refuse_mint_over_existing_rows(self) -> None:
+        """A missing key file with stored rows means the key was LOST, not
+        that this is first use. Minting here would orphan every credential
+        under a fresh key with no warning (R-522)."""
+        if not self._db_path.is_file():
+            return
+        try:
+            conn = sqlite3.connect(self._db_path)
+            try:
+                tables = {
+                    row[0]
+                    for row in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type = 'table'"
+                    )
+                }
+                has_rows = (
+                    "secrets" in tables
+                    and conn.execute("SELECT 1 FROM secrets LIMIT 1").fetchone()
+                    is not None
+                )
+            finally:
+                conn.close()
+        except sqlite3.Error as exc:
+            raise SecretStoreError(f"secret store I/O failed: {exc}") from exc
+        if has_rows:
+            raise SecretKeyMismatchError(
+                f"key mismatch: {self._db_path} holds secrets but the master "
+                f"key at {self._key_path} is missing; restore the key or "
+                "delete the DB — refusing to mint a new key over them"
+            )
+
     # -- connection --------------------------------------------------------
 
     def _connect(self) -> sqlite3.Connection:
         existed = self._db_path.is_file()
-        if existed:
-            _check_owner_only(self._db_path, "secret store")
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        if existed:
+            _ensure_private_file(self._db_path)
         conn = sqlite3.connect(self._db_path)
+        conn.execute("PRAGMA busy_timeout = 5000")
         conn.executescript(_SCHEMA)
         if not existed:
             os.chmod(self._db_path, 0o600)
         return conn
+
+    def _assert_key_binding(self, conn: sqlite3.Connection) -> None:
+        """Refuse to write under a key the DB is not bound to (R-522).
+
+        A replaced key file (wrong restore, systemd-vs-CLI key split) would
+        otherwise mix ciphertexts from two keys in one DB. A legacy DB with
+        rows but no binding is bound to the current key only after proving
+        the key decrypts an existing row.
+        """
+        row = conn.execute(
+            "SELECT fingerprint FROM key_binding WHERE id = 1"
+        ).fetchone()
+        if row is not None:
+            if row[0] != self._key_fingerprint:
+                raise SecretKeyMismatchError(
+                    f"key mismatch: {self._db_path} is bound to a different "
+                    "master key than the one loaded; restore the original "
+                    "key or delete the DB"
+                )
+            return
+        sample = conn.execute(
+            "SELECT name, ciphertext, nonce FROM secrets LIMIT 1"
+        ).fetchone()
+        if sample is not None:
+            name, ciphertext, nonce = sample
+            try:
+                self._aesgcm.decrypt(
+                    bytes(nonce), bytes(ciphertext), name.encode("utf-8")
+                )
+            except InvalidTag as exc:
+                raise SecretKeyMismatchError(
+                    f"key mismatch: the loaded key cannot decrypt existing "
+                    f"rows in {self._db_path}; refusing to mix keys"
+                ) from exc
+        conn.execute(
+            "INSERT OR IGNORE INTO key_binding (id, fingerprint) VALUES (1, ?)",
+            (self._key_fingerprint,),
+        )
 
     # -- validation --------------------------------------------------------
 
@@ -192,36 +319,47 @@ class SecretStore:
     # -- CRUD ----------------------------------------------------------------
 
     def set_secret(self, name: str, value: str, actor: str) -> None:
-        name = self._check_name(name)
-        value = self._check_value(value)
+        self.set_secrets({name: value}, actor)
+
+    @_sqlite_guarded
+    def set_secrets(self, values: Dict[str, str], actor: str) -> None:
+        """All-or-nothing multi-field write: validate everything, then one
+        transaction. A failure on any field stores none of them (R-539)."""
         actor = self._check_actor(actor)
-        nonce = os.urandom(_NONCE_BYTES)
-        ciphertext = self._aesgcm.encrypt(
-            nonce, value.encode("utf-8"), name.encode("utf-8")
-        )
+        items = [
+            (self._check_name(name), self._check_value(value))
+            for name, value in values.items()
+        ]
         now = _now()
         conn = self._connect()
         try:
             with conn:
-                conn.execute(
-                    "INSERT INTO secret_events (name, action, actor, at) "
-                    "VALUES (?, 'set', ?, ?)",
-                    (name, actor, now),
-                )
-                conn.execute(
-                    "INSERT INTO secrets "
-                    "(name, ciphertext, nonce, version, created_at, updated_at, updated_by) "
-                    "VALUES (?, ?, ?, 1, ?, ?, ?) "
-                    "ON CONFLICT(name) DO UPDATE SET "
-                    "ciphertext = excluded.ciphertext, nonce = excluded.nonce, "
-                    "version = secrets.version + 1, "
-                    "updated_at = excluded.updated_at, "
-                    "updated_by = excluded.updated_by",
-                    (name, ciphertext, nonce, now, now, actor),
-                )
+                self._assert_key_binding(conn)
+                for name, value in items:
+                    nonce = os.urandom(_NONCE_BYTES)
+                    ciphertext = self._aesgcm.encrypt(
+                        nonce, value.encode("utf-8"), name.encode("utf-8")
+                    )
+                    conn.execute(
+                        "INSERT INTO secret_events (name, action, actor, at) "
+                        "VALUES (?, 'set', ?, ?)",
+                        (name, actor, now),
+                    )
+                    conn.execute(
+                        "INSERT INTO secrets "
+                        "(name, ciphertext, nonce, version, created_at, updated_at, updated_by) "
+                        "VALUES (?, ?, ?, 1, ?, ?, ?) "
+                        "ON CONFLICT(name) DO UPDATE SET "
+                        "ciphertext = excluded.ciphertext, nonce = excluded.nonce, "
+                        "version = secrets.version + 1, "
+                        "updated_at = excluded.updated_at, "
+                        "updated_by = excluded.updated_by",
+                        (name, ciphertext, nonce, now, now, actor),
+                    )
         finally:
             conn.close()
 
+    @_sqlite_guarded
     def get_secret(self, name: str) -> Optional[str]:
         name = self._check_name(name)
         conn = self._connect()
@@ -245,6 +383,7 @@ class SecretStore:
             ) from exc
         return plaintext.decode("utf-8")
 
+    @_sqlite_guarded
     def has_secret(self, name: str) -> bool:
         name = self._check_name(name)
         conn = self._connect()
@@ -256,6 +395,7 @@ class SecretStore:
             conn.close()
         return row is not None
 
+    @_sqlite_guarded
     def list_secrets(self) -> List[Dict[str, Any]]:
         """Metadata + masked hint only. Plaintext is never in the result."""
         conn = self._connect()
@@ -287,6 +427,7 @@ class SecretStore:
             )
         return entries
 
+    @_sqlite_guarded
     def delete_secret(self, name: str, actor: str) -> bool:
         name = self._check_name(name)
         actor = self._check_actor(actor)
