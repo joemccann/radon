@@ -27,6 +27,7 @@ import os
 import re
 import threading
 import time
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Callable
 
@@ -73,6 +74,18 @@ _jwks_client = None
 _jwks_refresh_lock = threading.Lock()
 _jwks_refresh_after = 0.0
 
+# REL-193 (R-551): the JWKS bounding controls scripts/api/auth.py has, ported
+# to this mirror's synchronous shape. PyJWKClient force-refreshes on an
+# unknown kid, so without these an anonymous flood of random-kid tokens made
+# one outbound Clerk fetch per request (30s default timeout each) and pinned
+# the sync-tool threadpool.
+MAX_JWKS_INFLIGHT = 4
+JWKS_LOOKUP_TIMEOUT_SECONDS = 3.0
+JWKS_NEGATIVE_TTL_SECONDS = 30.0
+_jwks_gate = threading.BoundedSemaphore(MAX_JWKS_INFLIGHT)
+_jwks_negative: OrderedDict[str, float] = OrderedDict()
+_jwks_negative_lock = threading.Lock()
+
 
 def _get_jwks_client():
     global _jwks_client
@@ -82,8 +95,29 @@ def _get_jwks_client():
         jwks_url = os.environ.get("CLERK_JWKS_URL", "")
         if not jwks_url:
             raise AuthError(401, "authentication is not configured on this server")
-        _jwks_client = pyjwt.PyJWKClient(jwks_url, cache_keys=True)
+        _jwks_client = pyjwt.PyJWKClient(
+            jwks_url, cache_keys=True, timeout=JWKS_LOOKUP_TIMEOUT_SECONDS
+        )
     return _jwks_client
+
+
+def _remember_negative_kid(kid: str) -> None:
+    with _jwks_negative_lock:
+        _jwks_negative[kid] = time.monotonic() + JWKS_NEGATIVE_TTL_SECONDS
+        _jwks_negative.move_to_end(kid)
+        while len(_jwks_negative) > 256:
+            _jwks_negative.popitem(last=False)
+
+
+def _negative_kid_active(kid: str) -> bool:
+    with _jwks_negative_lock:
+        expiry = _jwks_negative.get(kid)
+        if expiry is None:
+            return False
+        if expiry > time.monotonic():
+            return True
+        _jwks_negative.pop(kid, None)
+        return False
 
 
 def _signing_key_for(token: str):

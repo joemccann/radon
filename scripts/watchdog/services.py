@@ -84,6 +84,9 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # legit gap in market hours: Sat 07:30 ET → Mon 16:00 ET ≈ 57h, so the
     # 25h open window it had as a Mon-Fri daemon handler would trip every
     # Monday. Closed stays 4 days for the weekend plus one holiday-drift day.
+    # R-585/R-586: this window is shadowed by flex-pull — a duplicate-only
+    # run errors the flex-pull row (26h open) while re-heartbeating this one
+    # ok, so DATA-FRESHNESS paging rides on flex-pull, not on this window.
     "cash-flow-sync":   {"open": 3 * _DAY, "closed": 4 * _DAY, "requires_ib": False},
     # execution-sweep fires at 20:30 ET on trading days only (evening
     # after-hours fill import, REL-012); skips weekends + US holidays.

@@ -305,3 +305,17 @@ describe("ThemeContext cross-device fill", () => {
     expect(observed).toBe("dark");
   });
 });
+
+
+describe("REL-222 (R-594): the hydrate merge is local-wins for columns too", () => {
+  it("a column toggled before hydrate resolves is not reverted by the server copy", async () => {
+    const { mergeUiPreferences } = await import("../lib/uiPreferences");
+    const merged = mergeUiPreferences(
+      { theme: "light", columns: { "orders-open": { strike: false } } },
+      { theme: "dark", columns: { "orders-open": { strike: true, tif: true } } },
+    );
+    expect(merged.theme).toBe("light"); // the theme half already local-wins
+    expect(merged.columns?.["orders-open"]?.strike).toBe(false);
+    expect(merged.columns?.["orders-open"]?.tif).toBe(true); // server fills gaps
+  });
+});

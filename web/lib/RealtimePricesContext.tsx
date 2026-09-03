@@ -142,16 +142,19 @@ export function RealtimePricesProvider({ children }: { children: ReactNode }) {
     const nextKey = requestKey(next);
     if (nextKey === desiredKeyRef.current) return;
     desiredKeyRef.current = nextKey;
+    // REL-197 (R-563): the linger unions against the PREVIOUS DESIRED set,
+    // never the previously-grown applied set — unioning against applied
+    // compounded every page's symbols for the life of the churn and pushed
+    // the relay past the IB market-data line cap. And the timer deadline is
+    // MONOTONIC: it is never re-armed by a later publish, so a desired set
+    // changing faster than the linger still commits its unsubscribes within
+    // one window (the callback applies whatever is desired when it fires).
+    const previousDesired = desiredRef.current;
     desiredRef.current = next;
-    if (shrinkTimerRef.current) {
-      clearTimeout(shrinkTimerRef.current);
-      shrinkTimerRef.current = null;
-    }
-    const previous = appliedRef.current;
     const grown: RealtimeSubscriptionRequest = {
-      symbols: unionBy(previous.symbols, next.symbols, (s) => s),
-      contracts: unionBy(previous.contracts, next.contracts, optionKey),
-      indexes: unionBy(previous.indexes, next.indexes, indexKeyOf),
+      symbols: unionBy(previousDesired.symbols, next.symbols, (s) => s),
+      contracts: unionBy(previousDesired.contracts, next.contracts, optionKey),
+      indexes: unionBy(previousDesired.indexes, next.indexes, indexKeyOf),
       depthSymbol: next.depthSymbol,
       depthSymbols: next.depthSymbols,
       depthExpiry: next.depthExpiry,
@@ -160,7 +163,7 @@ export function RealtimePricesProvider({ children }: { children: ReactNode }) {
     const toApply = shrinkPending ? grown : next;
     appliedRef.current = toApply;
     setApplied(toApply);
-    if (shrinkPending) {
+    if (shrinkPending && shrinkTimerRef.current === null) {
       shrinkTimerRef.current = setTimeout(() => {
         shrinkTimerRef.current = null;
         appliedRef.current = desiredRef.current;

@@ -157,7 +157,13 @@ export function createHeadlinesHub({
     const restored = seed && ring.some((row) => row.id === item.id);
     pushToRing(item);
     if (!restored) persist(item);
-    for (const client of clients) deliver(client, { type: "headline", item });
+    // REL-182 (R-513): a row fed by the flash-REST poll while the upstream
+    // WS is down must not render as a live feed — the client flips to live
+    // on any plain headline frame, clearing the REL-155 banner.
+    const frame = upstreamState === "down"
+      ? { type: "headline", item, degraded: true }
+      : { type: "headline", item };
+    for (const client of clients) deliver(client, frame);
     return true;
   }
 
@@ -320,6 +326,9 @@ export function createHeadlinesHub({
     if (event.event === "open") {
       consecutiveFailures = 0;
       upstreamState = "open";
+      // REL-182: the recovery ok row lands on the next health tick instead
+      // of waiting out the silence window since the pre-outage ok.
+      lastOkWriteAt = 0;
       log(`[mktnews] upstream open ${event.url}`);
       broadcastStatus("upstream-open");
     } else if (event.event === "close") {

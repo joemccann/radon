@@ -525,6 +525,12 @@ def classify_probes(ping: dict, status: dict) -> dict:
     if aggregate == "down":
         return {"ok": 0, "detail": "aggregate_down"}
     if aggregate == "degraded":
+        # R-510: name the dependency behind the degrade so a dead broker, a
+        # newsfeed flap and a 2FA lock stop producing the identical verdict.
+        reasons = payload.get("degraded_reasons")
+        if isinstance(reasons, list) and reasons:
+            joined = ",".join(str(r) for r in reasons[:4])
+            return {"ok": 1, "detail": f"edge_ok:aggregate_degraded({joined})"}
         return {"ok": 1, "detail": "edge_ok:aggregate_degraded"}
     if aggregate != "healthy":
         return {"ok": 0, "detail": "aggregate_invalid"}

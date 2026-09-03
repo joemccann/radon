@@ -62,12 +62,12 @@ describe("assistant catalog freshness", () => {
     expect(hits.map((hit) => `${hit.method} ${hit.path}`)).toContain("GET /streaks/{ticker}");
   });
 
-  it("authorize GET /streaks/NVDA is a FastAPI read", () => {
+  it("authorize GET /streaks/NVDA is a FastAPI read.spawn (REL-177: spawn-capped fan-out)", () => {
     const result = authorize("GET", "/streaks/NVDA");
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.surface).toBe("fastapi");
-    expect(result.capability).toBe("read");
+    expect(result.capability).toBe("read.spawn");
     expect(result.operation.path).toBe("/streaks/{ticker}");
   });
 

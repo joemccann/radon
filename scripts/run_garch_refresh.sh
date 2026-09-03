@@ -141,6 +141,10 @@ HTTP_CODE=000
 CURL_EXIT=28
 RESPONSE_BODY=""
 while :; do
+    # REL-208 (R-573): budget the ATTEMPT wall time too — a slow marker-bodied
+    # 502 is uncounted by sleep-only accounting and can run the unit past
+    # TimeoutStartSec into Result=timeout instead of the clean exit 1.
+    attempt_started=$(date +%s)
     BODY_FILE="$(mktemp)"
     HTTP_CODE=$(curl -sS -X POST -m "$FASTAPI_TIMEOUT_SECS" -o "$BODY_FILE" \
         -w "%{http_code}" "${FASTAPI_URL}" 2>/tmp/garch-refresh.curl.err)
@@ -154,6 +158,8 @@ while :; do
     if ! _is_capacity_shed "$CURL_EXIT" "$HTTP_CODE" "$RESPONSE_BODY"; then
         break
     fi
+    attempt_elapsed=$(( $(date +%s) - attempt_started ))
+    [ "$attempt_elapsed" -gt 0 ] && shed_waited=$((shed_waited + attempt_elapsed))
     remaining=$((SHED_WAIT_SECS - shed_waited))
     if [ "$remaining" -le 0 ]; then
         echo "$(date): GARCH shed for subprocess capacity (http=${HTTP_CODE}) after ${attempt} retries; not launching duplicate" >&2

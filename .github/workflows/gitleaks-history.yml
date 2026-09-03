@@ -1,0 +1,59 @@
+# REL-201 (R-562): the CI secret scan covers only each event's commit range,
+# so a rule or gitleaks-version tightening never re-audits history — a secret
+# that slipped past the old rules once would never be found again. This
+# scheduled job rescans the FULL history weekly. Its failure PAGES (an issue
+# the nightly runner forensics read) rather than blocking any merge.
+name: gitleaks-history
+
+on:
+  schedule:
+    - cron: "20 6 * * 1" # Mondays 06:20 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  full-history-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Same pinned binary as ci.yml — a compromised release asset cannot
+      # poison the scan.
+      - name: Install gitleaks
+        run: |
+          version="8.30.1"
+          sha256="551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+          curl -sSfL -o gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${version}/gitleaks_${version}_linux_x64.tar.gz"
+          echo "${sha256}  gitleaks.tar.gz" | sha256sum --check --status
+          sudo tar -xz -C /usr/local/bin -f gitleaks.tar.gz gitleaks
+          rm -f gitleaks.tar.gz
+          gitleaks version
+
+      # No --log-opts: the default git log walk covers the full fetched
+      # history, which is the whole point of this job.
+      - name: Scan the full history for secrets
+        run: |
+          set -euo pipefail
+          gitleaks detect --source . --config cloud/.gitleaks.toml --redact --no-banner --verbose
+
+      - name: Page on failure via a labeled issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          title="security: weekly full-history gitleaks scan failed"
+          existing="$(gh issue list --state open --search "$title in:title" --json number --jq '.[0].number // empty')"
+          body="The scheduled full-history secret scan failed on $(date -u +%F). Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "$title" --body "$body" --label security
+          fi

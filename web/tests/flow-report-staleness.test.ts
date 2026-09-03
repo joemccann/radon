@@ -171,3 +171,27 @@ describe("flowReportAgeLabel", () => {
     expect(flowReportAgeLabel({ fetched_at: "not-a-date" })).toBeNull();
   });
 });
+
+
+describe("REL-184 (R-516): a Friday EOD report stays fresh over the weekend", () => {
+  const fridayEod = { fetched_at: "2026-08-28T20:30:00.000Z" }; // Fri 16:30 ET
+
+  it("is fresh Saturday morning", () => {
+    expect(
+      isFlowReportStale(fridayEod, new Date("2026-08-29T14:00:00Z"), false),
+    ).toBe(false);
+  });
+
+  it("is fresh Monday pre-open", () => {
+    expect(
+      isFlowReportStale(fridayEod, new Date("2026-08-31T12:00:00Z"), false),
+    ).toBe(false);
+  });
+
+  it("goes stale once a new close exists", () => {
+    // Monday 21:30 UTC is after the Monday 16:00 ET close.
+    expect(
+      isFlowReportStale(fridayEod, new Date("2026-08-31T21:30:00Z"), false),
+    ).toBe(true);
+  });
+});

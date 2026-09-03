@@ -29,7 +29,7 @@ from utils.price_cache import (
     TTL_MARKET_HOURS,
     cache_key_stock,
     is_market_hours,
-    read_cache,
+    read_cache_envelope,
     write_cache,
 )
 from utils.streaks import build_streaks_payload, parse_yahoo_chart
@@ -64,8 +64,8 @@ def _cache_key(symbol: str) -> str:
     return cache_key_stock(symbol, _CACHE_WINDOW_TAG, today)
 
 
-def _read_cached_closes(symbol: str) -> Optional[dict[str, float]]:
-    return read_cache(STOCKS_DIR, _cache_key(symbol))
+def _read_cached_envelope(symbol: str) -> Optional[dict]:
+    return read_cache_envelope(STOCKS_DIR, _cache_key(symbol))
 
 
 def _write_cached_closes(symbol: str, closes: dict[str, float], source: str) -> None:
@@ -177,20 +177,104 @@ def _fetch_fallback_closes(
     symbol: str,
     best: dict[str, float],
     best_source: Optional[str],
+    errors: Optional[list] = None,
 ) -> tuple[dict[str, float], Optional[str]]:
-    """UW -> Robinhood -> Yahoo, keeping the longest short answer as backup."""
+    """UW -> Robinhood -> Yahoo, keeping the longest short answer as backup.
+
+    REL-177 (R-489): vendor FAILURES are collected into ``errors`` so an
+    expired UW token or a throttle embargo stops reading as a bad ticker.
+    """
     ladder = tuple((label, globals()[name]) for label, name in FALLBACK_LADDER)
     for source, fetch in ladder:
         try:
             closes = fetch(symbol)
         except Exception as exc:  # noqa: BLE001 — a dead vendor falls through
             logger.warning("%s streaks fetch failed for %s: %s", source, symbol, exc)
+            if errors is not None:
+                errors.append({"source": source, "error": str(exc)})
             continue
         if len(closes) >= MIN_ACCEPT_BARS:
             return closes, source
         if len(closes) > len(best):
             best, best_source = closes, source
     return best, best_source
+
+
+# One in-flight ladder per symbol (REL-177 / R-488): the assistant and the
+# panel can land concurrent lookups; the loser awaits the winner's result.
+_inflight: dict[str, asyncio.Task] = {}
+# Overall deadline, comfortably under the Next route's 60s budget. Also caps
+# any UW Retry-After sleep the client performs inside the ladder.
+STREAKS_DEADLINE_S = 45.0
+
+
+def _ib_gate_reason() -> Optional[str]:
+    """A reason to skip the IB socket, or None. REL-177 (R-488)."""
+    from ..ib_gateway import last_observed_auth_state
+
+    state = last_observed_auth_state()
+    if state is not None and state != "authenticated":
+        return f"gateway auth_state={state}"
+    return None
+
+
+async def _resolve_streaks(request: Request, symbol: str, scan_time: str) -> dict:
+    envelope = await asyncio.to_thread(_read_cached_envelope, symbol)
+    cached_data = (envelope or {}).get("data") or {}
+    cached_source = (envelope or {}).get("source")
+    # A cached higher-rung series serves with its PROVENANCE (R-490). A Yahoo
+    # or short cached answer does not short-circuit the ladder — rule 7: IB/UW
+    # are retried once they recover, the cache is only the backup.
+    if (
+        cached_data
+        and cached_source not in (None, "yahoo", "unknown", "cache")
+        and len(cached_data) >= MIN_ACCEPT_BARS
+    ):
+        payload = build_streaks_payload(
+            symbol, cached_data, source=cached_source, scan_time=scan_time
+        )
+        payload["cached"] = True
+        payload["fetched_at"] = (envelope or {}).get("fetched_at")
+        return payload
+
+    errors: list[dict] = []
+    gate_reason = _ib_gate_reason()
+    if gate_reason is None:
+        closes = await _fetch_ib_closes(request, symbol)
+    else:
+        logger.info("IB skipped for %s streaks: %s", symbol, gate_reason)
+        closes = {}
+    source: Optional[str] = "ib" if closes else None
+    if len(closes) < MIN_ACCEPT_BARS:
+        closes, source = await asyncio.to_thread(
+            _fetch_fallback_closes, symbol, closes, source, errors
+        )
+
+    if not closes and cached_data:
+        # Every live rung failed or came back empty: the stale cache beats
+        # nothing, served with its provenance and age.
+        payload = build_streaks_payload(
+            symbol, cached_data, source=cached_source, scan_time=scan_time
+        )
+        payload["cached"] = True
+        payload["fetched_at"] = (envelope or {}).get("fetched_at")
+        if errors:
+            payload["errors"] = errors
+        return payload
+
+    if not closes:
+        # Empty-payload guard: never cache an empty result. Failures are NOT
+        # the same as an unlisted symbol (R-489): the errors list says which.
+        payload = build_streaks_payload(symbol, {}, source=None, scan_time=scan_time)
+        if errors:
+            payload["errors"] = errors
+        return payload
+
+    await asyncio.to_thread(_write_cached_closes, symbol, closes, source or "unknown")
+    payload = build_streaks_payload(symbol, closes, source=source, scan_time=scan_time)
+    if errors:
+        payload["errors"] = errors
+    return payload
 
 
 @router.get("/streaks/{ticker}")
@@ -203,20 +287,25 @@ async def daily_streaks(ticker: str, request: Request):
     symbol = _require_ticker(ticker)
     scan_time = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
-    cached = await asyncio.to_thread(_read_cached_closes, symbol)
-    if cached:
-        return build_streaks_payload(symbol, cached, source="cache", scan_time=scan_time)
-
-    closes = await _fetch_ib_closes(request, symbol)
-    source: Optional[str] = "ib" if closes else None
-    if len(closes) < MIN_ACCEPT_BARS:
-        closes, source = await asyncio.to_thread(
-            _fetch_fallback_closes, symbol, closes, source
+    task = _inflight.get(symbol)
+    if task is None or task.done():
+        task = asyncio.ensure_future(
+            asyncio.wait_for(
+                _resolve_streaks(request, symbol, scan_time),
+                timeout=STREAKS_DEADLINE_S,
+            )
         )
-
-    if not closes:
-        # Empty-payload guard: never cache an empty result.
-        return build_streaks_payload(symbol, {}, source=None, scan_time=scan_time)
-
-    await asyncio.to_thread(_write_cached_closes, symbol, closes, source or "unknown")
-    return build_streaks_payload(symbol, closes, source=source, scan_time=scan_time)
+        _inflight[symbol] = task
+        task.add_done_callback(
+            lambda done: _inflight.pop(symbol, None)
+            if _inflight.get(symbol) is done
+            else None
+        )
+    try:
+        return await asyncio.shield(task)
+    except asyncio.TimeoutError:
+        payload = build_streaks_payload(symbol, {}, source=None, scan_time=scan_time)
+        payload["errors"] = [
+            {"source": "ladder", "error": f"deadline {STREAKS_DEADLINE_S:.0f}s exceeded"}
+        ]
+        return payload

@@ -201,6 +201,25 @@ def select_prunable(
     ]
 
 
+# REL-185 (R-517): the hard count valve. R-445 makes the age prune keep every
+# unconfirmed dump — correct per-night, unbounded under a sustained B2 outage
+# (100 nights = 100 dumps on a small disk). Beyond this many local dumps the
+# oldest are unlinked EVEN unconfirmed, and the cycle says so distinctly.
+LOCAL_DUMP_HARD_CAP = 30
+
+
+def select_hard_valve(entries, cap: int = LOCAL_DUMP_HARD_CAP):
+    """Oldest dump names beyond ``cap``, regardless of off-box confirmation."""
+    dumps = sorted(
+        ((name, mtime) for name, mtime in entries if name.endswith(".sql.gz")),
+        key=lambda item: item[1],
+    )
+    overflow = len(dumps) - cap
+    if overflow <= 0:
+        return []
+    return [name for name, _mtime in dumps[:overflow]]
+
+
 @dataclass(frozen=True)
 class RemoteObject:
     """One object under the off-box dump prefix (size + mtime for compare)."""
@@ -772,12 +791,23 @@ def run_backup() -> dict:
     pruned = select_prunable(entries, now, offbox=confirmed)
     for name in pruned:
         (BACKUP_DIR / name).unlink(missing_ok=True)
+    # REL-185 (R-517): hard valve — bound the local dir even when B2 has
+    # confirmed nothing.
+    remaining = [(n, m) for n, m in entries if n not in set(pruned)]
+    valve_pruned = select_hard_valve(remaining)
+    for name in valve_pruned:
+        (BACKUP_DIR / name).unlink(missing_ok=True)
 
     duration = round(time.monotonic() - started, 1)
     summary = (
         f"dumped {stats['tables']} tables / {stats['rows']} rows -> "
         f"{final_path.name} ({size} bytes) in {duration}s; pruned {len(pruned)}"
     )
+    if valve_pruned:
+        summary += (
+            f"; LOCAL RETENTION VALVE: pruned {len(valve_pruned)} unconfirmed "
+            f"dump(s) over the {LOCAL_DUMP_HARD_CAP} cap (B2 outage?)"
+        )
     if offbox_error:
         summary += f"; b2 FAILED: {offbox_error[:160]}"
     else:
@@ -794,6 +824,7 @@ def run_backup() -> dict:
         "tables": stats["tables"],
         "rows": stats["rows"],
         "pruned": len(pruned),
+        "valve_pruned": len(valve_pruned),
         "offbox_error": offbox_error,
     }
     if offbox:

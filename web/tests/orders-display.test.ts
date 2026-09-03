@@ -405,3 +405,51 @@ describe("summarizeOpenOrders", () => {
     expect(summarizeOpenOrders([tqqq], OVERNIGHT_NOW).workingCount).toBe(0);
   });
 });
+
+
+describe("REL-203 (R-564): header WORKING counts combo ROWS, not legs", () => {
+  const leg = (over: Record<string, unknown> = {}) => ({
+    orderId: 1,
+    permId: 1,
+    action: "BUY",
+    totalQuantity: 1,
+    filled: 0,
+    remaining: 1,
+    status: "Submitted",
+    orderType: "LMT",
+    limitPrice: 1.5,
+    tif: "GTC",
+    contract: { symbol: "AAOI", secType: "OPT", expiry: "20261016", strike: 20, right: "C" },
+    ...over,
+  });
+
+  it("a two-leg grouped combo contributes ONE working, matching its single chip", async () => {
+    const { buildOpenOrderDisplayRows } = await import("../lib/openOrderCombos");
+    const { summarizeOpenOrderRows } = await import("../lib/orders/orderDisplay");
+    const orders = [
+      leg({ orderId: 1, permId: 11, action: "SELL", contract: { symbol: "AAOI", secType: "OPT", expiry: "20261016", strike: 25, right: "C" } }),
+      leg({ orderId: 2, permId: 12, action: "BUY", contract: { symbol: "AAOI", secType: "OPT", expiry: "20261016", strike: 20, right: "P" } }),
+    ];
+    const rows = buildOpenOrderDisplayRows(orders as never);
+    const summary = summarizeOpenOrderRows(rows as never, new Date());
+    expect(summary.openCount).toBe(rows.length);
+    expect(summary.workingCount).toBe(
+      rows.length, // every rendered row shows exactly one WORKING chip here
+    );
+  });
+
+  it("diverging leg statuses classify from the aggregate, like the table", async () => {
+    const { buildOpenOrderDisplayRows } = await import("../lib/openOrderCombos");
+    const { summarizeOpenOrderRows } = await import("../lib/orders/orderDisplay");
+    const orders = [
+      leg({ orderId: 1, permId: 11, action: "SELL", status: "Submitted", contract: { symbol: "AAOI", secType: "OPT", expiry: "20261016", strike: 25, right: "C" } }),
+      leg({ orderId: 2, permId: 12, action: "BUY", status: "Filled", filled: 1, remaining: 0, contract: { symbol: "AAOI", secType: "OPT", expiry: "20261016", strike: 20, right: "P" } }),
+    ];
+    const rows = buildOpenOrderDisplayRows(orders as never);
+    const summary = summarizeOpenOrderRows(rows as never, new Date());
+    // MIXED aggregate: the table renders one non-Working chip; the header
+    // must agree (zero or one working, never two).
+    expect(summary.workingCount).toBeLessThanOrEqual(1);
+    expect(summary.openCount).toBe(rows.length);
+  });
+});

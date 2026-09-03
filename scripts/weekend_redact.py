@@ -52,9 +52,28 @@ def env_values(repo: Path) -> list[str]:
     return sorted(values, key=len, reverse=True)
 
 
+def _fragment_candidates(value: str) -> list[str]:
+    """Longest-first prefixes and suffixes of ``value`` down to the floor.
+
+    REL-206 (R-565): a byte-bounded tail cuts a secret mid-value; the exact
+    match misses the fragment and no `KEY=` shape remains on a cut line, so
+    the key-pattern pass misses it too. Any prefix/suffix at or above the
+    floor is scrubbed — the floor keeps ordinary prose intact.
+    """
+    fragments: list[str] = []
+    for length in range(len(value) - 1, MIN_VALUE_LEN - 1, -1):
+        fragments.append(value[:length])
+        fragments.append(value[-length:])
+    return fragments
+
+
 def redact(text: str, values: list[str]) -> str:
     for value in values:
         text = text.replace(value, REDACTED)
+    for value in values:
+        for fragment in _fragment_candidates(value):
+            if fragment in text:
+                text = text.replace(fragment, REDACTED)
     # Bearer first: `Authorization: Bearer x` also matches the key pattern
     # (AUTH), which would otherwise consume the word `Bearer` as the value
     # and leave the token standing.

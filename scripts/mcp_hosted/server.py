@@ -99,13 +99,28 @@ class HttpResult:
 
 
 def _http_get(url: str, headers: dict) -> HttpResult:
-    """One bounded GET. Kept tiny; tests inject a fake instead."""
+    """One bounded GET. Kept tiny; tests inject a fake instead.
+
+    REL-193 (R-550): streamed with a running byte bound — `resp.content`
+    buffers the whole upstream body before any slice, so the old form bounded
+    what was RETURNED, not what was allocated inside the 512M cgroup.
+    """
     import requests
 
-    resp = requests.get(url, headers=headers, timeout=HTTP_TIMEOUT_S)
-    body = resp.content[: MAX_RESPONSE_BYTES + 1]
-    if len(body) > MAX_RESPONSE_BYTES:
-        raise ValueError(f"upstream response exceeded {MAX_RESPONSE_BYTES} bytes")
+    resp = requests.get(url, headers=headers, timeout=HTTP_TIMEOUT_S, stream=True)
+    try:
+        chunks: list[bytes] = []
+        received = 0
+        for chunk in resp.iter_content(chunk_size=65536):
+            received += len(chunk)
+            if received > MAX_RESPONSE_BYTES:
+                raise ValueError(
+                    f"upstream response exceeded {MAX_RESPONSE_BYTES} bytes"
+                )
+            chunks.append(chunk)
+        body = b"".join(chunks)
+    finally:
+        resp.close()
     return HttpResult(resp.status_code, body.decode("utf-8", errors="replace"))
 
 
