@@ -1,6 +1,6 @@
 ---
 name: reliability-weekend
-description: Weekend reliability loop - daily delta-audit of everything merged since the last audited SHA (new findings appended to RELIABILITY_AUDIT.md), then red/green remediation of new P0/P1 findings on a PR branch. Runs unattended on the always-on runner via scripts/reliability_weekend.sh, one daily cycle at 00:00 local that runs audit then remediate; invoke as /reliability-weekend audit or /reliability-weekend remediate.
+description: Weekend reliability loop - daily delta-audit of everything merged since the last audited SHA (new findings appended to RELIABILITY_AUDIT.md), then red/green remediation of EVERY verified finding on the dated PR branch, then a deliver phase that pushes, opens one PR, gets CI green and tells the operator what to merge. Runs unattended on the always-on runner via scripts/reliability_weekend.sh, one daily cycle at 00:00 local that runs audit, remediate, then deliver; invoke as /reliability-weekend audit, /reliability-weekend remediate or /reliability-weekend deliver.
 ---
 
 # Reliability Weekend Loop
@@ -11,9 +11,10 @@ standard is the one set by the 2026-08-09 audit (`RELIABILITY_AUDIT.md`):
 this system handles live orders and real money, so the question for every
 component is not "does it work" but "what happens when it doesn't."
 
-The mode is the first argument: `audit` or `remediate`. The unattended job
-fires once a day at 00:00 local and runs `audit` then `remediate`
-sequentially in this loop's own clone.
+The mode is the first argument: `audit`, `remediate` or `deliver`. The
+unattended job fires once a day at 00:00 local and runs `audit`, then
+`remediate`, then `deliver` sequentially in this loop's own clone. The loop
+never merges; the human merge is the deploy trigger.
 
 ## Hard rails (both modes — violating any of these is a failed run)
 
@@ -83,6 +84,22 @@ P0, then P1, then P2 (this run's items first, then older stragglers)
 run is not an outcome; every backlog item ends this run as DONE or
 BLOCKED-with-root-cause.
 
+**Remediate mandate.** Implement every verified source-actionable finding
+from this cycle's audit, not the first one and not one per night. Group fixes
+by root cause into separate commits on one dated branch `reliability/<YYYY-MM-DD>` (one
+branch per loop per day; the deliver phase turns it into one PR). Red/green
+per fix; the full project gates before every commit. Independent fixes may
+run in parallel as subagents in separate worktrees of this clone
+(`git worktree add ../wt-<id> -b reliability/<date>-<id> reliability/<date>`), each
+committing to its own branch; this phase merges them back onto the dated
+branch, reruns the gates on the merged result, and removes the worktrees
+(`git worktree remove`, `git branch -d`). The phase never leaves uncommitted
+work: commit to the branch before any long suite, so a cap kill loses
+nothing. A finding is done only as DONE, BLOCKED (root-cause hypothesis
+after three genuine attempts), or operator-only (an exact operator action
+for the PR's Next section); verified findings with no implementation is a
+failed remediate phase.
+
 1. Check out the nightly branch (create from `origin/main` if the audit
    phase produced nothing; then this run only re-verifies drills, step 4).
    If the branch already carries `REL-###` commits from an earlier round
@@ -108,7 +125,78 @@ BLOCKED-with-root-cause.
 5. Push the branch; rewrite the PR via §Pull request output. DONE/BLOCKED
    tables and gate counts ×3 go on the rolling issue. If `cloud/services/*`
    changed, `--next` is the root `bootstrap-control-plane.sh` install-copy
-   before merge.
+   before merge. CI on that PR is the deliver phase's job (§Mode: deliver).
+
+## Mode: deliver (third phase of the daily cycle)
+
+Goal: every commit the remediate phase landed on `reliability/<YYYY-MM-DD>` reaches the
+operator as ONE pull request with CI green, in this same cycle, and the
+operator is told exactly what is ready to merge. The loop never merges.
+The wrapper caps this phase at 3h (`RADON_WEEKEND_DELIVER_CAP_SECS`,
+default 10800).
+
+1. Resume first. Read this loop's deliver record
+   (`python3.13 scripts/nightly_deliver.py show --loop reliability`; kept outside the clone under `~/radon-weekend/.reliability-deliver/`).
+   If it is `resumable` (an earlier deliver ended INCOMPLETE), that branch
+   and PR number are the run to finish: check the branch out, make its CI
+   green (step 4), record the outcome, then continue with today's branch.
+   Never open a second PR for a branch that already has one.
+2. Push the dated branch. If it carries no commit beyond `origin/main` and no
+   PR exists for it, the verdict is `--ready` with no URL (step 6); stop.
+3. Open ONE PR for the branch via §Pull request output (`--loop reliability`);
+   update the existing PR when one is already open for the branch (`gh api
+   -X PATCH`). Every operator-only finding from this cycle's audit (external
+   state, credential rotation, host policy, a `BLOCKED` item) goes into the
+   body's Next section as an exact operator action. Nothing is dropped
+   silently. Record the PR:
+   `python3.13 scripts/nightly_deliver.py record --loop reliability --branch <branch> --pr <n> --url <url> --status pending`.
+4. Wait for CI, bounded:
+   `python3.13 scripts/nightly_deliver.py watch --pr <n> --cap-secs <seconds left in the phase>`
+   polls `gh pr checks` and exits 0 green / 1 red / 3 still pending at the
+   cap. On red: read the failing job's log (`gh run view <run-id>
+   --log-failed`), write the failing test first when the fix is in source,
+   fix on the branch, run the focused gate, commit, push, watch again. Repeat
+   until green or the cap. Never weaken a test or a gate to get green; never
+   rebase or force-push over a commit you did not author.
+5. Record the outcome (`record ... --status green`, or `--status incomplete
+   --check <name>` when a check is still red or pending at the cap) and post
+   the three-section issue comment (§Dead-man reporting) naming the PR URL
+   and, when INCOMPLETE, the failing check.
+6. Print, as the LAST stdout line of the phase, the verdict line from
+   `python3.13 scripts/nightly_deliver.py verdict --loop reliability --ready <url>...`
+   (or `--incomplete <check> --pr-url <url>`). The wrapper greps it:
+   `NIGHTLY DELIVER READY: loop=reliability prs=<n> <urls>` becomes the operator
+   notification "N PR(s) green, ready to merge: <urls>" (Pushover and the
+   dead-man comment); `NIGHTLY DELIVER INCOMPLETE: loop=reliability check=<name>
+   pr=<url>` becomes "INCOMPLETE: <name>", the phase exits 75, and the next
+   fire resumes the same branch and PR from the record. An exit-0 deliver
+   phase without the line is INCOMPLETE. Never emit the line anywhere else.
+
+## Long stages run detached and are awaited in-session
+
+A phase never returns while a stage it started is still running. "Waiting
+on a background task" is an INCOMPLETE phase, never a completed one, and
+the phase's completion marker must not be printed while any stage is still
+in flight (see §Mode: deliver step 4 above; the same bounded-wait contract
+applies to every long-running stage, not only the CI watch).
+
+Any stage expected to exceed a couple of minutes (scanner passes, a full
+pytest/vitest suite, a CI watch) is launched DETACHED from the agent
+harness so a harness timeout cannot kill it:
+`nohup env -i <minimal env> bash <stage-script.sh> </dev/null >stage.out
+2>&1 & disown` (macOS has no `setsid`). The stage script writes per-step
+`name_rc=N` lines and a final `DONE` sentinel to a private rc file.
+
+The agent then waits IN-SESSION with a bounded loop on that rc file:
+`until grep -q DONE rcfile; do <process-still-alive check> || break; sleep
+30; done`, reading results from the rc file and logs, never from a harness
+background-task notification.
+
+Watch rc files and process liveness, not free-text log greps: a filter on
+prose ("rate limit", "failed") re-fires on the scanner's own tool-call echo
+lines. Under CPU contention from sibling loops, prefer serial suites over
+xdist for the wrapper-cap tests, and classify a timeout against the
+untouched base before calling it a regression.
 
 ## Pull request output
 
@@ -150,7 +238,11 @@ write-up:
 **PHASE** STAMP **status**
 optional detail
 
-The issue is created once with a timeless rolling-dead-man description. Run
+For the deliver phase the status IS the operator's merge cue: `N PR(s)
+green, ready to merge: <urls>`, `0 PR(s), nothing to merge`, or
+`INCOMPLETE: <check>` (CI not green at the cap; the next fire resumes the
+same branch and PR). The issue is created once with a timeless
+rolling-dead-man description. Run
 history stays in comments. The wrapper does not edit the issue body after
 the first run. A missing daily comment means the runner did not fire.
 
@@ -178,6 +270,17 @@ a running label, so a long remediate phase legitimately suppresses that day's
 report. Check `launchctl list | grep radon` before treating quiet as dead.
 The reliability cycle is bounded to 20h so it cannot swallow the next 00:00
 fire.
+
+## Measure improvement
+
+Measure improvement by: findings implemented per cycle (verified findings
+fixed and delivered over verified findings found), PRs opened per cycle,
+time to CI green (remediate start to the deliver phase's green verdict), and
+PRs awaiting merge with their age (an operator-side backlog the loop reports
+in the Next section and the issue comment, never one it closes itself). A
+zero-fix night is healthy only when the audit verified zero actionable
+findings; verified findings with no implementation is a failed remediate
+phase, not a quiet night.
 
 ## Self-improvement
 

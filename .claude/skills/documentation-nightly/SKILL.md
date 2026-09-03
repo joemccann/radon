@@ -1,6 +1,6 @@
 ---
 name: documentation-nightly
-description: Nightly documentation maintainer - daily audit that classifies the documentation impact of everything merged since the last audited SHA (rolling issue labeled documentation-nightly), then smallest source-backed remediation of P0/P1/P2 drift on a PR branch documentation/<date> without inventing prose, duplicating machine truth, or touching live systems. Runs unattended on the always-on runner via scripts/documentation_nightly.sh, one daily cycle at 00:30 local that runs audit then remediate; invoke as /documentation-nightly audit or /documentation-nightly remediate.
+description: Nightly documentation maintainer - daily audit that classifies the documentation impact of everything merged since the last audited SHA (rolling issue labeled documentation-nightly), then smallest source-backed remediation of EVERY verified P0/P1/P2 finding on the dated PR branch documentation/<date> without inventing prose, duplicating machine truth, or touching live systems, then a deliver phase that pushes, opens one PR, gets CI green and tells the operator what to merge. Runs unattended on the always-on runner via scripts/documentation_nightly.sh, one daily cycle at 00:30 local that runs audit, remediate, then deliver; invoke as /documentation-nightly audit, /documentation-nightly remediate or /documentation-nightly deliver.
 ---
 
 # Nightly Documentation Maintainer
@@ -16,9 +16,9 @@ durable API, dependency, topology, security, data, deployment, recovery, or
 operator contract is a defect. Creating a page with no concrete reader and
 decision is also a defect.
 
-The first argument is the mode: `audit` or `remediate`. The launchd job fires
-daily at 00:30 local and runs `audit` followed by `remediate` in this loop's
-dedicated clone.
+The first argument is the mode: `audit`, `remediate` or `deliver`. The
+launchd job fires daily at 00:30 local and runs `audit`, then `remediate`,
+then `deliver` in this loop's dedicated clone. The loop never merges.
 
 ## Runner integration
 
@@ -28,7 +28,7 @@ this skill does not re-implement them: it refuses outside the dedicated clone
 `.radon-documentation-runner` marker), takes the exclusive loop lock
 (`.weekend-runner.lock` — do NOT acquire a second lock), hard-resets the clone
 to `origin/main` before each phase, enforces the wall-clock caps (audit 2h,
-remediate 6h), and posts the per-phase dead-man comment on the rolling issue
+remediate 6h, deliver 3h), and posts the per-phase dead-man comment on the rolling issue
 plus the Pushover page. Your job is the audit/remediate content below. Pace to
 the cap; commit and push after every completed finding, never mid-task. Keep
 scratch state in `~/radon-weekend/.documentation-nightly-scratch/` — outside
@@ -47,7 +47,17 @@ on a successful exit.
 - Never optimize for page count, word count, documentation coverage
   percentage, number of nightly edits, or freshness timestamps.
 - A zero-change night is healthy when every high-risk change was classified
-  and no source-backed correction is needed.
+  and no source-backed correction is needed; verified findings with no
+  implementation is a failed remediate phase.
+
+Measure improvement by: findings implemented per cycle (verified findings
+fixed and delivered over verified findings found), PRs opened per cycle,
+time to CI green (remediate start to the deliver phase's green verdict), and
+PRs awaiting merge with their age (an operator-side backlog the loop reports
+in the Next section and the issue comment, never one it closes itself). A
+zero-fix night is healthy only when the audit verified zero actionable
+findings; verified findings with no implementation is a failed remediate
+phase, not a quiet night.
 
 ## Documentation value gate
 
@@ -453,7 +463,24 @@ Run these every night, keeping network and CPU work bounded:
 
 ## Mode: remediate
 
-Goal: make the smallest source-backed correction and prevent recurrence.
+Goal: make the smallest source-backed correction for EVERY verified P0/P1/P2
+finding from this cycle's audit and prevent recurrence.
+
+**Remediate mandate.** Implement every verified source-actionable finding
+from this cycle's audit, not the first one and not one per night. Group fixes
+by root cause into separate commits on one dated branch `documentation/<YYYY-MM-DD>` (one
+branch per loop per day; the deliver phase turns it into one PR). Red/green
+per fix; the full project gates before every commit. Independent fixes may
+run in parallel as subagents in separate worktrees of this clone
+(`git worktree add ../wt-<id> -b documentation/<date>-<id> documentation/<date>`), each
+committing to its own branch; this phase merges them back onto the dated
+branch, reruns the gates on the merged result, and removes the worktrees
+(`git worktree remove`, `git branch -d`). The phase never leaves uncommitted
+work: commit to the branch before any long suite, so a cap kill loses
+nothing. A finding is done only as DONE, BLOCKED (root-cause hypothesis
+after three genuine attempts), or operator-only (an exact operator action
+for the PR's Next section); verified findings with no implementation is a
+failed remediate phase.
 
 1. Read the latest audit handoff and re-verify every P0/P1 against
    `origin/main`. Resume an existing documentation PR when it owns the same
@@ -490,10 +517,82 @@ Goal: make the smallest source-backed correction and prevent recurrence.
    push immediately after each completed finding.
 10. Open or update the PR via §Pull request output. Trigger, stale claim,
     source evidence, classification, owner, and validations stay on the
-    rolling issue. An exact operator action is `--next`.
+    rolling issue. An exact operator action is `--next`. CI on that PR is
+    the deliver phase's job (§Mode: deliver).
 11. After three genuine failed attempts, mark `BLOCKED` with a root-cause
     hypothesis. Never invent a workaround, silently defer P0/P1, or leave a
     half-applied change.
+
+## Mode: deliver (third phase of the daily cycle)
+
+Goal: every commit the remediate phase landed on `documentation/<YYYY-MM-DD>` reaches the
+operator as ONE pull request with CI green, in this same cycle, and the
+operator is told exactly what is ready to merge. The loop never merges.
+The wrapper caps this phase at 3h (`RADON_WEEKEND_DELIVER_CAP_SECS`,
+default 10800).
+
+1. Resume first. Read this loop's deliver record
+   (`python3.13 scripts/nightly_deliver.py show --loop documentation`; kept outside the clone under `~/radon-weekend/.documentation-deliver/`).
+   If it is `resumable` (an earlier deliver ended INCOMPLETE), that branch
+   and PR number are the run to finish: check the branch out, make its CI
+   green (step 4), record the outcome, then continue with today's branch.
+   Never open a second PR for a branch that already has one.
+2. Push the dated branch. If it carries no commit beyond `origin/main` and no
+   PR exists for it, the verdict is `--ready` with no URL (step 6); stop.
+3. Open ONE PR for the branch via §Pull request output (`--loop documentation`);
+   update the existing PR when one is already open for the branch (`gh api
+   -X PATCH`). Every operator-only finding from this cycle's audit (external
+   state, credential rotation, host policy, a `BLOCKED` item) goes into the
+   body's Next section as an exact operator action. Nothing is dropped
+   silently. Record the PR:
+   `python3.13 scripts/nightly_deliver.py record --loop documentation --branch <branch> --pr <n> --url <url> --status pending`.
+4. Wait for CI, bounded:
+   `python3.13 scripts/nightly_deliver.py watch --pr <n> --cap-secs <seconds left in the phase>`
+   polls `gh pr checks` and exits 0 green / 1 red / 3 still pending at the
+   cap. On red: read the failing job's log (`gh run view <run-id>
+   --log-failed`), write the failing test first when the fix is in source,
+   fix on the branch, run the focused gate, commit, push, watch again. Repeat
+   until green or the cap. Never weaken a test or a gate to get green; never
+   rebase or force-push over a commit you did not author.
+5. Record the outcome (`record ... --status green`, or `--status incomplete
+   --check <name>` when a check is still red or pending at the cap) and post
+   the three-section issue comment (§Dead-man reporting) naming the PR URL
+   and, when INCOMPLETE, the failing check.
+6. Print, as the LAST stdout line of the phase, the verdict line from
+   `python3.13 scripts/nightly_deliver.py verdict --loop documentation --ready <url>...`
+   (or `--incomplete <check> --pr-url <url>`). The wrapper greps it:
+   `NIGHTLY DELIVER READY: loop=documentation prs=<n> <urls>` becomes the operator
+   notification "N PR(s) green, ready to merge: <urls>" (Pushover and the
+   dead-man comment); `NIGHTLY DELIVER INCOMPLETE: loop=documentation check=<name>
+   pr=<url>` becomes "INCOMPLETE: <name>", the phase exits 75, and the next
+   fire resumes the same branch and PR from the record. An exit-0 deliver
+   phase without the line is INCOMPLETE. Never emit the line anywhere else.
+
+## Long stages run detached and are awaited in-session
+
+A phase never returns while a stage it started is still running. "Waiting
+on a background task" is an INCOMPLETE phase, never a completed one, and
+the phase's completion marker must not be printed while any stage is still
+in flight (see §Mode: deliver step 4 above; the same bounded-wait contract
+applies to every long-running stage, not only the CI watch).
+
+Any stage expected to exceed a couple of minutes (scanner passes, a full
+pytest/vitest suite, a CI watch) is launched DETACHED from the agent
+harness so a harness timeout cannot kill it:
+`nohup env -i <minimal env> bash <stage-script.sh> </dev/null >stage.out
+2>&1 & disown` (macOS has no `setsid`). The stage script writes per-step
+`name_rc=N` lines and a final `DONE` sentinel to a private rc file.
+
+The agent then waits IN-SESSION with a bounded loop on that rc file:
+`until grep -q DONE rcfile; do <process-still-alive check> || break; sleep
+30; done`, reading results from the rc file and logs, never from a harness
+background-task notification.
+
+Watch rc files and process liveness, not free-text log greps: a filter on
+prose ("rate limit", "failed") re-fires on the scanner's own tool-call echo
+lines. Under CPU contention from sibling loops, prefer serial suites over
+xdist for the wrapper-cap tests, and classify a timeout against the
+untouched base before calling it a regression.
 
 ## Validation matrix
 
@@ -642,9 +741,12 @@ Only work that must happen OUTSIDE of CI pushing a new deployment
 (`OPERATOR_REQUIRED`, `BLOCKED`). If nothing remains: "Fixed with green deployment"
 
 The wrapper also sends the per-phase Pushover notification and posts the
-wrapper-level comment. A missing issue comment is the dead-man signal. A
-zero-finding night has an issue comment and notification, but no PR or
-repository artifact.
+wrapper-level comment. For the deliver phase that status IS the operator's
+merge cue: `N PR(s) green, ready to merge: <urls>`, `0 PR(s), nothing to
+merge`, or `INCOMPLETE: <check>` (CI not green at the cap; the next fire
+resumes the same branch and PR). A missing issue comment is the dead-man
+signal. A zero-finding night has an issue comment and notification, but no
+PR or repository artifact.
 
 Before allocating `DOC-###`, inspect the rolling issue, open/closed
 documentation PRs, and git history to avoid collisions. The issue and PR

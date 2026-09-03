@@ -1,6 +1,6 @@
 ---
 name: security-nightly
-description: Nightly security auditor and authorized local penetration tester - daily audit that scans the source delta since the last audited SHA with pinned deterministic tools plus (when operator-bootstrapped) Vercel DeepSec and the official Claude Security plugin, independently verifies every candidate against current code, then remediates at most one highest-severity source-actionable root cause with a durable regression. Runs unattended and CREDENTIAL-FREE in ~/radon-weekend/radon-security via scripts/security_nightly.sh, one daily cycle at 00:40 local (audit then remediate); invoke as /security-nightly audit or /security-nightly remediate. Fails closed and never touches production, live trading, third parties, or publishes a vulnerability.
+description: Nightly security auditor and authorized local penetration tester - daily audit that scans the source delta since the last audited SHA with pinned deterministic tools plus (when operator-bootstrapped) Vercel DeepSec and the official Claude Security plugin, independently verifies every candidate against current code, then remediates every independently verified source-actionable finding with a durable regression, then a deliver phase that pushes P2/P3 (and operator-released P0/P1) fixes as one sanitized PR, gets CI green and tells the operator what to merge. Runs unattended and CREDENTIAL-FREE in ~/radon-weekend/radon-security via scripts/security_nightly.sh, one daily cycle at 00:40 local (audit, remediate, then deliver); invoke as /security-nightly audit, /security-nightly remediate or /security-nightly deliver. Fails closed and never touches production, live trading, third parties, or publishes a vulnerability.
 ---
 
 # Nightly Security Auditor and Authorized Penetration Tester
@@ -15,9 +15,9 @@ or mistaking compliance activity for security. Find current-code
 vulnerabilities, prove or refute exploitability, repair the highest verified
 source-actionable risk, and convert every valid fix into a durable regression.
 
-The first argument is the mode: `audit` or `remediate`. The launchd job fires
-daily at 00:40 local and runs `audit` followed by `remediate` in this loop's
-dedicated clone. Every non-empty nightly source delta is independently scanned
+The first argument is the mode: `audit`, `remediate` or `deliver`. The
+launchd job fires daily at 00:40 local and runs `audit`, then `remediate`,
+then `deliver` in this loop's dedicated clone. The loop never merges. Every non-empty nightly source delta is independently scanned
 by Vercel Labs DeepSec and Anthropic's official Claude Security plugin. A
 budgeted full-repository refresh runs on the first Sunday of each month and
 after a material auth, order, topology, workflow, dependency, or threat-model
@@ -93,11 +93,43 @@ the public run log:
 
    `SECURITY-NIGHTLY PHASE COMPLETE: <phase> run_id=<run-id>`
 
+   The deliver phase prints its verdict line (§Mode: deliver) immediately
+   before this marker, and its `run-record.md` also carries `branch:`,
+   `pr:`, `deliver_status:` and any operator-written `released:` lines, so
+   a resumed deliver picks up the same branch and PR.
+
    The wrapper greps that prefix; without it an exit-0 phase is reported
    INCOMPLETE and exits non-zero. A clean fail-closed `OPERATOR_REQUIRED`
    night IS complete and DOES print the marker. Never emit the marker text
    anywhere else — not in a plan, a quote of this skill, or an interim
    message.
+
+## Long stages run detached and are awaited in-session
+
+A phase never returns while a stage it started is still running. "Waiting
+on a background task" is an INCOMPLETE phase, never a completed one, and
+the completion marker must not be printed while any stage is still in
+flight (see §Completion marker, INCOMPLETE, and resume above; this is the
+same rule, extended to every long-running stage such as DeepSec and the
+full pytest suite, not only the pipeline stages already covered there).
+
+Any stage expected to exceed a couple of minutes (DeepSec, a full
+pytest/vitest suite, a CI watch) is launched DETACHED from the agent
+harness so a harness timeout cannot kill it:
+`nohup env -i <minimal env> bash <stage-script.sh> </dev/null >stage.out
+2>&1 & disown` (macOS has no `setsid`). The stage script writes per-step
+`name_rc=N` lines and a final `DONE` sentinel to a private rc file.
+
+The agent then waits IN-SESSION with a bounded loop on that rc file:
+`until grep -q DONE rcfile; do <process-still-alive check> || break; sleep
+30; done`, reading results from the rc file and logs, never from a harness
+background-task notification.
+
+Watch rc files and process liveness, not free-text log greps: a filter on
+prose ("rate limit", "failed") re-fires on the scanner's own tool-call echo
+lines. Under CPU contention from sibling loops, prefer serial suites over
+xdist for the wrapper-cap tests, and classify a timeout against the
+untouched base before calling it a regression.
 
 ## Mission
 
@@ -115,14 +147,19 @@ the public run log:
   disclosure, auth bypass, remote code execution, deploy takeover, or public
   account data.
 - A zero-finding night is healthy. It creates no code, documentation, branch,
-  PR, suppression, or public audit artifact.
+  PR, suppression, or public audit artifact. Verified findings with no
+  implementation is a failed remediate phase, not a quiet night.
 
 Measure improvement by completed trust-boundary coverage, time from vulnerable
 commit to private verification, time from verification to a green fix,
 unresolved P0/P1 age, recurrence of a previously fixed root cause, and the
-fraction of findings with durable regressions. Do not optimize scanner finding
-counts, CVSS totals, files scanned, reports produced, or a synthetic security
-score.
+fraction of findings with durable regressions; and by findings implemented
+per cycle (verified findings fixed over verified findings found), PRs
+opened per cycle, time to CI green (remediate start to the deliver phase's
+green verdict), and PRs awaiting merge with their age (an operator-side
+backlog the loop reports, never one it closes itself). Do not optimize
+scanner finding counts, CVSS totals, files scanned, reports produced, or a
+synthetic security score.
 
 ## Authorization and scope
 
@@ -567,8 +604,26 @@ are not security severities. Classify them as `BLOCKED`, `INCOMPLETE`, or
 
 ## Remediation mode
 
-Remediate at most one highest-severity verified source-actionable root cause
-per run unless multiple edits are inseparable parts of the same boundary fix.
+**Remediate mandate.** Implement every verified source-actionable finding
+(independently verified against current code) from this cycle's audit,
+highest severity first, not the first one and not one per night. Group fixes
+by root cause into separate commits on one dated branch `security/<YYYY-MM-DD>` (one
+branch per loop per day; the deliver phase turns it into one PR). Red/green
+per fix; the full project gates before every commit. Independent fixes may
+run in parallel as subagents in separate worktrees of this clone
+(`git worktree add ../wt-<id> -b security/<date>-<id> security/<date>`), each
+committing to its own branch; this phase merges them back onto the dated
+branch, reruns the gates on the merged result, and removes the worktrees
+(`git worktree remove`, `git branch -d`). The phase never leaves uncommitted
+work: commit to the branch before any long suite, so a cap kill loses
+nothing. A finding is done only as DONE, BLOCKED (root-cause hypothesis
+after three genuine attempts), or operator-only (an exact operator action
+for the PR's Next section); verified findings with no implementation is a
+failed remediate phase.
+
+Unreleased P0/P1 fixes are committed on a local private branch (never
+pushed); P2/P3 fixes and operator-released P0/P1 fixes go on the dated
+branch the deliver phase pushes.
 
 1. Re-read the current SHA and reproduce the violation with the smallest
    non-destructive local regression. For a bug fix, record red evidence first.
@@ -591,16 +646,80 @@ per run unless multiple edits are inseparable parts of the same boundary fix.
 7. Commit locally with a sanitized message. Never include attack steps,
    secret/topology details, scanner dumps, or raw identifiers.
 8. P0/P1 work remains local/private until an operator coordinates a private
-   advisory, deployment, and disclosure. P2/P3 may be pushed on
-   `security/<YYYY-MM-DD>` and opened as a sanitized PR only when the complete
-   fix is green and the public diff itself does not create an exploitable
-   window. Human merge is mandatory. When a public PR is allowed, write it
-   via §Pull request output.
+   advisory, deployment, and disclosure (a `released: <finding id>` line in
+   the private run-record is that release). P2/P3 fixes, and released P0/P1
+   fixes, are pushed on `security/<YYYY-MM-DD>` and opened as ONE sanitized
+   PR by the deliver phase only when the complete fix is green and the public
+   diff itself does not create an exploitable window. Human merge is
+   mandatory. The PR is written via §Pull request output.
 
 Do not auto-remediate a dependency advisory, rotate a credential, rewrite Git
 history, alter production topology, change external policy, or deploy. State
 the exact operator action. After three evidence-backed failed remediation
 approaches, record `BLOCKED` privately and stop modifying that finding.
+
+## Mode: deliver (third phase of the daily cycle)
+
+Goal: every commit the remediate phase landed on `security/<YYYY-MM-DD>` reaches the
+operator as ONE pull request with CI green, in this same cycle, and the
+operator is told exactly what is ready to merge. The loop never merges.
+The wrapper caps this phase at 3h (`RADON_WEEKEND_DELIVER_CAP_SECS`,
+default 10800).
+
+Security rails for this phase, in addition to every hard rail above:
+
+- Push and open a PR ONLY for P2/P3 fixes and for P0/P1 fixes the operator
+  has explicitly released: a `released: <private finding id>` line the
+  operator wrote into the private `run-record.md`. An unreleased P0/P1 fix
+  stays on a local private branch, is never pushed, and is named in the
+  run-record only. The public PR, commits, branch name, and the dead-man
+  comment carry no vulnerability detail (rail 7): never a route, file,
+  attack path, exploit, secret, or account.
+- The deliver record (branch, PR number, failing check) is written both by
+  `nightly_deliver.py record` and as `branch:` / `pr:` / `deliver_status:`
+  lines in the private `run-record.md`; the next fire resumes the same
+  `run_id`, branch, and PR from there.
+- A red check is fixed in source with the same red/green discipline; never by
+  weakening a security contract test, a gitleaks policy, or a gate.
+
+1. Resume first. Read this loop's deliver record
+   (`python3.13 scripts/nightly_deliver.py show --loop security`; kept outside the clone under `~/radon-weekend/.security-deliver/`, mirrored in the private `run-record.md`).
+   If it is `resumable` (an earlier deliver ended INCOMPLETE), that branch
+   and PR number are the run to finish: check the branch out, make its CI
+   green (step 4), record the outcome, then continue with today's branch.
+   Never open a second PR for a branch that already has one.
+2. Push the dated branch. If it carries no commit beyond `origin/main` and no
+   PR exists for it, the verdict is `--ready` with no URL (step 6); stop.
+3. Open ONE PR for the branch via §Pull request output (`--loop security`);
+   update the existing PR when one is already open for the branch (`gh api
+   -X PATCH`). Every operator-only finding from this cycle's audit (external
+   state, credential rotation, host policy, a `BLOCKED` item) goes into the
+   body's Next section as an exact operator action. Nothing is dropped
+   silently. Record the PR:
+   `python3.13 scripts/nightly_deliver.py record --loop security --branch <branch> --pr <n> --url <url> --status pending`.
+4. Wait for CI, bounded:
+   `python3.13 scripts/nightly_deliver.py watch --pr <n> --cap-secs <seconds left in the phase>`
+   polls `gh pr checks` and exits 0 green / 1 red / 3 still pending at the
+   cap. On red: read the failing job's log (`gh run view <run-id>
+   --log-failed`), write the failing test first when the fix is in source,
+   fix on the branch, run the focused gate, commit, push, watch again. Repeat
+   until green or the cap. Never weaken a test or a gate to get green; never
+   rebase or force-push over a commit you did not author.
+5. Record the outcome (`record ... --status green`, or `--status incomplete
+   --check <name>` when a check is still red or pending at the cap) and post
+   the three-section issue comment (§Dead-man reporting) naming the PR URL
+   and, when INCOMPLETE, the failing check.
+6. Print, as the LAST stdout line of the phase, the verdict line from
+   `python3.13 scripts/nightly_deliver.py verdict --loop security --ready <url>...`
+   (or `--incomplete <check> --pr-url <url>`). The wrapper greps it:
+   `NIGHTLY DELIVER READY: loop=security prs=<n> <urls>` becomes the operator
+   notification "N PR(s) green, ready to merge: <urls>" (Pushover and the
+   dead-man comment); `NIGHTLY DELIVER INCOMPLETE: loop=security check=<name>
+   pr=<url>` becomes "INCOMPLETE: <name>", the phase exits 75, and the next
+   fire resumes the same branch and PR from the record. An exit-0 deliver
+   phase without the line is INCOMPLETE. Never emit the line anywhere else.
+   Then print the completion marker (`SECURITY-NIGHTLY PHASE COMPLETE:
+   deliver run_id=<run-id>`) as the very last line, after the verdict.
 
 ## Pull request output
 
@@ -658,6 +777,13 @@ all full project suites green or a clearly unrelated pre-existing baseline
 separated from focused green evidence, a clean rescan of the fixed root cause,
 and no sensitive content in the local commit or any approved public PR.
 
+A completed deliver requires: only P2/P3 and released P0/P1 commits on the
+pushed branch; one sanitized PR open for it (or none, recorded as
+`prs=0`); every operator-only finding named as an exact action in the PR's
+Next section; the deliver record and run-record carrying the branch, PR
+number and CI outcome; and the verdict line printed before the completion
+marker. CI still red or pending at the cap is INCOMPLETE, never OK.
+
 ## Private reporting and notifications
 
 The private run record contains: run ID, immutable SHAs, range, trigger, mode,
@@ -711,7 +837,10 @@ marker while work is parked in a background task or a suite is still running
 a completed one); start a fresh run id while a resumable incomplete
 run-record for the same phase exists; generate work merely so the nightly
 loop appears productive; run `gh issue comment`, `gh issue create`, or
-`gh issue edit` (the wrapper posts the only public issue comment).
+`gh issue edit` (the wrapper posts the only public issue comment); push or
+open a PR for a P0/P1 fix the operator has not released; merge a PR; stop at
+one fix while other verified findings stay unimplemented; print the deliver
+verdict while a check is still red or pending.
 
 ## Industry basis
 
