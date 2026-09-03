@@ -126,6 +126,37 @@ describe("profile", () => {
     expect(fetched.username).toBe("Joe Trader");
   });
 
+  it("PUT runs behind requireRouteAccess: allowlist denies, permitted caller saves", async () => {
+    const saved = process.env.ALLOWED_USER_IDS;
+    process.env.ALLOWED_USER_IDS = "user_someone_else";
+    try {
+      const { PUT } = await import("../app/api/profile/route");
+      const denied = await PUT(
+        req("http://localhost/api/profile", {
+          method: "PUT",
+          body: JSON.stringify({ username: "Intruder" }),
+        }),
+      );
+      expect(denied.status).toBe(403);
+      expect((await jsonOf(denied)).code).toBe("FORBIDDEN");
+      const rows = await db.execute("SELECT COUNT(*) AS n FROM user_profiles");
+      expect(Number(rows.rows[0].n)).toBe(0);
+
+      process.env.ALLOWED_USER_IDS = "user_test_1";
+      const allowed = await PUT(
+        req("http://localhost/api/profile", {
+          method: "PUT",
+          body: JSON.stringify({ username: "Joe Trader" }),
+        }),
+      );
+      expect(allowed.status).toBe(200);
+      expect((await jsonOf(allowed)).username).toBe("Joe Trader");
+    } finally {
+      if (saved === undefined) delete process.env.ALLOWED_USER_IDS;
+      else process.env.ALLOWED_USER_IDS = saved;
+    }
+  });
+
   it("PUT rejects oversized username", async () => {
     const { PUT } = await import("../app/api/profile/route");
     const res = await PUT(

@@ -25,6 +25,8 @@ from __future__ import annotations
 
 import os
 import re
+import threading
+import time
 from dataclasses import dataclass
 from typing import Callable
 
@@ -33,6 +35,10 @@ ROLE_DEMO = "demo"
 ROLE_OPERATOR = "operator"
 
 MAX_JWT_BYTES = 8_192  # mirrors scripts/api/auth.py
+# An unknown kid forces a live JWKS refetch (PyJWKClient.get_signing_key).
+# This surface is anonymous internet, so at most one such refetch per
+# window; mirrors scripts/api/auth.py JWKS_NEGATIVE_TTL_SECONDS.
+JWKS_REFRESH_COOLDOWN_SECONDS = 30.0
 _KID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 _ALGORITHMS = ["RS256"]
 
@@ -64,6 +70,8 @@ class Principal:
 ANONYMOUS = Principal(role=ROLE_ANONYMOUS)
 
 _jwks_client = None
+_jwks_refresh_lock = threading.Lock()
+_jwks_refresh_after = 0.0
 
 
 def _get_jwks_client():
@@ -79,8 +87,24 @@ def _get_jwks_client():
 
 
 def _signing_key_for(token: str):
-    """The JWKS signing key for this token. Split out so tests can stub it."""
-    return _get_jwks_client().get_signing_key_from_jwt(token).key
+    """The JWKS signing key for this token. Split out so tests can stub it.
+
+    A kid missing from the cached set gets one live refetch per
+    JWKS_REFRESH_COOLDOWN_SECONDS; inside the window it is denied without
+    an upstream request.
+    """
+    global _jwks_refresh_after
+    import jwt as pyjwt
+
+    client = _get_jwks_client()
+    kid = pyjwt.get_unverified_header(token).get("kid")
+    if kid not in {key.key_id for key in client.get_signing_keys()}:
+        with _jwks_refresh_lock:
+            now = time.monotonic()
+            if now < _jwks_refresh_after:
+                raise AuthError(401, "invalid token")
+            _jwks_refresh_after = now + JWKS_REFRESH_COOLDOWN_SECONDS
+    return client.get_signing_key_from_jwt(token).key
 
 
 def _get_allowed_users() -> set[str]:

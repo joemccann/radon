@@ -345,6 +345,40 @@ describe("positionGroupShareData", () => {
     // pnlPct = 500 / 24750 × 100 ≈ 2.02%.
     expect(data.pnlPct).toBeCloseTo(2.0202, 3);
     expect(data.pnl).toBe(500);
+    // T-383: entry basis for a stock-only group is per SHARE, not per contract.
+    // openCash = −24750 over 100 shares → $247.50/share, not $2.475.
+    expect(data.entryPrice).toBeCloseTo(247.5, 2);
+  });
+
+  it("T-384: mixed OPT + STK closes in one group use per-fill multipliers", () => {
+    // One option SLD (1 lot @ 5.00, ×100 = $500) and one stock SLD
+    // (100sh @ 250, ×1 = $25,000) land in the same ±60s symbol bucket with no
+    // orderRef. closeCash = 25,500; totalPnL = 600 → openCash = −24,900.
+    const group: PositionFillGroup = {
+      id: "mixed", symbol: "AAPL",
+      description: "Closed AAPL",
+      isClosing: true, totalQuantity: 101, netPrice: 0,
+      totalCommission: -3.00, totalPnL: 600,
+      time: "2026-03-17T10:00:30+00:00",
+      fills: [
+        {
+          execId: "opt-1", symbol: "AAPL", side: "SLD", quantity: 1,
+          avgPrice: 5.00, commission: -1.00, realizedPNL: 100,
+          time: "2026-03-17T10:00:00+00:00", exchange: "CBOE",
+          contract: { conId: 200, symbol: "AAPL", secType: "OPT", strike: 250, right: "C", expiry: "2026-03-20" },
+        },
+        {
+          execId: "stk-1", symbol: "AAPL", side: "SLD", quantity: 100,
+          avgPrice: 250, commission: -2.00, realizedPNL: 500,
+          time: "2026-03-17T10:00:30+00:00", exchange: "ARCA",
+          contract: { conId: 100, symbol: "AAPL", secType: "STK", strike: null, right: null, expiry: null },
+        },
+      ],
+    };
+    const data = positionGroupShareData(group, [group], []);
+    expect(data.pnl).toBe(600);
+    // Exact per-fill identity: 600 / 24,900 × 100
+    expect(data.pnlPct).toBeCloseTo((600 / 24900) * 100, 4);
   });
 
   it("returns null entryPrice when no matching open group and no allGroups", () => {

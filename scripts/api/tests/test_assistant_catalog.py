@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from fastapi.testclient import TestClient
 from starlette.routing import Route
 
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent
@@ -89,6 +90,46 @@ class TestAssistantCatalog:
         )
         for path in scans:
             assert capability_for("POST", path) == "read.spawn", path
+
+    def test_backtest_refresh_is_a_mutation_not_a_read(self, monkeypatch):
+        """refresh spawns a 180s subprocess that persists to Turso: it must
+        not be reachable through the GET pinned as a plain read."""
+        from scripts.api import auth, server
+        from scripts.api.assistant_catalog import capability_for
+
+        assert capability_for("GET", "/backtest/{strategy}") == "read"
+        assert (
+            capability_for("POST", "/backtest/{strategy}/refresh")
+            == "mutate.workspace"
+        )
+
+        monkeypatch.setattr(auth, "is_trusted_local_request", lambda request: True)
+        monkeypatch.setattr(server, "is_trusted_local_request", lambda request: True)
+        spawned = []
+
+        async def _spawn(script, args, timeout=None):
+            spawned.append((script, args, timeout))
+            from api.subprocess import ScriptResult
+
+            return ScriptResult(ok=True, data={"strategy": args[1], "fresh": True})
+
+        monkeypatch.setattr(server, "run_script", _spawn)
+        monkeypatch.setattr(
+            server,
+            "_load_latest_backtest_run",
+            lambda strategy: {"strategy": strategy, "cached": True},
+        )
+        client = TestClient(server.app)
+
+        assert client.get("/backtest/vcg").json() == {"strategy": "vcg", "cached": True}
+        assert client.get("/backtest/vcg?refresh=true").status_code == 400
+        assert client.get("/backtest/vcg?refresh=1").status_code == 400
+        assert spawned == []
+
+        response = client.post("/backtest/vcg/refresh")
+        assert response.status_code == 200
+        assert response.json() == {"strategy": "vcg", "fresh": True}
+        assert spawned == [("backtest_run.py", ["--strategy", "vcg", "--persist"], 180)]
 
     def test_unpinned_post_is_default_deny(self):
         from scripts.api.assistant_catalog import capability_for

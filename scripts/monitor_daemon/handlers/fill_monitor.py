@@ -39,11 +39,13 @@ try:
         fetch_open_orders as fetch_open_orders_for_mirror,
         save_orders as save_orders_snapshot,
     )
+    from db.writer import count_open_orders as count_open_orders_for_mirror  # type: ignore
 except ImportError:  # pragma: no cover
     build_orders_data_for_mirror = None  # type: ignore[assignment]
     fetch_executed_orders_for_mirror = None  # type: ignore[assignment]
     fetch_open_orders_for_mirror = None  # type: ignore[assignment]
     save_orders_snapshot = None  # type: ignore[assignment]
+    count_open_orders_for_mirror = None  # type: ignore[assignment]
 
 def _identity_int(value: Any) -> int:
     """Coerce an IB identity field (conId/permId) to int, else 0.
@@ -298,6 +300,16 @@ class FillMonitorHandler(BaseHandler):
             return
         try:
             open_orders = fetch_open_orders_for_mirror(client)
+            if not open_orders:
+                # get_open_orders caps its openOrderEnd wait at 0.5s and
+                # returns whatever arrived — an empty book from a slow
+                # gateway must never replace a non-empty snapshot (T-382).
+                if count_open_orders_for_mirror is None or count_open_orders_for_mirror() > 0:
+                    logger.warning(
+                        "fill_monitor: IB returned empty open-orders book but "
+                        "existing snapshot is non-empty — skipping mirror"
+                    )
+                    return
             executed = fetch_executed_orders_for_mirror(client)
             save_orders_snapshot(build_orders_data_for_mirror(open_orders, executed))
         except Exception as exc:  # noqa: BLE001 — never crash on mirror failure

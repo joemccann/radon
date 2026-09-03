@@ -141,6 +141,18 @@ class TestRouting:
             "/mcp prefix to survive"
         )
 
+    def test_hosted_mcp_bounds_the_request_body(self, caddy_dir):
+        """T-391: /mcp is anonymous internet POST reaching a MemoryMax=512M
+        process — the edge must reject oversized bodies (<= 1MB) before they
+        buffer in the MCP process."""
+        content = read_caddyfile(caddy_dir)
+        block = handle_block(content, "/mcp*")
+        match = re.search(r"request_body\s*\{[^}]*max_size\s+(\d+)(KB|MB)", block)
+        assert match, "/mcp* block must set request_body { max_size ... }"
+        size, unit = int(match.group(1)), match.group(2)
+        size_bytes = size * (1024 if unit == "KB" else 1024 * 1024)
+        assert size_bytes <= 1024 * 1024, "/mcp* max_size must be <= 1MB"
+
     def test_hosted_mcp_has_no_retry_loop(self, caddy_dir):
         """POST-only JSON-RPC with no idempotency key: a retry loop could
         replay a tool call. Caddy's default is zero retries — keep it."""

@@ -332,6 +332,61 @@ write_web_env
         )
         assert stat.S_IMODE(generated.stat().st_mode) == 0o600
 
+    def test_generated_mcp_env_carries_only_clerk_and_mcp_keys(self, tmp_path: Path) -> None:
+        """radon-mcp.service terminates anonymous internet traffic, so its
+        EnvironmentFile is derived from the canonical env with only the
+        Clerk verification inputs, the operator allowlist and RADON_MCP_*."""
+        cloud_env = tmp_path / "cloud.env"
+        cloud_env.write_text(
+            "CLERK_JWKS_URL=https://clerk.example.test/.well-known/jwks.json\n"
+            "CLERK_ISSUER=https://clerk.example.test\n"
+            "CLERK_SECRET_KEY=sk_live_secret\n"
+            "ALLOWED_USER_IDS='user_a,user_b$NOT_EXPANDED'\n"
+            "RADON_MCP_APP_BASE=http://127.0.0.1:3000\n"
+            "TURSO_AUTH_TOKEN=secret\n"
+            "UW_TOKEN=secret\n",
+            encoding="utf-8",
+        )
+        cloud_env.chmod(0o600)
+        mcp_env = tmp_path / "etc-radon" / "mcp.env"
+        mcp_env.parent.mkdir()
+
+        command = f"""
+set -euo pipefail
+export RADON_DIR={tmp_path / "radon"!s}
+export RADON_DEPLOY_ENV_FILE={cloud_env!s}
+export RADON_MCP_ENV_FILE={mcp_env!s}
+source {DEPLOY!s}
+write_mcp_env
+"""
+        subprocess.run(["bash", "-c", command], check=True, capture_output=True, text=True)
+
+        assert mcp_env.read_text(encoding="utf-8") == (
+            "CLERK_JWKS_URL=https://clerk.example.test/.well-known/jwks.json\n"
+            "CLERK_ISSUER=https://clerk.example.test\n"
+            "ALLOWED_USER_IDS='user_a,user_b$NOT_EXPANDED'\n"
+            "RADON_MCP_APP_BASE=http://127.0.0.1:3000\n"
+        )
+        assert stat.S_IMODE(mcp_env.stat().st_mode) == 0o600
+        assert not list(mcp_env.parent.glob("*.tmp.*"))
+
+    def test_deploy_writes_mcp_env_after_env_preflight(self, deploy_text: str) -> None:
+        main = _body(deploy_text, "main")
+        assert main.index("preflight_env ") < main.index("write_mcp_env ")
+
+    def test_setup_derives_the_same_mcp_env(self) -> None:
+        setup_text = SETUP.read_text(encoding="utf-8")
+        setup_body = _body(setup_text, "write_mcp_env")
+        assert "/etc/radon/mcp.env" in setup_body
+        assert "-m 0600 -o radon -g radon" in setup_body
+        deploy_text = DEPLOY.read_text(encoding="utf-8")
+        deploy_keys = re.search(r"readonly MCP_ENV_KEYS=('[^']+')", deploy_text)
+        assert deploy_keys and deploy_keys.group(1) in setup_body
+        # next to the canonical env: /etc/radon/env -> /etc/radon/mcp.env
+        assert '$(dirname "$ENV_FILE_DEFAULT")/mcp.env' in deploy_text
+        main = _body(setup_text, "main")
+        assert main.index("validate_env") < main.index("write_mcp_env")
+
     def test_deploy_code_contains_no_credential_shaped_example(self, deploy_text: str) -> None:
         assert "passwords like" not in deploy_text
 

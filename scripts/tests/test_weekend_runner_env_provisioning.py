@@ -63,6 +63,12 @@ PLISTS = {
 }
 
 # Dummy values only. Never stage a real credential into a fixture.
+WRAPPERS = {
+    "reliability": "reliability_weekend.sh",
+    "testing": "testing_weekend.sh",
+    "ci-performance": "ci_performance_nightly.sh",
+    "documentation": "documentation_nightly.sh",
+}
 DUMMY = {
     ".env": "TURSO_DB_URL=libsql://dummy.invalid\nTURSO_AUTH_TOKEN=dummy\n",
     ".env.ib-mode": "IB_GATEWAY_MODE=local\n",
@@ -116,6 +122,10 @@ def _stage(tmp_path: Path, name: str) -> tuple[Path, Path, dict]:
     (src / "web").mkdir(parents=True)
     for rel, body in DUMMY.items():
         (src / rel).write_text(body, encoding="utf-8")
+    # The setup script refuses a source checkout that does not carry its own
+    # loop wrapper (it reads the clone origin from there, never the cwd).
+    (src / "scripts").mkdir()
+    (src / "scripts" / WRAPPERS[name]).write_text("", encoding="utf-8")
 
     root = tmp_path / "weekend"
     clone = root / clone_name

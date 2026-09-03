@@ -78,6 +78,13 @@ export default defineConfig({
       ...process.env,
       RADON_AUTHLESS_TEST: "1",
       RADON_AUTHLESS_TEST_TOKEN: AUTHLESS_TEST_TOKEN,
+      // Pin a Clerk publishable STUB (after the process.env spread, so it
+      // always wins): whether specs exercise the realtime socket must not
+      // depend on ambient NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY / web/.env.
+      // pk_test_* is a non-secret instance identifier, never a credential.
+      // Auth in e2e comes from the authless token above, not Clerk.
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:
+        "pk_test_cmFkb24tZTJlLXN0dWIuY2xlcmsuYWNjb3VudHMuZGV2JA",
     },
   },
 });

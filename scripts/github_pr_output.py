@@ -17,6 +17,8 @@ import re
 import sys
 from datetime import date
 
+from nightly_issue_format import sanitize
+
 LOOP_TITLES = {
     "reliability": "Reliability",
     "testing": "Testing",
@@ -94,8 +96,15 @@ def format_pr_body(
 
 
 def render(*, loop: str, date: str, issue: str, fix: str, next_action: str | None) -> dict[str, str]:
+    title = format_pr_title(loop=loop, date=date, issue=issue)
+    if loop == "security":
+        # Public repo: the body gets the same redaction as the rolling-issue
+        # comment (routes, file:line, secrets, accounts).
+        issue = sanitize(issue)
+        fix = sanitize(fix)
+        next_action = sanitize(next_action) if next_action else next_action
     return {
-        "title": format_pr_title(loop=loop, date=date, issue=issue),
+        "title": title,
         "body": format_pr_body(issue=issue, fix=fix, next_action=next_action),
     }
 

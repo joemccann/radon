@@ -1518,9 +1518,12 @@ row plus a missing sidecar used to SendRequest at the next 08:00 ET window.
   `CashFlowSyncHandler.is_due` honored `daemon_state` `blocked_until` (the
   Monday 08:00 window). `/orders` POST `/api/blotter` → `journal_rehydrate`
   shares the token. Looking at the lozenge was itself a SendRequest.
-- **Detection:** `service_health.cash-flow-sync` error with `code 1025` or
-  "too many failed attempts"; lozenge `Do not retry`; `last_synced_at` days
-  old; sidecar file absent on the host.
+- **Detection:** a `service_health.cash-flow-sync` error row is now written
+  only by the sFTP ingest and carries `cash_flow_sync --from-file failed
+  (exit N)`, never a Flex code. A live 1025 surfaces on the SendRequest
+  consumers (`perf_twr_builder`, `journal_rehydrate`) and in
+  `utils.flex_embargo`: read the sidecar, not the cash-flow row. Lozenge
+  `Do not retry`; `last_synced_at` days old; sidecar file absent on the host.
 - **Discriminating check:** do NOT SendRequest. Read the row and the sidecar.
 
 ```
@@ -1665,7 +1668,7 @@ bug. Revisit only if Radon grows a real operator desktop shell.
 
 ## preferences-operator-403
 
-**Operator Save on `/preferences` returns 403 `Operator authorization required`.**
+**Operator Save on the profile Preferences tab (`/profile?tab=preferences`, formerly the `/preferences` page) returns 403 `Operator authorization required`.**
 Peak incident: 2026-08-15, operator signed in as joemccann on app.radon.run,
 `PUT /api/preferences` (`RADON_MAX_ORDER_NOTIONAL` → 1_000_000) 403.
 

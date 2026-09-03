@@ -2481,18 +2481,31 @@ async def paper_place(request: Request):
 
 
 @app.get("/backtest/{strategy}")
-async def backtest_strategy(request: Request, strategy: str, refresh: bool = False):
+async def backtest_strategy(request: Request, strategy: str, refresh: Optional[str] = None):
     """F12 — latest walk-forward backtest run for a strategy.
 
     Returns the most recent persisted run from ``backtest_runs`` (bounded hrana
-    read, off-loop). When none exists or ``refresh=true``, runs the subprocess
-    (which persists the fresh run) and returns its result.
+    read, off-loop). When none exists, runs the subprocess (which persists the
+    fresh run) and returns its result. A forced re-run is a mutation:
+    POST /backtest/{strategy}/refresh.
     """
-    if not refresh:
-        cached = await asyncio.to_thread(_load_latest_backtest_run, strategy)
-        if cached is not None:
-            return cached
+    if refresh is not None:
+        raise HTTPException(
+            status_code=400, detail="refresh is POST /backtest/{strategy}/refresh"
+        )
+    cached = await asyncio.to_thread(_load_latest_backtest_run, strategy)
+    if cached is not None:
+        return cached
+    return await _run_backtest(request, strategy)
 
+
+@app.post("/backtest/{strategy}/refresh")
+async def backtest_refresh(request: Request, strategy: str):
+    """F12 — force a fresh walk-forward run (180s subprocess, persists to Turso)."""
+    return await _run_backtest(request, strategy)
+
+
+async def _run_backtest(request: Request, strategy: str):
     task = asyncio.create_task(run_script(
         "backtest_run.py", ["--strategy", strategy, "--persist"], timeout=180
     ))
@@ -3674,6 +3687,19 @@ def _scan_cache_matches_preset(cached: Any, preset: str) -> bool:
     return universe.lower() in {f"preset:{preset_key}", f"fallback:{preset_key}"}
 
 
+def _preset_cooldown_429(name: str, last_scan: float, cooldown_s: float) -> HTTPException:
+    """The cooldown is keyed on the route: a cache miss inside the window
+    (a different preset, an explicit-ticker overwrite) is refused, never
+    re-spawned — varying `preset` used to bypass the window entirely."""
+    remaining = max(0.0, cooldown_s - (time.monotonic() - last_scan))
+    retry_after = str(max(1, int(remaining) + 1))
+    return HTTPException(
+        status_code=429,
+        detail=f"{name} scan cooldown: retry in {retry_after}s",
+        headers={"Retry-After": retry_after},
+    )
+
+
 @app.post("/leap/scan")
 async def leap_scan(preset: str = "largecaps", min_gap: float = 10.0, tickers: str = ""):
     """Run LEAP scan (leap_scanner_uw.py --preset X --json, or --tickers A,B).
@@ -3702,11 +3728,13 @@ async def leap_scan(preset: str = "largecaps", min_gap: float = 10.0, tickers: s
         cached = _read_cache(DATA_DIR / "leap.json")
         if _scan_cache_matches_preset(cached, preset):
             return cached
+        raise _preset_cooldown_429("leap", _leap_last_scan, LEAP_COOLDOWN_S)
     async with _leap_scan_lock:
         if not is_ticker_scan and time.monotonic() - _leap_last_scan < LEAP_COOLDOWN_S:
             cached = _read_cache(DATA_DIR / "leap.json")
             if _scan_cache_matches_preset(cached, preset):
                 return cached
+            raise _preset_cooldown_429("leap", _leap_last_scan, LEAP_COOLDOWN_S)
         workers = _bounded_env_int("RADON_LEAP_SCANNER_WORKERS", 16)
         if is_ticker_scan:
             args = [
@@ -4305,11 +4333,13 @@ async def garch_convergence_scan(preset: str = "largecaps", tickers: str = ""):
         cached = _read_cache(DATA_DIR / "garch_convergence.json")
         if _scan_cache_matches_preset(cached, preset):
             return cached
+        raise _preset_cooldown_429("garch", _garch_last_scan, GARCH_COOLDOWN_S)
     async with _garch_scan_lock:
         if not is_ticker_scan and time.monotonic() - _garch_last_scan < GARCH_COOLDOWN_S:
             cached = _read_cache(DATA_DIR / "garch_convergence.json")
             if _scan_cache_matches_preset(cached, preset):
                 return cached
+            raise _preset_cooldown_429("garch", _garch_last_scan, GARCH_COOLDOWN_S)
         workers = _bounded_env_int("RADON_GARCH_SCANNER_WORKERS", 16)
         if is_ticker_scan:
             args = [
@@ -4531,6 +4561,11 @@ async def internals_skew_history(
 ):
     if not uw_available:
         raise HTTPException(status_code=503, detail="UW token is required for internals skew history")
+    # Both tickers are interpolated into the outbound UW URL path.
+    nq_ticker = nq_ticker.upper()
+    spx_ticker = spx_ticker.upper()
+    if not _TICKER_RE.match(nq_ticker) or not _TICKER_RE.match(spx_ticker):
+        raise HTTPException(status_code=400, detail="Invalid ticker symbol")
 
     normalized_timeframe = timeframe.upper().strip() or "5Y"
     cache_path = _build_internals_skew_cache_path(

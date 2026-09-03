@@ -10,7 +10,8 @@ risk UI remains a display, never the enforcement.
 Operator-tunable (read at call time so operators can adjust without restart)
 through ``app_preferences``, which resolves DB row > env var > code default
 and discards any stored value outside the declared hard band:
-  RADON_MAX_ORDER_QTY        max contracts/shares per order   (default 500)
+  RADON_MAX_ORDER_QTY        max contracts per option order   (default 500)
+  RADON_MAX_STOCK_ORDER_QTY  max shares per stock order       (default 10_000)
   RADON_MAX_ORDER_NOTIONAL   max $ per order (qty×price×mult) (default 250_000)
   RADON_MAX_COMBO_LOSS_DOLLARS combo worst-case loss cap     (default 10_000_000)
   RADON_MAX_ORDERS_PER_MIN   max accepted placements per min  (default 10)

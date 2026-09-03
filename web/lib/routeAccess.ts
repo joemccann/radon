@@ -51,8 +51,19 @@ function parseAllowed(raw: string | undefined): Set<string> {
   return new Set((raw ?? "").split(",").map((value) => value.trim()).filter(Boolean));
 }
 
+// One dynamic import per module instance. Two handlers racing separate
+// `import()` calls of a vi.mock'd module hand the loser the real Clerk
+// module, which throws outside a request scope and lands the caller in the
+// NODE_ENV=test seam below as a different user. A rejected import is not
+// cached so the next call retries.
+let clerkServer: Promise<typeof import("@clerk/nextjs/server")> | undefined;
+
 async function defaultAuth(): Promise<AuthResult> {
-  const { auth } = await import("@clerk/nextjs/server");
+  clerkServer ??= import("@clerk/nextjs/server").catch((error) => {
+    clerkServer = undefined;
+    throw error;
+  });
+  const { auth } = await clerkServer;
   return (await auth()) as unknown as AuthResult;
 }
 

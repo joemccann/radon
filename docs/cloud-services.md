@@ -106,7 +106,7 @@ The same SSH public key is authorized on both routes — `~/.ssh/authorized_keys
 
 `data/replica.db` is intentionally absent — the embedded-replica architecture was retired 2026-05-20. If the file appears on disk (stray from a pre-migration host), it is safe to `rm` — nothing reads from it.
 
-Every `radon-*.service` (except `radon-grok-page-responder`) uses `EnvironmentFile=/etc/radon/env`. `/home/radon/radon-cloud/.env` is a compatibility symlink to that file. Media is `/var/lib/radon/media` (Caddy `media.radon.run`); `/home/radon/radon-cloud/media` is a compatibility symlink. The legacy directory is not a deploy source.
+Every `radon-*.service` (except `radon-grok-page-responder`, `radon-flex-pull` and `radon-mcp`, which load stripped files) uses `EnvironmentFile=/etc/radon/env`. `/home/radon/radon-cloud/.env` is a compatibility symlink to that file. Media is `/var/lib/radon/media` (Caddy `media.radon.run`); `/home/radon/radon-cloud/media` is a compatibility symlink. The legacy directory is not a deploy source.
 
 **Whole-stack kill switch:** `/usr/local/bin/radon` wraps all units (IB Gateway included). Run on the VPS or remotely:
 
@@ -386,11 +386,14 @@ JSON-RPC), documented for consumers at radon.run `/developers/mcp`.
   own token. No write tools; no `kb_*` corpus tools (operator journal/P&L
   stays on the checkout-only radon-kb stdio server); no service tokens.
 - **Env**: `CLERK_JWKS_URL` / `CLERK_ISSUER` / `ALLOWED_USER_IDS` from
-  `/etc/radon/env`. Optional overrides `RADON_MCP_{HOST,PORT,SITE_BASE,EDGE_BASE,APP_BASE,DEMO_BASE}`
+  `/etc/radon/mcp.env`, a stripped file `deploy.sh:write_mcp_env` (and
+  `setup-vps.sh`) derives from `/etc/radon/env` on every deploy; the unit
+  never loads the full secret set and runs with `/etc/radon/env`
+  inaccessible. Optional overrides `RADON_MCP_{HOST,PORT,SITE_BASE,EDGE_BASE,APP_BASE,DEMO_BASE}`
   and `RADON_MCP_ALLOWED_HOSTS` (comma list; default
   `app.radon.run,app.radon.run:*,127.0.0.1:*,localhost:*` — the SDK's
   DNS-rebinding protection 421s any Host not on it, so a serving-host change
-  must update this list).
+  must update this list) are copied through when present in `/etc/radon/env`.
 - **First enable** (install-units only auto-enables new timers):
   `sudo systemctl enable --now radon-mcp.service`, then
   `curl -s -X POST https://app.radon.run/mcp -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'`.
@@ -582,9 +585,9 @@ their `config/installed-units.sha256` entries.
 Daily `21:45 UTC` (`RandomizedDelaySec=300`), oneshot
 `scripts/fetch_credit_spread.py`. IB daily closes for HYG + SPX, then UW, then
 Robinhood (HYG only, when configured), then Yahoo. Both units share IB client IDs 56/69 and therefore serialize on `flock -w <peer budget> -E 75 /run/lock/radon-ib-history-5669.lock`: the 21:45/21:55 gap is not a mutex once `RandomizedDelaySec=300` applies to both. The lock loser exits 75 (`SuccessExitStatus=75`) and defers to its next slot instead of entering `failed` (R-127).
-Heartbeat `credit-spread`. Units are listed in `setup-vps.sh`
-`SERVICE_FILES`; root install-copy is still owed (`not-installed` allowlist
-expires 2026-12-31). Spec: [`indicators/credit.md`](indicators/credit.md).
+Heartbeat `credit-spread`. Installed by the deploy's `install-units` verb
+from `installed-units.sha256` (units on `auto-sync-units.txt`). Spec:
+[`indicators/credit.md`](indicators/credit.md).
 
 ### IEI/HYG ratio (`radon-iei-hyg.timer`)
 
@@ -692,7 +695,7 @@ Yahoo for whatever IB left empty (spark batches of 20 incrementally, per-symbol
 chart on backfill); UW is skipped so the 515-symbol sweep never spends the shared
 daily cap. Only raw per-session rows land in `dispersion_history`; the means and
 z-scores are rebuilt from every stored row each run. 22:20 clears the EST close
-and sits between ivrank 22:10 and yield-curve 22:30. Runs every calendar day;
+and sits between iv-spread 22:15 and yield-curve 22:30. Runs every calendar day;
 weekend and holiday runs find no new completed session, make no IB or Yahoo
 requests, and refresh only the snapshot + heartbeat that keep `dispersion` inside
 its 26h window. An empty VIX or a thin cross-section re-serves the stored series
@@ -737,9 +740,8 @@ deploy's `install-units` verb from `installed-units.sha256`.
 Daily `22:10 UTC` (`RandomizedDelaySec=120`), oneshot
 `scripts/fetch_ivrank.py`. SPY 30-day implied vol from IB
 (`OPTION_IMPLIED_VOLATILITY` daily bars, health-gated), UW iv-rank fallback,
-ranked over the trailing 252 sessions. Heartbeat `ivrank`. Units are listed in
-`setup-vps.sh` `SERVICE_FILES`; root install-copy is still owed
-(`not-installed` allowlist expires 2026-12-31). Spec:
+ranked over the trailing 252 sessions. Heartbeat `ivrank`. Installed by the
+deploy's `install-units` verb from `installed-units.sha256`. Spec:
 [`indicators/ivrank.md`](indicators/ivrank.md).
 
 ### IV SPREAD (`radon-iv-spread.timer`)
@@ -759,7 +761,12 @@ Install dependency: IBKR-hosted sFTP, not Flex Web Service. Full recipe:
 [`flex-sftp-setup.md`](flex-sftp-setup.md).
 
 `Tue..Sat 07:30 ET` plus `08:30 ET` empty-dir retry. Oneshot
-`scripts/flex_sftp_pull.py`. Heartbeat `flex-pull`. Stripped env
+`scripts/flex_sftp_pull.py`. Heartbeats `flex-pull` (the delivery signal)
+and, from the Activity branch of `flex_delivery_ingest`, `cash-flow-sync`
+(`ok` when `cash_flow_sync --from-file` succeeds or an already-applied
+statement is re-pulled, `error` with the exit code when it fails; a
+duplicate-only run is still a stale-remote `error` on `flex-pull`, R-389,
+but not on `cash-flow-sync`). Stripped env
 `/var/lib/radon/flex-secrets/env` (no `TWS_PASSWORD`). Units on
 `auto-sync-units.txt`.
 
@@ -793,8 +800,12 @@ never installed on the VPS (`systemctl is-enabled` → `not-found`) and nothing
 rebuilt the payload on a schedule at all; the only refreshes came from the
 page's own SWR trigger.
 
-**A Flex outage must not blank the page.** NAV degrades `flex → disk_cache →
-turso`; flows now degrade `flex → turso external_flows` via
+**A Flex outage must not blank the page.** NAV resolves `flex` (only with
+`--sendrequest`) → the fresher of the disk cache and Turso (a tie stays on
+disk; "disk then Turso" served an 18-day-old cache after the sFTP ingest had
+mirrored newer NAV into Turso, 2026-09-02). Flows come from a statement
+already in hand (the file ingest, or the NAV fetch this run) with no
+`IB_FLEX_TOKEN` required, then degrade `flex → turso external_flows` via
 `load_flows_from_turso()`. Before that fallback existed, one `fetch_flex_xml`
 exception produced `FlowSet.failed`, which suppresses TWR, Max DD, Sharpe and
 the equity curve — so the page flipped between +90.81% and `--` depending on

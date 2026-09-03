@@ -3,6 +3,7 @@ import { auth } from "@clerk/nextjs/server";
 import { dbExecute, describeDbError } from "@/lib/dbExecute";
 import { getRequestId, jsonApiError, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 import { ALLOWED_IMAGE_HOSTS, isAllowedImageUrl } from "@/lib/imageHosts";
+import { requireRouteAccess } from "@/lib/routeAccess";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -166,13 +167,15 @@ export async function GET(): Promise<Response> {
 
 export async function PUT(req: Request): Promise<Response> {
   const requestId = getRequestId();
-  const { userId } = await auth();
-  if (!userId) {
-    return setNoStoreResponseHeaders(
-      jsonApiError({ status: 401, code: "UNAUTHORIZED", message: "Sign in required", requestId }),
-      requestId,
-    );
-  }
+  // mutate.workspace pin: chat call_api can reach this handler, so the
+  // deployment gate (allowlist, demo state, per-user budget) runs here, not
+  // only in the middleware perimeter.
+  const access = await requireRouteAccess(req, {
+    rate: { key: "profile:mutate", limit: 20, windowMs: 60_000 },
+    durableRateTier: "C",
+  });
+  if (!access.ok) return access.response;
+  const { userId } = access.principal;
 
   let body: { username?: unknown; avatar_url?: unknown; ui_preferences?: unknown };
   try {

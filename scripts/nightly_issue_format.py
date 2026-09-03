@@ -62,6 +62,17 @@ _SECRET_ASSIGN_RE = re.compile(
     re.I,
 )
 _BEARER_RE = re.compile(r"(Bearer\s+)\S+", re.I)
+# Bare credential literals by well-known prefix or shape (the classes the
+# gitleaks default ruleset flags): Anthropic / OpenAI keys, GitHub tokens,
+# Slack tokens, AWS access key ids, three-part JWTs. Kept tight on purpose.
+_CREDENTIAL_LITERAL_RE = re.compile(
+    r"\b(?:sk-(?:ant-)?[A-Za-z0-9_-]{20,}"
+    r"|gh[pousr]_[A-Za-z0-9]{36,}"
+    r"|github_pat_[A-Za-z0-9_]{22,}"
+    r"|xox[abpors]-[A-Za-z0-9-]{10,}"
+    r"|AKIA[0-9A-Z]{16}"
+    r"|eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})"
+)
 _EMAIL_RE = re.compile(r"\b[\w.+-]+@[\w.-]+\.\w+\b")
 # App routes (/api/..., /v1/...). Not filesystem roots: lock-held comments
 # name $REPO and $RUNNER_LOCK (/Users/..., /tmp/..., /home/...).
@@ -148,6 +159,7 @@ def sanitize(text: str) -> str:
     text = _ROUTE_RE.sub(REDACTED, text)
     text = _FILE_LINE_RE.sub(REDACTED, text)
     text = _BEARER_RE.sub(lambda m: f"{m.group(1)}{REDACTED}", text)
+    text = _CREDENTIAL_LITERAL_RE.sub(REDACTED, text)
     text = _SECRET_ASSIGN_RE.sub(
         lambda m: f"{m.group(1)}{m.group(2)}{REDACTED}", text
     )

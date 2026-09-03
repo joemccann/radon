@@ -904,7 +904,7 @@ how this loop improves as the codebase grows.
   structural.** Tonight's audit again answered a mid-run nudge with text at
   "gates 53%" and exited 0 at four minutes; the wrapper correctly posted
   INCOMPLETE (T-379's check works) but the night's audit was still forfeit
-  (T-380: the wrapper now retries an INCOMPLETE phase once). Two things that
+  (T-380 filed: the wrapper should retry an INCOMPLETE phase once; not yet implemented). Two things that
   worked and should repeat: the remediate phase ADOPTED the dead audit's
   still-running detached gates script as its round 1 (zero wasted wall
   clock), and `/tmp/tw-<date>/` scratch survived the phase boundary exactly
