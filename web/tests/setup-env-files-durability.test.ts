@@ -165,3 +165,55 @@ describe("writes are atomic (R-524)", () => {
     expect(after).toContain("tab-two");
   });
 });
+
+describe("REL-218 (R-593): the upsert is quote-continuation aware", () => {
+  const multiline = [
+    'MENTHORQ_NOTES="first line',
+    "UW_TOKEN=inside-the-quoted-block",
+    'last line"',
+    "UW_TOKEN=old-real-value",
+    "",
+  ].join("\n");
+
+  it("never rewrites a continuation line inside a multiline quoted value", () => {
+    const next = upsertEnvContent(multiline, { UW_TOKEN: "new-value" }, "python");
+    const lines = next.split("\n");
+    expect(lines[1]).toBe("UW_TOKEN=inside-the-quoted-block");
+    expect(lines[2]).toBe('last line"');
+    expect(lines[3]).toBe("UW_TOKEN='new-value'");
+  });
+
+  it("round-trips a multiline value through the real @next/env", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "radon-env-"));
+    const target = path.join(dir, ".env");
+    const existing = [
+      'NOTES="line one',
+      "SENTINEL=not-an-assignment",
+      'line three"',
+      "UW_TOKEN=old",
+      "",
+    ].join("\n");
+    await fs.writeFile(target, existing);
+    const next = upsertEnvContent(existing, { UW_TOKEN: "fresh" }, "next");
+    await fs.writeFile(target, next);
+    const noLog = { info: () => {}, error: () => {} };
+    const parsed = loadEnvConfig(dir, true, noLog, true).combinedEnv as Record<string, string>;
+    expect(parsed.NOTES).toBe("line one\nSENTINEL=not-an-assignment\nline three");
+    expect(parsed.UW_TOKEN).toBe("fresh");
+    expect(parsed.SENTINEL).toBeUndefined();
+  });
+
+  it("rewriting a managed key whose OLD value is multiline consumes its continuation", () => {
+    const existing = [
+      'UW_TOKEN="old line one',
+      'old line two"',
+      "OTHER=keep",
+      "",
+    ].join("\n");
+    const next = upsertEnvContent(existing, { UW_TOKEN: "flat" }, "python");
+    expect(next).not.toContain("old line two");
+    const lines = next.split("\n");
+    expect(lines[0]).toBe("UW_TOKEN='flat'");
+    expect(lines[1]).toBe("OTHER=keep");
+  });
+});

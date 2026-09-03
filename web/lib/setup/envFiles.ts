@@ -96,17 +96,58 @@ export function upsertEnvContent(
   const lines = existing.length > 0 ? existing.split("\n") : [];
   const remaining = new Map(Object.entries(entries));
   const seen = new Set<string>();
+  // Scan a value for an unterminated quote: a `KEY="...` line opens a
+  // multiline statement in both declared parsers, and every line until the
+  // closing quote is VALUE CONTENT, not an assignment (REL-218 / R-593 —
+  // rewriting a `UW_TOKEN=` line inside a quoted block broke the whole
+  // statement through real python-dotenv).
+  const openQuoteOf = (value: string, from: string | null): string | null => {
+    let open = from;
+    for (let i = 0; i < value.length; i += 1) {
+      const ch = value[i];
+      if (open) {
+        if (ch === "\\" && open === '"') { i += 1; continue; }
+        if (ch === open) open = null;
+      } else if (i === 0 && (ch === '"' || ch === "'")) {
+        open = ch;
+      } else if (!from && i > 0) {
+        break; // only a value that STARTS quoted can continue across lines
+      }
+    }
+    return open;
+  };
   // EVERY occurrence of a managed key is rewritten: both parsers apply
   // last-assignment-wins, so leaving a later duplicate untouched silently
   // discards the wizard's value (R-546).
-  const next = lines.map((line) => {
+  let openQuote: string | null = null;
+  let dropContinuation = false;
+  const next: string[] = [];
+  for (const line of lines) {
+    if (openQuote) {
+      openQuote = openQuoteOf(line, openQuote);
+      // Inside a multiline value: either value content of an unmanaged key
+      // (preserve verbatim) or the tail of a managed key's OLD value we just
+      // replaced (drop it, or the fragment corrupts the file).
+      if (!dropContinuation) next.push(line);
+      if (!openQuote) dropContinuation = false;
+      continue;
+    }
     const match = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/.exec(line);
-    if (!match) return line;
+    if (!match) {
+      next.push(line);
+      continue;
+    }
     const key = match[1];
-    if (!remaining.has(key)) return line;
+    const value = line.slice(line.indexOf("=") + 1).trim();
+    openQuote = openQuoteOf(value, null);
+    if (!remaining.has(key)) {
+      next.push(line);
+      continue;
+    }
     seen.add(key);
-    return `${key}=${quote(key, remaining.get(key)!, dialect)}`;
-  });
+    next.push(`${key}=${quote(key, remaining.get(key)!, dialect)}`);
+    if (openQuote) dropContinuation = true;
+  }
   for (const key of seen) remaining.delete(key);
   if (remaining.size > 0) {
     if (next.length > 0 && next[next.length - 1] !== "") next.push("");
