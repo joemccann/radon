@@ -261,6 +261,20 @@ class SecretStore:
         ).fetchone()
         if row is not None:
             if row[0] != self._key_fingerprint:
+                # REL-223 (R-595): a stale binding over an EMPTY secrets table
+                # protects nothing — all rows were deleted before the key was
+                # lost, so a freshly minted key may rebind. With rows present
+                # the mismatch stays a hard refusal.
+                has_rows = (
+                    conn.execute("SELECT 1 FROM secrets LIMIT 1").fetchone()
+                    is not None
+                )
+                if not has_rows:
+                    conn.execute(
+                        "UPDATE key_binding SET fingerprint = ? WHERE id = 1",
+                        (self._key_fingerprint,),
+                    )
+                    return
                 raise SecretKeyMismatchError(
                     f"key mismatch: {self._db_path} is bound to a different "
                     "master key than the one loaded; restore the original "
