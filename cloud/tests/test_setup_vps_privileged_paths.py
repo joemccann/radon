@@ -188,7 +188,7 @@ class TestEnvFileGuard:
         )
         assert result.returncode == 0, result.stderr
         calls = log.read_text().splitlines()
-        assert calls[:2] == [f"chmod 0600 {env}", f"chown radon:radon {env}"]
+        assert calls[:2] == [f"chmod 0640 {env}", f"chown root:radon {env}"]
 
     def test_setup_node_regular_file_is_chmod_then_chown(
         self, harness: dict[str, Path]
@@ -202,7 +202,7 @@ class TestEnvFileGuard:
         # The later `install -o radon` of web/.env cannot succeed unprivileged;
         # the wire assertion is that the guarded pair ran against the real file.
         calls = log.read_text().splitlines()
-        assert calls[:2] == [f"chmod 0600 {env}", f"chown radon:radon {env}"]
+        assert calls[:2] == [f"chmod 0640 {env}", f"chown root:radon {env}"]
 
 
 # ── (b) symlinked checkout sources are refused ────────────────────────
@@ -567,15 +567,54 @@ class TestStaticContract:
 
 
 class TestRemoteInstallerPins:
-    def test_docker_apt_key_is_fingerprint_pinned_before_install(self) -> None:
+    DOCKER_FPR = "9DC858229FC7DD38854AE2D88D81803C0EBFCD88"
+    NODESOURCE_FPR = "6F71F525282841EEDAF851B42F59B5F99B1BE0B4"
+    CADDY_FPR = "65760C51EDEA2017CEA2CA15155B6D79CA56EA34"
+
+    def test_helper_refuses_a_key_that_does_not_match_the_pin(self) -> None:
         script = SETUP.read_text(encoding="utf-8")
-        assert 'readonly DOCKER_GPG_FINGERPRINT="9DC858229FC7DD38854AE2D88D81803C0EBFCD88"' in script
-        body = _function_body(script, "install_docker")
+        body = _function_body(script, "pin_apt_keyring")
         dearmor = body.index("--dearmor")
         check = body.index("--show-keys")
+        assert dearmor < check
+        assert "rm -f" in body[check:]
+        assert "does not match the pinned fingerprint" in body
+
+    def test_docker_apt_key_is_fingerprint_pinned_before_install(self) -> None:
+        script = SETUP.read_text(encoding="utf-8")
+        assert f'readonly DOCKER_GPG_FINGERPRINT="{self.DOCKER_FPR}"' in script
+        body = _function_body(script, "install_docker")
+        pin = body.index("pin_apt_keyring")
         install = body.index("apt install -y docker-ce")
-        assert dearmor < check < install
-        assert "rm -f /etc/apt/keyrings/docker.gpg" in body[check:install]
+        assert pin < install
+        assert "DOCKER_GPG_FINGERPRINT" in body[pin:install]
+
+    def test_nodesource_apt_key_is_fingerprint_pinned_and_setup_script_is_not_piped(
+        self,
+    ) -> None:
+        script = SETUP.read_text(encoding="utf-8")
+        assert f'readonly NODESOURCE_GPG_FINGERPRINT="{self.NODESOURCE_FPR}"' in script
+        body = _function_body(script, "install_node22")
+        pin = body.index("pin_apt_keyring")
+        install = body.index("apt install -y nodejs")
+        assert pin < install
+        assert "NODESOURCE_GPG_FINGERPRINT" in body[pin:install]
+        assert "setup_22.x" not in body
+        assert "| bash" not in body
+        assert "deb.nodesource.com/node_22.x" in body
+        assert "signed-by=" in body
+
+    def test_caddy_apt_key_is_fingerprint_pinned_and_sources_list_is_local(self) -> None:
+        script = SETUP.read_text(encoding="utf-8")
+        assert f'readonly CADDY_GPG_FINGERPRINT="{self.CADDY_FPR}"' in script
+        body = _function_body(script, "install_caddy")
+        pin = body.index("pin_apt_keyring")
+        install = body.index("apt-get install -y caddy")
+        assert pin < install
+        assert "CADDY_GPG_FINGERPRINT" in body[pin:install]
+        assert "debian.deb.txt" not in body
+        assert "dl.cloudsmith.io/public/caddy/stable/deb/debian" in body
+        assert "signed-by=" in body
 
 
 # ── playbook invariant ────────────────────────────────────────────────
@@ -587,3 +626,10 @@ class TestPlaybookInvariant:
         assert "never dereferences a path an unprivileged account can replace" in text
         assert "stage_from_checkout" in text
         assert "docker group" in text
+
+    def test_playbook_records_apt_key_pins_and_root_owned_env(self) -> None:
+        text = PLAYBOOK.read_text(encoding="utf-8")
+        assert "NodeSource" in text
+        assert "Caddy" in text
+        assert "fingerprint-pinned" in text
+        assert "canonical env file is 0640 root:radon" in text

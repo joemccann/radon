@@ -61,7 +61,7 @@ is dropped by systemd regardless of `NotifyAccess=`, so `Type=notify` +
 - Monorepo checkout: `/home/radon/radon`
 - Cloud source: `/home/radon/radon/cloud`
 - Immutable deploy support: `/home/radon/.radon-deploy-runners/<sha>.<run>/cloud`
-- Canonical secrets: `/etc/radon/env` (regular file, mode `0600`, owner `radon:radon`)
+- Canonical secrets: `/etc/radon/env` (regular file, mode `0640`, owner `root:radon`)
 - Compatibility secret symlink: `/home/radon/radon-cloud/.env` -> `/etc/radon/env`
 - Canonical media: `/var/lib/radon/media`
 - Compatibility media symlink: `/home/radon/radon-cloud/media` -> `/var/lib/radon/media`

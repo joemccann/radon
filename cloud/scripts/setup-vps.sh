@@ -35,6 +35,10 @@ readonly SSHD_KEYS_ONLY_DROPIN="${RADON_SSHD_KEYS_ONLY_DROPIN:-/etc/ssh/sshd_con
 readonly STAGE_DIR="${RADON_SETUP_STAGE_DIR:-/root/.radon-stage}"
 # Docker documents this fingerprint for its apt signing key.
 readonly DOCKER_GPG_FINGERPRINT="9DC858229FC7DD38854AE2D88D81803C0EBFCD88"
+# NodeSource nodesource-repo.gpg.key (NSolid <nsolid-gpg@nodesource.com>).
+readonly NODESOURCE_GPG_FINGERPRINT="6F71F525282841EEDAF851B42F59B5F99B1BE0B4"
+# Caddy Cloudsmith stable key (Caddy Web Server <contact@caddyserver.com>).
+readonly CADDY_GPG_FINGERPRINT="65760C51EDEA2017CEA2CA15155B6D79CA56EA34"
 
 readonly SERVICE_FILES=(
   radon-ib-gateway.service
@@ -262,6 +266,24 @@ install_base_packages() {
 
 # -- Prerequisites ----------------------------------------------------------
 
+pin_apt_keyring() {
+  local url="$1"
+  local dest="$2"
+  local fingerprint="$3"
+  local label="$4"
+  install -m 0755 -d "$(dirname "$dest")"
+  curl -fsSL "$url" | gpg --batch --yes --dearmor -o "$dest"
+  # apt trusts whatever this keyring holds: refuse a key that is not the
+  # pinned publisher rather than adding its repository under it.
+  if ! gpg --batch --show-keys --with-colons "$dest" 2>/dev/null \
+    | grep -q "^fpr:.*:${fingerprint}:"; then
+    rm -f "$dest"
+    log_error "${label} apt signing key does not match the pinned fingerprint"
+    return 1
+  fi
+  chmod a+r "$dest"
+}
+
 install_docker() {
   if docker compose version &>/dev/null; then
     log_warn "Docker with compose already installed -- skipping"
@@ -269,18 +291,11 @@ install_docker() {
   fi
 
   log_info "Installing Docker from official repo..."
-  install -m 0755 -d /etc/apt/keyrings
-  curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
-    | gpg --batch --yes --dearmor -o /etc/apt/keyrings/docker.gpg
-  # apt trusts whatever this keyring holds: refuse a key that is not the one
-  # Docker publishes rather than adding its repository under it.
-  if ! gpg --batch --show-keys --with-colons /etc/apt/keyrings/docker.gpg 2>/dev/null \
-    | grep -q "^fpr:.*:${DOCKER_GPG_FINGERPRINT}:"; then
-    rm -f /etc/apt/keyrings/docker.gpg
-    log_error "Docker apt signing key does not match the pinned fingerprint"
-    return 1
-  fi
-  chmod a+r /etc/apt/keyrings/docker.gpg
+  pin_apt_keyring \
+    "https://download.docker.com/linux/ubuntu/gpg" \
+    /etc/apt/keyrings/docker.gpg \
+    "$DOCKER_GPG_FINGERPRINT" \
+    "Docker"
 
   echo \
     "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
@@ -324,7 +339,15 @@ install_node22() {
 
   if $need_install; then
     log_info "Installing Node.js 22 from nodesource..."
-    curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+    pin_apt_keyring \
+      "https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key" \
+      /etc/apt/keyrings/nodesource.gpg \
+      "$NODESOURCE_GPG_FINGERPRINT" \
+      "NodeSource"
+    echo \
+      "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
+      | tee /etc/apt/sources.list.d/nodesource.list > /dev/null
+    apt update
     apt install -y nodejs
     log_success "Node.js 22 installed"
   fi
@@ -483,11 +506,12 @@ create_etc_radon_dir() {
   #
   # /etc/radon is root-owned with the sticky bit (root:radon 1770): radon can
   # still create entries (the Robinhood token store rotates rh-mcp.json beside
-  # the env through a same-directory temp + rename, and post-setup.sh delivers
-  # the env as radon), but cannot re-mode the directory or rename, unlink, or
-  # replace any root-owned entry in it. The env file itself stays 0600
-  # radon:radon because those writers run as radon; a link planted in its
-  # place is refused by require_regular_file before root touches it.
+  # the env through a same-directory temp + rename), but cannot re-mode the
+  # directory or rename, unlink, or replace any root-owned entry in it. The
+  # env file is 0640 root:radon: systemd and group radon can read; the
+  # unprivileged account cannot rewrite secrets. post-setup.sh and
+  # validate_env deliver it as root. A link planted in its place is refused
+  # by require_regular_file before root touches it.
   local dir="/etc/radon"
   local media="/var/lib/radon/media"
   # /var/lib/radon is radon-owned (2FA leases), so media/ is radon-replaceable
@@ -579,8 +603,8 @@ setup_node() {
   # into the build process by run_with_env.py and never copied into web/.env.
   if [[ -e "$ENV_FILE" || -L "$ENV_FILE" ]]; then
     require_regular_file "$ENV_FILE" || return 1
-    chmod 0600 "$ENV_FILE"
-    chown radon:radon "$ENV_FILE"
+    chmod 0640 "$ENV_FILE"
+    chown root:radon "$ENV_FILE"
     local public_env_tmp
     public_env_tmp="$(mktemp)"
     grep -E '^NEXT_PUBLIC_[A-Z0-9_]+=' "$ENV_FILE" > "$public_env_tmp" || true
@@ -613,10 +637,14 @@ install_caddy() {
   else
     log_info "Installing Caddy from official repos..."
     apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
-      | gpg --batch --yes --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
-      | tee /etc/apt/sources.list.d/caddy-stable.list
+    pin_apt_keyring \
+      "https://dl.cloudsmith.io/public/caddy/stable/gpg.key" \
+      /usr/share/keyrings/caddy-stable-archive-keyring.gpg \
+      "$CADDY_GPG_FINGERPRINT" \
+      "Caddy"
+    echo \
+      "deb [signed-by=/usr/share/keyrings/caddy-stable-archive-keyring.gpg] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main" \
+      | tee /etc/apt/sources.list.d/caddy-stable.list > /dev/null
     apt-get update
     apt-get install -y caddy
     log_success "Caddy installed"
@@ -1056,13 +1084,13 @@ validate_env() {
   if [[ ! -f "$env_file" ]]; then
     log_error ".env file not found at ${env_file}"
     echo "  Copy the example and fill in your values:"
-    echo "    install -m 0600 -o radon -g radon ${CLOUD_DIR}/.env.example ${env_file}"
+    echo "    install -m 0640 -o root -g radon ${CLOUD_DIR}/.env.example ${env_file}"
     return 1
   fi
 
   require_regular_file "$env_file" || return 1
-  chmod 0600 "$env_file"
-  chown radon:radon "$env_file"
+  chmod 0640 "$env_file"
+  chown root:radon "$env_file"
 
   if ! run_as_radon "$PYTHON_BIN" "${CLOUD_DIR}/scripts/check-env.py" \
     "$env_file" "${CLOUD_DIR}/config/required-env.txt"; then

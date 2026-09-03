@@ -55,6 +55,9 @@ window. Preflight refuses `scripts/*` / `config/*` mismatches until
    Ashburn snapshots stay in Ashburn. Not off-site.
 
 3. Copy `/etc/radon/env` to B2 under a tight prefix. Do not put it in git.
+   Preserve the mode on restore: `check-env.py` requires `0600` or `0640`
+   (canonical `0640` `root:radon`, so the service account reads but cannot
+   rewrite).
 
 4. Restore drill, under 20 minutes, off RTH:
 

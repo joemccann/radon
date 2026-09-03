@@ -139,8 +139,8 @@ def validate(env_file: Path, contract: Path, *, skip_required: bool) -> list[str
         return [f"required-key contract not found: {contract}"]
 
     mode = stat.S_IMODE(env_file.stat().st_mode)
-    if mode != 0o600:
-        errors.append(f"env file permissions must be 0600 (found {mode:04o})")
+    if mode not in {0o600, 0o640}:
+        errors.append(f"env file permissions must be 0600 or 0640 (found {mode:04o})")
 
     try:
         keys = required_keys(contract)

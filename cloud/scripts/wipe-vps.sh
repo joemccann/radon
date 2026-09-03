@@ -128,6 +128,7 @@ log_info "Removing Node.js..."
 apt-get remove -y nodejs 2>/dev/null || true
 rm -f /etc/apt/sources.list.d/nodesource.list
 rm -f /usr/share/keyrings/nodesource.gpg
+rm -f /etc/apt/keyrings/nodesource.gpg
 
 log_info "Cleaning up apt..."
 apt-get autoremove -y 2>/dev/null || true
