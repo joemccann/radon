@@ -2,6 +2,7 @@ import type { ExecutedOrder, OpenOrder, PortfolioPosition } from "./types";
 import { detectStructure, type OrderLeg } from "./optionsChainUtils";
 import type { PriceData } from "./pricesProtocol";
 import { optionKey } from "./pricesProtocol";
+import { resolveRealtimePrice } from "./positionUtils";
 
 type NormalizedAction = "BUY" | "SELL";
 type NormalizedRight = "C" | "P";
@@ -39,6 +40,57 @@ export type OpenOrderComboRow = {
 };
 
 export type OpenOrderDisplayRow = OpenOrderSingleRow | OpenOrderComboRow;
+
+export type ResolvedOpenOrderPrice = {
+  price: number | null;
+  isCalculated: boolean;
+};
+
+export type SignedComboPriceLeg = {
+  action: string;
+  ratio: number;
+  priceData?: PriceData | null;
+  fallbackPrice?: number | null;
+  fallbackIsCalculated?: boolean;
+};
+
+const UNAVAILABLE_ORDER_PRICE: ResolvedOpenOrderPrice = {
+  price: null,
+  isCalculated: false,
+};
+
+/**
+ * Resolve one signed combo mark from leg quotes using the same stale-last and
+ * midpoint policy as portfolio positions. The action is structural: BUY adds
+ * the leg and SELL subtracts it, independent of the BAG envelope action.
+ */
+export function resolveSignedComboPrice(
+  legs: readonly SignedComboPriceLeg[],
+): ResolvedOpenOrderPrice {
+  if (legs.length === 0) return UNAVAILABLE_ORDER_PRICE;
+
+  let price = 0;
+  let isCalculated = false;
+  for (const leg of legs) {
+    if ((leg.action !== "BUY" && leg.action !== "SELL") || !Number.isFinite(leg.ratio) || leg.ratio <= 0) {
+      return UNAVAILABLE_ORDER_PRICE;
+    }
+    const resolved = resolveRealtimePrice(
+      leg.priceData,
+      leg.fallbackPrice,
+      leg.fallbackIsCalculated,
+    );
+    if (resolved.price == null) return UNAVAILABLE_ORDER_PRICE;
+    price += (leg.action === "BUY" ? 1 : -1) * leg.ratio * resolved.price;
+    isCalculated = isCalculated || resolved.isCalculated;
+  }
+
+  if (!Number.isFinite(price)) return UNAVAILABLE_ORDER_PRICE;
+  return {
+    price: Math.round(price * 100) / 100,
+    isCalculated,
+  };
+}
 
 export type OpenOrderRowSortKey =
   | "symbol"
@@ -469,40 +521,44 @@ function buildComboStructureAndSummary(
   return { structure, summary: `${structure} (${parts.join(" / ")})` };
 }
 
-export function resolveOpenOrderComboPrice(orders: OpenOrder[], prices?: Record<string, PriceData>): number | null {
-  if (!prices) return null;
-  if (orders.length === 0) return null;
+export function resolveOpenOrderComboPriceData(
+  orders: OpenOrder[],
+  prices?: Record<string, PriceData>,
+): ResolvedOpenOrderPrice {
+  if (!prices || orders.length === 0) return UNAVAILABLE_ORDER_PRICE;
 
   const nonZeroLegSizes = orders.map((order) => Math.abs(order.totalQuantity)).filter((q) => q > 0);
-  if (nonZeroLegSizes.length === 0) return null;
+  if (nonZeroLegSizes.length === 0) return UNAVAILABLE_ORDER_PRICE;
   const baseQuantity = Math.min(...nonZeroLegSizes);
 
-  let netLast = 0;
+  const legs: SignedComboPriceLeg[] = [];
 
   for (const order of orders) {
-    if (order.contract.secType !== "OPT") return null;
-    if (order.contract.strike == null || order.contract.right == null || !order.contract.expiry) return null;
+    if (order.contract.secType !== "OPT") return UNAVAILABLE_ORDER_PRICE;
+    if (order.contract.strike == null || order.contract.right == null || !order.contract.expiry) {
+      return UNAVAILABLE_ORDER_PRICE;
+    }
 
     const right = normalizeRight(order.contract.right);
     const expiry = normalizeExpiry(order.contract.expiry);
-    if (!right || !expiry) return null;
+    if (!right || !expiry) return UNAVAILABLE_ORDER_PRICE;
 
     const symbol = order.contract.symbol.toUpperCase();
     const key = optionKey({ symbol, expiry: expiry.replace(/-/g, ""), strike: order.contract.strike, right });
-    const pd = prices[key];
-    if (!pd) return null;
-
-    const quote = pd.last ?? (pd.bid == null || pd.ask == null ? null : (pd.bid + pd.ask) / 2);
-    if (quote == null) return null;
-
-    const sign = order.action === "BUY" ? 1 : -1;
     const quantityScale = Math.abs(order.totalQuantity) / baseQuantity;
-    if (!Number.isFinite(quantityScale) || quantityScale <= 0) return null;
-    netLast += sign * quote * quantityScale;
+    if (!Number.isFinite(quantityScale) || quantityScale <= 0) return UNAVAILABLE_ORDER_PRICE;
+    legs.push({
+      action: order.action,
+      ratio: quantityScale,
+      priceData: prices[key],
+    });
   }
 
-  if (!Number.isFinite(netLast)) return null;
-  return Math.round(netLast * 100) / 100;
+  return resolveSignedComboPrice(legs);
+}
+
+export function resolveOpenOrderComboPrice(orders: OpenOrder[], prices?: Record<string, PriceData>): number | null {
+  return resolveOpenOrderComboPriceData(orders, prices).price;
 }
 
 export function buildOpenOrderDisplayRows(
