@@ -536,24 +536,27 @@ jobs:
       # non-replay of a severed POST /api/orders/place. R-220 is an
       # order-duplication guard on a path with no idempotency key. Without a
       # caddy binary both skip, and a Caddy release that changes retry_match
-      # semantics ships green. Deliberately tracks stable rather than pinning:
-      # detecting that semantics change is the point. T-205 (T-164 recurrence).
+      # semantics ships green. T-205 (T-164 recurrence). The version is
+      # pinned and the tarball checksum-verified (2026-09-02): bump `ver`
+      # deliberately so a retry_match semantics change lands as a diff here.
       # `al` collects cloud/tests/test_caddyfile.py::TestRestartWindowMechanism,
       # the executable proof that a request arriving during the deploy restart
       # window is held and served rather than 502'd; it is gated on the same
       # binary, so the install runs on both shards (T-322, third recurrence).
       - name: Install caddy (edge mechanism tests)
         if: matrix.shard == 'edge' || matrix.shard == 'al'
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag="$(gh api repos/caddyserver/caddy/releases/latest --jq .tag_name)"
-          curl -fsSL \
-            "https://github.com/caddyserver/caddy/releases/download/${tag}/caddy_${tag#v}_linux_amd64.tar.gz" \
-            -o /tmp/caddy.tar.gz
-          tar -xzf /tmp/caddy.tar.gz -C /tmp caddy
-          sudo install -m 0755 /tmp/caddy /usr/local/bin/caddy
+          # v2.11.4 was the latest stable release tag on 2026-09-02.
+          ver="2.11.4"
+          base="https://github.com/caddyserver/caddy/releases/download/v${ver}"
+          tarball="caddy_${ver}_linux_amd64.tar.gz"
+          dl="$(mktemp -d)"
+          curl -fsSL "${base}/${tarball}" -o "${dl}/${tarball}"
+          curl -fsSL "${base}/caddy_${ver}_checksums.txt" -o "${dl}/caddy_${ver}_checksums.txt"
+          (cd "$dl" && sha512sum -c --ignore-missing "caddy_${ver}_checksums.txt")
+          tar -xzf "${dl}/${tarball}" -C "$dl" caddy
+          sudo install -m 0755 "${dl}/caddy" /usr/local/bin/caddy
           caddy version
       # Separate job: pyproject.toml norecursedirs includes cloud/ because
       # cloud/tests/conftest.py collides with scripts/tests/conftest.py on the

@@ -29,10 +29,13 @@ reads service tokens or vendor keys and never forwards them to MCP
 clients (AST-pinned).
 
 Tool logic lives in `_*_impl(principal, ...)` functions with an injectable
-HTTP getter so tests never touch the network.
+HTTP getter so tests never touch the network. Every tool that performs an
+upstream read (or a JWKS fetch) runs it via asyncio.to_thread so a slow
+upstream never stalls the event loop for other callers.
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 from pathlib import Path
@@ -63,6 +66,9 @@ DEMO_BASE = os.environ.get("RADON_MCP_DEMO_BASE", "https://demo.radon.run")
 
 HTTP_TIMEOUT_S = 15
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+# Largest POST /mcp body accepted from the anonymous internet; a JSON-RPC
+# tools/call is a few hundred bytes.
+MAX_REQUEST_BYTES = 1024 * 1024
 
 # Public radon.run documents the anonymous rung may fetch. Wraps the
 # published site surface only — never /knowledge/* or any FastAPI route.
@@ -262,6 +268,12 @@ def _gated(read, ctx: Context | None) -> dict:
     return read(principal)
 
 
+async def _gated_off_loop(read, ctx: Context | None) -> dict:
+    """JWT verification (a possible JWKS fetch) and the proxied read both
+    block, so they run together in a worker thread."""
+    return await asyncio.to_thread(_gated, read, ctx)
+
+
 @mcp.tool()
 def radon_identity() -> dict:
     """What Radon Terminal is, the hosted MCP URL and auth rungs, and where
@@ -270,7 +282,7 @@ def radon_identity() -> dict:
 
 
 @mcp.tool()
-def radon_docs(
+async def radon_docs(
     slug: Annotated[
         str,
         Field(description="One of: " + ", ".join(sorted(PUBLIC_DOC_SLUGS))),
@@ -278,53 +290,112 @@ def radon_docs(
 ) -> dict:
     """Fetch one public radon.run document as markdown (llms.txt, agent
     instructions, or a named developer page). Needs no credentials."""
-    return _radon_docs_impl(slug)
+    return await asyncio.to_thread(_radon_docs_impl, slug)
 
 
 @mcp.tool()
-def radon_health() -> dict:
+async def radon_health() -> dict:
     """The public, trust-scoped Radon edge health verdict (reachable or not).
     Carries no account, unit, or broker detail. Needs no credentials."""
-    return _radon_health_impl()
+    return await asyncio.to_thread(_radon_health_impl)
 
 
 @mcp.tool()
-def demo_regime(ctx: Context) -> dict:
+async def demo_regime(ctx: Context) -> dict:
     """Current market regime snapshot (VIX / VVIX / CRI / correlation) from
     the Radon demo surface. Requires a Clerk demo-trial or operator token."""
-    return _gated(lambda p: _demo_read_impl(p, "/api/regime"), ctx)
+    return await _gated_off_loop(lambda p: _demo_read_impl(p, "/api/regime"), ctx)
 
 
 @mcp.tool()
-def demo_gex(ctx: Context) -> dict:
+async def demo_gex(ctx: Context) -> dict:
     """Latest gamma-exposure (GEX) scan from the Radon demo surface.
     Requires a Clerk demo-trial or operator token."""
-    return _gated(lambda p: _demo_read_impl(p, "/api/gex"), ctx)
+    return await _gated_off_loop(lambda p: _demo_read_impl(p, "/api/gex"), ctx)
 
 
 @mcp.tool()
-def operator_portfolio(ctx: Context) -> dict:
+async def operator_portfolio(ctx: Context) -> dict:
     """The operator's live portfolio snapshot (read-only). Requires the
     allowlisted operator Clerk token."""
-    return _gated(lambda p: _operator_read_impl(p, "/api/portfolio"), ctx)
+    return await _gated_off_loop(lambda p: _operator_read_impl(p, "/api/portfolio"), ctx)
 
 
 @mcp.tool()
-def operator_journal(ctx: Context) -> dict:
+async def operator_journal(ctx: Context) -> dict:
     """The operator's trade journal rows (read-only). Requires the
     allowlisted operator Clerk token."""
-    return _gated(lambda p: _operator_read_impl(p, "/api/journal"), ctx)
+    return await _gated_off_loop(lambda p: _operator_read_impl(p, "/api/journal"), ctx)
 
 
 @mcp.tool()
-def operator_blotter(ctx: Context) -> dict:
+async def operator_blotter(ctx: Context) -> dict:
     """The operator's blotter (today's fills, read-only). Requires the
     allowlisted operator Clerk token."""
-    return _gated(lambda p: _operator_read_impl(p, "/api/blotter"), ctx)
+    return await _gated_off_loop(lambda p: _operator_read_impl(p, "/api/blotter"), ctx)
 
 
 @mcp.tool()
-def operator_alerts(ctx: Context) -> dict:
+async def operator_alerts(ctx: Context) -> dict:
     """The operator's configured alerts (read-only). Requires the
     allowlisted operator Clerk token."""
-    return _gated(lambda p: _operator_read_impl(p, "/api/alerts"), ctx)
+    return await _gated_off_loop(lambda p: _operator_read_impl(p, "/api/alerts"), ctx)
+
+
+# ── ASGI app ─────────────────────────────────────────────────────────
+
+
+class RequestBodyLimit:
+    """Pure-ASGI cap on POST bodies: 413 above MAX_REQUEST_BYTES, decided
+    from Content-Length before the transport reads a byte, and enforced
+    while streaming for bodies that arrive without one."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or scope.get("method") != "POST":
+            await self.app(scope, receive, send)
+            return
+        length = dict(scope.get("headers") or ()).get(b"content-length", b"")
+        if length.isdigit() and int(length) > MAX_REQUEST_BYTES:
+            await self._reject(send)
+            return
+
+        received = 0
+        rejected = False
+
+        async def bounded_receive():
+            nonlocal received, rejected
+            message = await receive()
+            received += len(message.get("body", b""))
+            if received > MAX_REQUEST_BYTES and not rejected:
+                rejected = True
+                await self._reject(send)
+                return {"type": "http.disconnect"}
+            return message
+
+        async def guarded_send(message):
+            if not rejected:
+                await send(message)
+
+        await self.app(scope, bounded_receive, guarded_send)
+
+    @staticmethod
+    async def _reject(send):
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 413,
+                "headers": [(b"content-type", b"text/plain"), (b"content-length", b"0")],
+            }
+        )
+        await send({"type": "http.response.body", "body": b""})
+
+
+def build_app():
+    """The ASGI app radon-mcp.service serves: the SDK's streamable HTTP app
+    behind the request-body cap."""
+    app = mcp.streamable_http_app()
+    app.add_middleware(RequestBodyLimit)
+    return app

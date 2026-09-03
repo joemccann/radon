@@ -33,7 +33,9 @@ import path from "node:path";
 
 // Keys the web process needs (web/.env). Everything the wizard collects goes
 // into the root .env for the Python stack; this subset is duplicated for Next.
-const WEB_ENV_KEYS = new Set([
+// Also the only names the completion route accepts while the FastAPI registry
+// is unreachable (the offline path exists to get Clerk + Turso into place).
+export const WEB_ENV_KEYS = new Set([
   "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
   "CLERK_SECRET_KEY",
   "TURSO_DB_URL",

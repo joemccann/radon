@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { radonFetch, RadonApiError } from "@/lib/radonApi";
 import { getRequestId, jsonApiError, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 import { isSetupMode, isAuthMisconfigured } from "@/lib/setup/setupMode";
-import { verifySetupToken } from "@/lib/setup/setupToken";
+import { setupTokenRejection } from "@/lib/setup/setupToken";
 
 /**
  * First-run wizard dry-run vendor check. Proxies FastAPI
@@ -44,17 +44,8 @@ export async function POST(request: Request): Promise<Response> {
   } catch {
     body = {};
   }
-  if (!verifySetupToken(body.token)) {
-    return setNoStoreResponseHeaders(
-      jsonApiError({
-        message: "Setup token mismatch. It is printed in the terminal that launched Radon.",
-        status: 401,
-        code: "SETUP_TOKEN_INVALID",
-        requestId,
-      }),
-      requestId,
-    );
-  }
+  const rejected = setupTokenRejection(body.token, requestId);
+  if (rejected) return rejected;
   const service = typeof body.service === "string" ? body.service : "";
   if (!SERVICE_PATTERN.test(service)) {
     return setNoStoreResponseHeaders(

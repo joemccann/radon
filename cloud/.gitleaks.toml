@@ -6,7 +6,9 @@ useDefault = true
 [[rules]]
 id = "literal-tws-credential-assignment"
 description = "Literal TWS credentials must never be committed"
-regex = '''\bTWS_(?:USERID|PASSWORD)[ \t]*=[ \t]*["']?[A-Za-z0-9][A-Za-z0-9_.$!@#%^&*+:/=-]{3,}["']?'''
+# A value may start with a symbol. `$` counts only inside single quotes: a
+# bare or double-quoted `$name` / `${name}` is shell or dotenv interpolation.
+regex = '''\bTWS_(?:USERID|PASSWORD)[ \t]*=[ \t]*(?:["']?[A-Za-z0-9_.!@#%^&*+:/=-][A-Za-z0-9_.$!@#%^&*+:/=-]{3,}["']?|'\$[A-Za-z0-9_.$!@#%^&*+:/=-]{3,}')'''
 keywords = ["TWS_"]
 
 [[rules.allowlists]]

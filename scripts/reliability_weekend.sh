@@ -424,42 +424,51 @@ BILLING_IGNORED="${BILLING_IGNORED# }"
 # survives every nightly `git clean`. Refuse rather than edit operator state.
 BILLING_REROUTE_KEY_ASSIGN="^[[:space:]]*(export[[:space:]]+)?(${BILLING_REROUTE_KEYS// /|})[[:space:]]*=[[:space:]]*[^[:space:]#]"
 BILLING_REROUTE_FLAG_ASSIGN="^[[:space:]]*(export[[:space:]]+)?(${BILLING_REROUTE_FLAGS// /|})[[:space:]]*=[[:space:]]*[\"']?(1|true|yes)[\"']?([#[:space:]]|\$)"
-for key_file in .deepsec/.env .deepsec/.env.local .deepsec/.env.*.local .env.local; do
-  [[ -f "$key_file" ]] || continue
-  if grep -qE "$BILLING_REROUTE_KEY_ASSIGN" "$key_file" || grep -qiE "$BILLING_REROUTE_FLAG_ASSIGN" "$key_file"; then
-    echo "REFUSING: $key_file holds billing-reroute credentials; this loop bills the claude.ai subscription only, remove the key line" >&2
-    report "REFUSED" "$key_file holds billing-reroute credentials; the agent would bill metered API usage instead of the claude.ai subscription, remove the key line" || true
-    exit 2
-  fi
-done
-
-# web/.env is provisioned into the Radon-credential clones for the Next dev
-# server and pytest's load_dotenv, and the product copy carries
-# ANTHROPIC_API_KEY. Neither the agent nor any child may use it: scrub the
-# reroute lines in place (same inode, mode kept) so the subscription is the
-# only model route in this clone. The security clone refuses the file above.
-if [[ -f web/.env ]] && { grep -qE "$BILLING_REROUTE_KEY_ASSIGN" web/.env || grep -qiE "$BILLING_REROUTE_FLAG_ASSIGN" web/.env; }; then
-  echo "IGNORING: web/.env holds billing-reroute credentials; removed from the clone copy, this loop bills the claude.ai subscription only" >&2
-  { grep -vE "$BILLING_REROUTE_KEY_ASSIGN" web/.env | grep -viE "$BILLING_REROUTE_FLAG_ASSIGN" || true; } > web/.env.scrub
-  cat web/.env.scrub > web/.env
-  rm -f web/.env.scrub
-  BILLING_IGNORED="${BILLING_IGNORED:+$BILLING_IGNORED }web/.env"
-fi
-
 # A settings-level apiKeyHelper or env reroute reaches the agent past any
 # unset. Refuse and name the file; the operator edits it, not the loop.
 BILLING_REROUTE_SETTINGS_KEY="\"(${BILLING_REROUTE_KEYS// /|})\"[[:space:]]*:[[:space:]]*\"[^\"]"
 BILLING_REROUTE_SETTINGS_FLAG="\"(${BILLING_REROUTE_FLAGS// /|})\"[[:space:]]*:[[:space:]]*\"?(1|true|yes)\"?"
-for settings_file in "$HOME/.claude/settings.json" .claude/settings.json .claude/settings.local.json; do
-  [[ -f "$settings_file" ]] || continue
-  if grep -qE '"apiKeyHelper"[[:space:]]*:[[:space:]]*"[^"]' "$settings_file" \
-     || grep -qE "$BILLING_REROUTE_SETTINGS_KEY" "$settings_file" \
-     || grep -qiE "$BILLING_REROUTE_SETTINGS_FLAG" "$settings_file"; then
-    echo "REFUSING: $settings_file holds an apiKeyHelper or billing-reroute env entry; this loop bills the claude.ai subscription only, remove it" >&2
-    report "REFUSED" "$settings_file holds an apiKeyHelper or billing-reroute env entry; the agent would bill metered API usage instead of the claude.ai subscription, remove it" || true
-    exit 2
+# Checked in the prologue and AGAIN at the start of every phase and
+# continuation round, after the reset and before `claude` launches: the
+# in-phase agent can write any of these files, and .deepsec/, web/.env and
+# the settings files all survive `git clean`, so a one-time prologue check
+# let the next phase inherit what the previous phase planted.
+refuse_billing_reroute_files() {
+  local key_file settings_file
+  for key_file in .deepsec/.env .deepsec/.env.local .deepsec/.env.*.local .env.local; do
+    [[ -f "$key_file" ]] || continue
+    if grep -qE "$BILLING_REROUTE_KEY_ASSIGN" "$key_file" || grep -qiE "$BILLING_REROUTE_FLAG_ASSIGN" "$key_file"; then
+      echo "REFUSING: $key_file holds billing-reroute credentials; this loop bills the claude.ai subscription only, remove the key line" >&2
+      report "REFUSED" "$key_file holds billing-reroute credentials; the agent would bill metered API usage instead of the claude.ai subscription, remove the key line" || true
+      exit 2
+    fi
+  done
+
+  # web/.env is provisioned into the Radon-credential clones for the Next dev
+  # server and pytest's load_dotenv, and the product copy carries
+  # ANTHROPIC_API_KEY. Neither the agent nor any child may use it: scrub the
+  # reroute lines in place (same inode, mode kept) so the subscription is the
+  # only model route in this clone. The security clone refuses the file above.
+  if [[ -f web/.env ]] && { grep -qE "$BILLING_REROUTE_KEY_ASSIGN" web/.env || grep -qiE "$BILLING_REROUTE_FLAG_ASSIGN" web/.env; }; then
+    echo "IGNORING: web/.env holds billing-reroute credentials; removed from the clone copy, this loop bills the claude.ai subscription only" >&2
+    { grep -vE "$BILLING_REROUTE_KEY_ASSIGN" web/.env | grep -viE "$BILLING_REROUTE_FLAG_ASSIGN" || true; } > web/.env.scrub
+    cat web/.env.scrub > web/.env
+    rm -f web/.env.scrub
+    [[ " $BILLING_IGNORED " == *" web/.env "* ]] || BILLING_IGNORED="${BILLING_IGNORED:+$BILLING_IGNORED }web/.env"
   fi
-done
+
+  for settings_file in "$HOME/.claude/settings.json" .claude/settings.json .claude/settings.local.json; do
+    [[ -f "$settings_file" ]] || continue
+    if grep -qE '"apiKeyHelper"[[:space:]]*:[[:space:]]*"[^"]' "$settings_file" \
+       || grep -qE "$BILLING_REROUTE_SETTINGS_KEY" "$settings_file" \
+       || grep -qiE "$BILLING_REROUTE_SETTINGS_FLAG" "$settings_file"; then
+      echo "REFUSING: $settings_file holds an apiKeyHelper or billing-reroute env entry; this loop bills the claude.ai subscription only, remove it" >&2
+      report "REFUSED" "$settings_file holds an apiKeyHelper or billing-reroute env entry; the agent would bill metered API usage instead of the claude.ai subscription, remove it" || true
+      exit 2
+    fi
+  done
+}
+refuse_billing_reroute_files
 
 RUNNER_LOCK="$REPO/.weekend-runner.lock"
 acquire_runner_lock "$RUNNER_LOCK" || {
@@ -675,6 +684,10 @@ run_phase() {
     echo "[weekend] $PHASE done rc=$RC" | tee -a "$RUN_LOG"
     return 0
   fi
+  # Rail 5b again: the previous phase's agent may have planted a key file
+  # or a settings reroute the reset does not remove; refuse before this
+  # phase's `claude` launches.
+  refuse_billing_reroute_files
 
   # R-185: `timeout claude` returning 124 (cap) or any non-zero agent exit is
   # an EXPECTED outcome these rounds handle — but the ERR trap was still armed
@@ -709,6 +722,7 @@ run_phase() {
       report "GROUND TRUTH FAILED (round $round)" "could not re-ground the clone for a continuation round; the backlog is UNFINISHED and partial work is on the weekend branch" || true
       break
     fi
+    refuse_billing_reroute_files
   done
   # A genuine wrapper death AFTER the rounds finished must still page.
   trap on_crash ERR
