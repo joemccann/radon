@@ -11,6 +11,7 @@ Owner specs for regime tabs and the cheap-wing scanner. Add a row here when a sp
 | cor | `/regime/cor` | `cor` | [cor.md](cor.md) |
 | vixcor | `/regime/vixcor` | `vixcor` | [vixcor.md](vixcor.md) |
 | ivrank | `/regime/ivrank` | `ivrank` | [ivrank.md](ivrank.md) |
+| iv-spread | `/regime/iv-spread` | `iv-spread` | [iv-spread.md](iv-spread.md) |
 | curve | `/regime/curve` | `yield-curve` | [curve.md](curve.md) |
 | credit | `/regime/credit` | `credit-spread` | [credit.md](credit.md) |
 | iei-hyg | `/regime/iei-hyg` | `iei-hyg` | [iei-hyg.md](iei-hyg.md) (tab renamed TSY/HY 2026-08-23) |

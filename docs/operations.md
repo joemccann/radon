@@ -43,6 +43,44 @@ doc (root `CLAUDE.md` "Credentials").
 
 `.env.ib-mode` overlays `.env` and stores the IB mode toggle from `scripts/ib mode local|cloud`.
 
+### Encrypted credential store (profile Credentials tab)
+
+**The store wins over `.env`.** Keys entered in the profile Credentials tab
+are AES-256-GCM-encrypted rows in a host-local SQLite file
+`~/.radon/secrets.db` (0600, override `RADON_SECRET_STORE_PATH`) that never
+leaves the host — deliberately NOT Turso, so plaintext and ciphertext stay on
+the machine that uses them (operator decision 2026-09-01, PR #125; no
+migration planned). On FastAPI startup every stored registry name is exported
+into `os.environ` over the deployed `.env` value
+(`bootstrap_exported_names()` in `scripts/api/routes/credentials.py`), and
+subprocesses inherit it. Rotating a key in `.env` alone does nothing while a
+stored value exists: rotate in the Credentials tab, or delete the stored
+value first. Deleting a stored secret does not unset the already-exported
+value in the running process — it takes effect at the next FastAPI restart.
+
+**Master key.** Resolution order: systemd credential
+`radon-secret-store-key` in `$CREDENTIALS_DIRECTORY` (production
+`LoadCredentialEncrypted=`), then the key file at
+`$RADON_SECRET_STORE_KEY_FILE` (default `~/.radon/secret_store.key`,
+auto-generated 0600 on first use). There is no escrow: losing the key makes
+the ciphertext unrecoverable — back up the key file together with
+`secrets.db`, or plan to re-enter every credential. Field inventory:
+`scripts/credentials_registry.py`. Implementation: `scripts/secret_store.py`.
+
+### First-run setup wizard (`/setup`)
+
+With NO Clerk key configured, the whole app collapses to `/setup` plus its
+API: other pages redirect there and other APIs return 503 `SETUP_MODE`
+(`web/middleware.ts`, `web/lib/setup/setupMode.ts`). The wizard is gated by a
+one-shot token printed to the console that launched Radon
+(`RADON_SETUP_TOKEN` overrides it for automation; only read while no Clerk
+key is set). It writes collected values into the secret store AND
+materializes root `.env` / `web/.env` (`web/lib/setup/envFiles.ts` — Next.js
+and python-dotenv need real files at boot; values are single-quoted per the
+`$`-expansion rule above). Setup mode ends at the first restart after the
+Clerk keys are written; the setup surface then hard-refuses with 404. It can
+never activate while any Clerk key exists, so production is untouched.
+
 ## IB Gateway
 
 Three deployment modes selected by `IB_GATEWAY_MODE`:
@@ -104,7 +142,7 @@ Deeper troubleshooting and full Docker setup live in [`docs/ib-gateway-docker.md
 
 Hetzner host systemd is the production surface. Laptop dev uses launchd plists in `config/`. Laptop `com.radon.data-refresh` must stay unloaded. VPS `radon-flow-refresh.timer` owns hourly scanner/discover/flow during ET RTH.
 
-**Nightly loops on the Mac mini** (launchd, staggered 10 minutes apart, audit then remediate). Each runs in its own clone under `~/radon-weekend/` that hard-resets to `origin/main` every phase, uses a per-loop venv (`~/radon-weekend/venv-<loop>`) plus the shared `~/radon-weekend/.env`, and holds a per-clone `.weekend-runner.lock`. A wrapper refuses the clone unless it carries BOTH `.radon-weekend-runner` and that loop's own `.radon-<loop>-runner` marker, so pointing one loop at another's clone is a `REFUSED`, not a cross-run collision. The shared `.env` is not imported wholesale: each wrapper's `_notify_curl` reads only `PUSHOVER_USER` and `PUSHOVER_TOKEN` from it in bash and pages via `/usr/bin/curl` (never python). Model spend rides the claude.ai subscription only: every wrapper unsets each API-key / auth-token / base-URL / Bedrock / Vertex / Foundry / gateway variable the installed Claude Code honors (naming it on stderr and as `ignored=` on the phase-start line, never the value) and runs anyway, scrubs those lines out of a provisioned `web/.env` in place, and `REFUSED`s only what `unset` cannot reach: a `.deepsec/.env*` / `.env.local` key line or a Claude Code settings-level `apiKeyHelper` / `env` reroute. Never point another job, worktree, or responder at these clones. The `Fires` column is generated from each plist's `StartCalendarInterval`. Loop semantics live in `.claude/skills/<loop>/SKILL.md`; wrapper mechanics in the wrapper script; state on the rolling GitHub issue carrying the label.
+**Nightly loops on the Mac mini** (launchd, staggered 10 minutes apart, audit then remediate). Each runs in its own clone under `~/radon-weekend/` that hard-resets to `origin/main` every phase, uses a per-loop venv (`~/radon-weekend/venv-<loop>`) plus the shared `~/radon-weekend/.env`, and holds a per-clone `.weekend-runner.lock`. A wrapper refuses the clone unless it carries BOTH `.radon-weekend-runner` and that loop's own `.radon-<loop>-runner` marker, so pointing one loop at another's clone is a `REFUSED`, not a cross-run collision. The shared `.env` is not imported wholesale: each wrapper's `_notify_curl` reads only `PUSHOVER_USER` and `PUSHOVER_TOKEN` from it in bash and pages via `/usr/bin/curl` (never python). Model spend rides the claude.ai subscription only: every wrapper unsets each API-key / auth-token / base-URL / Bedrock / Vertex / Foundry / gateway variable the installed Claude Code honors (naming it on stderr and as `ignored=` on the phase-start line, never the value) and runs anyway, scrubs those lines out of a provisioned `web/.env` in place (except the security loop, whose clone is credential-free: any `.env` / `.env.ib-mode` / `web/.env` present there is `REFUSED`, not scrubbed), and `REFUSED`s only what `unset` cannot reach: a `.deepsec/.env*` / `.env.local` key line or a Claude Code settings-level `apiKeyHelper` / `env` reroute. Never point another job, worktree, or responder at these clones. The `Fires` column is generated from each plist's `StartCalendarInterval`. Loop semantics live in `.claude/skills/<loop>/SKILL.md`; wrapper mechanics in the wrapper script; state on the rolling GitHub issue carrying the label.
 
 | Loop | Fires (local) | Clone | Wrapper / plist | Issue label |
 |---|---|---|---|---|
@@ -116,7 +154,7 @@ Hetzner host systemd is the production surface. Laptop dev uses launchd plists i
 
 **The loops pin their own model. The global default does not reach them.** Every wrapper passes `--model` explicitly, so changing `model` in `~/.claude/settings.json` has no effect on any nightly run. The rungs are tried in order. A rung is dropped when that round's log shows the Claude CLI credits line, You've hit your Opus/Sonnet limit, Request rejected (429), 529 Overloaded, or experiencing high load (not a session or weekly cap, which is shared across models, and not the CLI tool-skip categories (rate-limited) and (overloaded), which retry the same model). Override the whole ladder with `RADON_WEEKEND_MODEL_LADDER` (space-separated model ids) in the wrapper's environment. Do not hand-edit a wrapper while a cycle is running: the shell reads the script incrementally and an edit strands the live run at a stale byte offset. The security loop additionally exports its current rung as `RADON_WEEKEND_MODEL` (re-exported after every drop), because its skill spawns a second `claude` for the Claude Security scan and a `--model` flag on the wrapper does not reach a child process; that scan reads the export. When every rung is exhausted the security loop reports `INCOMPLETE (all model quotas exhausted; top up at claude.ai/settings/usage)` and exits 75, and the other four report the same text under `FAILED`. Either way no audited SHA advances and the next fire resumes the same phase. The default ladder is pinned by `scripts/tests/test_weekend_model_ladder.py`; it is not repeated here.
 
-**Subscription only.** Every wrapper unsets Anthropic API-key and Bedrock/Vertex reroute variables. It refuses the run if a key, token, base URL, or bearer token is non-empty in the launch environment or in a gitignored env file the agent or scanners would reload (`.deepsec/.env*`, `.env.local`). `CLAUDE_CODE_USE_BEDROCK` and `CLAUDE_CODE_USE_VERTEX` refuse only truthy values (1/true/yes, with or without dotenv quotes); 0/false/no lock those reroutes off and still run. The loops bill the captain's claude.ai login. An API key in `web/.env` is the product assistant key and is not this rail; Claude Code auth is the process environment plus those ignored files.
+**Subscription only.** A reroute variable (key, token, base URL, Bedrock/Vertex/Foundry/gateway flag) in the launch environment is IGNORED, not fatal: the wrapper names it on stderr and as `ignored=` on the phase-start line (never the value), unsets it, and runs on the claude.ai subscription. Reroute lines in a provisioned `web/.env` (the product assistant key) are scrubbed out of the clone copy in place, same inode. The wrapper REFUSEs only what `unset` cannot reach: a key line in a gitignored env file a scanner reloads itself (`.deepsec/.env*`, `.env.local`) or a Claude Code settings-level `apiKeyHelper` / `env` reroute. Flag variables like `CLAUDE_CODE_USE_BEDROCK` count only when truthy (1/true/yes, with or without dotenv quotes); 0/false/no lock those reroutes off. Exception: the security clone is credential-free by rail — any `.env`, `.env.ib-mode`, or `web/.env` present in it is a `REFUSED` exit 2, never a scrub.
 
 **Dead-man reporting.** Each phase posts one runner-health comment (`**PHASE** STAMP **status**`, optional detail) on its rolling issue and one Pushover. That comment is not the three-section write-up. A missing issue comment is itself the dead-man signal. The issue is created once with a timeless rolling-dead-man description; run history stays in comments; the wrapper does not `gh issue edit` the body. The vocabulary is `OK`, `TRUNCATED` (the harness killed background work but the agent still exited 0), `TIMEOUT after <cap>s`, `FAILED (exit N)`, `CRASHED (exit N)` (the wrapper died first), `KILLED (SIG…)`, `REFUSED …` (a rail rejected the clone or environment) and `GROUND TRUTH FAILED` (the clone could not be refreshed, so the phase never ran). `INCOMPLETE` exists only in the testing loop (agent exited 0 with no commit on the nightly branch) and the security loop (agent exited 0 without printing the phase-completion marker, or every model rung reported an exhausted quota — a provider spend stop, which that loop's skill classifies as incomplete and resumable, never failed); the other three have no `INCOMPLETE` arm. Every security `INCOMPLETE` exits 75 and says the audited SHA was not advanced and the next fire resumes the same private run. None of the five paste a run-log tail. Pushover is in-wrapper `_notify_curl` via `/usr/bin/curl -q` (`-q` argv[1], so a planted curlrc cannot intercept) with `PUSHOVER_TOKEN` / `PUSHOVER_USER` off curl argv and off disk (piped `--config -`). `gh` and `timeout` are resolved before the venv is prepended to PATH (`timeout` next to `net_bounded`, before `--lock-lib-only`); Pushover user/token are snapshotted next to `GH_BIN` from WEEKEND_ROOT/.env before the agent. `report()`, `net_bounded`, and the agent wall-clock invoke those snapshots. `_notify_curl` `--config` values escape backslash, double-quote, and newlines. The security loop sanitizes with `/usr/bin/sed` and is wrapper-only (the agent does not `gh issue comment`); the other four agents still post the three-section issue update (Issue discovered / What was done / Next).
 
@@ -135,6 +173,7 @@ Hetzner host systemd is the production surface. Laptop dev uses launchd plists i
 | `radon-cta-sync.timer` | Mon-Fri 18:15 / 19:00 / 21:30 UTC | MenthorQ CTA refresh |
 | `radon-bpi.timer` | Mon-Fri 21:30 / 23:30 UTC; Tue-Sat 11:00 UTC | BPI after the close, same-evening Yahoo catch-up, morning catch-up |
 | `radon-ma-ratio.timer` | daily 22:45 UTC | SPX pct above 50d MA over pct above 200d MA (after the close; 5 min behind divyield). Spec: [`indicators/ma-ratio.md`](indicators/ma-ratio.md) |
+| `radon-iv-spread.timer` | daily 22:15 UTC | NDX minus SPX 1M ATM implied vol spread from IB (after the close; between ivrank and dispersion). Spec: [`indicators/iv-spread.md`](indicators/iv-spread.md) |
 | `radon-watchdog-{intraday,continuous,daily,error}.timer` | varies | Service-health alerting (Pushover) |
 | `radon-host-metrics.timer` | every 1 min | Host CPU, memory, loop lag. Details: [`cloud-services.md`](cloud-services.md#host-metrics-dur-12) |
 | `radon-equibles-{13f,ats,cot,filings,short-crowding}.timer` | daily / weekly | 13F, ATS, COT, filings, short crowding. Spec: [`equibles-api.md`](equibles-api.md) |

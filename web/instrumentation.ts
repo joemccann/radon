@@ -2,9 +2,15 @@
 // Used to keep the Turso connection pool warm so uncached DB reads/writes stay
 // on the ~12ms warm path instead of paying the ~60-80ms cold TLS handshake.
 export async function register() {
+  if (process.env.NEXT_RUNTIME !== "nodejs") return;
+  try {
+    const { syncSetupCompleteFromMarker } = await import("@/lib/setup/setupComplete");
+    await syncSetupCompleteFromMarker();
+  } catch (err) {
+    console.warn("[instrumentation] setup-complete sync failed:", err);
+  }
   // Only the long-lived Node.js production server has a process + undici pool
   // worth warming. Skip Edge runtime, the build, dev, and CI.
-  if (process.env.NEXT_RUNTIME !== "nodejs") return;
   if (process.env.NODE_ENV !== "production") return;
   try {
     const { startDbKeepAlive } = await import("@/lib/dbKeepAlive");

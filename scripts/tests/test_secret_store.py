@@ -126,6 +126,18 @@ class TestEncryptionAtRest:
         mode = stat.S_IMODE(os.stat(tmp_path / "secrets.db").st_mode)
         assert mode == 0o600
 
+    def test_existing_loose_permissions_reasserted_0600(self, tmp_path):
+        db = tmp_path / "secrets.db"
+        key = tmp_path / "k.key"
+        first = SecretStore(db_path=db, key_path=key)
+        first.set_secret("UW_TOKEN", UW_SAMPLE, actor="operator")
+        os.chmod(db, 0o644)
+        os.chmod(key, 0o644)
+        second = SecretStore(db_path=db, key_path=key)
+        assert second.get_secret("UW_TOKEN") == UW_SAMPLE
+        assert stat.S_IMODE(os.stat(db).st_mode) == 0o600
+        assert stat.S_IMODE(os.stat(key).st_mode) == 0o600
+
     def test_second_store_instance_reuses_key(self, tmp_path):
         first = SecretStore(
             db_path=tmp_path / "secrets.db", key_path=tmp_path / "k.key"
@@ -137,10 +149,16 @@ class TestEncryptionAtRest:
         assert second.get_secret("UW_TOKEN") == UW_SAMPLE
 
     def test_wrong_key_raises_integrity_error(self, tmp_path):
+        # REL-189 rewrite, same intent (wrong key must never decrypt): the
+        # key file now EXISTS with wrong bytes. The old shape (a missing
+        # second key path over a DB with rows) is the R-522 mint-refusal
+        # path and raises SecretKeyMismatchError at construction instead —
+        # covered by test_rel189_credential_store_durability.py.
         first = SecretStore(
             db_path=tmp_path / "secrets.db", key_path=tmp_path / "k1.key"
         )
         first.set_secret("UW_TOKEN", UW_SAMPLE, actor="operator")
+        (tmp_path / "k2.key").write_bytes(os.urandom(32))
         second = SecretStore(
             db_path=tmp_path / "secrets.db", key_path=tmp_path / "k2.key"
         )

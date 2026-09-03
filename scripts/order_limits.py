@@ -284,6 +284,62 @@ def check_order_limits(params: dict) -> Optional[dict[str, Any]]:
     return None
 
 
+def _legs_are_priceable(legs: Any) -> bool:
+    """True when `_combo_risk_per_unit` can price every leg.
+
+    `ib_orders.py:fetch_open_orders` skips combo legs it cannot qualify, so a
+    snapshot BAG may carry legs with no strike. `check_order_limits` fails
+    CLOSED on those (ORDER_COMBO_STRIKE), which is right for a placement the
+    caller composed and wrong for a resize of an order IB already holds.
+    """
+    if not isinstance(legs, list) or not 2 <= len(legs) <= _MAX_COMBO_LEGS:
+        return False
+    for leg in legs:
+        if not isinstance(leg, dict):
+            return False
+        if str(leg.get("sec_type") or leg.get("secType") or "").upper() == "STK":
+            continue
+        try:
+            if float(leg.get("strike") or 0) <= 0:
+                return False
+        except (TypeError, ValueError):
+            return False
+    return True
+
+
+def _working_order_shape(working_order: dict) -> tuple[str, Optional[list]]:
+    """(order type, combo legs) of a working order, from either shape.
+
+    R-431: the Turso `open_orders` payload nests the contract —
+    `contract.secType` and `contract.comboLegs` (``ib_orders.py``) — while a
+    caller-composed replacement carries `secType`/`legs` flat. Reading only
+    the flat keys resolved EVERY snapshot row to "option", so a working stock
+    order was bounded by the contracts cap (RADON_MAX_ORDER_QTY, hard max
+    2500): selling 10,000 shares was refused, and raising the contracts cap to
+    its ceiling could not unblock it. A BAG likewise never reached the
+    max-loss branch R-145 added.
+
+    A BAG whose legs cannot be priced stays "option" — the quantity and
+    notional bounds it already had, never a new fail-closed refusal of a
+    legitimate resize (the same trade-off ``ib_order_manage.py`` documents).
+    """
+    contract = working_order.get("contract")
+    contract = contract if isinstance(contract, dict) else {}
+
+    sec_type = str(contract.get("secType") or working_order.get("secType") or "").upper()
+
+    legs = working_order.get("legs")
+    if not isinstance(legs, list):
+        combo_legs = contract.get("comboLegs")
+        legs = combo_legs if isinstance(combo_legs, list) else None
+
+    if sec_type == "BAG" or (legs is not None and len(legs) >= 2):
+        return ("combo" if _legs_are_priceable(legs) else "option"), legs
+    if sec_type == "STK":
+        return "stock", None
+    return "option", None
+
+
 def check_modify_limits(
     working_order: Optional[dict],
     *,
@@ -303,18 +359,15 @@ def check_modify_limits(
 
     An unreadable working order is NOT a bypass: the contract-quantity cap
     still applies, exactly as before.
+
+    R-431: the shape is read through `_working_order_shape`, because the Turso
+    `open_orders` payload nests it one level down and reading the top level
+    typed every real working order as an option.
     """
     if not isinstance(working_order, dict):
         return check_quantity_limit(new_quantity) if new_quantity is not None else None
 
-    sec_type = str(working_order.get("secType") or "").upper()
-    legs = working_order.get("legs")
-    if sec_type == "BAG" or isinstance(legs, list) and len(legs) >= 2:
-        order_type = "combo"
-    elif sec_type == "STK":
-        order_type = "stock"
-    else:
-        order_type = "option"
+    order_type, legs = _working_order_shape(working_order)
 
     quantity = new_quantity
     if quantity is None:
@@ -329,7 +382,7 @@ def check_modify_limits(
         "limitPrice": price,
         "action": action or working_order.get("action"),
     }
-    if order_type == "combo" and isinstance(legs, list):
+    if order_type == "combo" and legs is not None:
         params["legs"] = legs
     return check_order_limits(params)
 

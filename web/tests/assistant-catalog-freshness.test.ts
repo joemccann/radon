@@ -9,7 +9,6 @@ import {
   advertisedPins,
   buildRuntimeCatalog,
   findFastApiTwin,
-  isAdvertisedPin,
 } from "@/lib/assistant/catalogBuild";
 import {
   loadPinSourcesFromDisk,
@@ -78,24 +77,15 @@ describe("assistant catalog freshness", () => {
     expect(ops.some((item) => item.surface === "next" && item.path === "/api/streaks")).toBe(false);
   });
 
-  it("every advertised FastAPI pin is in the runtime catalog (reverse of REL-161)", () => {
-    const missing = sources.fastapi
-      .filter((pin) => isAdvertisedPin(pin))
-      .map((pin) => `${pin.method} ${pin.path}`)
-      .filter((key) => !ops.some((item) => `${item.method} ${item.path}` === key));
-    expect(missing).toEqual([]);
-  });
-
-  it("every advertised Next-only pin is in the runtime catalog", () => {
-    const missing = advertisedPins(sources)
-      .filter((pin) => pin.surface === "next")
-      .map((pin) => `${pin.method} ${pin.path}`)
-      .filter((key) => !ops.some((item) => `${item.method} ${item.path}` === key));
-    expect(missing).toEqual([]);
-  });
-
-  it("runtime catalog is exactly buildRuntimeCatalog(disk pins)", () => {
-    expect(keys(ops)).toEqual(keys(buildRuntimeCatalog(sources)));
+  // T-354: the former "catalog equals buildRuntimeCatalog(disk pins)" trio
+  // compared catalogOperations() to its own construction, so an
+  // isAdvertisedPin that dropped every GET shrank both sides equally and
+  // stayed green. Pin a known read GET fixture instead.
+  it("a known read GET pin (/quote/{ticker}) is present in the runtime catalog", () => {
+    expect(keys(ops)).toContain("GET /quote/{ticker}");
+    const quote = ops.find((item) => item.method === "GET" && item.path === "/quote/{ticker}");
+    expect(quote?.surface).toBe("fastapi");
+    expect(quote?.capability).toBe("read");
   });
 
   it("knowledge and admin pins are not advertised", () => {

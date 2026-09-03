@@ -664,7 +664,7 @@ async def _heartbeat_orders_sync_skip(reason: str) -> None:
 
 
 async def _orders_sync_tick() -> None:
-    """Refresh open orders from IB during market hours.
+    """Refresh open orders from IB during equity EXT hours.
 
     Keeps the orders-sync service_health row fresh so the watchdog's
     intraday bucket (10-min window) does not fire stale alerts during the
@@ -675,15 +675,18 @@ async def _orders_sync_tick() -> None:
 
     Guards (all must pass):
     - not test_mode          — never run subprocess syncs in unit tests
-    - market hours open      — the watchdog window is intraday-only; no
-                               need to run outside 09:30–16:00 ET weekdays
+    - equity EXT session     — 04:00–20:00 ET weekdays (RTH + pre-market
+                               + AH). outsideRth stock orders fill after
+                               16:00; gating on RTH-only left those fills
+                               stuck as WORKING on /orders (AVGO 16:24 ET
+                               2026-09-02). Overnight 20:00–03:50 is not EXT.
     - pool has a connection  — proxy for "IB Gateway authenticated"; if
                                the pool is fully disconnected we would
                                just burn the IB cooldown and log an error
     """
     if test_mode:
         return
-    if not _is_market_open_now_et():
+    if not _is_orders_session_live_now_et():
         return
     if not _pool_has_any_connection():
         logger.debug("orders-sync loop: pool disconnected — skipping tick")
@@ -719,7 +722,7 @@ async def _orders_sync_tick() -> None:
 
 
 async def _orders_sync_loop(interval: float = ORDERS_SYNC_INTERVAL_SECS) -> None:
-    """Autonomous market-hours orders refresh loop.
+    """Autonomous equity-EXT orders refresh loop (04:00-20:00 ET).
 
     Sleeps first so the initial page-load /orders/refresh call (fired
     by the Next.js /orders route a few seconds after startup) has
@@ -1281,6 +1284,19 @@ def _is_market_open_now_et() -> bool:
             return False
         minutes = et.hour * 60 + et.minute
         return 9 * 60 + 30 <= minutes <= 16 * 60
+
+
+def _is_orders_session_live_now_et() -> bool:
+    """True while outsideRth equity orders can still fill (04:00-20:00 ET).
+
+    Falls back to RTH if the EXT helper cannot import so a calendar
+    regression cannot silently unsync the book all day.
+    """
+    try:
+        from utils.market_calendar import is_equity_ext_session_et
+        return is_equity_ext_session_et()
+    except Exception:
+        return _is_market_open_now_et()
 
 
 def _scan_time_to_et_date(scan_time: str) -> Optional[str]:
@@ -2465,18 +2481,31 @@ async def paper_place(request: Request):
 
 
 @app.get("/backtest/{strategy}")
-async def backtest_strategy(request: Request, strategy: str, refresh: bool = False):
+async def backtest_strategy(request: Request, strategy: str, refresh: Optional[str] = None):
     """F12 — latest walk-forward backtest run for a strategy.
 
     Returns the most recent persisted run from ``backtest_runs`` (bounded hrana
-    read, off-loop). When none exists or ``refresh=true``, runs the subprocess
-    (which persists the fresh run) and returns its result.
+    read, off-loop). When none exists, runs the subprocess (which persists the
+    fresh run) and returns its result. A forced re-run is a mutation:
+    POST /backtest/{strategy}/refresh.
     """
-    if not refresh:
-        cached = await asyncio.to_thread(_load_latest_backtest_run, strategy)
-        if cached is not None:
-            return cached
+    if refresh is not None:
+        raise HTTPException(
+            status_code=400, detail="refresh is POST /backtest/{strategy}/refresh"
+        )
+    cached = await asyncio.to_thread(_load_latest_backtest_run, strategy)
+    if cached is not None:
+        return cached
+    return await _run_backtest(request, strategy)
 
+
+@app.post("/backtest/{strategy}/refresh")
+async def backtest_refresh(request: Request, strategy: str):
+    """F12 — force a fresh walk-forward run (180s subprocess, persists to Turso)."""
+    return await _run_backtest(request, strategy)
+
+
+async def _run_backtest(request: Request, strategy: str):
     task = asyncio.create_task(run_script(
         "backtest_run.py", ["--strategy", strategy, "--persist"], timeout=180
     ))
@@ -3658,6 +3687,19 @@ def _scan_cache_matches_preset(cached: Any, preset: str) -> bool:
     return universe.lower() in {f"preset:{preset_key}", f"fallback:{preset_key}"}
 
 
+def _preset_cooldown_429(name: str, last_scan: float, cooldown_s: float) -> HTTPException:
+    """The cooldown is keyed on the route: a cache miss inside the window
+    (a different preset, an explicit-ticker overwrite) is refused, never
+    re-spawned — varying `preset` used to bypass the window entirely."""
+    remaining = max(0.0, cooldown_s - (time.monotonic() - last_scan))
+    retry_after = str(max(1, int(remaining) + 1))
+    return HTTPException(
+        status_code=429,
+        detail=f"{name} scan cooldown: retry in {retry_after}s",
+        headers={"Retry-After": retry_after},
+    )
+
+
 @app.post("/leap/scan")
 async def leap_scan(preset: str = "largecaps", min_gap: float = 10.0, tickers: str = ""):
     """Run LEAP scan (leap_scanner_uw.py --preset X --json, or --tickers A,B).
@@ -3686,11 +3728,13 @@ async def leap_scan(preset: str = "largecaps", min_gap: float = 10.0, tickers: s
         cached = _read_cache(DATA_DIR / "leap.json")
         if _scan_cache_matches_preset(cached, preset):
             return cached
+        raise _preset_cooldown_429("leap", _leap_last_scan, LEAP_COOLDOWN_S)
     async with _leap_scan_lock:
         if not is_ticker_scan and time.monotonic() - _leap_last_scan < LEAP_COOLDOWN_S:
             cached = _read_cache(DATA_DIR / "leap.json")
             if _scan_cache_matches_preset(cached, preset):
                 return cached
+            raise _preset_cooldown_429("leap", _leap_last_scan, LEAP_COOLDOWN_S)
         workers = _bounded_env_int("RADON_LEAP_SCANNER_WORKERS", 16)
         if is_ticker_scan:
             args = [
@@ -4289,11 +4333,13 @@ async def garch_convergence_scan(preset: str = "largecaps", tickers: str = ""):
         cached = _read_cache(DATA_DIR / "garch_convergence.json")
         if _scan_cache_matches_preset(cached, preset):
             return cached
+        raise _preset_cooldown_429("garch", _garch_last_scan, GARCH_COOLDOWN_S)
     async with _garch_scan_lock:
         if not is_ticker_scan and time.monotonic() - _garch_last_scan < GARCH_COOLDOWN_S:
             cached = _read_cache(DATA_DIR / "garch_convergence.json")
             if _scan_cache_matches_preset(cached, preset):
                 return cached
+            raise _preset_cooldown_429("garch", _garch_last_scan, GARCH_COOLDOWN_S)
         workers = _bounded_env_int("RADON_GARCH_SCANNER_WORKERS", 16)
         if is_ticker_scan:
             args = [
@@ -4515,6 +4561,11 @@ async def internals_skew_history(
 ):
     if not uw_available:
         raise HTTPException(status_code=503, detail="UW token is required for internals skew history")
+    # Both tickers are interpolated into the outbound UW URL path.
+    nq_ticker = nq_ticker.upper()
+    spx_ticker = spx_ticker.upper()
+    if not _TICKER_RE.match(nq_ticker) or not _TICKER_RE.match(spx_ticker):
+        raise HTTPException(status_code=400, detail="Invalid ticker symbol")
 
     normalized_timeframe = timeframe.upper().strip() or "5Y"
     cache_path = _build_internals_skew_cache_path(
@@ -5570,9 +5621,10 @@ async def cash_flows(
 ):
     """Return cash transactions from the `cash_flows` Turso table.
 
-    Reads-only — populated by `scripts/cash_flow_sync.py` which runs daily
-    via the monitor_daemon `cash_flow_sync` handler. Falls back to
-    `data/cash_flows.json` if the DB read fails.
+    Reads-only — populated by `scripts/cash_flow_sync.py --from-file` on the
+    sFTP-delivered statement (radon-flex-pull.timer, Tue..Sat 07:30 ET, via
+    `flex_delivery_ingest`). Falls back to `data/cash_flows.json` if the DB
+    read fails.
 
     Query params:
       days  - lookback window in days, default 90

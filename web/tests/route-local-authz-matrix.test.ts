@@ -37,6 +37,10 @@ const GUARDED_ADMIN_ACTION_ROUTES = [
   // R-180: this POST SPAWNS garch_convergence.py. Its leap/scan sibling has
   // carried the same guard since R-079; the read-only GET stays below.
   "garch-convergence/scan",
+  // profile PUT is a mutate.workspace pin, so chat call_api can reach it; the
+  // handler-local gate keeps it off the perimeter-only list like every other
+  // mutation. Its GET stays authenticated-only.
+  "profile",
 ] as const;
 
 // R-181: routes whose guard is a DIFFERENT allowlist. `admin/demo-users`
@@ -68,12 +72,12 @@ const MIDDLEWARE_PERIMETER_ONLY_ROUTES = [
   "equibles-smart-money-13f",
   "flex-token", "flow-surprise", "futures-quote", "garch-convergence",
   "hhlev", "hyad", "index-quote",
-  "informed-flow/[ticker]", "ivrank", "llm-token-index", "margin-debt",
+  "informed-flow/[ticker]", "ivrank", "iv-spread", "llm-token-index", "margin-debt",
   // models: read-only chat model picker catalog. Reports WHICH provider keys
   // are present in this deployment, never any key material — same posture as
   // its llm-token-index sibling, so the middleware perimeter is the only layer.
   "models", "prices",
-  "profile", "risk-free-rate", "skew", "skew2d", "straddle", "vixcor", "vixts",
+  "risk-free-rate", "skew", "skew2d", "straddle", "vixcor", "vixts",
   "vol-cone", "watchlist", "watchlist/[symbol]", "workflow", "yield-curve",
   "yield-curve/live",
 ] as const;

@@ -20,6 +20,7 @@ export type CredentialFieldEntry = {
   updated_at: string | null;
   updated_by: string | null;
   env_fallback: boolean;
+  exported_only: boolean;
 };
 
 export type CredentialServiceEntry = {

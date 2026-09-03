@@ -19,9 +19,31 @@ import { upsertEnvContent, writeSetupEnvFiles } from "../lib/setup/envFiles";
 const CLERK_ENV_KEYS = [
   "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
   "CLERK_SECRET_KEY",
+  "RADON_SETUP_COMPLETE",
 ] as const;
 
 let savedEnv: Record<string, string | undefined> = {};
+
+// Shape of FastAPI GET /credentials (scripts/api/routes/credentials.py).
+const FASTAPI_REGISTRY = {
+  groups: ["Infrastructure", "Market data"],
+  services: [
+    { id: "clerk", label: "Clerk", group: "Infrastructure", validator: true, slow: false, note: "",
+      fields: [{ name: "CLERK_SECRET_KEY" }, { name: "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY" }] },
+    { id: "unusual_whales", label: "Unusual Whales", group: "Market data", validator: true, slow: false, note: "",
+      fields: [{ name: "UW_TOKEN" }] },
+  ],
+  generated_at: "2026-09-01T00:00:00Z",
+};
+
+/** Temp monorepo root the complete route accepts (package.json + web/package.json). */
+async function makeRepoRoot(prefix: string): Promise<string> {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
+  await fs.mkdir(path.join(tmp, "web"));
+  await fs.writeFile(path.join(tmp, "package.json"), "{}");
+  await fs.writeFile(path.join(tmp, "web", "package.json"), "{}");
+  return tmp;
+}
 
 beforeEach(() => {
   savedEnv = {};
@@ -44,11 +66,15 @@ afterEach(async () => {
 });
 
 describe("setup mode detection", () => {
-  it("active only when BOTH Clerk keys are absent", () => {
+  it("active only when BOTH Clerk keys are absent and setup is not complete", async () => {
+    const { isSetupMode, isAuthMisconfigured } = await import("../lib/setup/setupMode");
     expect(isSetupMode(undefined, undefined)).toBe(true);
     expect(isSetupMode("", "  ")).toBe(true);
     expect(isSetupMode("pk_live_x", undefined)).toBe(false);
     expect(isSetupMode(undefined, "sk_live_x")).toBe(false);
+    process.env.RADON_SETUP_COMPLETE = "1";
+    expect(isSetupMode()).toBe(false);
+    expect(isAuthMisconfigured()).toBe(true);
   });
 
   it("setup paths are the page and its API only", () => {
@@ -89,6 +115,28 @@ describe("setup token", () => {
     expect(verifySetupToken("wrong")).toBe(false);
     expect(verifySetupToken("")).toBe(false);
     expect(verifySetupToken(42)).toBe(false);
+  });
+
+  it("a wrong length is a plain mismatch, never a throw", async () => {
+    process.env.RADON_SETUP_TOKEN = "operator-chosen-token";
+    const { verifySetupToken } = await import("../lib/setup/setupToken");
+    expect(verifySetupToken("x")).toBe(false);
+    expect(verifySetupToken("operator-chosen-token-and-more")).toBe(false);
+    expect(verifySetupToken("operator-chosen-token")).toBe(true);
+  });
+
+  it("locks out after ten wrong tokens in the window; the right token still works before that", async () => {
+    process.env.RADON_SETUP_TOKEN = "tok-1";
+    const { POST } = await import("../app/api/setup/status/route");
+    const attempt = (token: string) =>
+      POST(new Request("http://x/api/setup/status", { method: "POST", body: JSON.stringify({ token }) }));
+    for (let i = 0; i < 9; i += 1) expect((await attempt("nope")).status).toBe(401);
+    expect((await attempt("tok-1")).status).toBe(200);
+    expect((await attempt("nope")).status).toBe(401);
+    const locked = await attempt("nope");
+    expect(locked.status).toBe(429);
+    expect(Number(locked.headers.get("Retry-After"))).toBeGreaterThan(0);
+    expect((await attempt("tok-1")).status).toBe(429);
   });
 
   it("generates once and prints to the console", async () => {
@@ -171,9 +219,13 @@ describe("setup API routes", () => {
     process.env.RADON_SETUP_TOKEN = "tok-1";
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "radon-setup-"));
     await fs.mkdir(path.join(tmp, "web"));
+    await fs.writeFile(path.join(tmp, "package.json"), "{}");
+    await fs.writeFile(path.join(tmp, "web", "package.json"), "{}");
+    const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(path.join(tmp, "web"));
     const puts: Array<{ path: string; body: unknown }> = [];
     vi.doMock("@/lib/radonApi", () => ({
-      radonFetch: vi.fn(async (apiPath: string, init?: { body?: string }) => {
+      radonFetch: vi.fn(async (apiPath: string, init?: { method?: string; body?: string }) => {
+        if (init?.method === "GET") return FASTAPI_REGISTRY;
         puts.push({ path: apiPath, body: init?.body ? JSON.parse(init.body) : null });
         return { validation: { status: "valid", message: "" } };
       }),
@@ -183,10 +235,6 @@ describe("setup API routes", () => {
       },
       radonErrorDetailText: () => "",
     }));
-    vi.doMock("node:path", async (importOriginal) => {
-      const actual = (await importOriginal()) as typeof path;
-      return { ...actual, default: { ...actual, resolve: () => tmp } };
-    });
     const route = await import("../app/api/setup/complete/route");
     const res = await route.POST(
       new Request("http://x/api/setup/complete", {
@@ -211,8 +259,163 @@ describe("setup API routes", () => {
     expect(body.written.length).toBeGreaterThan(0);
     const root = await fs.readFile(path.join(tmp, ".env"), "utf8");
     expect(root).toContain("UW_TOKEN='uw-1'");
+    cwdSpy.mockRestore();
     vi.doUnmock("@/lib/radonApi");
-    vi.doUnmock("node:path");
+  });
+});
+
+describe("setup completion writes only registry-known, backend-accepted values", () => {
+  type Reply = { status: number; detail?: unknown } | Record<string, unknown>;
+  let replies: Record<string, Reply>;
+  let calls: Array<{ path: string; method: string; body: unknown }>;
+  let cwdSpy: ReturnType<typeof vi.spyOn>;
+  const writeSetupEnvFiles = vi.fn(async () => ["/repo/.env"]);
+
+  beforeEach(async () => {
+    process.env.RADON_SETUP_TOKEN = "tok-1";
+    calls = [];
+    replies = { "GET /credentials": FASTAPI_REGISTRY };
+    writeSetupEnvFiles.mockClear();
+    // The completion latch writes a marker under the repo root: keep that in a
+    // temp root, never the checkout running the tests.
+    const tmp = await makeRepoRoot("radon-setup-registry-");
+    cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(path.join(tmp, "web"));
+    vi.doMock("@/lib/setup/envFiles", async (importOriginal) => ({
+      ...(await importOriginal<typeof import("../lib/setup/envFiles")>()),
+      writeSetupEnvFiles,
+    }));
+    vi.doMock("@/lib/radonApi", () => {
+      class RadonApiError extends Error {
+        constructor(readonly status: number, readonly detail: unknown) {
+          super(`Radon API ${status}`);
+        }
+      }
+      return {
+        RadonApiError,
+        radonErrorDetailText: (detail: unknown) => String(detail),
+        radonFetch: vi.fn(async (apiPath: string, init?: { method?: string; body?: string }) => {
+          const method = init?.method ?? "GET";
+          calls.push({ path: apiPath, method, body: init?.body ? JSON.parse(init.body) : null });
+          const reply = replies[`${method} ${apiPath}`];
+          if (reply === undefined) throw new TypeError("fetch failed");
+          if (typeof reply.status === "number" && "detail" in reply) {
+            throw new RadonApiError(reply.status, reply.detail);
+          }
+          return reply;
+        }),
+      };
+    });
+  });
+
+  afterEach(() => {
+    cwdSpy.mockRestore();
+    vi.doUnmock("@/lib/setup/envFiles");
+    vi.doUnmock("@/lib/radonApi");
+  });
+
+  async function complete(services: Record<string, unknown>): Promise<Response> {
+    const route = await import("../app/api/setup/complete/route");
+    return route.POST(
+      new Request("http://x/api/setup/complete", {
+        method: "POST",
+        body: JSON.stringify({ token: "tok-1", services }),
+      }),
+    );
+  }
+
+  it("happy path: PUTs each service and writes exactly the accepted values", async () => {
+    replies["PUT /credentials/clerk"] = { validation: { status: "valid", message: "" } };
+    replies["PUT /credentials/unusual_whales"] = { validation: { status: "valid", message: "" } };
+    const res = await complete({
+      clerk: { CLERK_SECRET_KEY: " sk_live_1 " },
+      unusual_whales: { UW_TOKEN: "uw-1" },
+    });
+    expect(res.status).toBe(200);
+    expect(calls.filter((c) => c.method === "PUT")).toEqual([
+      {
+        path: "/credentials/clerk",
+        method: "PUT",
+        body: { values: { CLERK_SECRET_KEY: "sk_live_1" }, updated_by: "setup-wizard" },
+      },
+      {
+        path: "/credentials/unusual_whales",
+        method: "PUT",
+        body: { values: { UW_TOKEN: "uw-1" }, updated_by: "setup-wizard" },
+      },
+    ]);
+    expect(writeSetupEnvFiles).toHaveBeenCalledTimes(1);
+    expect(writeSetupEnvFiles.mock.calls[0][0]).toEqual({
+      CLERK_SECRET_KEY: "sk_live_1",
+      UW_TOKEN: "uw-1",
+    });
+  });
+
+  it("a field the registry does not know is a 400 and nothing is stored or written", async () => {
+    replies["PUT /credentials/clerk"] = { validation: { status: "valid", message: "" } };
+    const res = await complete({
+      clerk: { CLERK_SECRET_KEY: "sk_live_1", PATH: "/tmp/evil" },
+    });
+    expect(res.status).toBe(400);
+    expect(calls.filter((c) => c.method === "PUT")).toEqual([]);
+    expect(writeSetupEnvFiles).not.toHaveBeenCalled();
+  });
+
+  it("a service the registry does not know is a 400 and nothing is written", async () => {
+    const res = await complete({ shell: { LD_PRELOAD: "/tmp/x.so" } });
+    expect(res.status).toBe(400);
+    expect(calls.filter((c) => c.method === "PUT")).toEqual([]);
+    expect(writeSetupEnvFiles).not.toHaveBeenCalled();
+  });
+
+  it("a value carrying a newline or control character is a 400 and nothing is written", async () => {
+    for (const value of ["sk_live_1\nEVIL=1", "sk_live_1\r", "sk_\u0000live"]) {
+      calls = [];
+      const res = await complete({ clerk: { CLERK_SECRET_KEY: value } });
+      expect(res.status, JSON.stringify(value)).toBe(400);
+      expect(calls.filter((c) => c.method === "PUT")).toEqual([]);
+    }
+    expect(writeSetupEnvFiles).not.toHaveBeenCalled();
+  });
+
+  it("a backend 400 is an error outcome, not an offline write", async () => {
+    replies["PUT /credentials/clerk"] = { status: 400, detail: "CLERK_SECRET_KEY must be a non-empty string" };
+    const res = await complete({ clerk: { CLERK_SECRET_KEY: "sk_live_1" } });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      backend: boolean;
+      outcomes: Array<{ stored: boolean; validation: { status: string } }>;
+    };
+    expect(body.backend).toBe(true);
+    expect(body.outcomes).toEqual([
+      expect.objectContaining({ service: "clerk", stored: false, validation: expect.objectContaining({ status: "error" }) }),
+    ]);
+    expect(writeSetupEnvFiles).not.toHaveBeenCalled();
+  });
+
+  it("a transport failure still writes registry-known values to .env only", async () => {
+    // No PUT reply registered: the mock throws a plain TypeError, the shape of
+    // a refused socket, which is the only thing the offline path is for.
+    const res = await complete({ clerk: { CLERK_SECRET_KEY: "sk_live_1" } });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { backend: boolean };
+    expect(body.backend).toBe(false);
+    expect(writeSetupEnvFiles).toHaveBeenCalledTimes(1);
+    expect(writeSetupEnvFiles.mock.calls[0][0]).toEqual({ CLERK_SECRET_KEY: "sk_live_1" });
+  });
+
+  it("with the registry unreachable only the static web env keys are written", async () => {
+    delete replies["GET /credentials"];
+    const res = await complete({
+      clerk: { CLERK_SECRET_KEY: "sk_live_1" },
+      shell: { LD_PRELOAD: "/tmp/x.so" },
+    });
+    expect(res.status).toBe(400);
+    expect(writeSetupEnvFiles).not.toHaveBeenCalled();
+
+    const ok = await complete({ clerk: { CLERK_SECRET_KEY: "sk_live_1" } });
+    expect(ok.status).toBe(200);
+    expect(writeSetupEnvFiles).toHaveBeenCalledTimes(1);
+    expect(writeSetupEnvFiles.mock.calls[0][0]).toEqual({ CLERK_SECRET_KEY: "sk_live_1" });
   });
 });
 
@@ -329,5 +532,73 @@ describe("setup wizard wire contract", () => {
       services: { clerk: { CLERK_SECRET_KEY: "sk_live_new" } },
     });
     expect(document.body.innerHTML).not.toContain("sk_live_new");
+  });
+});
+
+describe("setup completion latch (REL-192)", () => {
+  it("setup complete + blank Clerk yields auth-misconfigured, not /setup", async () => {
+    process.env.RADON_SETUP_COMPLETE = "1";
+    const { handleSetupModeGate, handleAuthMisconfiguredGate } = await import("../middleware");
+    expect(handleSetupModeGate(new NextRequest("http://localhost/orders"))).toBeNull();
+    const api = handleAuthMisconfiguredGate(
+      new NextRequest("http://localhost/api/portfolio"),
+    );
+    expect(api?.status).toBe(503);
+    const page = handleAuthMisconfiguredGate(new NextRequest("http://localhost/orders"));
+    expect(page?.status).toBe(503);
+  });
+
+  it("consumed setup token rejects replay", async () => {
+    process.env.RADON_SETUP_TOKEN = "tok-1";
+    const { verifySetupToken, consumeSetupToken } = await import("../lib/setup/setupToken");
+    expect(verifySetupToken("tok-1")).toBe(true);
+    consumeSetupToken();
+    expect(verifySetupToken("tok-1")).toBe(false);
+  });
+
+  it("complete writes marker, consumes token, and rejects invalid repo root", async () => {
+    process.env.RADON_SETUP_TOKEN = "tok-1";
+    vi.doMock("@/lib/radonApi", () => ({
+      radonFetch: vi.fn(async () => ({ validation: { status: "valid", message: "" } })),
+      RadonApiError: class RadonApiError extends Error {
+        status = 500;
+        detail: unknown = null;
+      },
+      radonErrorDetailText: () => "",
+    }));
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "radon-setup-latch-"));
+    await fs.mkdir(path.join(tmp, "web"));
+    await fs.writeFile(path.join(tmp, "package.json"), "{}");
+    await fs.writeFile(path.join(tmp, "web", "package.json"), "{}");
+    const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(path.join(tmp, "web"));
+    const route = await import("../app/api/setup/complete/route");
+    const res = await route.POST(
+      new Request("http://x/api/setup/complete", {
+        method: "POST",
+        body: JSON.stringify({
+          token: "tok-1",
+          services: { clerk: { CLERK_SECRET_KEY: "sk_live_1" } },
+        }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    await fs.access(path.join(tmp, ".radon", "setup-complete"));
+    const { verifySetupToken } = await import("../lib/setup/setupToken");
+    expect(verifySetupToken("tok-1")).toBe(false);
+    cwdSpy.mockRestore();
+    vi.doUnmock("@/lib/radonApi");
+  });
+
+  it("setup API returns 403 when auth is misconfigured", async () => {
+    process.env.RADON_SETUP_COMPLETE = "1";
+    process.env.RADON_SETUP_TOKEN = "tok-1";
+    const route = await import("../app/api/setup/complete/route");
+    const res = await route.POST(
+      new Request("http://x/api/setup/complete", {
+        method: "POST",
+        body: JSON.stringify({ token: "tok-1", services: { clerk: { CLERK_SECRET_KEY: "x" } } }),
+      }),
+    );
+    expect(res.status).toBe(403);
   });
 });

@@ -79,6 +79,7 @@ const PINNED: Record<string, PinnedCapability> = {
   "internals/share": "internal",
   "internals/share/content": "internal",
   "ivrank": "read",
+  "iv-spread": "read",
   "journal": { GET: "read", POST: "mutate.workspace" },
   "journal/sync": "mutate.workspace",
   "knowledge/prior-evals": "read",

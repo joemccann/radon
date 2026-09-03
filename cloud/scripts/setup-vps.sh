@@ -30,6 +30,7 @@ readonly CADDY_BIN="${RADON_CADDY_BIN:-/usr/bin/caddy}"
 readonly CADDY_SYSTEMCTL="${RADON_CADDY_SYSTEMCTL:-/usr/bin/systemctl}"
 readonly CADDY_TIMEOUT="${RADON_CADDY_TIMEOUT:-/usr/bin/timeout}"
 readonly CADDY_SYNC="${RADON_CADDY_SYNC:-/usr/bin/sync}"
+readonly SSHD_KEYS_ONLY_DROPIN="${RADON_SSHD_KEYS_ONLY_DROPIN:-/etc/ssh/sshd_config.d/10-radon-keys-only.conf}"
 
 readonly SERVICE_FILES=(
   radon-ib-gateway.service
@@ -143,6 +144,8 @@ readonly SERVICE_FILES=(
   radon-credit-spread.timer
   radon-ivrank.service
   radon-ivrank.timer
+  radon-iv-spread.service
+  radon-iv-spread.timer
   radon-iei-hyg.service
   radon-iei-hyg.timer
   radon-trin.service
@@ -664,6 +667,18 @@ start_services() {
 # -- Firewall ----------------------------------------------------------------
 
 open_firewall() {
+  ufw default deny incoming
+  ufw default allow outgoing
+
+  # SSH is allowed before enable: switching on a default-deny firewall
+  # without it locks the operator out of the box.
+  if ufw status | grep -q "22/tcp.*ALLOW"; then
+    log_warn "Port 22 already open -- skipping"
+  else
+    ufw allow 22/tcp
+    log_success "Port 22 opened"
+  fi
+
   if ufw status | grep -q "80/tcp.*ALLOW"; then
     log_warn "Port 80 already open -- skipping"
   else
@@ -677,6 +692,54 @@ open_firewall() {
     ufw allow 443/tcp
     log_success "Port 443 opened"
   fi
+
+  if ufw status | grep -q "on tailscale0.*ALLOW"; then
+    log_warn "Tailnet ingress already open -- skipping"
+  else
+    ufw allow in on tailscale0
+    log_success "Tailnet ingress opened"
+  fi
+
+  if ufw status | grep -q "8321/tcp.*ALLOW.*10\.0\.0\.0/16"; then
+    log_warn "Port 8321 from 10.0.0.0/16 already open -- skipping"
+  else
+    ufw allow from 10.0.0.0/16 to any port 8321 proto tcp comment "radon-broker health"
+    log_success "Port 8321 opened from 10.0.0.0/16"
+  fi
+
+  if ufw status | grep -q "^Status: active"; then
+    log_warn "ufw already active -- skipping enable"
+  else
+    ufw --force enable
+    log_success "ufw enabled (default deny incoming)"
+  fi
+}
+
+# -- SSH: keys only ----------------------------------------------------------
+
+install_sshd_keys_only() {
+  local target="$SSHD_KEYS_ONLY_DROPIN"
+  local desired staged
+  desired=$'PasswordAuthentication no\nKbdInteractiveAuthentication no'
+
+  if [[ -f "$target" ]] && [[ "$(cat "$target")" == "$desired" ]]; then
+    log_warn "sshd keys-only drop-in already installed -- skipping"
+    return 0
+  fi
+
+  staged="$(mktemp)"
+  printf '%s\n' "$desired" > "$staged"
+  mkdir -p "$(dirname "$target")"
+  install -m 0644 "$staged" "$target"
+  rm -f "$staged"
+
+  if ! sshd -t; then
+    log_error "sshd -t rejected the keys-only drop-in; removing it"
+    rm -f "$target"
+    exit 1
+  fi
+  systemctl reload ssh
+  log_success "sshd keys-only drop-in installed (password auth disabled)"
 }
 
 # -- Fixed deploy privilege boundary -----------------------------------------
@@ -928,6 +991,7 @@ main() {
   install_fleet_dropin
   enable_services
   open_firewall
+  install_sshd_keys_only
   install_deploy_root_helper
   install_operator_cli
   install_app_runtime
