@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Nightly security loop runner — invoked by launchd on the always-on
-# runner (Mac mini). One job fires daily and runs `cycle`: the audit phase
-# and then the remediate phase, sequentially, in this loop's own clone.
+# runner (Mac mini). One job fires daily and runs `cycle`: the audit phase,
+# then the remediate phase, then the deliver phase (push, PR, CI green,
+# operator told what to merge), sequentially, in this loop's own clone.
 # Sequencing them inside one clone is what keeps two phases from checking
-# out over each other. Either phase still runs standalone (`audit` /
-# `remediate`). See .claude/skills/security-nightly/.
+# out over each other. Each phase still runs standalone (`audit` /
+# `remediate` / `deliver`). See .claude/skills/security-nightly/.
 #
 # Runs in its OWN dedicated clone (~/radon-weekend/radon-security), never
 # the reliability loop's (~/radon-weekend/radon). Both wrappers hard-reset
@@ -114,8 +115,8 @@ GIT_SSH_BOUNDED="ssh -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAli
 # initial parse itself, before main is defined.
 main() {
 
-MODE="${1:?usage: security_nightly.sh audit|remediate|cycle}"
-[[ "$MODE" == "audit" || "$MODE" == "remediate" || "$MODE" == "cycle" ]] || {
+MODE="${1:?usage: security_nightly.sh audit|remediate|deliver|cycle}"
+[[ "$MODE" == "audit" || "$MODE" == "remediate" || "$MODE" == "deliver" || "$MODE" == "cycle" ]] || {
   echo "unknown mode: $MODE" >&2; exit 2;
 }
 
@@ -316,6 +317,45 @@ BG_CEILING_MARKER="Background tasks still running after"
 # audited SHA untouched, so the next fire resumes the same private run in
 # ~/radon-weekend/.security-nightly-scratch/ instead of calling the night OK.
 PHASE_COMPLETE_MARKER="SECURITY-NIGHTLY PHASE COMPLETE:"
+
+# Deliver phase (2026-09-02): the skill's last line is a verdict the wrapper
+# turns into the cycle's final notification — "N PR(s) green, ready to merge:
+# <urls>" or "INCOMPLETE: <check>". Printed by scripts/nightly_deliver.py
+# verdict; parsed here in bash (never exec disk python after the agent). An
+# exit-0 deliver phase without it is INCOMPLETE, exits 75, and the next fire
+# resumes the same branch and PR from the private run-record.
+DELIVER_READY_MARKER="NIGHTLY DELIVER READY:"
+DELIVER_INCOMPLETE_MARKER="NIGHTLY DELIVER INCOMPLETE:"
+
+deliver_status() {
+  # Last verdict line of THIS round's slice of the log (R-426 scoping).
+  local line rest tok n="" urls="" check=""
+  line="$(tail -c "+$((ROUND_LOG_MARK + 1))" "$RUN_LOG" 2>/dev/null \
+    | grep -E "^(${DELIVER_READY_MARKER}|${DELIVER_INCOMPLETE_MARKER})" | tail -n 1 || true)"
+  case "$line" in
+    "$DELIVER_READY_MARKER"*)
+      rest="${line#"$DELIVER_READY_MARKER"}"
+      for tok in $rest; do
+        case "$tok" in
+          prs=*) n="${tok#prs=}" ;;
+          http://*|https://*) urls="${urls:+$urls }$tok" ;;
+        esac
+      done
+      if [[ "${n:-0}" == "0" ]]; then
+        printf '0 PR(s), nothing to merge'
+      else
+        printf '%s PR(s) green, ready to merge: %s' "$n" "$urls"
+      fi ;;
+    "$DELIVER_INCOMPLETE_MARKER"*)
+      rest="${line#"$DELIVER_INCOMPLETE_MARKER"}"
+      for tok in $rest; do
+        case "$tok" in check=*) check="${tok#check=}" ;; esac
+      done
+      printf 'INCOMPLETE: %s' "${check:-unnamed check}" ;;
+    *)
+      printf 'INCOMPLETE (exit 0 without the deliver verdict line)' ;;
+  esac
+}
 
 phase_status() {
   # rc + run log -> the one status string every dead-man channel carries.
@@ -522,10 +562,13 @@ RC=0
 
 begin_phase() {
   PHASE="$1"
-  # Audit fans out read agents (cap 2h); remediation is the long half (cap 6h).
-  CAP_SECS=$([[ "$PHASE" == "audit" ]] \
-    && echo "${RADON_WEEKEND_AUDIT_CAP_SECS:-7200}" \
-    || echo "${RADON_WEEKEND_REMEDIATE_CAP_SECS:-21600}")
+  # Audit fans out read agents (cap 2h); remediation is the long half (cap
+  # 6h); deliver pushes, opens the PR and waits on CI (cap 3h).
+  case "$PHASE" in
+    audit) CAP_SECS="${RADON_WEEKEND_AUDIT_CAP_SECS:-7200}" ;;
+    deliver) CAP_SECS="${RADON_WEEKEND_DELIVER_CAP_SECS:-10800}" ;;
+    *) CAP_SECS="${RADON_WEEKEND_REMEDIATE_CAP_SECS:-21600}" ;;
+  esac
   # One log per phase: the transient-network detector reads $RUN_LOG.
   # Issue comments do not include a run-log tail.
   RUN_LOG="$LOG_DIR/$PHASE-$STAMP.log"
@@ -727,7 +770,23 @@ run_phase() {
   elif [[ $RC -eq 0 && "$status" == TRUNCATED* ]]; then
     RC=75
   fi
+  # Deliver: the operator's merge cue is the verdict line, not exit 0. A cap
+  # hit is the likeliest incomplete deliver, so it is named as one.
+  if [[ "$PHASE" == "deliver" ]]; then
+    if [[ "$status" == "OK" ]]; then
+      status="$(deliver_status)"
+      [[ "$status" == INCOMPLETE* ]] && RC=75
+    elif [[ "$status" == TIMEOUT* ]]; then
+      status="INCOMPLETE: deliver cap hit before CI went green ($status)"
+    fi
+  fi
   case "$status" in
+    *"ready to merge: "*|"0 PR(s), nothing to merge")
+      report "$status" "CI is green on every PR this cycle delivered; merging is the operator's call. Verified findings stay private." ;;
+    "INCOMPLETE: "*)
+      report "$status" "CI could not be made green inside the deliver cap — this phase is INCOMPLETE; the branch and PR number are in the private run-record and the next fire resumes them" ;;
+    "INCOMPLETE (exit 0 without the deliver verdict line)")
+      report "$status" "the agent exited 0 without declaring the deliver verdict — this phase is INCOMPLETE; the next fire resumes the same private run, branch and PR" ;;
     OK)
       report "$status" "0 public findings to disclose. The phase completed. Verified findings stay private." ;;
     "INCOMPLETE (all model quotas"*)
@@ -746,16 +805,22 @@ run_phase() {
 
 if [[ "$MODE" == "cycle" ]]; then
   # Remediate runs regardless of the audit rc — backlog may exist even when
-  # the audit phase failed. Exit non-zero if either phase failed.
+  # the audit phase failed. Deliver runs regardless of the remediate rc —
+  # committed fixes on the dated branch are durable and CI, not the remediate
+  # exit code, decides whether they are mergeable. Exit non-zero if any
+  # phase failed; the deliver report is the cycle's final notification.
   set +e
   run_phase audit
   RC_AUDIT=$RC
   run_phase remediate
   RC_REMEDIATE=$RC
+  run_phase deliver
+  RC_DELIVER=$RC
   set -e
-  echo "[security-nightly] cycle done audit_rc=$RC_AUDIT remediate_rc=$RC_REMEDIATE"
+  echo "[security-nightly] cycle done audit_rc=$RC_AUDIT remediate_rc=$RC_REMEDIATE deliver_rc=$RC_DELIVER"
   [[ $RC_AUDIT -ne 0 ]] && exit "$RC_AUDIT"
-  exit "$RC_REMEDIATE"
+  [[ $RC_REMEDIATE -ne 0 ]] && exit "$RC_REMEDIATE"
+  exit "$RC_DELIVER"
 fi
 
 run_phase "$MODE"
