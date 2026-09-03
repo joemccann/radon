@@ -1530,7 +1530,7 @@ describe("POST /api/assistant — extended", () => {
 
     const body = await assistantDonePayload<{ model: string; content: string }>(res);
     expect(body.model).toBe("mock");
-    expect(body.content).toContain("Mock Grok response");
+    expect(body.content).toContain("Mock Radon response");
   });
 
   it("returns 400 when no messages supplied", async () => {
@@ -1631,7 +1631,11 @@ describe("POST /api/assistant — extended", () => {
 
     const frames = await drainAssistantStream(res);
     const failure = frames.find((frame) => frame.event === "error");
-    expect((failure?.data as { error: string }).error).toContain("500");
+    expect((failure?.data as { error: string }).error).toBe(
+      "The assistant couldn't complete this turn. No order was placed. Try again or choose another model.",
+    );
+    expect(JSON.stringify(failure?.data)).not.toContain("500");
+    expect(JSON.stringify(failure?.data)).not.toContain("Anthropic");
     expect(frames.some((frame) => frame.event === "done")).toBe(false);
   });
 

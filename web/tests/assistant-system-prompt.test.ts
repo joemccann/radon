@@ -42,6 +42,8 @@ describe("assistant system prompt", () => {
     const { SYSTEM_PROMPT } = await import("@/app/api/assistant/route");
 
     expect(SYSTEM_PROMPT).toContain("JOURNAL CONVENTIONS");
+    expect(SYSTEM_PROMPT).toMatch(/^You are Radon,/);
+    expect(SYSTEM_PROMPT).not.toMatch(/\bGrok\b/i);
     expect(SYSTEM_PROMPT).toContain("flex_agg");
     expect(SYSTEM_PROMPT).toContain("get_realized_pnl");
     expect(SYSTEM_PROMPT).toContain("query_journal");
