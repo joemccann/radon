@@ -192,16 +192,25 @@ describe("assistant route streams its envelope", () => {
     });
   });
 
-  it("reports a mid-turn failure as an error frame, not a status", async () => {
+  it("reports a user-safe mid-turn failure while logging provider detail", async () => {
     // The header is already on the wire by the time the loop throws, so there
     // is no status left to set. A 502 here would be a lie the client cannot
     // read.
-    runAssistantLoop.mockRejectedValue(new Error("provider exploded"));
+    const providerError =
+      'OpenAI request failed (400): {"error":{"message":"Unsupported parameter: max_tokens"}}';
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    runAssistantLoop.mockRejectedValue(new Error(providerError));
     const res = await post();
     expect(res.status).toBe(200);
-    const frames = parseSseFrames(await res.text());
+    const streamText = await res.text();
+    const frames = parseSseFrames(streamText);
     expect(frames.map((frame) => frame.event)).toContain("error");
-    expect((frames.at(-1)!.data as { error: string }).error).toBe("provider exploded");
+    expect((frames.at(-1)!.data as { error: string }).error).toBe(
+      "The assistant couldn't complete this turn. No order was placed. Try again or choose another model.",
+    );
+    expect(streamText).not.toContain("max_tokens");
+    expect(consoleError).toHaveBeenCalledWith("[assistant] turn failed", expect.any(Error));
+    expect((consoleError.mock.calls[0][1] as Error).message).toBe(providerError);
     expect(frames.some((frame) => frame.event === "done")).toBe(false);
   });
 

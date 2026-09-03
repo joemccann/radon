@@ -3,6 +3,7 @@ import { requireRouteAccess } from "@/lib/routeAccess";
 import { NextRequest, NextResponse } from "next/server";
 
 import { runAssistantLoop, type AssistantModelSelection, type AssistantTurn, type ToolEvent } from "@/lib/assistant/loop";
+import { assistantErrorMessage } from "@/lib/assistant/errorCopy";
 import { recordAssistantTurn, type AssistantTurnToolCall } from "@/lib/assistant/telemetry";
 import { enforceDemoAiQuota } from "@/lib/demo/enforceAiQuota";
 import { etCalendarDateString } from "@/lib/journal/rangePnl";
@@ -35,11 +36,11 @@ export type AssistantPayload = {
 export const maxDuration = 300;
 
 export const SYSTEM_PROMPT =
-  "You are Grok, running as Radon's trading operations assistant. " +
+  "You are Radon, the trading operations assistant. Never identify yourself as a model provider or model name. " +
   "You are an API client of the same HTTP APIs the operator UI uses. " +
   "Use list_apis to find the path, then call_api to invoke it. Do not guess paths. " +
   "Watchlist is GET/POST /api/watchlist and DELETE /api/watchlist/{symbol}. " +
-  "You analyze institutional flow, portfolio risk, and trade structure with the same direct style as Grok. " +
+  "You analyze institutional flow, portfolio risk, and trade structure with a direct operator style. " +
   "You can call named tools to pull live flow, scans, gamma exposure, the portfolio, quotes, priced option chains, ranked verticals, the 7-milestone evaluate pipeline, other FastAPI READ surfaces via fetch_backend or call_api, and the trade journal (query_journal for raw fills, get_realized_pnl for realized P&L). " +
   "Destructive actions (placing orders) are never executed automatically: propose them and let the operator confirm. " +
   "Always respond in short, decisive blocks using signal, structure, kelly logic, and final decision. " +
@@ -344,7 +345,7 @@ export async function POST(request: NextRequest): Promise<Response> {
 
           const content =
             mock && !result.proposal && isProviderMockContent(result.content)
-              ? `Mock Grok response: ${fallbackReply(lastUserContent(messages))}`
+              ? `Mock Radon response: ${fallbackReply(lastUserContent(messages))}`
               : result.content;
 
           const outcome = result.proposal ? "proposal" : result.outcome;
@@ -373,7 +374,8 @@ export async function POST(request: NextRequest): Promise<Response> {
             rounds: result.rounds,
           });
         } catch (error) {
-          const message = error instanceof Error ? error.message : "Unknown assistant error.";
+          const detail = error instanceof Error ? error : new Error("Unknown assistant error.");
+          console.error("[assistant] turn failed", detail);
           console.log(
             `[assistant] done rounds=0 outcome=error toolCalls=0 usageIn=0 usageOut=0 ms=${Date.now() - t0}`,
           );
@@ -385,7 +387,7 @@ export async function POST(request: NextRequest): Promise<Response> {
             outcome: "error",
             imageCount: images,
           });
-          send("error", { error: message });
+          send("error", { error: assistantErrorMessage() });
         } finally {
           finish();
         }
