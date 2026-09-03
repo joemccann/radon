@@ -158,6 +158,9 @@ class TestJwksBounding:
         calls = []
 
         class FailingClient:
+            def get_signing_keys(self):
+                return []
+
             def get_signing_key_from_jwt(self, token):
                 calls.append(1)
                 raise RuntimeError("kid not found")
@@ -173,6 +176,9 @@ class TestJwksBounding:
 
     def test_saturated_inflight_is_a_fast_503(self, monkeypatch):
         class SlowClient:
+            def get_signing_keys(self):
+                return []
+
             def get_signing_key_from_jwt(self, token):
                 raise AssertionError("must not be reached when saturated")
 
@@ -187,6 +193,9 @@ class TestJwksBounding:
         calls = []
 
         class FailingClient:
+            def get_signing_keys(self):
+                return []
+
             def get_signing_key_from_jwt(self, token):
                 calls.append(1)
                 raise RuntimeError("kid not found")
