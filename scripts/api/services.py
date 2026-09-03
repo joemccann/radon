@@ -150,11 +150,20 @@ def is_valid_unit(unit: str) -> bool:
 
 
 def host_role() -> str:
-    """RADON_HOST_ROLE for this process. Unset or garbage is combined."""
-    raw = (os.environ.get("RADON_HOST_ROLE") or "combined").strip().strip("\"'")
-    if raw in {"app", "broker", "combined"}:
-        return raw
-    return "combined"
+    """RADON_HOST_ROLE for this process.
+
+    REL-207 (R-570): casefolded, and a NON-EMPTY unknown value maps to the
+    least-privileged role ("app": never execs the control helper) — "garbage
+    is combined" silently granted combined-role behaviour to a hand-edited
+    `App` on the app VM. Unset/empty stays "combined" (the dev default).
+    """
+    raw = (os.environ.get("RADON_HOST_ROLE") or "").strip().strip("\"'")
+    if not raw:
+        return "combined"
+    lowered = raw.casefold()
+    if lowered in {"app", "broker", "combined"}:
+        return lowered
+    return "app"
 
 
 _HETZNER_PRIVATE = ipaddress.ip_network("10.0.0.0/16")

@@ -50,7 +50,7 @@ GREEN_RUN_LOOKUP_TIMEOUT_S = 60
 # from an unattended loop must not skip the gate that pins it. Any other .md
 # that a test names (by path or by basename) routes to the focused pytest
 # modules that read it, or arms the web gate when a vitest suite reads it.
-FAIL_CLOSED_DOC_BASENAMES = frozenset({"CLAUDE.md", "AGENTS.md", "SKILL.md"})
+FAIL_CLOSED_DOC_BASENAMES = frozenset({"claude.md", "agents.md", "skill.md"})
 TEST_TREES = ("tests", "scripts/tests", "cloud/tests", "web/tests")
 TEST_SOURCE_SUFFIXES = (".py", ".ts", ".tsx", ".js", ".jsx", ".mjs")
 
@@ -355,7 +355,9 @@ def route_documentation(paths: Iterable[str], root: Path = REPO) -> DocRouting:
     tests: set[str] = set()
     for path in paths:
         name = posixpath.basename(path)
-        if name in FAIL_CLOSED_DOC_BASENAMES:
+        # REL-207 (R-571): the repo lives on a case-insensitive filesystem;
+        # `web/Claude.md` must arm the gates like `web/CLAUDE.md`.
+        if name.casefold() in FAIL_CLOSED_DOC_BASENAMES:
             fail_closed = True
             continue
         needles = {f'"{path}"', f"'{path}'", f'"{name}"', f"'{name}'"}

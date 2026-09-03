@@ -151,6 +151,11 @@ python3.13 -m venv "$WEEKEND_VENV"
 "$WEEKEND_VENV/bin/pip" install -q --upgrade pip
 "$WEEKEND_VENV/bin/pip" install -q pytest
 "$WEEKEND_VENV/bin/pip" install -q -r "$WEEKEND_REPO/requirements.txt"
+# REL-207 (R-569): CI installs the dev deps (pytest-asyncio etc.); a runner
+# venv without them false-reds every async test in this loop's own gate.
+"$WEEKEND_VENV/bin/pip" install -q -r "$WEEKEND_REPO/requirements-dev.txt"
+"$WEEKEND_VENV/bin/python" -c "import pytest_asyncio" \
+  || { echo "REFUSING: pytest_asyncio not importable in $WEEKEND_VENV" >&2; exit 1; }
 ( cd "$WEEKEND_REPO" \
   && bun install --frozen-lockfile >/dev/null \
   && cd web && bun install --frozen-lockfile >/dev/null )
