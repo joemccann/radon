@@ -704,6 +704,28 @@ run_phase() {
   echo "[documentation-nightly] $PHASE done rc=$RC" | tee -a "$RUN_LOG"
 }
 
+# Durable per-runner prune of the weekend root, at the END of a cycle so it
+# cannot creep back up between fires. The allowlist lives in
+# scripts/weekend_prune.py: it enumerates the categories it may delete and
+# refuses every clone, venv, node_modules, scratch dir, held lock and unpushed
+# worktree by construction. NON-FATAL and bounded — a prune failure must never
+# change this cycle's status or exit code. Skip with RADON_WEEKEND_SKIP_PRUNE=1.
+# Never exec a python FILE from the clone or the venv after the agent: both are
+# agent-writable. The trusted copy is piped out of origin/main straight into an
+# isolated system interpreter (-I: no cwd, no clone dir, no user site on
+# sys.path), so a planted scripts/weekend_prune.py or json.py cannot run.
+prune_weekend_root() {
+  if [[ "${RADON_WEEKEND_SKIP_PRUNE:-0}" == "1" ]]; then return 0; fi
+  local rc=0
+  git -C "$REPO" show origin/main:scripts/weekend_prune.py 2>/dev/null \
+    | "${TIMEOUT_BIN:-}" "${RADON_WEEKEND_PRUNE_TIMEOUT_SECS:-600}" \
+      /usr/bin/python3 -I - --root "$WEEKEND_ROOT" >> "$RUN_LOG" 2>&1 || rc=$?
+  if [[ $rc -ne 0 ]]; then
+    echo "[prune] skipped (non-fatal rc=$rc)" >&2
+  fi
+  return 0
+}
+
 if [[ "$MODE" == "cycle" ]]; then
   # Remediate runs regardless of the audit rc — backlog may exist even when
   # the audit phase failed. Exit non-zero if either phase failed.
@@ -714,11 +736,13 @@ if [[ "$MODE" == "cycle" ]]; then
   RC_REMEDIATE=$RC
   set -e
   echo "[documentation-nightly] cycle done audit_rc=$RC_AUDIT remediate_rc=$RC_REMEDIATE"
+  prune_weekend_root
   [[ $RC_AUDIT -ne 0 ]] && exit "$RC_AUDIT"
   exit "$RC_REMEDIATE"
 fi
 
 run_phase "$MODE"
+prune_weekend_root
 exit "$RC"
 }
 # Call and exit on ONE line: parsed together, so even a returning main can
