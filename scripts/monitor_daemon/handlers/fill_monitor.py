@@ -303,8 +303,14 @@ class FillMonitorHandler(BaseHandler):
             if not open_orders:
                 # get_open_orders caps its openOrderEnd wait at 0.5s and
                 # returns whatever arrived — an empty book from a slow
-                # gateway must never replace a non-empty snapshot (T-382).
-                if count_open_orders_for_mirror is None or count_open_orders_for_mirror() > 0:
+                # gateway must never replace a non-empty snapshot (T-382),
+                # nor one whose working orders this handler still tracks
+                # (R-579).
+                if (
+                    self.known_orders
+                    or count_open_orders_for_mirror is None
+                    or count_open_orders_for_mirror() > 0
+                ):
                     logger.warning(
                         "fill_monitor: IB returned empty open-orders book but "
                         "existing snapshot is non-empty — skipping mirror"
