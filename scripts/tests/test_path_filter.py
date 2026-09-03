@@ -178,6 +178,10 @@ _NON_REPOSITORY_WEB_FIXTURES = {
     "cloud/tests/test_setup_vps_privileged_paths.py",
     "scripts/tests/test_weekend_runner_env_provisioning.py",
     "scripts/tests/test_weekend_subscription_only.py",
+    # Same family: it builds a miniature ~/radon-weekend under tmp_path with a
+    # web/node_modules and a web/.env inside it, to prove the prune's allowlist
+    # refuses both. Nothing it asserts reads the checkout's own web tree.
+    "scripts/tests/test_weekend_prune.py",
 }
 _DYNAMIC_WEB_READER_MODULES = {
     # Their tracked web paths live in parameter tables and are joined to ROOT

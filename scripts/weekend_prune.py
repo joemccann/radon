@@ -15,19 +15,31 @@ enumerates something protected still cannot delete it. Everything not named
 in a category is left alone — including anything it has never heard of.
 
 Refused by construction, never by pattern-matching what to avoid:
-  * any ``web/node_modules`` (a deleted one breaks the next remediate phase)
-  * any ``venv-*`` / ``.venv`` (the per-loop interpreters)
+  * any ``web/node_modules`` under a loop CLONE (a deleted one breaks the
+    next remediate phase's vitest run)
+  * any ``venv-*`` / ``.venv`` under a loop CLONE (the per-loop interpreters)
   * any ``.deepsec`` export and any private ``*scratch*`` dir (audit state)
   * a loop clone directory itself
-  * anything outside the weekend root and the OS temp dir
-  * a git worktree whose branch has commits not on its remote, or dirty
+  * anything outside the weekend root; only ``tmp_pytest`` may look at the OS
+    temp dir at all, and only at ``pytest-of-*`` trees inside it
+  * a git worktree that is dirty, has commits reachable from no remote,
+    carries a ``.weekend-keep`` marker, whose newest commit is younger than
+    ``WORKTREE_MIN_IDLE_DAYS``, or which HOLDS an env file or audit state —
+    ``git worktree remove`` deletes gitignored content, so that last check
+    reads the worktree's CONTENTS, not only its path. A ``node_modules`` or
+    a ``.venv`` inside an already-idle, already-pushed worktree is not a
+    refusal: it belongs to nothing that will run, and it is the bulk of what
+    this step exists to reclaim.
   * every path under a clone whose ``.weekend-runner.lock`` is held by a live
     pid — a cycle is running in it right now
 
-Stdlib only, like ``weekend_notify.py``: the wrappers call it with whatever
-``python3`` is on PATH, at the end of a cycle, best-effort. It never touches
-anything outside the root it is given and it never fails the run that called
-it — the wrappers discard its exit code.
+Stdlib only and 3.9-clean, like ``weekend_notify.py``. The wrappers pipe the
+``origin/main`` copy into ``/usr/bin/python3 -I -`` rather than exec a python
+FILE out of the agent-writable clone; that stops a planted working-tree file
+and a planted ``json.py`` on ``sys.path``, and nothing more (the ref it reads
+lives in the same clone). It never touches anything outside the root it is
+given and it never fails the run that called it — the wrappers discard its
+exit code.
 
     python3 scripts/weekend_prune.py --root ~/radon-weekend [--dry-run] [--json]
 """
@@ -57,9 +69,19 @@ CATEGORIES: Tuple[str, ...] = (
 
 RUN_LOG_MAX_AGE_DAYS = 30
 TMP_MAX_AGE_DAYS = 2
+# A worktree is only ever a candidate once its newest commit has gone quiet.
+# Clean + pushed is not idle: a branch awaiting CI triage looks exactly like an
+# abandoned one, and re-adding it costs a human a checkout.
+WORKTREE_MIN_IDLE_DAYS = 3
 GIT_TIMEOUT_SECS = 30
 RUNNER_LOCK = ".weekend-runner.lock"
 RUNNER_MARKER = ".radon-weekend-runner"
+# Drop this file in a worktree to keep it forever, whatever its age.
+WORKTREE_KEEP_MARKER = ".weekend-keep"
+# `git worktree remove` deletes gitignored files, so a worktree holding one of
+# these is refused whole. Env files carry hand-provisioned credentials and are
+# not rebuildable by a command; audit state is private and not reproducible.
+PROTECTED_WORKTREE_FILES = (".env", ".env.local", ".env.ib-mode")
 # Never rotated away: the plists point StandardOutPath/StandardErrorPath here
 # and only bump mtime when something writes, so they sort old (R-267).
 LAUNCHD_SINKS = ("launchd-",)
@@ -75,9 +97,11 @@ class Refused(Exception):
 def _protected_part(name: str) -> Optional[str]:
     """Why a single path component makes its whole subtree untouchable."""
     lowered = name.lower()
-    if name == "node_modules":
+    # macOS is case-insensitive: NODE_MODULES/ resolves to the same tree, so
+    # the refusal has to be case-insensitive too.
+    if lowered == "node_modules":
         return "protected: node_modules (a remediate phase needs it to run vitest)"
-    if name == "venv" or name == ".venv" or name.startswith("venv-"):
+    if lowered in ("venv", ".venv") or lowered.startswith("venv-"):
         return "protected: venv (a loop's python interpreter)"
     if lowered in (".deepsec", "deepsec"):
         return "protected: deepsec audit state"
@@ -141,9 +165,16 @@ def locking_pid(clone: Path) -> Optional[int]:
     return pid
 
 
-def _locked_clones(root: Path) -> Dict[str, int]:
-    """realpath -> live pid, for every clone under ``root`` with a held lock."""
+def _locked_clones(root: Path, caller: Optional[str] = None) -> Dict[str, int]:
+    """realpath -> live pid, for every clone under ``root`` with a held lock.
+
+    ``caller`` is the clone whose wrapper is running this prune. It holds its
+    own lock for the whole cycle and calls us from inside it, so honouring
+    that one lock would mean the loop that generates the garbage is the only
+    clone that can never clean it. Every other refusal still applies to it.
+    """
     held: Dict[str, int] = {}
+    caller_real = os.path.realpath(caller) if caller else None
     try:
         children = sorted(root.iterdir())
     except OSError:
@@ -151,9 +182,12 @@ def _locked_clones(root: Path) -> Dict[str, int]:
     for child in children:
         if not child.is_dir() or child.is_symlink() or not _is_loop_clone(child):
             continue
+        real = os.path.realpath(child)
+        if caller_real is not None and real == caller_real:
+            continue
         pid = locking_pid(child)
         if pid is not None:
-            held[os.path.realpath(child)] = pid
+            held[real] = pid
     return held
 
 
@@ -196,12 +230,13 @@ def refusal_reason(
         if reason is not None:
             return reason
 
-    if base == root_real:
-        if len(parts) == 1 and _is_loop_clone(Path(real)):
-            return "protected: loop clone directory"
-        for held_real, pid in (locked or {}).items():
-            if real == held_real or real.startswith(held_real.rstrip(os.sep) + os.sep):
-                return f"refused: runner lock held by live pid {pid}"
+    if base == root_real and len(parts) == 1 and _is_loop_clone(Path(real)):
+        return "protected: loop clone directory"
+    # Not gated on `base`: a clone registered under the OS temp dir gets the
+    # same lock refusal a clone under the root does.
+    for held_real, pid in (locked or {}).items():
+        if real == held_real or real.startswith(held_real.rstrip(os.sep) + os.sep):
+            return f"refused: runner lock held by live pid {pid}"
     return None
 
 
@@ -284,15 +319,23 @@ def _stale_run_logs(root: Path, locked: Dict[str, int], now: float) -> List[Path
         if os.path.realpath(clone) in locked:
             continue
         logs = clone / "logs"
-        if not logs.is_dir():
+        # `logs` itself may be a symlink; is_dir() follows it, and rotation
+        # would then delete whatever it points at (another clone's .git, say).
+        if logs.is_symlink() or not logs.is_dir():
             continue
+        confine = os.path.realpath(clone) + os.sep
         for label_dir in sorted(logs.iterdir()):
             if not label_dir.is_dir() or label_dir.is_symlink():
+                continue
+            if label_dir.name == ".git":
                 continue
             for entry in sorted(label_dir.iterdir()):
                 if not entry.is_file() or entry.is_symlink():
                     continue
                 if entry.name.startswith(LAUNCHD_SINKS):
+                    continue
+                # Every candidate must still RESOLVE inside its own clone.
+                if not os.path.realpath(entry).startswith(confine):
                     continue
                 try:
                     if entry.stat().st_mtime < cutoff:
@@ -315,15 +358,61 @@ def _git(clone: Path, *args: str) -> Optional[str]:
     return proc.stdout
 
 
-def _worktree_verdict(clone: Path, wt: Path, branch: str) -> Optional[str]:
+def _protected_content(wt: Path) -> Optional[str]:
+    """Why the CONTENTS of ``wt`` make it untouchable.
+
+    ``git worktree remove`` deletes gitignored files, so ``status
+    --porcelain`` — which never lists an ignored file — is not the whole
+    check, and applying ``refusal_reason`` to the worktree PATH says nothing
+    about what is inside it.
+
+    What counts as untouchable here is narrower than ``_protected_part``, on
+    purpose. That function protects a live loop CLONE, where ``web/
+    node_modules`` is the bootstrap a remediate phase needs to run vitest at
+    all and ``venv-*`` is a loop's interpreter — deleting either breaks the
+    next fire. A worktree only reaches this function after it has been proven
+    clean, fully reachable from a remote, past the idle floor and unmarked,
+    so a ``node_modules`` or ``.venv`` inside it belongs to nothing that is
+    going to run, and both are one command to rebuild: they are precisely the
+    garbage this step exists to reclaim. Env files and audit state are not
+    rebuildable by a command, so those still refuse the whole worktree.
+    """
+    for dirpath, dirnames, filenames in os.walk(str(wt), onerror=lambda _e: None):
+        keep = []
+        for name in dirnames:
+            lowered = name.lower()
+            if lowered in (".deepsec", "deepsec") or "scratch" in lowered:
+                return f"{name}/ (audit state, not reproducible)"
+            if name == ".git" or os.path.islink(os.path.join(dirpath, name)):
+                continue
+            # Not descended: nothing inside a node_modules or a venv can
+            # refuse the worktree, and walking one costs a hundred thousand
+            # stat calls.
+            if _protected_part(name) is None:
+                keep.append(name)
+        dirnames[:] = keep
+        for name in filenames:
+            if name in PROTECTED_WORKTREE_FILES:
+                return f"{name} (a provisioned env file)"
+    return None
+
+
+def _worktree_verdict(clone: Path, wt: Path, branch: str, now: float) -> Optional[str]:
     """Why this worktree must be kept, or None when it is safe to remove."""
     if not branch:
         return "refused: worktree is detached (no branch to compare)"
+    if (wt / WORKTREE_KEEP_MARKER).exists():
+        return f"refused: {WORKTREE_KEEP_MARKER} marker"
     status = _git(wt, "status", "--porcelain")
     if status is None:
         return "refused: worktree status unavailable"
     if status.strip():
         return "refused: dirty worktree (uncommitted work)"
+    # @{upstream} may be a LOCAL branch (branch.<b>.remote = .). Commits that
+    # exist on no remote at all would then read as 0 ahead.
+    upstream = _git(wt, "rev-parse", "--symbolic-full-name", "@{upstream}")
+    if upstream is None or not upstream.strip().startswith("refs/remotes/"):
+        return f"refused: unpushed branch {branch} (no remote-tracking upstream)"
     ahead = _git(wt, "rev-list", "--count", "@{upstream}..HEAD")
     if ahead is None:
         return f"refused: unpushed branch {branch} (no upstream on the remote)"
@@ -333,10 +422,35 @@ def _worktree_verdict(clone: Path, wt: Path, branch: str) -> Optional[str]:
         return "refused: worktree ahead-count unavailable"
     if count > 0:
         return f"refused: {count} unpushed commit(s) on {branch}"
+    off_remote = _git(wt, "rev-list", "--count", "HEAD", "--not", "--remotes")
+    if off_remote is None:
+        return "refused: worktree remote-reachability unavailable"
+    try:
+        off = int(off_remote.strip())
+    except ValueError:
+        return "refused: worktree remote-reachability unavailable"
+    if off > 0:
+        return f"refused: {off} commit(s) on {branch} reachable from no remote"
+    # Clean and pushed is not idle. A branch awaiting CI triage is
+    # indistinguishable from an abandoned one except by age.
+    committed = _git(wt, "log", "-1", "--format=%ct", "HEAD")
+    if committed is None:
+        return "refused: worktree commit date unavailable"
+    try:
+        stamp = float(committed.strip())
+    except ValueError:
+        return "refused: worktree commit date unavailable"
+    idle_days = (now - stamp) / 86400.0
+    if idle_days < WORKTREE_MIN_IDLE_DAYS:
+        return (f"refused: {branch} last committed {idle_days:.1f}d ago "
+                f"(idle floor {WORKTREE_MIN_IDLE_DAYS}d)")
+    held = _protected_content(wt)
+    if held is not None:
+        return f"refused: worktree holds {held}"
     return None
 
 
-def _worktrees(root: Path, locked: Dict[str, int]) -> Tuple[List[Tuple[Path, Path]], List[Dict[str, str]]]:
+def _worktrees(root: Path, locked: Dict[str, int], now: float) -> Tuple[List[Tuple[Path, Path]], List[Dict[str, str]]]:
     removable: List[Tuple[Path, Path]] = []
     refused: List[Dict[str, str]] = []
     try:
@@ -363,7 +477,7 @@ def _worktrees(root: Path, locked: Dict[str, int]) -> Tuple[List[Tuple[Path, Pat
                 if os.path.realpath(wt_path) != os.path.realpath(clone):
                     reason = refusal_reason(wt_path, root=root, temp_root=root, locked=locked)
                     if reason is None:
-                        reason = _worktree_verdict(clone, wt_path, branch)
+                        reason = _worktree_verdict(clone, wt_path, branch, now)
                     if reason is None:
                         removable.append((clone, wt_path))
                     else:
@@ -407,18 +521,19 @@ def _human(num: float) -> str:
     return f"{num:.1f} TiB"
 
 
-def run(*, root, temp_root=None, dry_run: bool = False, now: Optional[float] = None) -> dict:
+def run(*, root, temp_root=None, dry_run: bool = False, now: Optional[float] = None,
+        caller: Optional[str] = None) -> dict:
     root = Path(root)
     temp_root = Path(temp_root) if temp_root is not None else Path(tempfile.gettempdir())
     now = time.time() if now is None else now
 
-    locked = _locked_clones(root)
+    locked = _locked_clones(root, caller)
     refused: List[Dict[str, str]] = [
         {"path": path, "reason": f"refused: runner lock held by live pid {pid}"}
         for path, pid in sorted(locked.items())
     ]
 
-    removable_worktrees, worktree_refusals = _worktrees(root, locked)
+    removable_worktrees, worktree_refusals = _worktrees(root, locked, now)
     refused.extend(worktree_refusals)
 
     plan: Dict[str, List[Path]] = {
@@ -430,19 +545,36 @@ def run(*, root, temp_root=None, dry_run: bool = False, now: Optional[float] = N
     }
     worktree_clone = {os.path.realpath(wt): clone for clone, wt in removable_worktrees}
 
+    # Enumeration is the slow part. Re-read the locks immediately before the
+    # first unlink and honour the UNION, so a cycle that acquired its lock
+    # while we were walking is still refused (a released one stays refused
+    # too — that only costs us one night's reclaim).
+    locked = dict(locked)
+    locked.update(_locked_clones(root, caller))
+
     free_before = shutil.disk_usage(str(root)).free
     categories: Dict[str, dict] = {}
     for name in CATEGORIES:
         done: List[str] = []
         total = 0
+        # Only tmp_pytest may reach outside the root at all; every other
+        # category is confined to the root even when $TMPDIR points elsewhere.
+        cat_temp = temp_root if name == "tmp_pytest" else root
         for candidate in plan.get(name, []):
             real = os.path.realpath(candidate)
             try:
                 if name == "worktrees":
-                    size = _du(Path(candidate))
+                    # Re-checked immediately before the removal, not only at
+                    # enumeration: the path refusal, AND the contents, because
+                    # `git worktree remove` takes gitignored files with it.
                     reason = refusal_reason(candidate, root=root, temp_root=root, locked=locked)
+                    if reason is None:
+                        held = _protected_content(Path(candidate))
+                        if held is not None:
+                            reason = f"refused: worktree holds {held}"
                     if reason is not None:
                         raise Refused(f"{candidate}: {reason}")
+                    size = _du(Path(candidate))
                     if not dry_run:
                         # A registry op on the OWNING clone, never an rm -rf:
                         # git refuses when the worktree is busy or dirty.
@@ -451,7 +583,7 @@ def run(*, root, temp_root=None, dry_run: bool = False, now: Optional[float] = N
                                             "reason": "refused: git worktree remove declined"})
                             continue
                 else:
-                    size = remove_candidate(candidate, root=root, temp_root=temp_root,
+                    size = remove_candidate(candidate, root=root, temp_root=cat_temp,
                                             locked=locked, dry_run=dry_run)
             except Refused as exc:
                 refused.append({"path": real, "reason": str(exc)})
@@ -488,7 +620,7 @@ def format_report(report: dict) -> str:
             f"[prune] {name:<13} {_human(cat['bytes']):>10}  {cat['items']} item(s)"
         )
     for entry in report["refused"]:
-        lines.append(f"[prune] kept {entry['path']} — {entry['reason']}")
+        lines.append(f"[prune] kept {entry['path']} - {entry['reason']}")
     lines.append(
         "[prune] reclaimed {rec} free_after={after}".format(
             rec=_human(report["reclaimed_bytes"]),
@@ -523,6 +655,9 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--root", default=os.path.expanduser("~/radon-weekend"))
     parser.add_argument("--temp-dir", default=tempfile.gettempdir())
+    parser.add_argument("--self", dest="caller", default=None,
+                        help="the calling clone: ignore ITS runner lock, so the "
+                             "loop that made the garbage can clean it")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true", dest="as_json")
     args = parser.parse_args(argv)
@@ -533,7 +668,8 @@ def main(argv=None) -> int:
         print(f"[prune] {problem}", file=sys.stderr)
         return 2
 
-    report = run(root=root, temp_root=Path(args.temp_dir), dry_run=args.dry_run)
+    report = run(root=root, temp_root=Path(args.temp_dir), dry_run=args.dry_run,
+                 caller=args.caller)
     if args.as_json:
         print(json.dumps(report, indent=2, sort_keys=True))
     else:
