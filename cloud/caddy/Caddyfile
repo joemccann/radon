@@ -76,6 +76,12 @@
     # POST-only JSON-RPC with no idempotency key, so no lb_try_* retry loop
     # here — Caddy's default is zero retries.
     handle /mcp* {
+        # REL-193 (R-526): bound the anonymous JSON-RPC body at the edge.
+        # In-process BodyLimitMiddleware (scripts/mcp_hosted/serve.py) carries
+        # the same 1MB cap for direct-to-8334 callers.
+        request_body {
+            max_size 1MB
+        }
         reverse_proxy 127.0.0.1:8334 {
             transport http {
                 dial_timeout 5s

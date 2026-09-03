@@ -63,6 +63,10 @@ DEMO_BASE = os.environ.get("RADON_MCP_DEMO_BASE", "https://demo.radon.run")
 
 HTTP_TIMEOUT_S = 15
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+# REL-193 (R-526): the inbound JSON-RPC body cap, enforced at Caddy
+# (request_body max_size) AND in-process (BodyLimitMiddleware in serve.py) so
+# a direct-to-8334 caller cannot OOM the 512M unit either.
+MAX_REQUEST_BODY_BYTES = 1 * 1024 * 1024
 
 # Public radon.run documents the anonymous rung may fetch. Wraps the
 # published site surface only — never /knowledge/* or any FastAPI route.
@@ -93,13 +97,28 @@ class HttpResult:
 
 
 def _http_get(url: str, headers: dict) -> HttpResult:
-    """One bounded GET. Kept tiny; tests inject a fake instead."""
+    """One bounded GET. Kept tiny; tests inject a fake instead.
+
+    REL-193 (R-550): streamed with a running byte bound — `resp.content`
+    buffers the whole upstream body before any slice, so the old form bounded
+    what was RETURNED, not what was allocated inside the 512M cgroup.
+    """
     import requests
 
-    resp = requests.get(url, headers=headers, timeout=HTTP_TIMEOUT_S)
-    body = resp.content[: MAX_RESPONSE_BYTES + 1]
-    if len(body) > MAX_RESPONSE_BYTES:
-        raise ValueError(f"upstream response exceeded {MAX_RESPONSE_BYTES} bytes")
+    resp = requests.get(url, headers=headers, timeout=HTTP_TIMEOUT_S, stream=True)
+    try:
+        chunks: list[bytes] = []
+        received = 0
+        for chunk in resp.iter_content(chunk_size=65536):
+            received += len(chunk)
+            if received > MAX_RESPONSE_BYTES:
+                raise ValueError(
+                    f"upstream response exceeded {MAX_RESPONSE_BYTES} bytes"
+                )
+            chunks.append(chunk)
+        body = b"".join(chunks)
+    finally:
+        resp.close()
     return HttpResult(resp.status_code, body.decode("utf-8", errors="replace"))
 
 
