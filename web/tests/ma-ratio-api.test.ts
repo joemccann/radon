@@ -156,6 +156,21 @@ describe("GET /api/ma-ratio", () => {
     expect((await jsonOf(await GET())).missing).toBe(true);
   });
 
+  // REL-195 (R-527): a snapshot past MA_RATIO_MAX_AGE_MS means the writer is
+  // down; serving it unmarked made three-week-old breadth indistinguishable
+  // from live for the assistant read pin and any zone-turn-up derivation.
+  it("collapses a snapshot past 48h to missing+stale, keeping its scan_time", async () => {
+    const deadAge = new Date(Date.now() - 72 * 60 * 60_000).toISOString();
+    await insertSnapshot(buildPayload({ scan_time: deadAge }));
+
+    const { GET } = await import("../app/api/ma-ratio/route");
+    const json = await jsonOf(await GET());
+    expect(json.missing).toBe(true);
+    expect(json.stale).toBe(true);
+    expect(json.scan_time).toBe(deadAge);
+    expect(json.series).toEqual([]);
+  });
+
   it("declares force-dynamic per the disk-backed route cache contract", async () => {
     const route = await import("../app/api/ma-ratio/route");
     expect(route.dynamic).toBe("force-dynamic");
