@@ -375,6 +375,10 @@ class TestTheSetupIsCredentialFree:
         (src / "web").mkdir(parents=True)
         for rel, body in DUMMY.items():
             (src / rel).write_text(body, encoding="utf-8")
+        # The setup script refuses a source checkout that does not carry its
+        # own loop wrapper (it reads the clone origin from there, never cwd).
+        (src / "scripts").mkdir()
+        (src / "scripts" / "security_nightly.sh").write_text("", encoding="utf-8")
         root = tmp_path / "weekend"
         clone = root / CLONE
         (clone / ".git").mkdir(parents=True)
