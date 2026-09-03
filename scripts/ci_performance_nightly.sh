@@ -282,10 +282,31 @@ report() {
     issue="$(net_bounded "$GH_BIN" issue list --label "$DEADMAN_LABEL" --state open \
       --json number -q '.[0].number' 2>/dev/null || true)"
   fi
-  [[ -n "$issue" ]] && net_bounded "$GH_BIN" issue comment "$issue" --body "$body" >/dev/null 2>&1 || true
+  if [[ -n "$issue" ]]; then
+    prune_deadman_comments "$issue"
+    net_bounded "$GH_BIN" issue comment "$issue" --body "$body" >/dev/null 2>&1 || true
+  fi
   if [[ "$push" == "1" ]]; then
     notify_phase "$status"
   fi
+  return 0
+}
+
+# Wipes every existing dead-man comment right before report() posts the new
+# one, but only once no PR is open for this loop (merged, closed, or never
+# needed) — an open PR means an operator still needs the full run history
+# until they merge it. Never exec a python FILE from the agent-writable
+# clone: origin/main's copy is piped into an isolated system interpreter,
+# same defence as prune_weekend_root. Non-fatal and bounded by design; a
+# failure here must never change what report() posts or the run's exit code.
+prune_deadman_comments() {
+  local issue="$1"
+  if [[ "${RADON_WEEKEND_SKIP_ISSUE_PRUNE:-0}" == "1" ]]; then return 0; fi
+  if [[ -z "${TIMEOUT_BIN:-}" || -z "$GH_BIN" ]]; then return 0; fi
+  git -C "$REPO" show origin/main:scripts/nightly_issue_prune.py 2>/dev/null \
+    | "$TIMEOUT_BIN" "${RADON_WEEKEND_ISSUE_PRUNE_TIMEOUT_SECS:-30}" \
+      /usr/bin/python3 -I - --gh-bin "$GH_BIN" --issue "$issue" \
+      --branch-prefix "$PR_BRANCH_PREFIX" >/dev/null 2>&1 || true
   return 0
 }
 
