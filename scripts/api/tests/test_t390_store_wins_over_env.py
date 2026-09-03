@@ -53,6 +53,20 @@ def localhost_bypass(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def isolate_session_exported():
+    # bootstrap/PUT add names to the module-global _SESSION_EXPORTED; restore
+    # it so later files (test_credentials_routes.py::test_env_fallback_flagged)
+    # still see env-only names as fallback, not exported.
+    saved = {
+        module: set(module._SESSION_EXPORTED) for module in _route_module_instances()
+    }
+    yield
+    for module, names in saved.items():
+        module._SESSION_EXPORTED.clear()
+        module._SESSION_EXPORTED.update(names)
+
+
+@pytest.fixture(autouse=True)
 def tmp_store(tmp_path, monkeypatch):
     monkeypatch.setenv("RADON_SECRET_STORE_PATH", str(tmp_path / "secrets.db"))
     monkeypatch.setenv(
