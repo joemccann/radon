@@ -108,7 +108,9 @@ CATALOG: dict[CatalogKey, Capability] = {
     ("POST", "/scan"): "read.spawn",
     ("GET", "/share/content"): "internal",
     ("GET", "/short-availability/{ticker}"): "read",
-    ("GET", "/streaks/{ticker}"): "read",
+    # REL-177 (R-491): read.spawn so MAX_SPAWN_PER_TURN caps assistant
+    # fan-out — each call can be a 10Y IB history fetch.
+    ("GET", "/streaks/{ticker}"): "read.spawn",
     ("POST", "/strength-confirmation/scan"): "read.spawn",
     ("POST", "/theta-harvester/scan"): "read.spawn",
     ("GET", "/ticker/ratings"): "read",

@@ -87,6 +87,27 @@ def _is_quarantined(path: Path) -> bool:
     return ".json.invalid-" in path.name
 
 
+def read_cache_envelope(cache_dir: Path, key: str) -> Optional[Dict[str, object]]:
+    """Like read_cache, but keeps the envelope: {data, source, fetched_at}.
+
+    REL-177 (R-490): discarding the stored source/fetched_at made every cache
+    hit render as a fresh `source="cache"`, hiding a sticky Yahoo win.
+    """
+    prices = read_cache(cache_dir, key)
+    if prices is None:
+        return None
+    subdir = STOCKS_DIR if cache_dir == STOCKS_DIR else OPTIONS_DIR
+    try:
+        data = verified_load(str(_cache_path(subdir, key)))
+    except (TypeError, ValueError, json.JSONDecodeError, FileNotFoundError):
+        return None
+    return {
+        "data": prices,
+        "source": data.get("source"),
+        "fetched_at": data.get("fetched_at"),
+    }
+
+
 def read_cache(cache_dir: Path, key: str) -> Optional[Dict[str, float]]:
     """Read cached price history. Returns data dict or None on miss/expired/corrupt."""
     subdir = STOCKS_DIR if cache_dir == STOCKS_DIR else OPTIONS_DIR

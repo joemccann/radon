@@ -1124,6 +1124,16 @@ async def _heal_ib_dependent_service_health(timeout: float) -> List[str]:
     return healed
 
 
+def last_observed_auth_state():
+    """The most recent auth_state any health check derived, or None.
+
+    REL-177 (R-488): on-demand routes (streaks) consult this before touching
+    the pool so an awaiting_2fa gateway is skipped in microseconds instead of
+    burning two bounded 15s calls per lookup.
+    """
+    return _auth_transition_state.get("previous_auth_state")
+
+
 async def handle_auth_state_transition(
     new_auth_state: str,
     pool,

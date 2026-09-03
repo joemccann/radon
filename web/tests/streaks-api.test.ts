@@ -65,7 +65,7 @@ beforeEach(() => {
 describe("GET /api/streaks", () => {
   it("exports read capability and rejects a missing symbol without calling FastAPI", async () => {
     const route = await importRoute();
-    expect(route.radonCapability).toBe("read");
+    expect(route.radonCapability).toBe("read.spawn"); // REL-177 (R-491): spawn-capped
 
     const res = await route.GET(new Request("http://localhost/api/streaks"));
     expect(res.status).toBe(400);
