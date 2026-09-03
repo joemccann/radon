@@ -70,7 +70,7 @@ import {
   mapOrderStatus,
   resolveOrderIntent,
   statusPillClass,
-  summarizeOpenOrders,
+  summarizeOpenOrderRows,
 } from "@/lib/orders/orderDisplay";
 import {
   classifyDisplayRowSession,
@@ -3107,7 +3107,7 @@ function OrdersSections({
 
   const canModify = (o: OpenOrder) => o.orderType === "LMT" || o.orderType === "STP LMT";
   const now = new Date();
-  const openOrdersSummary = summarizeOpenOrders(orders.open_orders, now);
+  const openOrdersSummary = summarizeOpenOrderRows(openOrderRows, now);
   const sessionCounts = summarizeSessionWindows(openOrderRows, now);
   const lastSyncLabel = orders.last_sync
     ? formatRelativeTime(orders.last_sync)
