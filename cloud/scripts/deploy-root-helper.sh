@@ -252,7 +252,15 @@ read_host_role() {
   fi
   case "$role" in
     app|broker|combined) printf '%s\n' "$role" ;;
-    *) printf 'combined\n' ;;
+    *)
+      # REL-221 (R-590): fail-closed but never silent — an app host with a
+      # corrupt env file stops skipping gateway units and the later
+      # verify_control_plane failure reads as "target unavailable".
+      if [[ -f "$envf" ]]; then
+        echo "read_host_role: ${envf} exists but RADON_HOST_ROLE parsed to '${role}'; falling back to combined" >&2
+      fi
+      printf 'combined\n'
+      ;;
   esac
 }
 
@@ -744,8 +752,18 @@ stage_unit_candidate() {
 # verifier to parse it as that unit type.
 unit_candidate_verifies() {
   local candidate="$1" unit="$2" scratch rc=0
-  [[ -n "$SYSTEMD_ANALYZE" && -x "$SYSTEMD_ANALYZE" ]] || return 0
-  scratch="$(mktemp -d "${SYSTEMD_UNIT_DIR}/.verify.XXXXXX")" || return 0
+  # REL-221 (R-589): "verifier unavailable" (no systemd-analyze on this host)
+  # is a logged, documented proceed — the manifest-hash gate still stands.
+  # A FAILED scratch setup is not: soft-passing it installed the candidate
+  # unverified, so it skips the unit instead.
+  if [[ -z "$SYSTEMD_ANALYZE" || ! -x "$SYSTEMD_ANALYZE" ]]; then
+    echo "unit-verify: systemd-analyze unavailable; installing ${unit} on the manifest gate alone" >&2
+    return 0
+  fi
+  if ! scratch="$(mktemp -d "${SYSTEMD_UNIT_DIR}/.verify.XXXXXX")"; then
+    echo "unit-verify: scratch setup failed under ${SYSTEMD_UNIT_DIR}; refusing ${unit}" >&2
+    return 1
+  fi
   if cat -- "$candidate" > "${scratch}/${unit}"; then
     if [[ -n "${TIMEOUT:-}" ]]; then
       "$TIMEOUT" --signal=TERM --kill-after=2s 10s \

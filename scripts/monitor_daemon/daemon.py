@@ -193,9 +193,19 @@ class MonitorDaemon:
                 now_et = datetime.now(ZoneInfo("America/New_York"))
                 if is_equity_ext_session_et(now_et):
                     return True
-            except Exception:
-                pass
-            return self._market_was_open_within_grace(handler)
+                return self._market_was_open_within_grace(handler)
+            except Exception as exc:
+                # REL-209 (R-578): fail to RTH, never to "never". A tzdata /
+                # calendar regression must not silently disable fill
+                # monitoring for the whole day — server.py makes the same
+                # fallback for the orders session.
+                logger.warning(
+                    "equity_ext session check failed (%s); falling back to RTH gate",
+                    exc,
+                )
+                if market_hours is None:
+                    market_hours = self.is_market_hours()
+                return market_hours or self._market_was_open_within_grace(handler)
 
         if market_hours is None:
             market_hours = self.is_market_hours()
@@ -250,7 +260,9 @@ class MonitorDaemon:
                     logger.error(f"Handler {handler.name} error: {result.get('error')}")
             else:
                 if handler.is_due():
-                    logger.debug(f"Skipping handler outside market hours: {handler.name}")
+                    # REL-209 (R-583): a due handler gated off by its session
+                    # window is an operational fact, not a debug detail.
+                    logger.info(f"Skipping handler outside market hours: {handler.name}")
                 else:
                     logger.debug(f"Handler {handler.name} not due yet")
         

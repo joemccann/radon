@@ -423,16 +423,28 @@ def _write_db(
             "message": f"iv-spread row upsert failed: {exc}",
             "class": "db_write_failed",
         }
+    # REL-213 (R-575): the snapshot write and the heartbeat are SEPARATE
+    # trys — a Turso failure on the snapshot is exactly the dead-writer
+    # condition the heartbeat exists to surface, so it must not silence it.
+    snapshot_error: Optional[dict[str, Any]] = None
     try:
         writer.upsert_scan_snapshot(SERVICE, scan_time, payload)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[iv-spread] snapshot write failed: {exc}", file=sys.stderr)
+        snapshot_error = {
+            "message": f"iv-spread snapshot write failed: {exc}",
+            "class": "db_write_failed",
+        }
+    try:
+        combined = health_error or row_error or snapshot_error
         writer.record_service_health(
             SERVICE,
-            "ok" if (health_error is None and row_error is None) else "error",
+            "ok" if combined is None else "error",
             finished_at=scan_time,
-            error=health_error or row_error,
+            error=combined,
         )
     except Exception as exc:  # noqa: BLE001 - best-effort mirror
-        print(f"[iv-spread] db cache non-fatal: {exc}", file=sys.stderr)
+        print(f"[iv-spread] heartbeat non-fatal: {exc}", file=sys.stderr)
 
 
 # ── payload ───────────────────────────────────────────────────────
@@ -651,7 +663,27 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    payload = run(backfill=args.backfill)
+    try:
+        payload = run(backfill=args.backfill)
+    except Exception as exc:
+        # REL-213 (R-574, R-577): the auth pre-gate, the no-cache fallback
+        # raise and the no-common-session raise all escaped with no heartbeat.
+        try:
+            if writer is not None:
+                from datetime import datetime, timezone
+
+                writer.record_service_health(
+                    SERVICE,
+                    "error",
+                    finished_at=datetime.now(timezone.utc)
+                    .isoformat()
+                    .replace("+00:00", "Z"),
+                    error={"message": f"iv-spread run failed: {exc}"},
+                )
+        except Exception as record_exc:  # noqa: BLE001
+            print(f"[iv-spread] crash heartbeat non-fatal: {record_exc}", file=sys.stderr)
+        print(f"[iv-spread] failed: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
     if args.json:
         print(json.dumps(payload, indent=2))
     else:

@@ -66,6 +66,15 @@ restarting, not from the tab. Deleting a stored secret does not unset the
 already-exported value in the running process — it takes effect at the next
 FastAPI restart.
 
+Failure modes (REL-217/REL-218, 2026-09-03): any store-constructor failure —
+`SecretStoreError` or OSError-class (key-file path is a directory, permission
+denied) — surfaces as HTTP 503 `CREDENTIAL_STORE_UNAVAILABLE`, never a raw
+500. The setup wizard's `.env` materialization (`web/lib/setup/envFiles.ts`)
+is quote-continuation aware: multiline quoted values already in the file are
+preserved verbatim, and a value neither dotenv dialect can encode is dropped
+from the env write and reported as an `env_refused` outcome while setup still
+completes (the encrypted store keeps the value; REL-216).
+
 **Master key.** Resolution order: systemd credential
 `radon-secret-store-key` in `$CREDENTIALS_DIRECTORY` (production
 `LoadCredentialEncrypted=`), then the key file at

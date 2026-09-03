@@ -125,6 +125,15 @@ Only parameters listed here are accepted. `meta` column indicates pagination sup
 `off-exchange-volume` is weekly (FINRA ATS transparency). `short-interest` settles bi-monthly.
 `short-volume` is daily.
 
+The ATS venue-share sweep (`scripts/fetch_equibles_ats_venue_share.py`) bounds
+each ticker fetch with an abandoned **daemon thread** (never a
+ThreadPoolExecutor — CPython's atexit join on executor workers blocks
+interpreter exit behind a tarpitted socket, REL-196/R-528). A
+timeout/budget-dropped tail records a `state='error'` health row naming the
+tickers, and their prior-snapshot series carry forward into the payload
+(`carried_forward`) so a covered-only batch never silently replaces a fuller
+snapshot (R-558).
+
 ### 13F institutional
 
 | Endpoint | Params | meta | Response |

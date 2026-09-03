@@ -176,3 +176,13 @@ def index_preset_dir(tmp_path, monkeypatch):
 
 # The T-317 Turso strip (`_strip_turso_credentials`) was hoisted to
 # scripts/conftest.py so scripts/api/tests gets it too. T-368.
+
+
+@pytest.fixture(autouse=True)
+def _reset_flex_cash_flow_error_latch():
+    """REL-210's duplicate-ok suppression latch is process-lifetime by design
+    (one sftp batch = one process); tests share a process, so reset it."""
+    module = sys.modules.get("flex_delivery_ingest")
+    if module is not None and hasattr(module, "_CASH_FLOW_ERROR_LATCHED"):
+        module._CASH_FLOW_ERROR_LATCHED = False
+    yield

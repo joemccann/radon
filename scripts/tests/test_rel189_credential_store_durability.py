@@ -160,3 +160,26 @@ class TestBootSurvivesACorruptedRow:
         store.set_secret("UW_TOKEN", UW_SAMPLE, actor="operator")
         (tmp_path / "secret_store.key").unlink()  # key mismatch at construction
         assert self._bootstrap() == []
+
+
+class TestRel223EmptyDbWithBindingRecovers:
+    """REL-223 (R-595): all secrets deleted + lost key file used to mint a
+    new key over the OLD binding — every later write raised
+    SecretKeyMismatchError forever, recoverable only by deleting the DB."""
+
+    def test_minted_key_rebinds_when_no_secrets_exist(self, tmp_path):
+        store = _store(tmp_path)
+        store.set_secret("UW_TOKEN", UW_SAMPLE, actor="operator")
+        store.delete_secret("UW_TOKEN", actor="operator")
+        (tmp_path / "secret_store.key").unlink()
+
+        fresh = _store(tmp_path)  # mints: the DB holds no secrets
+        fresh.set_secret("UW_TOKEN", UW_SAMPLE, actor="operator")  # pre-fix: mismatch forever
+        assert fresh.get_secret("UW_TOKEN") == UW_SAMPLE
+
+    def test_binding_still_refuses_when_secrets_exist(self, tmp_path):
+        store = _store(tmp_path)
+        store.set_secret("UW_TOKEN", UW_SAMPLE, actor="operator")
+        (tmp_path / "secret_store.key").unlink()
+        with pytest.raises(SecretKeyMismatchError):
+            _store(tmp_path)

@@ -47,6 +47,7 @@ except Exception:
 
 from bpi_scan import ensure_member_history, install_sigterm_unwind
 from clients.index_constituents import resolve_constituents
+from utils.market_calendar import last_completed_session_date
 from db import writer
 from utils.atomic_io import atomic_save
 
@@ -251,6 +252,33 @@ def resolve_spx_constituents() -> tuple[list[str], str]:
     return tickers, source
 
 
+def fetch_spx_overlay_closes(
+    yahoo_fallback: dict[str, float], *, fetch_ib=None
+) -> tuple[dict[str, float], str]:
+    """IB-first for the single-symbol SPX overlay (rule 7 / R-556).
+
+    The ~500-member constituent sweep stays the sanctioned bulk-Yahoo
+    deviation, but ONE daily index series does not share its pacing rationale.
+    UW has no SPX daily-close series (fetch_credit_spread.UW_SKIP), so the
+    ladder is IB then the sweep's own ^GSPC bars. IB bars are merged OVER the
+    fallback so the long Yahoo history keeps the chart populated.
+    """
+    ib_fn = fetch_ib
+    if ib_fn is None:
+        from fetch_credit_spread import fetch_ib_closes as ib_fn
+    try:
+        series = (ib_fn(["SPX"]) or {}).get("SPX") or {}
+    except Exception as exc:  # noqa: BLE001 — the overlay must never kill the sweep
+        _log(f"overlay: IB rung failed ({exc}); using swept ^GSPC")
+        series = {}
+    if not series:
+        return dict(yahoo_fallback), "yahoo"
+    last_complete = last_completed_session_date()
+    merged = dict(yahoo_fallback)
+    merged.update({d: c for d, c in series.items() if d <= last_complete})
+    return merged, ("ib+yahoo" if yahoo_fallback else "ib")
+
+
 # ── persistence ───────────────────────────────────────────────────
 
 def persist_result(payload: dict[str, Any], rows: list[dict[str, Any]]) -> None:
@@ -266,7 +294,9 @@ def persist_result(payload: dict[str, Any], rows: list[dict[str, Any]]) -> None:
     if rows:
         writer.upsert_ma_ratio_rows(rows, recorded_at=scan_time)
     writer.upsert_scan_snapshot(SERVICE, scan_time, payload)
-    writer.record_service_health(SERVICE, "ok", finished_at=scan_time)
+    # R-557: finished_at is WRITE time — the sweep can spend up to
+    # SWEEP_BUDGET_S between scan_time and this line.
+    writer.record_service_health(SERVICE, "ok", finished_at=_now_iso())
     _write_json_cache(payload)
 
 
@@ -294,7 +324,9 @@ def run(*, backfill: bool = False, no_db: bool = False) -> dict[str, Any]:
         no_db=no_db,
         sweep_deadline=sweep_deadline,
     )
-    spx_closes = closes.pop(SPX_OVERLAY_SYMBOL, {})
+    spx_closes, overlay_source = fetch_spx_overlay_closes(
+        closes.pop(SPX_OVERLAY_SYMBOL, {})
+    )
 
     member_flags = {
         member: sma_flags_series(series)
@@ -320,10 +352,21 @@ def run(*, backfill: bool = False, no_db: bool = False) -> dict[str, Any]:
             "constituents": constituents_source,
             "constituents_count": len(tickers),
             "member_close_fetches": fetch_counts,
+            "spx_overlay": overlay_source,
         },
     )
     if payload.get("missing"):
         _log(f"gated: {payload.get('reason')}; no rows/snapshot written")
+        # R-555: the gated path is a failure signal, not a quiet return — a
+        # dead Yahoo sweep lands here and must be diagnosable from the row.
+        if not no_db:
+            try:
+                writer.record_service_health(
+                    SERVICE, "error", finished_at=_now_iso(),
+                    error={"message": f"gated: {payload.get('reason')}"},
+                )
+            except Exception as exc:  # noqa: BLE001
+                _log(f"gated-heartbeat non-fatal: {exc}")
         return payload
     if no_db:
         _log("--no-db: skipping Turso writes and the JSON mirror")
@@ -353,7 +396,16 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    payload = run(backfill=args.backfill, no_db=args.no_db)
+    try:
+        payload = run(backfill=args.backfill, no_db=args.no_db)
+    except Exception as exc:
+        # R-555: run()/main() had no exception handling — a Turso failure or
+        # crash wrote nothing at all.
+        from db.service_cycle import record_failed_cycle
+
+        record_failed_cycle(SERVICE, exc)
+        print(f"\nMA RATIO — failed: {exc}", file=sys.stderr)
+        return 1
     if args.json:
         print(json.dumps(payload, indent=2))
     else:

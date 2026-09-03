@@ -208,3 +208,57 @@ class TestParseYahooChart:
         assert parse_yahoo_chart({}) == {}
         assert parse_yahoo_chart({"chart": {"result": []}}) == {}
         assert parse_yahoo_chart({"chart": {"result": [{}]}}) == {}
+
+
+class TestRel177GapsAndSettled:
+    """REL-177 (R-492, R-493): a vendor hole is a BREAK, and today's
+    in-progress bar is flagged unsettled and excluded from current."""
+
+    def test_a_none_close_breaks_the_streak_and_is_counted(self):
+        from utils.streaks import build_streaks_payload
+
+        payload = build_streaks_payload(
+            "SPY",
+            {"2026-08-03": 10.0, "2026-08-04": 11.0, "2026-08-05": None, "2026-08-06": 12.0},
+            source="uw",
+            scan_time="2026-09-03T00:00:00Z",
+        )
+        assert payload["gaps"] == 1
+        assert payload["current"]["streak"] == 0, (
+            "day t+1 was compared against t-1 across the hole, extending a "
+            "streak the tape never had"
+        )
+
+    def test_todays_in_progress_bar_is_unsettled_and_excluded_from_current(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        from utils.streaks import build_streaks_payload
+
+        et_now = datetime(2026, 9, 2, 11, 0, tzinfo=ZoneInfo("America/New_York"))
+        payload = build_streaks_payload(
+            "SPY",
+            {"2026-08-31": 10.0, "2026-09-01": 11.0, "2026-09-02": 12.0},
+            source="ib",
+            scan_time="2026-09-02T15:00:00Z",
+            now=et_now,
+        )
+        assert payload["current"]["date"] == "2026-09-01"
+        assert payload["series"][-1]["settled"] is False
+
+    def test_a_completed_session_stays_settled(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        from utils.streaks import build_streaks_payload
+
+        et_now = datetime(2026, 9, 2, 18, 0, tzinfo=ZoneInfo("America/New_York"))
+        payload = build_streaks_payload(
+            "SPY",
+            {"2026-08-31": 10.0, "2026-09-01": 11.0, "2026-09-02": 12.0},
+            source="ib",
+            scan_time="2026-09-02T22:05:00Z",
+            now=et_now,
+        )
+        assert payload["current"]["date"] == "2026-09-02"
+        assert all(row.get("settled", True) for row in payload["series"])

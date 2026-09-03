@@ -29,7 +29,7 @@ export type HeadlinesStatus = "connecting" | "live" | "down";
 
 type ClientFrame =
   | { type: "snapshot"; items: Headline[] }
-  | { type: "headline"; item: Headline }
+  | { type: "headline"; item: Headline; degraded?: boolean }
   | { type: "status"; state: string };
 
 export function useHeadlines() {
@@ -63,7 +63,9 @@ export function useHeadlines() {
           next.push(frame.item);
           return next.slice(-50);
         });
-        setStatus("live");
+        // REL-182 (R-513): a flash-REST-fed row (degraded) updates the tape
+        // but must not clear the down banner — the upstream is still dead.
+        if (frame.degraded !== true) setStatus("live");
         return;
       }
       if (frame.type === "status" && frame.state === "upstream-down") {

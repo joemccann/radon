@@ -236,7 +236,9 @@ class TestClassifyProbes:
                 }
             ),
         )
-        assert result == {"ok": 1, "detail": "edge_ok:aggregate_degraded"}
+        assert result["ok"] == 1
+        # REL-181 (R-510): the verdict now names the degraded dependency.
+        assert result["detail"].startswith("edge_ok:aggregate_degraded")
 
     def test_schema_v2_degraded_with_ok_true_is_contradictory(self):
         result = probe.classify_probes(
@@ -263,7 +265,9 @@ class TestClassifyProbes:
             units_age_secs=0,
         )
         result = probe.classify_probes(_ok_probe(), _ok_probe(payload=degraded))
-        assert result == {"ok": 1, "detail": "edge_ok:aggregate_degraded"}
+        assert result["ok"] == 1
+        # REL-181 (R-510): the verdict now names the degraded dependency.
+        assert result["detail"].startswith("edge_ok:aggregate_degraded")
 
     def test_newsfeed_unit_down_payload_keeps_edge_ok(self):
         # 2026-08-29 page 0b7726f8: newsfeed flap must not write aggregate_down.
@@ -295,7 +299,9 @@ class TestClassifyProbes:
         )
         assert degraded["overall_state"] == "degraded"
         result = probe.classify_probes(_ok_probe(), _ok_probe(payload=degraded))
-        assert result == {"ok": 1, "detail": "edge_ok:aggregate_degraded"}
+        assert result["ok"] == 1
+        # REL-181 (R-510): the verdict now names the degraded dependency.
+        assert result["detail"].startswith("edge_ok:aggregate_degraded")
 
     def test_newsfeed_unit_starting_payload_keeps_edge_ok(self):
         # 2026-08-29 page 344f0592: activating sidecar must not write aggregate_down.
@@ -327,7 +333,9 @@ class TestClassifyProbes:
         )
         assert degraded["overall_state"] == "degraded"
         result = probe.classify_probes(_ok_probe(), _ok_probe(payload=degraded))
-        assert result == {"ok": 1, "detail": "edge_ok:aggregate_degraded"}
+        assert result["ok"] == 1
+        # REL-181 (R-510): the verdict now names the degraded dependency.
+        assert result["detail"].startswith("edge_ok:aggregate_degraded")
 
     def test_valid_schema_v2_down_is_distinct_from_invalid_payload(self):
         result = probe.classify_probes(

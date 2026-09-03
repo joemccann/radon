@@ -79,8 +79,13 @@ export function isFlowReportStale(
 
   const marketOpen = marketOpenOverride ?? isMarketOpenNow(now);
   if (marketOpen) return ageMs > MARKET_HOURS_TTL_MS;
-  if (ageMs > AFTER_HOURS_TTL_MS) return true;
-  return !postdatesLastClose(parsed, now);
+  // REL-184 (R-516): a report that postdates the last close cannot go stale
+  // off-hours — no newer session data exists. Checking the flat 8h TTL first
+  // judged every Friday EOD report stale all weekend, so every weekend page
+  // view launched a 300s scan that could not produce anything new.
+  if (postdatesLastClose(parsed, now)) return false;
+  // Predates the last close: a newer session exists, the report is stale.
+  return true;
 }
 
 export const FLOW_REPORT_STALENESS = {

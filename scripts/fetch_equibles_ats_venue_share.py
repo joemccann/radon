@@ -61,7 +61,7 @@ import json
 import statistics
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+import threading
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Optional
@@ -547,6 +547,14 @@ def _write_json_cache(payload: dict[str, Any]) -> None:
     ATS_VENUE_SHARE_JSON.write_text(json.dumps(payload, indent=2))
 
 
+def _read_prior_payload() -> Optional[dict[str, Any]]:
+    """The last written snapshot, for carrying a dropped tail forward."""
+    try:
+        return json.loads(ATS_VENUE_SHARE_JSON.read_text())
+    except Exception:  # noqa: BLE001 — absent/corrupt prior is just "no prior"
+        return None
+
+
 # ── orchestration ─────────────────────────────────────────────────
 
 def watchlist_tickers() -> list[str]:
@@ -616,20 +624,26 @@ def _fetch_ticker_bounded(
     Python cannot kill it — and the caller must not reuse ``client`` afterward
     because the shared Session may still be mid-request.
     """
-    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"ats-{ticker}")
-    future = executor.submit(_fetch_ticker, client, ticker, start_date, end_date)
-    try:
-        return future.result(timeout=max(timeout_s, 0.001))
-    except FuturesTimeoutError as exc:
-        executor.shutdown(wait=False, cancel_futures=True)
-        raise TimeoutError(
-            f"{ticker}: fetch exceeded {timeout_s:.0f}s wall-clock"
-        ) from exc
-    finally:
-        # Only wait when the future finished; a timed-out worker is retained
-        # until process exit (same contract as monitor_daemon hard deadlines).
-        if future.done():
-            executor.shutdown(wait=True)
+    # REL-196 (R-528): a daemon thread, never a ThreadPoolExecutor. CPython
+    # registers an atexit join for executor workers, so an abandoned tarpitted
+    # worker blocked interpreter exit until systemd's TimeoutStartSec SIGTERM
+    # (verified on 3.13; same fix as the filings sibling, cc53c467).
+    box: dict[str, Any] = {}
+
+    def worker() -> None:
+        try:
+            box["value"] = _fetch_ticker(client, ticker, start_date, end_date)
+        except Exception as exc:  # noqa: BLE001 — re-raised on the joiner
+            box["exc"] = exc
+
+    thread = threading.Thread(target=worker, name=f"ats-{ticker}", daemon=True)
+    thread.start()
+    thread.join(timeout=max(timeout_s, 0.001))
+    if thread.is_alive():
+        raise TimeoutError(f"{ticker}: fetch exceeded {timeout_s:.0f}s wall-clock")
+    if "exc" in box:
+        raise box["exc"]
+    return box["value"]
 
 
 def run(
@@ -794,15 +808,51 @@ def run(
         )
         return {**payload, "partial": True}
 
+    # REL-196 (R-558): a budget/timeout-dropped tail must neither vanish from
+    # the snapshot nor hide inside an `ok` row's error payload (the watchdog
+    # error bucket fires only on state == 'error'). Carry the prior snapshot's
+    # series for the dropped tickers forward — their rows are date-stamped, so
+    # nothing is presented as newer than it is — and record the drop as error.
+    dropped = sorted(
+        {e["ticker"] for e in errors if e.get("code") in ("timeout", "budget")}
+    )
+    if dropped:
+        prior = _read_prior_payload() or {}
+        prior_series = prior.get("series") or {}
+        carried = [
+            t for t in dropped
+            if t not in series_by_ticker and prior_series.get(t)
+        ]
+        if carried:
+            merged = dict(series_by_ticker)
+            for t in carried:
+                merged[t] = prior_series[t]
+            payload = {**build_payload(merged, scan_time, errors),
+                       "carried_forward": carried}
     _write_db_cache(payload, scan_time)
     _write_json_cache(payload)
-    _record_health(
-        "ok",
-        scan_time,
-        error={"requested": len(universe), "covered": covered, "failed": len(errors)}
-        if errors
-        else None,
-    )
+    if dropped:
+        _record_health(
+            "error",
+            scan_time,
+            error={
+                "message": (
+                    f"dropped tail: {len(dropped)} ticker(s) deferred by "
+                    f"timeout/budget: {', '.join(dropped)}"
+                ),
+                "requested": len(universe),
+                "covered": covered,
+                "failed": len(errors),
+            },
+        )
+    else:
+        _record_health(
+            "ok",
+            scan_time,
+            error={"requested": len(universe), "covered": covered, "failed": len(errors)}
+            if errors
+            else None,
+        )
     return payload
 
 
