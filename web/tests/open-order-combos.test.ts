@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { ExecutedOrder, OpenOrder, PortfolioPosition } from "../lib/types";
-import { buildExecutedGroupDescription, buildOpenOrderDisplayRows, resolveOpenOrderComboPrice } from "../lib/openOrderCombos";
+import {
+  buildExecutedGroupDescription,
+  buildOpenOrderDisplayRows,
+  resolveOpenOrderComboPrice,
+  resolveOpenOrderComboPriceData,
+} from "../lib/openOrderCombos";
 import type { PriceData } from "../lib/pricesProtocol";
 
 function makeOrder(overrides: Partial<OpenOrder> & { symbol?: string; right?: string; strike?: number; expiry?: string } = {}): OpenOrder {
@@ -266,6 +271,30 @@ describe("buildOpenOrderDisplayRows", () => {
 });
 
 describe("resolveOpenOrderComboPrice", () => {
+  it("uses the portfolio stale-last policy and carries calculated provenance", () => {
+    const longPut = makeOrder({ orderId: 1, action: "BUY", right: "P", strike: 145, totalQuantity: 150 });
+    const shortPut = makeOrder({ orderId: 2, action: "SELL", right: "P", strike: 150, totalQuantity: 150 });
+    const prices: Record<string, PriceData> = {
+      AAPL_20260417_145_P: makePrice({
+        symbol: "AAPL_20260417_145_P",
+        last: 9.6,
+        bid: 9.16,
+        ask: 9.6,
+      }),
+      AAPL_20260417_150_P: makePrice({
+        symbol: "AAPL_20260417_150_P",
+        last: 11.2,
+        bid: 11.3,
+        ask: 11.36,
+      }),
+    };
+
+    expect(resolveOpenOrderComboPriceData([longPut, shortPut], prices)).toEqual({
+      price: -1.73,
+      isCalculated: true,
+    });
+  });
+
   it("computes signed net quote from option legs", () => {
     const shortPut = makeOrder({ orderId: 1, action: "SELL", right: "P", strike: 150, totalQuantity: 10 });
     const longCall = makeOrder({ orderId: 2, action: "BUY", right: "C", strike: 165, totalQuantity: 10 });
