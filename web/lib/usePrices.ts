@@ -699,7 +699,13 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
 
     const strategy = reconnectStrategyRef.current;
     if (!strategy.canRetry()) {
+      // REL-197 (R-529): exhaustion is tab-lifetime now (the one usePrices
+      // instance lives in root Providers), so last-known marks must not keep
+      // rendering as live. Clearing the map routes every consumer to its
+      // existing missing/"---" treatment; visibility/online/publish recovery
+      // below re-arms the strategy.
       setError("Max reconnect attempts reached");
+      setPrices({});
       return;
     }
 
@@ -724,6 +730,35 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
     reconnectStrategyRef.current.reset();
     connect();
   }, [connect]);
+
+  // REL-197 (R-529): recover a closed/exhausted socket on the signals a
+  // long-lived tab actually gets — returning to the foreground, the network
+  // coming back, and a page publishing new symbols. Guarded to the closed
+  // state with no backoff timer pending, so normal backoff is untouched.
+  const recoverIfClosed = useCallback(() => {
+    if (!enabled || !mountedRef.current) return;
+    if (connStateRef.current !== "closed") return;
+    if (reconnectTimeoutRef.current !== null) return;
+    const { symbols: syms, contracts: cts, indexes: idxs } = desiredRef.current;
+    if (syms.length === 0 && cts.length === 0 && idxs.length === 0) return;
+    reconnect();
+  }, [enabled, reconnect]);
+  const recoverIfClosedRef = useRef(recoverIfClosed);
+  recoverIfClosedRef.current = recoverIfClosed;
+
+  useEffect(() => {
+    if (typeof document === "undefined" || typeof window === "undefined") return;
+    const onVisible = () => {
+      if (document.visibilityState === "visible") recoverIfClosedRef.current();
+    };
+    const onOnline = () => recoverIfClosedRef.current();
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("online", onOnline);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("online", onOnline);
+    };
+  }, []);
 
   // ---------------------------------------------------------------------------
   // getSnapshot — isolated WS, unchanged
@@ -862,6 +897,10 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
     const ws = wsRef.current;
     if (ws && connStateRef.current === "open") {
       syncSubscriptions(ws);
+    } else if (connStateRef.current === "closed") {
+      // REL-197 (R-529): a page publishing a changed desired set while the
+      // socket sits exhausted is a recovery signal, not a no-op.
+      recoverIfClosedRef.current();
     }
     // If still connecting, onopen will flush via syncSubscriptions
   }, [symbolHash, contractHash, indexHash, syncSubscriptions]);
