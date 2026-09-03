@@ -630,18 +630,13 @@ class TestUpstreamReadsLeaveTheEventLoop:
 
         seen: list = []
 
-        class FakeResponse:
-            status_code = 200
-
-            def iter_content(self, chunk_size):
-                yield b'{"ok": true}'
-
-            def close(self):
-                pass
-
         def fake_get(url, headers=None, timeout=None, stream=None):
             seen.append(threading.current_thread())
-            return FakeResponse()
+            return SimpleNamespace(
+                status_code=200,
+                iter_content=lambda chunk_size: iter([b'{"ok": true}']),
+                close=lambda: None,
+            )
 
         monkeypatch.setattr(requests, "get", fake_get)
         return seen
