@@ -147,7 +147,7 @@ Recorded here only in case §1 is overridden and a second query id is created:
 
 ### a. Pull the amended query once and confirm the Transfers section appears
 
-Run **after 17:15 ET** (so `cash_flow_sync`'s daily 17:00 ET call has already completed) or **before 16:00 ET**, never in the 17:00–17:10 ET window.
+Run outside the scheduled consumers' windows in §7 (no daemon `cash_flow_sync` SendRequest exists any more; routine ingest is sFTP).
 
 ```bash
 cd /Users/joemccann/dev/apps/finance/radon/.claude/worktrees/perf-pnl-refactor
@@ -294,8 +294,8 @@ SELECT report_date, amount, flow_type FROM external_flows ORDER BY report_date;
 
 | Consumer | When | Requests |
 |---|---|---|
-| `cash_flow_sync` (monitor_daemon handler) | 17:00 ET, trading days only | 1 SendRequest + polling |
-| `radon-perf-twr.timer` → builder | 20:45 ET ±5min randomized delay, Mon–Fri | 1 SendRequest (document reused for flows) |
+| `cash_flow_sync` | not scheduled since 2026-09-02; runs `--from-file` inside `flex_delivery_ingest` after `radon-flex-pull.timer` (Tue..Sat 07:30 ET) | 0 (sFTP delivery) |
+| `radon-perf-twr.timer` → builder | Tue..Sat 07:30 ET | 0 by default (`sendrequest` off; statement in hand) |
 
 **Sequencing rules for the manual work:**
 

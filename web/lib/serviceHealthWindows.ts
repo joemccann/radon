@@ -62,7 +62,7 @@ const DAY = 24 * HOUR;
  *   portfolio-sync       10m open, 3d closed   (writer: scripts/ib_sync.py)
  *   orders-read-compare  10m open, 3d closed   (writer: web/app/api/orders/route.ts)
  *   journal-sync         10m always
- *   cash-flow-sync       25h open, 4d closed  (trading-day only; skips weekends)
+ *   cash-flow-sync       3d open, 4d closed   (sFTP ingest, Tue..Sat 07:30 ET)
  *   fill-monitor         5m open, 3d closed
  *   flex-token-check     25h (daily)
  *   flex-web-service     8d on-demand (1025 lockout heartbeat only)
@@ -130,10 +130,9 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // catch a missed weekday run. Pulls get_fills() from IB Gateway.
   "execution-sweep": { open: 26 * HOUR, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: true },
 
-  // ``fill-monitor`` only runs during market hours via the monitor
-  // daemon. Its 1h closed window assumed the daemon fired during
-  // extended hours too, which it does not (DST fix 2026-05-14 confirmed
-  // the market-hours gate). Widen ``extended`` + ``closed`` to cover the
+  // ``fill-monitor`` runs 04:00-20:00 ET via the monitor daemon
+  // (session_window="equity_ext", scripts/monitor_daemon/handlers/
+  // fill_monitor.py). ``extended`` + ``closed`` cover the overnight and
   // worst-case weekend gap.
   "fill-monitor": { open: 5 * MIN, extended: 3 * DAY, closed: 3 * DAY, category: "scheduled", requires_ib: true },
   // position-reconcile — 30-min RTH IB-vs-snapshot position drift check

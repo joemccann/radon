@@ -119,7 +119,7 @@ FastAPI timeouts now match the script deadlines: `/orders/place` is 25s subproce
 
 ## Operator Preferences Contract (`app_preferences.py`)
 
-The `/preferences` page makes the order-limit caps and scanner worker counts
+The profile Preferences tab (`/profile?tab=preferences`; `/preferences` redirects there) makes the order-limit caps and scanner worker counts
 tunable at runtime. `order_limits.py` keeps its public functions but delegates
 every lookup here. Rules that must not be relaxed:
 
