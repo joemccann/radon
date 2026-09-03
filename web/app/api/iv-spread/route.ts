@@ -37,7 +37,7 @@ const IV_SPREAD_MAX_AGE_MS = 48 * 60 * 60_000;
 // so freshness must ride the DATA age (as_of, a YYYY-MM-DD) or the 48h gate
 // can never trip during a long IB outage — machine consumers saw 10-day-old
 // data with a live scan_time. Non-stale payloads keep scan_time freshness.
-function ivSpreadContentTimestampMs(data: Record<string, unknown>, scanTime: unknown): number {
+function ivSpreadContentTimestampMs(data: Record<string, unknown>, scanTime: unknown): number | null {
   if (data.status === "stale_source" && typeof data.as_of === "string" && data.as_of) {
     return contentTimestampMs(`${data.as_of}T22:15:00Z`);
   }
