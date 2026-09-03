@@ -300,7 +300,7 @@ container healthcheck probes internal port `4001` for live and `4002` for paper.
 The deploy script writes only literal `NEXT_PUBLIC_*` lines to `web/.env` and
 sets mode `0600`. Server-side build values are parsed without interpolation and
 exist only in the build process environment. The production cloud `.env` must
-also be mode `0600`. The script does **not** create a root `.env` in the radon
+be mode `0640` root:radon. The script does **not** create a root `.env` in the radon
 directory.
 
 ---

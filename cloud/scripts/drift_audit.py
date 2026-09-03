@@ -164,11 +164,13 @@ def set_cloud_root(root: Path) -> None:
 def load_env_keys(path: Path, keys: tuple[str, ...]) -> dict[str, str]:
     """Read an allowlisted set of keys out of an env file, as DATA.
 
-    This process runs as root while the file is 0600 radon:radon, so the file's
-    contents are attacker-influenced from root's point of view. Only the named
-    keys are returned, and nothing here touches os.environ -- an appended
-    LD_PRELOAD or PATH line is read past, not applied. Literal parsing (no
-    shell) also keeps a `$VAR` in a secret from being expanded.
+    This process runs as root. The canonical file is 0640 root:radon, but the
+    compatibility path lives under /home/radon, which the unprivileged account
+    can replace, so the file's contents are attacker-influenced from root's
+    point of view. Only the named keys are returned, and nothing here touches
+    os.environ -- an appended LD_PRELOAD or PATH line is read past, not
+    applied. Literal parsing (no shell) also keeps a `$VAR` in a secret from
+    being expanded.
     """
     values: dict[str, str] = {}
     try:

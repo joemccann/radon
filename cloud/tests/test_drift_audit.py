@@ -277,11 +277,12 @@ class TestCloudRootInput:
 
 
 class TestEnvKeysAreReadAsData:
-    """Root reads two keys out of the radon-owned env file; it never inherits it.
+    """Root reads two keys out of the env file; it never inherits it.
 
     systemd would merge every line of an EnvironmentFile into root's
-    environment, so an appended LD_PRELOAD or PATH line in a 0600 radon:radon
-    file would be root code execution on the next timer tick.
+    environment, so an appended LD_PRELOAD or PATH line on a path the
+    unprivileged account can replace would be root code execution on the
+    next timer tick.
     """
 
     def _env_file(self, tmp_path, body):
