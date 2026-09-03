@@ -679,3 +679,61 @@ Outcome for tonight: `VALIDATING` pending remediate (CIP-005 stage 2).
 Residual bottleneck after stage 2: python gate ~110-115s and web gate ~109s
 co-wall, then prestage + deploy 84-96s floor with a 60s gateway-wait p95
 tail (CIP-006), with CIP-004 the next p50 cut.
+
+### 2026-09-03 - audit - branch `ci-performance/2026-09-03`
+
+- Audited range: `db25990d..0202e32d` (17 commits: PRs #240-#255 plus two
+  direct pushes). Runner state: dedicated clone, exclusive lock
+  `/tmp/radon-ci-performance.lock` owned by this cycle, clean tree, no
+  orphaned stash.
+- **CIP-005 stage 2 was selected on 09-02 but never implemented**: PR #241
+  merged as the audit ledger only; `.github/workflows/ci.yml` and
+  `test_ci_deploy_concurrency.py` are unchanged in the whole range (range
+  has zero `.github/` diffs). The 09-02 remediate phase produced no ledger
+  entry, no commit, and no PR - a silent remediate no-op. Stage 2 carries
+  forward as tonight's remediate item unchanged.
+- Changed CI/build/deploy surfaces: none. Changed test surfaces: 9 new
+  python test files (notably `test_rel189_*` and `test_rel191_*` land in
+  `scripts-rs`, adding work to the already-heaviest movable shard, and
+  `test_iv_spread` lands in `scripts-i`). Union contract remains fail-closed;
+  gate closure re-verified locally: 78 contract tests passed
+  (`test_ci_deploy_concurrency` + `test_ci_gate_integrity` +
+  `test_path_filter`).
+
+**Samples (15 `push` runs on `main` in range, 2026-09-02T13:43Z ..
+2026-09-02T23:34Z; 12 success, 1 failure, 2 cancelled; queue delay 2-4s).**
+
+| Class / cache | n | p50 | p95 | min-max | Notes |
+|---|---|---|---|---|---|
+| mixed/py, warm | 11 | 267s | ~400s | 231-408s | 390s+408s runs follow back-to-back merges (gateway wait) |
+| web, warm | 1 | 262s | - | - | 33667322880 |
+
+**Critical path (33695685875, 252s, mixed warm):** `Path filter` 7s ->
+`pytest (scripts-rs|scripts-npsz)` 98s (end +108) -> `pytest coverage
+ratchet` 19s (end +130) -> `Prestage` 23s -> `Deploy to VPS` 89s -> 248s.
+Identical shape to 09-02: the npsz/rs pair is still the python-gate wall,
+web gate ends +85, exactly what stage 2 targets. Deploy tail cluster
+(gateway wait) reproduced on 33682386903 (390s) and 33694683198 (408s),
+both minutes after a prior deploy - CIP-006 evidence grows again.
+
+#### CIP-005 stage 2 - RE-SELECTED for tonight's remediate
+
+Plan, predicted savings, safety rails, revert trigger, and validation set
+are unchanged from the 2026-09-02 entry (moves: `test_we*` -> scripts-gh,
+`test_ru*` -> rest, `test_ro*` -> scripts-daemons; predicted gate-auth
+~135s -> ~110-113s, deploy-clean mixed p50 -20 to -25s). The new
+`test_rel18*/19*` files stay in `scripts-rs` by glob (`test_r[!ou]*.py`)
+alongside rel137 - consistent with the plan.
+
+#### CIP-004, CIP-006 - DEFERRED, unchanged plans
+
+Outcome for tonight: `VALIDATING` pending remediate (CIP-005 stage 2).
+Residual bottleneck after stage 2: python/web gate co-wall ~110s, then the
+84-96s deploy floor with the 60s gateway-wait p95 tail (CIP-006).
+
+#### Lesson
+
+- 2026-09-03: a remediate phase can no-op silently (09-02 selected stage 2,
+  wrapper posted phases, but no commit/PR/ledger entry ever appeared). The
+  next audit must always diff `origin/main` for the previously selected
+  change before assuming it merged - which tonight's step 2 caught.
