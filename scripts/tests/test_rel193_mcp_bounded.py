@@ -60,14 +60,14 @@ class TestAsgiBodyCap:
             content=b"x",
             headers={
                 "content-type": "application/json",
-                "content-length": str(hosted.MAX_REQUEST_BODY_BYTES + 1),
+                "content-length": str(hosted.MAX_REQUEST_BYTES + 1),
                 "host": "127.0.0.1",
             },
         )
         assert resp.status_code == 413
 
     def test_an_oversized_streamed_body_never_buffers_fully(self, client):
-        big = b"x" * (hosted.MAX_REQUEST_BODY_BYTES + 65536)
+        big = b"x" * (hosted.MAX_REQUEST_BYTES + 65536)
         resp = client.post(
             "/mcp",
             content=big,
@@ -147,6 +147,7 @@ class TestJwksBounding:
             mcp_auth, "_jwks_gate",
             threading.BoundedSemaphore(mcp_auth.MAX_JWKS_INFLIGHT),
         )
+        monkeypatch.setattr(mcp_auth, "_jwks_refresh_after", 0.0)
 
     def _token_with_kid(self, kid: str) -> str:
         # _signing_key_for only reads the header, so an unsigned shell works.
@@ -158,6 +159,9 @@ class TestJwksBounding:
         calls = []
 
         class FailingClient:
+            def get_signing_keys(self):
+                return []
+
             def get_signing_key_from_jwt(self, token):
                 calls.append(1)
                 raise RuntimeError("kid not found")
@@ -187,6 +191,9 @@ class TestJwksBounding:
         calls = []
 
         class FailingClient:
+            def get_signing_keys(self):
+                return []
+
             def get_signing_key_from_jwt(self, token):
                 calls.append(1)
                 raise RuntimeError("kid not found")
@@ -196,7 +203,7 @@ class TestJwksBounding:
             token = self._token_with_kid(f"kid-{i % 5}")
             with pytest.raises(Exception):
                 mcp_auth._signing_key_for(token)
-        assert len(calls) <= 5, (
+        assert len(calls) == 1, (
             f"50 requests over 5 kids made {len(calls)} JWKS fetches"
         )
 
