@@ -8354,6 +8354,343 @@ newest **P2** stragglers (T-353…T-378) in value order. Evidence rows land in
    gain a duplicate final rung. Sibling loops adding the same retry will
    hit the same fixture assumption.
 
+## Delta audit 2026-09-03
+
+Range `39bf6f5e..HEAD` (`0202e32d`): 49 commits / 340 files / +41249−1406.
+Thursday run; no weekend-date hazard live. Five read-only agents (money-path,
+cash-flow pipeline, fragile+blast-radius, gate drift, MCP/loop-infra); every
+P0/P1 below was re-read at the cited lines by the lead before numbering.
+CI on `main` is green at this HEAD; the red runs visible at audit time were
+all on the reliability loop's PR branch. 27 new findings: 1 P0, 10 P1, 16 P2
+(T-382…T-408; T-408 numbered after the standing build-probe re-triage).
+
+### T-382 · P0 — `_mirror_ib_orders_snapshot` is a DELETE+INSERT replace of `open_orders` whose body has zero test coverage; a slow gateway writes an empty book as truth
+`c0fd81d6` added the mirror at `scripts/monitor_daemon/handlers/fill_monitor.py:285-305`,
+fired on every fill (`:272-274`). It calls `fetch_open_orders(client)` →
+`save_orders(...)`, a full snapshot replace of `open_orders`
+(`scripts/ib_orders.py:280-287`, DELETE+INSERT). The source set is
+`IBClient.get_open_orders` (`scripts/clients/ib_client.py:877-898`), which
+waits on `openOrderEndEvent` hard-capped at **0.5 s** and returns
+`openTrades()` regardless — a slow gateway on fill_monitor's short-lived
+connection returns `[]`, which the mirror writes as truth, wiping every
+working order off `/orders` during exactly the extended-hours window the
+commit exists to cover; the operator seeing an empty working book can
+double-place. The handler swallows failures by design (`:303-305`).
+Every test patches the method out: autouse disable at
+`scripts/tests/test_monitor_daemon/test_fill_monitor.py:22-31`; the three
+"mirror" tests assert only `mock_mirror.assert_called_once_with(...)`
+(`:196-201`, `:225`, `:238`). The body (fetch → build → save) never executes
+under test.
+**Red:** stub `fetch_open_orders_for_mirror → []` while
+`fetch_executed_orders_for_mirror` returns one fill; assert
+`save_orders_snapshot` is not called (or preserves the prior open set) —
+fails today. **Green:** an incomplete/timed-out book never replaces a
+non-empty snapshot; the guard is itself under test.
+
+### T-383 · P1 — stock close card derives a 100× wrong entry price; the new test asserts only `pnlPct`
+`085d2254` made `closedGroupCloseCash` non-null for stock-only groups
+(`web/components/WorkspaceSections.tsx:334-350`, STK ×1), feeding the
+fully-closed fallback `entryPrice = -(openCash / 100) / comboUnits`
+(`:474-481`) whose `/100` is an unconditional option multiplier. The
+commit's own fixture (AAPL 100 sh @ 252.50, `web/tests/share-pnl.test.ts:329-348`)
+yields `entryPrice = 2.475` against a true $247.50; before the commit the
+card rendered blank. The delta test asserts only `pnl`/`pnlPct` (`:346-348`);
+`entryPrice` is returned unasserted.
+**Red:** `expect(data.entryPrice).toBeCloseTo(247.5, 2)` on that fixture —
+fails today at 2.475. **Green:** line ~478 divides by a per-group multiplier
+(100 only when the group carries an OPT/BAG fill).
+
+### T-384 · P1 — mixed OPT+STK fill group blends ×100 and ×1 cash into one denominator, untested
+`closedGroupCloseCash` now accepts STK (`WorkspaceSections.tsx:334-337`);
+symbol-window bucketing (`:656-677`, ±60 s when no durable correlation)
+puts an option close and a stock close of the same ticker in one group,
+summing across multipliers into `closeCash` → `pnlPct`/`entryPrice`. Every
+delta test uses a homogeneous group (`share-pnl.test.ts` has exactly one
+`secType: "STK"` hit, `:340`).
+**Red:** a group of one OPT SLD (1 lot @ 5.00) + one STK SLD (100 sh @ 250)
+same minute, no `orderRef`; assert the exact expected `pnlPct` under
+per-fill multipliers — today it silently blends. **Green:** per-fill
+multiplier arithmetic pinned.
+
+### T-385 · P1 — the R-431 stock-cap fix is proved only against a hand-built fixture — the exact failure mode the commit blames
+`bdbe31de`'s `scripts/api/tests/test_modify_snapshot_contract_shape.py:33-58`
+hand-builds "a working stock order exactly as `fetch_open_orders`
+serializes it" without executing the serializer. Nothing binds
+`serialize_contract` (`scripts/ib_orders.py:80-121`) to
+`_working_order_shape`'s readers (`scripts/order_limits.py:329-334`).
+Consequences: serializer legs carry no `secType` key, so the STK-leg
+exemption at `order_limits.py:299-300` can never match a real snapshot leg
+(untested either way); and the only `/orders/modify` limit route test posts
+with no snapshot present (`scripts/api/tests/test_order_limits_routes.py:58-69`),
+exercising the `None` fallback, not the stock-cap branch — no full-URL wire
+test of the changed money-path gate (`scripts/api/server.py:3206-3216`).
+**Red:** (a) run `fetch_open_orders` over a stub ib_insync trade, feed the
+row to `_working_order_shape`, assert `("stock", None)` / `("combo", legs)`
+— reds the moment a serializer key moves; (b) route test: seed the snapshot
+with that serialized row, POST `/orders/modify` `{"orderId": 41,
+"newQuantity": 10000}` → 200 + `--new-quantity` spawn; 60000 → 422
+`ORDER_QTY_LIMIT`. **Green:** both pass end-to-end from serializer output.
+
+### T-386 · P1 — `Providers` keyless early-return silently drops the realtime tree; the e2e suite's socket coverage is ambient-env-dependent
+`web/components/Providers.tsx:18-23`: module-scope `CLERK_CONFIGURED`;
+when falsy everything below — including `RealtimePricesProvider` (`:35`),
+since 0f7e66bf the sole socket owner — is skipped.
+`web/playwright.config.ts:77-81` sets no Clerk key, so whether
+`ws-connection-stability.spec.ts`, `day-move-ib-daily-pnl.spec.ts`,
+`spread-price-bar.spec.ts` etc. exercise a live socket depends on the
+runner's ambient `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` / `web/.env`.
+**Red:** boot the e2e webServer with the key unset; a live-prices spec
+should fail loudly (today it degrades to placeholders). **Green:**
+`playwright.config.ts` pins a `pk_test_*` stub in `webServer.env` plus a
+contract test asserting the key is present in that env block.
+
+### T-387 · P1 — the setup-mode gate runs before the authless test bypass, 503/302-ing every e2e request on a keyless runner
+`web/middleware.ts:459` calls `handleSetupModeGate` before the authless
+bypass at `:470`; `isSetupMode` (`web/lib/setup/setupMode.ts:28-35`) is
+true whenever both Clerk keys are blank and `RADON_SETUP_COMPLETE` unset —
+so on a keyless runner every page 302s to `/setup` and every `/api/*` call
+503s `SETUP_MODE` before the Playwright token is consulted. Same root
+cause as T-386, different blast surface.
+**Red:** `handleSetupModeGate` on `/portfolio` with no Clerk env and a
+valid `x-radon-authless-test` header returns a redirect today. **Green:**
+bypass ordered ahead of (or excluded from) the setup gate, pinned in
+`web/tests/middleware-authless.test.ts`.
+
+### T-388 · P1 — `portfolio-startup-performance-contract.test.ts` mocks a hook the component no longer calls; the test silently flipped branches
+`web/tests/portfolio-startup-performance-contract.test.ts:92-93` mocks
+`@/lib/usePrices` with `connected: true`, then renders `WorkspaceShell` —
+which since 0f7e66bf calls `useRealtimePrices()`
+(`web/components/WorkspaceShell.tsx:17,267`) and, with no provider in the
+tree, receives the context default `connected: false`
+(`web/lib/RealtimePricesContext.tsx:76-90`). The mock is dead; the test
+now measures the disconnected branch while green. File untouched in the
+delta (blast radius).
+**Red:** assert the shell observed `connected === true` — fails today.
+**Green:** wrap in `RealtimePricesProvider` with a stubbed value, or mock
+`@/lib/RealtimePricesContext`.
+
+### T-389 · P1 — the new socket-ownership contract test asserts substrings, not its claims
+`web/tests/realtime-socket-ownership-contract.test.ts:28-35`: "mounted in
+the root Providers tree" is satisfied by the import line at
+`Providers.tsx:8` even though the JSX sits below the `CLERK_CONFIGURED`
+early return (blind to T-386); "exactly one production call site" asserts
+presence, not uniqueness (a second `usePrices()` caller stays green).
+**Red:** repo-wide scan for `/\busePrices\s*\(/` across `components/**` +
+`lib/**` expecting exactly one hit, plus an assertion that `Providers.tsx`
+has no early `return` before `RealtimePricesProvider` — both red today (the
+early return exists). **Green:** both pass on a fixed `Providers.tsx`.
+
+### T-390 · P1 — "store wins over `.env`" is a docstring with zero coverage
+`scripts/api/routes/credentials.py:320-350`: line 347 unconditionally
+`os.environ[name] = value`, but every test deletes the conflicting env var
+first (`scripts/tests/test_rel189_credential_store_durability.py:137-138`,
+`scripts/api/tests/test_credentials_routes.py:131,154,172`);
+`test_env_fallback_flagged` (`:117-129`) asserts display flags only.
+Inverting line 346 to `if value and name not in os.environ:` keeps the
+whole suite green while every rotated credential silently does nothing
+until reboot.
+**Red:** set `os.environ["UW_TOKEN"]="stale"`, store a different value,
+call `bootstrap_exported_names()`, assert env holds the stored value; add
+the PUT-path mirror (`credentials.py:266`). **Green:** passes; the
+inversion mutation reds it.
+
+### T-391 · P1 — the internet-facing `/mcp` route has no request-body bound and no test that would notice
+`cloud/caddy/Caddyfile:78-86` has timeouts only; no `request_body max_size`
+anywhere in the repo. Existing bounds are on the wrong axis
+(`scripts/mcp_hosted/server.py:65,100-102` upstream response;
+`auth.py:35,137` JWT header). `stateless_http=True` hands Starlette the
+full body pre-auth under `MemoryMax=512M` — an anonymous POST is a cheap
+OOM-kill. `cloud/tests/test_caddyfile.py` asserts six properties of the
+block, none about size; `scripts/tests/test_mcp_hosted.py:398-448` posts
+only small well-formed JSON-RPC. (Product defect flagged by the
+reliability loop's 2026-09-02 PR #243; this entry is the test-suite gap.)
+**Red:** a `test_caddyfile.py` assertion via the existing `handle_block()`
+helper that the `/mcp*` block contains `request_body max_size` ≤ 1MB, and a
+transport test posting an oversized body asserting 413 pre-execution —
+both fail today. **Green:** both pass, scoped to the `/mcp*` block.
+
+### T-392 · P2 — wall-clock sleep before interaction in a delta-modified e2e spec
+`web/e2e/mobile-order-ticket.spec.ts:329` `waitForTimeout(400)` to let the
+ATM auto-center settle before `cell.hover()` (the 600 ms at `:332` is a
+legitimate long-press dwell). **Red/green:** wait on the settled state
+(stable `boundingBox()` poll or a `data-atm-centered` testid).
+
+### T-393 · P2 — three new subprocess launches inherit the runner env while siblings in the same file pass `env=` (T-381 class)
+`scripts/tests/test_github_pr_output.py:199-204`,
+`scripts/tests/test_nightly_issue_format.py:280-295,898-902` — no `env=`;
+siblings at `:555,:656,:743,:826,:870,:993` pass it. No proven leak today
+(children are pure formatters), but any future `set -x`/traceback dumps
+`GH_TOKEN`/`ANTHROPIC_API_KEY` into `capture_output` and CI logs.
+**Red/green:** minimal explicit `env=` at the three sites.
+
+### T-394 · P2 — `regime-spy-subscription.test.ts` narrates the pre-0f7e66bf wiring and passes by string accident
+`web/tests/regime-spy-subscription.test.ts:31-33` asserts
+`source.toContain("symbols: allSymbols")`, now satisfied by
+`publishSubscriptions({ symbols: allSymbols, ... })` at
+`WorkspaceShell.tsx:278`, not a `usePrices` call. Whole file is source-text
+grep. **Red/green:** assert `publishSubscriptions` is the recipient,
+render-based.
+
+### T-395 · P2 — stale count comment in the regime tab test
+`web/tests/regime-rail.test.tsx:204` still reads "not all 22 REGIME_TABS"
+against 30 at `:44-49`/`:167-175`; third stale number in that comment's
+history. **Red/green:** derive the phrase from `REGIME_TABS.length` or
+drop the number.
+
+### T-396 · P2 — the "applied duplicate heartbeats ok" test asserts a contract the source does not implement
+`scripts/flex_delivery_ingest.py:99-115` heartbeats `ok` for any status
+`!= "in_progress"`, including `None` (lost claim + vanished row);
+`scripts/tests/test_cash_flows_from_sftp_delivery.py:124-138` stubs
+`"applied"` and is green on the weaker implementation.
+**Red:** `flex_delivery_status → None` asserting `heartbeats == []` fails
+today; passes once the source reads `== "applied"`.
+
+### T-397 · P2 — daemon-registration test is a module-wide AST grep that misses three registration shapes
+`test_cash_flows_from_sftp_delivery.py:37-49` collects only
+`register(Name(...))` literals: false-greens on `h = …; register(h)`,
+`register(handlers.CashFlowSyncHandler())`, and factory registration.
+**Red:** build the daemon and assert `"cash-flow-sync" not in
+{h.service_name for h in daemon.handlers}` — reds on all three variants.
+
+### T-398 · P2 — the capacity-shed marker is a byte literal in three places; cross-boundary drift is invisible
+`scripts/api/server.py:465` defines it; `scripts/run_garch_refresh.sh:113`
+and `scripts/tests/test_garch_capacity_shed_retry.py:36` (plus
+`test_leap_capacity_shed_retry.py:43`,
+`test_flow_refresh_shed_honesty.py:190,264`,
+`test_leap_garch_no_duplicate_scan.py:85`) re-declare it. Changing
+`server.py` alone regresses garch/leap/flow to "indeterminate → P1 page"
+with all suites green. **Red:** a parity test asserting
+`server._CAPACITY_SHED_MARKER` equals the string the shell scripts grep.
+
+### T-399 · P2 — `test_leap_garch_refresh_defaults.py:33-36` additions are source-string mirrors
+Asserting the shell script contains its own text; the behavioural
+equivalent exists at `test_garch_capacity_shed_retry.py:244-261`. The one
+marginal value (240 s default fits `TimeoutStartSec=3900`) belongs as
+arithmetic against the unit file.
+
+### T-400 · P2 — no python↔TypeScript parity test for the widened `cash-flow-sync` health window
+`scripts/watchdog/services.py:82-88` and
+`web/lib/serviceHealthWindows.ts:118-125` hand-mirror `open: 3 * DAY`; the
+parity test at `scripts/tests/test_cadence_and_growth_bounds.py:144-151`
+covers `SIGNALS_SERVICES` only. Each side has its own 73 h test, but the
+two can diverge with both suites green. **Red/green:** add
+`cash-flow-sync` to the parametrized parity set.
+
+### T-401 · P2 — ~57 tests pin the scheduling behaviour of a handler production no longer registers
+`scripts/monitor_daemon/run.py:107-112` dropped `CashFlowSyncHandler`
+(module marked "NOT REGISTERED since 2026-09-02" at
+`handlers/cash_flow_sync.py:3-10`), but
+`test_cash_flow_sync_cadence.py` / `_exit_codes.py` /
+`_timeout_retry_budget.py` still assert the 08:00 ET window, breaker and
+backoff of a path never entered. Green while cash flows are broken.
+**Red/green:** trim to the R-104/R-108/R-109 embargo contracts or mark the
+files as covering a retired path.
+
+### T-402 · P2 — mtime-tie flake in the new prune test on coarse-mtime filesystems
+`scripts/tests/test_flex_sftp_pull.py:519-531` writes five files 10 ms
+apart; `retain_newest_gpg` (`scripts/flex_sftp_pull.py:233-238`) sorts
+`iterdir()` by `st_mtime` — 1 s-granularity filesystems tie and `iterdir`
+order decides the exact-name assertion. APFS/ext4 fine; latent CI-image
+dependency. **Red/green:** set explicit distinct mtimes via `os.utime`.
+
+### T-403 · P2 — the three cross-tree contract jobs resolved `skipped` on the gating main run while listed in `deploy.needs`
+Run 33695685875 (`0202e32d`): `Cross-tree contracts (root)/(cloud)/(scripts)`
+all skipped (path-filter-driven empty set, `ci.yml:172,196,217`) yet deploy
+ran via the `!cancelled() && result == 'success'` idiom (`ci.yml:914-917`).
+Not new drift; flagged because a routinely-skipping `needs:` entry is
+indistinguishable from one that stopped working. **Red/green:** a contract
+asserting the skip reason is the path filter (outputs empty), not a broken
+invocation.
+
+### T-404 · P2 — the `MAX_RESPONSE_BYTES` truncation raise has never executed
+`scripts/mcp_hosted/server.py:100-102` raises `ValueError` inside a tool
+body; every test injects `FakeHttp` (`test_mcp_hosted.py:85-93`) bypassing
+`_http_get`. Under FastMCP the raise surfaces as a transport error, not
+the module's `{"error", "status"}` envelope. **Red:** `_http_get` against
+a localhost fixture serving `MAX_RESPONSE_BYTES + 1` asserting the
+envelope; a 2 MiB-exact body still returns `{"data": ...}`.
+
+### T-405 · P2 — the MCP loopback bind is tested as a default, not a deployment
+`scripts/mcp_hosted/server.py:236-237` reads `RADON_MCP_HOST` with no
+allowlist; `test_mcp_hosted.py:362-365` asserts the default only. The real
+defence is unit-file line ordering (`Environment=` after
+`EnvironmentFile=` in `cloud/services/radon-mcp.service`), untested.
+**Red:** assert the `Environment=RADON_MCP_HOST=` line index exceeds the
+`EnvironmentFile=` index; swapping the lines reds it.
+
+### T-406 · P2 — `/design.md` is contract-tested as a file, never as a URL
+`web/tests/design-artifact-contract.test.ts:111` asserts disk existence;
+`middleware-auth.test.ts:85-89` asserts the matcher exemption; nothing
+asserts Next actually serves `.md` from `public/` (the fragile bit
+`middleware.ts:173-178` itself names). **Red/green:** route-level GET of
+`/design.md` asserting 200 + a known `rd-*` class in the body.
+
+### T-407 · P2 — any `closeOut` suppresses the entire Gate-3 critical banner; the proportion policy is undecided and untested
+`31c39238`: `web/lib/order/risk/OrderRiskGate.tsx:213-220` →
+`web/lib/correlationRiskBanner.ts:95-105`. Callers gate `closeOut` on held
+size (`ModifyOrderModal.tsx:452-471`, `positionTrade.ts:402-405`) so
+over-close/flip is bounded, but a 1-share trim of a 10,000-share leg
+suppresses a 73 %-cluster banner. `resolveCorrelationOrderContext` has no
+direct test. **Red/green:** pin the intended token-reduce policy in
+`web/tests/correlation-risk-banner.test.ts`.
+
+### T-408 · P1 — the web tree does not type-check, and no gate runs the type checker
+`npx next build` (default mode) fails at "Running TypeScript" with
+`./app/api/setup/complete/route.ts:42:9 — Type '"SETUP_ALREADY_COMPLETE"'
+is not assignable to type 'ErrorCode | undefined'` (same literal also at
+`web/app/api/setup/validate/route.ts:29` and `status/route.ts:26`, from
+the b0322b6f setup wizard). The repo's `npm run build` is
+`next build --experimental-build-mode=compile` (`web/package.json:14`),
+which skips type checking, so CI builds, tests and deploys green over a
+tree `tsc` rejects. This re-triages the 2026-09-02 note-2 standing item:
+the prerender failure could not be reached because the build now dies
+earlier, at types.
+**Red:** `npx tsc --noEmit` (or default-mode build) in `web/` — fails
+today. **Green:** `ErrorCode` gains the literal (or the routes use an
+existing code) and a CI step or vitest contract runs the type check so
+the gap cannot reopen.
+
+### Backlog rows
+
+| ID | Sev | AC (red → green) |
+|---|---|---|
+| T-408 | P1 | `tsc --noEmit` green in `web/` and enforced by a gate; red today at `app/api/setup/complete/route.ts:42`. |
+| T-382 | P0 | Empty/timed-out `get_open_orders` book must not replace a non-empty `open_orders` snapshot; mirror-body test executes fetch→build→save with a stub client. Red: stub empty book asserts no destructive save (fails today). |
+| T-383 | P1 | `share-pnl.test.ts` stock-only fixture asserts `entryPrice ≈ 247.50` (red at 2.475); source uses per-group multiplier. |
+| T-384 | P1 | Mixed OPT+STK group asserts exact `pnlPct` under per-fill multipliers (red: blended today). |
+| T-385 | P1 | Serializer-fed `_working_order_shape` contract + `/orders/modify` full-URL route test with seeded snapshot (200/422 pair). |
+| T-386 | P1 | `playwright.config.ts` pins a Clerk stub key in `webServer.env`; contract test asserts it (red today: absent). |
+| T-387 | P1 | Authless bypass ordered ahead of setup gate; pinned in `middleware-authless.test.ts` (red today: 302 to /setup). |
+| T-388 | P1 | Startup-perf contract asserts `connected === true` observed (red today); provider-wrapped render. |
+| T-389 | P1 | Ownership contract: exactly-one `usePrices(` call site repo-wide + no early return before `RealtimePricesProvider` (red today). |
+| T-390 | P1 | Bootstrap precedence test: stale env + stored value → env holds stored value; inversion mutation reds it. |
+| T-391 | P1 | `/mcp*` `request_body max_size` Caddyfile assertion + oversized-POST 413 transport test (both red today). |
+| T-392 | P2 | Replace `waitForTimeout(400)` with settled-state wait. |
+| T-393 | P2 | Explicit `env=` at the three subprocess sites. |
+| T-394 | P2 | Rewire `regime-spy-subscription` to assert `publishSubscriptions` recipient. |
+| T-395 | P2 | Derive or drop the "22 tabs" comment number. |
+| T-396 | P2 | `flex_delivery_status → None` asserts no heartbeat; source narrows to `== "applied"`. |
+| T-397 | P2 | Behavioural registration check via `daemon.handlers` service names. |
+| T-398 | P2 | Shed-marker parity test across server.py and the shell wrappers. |
+| T-399 | P2 | Replace string mirrors with unit-file arithmetic (240 < TimeoutStartSec). |
+| T-400 | P2 | Add `cash-flow-sync` to the py↔TS window parity parametrization. |
+| T-401 | P2 | Trim or re-label the retired-path cadence/exit/retry test files. |
+| T-402 | P2 | Explicit `os.utime` mtimes in the prune test. |
+| T-403 | P2 | Contract distinguishing path-filter skip from broken contract job. |
+| T-404 | P2 | Execute `_http_get` oversize path; assert error envelope. |
+| T-405 | P2 | Unit-file line-order assertion for `RADON_MCP_HOST`. |
+| T-406 | P2 | Route-level GET `/design.md` → 200 + `rd-*` body. |
+| T-407 | P2 | Pin token-reduce banner policy in `correlation-risk-banner.test.ts`. |
+
+### Standing-item re-triage
+
+- **`npx next build` default-mode prerender failure (2026-09-02 note 2):**
+  re-probed at this HEAD; result recorded in the ledger line below.
+- **vitest teardown-race exit-code shape (note 1):** did not recur; round 1
+  vitest exited 0, 8598 passed.
+- **T-311 `orders-place-cache-race`:** not re-run this audit; remains open
+  on the backlog.
+
 ## 11 · Audit ledger
 
 The weekend loop (`.claude/skills/testing-weekend/`) reads the last line
@@ -8373,6 +8710,7 @@ Delta findings continue the T-### numbering in dated `## Delta audit` sections.
 - Audited through: `39bf6f5e` on 2026-08-31 — 34 new findings (T-346…T-379: 8 P1, 26 P2) over 51 commits / 247 files / +20997-853, base `fda36450`. Landed by the REMEDIATION phase: the audit phase drafted T-346…T-378 and exited 0 on a progress message without committing (T-379, T-239 class), so its ledger line is written here. Gates round 1 (audit's detached script, load 4.6→20): pytest **9508 passed / 0 failed** (first green pytest round on this clone since `web/.env`; T-317 fixed); vitest 832 files / **8392 passed / 0 failed**; cloud **35 failed** / 1500 passed on darwin — one-for-one swap against the 2026-08-30 list (+1 new bash-3.2 red from `1b85a8b3`, −1 T-325 fixed), baseline stays 35. Collection union clean on all three gates (pytest 9509 = shard sum, cloud 44/44, vitest 8392 = CI + 1) so T-122 holds. `deploy.needs` identical base→HEAD (14 jobs, ratchets retained); `main` still has no `required_status_checks` (T-222). Zero code skips in the delta, no `.only`/`xfail`, no exclusion growth, no threshold moved. Delta-file determinism 3× recorded in `TEST_LOG.md`.
 - Audited through: **NOT ADVANCED** on 2026-09-01 — both phases exited 1 on "out of usage credits" four seconds in (pre-#238/#239 wrapper); the branch was pushed empty and FAILED reported on all three dead-man channels. Written retroactively by the 2026-09-02 remediation phase.
 - Audited through: **NOT ADVANCED** on 2026-09-02 — the audit phase exited 0 at ~4 minutes on a text-only progress message with zero findings drafted (T-379 class; the wrapper correctly posted INCOMPLETE, so T-379's detection works — recovery does not exist, filed as T-380). `39bf6f5e..db25990d` (32 commits / 259 files / +26958-1135) is **UNAUDITED**; the next audit must take `39bf6f5e` as its base. The remediation phase adopted the audit's detached gates for round 1, filed T-380, and worked the P2 backlog (T-353…T-378).
+- Audited through: `0202e32d` on 2026-09-03 — 27 new findings (T-382…T-408: 1 P0, 10 P1, 16 P2) over 49 commits / 340 files / +41249−1406, base `39bf6f5e` per the two NOT ADVANCED lines above. Gates round 1 serial BEFORE the fan-out (load 5→6): pytest **10882 passed / 0 failed**; vitest **8598 passed / 0 failed**; cloud **35 failed** / 1536 passed on darwin, FAILED list **byte-identical** to the 2026-09-02 list — baseline stays 35. Delta-touched determinism 3× each root: scripts 2651 passed ×3, vitest 817 passed ×3, cloud 21 failed / 784 passed ×3 with identical FAILED lists, all 21 a strict subset of the 35 darwin baseline. Tree clean after every gate (T-275 sweep), no runner secrets in gate logs (T-381 sweep). CI green on `main` at this HEAD (run 33695685875); the red runs at audit time were the reliability loop's PR branch. `deploy.needs` identical base→HEAD (14 jobs), coverage config diff empty, no threshold moved, no exclusion growth, 9 new skip lines all conditional/`skipif` with reasons, no `.only`/`xfail`. Shard union clean: CI 10882+1 skipped = 10883 local collection exact; cloud 1575+2 = 1577 exact (T-122 holds). `main` still has no `required_status_checks` (T-222). Standing note-2 re-triaged: the default-mode build now dies at TYPES, not prerender — numbered T-408.
 
 ## Remediation 2026-08-29 — PR #140
 
@@ -8469,3 +8807,18 @@ FILE, not by count: 21 `test_ib_gateway_control.py` + 13
 class, T-118 — plus 3 deliberate `test_caddy_edge_timeouts.py` reds (T-205
 working as designed; no `caddy` binary on this host). **Zero failures in
 either cloud file this phase touched.**
+
+## Remediation 2026-09-03 — PR #260
+
+All 11 un-DONE P0/P1 findings from this cycle's audit are DONE: T-382 (P0),
+T-383…T-391, T-408. The 16 P2s (T-392…T-407) are DEFERRED. Evidence per task
+in `TEST_LOG.md` §Remediation 2026-09-03. Two findings' subjects were broken
+product code, per the standing pattern: T-385 (serializer legs carried no
+`secType`, so the stock-leg cap exemption never matched a real snapshot — 
+source fixed, wire-tested) and T-389 (the keyless early return in
+`Providers.tsx` dropped the realtime tree — provider now mounts regardless).
+One lead correction on landing: T-390's new file leaked the module-global
+`_SESSION_EXPORTED` across files and redded `test_env_fallback_flagged`;
+fixed with a snapshot/restore fixture, not by weakening either test.
+T-408's enforcement half (a tsc step in ci.yml) is an operator decision and
+was deliberately not made here.
