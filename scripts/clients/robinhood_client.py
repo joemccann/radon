@@ -606,20 +606,41 @@ class RobinhoodTokenStore:
         try:
             self._commit_persist(tmp_fd)
         except OSError as exc:
-            # The endpoint already rotated the token; disk still holds the
-            # spent one. Save the rotation somewhere writable and stop this
-            # process from refreshing again on the stale file.
+            self._handle_commit_failure(exc)
+        return str(access)
+
+    def _handle_commit_failure(self, exc: OSError) -> None:
+        """The endpoint already rotated the token; disk still holds the spent
+        one. Save the rotation somewhere writable and stop this process from
+        refreshing again on the stale file.
+
+        REL-205 (R-568): if the fallback write ALSO fails, the process must
+        STILL disable — the raw PermissionError used to escape first, the
+        rotated token existed nowhere, and the next call re-spent the spent
+        refresh token.
+        """
+        try:
             saved = self._save_rotation_fallback()
+        except Exception as fallback_exc:  # noqa: BLE001 — double fault
             _disable_for_process(
                 f"rotated Robinhood token could not be persisted to {self._path} "
-                f"({exc.strerror}); saved to {saved}"
+                f"({exc.strerror}) AND the fallback write failed ({fallback_exc}); "
+                "saved: NOWHERE — the rotation lives only in this process"
             )
             raise RobinhoodClientError(
-                f"Robinhood token rotated but {self._path} could not be written "
-                f"({exc.strerror}); the new tokens are at {saved} — restore them to "
-                f"{self._path} before the next run"
+                f"Robinhood token rotated but neither {self._path} nor the "
+                f"fallback dir could be written ({exc.strerror} / {fallback_exc}); "
+                "re-provision the Robinhood tokens before the next run"
             ) from None
-        return str(access)
+        _disable_for_process(
+            f"rotated Robinhood token could not be persisted to {self._path} "
+            f"({exc.strerror}); saved to {saved}"
+        )
+        raise RobinhoodClientError(
+            f"Robinhood token rotated but {self._path} could not be written "
+            f"({exc.strerror}); the new tokens are at {saved} — restore them to "
+            f"{self._path} before the next run"
+        ) from None
 
 
 def robinhood_configured() -> bool:
