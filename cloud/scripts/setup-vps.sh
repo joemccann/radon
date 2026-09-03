@@ -1079,6 +1079,7 @@ write_mcp_env() {
   # RADON_MCP_* knobs), never the full secret set. Same key set as
   # deploy.sh:write_mcp_env, which rewrites it on every deploy.
   local mcp_env_tmp
+  require_regular_file "$ENV_FILE" || return 1
   mcp_env_tmp="$(mktemp)"
   grep -E '^(CLERK_JWKS_URL|CLERK_ISSUER|ALLOWED_USER_IDS|RADON_MCP_[A-Z0-9_]+)=' "$ENV_FILE" > "$mcp_env_tmp" || true
   install -m 0600 -o radon -g radon "$mcp_env_tmp" /etc/radon/mcp.env

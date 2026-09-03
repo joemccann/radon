@@ -161,7 +161,7 @@ class TestEnvFileGuard:
         _stub(h["bin"], "systemctl", h["tmp"] / "systemctl.log", exit_code=3)
         return log
 
-    @pytest.mark.parametrize("function", ["validate_env", "setup_node"])
+    @pytest.mark.parametrize("function", ["validate_env", "setup_node", "write_mcp_env"])
     def test_symlinked_env_is_refused_before_chmod_or_chown(
         self, harness: dict[str, Path], function: str
     ) -> None:
@@ -513,6 +513,15 @@ class TestStaticContract:
             if guard is None or guard not in body or body.index(guard) > body.index(line):
                 offenders.append(f"{index + 1}: {line} (no preceding guard in {function}())")
         assert offenders == [], "\n".join(offenders)
+
+    def test_every_env_file_reader_is_guarded_first(self) -> None:
+        script = SETUP.read_text(encoding="utf-8")
+        for function in ("validate_env", "setup_node", "write_mcp_env"):
+            body = _function_body(script, function)
+            guard = body.index("require_regular_file")
+            for reader in ("chmod", "chown", "grep -E"):
+                if reader in body:
+                    assert guard < body.index(reader), (function, reader)
 
     def test_no_install_or_cp_reads_the_checkout_outside_the_helper(self) -> None:
         script = SETUP.read_text(encoding="utf-8")
