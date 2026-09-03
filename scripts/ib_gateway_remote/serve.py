@@ -107,7 +107,7 @@ def healthz_payload() -> dict:
     """Liveness plus mTLS cert expiry (REL-178 / R-496): the 825-day
     self-signed pair dies silently otherwise."""
     payload: dict = {"ok": True, "service": "ib-gateway-remote"}
-    cert_path = os.environ.get("RADON_IB_REMOTE_CERT") or ""
+    cert_path = os.environ.get("RADON_IB_REMOTE_CERT", "")
     if cert_path:
         try:
             from utils.cert_expiry import cert_days_left, cert_not_after

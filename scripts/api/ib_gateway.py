@@ -1321,7 +1321,7 @@ async def recover_stuck_pool(
 
 def _remote_cert_summary() -> Optional[dict]:
     """Days left on the app-side mTLS client cert (REL-178 / R-496)."""
-    cert_path = os.environ.get("RADON_IB_REMOTE_CLIENT_CERT") or ""
+    cert_path = os.environ.get("RADON_IB_REMOTE_CLIENT_CERT", "")
     if not cert_path:
         return None
     try:
