@@ -449,6 +449,8 @@ write_web_env() {
 write_mcp_env() {
   local cloud_env="${1:-$ENV_FILE_DEFAULT}"
   local mcp_env="${2:-$MCP_ENV_FILE}"
+  # preflight_env has already required the canonical file; nothing to derive otherwise.
+  [[ -f "$cloud_env" ]] || return 0
   umask 077
   MCP_ENV_TMP="$(mktemp "${mcp_env}.tmp.XXXXXX")"
   grep -E "$MCP_ENV_KEYS" "$cloud_env" > "$MCP_ENV_TMP" || true
