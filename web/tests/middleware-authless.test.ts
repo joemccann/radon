@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { NextFetchEvent } from "next/server";
 import { NextRequest } from "next/server";
 
-import {
+import middleware, {
   isAuthlessTestBypassEnabled,
 } from "../middleware";
 
@@ -26,5 +27,44 @@ describe("isAuthlessTestBypassEnabled", () => {
       "secret",
       "1",
     )).toBe(false);
+  });
+});
+
+describe("authless test bypass vs first-run setup gate", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("serves /portfolio to a valid authless test request even with no Clerk env (keyless runner)", async () => {
+    // Keyless runner: both Clerk keys blank, wizard never completed → the
+    // setup gate would 302 everything to /setup. The Playwright token must
+    // win: e2e specs run exactly like this.
+    vi.stubEnv("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", "");
+    vi.stubEnv("CLERK_SECRET_KEY", "");
+    vi.stubEnv("RADON_SETUP_COMPLETE", "");
+    vi.stubEnv("RADON_AUTHLESS_TEST", "1");
+    vi.stubEnv("RADON_AUTHLESS_TEST_TOKEN", "secret-token");
+
+    const request = new NextRequest("http://localhost:3000/portfolio", {
+      headers: { "x-radon-authless-test": "secret-token" },
+    });
+    const response = await middleware(request, {} as NextFetchEvent);
+
+    expect(response?.status).toBe(200);
+    expect(response?.headers.get("location")).toBeNull();
+  });
+
+  it("still setup-gates a keyless request WITHOUT the authless token", async () => {
+    vi.stubEnv("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", "");
+    vi.stubEnv("CLERK_SECRET_KEY", "");
+    vi.stubEnv("RADON_SETUP_COMPLETE", "");
+    vi.stubEnv("RADON_AUTHLESS_TEST", "1");
+    vi.stubEnv("RADON_AUTHLESS_TEST_TOKEN", "secret-token");
+
+    const request = new NextRequest("http://localhost:3000/portfolio");
+    const response = await middleware(request, {} as NextFetchEvent);
+
+    expect(response?.status).toBe(307);
+    expect(response?.headers.get("location")).toContain("/setup");
   });
 });

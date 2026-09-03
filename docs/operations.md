@@ -50,13 +50,21 @@ are AES-256-GCM-encrypted rows in a host-local SQLite file
 `~/.radon/secrets.db` (0600, override `RADON_SECRET_STORE_PATH`) that never
 leaves the host — deliberately NOT Turso, so plaintext and ciphertext stay on
 the machine that uses them (operator decision 2026-09-01, PR #125; no
-migration planned). On FastAPI startup every stored registry name is exported
-into `os.environ` over the deployed `.env` value
-(`bootstrap_exported_names()` in `scripts/api/routes/credentials.py`), and
+migration planned). On FastAPI startup every stored registry name that
+decrypts is exported into `os.environ` over the deployed `.env` value
+(`bootstrap_exported_names()` in `scripts/api/routes/credentials.py`; a row
+the loaded key cannot decrypt is logged and skipped, and a store that cannot
+open is logged and skipped, so startup never fails on the store), and
 subprocesses inherit it. Rotating a key in `.env` alone does nothing while a
 stored value exists: rotate in the Credentials tab, or delete the stored
-value first. Deleting a stored secret does not unset the already-exported
-value in the running process — it takes effect at the next FastAPI restart.
+value first. Exception: the IB Gateway password. Saving it in the tab does
+not rotate what the Gateway reads (`TWS_PASSWORD_FILE` / docker secrets).
+The tab also refuses a `TURSO_DB_URL` that is not `libsql://` or `https://`
+or whose host differs from the `TURSO_DB_URL` already in the environment;
+point a deployment at a different Turso database by editing `.env` and
+restarting, not from the tab. Deleting a stored secret does not unset the
+already-exported value in the running process — it takes effect at the next
+FastAPI restart.
 
 Failure modes (REL-217/REL-218, 2026-09-03): any store-constructor failure —
 `SecretStoreError` or OSError-class (key-file path is a directory, permission
@@ -71,24 +79,57 @@ completes (the encrypted store keeps the value; REL-216).
 `radon-secret-store-key` in `$CREDENTIALS_DIRECTORY` (production
 `LoadCredentialEncrypted=`), then the key file at
 `$RADON_SECRET_STORE_KEY_FILE` (default `~/.radon/secret_store.key`,
-auto-generated 0600 on first use). There is no escrow: losing the key makes
-the ciphertext unrecoverable — back up the key file together with
-`secrets.db`, or plan to re-enter every credential. Field inventory:
+auto-generated 0600 on first use). There is no escrow, and `secrets.db` is
+bound to its key by fingerprint (`key_binding` table): with rows present and
+the key file missing, the store refuses to open rather than minting a new key
+over them, and a replaced key refuses writes. Every `/credentials` route then
+answers 503 `CREDENTIAL_STORE_UNAVAILABLE`. Recovery is to restore the
+original key, or delete `~/.radon/secrets.db` and re-enter every credential.
+Back up the key file together with `secrets.db`. Field inventory:
 `scripts/credentials_registry.py`. Implementation: `scripts/secret_store.py`.
+
+**Validation is throttled.** Saving (`PUT /credentials/{service}`) and the
+dry-run check (`POST /credentials/{service}/validate`) both run the vendor
+validator, which can hold a thread for up to `SLOW_LOGIN_TIMEOUT_S` (90s on
+the browser-login services). The route bounds it: at most
+`VALIDATOR_CONCURRENCY` (2) validators in flight per process, and one run per
+service per `VALIDATOR_COOLDOWN_S` (5s). A request inside the window gets
+`429` with `Retry-After` and code `VALIDATION_COOLDOWN`, and makes no vendor
+call; on the PUT path nothing is stored. Constants and the chokepoint
+(`_run_validator`) live in `scripts/api/routes/credentials.py`.
 
 ### First-run setup wizard (`/setup`)
 
-With NO Clerk key configured, the whole app collapses to `/setup` plus its
-API: other pages redirect there and other APIs return 503 `SETUP_MODE`
-(`web/middleware.ts`, `web/lib/setup/setupMode.ts`). The wizard is gated by a
-one-shot token printed to the console that launched Radon
-(`RADON_SETUP_TOKEN` overrides it for automation; only read while no Clerk
-key is set). It writes collected values into the secret store AND
-materializes root `.env` / `web/.env` (`web/lib/setup/envFiles.ts` — Next.js
-and python-dotenv need real files at boot; values are single-quoted per the
-`$`-expansion rule above). Setup mode ends at the first restart after the
-Clerk keys are written; the setup surface then hard-refuses with 404. It can
-never activate while any Clerk key exists, so production is untouched.
+With NO Clerk key configured and no completion latch, the whole app collapses
+to `/setup` plus its API: other pages redirect there and other APIs return
+503 `SETUP_MODE` (`web/middleware.ts`, `web/lib/setup/setupMode.ts`). The
+wizard is gated by a one-shot token printed to the console that launched
+Radon (`RADON_SETUP_TOKEN` overrides it for automation; only read while no
+Clerk key is set); `POST /api/setup/complete` consumes it, so a replay is
+rejected. It writes collected values into the secret store AND materializes
+root `.env` / `web/.env` (`web/lib/setup/envFiles.ts`: Next.js and
+python-dotenv need real files at boot). Values are quoted per consumer,
+python-dotenv dialect for the root `.env` and `@next/env` dialect for
+`web/.env`; a value neither dialect can encode (a newline, or a quote or
+backslash mixed with `$`) is refused with an error instead of being written,
+so enter it in the Credentials tab or by hand. Writes are temp-file + rename
+(never truncate-in-place) and every duplicate occurrence of a managed key is
+rewritten. Only the web subset (`WEB_ENV_KEYS` in `envFiles.ts`: the Clerk
+keys, Turso, and the model and data API keys) reaches `web/.env`.
+
+**Completion latch.** Completion writes `<repo root>/.radon/setup-complete`
+(0600, gitignored) and sets `RADON_SETUP_COMPLETE=1` in the running process;
+`web/instrumentation.ts` re-promotes the marker into that flag at every Node
+boot (Edge middleware reads only the flag). Setup mode ends the moment the
+latch is set, not at restart: until the stack is restarted with the Clerk
+keys loaded, every page and API answers 503 `AUTH_MISCONFIGURED` ("Restart
+the stack") and the setup APIs answer 403 `SETUP_ALREADY_COMPLETE`. After that
+restart the setup surface hard-refuses with 404. Completion returns 500
+`SETUP_REPO_ROOT_INVALID` unless the directory above `web/` holds both
+`package.json` and `web/package.json`. To re-run the wizard, delete the
+marker and unset `RADON_SETUP_COMPLETE` while the Clerk keys are still
+absent. The wizard can never activate while any Clerk key exists, so
+production is untouched.
 
 ## IB Gateway
 
@@ -151,7 +192,7 @@ Deeper troubleshooting and full Docker setup live in [`docs/ib-gateway-docker.md
 
 Hetzner host systemd is the production surface. Laptop dev uses launchd plists in `config/`. Laptop `com.radon.data-refresh` must stay unloaded. VPS `radon-flow-refresh.timer` owns hourly scanner/discover/flow during ET RTH.
 
-**Nightly loops on the Mac mini** (launchd, staggered 10 minutes apart, audit then remediate). Each runs in its own clone under `~/radon-weekend/` that hard-resets to `origin/main` every phase, uses a per-loop venv (`~/radon-weekend/venv-<loop>`) plus the shared `~/radon-weekend/.env`, and holds a per-clone `.weekend-runner.lock`. A wrapper refuses the clone unless it carries BOTH `.radon-weekend-runner` and that loop's own `.radon-<loop>-runner` marker, so pointing one loop at another's clone is a `REFUSED`, not a cross-run collision. The shared `.env` is not imported wholesale: each wrapper's `_notify_curl` reads only `PUSHOVER_USER` and `PUSHOVER_TOKEN` from it in bash and pages via `/usr/bin/curl` (never python). Model spend rides the claude.ai subscription only: every wrapper unsets each API-key / auth-token / base-URL / Bedrock / Vertex / Foundry / gateway variable the installed Claude Code honors (naming it on stderr and as `ignored=` on the phase-start line, never the value) and runs anyway, scrubs those lines out of a provisioned `web/.env` in place (except the security loop, whose clone is credential-free: any `.env` / `.env.ib-mode` / `web/.env` present there is `REFUSED`, not scrubbed), and `REFUSED`s only what `unset` cannot reach: a `.deepsec/.env*` / `.env.local` key line or a Claude Code settings-level `apiKeyHelper` / `env` reroute. Never point another job, worktree, or responder at these clones. The `Fires` column is generated from each plist's `StartCalendarInterval`. Loop semantics live in `.claude/skills/<loop>/SKILL.md`; wrapper mechanics in the wrapper script; state on the rolling GitHub issue carrying the label.
+**Nightly loops on the Mac mini** (launchd, staggered 10 minutes apart, audit then remediate). Each runs in its own clone under `~/radon-weekend/` that hard-resets to `origin/main` every phase, uses a per-loop venv (`~/radon-weekend/venv-<loop>`) plus the shared `~/radon-weekend/.env`, and holds a per-clone `.weekend-runner.lock`. A wrapper refuses the clone unless it carries BOTH `.radon-weekend-runner` and that loop's own `.radon-<loop>-runner` marker, so pointing one loop at another's clone is a `REFUSED`, not a cross-run collision. The shared `.env` is not imported wholesale: each wrapper's `_notify_curl` reads only `PUSHOVER_USER` and `PUSHOVER_TOKEN` from it in bash and pages via `/usr/bin/curl` (never python). Model spend rides the claude.ai subscription only: every wrapper unsets each API-key / auth-token / base-URL / Bedrock / Vertex / Foundry / gateway variable the installed Claude Code honors (naming it on stderr and as `ignored=` on the phase-start line, never the value) and runs anyway, scrubs those lines out of a provisioned `web/.env` in place (except the security loop, whose clone is credential-free: any `.env` / `.env.ib-mode` / `web/.env` present there is `REFUSED`, not scrubbed), and `REFUSED`s only what `unset` cannot reach: a `.deepsec/.env*` / `.env.local` key line or a Claude Code settings-level `apiKeyHelper` / `env` reroute. Those file checks (and the security clone's credential-file check) run again at the start of every phase and continuation round, after the reset and before `claude` launches, so a file an in-phase agent plants cannot be inherited by the next phase. The `setup_*` scripts read the clone origin from their own checkout (`git -C "$SRC_REPO"`), never the caller's cwd, and `REFUSE` when that is not a Radon checkout. Never point another job, worktree, or responder at these clones. The `Fires` column is generated from each plist's `StartCalendarInterval`. Loop semantics live in `.claude/skills/<loop>/SKILL.md`; wrapper mechanics in the wrapper script; state on the rolling GitHub issue carrying the label.
 
 | Loop | Fires (local) | Clone | Wrapper / plist | Issue label |
 |---|---|---|---|---|
@@ -189,7 +230,7 @@ Hetzner host systemd is the production surface. Laptop dev uses launchd plists i
 | `radon-vol-cone.timer` | Mon-Fri 20:45 UTC | Completed-session cheap-wing cone (16:45 ET, after the close grace). Spec: [`indicators/vol-cone.md`](indicators/vol-cone.md) |
 | `radon-vol-cone-intraday.timer` | Mon-Fri 09:00-16:30 ET every 15 min | Live sample ranked against that stored cone, so the tab is tradeable during the session instead of a day stale. Holds without spending a UW request outside market hours or under a nearly-spent daily budget, and a held pass no longer republishes the shared `vol-cone` snapshot. The 16:45 ET slot is deliberately absent: in EDT it is 20:45 UTC, the EOD writer's own minute (R-128). |
 | `radon-vixcor.timer` | daily 02:35 UTC | VIX x COR3M 20-session correlation, 15 min behind `radon-cor`. Spec: [`indicators/vixcor.md`](indicators/vixcor.md) |
-| `radon-credit-spread.timer` | daily 21:45 UTC | HYG vs SPX credit-equity series. IB first, then UW, then Robinhood (when configured), then Yahoo. Spec: [`indicators/credit.md`](indicators/credit.md). Units are in `setup-vps.sh`; root install-copy still owed. |
+| `radon-credit-spread.timer` | daily 21:45 UTC | HYG vs SPX credit-equity series. IB first, then UW, then Robinhood (when configured), then Yahoo. Spec: [`indicators/credit.md`](indicators/credit.md). |
 | `radon-iei-hyg.timer` | daily 21:55 UTC | IEI/HYG duration-vs-credit ratio. Spec: [`indicators/iei-hyg.md`](indicators/iei-hyg.md) |
 | `radon-leap.timer` | Mon-Fri 10:00 ET | LEAP IV-mispricing scan via FastAPI. Capacity-shed case: [`incident-runbook.md`](incident-runbook.md) |
 | `radon-garch.timer` | Mon-Fri 14:00 / 17:00 / 20:00 UTC | GARCH convergence scan via FastAPI, 3x per RTH session. Capacity-shed case: [`incident-runbook.md`](incident-runbook.md) |
@@ -256,15 +297,15 @@ Staleness windows live in `web/lib/serviceHealthWindows.ts`. Cycle-driven writer
 
 **Database access pattern (post-2026-05-20):** every Radon process now goes direct-to-cloud — the code default since DUR-07 (replica opt-in only via `RADON_DB_USE_REPLICA=1`), with the `RADON_DB_NO_REPLICA=1` kill switch applied fleet-wide through the `radon-.service.d/common.conf` prefix drop-in. The libsql embedded-replica architecture (`data/replica.db`) was retired after multi-writer WAL contention and then single-writer frame conflicts between the replica owner and direct-cloud writers. Reads cost +30–60 ms per cloud round-trip, absorbed by SWR caching. The `replica_watchdog` handler still exists in `monitor_daemon` as a vestigial safety net (it sits idle in the no-replica world), but `data/replica.db` itself should not exist on any host. See `feedback_libsql_replica_one_writer.md`.
 
-**Market-hours gate.** Handlers tagged `requires_market_hours=True` (`fill_monitor`, `exit_orders`, `journal_sync`) only run during 09:30-16:00 ET. The daemon converts UTC to ET via `zoneinfo.ZoneInfo("America/New_York")` so DST is handled automatically; a fail-open UTC-5 fallback fires only if the host is missing `tzdata`. Never hardcode a fixed offset for ET — it silently shifts the window 1h every DST season.
+**Market-hours gate.** Handlers tagged `requires_market_hours=True` (`fill_monitor`, `exit_orders`, `journal_sync`) only run during their session window: 09:30-16:00 ET by default, or 04:00-20:00 ET for `fill_monitor` (`session_window = "equity_ext"`, so outsideRth stock fills reach `/orders` after the cash close; the FastAPI orders-sync tick uses the same window). The daemon converts UTC to ET via `zoneinfo.ZoneInfo("America/New_York")` so DST is handled automatically; a fail-open UTC-5 fallback fires only if the host is missing `tzdata`. Never hardcode a fixed offset for ET — it silently shifts the window 1h every DST season.
 
 ## Cash Flows
 
-`scripts/cash_flow_sync.py` pulls `CashTransaction` rows from IBKR Flex (`IB_FLEX_NAV_QUERY_ID=1497709`) and upserts into the `cash_flows` Turso table. Surfaces on `/orders` via `web/components/CashFlowsSection.tsx`.
+`scripts/cash_flow_sync.py` parses `CashTransaction` rows from an IBKR Flex Activity statement and upserts into the `cash_flows` Turso table. Surfaces on `/orders` via `web/components/CashFlowsSection.tsx`.
 
-**Cadence:** once per ET trading day at 17:00 ET (1h after the close). Flex publishes once per day, so faster polling buys nothing. Holidays and weekends are skipped via `utils.market_calendar`. Late-fires past 18:00 ET if the daemon was off.
+**Cadence:** the sFTP-delivered Activity statement: `radon-flex-pull.timer` (Tue..Sat 07:30 ET) -> `scripts/flex_delivery_ingest.py` -> `cash_flow_sync --from-file`. That ingest is the only path that writes `cash_flows` and it owns the `cash-flow-sync` service-health row (`ok` after a successful run or an already-applied duplicate statement, `error` with the exit code when the run fails). The monitor daemon's `CashFlowSyncHandler` is not registered (2026-09-02); a weekday SendRequest is off by policy. Query ids and the pull unit: [`cloud-services.md`](cloud-services.md) "Flex sFTP pull".
 
-**Throttle backoff.** Flex codes 1001 / 1018 / 1019 raise `FlexThrottleError` on the first hit (no internal retry, no sleep), and the handler advances an exponential breaker (24h → 48h → 72h → 168h capped) persisted across daemon restarts. The breaker composes with the daily window; embargo expiry waits until the next 17:00 ET slot.
+**Throttle backoff.** Only Flex code 1018 is a rate limit; the breaker ladder is 90s -> 5m -> 15m -> 1h. 1001/1009 take the soft lane; 1019 on a poll is not an error. Detail: `scripts/monitor_daemon/CLAUDE.md`.
 
 ## Deployment
 

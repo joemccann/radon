@@ -1024,6 +1024,7 @@ set -eu
         "RADON_APP_DIR": str(APP_ROOT),
         "RADON_SUDOERS_DIR": str(sudoers_dir),
         "RADON_POLKIT_RULES_DIR": str(polkit_dir),
+        "RADON_SETUP_STAGE_DIR": str(tmp_path / "stage"),
         "RADON_VISUDO_BIN": str(visudo),
         "RADON_POLICY_SKIP_CHOWN": "1",
         "RADON_SKIP_POLKIT_RELOAD": "1",

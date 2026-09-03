@@ -750,3 +750,48 @@ class TestRel201GateFailsClosed:
     def test_an_empty_base_still_uses_the_fallback(self, monkeypatch):
         monkeypatch.setenv("DOCS_CONTRACT_BASE", "")
         assert isinstance(_changed_paths(), list)
+
+# ── DOC-057: "root install-copy is still owed" must not outlive the install ──
+#
+# The topology owners kept telling an operator that radon-ivrank and
+# radon-credit-spread units were waiting on a manual root install-copy after
+# both pairs were pinned in cloud/config/installed-units.sha256 (the deploy's
+# install-units verb installs anything listed there). An operator following
+# the stale sentence copies units by hand over a root-owned install. A section
+# may say the copy is owed only while its units are absent from the manifest.
+
+_INSTALLED_UNITS = _ROOT / "cloud" / "config" / "installed-units.sha256"
+_TOPOLOGY_DOCS = ("docs/cloud-services.md", "docs/operations.md")
+_OWED = re.compile(r"install-copy[^.|\n]*owed|owed[^.|\n]*install-copy")
+_UNIT_NAME = re.compile(r"\bradon-[a-z0-9-]+\.(?:timer|service)\b")
+
+
+def _installed_unit_names() -> set[str]:
+    names: set[str] = set()
+    for line in _INSTALLED_UNITS.read_text(encoding="utf-8").splitlines():
+        parts = line.split()
+        if len(parts) == 2 and _UNIT_NAME.fullmatch(parts[1]):
+            names.add(parts[1])
+    return names
+
+
+class TestInstallCopyOwedClaims:
+    def test_the_manifest_is_parseable(self):
+        assert "radon-ivrank.timer" in _installed_unit_names()
+
+    def test_no_owner_says_an_installed_unit_still_owes_its_copy(self):
+        installed = _installed_unit_names()
+        wrong: list[str] = []
+        for rel in _TOPOLOGY_DOCS:
+            text = (_ROOT / rel).read_text(encoding="utf-8")
+            for unit in _claim_units(text):
+                if not _OWED.search(unit):
+                    continue
+                for name in _UNIT_NAME.findall(unit):
+                    if name in installed:
+                        wrong.append(f"{rel}: says {name} still owes its root install-copy")
+        assert not wrong, (
+            "Doc claims a root install-copy is still owed for a unit that "
+            "cloud/config/installed-units.sha256 already pins:\n  "
+            + "\n  ".join(sorted(set(wrong)))
+        )

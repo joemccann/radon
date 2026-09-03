@@ -150,6 +150,43 @@ class TestWireShapes:
         assert call.headers["Authorization"] == "Bearer ts-1"
         assert call.json["requests"][0]["stmt"]["sql"] == "SELECT 1"
 
+    def test_turso_https_url_is_accepted_as_is(self, http):
+        result = cv.validate(
+            "turso",
+            {
+                "TURSO_DB_URL": "https://radon-x.aws-us-west-2.turso.io",
+                "TURSO_AUTH_TOKEN": "ts-1",
+            },
+        )
+        assert result.status == "valid"
+        (call,) = http.calls
+        assert call.url == "https://radon-x.aws-us-west-2.turso.io/v2/pipeline"
+
+
+class TestTursoEgressPin:
+    """The Turso probe carries a Bearer token, so the URL it posts to is an
+    egress decision, not caller preference: https + *.turso.io only. Any
+    other destination is refused BEFORE a request is built (no wire call)."""
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://radon-x.aws-us-west-2.turso.io",  # cleartext
+            "https://collector.example.net",  # non-Turso host
+            "http://127.0.0.1:9999",  # local service
+            "libsql://collector.example.net",  # scheme rewrite, wrong host
+            "https://radon-x.aws-us-west-2.turso.io@collector.example.net/",  # userinfo spoof
+            "https://xturso.io",  # suffix without the dot
+            "ftp://radon-x.aws-us-west-2.turso.io",  # non-http scheme
+        ],
+    )
+    def test_non_turso_destination_is_refused_without_egress(self, http, url):
+        result = cv.validate(
+            "turso", {"TURSO_DB_URL": url, "TURSO_AUTH_TOKEN": "ts-1"}
+        )
+        assert result.status == "invalid"
+        assert http.calls == []
+
 
 class TestDispatch:
     def test_missing_values_are_unchecked_not_invalid(self, http):

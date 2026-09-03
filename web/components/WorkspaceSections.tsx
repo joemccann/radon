@@ -483,7 +483,12 @@ export function positionGroupShareData(
       const openCash = closedGroupOpenCash(group);
       if (openCash != null) {
         const comboUnits = Math.max(group.totalQuantity, 1);
-        entryPrice = -(openCash / 100) / comboUnits;
+        // Per-group multiplier: ×100 only when the group carries an option
+        // (OPT/BAG) fill; a stock-only group's basis is already per share.
+        const groupMultiplier = group.fills.some(
+          (f) => f.contract.secType === "OPT" || f.contract.secType === "BAG",
+        ) ? 100 : 1;
+        entryPrice = -(openCash / groupMultiplier) / comboUnits;
         if (entryNotional === 0) {
           entryNotional = Math.abs(openCash);
         }

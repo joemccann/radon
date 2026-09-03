@@ -14,10 +14,13 @@ StartLimitBurst=5
 Type=simple
 User=radon
 WorkingDirectory=/home/radon/radon
-# CLERK_JWKS_URL / CLERK_ISSUER / ALLOWED_USER_IDS come from the canonical
-# env contract; systemd EnvironmentFile is a literal parser, so $-containing
-# values are safe (feedback_env_file_shell_expansion.md).
-EnvironmentFile=/etc/radon/env
+# Stripped env: CLERK_JWKS_URL / CLERK_ISSUER / ALLOWED_USER_IDS and the
+# RADON_MCP_* knobs, derived from the canonical env by deploy.sh
+# (write_mcp_env) and setup-vps.sh. NEVER the full secret set: this is the
+# one unit terminating anonymous internet traffic. systemd EnvironmentFile
+# is a literal parser, so $-containing values are safe
+# (feedback_env_file_shell_expansion.md).
+EnvironmentFile=/etc/radon/mcp.env
 Environment=RADON_MCP_HOST=127.0.0.1
 Environment=RADON_MCP_PORT=8334
 TasksMax=64
@@ -34,6 +37,14 @@ Environment=PYTHONDONTWRITEBYTECODE=1
 ExecStart=/usr/bin/env -i HOME=/home/radon PATH=/usr/bin:/bin PYTHONDONTWRITEBYTECODE=1 CLERK_JWKS_URL=${CLERK_JWKS_URL} CLERK_ISSUER=${CLERK_ISSUER} ALLOWED_USER_IDS=${ALLOWED_USER_IDS} RADON_MCP_HOST=${RADON_MCP_HOST} RADON_MCP_PORT=${RADON_MCP_PORT} /home/radon/radon/.venv/bin/python -m scripts.mcp_hosted.serve
 Restart=always
 RestartSec=2
+NoNewPrivileges=yes
+ProtectSystem=strict
+# read-only, not yes: the venv and checkout it executes live under /home/radon.
+ProtectHome=read-only
+PrivateTmp=yes
+# The stripped EnvironmentFile is pointless if the process can read the
+# full secret set off disk as user radon.
+InaccessiblePaths=-/etc/radon/env
 
 [Install]
 WantedBy=multi-user.target

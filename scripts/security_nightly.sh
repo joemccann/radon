@@ -241,6 +241,7 @@ _sanitize_issue_text() {
     -e 's,(^|[^[:alnum:].])/(api|admin)/[A-Za-z0-9._/-]+,\1[REDACTED],g' \
     -e 's,[A-Za-z0-9./_-]+\.(py|ts|tsx|js|mjs|cjs|sh|go|rb|java|json|yml|yaml|toml|md):[0-9]+,[REDACTED],g' \
     -e 's,[Bb]earer [^[:space:]]+,Bearer [REDACTED],g' \
+    -e 's#(^|[^[:alnum:]_])(sk-(ant-)?[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,}|xox[abpors]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})#\1[REDACTED]#g' \
     -e 's,[A-Za-z0-9_]*(TOKEN|SECRET|PASSWORD|PASSWD|PASS|AUTH|CREDENTIAL|API_KEY|APIKEY|_KEY)[A-Za-z0-9_]*[[:space:]]*[=:][[:space:]]*[^[:space:]]+,[REDACTED],g' \
     -e 's,[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z][A-Za-z]+,[REDACTED],g' \
     -e 's,(^|[^A-Za-z0-9])(radon)?(trader|operator)[0-9]+,\1[REDACTED],g' \
@@ -413,12 +414,16 @@ cd "$REPO"
 # REL-180 (R-506): CREDENTIAL-FREE is a check, not a comment. A credential
 # file that ever lands in this clone (an operator copy, a stray provision)
 # would ride every nightly reset into the third-party scanners' tree.
-for credential_file in .env .env.ib-mode web/.env; do
-  [[ -e "$credential_file" ]] || continue
-  echo "REFUSING: $REPO holds a credential file ($credential_file); the security clone must stay credential-free — remove it" >&2
-  report "REFUSED" "$REPO holds a credential file ($credential_file); the security loop runs credential-free only — remove it from the clone" || true
-  exit 2
-done
+refuse_credential_files() {
+  local credential_file
+  for credential_file in .env .env.ib-mode web/.env; do
+    [[ -e "$credential_file" ]] || continue
+    echo "REFUSING: $REPO holds a credential file ($credential_file); the security clone must stay credential-free — remove it" >&2
+    report "REFUSED" "$REPO holds a credential file ($credential_file); the security loop runs credential-free only — remove it from the clone" || true
+    exit 2
+  done
+}
+refuse_credential_files
 
 # Rail 5b: subscription only. Claude Code prefers an API key / Bedrock / Vertex /
 # Foundry / gateway reroute over the claude.ai login whenever one is visible.
@@ -455,42 +460,51 @@ BILLING_IGNORED="${BILLING_IGNORED# }"
 # survives every nightly `git clean`. Refuse rather than edit operator state.
 BILLING_REROUTE_KEY_ASSIGN="^[[:space:]]*(export[[:space:]]+)?(${BILLING_REROUTE_KEYS// /|})[[:space:]]*=[[:space:]]*[^[:space:]#]"
 BILLING_REROUTE_FLAG_ASSIGN="^[[:space:]]*(export[[:space:]]+)?(${BILLING_REROUTE_FLAGS// /|})[[:space:]]*=[[:space:]]*[\"']?(1|true|yes)[\"']?([#[:space:]]|\$)"
-for key_file in .deepsec/.env .deepsec/.env.local .deepsec/.env.*.local .env.local; do
-  [[ -f "$key_file" ]] || continue
-  if grep -qE "$BILLING_REROUTE_KEY_ASSIGN" "$key_file" || grep -qiE "$BILLING_REROUTE_FLAG_ASSIGN" "$key_file"; then
-    echo "REFUSING: $key_file holds billing-reroute credentials; this loop bills the claude.ai subscription only, remove the key line" >&2
-    report "REFUSED" "$key_file holds billing-reroute credentials; the agent would bill metered API usage instead of the claude.ai subscription, remove the key line" || true
-    exit 2
-  fi
-done
-
-# web/.env is provisioned into the Radon-credential clones for the Next dev
-# server and pytest's load_dotenv, and the product copy carries
-# ANTHROPIC_API_KEY. Neither the agent nor any child may use it: scrub the
-# reroute lines in place (same inode, mode kept) so the subscription is the
-# only model route in this clone. The security clone refuses the file above.
-if [[ -f web/.env ]] && { grep -qE "$BILLING_REROUTE_KEY_ASSIGN" web/.env || grep -qiE "$BILLING_REROUTE_FLAG_ASSIGN" web/.env; }; then
-  echo "IGNORING: web/.env holds billing-reroute credentials; removed from the clone copy, this loop bills the claude.ai subscription only" >&2
-  { grep -vE "$BILLING_REROUTE_KEY_ASSIGN" web/.env | grep -viE "$BILLING_REROUTE_FLAG_ASSIGN" || true; } > web/.env.scrub
-  cat web/.env.scrub > web/.env
-  rm -f web/.env.scrub
-  BILLING_IGNORED="${BILLING_IGNORED:+$BILLING_IGNORED }web/.env"
-fi
-
 # A settings-level apiKeyHelper or env reroute reaches the agent past any
 # unset. Refuse and name the file; the operator edits it, not the loop.
 BILLING_REROUTE_SETTINGS_KEY="\"(${BILLING_REROUTE_KEYS// /|})\"[[:space:]]*:[[:space:]]*\"[^\"]"
 BILLING_REROUTE_SETTINGS_FLAG="\"(${BILLING_REROUTE_FLAGS// /|})\"[[:space:]]*:[[:space:]]*\"?(1|true|yes)\"?"
-for settings_file in "$HOME/.claude/settings.json" .claude/settings.json .claude/settings.local.json "/Library/Application Support/ClaudeCode/managed-settings.json" /etc/claude-code/managed-settings.json; do
-  [[ -f "$settings_file" ]] || continue
-  if grep -qE '"apiKeyHelper"[[:space:]]*:[[:space:]]*"[^"]' "$settings_file" \
-     || grep -qE "$BILLING_REROUTE_SETTINGS_KEY" "$settings_file" \
-     || grep -qiE "$BILLING_REROUTE_SETTINGS_FLAG" "$settings_file"; then
-    echo "REFUSING: $settings_file holds an apiKeyHelper or billing-reroute env entry; this loop bills the claude.ai subscription only, remove it" >&2
-    report "REFUSED" "$settings_file holds an apiKeyHelper or billing-reroute env entry; the agent would bill metered API usage instead of the claude.ai subscription, remove it" || true
-    exit 2
+# Checked in the prologue and AGAIN at the start of every phase and
+# continuation round, after the reset and before `claude` launches: the
+# in-phase agent can write any of these files, and .deepsec/, web/.env and
+# the settings files all survive `git clean`, so a one-time prologue check
+# let the next phase inherit what the previous phase planted.
+refuse_billing_reroute_files() {
+  local key_file settings_file
+  for key_file in .deepsec/.env .deepsec/.env.local .deepsec/.env.*.local .env.local; do
+    [[ -f "$key_file" ]] || continue
+    if grep -qE "$BILLING_REROUTE_KEY_ASSIGN" "$key_file" || grep -qiE "$BILLING_REROUTE_FLAG_ASSIGN" "$key_file"; then
+      echo "REFUSING: $key_file holds billing-reroute credentials; this loop bills the claude.ai subscription only, remove the key line" >&2
+      report "REFUSED" "$key_file holds billing-reroute credentials; the agent would bill metered API usage instead of the claude.ai subscription, remove the key line" || true
+      exit 2
+    fi
+  done
+
+  # web/.env is provisioned into the Radon-credential clones for the Next dev
+  # server and pytest's load_dotenv, and the product copy carries
+  # ANTHROPIC_API_KEY. Neither the agent nor any child may use it: scrub the
+  # reroute lines in place (same inode, mode kept) so the subscription is the
+  # only model route in this clone. The security clone refuses the file above.
+  if [[ -f web/.env ]] && { grep -qE "$BILLING_REROUTE_KEY_ASSIGN" web/.env || grep -qiE "$BILLING_REROUTE_FLAG_ASSIGN" web/.env; }; then
+    echo "IGNORING: web/.env holds billing-reroute credentials; removed from the clone copy, this loop bills the claude.ai subscription only" >&2
+    { grep -vE "$BILLING_REROUTE_KEY_ASSIGN" web/.env | grep -viE "$BILLING_REROUTE_FLAG_ASSIGN" || true; } > web/.env.scrub
+    cat web/.env.scrub > web/.env
+    rm -f web/.env.scrub
+    [[ " $BILLING_IGNORED " == *" web/.env "* ]] || BILLING_IGNORED="${BILLING_IGNORED:+$BILLING_IGNORED }web/.env"
   fi
-done
+
+  for settings_file in "$HOME/.claude/settings.json" .claude/settings.json .claude/settings.local.json "/Library/Application Support/ClaudeCode/managed-settings.json" /etc/claude-code/managed-settings.json; do
+    [[ -f "$settings_file" ]] || continue
+    if grep -qE '"apiKeyHelper"[[:space:]]*:[[:space:]]*"[^"]' "$settings_file" \
+       || grep -qE "$BILLING_REROUTE_SETTINGS_KEY" "$settings_file" \
+       || grep -qiE "$BILLING_REROUTE_SETTINGS_FLAG" "$settings_file"; then
+      echo "REFUSING: $settings_file holds an apiKeyHelper or billing-reroute env entry; this loop bills the claude.ai subscription only, remove it" >&2
+      report "REFUSED" "$settings_file holds an apiKeyHelper or billing-reroute env entry; the agent would bill metered API usage instead of the claude.ai subscription, remove it" || true
+      exit 2
+    fi
+  done
+}
+refuse_billing_reroute_files
 
 RUNNER_LOCK="$REPO/.weekend-runner.lock"
 acquire_runner_lock "$RUNNER_LOCK" || {
@@ -654,6 +668,11 @@ run_phase() {
     echo "[security-nightly] $PHASE done rc=$RC" | tee -a "$RUN_LOG"
     return 0
   fi
+  # Rail 5b again: the previous phase's agent may have planted a key file
+  # or a settings reroute the reset does not remove; refuse before this
+  # phase's `claude` launches.
+  refuse_credential_files
+  refuse_billing_reroute_files
 
   # Attempt clock is per phase: under cycle the remediate phase must not
   # inherit the audit phase's elapsed seconds and insta-timeout.
