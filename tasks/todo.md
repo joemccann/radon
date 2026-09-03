@@ -30,7 +30,11 @@
 
 ## Review
 
-- Pending.
+- Latest green main (`526c4d64`, run 33776679233) supplies the canonical fixes;
+  redundant local variants were removed after reconciliation.
+- Reconciled CI regressions: 137 passed; original PR delivery suites: 359 passed.
+- Full verification: Python 11,369 passed with 22 load-only timeouts rerun 83/83;
+  Vitest 8,640 passed; typecheck, lint, and production build green.
 
 ---
 

@@ -18,37 +18,6 @@ if str(SCRIPTS_DIR) not in sys.path:
 from utils import ib_2fa_lock  # noqa: E402
 
 
-def _credential_route_modules():
-    """Return both import-path instances used by the FastAPI test tree."""
-    # server imports the route through the production ``api.*`` path; load it
-    # before collecting aliases so fixture ordering cannot hide that instance.
-    from scripts.api import server as _server  # noqa: F401
-    from scripts.api.routes import credentials
-
-    modules = [credentials]
-    doppelganger = sys.modules.get("api.routes.credentials")
-    if doppelganger is not None and doppelganger is not credentials:
-        modules.append(doppelganger)
-    return modules
-
-
-@pytest.fixture(autouse=True)
-def _isolate_credential_validator_throttle():
-    """Keep validator cooldown and semaphore state local to each test."""
-    modules = _credential_route_modules()
-    saved = [
-        (module, module._validator_last_run, module._validator_slots)
-        for module in modules
-    ]
-    for module, _, _ in saved:
-        module._validator_last_run = {}
-        module._validator_slots = None
-    yield
-    for module, last_run, slots in saved:
-        module._validator_last_run = last_run
-        module._validator_slots = slots
-
-
 @pytest.fixture(autouse=True)
 def _isolate_ib_2fa_lock_orphan_state(monkeypatch):
     """Reset the process-wide orphan-confirmation memory around every test.
