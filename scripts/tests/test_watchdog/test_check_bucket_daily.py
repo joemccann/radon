@@ -1,8 +1,9 @@
 """The daily bucket fires regardless of hour.
 
-cash-flow-sync runs once per ET trading day; its open-state window is 25h
-(catches a missed weekday run quickly) and its closed-state window is 4d
-(covers the weekend gap). flex-token-check has a uniform 25h window.
+cash-flow-sync is written by the sFTP ingest Tue..Sat 07:30 ET; its open-state
+window is 3d (a Monday session is ~57h past the Saturday run) and its
+closed-state window is 4d (covers the weekend gap plus a holiday day).
+flex-token-check has a uniform 25h window.
 The watchdog timer fires every hour and we expect the bucket to always run.
 """
 from __future__ import annotations
@@ -48,14 +49,16 @@ class TestDailyBucket:
         report = check.check_bucket(bucket="daily", now=now)
         assert report.ran is True
 
-    def test_daily_fires_when_cash_flow_silent_for_26h(self, db_conn):
+    def test_daily_fires_when_cash_flow_silent_for_3_days(self, db_conn):
         from watchdog import check
 
-        # cash-flow-sync open-state window is 25h. This test runs at 11:00
-        # ET on a Wednesday (market open), so market_state="open" and the
-        # 25h open window applies. Past 26h is stale during market hours.
+        # cash-flow-sync is written by the sFTP ingest (Tue..Sat 07:30 ET),
+        # so its open-state window is 3 days: a Monday session is legitimately
+        # ~57h past the Saturday run. This test runs at 11:00 ET on a
+        # Wednesday (market open), so market_state="open" and the 3-day open
+        # window applies. Past 73h is stale during market hours.
         now = datetime(2026, 5, 13, 15, 0, tzinfo=timezone.utc)
-        _seed(db_conn, "cash-flow-sync", "ok", now - timedelta(hours=26))
+        _seed(db_conn, "cash-flow-sync", "ok", now - timedelta(hours=73))
         _seed(db_conn, "flex-token-check", "ok", now - timedelta(hours=22))
         check.check_bucket(bucket="daily", now=now)
         report = check.check_bucket(bucket="daily", now=now + timedelta(hours=1))

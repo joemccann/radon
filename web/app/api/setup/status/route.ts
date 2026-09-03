@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { radonFetch } from "@/lib/radonApi";
 import { getRequestId, jsonApiError, setNoStoreResponseHeaders } from "@/lib/apiContracts";
-import { isSetupMode } from "@/lib/setup/setupMode";
-import { verifySetupToken } from "@/lib/setup/setupToken";
+import { isSetupMode, isAuthMisconfigured } from "@/lib/setup/setupMode";
+import { setupTokenRejection } from "@/lib/setup/setupToken";
 
 /**
  * First-run wizard status: verifies the console token and returns the
@@ -18,6 +18,17 @@ export const radonCapability = "internal";
 
 export async function POST(request: Request): Promise<Response> {
   const requestId = getRequestId();
+  if (isAuthMisconfigured()) {
+    return setNoStoreResponseHeaders(
+      jsonApiError({
+        message: "Setup already completed. Restart the stack to load authentication keys.",
+        status: 403,
+        code: "SETUP_ALREADY_COMPLETE",
+        requestId,
+      }),
+      requestId,
+    );
+  }
   if (!isSetupMode()) {
     return setNoStoreResponseHeaders(
       jsonApiError({ message: "Not found", status: 404, code: "NOT_FOUND", requestId }),
@@ -30,17 +41,8 @@ export async function POST(request: Request): Promise<Response> {
   } catch {
     body = {};
   }
-  if (!verifySetupToken(body.token)) {
-    return setNoStoreResponseHeaders(
-      jsonApiError({
-        message: "Setup token mismatch. It is printed in the terminal that launched Radon.",
-        status: 401,
-        code: "SETUP_TOKEN_INVALID",
-        requestId,
-      }),
-      requestId,
-    );
-  }
+  const rejected = setupTokenRejection(body.token, requestId);
+  if (rejected) return rejected;
   try {
     const data = await radonFetch("/credentials", { method: "GET", timeout: 15_000 });
     return setNoStoreResponseHeaders(

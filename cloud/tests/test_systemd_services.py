@@ -117,6 +117,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-credit-spread.timer",
     "radon-ivrank.service",
     "radon-ivrank.timer",
+    "radon-iv-spread.service",
+    "radon-iv-spread.timer",
     "radon-iei-hyg.service",
     "radon-iei-hyg.timer",
     "radon-trin.service",
@@ -157,6 +159,7 @@ ENV_FILE_PATH = "/etc/radon/env"
 STRIPPED_ENV_SERVICES = {
     "radon-grok-page-responder.service": "/home/radon/radon-page-responder.env",
     "radon-flex-pull.service": "/var/lib/radon/flex-secrets/env",
+    "radon-mcp.service": "/etc/radon/mcp.env",
 }
 STATIC_SERVICES = {
     "radon-refresh.service",
@@ -1277,3 +1280,30 @@ class TestNewsfeedShutdownExitStatus:
             "if this ever stops holding, re-derive the reason "
             "SuccessExitStatus=75 is load-bearing here"
         )
+
+
+class TestHostedMcp:
+    """radon-mcp.service is the only unit terminating anonymous internet
+    traffic (Caddy /mcp* -> 127.0.0.1:8334). It gets a stripped env and a
+    sandbox, never the full production secret set."""
+
+    FILENAME = "radon-mcp.service"
+
+    def test_loads_stripped_env_not_production_secrets(self, unit, services_dir):
+        svc = unit(self.FILENAME)["Service"]
+        assert svc["environmentfile"] == STRIPPED_ENV_SERVICES[self.FILENAME]
+        text = (services_dir / self.FILENAME).read_text(encoding="utf-8")
+        for line in text.splitlines():
+            if line.startswith("EnvironmentFile="):
+                assert ENV_FILE_PATH not in line, line
+        # The stripped env is pointless if the process can read the real
+        # secrets off disk as user radon.
+        assert f"-{ENV_FILE_PATH}" in svc.get("inaccessiblepaths", "")
+
+    def test_is_sandboxed(self, unit):
+        svc = unit(self.FILENAME)["Service"]
+        assert svc.get("nonewprivileges") == "yes"
+        assert svc.get("protectsystem") == "strict"
+        # The venv and checkout it executes live under /home/radon.
+        assert svc.get("protecthome") == "read-only"
+        assert svc.get("privatetmp") == "yes"

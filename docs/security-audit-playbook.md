@@ -69,6 +69,15 @@ line here whenever you ship a security fix.**
   (service-health runs `scrubSecrets`).
   (`feedback_health_endpoint_public_leak_and_trust_chokepoint`)
 - **No Next.js spawn with user args**; subprocess + PI exec allowlists intact.
+- **Hosted MCP env isolation** — `radon-mcp.service` (the one unit terminating
+  anonymous internet traffic) loads only `/etc/radon/mcp.env` (Clerk verification
+  inputs, `ALLOWED_USER_IDS`, `RADON_MCP_*`), never `/etc/radon/env`, and runs
+  sandboxed with `/etc/radon/env` inaccessible.
+  (`cloud/tests/test_systemd_services.py::TestHostedMcp`, `cloud/tests/test_deploy_resilience.py`)
+- **Hosted MCP resource bounds** — POST `/mcp` bodies over `MAX_REQUEST_BYTES` are
+  413'd before parsing, an unknown-kid JWKS refetch is limited to one per
+  `JWKS_REFRESH_COOLDOWN_SECONDS`, and every upstream read runs off the event loop.
+  (`scripts/tests/test_mcp_hosted.py`)
 - **CSP enforced (not Report-Only)** — `web/middleware.ts:buildCspWithNonce` ships a
   per-request nonce with NO `'unsafe-inline'`/`'unsafe-eval'` in `script-src`, and
   `next.config.mjs` emits NO CSP header. Must keep `worker-src 'self' blob:` and the
@@ -113,6 +122,27 @@ line here whenever you ship a security fix.**
   field is an egress decision, never preference (Turso: https + `*.turso.io` only).
   (`scripts/tests/test_credential_validators.py::TestTursoEgressPin`,
   `scripts/api/tests/test_credentials_routes.py::TestValidateEgressPin`)
+- **Long-held validator threads are bounded** — any route that runs a vendor
+  validator/probe off-loop (tens of seconds per call) caps what is in flight and
+  refuses a repeat for the same target inside a cooldown with 429 + `Retry-After`;
+  the refused request makes no vendor call.
+  (`scripts/api/tests/test_credentials_routes.py::TestValidatorThrottle`)
+- **Scan cooldowns are keyed on the route** — a cache miss inside a scan's
+  cooldown window (different `preset`, explicit-ticker overwrite) is refused with
+  429 + `Retry-After`, never re-spawned; a request parameter must not be able to
+  open a fresh subprocess per distinct value.
+  (`scripts/api/tests/test_leap_route.py::test_leap_cooldown_is_keyed_on_route_not_preset`,
+  `scripts/api/tests/test_garch_convergence_route.py::test_garch_cooldown_is_keyed_on_route_not_preset`)
+- **Spawn-and-persist forms are pinned as mutations** — a route whose parameter
+  turns a cached read into a subprocess that writes Turso must expose that form as
+  its own (method, path) pinned `mutate.*` in `assistant_catalog.py`, never as a
+  query flag on a `read` pin (the assistant strips the query before matching).
+  (`scripts/api/tests/test_assistant_catalog.py::TestAssistantCatalog::test_backtest_refresh_is_a_mutation_not_a_read`)
+- **Path-interpolated symbols are validated at the boundary** — any query/path
+  value that is interpolated into an outbound vendor URL path is matched against
+  the module's existing ticker pattern and refused with 400 before any client is
+  constructed.
+  (`scripts/api/tests/test_internals_skew_history_route.py`)
 - **Root provisioning never dereferences a path an unprivileged account can replace**
   — `cloud/scripts/setup-vps.sh` runs as root; every chmod/chown of the env file passes `require_regular_file` (a symlink is refused, never followed)
   and every unit, drop-in, journald conf, Caddyfile, helper, sudoers and polkit

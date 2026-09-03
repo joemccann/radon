@@ -238,9 +238,10 @@ def test_garch_ticker_scan_bypasses_preset_cooldown(client, monkeypatch):
     assert server._garch_last_scan == seeded
 
 
-def test_garch_preset_scan_ignores_explicit_ticker_cache(client, monkeypatch):
+def test_garch_preset_scan_inside_cooldown_never_serves_explicit_cache(client, monkeypatch):
     """A preset request inside the cooldown must not be served an
-    explicit-universe cache left behind by a custom pair scan."""
+    explicit-universe cache left behind by a custom pair scan, and must not
+    re-spawn either: the window is keyed on the route."""
     import time
     from scripts.api import server
 
@@ -253,37 +254,16 @@ def test_garch_preset_scan_ignores_explicit_ticker_cache(client, monkeypatch):
         "tickers": {},
         "pairs": [],
     }
-    preset_payload = {
-        **explicit_payload,
-        "universe": "preset:mega-tech",
-        "requested_tickers": ["AAPL", "MSFT"],
-    }
-    cache_reads = {"n": 0}
-    calls = []
-
-    def _read(_path):
-        cache_reads["n"] += 1
-        return explicit_payload if cache_reads["n"] < 3 else preset_payload
-
-    async def _stub(script, args, timeout=None):
-        calls.append((script, args, timeout))
-        return _fake_script_result(ok=True, data={})
 
     with (
-        patch("scripts.api.server.run_script", side_effect=_stub),
-        patch("scripts.api.server._read_cache", side_effect=_read),
+        patch("scripts.api.server.run_script") as run_mock,
+        patch("scripts.api.server._read_cache", return_value=explicit_payload),
     ):
         resp = client.post("/garch-convergence/scan?preset=mega-tech")
 
-    assert resp.status_code == 200
-    assert resp.json()["universe"] == "preset:mega-tech"
-    assert calls == [
-        (
-            "garch_convergence.py",
-            ["--preset", "mega-tech", "--json", "--no-open", "--workers", "16"],
-            3600,
-        )
-    ]
+    assert resp.status_code == 429
+    assert int(resp.headers["Retry-After"]) >= 1
+    run_mock.assert_not_called()
 
 
 def test_garch_rejects_odd_ticker_count(client):
@@ -302,3 +282,36 @@ def test_garch_rejects_invalid_ticker_symbol(client):
     assert resp.status_code == 400
     assert "1-6 letter" in resp.text
     run_mock.assert_not_called()
+
+
+def test_garch_cooldown_is_keyed_on_route_not_preset(client, monkeypatch):
+    import time
+
+    from scripts.api import server
+
+    monkeypatch.setattr(server, "_garch_last_scan", time.monotonic())
+    calls: list[tuple[str, list[str], int | None]] = []
+
+    async def fake_run_script(script, args, timeout=None):
+        calls.append((script, args, timeout))
+        return _fake_script_result(ok=True, data={})
+
+    cached = {"scan_time": "2026-05-22T14:00:00", "universe": "preset:semis", "tickers": {}, "pairs": []}
+    monkeypatch.setattr(server, "run_script", fake_run_script)
+    monkeypatch.setattr(server, "_read_cache", lambda _path: cached)
+
+    assert client.post("/garch-convergence/scan?preset=semis").status_code == 200
+    blocked = client.post("/garch-convergence/scan?preset=energy")
+    assert blocked.status_code == 429
+    assert 1 <= int(blocked.headers["Retry-After"]) <= server.GARCH_COOLDOWN_S
+    assert calls == []
+
+    monkeypatch.setattr(server, "_garch_last_scan", -1e9)
+    assert client.post("/garch-convergence/scan?preset=energy").status_code == 200
+    assert calls == [
+        (
+            "garch_convergence.py",
+            ["--preset", "energy", "--json", "--no-open", "--workers", "16"],
+            3600,
+        )
+    ]

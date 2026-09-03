@@ -148,6 +148,8 @@ readonly SERVICE_FILES=(
   radon-credit-spread.timer
   radon-ivrank.service
   radon-ivrank.timer
+  radon-iv-spread.service
+  radon-iv-spread.timer
   radon-iei-hyg.service
   radon-iei-hyg.timer
   radon-trin.service
@@ -1071,6 +1073,19 @@ validate_env() {
   log_success "Environment validated"
 }
 
+write_mcp_env() {
+  # radon-mcp.service terminates anonymous internet traffic, so it loads
+  # /etc/radon/mcp.env (Clerk verification inputs, operator allowlist,
+  # RADON_MCP_* knobs), never the full secret set. Same key set as
+  # deploy.sh:write_mcp_env, which rewrites it on every deploy.
+  local mcp_env_tmp
+  mcp_env_tmp="$(mktemp)"
+  grep -E '^(CLERK_JWKS_URL|CLERK_ISSUER|ALLOWED_USER_IDS|RADON_MCP_[A-Z0-9_]+)=' "$ENV_FILE" > "$mcp_env_tmp" || true
+  install -m 0600 -o radon -g radon "$mcp_env_tmp" /etc/radon/mcp.env
+  rm -f "$mcp_env_tmp"
+  log_success "Hosted MCP env written to /etc/radon/mcp.env"
+}
+
 # -- Main --------------------------------------------------------------------
 
 main() {
@@ -1084,6 +1099,7 @@ main() {
   create_etc_radon_dir
   clone_repos
   validate_env
+  write_mcp_env
   setup_python
   setup_node
   install_caddy

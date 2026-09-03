@@ -309,3 +309,32 @@ describe("R-466 / REL-165: the text fetch is bounded", () => {
     }
   });
 });
+
+// T-374: the tests above all inject timeoutMs, so the 30 s DEFAULT (the
+// REL-165 incident constant) was a free variable. AbortSignal.timeout runs on
+// Node's internal timer, which vitest fake timers cannot advance (verified:
+// advanceTimersByTimeAsync(30_001) leaves the signal un-aborted), so the
+// default's wiring is asserted directly: the AbortSignal.timeout spy sees
+// exactly 30 000 ms and the fetch carries the very signal it returned. The
+// abort path itself is proven end-to-end by the timeoutMs: 50 test above.
+describe("T-374: the default fetch bound is exactly 30 000 ms", () => {
+  it("with no timeoutMs override, the model call carries AbortSignal.timeout(30000) on the wire", async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(chatCompletion(JSON.stringify({ tags: ["puts", "options", "positioning"] }))),
+    );
+    global.fetch = fetchMock as typeof fetch;
+
+    const { createTagger } = await import("../../scripts/newsfeed/tagger.js");
+    const tagger = createTagger({ getTaxonomySnapshot: async () => TAXONOMY });
+
+    const tags = await tagger.tagPost({ id: "p-t374", title: "X", content: "Y" });
+    expect(tags).toEqual(["PUTS", "OPTIONS", "POSITIONING"]);
+
+    expect(timeoutSpy).toHaveBeenCalledTimes(1);
+    expect(timeoutSpy).toHaveBeenCalledWith(30_000);
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+    expect(init.signal).toBe(timeoutSpy.mock.results[0].value);
+  });
+});

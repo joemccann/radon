@@ -13,7 +13,7 @@ import type { DispersionData } from "./dispersion";
 export type RegimeTab =
   | "cri" | "vcg" | "gex" | "grg"
   | "breadth" | "bpi" | "margin" | "straddle"
-  | "cor" | "vixcor" | "vixts" | "dispersion" | "ivrank" | "skew" | "skew2d" | "curve"
+  | "cor" | "vixcor" | "vixts" | "dispersion" | "ivrank" | "iv-spread" | "skew" | "skew2d" | "curve"
   | "cot" | "ats" | "short" | "llm" | "backtest" | "credit" | "iei-hyg" | "trin" | "divyield" | "hyad" | "hhlev"
   | "ma-ratio"
   | "streaks";
@@ -22,7 +22,7 @@ export type RegimeRailGroup = { label: string; tabs: readonly RegimeTab[] };
 
 export const REGIME_RAIL_GROUPS: readonly RegimeRailGroup[] = [
   { label: "Composite", tabs: ["cri", "grg", "vcg"] },
-  { label: "Volatility", tabs: ["vixcor", "vixts", "dispersion", "ivrank", "skew", "skew2d", "curve", "straddle"] },
+  { label: "Volatility", tabs: ["vixcor", "vixts", "dispersion", "ivrank", "iv-spread", "skew", "skew2d", "curve", "straddle"] },
   { label: "Positioning", tabs: ["gex", "margin", "hhlev", "credit", "iei-hyg", "cot", "short", "ats"] },
   { label: "Breadth & sentiment", tabs: ["breadth", "ma-ratio", "trin", "divyield", "hyad", "bpi", "cor", "streaks"] },
   { label: "Models", tabs: ["llm", "backtest"] },
@@ -38,6 +38,7 @@ export const REGIME_TAB_LABEL: Record<RegimeTab, string> = {
   vixts: "VIX TS",
   dispersion: "DISPERSION",
   ivrank: "IV RANK",
+  "iv-spread": "IV SPREAD",
   skew: "SKEW",
   skew2d: "SKEW 2D",
   curve: "CURVE",

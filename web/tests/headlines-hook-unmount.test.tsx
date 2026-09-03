@@ -10,16 +10,16 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const deferred = vi.hoisted(() => {
-  let resolve: (url: string) => void = () => {};
-  const promise = new Promise<string>((r) => {
-    resolve = r;
-  });
-  return { promise, resolve: (url: string) => resolve(url) };
+const tickets = vi.hoisted(() => {
+  const waiting: Array<(url: string) => void> = [];
+  return {
+    issue: () => new Promise<string>((resolve) => waiting.push(resolve)),
+    resolve: (url: string) => waiting.shift()?.(url),
+  };
 });
 
 vi.mock("../lib/headlinesSocket", () => ({
-  buildHeadlinesWebSocketUrl: () => deferred.promise,
+  buildHeadlinesWebSocketUrl: () => tickets.issue(),
   headlinesUrlLeaksUpstream: () => false,
 }));
 
@@ -59,12 +59,37 @@ describe("useHeadlines unmount during the awaited ticket", () => {
     expect(MockWebSocket.instances).toHaveLength(0);
     unmount();
     await act(async () => {
-      deferred.resolve("ws://localhost:8766/ws-headlines?ticket=t");
+      tickets.resolve("ws://localhost:8766/ws-headlines?ticket=t");
       await Promise.resolve();
       await Promise.resolve();
       await Promise.resolve();
     });
+    // T-366: the fixed hook must never reach the constructor after unmount
+    // (R-460 checks `stopped` again after the awaited ticket), so zero
+    // instances — not merely zero OPEN instances — is the contract.
+    expect(MockWebSocket.instances).toHaveLength(0);
     const leaked = MockWebSocket.instances.filter((socket) => socket.readyState !== 3);
     expect(leaked).toHaveLength(0);
+  });
+
+  // T-366: drain-schedule control. The unmount test proves the fix by the
+  // ABSENCE of a socket, which is vacuously green if open() gains one more
+  // await and never reaches the WebSocket constructor inside the drained
+  // ticks. Same resolve+drain schedule without unmount must construct the
+  // socket on the first tick, so an extra await in the open path turns THIS
+  // red instead of leaving both tests green without executing the fix.
+  it("constructs the socket on the same drain schedule when not unmounted", async () => {
+    const { unmount } = renderHook(() => useHeadlines());
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(MockWebSocket.instances).toHaveLength(0);
+    await act(async () => {
+      tickets.resolve("ws://localhost:8766/ws-headlines?ticket=t");
+      await Promise.resolve();
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+    unmount();
+    expect(MockWebSocket.instances[0]?.readyState).toBe(3);
   });
 });

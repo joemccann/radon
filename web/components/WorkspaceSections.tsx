@@ -327,13 +327,16 @@ function resolveOpeningLegBasis(
   };
 }
 
-/** Net cash received by a group's closing option fills in dollars
- *  (SLD positive, BOT negative). Null when any fill is unpriced or sideless. */
+/** Net cash received by a group's closing fills in dollars
+ *  (SLD positive, BOT negative). Options use the ×100 multiplier, stocks ×1.
+ *  Null when any fill is unpriced or sideless. */
 function closedGroupCloseCash(group: PositionFillGroup): number | null {
-  const optFills = group.fills.filter((f) => f.contract.secType === "OPT");
-  if (optFills.length === 0) return null;
+  const priced = group.fills.filter(
+    (f) => f.contract.secType === "OPT" || f.contract.secType === "STK",
+  );
+  if (priced.length === 0) return null;
   let closeCash = 0;
-  for (const fill of optFills) {
+  for (const fill of priced) {
     if (fill.avgPrice == null || !Number.isFinite(fill.avgPrice)) return null;
     const cashSign = fill.side === "SLD" || fill.side === "SELL"
       ? 1
@@ -341,7 +344,8 @@ function closedGroupCloseCash(group: PositionFillGroup): number | null {
         ? -1
         : 0;
     if (cashSign === 0) return null;
-    closeCash += cashSign * fill.avgPrice * Math.abs(fill.quantity) * 100;
+    const multiplier = fill.contract.secType === "OPT" ? 100 : 1;
+    closeCash += cashSign * fill.avgPrice * Math.abs(fill.quantity) * multiplier;
   }
   return closeCash;
 }
@@ -606,10 +610,12 @@ export function groupExecutedOrders(
   };
 
   const isClosingFill = (fill: ExecutedOrder): boolean => {
-    if (fill.contract.secType !== "OPT") return false;
     // Primary signal: IB populated realizedPNL on the commission report.
+    // Applies to every sec type — a stock (or future) SELL-to-close / BUY-to-cover
+    // carries realizedPNL just as an option close does.
     if (fill.realizedPNL != null && Math.abs(fill.realizedPNL) > 0.01) return true;
-    // Fallback: this fill closes against an existing portfolio leg.
+    // Fallback (options only): this fill closes against an existing portfolio leg.
+    if (fill.contract.secType !== "OPT") return false;
     // BOT against a SHORT leg, or SLD against a LONG leg = reduces the position.
     const basis = portfolioLegBasisFor(fill);
     if (!basis) return false;

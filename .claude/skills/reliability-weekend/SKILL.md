@@ -662,3 +662,12 @@ how this loop improves as the codebase grows.
   outputs (`select_gates(...)` results, libsql claim races, `place_order` call counts) that settled four
   fixes as HOLDS and produced four P2s from the uncovered cases — the "name one case the shipped test does
   not cover and run it" instruction paid for itself again.
+- 2026-09-02 (audit): **when the previous backlog has missing REL rows, read the rolling issue's comments
+  for that date BEFORE theorizing.** The 09-01 cycle's 8 remediate rounds all died in ~40 seconds on
+  "You're out of usage credits" (subscription exhaustion) — one `gh issue view` explained both the missing
+  09-01 ledger line and ten un-started tasks (REL-175…178, REL-181…186). Un-started tasks roll into the
+  NEXT remediate; do not re-file them as findings. Corollary: rounds have no quota-aware backoff, so a
+  quota outage burns the whole round budget in seconds — the wrapper defect is filed, but the triage move
+  (issue forensics first) stands regardless. Also this run: a one-tool-call CPython repro in the lead
+  (`ThreadPoolExecutor` atexit join, exit 124 under `timeout`) turned a walk's strongest P1 claim into
+  CONFIRMED — executing the cheap repro beats rating a plausible mechanism.
