@@ -473,7 +473,14 @@ def test_the_prune_is_bounded_by_a_timeout(tmp_path: Path, loop: str) -> None:
     bounded = [ln for ln in _lines(cfg)
                if ln.startswith("TIMEOUT ") and "/usr/bin/python3" in ln]
     assert bounded, _why(result, cfg)
-    assert re.search(r"^TIMEOUT \d+ /usr/bin/python3 -I - --root .+ --self ", bounded[0]), bounded[0]
+    # report()'s own dead-man comment prune (nightly_issue_prune.py) also
+    # pipes a bounded, isolated python3 call, so this loop's disk-prune is
+    # no longer necessarily the first one in a cycle — find it by shape.
+    weekend_prune_calls = [ln for ln in bounded if "--root" in ln]
+    assert weekend_prune_calls, bounded
+    assert re.search(
+        r"^TIMEOUT \d+ /usr/bin/python3 -I - --root .+ --self ", weekend_prune_calls[0]
+    ), weekend_prune_calls[0]
 
 
 @pytest.mark.parametrize("loop", LOOP_IDS)
