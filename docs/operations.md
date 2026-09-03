@@ -67,6 +67,16 @@ the ciphertext unrecoverable — back up the key file together with
 `secrets.db`, or plan to re-enter every credential. Field inventory:
 `scripts/credentials_registry.py`. Implementation: `scripts/secret_store.py`.
 
+**Validation is throttled.** Saving (`PUT /credentials/{service}`) and the
+dry-run check (`POST /credentials/{service}/validate`) both run the vendor
+validator, which can hold a thread for up to `SLOW_LOGIN_TIMEOUT_S` (90s on
+the browser-login services). The route bounds it: at most
+`VALIDATOR_CONCURRENCY` (2) validators in flight per process, and one run per
+service per `VALIDATOR_COOLDOWN_S` (5s). A request inside the window gets
+`429` with `Retry-After` and code `VALIDATION_COOLDOWN`, and makes no vendor
+call; on the PUT path nothing is stored. Constants and the chokepoint
+(`_run_validator`) live in `scripts/api/routes/credentials.py`.
+
 ### First-run setup wizard (`/setup`)
 
 With NO Clerk key configured, the whole app collapses to `/setup` plus its
