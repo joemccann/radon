@@ -374,7 +374,29 @@ def check_modify_limits(
         quantity = working_order.get("quantity") or working_order.get("totalQuantity")
     price = new_price
     if price is None:
-        price = working_order.get("limitPrice") or working_order.get("lmtPrice") or 0
+        # REL-211 (R-580): a working STP/MKT-style order carries no limit
+        # price; auxPrice/stopPrice still bounds its notional.
+        price = (
+            working_order.get("limitPrice")
+            or working_order.get("lmtPrice")
+            or working_order.get("auxPrice")
+            or working_order.get("stopPrice")
+            or 0
+        )
+
+    if order_type == "stock" and not price:
+        # REL-211 (R-580): with no resolvable price the notional cap cannot
+        # be computed, and a quantity-only modify was bounded solely by the
+        # 50,000-share band (50,000 x a $500 stock = $25M past the $250k
+        # cap). Fail closed, same convention as the unpriceable-combo-strike
+        # refusal above.
+        return {
+            "code": "ORDER_STOCK_PRICE_UNRESOLVED",
+            "message": (
+                "stock modify has no resolvable price (limit/aux/stop), so "
+                "its notional cannot be bounded — refused"
+            ),
+        }
 
     params: dict[str, Any] = {
         "type": order_type,
