@@ -6,6 +6,11 @@ must happen outside of CI pushing a new deployment. Audit tables, SHA
 ranges, finding inventories and gate counts belong on the rolling GitHub
 issue and in the loop ledgers, not here.
 
+--issue/--fix/--next take one bullet per line (`- **Component**: what
+happened.`), not a single dense paragraph; each bullet's own internal
+whitespace collapses but the line breaks between bullets survive. A plain
+one-line sentence still works unchanged.
+
 This module does not post issues, issue comments, or Pushover pages.
 """
 
@@ -35,11 +40,26 @@ GITHUB_PR_TITLE_MAX = 256
 _DATE = re.compile(r"\A\d{4}-\d{2}-\d{2}\Z")
 
 
+def _normalize_multiline(value: str | None) -> str:
+    """Collapse repeated whitespace within each line but keep line breaks,
+    so a caller-supplied bullet list survives instead of being flattened
+    into one paragraph. A plain single-line value is unaffected."""
+    lines = (" ".join(line.split()) for line in (value or "").splitlines())
+    return "\n".join(line for line in lines if line)
+
+
 def _clean(value: str, *, field: str) -> str:
-    text = " ".join((value or "").split())
+    text = _normalize_multiline(value)
     if not text:
         raise ValueError(f"{field} must be non-empty plain language")
     return text
+
+
+def _title_summary(value: str, *, field: str) -> str:
+    """A title is one GitHub line: take the first bullet (or sentence) and
+    strip its Markdown so a bulleted --issue still yields a plain title."""
+    first_line = _clean(value, field=field).splitlines()[0]
+    return first_line.removeprefix("- ").replace("**", "")
 
 
 def _calendar_date(value: str) -> str:
@@ -64,7 +84,7 @@ def format_pr_title(*, loop: str, date: str, issue: str) -> str:
         known = ", ".join(sorted(LOOP_TITLES))
         raise ValueError(f"unknown loop {loop!r}; expected one of: {known}")
     day = _calendar_date(date)
-    summary = _clean(issue, field="issue")
+    summary = _title_summary(issue, field="issue")
     if loop == "security":
         title = f"{prefix} {day}"
     else:
@@ -83,8 +103,7 @@ def format_pr_body(
     """Three sections, in order. Default Next is a green deployment."""
     issue_text = _clean(issue, field="issue")
     fix_text = _clean(fix, field="fix")
-    leftover = " ".join((next_action or "").split())
-    next_text = leftover or GREEN_DEPLOYMENT
+    next_text = _normalize_multiline(next_action) or GREEN_DEPLOYMENT
     return (
         f"## {ISSUE_HEADING}\n\n"
         f"{issue_text}\n\n"
@@ -115,8 +134,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--loop", required=True, choices=sorted(LOOP_TITLES))
     parser.add_argument("--date", required=True, help="YYYY-MM-DD")
-    parser.add_argument("--issue", required=True, help="what went wrong, in plain language")
-    parser.add_argument("--fix", required=True, help="what this PR actually changed")
+    parser.add_argument(
+        "--issue",
+        required=True,
+        help="what went wrong: one bullet per line, e.g. '- **X**: happened.'",
+    )
+    parser.add_argument(
+        "--fix",
+        required=True,
+        help="what this PR actually changed: one bullet per line",
+    )
     parser.add_argument(
         "--next",
         dest="next_action",

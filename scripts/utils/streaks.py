@@ -34,6 +34,29 @@ def closes_to_rows(closes: Mapping[str, Any] | None) -> list[dict[str, Any]]:
     return [{"date": date, "close": cleaned[date]} for date in sorted(cleaned)]
 
 
+def compute_streaks_with_gaps(
+    rows: list[dict[str, Any]], gaps: set[str]
+) -> list[int]:
+    """Per-row streaks where a gap date between two valid sessions is a
+    break: the session after a hole starts at 0 (REL-177 / R-493)."""
+    merged = sorted({row["date"] for row in rows} | set(gaps))
+    by_date: dict[str, float] = {row["date"]: row["close"] for row in rows}
+    streaks_by_date: dict[str, int] = {}
+    prev_close: float | None = None
+    prev_streak = 0
+    for date in merged:
+        if date in gaps and date not in by_date:
+            prev_close = None
+            prev_streak = 0
+            continue
+        close = by_date[date]
+        streak = prev_streak + 1 if (prev_close is not None and close > prev_close) else 0
+        streaks_by_date[date] = streak
+        prev_close = close
+        prev_streak = streak
+    return [streaks_by_date[row["date"]] for row in rows]
+
+
 def compute_streaks(closes: list[float]) -> list[int]:
     """streak[i] = consecutive gains ending at i; down/flat resets to 0."""
     streaks: list[int] = []
@@ -95,21 +118,63 @@ def _missing_payload(symbol: str, source: Any, scan_time: Any) -> dict[str, Any]
     }
 
 
+def _gap_dates(closes: Mapping[str, Any] | None) -> set[str]:
+    """Dates whose close is present but unusable (None/0/non-finite).
+
+    REL-177 (R-493): a vendor hole must be a BREAK, not a splice — comparing
+    day t+1 against t-1 extended a streak the tape never had.
+    """
+    gaps: set[str] = set()
+    for raw_date, raw_close in (closes or {}).items():
+        date = str(raw_date or "")[:10]
+        if len(date) != 10:
+            continue
+        try:
+            value = float(raw_close)
+        except (TypeError, ValueError):
+            gaps.add(date)
+            continue
+        if not math.isfinite(value) or value <= 0:
+            gaps.add(date)
+    return gaps
+
+
+def _last_bar_is_unsettled(last_date: str, now: datetime | None) -> bool:
+    """True when the series' last bar is TODAY's in-progress ET session.
+
+    REL-177 (R-492): IB and Yahoo daily series carry the live bar; dating it
+    as a close flips streak/day-change intraday on an unsettled print.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+
+        et_now = (now or datetime.now(timezone.utc)).astimezone(
+            ZoneInfo("America/New_York")
+        )
+    except Exception:  # noqa: BLE001 — no tzdata: keep the old behavior
+        return False
+    if last_date != et_now.strftime("%Y-%m-%d"):
+        return False
+    return et_now.hour * 60 + et_now.minute < 16 * 60
+
+
 def build_streaks_payload(
     symbol: str,
     closes: Mapping[str, Any] | None,
     *,
     source: Any,
     scan_time: Any,
+    now: datetime | None = None,
 ) -> dict[str, Any]:
     """Full STREAKS payload; fewer than 2 usable closes is the missing shell."""
     sym = (symbol or "").strip().upper()
     rows = closes_to_rows(closes)
+    gaps = _gap_dates(closes)
     if len(rows) < 2:
         return _missing_payload(sym, source, scan_time)
 
     values = [row["close"] for row in rows]
-    streaks = compute_streaks(values)
+    streaks = compute_streaks_with_gaps(rows, gaps)
     runs = run_lengths(streaks)
     current_streak = streaks[-1]
     max_streak = max(streaks)
@@ -121,6 +186,9 @@ def build_streaks_payload(
     comparisons = len(values) - 1
     up_days = sum(1 for i in range(1, len(values)) if values[i] > values[i - 1])
 
+    unsettled = _last_bar_is_unsettled(rows[-1]["date"], now)
+    current_index = len(rows) - 2 if unsettled and len(rows) >= 3 else len(rows) - 1
+
     return {
         "symbol": sym,
         "scan_time": scan_time,
@@ -129,11 +197,14 @@ def build_streaks_payload(
         "count": len(rows),
         "first_date": rows[0]["date"],
         "last_date": rows[-1]["date"],
+        "gaps": len(gaps),
         "current": {
-            "date": rows[-1]["date"],
-            "close": round(values[-1], 4),
-            "streak": current_streak,
-            "day_change_pct": round((values[-1] / values[-2] - 1) * 100, 2),
+            "date": rows[current_index]["date"],
+            "close": round(values[current_index], 4),
+            "streak": streaks[current_index],
+            "day_change_pct": round(
+                (values[current_index] / values[current_index - 1] - 1) * 100, 2
+            ),
         },
         "stats": {
             "max_streak": max_streak,
@@ -148,7 +219,12 @@ def build_streaks_payload(
             "up_day_pct": round(up_days / comparisons * 100, 1),
         },
         "series": [
-            {"date": row["date"], "close": round(row["close"], 4), "streak": streak}
-            for row, streak in zip(rows, streaks)
+            {
+                "date": row["date"],
+                "close": round(row["close"], 4),
+                "streak": streak,
+                **({"settled": False} if unsettled and i == len(rows) - 1 else {}),
+            }
+            for i, (row, streak) in enumerate(zip(rows, streaks))
         ],
     }

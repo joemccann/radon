@@ -200,13 +200,19 @@ def run() -> Optional[dict[str, Any]]:
         return None
 
     now = datetime.now(timezone.utc)
-    popular, scan_results = fetch_crowding()
-    rows = build_rows(popular, scan_results, now.strftime("%Y-%m-%d"))
-    scan_time = now.isoformat().replace("+00:00", "Z")
-    if rows:
-        persist(rows, scan_time)
-    else:
-        _log("no crowding rows parsed; nothing written")
+    # REL-175 (R-483): the docstring and .env.example promise a clean skip on
+    # any Robinhood failure; the fetch and persist sat outside every try.
+    try:
+        popular, scan_results = fetch_crowding()
+        rows = build_rows(popular, scan_results, now.strftime("%Y-%m-%d"))
+        scan_time = now.isoformat().replace("+00:00", "Z")
+        if rows:
+            persist(rows, scan_time)
+        else:
+            _log("no crowding rows parsed; nothing written")
+    except Exception as exc:  # noqa: BLE001 — overlay job: skip cleanly, say why
+        _log(f"crowding cycle failed; skipping cleanly: {exc}")
+        return None
     return {"scan_time": scan_time, "count": len(rows), "rows": rows}
 
 

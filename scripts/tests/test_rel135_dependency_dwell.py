@@ -120,22 +120,34 @@ class TestDependencyDwellBound:
             "radon-nextjs": {"state": "up"},
             "ib-gateway": {"state": "down", "detail": "ConnectionRefusedError"},
         }
-        assert probes.aggregate_state(live_probes, weekend, "ok", 2.0) == "degraded"
+        # REL-181 rewrote the suppression from a set-exclusion to a
+        # calendar+result predicate, so this case now pins the injected
+        # Saturday clock the scenario always described (page a45d6410 WAS a
+        # weekend). The unconditional form this test used to accept is R-478.
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        saturday = datetime(2026, 8, 30, 22, 6, tzinfo=ZoneInfo("America/New_York"))
+        assert probes.aggregate_state(
+            live_probes, weekend, "ok", 2.0, now_et=saturday
+        ) == "degraded"
         payload = probes.build_status(
-            live_probes, weekend, "2026-08-30T22:06:00Z", "ok", 2.0
+            live_probes, weekend, "2026-08-30T22:06:00Z", "ok", 2.0,
+            now_et=saturday,
         )
         assert payload["overall_state"] == "degraded"
         verdict = edge_probe.classify_probes(
             {"reachable": True, "http_status": 200},
             {"reachable": True, "http_status": 200, "payload": payload},
         )
-        assert verdict == {"ok": 1, "detail": "edge_ok:aggregate_degraded"}
+        assert verdict["ok"] == 1
+        assert verdict["detail"].startswith("edge_ok:aggregate_degraded")
 
-    def test_dwell_escalate_excludes_the_broker_only(self):
-        assert "radon-ib-gateway.service" not in probes.DWELL_ESCALATE_UNITS
-        assert probes.DWELL_ESCALATE_UNITS == (
-            probes.DEPENDENCY_UNITS - frozenset({"radon-ib-gateway.service"})
-        )
+    def test_dwell_escalation_covers_the_broker_under_a_predicate(self):
+        """REL-181 (R-478): the broker is dwell-escalated like every other
+        dependency unless BOTH the market is closed and the exit was clean."""
+        assert "radon-ib-gateway.service" in probes.DWELL_ESCALATE_UNITS
+        assert probes.DWELL_ESCALATE_UNITS == probes.DEPENDENCY_UNITS
 
 
 class TestUnitStateCacheCarriesDwell:

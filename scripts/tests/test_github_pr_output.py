@@ -107,6 +107,56 @@ class TestFormatPrBody:
             _body(**kwargs)
 
 
+class TestBulletedSections:
+    """--issue/--fix/--next may carry one bullet per line so a PR reads as
+    a scannable list instead of one dense paragraph. Each bullet's own
+    internal whitespace still collapses; line breaks between bullets do
+    not."""
+
+    def test_issue_bullets_survive_as_separate_lines(self):
+        body = _body(
+            issue=(
+                "- **Validator**: contacted any host a caller named.\n"
+                "- **Wizard**: wrote unknown env keys on backend errors."
+            ),
+            fix="B.",
+        )
+        issue_block = body.split(ISSUE_HEADING, 1)[1].split(FIX_HEADING, 1)[0].strip()
+        assert issue_block == (
+            "- **Validator**: contacted any host a caller named.\n"
+            "- **Wizard**: wrote unknown env keys on backend errors."
+        )
+
+    def test_internal_whitespace_still_collapses_per_line(self):
+        body = _body(issue="-   **Validator**:   too   many   spaces.", fix="B.")
+        assert "- **Validator**: too many spaces." in body
+
+    def test_blank_lines_between_bullets_are_dropped(self):
+        body = _body(issue="- First finding.\n\n\n- Second finding.", fix="B.")
+        issue_block = body.split(ISSUE_HEADING, 1)[1].split(FIX_HEADING, 1)[0].strip()
+        assert issue_block == "- First finding.\n- Second finding."
+
+    def test_next_action_bullets_also_survive(self):
+        body = _body(
+            issue="A.",
+            fix="B.",
+            next_action=(
+                "- **Deploy**: writes the derived env file.\n"
+                "- **Operator**: pins the repository key by fingerprint."
+            ),
+        )
+        next_block = body.split(NEXT_HEADING, 1)[1].strip()
+        assert next_block == (
+            "- **Deploy**: writes the derived env file.\n"
+            "- **Operator**: pins the repository key by fingerprint."
+        )
+
+    def test_single_line_issue_is_unaffected(self):
+        body = _body(issue="The TLS handshake ran on the accept thread.", fix="B.")
+        issue_block = body.split(ISSUE_HEADING, 1)[1].split(FIX_HEADING, 1)[0].strip()
+        assert issue_block == "The TLS handshake ran on the accept thread."
+
+
 class TestFormatPrTitle:
     @pytest.mark.parametrize(
         "loop, prefix",
@@ -136,6 +186,17 @@ class TestFormatPrTitle:
         assert issue not in title
         body = _body(issue=issue, fix="The chokepoint now refuses the input.")
         assert issue in body
+
+    def test_bulleted_issue_collapses_to_a_single_line_title(self):
+        issue = (
+            "- **Validator**: contacted any host a caller named.\n"
+            "- **Wizard**: wrote unknown env keys on backend errors."
+        )
+        title = pr.format_pr_title(loop="reliability", date="2026-09-01", issue=issue)
+        assert "\n" not in title
+        assert title == (
+            "Reliability 2026-09-01: Validator: contacted any host a caller named."
+        )
 
     def test_unknown_loop_is_refused(self):
         with pytest.raises(ValueError, match="loop"):

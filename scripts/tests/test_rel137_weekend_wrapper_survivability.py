@@ -408,6 +408,17 @@ class TestTerminalFailuresPage:
             if re.search(r'\breport\b.*"\s+0(\s|$)', ln) or re.search(r"\breport\b.*\s0\s*\|\|", ln)
         ]
         for line in suppressed:
+            # REL-199 (R-531) reordered on_signal to page via a DIRECT
+            # notify_phase before the gh ladder; its report suppresses the
+            # duplicate push. The intent of this pin (terminal outcomes page)
+            # is preserved — assert the explicit page instead.
+            if "KILLED (SIG" in line:
+                fn_start = body.index("on_signal()")
+                fn = body[fn_start : body.index("\n}", fn_start)]
+                assert fn.index("notify_phase") < fn.index("report "), (
+                    "on_signal suppresses the report push without paging first"
+                )
+                continue
             assert "continuing" in line, (
                 "a terminal outcome where the agent never ran must page; only "
                 f"an interim continuation round stays issue-only: {line}"
