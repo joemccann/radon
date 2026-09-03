@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import errno
 import json
+from datetime import datetime
 import math
 import socket
 import urllib.error
@@ -161,12 +162,45 @@ DEPENDENCY_UNITS = frozenset({
     "radon-monitor.service",
 })
 # R-382 dwell escalates a sidecar that stays non-up past the bound
-# (newsfeed / monitor Restart=always deaths). The broker is not a flap:
-# IBKR weekend session shutdown leaves radon-ib-gateway inactive/dead
-# Result=success for 40+ hours, IBC auto-restart frozen off-hours. Applying
-# the 900s dwell to that unit recreated the 2026-08-09 false edge P1
-# (page a45d6410, 2026-08-30). On-box still pages ib-gateway-grouped.
-DWELL_ESCALATE_UNITS = DEPENDENCY_UNITS - frozenset({"radon-ib-gateway.service"})
+# (newsfeed / monitor Restart=always deaths). The broker is special but NOT
+# exempt (REL-181 / R-478, NF-10): IBKR session shutdown leaves
+# radon-ib-gateway inactive/dead Result=success for 40+ hours off-session
+# (weekends, and nightly outside the 04:00-20:00 ET equity EXT window) — the
+# unconditional exclusion that replaced the dwell recreated permanent
+# blindness the other way (a gateway dead Tuesday 10:00 ET could never
+# escalate the edge floor). The suppression is now a predicate:
+# `Result=success` AND the market is closed. Anything else takes the 900s
+# dwell. Holidays are NOT calendared here (stdlib isolation contract: no
+# repo imports), so a clean exit on a holiday Monday escalates and pages —
+# fail toward paging; on-box ib-gateway-grouped still dedupes.
+DWELL_ESCALATE_UNITS = DEPENDENCY_UNITS
+GATEWAY_UNIT = "radon-ib-gateway.service"
+
+
+def _now_et(now_et=None):
+    if now_et is not None:
+        return now_et
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("America/New_York"))
+    except Exception:
+        from datetime import timedelta, timezone
+        return datetime.now(timezone.utc) + timedelta(hours=-5)
+
+
+def _market_closed_et(dt) -> bool:
+    """Weekend, or a weekday outside the 04:00-20:00 ET equity EXT session."""
+    if dt.weekday() >= 5:
+        return True
+    minutes = dt.hour * 60 + dt.minute
+    return not (4 * 60 <= minutes < 20 * 60)
+
+
+def _gateway_dwell_suppressed(value: dict, now_et) -> bool:
+    return (
+        str(value.get("result", "")).lower() == "success"
+        and _market_closed_et(_now_et(now_et))
+    )
 
 
 def _evidence_current(age_secs, bound: float) -> bool:
@@ -237,7 +271,7 @@ def _nested_api_state(probe_results: dict) -> str | None:
 
 def aggregate_state(probe_results: dict, units: dict,
                     health_service: str = "ok", units_age_secs=None,
-                    probes_age_secs=None) -> str:
+                    probes_age_secs=None, now_et=None) -> str:
     """Return the canonical state for this daemon's direct observations.
 
     The off-box ``external_probe`` row is deliberately excluded: folding an old
@@ -281,7 +315,10 @@ def aggregate_state(probe_results: dict, units: dict,
                 if name in DWELL_ESCALATE_UNITS and state != "up":
                     dwell = value.get("non_up_secs")
                     if isinstance(dwell, (int, float)) and dwell >= DEPENDENCY_DWELL_LIMIT_SECS:
-                        dependency_stuck = True
+                        if name == GATEWAY_UNIT and _gateway_dwell_suppressed(value, now_et):
+                            pass  # weekend/overnight clean exit: REL-181 predicate
+                        else:
+                            dependency_stuck = True
     nested_api_state = _nested_api_state(probe_results)
     if nested_api_state is not None:
         dependency_states.append(nested_api_state)
@@ -321,10 +358,32 @@ def aggregate_state(probe_results: dict, units: dict,
     return "unknown"
 
 
+def degraded_reasons(probe_results: dict, units: dict) -> list:
+    """Names of the non-up dependencies behind a degraded aggregate (R-510).
+
+    Always computed; empty when everything dependency-side is up. The off-box
+    edge probe folds this into its verdict detail so "gateway down
+    (suppressed)", "newsfeed flap" and "2FA lock" stop being the same word.
+    """
+    _NON_UP = {"down", "error", "failed", "unhealthy", "starting", "unknown"}
+    reasons = []
+    for name, value in (probe_results or {}).items():
+        if isinstance(value, dict) and name in DEPENDENCY_PROBES:
+            if str(value.get("state", "unknown")).lower() in _NON_UP:
+                reasons.append(name)
+    for name, value in (units or {}).items():
+        if isinstance(value, dict) and name in DEPENDENCY_UNITS:
+            if str(value.get("state", "unknown")).lower() != "up":
+                reasons.append(name)
+    if _nested_api_state(probe_results) == "down":
+        reasons.append("radon-api:broker")
+    return sorted(set(reasons))
+
+
 def build_status(probes: dict, units: dict, generated_at: str,
                  health_service: str = "ok", units_age_secs=None,
                  service_health=None, external_probe=None,
-                 probes_age_secs=None) -> dict:
+                 probes_age_secs=None, now_et=None) -> dict:
     """Assemble the always-200 /status body. Degraded sources are fields, never
     error codes (per feedback_http_status_for_real_errors.md).
 
@@ -339,11 +398,13 @@ def build_status(probes: dict, units: dict, generated_at: str,
         health_service,
         units_age_secs,
         probes_age_secs,
+        now_et=now_et,
     )
     return {
         "schema_version": STATUS_SCHEMA_VERSION,
         "ok": overall_state == "up",
         "overall_state": overall_state,
+        "degraded_reasons": degraded_reasons(probes, units),
         "health_service": health_service,
         "generated_at": generated_at,
         "probes": probes,
