@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import fcntl
+import http.client
 import ipaddress
 import json
 import logging
@@ -540,32 +541,68 @@ def _remote_http(verb: str, timeout: float) -> tuple[int, dict]:
         payload = _decode_remote_body(exc.read())
         payload.setdefault("detail", str(exc))
         return exc.code, payload
-    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+    except (
+        urllib.error.URLError,
+        TimeoutError,
+        OSError,
+        ValueError,
+        # REL-200 (R-566): a TLS-valid broker emitting non-HTTP garbage raises
+        # BadStatusLine/HTTPException — structured 502, never a raw 500.
+        http.client.HTTPException,
+    ) as exc:
         return -1, {"ok": False, "detail": str(exc)}
 
 
-_remote_status_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ib-remote-status")
+# max_workers > 1 on purpose (REL-200): an abandoned wedged probe still
+# occupies its worker until its socket dies; the replacement must not queue
+# behind it. Coalescing keeps at most one LIVE probe; the extra workers only
+# absorb abandoned corpses.
+_remote_status_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="ib-remote-status")
 _remote_status_guard = threading.Lock()
 _remote_status_inflight: Optional[Future] = None
+_remote_status_started: float = 0.0
 _remote_status_cache: Optional[tuple[float, tuple[int, dict]]] = None
+# REL-200 (R-561): urlopen's timeout bounds per-socket ops, not the total —
+# a one-byte-every-4s broker wedges the probe forever. Past this dwell the
+# in-flight future is abandoned (thread left to die with its socket) and a
+# fresh probe replaces it.
+REMOTE_STATUS_ABANDON_AFTER_S = 3 * REMOTE_STATUS_TIMEOUT_S
 
 
 def _reset_remote_status_cache() -> None:
     """Test hook: forget the cached probe and the in-flight handle."""
-    global _remote_status_inflight, _remote_status_cache
+    global _remote_status_inflight, _remote_status_cache, _remote_status_started
     with _remote_status_guard:
         _remote_status_inflight = None
         _remote_status_cache = None
+        _remote_status_started = 0.0
 
 
 def _remote_status_future() -> Future:
-    """The one in-flight status probe, started if none is running."""
-    global _remote_status_inflight
+    """The one in-flight status probe, started if none is running.
+
+    REL-200 (R-561): an in-flight probe older than the abandonment dwell is
+    dropped and replaced — its worker thread dies with its wedged socket.
+    """
+    global _remote_status_inflight, _remote_status_started
     with _remote_status_guard:
+        stale = (
+            _remote_status_inflight is not None
+            and not _remote_status_inflight.done()
+            and time.monotonic() - _remote_status_started > REMOTE_STATUS_ABANDON_AFTER_S
+        )
+        if stale:
+            logger.warning(
+                "broker status probe wedged for >%.0fs; abandoning it and "
+                "starting a fresh probe",
+                REMOTE_STATUS_ABANDON_AFTER_S,
+            )
+            _remote_status_inflight = None
         if _remote_status_inflight is None or _remote_status_inflight.done():
             _remote_status_inflight = _remote_status_executor.submit(
                 _remote_http, "status", REMOTE_STATUS_TIMEOUT_S
             )
+            _remote_status_started = time.monotonic()
         return _remote_status_inflight
 
 

@@ -58,6 +58,59 @@ _COOLDOWN_AFTER: dict[str, tuple[str, ...]] = {
 }
 _verb_history: dict[str, float] = {}
 _verb_history_guard = threading.Lock()
+
+
+def _verb_state_file() -> Path | None:
+    """REL-200 (R-567): the cooldown survives a daemon restart via a small
+    wall-clock state file (systemd StateDirectory, or the test override)."""
+    root = os.environ.get("STATE_DIRECTORY") or os.environ.get("RADON_IB_REMOTE_STATE_DIR")
+    if not root:
+        return None
+    return Path(root.split(":", 1)[0]) / "verb-history.json"
+
+
+def _persist_verb_history(wall_by_verb: dict[str, float]) -> None:
+    path = _verb_state_file()
+    if path is None:
+        return
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(wall_by_verb))
+        os.replace(tmp, path)
+        os.chmod(path, 0o600)
+    except OSError:  # noqa: PERF203 - best-effort; the in-memory copy still guards
+        pass
+
+
+_verb_wall_history: dict[str, float] = {}
+
+
+def _hydrate_verb_history() -> None:
+    """Seed the monotonic history from persisted wall-clock stamps that are
+    still inside the cooldown window."""
+    path = _verb_state_file()
+    if path is None or not path.is_file():
+        return
+    try:
+        stored = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return
+    if not isinstance(stored, dict):
+        return
+    wall_now = time.time()
+    mono_now = time.monotonic()
+    with _verb_history_guard:
+        for verb, wall_at in stored.items():
+            if not isinstance(wall_at, (int, float)):
+                continue
+            age = wall_now - wall_at
+            if 0 <= age < VERB_COOLDOWN_S:
+                _verb_history[verb] = mono_now - age
+                _verb_wall_history[verb] = wall_at
+
+
+_hydrate_verb_history()
 LEASE_HELD_RC = 75
 CONTROL_BUSY_RC = 74
 FORBIDDEN_BINDS = frozenset({"0.0.0.0", "::", "::0", ""})
@@ -240,6 +293,8 @@ def cooldown_refusal(verb: str, now: float | None = None) -> str | None:
 def record_verb(verb: str, now: float | None = None) -> None:
     with _verb_history_guard:
         _verb_history[verb] = time.monotonic() if now is None else now
+        _verb_wall_history[verb] = time.time()
+        _persist_verb_history(dict(_verb_wall_history))
 
 
 def broker_lease() -> dict | None:

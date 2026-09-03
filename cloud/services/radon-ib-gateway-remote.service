@@ -11,6 +11,9 @@ StartLimitBurst=5
 [Service]
 Type=simple
 User=radon
+# REL-200 (R-567): the stop/start verb cooldown persists here so a daemon
+# restart between stop and start cannot re-enable a stacked-2FA-push sequence.
+StateDirectory=radon-ib-remote
 WorkingDirectory=/home/radon/radon
 EnvironmentFile=/etc/radon/env
 Environment=RADON_IB_REMOTE_BIND=10.0.0.4
