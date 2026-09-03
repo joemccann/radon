@@ -337,8 +337,14 @@ on_signal() {
   local sig="$1"
   trap - INT TERM HUP ERR EXIT
   kill_round_group
-  report "KILLED (SIG${sig})" "the wrapper was signalled before the phase finished — launchd ExitTimeOut, a bootout, an operator kill or a reboot; partial work may exist on the weekend branch"
+  # REL-199 (R-531): launchd's default ExitTimeOut is ~20s and report()'s gh
+  # ladder is up to five 120s-bounded calls — a bootout produced NO page.
+  # Release the lock and fire the 10s-bounded Pushover FIRST, log locally,
+  # then give GitHub one short-bounded attempt.
   release_runner_lock "${RUNNER_LOCK:-}"
+  notify_phase "KILLED (SIG${sig})" || true
+  echo "[weekend] KILLED (SIG${sig}) $(date -u +%FT%TZ)" >> "${RUN_LOG:-/dev/null}" 2>/dev/null || true
+  NET_TIMEOUT_SECS=10 report "KILLED (SIG${sig})" "the wrapper was signalled before the phase finished — launchd ExitTimeOut, a bootout, an operator kill or a reboot; partial work may exist on the weekend branch" 0
   exit 143
 }
 

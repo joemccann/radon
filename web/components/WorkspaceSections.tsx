@@ -331,9 +331,17 @@ function resolveOpeningLegBasis(
  *  (SLD positive, BOT negative). Options use the ×100 multiplier, stocks ×1.
  *  Null when any fill is unpriced or sideless. */
 function closedGroupCloseCash(group: PositionFillGroup): number | null {
-  const priced = group.fills.filter(
+  let priced = group.fills.filter(
     (f) => f.contract.secType === "OPT" || f.contract.secType === "STK",
   );
+  // REL-219 (R-582): a mixed group (same-day opening BUYs + a partial close)
+  // must sum CLOSING cash only, or the P&L identity below derives an entry
+  // basis from mixed open+close cash and the return % is fabricated. The
+  // realizedPNL-bearing fills are exactly the ones group.totalPnL came from.
+  const closing = priced.filter(
+    (f) => f.realizedPNL != null && Math.abs(f.realizedPNL) > 0.01,
+  );
+  if (closing.length > 0 && closing.length < priced.length) priced = closing;
   if (priced.length === 0) return null;
   let closeCash = 0;
   for (const fill of priced) {
