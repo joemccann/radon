@@ -314,6 +314,94 @@ class TestRedactor:
         assert out.count("[REDACTED]") >= 4
 
 
+# --- the setup scripts clone the origin of THEIR OWN checkout ---------------
+
+SETUPS = {
+    "reliability": "setup_reliability_weekend.sh",
+    "testing": "setup_testing_weekend.sh",
+    "ci-performance": "setup_ci_performance.sh",
+    "documentation": "setup_documentation_nightly.sh",
+    "security": "setup_security_nightly.sh",
+}
+SCRIPT_ORIGIN = "git@example.invalid:radon/script-checkout.git"
+CALLER_ORIGIN = "git@example.invalid:someone/unrelated.git"
+
+
+def _git_repo(path: Path, origin: str) -> Path:
+    path.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(path)], check=True)
+    subprocess.run(["git", "-C", str(path), "remote", "add", "origin", origin], check=True)
+    return path
+
+
+def _setup_stubs(tmp_path: Path, git_log: Path) -> Path:
+    """Real git answers `config` / `rev-parse`; anything that would touch the
+    network or a clone is logged and succeeds. Everything else the setup
+    scripts probe is a no-op stub so the run aborts only after the clone."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    real_git = shutil.which("git")
+    (bin_dir / "git").write_text(
+        "#!/bin/sh\n"
+        f'printf "%s\\n" "$*" >> "{git_log}"\n'
+        'sub="$1"; [ "$1" = "-C" ] && sub="$3"\n'
+        'case "$sub" in clone|fetch|checkout|reset|ls-remote) exit 0 ;; esac\n'
+        f'exec "{real_git}" "$@"\n'
+    )
+    for name in ("gh", "claude", "ssh", "bun", "node", "caddy", "plutil", "launchctl"):
+        (bin_dir / name).write_text("#!/bin/sh\nexit 0\n")
+    for exe in bin_dir.iterdir():
+        exe.chmod(0o755)
+    return bin_dir
+
+
+def _run_setup(loop: str, script_repo: Path, cwd: Path, tmp_path: Path, extra_env=None):
+    git_log = tmp_path / "git.log"
+    bin_dir = _setup_stubs(tmp_path, git_log)
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    env = {
+        "PATH": f"{bin_dir}:/usr/bin:/bin",
+        "HOME": str(home),
+        "RADON_WEEKEND_ROOT": str(tmp_path / "weekend"),
+    }
+    env.update(extra_env or {})
+    result = subprocess.run(
+        [BASH, str(script_repo / "scripts" / SETUPS[loop])],
+        cwd=cwd, env=env, capture_output=True, text=True, timeout=60,
+    )
+    log = git_log.read_text() if git_log.exists() else ""
+    clones = [line for line in log.splitlines() if line.startswith("clone ")]
+    return result, clones
+
+
+class TestSetupClonesItsOwnOrigin:
+    @pytest.mark.parametrize("loop", sorted(SETUPS))
+    def test_the_clone_origin_is_the_script_checkout_not_the_cwd(self, loop: str, tmp_path: Path) -> None:
+        script_repo = _git_repo(tmp_path / "script-checkout", SCRIPT_ORIGIN)
+        (script_repo / "scripts").mkdir()
+        for name in (SETUPS[loop], WRAPPERS[loop]):
+            shutil.copy2(REPO / "scripts" / name, script_repo / "scripts" / name)
+        caller = _git_repo(tmp_path / "unrelated-cwd", CALLER_ORIGIN)
+        result, clones = _run_setup(loop, script_repo, caller, tmp_path)
+        assert clones, (result.returncode, result.stdout[-400:], result.stderr[-400:])
+        assert all(SCRIPT_ORIGIN in line for line in clones), clones
+        assert not any(CALLER_ORIGIN in line for line in clones), (
+            f"{SETUPS[loop]} cloned the caller's cwd origin: {clones}"
+        )
+
+    @pytest.mark.parametrize("loop", sorted(SETUPS))
+    def test_a_script_outside_a_radon_checkout_refuses(self, loop: str, tmp_path: Path) -> None:
+        stray = tmp_path / "stray"
+        (stray / "scripts").mkdir(parents=True)
+        shutil.copy2(REPO / "scripts" / SETUPS[loop], stray / "scripts" / SETUPS[loop])
+        caller = _git_repo(tmp_path / "unrelated-cwd", CALLER_ORIGIN)
+        result, clones = _run_setup(loop, stray, caller, tmp_path)
+        assert result.returncode == 2, (result.returncode, result.stdout[-400:], result.stderr[-400:])
+        assert "REFUSING" in result.stderr and "Radon checkout" in result.stderr, result.stderr[-400:]
+        assert not clones, clones
+
+
 # --- R-506: the security clone refuses credentials --------------------------
 
 

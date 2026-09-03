@@ -118,6 +118,12 @@ readonly ENV_CHECKER_PYTHON="${RADON_ENV_CHECKER_PYTHON:-${VENV_DIR}/bin/python}
 readonly SYSTEM_PYTHON="${RADON_SYSTEM_PYTHON:-/usr/bin/python3.13}"
 readonly RELEASES_DIR="${RADON_RELEASES_DIR:-/home/radon/.radon-releases}"
 readonly RELEASE_ARTIFACTS=(node_modules web/node_modules web/.next web/.env)
+# radon-mcp.service terminates anonymous internet traffic, so it loads this
+# stripped env (Clerk verification inputs, operator allowlist, RADON_MCP_*
+# knobs) instead of the full secret set. It sits next to the canonical env
+# (/etc/radon/mcp.env in production, which is what the unit loads).
+readonly MCP_ENV_FILE="${RADON_MCP_ENV_FILE:-$(dirname "$ENV_FILE_DEFAULT")/mcp.env}"
+readonly MCP_ENV_KEYS='^(CLERK_JWKS_URL|CLERK_ISSUER|ALLOWED_USER_IDS|RADON_MCP_[A-Z0-9_]+)='
 readonly ROLLBACK_ARTIFACTS=(node_modules web/node_modules web/.next web/.env .venv)
 readonly REUSE_LIVE_MARKER=".deploy-reuse-live"
 readonly PRESTAGE_FILE="${RADON_DEPLOY_PRESTAGE:-/home/radon/.radon-prestage}"
@@ -145,6 +151,7 @@ JOURNAL_STAGE_DIR=""
 JOURNAL_BACKUP_DIR=""
 JOURNAL_PHASE=""
 WEB_ENV_TMP=""
+MCP_ENV_TMP=""
 SUPERVISED_TIMEOUT_PID=""
 SUPERVISED_TIMEOUT_PGID=""
 SUPERVISOR_RECOVERY_DONE=0
@@ -439,6 +446,19 @@ write_web_env() {
   WEB_ENV_TMP=""
 }
 
+write_mcp_env() {
+  local cloud_env="${1:-$ENV_FILE_DEFAULT}"
+  local mcp_env="${2:-$MCP_ENV_FILE}"
+  # preflight_env has already required the canonical file; nothing to derive otherwise.
+  [[ -f "$cloud_env" ]] || return 0
+  umask 077
+  MCP_ENV_TMP="$(mktemp "${mcp_env}.tmp.XXXXXX")"
+  grep -E "$MCP_ENV_KEYS" "$cloud_env" > "$MCP_ENV_TMP" || true
+  chmod 0600 "$MCP_ENV_TMP"
+  mv -f "$MCP_ENV_TMP" "$mcp_env"
+  MCP_ENV_TMP=""
+}
+
 run_with_cloud_env() {
   local env_file="$1"
   shift
@@ -499,6 +519,7 @@ handle_deploy_signal() {
   local signal_name="${1:-TERM}"
   trap - TERM INT HUP
   [[ -z "$WEB_ENV_TMP" ]] || rm -f "$WEB_ENV_TMP" || log_error "Could not remove temporary web env"
+  [[ -z "$MCP_ENV_TMP" ]] || rm -f "$MCP_ENV_TMP" || log_error "Could not remove temporary mcp env"
   recover_services_after_interrupt
   log_error "Deployment interrupted by ${signal_name}; green marker was not advanced"
   exit 143
@@ -510,6 +531,7 @@ handle_deploy_exit() {
 
   if (( exit_code != 0 )); then
     [[ -z "$WEB_ENV_TMP" ]] || rm -f "$WEB_ENV_TMP" || log_error "Could not remove temporary web env"
+    [[ -z "$MCP_ENV_TMP" ]] || rm -f "$MCP_ENV_TMP" || log_error "Could not remove temporary mcp env"
     # Preserve the triggering command's status even if service recovery fails.
     recover_services_after_interrupt || true
     if [[ ! -f "$TRANSITION_JOURNAL_FILE" && -n "$STAGED_RELEASE_DIR" ]]; then
@@ -1675,6 +1697,8 @@ main() {
     log_error "Fix ${ENV_FILE_DEFAULT}; the escape hatch skips required-key shape only."
     return 1
   fi
+  # The hosted MCP unit loads a stripped env derived from the file just validated.
+  write_mcp_env "$ENV_FILE_DEFAULT"
 
   local prev_commit
   prev_commit="$(current_commit)"

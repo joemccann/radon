@@ -44,6 +44,8 @@ _VALUE_MAX_BYTES = 8192
 _ACTOR_MAX_LEN = 64
 _NONCE_BYTES = 12
 _KEY_BYTES = 32
+# Below this length a last-4 hint is a meaningful fraction of a password.
+_HINT_MIN_LEN = 20
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS secrets (
@@ -119,7 +121,7 @@ def _now() -> str:
 
 
 def _mask(value: str) -> str:
-    if len(value) >= 8:
+    if len(value) >= _HINT_MIN_LEN:
         return "\u2022" * 4 + value[-4:]
     return "\u2022" * 4
 

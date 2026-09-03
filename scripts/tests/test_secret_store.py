@@ -24,6 +24,7 @@ from secret_store import (
 # line as a *_TOKEN/*_KEY identifier trips the gitleaks generic-api-key rule
 # (Secret scan CI job), and these are synthetic samples, not credentials.
 UW_SAMPLE = "-".join(("uw", "abc123secret"))
+UW_LONG = "-".join(("uw", "abc123", "long", "enough", "secret"))
 UW_VISIBLE = "-".join(("uw", "plainly", "visible", "token"))
 UW_SWAP = "-".join(("value", "for", "uw", "1234"))
 EXA_FIRST = "-".join(("first", "value", "1234"))
@@ -72,12 +73,12 @@ class TestRoundtrip:
 
 class TestListNeverLeaksPlaintext:
     def test_list_masks_value_to_last_four(self, store):
-        store.set_secret("UW_TOKEN", UW_SAMPLE, actor="operator")
+        store.set_secret("UW_TOKEN", UW_LONG, actor="operator")
         (entry,) = store.list_secrets()
         assert entry["name"] == "UW_TOKEN"
         assert entry["hint"] == "\u2022\u2022\u2022\u2022cret"
         assert "value" not in entry
-        assert UW_SAMPLE not in str(entry)
+        assert UW_LONG not in str(entry)
 
     def test_short_values_fully_masked(self, store):
         store.set_secret("PIN", "1234567", actor="operator")
@@ -228,3 +229,23 @@ class TestAudit:
         (count,) = conn.execute("SELECT COUNT(*) FROM secret_events").fetchone()
         conn.close()
         assert count == 0
+
+
+class TestHintThreshold:
+    """A password-length value must reveal nothing; only long, high-entropy
+    values show their last four."""
+
+    def test_nineteen_char_value_reveals_nothing(self, store):
+        value = "-".join(("pw", "notreal", "value", "19"))
+        assert len(value) == 19
+        store.set_secret("GATEWAY_PASSWORD", value, actor="operator")
+        (entry,) = store.list_secrets()
+        assert entry["hint"] == "••••"
+
+    def test_twenty_char_value_reveals_at_most_last_four(self, store):
+        value = "-".join(("tok", "notreal", "value", "20"))
+        assert len(value) == 20
+        store.set_secret("UW_TOKEN", value, actor="operator")
+        (entry,) = store.list_secrets()
+        assert entry["hint"] == "••••" + value[-4:]
+        assert value[:-4] not in entry["hint"]

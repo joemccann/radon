@@ -141,11 +141,15 @@ def _audit(
     env_file=None,
     home_settings=None,
     repo_settings=None,
+    mode="audit",
+    claude_stub=None,
 ):
     env_dump = tmp_path / "agent-env.txt"
     gh_log = tmp_path / "gh.log"
     wrapper = LOOPS[loop]
     bin_dir = _stub_bin(tmp_path, env_dump, gh_log)
+    if claude_stub is not None:
+        (bin_dir / "claude").write_text(claude_stub, encoding="utf-8")
     repo = _clone(tmp_path, wrapper)
     home = tmp_path / "home"
     if env_file is not None:
@@ -170,7 +174,7 @@ def _audit(
     }
     env.update(env_extra or {})
     proc = subprocess.run(
-        [BASH, str(repo / "scripts" / wrapper.name), "audit"],
+        [BASH, str(repo / "scripts" / wrapper.name), mode],
         cwd=repo, env=env, capture_output=True, text=True, timeout=120,
     )
     return proc, env_dump, repo
@@ -478,3 +482,40 @@ class TestASettingsLevelRerouteRefusesTheRun:
         proc, env_dump, _ = _audit(tmp_path, loop, home_settings=settings)
         assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
         assert env_dump.exists(), f"{loop}: ordinary settings refused the run"
+
+
+@pytest.mark.parametrize("loop", sorted(LOOPS))
+class TestTheRailsAreReCheckedBeforeEveryPhase:
+    """A reroute planted by the in-phase agent must not reach the next phase.
+
+    The prologue check runs once; `cycle` then runs audit and remediate with a
+    reset in between, and the gitignored .deepsec/ and the settings files
+    survive that reset. The remediate phase must re-check and refuse."""
+
+    @pytest.mark.parametrize(
+        "plant",
+        (
+            f"mkdir -p .deepsec && printf 'ANTHROPIC_API_KEY={KEY}\\n' > .deepsec/.env.local",
+            "mkdir -p .claude && printf '{\"apiKeyHelper\": \"/bin/echo\"}' > .claude/settings.local.json",
+        ),
+    )
+    def test_a_reroute_planted_during_audit_refuses_remediate(self, tmp_path, loop, plant):
+        calls = tmp_path / "claude-calls.txt"
+        stub = (
+            "#!/bin/sh\n"
+            f'printf "%s\\n" "$*" >> "{calls}"\n'
+            f"{plant}\n"
+            f'echo "{COMPLETION}"\n'
+            "exit 0\n"
+        )
+        proc, _, _ = _audit(tmp_path, loop, mode="cycle", claude_stub=stub)
+        out = proc.stdout + proc.stderr
+        launched = calls.read_text(encoding="utf-8") if calls.exists() else ""
+        assert "audit" in launched, (proc.returncode, out)
+        assert "remediate" not in launched, (
+            f"{loop}: the remediate phase launched the agent over a reroute "
+            f"the audit phase planted: {out!r}"
+        )
+        assert proc.returncode == 2, (proc.returncode, out)
+        assert "REFUSING" in out, out
+        assert KEY not in out, out

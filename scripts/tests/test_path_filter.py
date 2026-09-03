@@ -175,6 +175,7 @@ _NON_REPOSITORY_WEB_FIXTURES = {
     # checkout's web tree, so a real web change cannot affect their assertions.
     "cloud/tests/test_deploy_corrections.py",
     "cloud/tests/test_deploy_resilience.py",
+    "cloud/tests/test_setup_vps_privileged_paths.py",
     "scripts/tests/test_weekend_runner_env_provisioning.py",
     "scripts/tests/test_weekend_subscription_only.py",
 }

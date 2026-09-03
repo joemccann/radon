@@ -16,8 +16,10 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -399,9 +401,7 @@ def http_client():
 
     # base_url pins the production Host header: Caddy forwards the original
     # `app.radon.run` Host, which the transport security allowlist must admit.
-    with TestClient(
-        hosted.mcp.streamable_http_app(), base_url="https://app.radon.run"
-    ) as client:
+    with TestClient(hosted.build_app(), base_url="https://app.radon.run") as client:
         yield client
 
 
@@ -446,3 +446,181 @@ class TestStreamableHttpTransport:
     def test_docs_path_404s_on_this_process(self, http_client):
         assert http_client.get("/docs").status_code == 404
         assert http_client.get("/openapi.json").status_code == 404
+
+    def test_oversize_post_is_413_on_the_real_app(self, http_client):
+        response = http_client.post(
+            "/mcp",
+            content=b"x" * (hosted.MAX_REQUEST_BYTES + 1),
+            headers={
+                "Accept": "application/json, text/event-stream",
+                "Content-Type": "application/json",
+            },
+        )
+        assert response.status_code == 413
+        # the cap never touches a well-formed call
+        assert _rpc_call(http_client, "radon_identity").status_code == 200
+
+
+# ── resource bounds on the anonymous surface ──────────────────────────
+
+
+def _body_reading_app(calls: list):
+    """A fake inner ASGI app that, like the SDK transport, reads the whole
+    body before answering."""
+
+    async def app(scope, receive, send):
+        if scope["type"] != "http":
+            return
+        while True:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                return  # Starlette raises ClientDisconnect here; no handler runs
+            if not message.get("more_body"):
+                break
+        calls.append(scope["path"])
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"ok"})
+
+    return app
+
+
+class TestRequestBodyCap:
+    HEADERS = {"Content-Type": "application/json"}
+
+    def _client(self, calls):
+        from starlette.testclient import TestClient
+
+        return TestClient(hosted.RequestBodyLimit(_body_reading_app(calls)))
+
+    def test_oversize_content_length_is_413_before_the_handler(self):
+        calls: list = []
+        client = self._client(calls)
+        response = client.post(
+            "/mcp", content=b"x" * (hosted.MAX_REQUEST_BYTES + 1), headers=self.HEADERS
+        )
+        assert response.status_code == 413
+        assert calls == []
+
+    def test_oversize_streamed_body_is_413_and_never_answered_200(self):
+        calls: list = []
+        client = self._client(calls)
+
+        def chunks():
+            for _ in range(hosted.MAX_REQUEST_BYTES // 65536 + 2):
+                yield b"x" * 65536
+
+        response = client.post("/mcp", content=chunks(), headers=self.HEADERS)
+        assert response.status_code == 413
+        assert calls == []
+
+    def test_body_at_the_cap_passes_through(self):
+        calls: list = []
+        client = self._client(calls)
+        response = client.post(
+            "/mcp", content=b"x" * hosted.MAX_REQUEST_BYTES, headers=self.HEADERS
+        )
+        assert response.status_code == 200
+        assert calls == ["/mcp"]
+
+    def test_cap_is_one_mib(self):
+        assert hosted.MAX_REQUEST_BYTES == 1024 * 1024
+
+    def test_serve_entrypoint_runs_the_bounded_app(self):
+        source = (_SCRIPTS_DIR / "mcp_hosted" / "serve.py").read_text()
+        assert "build_app()" in source
+        assert "mcp.run(" not in source
+
+
+class TestJwksRefreshThrottle:
+    """An unknown kid forces a live JWKS refetch; anonymous callers must not
+    be able to turn that into an unbounded upstream request stream."""
+
+    @pytest.fixture
+    def jwks_fetches(self, monkeypatch, rsa_keys):
+        import jwt as pyjwt
+        from jwt.algorithms import RSAAlgorithm
+
+        jwk = RSAAlgorithm.to_jwk(rsa_keys[1], as_dict=True)
+        jwk.update({"kid": "test-kid", "use": "sig", "alg": "RS256"})
+        fetches: list = []
+
+        def fetch_data(self):
+            fetches.append(1)
+            data = {"keys": [jwk]}
+            self.jwk_set_cache.put(data)  # the real fetch_data caches too
+            return data
+
+        monkeypatch.setattr(pyjwt.PyJWKClient, "fetch_data", fetch_data)
+        monkeypatch.setenv("CLERK_JWKS_URL", "https://clerk.example.test/.well-known/jwks.json")
+        monkeypatch.setenv("CLERK_ISSUER", "https://clerk.example.test")
+        monkeypatch.setenv("ALLOWED_USER_IDS", OPERATOR_ID)
+        monkeypatch.setattr(mcp_auth, "_jwks_client", None)
+        monkeypatch.setattr(mcp_auth, "_jwks_refresh_after", 0.0)
+        return fetches
+
+    def test_unknown_kids_get_one_refetch_per_window(
+        self, jwks_fetches, rsa_keys, monkeypatch
+    ):
+        clock = [1000.0]
+        monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+
+        assert resolve_principal(operator_bearer(rsa_keys)).is_operator
+        assert len(jwks_fetches) == 1  # the initial JWKS load
+
+        for kid in ("rotated-1", "rotated-2"):
+            token = _mint(rsa_keys, {"sub": OPERATOR_ID}, headers={"kid": kid})
+            with pytest.raises(AuthError) as exc:
+                resolve_principal("Bearer " + token)
+            assert exc.value.status == 401
+        assert len(jwks_fetches) == 2  # one live refetch for the pair
+
+        # a known kid keeps verifying inside the window, with no fetch
+        assert resolve_principal(operator_bearer(rsa_keys)).is_operator
+        assert len(jwks_fetches) == 2
+
+        clock[0] += mcp_auth.JWKS_REFRESH_COOLDOWN_SECONDS
+        token = _mint(rsa_keys, {"sub": OPERATOR_ID}, headers={"kid": "rotated-3"})
+        with pytest.raises(AuthError):
+            resolve_principal("Bearer " + token)
+        assert len(jwks_fetches) == 3
+
+    def test_cooldown_mirrors_fastapi_negative_ttl(self):
+        from api import auth as api_auth
+
+        assert mcp_auth.JWKS_REFRESH_COOLDOWN_SECONDS == api_auth.JWKS_NEGATIVE_TTL_SECONDS
+
+
+class TestUpstreamReadsLeaveTheEventLoop:
+    @pytest.fixture
+    def request_threads(self, monkeypatch):
+        import requests
+
+        seen: list = []
+
+        def fake_get(url, headers=None, timeout=None):
+            seen.append(threading.current_thread())
+            return SimpleNamespace(status_code=200, content=b'{"ok": true}')
+
+        monkeypatch.setattr(requests, "get", fake_get)
+        return seen
+
+    def test_public_docs_read_runs_in_a_worker_thread(self, request_threads):
+        async def main():
+            result = await hosted.radon_docs("llms.txt")
+            assert result["markdown"] == '{"ok": true}'
+            assert request_threads[0] is not threading.current_thread()
+
+        asyncio.run(main())
+
+    def test_gated_operator_read_runs_in_a_worker_thread(
+        self, request_threads, clerk_env, rsa_keys
+    ):
+        request = SimpleNamespace(headers={"authorization": operator_bearer(rsa_keys)})
+        ctx = SimpleNamespace(request_context=SimpleNamespace(request=request))
+
+        async def main():
+            result = await hosted.operator_portfolio(ctx)
+            assert result == {"data": {"ok": True}}
+            assert request_threads[0] is not threading.current_thread()
+
+        asyncio.run(main())

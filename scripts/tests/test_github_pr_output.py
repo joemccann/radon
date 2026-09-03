@@ -357,3 +357,60 @@ class TestIssueGenerationIsUntouched:
             assert "**Issue discovered**" not in fmt, path.name
             assert "**What was done to fix it**" not in fmt, path.name
             assert "Fixed with green deployment" not in fmt, path.name
+
+
+class TestSecurityBodyIsRedacted:
+    """The security title is date-only; the body must pass the same public
+    sanitizer as the rolling-issue comment (scripts/nightly_issue_format.py)."""
+
+    # Runtime-join so the synthetic assignment never sits in the tree as a
+    # contiguous secret-shaped literal.
+    SECRET = "UW_" + "TOKEN" + "=" + "NOT-A-REAL-KEY-1234"
+    ROUTE = "/api/orders/place"
+
+    def test_render_redacts_secret_and_route_in_security_body(self):
+        payload = pr.render(
+            loop="security",
+            date="2026-09-02",
+            issue=f"Reached {self.ROUTE} with {self.SECRET} in the request.",
+            fix="The chokepoint now refuses the input.",
+            next_action=f"Rotate {self.SECRET} before merge.",
+        )
+        assert "NOT-A-REAL-KEY-1234" not in payload["body"]
+        assert self.ROUTE not in payload["body"]
+        assert "[REDACTED]" in payload["body"]
+        assert ISSUE_HEADING in payload["body"]
+        assert FIX_HEADING in payload["body"]
+        assert NEXT_HEADING in payload["body"]
+
+    def test_non_security_loops_keep_the_body_verbatim(self):
+        payload = pr.render(
+            loop="reliability",
+            date="2026-09-02",
+            issue=f"{self.ROUTE} hung the accept thread.",
+            fix="Handshake now runs per connection.",
+            next_action=None,
+        )
+        assert self.ROUTE in payload["body"]
+
+    def test_cli_security_json_body_is_redacted(self):
+        proc = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS / "github_pr_output.py"),
+                "--loop", "security",
+                "--date", "2026-09-02",
+                "--issue", f"Reached {self.ROUTE} with {self.SECRET} in the request.",
+                "--fix", "The chokepoint now refuses the input.",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert proc.returncode == 0, proc.stderr
+        payload = json.loads(proc.stdout)
+        assert payload["title"] == "Security 2026-09-02"
+        assert "NOT-A-REAL-KEY-1234" not in payload["body"]
+        assert self.ROUTE not in payload["body"]
+        assert "[REDACTED]" in payload["body"]

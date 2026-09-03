@@ -106,7 +106,7 @@ The same SSH public key is authorized on both routes — `~/.ssh/authorized_keys
 
 `data/replica.db` is intentionally absent — the embedded-replica architecture was retired 2026-05-20. If the file appears on disk (stray from a pre-migration host), it is safe to `rm` — nothing reads from it.
 
-Every `radon-*.service` (except `radon-grok-page-responder`) uses `EnvironmentFile=/etc/radon/env`. `/home/radon/radon-cloud/.env` is a compatibility symlink to that file. Media is `/var/lib/radon/media` (Caddy `media.radon.run`); `/home/radon/radon-cloud/media` is a compatibility symlink. The legacy directory is not a deploy source.
+Every `radon-*.service` (except `radon-grok-page-responder`, `radon-flex-pull` and `radon-mcp`, which load stripped files) uses `EnvironmentFile=/etc/radon/env`. `/home/radon/radon-cloud/.env` is a compatibility symlink to that file. Media is `/var/lib/radon/media` (Caddy `media.radon.run`); `/home/radon/radon-cloud/media` is a compatibility symlink. The legacy directory is not a deploy source.
 
 **Whole-stack kill switch:** `/usr/local/bin/radon` wraps all units (IB Gateway included). Run on the VPS or remotely:
 
@@ -386,11 +386,14 @@ JSON-RPC), documented for consumers at radon.run `/developers/mcp`.
   own token. No write tools; no `kb_*` corpus tools (operator journal/P&L
   stays on the checkout-only radon-kb stdio server); no service tokens.
 - **Env**: `CLERK_JWKS_URL` / `CLERK_ISSUER` / `ALLOWED_USER_IDS` from
-  `/etc/radon/env`. Optional overrides `RADON_MCP_{HOST,PORT,SITE_BASE,EDGE_BASE,APP_BASE,DEMO_BASE}`
+  `/etc/radon/mcp.env`, a stripped file `deploy.sh:write_mcp_env` (and
+  `setup-vps.sh`) derives from `/etc/radon/env` on every deploy; the unit
+  never loads the full secret set and runs with `/etc/radon/env`
+  inaccessible. Optional overrides `RADON_MCP_{HOST,PORT,SITE_BASE,EDGE_BASE,APP_BASE,DEMO_BASE}`
   and `RADON_MCP_ALLOWED_HOSTS` (comma list; default
   `app.radon.run,app.radon.run:*,127.0.0.1:*,localhost:*` — the SDK's
   DNS-rebinding protection 421s any Host not on it, so a serving-host change
-  must update this list).
+  must update this list) are copied through when present in `/etc/radon/env`.
 - **First enable** (install-units only auto-enables new timers):
   `sudo systemctl enable --now radon-mcp.service`, then
   `curl -s -X POST https://app.radon.run/mcp -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'`.

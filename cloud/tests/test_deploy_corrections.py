@@ -1716,7 +1716,8 @@ restart_services
         assert "mktemp" in configure
         assert configure.find("visudo -cf") < configure.find("mv -f")
         installer = function_body(setup, "install_deploy_root_helper")
-        assert "install -m 0755 -o root -g root" in installer
+        # Root-staged copy out of the radon-owned checkout, final mode/owner here.
+        assert 'stage_from_checkout "$source" "$staged" 0755 -o root -g root' in installer
         assert "mv -f" in installer
         main = function_body(setup, "main")
         assert main.find("install_deploy_root_helper") < main.find("configure_sudoers")
@@ -1768,6 +1769,7 @@ configure_caddy
                 **os.environ,
                 "RADON_SETUP_SOURCE_ONLY": "1",
                 "RADON_CLOUD_DIR": str(cloud),
+                "RADON_SETUP_STAGE_DIR": str(tmp_path / "stage"),
                 "RADON_CADDY_CONFIG_PATH": str(live),
                 "RADON_CADDY_LOG_DIR": str(tmp_path / "log"),
                 "RADON_CADDY_BIN": str(fake_caddy),
@@ -1821,6 +1823,7 @@ configure_caddy
                 **os.environ,
                 "RADON_SETUP_SOURCE_ONLY": "1",
                 "RADON_CLOUD_DIR": str(cloud),
+                "RADON_SETUP_STAGE_DIR": str(tmp_path / "stage"),
                 "RADON_CADDY_CONFIG_PATH": str(live),
                 "RADON_CADDY_LOG_DIR": str(tmp_path / "log"),
                 "RADON_CADDY_BIN": str(fake_caddy),
