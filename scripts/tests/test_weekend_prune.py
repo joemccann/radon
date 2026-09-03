@@ -360,11 +360,17 @@ def _stage(tmp_path: Path, loop: str, *, agent_rc: int = 0,
         src = (REPO / "scripts" / script).read_text(encoding="utf-8")
         marker = re.search(r'PHASE_COMPLETE_MARKER="([^"]+)"', src).group(1)
         complete_line = f"echo '{marker} stub run_id=stub'\n"
+    # The deliver phase keys OK on the skill's verdict line, which every loop's
+    # wrapper greps for; the stub prints it when invoked for deliver.
+    deliver_line = (
+        f"case \" $* \" in *\" deliver\"*)"
+        f" echo 'NIGHTLY DELIVER READY: loop={loop} prs=0' ;; esac\n"
+    )
     _executable(
         bin_dir / "claude",
         "#!/bin/bash\n"
         f'echo "CLAUDE" >> "{order}"\n'
-        "echo 'stub agent output'\n" + complete_line
+        "echo 'stub agent output'\n" + deliver_line + complete_line
         + 'exit "${STUB_CLAUDE_RC:-0}"\n',
     )
     _executable(
