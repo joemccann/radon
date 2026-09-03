@@ -554,7 +554,7 @@ jobs:
           dl="$(mktemp -d)"
           curl -fsSL "${base}/${tarball}" -o "${dl}/${tarball}"
           curl -fsSL "${base}/caddy_${ver}_checksums.txt" -o "${dl}/caddy_${ver}_checksums.txt"
-          (cd "$dl" && sha256sum -c --ignore-missing "caddy_${ver}_checksums.txt")
+          (cd "$dl" && sha512sum -c --ignore-missing "caddy_${ver}_checksums.txt")
           tar -xzf "${dl}/${tarball}" -C "$dl" caddy
           sudo install -m 0755 "${dl}/caddy" /usr/local/bin/caddy
           caddy version

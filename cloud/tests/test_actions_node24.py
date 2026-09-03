@@ -94,4 +94,4 @@ def test_caddy_install_is_version_pinned_and_checksum_verified() -> None:
     for run in steps:
         assert re.search(r'ver="\d+\.\d+\.\d+"', run), run
         assert "_checksums.txt" in run, run
-        assert "sha256sum -c --ignore-missing" in run, run
+        assert "sha512sum -c --ignore-missing" in run, run

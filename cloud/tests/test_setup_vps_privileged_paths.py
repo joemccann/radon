@@ -324,7 +324,7 @@ class TestRegularSourceStaged:
             harness["bin"] / "cmp",
             f"""#!/bin/sh
 staged="$4"
-mode="$(stat -f %Lp "$staged" 2>/dev/null || stat -c %a "$staged")"
+mode="$(stat -c %a "$staged" 2>/dev/null || stat -f %Lp "$staged")"
 printf '%s %s\\n' "$mode" "$staged" >> {cmp_log!s}
 exec {real_cmp} "$@"
 """,
@@ -379,7 +379,7 @@ exec {real_cmp} "$@"
             harness["bin"] / "caddy",
             f"""#!/bin/sh
 candidate="$3"
-mode="$(stat -f %Lp "$candidate" 2>/dev/null || stat -c %a "$candidate")"
+mode="$(stat -c %a "$candidate" 2>/dev/null || stat -f %Lp "$candidate")"
 printf '%s\\n' "$mode" >> {caddy_log!s}
 exit 0
 """,
