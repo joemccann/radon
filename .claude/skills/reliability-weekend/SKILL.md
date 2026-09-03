@@ -674,3 +674,18 @@ how this loop improves as the codebase grows.
 - 2026-09-03 (audit): `github_pr_output.py` uses `--issue` verbatim as the title and truncates at ~250
   chars mid-word. Keep `--issue` to one or two short clauses (it is also the PR title); the detail
   belongs in the rolling-issue comment, not the flag.
+- 2026-09-03 (remediate): **a file-level autouse fixture can stub the exact method your new test
+  targets, and the test passes vacuously.** `test_fill_monitor.py` autouse-stubs
+  `_mirror_ib_orders_snapshot` to a no-op; the REL-212 guard test "passed" pre-fix and its control
+  cases failed instead. When adding tests to an existing file, read its fixtures FIRST and restore
+  the real method in a class-scoped fixture. Same run: patching `scripts.api.routes.streaks` while
+  the app runs `api.routes.streaks` is the dual-module import trap in a second wardrobe — patch the
+  exact module path the app imports.
+- 2026-09-03 (remediate): the widened-guard lesson held twice more — the REL-186 per-function
+  placement tripwire found an unguarded `modify_order` on its first run, and the REL-114
+  catalog-parity test went red the moment REL-178's refactor hid the `"ib-watchdog"` literal from
+  its resolver (fixed by keeping the literal at the transport call). Budget the extra fix; the
+  guard going red on your own change is the guard working.
+- 2026-09-03 (remediate): REL-210's process-lifetime error latch leaked across unrelated pytest
+  tests sharing the interpreter and surfaced as an order-dependent red two tasks later. A
+  process-scoped latch in production code needs a conftest autouse reset the same commit it ships.
