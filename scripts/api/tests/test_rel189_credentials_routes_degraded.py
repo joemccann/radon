@@ -135,3 +135,17 @@ class TestStoreIoFailuresAre503:
         (tmp_path / "secrets.db").mkdir()
         response = client.get("/credentials")
         assert response.status_code == 503, response.text
+
+
+class TestOsErrorConstructorFailuresAre503:
+    """REL-217 (R-592): OSError-class constructor failures (key-file path is
+    a directory) were raw 500s, violating the R-521/R-522 contract."""
+
+    def test_key_file_as_directory_is_a_503(self, tmp_path, monkeypatch, client):
+        key_dir = tmp_path / "keydir"
+        key_dir.mkdir()
+        monkeypatch.setenv("RADON_SECRET_STORE_DB", str(tmp_path / "secrets.db"))
+        monkeypatch.setenv("RADON_SECRET_STORE_KEY_FILE", str(key_dir))
+        response = client.get("/credentials")
+        assert response.status_code == 503
+        assert response.json()["detail"]["code"] == "CREDENTIAL_STORE_UNAVAILABLE"

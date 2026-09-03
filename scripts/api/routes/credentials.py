@@ -78,7 +78,10 @@ def _open_store() -> SecretStore:
     key, unopenable DB) is the crafted 503, never a raw 500 (R-521/R-522)."""
     try:
         return _store()
-    except SecretStoreError as exc:
+    except (SecretStoreError, OSError) as exc:
+        # REL-217 (R-592): OSError-class constructor failures (key-file path
+        # is a directory, permission denied) are the same operational fact as
+        # an unopenable DB — 503, never a raw 500.
         logger.warning("credential store unavailable: %s", exc)
         raise _store_unavailable(exc)
 
