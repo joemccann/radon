@@ -496,3 +496,26 @@ class TestThePrFormatterAcceptsEveryLoop:
     def test_the_skill_passes_its_own_slug_to_the_formatter(self, loop):
         text = _skill(loop).read_text(encoding="utf-8")
         assert f"--loop {loop}" in text
+
+
+# --------------------------------------------------------------------------
+# (e) long stages run detached and are awaited in-session, not parked in the
+#     harness's background (security lessons.md #20: the 2026-09-02 and
+#     2026-09-03 security audits parked DeepSec / pytest as harness
+#     background tasks and returned INCOMPLETE when the wrapper killed them)
+# --------------------------------------------------------------------------
+class TestLongStagesRunDetachedAndAreAwaitedInSession:
+    @pytest.mark.parametrize("loop", LOOP_IDS)
+    @pytest.mark.parametrize(
+        "sentence",
+        [
+            "## Long stages run detached and are awaited in-session",
+            "must not be printed while any stage is still in",
+            "nohup",
+            "disown",
+            "DONE",
+        ],
+    )
+    def test_the_detached_stage_rule_is_present(self, loop, sentence):
+        text = " ".join(_skill(loop).read_text(encoding="utf-8").split())
+        assert sentence in text, f"{loop}: SKILL.md does not state {sentence!r}"

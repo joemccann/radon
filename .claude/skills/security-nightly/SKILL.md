@@ -104,6 +104,33 @@ the public run log:
    anywhere else — not in a plan, a quote of this skill, or an interim
    message.
 
+## Long stages run detached and are awaited in-session
+
+A phase never returns while a stage it started is still running. "Waiting
+on a background task" is an INCOMPLETE phase, never a completed one, and
+the completion marker must not be printed while any stage is still in
+flight (see §Completion marker, INCOMPLETE, and resume above; this is the
+same rule, extended to every long-running stage such as DeepSec and the
+full pytest suite, not only the pipeline stages already covered there).
+
+Any stage expected to exceed a couple of minutes (DeepSec, a full
+pytest/vitest suite, a CI watch) is launched DETACHED from the agent
+harness so a harness timeout cannot kill it:
+`nohup env -i <minimal env> bash <stage-script.sh> </dev/null >stage.out
+2>&1 & disown` (macOS has no `setsid`). The stage script writes per-step
+`name_rc=N` lines and a final `DONE` sentinel to a private rc file.
+
+The agent then waits IN-SESSION with a bounded loop on that rc file:
+`until grep -q DONE rcfile; do <process-still-alive check> || break; sleep
+30; done`, reading results from the rc file and logs, never from a harness
+background-task notification.
+
+Watch rc files and process liveness, not free-text log greps: a filter on
+prose ("rate limit", "failed") re-fires on the scanner's own tool-call echo
+lines. Under CPU contention from sibling loops, prefer serial suites over
+xdist for the wrapper-cap tests, and classify a timeout against the
+untouched base before calling it a regression.
+
 ## Mission
 
 - Protect operator credentials, brokerage access, live orders, journal
