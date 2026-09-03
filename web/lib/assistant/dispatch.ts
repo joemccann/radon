@@ -7,7 +7,7 @@
 
 import { radonFetch } from "@/lib/radonApi";
 import { backendQueryPath } from "@/lib/assistant/backend";
-import { authorize, search, type CatalogOperation } from "@/lib/assistant/catalog";
+import { authorize, catalogUnavailable, search, type CatalogOperation } from "@/lib/assistant/catalog";
 import { NEXT_MODULES } from "@/lib/assistant/nextLoaders";
 import { routeIdFromNextPath } from "@/lib/assistant/pinSources";
 
@@ -221,9 +221,14 @@ async function dispatchFastApi(
   return fencePayload(payload, 200);
 }
 
-export function listApis(input: Record<string, unknown>): { operations: ReturnType<typeof search> } {
+export function listApis(
+  input: Record<string, unknown>,
+): { operations: ReturnType<typeof search>; catalog_unavailable?: true } {
   const q = typeof input.q === "string" ? input.q : "";
-  return { operations: search(q) };
+  const operations = search(q);
+  // REL-183 (R-514): tell the model the emptiness is an outage, not "no APIs".
+  if (catalogUnavailable()) return { operations, catalog_unavailable: true };
+  return { operations };
 }
 
 export async function callApi(
