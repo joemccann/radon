@@ -120,16 +120,6 @@ def _negative_kid_active(kid: str) -> bool:
         return False
 
 
-def _cached_kids(client) -> set[str] | None:
-    """kids already held by the client, or None when it cannot enumerate
-    them (then the refresh cooldown does not apply and the per-kid negative
-    cache is the only bound)."""
-    get_signing_keys = getattr(client, "get_signing_keys", None)
-    if get_signing_keys is None:
-        return None
-    return {key.key_id for key in get_signing_keys()}
-
-
 def _signing_key_for(token: str):
     """The JWKS signing key for this token. Split out so tests can stub it.
 
@@ -145,10 +135,10 @@ def _signing_key_for(token: str):
         raise AuthError(401, "invalid token")
     if not _jwks_gate.acquire(blocking=False):
         raise AuthError(503, "authentication unavailable")
+
     try:
         client = _get_jwks_client()
-        cached_kids = _cached_kids(client)
-        if cached_kids is not None and kid not in cached_kids:
+        if kid not in {key.key_id for key in client.get_signing_keys()}:
             with _jwks_refresh_lock:
                 now = time.monotonic()
                 if now < _jwks_refresh_after:
