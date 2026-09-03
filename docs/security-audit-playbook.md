@@ -69,6 +69,15 @@ line here whenever you ship a security fix.**
   (service-health runs `scrubSecrets`).
   (`feedback_health_endpoint_public_leak_and_trust_chokepoint`)
 - **No Next.js spawn with user args**; subprocess + PI exec allowlists intact.
+- **Hosted MCP env isolation** — `radon-mcp.service` (the one unit terminating
+  anonymous internet traffic) loads only `/etc/radon/mcp.env` (Clerk verification
+  inputs, `ALLOWED_USER_IDS`, `RADON_MCP_*`), never `/etc/radon/env`, and runs
+  sandboxed with `/etc/radon/env` inaccessible.
+  (`cloud/tests/test_systemd_services.py::TestHostedMcp`, `cloud/tests/test_deploy_resilience.py`)
+- **Hosted MCP resource bounds** — POST `/mcp` bodies over `MAX_REQUEST_BYTES` are
+  413'd before parsing, an unknown-kid JWKS refetch is limited to one per
+  `JWKS_REFRESH_COOLDOWN_SECONDS`, and every upstream read runs off the event loop.
+  (`scripts/tests/test_mcp_hosted.py`)
 - **CSP enforced (not Report-Only)** — `web/middleware.ts:buildCspWithNonce` ships a
   per-request nonce with NO `'unsafe-inline'`/`'unsafe-eval'` in `script-src`, and
   `next.config.mjs` emits NO CSP header. Must keep `worker-src 'self' blob:` and the
