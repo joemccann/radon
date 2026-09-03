@@ -213,7 +213,7 @@ export default function CredentialsPanel() {
             const slug = serviceSlug(service.id);
             return (
               <div
-                className="preferences-row"
+                className="preferences-row preferences-row--service"
                 data-testid={`credential-service-${slug}`}
                 key={service.id}
               >
@@ -232,52 +232,56 @@ export default function CredentialsPanel() {
                   <p className="preferences-row__description">{service.note}</p>
                 ) : null}
 
-                {service.fields.map((field) => (
-                  <div className="preferences-row__control" key={field.name}>
-                    <label className="preferences-row__meta" htmlFor={`cred-${field.name}`}>
-                      <span className="preferences-row__head">
-                        <span className="preferences-row__label">{field.label}</span>
-                        <code className="preferences-row__key">{field.name}</code>
-                      </span>
-                      <span className="preferences-row__metaline" data-testid={`credential-status-${field.name}`}>
-                        {fieldStatus(field)}
-                      </span>
-                    </label>
-                    <input
-                      id={`cred-${field.name}`}
-                      className="order-input preferences-row__input"
-                      type={field.secret ? "password" : "text"}
-                      autoComplete="off"
-                      spellCheck={false}
-                      placeholder={
-                        field.configured
-                          ? `Replace ${field.hint}`
-                          : field.placeholder || "Paste value"
-                      }
-                      value={drafts[field.name] ?? ""}
-                      disabled={busy}
-                      onChange={(e) =>
-                        setDrafts((current) => ({
-                          ...current,
-                          [field.name]: e.target.value,
-                        }))
-                      }
-                    />
-                    {field.configured ? (
-                      <button
-                        type="button"
-                        className="admin-btn admin-btn-ghost"
-                        data-testid={`credential-clear-${field.name}`}
-                        disabled={busy}
-                        onClick={() => {
-                          void clearField(service, field);
-                        }}
-                      >
-                        Clear
-                      </button>
-                    ) : null}
-                  </div>
-                ))}
+                <div className="credentials-fields">
+                  {service.fields.map((field) => (
+                    <div className="credentials-field" key={field.name}>
+                      <label className="credentials-field__meta" htmlFor={`cred-${field.name}`}>
+                        <span className="credentials-field__title">
+                          <span className="preferences-row__label">{field.label}</span>
+                          <code className="preferences-row__key">{field.name}</code>
+                        </span>
+                        <span className="preferences-row__meta" data-testid={`credential-status-${field.name}`}>
+                          {fieldStatus(field)}
+                        </span>
+                      </label>
+                      <div className="credentials-field__inputrow">
+                        <input
+                          id={`cred-${field.name}`}
+                          className="order-input preferences-row__input credentials-field__input"
+                          type={field.secret ? "password" : "text"}
+                          autoComplete="off"
+                          spellCheck={false}
+                          placeholder={
+                            field.configured
+                              ? `Replace ${field.hint}`
+                              : field.placeholder || "Paste value"
+                          }
+                          value={drafts[field.name] ?? ""}
+                          disabled={busy}
+                          onChange={(e) =>
+                            setDrafts((current) => ({
+                              ...current,
+                              [field.name]: e.target.value,
+                            }))
+                          }
+                        />
+                        {field.configured ? (
+                          <button
+                            type="button"
+                            className="admin-btn admin-btn-ghost"
+                            data-testid={`credential-clear-${field.name}`}
+                            disabled={busy}
+                            onClick={() => {
+                              void clearField(service, field);
+                            }}
+                          >
+                            Clear
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                  ))}
+                </div>
 
                 <div className="admin-actions-row">
                   <button

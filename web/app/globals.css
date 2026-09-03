@@ -20844,6 +20844,72 @@ body[data-mobile="true"] .alerts-rule__channel {
   margin: 0;
 }
 
+/* ── Service rows (profile Credentials tab, setup wizard) ──
+   One row per vendor service with N fields stacked below the header.
+   Fields never share a grid cell, so multi-field services (MenthorQ,
+   IB Flex) cannot paint on top of each other. */
+.preferences-row--service {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    "head"
+    "description"
+    "fields"
+    "actions"
+    "error";
+}
+
+.credentials-fields {
+  grid-area: fields;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 4px;
+  min-width: 0;
+}
+
+.credentials-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 300px);
+  gap: 2px 16px;
+  align-items: start;
+  min-width: 0;
+}
+
+.credentials-field__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.credentials-field__title {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  min-width: 0;
+}
+
+.credentials-field__inputrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.credentials-field__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+  text-align: left;
+}
+
+.preferences-row__key {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .preferences-badge {
   font-size: 11px;
   font-family: var(--font-mono);
@@ -20899,6 +20965,25 @@ body[data-mobile="true"] .alerts-rule__channel {
   .preferences-row__input {
     width: 100%;
     text-align: left;
+  }
+
+  .credentials-field {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+
+  .credentials-field__input {
+    width: 100%;
+  }
+
+  .credentials-field__inputrow .order-input,
+  .credentials-field__inputrow .admin-btn {
+    min-height: 44px;
+  }
+
+  .preferences-row--service .admin-actions-row .admin-btn {
+    min-height: 44px;
+    width: 100%;
   }
 }
 

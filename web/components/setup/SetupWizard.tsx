@@ -284,7 +284,7 @@ export default function SetupWizard() {
               const verdict = verdicts[service.id];
               const hasValues = Object.keys(valuesFor(service)).length > 0;
               return (
-                <div className="preferences-row" data-testid={`setup-service-${service.id}`} key={service.id}>
+                <div className="preferences-row preferences-row--service" data-testid={`setup-service-${service.id}`} key={service.id}>
                   <div className="preferences-row__head">
                     <span className="preferences-row__label">
                       {service.label}
@@ -297,29 +297,33 @@ export default function SetupWizard() {
                   {service.note ? (
                     <p className="preferences-row__description">{service.note}</p>
                   ) : null}
-                  {service.fields.map((field) => (
-                    <div className="preferences-row__control" key={field.name}>
-                      <label className="preferences-row__meta" htmlFor={`setup-${field.name}`}>
-                        <span className="preferences-row__head">
-                          <span className="preferences-row__label">{field.label}</span>
-                          <code className="preferences-row__key">{field.name}</code>
-                        </span>
-                      </label>
-                      <input
-                        id={`setup-${field.name}`}
-                        className="order-input preferences-row__input"
-                        type={field.secret ? "password" : "text"}
-                        autoComplete="off"
-                        spellCheck={false}
-                        placeholder={field.placeholder || "Paste value"}
-                        value={drafts[field.name] ?? ""}
-                        disabled={busy || completing}
-                        onChange={(e) =>
-                          setDrafts((current) => ({ ...current, [field.name]: e.target.value }))
-                        }
-                      />
-                    </div>
-                  ))}
+                  <div className="credentials-fields">
+                    {service.fields.map((field) => (
+                      <div className="credentials-field" key={field.name}>
+                        <label className="credentials-field__meta" htmlFor={`setup-${field.name}`}>
+                          <span className="credentials-field__title">
+                            <span className="preferences-row__label">{field.label}</span>
+                            <code className="preferences-row__key">{field.name}</code>
+                          </span>
+                        </label>
+                        <div className="credentials-field__inputrow">
+                          <input
+                            id={`setup-${field.name}`}
+                            className="order-input preferences-row__input credentials-field__input"
+                            type={field.secret ? "password" : "text"}
+                            autoComplete="off"
+                            spellCheck={false}
+                            placeholder={field.placeholder || "Paste value"}
+                            value={drafts[field.name] ?? ""}
+                            disabled={busy || completing}
+                            onChange={(e) =>
+                              setDrafts((current) => ({ ...current, [field.name]: e.target.value }))
+                            }
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                   {service.validator ? (
                     <div className="admin-actions-row">
                       <button
