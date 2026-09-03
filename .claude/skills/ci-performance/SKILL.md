@@ -1,6 +1,6 @@
 ---
 name: ci-performance
-description: Nightly CI and deploy optimizer - measure the real push-to-green-production critical path from GitHub Actions and production deploy timestamps, then land one bounded, evidence-backed optimization per night on a PR branch without weakening any test, gate, provenance, health, recovery or rollback guarantee. Runs unattended on the always-on runner via scripts/ci_performance_nightly.sh, one daily cycle at 00:20 local that runs audit then remediate; invoke as /ci-performance audit or /ci-performance remediate.
+description: Nightly CI and deploy optimizer - measure the real push-to-green-production critical path from GitHub Actions and production deploy timestamps, then land every ranked, evidence-backed optimization that passes the rails on the dated PR branch (one commit per experiment so each stays attributable) without weakening any test, gate, provenance, health, recovery or rollback guarantee, then a deliver phase that pushes, opens one PR, gets CI green and tells the operator what to merge. Runs unattended on the always-on runner via scripts/ci_performance_nightly.sh, one daily cycle at 00:20 local that runs audit, remediate, then deliver; invoke as /ci-performance audit, /ci-performance remediate or /ci-performance deliver.
 ---
 
 # Nightly CI and Deploy Optimizer
@@ -10,13 +10,14 @@ trading system. This job runs unattended on the always-on Mac mini. No human
 can answer questions during the run.
 
 Your mandate is to continuously reduce the measured time from a push to
-`main` until a healthy production deployment completes. Optimize one bounded,
-evidence-backed bottleneck at a time. Preserve every test, security, artifact,
-deployment, recovery, and rollback guarantee.
+`main` until a healthy production deployment completes. Implement every
+ranked, evidence-backed candidate that passes the rails, one commit per
+candidate so each experiment stays attributable. Preserve every test,
+security, artifact, deployment, recovery, and rollback guarantee.
 
-The first argument is the mode: `audit` or `remediate`. The launchd job fires
-daily at 00:20 local and runs `audit` followed by `remediate` in this loop's
-dedicated clone.
+The first argument is the mode: `audit`, `remediate` or `deliver`. The
+launchd job fires daily at 00:20 local and runs `audit`, then `remediate`,
+then `deliver` in this loop's dedicated clone. The loop never merges.
 
 ## Objective
 
@@ -30,7 +31,17 @@ dedicated clone.
 - Prefer simple changes that remove redundant work, improve safe concurrency,
   balance shards, preserve reusable work, or reduce transfer size.
 - Do not manufacture work. A night with no safe, material optimization is a
-  successful audit when it records the evidence and reports cleanly.
+  successful audit when it records the evidence and reports cleanly;
+  verified findings with no implementation is a failed remediate phase.
+
+Measure improvement by: findings implemented per cycle (verified findings
+fixed and delivered over verified findings found), PRs opened per cycle,
+time to CI green (remediate start to the deliver phase's green verdict), and
+PRs awaiting merge with their age (an operator-side backlog the loop reports
+in the Next section and the issue comment, never one it closes itself). A
+zero-fix night is healthy only when the audit verified zero actionable
+findings; verified findings with no implementation is a failed remediate
+phase, not a quiet night.
 
 ## Historical anchors
 
@@ -220,19 +231,38 @@ evidence-backed optimization candidate.
    Estimate recurring critical-path seconds saved, confidence, effort, risk,
    runner-minute effect, and validation cost.
 8. Rank candidates by expected critical-path impact, confidence, safety, and
-   effort. Select only the highest-value candidate that fits the bounded run.
-   Do not select work merely because it is easy or fashionable.
+   effort. Every candidate that passes the rails is handed to the remediate
+   phase, highest value first; none is dropped for being second. Do not
+   select work merely because it is easy or fashionable.
 9. Append the audit and candidate to `CI_PERFORMANCE_LOG.md`, commit it, push
    the nightly branch, and open or update the nightly PR via §Pull request
    output. Zero findings still updates the log and PR as dead-man evidence.
 
 ## Mode: remediate
 
-Goal: implement one measured optimization without weakening any invariant.
+Goal: implement every ranked, measured optimization without weakening any
+invariant, one commit per `CIP-###` so each experiment stays attributable.
 
-1. Resume the audit branch and selected `CIP-###` item. Before editing, write
-   down the comparable baseline runs, current critical path, hypothesis,
-   expected seconds saved, affected paths, safety risks, and revert trigger.
+**Remediate mandate.** Implement every verified source-actionable finding
+from this cycle's audit, not the first one and not one per night. Group fixes
+by root cause into separate commits on one dated branch `ci-performance/<YYYY-MM-DD>` (one
+branch per loop per day; the deliver phase turns it into one PR). Red/green
+per fix; the full project gates before every commit. Independent fixes may
+run in parallel as subagents in separate worktrees of this clone
+(`git worktree add ../wt-<id> -b ci-performance/<date>-<id> ci-performance/<date>`), each
+committing to its own branch; this phase merges them back onto the dated
+branch, reruns the gates on the merged result, and removes the worktrees
+(`git worktree remove`, `git branch -d`). The phase never leaves uncommitted
+work: commit to the branch before any long suite, so a cap kill loses
+nothing. A finding is done only as DONE, BLOCKED (root-cause hypothesis
+after three genuine attempts), or operator-only (an exact operator action
+for the PR's Next section); verified findings with no implementation is a
+failed remediate phase.
+
+1. Resume the audit branch and the ranked `CIP-###` items. Before editing
+   each, write down the comparable baseline runs, current critical path,
+   hypothesis, expected seconds saved, affected paths, safety risks, and
+   revert trigger.
 2. Establish the clean `origin/main` local gate baseline. Run CPU-heavy local
    gates serially. If other midnight loops are consuming the Mac mini, wait
    within the wrapper's bound or record the contention; do not use distorted
@@ -252,11 +282,83 @@ Goal: implement one measured optimization without weakening any invariant.
    §Pull request output. Hypothesis, before evidence, predicted savings,
    tests, safety checks, runner-minute estimate, and validation plan stay
    on the rolling issue and in `CI_PERFORMANCE_LOG.md`.
-8. Do not merge or deploy manually. After human merge, use subsequent organic
-   `main` runs to evaluate the experiment. The next nightly audit appends
-   samples until acceptance thresholds are met.
+8. Do not merge or deploy manually. CI on the PR is the deliver phase's job
+   (§Mode: deliver). After human merge, use subsequent organic `main` runs
+   to evaluate the experiment. The next nightly audit appends samples until
+   acceptance thresholds are met.
 9. Mark the experiment `ACCEPTED`, `REJECTED`, `VALIDATING`, `BLOCKED`, or
    `INSUFFICIENT_SAMPLE`. Never call a single warm run a proven win.
+
+## Mode: deliver (third phase of the daily cycle)
+
+Goal: every commit the remediate phase landed on `ci-performance/<YYYY-MM-DD>` reaches the
+operator as ONE pull request with CI green, in this same cycle, and the
+operator is told exactly what is ready to merge. The loop never merges.
+The wrapper caps this phase at 3h (`RADON_WEEKEND_DELIVER_CAP_SECS`,
+default 10800).
+
+1. Resume first. Read this loop's deliver record
+   (`python3.13 scripts/nightly_deliver.py show --loop ci-performance`; kept outside the clone under `~/radon-weekend/.ci-performance-deliver/`).
+   If it is `resumable` (an earlier deliver ended INCOMPLETE), that branch
+   and PR number are the run to finish: check the branch out, make its CI
+   green (step 4), record the outcome, then continue with today's branch.
+   Never open a second PR for a branch that already has one.
+2. Push the dated branch. If it carries no commit beyond `origin/main` and no
+   PR exists for it, the verdict is `--ready` with no URL (step 6); stop.
+3. Open ONE PR for the branch via §Pull request output (`--loop ci-performance`);
+   update the existing PR when one is already open for the branch (`gh api
+   -X PATCH`). Every operator-only finding from this cycle's audit (external
+   state, credential rotation, host policy, a `BLOCKED` item) goes into the
+   body's Next section as an exact operator action. Nothing is dropped
+   silently. Record the PR:
+   `python3.13 scripts/nightly_deliver.py record --loop ci-performance --branch <branch> --pr <n> --url <url> --status pending`.
+4. Wait for CI, bounded:
+   `python3.13 scripts/nightly_deliver.py watch --pr <n> --cap-secs <seconds left in the phase>`
+   polls `gh pr checks` and exits 0 green / 1 red / 3 still pending at the
+   cap. On red: read the failing job's log (`gh run view <run-id>
+   --log-failed`), write the failing test first when the fix is in source,
+   fix on the branch, run the focused gate, commit, push, watch again. Repeat
+   until green or the cap. Never weaken a test or a gate to get green; never
+   rebase or force-push over a commit you did not author.
+5. Record the outcome (`record ... --status green`, or `--status incomplete
+   --check <name>` when a check is still red or pending at the cap) and post
+   the three-section issue comment (§Dead-man reporting) naming the PR URL
+   and, when INCOMPLETE, the failing check.
+6. Print, as the LAST stdout line of the phase, the verdict line from
+   `python3.13 scripts/nightly_deliver.py verdict --loop ci-performance --ready <url>...`
+   (or `--incomplete <check> --pr-url <url>`). The wrapper greps it:
+   `NIGHTLY DELIVER READY: loop=ci-performance prs=<n> <urls>` becomes the operator
+   notification "N PR(s) green, ready to merge: <urls>" (Pushover and the
+   dead-man comment); `NIGHTLY DELIVER INCOMPLETE: loop=ci-performance check=<name>
+   pr=<url>` becomes "INCOMPLETE: <name>", the phase exits 75, and the next
+   fire resumes the same branch and PR from the record. An exit-0 deliver
+   phase without the line is INCOMPLETE. Never emit the line anywhere else.
+
+## Long stages run detached and are awaited in-session
+
+A phase never returns while a stage it started is still running. "Waiting
+on a background task" is an INCOMPLETE phase, never a completed one, and
+the phase's completion marker must not be printed while any stage is still
+in flight (see §Mode: deliver step 4 above; the same bounded-wait contract
+applies to every long-running stage, not only the CI watch).
+
+Any stage expected to exceed a couple of minutes (scanner passes, a full
+pytest/vitest suite, a CI watch) is launched DETACHED from the agent
+harness so a harness timeout cannot kill it:
+`nohup env -i <minimal env> bash <stage-script.sh> </dev/null >stage.out
+2>&1 & disown` (macOS has no `setsid`). The stage script writes per-step
+`name_rc=N` lines and a final `DONE` sentinel to a private rc file.
+
+The agent then waits IN-SESSION with a bounded loop on that rc file:
+`until grep -q DONE rcfile; do <process-still-alive check> || break; sleep
+30; done`, reading results from the rc file and logs, never from a harness
+background-task notification.
+
+Watch rc files and process liveness, not free-text log greps: a filter on
+prose ("rate limit", "failed") re-fires on the scanner's own tool-call echo
+lines. Under CPU contention from sibling loops, prefer serial suites over
+xdist for the wrapper-cap tests, and classify a timeout against the
+untouched base before calling it a regression.
 
 ## Candidate search space
 
@@ -408,7 +510,10 @@ A zero-change night must still report. Silence is a runner failure signal.
 The wrapper (`scripts/ci_performance_nightly.sh`) already posts a per-phase
 comment on the rolling issue and a per-phase Pushover with the phase status
 and the PR URL, so the agent owns the formatter-produced PR body and the
-issue's three-section write-up, not the dead-man plumbing.
+issue's three-section write-up, not the dead-man plumbing. For the deliver
+phase that status IS the operator's merge cue: `N PR(s) green, ready to
+merge: <urls>`, `0 PR(s), nothing to merge`, or `INCOMPLETE: <check>` (CI
+not green at the cap; the next fire resumes the same branch and PR).
 
 ## Self-improvement
 
