@@ -21,6 +21,9 @@ export type ErrorCode =
   // First-run setup: the whole API surface is parked until /setup finishes.
   | "SETUP_MODE"
   | "SETUP_TOKEN_INVALID"
+  | "SETUP_ALREADY_COMPLETE"
+  | "SETUP_REPO_ROOT_INVALID"
+  | "AUTH_MISCONFIGURED"
   | "BACKEND_UNAVAILABLE"
   | "INTERNAL_ERROR";
 

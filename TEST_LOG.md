@@ -575,3 +575,22 @@ finish.
 | T-372 | DONE | `03796803` cherry | Sleep-ordering replaced with explicit `os.utime` stamps, `0.gpg` deliberately newest. RED on a name-sort mutation. GREEN ×3 `17 passed` (1.15 s → 0.16 s); lead re-ran landed `17 passed`. |
 | T-355 | DONE | `aaffb949` cherry | New `web/tests/use-streaks.test.tsx` (6 tests): exact URL `"/api/streaks?symbol=spy"`, `cache: "no-store"`, stale-response guard (first request resolved last), 3 error mappings. RED: path typo → 3 failed; guard deleted → 1 failed. GREEN ×3 `6 passed`. Hook source untouched. |
 | T-369 | DONE (UI verified) | `aaffb949` cherry | Spec keys on `[aria-current="page"]`; `StreaksChart.tsx` gains `streaks-price-path`/`streaks-bar` testids; unit + spec keyed on them. GREEN ×3: unit `18 passed`, e2e `4 passed` under `next start` (compile-mode build). Screenshot: `/tmp/tw-2026-09-02/streaks-tab-chart.png`. Lead re-ran landed unit files `24 passed`. |
+
+## Remediation 2026-09-03 — branch testing/2026-09-03 (PR #260)
+
+| Task | Status | Commits | Evidence |
+|---|---|---|---|
+| T-382 | DONE | `4efff34f` | Red: empty fetched book replaced non-empty snapshot (`save called with {'open_orders': []}`). Guard: empty book + non-empty Turso count skips save (new `writer.count_open_orders`); mirror body now executes fetch→build→save under test via pre-fixture `_ORIG_MIRROR`. Green: fill_monitor 24 passed. |
+| T-390 | DONE | `8dba0e45`+`36ecacd7` | Mutation red: inverted env export → 2 new tests fail, existing 24 stay green (gap confirmed). Green: 26 passed. Follow-up commit: restore module-global `_SESSION_EXPORTED` per test — the landed suite redded `test_env_fallback_flagged` via cross-file pollution (caught by lead's post-land scoped run). |
+| T-383 | DONE | `05980c46` | Red: `expected 2.475 to be close to 247.5`. Green: per-group multiplier (100 only with OPT/BAG fill) in entryPrice fallback; share-pnl+position-group 68 passed. |
+| T-384 | DONE | `05980c46` | pnlPct NOT blended at HEAD (closeCash already per-fill); exact-expectation regression (600/24,900 → 2.4096%) pins it against a group-level ×100 regression. |
+| T-385 | DONE | `f1f337b1` | Real defect: `serialize_contract` emitted no `secType` on BAG legs — STK-leg exemption at `order_limits.py:299` dead against real snapshots (red: `'option' == 'combo'`). Source fix + serializer-bound shape contract + `/orders/modify` wire tests (10000→200 with full spawn args, 60000→422 ORDER_QTY_LIMIT). Green: 18 passed scoped, 92 blast-radius. |
+| T-386 | DONE | `62349a76` | Red: `expected '' to match /^pk_test_/`. `pk_test_` stub pinned in playwright webServer.env + contract test. |
+| T-387 | DONE | `62349a76` | Red: authless-token request 307 → /setup. Setup + auth-misconfigured gates now skipped for a valid authless token; tokenless still 307. Green: 71 passed across 7 middleware/setup files; 21 re-verified in landed tree. |
+| T-388 | DONE | `4676d655` | Red: shell observed `connected === false` (dead `usePrices` mock). Green via stubbed RealtimePricesContext; perf file ×3 at 2.49–2.56s, no timeout changes. |
+| T-389 | DONE | `4676d655` | Red: early return before provider (`expected 628 to be less than 112`). Providers.tsx: realtime core mounts on keyless boots, Clerk wrapping conditional; exactly-one `usePrices(` call-site scan. Green: 16 passed + 11 provider blast-radius. |
+| T-391 | DONE | `df4550ad` | Red: no `request_body` in /mcp* Caddy block, no app bound. Green: `max_size 1MB` edge + `_BodySizeLimit` ASGI middleware (413 pre-dispatch, tool spy asserts zero execution); caddyfile 34 passed, mcp_hosted 37 passed (roots run separately). |
+| T-408 | DONE | `ff8dbc03` | Red: tsc 5 errors (3 literals). ErrorCode union gains `SETUP_ALREADY_COMPLETE`/`SETUP_REPO_ROOT_INVALID`/`AUTH_MISCONFIGURED`; drift-guard contract test (red pre-fix). `npx tsc --noEmit` exit 0 in landed tree (with T-387's middleware edits present). CI tsc-gate step left to operator. |
+
+P2s T-392…T-407 DEFERRED. Closing 3× gate counts below.
+Closing gates ×3 (serial, detached script; reliability loop's cycle concurrent, load 4-9): pytest `10896 passed, 1 skipped` ×3; vitest `8604 passed / 851 files, 0 failed` ×3; cloud `35 failed, 1537 passed, 6 skipped` ×3 with FAILED lists byte-identical to each other AND to this cycle's audit round-1 baseline (darwin bash-3.2/caddy class, T-118). Tree clean after gates (T-275); zero runner secrets in gate logs (T-381).

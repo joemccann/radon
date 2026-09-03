@@ -2350,6 +2350,13 @@ def replace_open_orders_for_session(
     db.commit()
 
 
+def count_open_orders() -> int:
+    """Row count of the open_orders snapshot (T-382 empty-book guard)."""
+    db = get_db()
+    row = db.execute("SELECT COUNT(*) FROM open_orders").fetchone()
+    return int(row[0]) if row else 0
+
+
 def upsert_daemon_state(
     handler: str,
     *,
