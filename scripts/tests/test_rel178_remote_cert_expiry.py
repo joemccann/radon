@@ -93,7 +93,7 @@ class TestWatchdogClassifies:
         rows: list[tuple] = []
         monkeypatch.setattr(
             wd, "_write_service_health_transport",
-            lambda service, state, error=None: rows.append((service, state, error)),
+            lambda state, error=None: rows.append(("ib-watchdog", state, error)),
         )
         monkeypatch.setattr(
             wd, "_REMOTE_CERT_ALERT",
@@ -110,7 +110,7 @@ class TestWatchdogClassifies:
         rows: list[tuple] = []
         monkeypatch.setattr(
             wd, "_write_service_health_transport",
-            lambda service, state, error=None: rows.append((service, state, error)),
+            lambda state, error=None: rows.append(("ib-watchdog", state, error)),
         )
         monkeypatch.setattr(
             wd, "_REMOTE_CERT_ALERT",

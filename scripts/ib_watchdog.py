@@ -721,13 +721,13 @@ def note_remote_cert(days_left: Optional[float]) -> None:
         })
 
 
-def _write_service_health_transport(service: str, state: str, error=None) -> None:
+def _write_service_health_transport(state: str, error=None) -> None:
     try:
         from db.hrana_http import write_service_health_http
     except ImportError:
         from scripts.db.hrana_http import write_service_health_http
 
-    write_service_health_http(service, state, error=error)
+    write_service_health_http("ib-watchdog", state, error=error)
 
 
 def _write_service_health(
@@ -746,7 +746,6 @@ def _write_service_health(
             state_label = "error"
         error_message = f"{error_message}; {note}" if error_message else note
     _write_service_health_transport(
-        "ib-watchdog",
         state_label,
         error={"message": error_message} if error_message else None,
     )

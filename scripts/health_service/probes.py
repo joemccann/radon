@@ -81,6 +81,29 @@ def probe_http_json(url: str, timeout: float = 2.0, max_bytes: int = 65536) -> d
         return {"state": classify_conn_error(exc), "detail": exc.__class__.__name__}
 
 
+def probe_http_alive(url: str, timeout: float = 2.0) -> dict:
+    """Liveness-only HTTP probe: ANY HTTP response (including 4xx/5xx) proves
+    the process is serving. Refused -> down; timeout -> unknown (a wedged
+    listener that accepts and never answers). REL-194 (R-554)."""
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            resp.read(1024)
+            return {"state": "up", "http_status": getattr(resp, "status", 200)}
+    except urllib.error.HTTPError as exc:
+        return {"state": "up", "http_status": exc.code}
+    except urllib.error.URLError as exc:
+        reason = exc.reason
+        if isinstance(reason, OSError):
+            return {"state": classify_conn_error(reason), "detail": reason.__class__.__name__}
+        if "timed out" in str(reason).lower():
+            return {"state": "unknown", "detail": "timeout"}
+        return {"state": "unknown", "detail": str(reason)[:80]}
+    except (socket.timeout, TimeoutError):
+        return {"state": "unknown", "detail": "timeout"}
+    except OSError as exc:
+        return {"state": classify_conn_error(exc), "detail": exc.__class__.__name__}
+
+
 def unit_coarse_state(active_state: str, sub_state: str) -> str:
     """Collapse systemd ActiveState/SubState into the three-valued vocabulary.
 
@@ -155,7 +178,7 @@ STATUS_SCHEMA_VERSION = 2
 # R-382.
 DEPENDENCY_DWELL_LIMIT_SECS = 900.0
 
-DEPENDENCY_PROBES = frozenset({"ib-gateway"})
+DEPENDENCY_PROBES = frozenset({"ib-gateway", "radon-mcp"})
 DEPENDENCY_UNITS = frozenset({
     "radon-ib-gateway.service",
     "radon-newsfeed.service",

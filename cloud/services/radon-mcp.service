@@ -22,7 +22,16 @@ Environment=RADON_MCP_HOST=127.0.0.1
 Environment=RADON_MCP_PORT=8334
 TasksMax=64
 MemoryMax=512M
-ExecStart=/home/radon/radon/.venv/bin/python -m scripts.mcp_hosted.serve
+# REL-194 (R-553): the internet-facing MCP must not inherit the whole
+# production secret file. `env -i` re-execs with an ALLOWLIST — the three
+# Clerk vars its auth mirror needs plus its own bind config — so UW_TOKEN,
+# IB_FLEX_TOKEN, Turso and B2 creds never enter this process.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/bin/env -i HOME=/home/radon PATH=/usr/bin:/bin PYTHONDONTWRITEBYTECODE=1 CLERK_JWKS_URL=${CLERK_JWKS_URL} CLERK_ISSUER=${CLERK_ISSUER} ALLOWED_USER_IDS=${ALLOWED_USER_IDS} RADON_MCP_HOST=${RADON_MCP_HOST} RADON_MCP_PORT=${RADON_MCP_PORT} /home/radon/radon/.venv/bin/python -m scripts.mcp_hosted.serve
 Restart=always
 RestartSec=2
 
