@@ -27,7 +27,15 @@ LAUNCH_AGENTS="$HOME/Library/LaunchAgents"
 # The checkout this script lives in is the source of the gitignored env files
 # the runner clone cannot get from `git clone`. Override for an unusual layout.
 SRC_REPO="${RADON_WEEKEND_SRC_REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-ORIGIN_URL="$(git config --get remote.origin.url 2>/dev/null || echo git@github.com:joemccann/radon.git)"
+# The clone origin is read from THAT checkout, never the caller's cwd: run
+# from inside another repository, a bare `git config` answered with that
+# repository's origin and the runner clone was cut from it.
+if [[ ! -f "$SRC_REPO/scripts/documentation_nightly.sh" ]] \
+   || ! git -C "$SRC_REPO" rev-parse --show-toplevel >/dev/null 2>&1; then
+  echo "REFUSING: $SRC_REPO is not a Radon checkout (set RADON_WEEKEND_SRC_REPO to one)" >&2
+  exit 2
+fi
+ORIGIN_URL="$(git -C "$SRC_REPO" config --get remote.origin.url 2>/dev/null || echo git@github.com:joemccann/radon.git)"
 
 fail=0
 check() {
