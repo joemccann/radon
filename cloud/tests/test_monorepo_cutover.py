@@ -530,6 +530,11 @@ def test_runtime_code_paths_are_canonical_while_secret_path_remains_stable() -> 
                     assert line.lstrip("EnvironmentFile=").lstrip("-") == (
                         "/var/lib/radon/flex-secrets/env"
                     ), name
+                elif name == "radon-mcp.service":
+                    # The anonymous-facing MCP unit gets a derived, non-secret
+                    # subset (written next to the canonical file), never the
+                    # full secret set.
+                    assert line == "EnvironmentFile=/etc/radon/mcp.env", name
                 else:
                     assert line == f"EnvironmentFile={CANONICAL_ENV_FILE}", name
             if line.startswith(("WorkingDirectory=", "ExecStart=", "ExecStop=")):
