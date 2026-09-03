@@ -774,15 +774,25 @@ run_phase() {
 # worktree by construction. NON-FATAL and bounded — a prune failure must never
 # change this cycle's status or exit code. Skip with RADON_WEEKEND_SKIP_PRUNE=1.
 # Never exec a python FILE from the clone or the venv after the agent: both are
-# agent-writable. The trusted copy is piped out of origin/main straight into an
-# isolated system interpreter (-I: no cwd, no clone dir, no user site on
-# sys.path), so a planted scripts/weekend_prune.py or json.py cannot run.
+# agent-writable. The origin/main copy is piped straight into an isolated system
+# interpreter (-I: no cwd, no clone dir, no user site on sys.path). That stops a
+# planted working-tree scripts/weekend_prune.py and a planted json.py on
+# sys.path. It is NOT a network trust anchor: refs/remotes/origin/main lives in
+# the same agent-writable $REPO/.git, so an agent that rewrites that ref is
+# still ahead of it. Defence in depth, not a boundary.
+# --self "$REPO" makes this clone ignore its OWN runner lock, which it holds for
+# the whole cycle: otherwise the loop that generates the garbage is the one
+# clone that can never clean it. Every other refusal still applies to it.
 prune_weekend_root() {
   if [[ "${RADON_WEEKEND_SKIP_PRUNE:-0}" == "1" ]]; then return 0; fi
+  if [[ -z "${TIMEOUT_BIN:-}" ]]; then
+    echo "[prune] skipped (no timeout(1) to bound it)" >&2
+    return 0
+  fi
   local rc=0
   git -C "$REPO" show origin/main:scripts/weekend_prune.py 2>/dev/null \
-    | "${TIMEOUT_BIN:-}" "${RADON_WEEKEND_PRUNE_TIMEOUT_SECS:-600}" \
-      /usr/bin/python3 -I - --root "$WEEKEND_ROOT" >> "$RUN_LOG" 2>&1 || rc=$?
+    | "$TIMEOUT_BIN" "${RADON_WEEKEND_PRUNE_TIMEOUT_SECS:-600}" \
+      /usr/bin/python3 -I - --root "$WEEKEND_ROOT" --self "$REPO" >> "$RUN_LOG" 2>&1 || rc=$?
   if [[ $rc -ne 0 ]]; then
     echo "[prune] skipped (non-fatal rc=$rc)" >&2
   fi
