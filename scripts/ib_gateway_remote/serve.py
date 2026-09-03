@@ -103,6 +103,23 @@ def parse_client_names(raw: str) -> frozenset[str]:
     return names
 
 
+def healthz_payload() -> dict:
+    """Liveness plus mTLS cert expiry (REL-178 / R-496): the 825-day
+    self-signed pair dies silently otherwise."""
+    payload: dict = {"ok": True, "service": "ib-gateway-remote"}
+    cert_path = os.environ.get("RADON_IB_REMOTE_CERT") or ""
+    if cert_path:
+        try:
+            from utils.cert_expiry import cert_days_left, cert_not_after
+        except ImportError:  # pragma: no cover - module entrypoint layout
+            from scripts.utils.cert_expiry import cert_days_left, cert_not_after
+        days = cert_days_left(cert_path)
+        if days is not None:
+            payload["ib_remote_cert_days_left"] = round(days, 1)
+            payload["ib_remote_cert_not_after"] = cert_not_after(cert_path)
+    return payload
+
+
 def client_cert_allowed(cert: dict | None, names: Iterable[str]) -> bool:
     """True when the verified peer certificate's CN or a DNS SAN is allowlisted."""
     if not cert:
@@ -312,7 +329,7 @@ class GatewayRemoteHandler(BaseHTTPRequestHandler):
         if not self._authorize():
             return
         if self.path.split("?", 1)[0] == "/healthz":
-            self._ok({"ok": True, "service": "ib-gateway-remote"})
+            self._ok(healthz_payload())
             return
         if self.path.split("?", 1)[0] == "/status":
             self._helper("status")

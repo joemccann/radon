@@ -1319,6 +1319,21 @@ async def recover_stuck_pool(
     return recovered
 
 
+def _remote_cert_summary() -> Optional[dict]:
+    """Days left on the app-side mTLS client cert (REL-178 / R-496)."""
+    cert_path = os.environ.get("RADON_IB_REMOTE_CLIENT_CERT") or ""
+    if not cert_path:
+        return None
+    try:
+        from utils.cert_expiry import cert_days_left
+    except ImportError:  # pragma: no cover
+        from scripts.utils.cert_expiry import cert_days_left
+    days = cert_days_left(cert_path)
+    if days is None:
+        return None
+    return {"cert_days_left": round(days, 1)}
+
+
 def _derive_auth_state(check_result: Dict, pool_status: Optional[dict]) -> str:
     """Derive auth_state from a check result + optional pool status.
 
@@ -1377,6 +1392,9 @@ async def check_ib_gateway(
             # awaiting_2fa, so report "remote" and defer to the host that
             # actually owns the Gateway.
             result["auth_state"] = "remote"
+            remote_summary = _remote_cert_summary()
+            if remote_summary is not None:
+                result["remote"] = remote_summary
         if pool is not None and result["auth_state"] != "remote":
             await handle_auth_state_transition(result["auth_state"], pool)
         return result
