@@ -32,6 +32,11 @@
         <string>__WEEKEND_REPO__</string>
         <key>HOME</key>
         <string>__HOME__</string>
+        <!-- REL-198 (R-536): the billing-reroute variable list is pinned to
+             the installed CLI build; a self-updating CLI silently invalidates
+             it. A human re-enables updates, verifies, records, re-freezes. -->
+        <key>DISABLE_AUTOUPDATER</key>
+        <string>1</string>
     </dict>
 
     <!-- Daily 00:00 local (no Weekday key). One job runs the audit phase then
