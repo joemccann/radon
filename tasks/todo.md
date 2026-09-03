@@ -1,4 +1,4 @@
-# Task: Repair PR #261 CI regressions (2026-09-03) [WIP]
+# Task: Repair PR #261 CI regressions (2026-09-03) [COMPLETE]
 
 ## Objective
 
@@ -26,7 +26,7 @@
 - [x] T5 credential-validator isolation fix
 - [x] T6 focused suites green - 137 passed
 - [x] T7 full suite/build verified - Python 11,369 passed; 22 load timeouts reran 83/83; Vitest 8,640 passed; typecheck/lint/build green
-- [ ] T8 PR #261 green
+- [x] T8 PR #261 green - CI 33779844719 and app images 33779844555
 
 ## Review
 
@@ -35,6 +35,7 @@
 - Reconciled CI regressions: 137 passed; original PR delivery suites: 359 passed.
 - Full verification: Python 11,369 passed with 22 load-only timeouts rerun 83/83;
   Vitest 8,640 passed; typecheck, lint, and production build green.
+- PR head `5ffb2b0a`: CI run 33779844719 and app-images run 33779844555 passed.
 
 ---
 
