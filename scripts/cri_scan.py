@@ -1655,19 +1655,67 @@ def scan_lock_path() -> Path:
     return Path(override) if override else CRI_SCAN_LOCK_PATH
 
 
+class ScanLockError(RuntimeError):
+    """The lock PATH is broken (EACCES/EROFS/missing dir) — not contention.
+
+    REL-176 (R-487): after the lock moved into the bind-mounted `data/`, a
+    blanket `except OSError` made an ownership drift on `data/` read as
+    "another scan in flight" forever, serving the cache indefinitely with no
+    error signal.
+    """
+
+
 def _acquire_scan_lock():
-    """The open file handle when this process won, `None` when one is running."""
+    """The open file handle when this process won, `None` when one is
+    running. Raises ScanLockError when the lock path itself is unusable."""
     global _scan_lock_handle
 
     import fcntl  # noqa: PLC0415 — POSIX-only, and only this path needs it
 
     try:
         handle = open(scan_lock_path(), "a+")  # noqa: SIM115 — held for the process lifetime
+    except OSError as exc:
+        raise ScanLockError(f"cannot open scan lock {scan_lock_path()}: {exc}") from exc
+    try:
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
+    except BlockingIOError:
+        handle.close()
         return None
+    except OSError as exc:
+        handle.close()
+        raise ScanLockError(f"cannot flock scan lock {scan_lock_path()}: {exc}") from exc
     _scan_lock_handle = handle
     return handle
+
+
+# The loser's cache budget mirrors the watchdog's `closed` window for
+# cri-scan (3 days): beyond that the cache is a different market regime,
+# not an answer.
+LOSER_CACHE_MAX_AGE_S = 3 * 24 * 3600.0
+
+
+def loser_cache_payload(cached: Optional[dict]) -> Optional[dict]:
+    """The cached payload marked as served-from-cache, or None to refuse.
+
+    REL-176 (R-487): the flock loser used to echo `data/cri.json` verbatim
+    with no age bound and no marker, so a days-old scan was returned as the
+    live /regime/scan answer.
+    """
+    if not isinstance(cached, dict):
+        return None
+    scan_time = cached.get("scan_time")
+    if not isinstance(scan_time, str) or not scan_time:
+        return None
+    try:
+        stamp = datetime.fromisoformat(scan_time.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    age = (datetime.now(timezone.utc) - stamp).total_seconds()
+    if age > LOSER_CACHE_MAX_AGE_S:
+        return None
+    return {**cached, "served_from_cache": True}
 
 
 def _read_cached_scan(path: Path) -> Optional[dict]:
@@ -1735,18 +1783,39 @@ Examples:
     # up to 180s — both racing the same `data/cri.json` write and the same IB
     # client-id range (50-61). A loser serves the cache rather than queueing
     # behind a run that may take three minutes. R-423.
-    lock_handle = _acquire_scan_lock()
+    try:
+        lock_handle = _acquire_scan_lock()
+    except ScanLockError as exc:
+        # A broken lock path is an outage, not contention: heartbeat and fail.
+        print(f"  ERROR: {exc}", file=sys.stderr)
+        try:
+            from db import writer as _writer  # noqa: PLC0415
+
+            _writer.record_service_health(
+                "cri-scan", "error",
+                finished_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                error={"message": str(exc)},
+            )
+        except Exception as record_exc:  # noqa: BLE001
+            print(f"  lock-error heartbeat non-fatal: {record_exc}", file=sys.stderr)
+        sys.exit(1)
     if lock_handle is None:
         if args.json:
             # Not the off-hours gate: `cached_scan_if_fresh(force=True)` is
             # "never serve", and the winner is about to rewrite this file
-            # anyway, so whatever it holds now is the best answer available.
-            cached = _read_cached_scan(_PROJECT_DIR / "data" / "cri.json")
+            # anyway — but the loser's answer carries its age and refuses a
+            # cache past the closed window (REL-176 / R-487).
+            cached = loser_cache_payload(
+                _read_cached_scan(_PROJECT_DIR / "data" / "cri.json")
+            )
             if cached is not None:
                 print("  Another CRI scan is in flight; serving cache.", file=sys.stderr)
                 print(json.dumps(cached, indent=2))
                 return
-        print("  Another CRI scan is in flight and no cache is available.", file=sys.stderr)
+        print(
+            "  Another CRI scan is in flight and no fresh cache is available.",
+            file=sys.stderr,
+        )
         sys.exit(75)
 
     t_start = time.time()
