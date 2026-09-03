@@ -54,12 +54,25 @@ def _git(*args: str) -> str:
 
 def _changed_paths() -> list[str]:
     base = (os.environ.get("DOCS_CONTRACT_BASE") or "").strip()
-    if base in {"", _ZERO}:
+    explicit_base = base not in {"", _ZERO}
+    if not explicit_base:
         try:
             _git("rev-parse", "--verify", "origin/main")
             base = "origin/main"
         except subprocess.CalledProcessError:
             base = "HEAD~1"
+    else:
+        # REL-201 (R-560): an explicit base that does not resolve made every
+        # diff below `continue` — zero changed paths, silent pass. Mirror the
+        # gitleaks ensure_commit: fail LOUDLY naming the base.
+        try:
+            _git("rev-parse", "--verify", f"{base}^{{commit}}")
+        except subprocess.CalledProcessError as exc:
+            raise AssertionError(
+                f"DOCS_CONTRACT_BASE {base} is not a resolvable commit in this "
+                "clone — the ownership gate would silently pass (R-560); fetch "
+                "the base or fix the workflow's fetch depth"
+            ) from exc
     names: set[str] = set()
     for args in (
         ["diff", "--name-only", f"{base}...HEAD"],
@@ -68,7 +81,12 @@ def _changed_paths() -> list[str]:
     ):
         try:
             out = _git(*args)
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError as exc:
+            if explicit_base and args[:2] == ["diff", "--name-only"] and len(args) == 3:
+                raise AssertionError(
+                    f"git diff against DOCS_CONTRACT_BASE {base} failed — the "
+                    "ownership gate would silently pass (R-560)"
+                ) from exc
             continue
         names.update(line.strip() for line in out.splitlines() if line.strip())
     return sorted(names)
@@ -718,3 +736,17 @@ class TestTheWorkflowGivesThisContractAHistoryToDiff:
             f"the non-{_HISTORY_SHARD} shards resolve to fetch-depth {depth!r}; "
             "a full clone on every python shard is a needless CI cost"
         )
+
+
+class TestRel201GateFailsClosed:
+    """REL-201 (R-560): an unresolvable DOCS_CONTRACT_BASE must FAIL the
+    gate loudly, never `continue` into a zero-changed-paths pass."""
+
+    def test_a_nonexistent_base_fails_naming_it(self, monkeypatch):
+        monkeypatch.setenv("DOCS_CONTRACT_BASE", "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+        with pytest.raises(AssertionError, match="deadbeef"):
+            _changed_paths()
+
+    def test_an_empty_base_still_uses_the_fallback(self, monkeypatch):
+        monkeypatch.setenv("DOCS_CONTRACT_BASE", "")
+        assert isinstance(_changed_paths(), list)
