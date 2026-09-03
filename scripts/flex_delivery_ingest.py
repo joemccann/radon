@@ -165,7 +165,24 @@ def _page_release_failure(digest: str, message: str) -> None:
         print(f"[flex-ingest] release-failure page non-fatal: {exc}", file=sys.stderr)
 
 
+# REL-210 (R-584): once an error heartbeat is written in this process, a later
+# duplicate's "ok" must not repaint the row green — the sftp batch iterates the
+# remote listing unsorted and delivered files are never removed remotely, so a
+# stale duplicate routinely sorts after a failing new statement.
+_CASH_FLOW_ERROR_LATCHED = False
+
+
 def _heartbeat_cash_flow_sync(state: str, error: Dict[str, Any] | None = None) -> None:
+    global _CASH_FLOW_ERROR_LATCHED
+    if state == "error":
+        _CASH_FLOW_ERROR_LATCHED = True
+    elif _CASH_FLOW_ERROR_LATCHED:
+        print(
+            "[flex-ingest] suppressing cash-flow-sync ok heartbeat: an error "
+            "was recorded earlier in this run (REL-210)",
+            file=sys.stderr,
+        )
+        return
     try:
         from db import writer  # noqa: PLC0415
 
