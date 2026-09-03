@@ -230,6 +230,12 @@ def _apply_classified(kind: str, xml_text: str, digest: str, source_path: str) -
                 "error": f"cash_flow_sync failed (exit {cash_code}); TWR not rebuilt",
                 "source_path": source_path,
             }
+        # REL-220 (R-588): this ok deliberately precedes the TWR build — it
+        # reports the CASH-FLOW write, which is complete and (per R-329's
+        # id-keyed upsert) convergent under the retry a TWR failure triggers:
+        # the caller releases the claim, and re-ingesting the same bytes
+        # re-applies to identical rows. The TWR half reports through its own
+        # perf-twr surface. Pinned by test_rel220_twr_retry_convergence.
         _heartbeat_cash_flow_sync("ok")
         twr = perf_twr_builder.build_and_persist(from_file=source_path, persist=True)
         return {
