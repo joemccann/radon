@@ -150,7 +150,8 @@ class TestSetupVpsCaddy:
 class TestSetupVpsSystemd:
     def test_copies_service_files_to_systemd(self, setup_vps):
         assert "/etc/systemd/system/" in setup_vps
-        assert re.search(r'\bcp\b.*systemd', setup_vps)
+        # Units are copied through the root-only staging helper, not a bare cp.
+        assert re.search(r'\b(cp|stage_from_checkout)\b.*systemd', setup_vps)
 
     def test_daemon_reload(self, setup_vps):
         assert "systemctl daemon-reload" in setup_vps

@@ -73,7 +73,9 @@ is dropped by systemd regardless of `NotifyAccess=`, so `Type=notify` +
 The legacy directory is not a code source. Do not symlink the whole
 `/home/radon/radon-cloud` directory. Code paths, working directories, Compose,
 drift audit, helpers, and units use the monorepo cloud path. Units load
-`EnvironmentFile=/etc/radon/env`.
+`EnvironmentFile=/etc/radon/env`; the exception is `radon-mcp.service`, which
+loads the stripped `/etc/radon/mcp.env` that `deploy.sh:write_mcp_env` derives
+from it.
 
 ## Deployment Contract
 

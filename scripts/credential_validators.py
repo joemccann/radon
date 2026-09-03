@@ -187,9 +187,17 @@ def _validate_turso(values: Dict[str, str]) -> ValidationResult:
     url = raw_url
     if url.startswith("libsql://"):
         url = "https://" + url[len("libsql://") :]
+    # Egress pin: this probe sends TURSO_AUTH_TOKEN (which _merged_values may
+    # have filled from the store/env) as a Bearer header, so the destination
+    # is not caller preference — https + *.turso.io only, and when a database
+    # host is configured the probe may only go to that host.
     parsed = urlparse(url)
-    if parsed.scheme != "https" or not parsed.netloc:
-        return ValidationResult("invalid", "Turso URL must be a libsql:// or https:// URL")
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme != "https" or not host.endswith(".turso.io"):
+        return ValidationResult(
+            "invalid",
+            "TURSO_DB_URL must be a libsql:// or https:// URL on *.turso.io",
+        )
     configured = os.environ.get("TURSO_DB_URL", "").strip()
     if configured:
         cfg = configured

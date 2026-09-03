@@ -454,20 +454,31 @@ export default async function middleware(
   request: NextRequest,
   event: NextFetchEvent,
 ) {
-  // First-run setup mode short-circuits BEFORE Clerk: with no keys configured
-  // clerkMiddleware cannot run at all, and there is nothing to protect yet.
-  const setupGate = handleSetupModeGate(request);
-  if (setupGate) return setupGate;
+  // The Playwright authless bypass is EXEMPT from the setup / misconfigured
+  // gates: a keyless e2e runner (no Clerk env, wizard never run) is exactly
+  // the setup-mode fingerprint, and without this exemption every spec request
+  // 302'd to /setup (pages) or 503'd (API) before the token was consulted.
+  const authlessBypass = isAuthlessTestBypassEnabled(
+    request.headers.get("x-radon-authless-test"),
+  );
 
-  const misconfiguredGate = handleAuthMisconfiguredGate(request);
-  if (misconfiguredGate) return misconfiguredGate;
+  if (!authlessBypass) {
+    // First-run setup mode short-circuits BEFORE Clerk: with no keys
+    // configured clerkMiddleware cannot run at all, and there is nothing to
+    // protect yet.
+    const setupGate = handleSetupModeGate(request);
+    if (setupGate) return setupGate;
+
+    const misconfiguredGate = handleAuthMisconfiguredGate(request);
+    if (misconfiguredGate) return misconfiguredGate;
+  }
 
   // Probe routes are bearer-gated EVERYWHERE — before the local-dev bypass —
   // so the gate behaves identically in dev, tests, and production.
   const probeGate = await handleProbeBearerGate(request);
   if (probeGate) return probeGate;
 
-  if (isAuthlessTestBypassEnabled(request.headers.get("x-radon-authless-test"))) {
+  if (authlessBypass) {
     return NextResponse.next();
   }
 

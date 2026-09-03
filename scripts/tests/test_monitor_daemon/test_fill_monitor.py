@@ -14,7 +14,12 @@ from unittest.mock import Mock, patch, MagicMock
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+import monitor_daemon.handlers.fill_monitor as fill_monitor_module
 from monitor_daemon.handlers.fill_monitor import FillMonitorHandler
+
+# Captured before the autouse fixture patches the method out, so the
+# mirror-body tests below can execute the real implementation.
+_ORIG_MIRROR = FillMonitorHandler._mirror_ib_orders_snapshot
 
 
 @pytest.fixture(autouse=True)
@@ -164,6 +169,75 @@ class TestFillMonitorExecute:
 
             assert result["complete_fills"] == 1
             assert result["completed"][0]["order_id"] == 5
+
+
+class TestFillMonitorMirrorBody:
+    """The mirror body itself (T-382).
+
+    IBClient.get_open_orders waits on openOrderEnd capped at 0.5s and
+    returns openTrades() regardless — a slow gateway yields [], which the
+    mirror must NOT write over a non-empty existing snapshot (it would
+    wipe every working order off /orders).
+    """
+
+    def _stub_mirror_env(self, monkeypatch, *, open_orders, executed, existing_count):
+        save = MagicMock()
+        monkeypatch.setattr(
+            fill_monitor_module, "fetch_open_orders_for_mirror",
+            lambda client: open_orders, raising=False)
+        monkeypatch.setattr(
+            fill_monitor_module, "fetch_executed_orders_for_mirror",
+            lambda client: executed, raising=False)
+        monkeypatch.setattr(
+            fill_monitor_module, "build_orders_data_for_mirror",
+            lambda o, e: {"open_orders": o, "executed_orders": e}, raising=False)
+        monkeypatch.setattr(
+            fill_monitor_module, "save_orders_snapshot", save, raising=False)
+        monkeypatch.setattr(
+            fill_monitor_module, "count_open_orders_for_mirror",
+            lambda: existing_count, raising=False)
+        return save
+
+    def test_empty_book_never_replaces_nonempty_snapshot(self, monkeypatch):
+        """RED for T-382: [] from a slow gateway must not clobber working orders."""
+        save = self._stub_mirror_env(
+            monkeypatch, open_orders=[],
+            executed=[{"exec_id": "e1"}], existing_count=3)
+        handler = FillMonitorHandler(send_notifications=False)
+        _ORIG_MIRROR(handler, MagicMock())
+        save.assert_not_called()
+
+    def test_empty_book_with_empty_existing_snapshot_saves(self, monkeypatch):
+        """A genuinely flat book over a flat snapshot still mirrors."""
+        save = self._stub_mirror_env(
+            monkeypatch, open_orders=[],
+            executed=[{"exec_id": "e1"}], existing_count=0)
+        handler = FillMonitorHandler(send_notifications=False)
+        _ORIG_MIRROR(handler, MagicMock())
+        save.assert_called_once_with(
+            {"open_orders": [], "executed_orders": [{"exec_id": "e1"}]})
+
+    def test_nonempty_book_fetches_builds_and_saves(self, monkeypatch):
+        """Happy path: mirror body runs fetch → build → save."""
+        save = self._stub_mirror_env(
+            monkeypatch, open_orders=[{"perm_id": 7}],
+            executed=[{"exec_id": "e1"}], existing_count=3)
+        handler = FillMonitorHandler(send_notifications=False)
+        _ORIG_MIRROR(handler, MagicMock())
+        save.assert_called_once_with(
+            {"open_orders": [{"perm_id": 7}], "executed_orders": [{"exec_id": "e1"}]})
+
+    def test_snapshot_count_failure_is_swallowed_and_skips_save(self, monkeypatch):
+        """Counter blowing up must neither crash the handler nor clobber."""
+        save = self._stub_mirror_env(
+            monkeypatch, open_orders=[], executed=[], existing_count=0)
+        def boom():
+            raise RuntimeError("turso down")
+        monkeypatch.setattr(
+            fill_monitor_module, "count_open_orders_for_mirror", boom, raising=False)
+        handler = FillMonitorHandler(send_notifications=False)
+        _ORIG_MIRROR(handler, MagicMock())  # must not raise
+        save.assert_not_called()
 
 
 class TestFillMonitorOrdersSnapshotMirror:

@@ -4,6 +4,7 @@ import re
 import tomllib
 from pathlib import Path
 
+import pytest
 import yaml
 
 
@@ -196,3 +197,26 @@ def test_custom_rules_still_match_new_literals_but_not_empty_placeholders() -> N
     assert not literal.search("TWS_" + "PASSWORD" + "=")
     assert not literal.search("TWS_" + "USERID" + "=${TWS_USERID}")
     assert example.search(example_phrase)
+
+
+@pytest.mark.parametrize("symbol", ["$", "!", "#", "%", "@", "*", "+", "-", ".", "_"])
+def test_literal_rule_catches_values_starting_with_a_symbol(symbol: str) -> None:
+    rules = _config_rules()
+    literal = re.compile(rules["literal-tws-credential-assignment"]["regex"])
+    # `$` is only a literal inside single quotes (a bare or double-quoted
+    # `$name` is shell / dotenv interpolation); every other symbol is literal
+    # in any quoting.
+    quotes = ("'",) if symbol == "$" else ("", "'", '"')
+    for quote in quotes:
+        assignment = "TWS_" + "PASSWORD" + "=" + quote + symbol + "notreal!" + quote
+        assert literal.search(assignment), assignment
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["${TWS_PASSWORD}", '"${TWS_PASSWORD}"', "$TWS_PASSWORD", '"$TWS_PASSWORD"', "$(pass show tws)"],
+)
+def test_literal_rule_still_ignores_interpolation(value: str) -> None:
+    rules = _config_rules()
+    literal = re.compile(rules["literal-tws-credential-assignment"]["regex"])
+    assert not literal.search("TWS_" + "PASSWORD" + "=" + value), value

@@ -89,8 +89,30 @@ vi.mock("@/lib/TickerDetailContext", () => ({ useTickerDetail: () => tickerDetai
 vi.mock("@/lib/offline/OfflineStatusContext", () => ({ useOfflineStatus: () => ({ offline: false }) }));
 vi.mock("@/lib/ThemeContext", () => ({ useTheme: () => ({ theme: "dark", toggleTheme: () => {} }) }));
 vi.mock("@/lib/RealtimeAuthContext", () => ({ useRealtimeAuth: () => async () => null }));
-vi.mock("@/lib/usePrices", () => ({
-  usePrices: () => ({ prices: {}, depths: {}, tape: {}, connected: true }),
+// The shell reads the root realtime context (useRealtimePrices), not
+// @/lib/usePrices directly. Record every `connected` value the shell observes
+// so the perf cases below provably measure the CONNECTED branch — a dead mock
+// here once left them timing the disconnected fallback (T-388).
+const observedConnected: boolean[] = [];
+const realtimeValue = {
+  prices: {},
+  fundamentals: {},
+  depths: {},
+  tape: {},
+  connected: true,
+  ibConnected: true,
+  ibIssue: null,
+  ibStatusMessage: null,
+  error: null,
+  reconnect: () => {},
+  getSnapshot: async () => ({}),
+  publishSubscriptions: () => {},
+};
+vi.mock("@/lib/RealtimePricesContext", () => ({
+  useRealtimePrices: () => {
+    observedConnected.push(realtimeValue.connected);
+    return realtimeValue;
+  },
 }));
 vi.mock("@/lib/useOrders", () => ({
   useOrders: () => ({ data: null, loading: false, syncing: false, error: null, lastSync: null, syncNow: () => {} }),
@@ -209,6 +231,12 @@ describe("portfolio startup performance contracts", () => {
 
     expect(container.querySelector(`[data-testid="lazy-chunk-${portfolioChunk}"]`)).not.toBeNull();
     expect(container.querySelector(`[data-testid="lazy-chunk-${workspaceChunk}"]`)).toBeNull();
+
+    // T-388: this render must exercise the CONNECTED branch. Without a
+    // provider (or a stubbed context value) the shell reads the context
+    // default `connected: false` and these timings measure the wrong path.
+    expect(observedConnected.length, "shell must read useRealtimePrices()").toBeGreaterThan(0);
+    expect(observedConnected.every((c) => c === true), "shell must observe connected === true").toBe(true);
   });
 
   /**

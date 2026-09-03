@@ -8,6 +8,7 @@ CI Python now uses astral-sh/setup-uv (node24) instead of setup-python.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import yaml
@@ -65,3 +66,32 @@ def test_node20_action_pins_are_gone() -> None:
     blob = "\n".join(p.read_text(encoding="utf-8") for p in WORKFLOWS.glob("*.yml"))
     for sha in NODE20_PINS:
         assert sha not in blob, f"stale node20 pin {sha}"
+
+
+# Binaries fetched inside `run:` steps are pinned like actions are. A
+# `releases/latest` download is a mutable reference: the artifact under it
+# changes without any diff in this repo.
+def _run_scripts() -> list[tuple[str, str]]:
+    found = []
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+        for job_name, job in (workflow.get("jobs") or {}).items():
+            for step in job.get("steps") or []:
+                run = step.get("run")
+                if run:
+                    found.append((f"{path.name}:{job_name}:{step.get('name', '')}", run))
+    return found
+
+
+def test_run_steps_never_download_releases_latest() -> None:
+    offenders = [where for where, run in _run_scripts() if "releases/latest" in run]
+    assert offenders == [], f"unpinned releases/latest download in {offenders}"
+
+
+def test_caddy_install_is_version_pinned_and_checksum_verified() -> None:
+    steps = [run for where, run in _run_scripts() if "caddyserver/caddy" in run]
+    assert steps, "no workflow step installs caddy"
+    for run in steps:
+        assert re.search(r'ver="\d+\.\d+\.\d+"', run), run
+        assert "_checksums.txt" in run, run
+        assert "sha512sum -c --ignore-missing" in run, run
