@@ -298,6 +298,19 @@ class FillMonitorHandler(BaseHandler):
             return
         try:
             open_orders = fetch_open_orders_for_mirror(client)
+            if not open_orders and self.known_orders:
+                # REL-212 (R-579): "vanished from the snapshot" is not proof
+                # (same class as the completion check above). A degraded-but-
+                # connected session returns an empty snapshot for every order
+                # at once; whole-replacing Turso here wiped live WORKING rows
+                # until the next 5-min sync tick. Skip; the coordinator loop
+                # is the recovery path.
+                logger.warning(
+                    "fill_monitor: mirror skipped — empty open-orders read "
+                    "while %d working order(s) are tracked (degraded snapshot)",
+                    len(self.known_orders),
+                )
+                return
             executed = fetch_executed_orders_for_mirror(client)
             save_orders_snapshot(build_orders_data_for_mirror(open_orders, executed))
         except Exception as exc:  # noqa: BLE001 — never crash on mirror failure

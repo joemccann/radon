@@ -458,3 +458,64 @@ class TestFillMonitorTradeIdUniqueness:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+_REAL_MIRROR = FillMonitorHandler._mirror_ib_orders_snapshot
+
+
+class TestMirrorGuardsAgainstDegradedSnapshot:
+    """REL-212 (R-579): an empty mirror read while working orders are tracked
+    must NOT whole-replace Turso open_orders."""
+
+    @pytest.fixture(autouse=True)
+    def _restore_real_mirror(self, monkeypatch):
+        # The file-level autouse fixture stubs the mirror to a no-op; this
+        # class tests the mirror itself.
+        monkeypatch.setattr(
+            FillMonitorHandler, "_mirror_ib_orders_snapshot", _REAL_MIRROR
+        )
+
+    def _handler_with_tracked_order(self):
+        handler = FillMonitorHandler(send_notifications=False)
+        handler.known_orders = {
+            7: {"symbol": "NVDA", "action": "BUY", "quantity": 10, "filled": 0},
+        }
+        return handler
+
+    def test_empty_open_orders_with_tracked_orders_skips_the_replace(self):
+        import monitor_daemon.handlers.fill_monitor as fm
+
+        saved = []
+        with patch.object(fm, "fetch_open_orders_for_mirror", lambda c: []), \
+             patch.object(fm, "fetch_executed_orders_for_mirror", lambda c: []), \
+             patch.object(fm, "build_orders_data_for_mirror", lambda o, e: {"open_orders": o}), \
+             patch.object(fm, "save_orders_snapshot", lambda data: saved.append(data)):
+            self._handler_with_tracked_order()._mirror_ib_orders_snapshot(MagicMock())
+        assert saved == [], (
+            "an empty open-orders read whole-replaced Turso while a working "
+            "order was still tracked (degraded-snapshot race, R-579)"
+        )
+
+    def test_empty_open_orders_with_nothing_tracked_still_mirrors(self):
+        import monitor_daemon.handlers.fill_monitor as fm
+
+        saved = []
+        handler = FillMonitorHandler(send_notifications=False)
+        handler.known_orders = {}
+        with patch.object(fm, "fetch_open_orders_for_mirror", lambda c: []), \
+             patch.object(fm, "fetch_executed_orders_for_mirror", lambda c: []), \
+             patch.object(fm, "build_orders_data_for_mirror", lambda o, e: {"open_orders": o}), \
+             patch.object(fm, "save_orders_snapshot", lambda data: saved.append(data)):
+            handler._mirror_ib_orders_snapshot(MagicMock())
+        assert len(saved) == 1
+
+    def test_populated_open_orders_still_mirror(self):
+        import monitor_daemon.handlers.fill_monitor as fm
+
+        saved = []
+        with patch.object(fm, "fetch_open_orders_for_mirror", lambda c: [{"orderId": 7}]), \
+             patch.object(fm, "fetch_executed_orders_for_mirror", lambda c: []), \
+             patch.object(fm, "build_orders_data_for_mirror", lambda o, e: {"open_orders": o}), \
+             patch.object(fm, "save_orders_snapshot", lambda data: saved.append(data)):
+            self._handler_with_tracked_order()._mirror_ib_orders_snapshot(MagicMock())
+        assert len(saved) == 1
