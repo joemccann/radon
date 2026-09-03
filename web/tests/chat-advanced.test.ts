@@ -63,7 +63,9 @@ describe("requestAssistantReply", () => {
 
     const result = await requestAssistantReply([], "test question");
 
-    expect(result).toBe("Error: API rate limit exceeded");
+    expect(result).toBe(
+      "The assistant couldn't complete this turn. No order was placed. Try again or choose another model.",
+    );
   });
 
   it("returns generic error when HTTP error has no error field", async () => {
@@ -74,7 +76,9 @@ describe("requestAssistantReply", () => {
 
     const result = await requestAssistantReply([], "test question");
 
-    expect(result).toBe("Assistant service returned an error.");
+    expect(result).toBe(
+      "The assistant couldn't complete this turn. No order was placed. Try again or choose another model.",
+    );
   });
 
   it("returns fallback reply when content is empty", async () => {

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, Copy, Check } from "lucide-react";
 import { ApprovalGate, AskComposer, EngineTrace } from "@/components/agent";
 import { buildTurnSteps, describeEngines } from "@/lib/agent/turnSteps";
+import { assistantErrorMessage } from "@/lib/assistant/errorCopy";
 import type {
   ApiMessage,
   AssistantOrderInput,
@@ -16,7 +17,6 @@ import type {
 } from "@/lib/types";
 import { createTimestamp } from "@/lib/utils";
 import {
-  fallbackReply,
   placeProposedOrder,
   requestAssistantTurn,
   requestPiReply,
@@ -341,21 +341,24 @@ export default function ChatPanel({
       setStatus("done");
     } catch (error) {
       const isPiCommand = Boolean(piCommand);
-      const fallback = isPiCommand ? "PI command failed to run in this session." : fallbackReply(cleaned);
       const errorMessage =
-        error instanceof Error
+        isPiCommand && error instanceof Error
           ? error.message
           : isPiCommand
             ? "Unexpected PI command error."
-            : "Unexpected assistant error.";
-      const fallbackContent = `${fallback}\n\nFallback note: ${errorMessage}`;
+            : assistantErrorMessage();
+      const fallbackContent = isPiCommand
+        ? `PI command failed to run in this session.\n\nFallback note: ${errorMessage}`
+        : errorMessage;
 
       setMessages((current) =>
         current.map((message) =>
           message.id === assistantId ? { ...message, content: fallbackContent } : message,
         ),
       );
-      setLastError(errorMessage);
+      // The transcript already carries assistant failures. Keep the separate
+      // error rail for PI commands and order placement so copy is said once.
+      setLastError(isPiCommand ? errorMessage : "");
       setStatus("error");
     }
   };
@@ -434,7 +437,7 @@ export default function ChatPanel({
                       className={`chat-message ${message.role}${isStreamingThis ? " streaming" : ""}`}
                     >
                       <div className="chat-meta">
-                        <span className="chat-role">{isAssistant ? "Grok" : "You"}</span>
+                        <span className="chat-role">{isAssistant ? "Radon" : "You"}</span>
                         <span className="chat-time">{message.timestamp}</span>
                       </div>
                       <div className="chat-message-body">

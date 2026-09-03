@@ -97,4 +97,80 @@ describe("ChatPanel streaming UX", () => {
       { timeout: 4000 },
     );
   });
+
+  it("renders recovery copy instead of provider JSON", async () => {
+    const providerError =
+      'OpenAI request failed (400): {"error":{"message":"Unsupported parameter: max_tokens"}}';
+    const body = [
+      "event: start",
+      "data: {}",
+      "",
+      "event: error",
+      `data: ${JSON.stringify({ error: providerError })}`,
+      "",
+      "",
+    ].join("\n");
+    // @ts-expect-error test stub
+    global.fetch = vi.fn(async () =>
+      new Response(body, { status: 200, headers: { "Content-Type": "text/event-stream" } }),
+    );
+
+    render(<ChatPanel activeSection="portfolio" />);
+    const textarea = screen.getByLabelText("Ask Radon");
+    fireEvent.change(textarea, { target: { value: "Check DRAM IV rank" } });
+    fireEvent.submit(textarea.closest("form")!);
+
+    await waitFor(
+      () => {
+        expect(
+          screen.getByText(
+            "The assistant couldn't complete this turn. No order was placed. Try again or choose another model.",
+          ),
+        ).toBeTruthy();
+      },
+      { timeout: 4000 },
+    );
+    expect(screen.queryByText(/OpenAI request failed/i)).toBeNull();
+    expect(document.body.textContent).not.toContain("max_tokens");
+  });
+
+  it("attributes assistant output to Radon", async () => {
+    // @ts-expect-error test stub
+    global.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({ content: "Flow is neutral." }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    const { container } = render(<ChatPanel activeSection="portfolio" />);
+    const textarea = screen.getByLabelText("Ask Radon");
+    fireEvent.change(textarea, { target: { value: "How is SPY flow?" } });
+    fireEvent.submit(textarea.closest("form")!);
+
+    await waitFor(() => expect(screen.getByText("Flow is neutral.")).toBeTruthy());
+    const assistantMessage = container.querySelector(".chat-message.assistant");
+    expect(assistantMessage?.querySelector(".chat-role")?.textContent).toBe("Radon");
+    expect(assistantMessage?.textContent).not.toMatch(/\bGrok\b/i);
+  });
+
+  it("renders one safe message when the assistant request throws", async () => {
+    const providerError =
+      'OpenAI request failed (400): {"error":{"message":"Unsupported parameter: max_tokens"}}';
+    // @ts-expect-error test stub
+    global.fetch = vi.fn(async () => {
+      throw new Error(providerError);
+    });
+
+    render(<ChatPanel activeSection="portfolio" />);
+    const textarea = screen.getByLabelText("Ask Radon");
+    fireEvent.change(textarea, { target: { value: "How is SPY flow?" } });
+    fireEvent.submit(textarea.closest("form")!);
+
+    const safeCopy =
+      "The assistant couldn't complete this turn. No order was placed. Try again or choose another model.";
+    await waitFor(() => expect(screen.getAllByText(safeCopy)).toHaveLength(1));
+    expect(document.body.textContent).not.toContain("OpenAI request failed");
+    expect(document.body.textContent).not.toContain("max_tokens");
+  });
 });

@@ -1,3 +1,58 @@
+# Task: Require PR CI supervision and green notification (2026-09-03) [DONE]
+
+## Dependency graph
+
+- T1 depends_on: [] - Define the repository-wide PR lifecycle, green criteria, retry behavior, and notification payload.
+- T2 depends_on: [T1] - Add the same mandatory lifecycle to root `AGENTS.md` and `CLAUDE.md`.
+- T3 depends_on: [T2] - Verify both instruction files stay aligned and record the documentation-only review evidence.
+
+## Checklist
+
+- [x] T1 Define the PR lifecycle contract.
+- [x] T2 Update both root instruction files.
+- [x] T3 Verify parity and document results.
+
+## Review
+
+- Root `AGENTS.md` and `CLAUDE.md` now require agents that create PRs to wait for the expected latest-head CI suite, autonomously repair every non-green outcome, and continue until all applicable checks are green.
+- Green completion now requires one confirmed normal-priority Pushover containing a brief PR description and clickable GitHub PR URL; missing credentials and delivery failures cannot be silently skipped.
+- Documentation-only verification passed: mirrored section diff is empty and `git diff --check` is clean. No product test suite was required.
+
+---
+
+# Task: Assistant errors never expose provider payloads (2026-09-03) [DONE]
+
+The chat transcript must replace provider/API diagnostics with concise,
+actionable recovery copy while retaining the original failure in server logs.
+
+## Dependency graph
+
+- E1 depends_on: [] - trace streamed and pre-stream assistant error paths
+- E2 depends_on: [E1] - red Vitest coverage for provider JSON sanitization
+- E3 depends_on: [E2] - central user-safe assistant error mapping at the client boundary
+- E4 depends_on: [E3] - user-visible assistant attribution and generated identity use Radon, never Grok
+- E5 depends_on: [E3, E4] - Playwright regression and visual verification of the rendered error and Radon label
+- E6 depends_on: [E2, E3, E4, E5] - focused tests, detector, full web suite, review
+
+## Checklist
+
+- [x] E1 trace error paths
+- [x] E2 red Vitest coverage
+- [x] E3 user-safe mapping
+- [x] E4 Radon attribution
+- [x] E5 Playwright + screenshot
+- [x] E6 full verification
+
+## Review
+
+- Provider/API diagnostics remain in server logs; SSE, HTTP, and thrown-request UI paths emit only fixed recovery copy.
+- Assistant speaker label, system identity, and mock response attribution use Radon; factual model-picker names remain unchanged.
+- Focused Vitest 120 passed; Playwright 2 passed with rendered screenshot; Impeccable detector clean.
+- Full Vitest 8,167 passed; typecheck clean; lint 0 errors with 17 existing warnings.
+- Next compile passed; existing output-trace audit remained red on oversized assistant/orders traces, including 17.2 GiB of untouched orders backup/archive data.
+
+---
+
 # Task: Remove mobile cockpit HELD chip (FM-RADON-HELD) [WIP]
 
 Captain: the teal HELD badge between the SMH OPTION header and the

@@ -10,6 +10,7 @@ import type {
   WorkspaceSection,
 } from "./types";
 import { PI_COMMAND_ALIASES, PI_COMMAND_SET } from "./data";
+import { assistantErrorMessage } from "./assistant/errorCopy";
 import { placeOrderFeedback } from "./orders/placeOrderFeedback";
 import {
   createTimestamp,
@@ -157,22 +158,6 @@ async function readJsonBody<T>(response: Response): Promise<T | null> {
 }
 
 /**
- * The edge abandons an assistant turn before the route does, and its 504 body
- * is not JSON, so `payload.error` is empty and the status is the only thing
- * carrying the reason. "Assistant service returned an error." told the
- * operator nothing on 2026-08-29 when a pasted-chart turn timed out at the
- * proxy while the turn itself was still running.
- */
-const TIMEOUT_STATUSES = new Set([408, 504]);
-
-function assistantErrorMessage(status: number | undefined, error: string | undefined): string {
-  if (typeof status === "number" && TIMEOUT_STATUSES.has(status)) {
-    return "The turn timed out before the assistant answered. A smaller image or a shorter question may get through.";
-  }
-  return error ? `Error: ${error}` : "Assistant service returned an error.";
-}
-
-/**
  * Text-only assistant turn. Delegates to {@link requestAssistantTurn} so there
  * is ONE reader of the endpoint: the route answers `text/event-stream` now, and
  * a second call site parsing the body as JSON would silently fall back to
@@ -271,8 +256,9 @@ async function readAssistantStream(
       return;
     }
     if (event === "error") {
-      const parsed = parseFrameData(raw) as { error?: string } | null;
-      failure = assistantErrorMessage(undefined, parsed?.error);
+      // Ignore the frame text at this second trust boundary so an older route
+      // cannot leak provider diagnostics into a newer client.
+      failure = assistantErrorMessage();
       return;
     }
     if (event === "done") {
@@ -356,8 +342,7 @@ export async function requestAssistantTurn(
   // Every rejection that carries a status is written before the stream opens,
   // so a non-2xx is still a JSON body.
   if (!response.ok) {
-    const failed = await readJsonBody<AssistantResponse>(response);
-    const message = assistantErrorMessage(response.status, failed?.error);
+    const message = assistantErrorMessage(response.status);
     return { content: message, proposal: null, toolEvents: [], model: null };
   }
 
