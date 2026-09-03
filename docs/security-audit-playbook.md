@@ -113,6 +113,17 @@ line here whenever you ship a security fix.**
   field is an egress decision, never preference (Turso: https + `*.turso.io` only).
   (`scripts/tests/test_credential_validators.py::TestTursoEgressPin`,
   `scripts/api/tests/test_credentials_routes.py::TestValidateEgressPin`)
+- **Root provisioning never dereferences a path an unprivileged account can replace**
+  — `cloud/scripts/setup-vps.sh` runs as root; every chmod/chown of the env file passes `require_regular_file` (a symlink is refused, never followed)
+  and every unit, drop-in, journald conf, Caddyfile, helper, sudoers and polkit
+  install from the radon-owned checkout goes through `stage_from_checkout`
+  (regular-file check, root-only 0600 staging copy, byte re-check, then install
+  at the final mode). `/etc/radon` is root-owned (`root:radon 1770`), links under
+  `/home/radon/.ssh` and at `/var/lib/radon/media` are refused, and the Docker
+  apt key is fingerprint-pinned. Accepted, operator-owned risk: `radon` stays in
+  the docker group because the IB Gateway container is driven by that account
+  and Docker socket access is root-equivalent by design.
+  (`cloud/tests/test_setup_vps_privileged_paths.py`)
 
 ## Triage & patch policy
 
