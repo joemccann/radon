@@ -233,6 +233,24 @@ class TestCheckEnvHostRole:
         assert not mod._gateway_host_ok("app", "100.112.32.16")
 
 
+class TestCanonicalEnvMode:
+    """VPS canonical file is 0640 root:radon; 0600 remains valid for owner-only copies."""
+
+    def test_0640_does_not_fail_the_mode_check(self, tmp_path: Path):
+        env_file = _write_env(tmp_path, _valid_assignments())
+        env_file.chmod(0o640)
+        result = _run_check_env(env_file)
+        combined = result.stdout + result.stderr
+        assert "permissions" not in combined
+
+    def test_world_readable_fails_the_mode_check(self, tmp_path: Path):
+        env_file = _write_env(tmp_path, _valid_assignments())
+        env_file.chmod(0o644)
+        result = _run_check_env(env_file)
+        assert result.returncode != 0
+        assert "permissions" in result.stdout + result.stderr
+
+
 class TestOperatorHostRole:
     def test_app_role_does_not_require_gateway(self):
         body = OPERATOR.read_text(encoding="utf-8")
