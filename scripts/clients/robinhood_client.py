@@ -1060,8 +1060,37 @@ def fetch_robinhood_quote(symbol: str, *, index: bool = False) -> Optional[float
         print(f"  Robinhood quote failed for {symbol}: {exc}", file=sys.stderr)
         return None
     for row in rows:
-        for key in ("last_trade_price", "last", "last_price", "price", "mark_price"):
+        # REL-175 (R-486): never serve mark_price as a last trade, and refuse
+        # a row whose OWN timestamp says the print is stale — this value can
+        # become a stored session close in cri when IB's tick is missing. An
+        # absent timestamp does not kill the rung (the quote shape is
+        # unpublished); only a present-and-stale one does.
+        if _quote_row_is_stale(row):
+            print(f"  Robinhood quote for {symbol} rejected: stale timestamp", file=sys.stderr)
+            continue
+        for key in ("last_trade_price", "last", "last_price", "price"):
             parsed = _to_price(row.get(key))
             if parsed is not None:
                 return parsed
     return None
+
+
+QUOTE_STALE_AFTER_S = 24 * 3600.0
+
+
+def _quote_row_is_stale(row: Any) -> bool:
+    from datetime import datetime, timezone
+
+    for key in ("updated_at", "last_trade_at", "timestamp", "quote_timestamp"):
+        raw = row.get(key) if isinstance(row, dict) else None
+        if not isinstance(raw, str) or not raw:
+            continue
+        try:
+            stamp = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        age = (datetime.now(timezone.utc) - stamp).total_seconds()
+        return age > QUOTE_STALE_AFTER_S
+    return False

@@ -498,25 +498,43 @@ def _fetch_ib_current_quote(ticker: str) -> Optional[float]:
         ib.disconnect()
 
 
-def fetch_preferred_current_quote(ticker: str) -> Optional[float]:
+# REL-175 (R-486): the appended post-close bar records which rung served each
+# quote, so a fallback-sourced close is attributable from cri.json.
+_POST_CLOSE_SNAPSHOT_SOURCES: Dict[str, str] = {}
+
+
+def last_post_close_snapshot_sources() -> Dict[str, str]:
+    return dict(_POST_CLOSE_SNAPSHOT_SOURCES)
+
+
+def fetch_preferred_current_quote_with_source(
+    ticker: str,
+) -> Tuple[Optional[float], Optional[str]]:
     """Fetch a current quote using IB first, then Robinhood, then Yahoo."""
     ib_quote = _fetch_ib_current_quote(ticker)
     if ib_quote is not None:
         print(f"  IB: {ticker} current quote {ib_quote:.2f}", file=sys.stderr)
-        return ib_quote
+        return ib_quote, "ib"
 
     rh_quote = _fetch_rh_current_quote(ticker)
     if rh_quote is not None:
         print(f"  Robinhood: {ticker} current quote {rh_quote:.2f}", file=sys.stderr)
-        return rh_quote
+        return rh_quote, "robinhood"
 
     yahoo_quote = _fetch_yahoo_current_quote(ticker)
     if yahoo_quote is not None:
         print(f"  Yahoo: {ticker} current quote {yahoo_quote:.2f}", file=sys.stderr)
-        return yahoo_quote
+        return yahoo_quote, "yahoo"
 
     print(f"  ERROR: No current {ticker} quote available", file=sys.stderr)
-    return None
+    return None, None
+
+
+def fetch_preferred_current_quote(ticker: str) -> Optional[float]:
+    value, source = fetch_preferred_current_quote_with_source(ticker)
+    if source is not None:
+        _POST_CLOSE_SNAPSHOT_SOURCES[ticker] = source
+    return value
 
 
 def select_cor1m_current_quote(
@@ -600,12 +618,19 @@ def current_session_date_et(now: Optional[datetime] = None) -> str:
 
 def build_post_close_snapshot(session_date: str, use_official_cboe_close: bool) -> Dict[str, Optional[float]]:
     """Build the end-of-day snapshot used when daily bars lag the current ET session."""
-    return {
+    _POST_CLOSE_SNAPSHOT_SOURCES.clear()
+    snapshot = {
         "VIX": fetch_cboe_vix_close(session_date) if use_official_cboe_close else fetch_preferred_current_quote("VIX"),
         "VVIX": fetch_cboe_vvix_close(session_date) if use_official_cboe_close else fetch_preferred_current_quote("VVIX"),
         "SPY": fetch_preferred_current_quote("SPY"),
         "COR1M": fetch_cor1m_current_quote(),
     }
+    if use_official_cboe_close:
+        if snapshot["VIX"] is not None:
+            _POST_CLOSE_SNAPSHOT_SOURCES["VIX"] = "cboe"
+        if snapshot["VVIX"] is not None:
+            _POST_CLOSE_SNAPSHOT_SOURCES["VVIX"] = "cboe"
+    return snapshot
 
 
 def append_post_close_snapshot(
@@ -1730,6 +1755,7 @@ Examples:
     aligned, common_dates = fetch_all(ALL_TICKERS)
     prior_cor1m_close = float(aligned["COR1M"][-1]) if len(aligned["COR1M"]) > 0 else float("nan")
     post_close_snapshot_appended = False
+    post_close_snapshot_sources = {}
 
     print(f"  Data range: {common_dates[0]} to {common_dates[-1]} ({len(common_dates)} bars)", file=sys.stderr)
 
@@ -1762,6 +1788,8 @@ Examples:
             )
             post_close_snapshot_appended = appended
             if appended:
+                post_close_snapshot_sources = last_post_close_snapshot_sources()
+            if appended:
                 print(
                     f"  Appended today's closing snapshot for {session_date} to replace the lagged prior-session view",
                     file=sys.stderr,
@@ -1771,6 +1799,8 @@ Examples:
     result = run_analysis(aligned, common_dates, current_quotes=current_quotes)
     if post_close_snapshot_appended and not math.isnan(prior_cor1m_close):
         result["cor1m_previous_close"] = round(prior_cor1m_close, 2)
+    if post_close_snapshot_appended:
+        result["post_close_snapshot_sources"] = post_close_snapshot_sources
 
     # Official Cboe close wins over any IB-derived anchor when available;
     # the positional daily-bar logic above stays as the offline fallback.
