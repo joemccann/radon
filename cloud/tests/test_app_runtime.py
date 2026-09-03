@@ -81,6 +81,15 @@ def _runtime_env(tmp_path: Path, fake_docker: Path | None = None) -> dict[str, s
     state_dir = tmp_path / "state"
     for d in (data_dir, media_dir, state_dir):
         d.mkdir(exist_ok=True)
+    credentials_dir = tmp_path / "credentials"
+    credentials_dir.mkdir(exist_ok=True)
+    (credentials_dir / "radon-secret-store-key").write_bytes(os.urandom(32))
+    chown_log = tmp_path / "chown.log"
+    fake_chown = tmp_path / "chown"
+    _write_executable(
+        fake_chown,
+        f"#!/bin/bash\nprintf '%s\\n' \"$*\" >> {chown_log!s}\n",
+    )
     notify = tmp_path / "notify.sock"
     notify.write_bytes(b"")
     # macOS AF_UNIX sockaddr is 104 bytes; pytest tmp_path overflows it.
@@ -94,7 +103,9 @@ def _runtime_env(tmp_path: Path, fake_docker: Path | None = None) -> dict[str, s
         "RADON_TEST_DATA_DIR": str(data_dir),
         "RADON_TEST_MEDIA_DIR": str(media_dir),
         "RADON_TEST_STATE_DIR": str(state_dir),
+        "RADON_TEST_CHOWN": str(fake_chown),
         "RADON_APP_IMAGE_TAG": TEST_SHA,
+        "CREDENTIALS_DIRECTORY": str(credentials_dir),
         "NOTIFY_SOCKET": str(notify),
         "WATCHDOG_USEC": "45000000",
         "RADON_TEST_NOTIFY_PROXY_DIR": str(proxy_dir),
@@ -500,6 +511,145 @@ def test_run_api_binds_all_interfaces_with_proxy_headers(tmp_path: Path) -> None
     assert "8321" in log
     assert "--proxy-headers" in log
     assert "127.0.0.1" in log  # forwarded-allow-ips
+
+
+def test_run_api_mounts_systemd_credential_and_persists_store(tmp_path: Path) -> None:
+    result = _run(tmp_path, ["run", "radon-api.service"])
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    host_dir = Path(result.proxy_dir) / "credentials" / "radon-api.service"  # type: ignore[attr-defined]
+    container_dir = "/run/credentials/radon-api.service"
+    staged = host_dir / "radon-secret-store-key"
+    assert f"--env CREDENTIALS_DIRECTORY={container_dir}" in log
+    assert f"type=bind,src={host_dir},dst={container_dir},readonly" in log
+    assert "RADON_SECRET_STORE_PATH=/home/radon/radon/data/secret_store/secrets.db" in log
+    assert staged.read_bytes() == (tmp_path / "credentials" / staged.name).read_bytes()
+    assert stat.S_IMODE(staged.stat().st_mode) == 0o400
+    assert stat.S_IMODE((tmp_path / "data" / "secret_store").stat().st_mode) == 0o700
+    chowns = (tmp_path / "chown.log").read_text(encoding="utf-8")
+    assert f"1000:1000 {host_dir} {staged}" in chowns
+    assert "python scripts/secret_store.py && exec uvicorn" in _run_line(result)
+
+
+def test_run_api_refuses_noncanonical_production_store_before_removal(
+    tmp_path: Path,
+) -> None:
+    result = _run(
+        tmp_path,
+        ["run", "radon-api.service"],
+        extra_env={"RADON_SECRET_STORE_PATH": "/tmp/wrong-store.db"},
+    )
+    assert result.returncode == 78
+    assert "RADON_SECRET_STORE_PATH must be" in result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    assert "rm -f radon-api.service" not in log
+    assert not [line for line in log.splitlines() if line.startswith("run ")]
+
+
+def test_secret_store_runtime_artifacts_are_ignored() -> None:
+    ignore = (REPO / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert "/.radon-systemd-credential" in ignore
+    assert "/data/secret_store/" in ignore
+
+
+@pytest.mark.parametrize(
+    "unit",
+    (
+        "radon-nextjs.service",
+        "radon-relay.service",
+        "radon-monitor.service",
+        "radon-newsfeed.service",
+    ),
+)
+def test_non_api_units_do_not_receive_secret_store_credential(
+    tmp_path: Path, unit: str
+) -> None:
+    result = _run(tmp_path, ["run", unit])
+    assert result.returncode == 0, result.stderr
+    run = _run_line(result)
+    assert "CREDENTIALS_DIRECTORY=" not in run
+    assert "/run/credentials/" not in run
+    assert "RADON_SECRET_STORE_PATH=" not in run
+
+
+@pytest.mark.parametrize("size", (31, 33))
+def test_run_api_refuses_wrong_sized_systemd_credential(
+    tmp_path: Path, size: int
+) -> None:
+    credentials_dir = tmp_path / "bad-credentials"
+    credentials_dir.mkdir()
+    (credentials_dir / "radon-secret-store-key").write_bytes(os.urandom(size))
+    result = _run(
+        tmp_path,
+        ["run", "radon-api.service"],
+        extra_env={"CREDENTIALS_DIRECTORY": str(credentials_dir)},
+    )
+    assert result.returncode != 0
+    assert "exactly 32 bytes" in result.stderr
+    assert not [
+        line for line in result.docker_log.read_text(encoding="utf-8").splitlines()  # type: ignore[attr-defined]
+        if line.startswith("run ")
+    ]
+
+
+def test_run_api_refuses_missing_or_symlinked_systemd_credential(
+    tmp_path: Path,
+) -> None:
+    missing = tmp_path / "missing-credentials"
+    missing.mkdir()
+    result = _run(
+        tmp_path,
+        ["run", "radon-api.service"],
+        extra_env={"CREDENTIALS_DIRECTORY": str(missing)},
+    )
+    assert result.returncode != 0
+    assert "regular, non-symlink" in result.stderr
+    assert "rm -f radon-api.service" not in result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+
+    target = tmp_path / "target-key"
+    target.write_bytes(os.urandom(32))
+    (missing / "radon-secret-store-key").symlink_to(target)
+    result = _run(
+        tmp_path,
+        ["run", "radon-api.service"],
+        extra_env={"CREDENTIALS_DIRECTORY": str(missing)},
+    )
+    assert result.returncode != 0
+    assert "regular, non-symlink" in result.stderr
+
+
+def test_run_api_cleans_staged_credential_on_pre_exec_failure(
+    tmp_path: Path,
+) -> None:
+    result = _run(
+        tmp_path,
+        ["run", "radon-api.service"],
+        extra_env={"RADON_TEST_PYTHON": "/bin/false"},
+    )
+    assert result.returncode == 71, result.stderr
+    host_dir = Path(result.proxy_dir) / "credentials" / "radon-api.service"  # type: ignore[attr-defined]
+    assert not host_dir.exists()
+
+
+def test_stop_removes_only_staged_credential_and_preserves_database(
+    tmp_path: Path,
+) -> None:
+    result = _run(tmp_path, ["run", "radon-api.service"])
+    assert result.returncode == 0, result.stderr
+    proxy_dir = Path(result.proxy_dir)  # type: ignore[attr-defined]
+    host_dir = proxy_dir / "credentials" / "radon-api.service"
+    database = tmp_path / "data" / "secret_store" / "secrets.db"
+    database.write_bytes(b"persistent")
+    assert host_dir.exists()
+
+    stopped = _run(
+        tmp_path,
+        ["stop", "radon-api.service"],
+        extra_env={"RADON_TEST_NOTIFY_PROXY_DIR": str(proxy_dir)},
+    )
+    assert stopped.returncode == 0, stopped.stderr
+    assert not host_dir.exists()
+    assert database.read_bytes() == b"persistent"
 
 
 def test_run_binds_only_the_narrow_state_subdirectories(tmp_path: Path) -> None:

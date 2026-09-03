@@ -676,6 +676,22 @@ class TestAPI:
         svc = unit(self.FILENAME)["Service"]
         assert svc["environmentfile"] == ENV_FILE_PATH
 
+    def test_loads_encrypted_secret_store_key(self, unit):
+        svc = unit(self.FILENAME)["Service"]
+        assert svc["loadcredentialencrypted"] == (
+            "radon-secret-store-key:"
+            "/etc/credstore.encrypted/radon-secret-store-key"
+        )
+
+    def test_host_and_container_modes_share_persistent_store_path(
+        self, services_dir
+    ):
+        lines = (services_dir / self.FILENAME).read_text(encoding="utf-8").splitlines()
+        assert (
+            "Environment=RADON_SECRET_STORE_PATH="
+            "/home/radon/radon/data/secret_store/secrets.db"
+        ) in lines
+
 
 # ---------------------------------------------------------------------------
 # radon-nextjs.service

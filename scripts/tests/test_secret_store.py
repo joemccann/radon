@@ -16,6 +16,7 @@ from secret_store import (
     SecretStore,
     SecretStoreError,
     SecretValidationError,
+    verify_secret_store,
 )
 
 
@@ -179,6 +180,41 @@ class TestSystemdCredential:
         assert store.get_secret("UW_TOKEN") == UW_SAMPLE
         # No fallback key file materialized anywhere under tmp_path
         assert not (tmp_path / "secret_store.key").exists()
+
+    def test_verify_secret_store_reads_every_existing_row(
+        self, tmp_path, monkeypatch
+    ):
+        db_path = tmp_path / "secrets.db"
+        key_path = tmp_path / "secret_store.key"
+        store = SecretStore(db_path=db_path, key_path=key_path)
+        store.set_secret("UW_TOKEN", UW_SAMPLE, actor="operator")
+        monkeypatch.delenv("CREDENTIALS_DIRECTORY", raising=False)
+        monkeypatch.setenv("RADON_SECRET_STORE_PATH", str(db_path))
+        monkeypatch.setenv("RADON_SECRET_STORE_KEY_FILE", str(key_path))
+        assert verify_secret_store() == 1
+
+    def test_verify_secret_store_rejects_wrong_systemd_key(
+        self, tmp_path, monkeypatch
+    ):
+        db_path = tmp_path / "secrets.db"
+        key_path = tmp_path / "secret_store.key"
+        store = SecretStore(db_path=db_path, key_path=key_path)
+        store.set_secret("UW_TOKEN", UW_SAMPLE, actor="operator")
+        credentials_dir = tmp_path / "credentials"
+        credentials_dir.mkdir()
+        (credentials_dir / "radon-secret-store-key").write_bytes(os.urandom(32))
+        monkeypatch.setenv("CREDENTIALS_DIRECTORY", str(credentials_dir))
+        monkeypatch.setenv("RADON_SECRET_STORE_PATH", str(db_path))
+        with pytest.raises(SecretStoreError):
+            verify_secret_store()
+
+    def test_hetzner_refuses_noncanonical_store_override(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("RADON_MODE", "hetzner")
+        monkeypatch.setenv("RADON_SECRET_STORE_PATH", str(tmp_path / "other.db"))
+        with pytest.raises(SecretStoreError, match="RADON_SECRET_STORE_PATH must be"):
+            SecretStore(key_path=tmp_path / "secret_store.key")
 
 
 class TestValidation:
