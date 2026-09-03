@@ -26,6 +26,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -50,10 +51,18 @@ GIT_ENV = {
 }
 
 
-def _git(*args: str, cwd: Path) -> str:
+def _git(*args: str, cwd: Path, when: str | None = None) -> str:
+    env = dict(GIT_ENV)
+    if when is not None:
+        env["GIT_AUTHOR_DATE"] = when
+        env["GIT_COMMITTER_DATE"] = when
     return subprocess.run(
-        ["git", *args], cwd=cwd, env=GIT_ENV, capture_output=True, text=True, check=True
+        ["git", *args], cwd=cwd, env=env, capture_output=True, text=True, check=True
     ).stdout.strip()
+
+
+def _days_ago(days: float) -> str:
+    return f"{int(time.time() - days * 86400)} +0000"
 
 
 def _fill(path: Path, kb: int = 4) -> None:
@@ -73,7 +82,12 @@ def weekend_root(tmp_path: Path) -> Path:
     clone = root / "radon"
     _git("clone", str(remote), str(clone), cwd=tmp_path)
     _fill(clone / "README.md", 1)
-    _git("add", "README.md", cwd=clone)
+    # As in the real clones: a bootstrapped node_modules and a provisioned
+    # web/.env are GITIGNORED, so `status --porcelain` never lists them.
+    (clone / ".gitignore").write_text(
+        "node_modules/\n.env\n.venv/\n.deepsec/\n.weekend-keep\n", encoding="utf-8"
+    )
+    _git("add", "README.md", ".gitignore", cwd=clone)
     _git("commit", "-m", "init", cwd=clone)
     _git("push", "-u", "origin", "main", cwd=clone)
     (clone / ".radon-weekend-runner").touch()
@@ -94,13 +108,19 @@ def weekend_root(tmp_path: Path) -> Path:
     return root
 
 
-def _add_worktree(root: Path, name: str, *, pushed: bool) -> Path:
+def _add_worktree(root: Path, name: str, *, pushed: bool, age_days: float = 30.0) -> Path:
+    """A worktree whose newest commit is ``age_days`` old.
+
+    Age matters: a worktree is only ever a candidate once its branch has been
+    quiet for WORKTREE_MIN_IDLE_DAYS, so a freshly committed one is refused
+    whatever else is true of it.
+    """
     clone = root / "radon"
     wt = root / name
     _git("worktree", "add", "-b", f"loops/{name}", str(wt), "main", cwd=clone)
     _fill(wt / "work.txt", 4)
     _git("add", "work.txt", cwd=wt)
-    _git("commit", "-m", name, cwd=wt)
+    _git("commit", "-m", name, cwd=wt, when=_days_ago(age_days))
     if pushed:
         _git("push", "-u", "origin", f"loops/{name}", cwd=wt)
     return wt
@@ -453,7 +473,7 @@ def test_the_prune_is_bounded_by_a_timeout(tmp_path: Path, loop: str) -> None:
     bounded = [ln for ln in _lines(cfg)
                if ln.startswith("TIMEOUT ") and "/usr/bin/python3" in ln]
     assert bounded, _why(result, cfg)
-    assert re.search(r"^TIMEOUT \d+ /usr/bin/python3 -I - --root ", bounded[0]), bounded[0]
+    assert re.search(r"^TIMEOUT \d+ /usr/bin/python3 -I - --root .+ --self ", bounded[0]), bounded[0]
 
 
 @pytest.mark.parametrize("loop", LOOP_IDS)
@@ -462,13 +482,20 @@ def test_the_prune_targets_the_weekend_root(tmp_path: Path, loop: str) -> None:
     result = _run(cfg, "cycle")
     call = [ln for ln in _lines(cfg) if ln.startswith("PY ")]
     assert call, _why(result, cfg)
-    assert call[0] == f"PY --root {cfg['root']}", call[0]
+    assert call[0] == f"PY --root {cfg['root']} --self {cfg['clone']}", call[0]
 
 
 @pytest.mark.parametrize("loop", LOOP_IDS)
 def test_the_prune_never_execs_a_python_file_from_the_agent_writable_clone(loop: str) -> None:
     """Rail 5: the clone and the venv are agent-writable after a phase, so the
-    prune is piped out of origin/main into an ISOLATED system interpreter."""
+    prune is piped out of origin/main into an ISOLATED system interpreter.
+
+    This is defence in depth, NOT a trust boundary: refs/remotes/origin/main
+    lives in the same agent-writable $REPO/.git. What it does buy is that a
+    planted WORKING-TREE scripts/weekend_prune.py is never the file that runs,
+    and -I keeps cwd, the clone dir and user site off sys.path so a planted
+    json.py cannot be imported either. The wrapper comment says exactly this.
+    """
     body = (REPO / "scripts" / LOOPS[loop]).read_text(encoding="utf-8")
     assert 'git -C "$REPO" show origin/main:scripts/weekend_prune.py' in body
     assert "/usr/bin/python3 -I -" in body
@@ -500,3 +527,327 @@ def test_the_prune_is_skippable_by_env(tmp_path: Path, loop: str) -> None:
     assert result.returncode == 0, _why(result, cfg)
     assert not [ln for ln in _lines(cfg) if ln.startswith("PY ")]
     assert not [ln for ln in _lines(cfg) if ln.startswith("GIT show weekend_prune")]
+
+
+# --------------------------------------------------------------------------
+# 6. `git worktree remove` deletes GITIGNORED files, so the refusal has to be
+#    applied to the worktree's contents, not only to its path.
+# --------------------------------------------------------------------------
+def test_a_worktree_holding_an_env_file_is_refused_whole(weekend_root: Path) -> None:
+    """`status --porcelain` never lists an ignored file, and applying the path
+    refusal to the worktree PATH says nothing about what is inside it. A
+    hand-provisioned env file is not rebuildable by a command."""
+    wt = _add_worktree(weekend_root, "wt-provisioned", pushed=True)
+    (wt / "web").mkdir(parents=True, exist_ok=True)
+    (wt / "web" / ".env").write_text("UW_TOKEN=secret\n", encoding="utf-8")
+    assert _git("status", "--porcelain", cwd=wt) == "", "ignored, so status is clean"
+
+    report = weekend_prune.run(root=weekend_root, temp_root=weekend_root / "no-temp")
+
+    assert (wt / "web" / ".env").exists()
+    reasons = {r["path"]: r["reason"] for r in report["refused"]}
+    assert ".env" in reasons[os.path.realpath(wt)]
+
+
+def test_a_worktree_holding_audit_state_is_refused_whole(weekend_root: Path) -> None:
+    wt = _add_worktree(weekend_root, "wt-audited", pushed=True)
+    _fill(wt / ".deepsec" / "export.json", 8)
+
+    report = weekend_prune.run(root=weekend_root, temp_root=weekend_root / "no-temp")
+
+    assert (wt / ".deepsec" / "export.json").exists()
+    reasons = {r["path"]: r["reason"] for r in report["refused"]}
+    assert "deepsec" in reasons[os.path.realpath(wt)]
+
+
+def test_node_modules_inside_an_idle_pushed_worktree_is_reclaimed_with_it(
+    weekend_root: Path,
+) -> None:
+    """The narrow half of the same rule. A bootstrapped tree inside a worktree
+    that is already clean, already fully pushed, past the idle floor and
+    unmarked belongs to nothing that will run, and it is the bulk of what this
+    step exists to reclaim. The CLONE's own node_modules is a different thing
+    and stays refused by path."""
+    wt = _add_worktree(weekend_root, "wt-bootstrapped", pushed=True)
+    _fill(wt / "web" / "node_modules" / "vitest" / "bin" / "v.js", 256)
+    _fill(wt / ".venv" / "bin" / "python", 64)
+
+    report = weekend_prune.run(root=weekend_root, temp_root=weekend_root / "no-temp")
+
+    assert not wt.exists()
+    assert report["categories"]["worktrees"]["bytes"] > 256 * 1024
+    assert (weekend_root / "radon" / "web" / "node_modules" / "pkg" / "index.js").exists()
+
+
+def test_a_bootstrapped_worktree_still_inside_the_idle_floor_is_kept(
+    weekend_root: Path,
+) -> None:
+    wt = _add_worktree(weekend_root, "wt-live", pushed=True, age_days=0.0)
+    _fill(wt / "web" / "node_modules" / "vitest" / "bin" / "v.js", 64)
+
+    weekend_prune.run(root=weekend_root, temp_root=weekend_root / "no-temp")
+
+    assert (wt / "web" / "node_modules" / "vitest" / "bin" / "v.js").exists()
+
+
+# --------------------------------------------------------------------------
+# 7. Idleness, not just cleanliness. A branch awaiting CI triage is
+#    indistinguishable from an abandoned one except by age.
+# --------------------------------------------------------------------------
+def test_a_recently_committed_worktree_is_refused_however_clean(weekend_root: Path) -> None:
+    wt = _add_worktree(weekend_root, "wt-mandate", pushed=True, age_days=0.0)
+    report = weekend_prune.run(root=weekend_root, temp_root=weekend_root / "no-temp")
+    assert wt.is_dir(), "a branch committed today is not abandoned"
+    reasons = {r["path"]: r["reason"] for r in report["refused"]}
+    assert "idle floor" in reasons[os.path.realpath(wt)]
+
+
+def test_a_worktree_just_past_the_idle_floor_is_reclaimable(weekend_root: Path) -> None:
+    wt = _add_worktree(
+        weekend_root, "wt-idle", pushed=True,
+        age_days=weekend_prune.WORKTREE_MIN_IDLE_DAYS + 1,
+    )
+    weekend_prune.run(root=weekend_root, temp_root=weekend_root / "no-temp")
+    assert not wt.exists()
+
+
+def test_a_weekend_keep_marker_pins_a_worktree_forever(weekend_root: Path) -> None:
+    wt = _add_worktree(weekend_root, "wt-keep", pushed=True, age_days=400.0)
+    (wt / weekend_prune.WORKTREE_KEEP_MARKER).write_text("", encoding="utf-8")
+
+    report = weekend_prune.run(root=weekend_root, temp_root=weekend_root / "no-temp")
+
+    assert wt.is_dir()
+    reasons = {r["path"]: r["reason"] for r in report["refused"]}
+    assert weekend_prune.WORKTREE_KEEP_MARKER in reasons[os.path.realpath(wt)]
+
+
+def test_a_worktree_whose_upstream_is_a_local_branch_is_refused(weekend_root: Path) -> None:
+    """`branch.<b>.remote = .` makes @{upstream} a LOCAL ref, so ahead-count
+    reads 0 while the commits exist on no remote at all."""
+    wt = _add_worktree(weekend_root, "wt-local-upstream", pushed=False, age_days=90.0)
+    branch = "loops/wt-local-upstream"
+    _git("config", f"branch.{branch}.remote", ".", cwd=wt)
+    _git("config", f"branch.{branch}.merge", f"refs/heads/{branch}", cwd=wt)
+    assert _git("rev-list", "--count", "@{upstream}..HEAD", cwd=wt) == "0"
+
+    report = weekend_prune.run(root=weekend_root, temp_root=weekend_root / "no-temp")
+
+    assert wt.is_dir(), "commits on no remote must never be removed"
+    reasons = {r["path"]: r["reason"] for r in report["refused"]}
+    assert "remote" in reasons[os.path.realpath(wt)]
+
+
+# --------------------------------------------------------------------------
+# 8. Run-log rotation stays inside its own clone, whatever `logs` really is.
+# --------------------------------------------------------------------------
+def _old(path: Path, days: float) -> None:
+    stamp = time.time() - days * 86400
+    os.utime(path, (stamp, stamp))
+
+
+def test_stale_run_logs_rotate_but_fresh_ones_and_launchd_sinks_do_not(
+    weekend_root: Path,
+) -> None:
+    logs = weekend_root / "radon" / "logs" / "audit"
+    stale, fresh, sink = logs / "audit-old.log", logs / "audit-new.log", logs / "launchd-out.log"
+    for f in (stale, fresh, sink):
+        _fill(f, 4)
+    _old(stale, weekend_prune.RUN_LOG_MAX_AGE_DAYS + 1)
+    _old(sink, weekend_prune.RUN_LOG_MAX_AGE_DAYS + 1)
+
+    report = weekend_prune.run(root=weekend_root, temp_root=weekend_root / "no-temp")
+
+    assert not stale.exists()
+    assert fresh.exists()
+    assert sink.exists(), "the plists point StandardOutPath here; it sorts old (R-267)"
+    assert report["categories"]["run_logs"]["items"] == 1
+
+
+def test_a_symlinked_logs_dir_never_rotates_anything_outside_its_clone(
+    weekend_root: Path,
+) -> None:
+    """`logs.is_dir()` follows a symlink. Without the confinement check,
+    rotation walks whatever it points at - here a sibling clone's .git."""
+    victim = weekend_root / "radon-testing"
+    _fill(victim / ".git" / "config", 1)
+    (victim / weekend_prune.RUNNER_MARKER).touch()
+    for entry in (victim / ".git").iterdir():
+        _old(entry, weekend_prune.RUN_LOG_MAX_AGE_DAYS + 5)
+
+    docs = weekend_root / "radon-documentation"
+    docs.mkdir()
+    (docs / weekend_prune.RUNNER_MARKER).touch()
+    (docs / "logs").symlink_to(victim)
+
+    weekend_prune.run(root=weekend_root, temp_root=weekend_root / "no-temp")
+
+    assert (victim / ".git" / "config").exists(), "a sibling clone's .git is not a run log"
+
+
+def test_run_logs_can_never_delete_under_the_os_temp_dir(
+    weekend_root: Path, tmp_path: Path, monkeypatch
+) -> None:
+    """Only tmp_pytest may look outside the root. Every other category is
+    confined to the root even when $TMPDIR points somewhere writable."""
+    temp_root = tmp_path / "ostemp"
+    victim = temp_root / "precious.txt"
+    _fill(victim, 1)
+    monkeypatch.setattr(weekend_prune, "_stale_run_logs", lambda *a, **k: [victim])
+
+    report = weekend_prune.run(root=weekend_root, temp_root=temp_root)
+
+    assert victim.exists()
+    assert report["categories"]["run_logs"]["items"] == 0
+    assert any("outside" in r["reason"] for r in report["refused"])
+
+
+def test_abandoned_pytest_tmp_trees_are_reclaimed_and_fresh_ones_are_not(
+    weekend_root: Path, tmp_path: Path
+) -> None:
+    temp_root = tmp_path / "ostemp"
+    stale = temp_root / "pytest-of-runner" / "pytest-1"
+    fresh = temp_root / "pytest-of-runner" / "pytest-99"
+    for d in (stale, fresh):
+        _fill(d / "junk.bin", 16)
+    _old(stale, weekend_prune.TMP_MAX_AGE_DAYS + 1)
+
+    report = weekend_prune.run(root=weekend_root, temp_root=temp_root)
+
+    assert not stale.exists()
+    assert fresh.exists()
+    assert report["categories"]["tmp_pytest"]["items"] == 1
+
+
+# --------------------------------------------------------------------------
+# 9. The calling clone. It holds its own lock for the whole cycle.
+# --------------------------------------------------------------------------
+def _lock(clone: Path, pid: int) -> None:
+    lock = clone / weekend_prune.RUNNER_LOCK
+    lock.mkdir()
+    (lock / "pid").write_text(f"{pid}\n", encoding="utf-8")
+
+
+def test_the_calling_clone_prunes_itself_despite_holding_its_own_lock(
+    weekend_root: Path,
+) -> None:
+    """Without --self the loop that generates the garbage is the one clone
+    that can never clean it: the wrapper calls the prune from inside its own
+    lock, at the end of the cycle."""
+    clone = weekend_root / "radon"
+    _lock(clone, os.getpid())
+
+    weekend_prune.run(root=weekend_root, temp_root=weekend_root / "no-temp",
+                      caller=str(clone))
+
+    assert not (clone / "scripts" / "__pycache__").exists()
+    assert (clone / "web" / "node_modules" / "pkg" / "index.js").exists(), \
+        "--self waives the LOCK refusal and nothing else"
+
+
+def test_self_never_waives_another_clones_live_lock(weekend_root: Path) -> None:
+    caller = weekend_root / "radon"
+    peer = weekend_root / "radon-testing"
+    _fill(peer / "scripts" / "__pycache__" / "mod.pyc", 8)
+    (peer / weekend_prune.RUNNER_MARKER).touch()
+    _lock(peer, os.getpid())
+
+    report = weekend_prune.run(root=weekend_root, temp_root=weekend_root / "no-temp",
+                               caller=str(caller))
+
+    assert (peer / "scripts" / "__pycache__").exists()
+    assert any("lock" in r["reason"] for r in report["refused"])
+
+
+def test_a_lock_taken_while_the_prune_walks_is_still_honoured(
+    weekend_root: Path, monkeypatch
+) -> None:
+    """`locked` is read again immediately before the first unlink and the two
+    snapshots are unioned, so a cycle that starts mid-walk is not deleted into."""
+    peer = weekend_root / "radon-testing"
+    _fill(peer / "scripts" / "__pycache__" / "mod.pyc", 8)
+    (peer / weekend_prune.RUNNER_MARKER).touch()
+
+    original = weekend_prune._tmp_pytest
+
+    def _late_lock(*args, **kwargs):
+        if not (peer / weekend_prune.RUNNER_LOCK).exists():
+            _lock(peer, os.getpid())
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(weekend_prune, "_tmp_pytest", _late_lock)
+
+    weekend_prune.run(root=weekend_root, temp_root=weekend_root / "no-temp")
+
+    assert (peer / "scripts" / "__pycache__").exists(), \
+        "enumerated before the lock, refused at the unlink"
+
+
+# --------------------------------------------------------------------------
+# 10. Hardening: macOS is case-insensitive, and operator copy carries no em dash.
+# --------------------------------------------------------------------------
+@pytest.mark.parametrize("name", ["NODE_MODULES", "Node_Modules", "VENV-testing", ".VENV"])
+def test_protection_is_case_insensitive_like_the_filesystem(name: str) -> None:
+    assert weekend_prune._protected_part(name) is not None
+
+
+def test_the_operator_report_carries_no_em_dash(weekend_root: Path) -> None:
+    """CLAUDE.md rule 6. These lines land in the phase log a human reads."""
+    _add_worktree(weekend_root, "wt-mandate", pushed=False)
+    report = weekend_prune.run(root=weekend_root, temp_root=weekend_root / "no-temp",
+                               dry_run=True)
+    text = weekend_prune.format_report(report)
+    assert "kept " in text
+    assert "—" not in text, text
+
+
+# --------------------------------------------------------------------------
+# 11. Wrapper wiring the earlier suite left unpinned.
+# --------------------------------------------------------------------------
+@pytest.mark.parametrize("loop", LOOP_IDS)
+def test_the_prune_runs_on_the_single_phase_path_too(tmp_path: Path, loop: str) -> None:
+    """`run_phase "$MODE"; prune_weekend_root; exit "$RC"` is the branch an
+    operator takes by hand, and the one call site under `set -e` with on_crash
+    armed. The cycle tests never reach it."""
+    cfg = _stage(tmp_path, loop, agent_rc=0)
+    result = _run(cfg, "audit")
+
+    assert result.returncode == 0, _why(result, cfg)
+    assert [ln for ln in _lines(cfg) if ln.startswith("PY ")], _why(result, cfg)
+    assert "CRASHED" not in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("loop", LOOP_IDS)
+def test_a_single_phase_failure_still_survives_a_failing_prune(
+    tmp_path: Path, loop: str
+) -> None:
+    clean = _stage(tmp_path / "clean", loop, agent_rc=7)
+    baseline = _run(clean, "audit")
+    broken = _stage(tmp_path / "broken", loop, agent_rc=7, prune_rc=3)
+    result = _run(broken, "audit")
+
+    assert [ln for ln in _lines(broken) if ln.startswith("PY ")], _why(result, broken)
+    assert result.returncode == baseline.returncode, _why(result, broken)
+    assert "CRASHED" not in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("loop", LOOP_IDS)
+def test_the_prune_never_degrades_to_an_empty_command_word(loop: str) -> None:
+    """TIMEOUT_BIN comes from `command -v timeout`, which is empty on a macOS
+    host without coreutils. `"${TIMEOUT_BIN:-}"` does not defend against that:
+    it executes the EMPTY command word, rc 127, and the prune silently never
+    runs while the log claims a bound. Guard on the value instead."""
+    body = (REPO / "scripts" / LOOPS[loop]).read_text(encoding="utf-8")
+    assert '| "${TIMEOUT_BIN:-}"' not in body, "an empty command word, not a default"
+    block = body.split("prune_weekend_root() {", 1)[1].split("\n}", 1)[0]
+    assert '[[ -z "${TIMEOUT_BIN:-}" ]]' in block, "guard on the value"
+    assert '| "$TIMEOUT_BIN"' in block, "and then use it bare, like every other site"
+
+
+@pytest.mark.parametrize("loop", LOOP_IDS)
+def test_the_wrapper_does_not_claim_origin_main_is_a_trust_boundary(loop: str) -> None:
+    """refs/remotes/origin/main lives in the same agent-writable $REPO/.git, so
+    the pipe defeats a working-tree plant and nothing stronger. Say that."""
+    body = (REPO / "scripts" / LOOPS[loop]).read_text(encoding="utf-8")
+    block = body.split("prune_weekend_root() {")[0].rsplit("# Durable per-runner", 1)[-1]
+    assert "NOT a network trust anchor" in block or "not a boundary" in block.lower()
