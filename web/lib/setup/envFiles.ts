@@ -196,6 +196,33 @@ let writeChain: Promise<unknown> = Promise.resolve();
  * dialect) and web/.env (the web subset, @next/env dialect). Returns the
  * file paths written.
  */
+/** REL-216 (R-591): pre-check each value against the dialect(s) its file
+ * needs. A refused value must be dropped and REPORTED, never thrown after
+ * credentials were stored and before the setup latch — that wedged
+ * onboarding permanently. */
+export function partitionEnvEncodable(values: Record<string, string>): {
+  encodable: Record<string, string>;
+  refused: Array<{ key: string; message: string }>;
+} {
+  const encodable: Record<string, string> = {};
+  const refused: Array<{ key: string; message: string }> = [];
+  for (const [key, value] of Object.entries(values)) {
+    try {
+      quote(key, value, "python");
+      if (WEB_ENV_KEYS.has(key)) quote(key, value, "next");
+      encodable[key] = value;
+    } catch (error) {
+      if (error instanceof EnvEncodingError) {
+        refused.push({ key, message: error.message });
+      } else {
+        throw error;
+      }
+    }
+  }
+  return { encodable, refused };
+}
+
+
 export async function writeSetupEnvFiles(
   values: Record<string, string>,
   repoRoot: string = path.resolve(process.cwd(), ".."),

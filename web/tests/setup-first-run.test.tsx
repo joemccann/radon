@@ -220,6 +220,59 @@ describe("setup API routes", () => {
   });
 });
 
+describe("REL-216 (R-591): setup completes past an env-encoding refusal", () => {
+  it("a refused value still latches setup and is reported in outcomes", async () => {
+    process.env.RADON_SETUP_TOKEN = "tok-2";
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "radon-setup-"));
+    await fs.mkdir(path.join(tmp, "web"));
+    await fs.writeFile(path.join(tmp, "package.json"), "{}");
+    await fs.writeFile(path.join(tmp, "web", "package.json"), "{}");
+    const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(path.join(tmp, "web"));
+    vi.doMock("@/lib/radonApi", () => ({
+      radonFetch: vi.fn(async () => ({ validation: { status: "valid", message: "" } })),
+      RadonApiError: class RadonApiError extends Error {
+        status = 500;
+        detail: unknown = null;
+      },
+      radonErrorDetailText: () => "",
+    }));
+    const route = await import("../app/api/setup/complete/route");
+    const res = await route.POST(
+      new Request("http://x/api/setup/complete", {
+        method: "POST",
+        body: JSON.stringify({
+          token: "tok-2",
+          services: {
+            // The python dialect refuses the single-quote + interpolation
+            // combination (REL-191); this used to throw AFTER the store and
+            // BEFORE the latch, wedging onboarding permanently.
+            menthorq: { MENTHORQ_PASSWORD: "sk_live_ab'${X}cd" },
+            unusual_whales: { UW_TOKEN: "uw-ok" },
+          },
+        }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      outcomes: Array<{ service: string; validation: { status: string } }>;
+      written: string[];
+    };
+    expect(body.ok).toBe(true);
+    const refusal = body.outcomes.find((o) => o.validation.status === "env_refused");
+    expect(refusal, "the refused key is reported in outcomes").toBeTruthy();
+    const root = await fs.readFile(path.join(tmp, ".env"), "utf8");
+    expect(root).toContain("UW_TOKEN='uw-ok'");
+    expect(root).not.toContain("sk_live_ab");
+    // The latch was set and the token consumed.
+    const marker = await fs.readFile(path.join(tmp, ".radon", "setup-complete"), "utf8").catch(() => null);
+    expect(marker, "markSetupComplete ran").not.toBeNull();
+    cwdSpy.mockRestore();
+    vi.doUnmock("@/lib/radonApi");
+  });
+});
+
+
 describe("setup wizard wire contract", () => {
   const REGISTRY = {
     ok: true,
