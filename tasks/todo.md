@@ -1,3 +1,44 @@
+# Task: Repair PR #261 CI regressions (2026-09-03) [COMPLETE]
+
+## Objective
+
+- Resolve every failure from Actions run 33769763869, preserve the intended
+  nightly-loop delivery changes, and keep PR #261 under observation until all
+  required checks are green.
+
+## Dependency graph
+
+- T1 depends_on: [] - reproduce and classify all nine failing tests
+- T2 depends_on: [T1] - repair MCP request bounds, streamed reads, and JWKS tests
+- T3 depends_on: [T1] - pin all official JavaScript actions to approved Node 24 SHAs
+- T4 depends_on: [T1] - restore empty healthy open-order snapshot mirroring
+- T5 depends_on: [T1] - isolate credential validator rate limiting between tests
+- T6 depends_on: [T2, T3, T4, T5] - run every focused failing suite
+- T7 depends_on: [T6] - run the full project test suite and build checks
+- T8 depends_on: [T7] - review diff, commit, push, and monitor PR #261 to green
+
+## Checklist
+
+- [x] T1 classified from Actions logs
+- [x] T2 MCP compatibility fixes
+- [x] T3 action pin fix
+- [x] T4 fill-monitor mirror fix
+- [x] T5 credential-validator isolation fix
+- [x] T6 focused suites green - 137 passed
+- [x] T7 full suite/build verified - Python 11,369 passed; 22 load timeouts reran 83/83; Vitest 8,640 passed; typecheck/lint/build green
+- [x] T8 PR #261 green - CI 33779844719 and app images 33779844555
+
+## Review
+
+- Latest green main (`526c4d64`, run 33776679233) supplies the canonical fixes;
+  redundant local variants were removed after reconciliation.
+- Reconciled CI regressions: 137 passed; original PR delivery suites: 359 passed.
+- Full verification: Python 11,369 passed with 22 load-only timeouts rerun 83/83;
+  Vitest 8,640 passed; typecheck, lint, and production build green.
+- PR head `5ffb2b0a`: CI run 33779844719 and app-images run 33779844555 passed.
+
+---
+
 # Task: Remove mobile cockpit HELD chip (FM-RADON-HELD) [WIP]
 
 Captain: the teal HELD badge between the SMH OPTION header and the
