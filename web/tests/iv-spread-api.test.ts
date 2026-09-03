@@ -188,6 +188,44 @@ describe("GET /api/iv-spread — absent and stale data are 200, never 4xx", () =
     expect(await res.json()).toEqual(MISSING_IV_SPREAD);
   });
 
+  // REL-214 (R-576): a stale_source re-serve refreshes scan_time every run,
+  // so the 48h gate never tripped in a multi-week IB outage — machine
+  // consumers (assistant call_api) saw a live scan_time on 10-day-old data.
+  // Freshness for stale_source payloads rides the DATA age (as_of).
+  it("degrades a stale_source payload whose as_of is 10 days old, despite a fresh scan_time", async () => {
+    const tenDaysAgo = new Date(Date.now() - 10 * 24 * 60 * 60_000)
+      .toISOString()
+      .slice(0, 10);
+    const reserved = buildPayload({
+      status: "stale_source",
+      scan_time: new Date().toISOString(),
+      as_of: tenDaysAgo,
+    });
+    await insertSnapshot(reserved);
+
+    const { GET } = await import("../app/api/iv-spread/route");
+    const json = (await (await GET()).json()) as Record<string, unknown>;
+    expect(json.missing).toBe(true);
+    expect(json.stale).toBe(true);
+  });
+
+  it("serves a stale_source payload re-served within the budget", async () => {
+    const yesterday = new Date(Date.now() - 24 * 60 * 60_000)
+      .toISOString()
+      .slice(0, 10);
+    const reserved = buildPayload({
+      status: "stale_source",
+      scan_time: new Date().toISOString(),
+      as_of: yesterday,
+    });
+    await insertSnapshot(reserved);
+
+    const { GET } = await import("../app/api/iv-spread/route");
+    const json = (await (await GET()).json()) as Record<string, unknown>;
+    expect(json.missing).toBeUndefined();
+    expect(json.status).toBe("stale_source");
+  });
+
   it("collapses a snapshot older than the 48h budget to the missing shape at 200", async () => {
     const old = new Date(Date.now() - 49 * 3_600_000).toISOString();
     await insertSnapshot(buildPayload({ scan_time: old }), old);
