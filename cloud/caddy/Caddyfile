@@ -76,6 +76,13 @@
     # POST-only JSON-RPC with no idempotency key, so no lb_try_* retry loop
     # here — Caddy's default is zero retries.
     handle /mcp* {
+        # T-391: anonymous internet POST into a MemoryMax=512M process —
+        # bound the body at the edge so an oversized upload dies here (413)
+        # instead of buffering in radon-mcp. Mirrored app-side by
+        # MAX_REQUEST_BYTES in scripts/mcp_hosted/server.py.
+        request_body {
+            max_size 1MB
+        }
         reverse_proxy 127.0.0.1:8334 {
             transport http {
                 dial_timeout 5s

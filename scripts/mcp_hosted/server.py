@@ -245,6 +245,83 @@ mcp = FastMCP(
     ),
 )
 
+# T-391: hard bound on the inbound request body. Caddy enforces the same
+# 1MB at the edge (cloud/caddy/Caddyfile /mcp* request_body max_size); this
+# is the app-side belt so a direct or misconfigured path can't hand the
+# stateless transport an unbounded body under MemoryMax=512M.
+MAX_REQUEST_BYTES = 1024 * 1024
+
+
+class _BodySizeLimit:
+    """Pure-ASGI middleware: 413 any request whose body exceeds max_bytes,
+    before the JSON-RPC layer (and any tool) sees it."""
+
+    def __init__(self, app, max_bytes: int = MAX_REQUEST_BYTES):
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def _reject(self, send) -> None:
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 413,
+                "headers": [(b"content-type", b"text/plain")],
+            }
+        )
+        await send({"type": "http.response.body", "body": b"request body too large"})
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        for name, value in scope.get("headers") or []:
+            if name == b"content-length" and value.isdigit():
+                if int(value) > self.max_bytes:
+                    return await self._reject(send)
+        received = 0
+        overflowed = False
+
+        async def bounded_receive():
+            nonlocal received, overflowed
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > self.max_bytes:
+                    overflowed = True
+                    # Present the stream as ended so the app stops reading.
+                    return {"type": "http.disconnect"}
+            return message
+
+        response_started = False
+
+        async def guarded_send(message):
+            nonlocal response_started
+            if overflowed:
+                if response_started:
+                    return
+                response_started = True
+                return await self._reject(send)
+            if message["type"] == "http.response.start":
+                response_started = True
+            await send(message)
+
+        await self.app(scope, bounded_receive, guarded_send)
+        if overflowed and not response_started:
+            await self._reject(send)
+
+
+_build_streamable_http_app = mcp.streamable_http_app
+
+
+def _bounded_streamable_http_app():
+    app = _build_streamable_http_app()
+    app.add_middleware(_BodySizeLimit)
+    return app
+
+
+# Both serve.py (mcp.run) and tests build the app through this attribute,
+# so the bound rides every construction path.
+mcp.streamable_http_app = _bounded_streamable_http_app
+
 
 def _principal_from_context(ctx: Context | None) -> Principal:
     """Resolve the caller's rung from the HTTP request behind the context."""

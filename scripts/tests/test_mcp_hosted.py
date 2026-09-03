@@ -443,6 +443,39 @@ class TestStreamableHttpTransport:
         payload = _tool_payload(response)
         assert payload["status"] == 401
 
+    def test_oversized_body_is_413_before_any_tool_runs(
+        self, http_client, monkeypatch
+    ):
+        """T-391: anonymous POST with a > 1MB body must be rejected 413 by
+        the app itself (belt to Caddy's edge max_size) before the JSON-RPC
+        layer or any tool executes."""
+        calls = []
+        monkeypatch.setattr(
+            hosted, "_radon_identity_impl", lambda: calls.append(1) or {}
+        )
+        padding = "x" * (hosted.MAX_REQUEST_BYTES + 1)
+        response = http_client.post(
+            "/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "radon_identity",
+                    "arguments": {"_pad": padding},
+                },
+            },
+            headers={
+                "Accept": "application/json, text/event-stream",
+                "Content-Type": "application/json",
+            },
+        )
+        assert response.status_code == 413
+        assert calls == [], "tool must not execute on an oversized body"
+
+    def test_app_body_bound_matches_the_edge_bound(self):
+        assert hosted.MAX_REQUEST_BYTES == 1024 * 1024
+
     def test_docs_path_404s_on_this_process(self, http_client):
         assert http_client.get("/docs").status_code == 404
         assert http_client.get("/openapi.json").status_code == 404
