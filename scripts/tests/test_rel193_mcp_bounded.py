@@ -60,14 +60,14 @@ class TestAsgiBodyCap:
             content=b"x",
             headers={
                 "content-type": "application/json",
-                "content-length": str(hosted.MAX_REQUEST_BODY_BYTES + 1),
+                "content-length": str(hosted.MAX_REQUEST_BYTES + 1),
                 "host": "127.0.0.1",
             },
         )
         assert resp.status_code == 413
 
     def test_an_oversized_streamed_body_never_buffers_fully(self, client):
-        big = b"x" * (hosted.MAX_REQUEST_BODY_BYTES + 65536)
+        big = b"x" * (hosted.MAX_REQUEST_BYTES + 65536)
         resp = client.post(
             "/mcp",
             content=big,
@@ -158,6 +158,9 @@ class TestJwksBounding:
         calls = []
 
         class FailingClient:
+            def get_signing_keys(self):
+                return []
+
             def get_signing_key_from_jwt(self, token):
                 calls.append(1)
                 raise RuntimeError("kid not found")
@@ -173,6 +176,9 @@ class TestJwksBounding:
 
     def test_saturated_inflight_is_a_fast_503(self, monkeypatch):
         class SlowClient:
+            def get_signing_keys(self):
+                return []
+
             def get_signing_key_from_jwt(self, token):
                 raise AssertionError("must not be reached when saturated")
 
@@ -187,6 +193,9 @@ class TestJwksBounding:
         calls = []
 
         class FailingClient:
+            def get_signing_keys(self):
+                return []
+
             def get_signing_key_from_jwt(self, token):
                 calls.append(1)
                 raise RuntimeError("kid not found")
