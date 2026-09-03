@@ -1,5 +1,10 @@
 # Lessons
 
+## 2026-09-03 — Assistant identity is Radon, not a provider model
+
+- User-facing assistant speaker labels and generated self-identification must
+  say Radon, never Grok. Model selectors may keep factual provider/model names.
+
 ## 2026-09-02 — localhost needs local.sh; local.sh stops the VPS gateway
 
 - Do not curl localhost:3000 / :8321 unless `scripts/local.sh` is already

@@ -100,14 +100,21 @@ describe("requestAssistantTurn consumes the event stream", () => {
     expect(turn.toolEvents).toHaveLength(1);
   });
 
-  it("surfaces a mid-turn error frame", async () => {
+  it("replaces a mid-turn provider payload with actionable recovery copy", async () => {
+    const providerError =
+      'OpenAI request failed (400): {"error":{"message":"Unsupported parameter: max_tokens","type":"invalid_request_error"}}';
     fetchMock.mockResolvedValue(
-      sseResponse([frame("start", {}), frame("error", { error: "provider exploded" })]),
+      sseResponse([frame("start", {}), frame("error", { error: providerError })]),
     );
 
     const turn = await requestAssistantTurn([], "How is SPY flow?");
 
-    expect(turn.content).toContain("provider exploded");
+    expect(turn.content).toBe(
+      "The assistant couldn't complete this turn. No order was placed. Try again or choose another model.",
+    );
+    expect(turn.content).not.toContain("OpenAI");
+    expect(turn.content).not.toContain("max_tokens");
+    expect(turn.content).not.toContain("{");
   });
 
   it("frames split across chunk boundaries are still parsed", async () => {

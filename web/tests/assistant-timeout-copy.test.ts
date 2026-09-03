@@ -67,16 +67,23 @@ describe("assistant turn timeout copy", () => {
     expect(turn.content).toMatch(/timed out/i);
   });
 
-  it("leaves a non-timeout failure with its own reported error", async () => {
+  it("does not expose a non-timeout provider error", async () => {
     mockFetch.mockResolvedValue({
       ok: false,
       status: 502,
-      json: async () => ({ error: "Anthropic overloaded" }),
+      json: async () => ({
+        error:
+          'OpenAI request failed (400): {"error":{"message":"Unsupported parameter: max_tokens"}}',
+      }),
     });
 
     const turn = await requestAssistantTurn([], "analyze this chart");
 
-    expect(turn.content).toBe("Error: Anthropic overloaded");
+    expect(turn.content).toBe(
+      "The assistant couldn't complete this turn. No order was placed. Try again or choose another model.",
+    );
+    expect(turn.content).not.toContain("OpenAI");
+    expect(turn.content).not.toContain("max_tokens");
   });
 
   it("still falls back to the generic string for an unexplained non-timeout status", async () => {
@@ -84,7 +91,9 @@ describe("assistant turn timeout copy", () => {
 
     const turn = await requestAssistantTurn([], "analyze this chart");
 
-    expect(turn.content).toBe("Assistant service returned an error.");
+    expect(turn.content).toBe(
+      "The assistant couldn't complete this turn. No order was placed. Try again or choose another model.",
+    );
   });
 
   it("applies the same copy to the plain reply path", async () => {
