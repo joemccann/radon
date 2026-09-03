@@ -45,6 +45,15 @@ Sub-directory CLAUDE.md files auto-load when cwd is anywhere under that subtree.
 
 ---
 
+## Pull Request Completion
+
+- Whenever you create or open a pull request, capture its GitHub URL and latest head SHA, verify that GitHub has registered the expected CI suite for that SHA, then remain active and run `gh pr checks <PR-URL> --watch --interval 10` (or an equivalent continuous check) until every applicable CI/build check on that exact head is complete and green. "No checks reported" is pending, not success; keep polling until the expected checks appear.
+- A failed, cancelled, timed-out, action-required, or stale check is not a stopping point. Inspect the failed run with `gh run view <RUN-ID> --log-failed`, fix the root cause, run the relevant local verification, commit and push the repair, confirm the PR head SHA changed, and resume watching. Repeat until green; do not yield the task back while safe, in-scope changes can repair CI.
+- Do not call the PR complete while any applicable check on the latest head is queued, in progress, or failing. Superseded runs do not count.
+- After the latest head is fully green, send exactly one normal-priority Pushover notification titled `radon PR green`. Its message must briefly describe the PR and include the clickable GitHub PR URL (`url` plus `url_title`). Load only `PUSHOVER_USER` and `PUSHOVER_TOKEN`; never expose credentials. Confirm Pushover accepted the request. Missing credentials or delivery failure must be reported and retried, never silently skipped or described as complete.
+
+---
+
 ## ⛔ Mandatory Rules
 
 1. **Be extremely terse.** See §Response Format — it is a hard rule, not a preference.
