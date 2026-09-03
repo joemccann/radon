@@ -577,6 +577,7 @@ class TestMirrorGuardsAgainstDegradedSnapshot:
         handler = FillMonitorHandler(send_notifications=False)
         handler.known_orders = {}
         with patch.object(fm, "fetch_open_orders_for_mirror", lambda c: []), \
+             patch.object(fm, "count_open_orders_for_mirror", lambda: 0), \
              patch.object(fm, "fetch_executed_orders_for_mirror", lambda c: []), \
              patch.object(fm, "build_orders_data_for_mirror", lambda o, e: {"open_orders": o}), \
              patch.object(fm, "save_orders_snapshot", lambda data: saved.append(data)):
