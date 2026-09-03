@@ -85,6 +85,21 @@ def test_drift_audit_file_pairs_omit_secret_paths() -> None:
         assert not repo_rel.endswith(".env")
 
 
+def test_canonical_env_is_root_owned_group_readable() -> None:
+    """The service account must not be able to rewrite production secrets."""
+    claude = (CLOUD / "CLAUDE.md").read_text(encoding="utf-8")
+    assert "mode `0640`" in claude
+    assert "owner `root:radon`" in claude
+    setup = (CLOUD / "scripts" / "setup-vps.sh").read_text(encoding="utf-8")
+    assert 'chmod 0640 "$ENV_FILE"' in setup or 'chmod 0640 "$env_file"' in setup
+    assert 'chown root:radon "$ENV_FILE"' in setup
+    assert 'chown root:radon "$env_file"' in setup
+    post = (CLOUD / "scripts" / "post-setup.sh").read_text(encoding="utf-8")
+    assert "install -m 0640 -o root -g radon" in post
+    assert 'scp "$ENV_FILE" "${VPS_RADON}:~/radon-cloud/.env"' not in post
+    assert "chmod 0600 ~/radon-cloud/.env" not in post
+
+
 def test_setup_vps_grants_caddy_traverse_into_media_parent() -> None:
     """/var/lib/radon is 0750 radon:radon and Caddy serves media/ beneath it.
 

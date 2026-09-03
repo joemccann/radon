@@ -184,12 +184,13 @@ def test_no_root_unit_inherits_a_radon_writable_environment_file():
     """Relocating the payload is not enough if the environment still comes from radon.
 
     systemd merges every KEY=VALUE line of an EnvironmentFile into the process
-    environment with no filtering, and /home/radon/radon-cloud/.env is 0600
-    radon:radon by design (setup-vps.sh). One appended LD_PRELOAD line makes the
-    next timer tick load radon-authored code into root, and PATH= makes root's
-    bare `docker` / `systemctl` calls resolve to radon-owned binaries. `-I` does
-    not affect either. A root unit may READ specific keys out of that file as
-    data; it must not inherit the file wholesale.
+    environment with no filtering, and /home/radon/radon-cloud/.env is a
+    compatibility path the unprivileged account can replace. One appended
+    LD_PRELOAD line makes the next timer tick load radon-authored code into
+    root, and PATH= makes root's bare `docker` / `systemctl` calls resolve to
+    radon-owned binaries. `-I` does not affect either. A root unit may READ
+    specific keys out of that file as data; it must not inherit the file
+    wholesale.
     """
     offenders = {
         name: paths
