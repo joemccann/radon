@@ -185,6 +185,10 @@ def _build(
         src = (REPO / "scripts" / script).read_text(encoding="utf-8")
         marker = re.search(r'PHASE_COMPLETE_MARKER="([^"]+)"', src).group(1)
         complete_line = f"echo '{marker} stub run_id=stub'\n"
+    # The deliver phase (2026-09-02) keys OK on the skill's verdict line the
+    # same way; every loop's wrapper greps it, so the stub prints it whenever
+    # it is invoked for deliver.
+    deliver_line = f"case \" $* \" in *\" deliver\"*) echo 'NIGHTLY DELIVER READY: loop={loop} prs=0' ;; esac\n"
     _executable(
         bin_dir / "claude",
         "#!/bin/bash\n"
@@ -192,6 +196,7 @@ def _build(
         f'if [ "${{STUB_ATTACK_ON:-off}}" = "agent" ]; then "{attack_sh}"; fi\n'
         'if [ "${STUB_CLAUDE_SLEEP:-0}" != "0" ]; then sleep "$STUB_CLAUDE_SLEEP"; fi\n'
         "echo 'stub agent output'\n"
+        + deliver_line
         + complete_line
         + 'exit "${STUB_CLAUDE_RC:-0}"\n',
     )
@@ -366,6 +371,7 @@ def test_a_cycle_still_reports_both_phases(tmp_path: Path, loop: str) -> None:
     assert result.returncode == 0, _why(result, cfg)
     bodies = "\n".join(_comments(cfg))
     assert bodies.count("**audit**") >= 1 and bodies.count("**remediate**") >= 1, bodies
+    assert bodies.count("**deliver**") >= 1, bodies
     assert "audit" in bodies and "remediate" in bodies, bodies
     assert "CRASHED" not in bodies, bodies
 
