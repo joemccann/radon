@@ -671,3 +671,6 @@ how this loop improves as the codebase grows.
   (issue forensics first) stands regardless. Also this run: a one-tool-call CPython repro in the lead
   (`ThreadPoolExecutor` atexit join, exit 124 under `timeout`) turned a walk's strongest P1 claim into
   CONFIRMED — executing the cheap repro beats rating a plausible mechanism.
+- 2026-09-03 (audit): `github_pr_output.py` uses `--issue` verbatim as the title and truncates at ~250
+  chars mid-word. Keep `--issue` to one or two short clauses (it is also the PR title); the detail
+  belongs in the rolling-issue comment, not the flag.
