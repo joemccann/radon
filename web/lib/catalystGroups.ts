@@ -40,7 +40,13 @@ function compareCategories(a: CatalystCategory, b: CatalystCategory): number {
 /** Held rows lead their category so exposure survives the collapsed preview. */
 function compareRows(a: CategorizedCatalystRow, b: CategorizedCatalystRow): number {
   if (a.isHeld !== b.isHeld) return a.isHeld ? -1 : 1;
-  return a.days_until - b.days_until;
+  if (a.days_until !== b.days_until) return a.days_until - b.days_until;
+  const aTime = a.event_time ? Date.parse(a.event_time) : NaN;
+  const bTime = b.event_time ? Date.parse(b.event_time) : NaN;
+  if (Number.isFinite(aTime) && Number.isFinite(bTime)) return aTime - bTime;
+  if (Number.isFinite(aTime)) return -1;
+  if (Number.isFinite(bTime)) return 1;
+  return 0;
 }
 
 /**
