@@ -34,7 +34,7 @@ Modify (lockstep pins — miss one and a test fails, which is the point):
 
 - `scripts/db/writer.py` — `upsert_<name>_rows(...)` (+ reuse `upsert_scan_snapshot` / `record_service_health`)
 - IA: time-series market-state charts (CRI, GEX, breadth, margin) go on `/regime/<slug>`. Name-ranking scanners (LEAP, GARCH, cheap-wing vol cone) go on `/scanner?mode=<slug>` next to Flow / Discover. Do not park a name scanner on Regime.
-- Regime only: `web/components/RegimePanel.tsx` — **four places**: the `RegimeTab` union, `REGIME_TAB_VALUES`, the `tabFromPathname` regex, the desktop `<button>` row (the mobile chip bar maps over an inline array — update it too), plus the `if (activeTab === "<slug>")` dispatch branch
+- Regime only: `web/lib/regimeRail.ts` first (the `RegimeTab` union, the `REGIME_RAIL_GROUPS` entry that places the tab in its rail group, and `REGIME_TAB_LABEL`), then `web/components/RegimePanel.tsx` (`MOBILE_TAB_LABEL` if the label needs a short form, the `tabFromPathname` regex, the mobile chip bar's inline `RegimeTab[]` array, plus the `if (activeTab === "<slug>")` dispatch branch)
 - Regime only: `web/tests/regime-tab-routes.test.tsx` — add `["<slug>", "app/regime/<slug>/page.tsx"]` to the `describe.each` table + a render/navigation case
 - Scanner: `ScannerModeTabs` + `WorkspaceSections` `ScannerMode` + `?mode=` parse + panel branch + `scanner-mode-tabs` tests
 - `web/lib/serviceHealthWindows.ts` — staleness window entry (kebab-case service name)
@@ -102,7 +102,7 @@ Modify (lockstep pins — miss one and a test fails, which is the point):
 
 ## 6. Scheduling and deploy
 
-- Units in `cloud/services/`: `radon-<name>.service` (`Type=oneshot`, `User=radon`, `WorkingDirectory=/home/radon/radon`, `EnvironmentFile=/home/radon/radon-cloud/.env`, `Environment=RADON_DB_NO_REPLICA=1`, `ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/fetch_<name>.py`, `TimeoutStartSec` sized to the job, journald out/err) + `radon-<name>.timer` (`OnCalendar=... UTC`, `Persistent=true`, `RandomizedDelaySec`, `WantedBy=timers.target`). Comment the OnCalendar choice.
+- Units in `cloud/services/`: `radon-<name>.service` (`Type=oneshot`, `User=radon`, `WorkingDirectory=/home/radon/radon`, `EnvironmentFile=/etc/radon/env`, `Environment=RADON_DB_NO_REPLICA=1`, `ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/fetch_<name>.py`, `TimeoutStartSec` sized to the job, journald out/err) + `radon-<name>.timer` (`OnCalendar=... UTC`, `Persistent=true`, `RandomizedDelaySec`, `WantedBy=timers.target`). Comment the OnCalendar choice.
 - Register in `setup-vps.sh` `SERVICE_FILES`, `cloud/tests/test_systemd_services.py`, and `cloud/config/installed-units.sha256` (sha256 of each unit file). The deploy's `install-units` verb then installs the pair root-owned and enables the timer on the next green deploy; verify on the host with `systemctl list-timers 'radon-<name>*'`.
 - Prod env note: units call the venv python **directly** — the `run_*.sh` wrapper fallback ladder resolves the wrong python on the VPS (feedback_scan_wrapper_fallback_picks_system_python).
 
