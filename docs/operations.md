@@ -46,16 +46,19 @@ doc (root `CLAUDE.md` "Credentials").
 ### Encrypted credential store (profile Credentials tab)
 
 **The store wins over `.env`.** Keys entered in the profile Credentials tab
-are AES-256-GCM-encrypted rows in a host-local SQLite file
-`~/.radon/secrets.db` (0600, override `RADON_SECRET_STORE_PATH`) that never
-leaves the host — deliberately NOT Turso, so plaintext and ciphertext stay on
-the machine that uses them (operator decision 2026-09-01, PR #125; no
-migration planned). On FastAPI startup every stored registry name that
-decrypts is exported into `os.environ` over the deployed `.env` value
-(`bootstrap_exported_names()` in `scripts/api/routes/credentials.py`; a row
-the loaded key cannot decrypt is logged and skipped, and a store that cannot
-open is logged and skipped, so startup never fails on the store), and
-subprocesses inherit it. Rotating a key in `.env` alone does nothing while a
+are AES-256-GCM-encrypted rows in a host-local SQLite file. Host mode defaults
+to `~/.radon/secrets.db`; the production container pins
+`/home/radon/radon/data/secret_store/secrets.db` on its persistent data bind
+(`0600`, override `RADON_SECRET_STORE_PATH`). The store never leaves the host —
+deliberately NOT Turso, so plaintext and ciphertext stay on the machine that
+uses them (operator decision 2026-09-01, PR #125; no migration planned).
+Before Uvicorn starts, `scripts/secret_store.py` opens the configured store and
+authenticates every encrypted row; a missing, replaced, or malformed key fails
+the unit instead of starting credential-degraded. After that preflight, every
+stored registry name is exported into `os.environ` over the deployed `.env`
+value (`bootstrap_exported_names()` in
+`scripts/api/routes/credentials.py`), and subprocesses inherit it. Rotating a
+key in `.env` alone does nothing while a
 stored value exists: rotate in the Credentials tab, or delete the stored
 value first. Exception: the IB Gateway password. Saving it in the tab does
 not rotate what the Gateway reads (`TWS_PASSWORD_FILE` / docker secrets).
@@ -65,6 +68,16 @@ point a deployment at a different Turso database by editing `.env` and
 restarting, not from the tab. Deleting a stored secret does not unset the
 already-exported value in the running process — it takes effect at the next
 FastAPI restart.
+
+The first container cutover is a one-time migration: before any restart, copy
+the live container's `~/.radon/secrets.db` and its exact matching key into
+`data/secret_store/`, verify every row decrypts there, and only then install the
+encrypted credential and restart. Never let the `--rm` container disappear
+first. Both host and container units pin the same persistent database path so
+runtime-mode rollback cannot select a different store. Production rejects a
+different `RADON_SECRET_STORE_PATH` while `RADON_MODE=hetzner`, and the
+container wrapper checks that invariant before removing the running container.
+`data/secret_store/` and the repo-root operator recovery key are gitignored.
 
 Failure modes (REL-217/REL-218, 2026-09-03): any store-constructor failure —
 `SecretStoreError` or OSError-class (key-file path is a directory, permission
@@ -76,16 +89,26 @@ from the env write and reported as an `env_refused` outcome while setup still
 completes (the encrypted store keeps the value; REL-216).
 
 **Master key.** Resolution order: systemd credential
-`radon-secret-store-key` in `$CREDENTIALS_DIRECTORY` (production
-`LoadCredentialEncrypted=`), then the key file at
+`radon-secret-store-key` in `$CREDENTIALS_DIRECTORY`, then the key file at
 `$RADON_SECRET_STORE_KEY_FILE` (default `~/.radon/secret_store.key`,
-auto-generated 0600 on first use). There is no escrow, and `secrets.db` is
+auto-generated 0600 on first use). Production
+`radon-api.service` loads
+`/etc/credstore.encrypted/radon-secret-store-key` with
+`LoadCredentialEncrypted=`. The root container wrapper validates the decrypted
+value is a regular, non-symlink 32-byte file, stages a `0400` copy owned by the
+numeric `radon` UID/GID under `/run/radon-app-runtime/credentials/`, and mounts
+only that directory read-only into the API container. The key is never passed
+through Docker arguments or environment values; the staged plaintext is
+removed by `ExecStopPost` after the container stops.
+
+There is no escrow, and `secrets.db` is
 bound to its key by fingerprint (`key_binding` table): with rows present and
 the key file missing, the store refuses to open rather than minting a new key
 over them, and a replaced key refuses writes. Every `/credentials` route then
 answers 503 `CREDENTIAL_STORE_UNAVAILABLE`. Recovery is to restore the
-original key, or delete `~/.radon/secrets.db` and re-enter every credential.
-Back up the key file together with `secrets.db`. Field inventory:
+original key, or delete the configured `secrets.db` and re-enter every
+credential. Back up the exact key together with `secrets.db`; any local
+recovery copy must be mode `0600` and gitignored. Field inventory:
 `scripts/credentials_registry.py`. Implementation: `scripts/secret_store.py`.
 
 **Validation is throttled.** Saving (`PUT /credentials/{service}`) and the

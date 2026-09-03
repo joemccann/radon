@@ -19,6 +19,7 @@ if [[ "${RADON_APP_RUNTIME_TEST_MODE:-0}" == "1" ]]; then
   MEDIA_DIR="${RADON_TEST_MEDIA_DIR:?test media dir is required}"
   STATE_DIR="${RADON_TEST_STATE_DIR:?test state dir is required}"
   LEASE_DIR="${STATE_DIR}/ib-lease"
+  CHOWN="${RADON_TEST_CHOWN:?test chown is required}"
   PYTHON="${RADON_TEST_PYTHON:-$(command -v python3)}"
   NOTIFY_PROXY_DIR="${RADON_TEST_NOTIFY_PROXY_DIR:-${STATE_DIR}/notify}"
 else
@@ -33,14 +34,89 @@ else
   MEDIA_DIR=/var/lib/radon/media
   STATE_DIR=/var/lib/radon
   LEASE_DIR=/var/lib/radon/ib-lease
+  CHOWN=/usr/bin/chown
   PYTHON=/usr/bin/python3
   NOTIFY_PROXY_DIR=/run/radon-app-runtime
 fi
+
+readonly SECRET_STORE_CREDENTIAL_NAME=radon-secret-store-key
+readonly SECRET_STORE_CREDENTIAL_CONTAINER_DIR=/run/credentials/radon-api.service
+readonly SECRET_STORE_DB_CONTAINER_PATH=/home/radon/radon/data/secret_store/secrets.db
+readonly SECRET_STORE_CREDENTIAL_STAGE_ROOT="${NOTIFY_PROXY_DIR}/credentials"
+STAGED_CREDENTIAL_UNIT=""
 
 usage() {
   echo "usage: radon-app-runtime {pull [<sha>]|run <unit>|stop <unit>|notify-proxy <listen> <upstream>}" >&2
   exit 64
 }
+
+cleanup_runtime_credential() {
+  local unit="$1"
+  local credential_dir="${SECRET_STORE_CREDENTIAL_STAGE_ROOT}/${unit}"
+  local credential_file="${credential_dir}/${SECRET_STORE_CREDENTIAL_NAME}"
+  [[ "$unit" == "radon-api.service" ]] || return 0
+  if [[ -d "$credential_dir" ]]; then
+    chmod 0700 "$credential_dir" 2>/dev/null || true
+    rm -f "$credential_file"
+    rmdir "$credential_dir" 2>/dev/null || true
+  fi
+  if [[ "$STAGED_CREDENTIAL_UNIT" == "$unit" ]]; then
+    STAGED_CREDENTIAL_UNIT=""
+  fi
+  return 0
+}
+
+cleanup_staged_credential_on_exit() {
+  [[ -n "$STAGED_CREDENTIAL_UNIT" ]] || return 0
+  cleanup_runtime_credential "$STAGED_CREDENTIAL_UNIT"
+}
+
+stage_api_credential() {
+  local unit="$1" ids="$2"
+  local source credential_dir credential_file staged_size
+  validate_api_startup_inputs
+  source="${CREDENTIALS_DIRECTORY}/${SECRET_STORE_CREDENTIAL_NAME}"
+
+  credential_dir="${SECRET_STORE_CREDENTIAL_STAGE_ROOT}/${unit}"
+  credential_file="${credential_dir}/${SECRET_STORE_CREDENTIAL_NAME}"
+  cleanup_runtime_credential "$unit"
+  STAGED_CREDENTIAL_UNIT="$unit"
+  install -d -m 0700 "$SECRET_STORE_CREDENTIAL_STAGE_ROOT" "$credential_dir"
+  install -m 0400 "$source" "$credential_file"
+  "$CHOWN" "$ids" "$credential_dir" "$credential_file"
+  chmod 0500 "$credential_dir"
+  staged_size="$(wc -c < "$credential_file" | tr -d '[:space:]')"
+  [[ "$staged_size" == "32" ]] || {
+    echo "radon-app-runtime: staged ${SECRET_STORE_CREDENTIAL_NAME} must be exactly 32 bytes" >&2
+    return 78
+  }
+}
+
+validate_api_startup_inputs() {
+  local credentials_dir="${CREDENTIALS_DIRECTORY:-}"
+  local source source_size configured_db_path
+  configured_db_path="${RADON_SECRET_STORE_PATH:-$SECRET_STORE_DB_CONTAINER_PATH}"
+  [[ "$configured_db_path" == "$SECRET_STORE_DB_CONTAINER_PATH" ]] || {
+    echo "radon-app-runtime: RADON_SECRET_STORE_PATH must be ${SECRET_STORE_DB_CONTAINER_PATH}" >&2
+    return 78
+  }
+  [[ "$credentials_dir" == /* ]] || {
+    echo "radon-app-runtime: CREDENTIALS_DIRECTORY must be an absolute path" >&2
+    return 78
+  }
+  source="${credentials_dir}/${SECRET_STORE_CREDENTIAL_NAME}"
+  if [[ -L "$source" || ! -f "$source" || ! -r "$source" ]]; then
+    echo "radon-app-runtime: ${SECRET_STORE_CREDENTIAL_NAME} must be a readable, regular, non-symlink file" >&2
+    return 78
+  fi
+  source_size="$(wc -c < "$source" | tr -d '[:space:]')"
+  [[ "$source_size" == "32" ]] || {
+    echo "radon-app-runtime: ${SECRET_STORE_CREDENTIAL_NAME} must be exactly 32 bytes" >&2
+    return 78
+  }
+}
+
+trap cleanup_staged_credential_on_exit EXIT
 
 image_tag() {
   local tag
@@ -204,6 +280,7 @@ cmd_stop() {
   # Idempotent: ExecStopPost runs on every stop, including ones where the
   # container already exited on its own. R-232.
   "$DOCKER" rm -f "$unit" >/dev/null 2>&1 || true
+  cleanup_runtime_credential "$unit"
 }
 
 
@@ -315,6 +392,10 @@ cmd_run() {
     *) exit 64 ;;
   esac
 
+  if [[ "$unit" == "radon-api.service" ]]; then
+    validate_api_startup_inputs
+  fi
+
   # R-232, and its limit: the container's processes land in
   # system.slice/docker-<id>.scope, NOT the unit's cgroup, so systemd's
   # KillMode=control-group sweep and the post-TimeoutStopSec SIGKILL reach only
@@ -328,6 +409,14 @@ cmd_run() {
   # Restart=always + RestartSec=5 + StartLimitBurst=5 parks the unit
   # start-limit-hit inside 25s while the orphan keeps writing to data/.
   "$DOCKER" rm -f "$unit" >/dev/null 2>&1 || true
+  cleanup_runtime_credential "$unit"
+
+  if [[ "$unit" == "radon-api.service" ]]; then
+    local secret_store_dir="${DATA_DIR}/secret_store"
+    install -d -m 0700 "$secret_store_dir"
+    "$CHOWN" "$ids" "$secret_store_dir"
+    stage_api_credential "$unit" "$ids"
+  fi
 
   # The container gets NARROW binds, never $STATE_DIR itself. /var/lib/radon
   # holds control-plane-ready, the manifest digest and the root deploy
@@ -367,6 +456,11 @@ cmd_run() {
     if [[ -d "$ib_remote_certs" ]]; then
       set -- "$@" -v "${ib_remote_certs}:${ib_remote_certs}:ro"
     fi
+    local credential_host_dir="${SECRET_STORE_CREDENTIAL_STAGE_ROOT}/${unit}"
+    set -- "$@" \
+      --env "CREDENTIALS_DIRECTORY=${SECRET_STORE_CREDENTIAL_CONTAINER_DIR}" \
+      --env "RADON_SECRET_STORE_PATH=${SECRET_STORE_DB_CONTAINER_PATH}" \
+      --mount "type=bind,src=${credential_host_dir},dst=${SECRET_STORE_CREDENTIAL_CONTAINER_DIR},readonly"
   fi
 
   if [[ -n "${NOTIFY_SOCKET:-}" && "${NOTIFY_SOCKET}" == /* ]]; then
@@ -409,7 +503,7 @@ cmd_run() {
   set -- "$@" "$image"
   case "$unit" in
     radon-api.service)
-      set -- "$@" sh -c 'python scripts/db/migrate.py && exec uvicorn scripts.api.server:app --host 0.0.0.0 --port 8321 --proxy-headers --forwarded-allow-ips 127.0.0.1'
+      set -- "$@" sh -c 'python scripts/db/migrate.py && python scripts/secret_store.py && exec uvicorn scripts.api.server:app --host 0.0.0.0 --port 8321 --proxy-headers --forwarded-allow-ips 127.0.0.1'
       ;;
     radon-monitor.service)
       set -- "$@" python -m scripts.monitor_daemon.run --daemon

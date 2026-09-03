@@ -35,6 +35,9 @@ EXEMPT: dict[str, str] = {
     # radon-.service.d/common.conf and per-unit `Environment=` lines own these.
     "RADON_DB_NO_REPLICA": "set by cloud/services/radon-.service.d/common.conf",
     "RADON_DB_USE_REPLICA": "explicit replica opt-in; unset is the production state (DUR-07)",
+    "CREDENTIALS_DIRECTORY": "injected by systemd from LoadCredentialEncrypted; never stored in /etc/radon/env",
+    "RADON_SECRET_STORE_PATH": "optional host override; container runtime pins the durable data-volume path",
+    "RADON_SECRET_STORE_KEY_FILE": "optional development/rollback fallback; production uses the systemd credential",
     # Test-pollution guards. Their ABSENCE is the production state; setting
     # either in the deploy env would disarm the guard.
     "PYTEST_CURRENT_TEST": "set by pytest; production must never define it",

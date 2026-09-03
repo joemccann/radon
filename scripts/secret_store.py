@@ -37,6 +37,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 DEFAULT_DB_PATH = Path.home() / ".radon" / "secrets.db"
 DEFAULT_KEY_PATH = Path.home() / ".radon" / "secret_store.key"
+PRODUCTION_DB_PATH = Path("/home/radon/radon/data/secret_store/secrets.db")
 SYSTEMD_CREDENTIAL_NAME = "radon-secret-store-key"
 
 _NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
@@ -132,11 +133,18 @@ class SecretStore:
         db_path: Optional[Path] = None,
         key_path: Optional[Path] = None,
     ) -> None:
-        self._db_path = Path(
-            db_path
-            or os.environ.get("RADON_SECRET_STORE_PATH")
-            or DEFAULT_DB_PATH
-        )
+        configured_db_path = os.environ.get("RADON_SECRET_STORE_PATH")
+        if db_path is not None:
+            self._db_path = Path(db_path)
+        elif os.environ.get("RADON_MODE") == "hetzner":
+            if configured_db_path and Path(configured_db_path) != PRODUCTION_DB_PATH:
+                raise SecretStoreError(
+                    "RADON_SECRET_STORE_PATH must be "
+                    f"{PRODUCTION_DB_PATH} when RADON_MODE=hetzner"
+                )
+            self._db_path = PRODUCTION_DB_PATH
+        else:
+            self._db_path = Path(configured_db_path or DEFAULT_DB_PATH)
         self._key_path = Path(
             key_path
             or os.environ.get("RADON_SECRET_STORE_KEY_FILE")
@@ -462,3 +470,19 @@ class SecretStore:
         finally:
             conn.close()
         return True
+
+
+def verify_secret_store() -> int:
+    """Open the configured store and authenticate every encrypted value."""
+    store = SecretStore()
+    entries = store.list_secrets()
+    for entry in entries:
+        if store.get_secret(entry["name"]) is None:
+            raise SecretIntegrityError(
+                f"credential {entry['name']} disappeared during verification"
+            )
+    return len(entries)
+
+
+if __name__ == "__main__":
+    verify_secret_store()
