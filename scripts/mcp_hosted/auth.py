@@ -130,15 +130,26 @@ def _signing_key_for(token: str):
     global _jwks_refresh_after
     import jwt as pyjwt
 
-    client = _get_jwks_client()
     kid = pyjwt.get_unverified_header(token).get("kid")
-    if kid not in {key.key_id for key in client.get_signing_keys()}:
-        with _jwks_refresh_lock:
-            now = time.monotonic()
-            if now < _jwks_refresh_after:
-                raise AuthError(401, "invalid token")
-            _jwks_refresh_after = now + JWKS_REFRESH_COOLDOWN_SECONDS
-    return client.get_signing_key_from_jwt(token).key
+    if _negative_kid_active(kid):
+        raise AuthError(401, "invalid token")
+    if not _jwks_gate.acquire(blocking=False):
+        raise AuthError(503, "authentication unavailable")
+
+    try:
+        client = _get_jwks_client()
+        if kid not in {key.key_id for key in client.get_signing_keys()}:
+            with _jwks_refresh_lock:
+                now = time.monotonic()
+                if now < _jwks_refresh_after:
+                    raise AuthError(401, "invalid token")
+                _jwks_refresh_after = now + JWKS_REFRESH_COOLDOWN_SECONDS
+        return client.get_signing_key_from_jwt(token).key
+    except Exception:
+        _remember_negative_kid(kid)
+        raise
+    finally:
+        _jwks_gate.release()
 
 
 def _get_allowed_users() -> set[str]:
