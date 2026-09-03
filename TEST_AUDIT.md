@@ -8807,3 +8807,18 @@ FILE, not by count: 21 `test_ib_gateway_control.py` + 13
 class, T-118 — plus 3 deliberate `test_caddy_edge_timeouts.py` reds (T-205
 working as designed; no `caddy` binary on this host). **Zero failures in
 either cloud file this phase touched.**
+
+## Remediation 2026-09-03 — PR #260
+
+All 11 un-DONE P0/P1 findings from this cycle's audit are DONE: T-382 (P0),
+T-383…T-391, T-408. The 16 P2s (T-392…T-407) are DEFERRED. Evidence per task
+in `TEST_LOG.md` §Remediation 2026-09-03. Two findings' subjects were broken
+product code, per the standing pattern: T-385 (serializer legs carried no
+`secType`, so the stock-leg cap exemption never matched a real snapshot — 
+source fixed, wire-tested) and T-389 (the keyless early return in
+`Providers.tsx` dropped the realtime tree — provider now mounts regardless).
+One lead correction on landing: T-390's new file leaked the module-global
+`_SESSION_EXPORTED` across files and redded `test_env_fallback_flagged`;
+fixed with a snapshot/restore fixture, not by weakening either test.
+T-408's enforcement half (a tsc step in ci.yml) is an operator decision and
+was deliberately not made here.

@@ -593,3 +593,4 @@ finish.
 | T-408 | DONE | `ff8dbc03` | Red: tsc 5 errors (3 literals). ErrorCode union gains `SETUP_ALREADY_COMPLETE`/`SETUP_REPO_ROOT_INVALID`/`AUTH_MISCONFIGURED`; drift-guard contract test (red pre-fix). `npx tsc --noEmit` exit 0 in landed tree (with T-387's middleware edits present). CI tsc-gate step left to operator. |
 
 P2s T-392…T-407 DEFERRED. Closing 3× gate counts below.
+Closing gates ×3 (serial, detached script; reliability loop's cycle concurrent, load 4-9): pytest `10896 passed, 1 skipped` ×3; vitest `8604 passed / 851 files, 0 failed` ×3; cloud `35 failed, 1537 passed, 6 skipped` ×3 with FAILED lists byte-identical to each other AND to this cycle's audit round-1 baseline (darwin bash-3.2/caddy class, T-118). Tree clean after gates (T-275); zero runner secrets in gate logs (T-381).
