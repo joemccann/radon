@@ -428,3 +428,64 @@ class TestSuppressionCeilingsAreSmallEnoughToMatter:
             scripts_units.KILL_BEFORE_GREEN_FROZEN_CAP_SECS
             == units.KILL_BEFORE_GREEN_FROZEN_CAP_SECS
         )
+
+
+class TestRel202Exit143DwellBound:
+    """REL-202 (R-559, NF-10): the exit-code/143 aperture matches a shape ANY
+    SIGTERM source produces (earlyoom, pkill, a co-scheduled TimeoutStopSec),
+    so it must not inherit the 24h kill-before-green horizon — it needs a
+    short deploy-window dwell of its own."""
+
+    def _unit_143(self, failed_at: datetime) -> dict:
+        return {
+            "Id": "radon-bpi.service",
+            "Result": "exit-code",
+            "ExecMainStatus": 143,
+            "InactiveEnterTimestamp": failed_at.strftime("%a %Y-%m-%d %H:%M:%S UTC"),
+        }
+
+    def test_a_143_death_90min_before_green_with_no_journal_pages(self):
+        now = T0 + timedelta(hours=2)
+        deploy = {
+            "marker_mtime": T0 + timedelta(minutes=90),
+            "in_flight": False,
+            "journal_age_seconds": None,
+        }
+        assert units._is_deploy_collateral(self._unit_143(T0), deploy, now) is False, (
+            "an earlyoom/pkill 143 death 90 minutes before a routine deploy "
+            "green was still classified deploy collateral"
+        )
+
+    def test_a_143_death_inside_a_journalled_window_is_collateral(self):
+        now = T0 + timedelta(seconds=30)
+        deploy = {
+            "marker_mtime": None,
+            "in_flight": True,
+            "journal_age_seconds": 20.0,
+        }
+        assert units._is_deploy_collateral(self._unit_143(T0), deploy, now) is True
+
+    def test_a_143_death_minutes_before_green_is_collateral(self):
+        now = T0 + timedelta(minutes=10)
+        deploy = {
+            "marker_mtime": T0 + timedelta(minutes=5),
+            "in_flight": False,
+            "journal_age_seconds": None,
+        }
+        assert units._is_deploy_collateral(self._unit_143(T0), deploy, now) is True
+
+    def test_the_signal_shape_keeps_the_wide_horizon(self):
+        """Result=signal is the default SIGTERM disposition inside a real
+        stop-clean; its pre-existing 24h kill-before-green handling stands."""
+        now = T0 + timedelta(hours=2)
+        unit = {
+            "Id": "radon-bpi.service",
+            "Result": "signal",
+            "InactiveEnterTimestamp": T0.strftime("%a %Y-%m-%d %H:%M:%S UTC"),
+        }
+        deploy = {
+            "marker_mtime": T0 + timedelta(minutes=90),
+            "in_flight": False,
+            "journal_age_seconds": None,
+        }
+        assert units._is_deploy_collateral(unit, deploy, now) is True

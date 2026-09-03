@@ -91,6 +91,12 @@ DEPLOY_COLLATERAL_WINDOW_SECS = 60 * 60
 # a 60-min cap here false-paged that exact shape). Past 24h the unit is
 # frozen — the deploy left it dead (e.g. timer disabled) — and it re-pages P1.
 KILL_BEFORE_GREEN_FROZEN_CAP_SECS = 24 * 60 * 60
+# REL-202 (R-559, NF-10): the exit-code/143 aperture matches a shape ANY
+# SIGTERM source produces (earlyoom, pkill, a co-scheduled TimeoutStopSec),
+# and daily deploys keep the 24h pre-green horizon permanently warm. A REAL
+# deploy stop-clean greens within minutes of the kill, so 143 gets its own
+# short kill-to-marker dwell; Result=signal keeps the wide horizon.
+GRACEFUL_EXIT_MARKER_DWELL_SECS = 15 * 60
 
 # R-157: the `in_flight` branch keyed on nothing but the journal EXISTING.
 # R-057 established that an interrupted deploy leaves it on disk indefinitely
@@ -257,7 +263,13 @@ def _is_deploy_collateral(unit: dict, deploy: Optional[dict], now: datetime) -> 
     if marker is not None and failed_at < marker:
         if age > KILL_BEFORE_GREEN_FROZEN_CAP_SECS:
             return False
-        return 0 <= (marker - failed_at).total_seconds() <= KILL_BEFORE_GREEN_FROZEN_CAP_SECS
+        kill_to_marker = (marker - failed_at).total_seconds()
+        if _is_graceful_sigterm_exit(unit):
+            # REL-202: the ambiguous 143 shape is collateral only when the
+            # green marker landed within minutes of the kill (a journalled
+            # in-flight window is handled below).
+            return 0 <= kill_to_marker <= GRACEFUL_EXIT_MARKER_DWELL_SECS
+        return 0 <= kill_to_marker <= KILL_BEFORE_GREEN_FROZEN_CAP_SECS
     if deploy.get("in_flight") and not _journal_is_stranded(deploy):
         return age <= DEPLOY_COLLATERAL_WINDOW_SECS
     if marker is None:
