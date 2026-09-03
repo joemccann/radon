@@ -424,6 +424,19 @@ def load_nav_from_disk() -> Optional[Dict[str, float]]:
             nav = _nav_rows_to_map(_json.loads(path.read_text()))
         except (_json.JSONDecodeError, OSError, AttributeError):
             continue
+        # REL-215 (R-587): a corrupted FUTURE key (2027-01-01) passed the
+        # old-age budget trivially and, because freshness selection is
+        # max(date-string), beat Turso forever. NAV is a report of a day
+        # that happened; drop anything dated past today.
+        today_iso = _date.today().isoformat()
+        future_keys = [key for key in nav if key > today_iso]
+        if future_keys:
+            print(
+                f"[perf_twr] Dropping {len(future_keys)} future-dated NAV "
+                f"key(s) from {path}: {sorted(future_keys)}",
+                file=_sys.stderr,
+            )
+            nav = {key: value for key, value in nav.items() if key <= today_iso}
         if len(nav) < 2:
             continue
         if not _is_within_disk_budget(nav):
