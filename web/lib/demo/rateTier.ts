@@ -15,7 +15,9 @@ const AI_PATHS = new Set<string>([
   "/api/ticker/info",
 ]);
 
-// Expensive scans / aggregations / IB-touching exec, regardless of method.
+// Expensive producers / aggregations / IB-touching exec. Cached GETs are
+// ordinary reads; classifying them here made passive panels spend a 10/hour
+// producer allowance before an operator touched a control.
 const EXPENSIVE_PATTERNS: RegExp[] = [
   /^\/api\/(vcg|gex|cri|leap)\/scan$/,
   /^\/api\/regime(\/|$)/,
@@ -55,7 +57,7 @@ export function classifyRateTier(
   if (normalizedMethod === "GET" && pathname === "/api/headlines") return "G";
   if (normalizedMethod === "GET" && PASSIVE_POLL_PATHS.has(pathname)) return "I";
   if (AI_PATHS.has(pathname)) return "D";
-  if (EXPENSIVE_PATTERNS.some((re) => re.test(pathname))) return "B";
+  if (normalizedMethod !== "GET" && EXPENSIVE_PATTERNS.some((re) => re.test(pathname))) return "B";
   if (WRITE_METHODS.has(normalizedMethod)) return "C";
   return "A";
 }

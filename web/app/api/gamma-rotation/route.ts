@@ -6,8 +6,9 @@ import { join } from "path";
 import { dbExecute } from "@/lib/dbExecute";
 import { cachedRead, invalidateCache } from "@/lib/dbCache";
 import { radonFetch } from "@/lib/radonApi";
-import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
+import { getRequestId, setCacheResponseHeaders, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 import { isGammaRotationStale } from "@/lib/gammaRotationStaleness";
+import { buildDemoGammaRotationFixture } from "@/lib/demo/fixtures/regime";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -164,9 +165,12 @@ function triggerBackgroundScan(): void {
 export const radonCapability = { GET: "read", POST: "read.spawn" };
 
 export async function GET(): Promise<Response> {
-  const access = await requireRouteAccess(undefined, { rate: { key: "gamma-rotation:route", limit: 20, windowMs: 60_000 } });
+  const access = await requireRouteAccess(undefined, { rate: { key: "gamma-rotation:route", limit: 20, windowMs: 60_000 }, durableRateTier: "A" });
   if (!access.ok) return access.response;
   const requestId = getRequestId();
+  if (access.principal.kind === "demo") {
+    return setNoStoreResponseHeaders(NextResponse.json(buildDemoGammaRotationFixture()), requestId);
+  }
   const cached = await readCachedGammaRotation();
   const data = normalizeGammaRotationPayload(cached ?? {});
   const currentMarketOpen = isMarketOpenNow();
@@ -188,8 +192,12 @@ export async function GET(): Promise<Response> {
 }
 
 export async function POST(): Promise<Response> {
-  const access = await requireRouteAccess(undefined, { rate: { key: "gamma-rotation:route", limit: 20, windowMs: 60_000 } });
+  const access = await requireRouteAccess(undefined, { rate: { key: "gamma-rotation:route", limit: 20, windowMs: 60_000 }, durableRateTier: "B" });
   if (!access.ok) return access.response;
+  if (access.principal.kind === "demo") {
+    const requestId = getRequestId();
+    return setNoStoreResponseHeaders(NextResponse.json(buildDemoGammaRotationFixture()), requestId);
+  }
   try {
     const rawData = await radonFetch<Record<string, unknown>>("/gamma-rotation/scan", { method: "POST", timeout: 130_000 });
     invalidateCache("gamma-rotation:snapshot");

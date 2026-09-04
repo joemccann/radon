@@ -79,7 +79,7 @@ function withSessionStaleness(payload: SnapshotPayload): SnapshotPayload {
 export const radonCapability = { GET: "read", POST: "read.spawn" };
 
 export async function GET(request: Request): Promise<Response> {
-  const access = await requireRouteAccess(undefined, { rate: { key: "options/rv-ratio:route", limit: 20, windowMs: 60_000 } });
+  const access = await requireRouteAccess(undefined, { rate: { key: "options/rv-ratio:route", limit: 20, windowMs: 60_000 }, durableRateTier: "A" });
   if (!access.ok) return access.response;
   const parsed = parseSymbol(request);
   if (parsed.response) return parsed.response;
@@ -96,7 +96,7 @@ export async function GET(request: Request): Promise<Response> {
 }
 
 export async function POST(request: Request): Promise<Response> {
-  const access = await requireRouteAccess(undefined, { rate: { key: "options/rv-ratio:route", limit: 20, windowMs: 60_000 } });
+  const access = await requireRouteAccess(undefined, { rate: { key: "options/rv-ratio:route", limit: 20, windowMs: 60_000 }, durableRateTier: "B" });
   if (!access.ok) return access.response;
   const parsed = parseSymbol(request);
   if (parsed.response) return parsed.response;

@@ -7,6 +7,7 @@ import {
   optionsJson,
 } from "../_shared";
 import { boundedTicker, OPTION_EXPIRY_PATTERN } from "@/lib/requestBounds";
+import { buildDemoOptionChain } from "@/lib/demo/fixtures/options";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -14,7 +15,10 @@ export const runtime = "nodejs";
 export const radonCapability = "read";
 
 export async function GET(request: Request): Promise<Response> {
-  const access = await requireRouteAccess(undefined, { rate: { key: "options/chain:route", limit: 20, windowMs: 60_000 } });
+  const access = await requireRouteAccess(undefined, {
+    rate: { key: "options/chain:route", limit: 20, windowMs: 60_000 },
+    durableRateTier: "A",
+  });
   if (!access.ok) return access.response;
   const { searchParams } = new URL(request.url);
   const symbol = boundedTicker(searchParams.get("symbol"));
@@ -25,6 +29,10 @@ export async function GET(request: Request): Promise<Response> {
   }
   if (expiry && !OPTION_EXPIRY_PATTERN.test(expiry)) {
     return optionsJson({ error: "Invalid expiry", code: "BAD_REQUEST" }, 400);
+  }
+
+  if (access.principal.kind === "demo") {
+    return optionsJson({ ...buildDemoOptionChain(symbol, expiry) });
   }
 
   try {

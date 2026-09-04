@@ -78,6 +78,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  vi.unstubAllEnvs();
   vi.unstubAllGlobals();
 });
 
@@ -129,5 +130,22 @@ describe("TickerSearch lazy connect", () => {
     act(() => ws.simulateOpen());
     const searches = ws.sent.map((s) => JSON.parse(s)).filter((m) => m.action === "search");
     expect(searches).toEqual([{ action: "search", pattern: "AAPL" }]);
+  });
+
+  it("resolves demo symbols locally without a ticket, socket, or unavailable alarm", async () => {
+    vi.stubEnv("NEXT_PUBLIC_RADON_DEMO", "1");
+    const onSearchUnavailable = vi.fn();
+    render(<TickerSearch onSelect={vi.fn()} onSearchUnavailable={onSearchUnavailable} />);
+    const input = screen.getByRole("combobox");
+
+    act(() => { fireEvent.focus(input); });
+    act(() => { fireEvent.change(input, { target: { value: "SNDK" } }); });
+    act(() => { vi.advanceTimersByTime(300); });
+    await flush();
+
+    expect(screen.getByText("SNDK")).toBeTruthy();
+    expect(wsInstances).toHaveLength(0);
+    expect(ticketFetches).toBe(0);
+    expect(onSearchUnavailable).not.toHaveBeenCalled();
   });
 });
