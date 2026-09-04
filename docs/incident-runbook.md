@@ -1415,14 +1415,52 @@ heartbeats.** Peak: 2026-08-24 19:30Z, page `60096761…`, 19m silent
   `Result=signal` on units, not this loop.
 - **Remediation (code):** retry capacity shed
   (`ORDERS_SYNC_SHED_RETRIES=2`, `ORDERS_SYNC_SHED_RETRY_DELAY_SECS=8`).
-  Persistent shed heartbeats `ok` over `api.db_http` (R-170: lane full
-  is not a writer fault) so `_check_stale` cannot page; the next 5-min
-  tick retries the sync. Real IB/script misses still do not stamp ok.
-  Do not put `ib_orders.py` on the reserved order lane.
+  Persistent shed heartbeats `warn` over `api.db_http` (R-170: lane full
+  is not a writer fault; R-216: never `ok`) so `_check_stale` cannot page;
+  the next 5-min tick retries the sync. Real misses heartbeat `error`
+  (not `ok`) so silence cannot page. Do not put `ib_orders.py` on the
+  reserved order lane.
 - **Regression:**
   `test_orders_sync_loop.py::test_orders_sync_tick_retries_capacity_shed_then_succeeds`,
-  `test_orders_sync_tick_persistent_capacity_shed_heartbeats_ok`,
-  `test_orders_sync_tick_real_failure_does_not_skip_heartbeat`.
+  `test_orders_sync_tick_capacity_shed_heartbeats_without_claiming_ok`,
+  `test_orders_sync_tick_real_failure_does_not_stamp_ok`.
+- **Code:** `scripts/api/server.py` (`_orders_sync_tick`,
+  `_heartbeat_orders_sync_skip`).
+
+---
+
+## orders-sync-miss-stale
+
+**Autonomous `orders-sync` loop pages P1 `kind=stale` during RTH when
+`ib_orders.py --sync` fails or the FastAPI pool is down while the
+gateway stays up, and the tick never heartbeats.** Peak: 2026-09-04
+16:35Z, page `99dad5ec…`, 15m silent (window 10m) while market open.
+
+- **Mechanism:** `_orders_sync_tick` only heartbeated capacity shed.
+  `service_cycle("orders-sync")` lives inside `ib_orders.py`, so a
+  30s subprocess timeout, a non-shed script miss, or a skip because
+  `_pool_has_any_connection()` is false writes nothing. Two 5-min
+  ticks freeze `updated_at` past the 10-min open window. `/health/lite`
+  stays 200 / authenticated; fill-monitor / portfolio-sync / relay stay
+  fresh; grouping does not fire (`auth_state` is not `awaiting_2fa` /
+  `unreachable`).
+- **Discriminating check:** only `orders-sync` stale; `/health/lite`
+  authenticated; sibling IB writers fresh; radon-api journal
+  `orders-sync loop: sync failed:` (timeout or script error) or
+  `pool disconnected` with the gateway TCP probe still listening.
+  Capacity-shed lines are the sibling case. Grouped IB 2FA /
+  unreachable is a different class. Deploy stop-clean is
+  `Result=signal` on units, not this loop.
+- **Remediation (code):** heartbeat `error` (never `ok`) on a non-shed
+  miss and on a pool skip while the gateway TCP probe is up, so
+  `_check_stale` cannot page silence and the error bucket names the
+  miss. Gateway down / `upstream_dead` stays silent so IB-outage
+  grouping can still page stale. Do not restart-flap.
+- **Regression:**
+  `test_orders_sync_loop.py::test_orders_sync_tick_script_timeout_heartbeats_error`,
+  `test_orders_sync_tick_pool_disconnected_gateway_up_heartbeats`,
+  `test_orders_sync_tick_skips_when_pool_disconnected`,
+  `test_orders_sync_tick_real_failure_does_not_stamp_ok`.
 - **Code:** `scripts/api/server.py` (`_orders_sync_tick`,
   `_heartbeat_orders_sync_skip`).
 
