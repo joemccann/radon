@@ -37,3 +37,64 @@ class TestScheduledFullHistoryScan:
     def test_the_binary_is_checksum_pinned(self):
         src = WORKFLOW.read_text()
         assert "sha256sum --check" in src
+
+
+# ── T-415: parse the workflow, do not substring it ────────────────────
+#
+# Every assertion above is a substring over the raw file: `"issue" in src`
+# matches `issues: write`, a comment or a step name, and `"gitleaks detect"
+# in src` says nothing about which config or args the command actually
+# runs. Parse the YAML and read the argv.
+
+
+def _workflow() -> dict:
+    import yaml
+
+    return yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+
+
+def _triggers(workflow: dict) -> dict:
+    # YAML 1.1 resolves the bare key `on` to the boolean True.
+    return workflow.get("on", workflow.get(True))
+
+
+def _steps(workflow: dict) -> list[dict]:
+    jobs = workflow["jobs"]
+    assert len(jobs) == 1, sorted(jobs)
+    return next(iter(jobs.values()))["steps"]
+
+
+def _argv(step: dict) -> list[str]:
+    import shlex
+
+    return shlex.split(step.get("run", ""))
+
+
+class TestWorkflowIsParsed:
+    def test_it_is_scheduled_with_a_cron(self):
+        schedule = _triggers(_workflow())["schedule"]
+        assert schedule and schedule[0]["cron"].strip()
+
+    def test_the_detect_step_passes_the_repo_config_as_a_parsed_token(self):
+        steps = _steps(_workflow())
+        def _is_detect(step: dict) -> bool:
+            argv = _argv(step)
+            return any(
+                argv[i] == "gitleaks" and argv[i + 1] == "detect"
+                for i in range(len(argv) - 1)
+            )
+
+        detect = [step for step in steps if _is_detect(step)]
+        assert len(detect) == 1, [step.get("name") for step in detect]
+        argv = _argv(detect[0])
+        assert "--log-opts" not in argv
+        idx = argv.index("--config")
+        assert argv[idx + 1] == "cloud/.gitleaks.toml", argv
+
+    def test_the_failure_step_actually_opens_an_issue(self):
+        steps = _steps(_workflow())
+        failure = [step for step in steps if str(step.get("if", "")).strip() == "failure()"]
+        assert len(failure) == 1, [step.get("name") for step in steps]
+        argv = _argv(failure[0])
+        for token in ("gh", "issue", "create"):
+            assert token in argv, argv
