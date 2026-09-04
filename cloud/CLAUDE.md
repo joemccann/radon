@@ -245,7 +245,7 @@ Immutable runners under `~/.radon-deploy-runners/` are extracted `a-w`.
 - Setup validates the stable env before dependency installation or builds.
 - Host needs the exact Bun pin on radon PATH for staged Next builds.
 
-**IB Flex / Gateway env (Hetzner `/home/radon/radon-cloud/.env` mode `0600`; moved from root `CLAUDE.md`):** `IB_FLEX_TOKEN`, `IB_FLEX_QUERY_ID=1422766` (blotter), `IB_FLEX_NAV_QUERY_ID=1442520` (Activity query "Equity Summary in Base"; carries THREE sections — NAV in Base, Cash Transactions and Transfers — don't repurpose for trade pulls), `IB_GATEWAY_MODE=cloud` (production; FastAPI must not own Compose), `IB_GATEWAY_COMPOSE_DIR=/home/radon/radon/cloud` (monorepo path; not `~/radon-cloud`), `RADON_MODE=hetzner`.
+**IB Flex / Gateway env (Hetzner `/etc/radon/env` mode `0640`, owner `root:radon`; moved from root `CLAUDE.md`):** `IB_FLEX_TOKEN`, `IB_FLEX_QUERY_ID=1422766` (blotter), `IB_FLEX_NAV_QUERY_ID=1442520` (Activity query "Equity Summary in Base"; carries THREE sections — NAV in Base, Cash Transactions and Transfers — don't repurpose for trade pulls), `IB_GATEWAY_MODE=cloud` (production; FastAPI must not own Compose), `IB_GATEWAY_COMPOSE_DIR=/home/radon/radon/cloud` (monorepo path; not `~/radon-cloud`), `RADON_MODE=hetzner`.
 
 **Verify Flex query ids against the real env before trusting one written down anywhere** — a stale id documented here once pointed the runbook at a query that does not exist for this account. `IB_FLEX_FLOWS_QUERY_ID` is deliberately unset: `_flows_query_id()` falls back to the NAV id and `resolve_flows` reuses the one fetched document, so a run makes ONE Flex request. Setting it to a second id doubles the request rate against a token that has already taken a 24h-to-168h throttle embargo.
 
@@ -291,7 +291,9 @@ sudoers verb still needs one `bootstrap-control-plane.sh`. After that
 verb is installed, helper/sudoers/polkit edits deploy without root SSH.
 
 The drift audit runs from `/home/radon/radon/cloud` and compares live Caddy,
-Compose, systemd, polkit, sudoers, and installed helpers with this source. It
+Compose, systemd, polkit, sudoers, and installed helpers with this source; on
+`RADON_HOST_ROLE=app` the Compose and `ib-gateway-control` surfaces are
+role-skipped because Gateway runtime surfaces are absent by design there. It
 must never read or report `.env*` contents.
 
 `radon-health.service` remains runtime-isolated from the trading cascade: no

@@ -389,7 +389,10 @@ JSON-RPC), documented for consumers at radon.run `/developers/mcp`.
   `/etc/radon/mcp.env`, a stripped file `deploy.sh:write_mcp_env` (and
   `setup-vps.sh`) derives from `/etc/radon/env` on every deploy; the unit
   never loads the full secret set and runs with `/etc/radon/env`
-  inaccessible. Optional overrides `RADON_MCP_{HOST,PORT,SITE_BASE,EDGE_BASE,APP_BASE,DEMO_BASE}`
+  inaccessible. The stripped env and sandbox are landed in the repo only; the
+  live unit still differs until an operator installs the root copy, which
+  `cloud/config/drift-allowlist.conf` carries as a
+  `unit-mismatch:radon-mcp.service` entry expiring 2026-10-31. Optional overrides `RADON_MCP_{HOST,PORT,SITE_BASE,EDGE_BASE,APP_BASE,DEMO_BASE}`
   and `RADON_MCP_ALLOWED_HOSTS` (comma list; default
   `app.radon.run,app.radon.run:*,127.0.0.1:*,localhost:*` — the SDK's
   DNS-rebinding protection 421s any Host not on it, so a serving-host change
@@ -766,7 +769,9 @@ and, from the Activity branch of `flex_delivery_ingest`, `cash-flow-sync`
 (`ok` when `cash_flow_sync --from-file` succeeds or an already-applied
 statement is re-pulled, `error` with the exit code when it fails; a
 duplicate-only run is still a stale-remote `error` on `flex-pull`, R-389,
-but not on `cash-flow-sync`). Stripped env
+but not on `cash-flow-sync`; once any file heartbeats `error`, later `ok`
+heartbeats in the same run are suppressed, so the row reports the batch's
+worst outcome, REL-210). Stripped env
 `/var/lib/radon/flex-secrets/env` (no `TWS_PASSWORD`). Units on
 `auto-sync-units.txt`.
 
