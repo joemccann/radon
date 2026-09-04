@@ -224,6 +224,21 @@ def check_service(*, service: str, kind: str, now: datetime, market_state: str) 
     return _check_stale(service=service, health=health, now=now, market_state=market_state)
 
 
+def error_text(blob: Any) -> str:
+    """Operator-facing text from a writer's error blob.
+
+    Writers disagree on the key: `drift_audit` writes `summary`,
+    FastAPI paths write `detail`, reconcile writes `reason`.
+    """
+    if not isinstance(blob, dict):
+        return ""
+    for key in ("message", "summary", "detail", "reason"):
+        value = blob.get(key)
+        if value:
+            return str(value)
+    return ""
+
+
 def _embargo_deadline(err: Any) -> Optional[datetime]:
     """The writer's own next-attempt deadline from its error payload, or None.
 
@@ -262,7 +277,7 @@ def _check_error(*, service: str, health: Optional[dict], now: datetime, market_
         err = json.loads(err_blob) if isinstance(err_blob, str) else err_blob
     except json.JSONDecodeError:
         err = {}
-    err_msg = err.get("message") if isinstance(err, dict) else None
+    err_msg = error_text(err)
     decision = cooldown_mod.record_failure_and_decide(service=service, kind="error", now=now)
     severity = _resolve_severity(service=service, kind="error", market_state=market_state)
     msg = f"in error state: {err_msg or 'unknown'}"
