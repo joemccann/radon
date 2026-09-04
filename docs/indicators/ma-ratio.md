@@ -156,7 +156,9 @@ migration executed into in-memory sqlite.
   `fromDisk` = `data/ma_ratio.json`, fresher content timestamp wins.
 - `MAX_AGE_MS = 48h` — daily 22:45 UTC timer with slack; older than 48h means the
   writer is down, not merely between runs. Missing contract: HTTP 200 + frozen
-  `{ missing: true, scan_time: null, data_date: null, current: null, series: [], zone: null }`.
+  `{ missing: true, scan_time: null, data_date: null, current: null, series: [], zone: null }`;
+  past 48h the route serves `staleCollapse(MISSING_MA_RATIO, result)`, i.e. that
+  same shape plus `stale: true` and the last-good `scan_time`.
 - `setCacheResponseHeaders(..., { maxAgeSeconds: 300, staleWhileRevalidateSeconds: 3600, tags: ["ma-ratio"] })`.
 - `web/lib/maRatio.ts`: types + pure helpers (`maRatioStateLabel(ratio)`,
   `maRatioZoneTurnUp(series)`, formatters, `MA_RATIO_ZONE = { low: 0.25, high: 0.5 }`).
