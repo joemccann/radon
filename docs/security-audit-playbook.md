@@ -93,6 +93,9 @@ line here whenever you ship a security fix.**
 - **CI supply chain** — third-party GitHub Actions SHA-pinned; the gitleaks binary
   download is SHA256-verified; `requirements.txt` pinned to the VPS's running
   versions. (`feedback_pin_requirements_to_vps_not_laptop`)
+- **Weekly full-history secret scan** — `.github/workflows/gitleaks-history.yml`
+  rescans the entire fetched history every Monday, pages via a `security`-labeled
+  GitHub issue on failure, and never blocks a merge.
 - **CORS explicit allowlist** — FastAPI CORS uses `allow_origins=[...]` (explicit
   hosts), NOT a `https://.*\.radon\.run` wildcard regex (which a subdomain
   takeover could ride). `allow_credentials` stays False.
