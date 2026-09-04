@@ -612,6 +612,11 @@ finish.
 | T-438 | DONE | `4f016f2a` | New `test_a_changed_heldout_spec_carries_a_dated_ledger_annotation`: local-git-only merge-base (`RADON_E2E_CURATION_BASE` → `$GITHUB_BASE_REF` → `origin/main` → `main`), never fetches, clean skip with a stated reason when none resolve. RED with annotations removed and with a stale date. Fired for real on landing — both specs were modified today against a 2026-09-03 stamp — and the annotations were re-stamped with the `next start` evidence. |
 | T-439 | DONE | `4f016f2a` | Neither hypothesis. Traced with `bash -x`: the script reaches `return 71` → `exit 71` → `cleanup_runtime_credential` → `rmdir`; untraced run gives `rc=71 t=18.13s, credential dir exists: False`. The cost is `start_notify_proxy`'s 50 × forked `sleep 0.1` (11.66 s on darwin, ~5 s on Linux) against a 10 s harness timeout. `timeout` threaded through `_run`, 90 s at this one call site, `/usr/bin/false` for portability. Reverting to 10 s reproduces the `TimeoutExpired`. The bind-poll latency itself is untouched and is why this is one bad day from flaking on Linux. |
 
+Closing gates x3 (serial, detached script; load 2-7): pytest `11492 passed, 1 skipped, 90 deselected, 0 failed` x3 (1578s / 1611s / 1641s); vitest `855 files, 8667 passed, 0 failed` x3; cloud `34 failed, 1646 passed, 6 skipped` x3 with the FAILED lists byte-identical across all three rounds and ZERO new entries against this cycle's audit round-1 baseline (darwin bash-3.2 / missing-caddy class, T-118). Five baseline entries are gone: the two `test_app_runtime.py` reds T-439 fixed, plus three that had been load artifacts in the audit round. New darwin cloud baseline: **34**. Tree clean after every gate (T-275); zero runner secrets in any gate log (T-381).
+
+A first launch of this closing gate reported `75 failed` and every one was an artifact of the launcher, not the tree: `nohup env -i` with a minimal `PATH` left `node`, `openssl` and `launchctl` unreachable, so the weekend-wrapper, loop-launcher and mTLS gateway-remote suites failed on missing binaries. The same 8 files were `257 passed` in a normal shell. Discarded and relaunched with a full `PATH`.
+
+
 ## Remediation 2026-09-03 — branch testing/2026-09-03 (PR #260)
 
 | Task | Status | Commits | Evidence |
