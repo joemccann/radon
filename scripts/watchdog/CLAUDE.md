@@ -62,3 +62,9 @@ Verified against each writer's source code in `test_services.py`. UW-only / Flex
 ## Auto-Heal on Recovery
 
 When IB transitions from `awaiting_2fa` → `authenticated`, the handler clears stale `service_health` rows for `requires_ib=true` services. Watchdog-alerts is intentionally NOT in scope (separate writer-semantics fix). Commit 5aea4ec.
+
+---
+
+## Digest Error Text
+
+`error_text()` (`check.py`) renders a writer's error blob by taking the first non-empty of `message` > `summary` > `detail` > `reason` — writers disagree on the key (`drift_audit` writes `summary`, FastAPI paths write `detail`, reconcile writes `reason`). A writer supplying none of the four renders `in error state: unknown`.
