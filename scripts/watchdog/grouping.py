@@ -56,7 +56,7 @@ from urllib import request as urllib_request
 from . import cooldown as cooldown_mod
 from . import notify
 from . import services as services_mod
-from .check import CheckOutcome
+from .check import CheckOutcome, error_text
 
 
 log = logging.getLogger("watchdog.grouping")
@@ -151,7 +151,7 @@ def _parse_error_text(raw: object) -> str:
     if raw is None:
         return ""
     if isinstance(raw, dict):
-        return str(raw.get("message") or raw.get("detail") or "")
+        return error_text(raw)
     text = str(raw).strip()
     if not text:
         return ""
@@ -161,7 +161,7 @@ def _parse_error_text(raw: object) -> str:
         except (json.JSONDecodeError, TypeError):
             return text
         if isinstance(parsed, dict):
-            return str(parsed.get("message") or parsed.get("detail") or text)
+            return error_text(parsed) or text
     return text
 
 

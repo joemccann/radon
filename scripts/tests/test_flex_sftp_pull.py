@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
@@ -387,7 +387,8 @@ def test_run_without_ingest_drives_default_ingest(tmp_path, monkeypatch):
     """The production wiring: `run()` with no `ingest=` must reach the writers. T-259.
 
     The re-pull of the same bytes is the R-389 stale-remote case: after the
-    cutover a duplicate-only run is an error, not progress. T-318.
+    cutover a duplicate-only run whose newest statement period is stale is an
+    error, not progress. T-318/R-448.
     """
     import flex_delivery_ingest
     import flex_sftp_pull as pull
@@ -533,3 +534,84 @@ def test_retain_newest_gpg_prunes_pgp_names(tmp_path):
         "U4698258.Trade_History.20260903.20260903.xml.pgp",
         "U4698258.Trade_History.20260904.20260904.xml.pgp",
     ]
+
+
+# --- R-448: an idempotent re-pull of the CURRENT statement is not a stoppage --
+
+_NOW_ET = datetime.now(ZoneInfo("America/New_York")).replace(
+    hour=8, minute=30, second=0, microsecond=0
+)
+
+
+def _statement_xml(period_end: "date") -> bytes:
+    stamp = period_end.strftime("%Y%m%d")
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<FlexQueryResponse queryName="Trade Confirmation" type="TC">'
+        '<FlexStatements count="1">'
+        f'<FlexStatement accountId="U0000000" fromDate="{stamp}" toDate="{stamp}"'
+        ' period="LastBusinessDay" whenGenerated="20260805;073000">'
+        '<Trades>'
+        f'<Trade accountId="U0000000" symbol="NAK" assetCategory="STK" tradeDate="{stamp}"'
+        f' dateTime="{stamp};115321" quantity="-18628" tradePrice="1.585" buySell="SELL"'
+        ' ibCommission="-1.25" tradeID="9998092102" />'
+        '</Trades>'
+        '</FlexStatement>'
+        '</FlexStatements>'
+        '</FlexQueryResponse>'
+    ).encode()
+
+
+def _duplicating_ingest():
+    seen: set[str] = set()
+
+    def ingest(xml_text, source_path=None, **kwargs):
+        outcome = "duplicate" if xml_text in seen else "applied"
+        seen.add(xml_text)
+        return {"ok": True, "outcome": outcome}
+
+    return ingest
+
+
+def _pull_twice(tmp_path, monkeypatch, period_end):
+    import flex_sftp_pull as pull
+
+    heartbeats = []
+    monkeypatch.setattr(
+        pull, "_heartbeat", lambda state, error=None: heartbeats.append((state, error))
+    )
+    config = _ssh_config(tmp_path / "ssh_config")
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    fake = FakeSftp({"trades.gpg": _statement_xml(period_end)})
+    ingest = _duplicating_ingest()
+    codes = [
+        pull.run(
+            config=config,
+            inbox=inbox,
+            runner=fake,
+            decrypt=lambda data, **k: data.decode(),
+            ingest=ingest,
+            now=_NOW_ET,
+        )
+        for _ in range(2)
+    ]
+    return codes, heartbeats
+
+
+def test_duplicate_repull_of_current_statement_is_ok(tmp_path, monkeypatch):
+    from utils.market_calendar import last_completed_session_date
+
+    current = date.fromisoformat(last_completed_session_date(_NOW_ET))
+    codes, heartbeats = _pull_twice(tmp_path, monkeypatch, current)
+
+    assert codes == [0, 0]
+    assert heartbeats[-1][0] == "ok"
+
+
+def test_stale_remote_still_errors(tmp_path, monkeypatch):
+    codes, heartbeats = _pull_twice(tmp_path, monkeypatch, _NOW_ET.date() - timedelta(days=10))
+
+    assert codes[-1] == 1
+    assert heartbeats[-1][0] == "error"
+    assert "stopped delivering" in str(heartbeats[-1][1])

@@ -340,6 +340,50 @@ class TestMainExitAndHealth(unittest.TestCase):
         self.assertIn("quantity_mismatch_count", recorded[0][1])
         self.assertEqual(recorded[0][1]["quantity_mismatch_count"], 1)
 
+    def test_ib_unreachable_health_detail_has_message(self):
+        recorded = []
+        with patch.object(ib_reconcile, "connect_ib", return_value=None), patch.object(
+            ib_reconcile, "_record_health", side_effect=lambda s, d: recorded.append((s, d))
+        ):
+            with self.assertRaises(SystemExit):
+                ib_reconcile.main()
+        self.assertIn("unreachable", recorded[0][1]["message"])
+
+    def test_attention_health_detail_has_message(self):
+        client = MagicMock()
+        recorded = []
+        ib_positions = [_ib_opt("AAOI", 5, 10.0, "C", LIVE_EXPIRY_IB)]
+        portfolio = {
+            "positions": [
+                _local_position("AAOI", 3, "LONG", 10.0, "Call", LIVE_EXPIRY_SNAPSHOT)
+            ]
+        }
+        with patch.object(ib_reconcile, "connect_ib", return_value=client), patch.object(
+            ib_reconcile, "load_trade_log", return_value={"trades": []}
+        ), patch.object(
+            ib_reconcile, "load_portfolio_snapshot", return_value=portfolio
+        ), patch.object(
+            ib_reconcile, "fetch_ib_executions", return_value=[]
+        ), patch.object(
+            ib_reconcile, "fetch_ib_positions", return_value=ib_positions
+        ), patch.object(
+            ib_reconcile, "save_reconciliation_report"
+        ), patch.object(
+            ib_reconcile, "_record_health", side_effect=lambda s, d: recorded.append((s, d))
+        ):
+            ib_reconcile.main()
+        self.assertIn("quantity mismatch", recorded[0][1]["message"])
+
+    def test_drift_message_counts_new_trades(self):
+        """needs_attention flips on new_trades alone; the digest line must say so."""
+        detail = {
+            "new_trades_count": 4,
+            "quantity_mismatch_count": 0,
+            "positions_missing_locally_count": 0,
+            "positions_closed_count": 0,
+        }
+        self.assertIn("4 new trade(s)", ib_reconcile._drift_message(detail))
+
 
 class TestPositionReconcileHandler(unittest.TestCase):
     def _make_handler(self, ib_positions, portfolio, connect_ok=True):
@@ -373,6 +417,23 @@ class TestPositionReconcileHandler(unittest.TestCase):
         self.assertEqual(state, "error")
         self.assertEqual(kwargs["error"]["quantity_mismatch_count"], 1)
         client.disconnect.assert_called_once()
+
+    def test_error_health_blob_carries_operator_message(self):
+        handler, _ = self._make_handler(
+            [_ib_opt("AAOI", 5, 10.0, "C", LIVE_EXPIRY_IB)],
+            {"positions": [_local_position("AAOI", 3, "LONG", 10.0, "Call", LIVE_EXPIRY_SNAPSHOT)]},
+        )
+        handler.execute()
+        message = handler.record_cycle_health.call_args[1]["error"]["message"]
+        self.assertIn("quantity mismatch", message)
+
+    def test_clean_run_writes_no_error_blob(self):
+        handler, _ = self._make_handler(
+            [_ib_opt("CRCL", 40, 110.0, "C", LIVE_EXPIRY_IB)],
+            {"positions": [_local_position("CRCL", 40, "LONG", 110.0, "Call", LIVE_EXPIRY_SNAPSHOT)]},
+        )
+        handler.execute()
+        self.assertIsNone(handler.record_cycle_health.call_args[1]["error"])
 
     def test_ok_heartbeat_when_clean(self):
         handler, client = self._make_handler(
