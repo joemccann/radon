@@ -594,3 +594,18 @@ finish.
 
 P2s T-392…T-407 DEFERRED. Closing 3× gate counts below.
 Closing gates ×3 (serial, detached script; reliability loop's cycle concurrent, load 4-9): pytest `10896 passed, 1 skipped` ×3; vitest `8604 passed / 851 files, 0 failed` ×3; cloud `35 failed, 1537 passed, 6 skipped` ×3 with FAILED lists byte-identical to each other AND to this cycle's audit round-1 baseline (darwin bash-3.2/caddy class, T-118). Tree clean after gates (T-275); zero runner secrets in gate logs (T-381).
+
+## 2026-09-04 — audit phase (testing/2026-09-04)
+
+| Item | Result |
+|---|---|
+| Range | `0202e32d..2b936ebc` — 50 commits / 282 files / +17076−1128 |
+| Findings | 31 new (T-409…T-439): 2 P0, 10 P1, 19 P2 |
+| pytest (round 1) | 11546 passed, 0 failed, 1 skipped — 2617s (load sample; reliability loop mid-gate) |
+| vitest (round 1) | 855 files, 8627 passed, 0 failed, 18 skipped |
+| cloud (round 1) | 37 failed, 1634 passed, 7 skipped (darwin) |
+| cloud base `0202e32d` | 38 failed, 1532 passed — 2 fixed in range, 1 new (T-439) |
+| Round 2 | STOPPED at the phase cap; delta-touched determinism re-runs not run (133 test files ≈ full suite) |
+| Collection union | CLEAN ×3 (pytest 595=595, cloud 49=49, all 41 new test files in a CI path set) |
+| Tree after gates | clean ×3 (T-275 sweep) |
+| Gate enforcement | `deploy:` identical base→HEAD; thresholds unmoved; 0 new skips; `main` still has no `required_status_checks` (T-222) |
