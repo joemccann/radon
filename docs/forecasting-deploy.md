@@ -60,7 +60,8 @@ runbook](monorepo-cloud-migration.md) for the main VPS control-plane procedure.
 The dedicated-host transaction must preserve these invariants:
 
 - `WorkingDirectory=/home/radon/radon`, from the same monorepo SHA as `cloud/`.
-- `EnvironmentFile=/home/radon/radon-cloud/.env`, mode `0600`; never copy its
+- `EnvironmentFile=/etc/radon/env`, mode `0640` `root:radon`
+  (`/home/radon/radon-cloud/.env` is the compatibility symlink); never copy its
   values into the checkout.
 - `RADON_DB_NO_REPLICA=1` to use the direct cloud database path.
 - `ExecStart` uses `/home/radon/forecasting-venv/bin/python` and the canonical
