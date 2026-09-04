@@ -52,6 +52,7 @@ dashboard-feed-tabs.spec.ts
 dashboard-panel-chrome.spec.ts
 dashboard-vol-cone-hero.spec.ts
 day-move-ib-daily-pnl.spec.ts
+demo-headlines.spec.ts
 dispersion-tab.spec.ts
 divyield-tab.spec.ts
 dollar-delta-leverage.spec.ts
@@ -188,3 +189,6 @@ ws-connection-stability.spec.ts
 #   needs a seeded open combo order the CI fixture does not provide). T-427/T-437
 #   moved it onto testids and a window-relative expiry; run locally under
 #   `next start` (4 passed) with screenshots captured.
+# REVIEWED 2026-09-04 demo-headlines.spec.ts — held out because it requires the
+#   demo build-time flag. Demo compile passed; Chromium passed locally with an
+#   inspected dashboard screenshot. Unit contracts remain in the CI Vitest gate.
