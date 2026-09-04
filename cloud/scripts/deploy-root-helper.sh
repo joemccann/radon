@@ -201,6 +201,11 @@ readonly CONTROL_PLANE_READY="${CONTROL_PLANE_ROOT}/var/lib/radon/control-plane-
 readonly GATEWAY_TRANSITION_FILE="${CONTROL_PLANE_ROOT}/var/lib/radon/ib-gateway-transition.json"
 readonly LOGICAL_CONTROL_PLANE_MANIFEST="/var/lib/radon/control-plane-manifest.sha256"
 
+# Where control-plane bytes are read from. refresh_control_plane repoints this
+# at a root-owned staging copy of the git blobs for the deployed commit, so the
+# radon-writable checkout is never the source of a root install.
+CONTROL_PLANE_SOURCE_ROOT="$CLOUD_SOURCE"
+
 [[ "${#CONTROL_PLANE_SOURCES[@]}" -eq "${#CONTROL_PLANE_TARGETS[@]}" && \
    "${#CONTROL_PLANE_SOURCES[@]}" -eq "${#CONTROL_PLANE_MODES[@]}" ]] || {
   echo "internal control-plane contract is inconsistent" >&2
@@ -1388,7 +1393,7 @@ write_control_plane_manifest_and_ready() {
     dest="${CONTROL_PLANE_ROOT}${CONTROL_PLANE_TARGETS[$index]}"
     if app_skips_control_plane_source "$source_rel" && \
        [[ ! -f "$dest" || -L "$dest" ]]; then
-      digest="$(file_sha256 "${CLOUD_SOURCE}/${source_rel}")" || {
+      digest="$(file_sha256 "${CONTROL_PLANE_SOURCE_ROOT}/${source_rel}")" || {
         "$RM" -f "$tmp_manifest"
         return 73
       }
@@ -1402,7 +1407,7 @@ write_control_plane_manifest_and_ready() {
       # manifest entry. R-380.
       case "$source_rel" in
         services/*.service.d/*.conf)
-          [[ -f "${CLOUD_SOURCE}/${source_rel}" ]] || continue
+          [[ -f "${CONTROL_PLANE_SOURCE_ROOT}/${source_rel}" ]] || continue
           ;;
       esac
       "$RM" -f "$tmp_manifest"
@@ -1427,14 +1432,93 @@ write_control_plane_manifest_and_ready() {
   "$SYNC" -f "$CONTROL_PLANE_READY"
 }
 
+# The commit whose control-plane bytes this host may install: the local HEAD,
+# required to be reachable from the GitHub main tip. Unlike
+# resolve_trusted_main_tip this does NOT demand HEAD == tip, because a rollback
+# deliberately runs an older release and must install THAT release's control
+# plane, not the newest one. What it refuses is a commit GitHub main has never
+# contained -- a local commit, an amended history, a rewritten branch -- which
+# is what keeps the radon-writable checkout from being an input to a root
+# install.
+resolve_deployed_control_plane_commit() {
+  local remote_sha local_sha
+
+  unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
+        GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_EXEC_PATH GIT_SSH GIT_SSH_COMMAND \
+        GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM \
+        GIT_SSL_NO_VERIFY GIT_HTTP_USER_AGENT GIT_PROXY_COMMAND || true
+
+  [[ -n "$GIT" && -n "$RADON_GIT_DIR" && -n "$UNIT_REMOTE" ]] || {
+    echo "control-plane trust-source paths are not configured" >&2
+    return 78
+  }
+  if [[ "$FORCE_GITHUB_REMOTE_CHECK" == "1" ]]; then
+    github_origin_is_allowed "$UNIT_REMOTE" || {
+      echo "control-plane remote is not the GitHub radon repo" >&2
+      return 76
+    }
+  fi
+  remote_sha="$(git_bounded -c protocol.version=1 ls-remote --refs "$UNIT_REMOTE" refs/heads/main | awk '{print $1}')" || {
+    echo "could not read the GitHub main tip" >&2
+    return 69
+  }
+  [[ "$remote_sha" =~ ^[0-9a-f]{40}$ ]] || {
+    echo "invalid GitHub main tip" >&2
+    return 69
+  }
+  local_sha="$(git_bounded --git-dir="$RADON_GIT_DIR" rev-parse HEAD)" || {
+    echo "could not read local HEAD" >&2
+    return 66
+  }
+  [[ "$local_sha" =~ ^[0-9a-f]{40}$ ]] || {
+    echo "invalid local HEAD" >&2
+    return 66
+  }
+  # Ancestry can only be decided against an object this host actually has.
+  # The deploy job fetches main as radon before asking; a missing tip is a
+  # broken deploy, not a licence to install unreviewed bytes.
+  git_bounded --git-dir="$RADON_GIT_DIR" cat-file -e "${remote_sha}^{commit}" || {
+    echo "local git store is missing the main tip" >&2
+    return 66
+  }
+  git_bounded --git-dir="$RADON_GIT_DIR" merge-base --is-ancestor \
+    "$local_sha" "$remote_sha" || {
+    echo "HEAD is not reachable from the GitHub main tip; refusing control-plane refresh" >&2
+    return 76
+  }
+  printf '%s\n' "$local_sha"
+}
+
+# Materializes every control-plane source as a root-owned copy of the git blob
+# at $commit. The checkout working tree is never read: the radon account can
+# write it, and these bytes become /etc/sudoers.d, /usr/local/sbin and unit
+# files. R-084, which install_manifest_units has always honoured and this path
+# did not.
+stage_control_plane_sources() {
+  local commit="$1" staging="$2"
+  local index source_rel staged
+
+  for index in "${!CONTROL_PLANE_SOURCES[@]}"; do
+    source_rel="${CONTROL_PLANE_SOURCES[$index]}"
+    staged="${staging}/${source_rel}"
+    mkdir -p "$(dirname -- "$staged")" || return 73
+    # A source absent at this commit stays absent, so the existing
+    # missing-source arms (drop-in rollback, app-role skip) still decide.
+    if ! git_bounded --git-dir="$RADON_GIT_DIR" cat-file blob \
+      "${commit}:cloud/${source_rel}" > "$staged" 2>/dev/null; then
+      /bin/rm -f -- "$staged"
+      continue
+    fi
+    chmod 0600 "$staged" || return 73
+  done
+}
+
 # Unit-only refresh during deploy. Must not exec bootstrap-control-plane.sh:
 # bootstrap refuses the in-flight app transition journal and the deploy lock.
 # Pending Gateway transition is the only transition that blocks this path.
 refresh_control_plane() {
   local privileged=0
-  local index source_rel source dest installed_hash source_hash mode
-  local -a unit_indexes=()
-  local -a privileged_indexes=()
+  local commit staging rc=0
 
   [[ "${1:-}" == "privileged" ]] && privileged=1
 
@@ -1448,9 +1532,29 @@ refresh_control_plane() {
     return 75
   fi
 
+  commit="$(resolve_deployed_control_plane_commit)" || return $?
+  mkdir -p "$STATE_DIR" || return 73
+  staging="$(mktemp -d "${STATE_DIR}/control-plane-src.XXXXXX")" || return 73
+  chmod 0700 "$staging"
+  CONTROL_PLANE_SOURCE_ROOT="$staging"
+  stage_control_plane_sources "$commit" "$staging" || rc=$?
+  if (( rc == 0 )); then
+    refresh_control_plane_staged "$privileged" || rc=$?
+  fi
+  /bin/rm -rf -- "$staging"
+  CONTROL_PLANE_SOURCE_ROOT="$CLOUD_SOURCE"
+  return "$rc"
+}
+
+refresh_control_plane_staged() {
+  local privileged="$1"
+  local index source_rel source dest installed_hash source_hash mode
+  local -a unit_indexes=()
+  local -a privileged_indexes=()
+
   for index in "${!CONTROL_PLANE_SOURCES[@]}"; do
     source_rel="${CONTROL_PLANE_SOURCES[$index]}"
-    source="${CLOUD_SOURCE}/${source_rel}"
+    source="${CONTROL_PLANE_SOURCE_ROOT}/${source_rel}"
     dest="${CONTROL_PLANE_ROOT}${CONTROL_PLANE_TARGETS[$index]}"
     if app_skips_control_plane_source "$source_rel"; then
       if [[ -f "$dest" && ! -L "$dest" ]]; then
@@ -1502,7 +1606,7 @@ refresh_control_plane() {
 
   for index in ${unit_indexes[@]+"${unit_indexes[@]}"}; do
     source_rel="${CONTROL_PLANE_SOURCES[$index]}"
-    source="${CLOUD_SOURCE}/${source_rel}"
+    source="${CONTROL_PLANE_SOURCE_ROOT}/${source_rel}"
     dest="${CONTROL_PLANE_ROOT}${CONTROL_PLANE_TARGETS[$index]}"
     refresh_install_file "$source" "$dest" 0644 || return $?
     if [[ "$(file_sha256 "$dest")" != "$(file_sha256 "$source")" ]]; then
@@ -1514,7 +1618,7 @@ refresh_control_plane() {
   if (( privileged == 1 )); then
     for index in ${privileged_indexes[@]+"${privileged_indexes[@]}"}; do
       source_rel="${CONTROL_PLANE_SOURCES[$index]}"
-      source="${CLOUD_SOURCE}/${source_rel}"
+      source="${CONTROL_PLANE_SOURCE_ROOT}/${source_rel}"
       dest="${CONTROL_PLANE_ROOT}${CONTROL_PLANE_TARGETS[$index]}"
       mode="${CONTROL_PLANE_MODES[$index]}"
       refresh_install_file "$source" "$dest" "$mode" || return $?
