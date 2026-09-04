@@ -494,7 +494,7 @@ every cash movement, and positions. It is the most sensitive thing Radon touches
    `StateDirectoryMode=0700`, `UMask=0077`, `PrivateTmp=true`, `ProtectHome=read-only`,
    `NoNewPrivileges=true`, `ProtectSystem=strict`. No existing unit uses these. This one should be
    the first.
-7. **All credentials in `/home/radon/radon-cloud/.env`, mode `0600`, via `EnvironmentFile=`.**
+7. **All credentials in `/etc/radon/env`, mode `0640` `root:radon`, via `EnvironmentFile=`.**
    Never `~/.zshrc`, never inside the checkout, never `web/.env`. **Single-quote any value
    containing `$`** or systemd and bash sourcing expand it and the unit fails silently under
    `set -u` (`feedback_env_file_shell_expansion`). Run new keys through `cloud/scripts/check-env.py`.

@@ -26,8 +26,9 @@ never merges; the human merge is the deploy trigger.
    `reliability/<YYYY-MM-DD>` and a PR. The human merge is the
    deploy trigger.
 4. **Never run against the operator's working clone.** Refuse (exit
-   nonzero, say why) unless the file `.radon-weekend-runner` exists in the
-   repo root — that marker means this is the dedicated runner clone.
+   nonzero, say why) unless BOTH `.radon-weekend-runner` and
+   `.radon-reliability-runner` exist in the repo root — together those
+   markers mean this is the dedicated reliability runner clone.
 5. **Respect the frozen contracts.** `RELIABILITY_AUDIT.md` finding IDs
    (R-###) and backlog IDs (REL-###) continue their numbering; never
    renumber or rewrite prior entries. `RELIABILITY_LOG.md` is append-only.

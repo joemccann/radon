@@ -64,8 +64,9 @@ path.
 
 Violating any rail is a failed run.
 
-1. **Use only the dedicated runner clone.** Refuse to run unless
-   `.radon-weekend-runner` exists at the repository root. The intended clone
+1. **Use only the dedicated runner clone.** Refuse to run unless BOTH
+   `.radon-weekend-runner` and `.radon-ci-performance-runner` exist at the
+   repository root. The intended clone
    is `~/radon-weekend/radon-ci-performance`. Never use the operator clone or
    the testing/reliability loop clones.
 2. **Take an exclusive loop lock.** Refuse or exit cleanly if another
