@@ -10,7 +10,7 @@ export const runtime = "nodejs";
 export const radonCapability = "internal";
 
 export async function POST(request: Request): Promise<Response> {
-  const access = await requireRouteAccess(request, { rate: { key: "share-generator", limit: 10, windowMs: 60_000 } });
+  const access = await requireRouteAccess(request, { rate: { key: "share-generator", limit: 10, windowMs: 60_000 }, durableRateTier: "B" });
   if (!access.ok) return access.response;
   const limit = rateLimit(clientIp(request), { limit: SHARE_CARD_LIMIT, windowMs: SHARE_WINDOW_MS });
   if (!limit.ok) {

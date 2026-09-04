@@ -525,7 +525,7 @@ export default function WorkspaceShell({ section, tickerParam, initialPortfolio 
 
   // R-149: no snapshot at all is a BLACKOUT, and "Awaiting first sample" read
   // as a benign startup state for the rest of the session.
-  const syncLabel = lastSync
+  const syncLabel = isDemoMode ? "Sample snapshot" : lastSync
     ? `Last sample ${new Date(lastSync).toLocaleTimeString([], { hour12: false })}`
     : error
       ? "Sync failed. Reconstruction incomplete."
@@ -580,19 +580,21 @@ export default function WorkspaceShell({ section, tickerParam, initialPortfolio 
           onSyncNow={syncNow}
         >
           {!isOptionsWorkspace ? <div className="sync-controls">
-            <span className={`sync-status ${error || snapshotState === "unknown" ? "sync-error" : syncing ? "sync-active" : ""}`}>
+            <span className={`sync-status ${!isDemoMode && (error || snapshotState === "unknown") ? "sync-error" : syncing ? "sync-active" : ""}`}>
               {syncLabel}
             </span>
-            <button
-              type="button"
-              className="sync-button"
-              onClick={syncNow}
-              disabled={syncing}
-              title={`Sync ${syncTarget} from IB Gateway`}
-            >
-              <RefreshCw size={14} className={syncing ? "spin" : ""} />
-              {syncing ? "Syncing…" : "Sync Now"}
-            </button>
+            {!isDemoMode ? (
+              <button
+                type="button"
+                className="sync-button"
+                onClick={syncNow}
+                disabled={syncing}
+                title={`Sync ${syncTarget} from IB Gateway`}
+              >
+                <RefreshCw size={14} className={syncing ? "spin" : ""} />
+                {syncing ? "Syncing…" : "Sync Now"}
+              </button>
+            ) : null}
           </div> : null}
         </Header>
 

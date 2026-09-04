@@ -14,6 +14,9 @@ import { useWatchlist } from "@/lib/useWatchlist";
 import { useRealtimeAuth } from "@/lib/RealtimeAuthContext";
 import { buildAuthenticatedWebSocketUrl, resolveRealtimeWebSocketUrl } from "@/lib/realtimeSocketAuth";
 import StarToggle from "@/components/StarToggle";
+import { demoSymbolHash } from "@/lib/demo/fixtures/market";
+import { isFuturesRoot } from "@/lib/futuresSymbols";
+import { isIndexSymbol } from "@/lib/indexSymbols";
 
 type SearchResult = {
   conId: number;
@@ -37,12 +40,37 @@ type TickerSearchProps = {
 const MAX_RESULTS = 10;
 const DEBOUNCE_MS = 200;
 const ALLOWED_SEC_TYPES = new Set(["STK", "IND", "FUT"]);
+const DEMO_SEARCH_SYMBOLS = [
+  "AAPL", "AMAT", "AMD", "COIN", "GOOG", "META", "MSFT", "NEM",
+  "NVDA", "QQQ", "SNDK", "SPY", "TSLA", "VIX",
+];
+
+function demoSearchResults(pattern: string): SearchResult[] {
+  const normalized = pattern.trim().toUpperCase();
+  if (!/^[A-Z][A-Z.]{0,9}$/.test(normalized)) return [];
+  const symbols = [
+    normalized,
+    ...DEMO_SEARCH_SYMBOLS.filter((symbol) => symbol !== normalized && symbol.startsWith(normalized)),
+  ].slice(0, MAX_RESULTS);
+  return symbols.map((symbol) => {
+    const secType = isFuturesRoot(symbol) ? "FUT" : isIndexSymbol(symbol) ? "IND" : "STK";
+    return {
+      conId: demoSymbolHash(symbol),
+      symbol,
+      secType,
+      primaryExchange: secType === "FUT" ? "CME" : secType === "IND" ? "CBOE" : "SMART",
+      currency: "USD",
+      ...(secType === "STK" ? { derivativeSecTypes: ["OPT"] } : {}),
+    };
+  });
+}
 
 const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
   function TickerSearch(
     { onSelect, placeholder = "Search ticker...", className, ariaLabel = "Search ticker", onSearchUnavailable },
     ref,
   ) {
+    const demoMode = process.env.NEXT_PUBLIC_RADON_DEMO === "1";
     const inputRef = useRef<HTMLInputElement>(null);
     const wsRef = useRef<WebSocket | null>(null);
     const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -96,6 +124,7 @@ const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
     /*  WebSocket lifecycle                                                */
     /* ------------------------------------------------------------------ */
     const connectWs = useCallback(() => {
+      if (demoMode) return;
       if (!mountedRef.current) return;
       if (connectingRef.current) return;
       if (
@@ -204,7 +233,7 @@ const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
           reconnectTimerRef.current = setTimeout(connectWs, delay);
         }
       }
-    }, [onSearchUnavailable]);
+    }, [demoMode, onSearchUnavailable]);
 
     // Deliberately no eager connect on mount: this component remounts on every
     // App Router navigation (Header lives in the per-page WorkspaceShell, and
@@ -251,6 +280,12 @@ const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
         activePatternRef.current = pattern.trim().toUpperCase();
 
         debounceRef.current = setTimeout(() => {
+          if (demoMode) {
+            setResults(demoSearchResults(pattern));
+            setLoading(false);
+            pendingPatternRef.current = null;
+            return;
+          }
           const ws = wsRef.current;
           if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ action: "search", pattern: pattern.trim() }));
@@ -270,7 +305,7 @@ const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
           }
         }, DEBOUNCE_MS);
       },
-      [connectWs, onSearchUnavailable],
+      [connectWs, demoMode, onSearchUnavailable],
     );
 
     /* ------------------------------------------------------------------ */

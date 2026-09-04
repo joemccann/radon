@@ -294,7 +294,7 @@ function DataRow({ row }: { row: CtaRow }) {
 export const radonCapability = "read";
 
 export async function GET(request: Request) {
-  const access = await requireRouteAccess(undefined, { rate: { key: "menthorq/cta/image:route", limit: 20, windowMs: 60_000 } });
+  const access = await requireRouteAccess(undefined, { rate: { key: "menthorq/cta/image:route", limit: 20, windowMs: 60_000 }, durableRateTier: "B" });
   if (!access.ok) return access.response;
   const { searchParams } = new URL(request.url);
   const section = searchParams.get("section") ?? undefined;

@@ -21,7 +21,7 @@ export type RoutePrincipal = {
   token?: string;
 };
 
-export type RouteAccessOptions = {
+type RouteAccessCommonOptions = {
   operatorOnly?: boolean;
   /**
    * The route carries its own demo order blockade downstream (paper path or an
@@ -31,9 +31,18 @@ export type RouteAccessOptions = {
    * everywhere else operatorOnly stays fail-closed.
    */
   demoBlockadeRoute?: boolean;
-  rate?: { key: string; limit: number; windowMs: number };
-  durableRateTier?: DemoRateTier;
 };
+
+export type RouteAccessOptions = RouteAccessCommonOptions & (
+  | {
+      rate: { key: string; limit: number; windowMs: number };
+      durableRateTier: DemoRateTier;
+    }
+  | {
+      rate?: never;
+      durableRateTier?: never;
+    }
+);
 
 export type RouteAccessDeps = {
   authFn?: () => Promise<AuthResult>;
@@ -164,10 +173,15 @@ export async function requireRouteAccess(
   // budget above, and backend admission/single-flight controls. Demo traffic
   // additionally consumes its fail-closed cross-instance spend/DOS budget.
   if (options.rate && kind === "demo") {
+    if (!options.durableRateTier) {
+      // TypeScript makes this unreachable for in-repo callers. Keep the
+      // runtime guard for JavaScript or dynamically assembled options so a
+      // new route cannot silently inherit an unrelated quota class.
+      return reject(503, "Rate limit policy unavailable");
+    }
     try {
-      const tier = options.durableRateTier ?? "B";
       const durable = await (deps.durableRateLimitFn ?? demoRateLimit)(
-        tier,
+        options.durableRateTier,
         `route:${options.rate.key}:${userId}`,
       );
       if (!durable.success) {

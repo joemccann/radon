@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { readFile } from "fs/promises";
 import { join } from "path";
-import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
+import { getRequestId, setCacheResponseHeaders, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 import { getDb } from "@/lib/db";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead, staleCollapse, isMissingPayload } from "@/lib/dbFirstRead";
 import { MISSING_TRIN } from "@/lib/trin";
+import { requireRouteAccess } from "@/lib/routeAccess";
+import { buildDemoTrinFixture } from "@/lib/demo/fixtures/regime";
 // Disable Next.js static caching: this handler reads live disk state
 // (data/*.json, cache files). Without this, the framework freezes the
 // first response and serves stale data until the dev server restarts.
@@ -43,7 +45,12 @@ async function readTrinFromDisk(): Promise<TimestampedRead<Record<string, unknow
 export const radonCapability = "read";
 
 export async function GET(): Promise<Response> {
+  const access = await requireRouteAccess();
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
+  if (access.principal.kind === "demo") {
+    return setNoStoreResponseHeaders(NextResponse.json(buildDemoTrinFixture()), requestId);
+  }
   const result = await dbFirstRead({
     fromDb: readTrinFromDb,
     fromDisk: readTrinFromDisk,

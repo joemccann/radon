@@ -67,6 +67,7 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
     showBackgroundError = false,
     loadWhenInactive = true,
   } = config;
+  const isDemoMode = process.env.NEXT_PUBLIC_RADON_DEMO === "1";
 
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
@@ -103,7 +104,7 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
    * pick up the recovery. R-230.
    */
   const armRetry = useCallback((json: T) => {
-    if (!active || !shouldRetry?.(json)) {
+    if (isDemoMode || !active || !shouldRetry?.(json)) {
       retryAttemptRef.current = 0;
       return;
     }
@@ -118,7 +119,7 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
     retryTimeoutRef.current = setTimeout(() => {
       void requestRef.current(retryMethod, true);
     }, delay);
-  }, [active, shouldRetry, retryIntervalMs, maxRetryDelayMs, maxRetryAttempts, retryMethod]);
+  }, [active, isDemoMode, shouldRetry, retryIntervalMs, maxRetryDelayMs, maxRetryAttempts, retryMethod]);
 
   const executeRequest = useCallback(async (method: RetryMethod, background = false) => {
     // R-106: a wedged endpoint (FastAPI blocked on UW / MenthorQ) used to
@@ -174,9 +175,11 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
   requestRef.current = executeRequest;
 
   const triggerSync = useCallback(async () => {
-    const method = hasPost ? "POST" : "GET";
+    // Demo snapshots are read-only. A manual refresh re-reads the deterministic
+    // fixture instead of consuming a producer/mutation quota.
+    const method = hasPost && !isDemoMode ? "POST" : "GET";
     await executeRequest(method, false);
-  }, [executeRequest, hasPost]);
+  }, [executeRequest, hasPost, isDemoMode]);
 
   // Initial fetch — read the cached file once when the hook mounts (unless
   // loadWhenInactive is false and the consumer is inactive). active=false
@@ -218,7 +221,7 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
 
         // Auto-sync on first load when the hook is active. GET-only endpoints
         // already hydrated above — do not immediately re-GET the same cache.
-        if (active && !didInitialSync.current) {
+        if (!isDemoMode && active && !didInitialSync.current) {
           didInitialSync.current = true;
           if (hasPost) void triggerSync();
         }
@@ -227,7 +230,7 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
         setError(err instanceof Error ? err.message : "Unknown error");
         setLoading(false);
         didInitialRead.current = true;
-        if (active && !didInitialSync.current) {
+        if (!isDemoMode && active && !didInitialSync.current) {
           didInitialSync.current = true;
           if (hasPost) void triggerSync();
         }
@@ -235,7 +238,7 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
     };
 
     void init();
-  }, [active, armRetry, clearRetry, endpoint, hasPost, loadWhenInactive, triggerSync, extractTimestamp]);
+  }, [active, armRetry, clearRetry, endpoint, hasPost, isDemoMode, loadWhenInactive, triggerSync, extractTimestamp]);
 
   // If the hook mounted while inactive (with loadWhenInactive), issue the first
   // POST/sync when it later becomes active. When loadWhenInactive is false the
@@ -243,27 +246,29 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
   // Re-activation after the first sync (scanner mode, section still mounted)
   // must kick a fresh producer run — didInitialSync used to swallow that.
   useEffect(() => {
+    if (isDemoMode) return;
     const becameActive = active && !previousActiveRef.current;
     previousActiveRef.current = active;
     if (!becameActive || !didInitialRead.current) return;
     didInitialSync.current = true;
     if (hasPost) void triggerSync();
     else void requestRef.current("GET", true);
-  }, [active, hasPost, triggerSync]);
+  }, [active, hasPost, isDemoMode, triggerSync]);
 
   // Pathname change while this hook stays mounted (regime tabs, ticker
   // swaps). Re-read the cache immediately; do not wait for the interval.
   useEffect(() => {
+    if (isDemoMode) return;
     if (!routeKey || routeKey === lastRouteKeyRef.current) return;
     lastRouteKeyRef.current = routeKey;
     if (!didInitialRead.current) return;
     if (!active && !loadWhenInactive) return;
     void requestRef.current("GET", true);
-  }, [routeKey, active, loadWhenInactive]);
+  }, [routeKey, active, isDemoMode, loadWhenInactive]);
 
   // Auto-sync interval (only when active)
   useEffect(() => {
-    if (!active || interval <= 0) {
+    if (isDemoMode || !active || interval <= 0) {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
@@ -280,7 +285,7 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
       if (intervalRef.current) clearInterval(intervalRef.current);
       clearRetry();
     };
-  }, [active, clearRetry, interval, triggerSync]);
+  }, [active, clearRetry, interval, isDemoMode, triggerSync]);
 
   const syncNow = useCallback(() => {
     void triggerSync();
