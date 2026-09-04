@@ -21,6 +21,39 @@ def trusted_client(monkeypatch, tmp_path):
         server._order_rate_timestamps.clear()
 
 
+class TestCancelAlreadyConfirmed:
+    def test_ib_202_string(self):
+        from scripts.api.server import _cancel_already_confirmed
+
+        assert _cancel_already_confirmed("IB error 202: Order Canceled - reason:")
+
+    def test_ib_202_structured_code(self):
+        from scripts.api.server import _cancel_already_confirmed
+
+        assert _cancel_already_confirmed({
+            "ib_error_code": 202,
+            "ib_error_text": "Order Canceled - reason:",
+            "message": "Order Cancelled — IB error 202: Order Canceled - reason:",
+        })
+
+    def test_already_cancelled(self):
+        from scripts.api.server import _cancel_already_confirmed
+
+        assert _cancel_already_confirmed("Order already Cancelled — cannot cancel")
+
+    def test_filled_is_not_confirmed_cancel(self):
+        from scripts.api.server import _cancel_already_confirmed
+
+        assert not _cancel_already_confirmed("Order already Filled — cannot cancel")
+
+    def test_not_found_is_not_confirmed_cancel(self):
+        from scripts.api.server import _cancel_already_confirmed
+
+        assert not _cancel_already_confirmed(
+            "IB rejected cancel: OrderId that needs to be cancelled is not found"
+        )
+
+
 def _replacement():
     return {
         "type": "combo", "symbol": "SPX", "action": "BUY", "quantity": 1,
@@ -196,3 +229,131 @@ class TestReplaceReservesRateBudgetBeforeCancelling:
 
         assert response.status_code == 200
         cancel.assert_awaited_once()
+
+
+def test_replace_treats_ib_202_cancel_as_confirmed_and_places(trusted_client, monkeypatch):
+    """IB 202 during cancel means the original is already gone.
+
+    The 2026-09-04 combo modify toasted REPLACE_PARTIAL / phase=cancellation
+    with cancelled=[] and never placed. IB later pushed that the order was
+    cancelled. A 202 (or already-Cancelled) from cancel must not abort the
+    replacement.
+    """
+    from scripts.api import server
+
+    monkeypatch.setattr(server, "orders_whatif", AsyncMock(return_value={"status": "ok"}))
+    monkeypatch.setattr(
+        server,
+        "orders_cancel",
+        AsyncMock(side_effect=HTTPException(
+            status_code=502,
+            detail="IB error 202: Order Canceled - reason:",
+        )),
+    )
+    place = AsyncMock(return_value={"status": "ok", "orderId": 99})
+    monkeypatch.setattr(server, "_orders_place_after_rate_reservation", place)
+    server._order_rate_timestamps.clear()
+
+    try:
+        response = trusted_client.post("/orders/replace", json={
+            "cancelOrders": [{"orderId": 10}],
+            "replaceOrder": _replacement(),
+        })
+    finally:
+        server._order_rate_timestamps.clear()
+
+    assert response.status_code == 200
+    place.assert_awaited_once()
+    body = response.json()
+    assert body["cancelled"] == [{"orderId": 10, "permId": None, "status": "Cancelled"}]
+    assert body["orderId"] == 99
+
+
+def test_replace_treats_already_cancelled_as_confirmed_and_places(trusted_client, monkeypatch):
+    from scripts.api import server
+
+    monkeypatch.setattr(server, "orders_whatif", AsyncMock(return_value={"status": "ok"}))
+    monkeypatch.setattr(
+        server,
+        "orders_cancel",
+        AsyncMock(side_effect=HTTPException(
+            status_code=502,
+            detail="Order already Cancelled — cannot cancel",
+        )),
+    )
+    place = AsyncMock(return_value={"status": "ok", "orderId": 8})
+    monkeypatch.setattr(server, "_orders_place_after_rate_reservation", place)
+    server._order_rate_timestamps.clear()
+
+    try:
+        response = trusted_client.post("/orders/replace", json={
+            "cancelOrders": [{"orderId": 10, "permId": 44}],
+            "replaceOrder": _replacement(),
+        })
+    finally:
+        server._order_rate_timestamps.clear()
+
+    assert response.status_code == 200
+    place.assert_awaited_once()
+    assert response.json()["cancelled"][0]["status"] == "Cancelled"
+
+
+def test_replace_still_aborts_on_real_cancel_reject(trusted_client, monkeypatch):
+    from scripts.api import server
+
+    monkeypatch.setattr(server, "orders_whatif", AsyncMock(return_value={"status": "ok"}))
+    place = AsyncMock(return_value={"status": "ok", "orderId": 1})
+    monkeypatch.setattr(
+        server,
+        "orders_cancel",
+        AsyncMock(side_effect=HTTPException(
+            status_code=502,
+            detail="IB rejected cancel: OrderId that needs to be cancelled is not found",
+        )),
+    )
+    monkeypatch.setattr(server, "_orders_place_after_rate_reservation", place)
+    server._order_rate_timestamps.clear()
+
+    try:
+        response = trusted_client.post("/orders/replace", json={
+            "cancelOrders": [{"orderId": 10}],
+            "replaceOrder": _replacement(),
+        })
+    finally:
+        server._order_rate_timestamps.clear()
+
+    assert response.status_code == 502
+    place.assert_not_awaited()
+    detail = response.json()["detail"]
+    assert detail["code"] == "REPLACE_PARTIAL"
+    assert detail["phase"] == "cancellation"
+    assert detail["cancelled"] == []
+
+
+def test_replace_does_not_place_when_original_already_filled(trusted_client, monkeypatch):
+    from scripts.api import server
+
+    monkeypatch.setattr(server, "orders_whatif", AsyncMock(return_value={"status": "ok"}))
+    place = AsyncMock(return_value={"status": "ok", "orderId": 1})
+    monkeypatch.setattr(
+        server,
+        "orders_cancel",
+        AsyncMock(side_effect=HTTPException(
+            status_code=502,
+            detail="Order already Filled — cannot cancel",
+        )),
+    )
+    monkeypatch.setattr(server, "_orders_place_after_rate_reservation", place)
+    server._order_rate_timestamps.clear()
+
+    try:
+        response = trusted_client.post("/orders/replace", json={
+            "cancelOrders": [{"orderId": 10}],
+            "replaceOrder": _replacement(),
+        })
+    finally:
+        server._order_rate_timestamps.clear()
+
+    assert response.status_code == 502
+    place.assert_not_awaited()
+    assert response.json()["detail"]["cancelled"] == []

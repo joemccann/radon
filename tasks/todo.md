@@ -1,3 +1,27 @@
+# Task: Combo replace IB 202 cancel abort (2026-09-04) [DONE]
+
+Combo modify treated IB error 202 as a failed cancel, skipped the replacement,
+and left the original cancelled at IB.
+
+## Dependency graph
+
+- T1 depends_on: [] - Reproduce: cancel 202 while BAG still PendingCancel; replace aborts with cancelled=[].
+- T2 depends_on: [T1] - Fail then fix cancel_order 202 confirmation and replace continue-to-place.
+- T3 depends_on: [T2] - Pin already-Filled does not place; run focused plus full gates.
+
+## Checklist
+
+- [x] T1 Red tests for cancel 202 and replace 202.
+- [x] T2 cancel_order + `_cancel_already_confirmed` + replace loop.
+- [x] T3 Focused green; runbook case `combo-replace-ib-202-cancel`.
+
+## Review
+
+- IB 202 is cancel confirmation. Replace now records it cancelled and places.
+- Already-Filled still aborts without placing.
+
+---
+
 # Task: Restore modify-order P&L percentage (2026-09-04) [DONE]
 
 Ensure order modification confirmation shows estimated realized P&L as both a

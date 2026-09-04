@@ -153,10 +153,27 @@ def cancel_order(client: IBClient, order_id: int, perm_id: int,
                 finalStatus=refreshed_trade.orderStatus.status,
             )
 
-        # Check for fatal errors (10147=order not found, 201=rejected)
+        # 10147/201 are real rejects. 202 ("Order Canceled - reason:") is IB's
+        # cancel confirmation — treating it as fatal left combo replacements
+        # unplaced after the original was already gone at the broker.
         fatal = [e for e in error_msgs if e[0] in (10147, 201)]
         if fatal:
             finish("error", f"IB rejected cancel: {fatal[0][1]}")
+        if any(code == 202 for code, _ in error_msgs):
+            finish(
+                "ok",
+                f"Order cancelled (orderId={trade.order.orderId})",
+                orderId=trade.order.orderId,
+                finalStatus="Cancelled",
+            )
+
+    if any(code == 202 for code, _ in error_msgs):
+        finish(
+            "ok",
+            f"Order cancelled (orderId={trade.order.orderId})",
+            orderId=trade.order.orderId,
+            finalStatus="Cancelled",
+        )
 
     final_status = latest_trade.orderStatus.status if latest_trade is not None else trade.orderStatus.status
     finish("error", f"Cancel failed — order still {final_status}",
