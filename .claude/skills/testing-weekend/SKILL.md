@@ -956,3 +956,23 @@ how this loop improves as the codebase grows.
   running, budget for one round only and say so in the ledger rather than
   starting two and killing one. One honest round plus a base-SHA diff is worth
   more than two contended rounds.
+
+- **2026-09-04 (remediate): `nohup env -i` for the detached gate script is a
+  TRAP — a minimal `PATH` reds 75 tests that have nothing to do with your
+  changes.** The closing 3x gate came back `75 failed`, concentrated in the
+  weekend-wrapper, loop-launcher and mTLS gateway-remote suites: with
+  `PATH=/usr/bin:/bin` there is no `node`, no `openssl`, no `launchctl`, and
+  those suites shell out to all three. The same 8 files were `257 passed` in a
+  normal shell. The detach rail is right; the minimal env is not. Export the
+  full `PATH` inside the stage script (venv bin, nvm node bin, `/opt/homebrew/bin`,
+  then the system dirs) and put the venv on `PATH` directly rather than
+  `source`ing `activate` and then overwriting `PATH` after it — the second
+  ordering silently gives you the system python and `No module named pytest`.
+  Both mistakes cost a full round each.
+- **2026-09-04 (remediate): a new guard can fire on the very branch that adds
+  it, and that is the guard working.** T-438's "a changed held-out e2e spec
+  needs a dated ledger annotation" redded on landing, because a sibling agent
+  had modified both named specs the same day against a previous-day stamp. The
+  correct response was to re-stamp the annotations with the `next start`
+  evidence that agent had actually captured, not to loosen the date comparison.
+  Land guards that read the branch diff LAST, after the changes they will judge.
