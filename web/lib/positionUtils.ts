@@ -152,8 +152,7 @@ export function hasBlendedLegBasis(pos: PortfolioPosition): boolean {
 /**
  * Signed aggregate basis, or `null` when the legs disagree about their basis
  * source (T-315): the blend is the basis of a trade that was never placed, so
- * every P&L, return, Today P&L and close-ticket figure downstream goes null
- * with it rather than presenting mv − blend as fact.
+ * capital, average-entry, return, and close-ticket calculations must not use it.
  */
 export function resolveEntryCost(pos: PortfolioPosition): number | null {
   if (hasBlendedLegBasis(pos)) return null;
@@ -415,13 +414,27 @@ export function describeReturnCapital(basis: ReturnCapitalBasis | null): string 
   return `Return on exact opening capital · ${amount} · as of ${basis.asOf}`;
 }
 
-/** Unrealized P&L $ = market value − signed entry cost. */
+/** Signed sum of leg entry values, available even when their sources differ. */
+function resolveLegPnlBasis(pos: PortfolioPosition): number | null {
+  if (pos.legs.length < 2) return resolveEntryCost(pos);
+  if (pos.legs.some((leg) => !Number.isFinite(leg.entry_cost))) return null;
+  return pos.legs.reduce((sum, leg) => {
+    const sign = leg.direction === "LONG" ? 1 : -1;
+    return sum + sign * Math.abs(leg.entry_cost);
+  }, 0);
+}
+
+/**
+ * Unrealized P&L $ = the signed sum of every leg's market value minus entry
+ * value. A mixed-provenance combo still has measurable per-leg P&L even though
+ * its aggregate basis remains unavailable for Return %, risk, and close-outs.
+ */
 export function getPnlDollars(
   pos: PortfolioPosition,
   marketValue?: number | null,
 ): number | null {
   const mv = marketValue !== undefined ? marketValue : resolveMarketValue(pos);
-  const entryCost = resolveEntryCost(pos);
+  const entryCost = resolveLegPnlBasis(pos);
   if (mv == null || entryCost == null) return null;
   return mv - entryCost;
 }
