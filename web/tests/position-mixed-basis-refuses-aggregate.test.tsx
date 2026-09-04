@@ -311,6 +311,7 @@ describe("close ticket carries no realised figure for a `mixed` position (T-315)
     const o = comboClose(MIXED);
     const { result } = renderHook(() => useOrderRisk(o.riskInput, portfolioOf(MIXED)));
     expect(result.current!.summary.estimatedPnl).toBeNull();
+    expect(result.current!.summary.estimatedPnlPct).toBeNull();
     expect(result.current!.okToSubmit).toBe(true);
     render(<OrderConfirmSummary summary={result.current!.summary} />);
     expect(document.body.textContent).not.toContain("Est. Realized P&L");
