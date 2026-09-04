@@ -33,6 +33,7 @@ import json
 import os
 import re
 import sys
+from datetime import date, timedelta
 from pathlib import Path
 
 _PROJECT_DIR = Path(__file__).resolve().parent.parent.parent
@@ -43,13 +44,73 @@ _DEMO_MIGRATIONS_DIR = Path(__file__).resolve().parent / "demo_migrations"
 # data-loss / leak event, so we refuse outright.
 _PROD_URL_MARKER = "radon-joemccann"
 
-_SEED_SNAPSHOT_TAKEN_AT = "2026-06-17T13:42:11+00:00"
-_SEED_LAST_SYNC = "2026-06-17T13:42:11+00:00"
+# ...and the demo DB is provisioned under this name. Requiring the POSITIVE
+# marker as well means a mistyped / unrelated target is refused rather than
+# silently written: the same ~/radon-cloud/.env on the prod app host holds both
+# credential pairs, so "not prod-marked" alone is too weak a guard.
+_DEMO_URL_MARKER = "radon-demo"
 
-_BOOTSTRAP_SQL = """
-    CREATE TABLE IF NOT EXISTS schema_migrations (
-      version    INTEGER PRIMARY KEY,
-      applied_at TEXT    NOT NULL
+# Seed dates are ANCHORED to the run date, never hardcoded. The first seed
+# baked 2026-06 expiries in, so by September every synthetic option had expired
+# and the demo rendered a dead account. Re-running the seeder now always
+# produces a live-looking book. Override the anchor for deterministic tests.
+_SEED_TODAY_ENV = "RADON_DEMO_SEED_TODAY"
+_SEED_SNAPSHOT_TIME = "T13:42:11+00:00"
+
+
+def _seed_anchor() -> date:
+    override = os.environ.get(_SEED_TODAY_ENV)
+    return date.fromisoformat(override) if override else date.today()
+
+
+def seed_snapshot_taken_at() -> str:
+    return f"{_seed_anchor().isoformat()}{_SEED_SNAPSHOT_TIME}"
+
+
+def _third_friday(year: int, month: int) -> date:
+    first = date(year, month, 1)
+    # weekday(): Monday=0 … Friday=4
+    return first + timedelta(days=(4 - first.weekday()) % 7 + 14)
+
+
+def _expiry_months_out(months: int) -> date:
+    """Third Friday `months` ahead, rolled forward if it has already passed."""
+    anchor = _seed_anchor()
+    year, month = anchor.year, anchor.month + months
+    year, month = year + (month - 1) // 12, (month - 1) % 12 + 1
+    expiry = _third_friday(year, month)
+    while expiry <= anchor:
+        month += 1
+        year, month = year + (month - 1) // 12, (month - 1) % 12 + 1
+        expiry = _third_friday(year, month)
+    return expiry
+
+
+def _expiry_iso(months: int) -> str:
+    return _expiry_months_out(months).isoformat()
+
+
+def _expiry_compact(months: int) -> str:
+    return _expiry_months_out(months).strftime("%Y%m%d")
+
+
+def _days_ago(days: int) -> str:
+    return (_seed_anchor() - timedelta(days=days)).isoformat()
+
+# The demo series gets its OWN, NAME-keyed ledger.
+#
+# The demo Turso DB is a full prod-shaped clone and shares one
+# `schema_migrations` table with the MAIN migration series (versions 1..69).
+# demo_migrations/0003 declared version 3, which the main series had claimed on
+# 2026-06-29, so a version-keyed applier read it as already applied and skipped
+# `demo_webhook_events` forever — every Clerk user.created webhook then threw
+# and demo.radon.run provisioned no trial for 22 days. Keying on the file NAME
+# in a dedicated table makes a version collision with the main series
+# structurally impossible.
+_DEMO_LEDGER_SQL = """
+    CREATE TABLE IF NOT EXISTS demo_schema_migrations (
+      name       TEXT PRIMARY KEY,
+      applied_at TEXT NOT NULL
     )
     """
 
@@ -77,11 +138,17 @@ def _read_demo_env() -> tuple[str, str]:
 
 
 def assert_not_prod(url: str) -> None:
-    """Hard guard — abort if the target URL looks like the prod DB."""
+    """Hard guard — abort unless the target URL is provably the demo DB."""
     if _PROD_URL_MARKER in url:
         raise SystemExit(
             "REFUSING TO SEED: target URL "
             f"({url!r}) contains the production marker {_PROD_URL_MARKER!r}. "
+            "demo_seed.py writes ONLY to the separate demo Turso DB."
+        )
+    if _DEMO_URL_MARKER not in url:
+        raise SystemExit(
+            "REFUSING TO SEED: target URL "
+            f"({url!r}) does not carry the demo marker {_DEMO_URL_MARKER!r}. "
             "demo_seed.py writes ONLY to the separate demo Turso DB."
         )
 
@@ -106,18 +173,28 @@ def _list_demo_migrations() -> list[tuple[int, str, Path]]:
 
 
 def apply_demo_migrations(db) -> None:
-    """Apply pending demo migrations (versioned, idempotent)."""
-    db.execute(_BOOTSTRAP_SQL)
+    """Apply pending demo migrations, keyed by FILE NAME (idempotent).
+
+    Never reads or writes the shared `schema_migrations` table — see
+    _DEMO_LEDGER_SQL for why that ledger cannot be trusted for this series.
+    """
+    db.execute(_DEMO_LEDGER_SQL)
     db.commit()
     applied = {
-        row[0] for row in db.execute("SELECT version FROM schema_migrations").fetchall()
+        row[0]
+        for row in db.execute("SELECT name FROM demo_schema_migrations").fetchall()
     }
-    for version, name, path in _list_demo_migrations():
-        if version in applied:
+    for _version, name, path in _list_demo_migrations():
+        if name in applied:
             continue
         print(f"[demo-seed] applying migration {name}")
         for stmt in _split_statements(path.read_text(encoding="utf-8")):
             db.execute(stmt)
+        db.execute(
+            "INSERT OR REPLACE INTO demo_schema_migrations (name, applied_at) "
+            "VALUES (?, datetime('now'))",
+            (name,),
+        )
         db.commit()
 
 
@@ -179,16 +256,16 @@ def _build_positions() -> list[dict]:
     # SPY/QQQ/TSLA per the Phase-1 brief, plus a SPY bull call spread.
     positions = [
         _single_leg_position(
-            1, "SPY", "Long Call $600.0", "2026-07-17", "LONG", 600.0, "Call",
-            entry_share=8.40, last_share=13.35, contracts=20, entry_date="2026-05-28",
+            1, "SPY", "Long Call $600.0", _expiry_iso(1), "LONG", 600.0, "Call",
+            entry_share=8.40, last_share=13.35, contracts=20, entry_date=_days_ago(20),
         ),
         _single_leg_position(
-            2, "QQQ", "Long Call $520.0", "2026-08-21", "LONG", 520.0, "Call",
-            entry_share=6.10, last_share=9.85, contracts=15, entry_date="2026-06-02",
+            2, "QQQ", "Long Call $520.0", _expiry_iso(2), "LONG", 520.0, "Call",
+            entry_share=6.10, last_share=9.85, contracts=15, entry_date=_days_ago(33),
         ),
         _single_leg_position(
-            3, "TSLA", "Long Call $340.0", "2026-09-18", "LONG", 340.0, "Call",
-            entry_share=11.85, last_share=18.40, contracts=10, entry_date="2026-06-05",
+            3, "TSLA", "Long Call $340.0", _expiry_iso(3), "LONG", 340.0, "Call",
+            entry_share=11.85, last_share=18.40, contracts=10, entry_date=_days_ago(30),
         ),
     ]
 
@@ -204,7 +281,7 @@ def _build_positions() -> list[dict]:
             "structure": "Bull Call Spread $620.0/$650.0",
             "structure_type": "Bull Call Spread",
             "risk_profile": "defined",
-            "expiry": "2026-07-17",
+            "expiry": _expiry_iso(1),
             "contracts": 20,
             "direction": "DEBIT",
             "entry_cost": round(spread_initial, 2),
@@ -214,7 +291,7 @@ def _build_positions() -> list[dict]:
             "kelly_optimal": None,
             "target": None,
             "stop": None,
-            "entry_date": "2026-06-08",
+            "entry_date": _days_ago(9),
         }
     )
     return positions
@@ -245,7 +322,7 @@ def build_portfolio_payload() -> dict:
     return {
         "bankroll": net_liq,
         "peak_value": net_liq,
-        "last_sync": _SEED_LAST_SYNC,
+        "last_sync": seed_snapshot_taken_at(),
         "positions": positions,
         "total_deployed_pct": round(total_initial / net_liq * 100, 2),
         "total_deployed_dollars": round(total_initial, 2),
@@ -266,13 +343,13 @@ def build_journal_rows() -> list[tuple[str, dict, str]]:
     """
     rows = [
         ("demo-spy-call-open", "SPY", "Long Call $600.0", "BUY_OPTION", 600.0,
-         "C", "2026-07-17", 20, 8.40, "2026-05-28"),
+         "C", _expiry_iso(1), 20, 8.40, _days_ago(20)),
         ("demo-qqq-call-open", "QQQ", "Long Call $520.0", "BUY_OPTION", 520.0,
-         "C", "2026-08-21", 15, 6.10, "2026-06-02"),
+         "C", _expiry_iso(2), 15, 6.10, _days_ago(33)),
         ("demo-tsla-call-open", "TSLA", "Long Call $340.0", "BUY_OPTION", 340.0,
-         "C", "2026-09-18", 10, 11.85, "2026-06-05"),
+         "C", _expiry_iso(3), 10, 11.85, _days_ago(30)),
         ("demo-spy-bcs-open", "SPY", "Bull Call Spread $620.0/$650.0", "BUY_COMBO",
-         620.0, "C", "2026-07-17", 20, 11.20, "2026-06-08"),
+         620.0, "C", _expiry_iso(1), 20, 11.20, _days_ago(9)),
     ]
     out: list[tuple[str, dict, str]] = []
     for trade_id, ticker, structure, action, strike, right, expiry, contracts, fill_share, date in rows:
@@ -320,7 +397,7 @@ def build_open_orders() -> list[tuple[int, dict]]:
                 "tif": "DAY",
                 "contract": {
                     "conId": None, "symbol": "TSLA", "secType": "OPT",
-                    "strike": 360.0, "right": "C", "expiry": "20260918",
+                    "strike": 360.0, "right": "C", "expiry": _expiry_compact(3),
                 },
                 "demo": True,
             },
@@ -343,7 +420,7 @@ def build_open_orders() -> list[tuple[int, dict]]:
                 "tif": "GTC",
                 "contract": {
                     "conId": None, "symbol": "QQQ", "secType": "OPT",
-                    "strike": 520.0, "right": "C", "expiry": "20260821",
+                    "strike": 520.0, "right": "C", "expiry": _expiry_compact(2),
                 },
                 "demo": True,
             },
@@ -357,9 +434,12 @@ def seed_synthetic_dataset(db) -> None:
     Fixed primary keys keep this idempotent (overwrite, not duplicate).
     """
     portfolio = build_portfolio_payload()
+    # The snapshot key moves with the anchor, so drop the previous seed rather
+    # than leaving a stale-dated row behind for the "latest snapshot" read.
+    db.execute("DELETE FROM portfolio_snapshots")
     db.execute(
         "INSERT OR REPLACE INTO portfolio_snapshots (taken_at, payload) VALUES (?, ?)",
-        (_SEED_SNAPSHOT_TAKEN_AT, json.dumps(portfolio)),
+        (seed_snapshot_taken_at(), json.dumps(portfolio)),
     )
 
     for trade_id, payload, filled_at in build_journal_rows():
