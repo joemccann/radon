@@ -100,3 +100,48 @@ class TestGatedOffDueHandlerIsObservable:
             for r in caplog.records
             if "Skipping" in r.message or "outside" in r.message
         )
+
+
+def can_run_at_with_calendar_saying_closed(et_now, monkeypatch):
+    """The realistic regression: `_load_ibkr_calendar` swallows
+    FileNotFoundError / JSONDecodeError / OSError, so a stale or corrupt
+    cache makes `is_equity_ext_session_et` return FALSE, never raise."""
+    import utils.market_calendar as mc
+
+    monkeypatch.setattr(mc, "is_equity_ext_session_et", lambda _now: False)
+
+    daemon = MonitorDaemon(respect_market_hours=True)
+    handler = ExtHandler()
+    daemon.register(handler)
+    with patch("monitor_daemon.daemon.datetime") as mock_dt:
+        mock_dt.now.return_value = et_now
+        mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+        return daemon._handler_can_run_now(handler)
+
+
+class TestCalendarDisagreementIsNotSilentlyAWeekend:
+    """R-625: REL-209's fallback covers only the RAISING branch, but the
+    module it guards is documented 'Never raises'. A corrupt calendar cache
+    marking a real trading day closed disabled fill monitoring for the whole
+    day, indistinguishable in the log from a normal weekend skip."""
+
+    def test_a_calendar_saying_closed_at_1000_et_still_runs(self, monkeypatch):
+        day = recent_trading_day()
+        at = datetime(day.year, day.month, day.day, 10, 0, tzinfo=ET)
+        assert can_run_at_with_calendar_saying_closed(at, monkeypatch) is True
+
+    def test_the_disagreement_is_logged_distinctly(self, monkeypatch, caplog):
+        day = recent_trading_day()
+        at = datetime(day.year, day.month, day.day, 10, 0, tzinfo=ET)
+        with caplog.at_level(logging.WARNING, logger="monitor_daemon.daemon"):
+            can_run_at_with_calendar_saying_closed(at, monkeypatch)
+        assert any("disagree" in r.message for r in caplog.records), [
+            r.message for r in caplog.records
+        ]
+
+    def test_a_genuine_overnight_hour_is_still_gated_off(self, monkeypatch):
+        """No disagreement at 21:00 ET — both gates say closed, so the
+        widened branch must not turn the ext gate into 'always run'."""
+        day = recent_trading_day()
+        at = datetime(day.year, day.month, day.day, 21, 0, tzinfo=ET)
+        assert can_run_at_with_calendar_saying_closed(at, monkeypatch) is False

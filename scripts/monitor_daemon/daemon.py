@@ -193,6 +193,24 @@ class MonitorDaemon:
                 now_et = datetime.now(ZoneInfo("America/New_York"))
                 if is_equity_ext_session_et(now_et):
                     return True
+                # R-625: the module below is documented "never raises" — a
+                # stale or corrupt IBKR calendar cache is swallowed and comes
+                # back as False, not as the exception the handler below
+                # catches. A calendar that says "closed" while the
+                # calendar-independent clock gate says the regular session is
+                # open is a data regression, not a weekend: run on the clock
+                # and say so, or fill monitoring goes dark for the whole
+                # trading day behind an ordinary out-of-hours log line.
+                if market_hours is None:
+                    market_hours = self.is_market_hours()
+                if market_hours:
+                    logger.warning(
+                        "equity_ext calendar and the RTH clock gate disagree "
+                        "(calendar says no session, clock says regular hours "
+                        "are open) — running on the clock gate; the IBKR "
+                        "calendar cache is likely stale or corrupt"
+                    )
+                    return True
                 return self._market_was_open_within_grace(handler)
             except Exception as exc:
                 # REL-209 (R-578): fail to RTH, never to "never". A tzdata /

@@ -227,6 +227,38 @@ class TestFillMonitorMirrorBody:
         save.assert_called_once_with(
             {"open_orders": [{"perm_id": 7}], "executed_orders": [{"exec_id": "e1"}]})
 
+    def test_partial_book_never_drops_tracked_working_orders(self, monkeypatch):
+        """RED for R-610 (P1): the same 0.5s openOrderEnd cap that produces an
+        EMPTY read produces a TRUNCATED one. The guard keyed on `not
+        open_orders`, so a partial arrival passed straight to the
+        whole-replacing save and the tracked orders it omitted vanished from
+        the book that drives modify and cancel — strictly more likely than the
+        fully-empty read already guarded."""
+        save = self._stub_mirror_env(
+            monkeypatch,
+            open_orders=[{"orderId": 1}],
+            executed=[{"exec_id": "e1"}],
+            existing_count=5,
+        )
+        handler = FillMonitorHandler(send_notifications=False)
+        handler.known_orders = {i: {"status": "Submitted"} for i in range(1, 6)}
+        _ORIG_MIRROR(handler, MagicMock())
+        save.assert_not_called()
+
+    def test_full_book_covering_every_tracked_order_still_saves(self, monkeypatch):
+        """The guard must not freeze the mirror: a read that covers every
+        tracked order mirrors normally, extra untracked ids included."""
+        save = self._stub_mirror_env(
+            monkeypatch,
+            open_orders=[{"orderId": 1}, {"orderId": 2}, {"orderId": 9}],
+            executed=[],
+            existing_count=2,
+        )
+        handler = FillMonitorHandler(send_notifications=False)
+        handler.known_orders = {1: {}, 2: {}}
+        _ORIG_MIRROR(handler, MagicMock())
+        save.assert_called_once()
+
     def test_snapshot_count_failure_is_swallowed_and_skips_save(self, monkeypatch):
         """Counter blowing up must neither crash the handler nor clobber."""
         save = self._stub_mirror_env(
