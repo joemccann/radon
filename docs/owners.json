@@ -59,10 +59,37 @@
         "scripts/*_nightly.sh",
         "scripts/weekend_notify.py",
         "scripts/weekend_redact.py",
+        "scripts/weekend_prune.py",
+        "scripts/nightly_*.py",
+        "scripts/github_pr_output.py",
         "config/com.radon.*-daily.plist"
       ],
       "owners": ["docs/operations.md"],
       "note": "operations.md is the one place indexing all five nightly loops: fire times, clone + marker rails, the model pin and the status vocabulary an operator reads off a page. #219 changed operator-facing behaviour in all five wrappers with no owner update (DOC-032/033/034/040). Loop SEMANTICS stay in .claude/skills/<loop>/SKILL.md; only the operator contract belongs here."
+    },
+    {
+      "id": "streaks-source-ladder",
+      "globs": ["scripts/api/routes/streaks.py"],
+      "owners": ["docs/indicators/streaks.md"],
+      "note": "Cache semantics and the vendor ladder are the reader-facing contract: a cached hit keeps its original source, and errors[] is not missing (DOC-065)."
+    },
+    {
+      "id": "credential-validators",
+      "globs": ["scripts/credential_validators.py"],
+      "owners": ["docs/operations.md"],
+      "note": "The Credentials tab refuses values on egress pins an operator cannot see from the UI (DOC-067)."
+    },
+    {
+      "id": "health-probes",
+      "globs": ["scripts/health_service/probes.py"],
+      "owners": ["scripts/health_service/CLAUDE.md"],
+      "note": "Probe sources, degraded_reasons and the dwell suppressions decide what an operator is paged for (DOC-074)."
+    },
+    {
+      "id": "flex-pull",
+      "globs": ["scripts/flex_sftp_pull.py"],
+      "owners": ["docs/cloud-services.md"],
+      "note": "When a duplicate-only or empty pull is an error vs expected is the on-call discriminator (DOC-078)."
     },
     {
       "id": "factory",

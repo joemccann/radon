@@ -823,6 +823,13 @@ Incident: 2026-08-15 00:24Z, P1 page `34ab3e3c…`.
   `error` + `next_attempt_at` on every soft-fail so `_check_stale` cannot
   page silence. Regression: `test_data_refresh.py::test_run_scan_timeout_heartbeats_cri_scan_error`,
   `test_cri_scan_budget_exceeds_observed_slow_path`.
+  Two other `cri-scan` shapes live in the same file: a `ScanLockError`
+  (`cannot open/flock scan lock …`) is a broken lock PATH, not contention —
+  `data/` ownership drift after the lock moved into the bind mount. It
+  heartbeats `error` and pages; the fix is `chown`, not a restart. And the
+  flock LOSER serves `data/cri.json` marked `served_from_cache: true`, but
+  refuses it past `LOSER_CACHE_MAX_AGE_S` (3 days) — beyond that the cache
+  is a different market regime, not an answer.
 - **Detection:** `GET /api/probe/freshness` (bearer `RADON_PROBE_FRESHNESS_TOKEN`,
   always 200) — `all_fresh: false` with the failing `checks` named; it is already
   market-state aware, so `all_fresh: null` off-hours is normal.
@@ -882,6 +889,9 @@ Incident: 2026-08-15 00:24Z, P1 page `34ab3e3c…`.
   process-wide 300s auth-failure embargo so a new FastAPI client per request
   cannot re-pay the budget. First call still bootstraps (self-heal).
   Discriminating check: probe 503 in ~60s + session ok + UI 504 in 50s.
+  The 503 body names the case: `authentication embargoed after a recent
+  failure` is the deliberate 300s backoff (transient, no remint needed);
+  `authentication is unavailable` is a broken credential chain.
   Timeout/embargo stop the 504; they do not restore the ladder. Remint is
   the Authorize click (or a headed export of the jar to
   `data/menthorq_dashboard/menthorq_dashboard_storage_state.json` on the
