@@ -1,5 +1,12 @@
 # Lessons
 
+## 2026-09-04 — Close-order P&L must include dollars and percent
+
+- Every close or modify confirmation that renders estimated realized P&L must
+  show both the signed dollar amount and return on absolute signed entry basis.
+- Pin this at the shared `OrderConfirmSummary` boundary and in the modify-order
+  browser path, including option, combo, stock-cover, loss, and missing-basis cases.
+
 ## 2026-09-03 — Assistant identity is Radon, not a provider model
 
 - User-facing assistant speaker labels and generated self-identification must

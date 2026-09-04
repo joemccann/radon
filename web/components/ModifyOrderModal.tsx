@@ -462,11 +462,9 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, op
         heldQuantity: heldLong,
         heldShortQuantity: heldShort,
         description: `${action} ${parsedQtyLocal} ${symbol} @ ${fmtPrice(parsedNewLocal)}`,
-        closeOut: closingLong
+        closeOut: closingLong || closingShort
           ? { entryCostDollars: parsedQtyLocal * Math.abs(basisPerShare) }
-          : closingShort
-            ? { entryCostDollars: -parsedQtyLocal * Math.abs(basisPerShare) }
-            : undefined,
+          : undefined,
       };
     }
     if (order.contract.secType !== "OPT") return null;
