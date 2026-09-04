@@ -326,6 +326,14 @@ describe("cardToneForIntent", () => {
   });
 });
 
+// 2026-09-02: after 20:00 ET the table showed three QUEUED chips
+// (ARM/SPCX NEXT RTH + TQQQ DAY+EXT) while the header said WORKING 3.
+// Working must match the mapped row status, not "any non-partial open order".
+// Module scope: the combo-row describe below classifies against the same
+// frozen clock, so no case in this file ever reads the wall clock.
+const OVERNIGHT_NOW = new Date("2026-08-28T01:00:00.000Z"); // 21:00 ET Thursday
+const AH_NOW = new Date("2026-08-27T21:30:00.000Z"); // 17:30 ET Thursday
+
 describe("summarizeOpenOrders", () => {
   it("counts working, partial, and open total", () => {
     const summary = summarizeOpenOrders([
@@ -342,12 +350,6 @@ describe("summarizeOpenOrders", () => {
     expect(summary.partialCount).toBe(1);
     expect(summary.workingCount).toBe(1);
   });
-
-  // 2026-09-02: after 20:00 ET the table showed three QUEUED chips
-  // (ARM/SPCX NEXT RTH + TQQQ DAY+EXT) while the header said WORKING 3.
-  // Working must match the mapped row status, not "any non-partial open order".
-  const OVERNIGHT_NOW = new Date("2026-08-28T01:00:00.000Z"); // 21:00 ET Thursday
-  const AH_NOW = new Date("2026-08-27T21:30:00.000Z"); // 17:30 ET Thursday
 
   it("does not count overnight PreSubmitted rows as Working", () => {
     const summary = summarizeOpenOrders(
@@ -431,7 +433,7 @@ describe("REL-203 (R-564): header WORKING counts combo ROWS, not legs", () => {
       leg({ orderId: 2, permId: 12, action: "BUY", contract: { symbol: "AAOI", secType: "OPT", expiry: "20261016", strike: 20, right: "P" } }),
     ];
     const rows = buildOpenOrderDisplayRows(orders as never);
-    const summary = summarizeOpenOrderRows(rows as never, new Date());
+    const summary = summarizeOpenOrderRows(rows as never, AH_NOW);
     expect(summary.openCount).toBe(rows.length);
     expect(summary.workingCount).toBe(
       rows.length, // every rendered row shows exactly one WORKING chip here
@@ -446,10 +448,11 @@ describe("REL-203 (R-564): header WORKING counts combo ROWS, not legs", () => {
       leg({ orderId: 2, permId: 12, action: "BUY", status: "Filled", filled: 1, remaining: 0, contract: { symbol: "AAOI", secType: "OPT", expiry: "20261016", strike: 20, right: "P" } }),
     ];
     const rows = buildOpenOrderDisplayRows(orders as never);
-    const summary = summarizeOpenOrderRows(rows as never, new Date());
-    // MIXED aggregate: the table renders one non-Working chip; the header
-    // must agree (zero or one working, never two).
-    expect(summary.workingCount).toBeLessThanOrEqual(1);
+    const summary = summarizeOpenOrderRows(rows as never, AH_NOW);
+    // MIXED aggregate: the table renders exactly one chip for the row, and
+    // with the clock frozen at AH_NOW the classification is deterministic —
+    // one working row, never two, never zero.
+    expect(summary.workingCount).toBe(1);
     expect(summary.openCount).toBe(rows.length);
   });
 });
