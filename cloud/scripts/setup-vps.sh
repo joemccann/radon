@@ -313,8 +313,13 @@ install_docker() {
   apt update
   apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
-  if id radon &>/dev/null; then
-    usermod -aG docker radon
+  # radon is deliberately NOT in group docker: that group is root-equivalent
+  # (mount the host into a container, walk out as root), and the only reason it
+  # ever held it was driving the ib-gateway container. That goes through the
+  # root-owned radon-docker-gw shim now. Strip a membership left by an older
+  # provision so a re-run of setup converges instead of preserving the hole.
+  if id radon &>/dev/null && id -nG radon 2>/dev/null | grep -qw docker; then
+    gpasswd -d radon docker || true
   fi
 
   log_success "Docker installed"
@@ -438,9 +443,10 @@ preflight_checks() {
     log_warn "radon user already exists -- skipping"
   fi
 
-  # Ensure radon is in the docker group (needed even if Docker was installed before user)
-  if command -v docker &>/dev/null && ! id -nG radon 2>/dev/null | grep -qw docker; then
-    usermod -aG docker radon
+  # Never add radon to group docker -- see install_docker. Converge an older
+  # provision that did.
+  if id -nG radon 2>/dev/null | grep -qw docker; then
+    gpasswd -d radon docker || true
   fi
 
   # R-619: the app-plane API container runs --user radon, so the plaintext
@@ -1117,6 +1123,51 @@ install_app_runtime() {
   log_success "App runtime wrapper installed"
 }
 
+# The root-owned Gateway docker operator that replaces radon's group `docker`
+# membership, plus the compose body it runs. Both must land root-owned: a
+# radon-writable compose file hands root straight back through the shim.
+install_docker_gw() {
+  local source="${CLOUD_DIR}/scripts/radon-docker-gw.sh"
+  local target="/usr/local/sbin/radon-docker-gw"
+  local compose_source="${CLOUD_DIR}/docker-compose.yml"
+  local compose_target="/etc/radon/ib-gateway-compose.yml"
+  local -a owner_args=(-o root -g root)
+  [[ "${RADON_HELPER_SKIP_CHOWN:-0}" == "1" ]] && owner_args=()
+  local staged
+
+  if [[ ! -f "$source" ]]; then
+    log_error "radon-docker-gw.sh missing from ${CLOUD_DIR}/scripts/"
+    return 1
+  fi
+  if [[ ! -f "$compose_source" ]]; then
+    log_error "docker-compose.yml missing from ${CLOUD_DIR}/"
+    return 1
+  fi
+
+  log_info "Installing /usr/local/sbin/radon-docker-gw..."
+  staged="$(mktemp "${target}.tmp.XXXXXX")"
+  if ! stage_from_checkout "$source" "$staged" 0755 ${owner_args[@]+"${owner_args[@]}"}; then
+    rm -f "$staged"
+    return 1
+  fi
+  if ! bash -n "$staged" || [[ ! -x "$staged" ]]; then
+    rm -f "$staged"
+    log_error "Gateway docker shim failed syntax/permission validation"
+    return 1
+  fi
+  mv -f "$staged" "$target"
+
+  log_info "Installing ${compose_target}..."
+  staged="$(mktemp "${compose_target}.tmp.XXXXXX")"
+  if ! stage_from_checkout "$compose_source" "$staged" 0644 ${owner_args[@]+"${owner_args[@]}"}; then
+    rm -f "$staged"
+    return 1
+  fi
+  mv -f "$staged" "$compose_target"
+
+  log_success "Gateway docker shim installed"
+}
+
 # The only direct systemd privilege left to the radon user is the watchdog's
 # fixed preheld adapter. All other mutations route through /usr/local/bin/radon.
 install_admin_polkit_rule() {
@@ -1211,6 +1262,7 @@ main() {
   install_deploy_root_helper
   install_operator_cli
   install_app_runtime
+  install_docker_gw
   configure_sudoers
   install_admin_polkit_rule
   start_services

@@ -97,10 +97,11 @@ def test_compose_renders_with_external_env_and_no_project_dotenv(tmp_path: Path)
 
 
 def test_deploy_exports_external_compose_env_for_preflight_and_gateway() -> None:
+    """The env-file pin moved into the root shim; the helper only names a verb."""
     deploy = DEPLOY.read_text(encoding="utf-8")
-    gateway = GATEWAY_HELPER.read_text(encoding="utf-8")
+    shim = (CLOUD_ROOT / "scripts" / "radon-docker-gw.sh").read_text(encoding="utf-8")
     preflight = _function_body(deploy, "preflight_env")
-    compose = _function_body(gateway, "compose")
+    compose = _function_body(shim, "compose")
 
     assert "RADON_COMPOSE_ENV_FILE" in preflight
     assert "RADON_COMPOSE_ENV_FILE" in compose
