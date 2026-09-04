@@ -81,6 +81,7 @@ import app_preferences
 from clients.menthorq_dashboard_client import (
     MenthorQDashboardAuthEmbargoed,
     MenthorQDashboardAuthError,
+    MenthorQDashboardBrowserUnavailable,
     MenthorQDashboardClient,
     MenthorQDashboardPayloadError,
     MenthorQDashboardTimeoutError,
@@ -4918,6 +4919,11 @@ async def options_exposure(symbol: str, frequency: str = "eod"):
     try:
         provider = MenthorQDashboardClient()
         return await asyncio.to_thread(provider.fetch_exposure, symbol, frequency)
+    except MenthorQDashboardBrowserUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Options exposure browser runtime is unavailable",
+        ) from exc
     except MenthorQDashboardAuthEmbargoed as exc:
         raise HTTPException(
             status_code=503,

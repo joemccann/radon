@@ -150,3 +150,25 @@ def test_route_maps_auth_embargo_to_transient_detail(client):
     from monitor_daemon.handlers import menthorq_login_probe
 
     assert menthorq_login_probe._is_auth_failure(503, detail) is False
+
+
+def test_route_maps_missing_browser_runtime_to_an_environment_detail(client):
+    from clients.menthorq_dashboard_client import MenthorQDashboardBrowserUnavailable
+
+    def _raise(*_args):
+        raise MenthorQDashboardBrowserUnavailable(
+            "dashboard browser runtime is unavailable"
+        )
+
+    provider = type("Provider", (), {"fetch_exposure": _raise})()
+
+    with patch("scripts.api.server.MenthorQDashboardClient", return_value=provider):
+        response = client.get("/options/exposure/SPX?frequency=eod")
+
+    assert response.status_code == 503
+    detail = response.json()["detail"]
+    assert "browser runtime" in detail.lower()
+
+    from monitor_daemon.handlers import menthorq_login_probe
+
+    assert menthorq_login_probe._is_auth_failure(503, detail) is False

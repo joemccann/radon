@@ -550,3 +550,95 @@ class TestAuthFailureEmbargo:
         monkeypatch.setattr(client, "_bootstrap_dashboard_session", _bootstrap)
         assert client._resolve_access_token() == token
         assert calls["bootstrap"] == 1
+
+
+class _FakeBrowserType:
+    def __init__(self, error: Exception):
+        self._error = error
+
+    def launch(self, **_kwargs):
+        raise self._error
+
+
+class _FakePlaywright:
+    def __init__(self, error: Exception):
+        self.chromium = _FakeBrowserType(error)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        return False
+
+
+def _install_failing_playwright(monkeypatch, error: Exception) -> None:
+    import sys
+    import types
+
+    module = types.ModuleType("playwright.sync_api")
+    module.sync_playwright = lambda: _FakePlaywright(error)
+    package = types.ModuleType("playwright")
+    package.sync_api = module
+    monkeypatch.setitem(sys.modules, "playwright", package)
+    monkeypatch.setitem(sys.modules, "playwright.sync_api", module)
+
+
+class TestMissingBrowserRuntimeIsNotACredentialFault:
+    """A chromium that was never downloaded is an ENVIRONMENT fault.
+
+    Flattening it into "dashboard authentication is unavailable" is what made
+    the daily login probe latch a broken-credential alarm for days.
+    """
+
+    def _client(self, tmp_path: Path) -> MenthorQDashboardClient:
+        return MenthorQDashboardClient(
+            storage_state_path=tmp_path / "dashboard.json",
+            username="operator@example.test",
+            password="test-password",
+        )
+
+    def test_missing_chromium_raises_a_distinct_browser_error(
+        self, tmp_path: Path, monkeypatch
+    ):
+        from clients.menthorq_dashboard_client import (
+            MenthorQDashboardBrowserUnavailable,
+        )
+
+        _install_failing_playwright(
+            monkeypatch,
+            RuntimeError(
+                "Executable doesn't exist at /ms-playwright/chromium/chrome\n"
+                "Looks like Playwright was just installed or updated. Please run "
+                "the following command to download new browsers: playwright install"
+            ),
+        )
+
+        with pytest.raises(MenthorQDashboardBrowserUnavailable) as exc_info:
+            self._client(tmp_path)._bootstrap_dashboard_session()
+
+        assert not isinstance(exc_info.value, MenthorQDashboardAuthError)
+        assert "playwright" not in str(exc_info.value).lower()
+
+    def test_missing_chromium_does_not_trip_the_auth_embargo(
+        self, tmp_path: Path, monkeypatch
+    ):
+        from clients import menthorq_dashboard_client as mod
+
+        _install_failing_playwright(
+            monkeypatch, RuntimeError("Executable doesn't exist at /ms-playwright")
+        )
+
+        with pytest.raises(mod.MenthorQDashboardBrowserUnavailable):
+            self._client(tmp_path)._resolve_access_token()
+
+        assert mod._auth_embargo_active() is False
+
+    def test_other_bootstrap_failures_stay_credential_failures(
+        self, tmp_path: Path, monkeypatch
+    ):
+        _install_failing_playwright(monkeypatch, RuntimeError("connection reset"))
+
+        with pytest.raises(
+            MenthorQDashboardAuthError, match="authentication is unavailable"
+        ):
+            self._client(tmp_path)._bootstrap_dashboard_session()
