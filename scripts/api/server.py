@@ -624,8 +624,13 @@ def _reset_orders_sync_shed_state() -> None:
     _orders_sync_consecutive_sheds = 0
 
 
-async def _heartbeat_orders_sync_skip(reason: str) -> None:
-    """Record a tick that could not spawn ib_orders.py — as a shed, not an OK.
+async def _heartbeat_orders_sync_skip(
+    reason: str,
+    *,
+    error_class: str = "capacity-shed",
+    state: Optional[str] = None,
+) -> None:
+    """Record a tick that did not finish ib_orders.py — never as OK.
 
     Capacity shed is R-170: the general lane is full, not a writer fault.
     Without any row, two consecutive 5-min sheds trip the 10-min stale window
@@ -633,14 +638,29 @@ async def _heartbeat_orders_sync_skip(reason: str) -> None:
     fabricated healthy row, a permanent shed is silent forever. So: a distinct
     non-ok state, and an escalation to `error` once the streak passes the
     ceiling. R-216.
+
+    A timed-out or failed spawn is the same silence class (2026-09-04 16:35Z
+    page 99dad5ec, 15m silent, market open, /health authenticated, siblings
+    fresh). Heartbeat `error` with the miss so `_check_stale` cannot page
+    and the error bucket names the reason. Do not stamp ok.
     """
     global _orders_sync_consecutive_sheds
-    _orders_sync_consecutive_sheds += 1
-    streak = _orders_sync_consecutive_sheds
-    escalated = streak > ORDERS_SYNC_MAX_CONSECUTIVE_SHEDS
-    # "warn" is the repo's existing vocabulary (web/lib/serviceHealth.ts:16);
-    # it is not "ok" and it is not yet a page.
-    state = "error" if escalated else "warn"
+    extra: dict[str, Any] = {"class": error_class}
+    if error_class == "capacity-shed":
+        _orders_sync_consecutive_sheds += 1
+        streak = _orders_sync_consecutive_sheds
+        extra["consecutive_sheds"] = streak
+        if state is None:
+            # "warn" is the repo's existing vocabulary (web/lib/serviceHealth.ts:16);
+            # it is not "ok" and it is not yet a page.
+            state = "error" if streak > ORDERS_SYNC_MAX_CONSECUTIVE_SHEDS else "warn"
+        extra["message"] = (
+            f"orders sync shed for subprocess capacity ({streak} consecutive): {reason}"
+        )
+    else:
+        if state is None:
+            state = "error"
+        extra["message"] = f"orders sync missed ({error_class}): {reason}"
     try:
         now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         await asyncio.to_thread(
@@ -651,14 +671,7 @@ async def _heartbeat_orders_sync_skip(reason: str) -> None:
                 state,
                 started_at=now,
                 finished_at=now,
-                error={
-                    "message": (
-                        f"orders sync shed for subprocess capacity "
-                        f"({streak} consecutive): {reason}"
-                    ),
-                    "class": "capacity-shed",
-                    "consecutive_sheds": streak,
-                },
+                error=extra,
             ),
         )
     except Exception:
@@ -692,6 +705,21 @@ async def _orders_sync_tick() -> None:
         return
     if not _pool_has_any_connection():
         logger.debug("orders-sync loop: pool disconnected — skipping tick")
+        # TCP probe only (no pool=) so this skip cannot drive 2FA recovery.
+        # Gateway down → stay silent so IB-outage grouping can still page
+        # stale. Gateway reachable → isolated stuck pool; heartbeat error
+        # so the 10-min stale window cannot page silence (page 99dad5ec).
+        try:
+            gw = await check_ib_gateway()
+        except Exception:
+            logger.exception("orders-sync loop: gateway probe failed after pool disconnect")
+            return
+        if gw.get("port_listening") and not gw.get("upstream_dead"):
+            await _heartbeat_orders_sync_skip(
+                "pool disconnected while gateway reachable",
+                error_class="pool-disconnected",
+                state="error",
+            )
         return
     logger.info("orders-sync loop: running ib_orders.py --sync")
     outcome = await _coordinated_orders_sync()
@@ -721,6 +749,11 @@ async def _orders_sync_tick() -> None:
         await _heartbeat_orders_sync_skip("subprocess capacity exhausted")
         return
     logger.warning("orders-sync loop: sync failed: %s", outcome.error)
+    await _heartbeat_orders_sync_skip(
+        outcome.error or "orders sync failed",
+        error_class="sync-failed",
+        state="error",
+    )
 
 
 async def _orders_sync_loop(interval: float = ORDERS_SYNC_INTERVAL_SECS) -> None:
