@@ -419,6 +419,7 @@ export default function ChatPanel({
               <div
                 ref={messagesRef}
                 className="chat-messages"
+                data-testid="chat-messages"
                 role="log"
                 aria-live="polite"
                 aria-atomic="false"
@@ -435,12 +436,13 @@ export default function ChatPanel({
                     <div
                       key={message.id}
                       className={`chat-message ${message.role}${isStreamingThis ? " streaming" : ""}`}
+                      data-testid={`chat-message-${message.role}`}
                     >
                       <div className="chat-meta">
-                        <span className="chat-role">{isAssistant ? "Radon" : "You"}</span>
+                        <span className="chat-role" data-testid="chat-role">{isAssistant ? "Radon" : "You"}</span>
                         <span className="chat-time">{message.timestamp}</span>
                       </div>
-                      <div className="chat-message-body">
+                      <div className="chat-message-body" data-testid="chat-message-body">
                         {isPending ? (
                           <EngineTrace
                             steps={buildTurnSteps(turnTools, status === "error" ? "error" : "submitted")}

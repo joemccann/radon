@@ -48,19 +48,12 @@ async function stubShellApis(page: Page, assistantError = false) {
 
 async function openChat(page: Page) {
   const dialog = page.getByRole("dialog", { name: "Radon chat" });
-  // Headless Chromium delivers Meta/Ctrl+j keydowns to document listeners
-  // attached in-page but the launcher's React handler never receives the
-  // native press. Retry the synthetic path across hydration.
-  await expect(async () => {
-    if (!(await dialog.isVisible())) {
-      await page.evaluate(() => {
-        document.dispatchEvent(
-          new KeyboardEvent("keydown", { key: "j", metaKey: true, bubbles: true }),
-        );
-      });
-    }
-    await expect(dialog).toBeVisible({ timeout: 500 });
-  }).toPass({ timeout: 15_000 });
+  // Wait for the launcher to report its ⌘J keydown listener attached, then send
+  // ONE real key press. A retry loop around a synthetic document-level event
+  // passed even with the launcher's handler deleted, so it verified nothing.
+  await expect(page.getByTestId("chat-launcher-ready")).toBeAttached({ timeout: 30_000 });
+  await page.keyboard.press("ControlOrMeta+j");
+  await expect(dialog).toBeVisible();
   return dialog;
 }
 
@@ -87,10 +80,10 @@ test("Radon Chat renders safe recovery copy instead of provider JSON", async ({ 
   await composer.fill("Check DRAM IV rank");
   await composer.press("Enter");
 
-  const assistantMessage = dialog.locator(".chat-message.assistant").last();
-  await expect(assistantMessage.locator(".chat-role")).toHaveText("Radon");
-  await expect(assistantMessage.locator(".chat-message-body")).toHaveText(SAFE_ASSISTANT_ERROR);
-  await expect(dialog.locator('.chat-messages[aria-busy="false"]')).toBeVisible();
+  const assistantMessage = dialog.getByTestId("chat-message-assistant").last();
+  await expect(assistantMessage.getByTestId("chat-role")).toHaveText("Radon");
+  await expect(assistantMessage.getByTestId("chat-message-body")).toHaveText(SAFE_ASSISTANT_ERROR);
+  await expect(dialog.getByTestId("chat-messages")).toHaveAttribute("aria-busy", "false");
   for (const internalDetail of [
     "OpenAI request failed",
     "max_tokens",
@@ -101,7 +94,7 @@ test("Radon Chat renders safe recovery copy instead of provider JSON", async ({ 
     await expect(assistantMessage).not.toContainText(internalDetail);
   }
 
-  await dialog.locator(".chat-launcher__panel").screenshot({
+  await dialog.getByTestId("chat-launcher-panel").screenshot({
     path: testInfo.outputPath("assistant-provider-error.png"),
   });
 });

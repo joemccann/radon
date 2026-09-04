@@ -512,7 +512,10 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
           </td>
         )}
         {columns.last_price && (
-          <td className={`right last-price-cell ${flashDirection ? `last-price-${flashDirection}` : ""}`}>
+          <td
+            className={`right last-price-cell ${flashDirection ? `last-price-${flashDirection}` : ""}`}
+            data-testid="position-last-price"
+          >
             {lastPrice != null ? fmtPriceOrCalculated(lastPrice, lastPriceIsCalculated) : "—"}
             {priceDirection === "up" && <ArrowUp size={11} className="price-trend-icon price-trend-up" aria-label="price up" />}
             {priceDirection === "down" && <ArrowDown size={11} className="price-trend-icon price-trend-down" aria-label="price down" />}
@@ -717,7 +720,7 @@ export default function PositionTable({
         </div>
       )}
       <div className={`table-wrap${density === "compact" ? " table-wrap--density-compact" : ""}`}>
-      <table className="position-table-sticky">
+      <table className="position-table-sticky" data-testid="position-table">
         <thead>
           <tr>
             <SortTh<PositionSortKey> label="Ticker" sortKey="ticker" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
