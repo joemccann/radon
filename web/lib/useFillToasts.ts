@@ -42,9 +42,14 @@ function safeSessionStorage(): SeenStorage | null {
 export function useFillToasts(
   orders: OrdersData | null,
   addToast: (type: ToastType, message: string, duration?: number) => string,
+  onNewFills?: () => void,
 ): void {
   const primedRef = useRef(false);
   const seenRef = useRef<Set<string>>(new Set());
+  // Read through a ref so a caller passing an inline closure cannot re-run the
+  // diff effect (and re-fire the producer sync) on every render.
+  const onNewFillsRef = useRef(onNewFills);
+  onNewFillsRef.current = onNewFills;
 
   useEffect(() => {
     if (shouldMarkDemoSignup()) return;
@@ -75,5 +80,9 @@ export function useFillToasts(
       if (key) seenRef.current.add(key);
     }
     if (storage) saveSeen(storage, seenRef.current);
+    // A fill is the earliest evidence the app has that positions changed.
+    // Without this the positions table waited on its own producer timer and
+    // rendered pre-fill state underneath a FILLED toast.
+    onNewFillsRef.current?.();
   }, [orders, addToast]);
 }
