@@ -161,5 +161,13 @@ export function catalystWhenLabel(row: CatalystRow): string {
       return dateLabel ? `${dateLabel} ${time} ET` : `${time} ET`;
     }
   }
+  // R-631: an untimed row sorts to the end of its day bucket with nothing
+  // marking the time as unknown, so an economic print that actually lands at
+  // 08:30 ET renders BELOW the 14:00 ET events and an operator reading the
+  // list top-down as a clock misses it. Only same-day rows need this — a row
+  // three days out is read as a date either way.
+  if (row.days_until === 0) {
+    return dateLabel ? `${dateLabel} time TBD` : "time TBD";
+  }
   return dateLabel;
 }
