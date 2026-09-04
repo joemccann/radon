@@ -1,3 +1,31 @@
+# Task: Ship libraries.dev UI pack C (2026-09-04)
+
+Wire `thinking-orbs` + `border-beam` on the terminal, and `border-beam` +
+light `metal-fx` on radon.run. No liquid-gooey, no img-fx, no product-pattern
+expansion.
+
+## Dependency graph
+
+- T1 depends_on: [] - Pin failing contracts for wait verbs, gate beams, CTA/marker accents, and package pins.
+- T2 depends_on: [T1] - Install approved packages with React 18+ peers into `web/` and `site/`.
+- T3 depends_on: [T2] - Wire app wait states, kit Gate 01-04 demo, optional IB connected beam.
+- T4 depends_on: [T2] - Wire marketing primary CTAs, gate/method markers, one hero beam.
+- T5 depends_on: [T3, T4] - Focused tests, dark-theme screenshots, bundle note, PR against main.
+
+## Checklist
+
+- [ ] T1 Failing contracts.
+- [ ] T2 Packages installed.
+- [ ] T3 App wiring.
+- [ ] T4 Marketing wiring.
+- [ ] T5 Verify, screenshot, open PR. Do not merge.
+
+## Review
+
+- Pending.
+
+---
+
 # Task: Make every demo workstation surface deterministic (2026-09-04) [DONE]
 
 Restore representative demo data across performance, orders, instruments,

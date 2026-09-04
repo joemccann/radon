@@ -1,3 +1,4 @@
+import { CtaBeam } from "@/components/atoms/CtaBeam";
 import { ThemeToggle } from "@/components/atoms/ThemeToggle";
 import { editorialNavLinks, DEMO_URL } from "@/lib/editorial-content";
 
@@ -30,12 +31,14 @@ export function EditorialHeader() {
               {link.label}
             </a>
           ))}
-          <a
-            href={DEMO_URL}
-            className={`inline-block rounded-[4px] border border-grid px-[13px] py-[7px] font-mono text-[11px] uppercase tracking-[0.06em] text-primary transition-colors hover:border-signal-deep hover:text-signal-deep ${focusRing}`}
-          >
-            Try free demo
-          </a>
+          <CtaBeam>
+            <a
+              href={DEMO_URL}
+              className={`inline-block rounded-[4px] border border-grid px-[13px] py-[7px] font-mono text-[11px] uppercase tracking-[0.06em] text-primary transition-colors hover:border-signal-deep hover:text-signal-deep ${focusRing}`}
+            >
+              Try free demo
+            </a>
+          </CtaBeam>
           <ThemeToggle />
         </nav>
       </div>
