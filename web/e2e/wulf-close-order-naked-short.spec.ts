@@ -260,7 +260,7 @@ test("WULF close-position order tab does not show a false naked-short warning", 
 
   await expect(page.locator(".existing-orders-title").first()).toContainText("Close Position");
 
-  await page.getByRole("button", { name: "SELL" }).click();
+  await page.getByRole("button", { name: "SELL", exact: true }).click();
   await page.locator(".order-input").fill("77");
   await page.locator(".modify-price-input").fill("4.47");
   await expect(page.locator(".order-error").filter({ hasText: /Naked short call/i })).toHaveCount(0);
