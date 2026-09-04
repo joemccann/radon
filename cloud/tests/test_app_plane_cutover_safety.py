@@ -250,6 +250,30 @@ class TestImageBuildCarriesPublicEnv:
 
 
 class TestImageBuildUsesRemoteCache:
+    def test_python_image_runs_a_hardened_browser_smoke(self):
+        jobs = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+        steps = jobs["python-image"]["steps"]
+        build_index = next(
+            index
+            for index, step in enumerate(steps)
+            if step.get("uses") == BUILD_PUSH_ACTION
+        )
+        build = steps[build_index]
+        smoke = steps[build_index + 1]["run"]
+
+        assert build["with"]["load"] is True
+        assert "docker run" in smoke
+        assert "ghcr.io/joemccann/radon-python:${{ github.sha }}" in smoke
+        assert "--pull=never" in smoke
+        assert "--user 1000:1000" in smoke
+        assert "--network none" in smoke
+        assert "--init" in smoke
+        assert "--cap-drop ALL" in smoke
+        assert "--security-opt no-new-privileges" in smoke
+        assert "sync_playwright" in smoke
+        assert "chromium.launch(headless=True)" in smoke
+        assert "page.title() == 'radon-browser-smoke'" in smoke
+
     @pytest.mark.parametrize(
         ("job_name", "dockerfile", "image", "scope"),
         (
