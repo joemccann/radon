@@ -588,7 +588,11 @@ class TestJwksRefreshThrottle:
         monkeypatch.setenv("CLERK_ISSUER", "https://clerk.example.test")
         monkeypatch.setenv("ALLOWED_USER_IDS", OPERATOR_ID)
         monkeypatch.setattr(mcp_auth, "_jwks_client", None)
-        monkeypatch.setattr(mcp_auth, "_jwks_refresh_after", 0.0)
+        # R-620: per-kid cooldown map, not a scalar.
+        monkeypatch.setattr(
+            mcp_auth, "_jwks_refresh_after", type(mcp_auth._jwks_refresh_after)()
+        )
+        monkeypatch.setattr(mcp_auth, "_jwks_negative", type(mcp_auth._jwks_negative)())
         return fetches
 
     def test_unknown_kids_get_one_refetch_per_window(
@@ -600,22 +604,33 @@ class TestJwksRefreshThrottle:
         assert resolve_principal(operator_bearer(rsa_keys)).is_operator
         assert len(jwks_fetches) == 1  # the initial JWKS load
 
-        for kid in ("rotated-1", "rotated-2"):
+        # R-620 made this cooldown PER KID: one global scalar let a flood of
+        # random kids keep it permanently in the future, so the genuinely-new
+        # kid from a Clerk rotation never got its refetch and every valid token
+        # 401'd. The bound the case pins is unchanged in shape — one live
+        # refetch per window — but it is now counted per kid.
+        for index, kid in enumerate(("rotated-1", "rotated-2"), start=2):
             token = _mint(rsa_keys, {"sub": OPERATOR_ID}, headers={"kid": kid})
             with pytest.raises(AuthError) as exc:
                 resolve_principal("Bearer " + token)
             assert exc.value.status == 401
-        assert len(jwks_fetches) == 2  # one live refetch for the pair
+            assert len(jwks_fetches) == index
+
+        # the SAME kid inside its own window costs no further fetch
+        token = _mint(rsa_keys, {"sub": OPERATOR_ID}, headers={"kid": "rotated-2"})
+        with pytest.raises(AuthError):
+            resolve_principal("Bearer " + token)
+        assert len(jwks_fetches) == 3
 
         # a known kid keeps verifying inside the window, with no fetch
         assert resolve_principal(operator_bearer(rsa_keys)).is_operator
-        assert len(jwks_fetches) == 2
+        assert len(jwks_fetches) == 3
 
         clock[0] += mcp_auth.JWKS_REFRESH_COOLDOWN_SECONDS
         token = _mint(rsa_keys, {"sub": OPERATOR_ID}, headers={"kid": "rotated-3"})
         with pytest.raises(AuthError):
             resolve_principal("Bearer " + token)
-        assert len(jwks_fetches) == 3
+        assert len(jwks_fetches) == 4
 
     def test_cooldown_mirrors_fastapi_negative_ttl(self):
         from api import auth as api_auth
