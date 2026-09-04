@@ -13,6 +13,7 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 from clients.menthorq_dashboard_client import (  # noqa: E402
+    MenthorQDashboardAuthEmbargoed,
     MenthorQDashboardAuthError,
     MenthorQDashboardPayloadError,
     MenthorQDashboardTimeoutError,
@@ -129,3 +130,23 @@ def test_route_maps_provider_failures_to_sanitized_statuses(
     assert response.json() == {"detail": expected_detail}
     assert "secret" not in response.text.lower()
     assert "private" not in response.text.lower()
+
+
+def test_route_maps_auth_embargo_to_transient_detail(client):
+    def _raise(*_args):
+        raise MenthorQDashboardAuthEmbargoed(
+            "dashboard authentication embargoed after a recent failure"
+        )
+
+    provider = type("Provider", (), {"fetch_exposure": _raise})()
+
+    with patch("scripts.api.server.MenthorQDashboardClient", return_value=provider):
+        response = client.get("/options/exposure/SPX?frequency=eod")
+
+    assert response.status_code == 503
+    detail = response.json()["detail"]
+    assert "embargo" in detail.lower()
+
+    from monitor_daemon.handlers import menthorq_login_probe
+
+    assert menthorq_login_probe._is_auth_failure(503, detail) is False

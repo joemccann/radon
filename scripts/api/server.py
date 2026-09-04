@@ -79,6 +79,7 @@ from api.routes.streaks import router as streaks_router
 
 import app_preferences
 from clients.menthorq_dashboard_client import (
+    MenthorQDashboardAuthEmbargoed,
     MenthorQDashboardAuthError,
     MenthorQDashboardClient,
     MenthorQDashboardPayloadError,
@@ -4869,6 +4870,11 @@ async def options_exposure(symbol: str, frequency: str = "eod"):
     try:
         provider = MenthorQDashboardClient()
         return await asyncio.to_thread(provider.fetch_exposure, symbol, frequency)
+    except MenthorQDashboardAuthEmbargoed as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Options exposure authentication embargoed after a recent failure",
+        ) from exc
     except MenthorQDashboardAuthError as exc:
         raise HTTPException(
             status_code=503,
