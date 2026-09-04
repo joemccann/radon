@@ -733,10 +733,14 @@ PYTEST_SHARD_LEAD_MODULES = {
     "scripts-jm": ["scripts/tests/test_leap_garch_no_duplicate_scan.py"],
     "scripts-npsz": [
         "scripts/tests/test_vixcor.py",
+    ],
+    "scripts-gh": [
         "scripts/tests/test_weekend_wrapper_self_rewrite.py",
     ],
     "scripts-rs": [
         "scripts/tests/test_rel137_weekend_wrapper_survivability.py",
+    ],
+    "rest": [
         "scripts/tests/test_run_flow_refresh_wrapper.py",
         "scripts/tests/test_run_portfolio_refresh_retry.py",
         "scripts/tests/test_run_signals_refresh_wrapper.py",

@@ -830,3 +830,42 @@ the 86-88s deploy floor (CIP-004) with the gateway-wait p95 tail (CIP-006).
   for a third consecutive night, the audit must state the no-op explicitly in
   the PR body's Issue section so the operator sees the loop is not shipping,
   rather than burying it in the ledger.
+
+### 2026-09-04 - remediate - branch `ci-performance/2026-09-04`
+
+- **CIP-005 stage 2 IMPLEMENTED** (first time after three consecutive silent
+  no-ops on 09-02, 09-03 and the 09-04 audit's carry-forward).
+- Changed files: `.github/workflows/ci.yml` (py-tests matrix rows
+  `scripts-gh`, `scripts-npsz`, `scripts-rs`, `scripts-daemons`, `rest`),
+  `scripts/tests/test_ci_deploy_concurrency.py`
+  (`PYTEST_SHARD_LEAD_MODULES`).
+- Moves: `test_we*` npsz -> `scripts-gh` (8 modules, gh ended +51 with
+  headroom); `test_ru*` rs -> `rest` (6 modules, rest ended +44);
+  `test_ro*` rs -> `scripts-daemons` (2 modules, daemons ended +52).
+  New globs: npsz `test_[n-p]*.py test_[t-v]*.py test_w[!e]*.py
+  test_[x-z]*.py`; rs `test_r[!ou]*.py test_s*.py`. Lead pins follow their
+  modules: `test_weekend_wrapper_self_rewrite.py` now leads `scripts-gh`,
+  the three `test_run_*_refresh` modules now lead `rest`, `test_vixcor.py`
+  keeps leading npsz and rel137 keeps leading rs.
+- Red/green: `PYTEST_SHARD_LEAD_MODULES` updated first ->
+  `test_heavy_pytest_modules_lead_their_shard` FAILED (`scripts-gh: got
+  ['scripts/tests/test_[g-h]*.py']`); after the `ci.yml` edit, 78 passed in
+  8.32s (`test_ci_deploy_concurrency` + `test_ci_gate_integrity` +
+  `test_path_filter`). Union/partition contract green: no overlap, no
+  unsharded file, no unsharded subdirectory.
+- Every glob resolves against the checkout (27 / 79 / 80 / 4 / 9 tokens for
+  gh / npsz / rs / daemons / rest), so an empty expansion cannot silently
+  drop a module; an unmatched literal would fail pytest closed.
+- Safety: no test removed, skipped, deselected or reweighted; shard count
+  unchanged (10); no `needs` edge, coverage ratchet, provenance, health,
+  stability-window or rollback surface touched; runner-seconds ~flat (work
+  moves between existing jobs).
+- Predicted: npsz job 119s -> ~77-85s, rs 101s -> ~75-85s, coverage ratchet
+  starts ~35-40s earlier, mixed warm p50 271s -> ~232-240s.
+- Revert trigger: any moved module failing on its new shard in the first
+  five `main` runs, or npsz/rs job p50 not dropping below 85s.
+- Validation: five deploy-clean mixed warm after-runs vs the deploy-clean
+  before-set; per-shard job walls from `gh api .../runs/<id>/jobs`.
+- Outcome: `VALIDATING` (implemented, awaiting post-merge samples).
+- Residual bottleneck: python/web gate co-wall ~100-110s, then the 86-88s
+  deploy floor (CIP-004) with the gateway-wait p95 tail (CIP-006).
