@@ -135,6 +135,15 @@ class MenthorQDashboardAuthEmbargoed(MenthorQDashboardAuthError):
     """
 
 
+class MenthorQDashboardBrowserUnavailable(MenthorQDashboardError):
+    """The headless browser runtime is missing; the credentials were never used.
+
+    Deliberately NOT an auth error: an image built without chromium used to
+    surface as "dashboard authentication is unavailable", which the daily
+    login probe latches as a broken credential chain.
+    """
+
+
 class MenthorQDashboardStorageError(MenthorQDashboardError):
     """The session jar could not be written locally (disk full, permissions).
 
@@ -153,6 +162,15 @@ class MenthorQDashboardUpstreamError(MenthorQDashboardError):
 
 class MenthorQDashboardPayloadError(MenthorQDashboardError):
     """The dashboard API returned a structurally invalid payload."""
+
+
+_BROWSER_MISSING_MARKERS = ("playwright install", "executable doesn't exist")
+
+
+def _is_browser_runtime_missing(exc: BaseException) -> bool:
+    if isinstance(exc, ImportError):
+        return True
+    return any(marker in str(exc).lower() for marker in _BROWSER_MISSING_MARKERS)
 
 
 def _finite_number(value: Any) -> float:
@@ -543,6 +561,10 @@ class MenthorQDashboardClient:
         except MenthorQDashboardAuthError:
             raise
         except Exception as exc:
+            if _is_browser_runtime_missing(exc):
+                raise MenthorQDashboardBrowserUnavailable(
+                    "dashboard browser runtime is unavailable"
+                ) from exc
             raise MenthorQDashboardAuthError(
                 "dashboard authentication is unavailable"
             ) from exc

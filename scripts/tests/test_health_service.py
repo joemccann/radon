@@ -13,6 +13,7 @@ import sys
 import threading
 import urllib.request
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
@@ -1109,3 +1110,109 @@ def test_lite_probe_fails_closed_for_invalid_empty_and_incomplete_json(monkeypat
     assert probes._nested_api_state({
         "radon-api": {"state": "up", "payload": {"service_state": "reachable"}}
     }) == "unknown"
+
+
+# --- two-host split (2026-08-30): IB Gateway lives on the broker host ---
+
+def _healthy_app_host_probes(gateway_state):
+    return {
+        "radon-api": {
+            "state": "up",
+            "payload": {
+                "service_state": "reachable",
+                "auth_state": "authenticated",
+                "upstream_dead": False,
+                "port_listening": True,
+            },
+        },
+        "radon-relay": {"state": "up"},
+        "radon-nextjs": {"state": "up"},
+        "ib-gateway": {"state": gateway_state, "detail": "ConnectionRefusedError"},
+    }
+
+
+def _app_host_units(gateway):
+    return {
+        "radon-api.service": {"state": "up"},
+        "radon-relay.service": {"state": "up"},
+        "radon-monitor.service": {"state": "up"},
+        "radon-nextjs.service": {"state": "up"},
+        "radon-newsfeed.service": {"state": "up"},
+        "radon-ib-gateway.service": gateway,
+    }
+
+
+def _most_recent_weekday_at_10_et():
+    """Mid-session ET on the latest weekday, derived from one live anchor."""
+    anchor = datetime.datetime.now(ZoneInfo("America/New_York")).replace(
+        hour=10, minute=0, second=0, microsecond=0
+    )
+    while anchor.weekday() >= 5:
+        anchor -= datetime.timedelta(days=1)
+    return anchor
+
+
+class TestHostRoleApplicability:
+    """On an `app` host the gateway moved to the broker (10.0.0.4), so the local
+    :4001 probe and radon-ib-gateway.service are permanently absent by design.
+    Mirrors cloud/scripts/drift_audit.py resolve_host_role()."""
+
+    _ABSENT_GATEWAY_UNIT = {
+        "state": "down", "result": "success", "non_up_secs": 2683.0,
+    }
+
+    def test_role_resolves_from_environment_and_defaults_to_combined(self, monkeypatch):
+        monkeypatch.setenv("RADON_HOST_ROLE", "app")
+        assert probes.resolve_host_role() == "app"
+        monkeypatch.setenv("RADON_HOST_ROLE", "'broker'")
+        assert probes.resolve_host_role() == "broker"
+        monkeypatch.setenv("RADON_HOST_ROLE", "nonsense")
+        assert probes.resolve_host_role() == "combined"
+        monkeypatch.delenv("RADON_HOST_ROLE", raising=False)
+        assert probes.resolve_host_role() == "combined"
+
+    def test_app_host_absent_gateway_does_not_collapse_the_edge(self, monkeypatch):
+        monkeypatch.setenv("RADON_HOST_ROLE", "app")
+        body = probes.build_status(
+            _healthy_app_host_probes("down"),
+            _app_host_units(self._ABSENT_GATEWAY_UNIT),
+            "t",
+            units_age_secs=0,
+        )
+        assert body["overall_state"] == "up"
+        assert body["ok"] is True
+        assert body["degraded_reasons"] == []
+        assert body["host_role"] == "app"
+        assert body["not_applicable"] == ["ib-gateway", "radon-ib-gateway.service"]
+        assert body["probes"]["ib-gateway"]["state"] == "down"
+        assert body["units"]["radon-ib-gateway.service"]["state"] == "down"
+
+    def test_app_host_exemption_is_gateway_only(self, monkeypatch):
+        monkeypatch.setenv("RADON_HOST_ROLE", "app")
+        units = _app_host_units(self._ABSENT_GATEWAY_UNIT)
+        units["radon-monitor.service"] = {
+            "state": "down", "result": "exit-code", "non_up_secs": 2683.0,
+        }
+        body = probes.build_status(
+            _healthy_app_host_probes("down"), units, "t", units_age_secs=0,
+        )
+        assert body["overall_state"] == "down"
+        assert body["degraded_reasons"] == ["radon-monitor.service"]
+
+    @pytest.mark.parametrize("role", ["broker", "combined", None])
+    def test_every_other_role_keeps_the_dwell_escalation(self, monkeypatch, role):
+        if role is None:
+            monkeypatch.delenv("RADON_HOST_ROLE", raising=False)
+        else:
+            monkeypatch.setenv("RADON_HOST_ROLE", role)
+        market_open = _most_recent_weekday_at_10_et()
+        body = probes.build_status(
+            _healthy_app_host_probes("down"),
+            _app_host_units(self._ABSENT_GATEWAY_UNIT),
+            "t",
+            units_age_secs=0,
+            now_et=market_open,
+        )
+        assert body["overall_state"] == "down"
+        assert body["degraded_reasons"] == ["ib-gateway", "radon-ib-gateway.service"]
+        assert body["not_applicable"] == []
