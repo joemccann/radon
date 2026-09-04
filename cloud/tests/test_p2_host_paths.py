@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
 CLOUD = Path(__file__).resolve().parents[1]
 REPO = CLOUD.parent
 SERVICES = CLOUD / "services"
@@ -113,3 +115,81 @@ def test_setup_vps_grants_caddy_traverse_into_media_parent() -> None:
     grant = text.index("usermod -aG radon caddy")
     restart_snippet = text[grant : grant + 400]
     assert "restart caddy" in restart_snippet
+
+
+# ── T-416: prove the env-file mode/owner by running the code ──────────
+#
+# test_canonical_env_is_root_owned_group_readable() above greps setup-vps.sh
+# for a chown line and CLAUDE.md for prose. Both pass if the chown sits in a
+# dead branch, or is overwritten by a looser chown later in the same
+# function. Source the env-writing functions against chmod/chown stubs and
+# assert the FINAL observed mode and owner of a real temp env file.
+
+_SETUP = CLOUD / "scripts" / "setup-vps.sh"
+
+
+def _env_harness(tmp_path: Path) -> tuple[Path, Path, Path, dict[str, str]]:
+    """Returns (env_file, owner_state, fake_bin, env)."""
+    import os
+    import stat
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    owner_state = tmp_path / "owner"
+
+    # chmod really applies, so the final mode is read off the file itself.
+    (fake_bin / "chmod").write_text('#!/bin/sh\nexec /bin/chmod "$@"\n')
+    # chown cannot run unprivileged; record the requested owner, last wins.
+    (fake_bin / "chown").write_text(
+        "#!/bin/sh\n"
+        "spec=$1\n"
+        "if [ \"$spec\" = -R ]; then spec=$2; fi\n"
+        f"printf '%s\\n' \"$spec\" >> {owner_state!s}\n"
+        "exit 0\n"
+    )
+    for noop in ("sudo", "install", "bun"):
+        (fake_bin / noop).write_text("#!/bin/sh\nexit 0\n")
+    # `systemctl is-active --quiet` must report inactive, or setup_node
+    # refuses to run at all and the chmod/chown are never reached.
+    (fake_bin / "systemctl").write_text("#!/bin/sh\nexit 3\n")
+    for stub in fake_bin.iterdir():
+        stub.chmod(stub.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+
+    env_file = tmp_path / "env"
+    env_file.write_text("NEXT_PUBLIC_X=1\nTURSO_AUTH_TOKEN=secret\n")
+    env_file.chmod(0o666)  # start wrong: only the script may narrow it
+
+    env = {
+        **os.environ,
+        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        "RADON_SETUP_SOURCE_ONLY": "1",
+        "RADON_DEPLOY_ENV_FILE": str(env_file),
+        "RADON_APP_DIR": str(tmp_path / "app"),
+        "RADON_CLOUD_DIR": str(tmp_path / "cloud-checkout"),
+    }
+    return env_file, owner_state, fake_bin, env
+
+
+def _source_and_call(function: str, env: dict[str, str]) -> None:
+    import subprocess
+
+    subprocess.run(
+        ["bash", "-c", f"set -uo pipefail\nsource {_SETUP!s}\n{function}\n"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+
+@pytest.mark.parametrize("function", ["validate_env", "setup_node"])
+def test_env_file_ends_up_0640_root_radon(tmp_path, function: str) -> None:
+    env_file, owner_state, _bin, env = _env_harness(tmp_path)
+    _source_and_call(function, env)
+
+    assert oct(env_file.stat().st_mode & 0o7777) == "0o640", (
+        f"{function} left the secret file at "
+        f"{oct(env_file.stat().st_mode & 0o7777)}"
+    )
+    owners = owner_state.read_text().split() if owner_state.exists() else []
+    assert owners, f"{function} never chowned the env file"
+    assert owners[-1] == "root:radon", f"final owner was {owners[-1]}: {owners}"
