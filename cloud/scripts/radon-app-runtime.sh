@@ -21,6 +21,7 @@ if [[ "${RADON_APP_RUNTIME_TEST_MODE:-0}" == "1" ]]; then
   LEASE_DIR="${STATE_DIR}/ib-lease"
   CHOWN="${RADON_TEST_CHOWN:?test chown is required}"
   PYTHON="${RADON_TEST_PYTHON:-$(command -v python3)}"
+  GETENT="${RADON_TEST_GETENT:?test getent is required}"
   NOTIFY_PROXY_DIR="${RADON_TEST_NOTIFY_PROXY_DIR:-${STATE_DIR}/notify}"
 else
   if (( EUID != 0 )); then
@@ -36,10 +37,17 @@ else
   LEASE_DIR=/var/lib/radon/ib-lease
   CHOWN=/usr/bin/chown
   PYTHON=/usr/bin/python3
+  GETENT=/usr/bin/getent
   NOTIFY_PROXY_DIR=/run/radon-app-runtime
 fi
 
 readonly SECRET_STORE_CREDENTIAL_NAME=radon-secret-store-key
+# R-619. The container runs --user radon, so a staged key owned by uid radon
+# is readable by every other thing that account can start. The plaintext key
+# is therefore handed over through a group the radon account is NOT in:
+# root:radon-secrets 0040, and the container gets the gid at start via
+# --group-add. Only root can grant that group, and only for this container.
+readonly SECRET_STORE_CREDENTIAL_GROUP=radon-secrets
 readonly SECRET_STORE_CREDENTIAL_CONTAINER_DIR=/run/credentials/radon-api.service
 readonly SECRET_STORE_DB_CONTAINER_PATH=/home/radon/radon/data/secret_store/secrets.db
 readonly SECRET_STORE_CREDENTIAL_STAGE_ROOT="${NOTIFY_PROXY_DIR}/credentials"
@@ -71,8 +79,34 @@ cleanup_staged_credential_on_exit() {
   cleanup_runtime_credential "$STAGED_CREDENTIAL_UNIT"
 }
 
+# The gid the plaintext key is handed to. Absent group, or a radon account that
+# has been added to it, means the delivery channel is open to the account the
+# container runs as -- refuse to start rather than stage a readable key.
+credential_group_gid() {
+  local entry gid
+  entry="$("$GETENT" group "$SECRET_STORE_CREDENTIAL_GROUP" 2>/dev/null)" || entry=""
+  gid="$(printf '%s' "$entry" | cut -d: -f3)"
+  [[ "$gid" =~ ^[0-9]+$ ]] || {
+    echo "radon-app-runtime: group ${SECRET_STORE_CREDENTIAL_GROUP} does not exist" >&2
+    return 78
+  }
+  printf '%s\n' "$gid"
+}
+
+assert_radon_cannot_open_credential_group() {
+  local groups
+  groups="$("$ID_BIN" -nG radon 2>/dev/null)" || groups=""
+  case " $groups " in
+    *" ${SECRET_STORE_CREDENTIAL_GROUP} "*)
+      echo "radon-app-runtime: radon must not be a member of ${SECRET_STORE_CREDENTIAL_GROUP}" >&2
+      return 78
+      ;;
+  esac
+  return 0
+}
+
 stage_api_credential() {
-  local unit="$1" ids="$2"
+  local unit="$1" gid="$2"
   local source credential_dir credential_file staged_size
   validate_api_startup_inputs
   source="${CREDENTIALS_DIRECTORY}/${SECRET_STORE_CREDENTIAL_NAME}"
@@ -83,13 +117,14 @@ stage_api_credential() {
   STAGED_CREDENTIAL_UNIT="$unit"
   install -d -m 0700 "$SECRET_STORE_CREDENTIAL_STAGE_ROOT" "$credential_dir"
   install -m 0400 "$source" "$credential_file"
-  "$CHOWN" "$ids" "$credential_dir" "$credential_file"
-  chmod 0500 "$credential_dir"
   staged_size="$(wc -c < "$credential_file" | tr -d '[:space:]')"
   [[ "$staged_size" == "32" ]] || {
     echo "radon-app-runtime: staged ${SECRET_STORE_CREDENTIAL_NAME} must be exactly 32 bytes" >&2
     return 78
   }
+  "$CHOWN" "root:${gid}" "$credential_dir" "$credential_file"
+  chmod 0040 "$credential_file"
+  chmod 0050 "$credential_dir"
 }
 
 validate_api_startup_inputs() {
@@ -392,8 +427,11 @@ cmd_run() {
     *) exit 64 ;;
   esac
 
+  local credential_gid=""
   if [[ "$unit" == "radon-api.service" ]]; then
     validate_api_startup_inputs
+    assert_radon_cannot_open_credential_group || exit $?
+    credential_gid="$(credential_group_gid)" || exit $?
   fi
 
   # R-232, and its limit: the container's processes land in
@@ -415,7 +453,7 @@ cmd_run() {
     local secret_store_dir="${DATA_DIR}/secret_store"
     install -d -m 0700 "$secret_store_dir"
     "$CHOWN" "$ids" "$secret_store_dir"
-    stage_api_credential "$unit" "$ids"
+    stage_api_credential "$unit" "$credential_gid"
   fi
 
   # The container gets NARROW binds, never $STATE_DIR itself. /var/lib/radon
@@ -458,6 +496,7 @@ cmd_run() {
     fi
     local credential_host_dir="${SECRET_STORE_CREDENTIAL_STAGE_ROOT}/${unit}"
     set -- "$@" \
+      --group-add "$credential_gid" \
       --env "CREDENTIALS_DIRECTORY=${SECRET_STORE_CREDENTIAL_CONTAINER_DIR}" \
       --env "RADON_SECRET_STORE_PATH=${SECRET_STORE_DB_CONTAINER_PATH}" \
       --mount "type=bind,src=${credential_host_dir},dst=${SECRET_STORE_CREDENTIAL_CONTAINER_DIR},readonly"

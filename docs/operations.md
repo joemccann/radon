@@ -96,11 +96,26 @@ auto-generated 0600 on first use). Production
 `radon-api.service` loads
 `/etc/credstore.encrypted/radon-secret-store-key` with
 `LoadCredentialEncrypted=`. The root container wrapper validates the decrypted
-value is a regular, non-symlink 32-byte file, stages a `0400` copy owned by the
-numeric `radon` UID/GID under `/run/radon-app-runtime/credentials/`, and mounts
-only that directory read-only into the API container. The key is never passed
-through Docker arguments or environment values; the staged plaintext is
-removed by `ExecStopPost` after the container stops.
+value is a regular, non-symlink 32-byte file, stages a copy under
+`/run/radon-app-runtime/credentials/`, and mounts only that directory
+read-only into the API container. The key is never passed through Docker
+arguments or environment values; the staged plaintext is removed by
+`ExecStopPost` after the container stops.
+
+The staged copy is `root:radon-secrets 0040` in a `root:radon-secrets 0050`
+directory, and the container is granted that gid at start with
+`--group-add` (R-619). The API container runs `--user radon`, so a copy owned
+by uid `radon` would be readable by anything else that account can start; the
+owner bits are empty and only root can grant `radon-secrets`, so the delivery
+channel is one the `radon` account cannot open for itself. `radon` is never a
+member: `setup-vps.sh` creates the system group and refuses to continue if it
+finds the account in it, and `radon-app-runtime` exits 78 before staging
+anything if the group is missing or `radon` has joined it.
+
+Residual: `radon` is in group `docker` (`setup-vps.sh`), which is
+root-equivalent on this host, so the group boundary is defense in depth
+against direct file reads, not against an operator-level compromise of that
+account.
 
 There is no escrow, and `secrets.db` is
 bound to its key by fingerprint (`key_binding` table): with rows present and
