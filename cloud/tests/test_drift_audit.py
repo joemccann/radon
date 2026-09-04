@@ -397,6 +397,79 @@ def test_gateway_control_helper_is_drift_audited():
     ) in da.FILE_PAIRS
 
 
+class TestRoleSkippedGatewayPlane:
+    def _gather(self, monkeypatch, role):
+        checked_files = []
+        compose_checks = []
+
+        def compare_file_pair(_live, _repo, label):
+            checked_files.append(label)
+            if label == "ib-gateway-control":
+                return {
+                    "id": "live-missing:ib-gateway-control",
+                    "detail": "/usr/local/bin/radon-ib-gateway-control",
+                }
+            return None
+
+        def check_compose(drifts):
+            compose_checks.append(True)
+            drifts.append(
+                {"id": "compose:unresolvable", "detail": "no such container"}
+            )
+
+        monkeypatch.setattr(da, "resolve_host_role", lambda environ=None: role)
+        monkeypatch.setattr(da, "_compare_file_pair", compare_file_pair)
+        monkeypatch.setattr(da, "_check_compose", check_compose)
+        monkeypatch.setattr(da, "_check_units", lambda drifts, known: None)
+        monkeypatch.setattr(da, "_check_sudoers", lambda drifts, known: None)
+        monkeypatch.setattr(da, "_check_env_invariants", lambda drifts: None)
+        monkeypatch.setattr(da, "_read_repo", lambda relative: "")
+        result = da.gather()
+        return result, checked_files, compose_checks
+
+    def test_app_role_marks_gateway_file_and_compose_as_role_skipped(
+        self, monkeypatch
+    ):
+        (drifts, allowed, known), checked_files, compose_checks = self._gather(
+            monkeypatch, "app"
+        )
+
+        assert drifts == []
+        assert allowed == {}
+        assert checked_files.count("ib-gateway-control") == 0
+        assert compose_checks == []
+        assert known == [
+            "role-skipped:ib-gateway-control",
+            "role-skipped:compose",
+        ]
+
+    def test_broker_role_still_checks_gateway_file_and_compose(self, monkeypatch):
+        (drifts, _allowed, known), checked_files, compose_checks = self._gather(
+            monkeypatch, "broker"
+        )
+
+        assert [drift["id"] for drift in drifts] == [
+            "live-missing:ib-gateway-control",
+            "compose:unresolvable",
+        ]
+        assert checked_files.count("ib-gateway-control") == 1
+        assert compose_checks == [True]
+        assert known == []
+
+    def test_combined_role_still_checks_gateway_file_and_compose(self, monkeypatch):
+        (drifts, _allowed, known), checked_files, compose_checks = self._gather(
+            monkeypatch, "combined"
+        )
+
+        assert [drift["id"] for drift in drifts] == [
+            "live-missing:ib-gateway-control",
+            "compose:unresolvable",
+        ]
+        assert checked_files.count("ib-gateway-control") == 1
+        assert compose_checks == [True]
+        assert known == []
+
+
 class TestSummary:
     def test_error_summary_is_compact_and_capped(self):
         drifts = [
