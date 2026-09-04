@@ -38,8 +38,11 @@ Ladder rule: first source returning >= 21 closes wins; if none reaches 21,
 the longest non-empty result is used (a genuinely young listing is short on
 every source). Results are cached via `utils.price_cache` (stocks dir, TTL
 15 min in market hours / 24 h after close), key
-`cache_key_stock(symbol, "streaks-max", <UTC date>)`; a cache hit reports
-`source: "cache"`. No Turso table and no migration: the payload is derived
+`cache_key_stock(symbol, "streaks-max", <UTC date>)`; a cached hit keeps its
+original `source` and adds `cached: true` plus `fetched_at`. The cache does
+not short-circuit the ladder: a Yahoo, short, or unknown-provenance cache
+entry still re-runs IB/UW first (rule 7), and vendor failures surface as
+`errors: [{ source, error }]`, which is distinct from `missing: true`. No Turso table and no migration: the payload is derived
 on demand from upstream vendors and carries no state a deploy could lose.
 
 Licensing: all four sources are already integrated repo clients used under
@@ -58,7 +61,8 @@ refresh cadence.
 ## Payload contract (FastAPI builds it; the Next route passes it through)
 
 `GET /streaks/{ticker}` (FastAPI, JWT-protected by default) and
-`GET /api/streaks?symbol={ticker}` (Next.js proxy, `radonCapability: "read"`).
+`GET /api/streaks?symbol={ticker}` (Next.js proxy, `radonCapability:
+"read.spawn"`).
 
 ```json
 {
@@ -104,7 +108,7 @@ refresh cadence.
 ## API route (Next.js)
 
 `web/app/api/streaks/route.ts` — GET only, `runtime = "nodejs"`,
-`radonCapability = "read"`, `requireRouteAccess` with a 20/min rate key,
+`radonCapability = "read.spawn"`, `requireRouteAccess` with a 20/min rate key,
 `boundedTicker` on `symbol`, per-symbol single-flight map, `radonFetch`
 timeout 60s (IB 15s + UW + Robinhood + Yahoo worst case), 502 + scrubbed
 detail when FastAPI is down. No disk reads, so the disk-route cache
