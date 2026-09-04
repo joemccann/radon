@@ -123,7 +123,7 @@ def _stub_bin(tmp_path: Path, env_dump: Path, gh_log: Path) -> Path:
             "done\n"
             'exec "$@"\n'
         ),
-        "git": "#!/bin/sh\nexit 0\n",
+        "git": '#!/bin/sh\n# REL-188: the wrapper reads commit evidence from git before calling a phase\n# OK, so the stub reports a fresh HEAD and a current committer date.\ncase "$*" in\n  *"rev-parse HEAD"*) date +%s%N; exit 0 ;;\n  *"--format=%ct"*) date +%s; exit 0 ;;\nesac\nexit 0\n',
         "python3": "#!/bin/sh\nexit 0\n",
     }
     for name, body in stubs.items():
