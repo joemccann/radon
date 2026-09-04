@@ -96,8 +96,14 @@ class PositionReconcileHandler(BaseHandler):
         report = ib_reconcile.generate_reconciliation_report([], discrepancies)
         detail = ib_reconcile._health_detail(report)
 
+        drift_message = ib_reconcile._drift_message(detail)
         state = "error" if report["needs_attention"] else "ok"
-        self.record_cycle_health(state, error=detail)
+        self.record_cycle_health(
+            state,
+            error={**detail, "message": drift_message}
+            if report["needs_attention"]
+            else None,
+        )
 
         result: dict[str, Any] = {
             "ib_positions": len(ib_positions),
@@ -108,12 +114,8 @@ class PositionReconcileHandler(BaseHandler):
             "expired_locally_count": detail["expired_locally_count"],
         }
         if report["needs_attention"]:
-            result["error"] = (
-                f"position drift vs IB: {detail['quantity_mismatch_count']} quantity "
-                f"mismatch(es), {detail['positions_missing_locally_count']} missing "
-                f"locally, {detail['positions_closed_count']} closed locally"
-            )
-            logger.warning("position-reconcile: %s detail=%s", result["error"], detail)
+            result["error"] = drift_message
+            logger.warning("position-reconcile: %s detail=%s", drift_message, detail)
         else:
             logger.debug(
                 "position-reconcile: in sync (ib=%d local=%d)",
