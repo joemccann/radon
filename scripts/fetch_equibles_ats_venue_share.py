@@ -457,6 +457,10 @@ def payload_has_data(payload: dict[str, Any]) -> bool:
     return bool(payload.get("current"))
 
 
+TIMER_WEEKDAY_UTC = 1         # Tuesday, per cloud/services/radon-equibles-ats.timer
+TIMER_HOUR_UTC = 9
+TIMER_MINUTE_UTC = 15
+
 # A cycle covering less than this fraction of the resolved universe is not a
 # cycle, it is a partial read that happens to have some rows in it.
 MIN_COVERAGE_RATIO = 0.6
@@ -465,6 +469,21 @@ MIN_COVERAGE_RATIO = 0.6
 # override rather than the scheduled watchlist sweep. The all-empty gate still
 # applies at every size.
 MIN_UNIVERSE_FOR_RATIO = 5
+
+
+def _next_scheduled_run(now: datetime) -> str:
+    """The next radon-equibles-ats.timer fire, as the heartbeat's next_attempt_at.
+
+    Weekly cadence: without this, the watchdog re-pages a single failed cycle
+    on every one of its own cycles for the seven days until the next attempt.
+    """
+    stamp = now.astimezone(timezone.utc).replace(
+        hour=TIMER_HOUR_UTC, minute=TIMER_MINUTE_UTC, second=0, microsecond=0
+    )
+    stamp += timedelta(days=(TIMER_WEEKDAY_UTC - stamp.weekday()) % 7)
+    if stamp <= now:
+        stamp += timedelta(days=7)
+    return stamp.isoformat().replace("+00:00", "Z")
 
 
 def has_sufficient_coverage(covered: int, requested: int) -> bool:
@@ -761,6 +780,7 @@ def run(
             scan_time,
             error={
                 "message": f"cycle aborted: {exc}",
+                "next_attempt_at": _next_scheduled_run(now),
                 "requested": len(universe),
                 "covered": len(series_by_ticker),
                 "failed": len(errors),
@@ -781,6 +801,8 @@ def run(
             scan_time,
             error={
                 "message": "no ticker produced a series",
+                "next_attempt_at": _next_scheduled_run(now),
+                "codes": sorted({e["code"] for e in errors if e.get("code")}),
                 "requested": len(universe),
                 "failed": len(errors),
             },
@@ -801,6 +823,7 @@ def run(
                     f"partial cycle: {covered}/{len(universe)} tickers covered, "
                     f"below the {MIN_COVERAGE_RATIO:.0%} floor"
                 ),
+                "next_attempt_at": _next_scheduled_run(now),
                 "requested": len(universe),
                 "covered": covered,
                 "failed": len(errors),
@@ -840,6 +863,7 @@ def run(
                     f"dropped tail: {len(dropped)} ticker(s) deferred by "
                     f"timeout/budget: {', '.join(dropped)}"
                 ),
+                "next_attempt_at": _next_scheduled_run(now),
                 "requested": len(universe),
                 "covered": covered,
                 "failed": len(errors),
