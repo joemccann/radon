@@ -6,6 +6,7 @@ import {
   buildHeadlinesWebSocketUrl,
   headlinesUrlLeaksUpstream,
 } from "./headlinesSocket";
+import { DEMO_HEADLINES_POLL_MS } from "./demo/headlinesPolicy";
 import { useRealtimeAuth } from "./RealtimeAuthContext";
 
 function reconnectDelayMs(attempt: number): number {
@@ -38,6 +39,41 @@ export function useHeadlines() {
   const [status, setStatus] = useState<HeadlinesStatus>("connecting");
 
   useEffect(() => {
+    if (process.env.NEXT_PUBLIC_RADON_DEMO === "1") {
+      let stopped = false;
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      let request: AbortController | null = null;
+
+      async function refresh() {
+        request = new AbortController();
+        try {
+          const response = await fetch("/api/headlines", {
+            cache: "no-store",
+            signal: request.signal,
+          });
+          if (!response.ok) throw new Error("Headline snapshot unavailable");
+          const payload = await response.json() as { items?: unknown; degraded?: unknown };
+          if (!Array.isArray(payload.items)) throw new Error("Invalid headline snapshot");
+          if (!stopped) {
+            setItems(payload.items as Headline[]);
+            setStatus(payload.degraded === true ? "down" : "live");
+          }
+        } catch {
+          if (!stopped) setStatus("down");
+        } finally {
+          request = null;
+          if (!stopped) timer = setTimeout(() => void refresh(), DEMO_HEADLINES_POLL_MS);
+        }
+      }
+
+      void refresh();
+      return () => {
+        stopped = true;
+        if (timer != null) clearTimeout(timer);
+        request?.abort();
+      };
+    }
+
     if (typeof WebSocket === "undefined") return;
     let stopped = false;
     let socket: WebSocket | null = null;

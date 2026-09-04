@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 const ROUTES = [
   "assistant", "attribution", "backtest/[strategy]", "blotter", "breadth",
   "cash-flows", "discover", "flow-analysis", "flow-analysis/[ticker]",
-  "futures/chain", "gamma-rotation", "gex", "index-options/chain", "internals",
+  "futures/chain", "gamma-rotation", "gex", "headlines", "index-options/chain", "internals",
   "journal", "journal/sync", "knowledge/prior-evals", "knowledge/search", "leap",
   "leap/scan", "menthorq/[command]/image", "menthorq/cta", "menthorq/cta/image", "newsfeed/posts",
   "options/chain", "options/expirations", "options/exposure", "options/rv-ratio",

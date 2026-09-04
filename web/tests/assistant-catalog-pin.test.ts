@@ -68,6 +68,7 @@ const PINNED: Record<string, PinnedCapability> = {
   "gex": { GET: "read", POST: "read.spawn" },
   "gex/share": "internal",
   "gex/share/content": "internal",
+  "headlines": "internal",
   "hhlev": "read",
   "hyad": "read",
   "ib/ws-ticket": "admin",

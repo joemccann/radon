@@ -27,6 +27,10 @@ describe("classifyRateTier", () => {
     expect(classifyRateTier("POST", "/api/ib/ws-ticket")).toBe("E");
   });
 
+  it("headline snapshots use an isolated realtime-polling budget", () => {
+    expect(classifyRateTier("GET", "/api/headlines")).toBe("G");
+  });
+
   it("plain reads are tier A", () => {
     expect(classifyRateTier("GET", "/api/portfolio")).toBe("A");
     expect(classifyRateTier("GET", "/api/orders")).toBe("A");
