@@ -701,8 +701,15 @@ class ExitOrdersHandler(BaseHandler):
                         # class is bounded in practice, but the notional branch
                         # was skipped entirely and a corrupt position size
                         # reached IB unbounded.
+                        # T-412: journal_trade_id is NULL on legacy rows, so
+                        # keying on it alone collapses every id-less leg onto
+                        # (None, "target") and one refusal suppressed an
+                        # unrelated position's exit. localSymbol is the
+                        # qualified broker identity (symbol+expiry+strike+
+                        # right) and is always present here.
                         refusal_key = (
                             order_info.get("journal_trade_id"),
+                            contract.localSymbol,
                             order_info["order_type"],
                         )
                         refusal_params = (contracts, target_price)
@@ -715,6 +722,15 @@ class ExitOrdersHandler(BaseHandler):
                                 "contract": contract.localSymbol,
                                 "reason": "limit_refused_previously",
                             })
+                            # T-410: the latch only suppresses the redundant
+                            # re-place, not the fact that the position is
+                            # still unprotected. Every cycle must heartbeat
+                            # error until the refusal clears.
+                            self._note_error(result, (
+                                f"exit order still refused by the order limit "
+                                f"({ticker} {order_info['order_type']}); "
+                                f"position remains unprotected"
+                            ))
                             continue
                         violation = check_order_limits({
                             "type": "option",
