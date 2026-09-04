@@ -9240,6 +9240,57 @@ class, T-118 — plus 3 deliberate `test_caddy_edge_timeouts.py` reds (T-205
 working as designed; no `caddy` binary on this host). **Zero failures in
 either cloud file this phase touched.**
 
+## Remediation 2026-09-04 — PR #274
+
+All 31 findings from this cycle's audit are DONE: T-409…T-439 (2 P0, 10 P1,
+19 P2). No DEFERRED. Evidence per task in `TEST_LOG.md` §Remediation
+2026-09-04. Eight parallel worktree agents; every landing re-verified in the
+main clone before commit.
+
+Four findings' subjects were broken product code, not only test gaps, per the
+standing pattern:
+
+- **T-410 (P0)** — the exit-order refusal latch stopped calling `_note_error`
+  from the second cycle onward, so `exit-orders` heartbeat `ok` while a
+  position sat with no target or stop. Source fixed; the skip path records the
+  error every cycle.
+- **T-412** — `refusal_key` collided on `(None, "target")` for any two legs
+  lacking a `journal_trade_id`, so a second position's protective leg was never
+  submitted. Key now includes `contract.localSymbol`.
+- **T-417** — production installed unpinned caddy from the Cloudsmith `stable`
+  repo while CI froze 2.11.4, so the edge tests guarding non-replay of a severed
+  `POST /api/orders/place` no longer described the production binary.
+  `setup-vps.sh` pins the same version; a test asserts the literals are equal.
+- **T-432** — bumping `STATUS_SCHEMA_VERSION` to 3 exposed that `health_probe`
+  and `watchdog.external_probe` both hard-pinned `== 2` and would have failed
+  closed against a v3 host. Both now accept the current schema and exactly one
+  predecessor. **Rollout constraint:** `deploy.sh` must land `health_probe` and
+  `watchdog` alongside `health_service`.
+
+Three corrections to the audit's own claims, made on the evidence:
+
+- **T-420** — the escalated verdict is `down`, not `degraded`; `dependency_stuck`
+  returns before the dependency-degrade branch. Tests assert the real semantics.
+- **T-426** — already satisfied at this HEAD by the T-173 guard at
+  `test_ci_deploy_concurrency.py:671-701`. No change made; the prescribed
+  `cloud/tests/test_sub/` drill was run and reds correctly.
+- **T-431** — the audit's arithmetic was wrong (real age range 1h45m..25h44m,
+  not 24h..47h59m), so the case could not have flaked. The determinism fix
+  stands anyway: a frozen-clock sweep over all 24 UTC hours.
+- **T-439** — neither hypothesis held. The pre-exec path does clean up and exit
+  71; the socket bind poll is 50 forked `sleep 0.1` calls, ~12s on darwin
+  against a 10s harness timeout. Bound raised at that one call site; no skip.
+  The underlying latency asymmetry is left as-is and is why the test is one bad
+  day from flaking on Linux too.
+
+**T-435 is operator-only.** The Clerk publishable key is inlined as a literal
+default parameter into the compiled edge middleware, so `isSetupMode()` is
+constant-false in any keyed production build and no spec against the shared
+Playwright `webServer` can observe the setup redirect. A true setup-mode e2e
+needs a second keyless compile-mode build with its own `distDir`, its own
+`next start` and a new CI job. Landed instead: a unit-level pin on the
+auth-misconfigured gate, which had no coverage at all.
+
 ## Remediation 2026-09-03 — PR #260
 
 All 11 un-DONE P0/P1 findings from this cycle's audit are DONE: T-382 (P0),
