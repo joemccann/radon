@@ -7407,6 +7407,18 @@ body[data-mobile="true"] .orders-command-strip__jump:active {
   font-size: 12px;
 }
 
+/* Partial fill: the header quantity is the REMAINDER, so name what already
+   filled rather than leaving the smaller number unexplained. */
+.modify-order-filled {
+  padding: 1px 6px;
+  border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent);
+  border-radius: 2px;
+  color: var(--warning);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .modify-layout {
   display: flex;
   flex-direction: column;
