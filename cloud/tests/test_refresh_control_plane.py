@@ -72,6 +72,15 @@ def _write_executable(path: Path, body: str) -> None:
     path.chmod(0o755)
 
 
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-C", str(repo), *args],
+        check=True,
+        capture_output=True,
+        env={**os.environ, "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null"},
+    )
+
+
 def sudoers_helper_verbs(text: str) -> list[str]:
     verbs: list[str] = []
     token = "/usr/local/sbin/radon-deploy-root "
@@ -167,9 +176,18 @@ exit 0
             shutil.copy2(source, installed)
             installed.chmod(int(mode, 8))
         self.write_manifest_and_ready()
+        # refresh-control-plane installs the git blobs of the deployed commit,
+        # never the working tree, so the fixture has to commit before the
+        # helper can see anything -- exactly the property under test.
+        _git(self.tmp, "init", "-b", "main", ".")
+        _git(self.tmp, "config", "user.email", "refresh-control-plane@test")
+        _git(self.tmp, "config", "user.name", "refresh-control-plane")
+        self.commit_sources()
         self.env = {
             **os.environ,
             "RADON_DEPLOY_HELPER_TEST_MODE": "1",
+            "RADON_TEST_GIT_DIR": str(self.tmp / ".git"),
+            "RADON_TEST_UNIT_REMOTE": str(self.tmp),
             "RADON_TEST_SYSTEMCTL": str(fake_systemctl),
             "RADON_TEST_RM": str(fake_rm),
             "RADON_TEST_SYNC": str(fake_sync),
@@ -203,7 +221,17 @@ exit 0
         index = CONTROL_PLANE_SOURCES.index(source_rel)
         return self.rootfs / CONTROL_PLANE_TARGETS[index].lstrip("/")
 
+    def commit_sources(self) -> None:
+        _git(self.tmp, "add", "--force", "cloud")
+        _git(self.tmp, "commit", "--allow-empty", "-m", "control-plane sources")
+
     def mutate_source(self, source_rel: str) -> None:
+        """A reviewed change: edit the tree, then land it on main."""
+        self.mutate_source_uncommitted(source_rel)
+        self.commit_sources()
+
+    def mutate_source_uncommitted(self, source_rel: str) -> None:
+        """What an attacker with the radon account can do: edit, never commit."""
         path = self.cloud / source_rel
         path.write_text(path.read_text(encoding="utf-8") + _diff_marker(source_rel), encoding="utf-8")
 
@@ -663,6 +691,7 @@ def test_privileged_refresh_refuses_a_runtime_script_with_a_syntax_error(tmp_pat
     box = Sandbox(tmp_path)
     source = box.cloud / RUNTIME_SOURCE
     source.write_text(source.read_text(encoding="utf-8") + "\nif [[ broken\n", encoding="utf-8")
+    box.commit_sources()
 
     _refused_without_install(box, "refresh-control-plane-privileged", "shell syntax validation failed")
     assert not list((box.rootfs / "usr" / "local" / "sbin").glob(".radon-refresh.*"))
@@ -693,6 +722,7 @@ def test_privileged_refresh_refuses_a_python_helper_with_a_syntax_error(tmp_path
     box = Sandbox(tmp_path)
     source = box.cloud / DRIFT_AUDIT_SOURCE
     source.write_text(source.read_text(encoding="utf-8") + "\ndef broken(:\n", encoding="utf-8")
+    box.commit_sources()
 
     _refused_without_install(box, "refresh-control-plane-privileged", "python syntax validation failed")
 
@@ -732,3 +762,38 @@ def test_refresh_install_file_has_a_validator_arm_for_every_control_plane_target
         if not any(fnmatch.fnmatchcase(target, pattern) for pattern in patterns)
     ]
     assert uncovered == [], uncovered
+
+
+def test_refresh_ignores_an_uncommitted_working_tree_edit(tmp_path: Path) -> None:
+    """R-084 for the control plane: the checkout is radon-writable.
+
+    A sudoers body that never landed on main must not reach /etc/sudoers.d,
+    otherwise the one sudo verb radon already holds mints it root.
+    """
+    box = Sandbox(tmp_path)
+    installed = box.installed_path(SUDOERS_SOURCE)
+    before = installed.read_bytes()
+
+    box.mutate_source_uncommitted(SUDOERS_SOURCE)
+    result = box.run("refresh-control-plane-privileged")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "current/unchanged" in result.stdout
+    assert installed.read_bytes() == before
+
+
+def test_refresh_refuses_a_head_that_is_not_on_main(tmp_path: Path) -> None:
+    """A commit GitHub main never contained is not evidence of review."""
+    box = Sandbox(tmp_path)
+    box.mutate_source_uncommitted(SUDOERS_SOURCE)
+    _git(box.tmp, "checkout", "-q", "-b", "attacker")
+    box.commit_sources()
+    installed = box.installed_path(SUDOERS_SOURCE)
+    before = installed.read_bytes()
+
+    result = box.run("refresh-control-plane-privileged")
+
+    combined = result.stdout + result.stderr
+    assert result.returncode == 76, combined
+    assert "not reachable from the GitHub main tip" in combined
+    assert installed.read_bytes() == before
