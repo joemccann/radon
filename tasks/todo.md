@@ -49,7 +49,7 @@ parent-row P&L from the resolved leg economics.
 - [x] T3 Correct demo quota/identity behavior.
 - [x] T4 Complete focused and browser verification.
 - [x] T5 Record review evidence.
-- [ ] T6 Publish and verify the pull request.
+- [x] T6 Publish and verify the pull request.
 
 ## Review
 
@@ -58,6 +58,7 @@ parent-row P&L from the resolved leg economics.
 - A/B are now scoped by the first API resource, nested routes share that resource key, and passive shell GETs use a user-global 60/minute plus 50,000/day budget. Mutation, AI, reconnect, and endpoint-local controls remain in place.
 - Regression was red with 4 failures, then green: 55 focused Vitest tests passed and typecheck was clean. Scanner Playwright checks passed 2/2 and the mobile screenshot was visually clean.
 - Playwright's authless harness intentionally bypasses Clerk middleware, so browser checks validate the rendered scanner but not the demo gate. The gate itself is covered directly through `handleDemoGate` with an exhausted regime bucket and a fresh scanner request.
+- PR #289 passed the complete exact-head suite after the ambiguous WULF smoke selector was narrowed to the exact order-action button.
 
 ---
 
@@ -79,7 +80,7 @@ parent-row P&L from the resolved leg economics.
 - [x] T3 Correct the source-of-truth selection.
 - [x] T4 Complete focused, full, and visual verification.
 - [x] T5 Review the final diff and evidence.
-- [ ] T6 Publish and verify the pull request.
+- [x] T6 Publish and verify the pull request.
 
 ## Review
 
@@ -88,6 +89,7 @@ parent-row P&L from the resolved leg economics.
 - Synthetic combo depth is suppressed when display and executable denominators differ, preventing a normalized display row from pre-filling an incompatible BAG limit.
 - Regression was red with the displayed bid at $380.63, then green: 54 combined focused Vitest tests passed; the complete instrument-switcher Playwright spec passed 5 with 1 intentional mobile skip; TypeScript passed; ESLint passed with 0 errors and 17 existing warnings; visual screenshot inspection passed.
 - The first full Vitest run passed 8,266/8,267 assertions before exposing one stale ratio-display expectation, corrected and rerun 22/22 green; one unrelated REL-148 suite has a pre-existing `web/web` fixture path. A second full run under severe host contention passed 8,176/8,246 with widespread timeouts; all touched suites reran 54/54 green after load cleared.
+- PR #289 passed the complete exact-head suite, including all eight Vitest shards, the coverage ratchet, and the 60-test Playwright P0-financial smoke.
 
 ---
 
