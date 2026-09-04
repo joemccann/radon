@@ -31,6 +31,68 @@ parent-row P&L from the resolved leg economics.
 
 ---
 
+# Task: Prevent first-visit demo scanner rate limiting (2026-09-04) [DONE]
+
+## Dependency graph
+
+- T1 depends_on: [] - Reproduce the first-visit demo scanner rate-limit state and trace request identity, tier, and quota accounting.
+- T2 depends_on: [T1] - Add a failing regression for a fresh demo visitor.
+- T3 depends_on: [T2] - Implement the smallest durable quota/identity correction while preserving abuse controls.
+- T4 depends_on: [T3] - Run focused tests and browser verification on the demo scanner.
+- T5 depends_on: [T4] - Document cause, evidence, and residual limits without exposing sensitive configuration.
+- T6 depends_on: [T5] - Commit the combined fix, open a pull request, supervise exact-head CI to green, and send the required notification.
+
+## Checklist
+
+- [x] T1 Reproduce and isolate first-visit rate limiting.
+- [x] T2 Record the regression red.
+- [x] T3 Correct demo quota/identity behavior.
+- [x] T4 Complete focused and browser verification.
+- [x] T5 Record review evidence.
+- [x] T6 Publish and verify the pull request.
+
+## Review
+
+- Live read-only evidence at 19:00:52Z showed both initial `/api/scanner` requests returning 429 while Upstash answered `PONG`; the affected identity's shared middleware counters were already A=100 and B=10.
+- The quotas were sized as operator actions but keyed every resource into one user-wide bucket. Three futures fallbacks alone poll six times/minute, so ordinary workstation fan-out could consume A=100/hour, while dashboard regime/GEX/VCG traffic could consume B=10/hour before the first scanner visit.
+- A/B are now scoped by the first API resource, nested routes share that resource key, and passive shell GETs use a user-global 60/minute plus 50,000/day budget. Mutation, AI, reconnect, and endpoint-local controls remain in place.
+- Regression was red with 4 failures, then green: 55 focused Vitest tests passed and typecheck was clean. Scanner Playwright checks passed 2/2 and the mobile screenshot was visually clean.
+- Playwright's authless harness intentionally bypasses Clerk middleware, so browser checks validate the rendered scanner but not the demo gate. The gate itself is covered directly through `handleDemoGate` with an exhausted regime bucket and a fresh scanner request.
+- PR #289 passed the complete exact-head suite after the ambiguous WULF smoke selector was narrowed to the exact order-action button.
+
+---
+
+# Task: Correct VIX option implied-spread quote (2026-09-04) [DONE]
+
+## Dependency graph
+
+- T1 depends_on: [] - Trace VIX contract selection, per-leg quote normalization, and cockpit implied-spread rendering; reproduce the displayed-value mismatch.
+- T2 depends_on: [T1] - Add a failing focused regression for the VIX bull-call spread using the observed $20C/$30C quotes.
+- T3 depends_on: [T2] - Implement the smallest source-of-truth correction without changing combo action, ratio, or debit/credit semantics.
+- T4 depends_on: [T3] - Run focused Vitest and Playwright coverage, typecheck, full web tests, and visual browser verification.
+- T5 depends_on: [T4] - Review the isolated diff and document results.
+- T6 depends_on: [T5] - Commit the combined fix, open a pull request, supervise exact-head CI to green, and send the required notification.
+
+## Checklist
+
+- [x] T1 Reproduce and isolate the quote mismatch.
+- [x] T2 Record the regression red.
+- [x] T3 Correct the source-of-truth selection.
+- [x] T4 Complete focused, full, and visual verification.
+- [x] T5 Review the final diff and evidence.
+- [x] T6 Publish and verify the pull request.
+
+## Review
+
+- The 500x499 holding was displayed as one GCD-reduced executable BAG, producing $380.63/$390.62/$400.61 instead of the portfolio's per-contract reporting quote. Display quotes now divide by the first-long contract denominator while `resolveNaturalSpreadQuote` retains exact executable BAG economics.
+- The observed leg markets now produce $0.76 bid, $0.78 mark, $0.80 ask, and $0.04 / 5.13% width. Focusing either option updates the cockpit header to that leg's quote, and the VIX futures ticket remains anchored to the $18.91 cash index.
+- Synthetic combo depth is suppressed when display and executable denominators differ, preventing a normalized display row from pre-filling an incompatible BAG limit.
+- Regression was red with the displayed bid at $380.63, then green: 54 combined focused Vitest tests passed; the complete instrument-switcher Playwright spec passed 5 with 1 intentional mobile skip; TypeScript passed; ESLint passed with 0 errors and 17 existing warnings; visual screenshot inspection passed.
+- The first full Vitest run passed 8,266/8,267 assertions before exposing one stale ratio-display expectation, corrected and rerun 22/22 green; one unrelated REL-148 suite has a pre-existing `web/web` fixture path. A second full run under severe host contention passed 8,176/8,246 with widespread timeouts; all touched suites reran 54/54 green after load cleared.
+- PR #289 passed the complete exact-head suite, including all eight Vitest shards, the coverage ratchet, and the 60-test Playwright P0-financial smoke.
+
+---
+
 # Task: Combo replace IB 202 cancel abort (2026-09-04) [DONE]
 
 Combo modify treated IB error 202 as a failed cancel, skipped the replacement,

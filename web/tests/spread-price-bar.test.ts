@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolveSpreadPriceData } from "@/lib/positionUtils";
+import { resolveNaturalSpreadQuote, resolveSpreadPriceData } from "@/lib/positionUtils";
 import type { PortfolioPosition } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
 
@@ -81,6 +81,38 @@ describe("resolveSpreadPriceData", () => {
     expect(result!.symbol).toBe("GOOG");
   });
 
+  it("quotes an imbalanced VIX spread per displayed contract instead of as one 500x499 BAG", () => {
+    const vixSpread: PortfolioPosition = {
+      ...bullCallSpread,
+      ticker: "VIX",
+      structure: "Ratio Bull Call Spread 500x499 $20/$30",
+      structure_type: "Ratio Bull Call Spread",
+      expiry: "2026-09-09",
+      contracts: 500,
+      legs: [
+        { ...bullCallSpread.legs[0], strike: 20, direction: "LONG", contracts: 500 },
+        { ...bullCallSpread.legs[1], strike: 30, direction: "SHORT", contracts: 499 },
+      ],
+    };
+    const prices: Record<string, PriceData> = {
+      "VIX_20260909_20_C": makePriceData({ symbol: "VIX_20260909_20_C", bid: 1.39, ask: 1.41 }),
+      "VIX_20260909_30_C": makePriceData({ symbol: "VIX_20260909_30_C", bid: 0.61, ask: 0.63 }),
+    };
+
+    const result = resolveSpreadPriceData("VIX", vixSpread, prices);
+    const executableBag = resolveNaturalSpreadQuote("VIX", vixSpread, prices);
+
+    expect(result).not.toBeNull();
+    expect(result!.bid).toBe(0.76);
+    expect(result!.last).toBe(0.78);
+    expect(result!.ask).toBe(0.80);
+    // Order entry still closes the exact integer 500:499 BAG. Only the
+    // position/reporting quote is normalized to the displayed 500 contracts.
+    expect(executableBag?.bid).toBeCloseTo(380.63, 5);
+    expect(executableBag?.mid).toBeCloseTo(390.62, 5);
+    expect(executableBag?.ask).toBeCloseTo(400.61, 5);
+  });
+
   it("returns null when per-leg prices are missing", () => {
     const prices: Record<string, PriceData> = {
       "GOOG_20260320_315_C": makePriceData({ symbol: "GOOG", bid: 8.50, ask: 8.80 }),
@@ -157,6 +189,7 @@ describe("resolveSpreadPriceData", () => {
     const bearPut: PortfolioPosition = {
       ...bullCallSpread,
       structure: "DEBIT 10X BEAR PUT SPREAD $340.0/$315.0",
+      contracts: 10,
       legs: [
         { type: "Put", strike: 340, direction: "LONG", contracts: 10, entry_cost: 20000, market_value: 18000, market_price_is_calculated: false },
         { type: "Put", strike: 315, direction: "SHORT", contracts: 10, entry_cost: 8000, market_value: 6000, market_price_is_calculated: false },

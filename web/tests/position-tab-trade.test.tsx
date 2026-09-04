@@ -68,12 +68,12 @@ describe("PositionTab — trade affordances", () => {
     expect(screen.getByTestId("pos-leg-trade-1").textContent).toBe("SELL"); // long put → sell to close
   });
 
-  it("uses canonical combo units once when valuing a ratio spread", () => {
+  it("uses portfolio reporting contracts once when valuing a ratio spread", () => {
     renderTab();
     const marketValue = screen.getByText("Market Value").parentElement?.textContent ?? "";
     expect(marketValue).toContain("$19,100");
     const mark = screen.getByText("Mark Price").parentElement?.textContent ?? "";
-    expect(mark).toContain("-$191.00");
+    expect(mark).toContain("-$38.20");
   });
 
   it("opens the combo ticket on the Close/Adjust Combo CTA", () => {
