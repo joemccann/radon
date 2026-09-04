@@ -237,22 +237,23 @@ export default function TickerDetailContent({
   // while the depth book is correct; deriveBookHeader is the same source the
   // OrderBook header uses, so the two never diverge. Falls through to raw
   // priceData (incl. the closed-market fallback) when there is no entitled book.
+  const bookIsSpreadNet = bookKey === comboBookKey && Boolean(isSpreadNet);
   const quotePriceData = useMemo<PriceData | null>(() => {
-    if (!priceData || isSpreadNet || !bookDepth || bookDepth.entitled !== true) return priceData;
+    if (!bookPriceData || bookIsSpreadNet || !bookDepth || bookDepth.entitled !== true) return bookPriceData;
     const head = deriveBookHeader(bookDepth, {
-      bid: priceData.bid,
-      ask: priceData.ask,
-      last: priceData.last,
-      lastLabel: priceData.lastIsCalculated ? "MARK" : "LAST",
+      bid: bookPriceData.bid,
+      ask: bookPriceData.ask,
+      last: bookPriceData.last,
+      lastLabel: bookPriceData.lastIsCalculated ? "MARK" : "LAST",
     });
     return {
-      ...priceData,
+      ...bookPriceData,
       bid: head.bid,
       ask: head.ask,
       last: head.last,
       lastIsCalculated: head.lastLabel !== "LAST",
     };
-  }, [priceData, isSpreadNet, bookDepth]);
+  }, [bookPriceData, bookIsSpreadNet, bookDepth]);
 
   // Resolve instrument kind for the depth panel. depth.kind wins when the relay
   // has classified it; else a relay-supported futures root (ES/NQ/...) or an
@@ -261,10 +262,10 @@ export default function TickerDetailContent({
   // pre-depth hint so the page subscribes depth and routes to the ladder before
   // any DepthBook has arrived; once it does, depth.kind is authoritative.
   const bookKind: "stock" | "option" | "future" | "combo" = bookDepth?.kind
-    ?? (isFuturesRoot(ticker) || (isIndexSymbol(ticker) && hasFuturesSupport(ticker))
-      ? "future"
-      : bookKey === comboBookKey
-        ? "combo"
+    ?? (bookKey === comboBookKey
+      ? "combo"
+      : isFuturesRoot(ticker) || (isIndexSymbol(ticker) && hasFuturesSupport(ticker))
+        ? "future"
       : !viewUnderlying && comboBookKeys.includes(bookKey) && bookKey !== ticker
         ? "option"
         : "stock");
@@ -332,7 +333,7 @@ export default function TickerDetailContent({
       bookPriceData={bookPriceData}
       quotePriceData={quotePriceData}
       priceData={priceData}
-      isSpreadNet={isSpreadNet}
+      isSpreadNet={bookIsSpreadNet}
       tickerOrders={tickerOrders}
       stockFallback={stockFallback}
       theme={theme}

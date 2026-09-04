@@ -15,7 +15,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { resolveDemoContext, type DemoPublicMetadata } from "./demoRole";
-import { classifyRateTier } from "./rateTier";
+import { classifyRateTier, demoRateLimitKey } from "./rateTier";
 import { demoRateLimit, type DemoRateLimitResult, type DemoRateTier } from "./rateLimit";
 
 function isApiPath(pathname: string): boolean {
@@ -88,7 +88,7 @@ export async function handleDemoGate(
   if (api) {
     const tier = classifyRateTier(request.method, pathname);
     const limiter = deps.rateLimiter ?? demoRateLimit;
-    const rl = await limiter(tier, userId);
+    const rl = await limiter(tier, demoRateLimitKey(tier, userId, pathname));
     if (!rl.success) {
       const res = NextResponse.json(
         {
@@ -106,7 +106,13 @@ export async function handleDemoGate(
       }
       return noStore(res);
     }
-    const dailyTier = tier === "E" ? "F" : tier === "G" ? "H" : null;
+    const dailyTier = tier === "E"
+      ? "F"
+      : tier === "G"
+        ? "H"
+        : tier === "I"
+          ? "J"
+          : null;
     if (dailyTier) {
       const daily = await limiter(dailyTier, userId);
       if (!daily.success) {
