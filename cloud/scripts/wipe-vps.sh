@@ -109,6 +109,15 @@ if id radon &>/dev/null; then
 fi
 rm -rf /home/radon
 
+# R-618: /home/radon holds the secret-store CIPHERTEXT
+# (data/secret_store/secrets.db); its master key lives outside that tree. Left
+# behind, a re-provision finds a key that decrypts nothing (the store is
+# key-bound by fingerprint and refuses to open, so every /credentials route
+# answers 503) — and a decommissioned host is handed back with a live key.
+log_info "Removing secret-store master credential..."
+rm -f /etc/credstore.encrypted/radon-secret-store-key
+rmdir /etc/credstore.encrypted 2>/dev/null || true
+
 # -- Remove sudoers -----------------------------------------------------------
 
 log_info "Removing radon sudoers config..."

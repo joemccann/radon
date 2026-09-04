@@ -556,18 +556,41 @@ ROLE_SKIPPED_GATEWAY_SURFACES: dict[str, frozenset[str]] = {
 }
 
 
+#: Roles that make this root-run auditor SKIP a check. R-604: the compat
+#: `RADON_ENV_FILE` the unit points at lives under /home/radon, which the
+#: unprivileged account can replace — `load_env_keys`' own docstring calls it
+#: attacker-influenced from root's point of view. It may still NAME a role,
+#: but it may not be the source of one that suppresses an audit surface.
+SUPPRESSING_ROLES: frozenset[str] = frozenset(ROLE_SKIPPED_UNITS) | frozenset(
+    ROLE_SKIPPED_GATEWAY_SURFACES
+)
+
+
 def resolve_host_role(environ=None) -> str:
-    """RADON_HOST_ROLE: process env, then /etc/radon/env, then RADON_ENV_FILE."""
+    """RADON_HOST_ROLE: process env, then /etc/radon/env, then RADON_ENV_FILE.
+
+    The last of those three is radon-writable, so a role it names is honoured
+    only when that role does not suppress anything (R-604).
+    """
     environ = os.environ if environ is None else environ
     raw = (environ.get("RADON_HOST_ROLE") or "").strip().strip("\"'")
     if not raw:
-        candidates = [CANONICAL_ENV_FILE]
-        if environ.get("RADON_ENV_FILE"):
-            candidates.append(Path(environ["RADON_ENV_FILE"]))
-        for path in candidates:
-            raw = load_env_keys(path, ("RADON_HOST_ROLE",)).get("RADON_HOST_ROLE", "").strip()
-            if raw:
-                break
+        raw = load_env_keys(
+            CANONICAL_ENV_FILE, ("RADON_HOST_ROLE",)
+        ).get("RADON_HOST_ROLE", "").strip()
+    if not raw and environ.get("RADON_ENV_FILE"):
+        compat = load_env_keys(
+            Path(environ["RADON_ENV_FILE"]), ("RADON_HOST_ROLE",)
+        ).get("RADON_HOST_ROLE", "").strip()
+        if compat in SUPPRESSING_ROLES:
+            print(
+                f"[drift-audit] ignoring RADON_HOST_ROLE={compat!r} from the "
+                "radon-writable compat env file; a suppressing role must come "
+                "from the process environment or /etc/radon/env",
+                file=sys.stderr,
+            )
+        else:
+            raw = compat
     return raw if raw in HOST_ROLES else "combined"
 
 
