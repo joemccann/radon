@@ -240,6 +240,11 @@ class TestTrustedHostMiddleware:
                 assert "*" not in allowed, "Host pinning must not be a wildcard"
                 assert "app.radon.run" in allowed
                 assert "demo.radon.run" in allowed
+                # The demo VM's FastAPI answers on demo-api.radon.run behind
+                # Caddy. It was absent when the host pin shipped, so the demo
+                # backend returned "Invalid host header" (400) on every request
+                # the moment the VM was redeployed onto current code.
+                assert "demo-api.radon.run" in allowed
                 assert "beta.radon.run" not in allowed
                 return
         raise AssertionError("TrustedHostMiddleware not installed on app")

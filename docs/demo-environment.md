@@ -169,3 +169,28 @@ operator locks them out of `app.radon.run`. Affected users re-sign-up.
 
 **Set `PUSHOVER_TOKEN` / `PUSHOVER_USER` on the `radon-demo` Vercel project** to
 arm the provisioning alert; it no-ops silently while unset.
+
+### VM backend redeploy, 2026-09-04
+
+The demo VM was frozen at 2026-07-03 (~50 commits behind on `scripts/api`).
+Redeployed by shipping `scripts/ requirements.txt pyproject.toml` over ssh+tar
+to `/opt/radon-demo/app` and rebuilding (`docker compose build api && up -d`).
+`data/` on the VM is NOT shipped — it holds the copied `flow_reports/*.json`
+that the TEST_MODE per-ticker flow guard serves.
+
+Rollback: `radon-demo-api:rollback` (the pre-redeploy image) and
+`/opt/radon-demo/app.bak` are both kept on the VM.
+
+The redeploy surfaced one break: `TrustedHostMiddleware` gained a host pin
+after the VM's last deploy, and `demo-api.radon.run` was never on the list, so
+every proxied request returned `400 Invalid host header` while `127.0.0.1`
+health stayed 200. The host is now pinned in `scripts/api/server.py`
+`_ALLOWED_HOSTS` rather than left to `RADON_ALLOWED_HOSTS` on the VM, so a
+fresh VM cannot reproduce it. Pinned by
+`scripts/api/tests/test_loopback_browser_bypass.py`.
+
+Post-redeploy verification: `/health` 200 externally, `/health/lite` 401 without
+the service token and 200 with it, `POST /vcg/scan` and `/breadth/scan` 200 from
+the seeded snapshots, `RADON_API_TEST_MODE=1` confirmed in the running
+container, container `TURSO_DB_URL` on `radon-demo-joemccann`, no tailscale and
+no reachable IB port on any prod host.

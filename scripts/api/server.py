@@ -958,6 +958,10 @@ _ALLOWED_HOSTS = [
     "0.0.0.0",
     "app.radon.run",
     "demo.radon.run",
+    # The demo VM's FastAPI, reached by the Vercel frontend over the public
+    # proxy. Pinned in code, not left to RADON_ALLOWED_HOSTS on the VM: a fresh
+    # VM or a wiped .env otherwise 400s the entire demo backend silently.
+    "demo-api.radon.run",
     "ib-gateway",
     "*.ts.net",
 ] + parse_allowed_hosts_env(os.environ.get("RADON_ALLOWED_HOSTS", ""))
