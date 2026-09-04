@@ -1052,16 +1052,26 @@ class TestRunProbe:
         assert probe.main() == probe.EXIT_UNHEALTHY
         assert history["freshness_ok"] == 0
 
-    def test_main_preserves_healthy_verdict_when_latest_write_fails(self, monkeypatch):
+    def test_ledger_write_failure_exits_nonzero(self, monkeypatch):
         _patch_happy_network(monkeypatch)
 
         def _boom(_row):
             raise turso_http.TursoHttpError("down")
         monkeypatch.setattr(probe, "upsert_external_probe", _boom)
         monkeypatch.setattr(probe, "insert_external_probe_run", lambda row: None)
-        assert probe.main() == 0
+        assert probe.main() == 1
 
-    def test_main_preserves_healthy_verdict_when_history_write_fails(self, monkeypatch):
+    def test_ledger_write_failure_still_emits_stdout_json(self, monkeypatch, capsys):
+        _patch_happy_network(monkeypatch)
+
+        def _boom(_row):
+            raise turso_http.TursoHttpError("down")
+        monkeypatch.setattr(probe, "upsert_external_probe", _boom)
+        monkeypatch.setattr(probe, "insert_external_probe_run", lambda row: None)
+        assert probe.main() == 1
+        assert json.loads(capsys.readouterr().out)["edge"]["ok"] == 1
+
+    def test_history_write_failure_stays_soft(self, monkeypatch):
         _patch_happy_network(monkeypatch)
         monkeypatch.setattr(probe, "upsert_external_probe", lambda row: None)
 
@@ -1070,14 +1080,20 @@ class TestRunProbe:
         monkeypatch.setattr(probe, "insert_external_probe_run", _boom)
         assert probe.main() == 0
 
-    def test_main_preserves_healthy_verdict_on_raw_urllib_timeout(self, monkeypatch):
+    def test_green_run_with_both_writes_landing_exits_zero(self, monkeypatch):
+        _patch_happy_network(monkeypatch)
+        monkeypatch.setattr(probe, "upsert_external_probe", lambda row: None)
+        monkeypatch.setattr(probe, "insert_external_probe_run", lambda row: None)
+        assert probe.main() == 0
+
+    def test_latest_write_raw_urllib_timeout_exits_nonzero(self, monkeypatch):
         _patch_happy_network(monkeypatch)
         monkeypatch.setattr(
             probe, "upsert_external_probe",
             lambda _row: (_ for _ in ()).throw(TimeoutError("SSL read timed out")),
         )
         monkeypatch.setattr(probe, "insert_external_probe_run", lambda row: None)
-        assert probe.main() == 0
+        assert probe.main() == 1
 
 
 # ── dead-man's-switch reader ─────────────────────────────────────────────────

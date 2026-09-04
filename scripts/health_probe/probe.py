@@ -656,6 +656,8 @@ def main() -> int:
     if outcome["write_errors"]:
         sys.stderr.write("[health_probe] probe ledger degraded: %s\n" % "; ".join(outcome["write_errors"]))
     sys.stdout.write(json.dumps({"edge": outcome["edge_row"], "run": outcome["runs_row"]}) + "\n")
+    if any(error.startswith("latest: ") for error in outcome["write_errors"]):
+        return 1
     if outcome["exit_code"] != 0:
         sys.stderr.write("[health_probe] UNHEALTHY (arming the workflow-failure email): %s\n"
                          % outcome["runs_row"]["detail"])
