@@ -861,3 +861,20 @@ how this loop improves as the codebase grows.
   `claude -p "/<loop>` invocation, searched from the arm point forward, and it holds across all five.
   Same shape as the comment-quotes-its-own-code trap: assert on what executes, not on what the file
   happens to contain first.
+- 2026-09-04 (deliver): **a wrapper contract change breaks every harness that stubs the tool it now
+  reads, not just the one the fix touched.** REL-188 made a phase OK only on commit evidence
+  (`git rev-parse HEAD` + `log --format=%ct`); four separate test files stub `git` as a silent
+  `exit 0`, so every phase in them read as uncommitted and returned 75. CI surfaced them in two
+  rounds because the first round's log grep was capped at 20 lines — read the FULL `FAILED` list
+  (`grep '^FAILED'` over the downloaded job log, then `uniq -c`), not the head of it, or you pay a
+  second 3-minute CI cycle per missed file. Corollary: `gh run view --log-failed` returned EMPTY
+  for every failing job on this repo; `gh api .../runs/<id>/logs` into a zip and `unzip -j` the one
+  job's txt is the reliable path.
+- 2026-09-04 (deliver): the deliver phase ran from a clone sitting on `main`, so the first three
+  greps for the fix under review found nothing and read as "the code is not there". Check
+  `git branch --show-current` BEFORE reading any code the branch changed; a stash-and-checkout
+  moves in-progress edits over cleanly, but only if the mismatch is caught early.
+- 2026-09-04 (deliver): the docs contract's owner-doc requirement is satisfied by prose that must
+  be TRUE. Two of three paragraphs written from the PR body's summary were accurate; the third
+  described `setupToken.ts` as reporting an unreadable store when it actually added a TTL. Read the
+  diff of each changed mapped file before writing its doc line, not the PR body's account of it.
