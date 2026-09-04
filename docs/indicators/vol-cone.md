@@ -253,7 +253,8 @@ Writer: chunked `INSERT ... ON CONFLICT(ticker, date, expiry) DO UPDATE`.
 `web/app/api/vol-cone/route.ts` — GET only, `dynamic = "force-dynamic"`,
 `runtime = "nodejs"`. `dbFirstRead` on `scan_snapshots` where
 `service = 'vol-cone'`, disk `data/vol_cone.json`.
-`MAX_AGE_MS = getFreshnessWindowMs("vol-cone", "closed")` (4d, shared with
+`maxAgeMs = getFreshnessWindowMs("vol-cone", getMarketStateFromDate())`
+(26h market-open / 4d closed, shared with
 the watchdog catalog in `web/lib/serviceHealthWindows.ts` /
 `scripts/watchdog/services.py`). Both writers are Mon-Fri only, so Friday's
 20:45 UTC snapshot is legitimately the newest until Monday; a private 48h
