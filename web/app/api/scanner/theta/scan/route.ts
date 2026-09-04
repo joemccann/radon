@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 import { radonFetch, RadonApiError } from "@/lib/radonApi";
 import { emptyThetaHarvesterPayload, readThetaHarvesterCache } from "../route";
+import { buildDemoThetaHarvester } from "@/lib/demo/fixtures/thetaHarvester";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -18,7 +19,7 @@ function cacheMatchesRequest(cached: Record<string, unknown>, ticker: string, pr
 export const radonCapability = "read.spawn";
 
 export async function POST(request: Request): Promise<Response> {
-  const access = await requireRouteAccess(undefined, { rate: { key: "scanner/theta/scan:route", limit: 20, windowMs: 60_000 } });
+  const access = await requireRouteAccess(undefined, { rate: { key: "scanner/theta/scan:route", limit: 20, windowMs: 60_000 }, durableRateTier: "B" });
   if (!access.ok) return access.response;
   const requestId = getRequestId();
   let body: Record<string, unknown> = {};
@@ -42,9 +43,10 @@ export async function POST(request: Request): Promise<Response> {
   } else if (typeof body.preset === "string") {
     params.set("preset", body.preset);
   }
-  if (!ticker && typeof body.limit === "number" && Number.isFinite(body.limit) && body.limit > 0) {
-    params.set("limit", String(Math.trunc(body.limit)));
-  }
+  const limit = !ticker && typeof body.limit === "number" && Number.isFinite(body.limit) && body.limit > 0
+    ? Math.trunc(body.limit)
+    : null;
+  if (limit !== null) params.set("limit", String(limit));
 
   // Search parameters (DTE window + minimum per-share credit). FastAPI validates
   // ranges; only forward finite numbers so bad input never reaches the subprocess.
@@ -59,6 +61,24 @@ export async function POST(request: Request): Promise<Response> {
   if (minDte !== null) params.set("min_dte", String(minDte));
   if (maxDte !== null) params.set("max_dte", String(maxDte));
   if (minCredit !== null) params.set("min_credit", String(minCredit));
+
+  if (access.principal.kind === "demo") {
+    return setNoStoreResponseHeaders(
+      NextResponse.json({
+        ...buildDemoThetaHarvester({
+          now: new Date(),
+          ticker: ticker || undefined,
+          preset,
+          limit,
+          minDte,
+          maxDte,
+          minCredit,
+        }),
+        scan_succeeded: true,
+      }),
+      requestId,
+    );
+  }
 
   const path = params.toString()
     ? `/theta-harvester/scan?${params.toString()}`

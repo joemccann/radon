@@ -25,7 +25,7 @@ function invalidQueryReason(body: SearchBody): string | null {
 export const radonCapability = "read";
 
 export async function POST(request: Request): Promise<Response> {
-  const access = await requireRouteAccess(undefined, { rate: { key: "knowledge/search:route", limit: 20, windowMs: 60_000 } });
+  const access = await requireRouteAccess(undefined, { rate: { key: "knowledge/search:route", limit: 20, windowMs: 60_000 }, durableRateTier: "B" });
   if (!access.ok) return access.response;
   const requestId = getRequestId();
 

@@ -13,7 +13,14 @@ describe("classifyRateTier", () => {
     expect(classifyRateTier("POST", "/api/gex/scan")).toBe("B");
     expect(classifyRateTier("POST", "/api/leap/scan")).toBe("B");
     expect(classifyRateTier("POST", "/api/pi/exec")).toBe("B");
-    expect(classifyRateTier("GET", "/api/performance/foo")).toBe("B");
+    expect(classifyRateTier("POST", "/api/performance/build")).toBe("B");
+  });
+
+  it("keeps cached measurement reads out of producer quotas", () => {
+    expect(classifyRateTier("GET", "/api/performance")).toBe("A");
+    expect(classifyRateTier("GET", "/api/scanner/theta")).toBe("A");
+    expect(classifyRateTier("GET", "/api/regime")).toBe("A");
+    expect(classifyRateTier("GET", "/api/regime/gex")).toBe("A");
   });
 
   it("writes are tier C", () => {

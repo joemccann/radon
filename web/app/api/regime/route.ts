@@ -8,9 +8,10 @@ import { selectPreferredCriCandidate, type CriCacheCandidate } from "@/lib/criCa
 import { backfillRealizedVolHistory, type RegimeHistoryEntry } from "@/lib/regimeHistory";
 import { radonFetch } from "@/lib/radonApi";
 import { createBackgroundScanTrigger } from "@/lib/backgroundScan";
-import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
+import { getRequestId, setCacheResponseHeaders, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 import { dbExecute } from "@/lib/dbExecute";
 import { cachedRead, invalidateCache } from "@/lib/dbCache";
+import { buildDemoCriFixture } from "@/lib/demo/fixtures/regime";
 // Disable Next.js static caching: this handler reads live disk state
 // (data/*.json, cache files). Without this, the framework freezes the
 // first response and serves stale data until the dev server restarts.
@@ -289,9 +290,12 @@ const triggerBackgroundScan = createBackgroundScanTrigger({ label: "CRI", run: r
 export const radonCapability = { GET: "read", POST: "read.spawn" };
 
 export async function GET(): Promise<Response> {
-  const access = await requireRouteAccess(undefined, { rate: { key: "regime:route", limit: 20, windowMs: 60_000 } });
+  const access = await requireRouteAccess(undefined, { rate: { key: "regime:route", limit: 20, windowMs: 60_000 }, durableRateTier: "A" });
   if (!access.ok) return access.response;
   const requestId = getRequestId();
+  if (access.principal.kind === "demo") {
+    return setNoStoreResponseHeaders(NextResponse.json(buildDemoCriFixture()), requestId);
+  }
   const result = await readLatestCri();
   const data = normalizeCriPayload((result?.data ?? EMPTY_CRI) as Record<string, unknown>);
   const currentMarketOpen = isMarketOpenNow();
@@ -340,8 +344,12 @@ export async function GET(): Promise<Response> {
 }
 
 export async function POST(): Promise<Response> {
-  const access = await requireRouteAccess(undefined, { rate: { key: "regime:route", limit: 20, windowMs: 60_000 } });
+  const access = await requireRouteAccess(undefined, { rate: { key: "regime:route", limit: 20, windowMs: 60_000 }, durableRateTier: "B" });
   if (!access.ok) return access.response;
+  if (access.principal.kind === "demo") {
+    const requestId = getRequestId();
+    return setNoStoreResponseHeaders(NextResponse.json(buildDemoCriFixture()), requestId);
+  }
   try {
     const rawData = await radonFetch<Record<string, unknown>>("/regime/scan", {
       method: "POST",

@@ -7,6 +7,7 @@ import { isPerformanceBehindPortfolioSync } from "@/lib/performanceFreshness";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 import { dbExecute } from "@/lib/dbExecute";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
+import { buildDemoPerformance } from "@/lib/demo/fixtures/performance";
 import { getMarketStateFromDate } from "@/lib/serviceHealthWindows";
 // Disable Next.js static caching: this handler reads live disk state
 // (data/*.json, cache files). Without this, the framework freezes the
@@ -159,9 +160,15 @@ async function readPerformanceFromDisk(): Promise<TimestampedRead<Record<string,
 export const radonCapability = { GET: "read", POST: "read.spawn" };
 
 export async function GET(): Promise<Response> {
-  const access = await requireRouteAccess(undefined, { rate: { key: "performance:route", limit: 20, windowMs: 60_000 } });
+  const access = await requireRouteAccess(undefined, { rate: { key: "performance:route", limit: 20, windowMs: 60_000 }, durableRateTier: "A" });
   if (!access.ok) return access.response;
   const requestId = getRequestId();
+  if (access.principal.kind === "demo") {
+    return setNoStoreResponseHeaders(
+      NextResponse.json(buildDemoPerformance(new Date())),
+      requestId,
+    );
+  }
   const cacheTtlMs = getCacheTtlMs();
   const [perfRead, portfolioSnapshot] = await Promise.all([
     // Fresher of DB row and disk JSON — a frozen writer on either side

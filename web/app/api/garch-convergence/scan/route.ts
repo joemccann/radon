@@ -25,6 +25,7 @@ export async function POST(request: Request): Promise<Response> {
   // leap/scan sibling has carried the same guard since R-079.
   const access = await requireRouteAccess(request, {
     rate: { key: "garch-convergence/scan:route", limit: 20, windowMs: 60_000 },
+    durableRateTier: "B",
   });
   if (!access.ok) return access.response;
   const requestId = getRequestId();

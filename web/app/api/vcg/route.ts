@@ -6,10 +6,11 @@ import { join } from "path";
 import { isVcgDataStale } from "@/lib/vcgStaleness";
 import { radonFetch } from "@/lib/radonApi";
 import { createBackgroundScanTrigger } from "@/lib/backgroundScan";
-import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
+import { getRequestId, setCacheResponseHeaders, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 import { getDb } from "@/lib/db";
 import { cachedRead } from "@/lib/dbCache";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
+import { buildDemoVcgFixture } from "@/lib/demo/fixtures/regime";
 import { getMarketStateFromDate, isUsTradingDay } from "@/lib/serviceHealthWindows";
 // Disable Next.js static caching: this handler reads live disk state
 // (data/*.json, cache files). Without this, the framework freezes the
@@ -124,9 +125,12 @@ const triggerBackgroundScan = createBackgroundScanTrigger({
 export const radonCapability = "read";
 
 export async function GET(): Promise<Response> {
-  const access = await requireRouteAccess(undefined, { rate: { key: "vcg:route", limit: 20, windowMs: 60_000 } });
+  const access = await requireRouteAccess(undefined, { rate: { key: "vcg:route", limit: 20, windowMs: 60_000 }, durableRateTier: "A" });
   if (!access.ok) return access.response;
   const requestId = getRequestId();
+  if (access.principal.kind === "demo") {
+    return setNoStoreResponseHeaders(NextResponse.json(buildDemoVcgFixture()), requestId);
+  }
   const cached = await readCachedVcg();
   const data = normalizeVcgPayload(cached ?? {});
   const currentMarketOpen = isMarketOpenNow();

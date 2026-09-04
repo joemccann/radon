@@ -6,6 +6,7 @@ import { statSync } from "fs";
 import { join } from "path";
 import { radonFetch } from "@/lib/radonApi";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
+import { buildDemoFlowReport } from "@/lib/demo/fixtures/flowAnalysis";
 
 // Disable Next.js static caching: this handler reads live disk state
 // (data/flow_reports/<TICKER>.json). Without this, Next 16 freezes the
@@ -71,7 +72,7 @@ type Params = { params: Promise<{ ticker: string }> };
 export const radonCapability = { GET: "read", POST: "read.spawn" };
 
 export async function GET(_req: Request, ctx: Params): Promise<Response> {
-  const access = await requireRouteAccess(undefined, { rate: { key: "flow-analysis/[ticker]:route", limit: 20, windowMs: 60_000 } });
+  const access = await requireRouteAccess(undefined, { rate: { key: "flow-analysis/[ticker]:route", limit: 20, windowMs: 60_000 }, durableRateTier: "A" });
   if (!access.ok) return access.response;
   const requestId = getRequestId();
   const { ticker: raw } = await ctx.params;
@@ -79,6 +80,13 @@ export async function GET(_req: Request, ctx: Params): Promise<Response> {
   if (!ticker) {
     return setNoStoreResponseHeaders(
       NextResponse.json({ error: "Invalid ticker symbol" }, { status: 400 }),
+      requestId,
+    );
+  }
+
+  if (access.principal.kind === "demo") {
+    return setNoStoreResponseHeaders(
+      NextResponse.json(buildDemoFlowReport(ticker, new Date())),
       requestId,
     );
   }
@@ -105,7 +113,7 @@ export async function GET(_req: Request, ctx: Params): Promise<Response> {
 }
 
 export async function POST(_req: Request, ctx: Params): Promise<Response> {
-  const access = await requireRouteAccess(undefined, { rate: { key: "flow-analysis/[ticker]:route", limit: 20, windowMs: 60_000 } });
+  const access = await requireRouteAccess(undefined, { rate: { key: "flow-analysis/[ticker]:route", limit: 20, windowMs: 60_000 }, durableRateTier: "B" });
   if (!access.ok) return access.response;
   const requestId = getRequestId();
   const { ticker: raw } = await ctx.params;
@@ -113,6 +121,13 @@ export async function POST(_req: Request, ctx: Params): Promise<Response> {
   if (!ticker) {
     return setNoStoreResponseHeaders(
       NextResponse.json({ error: "Invalid ticker symbol" }, { status: 400 }),
+      requestId,
+    );
+  }
+
+  if (access.principal.kind === "demo") {
+    return setNoStoreResponseHeaders(
+      NextResponse.json(buildDemoFlowReport(ticker, new Date())),
       requestId,
     );
   }
