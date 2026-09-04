@@ -48,6 +48,9 @@ export function computeUnrealizedBreakdown(
 export function sumUnrealizedBreakdown(portfolio: PortfolioData): number {
   let total = 0;
   for (const pos of portfolio.positions) {
+    // The account-level total remains reconcilable with the breakdown table,
+    // which cannot publish a mixed aggregate entry column.
+    if (hasBlendedLegBasis(pos)) continue;
     const pnl = getPnlDollars(pos, resolveMarketValue(pos));
     if (pnl != null) total += pnl;
   }
