@@ -549,6 +549,11 @@ ROLE_SKIPPED_UNITS: dict[str, frozenset[str]] = {
         }
     ),
 }
+# Gateway runtime surfaces are absent by design on app-role hosts. Keep them
+# visible as role-skipped notes without weakening broker/combined audits.
+ROLE_SKIPPED_GATEWAY_SURFACES: dict[str, frozenset[str]] = {
+    "app": frozenset({"ib-gateway-control", "compose"}),
+}
 
 
 def resolve_host_role(environ=None) -> str:
@@ -694,12 +699,21 @@ def _check_repo_dirty(drifts: list[dict]) -> None:
 def gather() -> tuple[list[dict], dict[str, str], list[str]]:
     raw_drifts: list[dict] = []
     known_untracked: list[str] = []
+    role_skipped = ROLE_SKIPPED_GATEWAY_SURFACES.get(
+        resolve_host_role(), frozenset()
+    )
 
     for live, repo_rel, label in FILE_PAIRS:
+        if label in role_skipped:
+            known_untracked.append(f"role-skipped:{label}")
+            continue
         drift = _compare_file_pair(live, repo_rel, label)
         if drift:
             raw_drifts.append(drift)
-    _check_compose(raw_drifts)
+    if "compose" in role_skipped:
+        known_untracked.append("role-skipped:compose")
+    else:
+        _check_compose(raw_drifts)
     _check_units(raw_drifts, known_untracked)
     _check_sudoers(raw_drifts, known_untracked)
     _check_env_invariants(raw_drifts)
