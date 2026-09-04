@@ -39,6 +39,14 @@ readonly DOCKER_GPG_FINGERPRINT="9DC858229FC7DD38854AE2D88D81803C0EBFCD88"
 readonly NODESOURCE_GPG_FINGERPRINT="6F71F525282841EEDAF851B42F59B5F99B1BE0B4"
 # Caddy Cloudsmith stable key (Caddy Web Server <contact@caddyserver.com>).
 readonly CADDY_GPG_FINGERPRINT="65760C51EDEA2017CEA2CA15155B6D79CA56EA34"
+# T-417: CI installs a frozen caddy tarball (.github/workflows/ci.yml,
+# `ver=`) to run the edge-mechanism tests. Production must be the SAME
+# version or those tests prove nothing about the proxy that actually serves
+# POST /api/orders/place — a path with no idempotency key, whose non-replay
+# rests on caddy's lb_retry_match semantics (cloud/caddy/Caddyfile R-220).
+# Bump both literals together; the equality is asserted by
+# cloud/tests/test_actions_node24.py.
+readonly CADDY_VERSION="2.11.4"
 
 readonly SERVICE_FILES=(
   radon-ib-gateway.service
@@ -646,7 +654,7 @@ install_caddy() {
       "deb [signed-by=/usr/share/keyrings/caddy-stable-archive-keyring.gpg] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main" \
       | tee /etc/apt/sources.list.d/caddy-stable.list > /dev/null
     apt-get update
-    apt-get install -y caddy
+    apt-get install -y caddy="${CADDY_VERSION}"
     log_success "Caddy installed"
   fi
 

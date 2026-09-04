@@ -117,6 +117,7 @@ def _run(
     args: list[str],
     extra_env: dict[str, str] | None = None,
     docker_body: str | None = None,
+    timeout: float = 10,
 ) -> subprocess.CompletedProcess[str]:
     docker_log = tmp_path / "docker.log"
     fake_docker = tmp_path / "docker"
@@ -146,7 +147,7 @@ exit 0
         env=env,
         capture_output=True,
         text=True,
-        timeout=10,
+        timeout=timeout,
     )
     result.docker_log = docker_log  # type: ignore[attr-defined]
     result.proxy_dir = env["RADON_TEST_NOTIFY_PROXY_DIR"]  # type: ignore[attr-defined]
@@ -621,10 +622,21 @@ def test_run_api_refuses_missing_or_symlinked_systemd_credential(
 def test_run_api_cleans_staged_credential_on_pre_exec_failure(
     tmp_path: Path,
 ) -> None:
+    # T-439: start_notify_proxy polls `[[ -S $listen ]]` 50 times with
+    # `sleep 0.1`. On Linux that is ~5s and fits the 10s default; each
+    # `sleep` is a fork+exec, and on darwin the same 50 iterations measure
+    # 11.7s wall (18s under load), so the harness SIGKILLed the script
+    # before it reached its own timeout branch and the assertion below
+    # never ran. Traced, the script DOES exit 71 and DOES unlink the staged
+    # credential -- there is no missing-cleanup path, and bash 3.2's `exec`
+    # is not involved (it reproduces identically with an existing
+    # /usr/bin/false, and /bin/false does not exist on darwin at all). Only
+    # the harness bound was wrong; the assertions are unchanged.
     result = _run(
         tmp_path,
         ["run", "radon-api.service"],
-        extra_env={"RADON_TEST_PYTHON": "/bin/false"},
+        extra_env={"RADON_TEST_PYTHON": "/usr/bin/false"},
+        timeout=90,
     )
     assert result.returncode == 71, result.stderr
     host_dir = Path(result.proxy_dir) / "credentials" / "radon-api.service"  # type: ignore[attr-defined]
