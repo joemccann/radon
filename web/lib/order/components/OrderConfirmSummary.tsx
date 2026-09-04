@@ -51,6 +51,15 @@ function formatCurrency(value: number | null | undefined): string {
   }).format(value);
 }
 
+function formatSignedPercent(value: number): string {
+  const normalized = Object.is(value, -0) ? 0 : value;
+  const formatted = new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  }).format(normalized);
+  return `${normalized >= 0 ? "+" : ""}${formatted}%`;
+}
+
 function formatPrice(value: number | null | undefined): string {
   if (value == null) return "---";
   return `$${value.toFixed(2)}`;
@@ -271,8 +280,16 @@ export function OrderConfirmSummary({
         {summary.estimatedPnl != null && (
           <span className="order-confirm-metric">
             <span className="order-confirm-metric-label">{summary.estimatedPnlLabel ?? "Est. P&L:"}</span>
-            <span className={`order-confirm-metric-value ${summary.estimatedPnl >= 0 ? "order-confirm-positive" : "order-confirm-negative"}`}>
-              {formatCurrency(summary.estimatedPnl)}
+            <span
+              className={`order-confirm-metric-value ${summary.estimatedPnl >= 0 ? "order-confirm-positive" : "order-confirm-negative"}`}
+              data-testid="order-confirm-estimated-pnl"
+            >
+              <span>{formatCurrency(summary.estimatedPnl)}</span>
+              {summary.estimatedPnlPct != null && (
+                <span className="order-confirm-pnl-percent">
+                  {` (${formatSignedPercent(summary.estimatedPnlPct)})`}
+                </span>
+              )}
             </span>
           </span>
         )}

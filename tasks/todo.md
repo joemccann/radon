@@ -1,3 +1,32 @@
+# Task: Restore modify-order P&L percentage (2026-09-04) [DONE]
+
+Ensure order modification confirmation shows estimated realized P&L as both a
+dollar amount and percentage, using the shared order-risk convention.
+
+## Dependency graph
+
+- T1 depends_on: [] - Trace the modify-order data path and reproduce the missing P&L percentage in unit and browser coverage.
+- T2 depends_on: [T1] - Add failing regressions for signed dollar and percentage output across option, combo, and stock-close modifications.
+- T3 depends_on: [T2] - Implement the smallest shared-summary fix without bypassing `useOrderRisk` or hand-building risk data.
+- T4 depends_on: [T3] - Run focused Vitest, relevant Playwright, and visual desktop verification against the reported surface.
+- T5 depends_on: [T4] - Run the full web suite, typecheck, lint, diff review, and document evidence.
+
+## Checklist
+
+- [x] T1 Trace the defect.
+- [x] T2 Re-establish red regression coverage.
+- [x] T3 Implement the shared fix.
+- [x] T4 Complete focused and visual verification.
+- [x] T5 Complete full verification and review.
+
+## Review
+
+- Modify confirmation now renders signed dollar P&L plus a signed one-decimal return on absolute entry basis for option, combo, partial-close, and stock-cover orders.
+- Zero or unavailable basis preserves the dollar estimate without inventing a percentage; mixed basis remains unavailable.
+- Verification: 8,173 Vitest tests passed, 2 focused Chromium tests passed, TypeScript passed, ESLint reported 0 errors and 17 pre-existing warnings, and the combo summary screenshot was visually inspected.
+
+---
+
 # Task: Require PR CI supervision and green notification (2026-09-03) [DONE]
 
 ## Dependency graph

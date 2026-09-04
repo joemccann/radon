@@ -453,9 +453,11 @@ test.describe("Combo order modify flow", () => {
     await expect(summary).toContainText("$40,000");
     await expect(summary).toContainText("Est. Realized P&L:");
     await expect(summary).toContainText("$15,000");
+    await expect(summary.getByTestId("order-confirm-estimated-pnl")).toContainText("(+60.0%)");
     await expect(summary).not.toContainText("Max Gain:");
     await expect(summary).not.toContainText("Max Loss:");
     await modal.screenshot({ path: "test-results/modify-combo-close-pnl.png" });
+    await summary.screenshot({ path: "test-results/modify-combo-close-pnl-summary.png" });
   });
 
   test("shows signed negative risk reversal prices and submits a negative replacement limit", async ({ page }) => {

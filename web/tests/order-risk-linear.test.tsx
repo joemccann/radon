@@ -202,6 +202,7 @@ describe("useOrderRisk — linear branch (stock)", () => {
     // Proceeds = 100 × 2.86 = 286; basis = 443; realised P&L = 286 - 443 = -157
     expect(result.current!.summary.totalCost).toBeCloseTo(286, 0);
     expect(result.current!.summary.estimatedPnl).toBeCloseTo(-157, 0);
+    expect(result.current!.summary.estimatedPnlPct).toBeCloseTo((-157 / 443) * 100, 6);
     expect(result.current!.okToSubmit).toBe(true);
   });
 
@@ -286,6 +287,7 @@ describe("useOrderRisk — linear branch (stock)", () => {
     expect(result.current!.summary.totalCost).toBe(5_000);
     expect(result.current!.summary.totalLabel).toMatch(/Cost to Cover/);
     expect(result.current!.summary.estimatedPnl).toBe(1_000);
+    expect(result.current!.summary.estimatedPnlPct).toBeCloseTo((1_000 / 6_000) * 100, 6);
   });
 });
 
