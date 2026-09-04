@@ -122,6 +122,13 @@ def test_stale_turso_row_uses_recent_green_github_run(monkeypatch) -> None:
         },
     )
 
+    # R-603 bounded this upgrade to WITNESS_SUPPRESS_MAX_CONSECUTIVE cycles;
+    # the counter is unavailable in this module's fixture-less tests and fails
+    # toward paging, so the ceiling is stubbed as "under it". The contract
+    # this case pins — a green witness rescues a stale row — is unchanged, and
+    # the ceiling itself is pinned in test_suppression_bounds.py.
+    monkeypatch.setattr(external_probe, "_register_witness_suppression", lambda *, now: True)
+
     outcome = external_probe.check_external_probe(now=NOW)
 
     assert outcome.status == "healthy"
