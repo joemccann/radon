@@ -278,8 +278,15 @@ report() {
       --json number -q '.[0].number' 2>/dev/null || true)"
   fi
   if [[ -n "$issue" ]]; then
-    prune_deadman_comments "$issue"
-    net_bounded "$GH_BIN" issue comment "$issue" --body "$body" >/dev/null 2>&1 || true
+    # R-612 (P0): post FIRST, and prune only once the post is confirmed. The
+    # prune used to run ahead of a post whose failure `|| true` swallowed, so a
+    # gh outage deleted the whole dead-man history and wrote nothing in its
+    # place. The new comment's id is handed to --keep so it survives the wipe.
+    local posted
+    posted="$(net_bounded "$GH_BIN" issue comment "$issue" --body "$body" 2>/dev/null || true)"
+    if [[ -n "$posted" ]]; then
+      prune_deadman_comments "$issue" "$posted"
+    fi
   fi
   if [[ "$push" == "1" ]]; then
     notify_phase "$status"
@@ -296,12 +303,14 @@ report() {
 # failure here must never change what report() posts or the run's exit code.
 prune_deadman_comments() {
   local issue="$1"
+  local posted="${2:-}"
+  local keep="${posted##*issuecomment-}"
   if [[ "${RADON_WEEKEND_SKIP_ISSUE_PRUNE:-0}" == "1" ]]; then return 0; fi
   if [[ -z "${TIMEOUT_BIN:-}" || -z "$GH_BIN" ]]; then return 0; fi
   git -C "$REPO" show origin/main:scripts/nightly_issue_prune.py 2>/dev/null \
     | "$TIMEOUT_BIN" "${RADON_WEEKEND_ISSUE_PRUNE_TIMEOUT_SECS:-30}" \
       /usr/bin/python3 -I - --gh-bin "$GH_BIN" --issue "$issue" \
-      --branch-prefix "$PR_BRANCH_PREFIX" >/dev/null 2>&1 || true
+      --branch-prefix "$PR_BRANCH_PREFIX" ${keep:+--keep "$keep"} >/dev/null 2>&1 || true
   return 0
 }
 

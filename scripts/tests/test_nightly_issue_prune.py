@@ -145,16 +145,25 @@ class TestWrapperWiring:
     scattered at call sites, so no code path can skip it by accident."""
 
     @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
-    def test_report_prunes_before_posting_the_new_comment(self, wrapper: Path):
+    def test_report_is_the_only_place_the_prune_is_wired(self, wrapper: Path):
+        # The ordering half of this case moved to TestWrapperPostBeforePrune
+        # when R-612 inverted it (post first, prune the confirmed remainder).
+        # What still matters here is unchanged: the prune hangs off report(),
+        # the single chokepoint every phase status flows through, so no code
+        # path can skip it and none can call it twice.
         text = wrapper.read_text(encoding="utf-8")
         assert "prune_deadman_comments" in text, wrapper.name
         report_start = text.index("\nreport() {")
         report_end = text.index("\n}", report_start)
         body = text[report_start:report_end]
-        assert "prune_deadman_comments" in body, wrapper.name
-        prune_at = body.index("prune_deadman_comments")
-        post_at = body.index('issue comment "$issue"')
-        assert prune_at < post_at, wrapper.name
+        assert body.count("prune_deadman_comments") == 1, wrapper.name
+        calls = [
+            line for line in text.splitlines()
+            if "prune_deadman_comments" in line
+            and not line.lstrip().startswith("#")
+            and "prune_deadman_comments() {" not in line
+        ]
+        assert len(calls) == 1, wrapper.name
 
     @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
     def test_prune_uses_the_isolated_origin_main_pipe(self, wrapper: Path):
@@ -182,3 +191,124 @@ class TestWrapperWiring:
         end = text.index("\n}", start)
         body = text[start:end]
         assert "RADON_WEEKEND_SKIP_ISSUE_PRUNE" in body, wrapper.name
+
+
+class TestFailClosed:
+    """R-596/R-597/R-598 (P0): the prune is a DESTRUCTIVE delete gated on a
+    network answer. 'gh failed' and 'this loop has no open PR' were the same
+    empty list, so any gh outage wiped the operator's only record of a
+    pending run. Unknown must mean: prune nothing."""
+
+    def _gh(self, tmp_path: Path, body: str) -> Path:
+        script = tmp_path / "fake-gh"
+        script.write_text("#!/usr/bin/env python3\nimport sys, json\n" + body, encoding="utf-8")
+        script.chmod(script.stat().st_mode | stat.S_IEXEC)
+        return script
+
+    def _run(self, gh_bin: Path, *, keep: str | None = None):
+        argv = [
+            sys.executable,
+            str(SCRIPTS / "nightly_issue_prune.py"),
+            "--gh-bin", str(gh_bin),
+            "--issue", "42",
+            "--branch-prefix", "reliability/",
+            "--timeout", "10",
+        ]
+        if keep is not None:
+            argv += ["--keep", keep]
+        return subprocess.run(argv, capture_output=True, text=True, timeout=60)
+
+    def _listing_fails_gh(self, tmp_path: Path, *, failure: str) -> Path:
+        log = tmp_path / "delete-log.txt"
+        return self._gh(
+            tmp_path,
+            f"LOG = {str(log)!r}\n"
+            "args = sys.argv[1:]\n"
+            "if args[:2] == ['pr', 'list']:\n"
+            + (
+                "    sys.exit(1)\n" if failure == "nonzero"
+                else "    import time; time.sleep(30)\n"
+            )
+            + "elif args[:1] == ['api'] and args[1:3] == ['-X', 'DELETE']:\n"
+            "    open(LOG, 'a').write(args[3].rsplit('/', 1)[-1] + '\\n')\n"
+            "elif args[:1] == ['api']:\n"
+            "    print('1'); print('2'); print('3')\n",
+        )
+
+    @pytest.mark.parametrize("failure", ["nonzero", "timeout"])
+    def test_a_failed_pr_listing_deletes_nothing(self, tmp_path, failure):
+        proc = self._run(self._listing_fails_gh(tmp_path, failure=failure))
+        assert proc.returncode == 0, proc.stderr
+        assert not (tmp_path / "delete-log.txt").exists(), proc.stderr
+        assert "unknown" in proc.stderr
+
+    def test_a_truncated_listing_page_deletes_nothing(self, tmp_path):
+        log = tmp_path / "delete-log.txt"
+        gh = self._gh(
+            tmp_path,
+            f"LOG = {str(log)!r}\n"
+            "args = sys.argv[1:]\n"
+            "limit = int(args[args.index('--limit') + 1]) if '--limit' in args else 30\n"
+            "if args[:2] == ['pr', 'list']:\n"
+            "    print(json.dumps([{'headRefName': 'other/%d' % i} for i in range(limit)]))\n"
+            "elif args[:1] == ['api'] and args[1:3] == ['-X', 'DELETE']:\n"
+            "    open(LOG, 'a').write(args[3].rsplit('/', 1)[-1] + '\\n')\n"
+            "elif args[:1] == ['api']:\n"
+            "    print('1')\n",
+        )
+        proc = self._run(gh)
+        assert proc.returncode == 0, proc.stderr
+        assert not (tmp_path / "delete-log.txt").exists(), proc.stderr
+
+    def test_the_just_posted_comment_is_kept(self, tmp_path):
+        log = tmp_path / "delete-log.txt"
+        gh = self._gh(
+            tmp_path,
+            f"LOG = {str(log)!r}\n"
+            "args = sys.argv[1:]\n"
+            "if args[:2] == ['pr', 'list']:\n"
+            "    print(json.dumps([]))\n"
+            "elif args[:1] == ['api'] and args[1:3] == ['-X', 'DELETE']:\n"
+            "    open(LOG, 'a').write(args[3].rsplit('/', 1)[-1] + '\\n')\n"
+            "elif args[:1] == ['api']:\n"
+            "    print('1'); print('2'); print('99')\n",
+        )
+        proc = self._run(gh, keep="99")
+        assert proc.returncode == 0, proc.stderr
+        assert sorted((tmp_path / "delete-log.txt").read_text().split()) == ["1", "2"]
+
+
+class TestWrapperPostBeforePrune:
+    """R-612 (P0): the prune ran BEFORE a post whose failure was swallowed by
+    `|| true`, so a gh outage during the post deleted the history and added
+    nothing. The post must be confirmed first, and the new comment kept."""
+
+    @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
+    def test_prune_runs_only_after_a_confirmed_post(self, wrapper: Path):
+        text = wrapper.read_text(encoding="utf-8")
+        report_start = text.index("\nreport() {")
+        report_end = text.index("\n}", report_start)
+        body = "\n".join(
+            line for line in text[report_start:report_end].splitlines()
+            if not line.lstrip().startswith("#")
+        )
+        assert body.index('issue comment "$issue"') < body.index("prune_deadman_comments"), wrapper.name
+
+    @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
+    def test_a_failed_post_prunes_nothing(self, wrapper: Path):
+        text = wrapper.read_text(encoding="utf-8")
+        report_start = text.index("\nreport() {")
+        report_end = text.index("\n}", report_start)
+        body = text[report_start:report_end]
+        # The prune is reached only through the branch guarded on the post's
+        # captured output, never unconditionally after a `|| true` post.
+        assert 'if [[ -n "$posted" ]]; then' in body, wrapper.name
+        assert "prune_deadman_comments \"$issue\" \"$posted\"" in body, wrapper.name
+
+    @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
+    def test_prune_forwards_the_new_comment_id_to_keep(self, wrapper: Path):
+        text = wrapper.read_text(encoding="utf-8")
+        start = text.index("prune_deadman_comments() {")
+        end = text.index("\n}", start)
+        body = text[start:end]
+        assert "--keep" in body, wrapper.name
