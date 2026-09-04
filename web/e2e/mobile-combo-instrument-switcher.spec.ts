@@ -20,7 +20,7 @@ const PORTFOLIO_MOCK = {
   total_deployed_pct: 1.2,
   total_deployed_dollars: 1_200,
   remaining_capacity_pct: 98.8,
-  position_count: 1,
+  position_count: 2,
   defined_risk_count: 0,
   undefined_risk_count: 1,
   avg_kelly_optimal: null,
@@ -70,6 +70,49 @@ const PORTFOLIO_MOCK = {
       stop: null,
       entry_date: daysFromToday(-7),
     },
+    {
+      id: 9,
+      ticker: "VIX",
+      structure: "Ratio Bull Call Spread 500x499 $20/$30",
+      structure_type: "Ratio Bull Call Spread",
+      risk_profile: "undefined",
+      expiry: EXPIRY,
+      contracts: 500,
+      direction: "DEBIT",
+      entry_cost: 40_000,
+      max_risk: null,
+      market_value: 39_062,
+      market_price_is_calculated: true,
+      ib_daily_pnl: 0,
+      legs: [
+        {
+          direction: "LONG",
+          contracts: 500,
+          type: "Call",
+          strike: 20,
+          entry_cost: 70_000,
+          avg_cost: 140,
+          market_price: 1.4,
+          market_value: 70_000,
+          market_price_is_calculated: false,
+        },
+        {
+          direction: "SHORT",
+          contracts: 499,
+          type: "Call",
+          strike: 30,
+          entry_cost: 30_000,
+          avg_cost: 60.12,
+          market_price: 0.62,
+          market_value: 30_938,
+          market_price_is_calculated: false,
+        },
+      ],
+      kelly_optimal: null,
+      target: null,
+      stop: null,
+      entry_date: daysFromToday(-7),
+    },
   ],
   account_summary: {
     net_liquidation: 100_000,
@@ -93,6 +136,78 @@ const ORDERS_EMPTY = {
 };
 
 const PRICE_FIXTURES: Record<string, unknown> = {
+  VIX: {
+    symbol: "VIX",
+    last: 18.91,
+    lastIsCalculated: false,
+    bid: 18.9,
+    ask: 18.92,
+    bidSize: 10,
+    askSize: 10,
+    volume: 10,
+    high: null,
+    low: null,
+    open: null,
+    close: 18.5,
+    week52High: null,
+    week52Low: null,
+    avgVolume: null,
+    delta: null,
+    gamma: null,
+    theta: null,
+    vega: null,
+    impliedVol: null,
+    undPrice: null,
+    timestamp: now,
+  },
+  [`VIX_${EXPIRY_KEY}_20_C`]: {
+    symbol: `VIX_${EXPIRY_KEY}_20_C`,
+    last: 1.4,
+    lastIsCalculated: false,
+    bid: 1.39,
+    ask: 1.41,
+    bidSize: 50,
+    askSize: 8_933,
+    volume: 10,
+    high: null,
+    low: null,
+    open: null,
+    close: 1.38,
+    week52High: null,
+    week52Low: null,
+    avgVolume: null,
+    delta: null,
+    gamma: null,
+    theta: null,
+    vega: null,
+    impliedVol: null,
+    undPrice: 18.91,
+    timestamp: now,
+  },
+  [`VIX_${EXPIRY_KEY}_30_C`]: {
+    symbol: `VIX_${EXPIRY_KEY}_30_C`,
+    last: 0.62,
+    lastIsCalculated: false,
+    bid: 0.61,
+    ask: 0.63,
+    bidSize: 999,
+    askSize: 4_566,
+    volume: 10,
+    high: null,
+    low: null,
+    open: null,
+    close: 0.6,
+    week52High: null,
+    week52Low: null,
+    avgVolume: null,
+    delta: null,
+    gamma: null,
+    theta: null,
+    vega: null,
+    impliedVol: null,
+    undPrice: 18.91,
+    timestamp: now,
+  },
   IWM: {
     symbol: "IWM",
     last: 244.65,
@@ -284,6 +399,45 @@ async function stubApis(page: Page) {
   await page.route("**/api/ib/ws-ticket", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ticket: "test" }) }),
   );
+  await page.route("**/api/futures/chain?*", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        symbol: "VIX",
+        exchange: "CFE",
+        contracts: [
+          {
+            conId: 9_001,
+            symbol: "VIX",
+            localSymbol: "VIXU6",
+            exchange: "CFE",
+            currency: "USD",
+            lastTradeDateOrContractMonth: EXPIRY_KEY,
+            multiplier: "1000",
+            tradingClass: "VX",
+            marketName: "VIX",
+            minTick: 0.05,
+          },
+        ],
+        count: 1,
+      }),
+    }),
+  );
+  await page.route("**/api/index-options/chain?*", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        symbol: "VIX",
+        exchange: "CBOE",
+        tradingClass: "VIX",
+        expirations: [EXPIRY_KEY],
+        contracts: [],
+        count: 0,
+      }),
+    }),
+  );
   await page.route("**/api/blotter", (route) =>
     route.fulfill({
       status: 200,
@@ -364,4 +518,54 @@ test("STOCK|OPTION labels are vertically centered in their segments", async ({ p
     });
     expect(offset, `${name} label off vertical center by ${offset}px`).toBeLessThanOrEqual(1.5);
   }
+});
+
+test("VIX 500x499 holdings show a per-contract implied quote", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "desktop cockpit regression");
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await installMockWebSocket(page);
+  await stubApis(page);
+
+  await page.goto("/VIX?posId=9");
+  await expect(page.locator(".cockpit-host")).toBeVisible({ timeout: 30_000 });
+
+  const implied = page.getByRole("button", { name: "Implied spread book" });
+  const long = page.getByRole("button", { name: "$20 Call book" });
+  const short = page.getByRole("button", { name: "$30 Call book" });
+  const header = page.locator(".cockpit-head");
+  const book = page.locator(".book-window");
+
+  await expect(implied).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator(".book-kind")).toHaveText("IMPLIED SPREAD");
+  await expect(header).toContainText("$0.78");
+  await expect(header).toContainText("NET $0.04 / 5.13%");
+  await expect(book).toContainText("$0.76");
+  await expect(book).toContainText("$0.80");
+  await expect(book).not.toContainText("390.62");
+
+  await expect(page.locator(".act-ticket")).toContainText("VIX Index");
+  await expect(page.locator(".act-ticket")).toContainText("$18.91");
+  await expect(page.locator(".act-ticket")).not.toContainText("$0.78");
+
+  await long.click();
+  await expect(long).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator(".book-kind")).toHaveText("OPTION");
+  await expect(header).toContainText("$1.40");
+  await expect(header).toContainText("SPREAD $0.02 / 1.43%");
+
+  await short.click();
+  await expect(short).toHaveAttribute("aria-pressed", "true");
+  await expect(header).toContainText("$0.62");
+  await expect(header).toContainText("SPREAD $0.02 / 3.23%");
+
+  await implied.click();
+  await expect(implied).toHaveAttribute("aria-pressed", "true");
+  await expect(header).toContainText("$0.78");
+
+  const screenshotPath = testInfo.outputPath("vix-implied-spread-desktop.png");
+  await page.screenshot({ path: screenshotPath, fullPage: true });
+  await testInfo.attach("vix-implied-spread-desktop", {
+    path: screenshotPath,
+    contentType: "image/png",
+  });
 });

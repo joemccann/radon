@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import type { OpenOrder, PortfolioData, PortfolioPosition } from "@/lib/types";
 import type { DepthBook, PriceData, Trade } from "@/lib/pricesProtocol";
 import { useTickerDetailOptional, type OrderPrefill } from "@/lib/TickerDetailContext";
-import { fmtPrice, legPriceKey } from "@/lib/positionUtils";
+import { fmtPrice, legPriceKey, positionSpreadQuoteScale } from "@/lib/positionUtils";
 import { useViewport } from "@/lib/useViewport";
 import SingleLegOrderTicket, { type SingleLegOrderAction } from "@/components/SingleLegOrderTicket";
 import { resolvePlacementTarget, type LinearOrderRiskInput } from "@/lib/order";
@@ -522,6 +522,7 @@ export default function BookTab({
 
   const selectedOptionLeg = optionLegBooks.find((leg) => leg.key === resolvedBookKey) ?? null;
   const isComboBook = bookKind === "combo" && comboLegBooks.length >= 2;
+  const comboQuoteScale = position ? positionSpreadQuoteScale(ticker, position) ?? 1 : 1;
   const depth = useMemo(() => {
     if (!isComboBook) {
       const live = depths?.[resolvedBookKey] ?? null;
@@ -543,6 +544,11 @@ export default function BookTab({
       }
       return live;
     }
+    // Display quotes are normalized to the portfolio's reporting-contract
+    // denominator. When that differs from the executable integer BAG unit,
+    // use the normalized L1 fallback: publishing BAG-scaled depth rows would
+    // make click-to-fill send a materially different limit price.
+    if (comboQuoteScale !== 1) return null;
     let depthCount = 0;
     let bboCount = 0;
     const legs = comboLegBooks.map((leg) => {
@@ -575,7 +581,7 @@ export default function BookTab({
         ? `HYBRID IMPLIED · ${depthCount} DEPTH + ${bboCount} BBO`
         : "IMPLIED LEG BBO",
     };
-  }, [ask, bid, bookKind, comboLegBooks, depths, isComboBook, priceData, prices, resolvedBookKey]);
+  }, [ask, bid, bookKind, comboLegBooks, comboQuoteScale, depths, isComboBook, priceData, prices, resolvedBookKey]);
   // depth.kind wins; else the kind resolved by the parent; else stock.
   const kind = depth?.kind ?? bookKind ?? "stock";
   // Time & Sales rides the same focused book key as depth. Newest-first from

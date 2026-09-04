@@ -99,4 +99,66 @@ describe("handleDemoGate", () => {
     expect(res).toBeNull();
     expect(limiter.mock.calls.map(([tier]) => tier)).toEqual(["G", "H"]);
   });
+
+  it("keeps a first scanner visit out of an exhausted regime budget", async () => {
+    const usage = new Map<string, number>();
+    const limiter = vi.fn(async (tier: string, key: string): Promise<DemoRateLimitResult> => {
+      const counterKey = `${tier}:${key}`;
+      const next = (usage.get(counterKey) ?? 0) + 1;
+      usage.set(counterKey, next);
+      return {
+        success: next <= 10,
+        limit: 10,
+        remaining: Math.max(0, 10 - next),
+        reset: NOW + 60_000,
+      };
+    });
+
+    for (let requestNumber = 0; requestNumber < 10; requestNumber += 1) {
+      const res = await handleDemoGate(
+        { userId: "fresh-demo-user", metadata: activeMeta, request: apiReq("/api/regime") },
+        { now: NOW, rateLimiter: limiter },
+      );
+      expect(res).toBeNull();
+    }
+
+    const scanner = await handleDemoGate(
+      { userId: "fresh-demo-user", metadata: activeMeta, request: apiReq("/api/scanner") },
+      { now: NOW, rateLimiter: limiter },
+    );
+
+    expect(scanner).toBeNull();
+    expect(limiter.mock.calls.at(-1)).toEqual([
+      "B",
+      "fresh-demo-user:resource:scanner",
+    ]);
+  });
+
+  it("shares one abuse budget across nested routes for the same resource", async () => {
+    const limiter = vi.fn(async () => allow);
+
+    await handleDemoGate(
+      { userId: "user", metadata: activeMeta, request: apiReq("/api/scanner") },
+      { now: NOW, rateLimiter: limiter },
+    );
+    await handleDemoGate(
+      { userId: "user", metadata: activeMeta, request: apiReq("/api/scanner/theta") },
+      { now: NOW, rateLimiter: limiter },
+    );
+
+    expect(limiter.mock.calls).toEqual([
+      ["B", "user:resource:scanner"],
+      ["B", "user:resource:scanner"],
+    ]);
+  });
+
+  it("shell polling consumes isolated minute and daily ceilings", async () => {
+    const limiter = vi.fn(async () => allow);
+    const res = await handleDemoGate(
+      { userId: "u", metadata: activeMeta, request: apiReq("/api/futures-quote") },
+      { now: NOW, rateLimiter: limiter },
+    );
+    expect(res).toBeNull();
+    expect(limiter.mock.calls.map(([tier]) => tier)).toEqual(["I", "J"]);
+  });
 });

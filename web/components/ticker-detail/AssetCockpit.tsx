@@ -8,6 +8,7 @@ import { useTickerDetailOptional, type OrderPrefill } from "@/lib/TickerDetailCo
 import { MetricCell } from "@/components/mobile/MetricCell";
 import { resolveMarketValue, resolveEntryCost, getAvgEntry, fmtPrice } from "@/lib/positionUtils";
 import { fmtMoneySigned } from "@/lib/format/money";
+import { isIndexSymbol } from "@/lib/indexSymbols";
 import BookTab from "./BookTab";
 import OrderTab from "./OrderTab";
 import ActHeldSummary from "./ActHeldSummary";
@@ -104,6 +105,7 @@ export default function AssetCockpit({
   viewUnderlying,
 }: AssetCockpitProps) {
   const live = (quotePriceData?.bid != null && quotePriceData?.ask != null) || quotePriceData?.last != null;
+  const ticketPriceData = isIndexSymbol(ticker) ? prices[ticker] ?? null : priceData;
 
   // When the underlying is in focus, the order ticket acts on the STOCK (a
   // fresh order), not the held option — OrderTab renders its linear stock form
@@ -183,7 +185,7 @@ export default function AssetCockpit({
               portfolio={portfolio}
               prices={prices}
               openOrders={tickerOrders}
-              tickerPriceData={priceData}
+              tickerPriceData={ticketPriceData}
             />
           </div>
           <div className="act-position">
@@ -215,7 +217,7 @@ export default function AssetCockpit({
         position={position}
         quotePriceData={quotePriceData}
         openOrders={tickerOrders}
-        tickerPriceData={priceData}
+        tickerPriceData={ticketPriceData}
       />
 
       <GlyphRail activeDeck={activeDeck} onDeckChange={onDeckChange} includeOrder={mobile} />

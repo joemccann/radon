@@ -496,13 +496,10 @@ function integerGcd(a: number, b: number): number {
   return a;
 }
 
-/** Natural executable spread market from cross-sided leg quotes. */
-export function resolveNaturalSpreadQuote(
+function netPositionLegs(
   ticker: string,
   position: PortfolioPosition,
-  prices: Record<string, PriceData>,
-): { bid: number; ask: number; mid: number; asOf?: string } | null {
-  if (position.legs.length < 2) return null;
+): Array<[key: string, signedContracts: number]> | null {
   const signedByKey = new Map<string, number>();
   for (const leg of position.legs) {
     if (!Number.isInteger(leg.contracts) || leg.contracts <= 0) return null;
@@ -512,7 +509,37 @@ export function resolveNaturalSpreadQuote(
     signedByKey.set(key, (signedByKey.get(key) ?? 0) + signed);
   }
   const netLegs = [...signedByKey.entries()].filter(([, signed]) => signed !== 0);
-  if (netLegs.length < 2) return null;
+  return netLegs.length >= 2 ? netLegs : null;
+}
+
+/**
+ * Scale between one executable integer-ratio BAG and one reporting contract.
+ *
+ * IB requires BAG ratios reduced by GCD, but portfolio `contracts` is the
+ * display denominator used by Avg Entry / Last. A nearly balanced 500x499
+ * holding is therefore one enormous executable BAG yet 500 reporting units.
+ */
+export function positionSpreadQuoteScale(
+  ticker: string,
+  position: PortfolioPosition,
+): number | null {
+  const netLegs = netPositionLegs(ticker, position);
+  const displayContracts = Math.abs(position.contracts);
+  if (!netLegs || !Number.isInteger(displayContracts) || displayContracts <= 0) return null;
+  const bagUnits = netLegs.map(([, signed]) => Math.abs(signed)).reduce(integerGcd);
+  const scale = displayContracts / bagUnits;
+  return Number.isFinite(scale) && scale > 0 ? scale : null;
+}
+
+/** Natural executable spread market from cross-sided leg quotes. */
+export function resolveNaturalSpreadQuote(
+  ticker: string,
+  position: PortfolioPosition,
+  prices: Record<string, PriceData>,
+): { bid: number; ask: number; mid: number; asOf?: string } | null {
+  if (position.legs.length < 2) return null;
+  const netLegs = netPositionLegs(ticker, position);
+  if (!netLegs) return null;
   const divisor = netLegs.map(([, signed]) => Math.abs(signed)).reduce(integerGcd);
   let bid = 0;
   let ask = 0;
@@ -549,8 +576,9 @@ export function resolveSpreadPriceData(
 
   const natural = resolveNaturalSpreadQuote(ticker, position, prices);
   if (!natural) return null;
-  const lo = Math.round(natural.bid * 100) / 100;
-  const hi = Math.round(natural.ask * 100) / 100;
+  const displayScale = positionSpreadQuoteScale(ticker, position) ?? 1;
+  const lo = Math.round((natural.bid / displayScale) * 100) / 100;
+  const hi = Math.round((natural.ask / displayScale) * 100) / 100;
   const mid = Number((((lo + hi) / 2)).toFixed(2));
 
   return {

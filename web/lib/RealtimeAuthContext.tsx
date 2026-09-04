@@ -13,7 +13,20 @@ const CLERK_CONFIGURED = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
 
 const anonymousToken: RealtimeTokenGetter = async () => null;
 
-export function RealtimeAuthProvider({ children }: { children: ReactNode }) {
+export function RealtimeAuthProvider({
+  children,
+  authlessTestBypass = false,
+}: {
+  children: ReactNode;
+  authlessTestBypass?: boolean;
+}) {
+  if (authlessTestBypass) {
+    return (
+      <RealtimeAuthContext.Provider value={undefined}>
+        {children}
+      </RealtimeAuthContext.Provider>
+    );
+  }
   if (!CLERK_CONFIGURED) {
     return (
       <RealtimeAuthContext.Provider value={anonymousToken}>

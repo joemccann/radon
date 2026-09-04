@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { headers } from "next/headers";
 import localFont from "next/font/local";
 import Providers from "@/components/Providers";
 import PwaRegister from "@/components/PwaRegister";
@@ -82,7 +83,18 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // The Playwright bypass is server-only and token-bound in middleware. Carry
+  // the same verified request into the client provider tree so realtime specs
+  // do not request WS credentials from the deliberately fake Clerk instance
+  // in the test config. A deployment flag alone cannot enter this branch.
+  const requestHeaders = await headers();
+  const authlessTestToken = process.env.RADON_AUTHLESS_TEST_TOKEN;
+  const authlessTestBypass =
+    process.env.RADON_AUTHLESS_TEST === "1" &&
+    Boolean(authlessTestToken) &&
+    requestHeaders.get("x-radon-authless-test") === authlessTestToken;
+
   return (
     <html
       lang="en"
@@ -94,7 +106,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <ThemeBootstrap />
       </head>
       <body className="app-root">
-        <Providers>{children}</Providers>
+        <Providers authlessTestBypass={authlessTestBypass}>{children}</Providers>
         <PwaRegister />
       </body>
     </html>

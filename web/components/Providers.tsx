@@ -17,14 +17,20 @@ import SignOutCachePurge from "@/components/SignOutCachePurge";
 // realtime prices provider, still must. Once keys exist this branch is dead.
 const CLERK_CONFIGURED = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
 
-export default function Providers({ children }: { children: React.ReactNode }) {
+export default function Providers({
+  children,
+  authlessTestBypass = false,
+}: {
+  children: React.ReactNode;
+  authlessTestBypass?: boolean;
+}) {
   // Mounted on EVERY boot path, Clerk configured or not — an early keyless
   // exit here once silently dropped the realtime tree (T-389).
   const core = (
-    <RealtimeAuthProvider>
+    <RealtimeAuthProvider authlessTestBypass={authlessTestBypass}>
       <OfflineStatusProvider>
         <RouteRefreshProvider>
-          <IBStatusProvider>
+          <IBStatusProvider authlessTestBypass={authlessTestBypass}>
             {/* Owns the realtime prices socket for the life of the tab.
                 Lives here (not in the per-page WorkspaceShell) so App
                 Router navigations never tear the connection down. */}
