@@ -149,6 +149,14 @@ class TestWatchdogCycleWiresTheCertIntoTheHealthRow:
         import ib_watchdog as wd
 
         monkeypatch.setattr(wd, "_REMOTE_CERT_ALERT", {})
+        # A real cycle acquires the 2FA push lease, which defaults to the
+        # host path /var/lib/radon/ib-lease. On a CI runner that is either
+        # absent or unwritable, so the cycle died before it reached the row
+        # under test. Point the lease at tmp_path: the assertion is about
+        # the cert escalation, not about where the lease lives.
+        monkeypatch.setenv(
+            "IB_2FA_LOCK_PATH", str(tmp_path / "ib-2fa-push-lock.json")
+        )
         rows: list[tuple] = []
         monkeypatch.setattr(
             wd, "_write_service_health_transport",
