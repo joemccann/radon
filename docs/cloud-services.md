@@ -394,10 +394,7 @@ JSON-RPC), documented for consumers at radon.run `/developers/mcp`.
   `/etc/radon/mcp.env`, a stripped file `deploy.sh:write_mcp_env` (and
   `setup-vps.sh`) derives from `/etc/radon/env` on every deploy; the unit
   never loads the full secret set and runs with `/etc/radon/env`
-  inaccessible. The stripped env and sandbox are landed in the repo only; the
-  live unit still differs until an operator installs the root copy, which
-  `cloud/config/drift-allowlist.conf` carries as a
-  `unit-mismatch:radon-mcp.service` entry expiring 2026-10-31. Optional overrides `RADON_MCP_{HOST,PORT,SITE_BASE,EDGE_BASE,APP_BASE,DEMO_BASE}`
+  inaccessible. Optional overrides `RADON_MCP_{HOST,PORT,SITE_BASE,EDGE_BASE,APP_BASE,DEMO_BASE}`
   and `RADON_MCP_ALLOWED_HOSTS` (comma list; default
   `app.radon.run,app.radon.run:*,127.0.0.1:*,localhost:*` — the SDK's
   DNS-rebinding protection 421s any Host not on it, so a serving-host change
