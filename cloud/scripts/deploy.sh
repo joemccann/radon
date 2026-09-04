@@ -101,6 +101,7 @@ UNITS_RESTARTED=1
 # Discord vars are intentionally absent — the notification stack uses Pushover.
 readonly ENV_FILE_DEFAULT="$(_default_env_file)"
 readonly APP_RUNTIME_HELPER="${RADON_APP_RUNTIME_HELPER:-/usr/local/sbin/radon-app-runtime}"
+readonly DOCKER_GW="${RADON_DOCKER_GW:-/usr/local/sbin/radon-docker-gw}"
 readonly APP_IMAGE_PREPULL_TIMEOUT="${RADON_APP_IMAGE_PREPULL_TIMEOUT:-600}"
 readonly NEXT_RUNTIME_DROPIN="${RADON_NEXT_RUNTIME_DROPIN:-/etc/systemd/system/radon-nextjs.service.d/runtime-container.conf}"
 readonly SYSTEMCTL="${RADON_SYSTEMCTL:-/usr/bin/systemctl}"
@@ -194,11 +195,25 @@ preflight_env() {
 
   # Do not let Compose print expanded values or secret fragments. A generic
   # failure is enough; operators can inspect the named-key checks above.
-  if ! (
+  #
+  # radon is not in group `docker` (that group is root-equivalent), so the
+  # render goes through the root shim, which pins the same canonical env file
+  # this deploy defaults to. The direct call remains for a dev or test
+  # invocation against some other env file, where the caller has its own
+  # docker access.
+  local compose_check_ok=0
+  if [[ -x "$DOCKER_GW" && "$env_file" == "$ENV_FILE_DEFAULT" ]]; then
+    if sudo -n "$DOCKER_GW" config-check >/dev/null 2>&1; then
+      compose_check_ok=1
+    fi
+  elif (
     cd "$CLOUD_DIR"
     RADON_COMPOSE_ENV_FILE="$env_file" \
       docker compose --env-file "$env_file" config --quiet >/dev/null 2>&1
   ); then
+    compose_check_ok=1
+  fi
+  if (( compose_check_ok == 0 )); then
     log_error "[preflight] FAIL: docker compose config validation failed"
     return 1
   fi

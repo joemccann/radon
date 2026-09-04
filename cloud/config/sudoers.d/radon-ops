@@ -29,7 +29,7 @@ radon ALL=(root) NOPASSWD: /usr/bin/docker logs ib-gateway
 # container, with no caller-supplied paths, images, mounts or flags. Each verb
 # is listed in full: a trailing wildcard would hand back the arbitrary argv the
 # shim exists to refuse.
-radon ALL=(root) NOPASSWD: /usr/local/sbin/radon-docker-gw compose-up, /usr/local/sbin/radon-docker-gw compose-down, /usr/local/sbin/radon-docker-gw inspect-running
+radon ALL=(root) NOPASSWD: /usr/local/sbin/radon-docker-gw compose-up, /usr/local/sbin/radon-docker-gw compose-down, /usr/local/sbin/radon-docker-gw inspect-running, /usr/local/sbin/radon-docker-gw config-check
 radon ALL=(root) NOPASSWD: /usr/local/sbin/radon-docker-gw pgrep-jvm, /usr/local/sbin/radon-docker-gw pgrep-java, /usr/local/sbin/radon-docker-gw thread-dump [0-9]*
 radon ALL=(root) NOPASSWD: /usr/local/sbin/radon-docker-gw logs, /usr/local/sbin/radon-docker-gw stats, /usr/local/sbin/radon-docker-gw ps
 
