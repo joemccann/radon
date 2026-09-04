@@ -369,6 +369,27 @@ describe("Time & Sales tape wiring", () => {
   });
 });
 
+describe("Ask-side SHARES header sits toward the price, not the venue", () => {
+  it("does not right-align the ask size header into MARKET", () => {
+    const book: DepthBook = {
+      ...STOCK_BOOK,
+      ask: [
+        { price: 105.24, size: 195, marketMaker: "DRCTEDARK", exchange: "SMART" },
+        { price: 105.25, size: 105, marketMaker: "IEXG", exchange: "SMART" },
+      ],
+    };
+    const { container } = renderBook(book, "stock");
+    const askHead = [...container.querySelectorAll(".book-side.ask .book-colhead > span")];
+    expect(askHead.map((el) => el.textContent)).toEqual(["Ask", "Shares", "Market"]);
+    expect(askHead[1].classList.contains("r")).toBe(false);
+    expect(askHead[2].classList.contains("r")).toBe(true);
+
+    const askRow = container.querySelector(".book-side.ask .book-row")!;
+    expect(askRow.querySelector(".book-shares")?.textContent).toBe("195");
+    expect(askRow.querySelector(".book-mkt")?.textContent).toBe("DRCTEDARK");
+  });
+});
+
 describe("Brand tokens only — no raw hex / tailwind color utilities", () => {
   it("emits no raw hex colors or green-500/red-500 in the rendered markup", () => {
     const { container } = renderBook(STOCK_BOOK, "stock");
