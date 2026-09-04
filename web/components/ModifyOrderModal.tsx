@@ -8,6 +8,11 @@ import type { ModifyComboLeg, ModifyOrderRequest } from "@/lib/orderModify";
 import Modal from "./Modal";
 import { getQuoteMetrics } from "@/lib/quoteTelemetry";
 import { applyRestingLimitToQuote } from "@/lib/modifyOrderQuote";
+import {
+  filledQuantity,
+  remainingQuantity,
+  toIbTotalQuantity,
+} from "@/lib/orders/modifyQuantity";
 import { fmtPrice, legPriceKey, resolveClosingBasis } from "@/lib/positionUtils";
 import {
   findHeldComboForClose,
@@ -318,8 +323,11 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, op
     if (order?.limitPrice != null) {
       setNewPrice(order.limitPrice.toFixed(2));
     }
+    // The operator edits what is STILL WORKING. On a partially filled order
+    // that is the remainder, not the original size — seeding the total priced
+    // the ticket as if nothing had filled.
     if (order?.totalQuantity != null) {
-      setNewQuantity(String(order.totalQuantity));
+      setNewQuantity(String(remainingQuantity(order)));
     }
     setOutsideRth(Boolean(order?.outsideRth));
     setEditableLegs(buildEditableComboLegs(order));
@@ -504,7 +512,10 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, op
   if (!order) return null;
 
   const currentPrice = order.limitPrice ?? 0;
-  const currentQuantity = order.totalQuantity;
+  // Compare against the remainder, so re-submitting an untouched partial
+  // order is correctly seen as "no quantity change".
+  const currentQuantity = remainingQuantity(order);
+  const alreadyFilled = filledQuantity(order);
   const parsedNew = parseFloat(newPrice);
   const parsedQuantity = parsePositiveInteger(newQuantity);
   const isComboOrder = order.contract.secType === "BAG" && editableLegs.length >= 2;
@@ -603,7 +614,9 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, op
 
     const request: ModifyOrderRequest = {};
     if (priceChanged) request.newPrice = parsedNew;
-    if (quantityChanged) request.newQuantity = parsedQuantity!;
+    // IB's modify assigns the NEW TOTAL (ib_order_manage.py), so the edited
+    // remainder has to carry the already-filled units back with it.
+    if (quantityChanged) request.newQuantity = toIbTotalQuantity(order, parsedQuantity!);
     if (outsideRthChanged) request.outsideRth = outsideRth;
     onConfirm(request);
   };
@@ -623,7 +636,12 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, op
           </span>
           <span>{order.orderType}</span>
           <span>{order.tif}</span>
-          <span>{order.totalQuantity}x</span>
+          <span>{currentQuantity}x</span>
+          {alreadyFilled > 0 && (
+            <span className="modify-order-filled">
+              {alreadyFilled} of {order.totalQuantity} filled
+            </span>
+          )}
         </div>
 
         <div className={`modify-layout${isComboOrder ? " modify-layout-combo" : ""}`}>
