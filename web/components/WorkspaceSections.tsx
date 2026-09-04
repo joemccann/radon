@@ -2723,7 +2723,7 @@ function resolveOrderLastPriceData(
   prices: Record<string, PriceData> | undefined,
   portfolio: PortfolioData | null | undefined,
 ): ResolvedOpenOrderPrice {
-  if (!prices) return { price: null, isCalculated: false };
+  if (!prices) return { price: null, isCalculated: false, isPreviousClose: false };
   const pk = orderPriceKey(order.contract);
   if (pk) {
     const priceData = prices[pk];
@@ -2731,7 +2731,7 @@ function resolveOrderLastPriceData(
     return { ...resolveSingleLegLastPrice(priceData), isPreviousClose: false };
   }
 
-  if (order.contract.secType !== "BAG") return { price: null, isCalculated: false };
+  if (order.contract.secType !== "BAG") return { price: null, isCalculated: false, isPreviousClose: false };
   const position = matchingBagPosition(order, portfolio);
 
   const comboLegs = order.contract.comboLegs;
@@ -2756,7 +2756,7 @@ function resolveOrderLastPriceData(
   }
 
   if (!position || !Number.isFinite(position.contracts) || position.contracts === 0) {
-    return { price: null, isCalculated: false };
+    return { price: null, isCalculated: false, isPreviousClose: false };
   }
   return resolveSignedComboPrice(position.legs.map((leg) => {
     const key = legPriceKey(position.ticker, position.expiry, leg);
@@ -2840,6 +2840,7 @@ function OrderPriceCell({ price, isCalculated = false, isPreviousClose = false }
       className={`right last-price-cell ${flashDirection ? `last-price-${flashDirection}` : ""}${isPreviousClose ? " last-price-prev-close" : ""}`}
       title={title}
       data-previous-close={isPreviousClose ? "true" : undefined}
+      data-testid="order-last-price"
     >
       {price != null ? fmtPriceOrCalculated(price, isCalculated) : "—"}
       {price != null && isPreviousClose && (

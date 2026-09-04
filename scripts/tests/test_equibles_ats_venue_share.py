@@ -34,11 +34,19 @@ import fetch_equibles_ats_venue_share as mod  # noqa: E402
 MIGRATION = Path(__file__).parents[1] / "db" / "migrations" / "0041_equibles_ats_venue_share.sql"
 
 
+# Fixed anchor Monday. Anchoring to the CURRENT in-progress week emitted
+# five consecutive days from this week's Monday, i.e. future-dated rows on any
+# Mon-Thu run, while run() caps the fetch at end_date = now.date().
+ANCHOR_MONDAY = date(2026, 8, 31)
+
+
 def mondays(count: int) -> list[str]:
-    """The `count` most recent Mondays, ascending, ending at this week's."""
-    today = date.today()
-    latest = today - timedelta(days=today.weekday())
-    return [(latest - timedelta(weeks=count - 1 - i)).isoformat() for i in range(count)]
+    """The `count` Mondays ending at the fixed ANCHOR_MONDAY, ascending."""
+    assert ANCHOR_MONDAY.weekday() == 0
+    return [
+        (ANCHOR_MONDAY - timedelta(weeks=count - 1 - i)).isoformat()
+        for i in range(count)
+    ]
 
 
 def off_exchange_row(week: str, *, ats_volume=4_000_000.0, ats_trades=8_000.0,

@@ -170,3 +170,21 @@ vol-cone-tab.spec.ts
 vxn-index-routing.spec.ts
 watchlist-page.spec.ts
 ws-connection-stability.spec.ts
+
+# ── CHANGE ANNOTATIONS (T-438) ───────────────────────────────────────────────
+# A held-out spec that CHANGES has no browser evidence anywhere: the curation
+# guard only ever asked whether a spec was classified, never whether a changed
+# one was re-run. scripts/tests/test_e2e_ci_curation.py now requires a
+# `# REVIEWED <YYYY-MM-DD> <spec>` line, dated on or after the spec's last
+# commit in the range, for every held-out spec modified since the merge-base.
+# Re-stamp the date when you change the spec again; a stale date reds.
+#
+# REVIEWED 2026-09-04 chat-launcher-focus.spec.ts — held out (chat launcher is
+#   dev-server-only focus behaviour). T-419/T-427 rewrote it onto a hydration
+#   marker plus a single real key press and off CSS-module locators; run locally
+#   under `next start` (production server, 4 passed) with a screenshot captured.
+#   Curate it if it stabilises in the shared CI runner.
+# REVIEWED 2026-09-04 open-order-combo.spec.ts — held out (combo blotter row
+#   needs a seeded open combo order the CI fixture does not provide). T-427/T-437
+#   moved it onto testids and a window-relative expiry; run locally under
+#   `next start` (4 passed) with screenshots captured.

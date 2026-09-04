@@ -209,21 +209,42 @@ describe("GET /api/iv-spread — absent and stale data are 200, never 4xx", () =
     expect(json.stale).toBe(true);
   });
 
-  it("serves a stale_source payload re-served within the budget", async () => {
-    const yesterday = new Date(Date.now() - 24 * 60 * 60_000)
-      .toISOString()
-      .slice(0, 10);
-    const reserved = buildPayload({
-      status: "stale_source",
-      scan_time: new Date().toISOString(),
-      as_of: yesterday,
-    });
-    await insertSnapshot(reserved);
+  // The route pins a stale_source as_of (a date-only YYYY-MM-DD) to
+  // T22:15:00Z, so the age the 48h budget actually sees depends on the UTC
+  // hour of the run, not just on the nominal age of the fixture. Freeze the
+  // clock and sweep all 24 hours so this can never become a wall-clock
+  // coin flip: with an explicit 30h target age the effective age stays in
+  // 8h..33h, comfortably inside the budget at every hour.
+  it("serves a stale_source payload re-served within the budget, at every UTC hour", async () => {
+    // Date only: libsql's in-memory client needs real timers to settle.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const { GET } = await import("../app/api/iv-spread/route");
+      for (let hour = 0; hour < 24; hour += 1) {
+        const now = new Date(Date.UTC(2026, 8, 4, hour, 30, 0));
+        vi.setSystemTime(now);
+        const asOf = new Date(now.getTime() - 30 * 3_600_000).toISOString().slice(0, 10);
+        const effectiveAgeH = (now.getTime() - Date.parse(`${asOf}T22:15:00Z`)) / 3_600_000;
+        expect(effectiveAgeH, `hour ${hour} age`).toBeGreaterThan(0);
+        expect(effectiveAgeH, `hour ${hour} age`).toBeLessThan(48);
 
-    const { GET } = await import("../app/api/iv-spread/route");
-    const json = (await (await GET()).json()) as Record<string, unknown>;
-    expect(json.missing).toBeUndefined();
-    expect(json.status).toBe("stale_source");
+        await db.execute("DELETE FROM scan_snapshots");
+        await insertSnapshot(
+          buildPayload({
+            status: "stale_source",
+            scan_time: now.toISOString(),
+            as_of: asOf,
+          }),
+        );
+
+        const json = (await (await GET()).json()) as Record<string, unknown>;
+        expect(json.missing, `hour ${hour}`).toBeUndefined();
+        expect(json.status, `hour ${hour}`).toBe("stale_source");
+        expect(json.as_of, `hour ${hour}`).toBe(asOf);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("collapses a snapshot older than the 48h budget to the missing shape at 200", async () => {

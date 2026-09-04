@@ -4,6 +4,7 @@ Covers the pure probe/parse/assembly logic plus a real-socket smoke test of the
 HTTP wiring. Deliberately uses real localhost sockets/servers rather than mocks
 so the stdlib probe behaviour is genuinely exercised.
 """
+import datetime
 import json
 import os
 import socket
@@ -222,9 +223,12 @@ class TestStatusResponse:
         assert body["probes"]["radon-api"]["state"] == "up"
         assert body["units"]["radon-api.service"]["state"] == "up"
         assert body["units_age_secs"] == 1.2
-        assert body["schema_version"] == 2
+        assert body["schema_version"] == probes.STATUS_SCHEMA_VERSION == 3
         assert body["ok"] is True
         assert body["overall_state"] == "up"
+        # T-432: v3 is what "the body carries degraded_reasons" means. Pinning
+        # the number without the field it announces is a vacuous pin.
+        assert body["degraded_reasons"] == []
         # service_health section present even with no cache wired in
         assert body["service_health"]["state"] == "unknown"
 
@@ -572,6 +576,149 @@ class TestStatusResponse:
         assert status == 200
         assert body["health_service"] == "ok"
         assert body["service_health"]["state"] == "unknown"
+
+
+class TestStatusSchemaVersionAnnouncesTheShape:
+    """T-432. `degraded_reasons` was added to the body under an unchanged
+    `schema_version = 2`, so a consumer pinned to v2 could not tell the two
+    shapes apart. The version and the field move together or neither is worth
+    asserting."""
+
+    _PROBES = {"radon-api": {"state": "up"}, "ib-gateway": {"state": "down"}}
+
+    def test_the_constant_is_v3(self):
+        assert probes.STATUS_SCHEMA_VERSION == 3
+
+    def test_a_v3_body_names_the_degraded_dependencies(self):
+        body = probes.build_status(
+            self._PROBES,
+            {"radon-api.service": {"state": "up"},
+             "radon-newsfeed.service": {"state": "failed"}},
+            "t",
+            units_age_secs=0,
+        )
+        assert body["schema_version"] == 3
+        assert body["overall_state"] == "degraded"
+        assert body["degraded_reasons"] == [
+            "ib-gateway", "radon-newsfeed.service",
+        ]
+
+    def test_every_body_carries_the_key_even_when_healthy(self):
+        body = probes.build_status(
+            {"radon-api": {"state": "up"}},
+            {"radon-api.service": {"state": "up"}},
+            "t",
+            units_age_secs=0,
+        )
+        assert body["overall_state"] == "up"
+        assert body["degraded_reasons"] == []
+
+    def test_the_off_box_consumers_accept_v3_and_its_predecessor(self):
+        """The bump is only safe because both consumers were widened with it;
+        a consumer left on `== 2` fails closed against every v3 host."""
+        import health_probe.probe as health_probe
+        from watchdog import external_probe
+
+        assert health_probe.SUPPORTED_STATUS_SCHEMAS == (3, 2)
+        assert external_probe.SUPPORTED_STATUS_SCHEMAS == (3, 2)
+        for version in (3, 2):
+            payload = {"schema_version": version, "ok": True, "overall_state": "up"}
+            assert health_probe._classify_status_payload(payload) == "healthy"
+        assert health_probe._classify_status_payload(
+            {"schema_version": 4, "ok": True, "overall_state": "up"}
+        ) == "invalid"
+
+
+class TestGatewayDwellWallClockGate:
+    """T-420. The gateway is no longer excluded from the dwell escalation; the
+    exclusion is now the predicate `_gateway_dwell_suppressed` = clean exit AND
+    market closed, evaluated against `_now_et(now_et)` — the REAL ET clock when
+    `now_et` is omitted. Every existing caller omits it, so this behaviour is
+    weekday/weekend dependent and pinned nowhere. Both cases inject the clock.
+    """
+
+    _PROBES = {
+        "radon-api": {
+            "state": "up",
+            "payload": {
+                "service_state": "reachable",
+                "auth_state": "authenticated",
+                "upstream_dead": False,
+                "port_listening": True,
+            },
+        },
+        "radon-relay": {"state": "up"},
+        "radon-nextjs": {"state": "up"},
+        "ib-gateway": {"state": "up"},
+    }
+
+    def _units(self):
+        return {
+            "radon-api.service": {"state": "up"},
+            "radon-relay.service": {"state": "up"},
+            "radon-nextjs.service": {"state": "up"},
+            "radon-monitor.service": {"state": "up"},
+            "radon-newsfeed.service": {"state": "up"},
+            probes.GATEWAY_UNIT: {
+                "state": "down",
+                "result": "success",
+                "non_up_secs": 901,
+            },
+        }
+
+    # Tuesday 10:00 ET, inside the 04:00-20:00 EXT session.
+    OPEN_ET = datetime.datetime(2026, 9, 1, 10, 0)
+    # Saturday 10:00 ET.
+    CLOSED_ET = datetime.datetime(2026, 9, 5, 10, 0)
+
+    def test_clean_exit_past_dwell_escalates_during_the_et_session(self):
+        state = probes.aggregate_state(
+            self._PROBES, self._units(), units_age_secs=0, now_et=self.OPEN_ET
+        )
+        # dwell escalation wins over the dependency downgrade: R-478 blindness
+        assert state == "down", state
+
+    def test_clean_exit_past_dwell_does_not_escalate_on_a_weekend(self):
+        state = probes.aggregate_state(
+            self._PROBES, self._units(), units_age_secs=0, now_et=self.CLOSED_ET
+        )
+        assert state == "degraded", state
+
+    def test_a_dirty_exit_escalates_even_on_a_weekend(self):
+        units = self._units()
+        units[probes.GATEWAY_UNIT]["result"] = "exit-code"
+        state = probes.aggregate_state(
+            self._PROBES, units, units_age_secs=0, now_et=self.CLOSED_ET
+        )
+        assert state == "down", state
+
+    def test_build_status_carries_the_injected_clock_through(self):
+        open_body = probes.build_status(
+            self._PROBES, self._units(), "t", units_age_secs=0, now_et=self.OPEN_ET
+        )
+        closed_body = probes.build_status(
+            self._PROBES, self._units(), "t", units_age_secs=0, now_et=self.CLOSED_ET
+        )
+        assert open_body["overall_state"] == "down"
+        assert closed_body["overall_state"] == "degraded"
+
+    def test_the_suppression_window_is_the_ext_session_not_the_rth_session(self):
+        # 21:00 ET Tuesday is outside 04:00-20:00: closed, so suppressed.
+        state = probes.aggregate_state(
+            self._PROBES,
+            self._units(),
+            units_age_secs=0,
+            now_et=datetime.datetime(2026, 9, 1, 21, 0),
+        )
+        assert state == "degraded", state
+        # 05:00 ET Tuesday is INSIDE 04:00-20:00 though outside RTH: open.
+        state = probes.aggregate_state(
+            self._PROBES,
+            self._units(),
+            units_age_secs=0,
+            now_et=datetime.datetime(2026, 9, 1, 5, 0),
+        )
+        assert state == "down", state
 
 
 # --- Feature B: stdlib-only Turso service_health HTTP reader ---

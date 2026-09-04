@@ -120,3 +120,79 @@ class TestWatchdogClassifies:
         service, state, error = rows[-1]
         assert state == "ok"
         assert "cert" in str(error).lower()
+
+
+class TestWatchdogCycleWiresTheCertIntoTheHealthRow:
+    """T-425: the classifier and the alert were both pinned, the CALL was not.
+
+    ``_run_cycle_steps`` is the only thing that moves a /health payload's
+    ``gateway.remote.cert_days_left`` into ``_REMOTE_CERT_ALERT``. Every
+    other case here either tests ``classify_remote_cert`` pure or patches
+    ``_REMOTE_CERT_ALERT`` directly, so deleting the ``note_remote_cert``
+    call left the file green and the cert would expire unwarned. Run one
+    real cycle instead and read the row that comes out the far end.
+    """
+
+    @staticmethod
+    def _healthy_payload(days_left):
+        return {
+            "ib_gateway": {
+                "service_state": "active",
+                "port_listening": True,
+                "upstream_dead": False,
+                "auth_state": "authenticated",
+                "remote": {"cert_days_left": days_left},
+            }
+        }
+
+    def _cycle_rows(self, tmp_path, monkeypatch, days_left):
+        import ib_watchdog as wd
+
+        monkeypatch.setattr(wd, "_REMOTE_CERT_ALERT", {})
+        # A real cycle acquires the 2FA push lease, which defaults to the
+        # host path /var/lib/radon/ib-lease. On a CI runner that is either
+        # absent or unwritable, so the cycle died before it reached the row
+        # under test. Point the lease at tmp_path: the assertion is about
+        # the cert escalation, not about where the lease lives.
+        monkeypatch.setenv(
+            "IB_2FA_LOCK_PATH", str(tmp_path / "ib-2fa-push-lock.json")
+        )
+        rows: list[tuple] = []
+        monkeypatch.setattr(
+            wd, "_write_service_health_transport",
+            lambda state, error=None: rows.append((state, error)),
+        )
+        monkeypatch.setattr(
+            wd, "fetch_health",
+            lambda url, timeout: wd.GatewayState.from_health_payload(
+                self._healthy_payload(days_left)
+            ),
+        )
+        # No sockets: the direct probe is stubbed alive so the cycle takes the
+        # plain healthy path and the row under test is the cert escalation only.
+        monkeypatch.setattr(wd, "probe_gateway_direct", lambda *a, **k: wd.GATEWAY_ALIVE)
+        monkeypatch.setattr(wd, "trigger_restart", lambda *a, **k: True)
+        wd.run_cycle(
+            state_path=tmp_path / "watchdog-state.json",
+            dry_run=True,
+            utcnow=lambda: dt.datetime(2026, 9, 4, 16, 0, tzinfo=dt.timezone.utc),
+        )
+        assert rows, "one cycle wrote no service-health row at all"
+        return rows[-1]
+
+    def test_a_three_day_cert_on_a_healthy_gateway_errors_the_row(
+        self, tmp_path, monkeypatch
+    ):
+        state, error = self._cycle_rows(tmp_path, monkeypatch, 3)
+        assert state == "error", (
+            "a /health payload carrying gateway.remote.cert_days_left=3 must "
+            "reach _REMOTE_CERT_ALERT through the cycle. If this is 'ok', the "
+            "note_remote_cert(...) call in _run_cycle_steps is gone and the "
+            "mTLS cert will expire with no page (REL-178)."
+        )
+        assert "cert" in str(error).lower()
+
+    def test_a_far_off_cert_leaves_the_row_alone(self, tmp_path, monkeypatch):
+        state, error = self._cycle_rows(tmp_path, monkeypatch, 400)
+        assert state == "ok"
+        assert "cert" not in str(error or "").lower()

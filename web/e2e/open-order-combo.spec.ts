@@ -1,5 +1,12 @@
 import { expect, test } from "@playwright/test";
 
+// The open-order fixture must stay inside the app's live expiry window, so it
+// is computed relative to today rather than pinned to a date that silently
+// rolls into the past (T-437).
+const AAPL_EXPIRY = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000)
+  .toISOString()
+  .slice(0, 10);
+
 const PORTFOLIO_MOCK = {
   bankroll: 100_000,
   peak_value: 100_000,
@@ -41,7 +48,7 @@ const ORDERS_RISK_REVERSAL = {
         secType: "OPT",
         strike: 150,
         right: "P",
-        expiry: "2026-04-17",
+        expiry: AAPL_EXPIRY,
       },
       action: "SELL",
       orderType: "LMT",
@@ -65,7 +72,7 @@ const ORDERS_RISK_REVERSAL = {
         secType: "OPT",
         strike: 165,
         right: "C",
-        expiry: "2026-04-17",
+        expiry: AAPL_EXPIRY,
       },
       action: "BUY",
       orderType: "LMT",
@@ -267,7 +274,7 @@ test.describe("Orders open-order combo rendering", () => {
     await page.goto("/orders");
 
     const riskReversalRow = page
-      .locator("tbody tr")
+      .locator('[data-testid^="open-order-row-"]')
       .filter({ hasText: "AAPL" })
       .filter({ hasText: "Risk Reversal" });
 
@@ -281,7 +288,7 @@ test.describe("Orders open-order combo rendering", () => {
     await expect(modifyButton).toBeEnabled();
     await modifyButton.click();
 
-    const modal = page.locator(".modify-dialog");
+    const modal = page.getByTestId("modify-dialog");
     await expect(modal).toBeVisible();
     await expect(modal).toContainText("Edit Legs");
     await expect(modal.locator("#modify-quantity-input")).toHaveValue("10");
@@ -297,7 +304,7 @@ test.describe("Orders open-order combo rendering", () => {
     const orderRow = page.getByTestId("open-order-row-71-7101");
     await expect(orderRow).toBeVisible({ timeout: 10_000 });
     await expect(orderRow).toContainText("$-1.95");
-    const orderLast = orderRow.locator("td.last-price-cell");
+    const orderLast = orderRow.getByTestId("order-last-price");
     await expect(orderLast).toHaveText("C$-1.73");
     const orderLastText = await orderLast.textContent();
 
@@ -307,14 +314,14 @@ test.describe("Orders open-order combo rendering", () => {
 
     await page.goto("/portfolio");
 
-    const positionRow = page.locator("table.position-table-sticky tbody tr").filter({ hasText: "SMH" }).first();
+    const positionRow = page.getByTestId("position-table").locator("tbody tr").filter({ hasText: "SMH" }).first();
     await expect(positionRow).toBeVisible({ timeout: 10_000 });
-    const positionLast = positionRow.locator("td.last-price-cell").last();
+    const positionLast = positionRow.getByTestId("position-last-price").last();
     await expect(positionLast).toHaveText("C$-1.73");
     expect(await positionLast.textContent()).toBe(orderLastText);
 
     const portfolioShot = testInfo.outputPath("smh-portfolio-price.png");
-    await page.locator("table.position-table-sticky").first().screenshot({ path: portfolioShot });
+    await page.getByTestId("position-table").first().screenshot({ path: portfolioShot });
     await testInfo.attach("SMH Portfolio combo price", { path: portfolioShot, contentType: "image/png" });
   });
 });

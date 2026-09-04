@@ -13,8 +13,12 @@ until someone classifies it.
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 from pathlib import Path
+
+import pytest
 
 _ROOT = Path(__file__).resolve().parents[2]
 _CI = _ROOT / ".github" / "workflows" / "ci.yml"
@@ -80,3 +84,111 @@ def test_the_five_delta_specs_are_curated() -> None:
     }
     missing = sorted(expected - _curated())
     assert not missing, f"dropped from the curated CI list again: {missing}"
+
+# ── T-438: a CHANGED held-out spec needs evidence, not just a classification ──
+#
+# The guard above asks whether every spec is CLASSIFIED. It never asked whether
+# a spec that changed was re-run anywhere. chat-launcher-focus.spec.ts and
+# open-order-combo.spec.ts were both edited in the 0202e32d..2b936ebc delta and
+# are both held out (ci-curation-ledger.txt), so their changes shipped with zero
+# browser evidence in CI and the ledger, being a frozen list of bare names, said
+# nothing about it. A hold-out is a standing decision; a change to the spec is a
+# new event, and the ledger has to be re-stamped for it.
+
+_ANNOTATION = re.compile(
+    r"^#\s*REVIEWED\s+(\d{4}-\d{2}-\d{2})\s+([A-Za-z0-9._-]+\.spec\.ts)\b"
+)
+
+
+def _git(*args: str) -> str | None:
+    """Local git only. Returns None on any failure -- never raises, never fetches."""
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(_ROOT), *args],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return out.stdout.strip() if out.returncode == 0 else None
+
+
+def _merge_base() -> str | None:
+    """The commit this branch forked from, resolved WITHOUT network.
+
+    Only refs already in the local object store are consulted, so a shallow or
+    detached checkout that has none of them degrades to a skip rather than a
+    false red. ``RADON_E2E_CURATION_BASE`` pins the base explicitly (CI can set
+    it from the PR base; the mutation drill for this guard uses it too).
+    """
+    pinned = os.environ.get("RADON_E2E_CURATION_BASE")
+    if pinned:
+        return _git("merge-base", "HEAD", pinned) or _git(
+            "rev-parse", "--verify", pinned + "^{commit}"
+        )
+    candidates = []
+    base_ref = os.environ.get("GITHUB_BASE_REF")
+    if base_ref:
+        candidates += ["origin/" + base_ref, base_ref]
+    candidates += ["origin/main", "main"]
+    for ref in candidates:
+        if _git("rev-parse", "--verify", ref + "^{commit}") is None:
+            continue
+        base = _git("merge-base", "HEAD", ref)
+        if base:
+            return base
+    return None
+
+
+def _annotations() -> dict[str, str]:
+    """spec basename -> the LATEST dated REVIEWED stamp for it."""
+    latest: dict[str, str] = {}
+    for line in _LEDGER.read_text().splitlines():
+        m = _ANNOTATION.match(line.strip())
+        if m and m.group(1) > latest.get(m.group(2), ""):
+            latest[m.group(2)] = m.group(1)
+    return latest
+
+
+def test_a_changed_heldout_spec_carries_a_dated_ledger_annotation() -> None:
+    base = _merge_base()
+    if base is None:
+        pytest.skip(
+            "no local merge-base: neither RADON_E2E_CURATION_BASE, "
+            "$GITHUB_BASE_REF, origin/main nor main resolves in this checkout "
+            "(shallow clone, or a tree with no upstream ref). This guard reads "
+            "only the local object store and never fetches, so it declines "
+            "rather than guessing a base."
+        )
+    changed = _git("diff", "--name-only", base, "HEAD", "--", "web/e2e") or ""
+    specs = {
+        name.rsplit("/", 1)[-1]
+        for name in changed.splitlines()
+        if name.endswith(".spec.ts") and (_ROOT / name).is_file()
+    }
+    # A clean checkout sitting ON the base has an empty diff and passes here;
+    # only COMMITTED changes count, so uncommitted local edits never red it.
+    heldout_changed = sorted(specs & _ledger())
+    if not heldout_changed:
+        return
+
+    annotations = _annotations()
+    problems = []
+    for spec in heldout_changed:
+        changed_on = _git(
+            "log", "-1", "--format=%cs", base + "..HEAD", "--", "web/e2e/" + spec
+        )
+        stamped = annotations.get(spec)
+        if stamped is None:
+            problems.append(spec + ": changed on " + str(changed_on) + ", no REVIEWED stamp")
+        elif changed_on and stamped < changed_on:
+            problems.append(
+                spec + ": changed on " + changed_on + ", stamp is stale (" + stamped + ")"
+            )
+
+    assert not problems, (
+        "These e2e specs were MODIFIED in this branch and are held out of the "
+        f"CI Playwright run, so the change has no browser evidence: {problems}. "
+        "Either curate the spec in the e2e-financial-smoke job, or add a "
+        "`# REVIEWED <YYYY-MM-DD> <spec> - <how it was verified>` line to "
+        "web/e2e/ci-curation-ledger.txt dated on or after the change."
+    )

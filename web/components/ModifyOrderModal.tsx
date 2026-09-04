@@ -615,7 +615,7 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, op
       title="Modify Order"
       className={isComboOrder ? "modify-order-modal modify-order-modal-combo" : "modify-order-modal"}
     >
-      <div className={`modify-dialog${isComboOrder ? " modify-dialog-combo" : ""}`}>
+      <div className={`modify-dialog${isComboOrder ? " modify-dialog-combo" : ""}`} data-testid="modify-dialog">
         <div className="modify-order-info">
           <strong>{order.symbol}</strong>
           <span className={`pill ${order.action === "BUY" ? "accum" : "distrib"}`}>

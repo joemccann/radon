@@ -67,4 +67,21 @@ describe("authless test bypass vs first-run setup gate", () => {
     expect(response?.status).toBe(307);
     expect(response?.headers.get("location")).toContain("/setup");
   });
+
+  it("still auth-misconfigured-gates a keyless request WITHOUT the authless token", async () => {
+    // Wizard finished (RADON_SETUP_COMPLETE=1) but the process lost its Clerk
+    // keys. The bypass exemption must not swallow this gate for ordinary
+    // traffic: only a token-bearing Playwright request is exempt (T-435).
+    vi.stubEnv("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", "");
+    vi.stubEnv("CLERK_SECRET_KEY", "");
+    vi.stubEnv("RADON_SETUP_COMPLETE", "1");
+    vi.stubEnv("RADON_AUTHLESS_TEST", "1");
+    vi.stubEnv("RADON_AUTHLESS_TEST_TOKEN", "secret-token");
+
+    const request = new NextRequest("http://localhost:3000/portfolio");
+    const response = await middleware(request, {} as NextFetchEvent);
+
+    expect(response?.status).toBe(503);
+    expect(await response?.text()).toContain("authentication keys are not loaded");
+  });
 });

@@ -356,6 +356,17 @@ def _wire_placeable_ib(mock_cls):
     return mock_client
 
 
+class _NoTradeIdJournalDb(FakeJournalDb):
+    """Journal rows whose ``trade_id`` column is NULL (legacy rows written
+    before the column was backfilled) — every leg loads with
+    ``journal_trade_id`` None."""
+
+    def execute(self, sql, args=()):
+        if sql.strip().upper().startswith("SELECT"):
+            return _Cursor([(None, json.dumps(t)) for t in self.trades.values()])
+        return _Cursor([])
+
+
 class FlakyUpdateJournalDb(FakeJournalDb):
     """UPDATEs raise for the first `fail_updates` attempts (Turso outage),
     then succeed — SELECTs keep working throughout, like a real Hrana
@@ -554,10 +565,91 @@ class TestRel185PerLegErrorsAndRefusalLatch:
         assert result["errors"] == ["limit refused leg 2", "leg 3 not acknowledged"]
         assert "limit refused leg 2" in result["error"]
 
-    def test_a_refused_leg_is_latched_until_params_change(self, monkeypatch):
-        handler = ExitOrdersHandler(db=object())
-        key = ("jt-1", "target")
-        handler._limit_refusals[key] = (9000, 3.5)
-        assert handler._limit_refusals.get(key) == (9000, 3.5)
-        # Params changed: the latch no longer matches and the leg re-checks.
-        assert handler._limit_refusals.get(key) != (100, 3.5)
+    @staticmethod
+    def _drive_refused_cycles(cycles=2):
+        """Drive ``run()`` N times against a placeable GOOG target whose
+        order-limit check always refuses. Returns (results, health_states)."""
+        violation = {"message": "quantity 44 exceeds the per-order cap"}
+        health = []
+
+        with patch('monitor_daemon.handlers.exit_orders.IBClient') as mock_cls, \
+             patch('monitor_daemon.handlers.exit_orders.Option'), \
+             patch('monitor_daemon.handlers.exit_orders.LimitOrder'), \
+             patch('order_limits.check_order_limits', return_value=violation):
+            client = _wire_placeable_ib(mock_cls)
+            db = FakeJournalDb([_pending_goog_trade()])
+            handler = ExitOrdersHandler(db=db)
+            handler.service_name = "exit-orders"
+            handler.record_cycle_health = (
+                lambda state, **kw: health.append((state, kw.get("error")))
+            )
+
+            results = [handler.run()["data"] for _ in range(cycles)]
+            return client, results, health
+
+    def test_a_refused_leg_is_latched_until_params_change(self):
+        """The latch must suppress the re-place: place_order is never
+        reached on either cycle, and the second cycle records the skip."""
+        client, results, _health = self._drive_refused_cycles()
+
+        client.place_order.assert_not_called()
+        assert results[0]["orders_failed"] == 1
+        assert results[1]["orders_skipped"] == 1
+        assert [e.get("reason") for e in results[1]["skipped"]] == [
+            "limit_refused_previously"
+        ]
+
+    def test_latched_refusal_still_heartbeats_error(self):
+        """T-410: the position is STILL unprotected on cycle two, so the
+        skip path must surface an error and heartbeat state=error."""
+        _client, results, health = self._drive_refused_cycles()
+
+        assert results[0].get("error"), "first refusal must surface an error"
+        assert results[1].get("error"), (
+            "a latched refusal leaves the position unprotected; the cycle "
+            "must not report a clean result"
+        )
+        assert [state for state, _err in health] == ["error", "error"]
+
+    def test_two_legs_without_a_journal_id_do_not_share_the_latch(self):
+        """T-412: keying the latch on journal_trade_id collapses every
+        id-less leg onto (None, "target"), so refusing the first silently
+        suppresses an unrelated position's exit order."""
+        goog = _pending_goog_trade()
+        msft = _pending_goog_trade()
+        msft["id"] = 9
+        msft["ticker"] = "MSFT"
+        msft["exit_orders"]["target"]["contract_spec"] = {
+            "symbol": "MSFT", "expiry": "20260417", "strike": 315, "right": "C",
+        }
+
+        def _limits(order):
+            if order["symbol"] == "GOOG":
+                return {"message": "quantity 44 exceeds the per-order cap"}
+            return None
+
+        with patch('monitor_daemon.handlers.exit_orders.IBClient') as mock_cls, \
+             patch('monitor_daemon.handlers.exit_orders.Option'), \
+             patch('monitor_daemon.handlers.exit_orders.LimitOrder'), \
+             patch('order_limits.check_order_limits', side_effect=_limits):
+            client = _wire_placeable_ib(mock_cls)
+            qualified = []
+            for sym in ("GOOG", "MSFT"):
+                c = MagicMock()
+                c.localSymbol = f"{sym}  260417C00315000"
+                c.symbol = sym
+                qualified.append([c])
+            # Option is patched, so qualification order (journal order) is
+            # what distinguishes the two legs.
+            client.qualify_contracts.side_effect = qualified
+
+            db = _NoTradeIdJournalDb([goog, msft])
+            handler = ExitOrdersHandler(db=db)
+            result = handler.execute()
+
+        assert result["orders_checked"] == 2
+        assert client.place_order.call_count == 1, (
+            "the MSFT leg passes the limit check and must still be placed"
+        )
+        assert client.place_order.call_args[0][0].localSymbol.startswith("MSFT")
+        assert result["orders_placed"] == 1

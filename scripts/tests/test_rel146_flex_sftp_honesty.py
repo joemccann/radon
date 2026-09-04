@@ -319,3 +319,72 @@ class TestStalenessIsMeasuredInSessions:
         friday = date(2026, 9, 4)
         saturday_8am = datetime(2026, 9, 5, 8, 0, tzinfo=pull.ZoneInfo(ZONE))
         assert pull.delivery_is_stale(friday, saturday_8am) is False
+
+
+class TestDeliveryStalenessGate:
+    """R-448 / T-413: a duplicate-only run is only an ERROR when the newest
+    delivered statement has fallen behind the last completed session.
+
+    Clock is pinned to Wed 2026-09-02 08:00 ET (pre-close), so the last
+    completed session is Tue 2026-09-01. Nothing here reads the real date.
+    """
+
+    NOW = datetime(2026, 9, 2, 8, 0, tzinfo=pull.ZoneInfo(ZONE))
+    LAST_SESSION = date(2026, 9, 1)
+    FIVE_SESSIONS_BACK = date(2026, 8, 25)  # 9/1, 8/31, 8/28, 8/27, 8/26 -> 8/25
+
+    @staticmethod
+    def _xml(to_date: date) -> bytes:
+        stamp = to_date.strftime("%Y%m%d")
+        return (
+            '<FlexQueryResponse><FlexStatements><FlexStatement '
+            f'accountId="U1" fromDate="{stamp}" toDate="{stamp}" period="LastBusinessDay"/>'
+            "</FlexStatements></FlexQueryResponse>"
+        ).encode()
+
+    def _drive(self, tmp_path, monkeypatch, to_date: date):
+        beats: list[tuple] = []
+        monkeypatch.setattr(pull, "_heartbeat", lambda state, error=None: beats.append((state, error)))
+        monkeypatch.setattr(pull, "classify_flex_xml", lambda _x: "trades")
+        inbox = tmp_path / "inbox"
+        inbox.mkdir()
+        code = pull.run(
+            config=_write(tmp_path, _config_lines()),
+            inbox=inbox,
+            runner=FakeSftp({"activity.gpg": self._xml(to_date)}),
+            decrypt=lambda data, **k: data.decode(),
+            ingest=lambda xml_text, source_path="", **k: {"ok": True, "outcome": "duplicate"},
+            now=self.NOW,
+        )
+        return code, beats
+
+    def test_the_pinned_session_is_the_one_the_gate_compares_against(self):
+        from utils.market_calendar import last_completed_session_date
+
+        assert last_completed_session_date(self.NOW) == self.LAST_SESSION.isoformat()
+
+    def test_a_current_statement_is_not_stale(self):
+        assert pull.delivery_is_stale(self.LAST_SESSION, self.NOW) is False
+
+    def test_a_statement_five_sessions_back_is_stale(self):
+        assert pull.delivery_is_stale(self.FIVE_SESSIONS_BACK, self.NOW) is True
+
+    def test_a_missing_statement_is_stale(self):
+        assert pull.delivery_is_stale(None, self.NOW) is True
+
+    def test_the_period_end_is_read_off_the_statement(self):
+        assert pull.statement_period_end(
+            self._xml(self.LAST_SESSION).decode()
+        ) == self.LAST_SESSION
+
+    def test_a_duplicate_of_todays_statement_still_exits_zero(self, tmp_path, monkeypatch):
+        """IBKR delivered; we already have it. Not a delivery stoppage."""
+        code, beats = self._drive(tmp_path, monkeypatch, self.LAST_SESSION)
+        assert code == 0, beats
+        assert [state for state, _ in beats] == ["ok"], beats
+
+    def test_the_same_duplicate_five_sessions_stale_pages(self, tmp_path, monkeypatch):
+        code, beats = self._drive(tmp_path, monkeypatch, self.FIVE_SESSIONS_BACK)
+        assert code == 1, beats
+        assert beats and beats[-1][0] == "error", beats
+        assert "stale" in (beats[-1][1] or ""), beats

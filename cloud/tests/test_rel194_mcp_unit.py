@@ -93,3 +93,48 @@ class TestLivenessProbe:
     def test_the_health_unit_enables_the_probe(self):
         src = _uncommented(HEALTH_UNIT)
         assert "RADON_MCP_PROBE_URL" in src
+
+
+# ── T-414: parse the unit, do not grep the ExecStart line ──────────────
+#
+# The MCP's containment is three directives, only one of which the
+# ExecStart assertions above read. Parse the unit as systemd ini so a
+# deleted InaccessiblePaths= or an EnvironmentFile= repointed at the full
+# secret file cannot pass.
+
+
+class _MultiDict(dict):
+    """systemd allows a directive to repeat; configparser would keep only
+    the last. During parsing configparser stores option values as lists of
+    lines, so extending preserves every occurrence."""
+
+    def __setitem__(self, key, value):
+        if key in self and isinstance(value, list) and isinstance(self[key], list):
+            self[key].extend(value)
+        else:
+            super().__setitem__(key, value)
+
+
+def _unit_directive(section: str, key: str) -> list[str]:
+    import configparser
+
+    parser = configparser.RawConfigParser(
+        strict=False, allow_no_value=True, dict_type=_MultiDict
+    )
+    parser.optionxform = str  # systemd directives are case-sensitive
+    parser.read_string(UNIT.read_text(encoding="utf-8"))
+    if not parser.has_option(section, key):
+        return []
+    raw = parser.get(section, key)
+    return [line.strip() for line in raw.splitlines() if line.strip()]
+
+
+class TestUnitContainmentDirectives:
+    def test_environment_file_is_the_stripped_mcp_env(self):
+        values = _unit_directive("Service", "EnvironmentFile")
+        assert values == ["/etc/radon/mcp.env"], values
+
+    def test_the_full_secret_file_is_inaccessible_to_the_process(self):
+        values = _unit_directive("Service", "InaccessiblePaths")
+        paths = {value.lstrip("-") for value in values}
+        assert "/etc/radon/env" in paths, values
