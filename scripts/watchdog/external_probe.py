@@ -66,13 +66,20 @@ def _read_local_aggregate(timeout: float = FETCH_TIMEOUT_SECONDS) -> dict | None
     return payload if isinstance(payload, dict) else None
 
 
+# Current on-box producer version plus the one validated predecessor, so a
+# watchdog running against a not-yet-redeployed health daemon (or vice versa)
+# does not read every recovery as an opaque body. Mirrors
+# `health_probe.probe.SUPPORTED_STATUS_SCHEMAS`.
+SUPPORTED_STATUS_SCHEMAS = (3, 2)
+
+
 def _local_aggregate_is_healthy(timeout: float = FETCH_TIMEOUT_SECONDS) -> bool:
-    """True only for schema-v2 ``up`` (strict). Prefer serving-path-ok for 5xx."""
+    """True only for a supported-schema ``up`` (strict). Prefer serving-path-ok for 5xx."""
     payload = _read_local_aggregate(timeout)
     if payload is None:
         return False
     return (
-        payload.get("schema_version") == 2
+        payload.get("schema_version") in SUPPORTED_STATUS_SCHEMAS
         and payload.get("ok") is True
         and str(payload.get("overall_state") or "").lower() == "up"
     )
@@ -87,7 +94,7 @@ def _local_aggregate_serving_path_ok(timeout: float = FETCH_TIMEOUT_SECONDS) -> 
     d98c3364) even though api/relay/nextjs and ``/sign-in`` stayed up.
     """
     payload = _read_local_aggregate(timeout)
-    if payload is None or payload.get("schema_version") != 2:
+    if payload is None or payload.get("schema_version") not in SUPPORTED_STATUS_SCHEMAS:
         return False
     state = str(payload.get("overall_state") or "").lower()
     ok = payload.get("ok")
@@ -162,7 +169,7 @@ def _local_aggregate_clears_offbox_down(
     stay fail-closed — those can be a serving-path restart.
     """
     payload = _read_local_aggregate(timeout)
-    if payload is None or payload.get("schema_version") != 2:
+    if payload is None or payload.get("schema_version") not in SUPPORTED_STATUS_SCHEMAS:
         return False
     if not _aggregate_is_newer_than(payload, sampled_at):
         return False
