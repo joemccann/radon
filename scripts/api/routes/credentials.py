@@ -257,6 +257,10 @@ async def list_credentials(request: Request):
         logger.warning("credential list failed: %s", exc)
         raise _store_unavailable(exc)
     return {
+        # R-621: an unopenable store at boot exports nothing and leaves every
+        # consumer on its .env fallback. Say so here rather than letting the
+        # per-field `env_fallback` flags read as a deliberate configuration.
+        "bootstrap_error": bootstrap_failure(),
         "services": [
             _service_entry(service, stored)
             for service in credentials_registry.SERVICES
@@ -305,6 +309,7 @@ async def put_credentials(service_id: str, request: Request):
         await asyncio.to_thread(_save)
     except SecretStoreError as exc:
         logger.warning("credential store write failed for %s: %s", service_id, exc)
+        note_validation_failed(service_id)  # R-630
         raise _store_unavailable(exc) from exc
 
     stored = await asyncio.to_thread(_stored_by_name, store)
@@ -350,6 +355,28 @@ async def delete_credential(service_id: str, name: str, request: Request):
     return {"removed": removed, "service": _service_entry(service, stored)}
 
 
+#: Set when the store could not be OPENED at boot (R-621). None means the
+#: last bootstrap reached the store, whatever it found there.
+_BOOTSTRAP_FAILURE: str | None = None
+
+
+def bootstrap_failure() -> str | None:
+    """The last boot-time store-open failure, or None."""
+    return _BOOTSTRAP_FAILURE
+
+
+def note_validation_failed(service_id: str) -> None:
+    """Release the validation cooldown a failed save consumed (R-630).
+
+    `_run_validator` stamps the window before the store write, and the PUT
+    path raises its 429 ahead of `store.set_secrets`, so a save that 503'd on
+    the store — or one the operator is retrying after a typo — came back as
+    VALIDATION_COOLDOWN and stored nothing. A save that did not happen has not
+    consumed a validation window.
+    """
+    _validator_last_run.pop(service_id, None)
+
+
 def bootstrap_exported_names() -> list:
     """Export stored secrets into os.environ (store wins over .env).
 
@@ -357,13 +384,26 @@ def bootstrap_exported_names() -> list:
     subprocesses inherit the operator's credentials without a restart chain.
     Only registry names are ever touched.
     """
+    global _BOOTSTRAP_FAILURE
     exported = []
     try:
         store = _store()
         stored = _stored_by_name(store)
     except Exception as exc:  # noqa: BLE001 - startup must not die on this
-        logger.warning("credential bootstrap skipped: %s", exc)
+        # R-621: this used to be a warning and an empty list, indistinguishable
+        # from "the store is empty". The API then booted clean, exported
+        # nothing, and every consumer fell back to whatever `.env` held —
+        # silently inverting the documented store-wins contract toward a
+        # rotated-out key, surfacing later as unrelated vendor 401s. Record
+        # it so the operator has one place that says the store did not open.
+        _BOOTSTRAP_FAILURE = f"{type(exc).__name__}: {exc}"
+        logger.error(
+            "credential store did not open at boot; NOTHING was exported and "
+            "every consumer is on its .env fallback: %s",
+            exc,
+        )
         return exported
+    _BOOTSTRAP_FAILURE = None
     for name in credentials_registry.all_field_names():
         if name not in stored:
             continue

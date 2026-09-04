@@ -232,6 +232,32 @@ export async function writeSetupEnvFiles(
   const run = async (): Promise<string[]> => {
     const written: string[] = [];
     const rootEnv = path.join(repoRoot, ".env");
+
+    // R-623: each file is written atomically but the PAIR was not. Root .env
+    // was renamed into place and a throw on the web write propagated out of
+    // the route with root .env already committed and markSetupComplete /
+    // consumeSetupToken never reached — a stack with CLERK_SECRET_KEY present
+    // and the publishable key absent, which is exactly the isAuthMisconfigured
+    // shape the middleware turns into a terminal page with no way back to
+    // /setup. Snapshot the root file so the pair can be rolled back.
+    let rootBefore: string | null = null;
+    try {
+      rootBefore = await fs.readFile(rootEnv, "utf8");
+    } catch {
+      rootBefore = null;
+    }
+    const rollbackRoot = async (): Promise<void> => {
+      try {
+        if (rootBefore === null) {
+          await fs.rm(rootEnv, { force: true });
+        } else {
+          await fs.writeFile(rootEnv, rootBefore, { encoding: "utf8", mode: 0o600 });
+        }
+      } catch {
+        // Best effort: the original error is the one worth propagating.
+      }
+    };
+
     await upsertEnvFile(rootEnv, values, "python");
     written.push(rootEnv);
 
@@ -241,7 +267,12 @@ export async function writeSetupEnvFiles(
     }
     if (Object.keys(webValues).length > 0) {
       const webEnv = path.join(repoRoot, "web", ".env");
-      await upsertEnvFile(webEnv, webValues, "next");
+      try {
+        await upsertEnvFile(webEnv, webValues, "next");
+      } catch (error) {
+        await rollbackRoot();
+        throw error;
+      }
       written.push(webEnv);
     }
     return written;
