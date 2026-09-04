@@ -435,6 +435,20 @@ preflight_checks() {
     usermod -aG docker radon
   fi
 
+  # R-619: the app-plane API container runs --user radon, so the plaintext
+  # secret-store master key must not be handed over as a file uid radon can
+  # open. radon-app-runtime stages it root:radon-secrets 0040 and grants the
+  # gid to that one container with --group-add. radon is never a member --
+  # the runtime refuses to start the API if it ever becomes one.
+  if ! getent group radon-secrets &>/dev/null; then
+    log_info "Creating radon-secrets group..."
+    groupadd --system radon-secrets
+  fi
+  if id -nG radon 2>/dev/null | grep -qw radon-secrets; then
+    log_error "radon must not be a member of radon-secrets (R-619)"
+    exit 1
+  fi
+
   # radon owns its home, so root never writes through a link under it.
   local ssh_path
   for ssh_path in /home/radon/.ssh /home/radon/.ssh/authorized_keys \

@@ -73,7 +73,25 @@ exit 0
 
 def _runtime_env(tmp_path: Path, fake_docker: Path | None = None) -> dict[str, str]:
     fake_id = tmp_path / "id"
-    _write_executable(fake_id, "#!/bin/bash\necho 1000\n")
+    # `id -nG radon` must answer with real group NAMES so the runtime can
+    # refuse to start when the radon account has been added to the
+    # credential-delivery group. Every other form still answers 1000.
+    _write_executable(
+        fake_id,
+        "#!/bin/bash\n"
+        'if [[ "$1" == "-nG" ]]; then\n'
+        '  echo "${RADON_TEST_RADON_GROUPS:-radon docker}"\n'
+        "  exit 0\n"
+        "fi\n"
+        "echo 1000\n",
+    )
+    fake_getent = tmp_path / "getent"
+    _write_executable(
+        fake_getent,
+        "#!/bin/bash\n"
+        'if [[ "${RADON_TEST_SECRET_GROUP_MISSING:-0}" == "1" ]]; then exit 2; fi\n'
+        'echo "$2:x:${RADON_TEST_SECRET_GROUP_GID:-1001}:"\n',
+    )
     env_file = tmp_path / "env"
     env_file.write_text("NODE_ENV=production\n", encoding="utf-8")
     data_dir = tmp_path / "data"
@@ -99,6 +117,7 @@ def _runtime_env(tmp_path: Path, fake_docker: Path | None = None) -> dict[str, s
         "RADON_APP_RUNTIME_TEST_MODE": "1",
         "RADON_TEST_DOCKER": str(fake_docker or tmp_path / "docker"),
         "RADON_TEST_ID": str(fake_id),
+        "RADON_TEST_GETENT": str(fake_getent),
         "RADON_TEST_ENV_FILE": str(env_file),
         "RADON_TEST_DATA_DIR": str(data_dir),
         "RADON_TEST_MEDIA_DIR": str(media_dir),
@@ -523,12 +542,67 @@ def test_run_api_mounts_systemd_credential_and_persists_store(tmp_path: Path) ->
     assert f"--env CREDENTIALS_DIRECTORY={container_dir}" in log
     assert f"type=bind,src={host_dir},dst={container_dir},readonly" in log
     assert "RADON_SECRET_STORE_PATH=/home/radon/radon/data/secret_store/secrets.db" in log
+    # R-619: the master key is delivered through the radon-secrets group, which
+    # the host radon account is not a member of. Owner is root and the owner
+    # bits are empty, so uid radon -- the uid the container itself runs as --
+    # cannot read the plaintext key outside the container.
+    assert stat.S_IMODE(host_dir.stat().st_mode) == 0o050
+    host_dir.chmod(0o700)  # the test user owns these; root ownership is stubbed
+    assert stat.S_IMODE(staged.stat().st_mode) == 0o040
+    staged.chmod(0o400)
     assert staged.read_bytes() == (tmp_path / "credentials" / staged.name).read_bytes()
-    assert stat.S_IMODE(staged.stat().st_mode) == 0o400
     assert stat.S_IMODE((tmp_path / "data" / "secret_store").stat().st_mode) == 0o700
     chowns = (tmp_path / "chown.log").read_text(encoding="utf-8")
-    assert f"1000:1000 {host_dir} {staged}" in chowns
+    assert f"root:1001 {host_dir} {staged}" in chowns
+    assert f"1000:1000 {tmp_path / 'data' / 'secret_store'}" in chowns
+    assert "--group-add 1001" in _run_line(result)
     assert "python scripts/secret_store.py && exec uvicorn" in _run_line(result)
+
+
+def test_run_api_refuses_when_credential_group_is_absent(tmp_path: Path) -> None:
+    result = _run(
+        tmp_path,
+        ["run", "radon-api.service"],
+        extra_env={"RADON_TEST_SECRET_GROUP_MISSING": "1"},
+    )
+    assert result.returncode == 78, result.stderr
+    assert "radon-secrets" in result.stderr
+    assert not [
+        line
+        for line in result.docker_log.read_text(encoding="utf-8").splitlines()  # type: ignore[attr-defined]
+        if line.startswith("run ")
+    ]
+
+
+def test_run_api_refuses_when_radon_can_open_the_credential_group(
+    tmp_path: Path,
+) -> None:
+    """The delivery channel is only closed while radon is outside the group."""
+    result = _run(
+        tmp_path,
+        ["run", "radon-api.service"],
+        extra_env={"RADON_TEST_RADON_GROUPS": "radon docker radon-secrets"},
+    )
+    assert result.returncode == 78, result.stderr
+    assert "radon must not be a member of radon-secrets" in result.stderr
+    assert not [
+        line
+        for line in result.docker_log.read_text(encoding="utf-8").splitlines()  # type: ignore[attr-defined]
+        if line.startswith("run ")
+    ]
+
+
+def test_setup_creates_the_credential_group_without_radon_in_it() -> None:
+    setup = SETUP.read_text(encoding="utf-8")
+    assert "groupadd --system radon-secrets" in setup
+    assert "radon must not be a member of radon-secrets" in setup
+    assert "usermod -aG radon-secrets radon" not in setup
+
+
+def test_non_api_units_are_not_given_the_credential_group(tmp_path: Path) -> None:
+    result = _run(tmp_path, ["run", "radon-nextjs.service"])
+    assert result.returncode == 0, result.stderr
+    assert "--group-add" not in _run_line(result)
 
 
 def test_run_api_refuses_noncanonical_production_store_before_removal(
