@@ -343,19 +343,19 @@ jobs:
           - shard: scripts-i
             paths: "scripts/tests/test_i*.py"
           - shard: scripts-gh
-            paths: "scripts/tests/test_[g-h]*.py"
+            paths: "scripts/tests/test_weekend_wrapper_self_rewrite.py scripts/tests/test_[g-h]*.py scripts/tests/test_we*.py"
           - shard: scripts-jm
             paths: "scripts/tests/test_leap_garch_no_duplicate_scan.py scripts/tests/test_[j-m]*.py"
           - shard: scripts-npsz
-            paths: "scripts/tests/test_vixcor.py scripts/tests/test_weekend_wrapper_self_rewrite.py scripts/tests/test_[n-p]*.py scripts/tests/test_[t-z]*.py"
+            paths: "scripts/tests/test_vixcor.py scripts/tests/test_[n-p]*.py scripts/tests/test_[t-v]*.py scripts/tests/test_w[!e]*.py scripts/tests/test_[x-z]*.py"
           - shard: scripts-rs
-            paths: "scripts/tests/test_rel137_weekend_wrapper_survivability.py scripts/tests/test_run_flow_refresh_wrapper.py scripts/tests/test_run_portfolio_refresh_retry.py scripts/tests/test_run_signals_refresh_wrapper.py scripts/tests/test_[r-s]*.py"
+            paths: "scripts/tests/test_rel137_weekend_wrapper_survivability.py scripts/tests/test_r[!ou]*.py scripts/tests/test_s*.py"
           - shard: scripts-daemons
-            paths: "scripts/tests/test_monitor_daemon scripts/tests/test_watchdog"
+            paths: "scripts/tests/test_monitor_daemon scripts/tests/test_watchdog scripts/tests/test_ro*.py"
           - shard: rest-api
             paths: scripts/api/tests
           - shard: rest
-            paths: scripts/trade_blotter tests
+            paths: "scripts/tests/test_run_flow_refresh_wrapper.py scripts/tests/test_run_portfolio_refresh_retry.py scripts/tests/test_run_signals_refresh_wrapper.py scripts/tests/test_ru*.py scripts/trade_blotter tests"
     concurrency:
       group: ci-py-tests-${{ github.ref }}-${{ matrix.shard }}
       cancel-in-progress: true
