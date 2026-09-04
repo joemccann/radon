@@ -414,15 +414,23 @@ export default function WorkspaceShell({ section, tickerParam, initialPortfolio 
     prevMarginLevelRef.current = level;
   }, [portfolio?.account_summary, addToast]);
 
-  // Persistent per-execution fill toasts, diffed from the global orders poll.
-  useFillToasts(orders, addToast);
-
-  const syncing = isOrdersPage ? ordersSyncing : portfolioSyncing;
-  const error = isOrdersPage ? ordersError : portfolioError;
   // Demo deployment is seed-data only (no IB gateway, no realtime relay), so the
   // connection-derived "Live data degraded" banner would always be on and read
   // as broken. Suppress it in demo; production (flag unset) is unchanged.
   const isDemoMode = process.env.NEXT_PUBLIC_RADON_DEMO === "1";
+
+  // Persistent per-execution fill toasts, diffed from the global orders poll.
+  // A new fill also drives the portfolio producer: positions changed, and the
+  // snapshot's own 60s timer would otherwise leave the table pre-fill under a
+  // FILLED toast. Demo has no IB gateway, so it stays read-only.
+  const onNewFills = useCallback(() => {
+    if (isDemoMode) return;
+    portfolioSyncNow();
+  }, [isDemoMode, portfolioSyncNow]);
+  useFillToasts(orders, addToast, onNewFills);
+
+  const syncing = isOrdersPage ? ordersSyncing : portfolioSyncing;
+  const error = isOrdersPage ? ordersError : portfolioError;
   // Options measurements are backed by dedicated sources, not the IB
   // portfolio/order relay. Their panels report source-specific faults.
   // While the browser is offline the OfflineBanner is the single

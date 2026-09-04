@@ -1,12 +1,15 @@
 [Unit]
-Description=Radon portfolio refresh - every minute during ET trading hours
+Description=Radon portfolio refresh - every minute during the ET extended session
 
 [Timer]
-# Fires every minute Mon-Fri 13:00-21:00 UTC. Covers ET trading hours
-# 09:30-16:00 across both DST shoulders (winter 14:30-21:00 UTC,
-# summer 13:30-20:00 UTC). run_portfolio_refresh.sh re-checks the
-# trading calendar at runtime and exits 0 on US trading holidays.
-OnCalendar=Mon..Fri *-*-* 09..16:*:00 America/New_York
+# Fires every minute Mon-Fri 04:00-19:59 ET, matching fill_monitor's
+# session_window=equity_ext (04:00-20:00 ET). outsideRth orders fill in
+# pre-market and after-hours, and those fills already mirror into
+# executed_orders and raise a FILLED toast; an RTH-only window here left
+# the positions table pre-fill until the next cash open.
+# run_portfolio_refresh.sh re-checks is_equity_ext_session_et() at runtime,
+# so holidays, IBKR `closed` days and the 20:00 boundary still exit 0.
+OnCalendar=Mon..Fri *-*-* 04..19:*:00 America/New_York
 Persistent=false
 
 [Install]

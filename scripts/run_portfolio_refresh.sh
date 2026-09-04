@@ -85,19 +85,23 @@ if [ -z "$PYTHON_BIN" ]; then
     exit 1
 fi
 
+# Positions must track fills whenever fills can happen. fill_monitor runs
+# session_window=equity_ext (04:00-20:00 ET), so an outsideRth fill mirrors
+# into executed_orders and raises a FILLED toast after the cash close; an
+# RTH-only gate here left the positions table pre-fill until the next open.
 IS_TRADING=$("$PYTHON_BIN" - <<'PY' 2>/dev/null || echo "no"
 import sys
 try:
     sys.path.insert(0, 'scripts')
-    from utils.market_calendar import market_state
-    print('yes' if market_state().get('is_open') else 'no')
+    from utils.market_calendar import is_equity_ext_session_et
+    print('yes' if is_equity_ext_session_et() else 'no')
 except Exception:
     print('no')
 PY
 )
 
 if [ "$IS_TRADING" = "no" ]; then
-    echo "$(date): Market closed — skipping portfolio refresh"
+    echo "$(date): Outside the extended equity session — skipping portfolio refresh"
     exit 0
 fi
 
