@@ -268,8 +268,15 @@ report() {
   local body
   body="$(_format_issue_body "$PHASE" "$status" "$detail")"
   local issue
+  # REL-188 (R-537): every gh call here was `|| true`, so an expired gh auth
+  # produced exactly the observable of a runner that never fired — a missing
+  # daily comment. Say so in the log; Pushover still fires either way.
   issue="$(net_bounded "$GH_BIN" issue list --label "$DEADMAN_LABEL" --state open \
     --json number -q '.[0].number' 2>/dev/null || true)"
+  if [[ -z "$issue" ]]; then
+    echo "[weekend] gh issue call failed or found no dead-man issue (auth expired?)" \
+      | tee -a "${RUN_LOG:-/dev/null}" >/dev/null 2>&1 || true
+  fi
   if [[ -z "$issue" ]]; then
     net_bounded "$GH_BIN" issue create --title "$DEADMAN_TITLE" --label "$DEADMAN_LABEL" \
       --body "$DEADMAN_CREATE_BODY" \
@@ -286,6 +293,9 @@ report() {
     posted="$(net_bounded "$GH_BIN" issue comment "$issue" --body "$body" 2>/dev/null || true)"
     if [[ -n "$posted" ]]; then
       prune_deadman_comments "$issue" "$posted"
+    else
+      echo "[weekend] gh issue call failed: the phase comment did not post" \
+        | tee -a "${RUN_LOG:-/dev/null}" >/dev/null 2>&1 || true
     fi
   fi
   if [[ "$push" == "1" ]]; then
@@ -661,10 +671,34 @@ fetch_origin_with_retry() {
   return 1
 }
 
+# REL-187 (R-519): every loop reset its clone to the RAW TIP of origin/main, so
+# a loop firing minutes after a red push spent its whole cycle auditing,
+# remediating and testing a tree CI had already rejected — and the resulting PR
+# mixed the loop's work with someone else's broken commit. Stale-but-green
+# beats fresh-but-red. GitHub being unreachable keeps the tip already checked
+# out, with a logged warning: an unreachable API must never stop a nightly run.
+# Isolated origin/main pipe, same defence as prune_deadman_comments.
+resolve_green_main_sha() {
+  [[ -n "${TIMEOUT_BIN:-}" && -n "$GH_BIN" ]] || return 0
+  git -C "$REPO" show origin/main:scripts/nightly_green_base.py 2>/dev/null \
+    | "$TIMEOUT_BIN" "${RADON_WEEKEND_GREEN_BASE_TIMEOUT_SECS:-60}" \
+      /usr/bin/python3 -I - --repo "${RADON_WEEKEND_GH_REPO:-joemccann/radon}" \
+      --repo-dir "$REPO" --head origin/main --gh-bin "$GH_BIN" 2>/dev/null || true
+  return 0
+}
+
 ground_truth() {
   fetch_origin_with_retry
   git checkout -f --quiet main
   git reset --hard --quiet origin/main
+  local green_sha
+  green_sha="$(resolve_green_main_sha)"
+  if [[ -n "$green_sha" ]] && git -C "$REPO" rev-parse --verify --quiet "${green_sha}^{commit}" >/dev/null; then
+    if [[ "$green_sha" != "$(git -C "$REPO" rev-parse origin/main)" ]]; then
+      echo "[weekend] origin/main tip is not CI-green; pinning to $green_sha" | tee -a "${RUN_LOG:-/dev/null}" >/dev/null 2>&1 || true
+    fi
+    git reset --hard --quiet "$green_sha"
+  fi
   git clean -fdxq --exclude=.radon-weekend-runner --exclude=.radon-testing-runner --exclude=.weekend-runner.lock --exclude=logs/ --exclude=.env --exclude=.env.ib-mode --exclude=web/.env --exclude=node_modules/ --exclude=.next/ --exclude=.deepsec/
 }
 
@@ -820,7 +854,13 @@ run_phase() {
   # TRUNCATED keep their precedence. T-379.
   # The deliver phase is keyed on its verdict line below, not on a commit:
   # a PR that went green first time needs no new commit.
-  if [[ "$status" == OK && "$PHASE" != "deliver" ]] && ! phase_committed; then status="$INCOMPLETE_STATUS"; fi
+  # REL-188 (R-534): this left RC at 0, so launchd and the cycle exit code
+  # read an unfinished phase as success while the dead-man comment said
+  # INCOMPLETE. 75 matches the security loop.
+  if [[ "$status" == OK && "$PHASE" != "deliver" ]] && ! phase_committed; then
+    status="$INCOMPLETE_STATUS"
+    RC=75
+  fi
   # Deliver: the operator's merge cue is the verdict line, not exit 0. A cap
   # hit is the likeliest incomplete deliver, so it is named as one.
   if [[ "$PHASE" == "deliver" ]]; then
