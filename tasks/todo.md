@@ -34,6 +34,7 @@ from exhausting shared quotas.
 - Verification: 70 focused Vitest tests and the dedicated demo Playwright test passed; 8,322 collected full-suite assertions passed, with one unrelated REL-148 suite retaining its pre-existing `web/web` collection path failure.
 - TypeScript and production compilation passed; ESLint reported 0 errors and 17 existing warnings. The post-build trace audit retained only the existing assistant and orders/place file-count/size failures.
 - Relevant surface Playwright coverage passed 30/31; the sole failure is the unchanged options-exposure sticky-header geometry baseline, after its demo data, controls, and table assertions passed.
+- CI curation passed 4/4 after the demo browser contract was added to the production-server smoke job; a demo-mode compile and the exact Playwright spec passed locally under `next start`.
 
 ---
 

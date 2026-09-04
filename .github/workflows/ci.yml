@@ -761,6 +761,21 @@ jobs:
           e2e/mobile-orders-session.spec.ts
           e2e/orders-session-window.spec.ts
           e2e/vixts-tab.spec.ts
+      # Demo behavior is compile-time gated by NEXT_PUBLIC_RADON_DEMO. Rebuild
+      # once with that boundary enabled so the transport-isolation spec proves
+      # the deployed demo contract instead of silently skipping in prod mode.
+      - name: Build demo workstation
+        working-directory: web
+        env:
+          NEXT_PUBLIC_RADON_DEMO: "1"
+        run: bun run build
+      - name: Run demo workstation spec
+        working-directory: web
+        env:
+          NEXT_PUBLIC_RADON_DEMO: "1"
+        run: >-
+          npx playwright test
+          e2e/demo-workstation-data.spec.ts
       - name: Upload traces on failure
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
