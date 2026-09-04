@@ -120,7 +120,7 @@ def _build(tmp_path: Path, loop: str, *, deliver_lines: str = "", extra_env: dic
         encoding="utf-8",
     )
 
-    _executable(bin_dir / "git", "#!/bin/bash\nexit 0\n")
+    _executable(bin_dir / "git", '#!/bin/bash\n# REL-188: the wrapper reads commit evidence from git before calling a phase\n# OK, so the stub reports a fresh HEAD and a current committer date.\ncase "$*" in\n  *"rev-parse HEAD"*) date +%s%N; exit 0 ;;\n  *"--format=%ct"*) date +%s; exit 0 ;;\nesac\nexit 0\n')
     _executable(bin_dir / "python3", "#!/bin/bash\nexit 0\n")
 
     complete = f"echo '{_security_marker()} '\"$PHASE\"' run_id=stub'\n" if loop == "security" else ""

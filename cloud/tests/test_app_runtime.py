@@ -902,3 +902,29 @@ def test_run_hands_docker_an_unquoted_root_only_copy_of_the_env_file(
     )
     # The host file is the secret of record and is never rewritten.
     assert "XAI_API_KEY='xai-abc$1'" in host_env.read_text(encoding="utf-8")
+
+
+def test_a_failed_docker_rm_does_not_delete_a_live_containers_credential(
+    tmp_path: Path,
+) -> None:
+    """R-628 (P3): `docker rm -f` is `|| true` and the very next line deletes
+    the staged key. The documented orphan-container case is precisely when
+    `rm -f` fails; the surviving API container keeps serving with its
+    read-only CREDENTIALS_DIRECTORY bind now empty, so the next in-container
+    secret_store open fails on a missing key instead of a clear conflict."""
+    stage_root = tmp_path / "stage"
+    result = _run(
+        tmp_path,
+        ["run", "radon-api.service"],
+        extra_env={"RADON_TEST_CREDENTIAL_STAGE_ROOT": str(stage_root)},
+        docker_body="""#!/bin/bash
+printf '%s\\n' "$*" >> {log}
+if [ "$1" = "rm" ]; then exit 1; fi
+exit 0
+""",
+    )
+    assert result.returncode != 0, (
+        "a `docker rm -f` that failed left an orphan holding --name and both "
+        "bind mounts; continuing into the credential cleanup is not safe"
+    )
+    assert "rm -f" in result.stderr or "orphan" in result.stderr.lower(), result.stderr

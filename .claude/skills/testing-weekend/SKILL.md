@@ -25,8 +25,9 @@ never merges; the human merge is the deploy trigger.
    `testing/<YYYY-MM-DD>` and a PR. The human merge is the deploy
    trigger.
 3. **Never run against the operator's working clone.** Refuse (exit
-   nonzero, say why) unless the file `.radon-weekend-runner` exists in the
-   repo root — that marker means this is the dedicated runner clone.
+   nonzero, say why) unless BOTH `.radon-weekend-runner` and
+   `.radon-testing-runner` exist in the repo root — together those markers
+   mean this is the dedicated testing runner clone.
 4. **Respect the frozen contracts.** `TEST_AUDIT.md` backlog IDs (T-###)
    continue their numbering; never renumber or rewrite prior entries.
    `TEST_LOG.md` is append-only. The PART A audit body (§1–§10) is frozen —
@@ -206,7 +207,15 @@ pytest/vitest suite, a CI watch) is launched DETACHED from the agent
 harness so a harness timeout cannot kill it:
 `nohup env -i <minimal env> bash <stage-script.sh> </dev/null >stage.out
 2>&1 & disown` (macOS has no `setsid`). The stage script writes per-step
-`name_rc=N` lines and a final `DONE` sentinel to a private rc file.
+`name_rc=N` lines and a final `DONE` sentinel to a private rc file. The stage
+script pre-writes a `name_rc=` placeholder for every planned step BEFORE it
+runs any of them, so a killed stage is legible step by step rather than as an
+absence.
+
+**An rc file with no `DONE` is a FAILED stage, never a passing one.** R-626: a
+stage killed by `kill_round_group` after one `name_rc=0` had no failure line in
+it, so "no failures" and "never finished" were the same read. Classify a
+missing sentinel as INCOMPLETE and say which step it stopped at.
 
 The agent then waits IN-SESSION with a bounded loop on that rc file:
 `until grep -q DONE rcfile; do <process-still-alive check> || break; sleep

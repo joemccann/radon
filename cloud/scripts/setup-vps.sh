@@ -507,6 +507,51 @@ preflight_checks() {
   log_success "Preflight checks passed"
 }
 
+provision_secret_store_credential() {
+  # R-605: radon-api.service carries
+  #   LoadCredentialEncrypted=radon-secret-store-key:/etc/credstore.encrypted/radon-secret-store-key
+  # and nothing created that file — it existed only as prose in
+  # docs/operations.md. systemd fails a unit outright when a
+  # LoadCredentialEncrypted= source is missing, BEFORE any ExecStart, so a
+  # rebuilt or restored host parked radon-api start-limit-hit inside ~25s with
+  # a credential error and no ExecStart ever running.
+  #
+  # A fresh host gets a fresh 32-byte key. An existing one is left alone: the
+  # store is key-bound by fingerprint (docs/operations.md), so replacing the
+  # key would orphan every stored credential.
+  local dir="/etc/credstore.encrypted"
+  local key="${dir}/radon-secret-store-key"
+
+  if [[ -e "$key" && ! -f "$key" ]]; then
+    log_error "Refusing ${key}: not a regular file"
+    exit 1
+  fi
+  install -d -m 0700 -o root -g root "$dir"
+  if [[ -f "$key" ]]; then
+    log_success "Secret-store credential already provisioned (${key})"
+    return 0
+  fi
+  if ! command -v systemd-creds >/dev/null 2>&1; then
+    log_error "systemd-creds is missing; radon-api.service cannot start without ${key}"
+    exit 1
+  fi
+  local tmp
+  tmp="$(mktemp)"
+  head -c 32 /dev/urandom | base64 \
+    | systemd-creds encrypt --name=radon-secret-store-key - "$tmp" || {
+      rm -f "$tmp"
+      log_error "systemd-creds encrypt failed; radon-api.service would fail on a missing ${key}"
+      exit 1
+    }
+  install -m 0600 -o root -g root "$tmp" "$key"
+  rm -f "$tmp"
+  if [[ ! -f "$key" ]]; then
+    log_error "Secret-store credential ${key} was not created; refusing to enable radon-api.service"
+    exit 1
+  fi
+  log_success "Secret-store credential provisioned (${key}, root 0600)"
+}
+
 create_etc_radon_dir() {
   # Canonical secrets and media dirs. Live units load /etc/radon/env.
   # Compatibility: ~/radon-cloud/.env and ~/radon-cloud/media are host
@@ -1134,6 +1179,7 @@ main() {
   validate_versions
   preflight_checks
   create_etc_radon_dir
+  provision_secret_store_credential
   clone_repos
   validate_env
   write_mcp_env

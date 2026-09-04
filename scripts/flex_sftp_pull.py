@@ -13,7 +13,7 @@ import os
 import subprocess
 import sys
 import tempfile
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -237,13 +237,51 @@ def statement_period_end(xml_text: str) -> Optional[date]:
     return _flex_day(statement.get("toDate"))
 
 
+def _sessions_between(start: date, end: date) -> int:
+    """Trading sessions strictly after ``start`` up to and including ``end``."""
+    from utils.market_calendar import load_holidays
+
+    if end <= start:
+        return 0
+    count = 0
+    day = start + timedelta(days=1)
+    while day <= end:
+        if day.weekday() < 5 and day.strftime("%Y-%m-%d") not in load_holidays(day.year):
+            count += 1
+        day += timedelta(days=1)
+    return count
+
+
+def _delivery_key(name: str) -> str:
+    """`<acct>.<Query_Name>.<from>.<to>.xml.pgp` -> `<acct>.<Query_Name>`.
+
+    The key a stoppage is judged against. Anything that does not parse falls
+    back to the whole basename, which errs toward MORE keys and therefore
+    toward paging, never toward suppression.
+    """
+    from pathlib import Path as _Path
+
+    base = _Path(name).name
+    parts = base.split(".")
+    if len(parts) >= 4:
+        return ".".join(parts[:2])
+    return base
+
+
 def delivery_is_stale(period_end: Optional[date], now: Optional[datetime] = None) -> bool:
+    """R-614: the lag is counted in trading SESSIONS, not calendar days.
+
+    `last_completed_session_date` returns a session date, but subtracting
+    calendar days from it stretched the one-session tolerance across weekends
+    and holidays — a stoppage whose last statement was Thursday's scored a
+    diff of 1 on Monday and stayed unpaged for roughly two extra days.
+    """
     from utils.market_calendar import last_completed_session_date
 
     if period_end is None:
         return True
     last_session = date.fromisoformat(last_completed_session_date(now))
-    return (last_session - period_end).days > MAX_DELIVERY_LAG_DAYS
+    return _sessions_between(period_end, last_session) > MAX_DELIVERY_LAG_DAYS
 
 
 def _flex_day(value: Optional[str]) -> Optional[date]:
@@ -407,6 +445,7 @@ def _run(
     failed = False
     ingested = 0
     newest_period_end: Optional[date] = None
+    newest_by_key: Dict[str, date] = {}
     for name in names:
         dest = inbox / Path(name).name
         try:
@@ -418,8 +457,19 @@ def _run(
             # Every classified file counts here, duplicates included: an
             # idempotent re-pull of the CURRENT statement is not a stoppage.
             period_end = statement_period_end(xml_text)
-            if period_end is not None and (newest_period_end is None or period_end > newest_period_end):
-                newest_period_end = period_end
+            # R-601: track the newest period PER QUERY/account key, not one max
+            # over the whole directory. IBKR names a delivery
+            # `<acct>.<Query_Name>.<from>.<to>.xml.pgp` and never removes it
+            # remotely, so a single max let one still-delivering query mask
+            # another query's total stoppage forever — a suppression with no
+            # dwell bound.
+            key = _delivery_key(name)
+            if period_end is not None:
+                prior = newest_by_key.get(key)
+                if prior is None or period_end > prior:
+                    newest_by_key[key] = period_end
+                if newest_period_end is None or period_end > newest_period_end:
+                    newest_period_end = period_end
             # `a.xml.pgp` labels as `a.xml`, `trades.gpg` as `trades.xml`.
             plain = dest.with_suffix("")
             if plain.suffix.lower() != ".xml":
@@ -447,11 +497,17 @@ def _run(
     if failed:
         _heartbeat("error", "one or more files rejected")
         return 1
-    if not ingested and delivery_is_stale(newest_period_end, now) and not empty_remote_is_expected(now):
+    stale_keys = sorted(
+        key for key, seen in newest_by_key.items() if delivery_is_stale(seen, now)
+    )
+    if not newest_by_key and delivery_is_stale(newest_period_end, now):
+        stale_keys = ["<unparseable period>"]
+    if not ingested and stale_keys and not empty_remote_is_expected(now):
         _heartbeat(
             "error",
-            "no NEW statement applied; the remote directory is stale "
-            "(IBKR has stopped delivering, or every file is already ingested)",
+            "no NEW statement applied and these deliveries are stale: "
+            + ", ".join(stale_keys)
+            + " (IBKR has stopped delivering them, or every file is already ingested)",
         )
         return 1
     _heartbeat("ok")

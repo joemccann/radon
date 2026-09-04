@@ -162,8 +162,12 @@ class TestJwksBounding:
                 return []
 
             def get_signing_key_from_jwt(self, token):
+                import jwt as pyjwt
+
                 calls.append(1)
-                raise RuntimeError("kid not found")
+                # A token-level verdict, not an upstream failure: R-606 caches
+                # only the former (see TestOutageIsNotASignatureVerdict).
+                raise pyjwt.exceptions.InvalidTokenError("kid not found")
 
         monkeypatch.setattr(mcp_auth, "_get_jwks_client", lambda: FailingClient())
         token = self._token_with_kid("bad-kid-1")
@@ -197,8 +201,12 @@ class TestJwksBounding:
                 return []
 
             def get_signing_key_from_jwt(self, token):
+                import jwt as pyjwt
+
                 calls.append(1)
-                raise RuntimeError("kid not found")
+                # A token-level verdict, not an upstream failure: R-606 caches
+                # only the former (see TestOutageIsNotASignatureVerdict).
+                raise pyjwt.exceptions.InvalidTokenError("kid not found")
 
         monkeypatch.setattr(mcp_auth, "_get_jwks_client", lambda: FailingClient())
         for i in range(50):
@@ -223,3 +231,103 @@ class TestJwksBounding:
         monkeypatch.setattr(mcp_auth, "_jwks_client", None)
         mcp_auth._get_jwks_client()
         assert isinstance(seen.get("timeout"), (int, float)) and seen["timeout"] <= 10
+
+
+class TestOutageIsNotASignatureVerdict:
+    """R-606 (P1): the `except Exception` around the JWKS lookup recorded the
+    token's REAL kid in the negative cache for ANY failure, including a
+    timeout or a 5xx from Clerk. `_negative_kid_active` then short-circuits
+    every later request with a 401 served without an upstream attempt, so
+    nothing re-probes and a one-off blip denies every valid token for 30s.
+
+    R-620 (P2): the refetch cooldown was one module-global scalar, so a flood
+    of random kids against this internet-facing surface kept it perpetually in
+    the future and a genuinely-new kid never triggered a refresh — key
+    rotation became a total auth outage."""
+
+    @pytest.fixture(autouse=True)
+    def _clean(self, monkeypatch):
+        monkeypatch.setattr(mcp_auth, "_jwks_negative", type(mcp_auth._jwks_negative)())
+        monkeypatch.setattr(
+            mcp_auth, "_jwks_refresh_after", type(mcp_auth._jwks_refresh_after)()
+        )
+        monkeypatch.setattr(
+            mcp_auth, "_jwks_gate",
+            threading.BoundedSemaphore(mcp_auth.MAX_JWKS_INFLIGHT),
+        )
+
+    def _token_with_kid(self, kid: str) -> str:
+        import jwt as pyjwt
+
+        return pyjwt.encode({"sub": "x"}, "secret", algorithm="HS256", headers={"kid": kid})
+
+    def test_a_timeout_is_an_outage_and_the_kid_stays_reprobeable(self, monkeypatch):
+        state = {"fail": True}
+
+        class Flaky:
+            def get_signing_keys(self):
+                if state["fail"]:
+                    raise TimeoutError("clerk timed out")
+                return [type("K", (), {"key_id": "kid-a"})()]
+
+            def get_signing_key_from_jwt(self, token):
+                return type("S", (), {"key": "the-key"})()
+
+        monkeypatch.setattr(mcp_auth, "_get_jwks_client", lambda: Flaky())
+        token = self._token_with_kid("kid-a")
+
+        with pytest.raises(AuthError) as first:
+            mcp_auth._signing_key_for(token)
+        assert first.value.status != 401, "an upstream outage is not a 401"
+
+        state["fail"] = False
+        assert mcp_auth._signing_key_for(token) == "the-key", (
+            "the same kid must be re-probeable after a transient failure"
+        )
+
+    def test_a_genuine_unknown_kid_is_still_cached(self, monkeypatch):
+        calls = []
+
+        class Known:
+            def get_signing_keys(self):
+                calls.append(1)
+                return [type("K", (), {"key_id": "kid-real"})()]
+
+            def get_signing_key_from_jwt(self, token):
+                import jwt as pyjwt
+
+                raise pyjwt.exceptions.InvalidTokenError("no such kid")
+
+        monkeypatch.setattr(mcp_auth, "_get_jwks_client", lambda: Known())
+        token = self._token_with_kid("kid-bogus")
+        for _ in range(3):
+            with pytest.raises(AuthError) as exc:
+                mcp_auth._signing_key_for(token)
+            assert exc.value.status == 401
+        assert len(calls) == 1, f"a cached bogus kid re-hit JWKS: {len(calls)}"
+
+    def test_a_random_kid_flood_does_not_starve_a_new_kid(self, monkeypatch):
+        """Key rotation during a flood: kid B is genuinely new and must still
+        get its refetch even though kid A just consumed a cooldown."""
+        keys = {"set": ["kid-old"]}
+
+        class Rotating:
+            def get_signing_keys(self):
+                return [type("K", (), {"key_id": k})() for k in keys["set"]]
+
+            def get_signing_key_from_jwt(self, token):
+                import jwt as pyjwt
+
+                kid = pyjwt.get_unverified_header(token).get("kid")
+                if kid in keys["set"]:
+                    return type("S", (), {"key": f"key-{kid}"})()
+                raise pyjwt.exceptions.InvalidTokenError("no such kid")
+
+        monkeypatch.setattr(mcp_auth, "_get_jwks_client", lambda: Rotating())
+
+        for i in range(20):
+            with pytest.raises(AuthError):
+                mcp_auth._signing_key_for(self._token_with_kid(f"random-{i}"))
+
+        keys["set"] = ["kid-old", "kid-new"]
+        assert mcp_auth._signing_key_for(self._token_with_kid("kid-new")) == "key-kid-new"

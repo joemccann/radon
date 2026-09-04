@@ -715,7 +715,9 @@ class TestAnAgentThatCommitsNothingIsNotReportedOk:
             "echo 'Draft findings numbered T-346..T-378 are ready; wait on its completion.'\n"
             "exit 0\n",
         )
-        assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
+        # An unfinished phase must not tell launchd it succeeded either: the
+        # wrapper reports INCOMPLETE on both channels AND exits 75.
+        assert proc.returncode == 75, (proc.returncode, proc.stdout, proc.stderr)
         comment = next((ln for ln in calls.splitlines() if ln.startswith("issue comment")), "")
         assert comment, f"no dead-man comment at all: {calls!r} {proc.stderr!r}"
         assert "**audit**" in calls and "**INCOMPLETE" in calls, (

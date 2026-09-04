@@ -152,6 +152,19 @@ describe("useOrderRisk — limit fill is structural max, not quoted-spread net",
     // Close-out short-circuits: max-loss/max-gain are not present; estimatedPnl
     // = proceeds − basis is surfaced instead.
     expect(result.current!.summary.estimatedPnl).toBeCloseTo(200 - 150, 6);
+    expect(result.current!.summary.estimatedPnlPct).toBeCloseTo((50 / 150) * 100, 6);
+  });
+
+  it("omits close P&L percentage when entry basis is zero", () => {
+    const { result } = renderHook(() =>
+      useOrderRisk(
+        bullCallSpreadInput({ closeOut: { entryCostDollars: 0 } }),
+        emptyPortfolio,
+      ),
+    );
+
+    expect(result.current!.summary.estimatedPnl).toBe(200);
+    expect(result.current!.summary.estimatedPnlPct).toBeNull();
   });
 });
 

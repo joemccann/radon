@@ -32,6 +32,7 @@ account-day-move-ib-daily-pnl.spec.ts
 admin-panel.spec.ts
 admin-visual-snapshot.spec.ts
 book-depth-client-nav.spec.ts
+book-montage-spacing.spec.ts
 bpi-tab.spec.ts
 cash-flows-section.spec.ts
 cash-flows-withdrawal-may8.spec.ts

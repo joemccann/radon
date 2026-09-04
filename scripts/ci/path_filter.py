@@ -222,6 +222,10 @@ CROSS_TREE_CONTRACTS = (
         ),
     ),
     CrossTreeContract(
+        patterns=("web/app/api/setup/complete/route.ts",),
+        tests=("scripts/tests/test_setup_service_id_parity.py",),
+    ),
+    CrossTreeContract(
         patterns=("web/lib/ieiHyg.ts",),
         tests=(
             "scripts/tests/test_silent_degradation_bounds.py::TestIeiHygNeedsAFullWindow::test_the_web_type_knows_the_unknown_state",

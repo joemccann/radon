@@ -189,6 +189,9 @@ function proposalQuote(
   return { label, priceData: prices[key] ?? null, model: null };
 }
 
+/** Consecutive failed turns after which the operator is told it is degraded (R-624). */
+const DEGRADED_AFTER_FAILURES = 3;
+
 export default function ChatPanel({
   portfolio,
   isOpen = true,
@@ -199,6 +202,9 @@ export default function ChatPanel({
   const [messages, setMessages] = useState<Message[]>([]);
   const [status, setStatus] = useState<ChatStatus>("idle");
   const [lastError, setLastError] = useState("");
+  // R-624: the per-turn copy repeats forever with no counter, so turn 1 and
+  // turn 200 of a sustained provider outage look identical to the operator.
+  const [consecutiveFailures, setConsecutiveFailures] = useState(0);
   const [proposal, setProposal] = useState<AssistantOrderProposal | null>(null);
   // Tool telemetry for the turn in flight. Reset per send so a finished turn's
   // trace can't leak into the next one.
@@ -338,6 +344,7 @@ export default function ChatPanel({
           setProposal(turn.proposal);
         }
       }
+      setConsecutiveFailures(0);
       setStatus("done");
     } catch (error) {
       const isPiCommand = Boolean(piCommand);
@@ -359,6 +366,7 @@ export default function ChatPanel({
       // The transcript already carries assistant failures. Keep the separate
       // error rail for PI commands and order placement so copy is said once.
       setLastError(isPiCommand ? errorMessage : "");
+      setConsecutiveFailures((n) => n + 1);
       setStatus("error");
     }
   };
@@ -494,6 +502,12 @@ export default function ChatPanel({
               Latest
             </button>
           </div>
+          ) : null}
+
+          {consecutiveFailures >= DEGRADED_AFTER_FAILURES ? (
+            <div className="chat-degraded" role="status">
+              {`The assistant has failed ${consecutiveFailures} turns in a row. The provider or the backend is degraded; retrying will not help until it recovers.`}
+            </div>
           ) : null}
 
           {lastError ? <div className="chat-error">{lastError}</div> : null}

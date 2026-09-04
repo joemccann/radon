@@ -463,3 +463,47 @@ class TestPositionReconcileHandler(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTheDaemonDoesNotClaimItCheckedForNewTrades:
+    """R-626 (P3): the handler calls `generate_reconciliation_report([], ...)`,
+    so `new_trades_count` is structurally always 0 — yet the shared message
+    printed '0 new trade(s)' into the digest line and into `result['error']`.
+    An operator reads that as "the daemon looked and found none"."""
+
+    def test_the_handler_message_omits_the_new_trades_clause(self):
+        import ib_reconcile
+
+        detail = {
+            "new_trades_count": 0,
+            "quantity_mismatch_count": 2,
+            "positions_missing_locally_count": 1,
+            "positions_closed_count": 0,
+        }
+        assert "new trade" not in ib_reconcile._drift_message(
+            detail, include_new_trades=False
+        )
+        assert "2 quantity mismatch(es)" in ib_reconcile._drift_message(
+            detail, include_new_trades=False
+        )
+
+    def test_the_full_reconcile_path_still_reports_new_trades(self):
+        import ib_reconcile
+
+        detail = {
+            "new_trades_count": 3,
+            "quantity_mismatch_count": 0,
+            "positions_missing_locally_count": 0,
+            "positions_closed_count": 0,
+        }
+        assert "3 new trade(s)" in ib_reconcile._drift_message(detail)
+
+    def test_the_handler_call_site_passes_the_flag(self):
+        src = (
+            Path(__file__).resolve().parents[1]
+            / "monitor_daemon" / "handlers" / "position_reconcile.py"
+        ).read_text()
+        body = "\n".join(
+            l for l in src.splitlines() if not l.lstrip().startswith("#")
+        )
+        assert "include_new_trades=False" in body

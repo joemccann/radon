@@ -281,13 +281,21 @@ def test_persistent_capacity_shed_no_duplicate_still_fails(tmp_path: Path) -> No
     port = _free_port()
 
     with _Stub(port, always_status=502, fail_body=SHED_BODY) as stub:
-        result = _run(repo, py, port, shed_wait="3", delay="1")
+        result = _run(repo, py, port, shed_wait="30", delay="10")
 
+    slept = _sleeps(tmp_path)
     assert result.returncode != 0, result.stdout + result.stderr
-    # The ladder is exact: a 3s budget at a 1s delay buys three waits and
-    # a fourth POST, then gives up.
+    # The ladder is exact in retry COUNT: a 30s budget at a 10s delay buys
+    # three waits and a fourth POST, then gives up. The per-step VALUES are
+    # not pinned - the wrapper also charges whole seconds of attempt wall time
+    # against the budget at `date +%s` granularity (:161-162), so an attempt
+    # that straddles a clock tick clips the final delay. Budgeting 30s against
+    # a 10s step keeps that jitter far below one rung; the old 3s/1s pinning
+    # of [1, 1, 1] made a single straddled tick drop a whole retry.
     assert stub.calls == [PATH] * 4, stub.calls
-    assert _sleeps(tmp_path) == [1, 1, 1], _sleeps(tmp_path)
+    assert len(slept) == 3, slept
+    assert all(d > 0 for d in slept), slept
+    assert sum(slept) <= 30, slept
     assert not marker.exists()
     combined = (result.stdout + result.stderr).lower()
     assert "capacity" in combined or "shed" in combined

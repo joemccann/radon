@@ -8501,19 +8501,17 @@ body[data-mobile="true"] .orders-command-strip__jump:active {
 .cockpit--mobile .book-row .book-mkt {
   font-size: 12px;
 }
-/* Tighter side columns on a phone: the desktop 52px-mkt / 70px-px pairs plus
-   12px pads need 382px of montage — 17px more than a 393px viewport leaves,
-   which grew an inner horizontal scrollbar and amputated the ask side. */
+/* Phone montage: market flexes, size hugs the price, gap keeps SHARES off MARKET. */
 .cockpit--mobile .book-side.bid .book-colhead,
 .cockpit--mobile .book-side.bid .book-row {
-  grid-template-columns: 44px minmax(0, 1fr) 58px;
+  grid-template-columns: minmax(0, 1fr) minmax(36px, auto) 58px;
   column-gap: 6px;
   padding-left: 8px;
   padding-right: 8px;
 }
 .cockpit--mobile .book-side.ask .book-colhead,
 .cockpit--mobile .book-side.ask .book-row {
-  grid-template-columns: 58px minmax(0, 1fr) 44px;
+  grid-template-columns: 58px minmax(36px, auto) minmax(0, 1fr);
   column-gap: 6px;
   padding-left: 8px;
   padding-right: 8px;
@@ -9824,14 +9822,29 @@ tr {
   border-bottom: 1px solid var(--line-grid);
   background: var(--bg-panel-raised);
 }
+.book-colhead > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .book-colhead .r { text-align: right; }
 .book-colhead .c { text-align: center; }
 
-/* two-sided montage (stock / option) */
+/* two-sided montage (stock / option)
+   Market is the flexible column (minmax 0 so long MPIDs ellipsis). Size hugs
+   the price: bid size right-aligned, ask size left-aligned. column-gap keeps
+   SHARES and MARKET from colliding on names like DRCTEDARK. */
 .book-sides { display: grid; grid-template-columns: 1fr 1fr; }
 .book-side.bid { border-right: 1px solid var(--line-grid); }
-.book-side.bid .book-colhead, .book-side.bid .book-row { grid-template-columns: 52px 1fr 70px; }
-.book-side.ask .book-colhead, .book-side.ask .book-row { grid-template-columns: 70px 1fr 52px; }
+.book-side.bid .book-colhead, .book-side.bid .book-row {
+  grid-template-columns: minmax(0, 1.15fr) minmax(44px, auto) 70px;
+  column-gap: 8px;
+}
+.book-side.ask .book-colhead, .book-side.ask .book-row {
+  grid-template-columns: 70px minmax(44px, auto) minmax(0, 1.15fr);
+  column-gap: 8px;
+}
 .book-row {
   display: grid;
   align-items: center;
@@ -9843,8 +9856,18 @@ tr {
   position: relative;
 }
 .book-row .book-mkt { color: var(--text-secondary); font-size: 11px; }
-.book-row .book-shares { color: var(--text-secondary); font-variant-numeric: tabular-nums; text-align: right; }
-.book-row .book-px { font-weight: 600; font-variant-numeric: tabular-nums; }
+.book-row .book-shares {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  min-width: 0;
+}
+.book-side.ask .book-row .book-shares { text-align: left; }
+.book-row .book-px {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  min-width: 0;
+}
 .book-side.bid .book-row .book-px { text-align: right; color: var(--signal-core-text); }
 .book-side.ask .book-row .book-px { text-align: left; color: var(--fault); }
 .book-side.ask .book-row .book-mkt { text-align: right; }
@@ -9930,10 +9953,16 @@ tr {
   align-items: center;
   gap: 5px;
   min-width: 0;
+  overflow: hidden;
   white-space: nowrap;
 }
 .book-side.ask .book-row .book-mkt { justify-content: flex-end; }
-.book-venue-lead { overflow: hidden; text-overflow: ellipsis; }
+.book-venue-lead {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1 1 auto;
+}
 .book-venue-more {
   flex: 0 0 auto;
   padding: 1px 4px;

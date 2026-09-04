@@ -302,3 +302,178 @@ class TestCli:
         verdict = json.loads(proc.stdout)
         assert verdict["state"] == "green"
         assert "pr checks 301 --json name,bucket,link" in gh_log.read_text(encoding="utf-8")
+
+
+class TestWatchAbortsOnABrokenGh:
+    """R-599/R-600 (P1): `gh_pr_checks` returned `[]` for both "no checks
+    reported yet" and "gh could not run at all", so a broken `gh` (auth
+    expiry, network) polled every 60s for the full 3h cap and then reported
+    `no-checks-reported` — the deliver phase's entire budget burned learning
+    nothing. A query FAILURE is not a pending state."""
+
+    def _clock(self):
+        t = {"now": 0.0}
+
+        def clock():
+            return t["now"]
+
+        def sleep(secs):
+            t["now"] += secs
+
+        return clock, sleep
+
+    def test_repeated_query_failures_abort_well_before_the_cap(self):
+        clock, sleep = self._clock()
+        calls = {"n": 0}
+
+        def failing(_pr):
+            calls["n"] += 1
+            return nd.CHECKS_UNAVAILABLE
+
+        verdict = nd.watch(
+            7, cap_secs=10800, interval=60, run_checks=failing, clock=clock, sleep=sleep
+        )
+        assert verdict["state"] != "green"
+        assert calls["n"] <= nd.MAX_CONSECUTIVE_QUERY_FAILURES + 1, calls
+        assert verdict["elapsed_secs"] < 10800
+        assert "gh" in verdict["check"] or "unavailable" in verdict["check"]
+
+    def test_a_transient_failure_between_pending_polls_does_not_abort(self):
+        clock, sleep = self._clock()
+        seq = [
+            nd.CHECKS_UNAVAILABLE,
+            [{"name": "ci", "bucket": "pending"}],
+            nd.CHECKS_UNAVAILABLE,
+            [{"name": "ci", "bucket": "pass"}],
+        ]
+
+        def flaky(_pr):
+            return seq.pop(0)
+
+        verdict = nd.watch(
+            7, cap_secs=10800, interval=60, run_checks=flaky, clock=clock, sleep=sleep
+        )
+        assert verdict["state"] == "green", verdict
+
+    def test_an_empty_row_list_is_still_pending_not_a_failure(self):
+        clock, sleep = self._clock()
+        verdict = nd.watch(
+            7, cap_secs=300, interval=60, run_checks=lambda _p: [],
+            clock=clock, sleep=sleep,
+        )
+        assert verdict["state"] == "timeout"
+        assert verdict["check"] == "no-checks-reported"
+
+    def test_a_gh_timeout_yields_a_verdict_not_a_traceback(self, monkeypatch):
+        def _boom(*a, **kw):
+            raise subprocess.TimeoutExpired(cmd="gh", timeout=120)
+
+        monkeypatch.setattr(nd.subprocess, "run", _boom)
+        assert nd.gh_pr_checks(7) is nd.CHECKS_UNAVAILABLE
+
+    def test_a_nonzero_gh_with_no_json_is_unavailable_not_empty(self, monkeypatch):
+        class _Proc:
+            stdout = "gh: could not authenticate"
+            returncode = 4
+
+        monkeypatch.setattr(nd.subprocess, "run", lambda *a, **kw: _Proc())
+        assert nd.gh_pr_checks(7) is nd.CHECKS_UNAVAILABLE
+
+
+class TestDeliverStatusFromTheRecord:
+    """R-611/R-613 (P1): the wrapper read its own verdict by grepping the
+    agent's transcript, so a marker line quoted inside agent prose could be
+    mistaken for the verdict, and a cap kill left nothing to resume from.
+    The record file is the durable, unforgeable source."""
+
+    def test_status_from_record_renders_the_operator_string(self, tmp_path):
+        nd.write_record(
+            "reliability", branch="reliability/2026-09-04", pr=301, url=URL1,
+            status="green", root=tmp_path,
+        )
+        assert nd.status_from_record("reliability", root=tmp_path) == (
+            f"1 PR(s) green, ready to merge: {URL1}"
+        )
+
+    def test_an_incomplete_record_names_the_failing_check(self, tmp_path):
+        nd.write_record(
+            "reliability", branch="reliability/2026-09-04", pr=301, url=URL1,
+            status="incomplete", check="ci / gate", root=tmp_path,
+        )
+        assert nd.status_from_record("reliability", root=tmp_path) == "INCOMPLETE: ci / gate"
+
+    def test_a_branch_only_record_is_reported_as_incomplete_but_resumable(self, tmp_path):
+        """The wrapper writes this BEFORE launching the agent, so a cap kill
+        mid-phase is genuinely resumable instead of leaving no trace."""
+        nd.write_record(
+            "reliability", branch="reliability/2026-09-04", pr=None, url=None,
+            status="launched", root=tmp_path,
+        )
+        status = nd.status_from_record("reliability", root=tmp_path)
+        assert status.startswith("INCOMPLETE"), status
+        assert nd.resumable("reliability", root=tmp_path) is not None
+
+    def test_no_record_at_all_says_so(self, tmp_path):
+        assert nd.status_from_record("reliability", root=tmp_path) == (
+            "INCOMPLETE (no deliver record — not resumable)"
+        )
+
+
+WRAPPERS = tuple(
+    REPO / "scripts" / n for n in (
+        "reliability_weekend.sh", "testing_weekend.sh", "ci_performance_nightly.sh",
+        "documentation_nightly.sh", "security_nightly.sh",
+    )
+)
+
+
+def _uncommented(text: str) -> str:
+    return "\n".join(l for l in text.splitlines() if not l.lstrip().startswith("#"))
+
+
+class TestWrapperDeliverRecordContract:
+    """R-611/R-613 (P1), all five loops."""
+
+    @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
+    def test_a_branch_only_record_is_written_before_the_agent_starts(self, wrapper):
+        body = _uncommented(wrapper.read_text(encoding="utf-8"))
+        assert "arm_deliver_record" in body, wrapper.name
+        assert "--status launched" in body, wrapper.name
+        # Armed before the agent is launched, not after it. The launch is the
+        # `claude -p "/<loop> $PHASE"` invocation; the loops differ over
+        # whether the round loop is a function or inline in run_phase, so
+        # anchor on the invocation itself.
+        lines = body.splitlines()
+        armed_at = next(
+            i for i, l in enumerate(lines) if l.strip() == "arm_deliver_record"
+        )
+        # The launch is whichever comes first AFTER the arm point: the inline
+        # `claude -p` invocation, or the `run_round` call for the loops that
+        # factored the round loop into a function. Both must follow it.
+        launch_at = next(
+            i for i, l in enumerate(lines)
+            if i > armed_at and ('claude -p "/' in l or l.strip() == "run_round")
+        )
+        assert armed_at < launch_at, wrapper.name
+        # ...and nothing launches the agent before run_phase reaches the arm.
+        before = "\n".join(lines[:armed_at])
+        assert "\nrun_round\n" not in before, wrapper.name
+
+    @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
+    def test_the_verdict_comes_from_the_record_not_the_transcript(self, wrapper):
+        body = _uncommented(wrapper.read_text(encoding="utf-8"))
+        start = body.index("deliver_status() {")
+        end = body.index("\n}", start)
+        fn = body[start:end]
+        assert "deliver-status" in fn, wrapper.name
+        assert "no deliver record" in fn, wrapper.name
+
+    @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
+    def test_the_record_read_uses_the_isolated_origin_main_pipe(self, wrapper):
+        body = _uncommented(wrapper.read_text(encoding="utf-8"))
+        for fn_name in ("deliver_status", "arm_deliver_record"):
+            start = body.index(f"{fn_name}() {{")
+            end = body.index("\n}", start)
+            fn = body[start:end]
+            assert "origin/main:scripts/nightly_deliver.py" in fn, (wrapper.name, fn_name)
+            assert "/usr/bin/python3 -I -" in fn, (wrapper.name, fn_name)

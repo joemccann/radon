@@ -64,8 +64,9 @@ path.
 
 Violating any rail is a failed run.
 
-1. **Use only the dedicated runner clone.** Refuse to run unless
-   `.radon-weekend-runner` exists at the repository root. The intended clone
+1. **Use only the dedicated runner clone.** Refuse to run unless BOTH
+   `.radon-weekend-runner` and `.radon-ci-performance-runner` exist at the
+   repository root. The intended clone
    is `~/radon-weekend/radon-ci-performance`. Never use the operator clone or
    the testing/reliability loop clones.
 2. **Take an exclusive loop lock.** Refuse or exit cleanly if another
@@ -347,7 +348,15 @@ pytest/vitest suite, a CI watch) is launched DETACHED from the agent
 harness so a harness timeout cannot kill it:
 `nohup env -i <minimal env> bash <stage-script.sh> </dev/null >stage.out
 2>&1 & disown` (macOS has no `setsid`). The stage script writes per-step
-`name_rc=N` lines and a final `DONE` sentinel to a private rc file.
+`name_rc=N` lines and a final `DONE` sentinel to a private rc file. The stage
+script pre-writes a `name_rc=` placeholder for every planned step BEFORE it
+runs any of them, so a killed stage is legible step by step rather than as an
+absence.
+
+**An rc file with no `DONE` is a FAILED stage, never a passing one.** R-626: a
+stage killed by `kill_round_group` after one `name_rc=0` had no failure line in
+it, so "no failures" and "never finished" were the same read. Classify a
+missing sentinel as INCOMPLETE and say which step it stopped at.
 
 The agent then waits IN-SESSION with a bounded loop on that rc file:
 `until grep -q DONE rcfile; do <process-still-alive check> || break; sleep

@@ -269,8 +269,15 @@ report() {
   local body
   body="$(_format_issue_body "$PHASE" "$status" "$detail")"
   local issue
+  # REL-188 (R-537): every gh call here was `|| true`, so an expired gh auth
+  # produced exactly the observable of a runner that never fired — a missing
+  # daily comment. Say so in the log; Pushover still fires either way.
   issue="$(net_bounded "$GH_BIN" issue list --label "$DEADMAN_LABEL" --state open \
     --json number -q '.[0].number' 2>/dev/null || true)"
+  if [[ -z "$issue" ]]; then
+    echo "[weekend] gh issue call failed or found no dead-man issue (auth expired?)" \
+      | tee -a "${RUN_LOG:-/dev/null}" >/dev/null 2>&1 || true
+  fi
   if [[ -z "$issue" ]]; then
     net_bounded "$GH_BIN" issue create --title "$DEADMAN_TITLE" --label "$DEADMAN_LABEL" \
       --body "$DEADMAN_CREATE_BODY" \
@@ -279,8 +286,18 @@ report() {
       --json number -q '.[0].number' 2>/dev/null || true)"
   fi
   if [[ -n "$issue" ]]; then
-    prune_deadman_comments "$issue"
-    net_bounded "$GH_BIN" issue comment "$issue" --body "$body" >/dev/null 2>&1 || true
+    # R-612 (P0): post FIRST, and prune only once the post is confirmed. The
+    # prune used to run ahead of a post whose failure `|| true` swallowed, so a
+    # gh outage deleted the whole dead-man history and wrote nothing in its
+    # place. The new comment's id is handed to --keep so it survives the wipe.
+    local posted
+    posted="$(net_bounded "$GH_BIN" issue comment "$issue" --body "$body" 2>/dev/null || true)"
+    if [[ -n "$posted" ]]; then
+      prune_deadman_comments "$issue" "$posted"
+    else
+      echo "[weekend] gh issue call failed: the phase comment did not post" \
+        | tee -a "${RUN_LOG:-/dev/null}" >/dev/null 2>&1 || true
+    fi
   fi
   if [[ "$push" == "1" ]]; then
     notify_phase "$status"
@@ -297,12 +314,14 @@ report() {
 # failure here must never change what report() posts or the run's exit code.
 prune_deadman_comments() {
   local issue="$1"
+  local posted="${2:-}"
+  local keep="${posted##*issuecomment-}"
   if [[ "${RADON_WEEKEND_SKIP_ISSUE_PRUNE:-0}" == "1" ]]; then return 0; fi
   if [[ -z "${TIMEOUT_BIN:-}" || -z "$GH_BIN" ]]; then return 0; fi
   git -C "$REPO" show origin/main:scripts/nightly_issue_prune.py 2>/dev/null \
     | "$TIMEOUT_BIN" "${RADON_WEEKEND_ISSUE_PRUNE_TIMEOUT_SECS:-30}" \
       /usr/bin/python3 -I - --gh-bin "$GH_BIN" --issue "$issue" \
-      --branch-prefix "$PR_BRANCH_PREFIX" >/dev/null 2>&1 || true
+      --branch-prefix "$PR_BRANCH_PREFIX" ${keep:+--keep "$keep"} >/dev/null 2>&1 || true
   return 0
 }
 
@@ -343,7 +362,35 @@ phase_status() {
 DELIVER_READY_MARKER="NIGHTLY DELIVER READY:"
 DELIVER_INCOMPLETE_MARKER="NIGHTLY DELIVER INCOMPLETE:"
 
+# R-611 (P1): a deliver phase killed at its cap left NOTHING behind when the
+# agent had not yet written a record, so "resume the same branch and PR"
+# resumed nothing. The wrapper arms a branch-only record before the agent
+# starts; the agent overwrites it with the PR number and status as it goes.
+# Same isolation as prune_deadman_comments: origin/main's copy piped into a
+# system interpreter, never a python FILE from the agent-writable clone.
+arm_deliver_record() {
+  [[ "$PHASE" == "deliver" ]] || return 0
+  [[ -n "${TIMEOUT_BIN:-}" ]] || return 0
+  git -C "$REPO" show origin/main:scripts/nightly_deliver.py 2>/dev/null \
+    | "$TIMEOUT_BIN" 30 /usr/bin/python3 -I - record --loop "$LOOP_SLUG" \
+      --branch "${PR_BRANCH_PREFIX}$(date +%F)" --status launched >/dev/null 2>&1 || true
+  return 0
+}
+
 deliver_status() {
+  # R-613: the verdict is read from the DURABLE record the phase writes, not
+  # by grepping the agent's own transcript — a marker line recited inside
+  # agent prose is not a verdict, and a cap kill leaves no transcript line at
+  # all. The log grep survives only as the fallback for a record-less run.
+  local from_record=""
+  if [[ -n "${TIMEOUT_BIN:-}" ]]; then
+    from_record="$(git -C "$REPO" show origin/main:scripts/nightly_deliver.py 2>/dev/null \
+      | "$TIMEOUT_BIN" 30 /usr/bin/python3 -I - deliver-status --loop "$LOOP_SLUG" 2>/dev/null || true)"
+  fi
+  case "$from_record" in
+    ""|*"no deliver record"*) ;;
+    *) printf '%s' "$from_record"; return 0 ;;
+  esac
   # Last verdict line of THIS round's slice of the log (R-426 scoping).
   local line rest tok n="" urls="" check=""
   line="$(tail -c "+$((ROUND_LOG_MARK + 1))" "$RUN_LOG" 2>/dev/null \
@@ -371,6 +418,24 @@ deliver_status() {
     *)
       printf 'INCOMPLETE (exit 0 without the deliver verdict line)' ;;
   esac
+}
+
+# REL-188 (R-520): a `claude -p` round can exit 0 having done nothing — no
+# commit, no ledger advance, no PR — and every dead-man channel then said OK.
+# Each phase commits at least once on the nightly branch by contract, so "exit
+# 0 and nothing was committed during this phase" is INCOMPLETE. Both the SHA
+# and the committer date are checked: a phase legitimately moves HEAD onto the
+# previous phase's branch tip without committing, so a moved HEAD alone is not
+# evidence.
+INCOMPLETE_STATUS="INCOMPLETE (agent exited 0 without committing to the nightly branch)"
+PHASE_HEAD_BEFORE=""
+PHASE_START_EPOCH=0
+phase_committed() {
+  local head epoch
+  head="$(git rev-parse HEAD 2>/dev/null || true)"
+  [[ -n "$head" && "$head" != "$PHASE_HEAD_BEFORE" ]] || return 1
+  epoch="$(git log -1 --format=%ct HEAD 2>/dev/null || true)"
+  [[ -n "$epoch" && "$epoch" -ge "$PHASE_START_EPOCH" ]]
 }
 
 on_crash() {
@@ -603,10 +668,34 @@ fetch_origin_with_retry() {
   return 1
 }
 
+# REL-187 (R-519): every loop reset its clone to the RAW TIP of origin/main, so
+# a loop firing minutes after a red push spent its whole cycle auditing,
+# remediating and testing a tree CI had already rejected — and the resulting PR
+# mixed the loop's work with someone else's broken commit. Stale-but-green
+# beats fresh-but-red. GitHub being unreachable keeps the tip already checked
+# out, with a logged warning: an unreachable API must never stop a nightly run.
+# Isolated origin/main pipe, same defence as prune_deadman_comments.
+resolve_green_main_sha() {
+  [[ -n "${TIMEOUT_BIN:-}" && -n "$GH_BIN" ]] || return 0
+  git -C "$REPO" show origin/main:scripts/nightly_green_base.py 2>/dev/null \
+    | "$TIMEOUT_BIN" "${RADON_WEEKEND_GREEN_BASE_TIMEOUT_SECS:-60}" \
+      /usr/bin/python3 -I - --repo "${RADON_WEEKEND_GH_REPO:-joemccann/radon}" \
+      --repo-dir "$REPO" --head origin/main --gh-bin "$GH_BIN" 2>/dev/null || true
+  return 0
+}
+
 ground_truth() {
   fetch_origin_with_retry
   git checkout -f --quiet main
   git reset --hard --quiet origin/main
+  local green_sha
+  green_sha="$(resolve_green_main_sha)"
+  if [[ -n "$green_sha" ]] && git -C "$REPO" rev-parse --verify --quiet "${green_sha}^{commit}" >/dev/null; then
+    if [[ "$green_sha" != "$(git -C "$REPO" rev-parse origin/main)" ]]; then
+      echo "[weekend] origin/main tip is not CI-green; pinning to $green_sha" | tee -a "${RUN_LOG:-/dev/null}" >/dev/null 2>&1 || true
+    fi
+    git reset --hard --quiet "$green_sha"
+  fi
   git clean -fdxq --exclude=.radon-weekend-runner --exclude=.radon-documentation-runner --exclude=.weekend-runner.lock --exclude=logs/ --exclude=.env --exclude=.env.ib-mode --exclude=web/.env --exclude=node_modules/ --exclude=.next/ --exclude=.deepsec/
 }
 
@@ -673,6 +762,7 @@ run_phase() {
   begin_phase "$1"
   trap on_crash ERR
   echo "[documentation-nightly] $PHASE start $STAMP repo=$REPO cap=${CAP_SECS}s${BILLING_IGNORED:+ ignored=${BILLING_IGNORED// /,}}" | tee -a "$RUN_LOG"
+  arm_deliver_record
   # NOT bare. Under `set -Eeuo pipefail` with the ERR trap armed, a failed
   # fetch made on_crash report and then the shell exit anyway — so
   # `run_phase audit` never returned and `run_phase remediate` was never run
@@ -697,6 +787,8 @@ run_phase() {
   # over it, so every failed or timed-out run posted a false
   # "CRASHED — wrapper died" dead-man comment AND then its real status.
   trap - ERR
+  PHASE_HEAD_BEFORE="$(git rev-parse HEAD 2>/dev/null || true)"
+  PHASE_START_EPOCH="$(date +%s)"
   local attempt=1 start_ts=$SECONDS remain round_start
   set +e
   while :; do
@@ -750,6 +842,14 @@ run_phase() {
 
   local status
   status="$(phase_status "$RC" "$RUN_LOG" "$ROUND_LOG_MARK")"
+  # REL-188: exit 0 with nothing committed is not a finished phase, and an
+  # unfinished phase must exit non-zero so neither the dead-man nor launchd is
+  # told it succeeded. The deliver phase is keyed on its verdict line below,
+  # not on a commit: a PR that went green first time needs no new commit.
+  if [[ "$status" == OK && "$PHASE" != "deliver" ]] && ! phase_committed; then
+    status="$INCOMPLETE_STATUS"
+    RC=75
+  fi
   # An exhausted ladder is not a generic non-zero exit: the operator needs the
   # cause and the one place it is fixed, or they re-fire into the same wall.
   if (( ALL_MODELS_EXHAUSTED )); then
