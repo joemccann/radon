@@ -46,7 +46,11 @@ print("exiting now")
         )
         elapsed = time.monotonic() - start
         assert "exiting now" in proc.stdout
-        assert elapsed < 10, (
+        # 25s, not 10s: the real cost is ~0s and the pre-fix hang is 600s, so
+        # 25s keeps ~24x headroom over a healthy run while still failing
+        # inside the 30s subprocess timeout with a readable message. A
+        # machine-speed bar of 10s buys nothing against a 600s defect.
+        assert elapsed < 25, (
             f"interpreter exit blocked {elapsed:.1f}s on the abandoned worker"
         )
 
