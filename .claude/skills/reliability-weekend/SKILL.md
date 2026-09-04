@@ -832,3 +832,32 @@ how this loop improves as the codebase grows.
   covered but not raise (REL-210), raise covered but not the False that the module actually
   returns (REL-209), fully-empty covered but not truncated (REL-212), stock covered but not option
   (REL-211). Ask "what is the other way this input arrives" per fix.
+
+- 2026-09-04 (remediate): **the permanent drill list in step 4 names a suite that does not exist.**
+  `test_daemon_bounded` matches nothing under `scripts/tests` (`grep -rl` over the whole tree finds
+  no such file); the closest real files are `test_unbounded_io_bounds.py` and `test_ib_insync_bounded.py`.
+  A `pytest` invocation listing it exits 4 before running anything, so a drill run that "failed" may
+  simply have a bad path in it. Resolve every drill path with `grep -rl` BEFORE the run, and treat a
+  rc-4 collection error as a list defect, not a regression.
+- 2026-09-04 (remediate): **a finding's proposed remedy was wrong three times, in three different
+  ways, and the repo told me each time.** R-597 asked for a `--head` prefix filter on `gh pr list`;
+  GitHub search has no prefix form for head refs, and a search that misses a real PR PRUNES — the
+  opposite of the fail-closed the finding wanted (a truncation bound gives the same guarantee).
+  R-614 claimed calendar-day arithmetic made detection SLIP; it is the reverse — calendar days are
+  larger than sessions, so the bug was false pages over weekends, and the session count is the fix
+  either way. R-622 asked to reject the request when the registry is unreachable, but FastAPI being
+  down during first-run setup is exactly the branch the offline path exists for, so rejecting wedges
+  onboarding; a static id mirror plus a parity test closes the hole without breaking first-run.
+  Read what the remedy would DO to the branch the code is defending before writing it.
+- 2026-09-04 (remediate): five pinned tests contradicted a fix this run and every one was
+  informative, not obstructive: three `next_attempt_at` cases pinned the exact suppression R-615
+  narrows (rewritten per-branch, plus a NEW rate-limited case that keeps the original assertion
+  alive), the JWKS throttle case pinned the global cooldown R-620 makes per-kid, and a fixture set
+  `_jwks_refresh_after = 0.0` — a float where the fix needs a map, which surfaced as a 503 in an
+  unrelated case. When a per-key refactor lands, grep the TEST fixtures for the old scalar too.
+- 2026-09-04 (remediate): the wrapper-contract assertions are the fiddliest part of a five-loop
+  change. `body.index("run_round")` finds the FUNCTION DEFINITION, not the call, and only two of the
+  five loops factor the round loop into a function at all — anchor an ordering assertion on the
+  `claude -p "/<loop>` invocation, searched from the arm point forward, and it holds across all five.
+  Same shape as the comment-quotes-its-own-code trap: assert on what executes, not on what the file
+  happens to contain first.
