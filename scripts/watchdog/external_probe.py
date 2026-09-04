@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from datetime import datetime, timedelta, timezone
@@ -12,6 +13,7 @@ from health_service import turso_http
 
 from .check import CheckOutcome
 
+log = logging.getLogger(__name__)
 
 SERVICE = "external-health-probe"
 FETCH_TIMEOUT_SECONDS = 2.5
@@ -215,14 +217,23 @@ def _sampled_during_deploy_window(sample_time: datetime, now: datetime) -> bool:
 
 def _latest_github_run(timeout: float = FETCH_TIMEOUT_SECONDS) -> dict | None:
     """Independent witness when Turso persistence is stale or unavailable."""
-    from utils.ipv4_first import prefer_ipv4
-
-    prefer_ipv4()
-    request = urllib.request.Request(
-        GITHUB_RUNS_URL,
-        headers={"Accept": "application/vnd.github+json", "User-Agent": "radon-watchdog"},
-    )
     try:
+        # R-617: the import and `prefer_ipv4()` sat OUTSIDE the guard below,
+        # whose whole job is to preserve the primary Turso verdict. An
+        # ImportError from `utils.ipv4_first` (module moved, `scripts` off
+        # sys.path, a partially deployed tree) therefore raised out of the
+        # entire continuous bucket, on exactly the cycle where the external
+        # probe was already failing.
+        from utils.ipv4_first import prefer_ipv4
+
+        prefer_ipv4()
+        request = urllib.request.Request(
+            GITHUB_RUNS_URL,
+            headers={
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "radon-watchdog",
+            },
+        )
         with urllib.request.urlopen(request, timeout=timeout) as response:
             payload = json.loads(response.read(262_144).decode("utf-8"))
         runs = payload.get("workflow_runs") or []
@@ -242,6 +253,44 @@ def _github_run_is_current_and_green(run: dict | None, now: datetime) -> bool:
     return 0 <= (now - timestamp).total_seconds() <= reader.STALE_AFTER_SECONDS
 
 
+
+# R-603: how many CONSECUTIVE cycles a green workflow run may disarm a STALE
+# Turso verdict before the dead-man fires anyway. The witness cannot see a
+# misrouted or renamed row, so an unbounded upgrade is a permanent mute.
+WITNESS_SUPPRESS_MAX_CONSECUTIVE = 3
+_WITNESS_COUNTER_SERVICE = "external-probe-witness-suppress"
+_WITNESS_COUNTER_KIND = "witness-suppression"
+
+
+def _register_witness_suppression(*, now: datetime) -> bool:
+    """Count one witness-suppressed cycle; True while under the ceiling.
+
+    Counter storage failure fails toward paging — a broken counter must never
+    extend a suppression.
+    """
+    from . import cooldown as cooldown_mod
+
+    try:
+        decision = cooldown_mod.record_failure_and_decide(
+            service=_WITNESS_COUNTER_SERVICE, kind=_WITNESS_COUNTER_KIND, now=now
+        )
+    except Exception as exc:  # noqa: BLE001 — storage must not extend suppression
+        log.warning("witness suppression counter unavailable; not suppressing: %s", exc)
+        return False
+    return decision.consecutive_failures <= WITNESS_SUPPRESS_MAX_CONSECUTIVE
+
+
+def _reset_witness_suppression() -> None:
+    from . import cooldown as cooldown_mod
+
+    try:
+        cooldown_mod.record_success(
+            service=_WITNESS_COUNTER_SERVICE, kind=_WITNESS_COUNTER_KIND
+        )
+    except Exception as exc:  # noqa: BLE001 — best-effort reset
+        log.warning("witness suppression counter reset failed: %s", exc)
+
+
 def check_external_probe(*, now: datetime | None = None) -> CheckOutcome:
     checked_at = now or datetime.now(timezone.utc)
     try:
@@ -254,9 +303,25 @@ def check_external_probe(*, now: datetime | None = None) -> CheckOutcome:
         verdict = {"verdict": reader.VERDICT_STALE, "reason": f"probe_read_failed: {exc}"}
 
     if verdict["verdict"] == reader.VERDICT_STALE:
-        github_run = _latest_github_run()
+        try:
+            github_run = _latest_github_run()
+        except Exception as exc:  # noqa: BLE001 — the witness must never kill the bucket
+            log.warning("github witness lookup failed: %s", exc)
+            github_run = None
         if _github_run_is_current_and_green(github_run, checked_at):
-            verdict = {"verdict": reader.VERDICT_HEALTHY, "reason": "github_workflow_current"}
+            # R-603: the witness proves only that the workflow exited 0 — never
+            # that a row readable at EXPECTED_SOURCE exists. Rename the source,
+            # rotate the secret to another DB or drop the row and this upgrade
+            # disarms the edge dead-man on EVERY cycle, forever, with no
+            # operator signal. Bound the suppression the same way the warmup
+            # ceiling is bounded (R-056).
+            if _register_witness_suppression(now=checked_at):
+                verdict = {
+                    "verdict": reader.VERDICT_HEALTHY,
+                    "reason": "github_workflow_current",
+                }
+    else:
+        _reset_witness_suppression()
 
     state = verdict["verdict"]
     offbox_age = verdict.get("age_seconds")

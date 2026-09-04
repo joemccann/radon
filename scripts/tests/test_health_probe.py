@@ -1168,3 +1168,37 @@ class TestDeadMansSwitch:
 
         assert result["verdict"] == reader.VERDICT_STALE
         assert result["reason"] == "invalid_checked_at"
+
+
+class TestCombinedOutageAndLedgerFailure:
+    """R-627 (P3): the `latest:` write-failure early return sits AHEAD of the
+    unhealthy branch, so a shared network fault that takes out both the edge
+    and the ledger reported exit 1 ('ledger degraded') and never named the
+    endpoint that was down. A consumer keying on EXIT_UNHEALTHY misclassified
+    the exact case both mechanisms exist for."""
+
+    def test_edge_down_plus_ledger_failure_is_unhealthy(self, monkeypatch, capsys):
+        _patch_happy_network(monkeypatch)
+        monkeypatch.setattr(probe, "probe_endpoint",
+                            lambda url, **k: {"reachable": False, "detail": "timeout"})
+
+        def _boom(_row):
+            raise turso_http.TursoHttpError("down")
+
+        monkeypatch.setattr(probe, "upsert_external_probe", _boom)
+        monkeypatch.setattr(probe, "insert_external_probe_run", lambda row: None)
+        assert probe.main() == probe.EXIT_UNHEALTHY
+        err = capsys.readouterr().err
+        assert "probe ledger degraded" in err
+        assert "UNHEALTHY" in err
+
+    def test_a_healthy_probe_with_a_ledger_failure_still_exits_one(self, monkeypatch):
+        """The R-627 fix must not swallow the ledger-only case."""
+        _patch_happy_network(monkeypatch)
+
+        def _boom(_row):
+            raise turso_http.TursoHttpError("down")
+
+        monkeypatch.setattr(probe, "upsert_external_probe", _boom)
+        monkeypatch.setattr(probe, "insert_external_probe_run", lambda row: None)
+        assert probe.main() == 1
