@@ -74,7 +74,7 @@ export default function WorkspaceShell({ section, tickerParam, initialPortfolio 
     && activeSection !== "watchlist"
     && activeSection !== "admin"
     && activeSection !== "workflow";
-  const { toasts, exitingIds, addToast, dismissToast } = useToast();
+  const { toasts, exitingIds, addToast, upsertToast, dismissToast } = useToast();
   const marketState = useMarketHours();
   const isMarketActive = marketState !== MarketState.CLOSED;
   // CME Globex session gate for the header ES/NQ/RTY futures strip — runs ~23h,
@@ -427,7 +427,7 @@ export default function WorkspaceShell({ section, tickerParam, initialPortfolio 
     if (isDemoMode) return;
     portfolioSyncNow();
   }, [isDemoMode, portfolioSyncNow]);
-  useFillToasts(orders, addToast, onNewFills);
+  useFillToasts(orders, upsertToast, onNewFills);
 
   const syncing = isOrdersPage ? ordersSyncing : portfolioSyncing;
   const error = isOrdersPage ? ordersError : portfolioError;
