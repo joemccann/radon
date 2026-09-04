@@ -6834,6 +6834,19 @@ tr.leg-row td {
   padding: 28px;
 }
 
+/* Mount point for DemoPendingLogo's WebGL sketch. Sized to match the mark;
+   collapses to zero footprint via :empty when WebGL is unavailable or the
+   visitor prefers reduced motion, so the panel renders identically to the
+   plain static card that shipped before the mark existed. */
+.demo-pending-logo {
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 16px;
+}
+.demo-pending-logo:empty {
+  display: none;
+}
+
 .trial-expired-kicker {
   display: flex;
   align-items: center;
