@@ -423,6 +423,7 @@ scripts/post-setup.sh
 - WebSocket uses short-lived tickets (no JWT in URLs)
 - Caddy enforces HTTPS with auto-redirect
 - IB Gateway port 4001 is bound to loopback and the Tailscale interface IP (`100.112.32.16`) only, never to the public NIC. The VPS FastAPI uses loopback; the laptop connects over Tailscale.
+- `setup-vps.sh` `open_firewall()` sets `ufw default deny incoming` and enables ufw; the allow rules live in that function
 - Public 22/tcp is open but keys-only (password and keyboard-interactive auth disabled by the sshd drop-in `setup-vps.sh` installs); Tailscale SSH is the primary route
 - `.env` and `.env.production` are gitignored and must never be committed. A credential-shaped example previously entered repository history; credential rotation and a coordinated destructive history rewrite remain required separately.
 - GitHub Actions pinned by commit SHA
