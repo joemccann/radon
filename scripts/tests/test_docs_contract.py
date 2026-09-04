@@ -237,6 +237,35 @@ class TestRobinhoodRankRule:
         ):
             assert name in operations, name
 
+    # DOC-072 (2026-09-04): four docs still claimed the host env file was mode
+    # 0600 owned by radon, one of them contradicting a correct line in the same
+    # file. cloud/scripts/setup-vps.sh installs it 0640 root:radon, so an
+    # operator "repairing" the permissions from a doc would lock the units out.
+    def test_no_doc_claims_a_stale_mode_for_the_host_env_file(self):
+        env_names = ("/etc/radon/env", "radon-cloud/.env")
+        for path in sorted(_ROOT.glob("docs/**/*.md")) + sorted(
+            _ROOT.glob("cloud/**/*.md")
+        ):
+            rel = path.relative_to(_ROOT).as_posix()
+            if rel.startswith("docs/archive/"):
+                continue
+            for lineno, line in enumerate(
+                path.read_text(encoding="utf-8").splitlines(), 1
+            ):
+                if not any(name in line for name in env_names):
+                    continue
+                if "0600" not in line:
+                    continue
+                # the rotating token store IS 0600 and is often named on the
+                # same line as the env file
+                if "rh-mcp.json" in line:
+                    continue
+                raise AssertionError(
+                    f"{rel}:{lineno} gives mode 0600 for the host env file; "
+                    "cloud/scripts/setup-vps.sh:606-607 installs /etc/radon/env "
+                    "0640 root:radon"
+                )
+
     def test_official_links_and_non_dependencies_are_pinned(self):
         services = (_ROOT / "docs" / "external-services.md").read_text(encoding="utf-8")
         for link in (
