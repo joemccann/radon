@@ -80,17 +80,15 @@ class TestAllLongComboDetection:
         structure, risk = detect_structure_type(legs)
         assert risk == "defined", f"Expected 'defined' but got '{risk}' for three long calls"
 
-    def test_mixed_long_short_still_complex(self):
-        """3 legs with mixed directions that don't match a known pattern stay complex."""
+    def test_protected_short_call_with_extra_long_put_is_defined(self):
+        """A capped call spread plus an extra long put remains defined risk."""
         legs = [
             _make_leg("C", 100.0, 10),   # long
             _make_leg("C", 110.0, -10),   # short
             _make_leg("P", 90.0, 10),     # long
         ]
-        structure, risk = detect_structure_type(legs)
-        # This should NOT be "defined" unless it matches a known safe pattern
-        # (it has a short leg), but it should at least not crash
-        assert risk in ("defined", "undefined", "complex")
+        _, risk = detect_structure_type(legs)
+        assert risk == "defined"
 
     def test_bull_call_spread_still_works(self):
         """Existing vertical spread detection still works (1 long, 1 short call)."""

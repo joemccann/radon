@@ -309,8 +309,44 @@ def detect_structure_type(legs: list) -> Tuple[str, str]:
             return f"Long Put Combo ({len(opt_legs)} legs)", "defined"
         return f"Long Combo ({len(opt_legs)} legs)", "defined"
 
+    # Mixed-direction option combos can still have fully bounded loss. Every
+    # short must be capped by at least the same quantity of long options of
+    # the same right; grouping already guarantees a common expiry. Extra long
+    # legs can add premium at risk, but cannot create naked tail exposure.
+    if opt_legs and len(opt_legs) == len(legs) and short_legs:
+        covered = all(
+            sum(max(0, l['position']) for l in opt_legs if l.get('right') == right)
+            >= sum(max(0, -l['position']) for l in opt_legs if l.get('right') == right)
+            for right in ('C', 'P')
+        )
+        if covered:
+            return f"Combo ({len(legs)} legs)", "defined"
+
     # Default for complex structures
     return f"Combo ({len(legs)} legs)", "complex"
+
+
+def _defined_option_combo_max_risk(legs: list, total_entry_cost: float) -> Optional[float]:
+    """Exact expiry max loss for a same-expiry, structurally bounded combo."""
+    strikes = sorted({float(l.get('strike', 0)) for l in legs if l['secType'] == 'OPT'})
+    if not strikes:
+        return None
+
+    min_pnl = float('inf')
+    for spot in [0.0, *strikes]:
+        intrinsic_value = 0.0
+        for leg in legs:
+            strike = float(leg.get('strike', 0))
+            intrinsic = (
+                max(0.0, spot - strike)
+                if leg.get('right') == 'C'
+                else max(0.0, strike - spot)
+            )
+            multiplier = float(leg.get('multiplier') or 100)
+            intrinsic_value += float(leg['position']) * intrinsic * multiplier
+        min_pnl = min(min_pnl, intrinsic_value - total_entry_cost)
+
+    return max(0.0, -min_pnl)
 
 
 def _raw_ratio_label(legs: list) -> str:
@@ -576,7 +612,9 @@ def collapse_positions(positions: list) -> list:
         # Calculate max risk
         if risk_profile == "defined":
             # For defined risk, max loss is net debit paid
-            if "Spread" in structure_type:
+            if structure_type.startswith("Combo ("):
+                max_risk = _defined_option_combo_max_risk(legs, total_entry_cost)
+            elif "Spread" in structure_type:
                 strikes = sorted([l.get('strike', 0) for l in legs if l['secType'] == 'OPT'])
                 width = (strikes[-1] - strikes[0]) * 100 * contracts if len(strikes) >= 2 else 0
                 if direction == "DEBIT":

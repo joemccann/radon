@@ -1,5 +1,13 @@
 # Lessons
 
+## 2026-09-04 — Defined-risk combinations need whole-structure coverage
+
+- Classify multi-leg risk from the complete same-expiry payoff, including
+  protective long legs outside a vertical spread; do not reduce recognition to
+  named two-leg structures.
+- When every leg has resolved entry and market values, the parent row must sum
+  per-leg P&L even if a separate return-capital input is unavailable.
+
 ## 2026-09-04 — IB error 202 is cancel confirmation, not a replace abort
 
 - IB error 202 (`Order Canceled - reason:`) is the broker's cancel

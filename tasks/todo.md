@@ -1,3 +1,36 @@
+# Task: Restore ARM defined-risk aggregate P&L (2026-09-04) [DONE]
+
+Recognize the reported three-leg ARM structure as defined risk and render its
+parent-row P&L from the resolved leg economics.
+
+## Dependency graph
+
+- T1 depends_on: [] - Reproduce the ARM classification and missing aggregate P&L, then trace the risk and valuation paths.
+- T2 depends_on: [T1] - Add failing unit and Playwright regressions for the exact three-leg structure.
+- T3 depends_on: [T2] - Implement the smallest structural-risk and aggregate-P&L correction.
+- T4 depends_on: [T3] - Run focused Vitest, Playwright, and visual browser verification.
+- T5 depends_on: [T4] - Run the full web suite, typecheck, lint, review the diff, and document evidence.
+- T6 depends_on: [T5] - Commit, open the PR, supervise exact-head CI to green, and send the required notification.
+
+## Checklist
+
+- [x] T1 Reproduce and trace the defect.
+- [x] T2 Establish red regression coverage.
+- [x] T3 Implement the minimal fix.
+- [x] T4 Complete focused and visual verification.
+- [x] T5 Complete full verification and review.
+- [x] T6 Open and supervise the PR.
+
+## Review
+
+- Same-expiry option combos now classify from whole-structure short coverage; ARM's protected call wing plus long put is defined, while an uncovered ratio remains complex.
+- Generic bounded combos compute exact expiry max loss at zero and every strike kink, producing $19,410 for the ARM fixture rather than using the unrelated outer-strike width.
+- Parent dollar P&L sums resolved signed leg economics even when aggregate basis provenance is mixed; Avg Entry, Return %, max risk, and close-out basis remain unavailable in that state.
+- Verification: focused Python 73 passed; focused Vitest 22 passed; CI-style Vitest 8,196 passed; Playwright passed once in dev and 3/3 under `next start`; typecheck/build clean; lint 0 errors and 17 existing warnings.
+- Full Python reached 11,558 passed, 1 skipped, with the new CI-curation contract and one load-sensitive GARCH retry failing; registration checks then passed 33/33 and the GARCH test passed alone.
+
+---
+
 # Task: Combo replace IB 202 cancel abort (2026-09-04) [DONE]
 
 Combo modify treated IB error 202 as a failed cancel, skipped the replacement,

@@ -13,15 +13,12 @@
  * sized off.
  *
  * The server already refuses to publish the aggregate (`entry_cost` and
- * `max_risk` arrive `null`). The display layer must refuse too, because
- * `resolveEntryCost` recomputes the same blend from the legs.
+ * `max_risk` arrive `null`). Capital and return calculations must keep that
+ * refusal, while dollar P&L may sum the independently measured leg P&Ls.
  *
  * T-315: the T-253 fixture carried no leg marks, so `resolveMarketValue` was
- * null and every P&L branch was unreachable — the cells it did not fix (P&L,
- * the portfolio Open P&L total, the unrealized breakdown, Today P&L and the
- * close ticket's realised figure) still subtracted the blend. The fixture
- * now marks both legs (mv = $4,500) so a blended P&L of +$3,500 is exactly
- * what an ungated path prints.
+ * null and every P&L branch was unreachable. The fixture marks both legs (mv
+ * = $4,500), making their signed P&L sum exactly +$3,500.
  */
 
 import React from "react";
@@ -212,10 +209,9 @@ describe("PositionTable renders no basis for a `mixed` position", () => {
     expect(cellTexts()).not.toContain("-$1,000");
   });
 
-  it("the P&L cell reads — and Return % N/A rather than mv − blend (T-315)", () => {
+  it("the P&L cell sums measured legs while Return % stays unavailable", () => {
     render(<PositionTable positions={[MIXED]} prices={{}} />);
-    expect(cellTexts()).not.toContain(BLENDED_PNL);
-    expect(cellUnder("P&L")).toBe("—");
+    expect(cellUnder("P&L")).toBe(BLENDED_PNL);
     expect(cellUnder("Return %")).toBe("N/A");
   });
 
@@ -230,20 +226,20 @@ describe("PositionTable renders no basis for a `mixed` position", () => {
   });
 });
 
-describe("resolveEntryCost / getPnlDollars refuse a blended leg basis (T-315)", () => {
+describe("mixed basis separates capital from measurable leg P&L", () => {
   it("resolveEntryCost is null for a `mixed` position", () => {
     expect(resolveEntryCost(MIXED)).toBeNull();
     expect(resolveEntryCost(CLEAN)).toBe(1000);
   });
 
-  it("getPnlDollars is null even with a real mark", () => {
-    expect(getPnlDollars(MIXED, 4500)).toBeNull();
+  it("getPnlDollars sums the independently measured legs", () => {
+    expect(getPnlDollars(MIXED, 4500)).toBe(3500);
     expect(getPnlDollars(CLEAN, 4500)).toBe(3500);
   });
 
-  it("Today P&L for a same-day `mixed` position is null, not mv − blend", () => {
+  it("Today P&L for a same-day `mixed` position uses the measured leg sum", () => {
     const sameDay = partiallyRolledVertical("mixed", { entry_date: todayET() });
-    expect(getTodayPnlDollars(sameDay, {})).toBeNull();
+    expect(getTodayPnlDollars(sameDay, {})).toBe(3500);
     const sameDayClean = partiallyRolledVertical("session_fills", { entry_date: todayET() });
     expect(getTodayPnlDollars(sameDayClean, {})).toBe(3500);
   });
