@@ -539,7 +539,12 @@ class TestDeployCollateralSignalKill:
     about failed units is unchanged: non-143 exit-code failures,
     start-limit-hit, and signal/143 kills with no deploy evidence still
     page. exit-code 143 (graceful SIGTERM unwind) inside a deploy window
-    is the same collateral as Result=signal (2026-09-01 e741ed1a)."""
+    is collateral too (2026-09-01 e741ed1a), but on a NARROWER horizon than
+    Result=signal: REL-202/NF-10, the 143 shape is what ANY SIGTERM source
+    produces (earlyoom, pkill, a co-scheduled TimeoutStopSec), so it gets
+    the GRACEFUL_EXIT_MARKER_DWELL_SECS 15-minute kill-to-marker dwell
+    while Result=signal keeps the 24h KILL_BEFORE_GREEN_FROZEN_CAP_SECS
+    horizon."""
 
     WINDOW_NOW = datetime(2026, 8, 5, 21, 50, tzinfo=timezone.utc)
 
@@ -773,6 +778,55 @@ class TestDeployCollateralSignalKill:
         assert len(outcomes) == 1
         assert outcomes[0].severity == "P3"
         assert "deploy" in outcomes[0].message.lower()
+
+    def test_graceful_sigterm_exit_143_inside_the_dwell_is_p3(self):
+        """T-433, lower side of GRACEFUL_EXIT_MARKER_DWELL_SECS (15 min).
+
+        A real deploy stop-clean greens within minutes of the kill. 600s
+        kill-to-marker is inside the dwell, so 143 is still collateral.
+        """
+        killed = datetime(2026, 9, 1, 23, 48, 28, tzinfo=timezone.utc)
+        marker = killed + timedelta(seconds=600)
+        now = marker + timedelta(seconds=60)
+        current = units.parse_show_output(
+            self._signal_block(killed, result="exit-code", exec_main_status=143)
+        )
+        outcomes = units.evaluate(
+            current=current, previous={}, now=now,
+            deploy={"marker_mtime": marker, "in_flight": False},
+        )
+        assert len(outcomes) == 1
+        assert outcomes[0].severity == "P3"
+        assert "deploy" in outcomes[0].message.lower()
+
+    def test_graceful_sigterm_exit_143_past_the_dwell_pages_p1(self):
+        """T-433, upper side of the same boundary — the whole point of it.
+
+        Result=signal at 3600s kill-to-marker is P3 (it rides the 24h
+        frozen cap). exit-code/143 at 3600s must NOT be: an hour between
+        the kill and the next green is not a deploy stop-clean, it is a
+        SIGTERM from somewhere else and it pages. Widening
+        GRACEFUL_EXIT_MARKER_DWELL_SECS back toward the 24h horizon reds
+        here.
+        """
+        killed = datetime(2026, 9, 1, 23, 48, 28, tzinfo=timezone.utc)
+        marker = killed + timedelta(seconds=3600)
+        now = marker + timedelta(seconds=60)
+        block = self._signal_block(killed, result="exit-code", exec_main_status=143)
+        outcomes = units.evaluate(
+            current=units.parse_show_output(block), previous={}, now=now,
+            deploy={"marker_mtime": marker, "in_flight": False},
+        )
+        assert [o.severity for o in outcomes] == ["P1"]
+
+        # Same timestamps, Result=signal: the wide horizon still applies, so
+        # this pair is what makes the two horizons distinguishable at all.
+        signal_outcomes = units.evaluate(
+            current=units.parse_show_output(self._signal_block(killed)),
+            previous={}, now=now,
+            deploy={"marker_mtime": marker, "in_flight": False},
+        )
+        assert [o.severity for o in signal_outcomes] == ["P3"]
 
     def test_graceful_sigterm_exit_143_without_deploy_evidence_stays_p1(self):
         killed = datetime(2026, 9, 1, 23, 48, 28, tzinfo=timezone.utc)
