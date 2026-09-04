@@ -49,6 +49,18 @@ not start, stop, or restart Gateway. Since R-430 the deploy job also runs
 `radon-deploy-root sync-control-plane` first, so privileged diffs (helper,
 sudoers, polkit) converge on GitHub main without root SSH too.
 
+**Refresh installs git blobs, never the working tree.** The sources it copies
+into `/etc/sudoers.d`, `/usr/local/sbin`, `/etc/polkit-1` and the unit
+directory come from `git cat-file blob` at the deployed commit, staged
+root-owned under `/var/lib/radon/deploy/control-plane-src.*`. That commit is
+the local HEAD, and it must be reachable from the GitHub main tip -- an
+ancestor, so a rollback still installs its own release's control plane, but
+never a commit main has not contained. `/home/radon/radon` is writable by
+`radon`, which holds a NOPASSWD verb for `refresh-control-plane-privileged`;
+reading the checkout there made those bytes a root install with only syntax
+validation in front of them. Same rule `install-units` has always followed
+(R-084).
+
 The five app-plane drop-ins run the container with the systemd notify
 socket proxied: `radon-app-runtime run` spawns `notify-proxy` inside the
 unit cgroup and mounts ITS socket as the container's `NOTIFY_SOCKET`. A
