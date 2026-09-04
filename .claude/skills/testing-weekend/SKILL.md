@@ -928,3 +928,31 @@ how this loop improves as the codebase grows.
   run: `grep -c "$PUSHOVER_TOKEN"`-style checks on the gate output for every
   secret the wrapper exports, and treat any hit as a P1 test-isolation
   finding.
+
+- **2026-09-04 (audit): `github_pr_output.py --issue` does NOT accumulate across
+  repeated flags — it keeps the LAST one.** Passing `--issue` five times
+  produced a PR body with a single bullet and a title taken from the fifth,
+  which reads exactly like a correctly-formatted one-finding night. The same
+  applies to `--next`. Pass ONE multi-line string per flag, with the bullets
+  separated by real newlines, and always print the generated body before
+  `gh pr create` — the PR is a dead-man channel, so a silently truncated body
+  is the failure this loop exists to prevent (same class as the 2026-08-26
+  `gh pr edit --body-file` silent abort).
+- **2026-09-04 (audit): a bounded wait loop that RUNS OUT is not a completed
+  wait — check the sentinel before you read the artifact.** The base-SHA cloud
+  attribution used `for i in $(seq 1 16); do ... sleep 20; done`, which expired
+  while pytest was still at 54%. `grep '^FAILED' cloud-base.log` therefore
+  returned zero lines, and `comm -13` against a 37-line HEAD list reported all
+  37 reds as NEW IN THIS DELTA — a five-alarm result that was pure artifact.
+  The tell was that neither "BASE DONE" nor "GONE" printed. Always branch on the
+  sentinel explicitly after the loop and refuse to diff when it is absent; an
+  empty FAILED list from a red run is impossible and should be treated as such.
+- **2026-09-04 (audit): the sibling loop's gates cost this phase its second
+  round.** With the reliability loop mid-gate in `~/radon-weekend/radon`
+  throughout, pytest took 2617 s (43 min) against a usual ~275 s — nearly 10x —
+  which alone consumed most of the cap and forced round 2 to be abandoned. The
+  2026-08-30 lesson says to check `ps` before trusting a round's numbers; extend
+  it to PLANNING: check for the sibling at pre-flight, and when it is already
+  running, budget for one round only and say so in the ledger rather than
+  starting two and killing one. One honest round plus a base-SHA diff is worth
+  more than two contended rounds.
