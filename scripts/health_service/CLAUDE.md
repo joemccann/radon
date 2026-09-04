@@ -22,9 +22,11 @@ The whole point is zero shared fate: a bug here, or any trading-stack dependency
   **Consumers.** The watchdogs, the deploy health-gate, CI and the Next.js admin proxy (`web/app/api/admin/edge-health/route.ts`) all read `127.0.0.1:8330/status` directly and keep the full body — do NOT point any of them at the public edge, or the admin unit inventory and `WriterFreshnessTable` silently render empty (and empty reads as green). The browser IB chip (`web/lib/IBStatusContext.tsx`) is unavoidably a public-edge caller, so it consumes the redacted aggregate: `overall_state == "up"` settles "connected", anything else is reported as unhealthy and the rich `/api/admin/health` proxy is asked to attribute the fault. `RADON_HEALTH_STATUS_TOKEN` is optional (documented in the root `.env.example`); unset just means the edge stays redacted.
 
   Sources, each isolated (own timeout + try/except so one failure can't fail the response):
-  - **live probes** (`run_probes`, concurrent): `radon-api` via `http://127.0.0.1:8321/health/lite`, relay `:8765` / Next.js `:3000` / IB-gateway `:4001` TCP.
+  - **live probes** (`run_probes`, concurrent): `radon-api` via `http://127.0.0.1:8321/health/lite`, relay `:8765` / Next.js `:3000` / IB-gateway `:4001` TCP, plus a `radon-mcp` HTTP liveness probe registered only when `RADON_MCP_PROBE_URL` is set (`cloud/services/radon-health.service` sets it) — a dependency probe, so a hung-but-alive MCP degrades the aggregate without collapsing the edge to `down`.
   - **unit states** (`UnitStateCache`): `systemctl show` on a **5s background thread** — NEVER fork on the request hot path (an OOM/disk-full incident is exactly when you can't).
   - **`service_health`** (`turso_http.ServiceHealthCache`): the Turso table over stdlib HTTP, bounded (≤2.5s) + ~5s TTL + lock-serialized; any outage/missing-creds degrades to `state:"unknown"`.
+
+  `/status` also carries **`degraded_reasons`** (`probes.degraded_reasons`): the sorted names of the non-`up` dependency probes and units behind a degraded aggregate, always computed and empty when everything dependency-side is up, so "gateway down (suppressed)", "newsfeed flap" and "2FA lock" stop reading as the same word. `_gateway_dwell_suppressed` also holds back the `radon-ib-gateway` dwell escalation when that unit's last `Result` is `success` and the clock is outside the 04:00-20:00 ET weekday session: a clean weekend/overnight exit is the expected state, not a stuck dependency.
 
 ## Conventions
 
