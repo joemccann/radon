@@ -1,12 +1,16 @@
 // Tiered Upstash sliding-window rate limiter, keyed by Clerk userId
 // (demo.radon.run, plan §Guardrails — Rate-limit / DOS).
 //
-// Four tiers:
+// Eight tiers:
 //   A — reads        ~100/hr   (cheap GETs)
 //   B — expensive    ~10/hr    (scans, heavy aggregations)
 //   C — mutations    5/day     (writes: notes, watchlist, alerts)
 //   D — AI           5/day     (LLM routes; the per-endpoint quota is the
 //                               finer-grained backstop in aiQuota.ts)
+//   E — WS tickets   20/min    (bounded reconnect bursts)
+//   F — WS tickets   200/day   (daily reconnect ceiling)
+//   G — headlines    5/min     (bounded snapshot-poll bursts)
+//   H — headlines    5,000/day (three persistent one-minute polling tabs)
 //
 // The limiter is constructed LAZILY from UPSTASH_REDIS_REST_URL / _TOKEN.
 // Production and demo deployments fail closed if it is unavailable; local
@@ -17,8 +21,12 @@
 
 import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
+import {
+  DEMO_HEADLINES_BURST_PER_MINUTE,
+  DEMO_HEADLINES_DAILY_LIMIT,
+} from "./headlinesPolicy";
 
-export type DemoRateTier = "A" | "B" | "C" | "D" | "E" | "F";
+export type DemoRateTier = "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H";
 
 export type DemoRateLimitResult = {
   success: boolean;
@@ -36,6 +44,8 @@ const TIER_CONFIG: Record<DemoRateTier, TierConfig> = {
   D: { limit: 5, window: "1 d" },
   E: { limit: 20, window: "1 m" },
   F: { limit: 200, window: "1 d" },
+  G: { limit: DEMO_HEADLINES_BURST_PER_MINUTE, window: "1 m" },
+  H: { limit: DEMO_HEADLINES_DAILY_LIMIT, window: "1 d" },
 };
 
 // Generous no-op result for builds without Upstash configured.

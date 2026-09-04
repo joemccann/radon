@@ -2,8 +2,9 @@
 //
 // Pure mapping consumed by the middleware demo rate-limiter. Tiers + budgets
 // are defined in rateLimit.ts (A reads 100/hr, B expensive 10/hr, C mutations
-// 5/day, D AI 5/day). Keeping the classifier pure makes the policy a unit test
-// instead of a thing you discover in production.
+// 5/day, D AI 5/day, E/F WS reconnects, G/H headline polling). Keeping the
+// classifier pure makes the policy a unit test instead of a thing you discover
+// in production.
 
 import type { DemoRateTier } from "./rateLimit";
 
@@ -36,9 +37,11 @@ export function classifyRateTier(
   method: string,
   pathname: string,
 ): DemoRateTier {
-  if (method.toUpperCase() === "POST" && pathname === "/api/ib/ws-ticket") return "E";
+  const normalizedMethod = method.toUpperCase();
+  if (normalizedMethod === "POST" && pathname === "/api/ib/ws-ticket") return "E";
+  if (normalizedMethod === "GET" && pathname === "/api/headlines") return "G";
   if (AI_PATHS.has(pathname)) return "D";
   if (EXPENSIVE_PATTERNS.some((re) => re.test(pathname))) return "B";
-  if (WRITE_METHODS.has(method.toUpperCase())) return "C";
+  if (WRITE_METHODS.has(normalizedMethod)) return "C";
   return "A";
 }

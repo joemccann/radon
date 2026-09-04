@@ -66,6 +66,7 @@ const NO_STORE_HOOKS = [
   "lib/useTickerFlowReport.ts",
   "lib/useRvRatio.ts",
   "lib/useBpi.ts",
+  "lib/useHeadlines.ts",
 ];
 
 describe("API route handlers — must export dynamic = 'force-dynamic'", () => {
