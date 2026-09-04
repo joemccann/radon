@@ -38,6 +38,11 @@ DEFAULT_REMOTE_DIR = "outgoing"
 FIRST_DELIVERY_DATE = date(2026, 8, 31)
 FIRST_DELIVERY_ENV = "RADON_FLEX_FIRST_DELIVERY"
 MAX_NIGHTLY_SPAN_DAYS = 5
+# How far behind the last completed session the NEWEST delivered statement may
+# sit before the remote counts as stale. Deliberately NOT MAX_NIGHTLY_SPAN_DAYS,
+# which bounds a statement's own period span — overloading it would let a real
+# IBKR delivery stoppage go unpaged for five days. R-448.
+MAX_DELIVERY_LAG_DAYS = 1
 KEEP_GPG = 3
 # IBKR names a PGP delivery `<acct>.<Query_Name>.<from>.<to>.xml.pgp`. The
 # filter kept only `.gpg`, so three days of files sat in `outgoing` while every
@@ -221,6 +226,26 @@ def nightly_period_ok(xml_text: str) -> bool:
     return (end - start).days <= MAX_NIGHTLY_SPAN_DAYS
 
 
+def statement_period_end(xml_text: str) -> Optional[date]:
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return None
+    statement = root.find(".//FlexStatement")
+    if statement is None:
+        return None
+    return _flex_day(statement.get("toDate"))
+
+
+def delivery_is_stale(period_end: Optional[date], now: Optional[datetime] = None) -> bool:
+    from utils.market_calendar import last_completed_session_date
+
+    if period_end is None:
+        return True
+    last_session = date.fromisoformat(last_completed_session_date(now))
+    return (last_session - period_end).days > MAX_DELIVERY_LAG_DAYS
+
+
 def _flex_day(value: Optional[str]) -> Optional[date]:
     if not value or len(value) < 8:
         return None
@@ -381,6 +406,7 @@ def _run(
     _ensure_inbox(inbox)
     failed = False
     ingested = 0
+    newest_period_end: Optional[date] = None
     for name in names:
         dest = inbox / Path(name).name
         try:
@@ -389,6 +415,11 @@ def _run(
             if not nightly_period_ok(xml_text):
                 raise FlexSftpError("period_gate: nightly path rejects 365-day/YTD")
             classify_flex_xml(xml_text)
+            # Every classified file counts here, duplicates included: an
+            # idempotent re-pull of the CURRENT statement is not a stoppage.
+            period_end = statement_period_end(xml_text)
+            if period_end is not None and (newest_period_end is None or period_end > newest_period_end):
+                newest_period_end = period_end
             # `a.xml.pgp` labels as `a.xml`, `trades.gpg` as `trades.xml`.
             plain = dest.with_suffix("")
             if plain.suffix.lower() != ".xml":
@@ -416,7 +447,7 @@ def _run(
     if failed:
         _heartbeat("error", "one or more files rejected")
         return 1
-    if not ingested and not empty_remote_is_expected(now):
+    if not ingested and delivery_is_stale(newest_period_end, now) and not empty_remote_is_expected(now):
         _heartbeat(
             "error",
             "no NEW statement applied; the remote directory is stale "
