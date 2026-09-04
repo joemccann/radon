@@ -27,6 +27,29 @@ dollar amount and percentage, using the shared order-risk convention.
 
 ---
 
+# Task: Install stripped radon-mcp unit (DOC-073) [DONE]
+
+## Dependency graph
+
+- M1 depends_on: [] - Copy stripped `radon-mcp.service` to the host and `systemctl restart radon-mcp`.
+- M2 depends_on: [M1] - Red tests: manifest digest matches the unit, no `unit-mismatch:radon-mcp.service` ack, runbook not pending.
+- M3 depends_on: [M2] - Drop the allowlist entry, pin `00e6875e…`, remove the DOC-073 pending sentence.
+- M4 depends_on: [M3] - Focused + cloud tests, PR, CI green, Pushover.
+
+## Checklist
+
+- [x] M1 Host install-copy + restart (live hash `00e6875e`, environ 8 keys, MCP 200)
+- [x] M2 Failing tests
+- [x] M3 Allowlist / manifest / docs
+- [x] M4 Focused tests green; cloud 1667 passed, 5 caddy-PATH baseline red
+
+## Review
+
+- Host `/etc/systemd/system/radon-mcp.service` matches repo `00e6875e`; process environ is the 8-key allowlist; public `/mcp` tools/list 200; health probe `radon-mcp` up (406).
+- Manifest digest corrected from `88120eaf` (install-units skip) to `00e6875e`. `unit-mismatch:radon-mcp.service` dropped. DOC-073 pending sentence removed.
+
+---
+
 # Task: Require PR CI supervision and green notification (2026-09-03) [DONE]
 
 ## Dependency graph

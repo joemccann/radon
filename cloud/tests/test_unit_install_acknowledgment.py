@@ -224,3 +224,18 @@ def test_the_fleet_wide_prefix_dropin_is_pinned():
         "entry; bump it in the same commit as the setup-vps install_fleet_dropin "
         "copy that puts it on the host"
     )
+
+
+def test_radon_mcp_stripped_unit_is_pinned_without_mismatch_ack():
+    """DOC-073: after the host install-copy, a leftover unit-mismatch ack
+    stale-allowlists and a wrong digest makes install-units skip forever."""
+    name = "radon-mcp.service"
+    path = _unit_files()[name]
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    assert _manifest_hashes().get(name) == digest, (
+        f"{name} digest {digest} is not pinned (got "
+        f"{_manifest_hashes().get(name)}); install-units skips on mismatch"
+    )
+    assert name not in _acknowledged_units(), (
+        f"{name} still has a drift-allowlist ack after the host install-copy"
+    )

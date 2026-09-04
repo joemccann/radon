@@ -848,3 +848,10 @@ class TestInstallCopyOwedClaims:
             "cloud/config/installed-units.sha256 already pins:\n  "
             + "\n  ".join(sorted(set(wrong)))
         )
+
+    def test_hosted_mcp_runbook_does_not_claim_a_pending_root_copy(self):
+        """DOC-073: the stripped radon-mcp unit is installed; the pending-copy
+        sentence must not outlive that install."""
+        text = (_ROOT / "docs" / "cloud-services.md").read_text(encoding="utf-8")
+        assert "unit-mismatch:radon-mcp.service" not in text
+        assert "live unit still differs" not in text
