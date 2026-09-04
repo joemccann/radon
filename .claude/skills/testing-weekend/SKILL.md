@@ -976,3 +976,23 @@ how this loop improves as the codebase grows.
   correct response was to re-stamp the annotations with the `next start`
   evidence that agent had actually captured, not to loosen the date comparison.
   Land guards that read the branch diff LAST, after the changes they will judge.
+
+- **2026-09-04 (deliver): a CI red the remediate phase never saw can be the
+  remediate phase's own work — attribute by AUTHORSHIP, not by `git diff
+  --name-only | grep`.** Three shards redded. Two were a pre-existing
+  whole-second `date` granularity bug in the shed ladders that only samples red
+  under load, correctly fixed here. The third (`test_rel178_...`) was read as
+  "untouched by this branch" because a `git diff --name-only origin/main..HEAD |
+  grep rel178` printed nothing — but `git log origin/main..HEAD -- <file>` named
+  the branch's own commit as its author. The file existed on main; the branch
+  ADDED a class to it, and diff-name matching had already been satisfied
+  upstream. Use `git log <base>..HEAD -- <path>` to attribute, never a name
+  grep, before writing "pre-existing" anywhere.
+- **2026-09-04 (deliver): a test that passes locally and fails on CI with an
+  errno is a PLATFORM-default test, not a flake.** The watchdog cert cycle
+  acquired the real 2FA lease, which resolves to per-user Application Support on
+  macOS and `/var/lib/radon/ib-lease` on Linux. Every new test that drives a
+  REAL cycle (rather than patching around it) inherits every host path that
+  cycle touches; grep the branch's new tests for the entry point and confirm
+  each one redirects the paths it will reach. That sweep is what proved this was
+  the only unguarded `run_cycle` on the branch.
