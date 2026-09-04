@@ -107,7 +107,7 @@ class TestCaptureHappyPath:
     def test_kill_minus_3_targets_discovered_pid(self, out_dir):
         runner = FakeRunner()
         capture_jvm_forensics(output_dir=out_dir, runner=runner, sleeper=lambda s: None)
-        kill_cmds = [c for c in runner.commands() if "kill -3" in c]
+        kill_cmds = [c for c in runner.commands() if "thread-dump" in c]
         assert len(kill_cmds) == 1
         assert "1770100" in kill_cmds[0]
 

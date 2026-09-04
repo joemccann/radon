@@ -36,6 +36,11 @@ ARTIFACTS = (
     Artifact("scripts/drift_audit.py", "/usr/local/lib/radon/drift_audit.py", 0o644),
     Artifact("scripts/disk_cleanup.py", "/usr/local/lib/radon/disk_cleanup.py", 0o644),
     Artifact("scripts/radon-app-runtime.sh", "/usr/local/sbin/radon-app-runtime", 0o755),
+    # The Gateway docker operator that replaces radon's group `docker`, and the
+    # compose body it runs as root -- which is why the body cannot stay in the
+    # radon-writable checkout.
+    Artifact("scripts/radon-docker-gw.sh", "/usr/local/sbin/radon-docker-gw", 0o755),
+    Artifact("docker-compose.yml", "/etc/radon/ib-gateway-compose.yml", 0o644),
     Artifact("config/sudoers.d/radon-deploy", "/etc/sudoers.d/radon-deploy", 0o440),
     Artifact("config/sudoers.d/radon-monitor", "/etc/sudoers.d/radon-monitor", 0o440),
     Artifact("config/sudoers.d/radon-ops", "/etc/sudoers.d/radon-ops", 0o440),
