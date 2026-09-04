@@ -6,7 +6,7 @@ that produces them, not as opaque constants.
 """
 import json
 import sqlite3
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -725,3 +725,126 @@ class TestConstructionFailureIsReported:
         with pytest.raises(EquiblesAuthError):
             self.mod.run(tickers=["AAPL"])
         assert self.health == ["error"]
+
+
+class TestNextAttemptAt:
+    """The timer is weekly (Tue 09:15 UTC). Every error heartbeat must say when
+    the next attempt actually lands, or the watchdog re-pages the same weekly
+    writer on every cycle for seven days."""
+
+    @pytest.fixture(autouse=True)
+    def _capture_health(self, tmp_path, monkeypatch):
+        import fetch_equibles_ats_venue_share as mod
+
+        monkeypatch.setattr(mod, "ATS_VENUE_SHARE_JSON", tmp_path / "ats_venue_share.json")
+        self.db_writes = []
+        self.health = []
+        monkeypatch.setattr(
+            mod, "_write_db_cache",
+            lambda payload, scan_time: self.db_writes.append(payload),
+        )
+        monkeypatch.setattr(
+            mod, "_record_health",
+            lambda state, scan_time, error=None: self.health.append(
+                {"state": state, "error": error}
+            ),
+        )
+        self.mod = mod
+
+    def _client(self, tickers, failures=None):
+        weeks = mondays(MIN_HISTORY_WEEKS + 4)
+        off = {t: [off_exchange_row(w) for w in weeks] for t in tickers}
+        short = {t: [r for w in weeks for r in short_volume_week(w)] for t in tickers}
+        return _StubClient(off, short, failures=failures)
+
+    def _expected(self, now):
+        stamp = now.replace(hour=9, minute=15, second=0, microsecond=0)
+        while stamp <= now or stamp.weekday() != 1:
+            stamp += timedelta(days=1)
+        return stamp.isoformat().replace("+00:00", "Z")
+
+    def _errors(self):
+        return [h["error"] for h in self.health if h["state"] == "error"]
+
+    def test_next_scheduled_run_is_the_coming_tuesday_0915_utc(self):
+        anchor = datetime.now(timezone.utc).replace(microsecond=0)
+        tuesday = anchor + timedelta(days=(1 - anchor.weekday()) % 7)
+        for now in (
+            anchor,
+            tuesday.replace(hour=9, minute=0),
+            tuesday.replace(hour=9, minute=30),
+        ):
+            assert self.mod._next_scheduled_run(now) == self._expected(now)
+
+    def test_empty_cycle_error_carries_next_attempt_and_codes(self):
+        from clients.equibles_client import EquiblesNotFoundError
+
+        now = datetime.now(timezone.utc)
+        client = _StubClient(
+            {}, {}, failures={"ZZZZ": EquiblesNotFoundError("nope", 404, "not_found")}
+        )
+        self.mod.run(client=client, tickers=["AAPL", "ZZZZ"], now=now)
+
+        error = self._errors()[0]
+        assert error["message"] == "no ticker produced a series"
+        assert error["next_attempt_at"] == self._expected(now)
+        assert "not_found" in error["codes"]
+
+    def test_wedged_client_empty_cycle_reports_timeout_and_budget_codes(self, monkeypatch):
+        now = datetime.now(timezone.utc)
+
+        def wedged(_client, ticker, _start, _end, timeout_s=0.0):
+            raise TimeoutError(f"{ticker}: fetch exceeded {timeout_s:.0f}s wall-clock")
+
+        monkeypatch.setattr(self.mod, "_fetch_ticker_bounded", wedged)
+        client = _StubClient({}, {})
+        self.mod.run(client=client, tickers=["AAPL", "MSFT", "NVDA"], now=now)
+
+        error = self._errors()[0]
+        assert error["message"] == "no ticker produced a series"
+        assert error["next_attempt_at"] == self._expected(now)
+        assert error["codes"] == ["budget", "timeout"]
+
+    def test_partial_cycle_error_carries_next_attempt(self):
+        from clients.equibles_client import EquiblesNotFoundError
+
+        now = datetime.now(timezone.utc)
+        universe = ["AAPL", "A", "B", "C", "D"]
+        failures = {t: EquiblesNotFoundError("nope") for t in universe[1:]}
+        client = self._client(universe, failures=failures)
+        payload = self.mod.run(client=client, tickers=universe, now=now)
+
+        assert payload["partial"] is True
+        error = self._errors()[0]
+        assert error["message"].startswith("partial cycle:")
+        assert error["next_attempt_at"] == self._expected(now)
+
+    def test_dropped_tail_error_carries_next_attempt(self, monkeypatch):
+        now = datetime.now(timezone.utc)
+        universe = ["AAPL", "MSFT", "NVDA", "AMD", "ZZZZ"]
+        client = self._client(universe)
+        real = self.mod._fetch_ticker_bounded
+
+        def wedge_last(client_, ticker, start_s, end_s, timeout_s=0.0):
+            if ticker == "ZZZZ":
+                raise TimeoutError(f"{ticker}: fetch exceeded {timeout_s:.0f}s wall-clock")
+            return real(client_, ticker, start_s, end_s, timeout_s=timeout_s)
+
+        monkeypatch.setattr(self.mod, "_fetch_ticker_bounded", wedge_last)
+        self.mod.run(client=client, tickers=universe, now=now)
+
+        error = self._errors()[0]
+        assert error["message"].startswith("dropped tail:")
+        assert error["next_attempt_at"] == self._expected(now)
+
+    def test_aborted_cycle_error_carries_next_attempt(self):
+        from clients.equibles_client import EquiblesAuthError
+
+        now = datetime.now(timezone.utc)
+        client = self._client(["AAPL"], failures={"AAPL": EquiblesAuthError("rejected")})
+        with pytest.raises(EquiblesAuthError):
+            self.mod.run(client=client, tickers=["AAPL"], now=now)
+
+        error = self._errors()[0]
+        assert error["message"].startswith("cycle aborted:")
+        assert error["next_attempt_at"] == self._expected(now)

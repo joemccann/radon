@@ -569,3 +569,27 @@ def test_missing_deploy_markers_never_suppress(tmp_path, monkeypatch) -> None:
 
     assert outcome.fired is True
     assert outcome.severity == "P1"
+
+
+def test_github_witness_prefers_ipv4_before_fetching() -> None:
+    """VPS IPv6 is blackholed to api.github.com; an AAAA-first walk burns the
+    whole bounded timeout and blinds the witness."""
+    from scripts.watchdog import external_probe
+
+    order: list[str] = []
+    response = MagicMock()
+    response.read.return_value = b'{"workflow_runs":[]}'
+
+    def _record_urlopen(*_args, **_kwargs):
+        order.append("fetch")
+        handle = MagicMock()
+        handle.__enter__.return_value = response
+        return handle
+
+    with (
+        patch("utils.ipv4_first.prefer_ipv4", lambda: order.append("prefer_ipv4")),
+        patch.object(external_probe.urllib.request, "urlopen", _record_urlopen),
+    ):
+        external_probe._latest_github_run()
+
+    assert order == ["prefer_ipv4", "fetch"]

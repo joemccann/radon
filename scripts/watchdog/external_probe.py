@@ -215,6 +215,9 @@ def _sampled_during_deploy_window(sample_time: datetime, now: datetime) -> bool:
 
 def _latest_github_run(timeout: float = FETCH_TIMEOUT_SECONDS) -> dict | None:
     """Independent witness when Turso persistence is stale or unavailable."""
+    from utils.ipv4_first import prefer_ipv4
+
+    prefer_ipv4()
     request = urllib.request.Request(
         GITHUB_RUNS_URL,
         headers={"Accept": "application/vnd.github+json", "User-Agent": "radon-watchdog"},
