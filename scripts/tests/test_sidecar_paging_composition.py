@@ -39,6 +39,21 @@ PINNED_DEPENDENCY_UNITS = frozenset({
 
 DEPENDENCY_UNITS = sorted(probes.DEPENDENCY_UNITS)
 
+# T-434. The PROBE partition is the second half of the same paging decision:
+# a name in here degrades the public edge aggregate instead of downing it, on
+# probe evidence rather than unit evidence. It grew to `radon-mcp` (REL-194 /
+# R-554) with only a membership assertion anywhere, so this file's guard did
+# not see it. Equality-pinned for the same reason `DEPENDENCY_UNITS` is.
+PINNED_DEPENDENCY_PROBES = frozenset({"ib-gateway", "radon-mcp"})
+
+DEPENDENCY_PROBES = sorted(probes.DEPENDENCY_PROBES)
+
+# The unit each dependency probe observes, for the on-box half.
+PROBE_UNITS = {
+    "ib-gateway": "radon-ib-gateway.service",
+    "radon-mcp": "radon-mcp.service",
+}
+
 _HEALTHY_PROBES = {
     "radon-api": {
         "state": "up",
@@ -80,6 +95,18 @@ def test_the_dependency_unit_set_is_the_pinned_one():
     assert probes.DEPENDENCY_UNITS == PINNED_DEPENDENCY_UNITS
 
 
+def test_the_dependency_probe_set_is_the_pinned_one():
+    """Same contract, probe side: a new dependency probe silently converts an
+    edge `down` into a `degraded` non-page, so it must be added here on purpose
+    and carry the behavioural pair below."""
+    assert probes.DEPENDENCY_PROBES == PINNED_DEPENDENCY_PROBES
+
+
+def test_every_dependency_probe_names_the_unit_that_backs_it():
+    """The on-box half can only be asserted for a probe whose unit is known."""
+    assert set(PROBE_UNITS) == set(probes.DEPENDENCY_PROBES)
+
+
 # ── off-box half: the edge must NOT collapse ─────────────────────────
 
 @pytest.mark.parametrize("unit", DEPENDENCY_UNITS)
@@ -93,6 +120,37 @@ def test_a_dependency_unit_alone_degrades_the_edge_rather_than_downing_it(
         units_age_secs=0,
     )
     assert state == "degraded"
+
+
+@pytest.mark.parametrize("probe", DEPENDENCY_PROBES)
+@pytest.mark.parametrize("probe_state", ["down", "failed", "unhealthy"])
+def test_a_dependency_probe_alone_degrades_the_edge_rather_than_downing_it(
+    probe, probe_state
+):
+    state = probes.aggregate_state(
+        {**_HEALTHY_PROBES, probe: {"state": probe_state}},
+        _HEALTHY_UNITS,
+        units_age_secs=0,
+    )
+    assert state == "degraded", state
+
+
+@pytest.mark.parametrize("probe", DEPENDENCY_PROBES)
+def test_a_dependency_probe_is_named_in_the_degraded_reasons(probe):
+    reasons = probes.degraded_reasons(
+        {**_HEALTHY_PROBES, probe: {"state": "down"}}, _HEALTHY_UNITS
+    )
+    assert reasons == [probe], reasons
+
+
+def test_a_serving_path_probe_by_contrast_still_downs_the_edge():
+    """Guards the partition itself: `radon-relay` is NOT a dependency probe."""
+    state = probes.aggregate_state(
+        {**_HEALTHY_PROBES, "radon-relay": {"state": "down"}},
+        _HEALTHY_UNITS,
+        units_age_secs=0,
+    )
+    assert state == "down", state
 
 
 # ── on-box half: the alarm the downgrade relies on ───────────────────
@@ -132,4 +190,26 @@ def test_the_start_limit_parked_case_pages_and_says_it_will_not_self_heal(unit):
     assert len(outcomes) == 1
     assert outcomes[0].severity == "P1"
     assert outcomes[0].fired is True
+    assert "auto-recover" in outcomes[0].message.lower()
+
+
+@pytest.mark.parametrize("probe", DEPENDENCY_PROBES)
+def test_the_unit_behind_each_dependency_probe_still_pages_p1_on_box(probe):
+    """The probe-side downgrade rests on the same "it has its own on-box
+    alarm" claim as the unit-side one, so it gets the same proof."""
+    unit = PROBE_UNITS[probe]
+    current = units.parse_show_output(_block(unit, active="failed", sub="failed"))
+    outcomes = units.evaluate(current=current, previous={}, now=NOW)
+    assert [(o.service, o.severity, o.fired) for o in outcomes] == [(unit, "P1", True)]
+
+
+@pytest.mark.parametrize("probe", DEPENDENCY_PROBES)
+def test_the_unit_behind_each_dependency_probe_pages_when_start_limit_parked(probe):
+    unit = PROBE_UNITS[probe]
+    current = units.parse_show_output(
+        _block(unit, active="failed", sub="failed", result="start-limit-hit", nrestarts=5)
+    )
+    outcomes = units.evaluate(current=current, previous={}, now=NOW)
+    assert len(outcomes) == 1
+    assert (outcomes[0].severity, outcomes[0].fired) == ("P1", True)
     assert "auto-recover" in outcomes[0].message.lower()

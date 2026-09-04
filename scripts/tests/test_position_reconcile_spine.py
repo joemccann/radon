@@ -155,7 +155,10 @@ class TestExpiryEdgeCases(unittest.TestCase):
     expiries, 0-qty broker rows, and the missing_in_ib branch."""
 
     ET = ZoneInfo("America/New_York")
-    TODAY = date.today()
+    # Pinned weekday (Friday). date.today() at class-definition time made the
+    # 14:00 ET "during session" case land on a weekend whenever the suite ran
+    # Sat/Sun, which flips the moment the cutoff becomes market-aware.
+    TODAY = date(2026, 9, 4)
     TODAY_IB = TODAY.strftime("%Y%m%d")
     TODAY_SNAPSHOT = TODAY.strftime("%Y-%m-%d")
 

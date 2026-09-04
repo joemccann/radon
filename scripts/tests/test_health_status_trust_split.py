@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 from health_probe import probe as health_probe
-from health_service import serve
+from health_service import probes, serve
 
 
 TOKEN = "test-status-token"
@@ -102,10 +102,15 @@ class TestUnauthenticatedEdgeCaller:
         assert "probes" not in body
         assert "service_health" not in body
         assert "external_probe" not in body
+        # T-432: `degraded_reasons` names radon-* units, so the v3 field stays
+        # behind the same detail gate as `units`. The public v3 shape is
+        # deliberately the five PUBLIC_STATUS_FIELDS and nothing more.
+        assert "degraded_reasons" not in body
+        assert set(body) == set(serve.PUBLIC_STATUS_FIELDS)
 
     def test_public_body_still_satisfies_the_off_box_prober(self, running):
         _, _, body = _get(running, headers={"X-Forwarded-For": "203.0.113.9"})
-        assert body["schema_version"] == 2
+        assert body["schema_version"] == probes.STATUS_SCHEMA_VERSION == 3
         assert isinstance(body["ok"], bool)
         assert isinstance(body["overall_state"], str)
         assert health_probe._classify_status_payload(body) != "invalid"

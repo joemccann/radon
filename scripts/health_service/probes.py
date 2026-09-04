@@ -161,7 +161,7 @@ UNIT_STATE_MAX_AGE_SECS = 30.0
 # Probe evidence gets the same treatment as unit evidence. The refresh interval
 # is 5s, so 30s is six missed sweeps. R-401.
 PROBE_STATE_MAX_AGE_SECS = 30.0
-STATUS_SCHEMA_VERSION = 2
+STATUS_SCHEMA_VERSION = 3
 
 # Non-edge components: reported in /status, but a failure here must not
 # collapse the public edge aggregate to "down". Off-box pages P1 on

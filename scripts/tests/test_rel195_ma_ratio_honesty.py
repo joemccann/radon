@@ -104,7 +104,17 @@ class TestOverlayIsIbFirst:
         assert calls == [("SPX",)]
         assert merged["2026-09-02"] == 6500.0
         assert merged["2026-09-01"] == 6400.0
-        assert "ib" in source
+        # Exact label, not a substring: "ib" in source is satisfied by
+        # "yahoo-fallback-via-ib-library", i.e. a label naming the wrong
+        # provider - the exact failure this file exists to prevent (rule 7).
+        assert source == "ib+yahoo"
+
+    def test_ib_only_series_is_labelled_ib(self):
+        merged, source = ma_ratio_scan.fetch_spx_overlay_closes(
+            {}, fetch_ib=lambda tickers: {"SPX": {"2026-09-02": 6500.0}}
+        )
+        assert merged == {"2026-09-02": 6500.0}
+        assert source == "ib"
 
     def test_ib_failure_falls_back_to_the_swept_series(self):
         def broken_ib(tickers):

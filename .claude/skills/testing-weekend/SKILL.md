@@ -937,3 +937,71 @@ how this loop improves as the codebase grows.
   run: `grep -c "$PUSHOVER_TOKEN"`-style checks on the gate output for every
   secret the wrapper exports, and treat any hit as a P1 test-isolation
   finding.
+
+- **2026-09-04 (audit): `github_pr_output.py --issue` does NOT accumulate across
+  repeated flags — it keeps the LAST one.** Passing `--issue` five times
+  produced a PR body with a single bullet and a title taken from the fifth,
+  which reads exactly like a correctly-formatted one-finding night. The same
+  applies to `--next`. Pass ONE multi-line string per flag, with the bullets
+  separated by real newlines, and always print the generated body before
+  `gh pr create` — the PR is a dead-man channel, so a silently truncated body
+  is the failure this loop exists to prevent (same class as the 2026-08-26
+  `gh pr edit --body-file` silent abort).
+- **2026-09-04 (audit): a bounded wait loop that RUNS OUT is not a completed
+  wait — check the sentinel before you read the artifact.** The base-SHA cloud
+  attribution used `for i in $(seq 1 16); do ... sleep 20; done`, which expired
+  while pytest was still at 54%. `grep '^FAILED' cloud-base.log` therefore
+  returned zero lines, and `comm -13` against a 37-line HEAD list reported all
+  37 reds as NEW IN THIS DELTA — a five-alarm result that was pure artifact.
+  The tell was that neither "BASE DONE" nor "GONE" printed. Always branch on the
+  sentinel explicitly after the loop and refuse to diff when it is absent; an
+  empty FAILED list from a red run is impossible and should be treated as such.
+- **2026-09-04 (audit): the sibling loop's gates cost this phase its second
+  round.** With the reliability loop mid-gate in `~/radon-weekend/radon`
+  throughout, pytest took 2617 s (43 min) against a usual ~275 s — nearly 10x —
+  which alone consumed most of the cap and forced round 2 to be abandoned. The
+  2026-08-30 lesson says to check `ps` before trusting a round's numbers; extend
+  it to PLANNING: check for the sibling at pre-flight, and when it is already
+  running, budget for one round only and say so in the ledger rather than
+  starting two and killing one. One honest round plus a base-SHA diff is worth
+  more than two contended rounds.
+
+- **2026-09-04 (remediate): `nohup env -i` for the detached gate script is a
+  TRAP — a minimal `PATH` reds 75 tests that have nothing to do with your
+  changes.** The closing 3x gate came back `75 failed`, concentrated in the
+  weekend-wrapper, loop-launcher and mTLS gateway-remote suites: with
+  `PATH=/usr/bin:/bin` there is no `node`, no `openssl`, no `launchctl`, and
+  those suites shell out to all three. The same 8 files were `257 passed` in a
+  normal shell. The detach rail is right; the minimal env is not. Export the
+  full `PATH` inside the stage script (venv bin, nvm node bin, `/opt/homebrew/bin`,
+  then the system dirs) and put the venv on `PATH` directly rather than
+  `source`ing `activate` and then overwriting `PATH` after it — the second
+  ordering silently gives you the system python and `No module named pytest`.
+  Both mistakes cost a full round each.
+- **2026-09-04 (remediate): a new guard can fire on the very branch that adds
+  it, and that is the guard working.** T-438's "a changed held-out e2e spec
+  needs a dated ledger annotation" redded on landing, because a sibling agent
+  had modified both named specs the same day against a previous-day stamp. The
+  correct response was to re-stamp the annotations with the `next start`
+  evidence that agent had actually captured, not to loosen the date comparison.
+  Land guards that read the branch diff LAST, after the changes they will judge.
+
+- **2026-09-04 (deliver): a CI red the remediate phase never saw can be the
+  remediate phase's own work — attribute by AUTHORSHIP, not by `git diff
+  --name-only | grep`.** Three shards redded. Two were a pre-existing
+  whole-second `date` granularity bug in the shed ladders that only samples red
+  under load, correctly fixed here. The third (`test_rel178_...`) was read as
+  "untouched by this branch" because a `git diff --name-only origin/main..HEAD |
+  grep rel178` printed nothing — but `git log origin/main..HEAD -- <file>` named
+  the branch's own commit as its author. The file existed on main; the branch
+  ADDED a class to it, and diff-name matching had already been satisfied
+  upstream. Use `git log <base>..HEAD -- <path>` to attribute, never a name
+  grep, before writing "pre-existing" anywhere.
+- **2026-09-04 (deliver): a test that passes locally and fails on CI with an
+  errno is a PLATFORM-default test, not a flake.** The watchdog cert cycle
+  acquired the real 2FA lease, which resolves to per-user Application Support on
+  macOS and `/var/lib/radon/ib-lease` on Linux. Every new test that drives a
+  REAL cycle (rather than patching around it) inherits every host path that
+  cycle touches; grep the branch's new tests for the entry point and confirm
+  each one redirects the paths it will reach. That sweep is what proved this was
+  the only unguarded `run_cycle` on the branch.

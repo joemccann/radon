@@ -440,18 +440,26 @@ def _legacy_status_payload_healthy(payload: dict) -> bool:
     return bool(states) and all(state in {"up", "ok", "healthy"} for state in states)
 
 
+# Current producer version plus the one validated predecessor. Keep in step
+# with `health_service.probes.STATUS_SCHEMA_VERSION`.
+SUPPORTED_STATUS_SCHEMAS = (3, 2)
+
+
 def _classify_status_payload(payload: dict) -> str:
     """Classify the Tier-2 aggregate as ``healthy``, ``down``, or ``invalid``.
 
-    Schema v2 publishes ``ok`` plus ``overall_state``. Exactly one validated
-    predecessor is accepted during producer-first rolling deploys; unknown
-    versions, contradictory fields, and opaque bodies are invalid public
-    contracts rather than recoverable aggregate-down observations.
+    Schema v2/v3 publish ``ok`` plus ``overall_state`` (v3 adds
+    ``degraded_reasons``, an additive field this classifier does not read).
+    Both are accepted during producer-first rolling deploys, since a probe
+    that rejected the version it has not been redeployed for would fail closed
+    on every host mid-deploy; unknown versions, contradictory fields, and
+    opaque bodies remain invalid public contracts rather than recoverable
+    aggregate-down observations.
     """
     if not isinstance(payload, dict) or not payload:
         return "invalid"
     schema_version = payload.get("schema_version")
-    if schema_version == 2:
+    if schema_version in SUPPORTED_STATUS_SCHEMAS:
         state = payload.get("overall_state")
         if type(payload.get("ok")) is not bool or not isinstance(state, str):
             return "invalid"

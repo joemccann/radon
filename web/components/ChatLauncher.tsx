@@ -23,6 +23,10 @@ type ChatLauncherProps = {
 
 export default function ChatLauncher({ activeSection, portfolio, prices }: ChatLauncherProps) {
   const [open, setOpen] = useState(false);
+  // Hydration marker: flipped by the keydown-listener effect below, so an e2e
+  // spec can wait for the ⌘J handler to be ATTACHED before pressing the key
+  // instead of retrying a synthetic event across hydration (T-419).
+  const [shortcutReady, setShortcutReady] = useState(false);
   // A prompt handed over from another surface (newsfeed follow-up chips).
   // Consumed once by ChatPanel, then cleared so it can't re-fire on re-render.
   const [seedPrompt, setSeedPrompt] = useState<string | null>(null);
@@ -48,10 +52,11 @@ export default function ChatLauncher({ activeSection, portfolio, prices }: ChatL
       }
     }
     document.addEventListener("keydown", onKeyDown);
+    setShortcutReady(true);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [open]);
 
-  if (!open) return null;
+  if (!open) return shortcutReady ? <span data-testid="chat-launcher-ready" hidden /> : null;
 
   return (
     <div
@@ -66,7 +71,7 @@ export default function ChatLauncher({ activeSection, portfolio, prices }: ChatL
         onClick={() => setOpen(false)}
         aria-label="Dismiss chat"
       />
-      <div className="chat-launcher__panel">
+      <div className="chat-launcher__panel" data-testid="chat-launcher-panel">
         {/* No header bar (design-lab Variant A): the composer rail carries the
             esc affordance, so the overlay is the conversation and nothing else. */}
         <ChatPanel
