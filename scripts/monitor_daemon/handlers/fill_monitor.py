@@ -300,15 +300,33 @@ class FillMonitorHandler(BaseHandler):
             return
         try:
             open_orders = fetch_open_orders_for_mirror(client)
+            # get_open_orders caps its openOrderEnd wait at 0.5s and returns
+            # whatever arrived. The same cap that yields an EMPTY book yields a
+            # TRUNCATED one, and `save_orders_snapshot` whole-replaces, so a
+            # partial arrival silently dropped the tracked working orders it
+            # omitted from the book that drives modify and cancel (R-610).
+            # Any tracked order missing from the read means the read is not a
+            # picture of the book — skip, the next tick is the recovery path.
+            returned_ids = {
+                row.get("orderId")
+                for row in open_orders or []
+                if isinstance(row, dict)
+            }
+            missing = [oid for oid in self.known_orders if oid not in returned_ids]
+            if missing:
+                logger.warning(
+                    "fill_monitor: IB open-orders read omits %d tracked working "
+                    "order(s) %s — skipping mirror",
+                    len(missing),
+                    sorted(missing)[:10],
+                )
+                return
             if not open_orders:
-                # get_open_orders caps its openOrderEnd wait at 0.5s and
-                # returns whatever arrived — an empty book from a slow
-                # gateway must never replace a non-empty snapshot (T-382),
-                # nor one whose working orders this handler still tracks
-                # (R-579).
+                # An empty book over a non-empty stored snapshot is the same
+                # truncation with nothing tracked in memory to detect it
+                # (T-382, R-579).
                 if (
-                    self.known_orders
-                    or count_open_orders_for_mirror is None
+                    count_open_orders_for_mirror is None
                     or count_open_orders_for_mirror() > 0
                 ):
                     logger.warning(

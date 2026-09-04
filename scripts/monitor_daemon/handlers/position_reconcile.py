@@ -96,7 +96,7 @@ class PositionReconcileHandler(BaseHandler):
         report = ib_reconcile.generate_reconciliation_report([], discrepancies)
         detail = ib_reconcile._health_detail(report)
 
-        drift_message = ib_reconcile._drift_message(detail)
+        drift_message = ib_reconcile._drift_message(detail, include_new_trades=False)
         state = "error" if report["needs_attention"] else "ok"
         self.record_cycle_health(
             state,

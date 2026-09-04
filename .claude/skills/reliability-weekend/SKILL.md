@@ -186,7 +186,15 @@ pytest/vitest suite, a CI watch) is launched DETACHED from the agent
 harness so a harness timeout cannot kill it:
 `nohup env -i <minimal env> bash <stage-script.sh> </dev/null >stage.out
 2>&1 & disown` (macOS has no `setsid`). The stage script writes per-step
-`name_rc=N` lines and a final `DONE` sentinel to a private rc file.
+`name_rc=N` lines and a final `DONE` sentinel to a private rc file. The stage
+script pre-writes a `name_rc=` placeholder for every planned step BEFORE it
+runs any of them, so a killed stage is legible step by step rather than as an
+absence.
+
+**An rc file with no `DONE` is a FAILED stage, never a passing one.** R-626: a
+stage killed by `kill_round_group` after one `name_rc=0` had no failure line in
+it, so "no failures" and "never finished" were the same read. Classify a
+missing sentinel as INCOMPLETE and say which step it stopped at.
 
 The agent then waits IN-SESSION with a bounded loop on that rc file:
 `until grep -q DONE rcfile; do <process-still-alive check> || break; sleep
@@ -796,3 +804,78 @@ how this loop improves as the codebase grows.
 - 2026-09-03 (remediate): REL-210's process-lifetime error latch leaked across unrelated pytest
   tests sharing the interpreter and surfaced as an order-dependent red two tasks later. A
   process-scoped latch in production code needs a conftest autouse reset the same commit it ships.
+- 2026-09-04 (audit): **zsh does not word-split an unquoted variable, and the loop-squash exclusion
+  failed silently because of it.** `for c in $LOOPS` passed the whole string as ONE argument and
+  `git show` died with "ambiguous argument"; the file list that came back looked plausible (128
+  files) and was simply the unsplit range. The repo's own CLAUDE.md warns about this for download
+  loops. Write the shas as a literal list in the `for`, and sanity-check the split by printing each
+  squash's file count -- 134/24/1/14/68 immediately showed which commits were loop output. Same
+  family: `grep --include=*.py` needs the glob QUOTED or zsh tries to expand it and reports "no
+  matches found" for every sweep. Five of the seven standing sweeps returned empty on the first
+  try for that reason alone, which reads exactly like "the mechanism is gone".
+- 2026-09-04 (audit): **the loop's own dead-man is auditable and this is where the P0s were.** Both
+  P0s are in `nightly_issue_prune.py` / `report()`, shipped by `d396eacc` eight days after the
+  prune was introduced to reduce issue scrollback. The walk that found them was the only one
+  pointed at the wrapper scripts, and the decisive evidence was a six-line stub `gh` in `/tmp`:
+  making `pr list` exit 1 produced `pruned 1/1 comments`, rc 0. Budget one walk per cycle at the
+  loop machinery itself, and prefer a stub-binary repro over reading the fail-open path -- it took
+  one tool call and turned a plausible reading into a confirmed P0.
+- 2026-09-04 (audit): the delta was small enough (28 feature commits, 44 source files) that the
+  binding constraint was neither agent capacity nor dedup -- there were ZERO cross-walk duplicates
+  this run, against three or more in each of the previous four audits. What replaced dedup as the
+  main lead-side work was SEVERITY ARBITRATION: two walk ratings were raised (R-608, R-609) and
+  both raises came from asking the same question -- does the mechanism this suppression defers to
+  actually cover the failure it hides? Write the arbitration into the row, not just the number.
+- 2026-09-04 (audit): the executing regression walk's instruction "name one case the shipped test
+  does not cover and RUN it" produced four PARTIALs from four reviewed fixes, a 100% hit rate, and
+  two of them were P1s. The recurring shape is now explicit enough to hand the walk directly: an
+  incident fix pins the branch the incident exercised, so test the ADJACENT branch -- return-1
+  covered but not raise (REL-210), raise covered but not the False that the module actually
+  returns (REL-209), fully-empty covered but not truncated (REL-212), stock covered but not option
+  (REL-211). Ask "what is the other way this input arrives" per fix.
+
+- 2026-09-04 (remediate): **the permanent drill list in step 4 names a suite that does not exist.**
+  `test_daemon_bounded` matches nothing under `scripts/tests` (`grep -rl` over the whole tree finds
+  no such file); the closest real files are `test_unbounded_io_bounds.py` and `test_ib_insync_bounded.py`.
+  A `pytest` invocation listing it exits 4 before running anything, so a drill run that "failed" may
+  simply have a bad path in it. Resolve every drill path with `grep -rl` BEFORE the run, and treat a
+  rc-4 collection error as a list defect, not a regression.
+- 2026-09-04 (remediate): **a finding's proposed remedy was wrong three times, in three different
+  ways, and the repo told me each time.** R-597 asked for a `--head` prefix filter on `gh pr list`;
+  GitHub search has no prefix form for head refs, and a search that misses a real PR PRUNES — the
+  opposite of the fail-closed the finding wanted (a truncation bound gives the same guarantee).
+  R-614 claimed calendar-day arithmetic made detection SLIP; it is the reverse — calendar days are
+  larger than sessions, so the bug was false pages over weekends, and the session count is the fix
+  either way. R-622 asked to reject the request when the registry is unreachable, but FastAPI being
+  down during first-run setup is exactly the branch the offline path exists for, so rejecting wedges
+  onboarding; a static id mirror plus a parity test closes the hole without breaking first-run.
+  Read what the remedy would DO to the branch the code is defending before writing it.
+- 2026-09-04 (remediate): five pinned tests contradicted a fix this run and every one was
+  informative, not obstructive: three `next_attempt_at` cases pinned the exact suppression R-615
+  narrows (rewritten per-branch, plus a NEW rate-limited case that keeps the original assertion
+  alive), the JWKS throttle case pinned the global cooldown R-620 makes per-kid, and a fixture set
+  `_jwks_refresh_after = 0.0` — a float where the fix needs a map, which surfaced as a 503 in an
+  unrelated case. When a per-key refactor lands, grep the TEST fixtures for the old scalar too.
+- 2026-09-04 (remediate): the wrapper-contract assertions are the fiddliest part of a five-loop
+  change. `body.index("run_round")` finds the FUNCTION DEFINITION, not the call, and only two of the
+  five loops factor the round loop into a function at all — anchor an ordering assertion on the
+  `claude -p "/<loop>` invocation, searched from the arm point forward, and it holds across all five.
+  Same shape as the comment-quotes-its-own-code trap: assert on what executes, not on what the file
+  happens to contain first.
+- 2026-09-04 (deliver): **a wrapper contract change breaks every harness that stubs the tool it now
+  reads, not just the one the fix touched.** REL-188 made a phase OK only on commit evidence
+  (`git rev-parse HEAD` + `log --format=%ct`); four separate test files stub `git` as a silent
+  `exit 0`, so every phase in them read as uncommitted and returned 75. CI surfaced them in two
+  rounds because the first round's log grep was capped at 20 lines — read the FULL `FAILED` list
+  (`grep '^FAILED'` over the downloaded job log, then `uniq -c`), not the head of it, or you pay a
+  second 3-minute CI cycle per missed file. Corollary: `gh run view --log-failed` returned EMPTY
+  for every failing job on this repo; `gh api .../runs/<id>/logs` into a zip and `unzip -j` the one
+  job's txt is the reliable path.
+- 2026-09-04 (deliver): the deliver phase ran from a clone sitting on `main`, so the first three
+  greps for the fix under review found nothing and read as "the code is not there". Check
+  `git branch --show-current` BEFORE reading any code the branch changed; a stash-and-checkout
+  moves in-progress edits over cleanly, but only if the mismatch is caught early.
+- 2026-09-04 (deliver): the docs contract's owner-doc requirement is satisfied by prose that must
+  be TRUE. Two of three paragraphs written from the PR body's summary were accurate; the third
+  described `setupToken.ts` as reporting an unreadable store when it actually added a TTL. Read the
+  diff of each changed mapped file before writing its doc line, not the PR body's account of it.

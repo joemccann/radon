@@ -462,10 +462,17 @@ def _health_detail(report: dict) -> dict:
     }
 
 
-def _drift_message(detail: dict) -> str:
+def _drift_message(detail: dict, *, include_new_trades: bool = True) -> str:
+    """R-626: the daemon's position-reconcile handler passes no trades, so its
+    `new_trades_count` is structurally 0 — printing '0 new trade(s)' told the
+    operator the daemon had looked. Only `main()`, which passes real trades,
+    may claim that clause."""
+    head = "position drift vs IB: "
+    if include_new_trades:
+        head += f"{detail['new_trades_count']} new trade(s), "
     return (
-        f"position drift vs IB: {detail['new_trades_count']} new trade(s), "
-        f"{detail['quantity_mismatch_count']} quantity mismatch(es), "
+        head
+        + f"{detail['quantity_mismatch_count']} quantity mismatch(es), "
         f"{detail['positions_missing_locally_count']} missing locally, "
         f"{detail['positions_closed_count']} closed locally"
     )

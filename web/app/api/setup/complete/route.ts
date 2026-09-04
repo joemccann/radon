@@ -27,6 +27,37 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const SERVICE_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
+
+/**
+ * R-622 (NF-3): when FastAPI is unreachable `fetchRegistry()` returns null and
+ * `known` fell back to the flat WEB_ENV_KEYS union — a truthy Set, so the
+ * `if (!known)` id guard below could never fire and ANY id matching
+ * SERVICE_PATTERN was accepted. That contradicts this file's own contract,
+ * and it bites in the common case, because FastAPI not yet being up during
+ * first-run setup is exactly the branch the offline path exists for.
+ *
+ * The offline path still has to write .env or first-run cannot complete, so
+ * the id is checked against this mirror of scripts/credentials_registry.py.
+ * Drift is caught by scripts/tests/test_setup_service_id_parity.py.
+ */
+const KNOWN_SERVICE_IDS = new Set([
+  "anthropic",
+  "artificial_analysis",
+  "backblaze",
+  "cerebras",
+  "clerk",
+  "equibles",
+  "exa",
+  "ib_flex",
+  "ib_gateway",
+  "mdw",
+  "menthorq",
+  "pushover",
+  "themarketear",
+  "turso",
+  "unusual_whales",
+  "xai",
+]);
 const FIELD_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/;
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
 const STORE_TIMEOUT_MS = 100_000;
@@ -110,7 +141,11 @@ export async function POST(request: Request): Promise<Response> {
   for (const [service, raw] of Object.entries(services)) {
     if (!SERVICE_PATTERN.test(service)) return badRequest(`${service} is not a credential service`);
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
-    const known = registry ? registry.get(service) : WEB_ENV_KEYS;
+    const known = registry
+      ? registry.get(service)
+      : KNOWN_SERVICE_IDS.has(service)
+        ? WEB_ENV_KEYS
+        : undefined;
     if (!known) return badRequest(`${service} is not a credential service`);
     const values: Record<string, string> = {};
     for (const [name, value] of Object.entries(raw as Record<string, unknown>)) {

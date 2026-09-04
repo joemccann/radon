@@ -577,3 +577,36 @@ class TestRoleSkippedUnits:
         canonical.write_text("RADON_HOST_ROLE='app'\n")
         assert da.resolve_host_role({"RADON_ENV_FILE": str(legacy)}) == "app"
         assert da.resolve_host_role({"RADON_HOST_ROLE": "garbage"}) == "combined"
+
+
+class TestASuppressingRoleNeedsARootOwnedSource:
+    """R-604 (P1): `resolve_host_role` falls back to `RADON_ENV_FILE`, which
+    the drift-audit unit points at `/home/radon/radon-cloud/.env` — a file
+    `load_env_keys`' own docstring calls attacker-influenced from root's point
+    of view. That value selects `app`, which SKIPS `ib-gateway-control`, the
+    compose check and five units. A role that suppresses a check may come only
+    from the process environment or the root-owned canonical file."""
+
+    def test_the_compat_file_cannot_select_a_suppressing_role(self, tmp_path, monkeypatch):
+        canonical = tmp_path / "etc-radon-env"
+        legacy = tmp_path / "legacy.env"
+        monkeypatch.setattr(da, "CANONICAL_ENV_FILE", canonical)
+        legacy.write_text("RADON_HOST_ROLE=app\n")
+        assert da.resolve_host_role({"RADON_ENV_FILE": str(legacy)}) == "combined"
+
+    def test_the_compat_file_may_still_select_a_non_suppressing_role(self, tmp_path, monkeypatch):
+        canonical = tmp_path / "etc-radon-env"
+        legacy = tmp_path / "legacy.env"
+        monkeypatch.setattr(da, "CANONICAL_ENV_FILE", canonical)
+        legacy.write_text("RADON_HOST_ROLE=broker\n")
+        assert da.resolve_host_role({"RADON_ENV_FILE": str(legacy)}) == "broker"
+
+    def test_the_canonical_root_owned_file_may_select_app(self, tmp_path, monkeypatch):
+        canonical = tmp_path / "etc-radon-env"
+        monkeypatch.setattr(da, "CANONICAL_ENV_FILE", canonical)
+        canonical.write_text("RADON_HOST_ROLE='app'\n")
+        assert da.resolve_host_role({}) == "app"
+
+    def test_the_process_environment_may_select_app(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(da, "CANONICAL_ENV_FILE", tmp_path / "missing")
+        assert da.resolve_host_role({"RADON_HOST_ROLE": "app"}) == "app"

@@ -477,6 +477,13 @@ def _next_scheduled_run(now: datetime) -> str:
     Weekly cadence: without this, the watchdog re-pages a single failed cycle
     on every one of its own cycles for the seven days until the next attempt.
     """
+    if now.tzinfo is None:
+        # R-616 (NF-9): `run()` takes `now` as a parameter and only defaulted
+        # it to an aware value later, so a naive `now` reached the comparison
+        # below INSIDE the handler whose job is to write the error row —
+        # replacing the cycle's own exception with a TypeError and leaving no
+        # service_health row at all.
+        now = now.replace(tzinfo=timezone.utc)
     stamp = now.astimezone(timezone.utc).replace(
         hour=TIMER_HOUR_UTC, minute=TIMER_MINUTE_UTC, second=0, microsecond=0
     )
@@ -484,6 +491,27 @@ def _next_scheduled_run(now: datetime) -> str:
     if stamp <= now:
         stamp += timedelta(days=7)
     return stamp.isoformat().replace("+00:00", "Z")
+
+
+def _embargo_until(cause: Optional[BaseException], now: datetime) -> Optional[str]:
+    """`next_attempt_at`, but only for a CADENCE-BOUND failure.
+
+    R-615 (NF-10): every error branch stamped the next weekly fire, and the
+    watchdog suppresses re-pages until that deadline — so a revoked API key or
+    a wedged client bought one page and then seven days of silence with ATS
+    venue-share frozen. Only a throttle or allowance failure is genuinely
+    "nothing will change before the next fire"; everything else must keep
+    paging until an operator acts.
+    """
+    if cause is None:
+        return None
+    try:
+        from clients.equibles_client import EquiblesRateLimitError
+    except Exception:  # noqa: BLE001 — the embargo is an optimisation
+        return None
+    if isinstance(cause, EquiblesRateLimitError):
+        return _next_scheduled_run(now)
+    return None
 
 
 def has_sufficient_coverage(covered: int, requested: int) -> bool:
@@ -688,6 +716,8 @@ def run(
     _CYCLE_FATAL = (EquiblesAuthError, EquiblesRateLimitError)
 
     now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)  # R-616
     scan_time = now.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
     end_date = now.date()
     start_date = end_date - timedelta(weeks=lookback_weeks)
@@ -780,7 +810,7 @@ def run(
             scan_time,
             error={
                 "message": f"cycle aborted: {exc}",
-                "next_attempt_at": _next_scheduled_run(now),
+                "next_attempt_at": _embargo_until(exc, now),
                 "requested": len(universe),
                 "covered": len(series_by_ticker),
                 "failed": len(errors),
@@ -801,7 +831,7 @@ def run(
             scan_time,
             error={
                 "message": "no ticker produced a series",
-                "next_attempt_at": _next_scheduled_run(now),
+                "next_attempt_at": _embargo_until(None, now),
                 "codes": sorted({e["code"] for e in errors if e.get("code")}),
                 "requested": len(universe),
                 "failed": len(errors),
@@ -823,7 +853,7 @@ def run(
                     f"partial cycle: {covered}/{len(universe)} tickers covered, "
                     f"below the {MIN_COVERAGE_RATIO:.0%} floor"
                 ),
-                "next_attempt_at": _next_scheduled_run(now),
+                "next_attempt_at": _embargo_until(None, now),
                 "requested": len(universe),
                 "covered": covered,
                 "failed": len(errors),
@@ -863,7 +893,7 @@ def run(
                     f"dropped tail: {len(dropped)} ticker(s) deferred by "
                     f"timeout/budget: {', '.join(dropped)}"
                 ),
-                "next_attempt_at": _next_scheduled_run(now),
+                "next_attempt_at": _embargo_until(None, now),
                 "requested": len(universe),
                 "covered": covered,
                 "failed": len(errors),

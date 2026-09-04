@@ -384,3 +384,58 @@ class TestShellSyntax:
         assert result.returncode == 0, (
             f"bash -n failed for {script.name}:\n{result.stderr}"
         )
+
+
+class TestSecretStoreCredentialIsProvisioned:
+    """R-605 (P1): `radon-api.service` carries
+    `LoadCredentialEncrypted=radon-secret-store-key:/etc/credstore.encrypted/...`
+    but nothing in the repo creates that file — it exists only as prose in
+    docs/operations.md. systemd fails a unit outright when the source is
+    missing, before any ExecStart, so a rebuilt host parks radon-api
+    start-limit-hit inside ~25s.
+
+    R-618 (P2): the wipe removes /home/radon (which holds the ciphertext) and
+    leaves the master key on disk, so a re-provision finds a key that decrypts
+    nothing — and a decommissioned host is handed back with a live one."""
+
+    SETUP = SETUP_SH
+    WIPE = REPO_ROOT / "scripts" / "wipe-vps.sh"
+    UNIT = REPO_ROOT / "services" / "radon-api.service"
+
+    def _uncommented(self, path):
+        return "\n".join(
+            l for l in path.read_text().splitlines() if not l.lstrip().startswith("#")
+        )
+
+    def test_the_unit_still_declares_the_credential(self):
+        assert "LoadCredentialEncrypted=radon-secret-store-key" in self.UNIT.read_text()
+
+    def test_setup_provisions_the_credstore_source(self):
+        body = self._uncommented(self.SETUP)
+        assert "/etc/credstore.encrypted" in body, (
+            "setup-vps.sh creates no credstore source for the unit's "
+            "LoadCredentialEncrypted="
+        )
+        assert "systemd-creds" in body
+
+    def test_setup_provisions_it_before_enabling_the_api_unit(self):
+        body = self._uncommented(self.SETUP)
+        main = body[body.index("\nmain() {"):]
+        assert main.index("provision_secret_store_credential") < main.index(
+            "enable_services"
+        ), (
+            "the credential must exist before the unit that hard-depends on it "
+            "is enabled"
+        )
+
+    def test_preflight_fails_loudly_when_the_credential_is_absent(self):
+        body = self._uncommented(self.SETUP)
+        slice_ = body[body.index("/etc/credstore.encrypted"):]
+        assert "log_error" in slice_ or "log_warn" in slice_
+
+    def test_the_wipe_removes_the_master_key_with_the_ciphertext(self):
+        body = self._uncommented(self.WIPE)
+        assert "/etc/credstore.encrypted" in body, (
+            "wipe-vps.sh deletes the ciphertext under /home/radon but leaves "
+            "the master key on a decommissioned host"
+        )

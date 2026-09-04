@@ -386,6 +386,9 @@ export async function POST(request: NextRequest): Promise<Response> {
             toolCalls: [],
             outcome: "error",
             imageCount: images,
+            // R-624: the class, so a sustained outage is queryable and
+            // turn 1 is distinguishable from turn 200.
+            errorClass: detail.name || "Error",
           });
           send("error", { error: assistantErrorMessage() });
         } finally {

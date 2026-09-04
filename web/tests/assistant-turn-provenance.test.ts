@@ -94,9 +94,9 @@ describe("assistant turn provenance", () => {
     await vi.waitFor(() => expect(dbExecute).toHaveBeenCalledTimes(1));
     const [stmt] = dbExecute.mock.calls[0];
     expect(stmt.sql).toMatch(
-      /INSERT INTO assistant_turns \(ts, user_msg, rounds, tool_calls, usage, outcome, image_count, provider, model\)/,
+      /INSERT INTO assistant_turns \(ts, user_msg, rounds, tool_calls, usage, outcome, image_count, provider, model, error_class\)/,
     );
-    expect(stmt.args.slice(5)).toEqual(["answered", 1, "xai", "grok-4.6"]);
+    expect(stmt.args.slice(5)).toEqual(["answered", 1, "xai", "grok-4.6", null]);
   });
 
   it("recordAssistantTurn writes image_count 0 and NULL provenance when absent", async () => {
@@ -110,7 +110,7 @@ describe("assistant turn provenance", () => {
     });
     await vi.waitFor(() => expect(dbExecute).toHaveBeenCalledTimes(1));
     const [stmt] = dbExecute.mock.calls[0];
-    expect(stmt.args.slice(5)).toEqual(["error", 0, null, null]);
+    expect(stmt.args.slice(5)).toEqual(["error", 0, null, null, null]);
   });
 
   it("returns 400 for a model id the catalog does not know, before the stream opens", async () => {
@@ -151,7 +151,7 @@ describe("assistant turn provenance", () => {
 
     await vi.waitFor(() => expect(dbExecute).toHaveBeenCalledTimes(1));
     const [stmt] = dbExecute.mock.calls[0];
-    expect(stmt.args.slice(6)).toEqual([0, "anthropic", "claude-opus-5"]);
+    expect(stmt.args.slice(6)).toEqual([0, "anthropic", "claude-opus-5", null]);
   });
 
   it("a turn that ran on the requested model carries requestedModel and no usedFallback", async () => {

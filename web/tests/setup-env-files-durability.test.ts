@@ -217,3 +217,71 @@ describe("REL-218 (R-593): the upsert is quote-continuation aware", () => {
     expect(lines[1]).toBe("OTHER=keep");
   });
 });
+
+describe("R-623: the two env files are written as a pair", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("rolls the root .env back when the web write fails", async () => {
+    const dir = await tmpdir();
+    await fs.mkdir(path.join(dir, "web"), { recursive: true });
+    const rootEnv = path.join(dir, ".env");
+    await fs.writeFile(rootEnv, "EXISTING=keep\n", "utf8");
+    const before = await fs.readFile(rootEnv, "utf8");
+
+    const realRename = fs.rename.bind(fs);
+    vi.spyOn(fs, "rename").mockImplementation(async (from: any, to: any) => {
+      if (String(to).includes(`${path.sep}web${path.sep}.env`)) {
+        const err: NodeJS.ErrnoException = new Error("EACCES: permission denied");
+        err.code = "EACCES";
+        throw err;
+      }
+      return realRename(from, to);
+    });
+
+    await expect(
+      writeSetupEnvFiles(
+        { CLERK_SECRET_KEY: "sk_test_x", NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_x" },
+        dir,
+      ),
+    ).rejects.toThrow();
+
+    // The half-written pair is exactly the isAuthMisconfigured shape the
+    // middleware turns into a terminal error page, with no way back to /setup.
+    expect(await fs.readFile(rootEnv, "utf8")).toBe(before);
+  });
+
+  it("still writes both files on the happy path", async () => {
+    const dir = await tmpdir();
+    await fs.mkdir(path.join(dir, "web"), { recursive: true });
+    const written = await writeSetupEnvFiles(
+      { CLERK_SECRET_KEY: "sk_test_x", NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_x" },
+      dir,
+    );
+    expect(written).toHaveLength(2);
+    expect(await fs.readFile(path.join(dir, ".env"), "utf8")).toContain("CLERK_SECRET_KEY");
+    expect(await fs.readFile(path.join(dir, "web", ".env"), "utf8")).toContain(
+      "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
+    );
+  });
+
+  it("removes a root .env it created when the web write fails", async () => {
+    const dir = await tmpdir();
+    await fs.mkdir(path.join(dir, "web"), { recursive: true });
+    const rootEnv = path.join(dir, ".env");
+
+    const realRename = fs.rename.bind(fs);
+    vi.spyOn(fs, "rename").mockImplementation(async (from: any, to: any) => {
+      if (String(to).includes(`${path.sep}web${path.sep}.env`)) {
+        throw new Error("ENOSPC");
+      }
+      return realRename(from, to);
+    });
+
+    await expect(
+      writeSetupEnvFiles({ NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_x" }, dir),
+    ).rejects.toThrow();
+    await expect(fs.readFile(rootEnv, "utf8")).rejects.toThrow();
+  });
+});

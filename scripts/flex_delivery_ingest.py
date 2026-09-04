@@ -203,7 +203,23 @@ def _apply_classified(kind: str, xml_text: str, digest: str, source_path: str) -
 
         if not source_path:
             raise FlexClassifyError("activity ingest requires a filesystem path")
-        cash_code = cash_flow_sync.main(["--from-file", source_path, "--no-file"])
+        # R-609 (P1): only a non-zero RETURN used to arm the error heartbeat.
+        # A RAISE out of the cash-flow write — a Turso/libsql error mid-chunk,
+        # a parse error after the first chunk — released the claim, propagated
+        # to the batch loop's per-file handler and wrote no heartbeat at all,
+        # so the next stale duplicate painted `cash-flow-sync` green over a
+        # half-applied `cash_flows`. Same failure, same latch.
+        try:
+            cash_code = cash_flow_sync.main(["--from-file", source_path, "--no-file"])
+        except Exception as exc:
+            _heartbeat_cash_flow_sync(
+                "error",
+                {
+                    "message": f"cash_flow_sync --from-file raised: {type(exc).__name__}: {exc}",
+                    "content_sha256": digest,
+                },
+            )
+            raise
         if cash_code != 0:
             _heartbeat_cash_flow_sync(
                 "error",

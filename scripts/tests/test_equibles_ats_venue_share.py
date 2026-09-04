@@ -29,6 +29,8 @@ from fetch_equibles_ats_venue_share import (
     weekly_short_volume,
 )
 
+import fetch_equibles_ats_venue_share as mod  # noqa: E402
+
 MIGRATION = Path(__file__).parents[1] / "db" / "migrations" / "0041_equibles_ats_venue_share.sql"
 
 
@@ -728,9 +730,15 @@ class TestConstructionFailureIsReported:
 
 
 class TestNextAttemptAt:
-    """The timer is weekly (Tue 09:15 UTC). Every error heartbeat must say when
-    the next attempt actually lands, or the watchdog re-pages the same weekly
-    writer on every cycle for seven days."""
+    """The timer is weekly (Tue 09:15 UTC), so a CADENCE-BOUND error heartbeat
+    must say when the next attempt actually lands or the watchdog re-pages the
+    same weekly writer on every cycle for seven days.
+
+    R-615 narrowed which failures qualify: `next_attempt_at` is a suppression,
+    and suppressing an auth failure, a coverage shortfall or a wedged client
+    for a week is exactly how ATS venue-share froze behind one page. Those
+    branches now carry `None` and keep paging; the assertions below moved with
+    the rule rather than being dropped."""
 
     @pytest.fixture(autouse=True)
     def _capture_health(self, tmp_path, monkeypatch):
@@ -787,7 +795,7 @@ class TestNextAttemptAt:
 
         error = self._errors()[0]
         assert error["message"] == "no ticker produced a series"
-        assert error["next_attempt_at"] == self._expected(now)
+        assert error["next_attempt_at"] is None
         assert "not_found" in error["codes"]
 
     def test_wedged_client_empty_cycle_reports_timeout_and_budget_codes(self, monkeypatch):
@@ -802,7 +810,8 @@ class TestNextAttemptAt:
 
         error = self._errors()[0]
         assert error["message"] == "no ticker produced a series"
-        assert error["next_attempt_at"] == self._expected(now)
+        # A wedged client is the case R-615 must NOT silence for a week.
+        assert error["next_attempt_at"] is None
         assert error["codes"] == ["budget", "timeout"]
 
     def test_partial_cycle_error_carries_next_attempt(self):
@@ -817,7 +826,9 @@ class TestNextAttemptAt:
         assert payload["partial"] is True
         error = self._errors()[0]
         assert error["message"].startswith("partial cycle:")
-        assert error["next_attempt_at"] == self._expected(now)
+        # Not cadence-bound: a coverage shortfall can be repaired by an
+        # operator today, so it must keep paging.
+        assert error["next_attempt_at"] is None
 
     def test_dropped_tail_error_carries_next_attempt(self, monkeypatch):
         now = datetime.now(timezone.utc)
@@ -835,7 +846,7 @@ class TestNextAttemptAt:
 
         error = self._errors()[0]
         assert error["message"].startswith("dropped tail:")
-        assert error["next_attempt_at"] == self._expected(now)
+        assert error["next_attempt_at"] is None
 
     def test_aborted_cycle_error_carries_next_attempt(self):
         from clients.equibles_client import EquiblesAuthError
@@ -847,4 +858,72 @@ class TestNextAttemptAt:
 
         error = self._errors()[0]
         assert error["message"].startswith("cycle aborted:")
+        # A revoked key is not "wait for the next fire".
+        assert error["next_attempt_at"] is None
+
+    def test_a_rate_limited_abort_still_carries_next_attempt(self):
+        from clients.equibles_client import EquiblesRateLimitError
+
+        now = datetime.now(timezone.utc)
+        client = self._client(["AAPL"], failures={"AAPL": EquiblesRateLimitError("429")})
+        with pytest.raises(EquiblesRateLimitError):
+            self.mod.run(client=client, tickers=["AAPL"], now=now)
+
+        error = self._errors()[0]
+        assert error["message"].startswith("cycle aborted:")
         assert error["next_attempt_at"] == self._expected(now)
+
+
+class TestEmbargoIsCappedToCadenceBoundFailures:
+    """R-615 (P2, NF-10): all four error branches stamped `next_attempt_at` =
+    next Tuesday, and the watchdog suppresses until that deadline. A revoked
+    API key or a wedged client therefore bought one page and then seven days
+    of silence with ATS venue-share frozen. Only a throttle or allowance
+    failure is genuinely cadence-bound."""
+
+    def test_a_rate_limit_still_embargoes_until_the_next_fire(self):
+        from clients.equibles_client import EquiblesRateLimitError
+
+        now = datetime(2026, 9, 2, 9, 0, tzinfo=timezone.utc)
+        assert mod._embargo_until(EquiblesRateLimitError("429"), now) == (
+            mod._next_scheduled_run(now)
+        )
+
+    def test_an_auth_failure_is_not_embargoed(self):
+        from clients.equibles_client import EquiblesAuthError
+
+        now = datetime(2026, 9, 2, 9, 0, tzinfo=timezone.utc)
+        assert mod._embargo_until(EquiblesAuthError("401"), now) is None
+
+    def test_a_coverage_shortfall_is_not_embargoed(self):
+        now = datetime(2026, 9, 2, 9, 0, tzinfo=timezone.utc)
+        assert mod._embargo_until(None, now) is None
+
+
+class TestNaiveNowDoesNotBreakTheErrorRow:
+    """R-616 (P2, NF-9): `_next_scheduled_run` compared an aware `stamp` to a
+    naive `now` INSIDE the handler whose whole job is to write the health row,
+    so the abort path wrote no row at all and replaced the original exception
+    with a TypeError."""
+
+    def test_next_scheduled_run_accepts_a_naive_now(self):
+        assert mod._next_scheduled_run(datetime(2026, 9, 1, 9, 0)).endswith("Z")
+
+    def test_run_normalises_a_naive_now_before_the_error_path(self, monkeypatch):
+        rows: list[tuple] = []
+        monkeypatch.setattr(
+            mod, "_record_health",
+            lambda state, scan_time, error=None: rows.append((state, error)),
+        )
+
+        class _Boom(Exception):
+            pass
+
+        def _client(*a, **k):
+            raise _Boom("upstream down")
+
+        monkeypatch.setattr(mod, "load_universe", lambda: ["AAPL"], raising=False)
+        monkeypatch.setattr(mod, "EquiblesClient", _client, raising=False)
+        with pytest.raises(Exception) as excinfo:
+            mod.run(now=datetime(2026, 9, 1, 9, 0), tickers=["AAPL"])
+        assert not isinstance(excinfo.value, TypeError), excinfo.value
