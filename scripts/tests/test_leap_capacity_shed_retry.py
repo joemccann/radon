@@ -136,6 +136,34 @@ class _Stub:
         self._server.server_close()
 
 
+CLOCK_LOG = "clock.n"
+
+
+def _clock(bin_dir: Path, tmp_path: Path, step: int) -> Path:
+    """A scripted epoch: call n returns ``1700000000 + n * step``.
+
+    The wrapper reads the clock exactly twice per ladder iteration (attempt
+    start, attempt end), so ``step`` IS the wall time each attempt appears to
+    take. ``step=1`` is the instant-502 case that CI kept sampling as one
+    phantom second.
+    """
+    counter = tmp_path / CLOCK_LOG
+    path = bin_dir / "clock"
+    _executable(
+        path,
+        textwrap.dedent(
+            f"""\
+            #!/bin/bash
+            n=$(cat {str(counter)!r} 2>/dev/null || echo 0)
+            n=$((n + 1))
+            echo "$n" > {str(counter)!r}
+            echo $((1700000000 + n * {step}))
+            """
+        ),
+    )
+    return path
+
+
 def _repo(tmp_path: Path, marker: Path) -> tuple[Path, Path]:
     repo = tmp_path / "repo"
     scripts_dir = repo / "scripts"
@@ -183,6 +211,7 @@ def _repo(tmp_path: Path, marker: Path) -> tuple[Path, Path]:
             """
         ),
     )
+    _clock(bin_dir, tmp_path, 1)
     return repo, py
 
 
@@ -193,6 +222,7 @@ def _run(
     *,
     shed_wait: str = "30",
     delay: str = "1",
+    clock_step: int = 1,
 ) -> subprocess.CompletedProcess[str]:
     env = {
         **os.environ,
@@ -201,6 +231,9 @@ def _run(
         "RADON_LEAP_SHED_WAIT_SECS": shed_wait,
         "RADON_LEAP_REFRESH_RETRY_DELAY_SECS": delay,
         "RADON_LEAP_SLEEP_CMD": str(repo.parent / "bin" / "sleep-recorder"),
+        "RADON_LEAP_NOW_CMD": str(
+            _clock(repo.parent / "bin", repo.parent, clock_step)
+        ),
     }
     return subprocess.run(
         ["bash", str(repo / "scripts" / WRAPPER)],
@@ -277,3 +310,42 @@ def test_persistent_capacity_shed_no_duplicate_still_fails(tmp_path: Path) -> No
     combined = (result.stdout + result.stderr).lower()
     assert "capacity" in combined or "shed" in combined
     assert "fallback" not in combined
+
+
+def test_instant_shed_never_bills_a_phantom_second(tmp_path: Path) -> None:
+    """CI 2026-09-04, shards scripts-jm/scripts-gh: the ladder ran three POSTs
+    instead of four. `date +%s` is whole-second, so an instant 502 whose
+    request happened to straddle a boundary billed one second it never spent,
+    and a 3s budget bought two waits instead of three. With the clock pinned to
+    a 1s-per-attempt step -- the tightest reading an instant attempt can
+    produce -- the ladder must still be exact.
+    """
+    marker = tmp_path / "direct-ran"
+    repo, py = _repo(tmp_path, marker)
+    port = _free_port()
+
+    with _Stub(port, always_status=502, fail_body=SHED_BODY) as stub:
+        result = _run(repo, py, port, shed_wait="3", delay="1", clock_step=1)
+
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert stub.calls == [PATH] * 4, stub.calls
+    assert _sleeps(tmp_path) == [1, 1, 1], _sleeps(tmp_path)
+    assert not marker.exists()
+
+
+def test_slow_attempt_still_bills_its_wall_time(tmp_path: Path) -> None:
+    """REL-208 (R-573) must survive the granularity correction: an attempt that
+    genuinely takes 5s bills 4s of the budget, so a 10s budget gives up after
+    three POSTs rather than running the unit past TimeoutStartSec.
+    """
+    marker = tmp_path / "direct-ran"
+    repo, py = _repo(tmp_path, marker)
+    port = _free_port()
+
+    with _Stub(port, always_status=502, fail_body=SHED_BODY) as stub:
+        result = _run(repo, py, port, shed_wait="10", delay="1", clock_step=5)
+
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert stub.calls == [PATH] * 3, stub.calls
+    assert _sleeps(tmp_path) == [1, 1], _sleeps(tmp_path)
+    assert not marker.exists()

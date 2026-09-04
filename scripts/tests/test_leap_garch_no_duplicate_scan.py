@@ -153,6 +153,23 @@ def _repo(tmp_path: Path, spec: dict, marker: Path) -> tuple[Path, Path]:
             """
         ),
     )
+    # The ladder reads the clock twice per attempt. A scripted 1s-per-attempt
+    # epoch is the tightest reading an instant 502 can produce, so the exact
+    # POST count below stops being a sample of where the second boundary fell
+    # (CI 2026-09-04, shards scripts-jm/scripts-gh).
+    counter = tmp_path / "clock.n"
+    _executable(
+        bin_dir / "clock",
+        textwrap.dedent(
+            f"""\
+            #!/bin/bash
+            n=$(cat {str(counter)!r} 2>/dev/null || echo 0)
+            n=$((n + 1))
+            echo "$n" > {str(counter)!r}
+            echo $((1700000000 + n))
+            """
+        ),
+    )
     return repo, py
 
 
@@ -170,6 +187,8 @@ def _run(
         spec["port_env"]: str(port),
         "RADON_LEAP_SLEEP_CMD": str(repo.parent / "bin" / "sleep-recorder"),
         "RADON_GARCH_SLEEP_CMD": str(repo.parent / "bin" / "sleep-recorder"),
+        "RADON_LEAP_NOW_CMD": str(repo.parent / "bin" / "clock"),
+        "RADON_GARCH_NOW_CMD": str(repo.parent / "bin" / "clock"),
     }
     if timeout_secs is not None:
         env["RADON_SCAN_FASTAPI_TIMEOUT_SECS"] = timeout_secs

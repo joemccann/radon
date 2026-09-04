@@ -108,6 +108,14 @@ RETRY_DELAY="${RADON_GARCH_REFRESH_RETRY_DELAY_SECS:-15}"
 # `sleep`; the tests substitute a recorder so the retry ladder is driven by
 # the accounted budget instead of the wall clock.
 SLEEP_CMD="${RADON_GARCH_SLEEP_CMD:-sleep}"
+# Injection point for the ladder's clock. Production leaves this empty
+# and reads `date +%s`; the tests substitute a scripted epoch so the
+# attempt-elapsed accounting below is exact instead of sampled.
+NOW_CMD="${RADON_GARCH_NOW_CMD:-}"
+
+_now() {
+    if [ -n "$NOW_CMD" ]; then "$NOW_CMD"; else date +%s; fi
+}
 # Matches scripts/api/server.py _CAPACITY_SHED_MARKER. Status alone cannot
 # tell a shed from a script-failed 502 (R-221).
 CAPACITY_SHED_MARKER="subprocess capacity exhausted"
@@ -144,7 +152,7 @@ while :; do
     # REL-208 (R-573): budget the ATTEMPT wall time too — a slow marker-bodied
     # 502 is uncounted by sleep-only accounting and can run the unit past
     # TimeoutStartSec into Result=timeout instead of the clean exit 1.
-    attempt_started=$(date +%s)
+    attempt_started=$(_now)
     BODY_FILE="$(mktemp)"
     HTTP_CODE=$(curl -sS -X POST -m "$FASTAPI_TIMEOUT_SECS" -o "$BODY_FILE" \
         -w "%{http_code}" "${FASTAPI_URL}" 2>/tmp/garch-refresh.curl.err)
@@ -158,7 +166,12 @@ while :; do
     if ! _is_capacity_shed "$CURL_EXIT" "$HTTP_CODE" "$RESPONSE_BODY"; then
         break
     fi
-    attempt_elapsed=$(( $(date +%s) - attempt_started ))
+    # `date +%s` is whole-second, so an instant 502 reads 0 or 1 purely on
+    # where the boundary fell. Billing that phantom second shortens the
+    # ladder under load. Drop one second of granularity: an attempt only
+    # bills the time it demonstrably spent, and a genuinely slow attempt
+    # (REL-208 / R-573) is still budgeted to within 1s.
+    attempt_elapsed=$(( $(_now) - attempt_started - 1 ))
     [ "$attempt_elapsed" -gt 0 ] && shed_waited=$((shed_waited + attempt_elapsed))
     remaining=$((SHED_WAIT_SECS - shed_waited))
     if [ "$remaining" -le 0 ]; then
