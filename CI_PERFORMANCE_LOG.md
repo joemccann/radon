@@ -737,3 +737,135 @@ Residual bottleneck after stage 2: python/web gate co-wall ~110s, then the
   wrapper posted phases, but no commit/PR/ledger entry ever appeared). The
   next audit must always diff `origin/main` for the previously selected
   change before assuming it merged - which tonight's step 2 caught.
+
+### 2026-09-04 - audit - branch `ci-performance/2026-09-04`
+
+- Audited range: `0202e32d..2b936ebc` (50 commits: PRs #256-#270 plus direct
+  pushes). Runner state: dedicated clone (`.radon-weekend-runner` present),
+  lock `/tmp/radon-ci-performance.lock` taken by this cycle, clean tree, no
+  orphaned stash. `flock` is unavailable on macOS zsh here - the lock is the
+  pid file plus the wrapper's own serialization.
+- **CIP-005 stage 2 still has not landed - third consecutive silent remediate
+  no-op.** PR #258 (the 09-03 audit) merged as ledger text only. The only
+  `.github/workflows/ci.yml` diff in the whole 50-commit range is the security
+  loop's caddy pin + sha512 verification (`dd81b66c`); the `py-tests` matrix
+  rows are byte-identical to 09-01. Stage 2 carries forward again.
+- Changed CI/build/deploy surfaces: `ci.yml` caddy install pinned to v2.11.4
+  with checksum verification (rail 10 strengthened, not weakened; `GH_TOKEN`
+  dropped from that step). `cloud/services/radon-mcp.service`,
+  `radon-ib-gateway-remote.service`.
+- Changed test surfaces: 35 new test files. 25 land in `scripts-rs`
+  (`test_rel1xx/2xx`), 1 new `test_weekend_prune.py` lands in the `test_we*`
+  group of `scripts-npsz`, 4 in `rest-api`, 5 in `cloud`. Both already-heaviest
+  movable shards grew, which is exactly what stage 2 relieves.
+- Gate closure re-verified locally: 78 contract tests passed
+  (`test_ci_deploy_concurrency` + `test_ci_gate_integrity` + `test_path_filter`,
+  8.44s). Every required gate remains inside the deploy dependency closure.
+
+**Samples (13 successful `push` runs on `main` in range,
+2026-09-03T13:20Z .. 2026-09-04T02:53Z; 6 failures, 2 cancelled excluded;
+queue delay 2-4s, reported separately and not counted as a win).**
+
+| Class / cache | n | p50 | p95 | min-max |
+|---|---|---|---|---|
+| mixed/py, warm | 13 | 271s | ~500s | 232-623s |
+
+Prior window p50 was 267s (09-03) and 255s (09-02): flat, no drift, and no
+merged perf change to attribute movement to. 33776679233 (623s) and
+33786454504 (381s) are back-to-back-merge deploy-gateway-wait runs (CIP-006).
+
+**Critical path (33830913939, 261s, mixed warm; identical shape on
+33828589948 / 271s):**
+`Path filter` 9s (+10) -> `pytest (scripts-npsz)` 119s (+131) ->
+`pytest coverage ratchet` 21s (+155) -> `Prepull exact app images` 8s (+165)
+-> `Prestage VPS release` 12s (+169) -> `Deploy to VPS` 86s (+259).
+
+Every other gate finishes by +115: `scripts-rs` +115 (101s), Vitest tail
++101, `cloud edge` +93, node image +38. `scripts-npsz` alone is the wall and
+is now 119-124s, up from the 95-118s band measured on 09-01/09-02 - the
+shard grew as predicted when new modules landed.
+
+#### CIP-005 stage 2 - RE-SELECTED (unchanged) for tonight's remediate
+
+Moves, predicted savings, safety rails, revert trigger and validation set are
+unchanged from the 2026-09-02 entry: `test_we*` -> `scripts-gh` (ends +51,
+huge headroom), `test_ru*` -> `rest` (ends +44), `test_ro*` ->
+`scripts-daemons` (ends +52). New glob shapes: npsz becomes
+`test_[t-v]*.py test_w[!e]*.py test_[x-z]*.py`; rs becomes
+`test_r[!ou]*.py test_s*.py`. The explicit lead-module pin
+`scripts/tests/test_weekend_wrapper_self_rewrite.py` must move off the npsz
+row with the glob, and `PYTEST_SHARD_LEAD_MODULES` in
+`test_ci_deploy_concurrency.py` updated to match. `test_weekend_prune.py`
+(new this range) rides the same move. Union contract stays fail-closed;
+no test removed, skipped, deselected or reweighted.
+- Predicted: npsz job 119s -> ~77-85s, rs 101s -> ~75-85s, coverage ratchet
+  start pulled ~35-40s earlier; mixed warm p50 271s -> ~232-240s. Clears the
+  10% + 15s bar. Shard count unchanged (10), runner-seconds ~flat.
+
+#### CIP-004 (deploy tail: `sync-scheduled-units` + duplicate fetch) - DEFERRED
+
+Unchanged plan. Deploy floor is now a stable 86-88s across all three sampled
+runs, so this remains the next p50 cut after stage 2.
+
+#### CIP-006 - deploy p95 observability - DEFERRED, evidence unchanged
+
+2 of 13 successful runs in range carry the gateway-wait tail (623s, 381s),
+both minutes after a prior deploy. Still ~0s p50, still ~all of p95.
+
+#### Reliability record (not performance)
+
+6 failures in range (33797295439, 33784525460, 33775920298, 33774024242,
+33771071956, 33769343624, 33767456463), 2 cancelled (33767296903,
+33767212158 - superseded pushes, as designed). Not performance samples.
+
+Outcome for tonight: `VALIDATING` pending remediate (CIP-005 stage 2).
+Residual bottleneck after stage 2: python/web gate co-wall ~100-110s, then
+the 86-88s deploy floor (CIP-004) with the gateway-wait p95 tail (CIP-006).
+
+#### Lesson
+
+- 2026-09-04: the 09-03 lesson ("diff `origin/main` for the previously
+  selected change before assuming it merged") fired again and caught a third
+  no-op. Add the stronger rule: when an audit re-selects the SAME `CIP-###`
+  for a third consecutive night, the audit must state the no-op explicitly in
+  the PR body's Issue section so the operator sees the loop is not shipping,
+  rather than burying it in the ledger.
+
+### 2026-09-04 - remediate - branch `ci-performance/2026-09-04`
+
+- **CIP-005 stage 2 IMPLEMENTED** (first time after three consecutive silent
+  no-ops on 09-02, 09-03 and the 09-04 audit's carry-forward).
+- Changed files: `.github/workflows/ci.yml` (py-tests matrix rows
+  `scripts-gh`, `scripts-npsz`, `scripts-rs`, `scripts-daemons`, `rest`),
+  `scripts/tests/test_ci_deploy_concurrency.py`
+  (`PYTEST_SHARD_LEAD_MODULES`).
+- Moves: `test_we*` npsz -> `scripts-gh` (8 modules, gh ended +51 with
+  headroom); `test_ru*` rs -> `rest` (6 modules, rest ended +44);
+  `test_ro*` rs -> `scripts-daemons` (2 modules, daemons ended +52).
+  New globs: npsz `test_[n-p]*.py test_[t-v]*.py test_w[!e]*.py
+  test_[x-z]*.py`; rs `test_r[!ou]*.py test_s*.py`. Lead pins follow their
+  modules: `test_weekend_wrapper_self_rewrite.py` now leads `scripts-gh`,
+  the three `test_run_*_refresh` modules now lead `rest`, `test_vixcor.py`
+  keeps leading npsz and rel137 keeps leading rs.
+- Red/green: `PYTEST_SHARD_LEAD_MODULES` updated first ->
+  `test_heavy_pytest_modules_lead_their_shard` FAILED (`scripts-gh: got
+  ['scripts/tests/test_[g-h]*.py']`); after the `ci.yml` edit, 78 passed in
+  8.32s (`test_ci_deploy_concurrency` + `test_ci_gate_integrity` +
+  `test_path_filter`). Union/partition contract green: no overlap, no
+  unsharded file, no unsharded subdirectory.
+- Every glob resolves against the checkout (27 / 79 / 80 / 4 / 9 tokens for
+  gh / npsz / rs / daemons / rest), so an empty expansion cannot silently
+  drop a module; an unmatched literal would fail pytest closed.
+- Safety: no test removed, skipped, deselected or reweighted; shard count
+  unchanged (10); no `needs` edge, coverage ratchet, provenance, health,
+  stability-window or rollback surface touched; runner-seconds ~flat (work
+  moves between existing jobs).
+- Predicted: npsz job 119s -> ~77-85s, rs 101s -> ~75-85s, coverage ratchet
+  starts ~35-40s earlier, mixed warm p50 271s -> ~232-240s.
+- Revert trigger: any moved module failing on its new shard in the first
+  five `main` runs, or npsz/rs job p50 not dropping below 85s.
+- Validation: five deploy-clean mixed warm after-runs vs the deploy-clean
+  before-set; per-shard job walls from `gh api .../runs/<id>/jobs`.
+- Outcome: `VALIDATING` (implemented, awaiting post-merge samples).
+- Residual bottleneck: python/web gate co-wall ~100-110s, then the 86-88s
+  deploy floor (CIP-004) with the gateway-wait p95 tail (CIP-006).
