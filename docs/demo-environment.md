@@ -194,3 +194,27 @@ the service token and 200 with it, `POST /vcg/scan` and `/breadth/scan` 200 from
 the seeded snapshots, `RADON_API_TEST_MODE=1` confirmed in the running
 container, container `TURSO_DB_URL` on `radon-demo-joemccann`, no tailscale and
 no reachable IB port on any prod host.
+
+### Second root cause: Svix auto-disabled the endpoint (found 2026-09-04)
+
+Restoring `demo_webhook_events` was necessary but not sufficient. The Svix
+endpoint `https://demo.radon.run/api/webhooks/clerk` was **Disabled** with a
+69.9% error rate, last updated 2026-08-19 — Svix auto-disabled it six days into
+the 500 storm. After that no delivery was even attempted, so the endpoint could
+not recover on its own once the underlying bug was fixed.
+
+Re-enabled via the Svix app portal (Clerk Backend API `POST /v1/webhooks/svix_url`
+returns a one-time login link), then `Replay → Replay missing messages` scoped to
+the narrowest window so only the new signup was replayed, never the ~60 stranded
+accounts.
+
+Verified end to end 2026-09-04: a real Google-OAuth signup produced
+`publicMetadata {demoRole: trial, demoTrialExpiresAt: 2026-09-08T16:00:00-04:00}`,
+a `demo_users` row, and a `demo_webhook_events` claim row.
+
+**Detection gap this leaves.** The Pushover alert added alongside the table fix
+fires from inside the webhook handler, so it is silent in exactly this failure
+mode — a disabled endpoint means the handler never runs. The durable signal is
+the provisioning RATE: alert when `user.created` signups occur with no
+corresponding `demo_users` row, or poll the Svix endpoint's enabled/error-rate
+state. Neither exists yet.
