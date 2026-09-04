@@ -114,6 +114,8 @@ readonly -a SOURCES=(
   scripts/drift_audit.py
   scripts/disk_cleanup.py
   scripts/radon-app-runtime.sh
+  scripts/radon-docker-gw.sh
+  docker-compose.yml
   config/sudoers.d/radon-deploy
   config/sudoers.d/radon-monitor
   config/sudoers.d/radon-ops
@@ -153,6 +155,8 @@ readonly -a LOGICAL_TARGETS=(
   /usr/local/lib/radon/drift_audit.py
   /usr/local/lib/radon/disk_cleanup.py
   /usr/local/sbin/radon-app-runtime
+  /usr/local/sbin/radon-docker-gw
+  /etc/radon/ib-gateway-compose.yml
   /etc/sudoers.d/radon-deploy
   /etc/sudoers.d/radon-monitor
   /etc/sudoers.d/radon-ops
@@ -186,7 +190,7 @@ readonly -a LOGICAL_TARGETS=(
   /etc/systemd/system/radon-newsfeed.service.d/runtime-container.conf
 )
 readonly -a MODES=(
-  0755 0755 0755 0644 0644 0755
+  0755 0755 0755 0644 0644 0755 0755 0644
   0440 0440 0440 0440
   0644
   0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644
@@ -194,7 +198,7 @@ readonly -a MODES=(
   0644 0644 0644 0644 0644
 )
 readonly -a KINDS=(
-  shell shell shell python python shell
+  shell shell shell python python shell shell compose
   sudoers sudoers sudoers sudoers
   polkit
   systemd systemd systemd systemd systemd systemd systemd systemd systemd systemd
@@ -336,6 +340,18 @@ for index in "${!SOURCES[@]}"; do
     polkit)
       "$NODE_BIN" --check < "$staged_path" || \
         die "polkit syntax validation failed: $relative_source"
+      ;;
+    # The Gateway compose body radon-docker-gw runs as root. Same gate the
+    # deploy helper's refresh_install_file applies.
+    compose)
+      grep -Eq '^services:' "$staged_path" || \
+        die "compose validation failed: $relative_source declares no services"
+      grep -Eq '^[[:space:]]+container_name:[[:space:]]*ib-gateway[[:space:]]*$' "$staged_path" || \
+        die "compose validation failed: $relative_source does not pin container_name ib-gateway"
+      ! grep -Eq '^[[:space:]]*privileged:[[:space:]]*true' "$staged_path" || \
+        die "compose validation failed: $relative_source requests privileged"
+      ! grep -Eq '^[[:space:]]*-[[:space:]]*/[[:space:]]*:' "$staged_path" || \
+        die "compose validation failed: $relative_source binds the host root"
       ;;
     python)
       # Parse only. Importing or compiling to disk would execute or cache
