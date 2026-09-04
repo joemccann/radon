@@ -56,7 +56,9 @@ export async function handleDemoGate(
         requestId,
       }, { status: 403 }));
     }
-    return noStore(new NextResponse("Demo access is not active.", { status: 403 }));
+    return noStore(
+      NextResponse.redirect(new URL("/demo-pending", request.url), 307),
+    );
   }
   if (!ctx) return null;
 

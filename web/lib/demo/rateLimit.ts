@@ -49,8 +49,13 @@ function denyUnavailable(tier: DemoRateTier): DemoRateLimitResult {
   return { success: false, limit, remaining: 0, reset: 0 };
 }
 
+type LimiterLike = { limit: (key: string) => Promise<DemoRateLimitResult | {
+  success: boolean; limit: number; remaining: number; reset: number;
+}> };
+
 let _redis: Redis | null | undefined; // undefined = not yet resolved
-const _limiters = new Map<DemoRateTier, Ratelimit>();
+const _limiters = new Map<DemoRateTier, LimiterLike>();
+let _limiterFactory: ((tier: DemoRateTier) => LimiterLike) | null = null;
 
 function getRedis(): Redis | null {
   if (_redis !== undefined) return _redis;
@@ -60,7 +65,8 @@ function getRedis(): Redis | null {
   return _redis;
 }
 
-function getLimiter(tier: DemoRateTier): Ratelimit | null {
+function getLimiter(tier: DemoRateTier): LimiterLike | null {
+  if (_limiterFactory) return _limiterFactory(tier);
   const redis = getRedis();
   if (!redis) return null;
   const existing = _limiters.get(tier);
@@ -90,12 +96,30 @@ export async function demoRateLimit(
       ? denyUnavailable(tier)
       : allowAll(tier);
   }
-  const { success, limit, remaining, reset } = await limiter.limit(userId);
-  return { success, limit, remaining, reset };
+  try {
+    const { success, limit, remaining, reset } = await limiter.limit(userId);
+    return { success, limit, remaining, reset };
+  } catch (error) {
+    // A dead or expired Redis must not throw out of middleware — unhandled,
+    // every demo /api/* call becomes an opaque 500 instead of a 429 the caller
+    // can act on. Deny (same posture as unconfigured), loudly.
+    console.error(
+      `[demo-rate-limit] tier ${tier} unavailable:`,
+      error instanceof Error ? error.message : error,
+    );
+    return denyUnavailable(tier);
+  }
 }
 
 // Test seam — drop memoised redis/limiters so env changes take effect.
 export function __resetRateLimitForTests(): void {
   _redis = undefined;
   _limiters.clear();
+}
+
+// Test seam — inject a limiter without an Upstash connection.
+export function __setLimiterFactoryForTests(
+  factory: ((tier: DemoRateTier) => LimiterLike) | null,
+): void {
+  _limiterFactory = factory;
 }

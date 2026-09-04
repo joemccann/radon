@@ -16,5 +16,3 @@ CREATE TABLE IF NOT EXISTS demo_ai_usage (
   call_count  INTEGER NOT NULL,
   PRIMARY KEY (user_id, endpoint, day_et)
 );
-
-INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (2, datetime('now'));

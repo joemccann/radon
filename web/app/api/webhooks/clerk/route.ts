@@ -20,6 +20,8 @@ import {
   releaseDemoWebhookEvent,
   type DemoDbClient,
 } from "@/lib/demo/demoUsers";
+import { claimWebhookEventOrDegrade } from "@/lib/demo/webhookLedger";
+import { notifyDemoProvisioningFailure } from "@/lib/notify/pushover";
 import type { DemoPublicMetadata } from "@/lib/demo/demoRole";
 
 export const runtime = "nodejs";
@@ -75,8 +77,19 @@ export async function POST(request: Request): Promise<Response> {
 
   const eventId = request.headers.get("svix-id")!;
   const db = getDemoDb() as unknown as DemoDbClient;
+  let replayGuarded = true;
   try {
-    if (!(await claimDemoWebhookEvent(db, eventId, event.type))) {
+    const claim = await claimWebhookEventOrDegrade({
+      eventId,
+      eventType: event.type,
+      claim: (id, type) => claimDemoWebhookEvent(db, id, type),
+      onDegrade: (reason) => {
+        console.warn(`[demo-webhook] ${reason}`);
+        void notifyDemoProvisioningFailure(reason);
+      },
+    });
+    replayGuarded = claim.replayGuarded;
+    if (!claim.proceed) {
       return ok({ duplicate: true, requestId });
     }
     const result = await provisionDemoTrial(event.data, {
@@ -91,8 +104,11 @@ export async function POST(request: Request): Promise<Response> {
     });
     return ok({ ...result, requestId });
   } catch (error) {
-    await releaseDemoWebhookEvent(db, eventId).catch(() => undefined);
+    if (replayGuarded) {
+      await releaseDemoWebhookEvent(db, eventId).catch(() => undefined);
+    }
     const detail = error instanceof Error ? error.message : "provisioning failed";
+    void notifyDemoProvisioningFailure(detail);
     // 500 so Clerk retries (the provisioning steps are idempotent).
     return ok({ error: "Provisioning failed.", detail, requestId }, 500);
   }
