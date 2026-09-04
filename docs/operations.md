@@ -62,8 +62,9 @@ key in `.env` alone does nothing while a
 stored value exists: rotate in the Credentials tab, or delete the stored
 value first. Exception: the IB Gateway password. Saving it in the tab does
 not rotate what the Gateway reads (`TWS_PASSWORD_FILE` / docker secrets).
-The tab also refuses a `TURSO_DB_URL` that is not `libsql://` or `https://`
-or whose host differs from the `TURSO_DB_URL` already in the environment;
+The tab also refuses a `TURSO_DB_URL` that is not `libsql://` or `https://`,
+whose host is not under `*.turso.io`, or whose host differs from the
+`TURSO_DB_URL` already in the environment;
 point a deployment at a different Turso database by editing `.env` and
 restarting, not from the tab. Deleting a stored secret does not unset the
 already-exported value in the running process — it takes effect at the next

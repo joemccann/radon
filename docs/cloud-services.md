@@ -385,6 +385,11 @@ JSON-RPC), documented for consumers at radon.run `/developers/mcp`.
   `operator_*` reads proxied to the local Next.js routes with the caller's
   own token. No write tools; no `kb_*` corpus tools (operator journal/P&L
   stays on the checkout-only radon-kb stdio server); no service tokens.
+  JWKS lookups are capped at `MAX_JWKS_INFLIGHT` (4) concurrent verifications;
+  a caller past the cap gets a retryable `503 authentication unavailable`
+  rather than queueing, and a kid that fails verification is negatively cached
+  for `JWKS_NEGATIVE_TTL_SECONDS` so a bad token cannot drive repeated
+  upstream fetches.
 - **Env**: `CLERK_JWKS_URL` / `CLERK_ISSUER` / `ALLOWED_USER_IDS` from
   `/etc/radon/mcp.env`, a stripped file `deploy.sh:write_mcp_env` (and
   `setup-vps.sh`) derives from `/etc/radon/env` on every deploy; the unit
@@ -768,8 +773,10 @@ Install dependency: IBKR-hosted sFTP, not Flex Web Service. Full recipe:
 and, from the Activity branch of `flex_delivery_ingest`, `cash-flow-sync`
 (`ok` when `cash_flow_sync --from-file` succeeds or an already-applied
 statement is re-pulled, `error` with the exit code when it fails; a
-duplicate-only run is still a stale-remote `error` on `flex-pull`, R-389,
-but not on `cash-flow-sync`; once any file heartbeats `error`, later `ok`
+duplicate-only run is a stale-remote `error` on `flex-pull` only when the
+newest statement period is more than `MAX_DELIVERY_LAG_DAYS` (1) behind the
+last session AND an empty remote is not expected for the date, R-389 + R-448;
+never on `cash-flow-sync`; once any file heartbeats `error`, later `ok`
 heartbeats in the same run are suppressed, so the row reports the batch's
 worst outcome, REL-210). Stripped env
 `/var/lib/radon/flex-secrets/env` (no `TWS_PASSWORD`). Units on
