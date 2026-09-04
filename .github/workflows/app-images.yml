@@ -40,6 +40,7 @@ jobs:
           context: .
           file: docker/app/Dockerfile.python
           platforms: linux/amd64
+          load: true
           push: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}
           tags: |
             ghcr.io/joemccann/radon-python:${{ github.sha }}
@@ -47,6 +48,13 @@ jobs:
           cache-from: type=gha,scope=radon-python
           cache-to: type=gha,mode=max,scope=radon-python
           provenance: false
+      - name: Smoke hardened Python browser runtime
+        run: |
+          docker run --rm --pull=never --init --user 1000:1000 --network none \
+            --cap-drop ALL --security-opt no-new-privileges \
+            --entrypoint python \
+            ghcr.io/joemccann/radon-python:${{ github.sha }} \
+            -c "from playwright.sync_api import sync_playwright; p = sync_playwright().start(); browser = p.chromium.launch(headless=True); page = browser.new_page(); page.set_content('<title>radon-browser-smoke</title>'); assert page.title() == 'radon-browser-smoke'; browser.close(); p.stop()"
 
   node-image:
     name: Build node image
