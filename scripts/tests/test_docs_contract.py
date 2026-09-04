@@ -580,6 +580,15 @@ _LOOPS = {
 }
 
 
+_LOOP_SKILLS = {
+    "reliability": "reliability-weekend",
+    "testing": "testing-weekend",
+    "ci-performance": "ci-performance",
+    "documentation": "documentation-nightly",
+    "security": "security-nightly",
+}
+
+
 def _operations_text() -> str:
     return (_ROOT / "docs" / "operations.md").read_text(encoding="utf-8")
 
@@ -621,6 +630,21 @@ class TestNightlyLoopIndex:
                 f"scripts/{wrapper} no longer names .radon-{loop}-runner; "
                 "docs/operations.md documents that marker as the rail"
             )
+
+    # DOC-084 (2026-09-04): three SKILL.md rails named only
+    # `.radon-weekend-runner`, so an agent reading its own rail believed the
+    # shared marker was the whole gate while its wrapper also required the
+    # per-loop one.
+    @pytest.mark.parametrize("loop,skill", sorted(_LOOP_SKILLS.items()))
+    def test_each_skill_rail_names_its_own_marker(self, loop, skill):
+        text = (_ROOT / ".claude" / "skills" / skill / "SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        assert f".radon-{loop}-runner" in text, (
+            f".claude/skills/{skill}/SKILL.md states the runner-clone rail "
+            f"without .radon-{loop}-runner, but scripts/"
+            f"{_LOOPS[loop][1]} refuses the clone without it"
+        )
 
 
 # DOC-045 (2026-09-01): TEST_LOG.md is not the only append-only root ledger,

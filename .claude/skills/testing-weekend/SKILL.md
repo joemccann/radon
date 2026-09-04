@@ -25,8 +25,9 @@ never merges; the human merge is the deploy trigger.
    `testing/<YYYY-MM-DD>` and a PR. The human merge is the deploy
    trigger.
 3. **Never run against the operator's working clone.** Refuse (exit
-   nonzero, say why) unless the file `.radon-weekend-runner` exists in the
-   repo root — that marker means this is the dedicated runner clone.
+   nonzero, say why) unless BOTH `.radon-weekend-runner` and
+   `.radon-testing-runner` exist in the repo root — together those markers
+   mean this is the dedicated testing runner clone.
 4. **Respect the frozen contracts.** `TEST_AUDIT.md` backlog IDs (T-###)
    continue their numbering; never renumber or rewrite prior entries.
    `TEST_LOG.md` is append-only. The PART A audit body (§1–§10) is frozen —
