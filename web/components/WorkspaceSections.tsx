@@ -2828,7 +2828,10 @@ function makeOpenOrderExtract(
 function OrderPriceCell({ price, isCalculated = false }: ResolvedOpenOrderPrice) {
   const { direction, flashDirection } = usePriceDirection(price);
   return (
-    <td className={`right last-price-cell ${flashDirection ? `last-price-${flashDirection}` : ""}`}>
+    <td
+      className={`right last-price-cell ${flashDirection ? `last-price-${flashDirection}` : ""}`}
+      data-testid="order-last-price"
+    >
       {price != null ? fmtPriceOrCalculated(price, isCalculated) : "—"}
       {direction === "up" && <ArrowUp size={11} className="price-trend-icon price-trend-up" aria-label="price up" />}
       {direction === "down" && <ArrowDown size={11} className="price-trend-icon price-trend-down" aria-label="price down" />}

@@ -165,15 +165,28 @@ describe("REL-182 — recovery ok row lands promptly", () => {
     const firstOkCount = health.filter(([state]) => state === "ok").length;
 
     // Outage: drop the upstream connection, then let it reconnect and frame.
+    // The budget is counted in HEALTH TICKS, not elapsed ms (T-418): an
+    // event-loop stall coalesces missed interval firings for the hub's health
+    // timer and for this counter alike, so a loaded machine cannot false-red a
+    // margin that is really "two 100ms ticks".
     for (const client of server.wss.clients) client.terminate();
-    const reopenedAt = Date.now();
-    await waitFor(
-      () => health.filter(([state]) => state === "ok").length > firstOkCount,
-      2_000,
-    );
-    const [, okAt] = health.filter(([state]) => state === "ok").at(-1);
-    // Pre-fix the second ok waits a full silenceMs (5s) after the first;
-    // the recovery reset makes it land within ~two 100ms health ticks.
-    expect(okAt - reopenedAt).toBeLessThan(1_000);
+    let ticksSinceReopen = 0;
+    const tickCounter = setInterval(() => {
+      ticksSinceReopen += 1;
+    }, 100);
+    tickCounter.unref?.();
+    let ticksToOk = null;
+    try {
+      await waitFor(() => {
+        if (health.filter(([state]) => state === "ok").length <= firstOkCount) return false;
+        ticksToOk ??= ticksSinceReopen;
+        return true;
+      }, 2_000);
+    } finally {
+      clearInterval(tickCounter);
+    }
+    // Pre-fix the second ok waits a full silenceMs (5s = 50 health ticks)
+    // after the first; the recovery reset makes it land within ~two ticks.
+    expect(ticksToOk).toBeLessThanOrEqual(3);
   });
 });
