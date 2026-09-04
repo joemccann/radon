@@ -245,7 +245,7 @@ export default function DashboardNewsFeed() {
 
   const commentaryOpen = feedTab === "commentary";
   // R-463: the footer's freshness fields belong to the OPEN tab. Under
-  // Headlines they read the hub's own status and the newest print's time,
+  // Headlines they read the selected transport's status and newest print time,
   // not the commentary scraper's.
   const newestHeadlineMs = newestHeadlineTime(headlines);
   const sampleAt = commentaryOpen ? (lastUpdated ? new Date(lastUpdated) : null) : (newestHeadlineMs == null ? null : new Date(newestHeadlineMs));
@@ -254,7 +254,13 @@ export default function DashboardNewsFeed() {
     : "---";
   const captureBasis = commentaryOpen
     ? (error ? "fault" : loading ? "awaiting" : "scraper")
-    : (headlinesStatus === "down" ? "fault" : headlinesStatus === "connecting" ? "awaiting" : "hub");
+    : (headlinesStatus === "down"
+      ? "fault"
+      : headlinesStatus === "connecting"
+        ? "awaiting"
+        : process.env.NEXT_PUBLIC_RADON_DEMO === "1"
+          ? "flash"
+          : "hub");
   const live = commentaryOpen
     ? !loading && !error && posts.length > 0
     : headlinesStatus === "live";
