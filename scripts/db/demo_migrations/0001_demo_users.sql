@@ -24,5 +24,3 @@ CREATE TABLE IF NOT EXISTS demo_users (
 
 CREATE INDEX IF NOT EXISTS idx_demo_users_status     ON demo_users(status);
 CREATE INDEX IF NOT EXISTS idx_demo_users_expires_at ON demo_users(expires_at);
-
-INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (1, datetime('now'));
