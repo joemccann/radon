@@ -1,5 +1,16 @@
 # Lessons
 
+## 2026-09-04 — IB error 202 is cancel confirmation, not a replace abort
+
+- IB error 202 (`Order Canceled - reason:`) is the broker's cancel
+  acknowledgement. On `/orders/replace` it must count as cancelled and the
+  replacement must still place. Treating it as a failed cancel leaves the
+  original gone and the position unhedged.
+- Do not wait for the open-order snapshot to drop a BAG before accepting 202.
+  Combo cancels can sit in `PendingCancel` longer than the 5s poll, then IBKR
+  Mobile pushes the cancel after Radon has already aborted the replacement.
+- Already-Filled is not 202. Do not place a replacement on top of a fill.
+
 ## 2026-09-04 — Close-order P&L must include dollars and percent
 
 - Every close or modify confirmation that renders estimated realized P&L must

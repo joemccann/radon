@@ -3089,6 +3089,40 @@ async def orders_replace(request: Request):
         _consume_order_rate_reservation(reserved_ref)
 
 
+_CANCEL_ALREADY_CONFIRMED_MARKERS = (
+    "ib error 202",
+    "order canceled",  # IB spelling of error 202
+    "already cancelled",
+    "already apicancelled",
+)
+
+
+def _cancel_already_confirmed(detail: object) -> bool:
+    """True when a cancel HTTP error means the working order is already gone.
+
+    IB error 202 is the cancel confirmation, not a reject. Combo replace used
+    to abort on it with cancelled=[] and skip the replacement, leaving the
+    position unhedged. Filled / not-found stay failures so we do not place
+    a second ticket on top of an execution.
+    """
+    if isinstance(detail, dict):
+        code = detail.get("ib_error_code")
+        if code == 202 or str(code) == "202":
+            return True
+        text = str(
+            detail.get("message")
+            or detail.get("error")
+            or detail.get("detail")
+            or detail
+        )
+    else:
+        text = str(detail or "")
+    lowered = text.lower()
+    if "already filled" in lowered:
+        return False
+    return any(marker in lowered for marker in _CANCEL_ALREADY_CONFIRMED_MARKERS)
+
+
 async def _orders_replace_after_rate_reservation(cancel_orders, replacement):
     """Body of /orders/replace after the per-minute slot is reserved."""
     # Complete every non-transmitting validation before the first cancellation.
@@ -3102,7 +3136,17 @@ async def _orders_replace_after_rate_reservation(cancel_orders, replacement):
     cancelled = []
     try:
         for target in cancel_orders:
-            result = await orders_cancel(_internal_json_request(target))
+            try:
+                result = await orders_cancel(_internal_json_request(target))
+            except HTTPException as cancel_exc:
+                if not _cancel_already_confirmed(cancel_exc.detail):
+                    raise
+                cancelled.append({
+                    "orderId": target.get("orderId"),
+                    "permId": target.get("permId"),
+                    "status": "Cancelled",
+                })
+                continue
             cancelled.append({
                 "orderId": target.get("orderId"),
                 "permId": target.get("permId"),

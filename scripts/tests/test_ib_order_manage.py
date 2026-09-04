@@ -29,6 +29,25 @@ def make_trade(order_id=10, perm_id=12345, status="Submitted", order_type="LMT",
     return trade
 
 
+class ErrorBus:
+    """Minimal ib_insync-style event so tests can fire errorEvent handlers."""
+
+    def __init__(self):
+        self._handlers = []
+
+    def __iadd__(self, handler):
+        self._handlers.append(handler)
+        return self
+
+    def __isub__(self, handler):
+        self._handlers = [h for h in self._handlers if h is not handler]
+        return self
+
+    def emit(self, req_id, error_code, error_string, extra=""):
+        for handler in list(self._handlers):
+            handler(req_id, error_code, error_string, extra)
+
+
 def make_client(trades=None):
     client = MagicMock()
     client.get_open_orders.return_value = trades or []
@@ -36,6 +55,7 @@ def make_client(trades=None):
     # Expose ib property for error event handling and clientId access
     client.ib = MagicMock()
     client.ib.client.clientId = 0
+    client.ib.errorEvent = ErrorBus()
     return client
 
 
@@ -203,6 +223,70 @@ class TestCancelOrder:
         data = json.loads(captured.out)
         assert data["status"] == "ok"
         assert data["finalStatus"] == "Cancelled"
+
+    def test_cancel_succeeds_when_ib_202_arrives_while_order_still_working(self, capsys):
+        """IB error 202 is the cancel confirmation, not a rejection.
+
+        Combo replace cancelled the BAG, got 202 while the snapshot still
+        showed WORKING/PendingCancel, treated that as failure, and never
+        placed the replacement. IB later pushed that the order was cancelled.
+        """
+        t = make_trade(status="Submitted")
+        t.order.clientId = 0
+        client = make_client([t])
+        client.ib.client.clientId = 0
+
+        def side_effect(order):
+            t.orderStatus.status = "PendingCancel"
+            client.ib.errorEvent.emit(
+                order.orderId, 202, "Order Canceled - reason:",
+            )
+
+        client.cancel_order = MagicMock(side_effect=side_effect)
+
+        with pytest.raises(SystemExit) as exc:
+            cancel_order(client, 10, 12345, "127.0.0.1", 4001)
+        assert exc.value.code == 0
+        data = json.loads(capsys.readouterr().out)
+        assert data["status"] == "ok"
+        assert data["finalStatus"] == "Cancelled"
+
+    def test_cancel_succeeds_on_broadcast_202(self, capsys):
+        t = make_trade(status="Submitted")
+        t.order.clientId = 0
+        client = make_client([t])
+        client.ib.client.clientId = 0
+
+        def side_effect(order):
+            client.ib.errorEvent.emit(-1, 202, "Order Canceled - reason:")
+
+        client.cancel_order = MagicMock(side_effect=side_effect)
+
+        with pytest.raises(SystemExit) as exc:
+            cancel_order(client, 10, 12345, "127.0.0.1", 4001)
+        assert exc.value.code == 0
+        data = json.loads(capsys.readouterr().out)
+        assert data["status"] == "ok"
+
+    def test_cancel_still_errors_on_201_reject(self, capsys):
+        t = make_trade(status="Submitted")
+        t.order.clientId = 0
+        client = make_client([t])
+        client.ib.client.clientId = 0
+
+        def side_effect(order):
+            client.ib.errorEvent.emit(
+                order.orderId, 201, "Order rejected - reason: cannot cancel",
+            )
+
+        client.cancel_order = MagicMock(side_effect=side_effect)
+
+        with pytest.raises(SystemExit) as exc:
+            cancel_order(client, 10, 12345, "127.0.0.1", 4001)
+        assert exc.value.code == 1
+        data = json.loads(capsys.readouterr().out)
+        assert data["status"] == "error"
+        assert "cannot cancel" in data["message"]
 
 
 # ─── modify_order ───────────────────────────────────────
