@@ -55,6 +55,41 @@ and left the original cancelled at IB.
 
 ---
 
+# Task: Restore realtime headlines in demo (2026-09-04) [DONE]
+
+The demo dashboard must render the sampled realtime headline feed instead of
+falling into the unavailable state when demo data is otherwise healthy.
+
+## Dependency graph
+
+- D1 depends_on: [] - Reproduce the demo failure and trace the browser, Next route, and upstream headline data contracts.
+- D2 depends_on: [D1] - Add a failing regression that captures the demo-only contract break.
+- D3 depends_on: [D2] - Implement the smallest root-cause fix while preserving degraded-state honesty, schema validation, bounded polling, live headline behavior, and no-store semantics.
+- D4 depends_on: [D3] - Run focused Vitest and dashboard Playwright coverage, including a rendered screenshot check.
+- D5 depends_on: [D4] - Run the full web test suite, typecheck, lint, and production compile; review the final diff.
+- D6 depends_on: [D5] - Commit, push, open the PR, and verify the expected CI suite is registered for the latest head SHA.
+- D7 depends_on: [D6] - Repair any CI failures, wait for every latest-head check to pass, send the required Pushover notification, and record review evidence.
+
+## Checklist
+
+- [x] D1 Reproduce and trace the defect.
+- [x] D2 Add a red regression.
+- [x] D3 Implement the minimal fix and resolve review findings.
+- [x] D4 Complete focused and visual verification.
+- [x] D5 Complete full local verification and review.
+- [x] D6 Open the PR and confirm latest-head CI registration.
+- [x] D7 Reach green CI, notify, and document results.
+
+## Review
+
+- Demo Vercel cannot terminate the same-origin headline WebSocket, so the demo hook now polls an authenticated, no-store Flash snapshot every 60 seconds while production keeps its existing WebSocket transport.
+- Snapshot normalization preserves the hub's oldest-first 50-row contract and bounds content/impact fields; malformed nonempty payloads fail closed, while stale-on-error cache results remain visible but explicitly degraded.
+- Dedicated G/H limits bound bursts at 5/minute and allow 5,000/day, covering three persistent tabs without consuming the ordinary demo read budget.
+- Verification: focused Vitest 163 passed; Chromium 1 passed with inspected screenshot; typecheck clean; lint 0 errors and 17 untouched warnings; demo production compile passed with `/api/headlines` dynamic.
+- Full web suite reached 8,266 passed and 1 unrelated failure caused by concurrent dirty ratio/VIX valuation work; the headline suites stayed green. Default post-build trace audit retained only the existing assistant/orders size failures.
+
+---
+
 # Task: Restore modify-order P&L percentage (2026-09-04) [DONE]
 
 Ensure order modification confirmation shows estimated realized P&L as both a

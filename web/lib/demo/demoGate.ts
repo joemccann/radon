@@ -106,13 +106,14 @@ export async function handleDemoGate(
       }
       return noStore(res);
     }
-    if (tier === "E") {
-      const daily = await limiter("F", userId);
+    const dailyTier = tier === "E" ? "F" : tier === "G" ? "H" : null;
+    if (dailyTier) {
+      const daily = await limiter(dailyTier, userId);
       if (!daily.success) {
         return noStore(NextResponse.json({
           error: "Demo rate limit exceeded. Slow down.",
           code: "DEMO_RATE_LIMITED",
-          tier: "F",
+          tier: dailyTier,
           limit: daily.limit,
           resetAt: daily.reset,
         }, { status: 429 }));

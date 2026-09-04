@@ -89,4 +89,14 @@ describe("handleDemoGate", () => {
     expect(res).toBeNull();
     expect(limiter.mock.calls.map(([tier]) => tier)).toEqual(["E", "F"]);
   });
+
+  it("headline polling consumes isolated minute and daily ceilings", async () => {
+    const limiter = vi.fn(async () => allow);
+    const res = await handleDemoGate(
+      { userId: "u", metadata: activeMeta, request: apiReq("/api/headlines") },
+      { now: NOW, rateLimiter: limiter },
+    );
+    expect(res).toBeNull();
+    expect(limiter.mock.calls.map(([tier]) => tier)).toEqual(["G", "H"]);
+  });
 });
