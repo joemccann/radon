@@ -49,6 +49,28 @@ not start, stop, or restart Gateway. Since R-430 the deploy job also runs
 `radon-deploy-root sync-control-plane` first, so privileged diffs (helper,
 sudoers, polkit) converge on GitHub main without root SSH too.
 
+**`radon` is not in group `docker`.** That group is root-equivalent: a member
+mounts the host into a container and walks out as root. The account held it
+only to drive the `ib-gateway` container, and that now goes through
+`/usr/local/sbin/radon-docker-gw` — root-owned, a fixed verb set
+(`compose-up`, `compose-down`, `inspect-running`, `pgrep-jvm`, `pgrep-java`,
+`thread-dump <pid>`, `logs`, `stats`, `ps`) against a pinned container, each
+verb listed in full in `sudoers.d/radon-ops` with no wildcard. Callers:
+`ib-gateway-control.sh` (still `User=radon`, so the 2FA lease and guard files
+under `/var/lib/radon` keep their ownership) and `scripts/jvm_forensics.py`.
+
+The compose body it runs lives at `/etc/radon/ib-gateway-compose.yml`, a
+control-plane artifact, NOT `cloud/docker-compose.yml` in the checkout: root
+acting on a file its caller can rewrite is the same escalation with extra
+steps. The shim refuses a symlinked or non-root-owned body, and
+`--project-name cloud` is pinned so the `cloud_ib-config` volume — the
+Gateway's Jts settings and 2FA state — survives the move.
+
+`inspect-running` passes docker's stdout, stderr and exit code through
+untouched: `gateway_state()` tells `missing` from `unknown` by matching
+"No such object" on stderr, and swallowing it wedges the watchdog's restart
+ladder at `unknown`.
+
 **Refresh installs git blobs, never the working tree.** The sources it copies
 into `/etc/sudoers.d`, `/usr/local/sbin`, `/etc/polkit-1` and the unit
 directory come from `git cat-file blob` at the deployed commit, staged

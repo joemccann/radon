@@ -42,7 +42,7 @@ def control_env(tmp_path: Path) -> tuple[dict[str, str], Path, Path, Path]:
         """#!/bin/sh
 set -eu
 printf '%s\n' "$*" >> "$FAKE_DOCKER_LOG"
-if [ "${1:-}" = inspect ]; then
+if [ "${1:-}" = inspect-running ]; then
   if [ -n "${FAKE_DOCKER_INSPECT_MARKER:-}" ] && [ ! -e "$FAKE_DOCKER_INSPECT_MARKER" ]; then
     : > "$FAKE_DOCKER_INSPECT_MARKER"
     sleep "${FAKE_DOCKER_INSPECT_DELAY:-0}"
@@ -60,13 +60,10 @@ if [ "${1:-}" = inspect ]; then
   fi
   exit 0
 fi
-if [ "${1:-}" = compose ]; then
-  case " $* " in
-    *" up -d "*) printf 'running\\n' > "$FAKE_DOCKER_STATE" ;;
-    *" down "*) printf 'stopped\\n' > "$FAKE_DOCKER_STATE" ;;
-  esac
-  exit 0
-fi
+case "${1:-}" in
+  compose-up) printf 'running\\n' > "$FAKE_DOCKER_STATE"; exit 0 ;;
+  compose-down) printf 'stopped\\n' > "$FAKE_DOCKER_STATE"; exit 0 ;;
+esac
 exit 2
 """,
     )
@@ -118,7 +115,7 @@ def test_healthy_start_does_not_take_lease(control_env):
 
     assert result.returncode == 0, result.stderr
     assert not lock.exists()
-    assert "compose up" not in log.read_text()
+    assert "compose-up" not in log.read_text()
 
 
 def test_reset_lease_does_not_touch_compose(control_env):
@@ -131,7 +128,7 @@ def test_reset_lease_does_not_touch_compose(control_env):
 
     assert result.returncode == 0, result.stderr
     assert "released" in result.stdout.lower() or "released" in result.stderr.lower()
-    assert not log.exists() or "compose" not in log.read_text()
+    assert not log.exists() or "compose-" not in log.read_text()
 
 
 def test_app_role_refuses_start_even_if_container_is_stopped(control_env):
@@ -144,7 +141,7 @@ def test_app_role_refuses_start_even_if_container_is_stopped(control_env):
     assert result.returncode != 0
     assert "RADON_HOST_ROLE=app" in result.stderr
     assert state.read_text().strip() == "stopped"
-    assert not log.exists() or "compose up" not in log.read_text()
+    assert not log.exists() or "compose-up" not in log.read_text()
 
 
 def test_dead_container_start_acquires_lease_before_compose(control_env):
@@ -155,7 +152,7 @@ def test_dead_container_start_acquires_lease_before_compose(control_env):
 
     assert result.returncode == 0, result.stderr
     assert state.read_text().strip() == "running"
-    assert re.search(r"compose .* up -d", log.read_text())
+    assert "compose-up" in log.read_text()
     assert lock.exists()
     assert "radon-cloud.ib-gateway-control" in lock.read_text()
 
@@ -184,7 +181,7 @@ def test_held_lease_refuses_dead_container_start(control_env):
     result = _run_control(env, "start")
 
     assert result.returncode != 0
-    assert "compose up" not in log.read_text()
+    assert "compose-up" not in log.read_text()
 
 
 def test_same_holder_restart_reentry_is_refused_before_second_cycle(control_env):
@@ -196,7 +193,7 @@ def test_same_holder_restart_reentry_is_refused_before_second_cycle(control_env)
 
     assert first.returncode == 0, first.stderr
     assert second.returncode == 75
-    assert sum(line.endswith(" down") for line in log.read_text().splitlines()) == 1
+    assert sum(line.strip() == "compose-down" for line in log.read_text().splitlines()) == 1
 
 
 def test_watchdog_preheld_lease_is_consumed_exactly_once(control_env):
@@ -210,7 +207,7 @@ def test_watchdog_preheld_lease_is_consumed_exactly_once(control_env):
 
     assert first.returncode == 0, first.stderr
     assert second.returncode != 0
-    assert sum(line.endswith(" down") for line in log.read_text().splitlines()) == 1
+    assert sum(line.strip() == "compose-down" for line in log.read_text().splitlines()) == 1
 
 
 def _wait_for_path(path: Path, timeout: float = 2.0) -> None:
@@ -307,11 +304,11 @@ def test_restart_and_concurrent_stop_are_serialized(control_env, tmp_path):
     assert stop.returncode == 0, stop.stderr
     assert state.read_text().strip() == "stopped"
     compose_actions = [
-        line.rsplit(" ", 1)[-1]
+        line.strip()
         for line in log.read_text().splitlines()
-        if line.startswith("compose ") and line.rsplit(" ", 1)[-1] in {"down", "-d"}
+        if line.strip() in {"compose-up", "compose-down"}
     ]
-    assert compose_actions == ["down", "-d", "down"]
+    assert compose_actions == ["compose-down", "compose-up", "compose-down"]
 
 
 def test_boot_and_watchdog_units_use_authoritative_control_path():
@@ -599,7 +596,7 @@ def test_gateway_helper_refuses_while_deploy_lock_is_held(control_env):
 
     assert result.returncode == 74
     assert "deploy/control lock held" in result.stderr
-    assert "compose" not in log.read_text()
+    assert "compose-" not in log.read_text()
     assert not lock.exists()
 
 
@@ -614,7 +611,7 @@ def test_healthy_start_is_noop_even_when_operator_holds_deploy_lock(control_env)
     assert result.returncode == 0, result.stderr
     assert "already running" in result.stdout
     assert not lock.exists()
-    assert all("compose" not in line for line in log.read_text().splitlines())
+    assert all("compose-" not in line for line in log.read_text().splitlines())
 
 
 def test_deploy_lock_refusal_releases_unused_watchdog_preheld_lease(control_env):
@@ -1206,7 +1203,7 @@ def test_stop_then_start_is_not_blocked_by_the_prior_lease(control_env):
 
     assert result.returncode == 0, result.stderr
     assert state.read_text().strip() == "running"
-    assert re.search(r"compose .* up -d", log.read_text())
+    assert "compose-up" in log.read_text()
 
 
 def test_start_ignores_a_lease_orphaned_while_the_gateway_stayed_down(control_env):
@@ -1276,7 +1273,7 @@ def test_app_role_in_canonical_env_file_refuses_start(control_env, tmp_path):
     assert result.returncode != 0
     assert "RADON_HOST_ROLE=app" in result.stderr
     assert state.read_text().strip() == "stopped"
-    assert not log.exists() or "compose up" not in log.read_text()
+    assert not log.exists() or "compose-up" not in log.read_text()
 
 
 def test_role_in_legacy_env_file_still_read_when_canonical_is_absent(control_env, tmp_path):

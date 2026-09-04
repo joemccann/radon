@@ -23,5 +23,15 @@ radon ALL=(root) NOPASSWD: /usr/sbin/faillock --user radon
 radon ALL=(root) NOPASSWD: /usr/bin/journalctl -u radon-*
 radon ALL=(root) NOPASSWD: /usr/bin/docker logs ib-gateway
 
+# --- Gateway container control (replaces radon's group `docker` membership) ---
+# Group docker is root-equivalent; radon held it only to drive ONE container.
+# radon-docker-gw is root-owned and takes a fixed verb set against a pinned
+# container, with no caller-supplied paths, images, mounts or flags. Each verb
+# is listed in full: a trailing wildcard would hand back the arbitrary argv the
+# shim exists to refuse.
+radon ALL=(root) NOPASSWD: /usr/local/sbin/radon-docker-gw compose-up, /usr/local/sbin/radon-docker-gw compose-down, /usr/local/sbin/radon-docker-gw inspect-running
+radon ALL=(root) NOPASSWD: /usr/local/sbin/radon-docker-gw pgrep-jvm, /usr/local/sbin/radon-docker-gw pgrep-java, /usr/local/sbin/radon-docker-gw thread-dump [0-9]*
+radon ALL=(root) NOPASSWD: /usr/local/sbin/radon-docker-gw logs, /usr/local/sbin/radon-docker-gw stats, /usr/local/sbin/radon-docker-gw ps
+
 # Anything else still requires the password; no blanket NOPASSWD or direct
 # systemctl/docker mutator is authorized.

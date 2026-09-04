@@ -18,6 +18,8 @@ readonly -a CONTROL_PLANE_SOURCES=(
   scripts/drift_audit.py
   scripts/disk_cleanup.py
   scripts/radon-app-runtime.sh
+  scripts/radon-docker-gw.sh
+  docker-compose.yml
   config/sudoers.d/radon-deploy
   config/sudoers.d/radon-monitor
   config/sudoers.d/radon-ops
@@ -57,6 +59,8 @@ readonly -a CONTROL_PLANE_TARGETS=(
   /usr/local/lib/radon/drift_audit.py
   /usr/local/lib/radon/disk_cleanup.py
   /usr/local/sbin/radon-app-runtime
+  /usr/local/sbin/radon-docker-gw
+  /etc/radon/ib-gateway-compose.yml
   /etc/sudoers.d/radon-deploy
   /etc/sudoers.d/radon-monitor
   /etc/sudoers.d/radon-ops
@@ -90,7 +94,7 @@ readonly -a CONTROL_PLANE_TARGETS=(
   /etc/systemd/system/radon-newsfeed.service.d/runtime-container.conf
 )
 readonly -a CONTROL_PLANE_MODES=(
-  755 755 755 644 644 755
+  755 755 755 644 644 755 755 644
   440 440 440 440
   644
   644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644
@@ -136,6 +140,7 @@ if [[ "${RADON_DEPLOY_HELPER_TEST_MODE:-0}" == "1" ]]; then
   readonly SHA256SUM="${RADON_TEST_SHA256SUM:-$(command -v sha256sum)}"
   readonly VISUDO="${RADON_TEST_VISUDO:-$(command -v visudo)}"
   readonly NODE="${RADON_TEST_NODE:-$(command -v node || true)}"
+  readonly DOCKER="${RADON_TEST_DOCKER:-}"
   test_replica_prefix="${RADON_TEST_REPLICA_PREFIX:?test replica prefix is required}"
   readonly REPLICA_FILES=(
     "$test_replica_prefix"
@@ -167,6 +172,7 @@ else
   readonly SHA256SUM=/usr/bin/sha256sum
   readonly VISUDO=/usr/sbin/visudo
   readonly NODE=/usr/bin/node
+  readonly DOCKER=/usr/bin/docker
   readonly ROOT_MUTATION_ACTION_TIMEOUT=180
   readonly ROOT_VERIFY_ACTION_TIMEOUT=30
   readonly ROOT_COMMIT_ACTION_TIMEOUT=30
@@ -1320,7 +1326,7 @@ refresh_install_file() {
         return 73
       fi
       ;;
-    */radon-deploy-root|*/radon-ib-gateway-control|*/usr/local/bin/radon|*/radon-app-runtime)
+    */radon-deploy-root|*/radon-ib-gateway-control|*/usr/local/bin/radon|*/radon-app-runtime|*/radon-docker-gw)
       if ! bash -n "$candidate"; then
         echo "shell syntax validation failed: ${dest}" >&2
         "$RM" -f "$candidate"
@@ -1331,6 +1337,22 @@ refresh_install_file() {
     # path runs on every deploy with the app tier STOPPED and used to install
     # the app runtime, polkit rules, python helpers and control-plane units
     # unvalidated; test_refresh_control_plane pins one arm per target. R-437.
+    # The Gateway compose body root acts on. It is a control-plane file for
+    # exactly one reason: radon-docker-gw runs it as root, so it must not be
+    # readable out of the radon-writable checkout. Same shape as publish_caddy's
+    # `caddy validate` gate.
+    */ib-gateway-compose.yml)
+      # `docker compose config` would have to resolve env_file and the whole
+      # variable set, which is not available at install time. Gate on the two
+      # things that make this body safe for root to run instead: it declares
+      # the pinned container, and it does not ask for privilege or the host
+      # filesystem. Provenance (the git blob at the deployed commit) is the
+      # real integrity gate.
+      if ! compose_body_is_valid "$candidate" "$dest"; then
+        "$RM" -f "$candidate"
+        return 73
+      fi
+      ;;
     */polkit-1/rules.d/*.rules)
       if [[ -z "$NODE" || ! -x "$NODE" ]] || ! "$NODE" --check < "$candidate"; then
         echo "polkit syntax validation failed: ${dest}" >&2
@@ -1381,6 +1403,31 @@ refresh_install_file() {
     return 73
   fi
   "$SYNC" -f "$dest"
+}
+
+# Root runs this compose body. It must name the Gateway container and must not
+# request privilege or a host-root bind -- the two shapes that turn "root runs
+# a compose file" into "caller is root".
+compose_body_is_valid() {
+  local candidate="$1" dest="$2"
+
+  grep -Eq '^services:' "$candidate" || {
+    echo "compose validation failed: ${dest} declares no services" >&2
+    return 1
+  }
+  grep -Eq '^[[:space:]]+container_name:[[:space:]]*ib-gateway[[:space:]]*$' "$candidate" || {
+    echo "compose validation failed: ${dest} does not pin container_name ib-gateway" >&2
+    return 1
+  }
+  if grep -Eq '^[[:space:]]*privileged:[[:space:]]*true' "$candidate"; then
+    echo "compose validation failed: ${dest} requests privileged" >&2
+    return 1
+  fi
+  if grep -Eq '^[[:space:]]*-[[:space:]]*/[[:space:]]*:' "$candidate"; then
+    echo "compose validation failed: ${dest} binds the host root" >&2
+    return 1
+  fi
+  return 0
 }
 
 write_control_plane_manifest_and_ready() {
