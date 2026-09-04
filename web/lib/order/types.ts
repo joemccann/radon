@@ -90,6 +90,8 @@ export interface OrderPresentationSummary {
   undefinedRiskReason?: string | null;
   breakeven?: number | null;  // For options/spreads
   estimatedPnl?: number | null;
+  /** Estimated realized P&L divided by the absolute signed entry basis. */
+  estimatedPnlPct?: number | null;
   estimatedPnlLabel?: string;
   /**
    * Phase-1 margin-impact estimate. Optional/nullable so existing producers
