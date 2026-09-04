@@ -21,6 +21,38 @@ each artifact's `case_id` anchors into this file. Triage them with the
 
 ---
 
+## combo-replace-ib-202-cancel
+
+**Combo modify cancel-replace treats IB error 202 as a failed cancel and never
+places the replacement.** Peak incident: 2026-09-04, `/orders` modify of a
+working BAG. Toast: `Replacement incomplete during cancellation` /
+`Cancelled: none reported` / `IB error 202: Order Canceled - reason:`. IBKR
+Mobile later pushed that the original was cancelled.
+
+- **Mechanism:** Combo modify always cancel-then-places. `ib_order_manage.cancel_order`
+  waits 5s for the order to leave the book. IB 202 ("Order Canceled - reason:")
+  is the cancel confirmation, not a reject. If the BAG stays `PendingCancel`
+  past the poll, the subprocess exits 1. `_extract_error_message` prefers the
+  last stderr line (`IB error 202: …`) over the JSON timeout. `/orders/replace`
+  then wraps that as `REPLACE_PARTIAL` / `phase=cancellation` with
+  `cancelled=[]` and skips `_orders_place_after_rate_reservation`. Original
+  gone at IB; replacement never transmitted.
+- **Detection:** `/orders` error toast with `replacementOrderRef=radon-replace-`
+  plus `IB error 202`; IBKR push "order cancelled"; open-order snapshot missing
+  the row and no new working replacement.
+- **Discriminating check:** `cancel_order` with errorEvent 202 while the
+  snapshot is still `PendingCancel` must return `status=ok`. `POST /orders/replace`
+  whose cancel step raises `IB error 202` must still call place. A 201 / already
+  Filled cancel must not place.
+- **Fix:** treat 202 as cancel confirmation in `ib_order_manage.cancel_order`;
+  `/orders/replace` records 202 / already-Cancelled as cancelled and continues
+  to place. Already-Filled stays a hard abort.
+- **Regression:**
+  `scripts/tests/test_ib_order_manage.py::TestCancelOrder::test_cancel_succeeds_when_ib_202_arrives_while_order_still_working`,
+  `scripts/api/tests/test_order_replace_state_machine.py::test_replace_treats_ib_202_cancel_as_confirmed_and_places`.
+- **Code:** `scripts/ib_order_manage.py`, `scripts/api/server.py`
+  (`_cancel_already_confirmed`, `_orders_replace_after_rate_reservation`).
+
 ## turso-destroy-storm
 
 **undici Agent destroy storm / Turso per-IP socket exhaustion.**
