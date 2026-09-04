@@ -664,11 +664,18 @@ def main() -> int:
     if outcome["write_errors"]:
         sys.stderr.write("[health_probe] probe ledger degraded: %s\n" % "; ".join(outcome["write_errors"]))
     sys.stdout.write(json.dumps({"edge": outcome["edge_row"], "run": outcome["runs_row"]}) + "\n")
-    if any(error.startswith("latest: ") for error in outcome["write_errors"]):
-        return 1
+    # R-627: the observed verdict outranks the ledger. A shared network fault
+    # takes out both, and the early `return 1` below used to report that case
+    # as "ledger degraded" only — never naming the endpoint that was down, and
+    # handing exit 1 to consumers keying on EXIT_UNHEALTHY. Both lines are
+    # emitted; the ledger failure only decides the code when the probe itself
+    # is otherwise healthy.
     if outcome["exit_code"] != 0:
         sys.stderr.write("[health_probe] UNHEALTHY (arming the workflow-failure email): %s\n"
                          % outcome["runs_row"]["detail"])
+        return outcome["exit_code"]
+    if any(error.startswith("latest: ") for error in outcome["write_errors"]):
+        return 1
     return outcome["exit_code"]
 
 

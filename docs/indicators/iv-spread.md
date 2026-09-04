@@ -375,7 +375,9 @@ const MISSING_IV_SPREAD = {
 };
 
 // radon-iv-spread.timer fires daily at 22:15 UTC including weekends, so a
-// snapshot older than two days means the writer is down.
+// snapshot older than two days means the writer is down. A stale_source
+// re-serve refreshes scan_time every run, so its age rides the DATA date
+// (as_of) via ivSpreadContentTimestampMs; other payloads age by scan_time.
 const IV_SPREAD_MAX_AGE_MS = 48 * 60 * 60_000;
 ```
 

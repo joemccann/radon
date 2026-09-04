@@ -226,6 +226,101 @@ class TestTheClaimNamesTheDeliveredFile:
         assert "/tmp/" not in recorded[0] and "/var/folders/" not in recorded[0], recorded
 
 
+class TestFreshnessIsPerQueryNotPerDirectory:
+    """R-601 (P1): `newest_period_end` was a single max over EVERY classified
+    file in `outgoing`, and IBKR never removes delivered files, so while ANY
+    query stayed fresh the max stayed current and a second query's total
+    stoppage could never fire the error branch. NF-10: a suppression with no
+    dwell bound."""
+
+    def _drive(self, tmp_path, monkeypatch, files, *, now, outcome="duplicate"):
+        beats: list[tuple] = []
+        monkeypatch.setattr(pull, "_heartbeat", lambda state, error=None: beats.append((state, error)))
+        monkeypatch.setattr(pull, "nightly_period_ok", lambda _x: True)
+        monkeypatch.setattr(pull, "classify_flex_xml", lambda _x: "trades")
+        inbox = tmp_path / "inbox"
+        inbox.mkdir()
+        code = pull.run(
+            config=_write(tmp_path, _config_lines()),
+            inbox=inbox,
+            runner=FakeSftp({name: xml.encode() for name, xml in files.items()}),
+            decrypt=lambda data, **k: data.decode(),
+            ingest=lambda xml_text, source_path="", **k: {"ok": True, "outcome": outcome},
+            now=now,
+        )
+        return code, beats
+
+    @staticmethod
+    def _statement(to_date: str) -> str:
+        return f'<FlexQueryResponse><FlexStatement toDate="{to_date}"/></FlexQueryResponse>'
+
+    def test_one_fresh_query_cannot_mask_another_that_stopped(self, tmp_path, monkeypatch):
+        now = datetime(2026, 9, 2, 8, 0, tzinfo=pull.ZoneInfo(ZONE))
+        code, beats = self._drive(
+            tmp_path,
+            monkeypatch,
+            {
+                "U1234.Nightly_Trades.20260901.20260901.xml.pgp": self._statement("20260901"),
+                "U1234.Nightly_Cash.20260818.20260818.xml.pgp": self._statement("20260818"),
+            },
+            now=now,
+        )
+        assert code == 1, beats
+        assert beats and beats[-1][0] == "error", beats
+        assert "Nightly_Cash" in (beats[-1][1] or ""), beats
+
+    def test_every_query_current_is_still_ok(self, tmp_path, monkeypatch):
+        now = datetime(2026, 9, 2, 8, 0, tzinfo=pull.ZoneInfo(ZONE))
+        code, beats = self._drive(
+            tmp_path,
+            monkeypatch,
+            {
+                "U1234.Nightly_Trades.20260901.20260901.xml.pgp": self._statement("20260901"),
+                "U1234.Nightly_Cash.20260901.20260901.xml.pgp": self._statement("20260901"),
+            },
+            now=now,
+        )
+        assert code == 0, beats
+        assert [s for s, _ in beats] == ["ok"], beats
+
+
+class TestStalenessIsMeasuredInSessions:
+    """R-614 (P2): the threshold subtracted CALENDAR days from a trading-SESSION
+    date, so a stoppage whose last statement was Thursday's scored diff 1 on
+    Monday and stayed unpaged — roughly two extra days of tolerance."""
+
+    def test_a_weekend_does_not_inflate_the_lag_into_a_false_page(self):
+        """Calendar arithmetic scored a Wednesday statement 4 days behind by
+        the following Tuesday even though only two sessions had passed."""
+        # 2026-09-04 Fri, 2026-09-07 Mon, 2026-09-08 Tue.
+        friday = date(2026, 9, 4)
+        tuesday_8am = datetime(2026, 9, 8, 8, 0, tzinfo=pull.ZoneInfo(ZONE))
+        # Sessions elapsed Fri -> last completed session (Mon) = 1, inside the
+        # one-session tolerance; calendar days = 3 and would have paged.
+        assert pull.delivery_is_stale(friday, tuesday_8am) is False
+
+    def test_a_two_session_gap_is_still_stale(self):
+        wednesday = date(2026, 9, 2)
+        tuesday_8am = datetime(2026, 9, 8, 8, 0, tzinfo=pull.ZoneInfo(ZONE))
+        assert pull.delivery_is_stale(wednesday, tuesday_8am) is True
+
+    def test_sessions_between_skips_weekends_and_holidays(self):
+        # Thu 2026-09-03 -> Mon 2026-09-07 is Fri only (Labor Day is a
+        # holiday): 1 session, against 4 calendar days.
+        assert pull._sessions_between(date(2026, 9, 3), date(2026, 9, 7)) == 1
+        assert pull._sessions_between(date(2026, 9, 3), date(2026, 9, 8)) == 2
+
+    def test_a_friday_statement_is_not_stale_on_monday(self):
+        friday = date(2026, 9, 4)
+        monday_8am = datetime(2026, 9, 7, 8, 0, tzinfo=pull.ZoneInfo(ZONE))
+        assert pull.delivery_is_stale(friday, monday_8am) is False
+
+    def test_the_weekend_itself_is_not_a_lag(self):
+        friday = date(2026, 9, 4)
+        saturday_8am = datetime(2026, 9, 5, 8, 0, tzinfo=pull.ZoneInfo(ZONE))
+        assert pull.delivery_is_stale(friday, saturday_8am) is False
+
+
 class TestDeliveryStalenessGate:
     """R-448 / T-413: a duplicate-only run is only an ERROR when the newest
     delivered statement has fallen behind the last completed session.

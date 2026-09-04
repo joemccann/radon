@@ -72,7 +72,12 @@ ANONYMOUS = Principal(role=ROLE_ANONYMOUS)
 
 _jwks_client = None
 _jwks_refresh_lock = threading.Lock()
-_jwks_refresh_after = 0.0
+# R-620: this was ONE module-global scalar, so a flood of random kids against
+# this internet-facing surface kept the cooldown perpetually in the future and
+# the genuinely-new kid produced by a Clerk key rotation never triggered a
+# refetch — every legitimate token 401'd for as long as the flood lasted. The
+# cooldown is per kid, bounded like the negative cache.
+_jwks_refresh_after: OrderedDict[str, float] = OrderedDict()
 
 # REL-193 (R-551): the JWKS bounding controls scripts/api/auth.py has, ported
 # to this mirror's synchronous shape. PyJWKClient force-refreshes on an
@@ -120,6 +125,21 @@ def _negative_kid_active(kid: str) -> bool:
         return False
 
 
+def _is_upstream_outage(exc: BaseException) -> bool:
+    """True when the failure says nothing about this token (R-606).
+
+    Only a PyJWT-class error is a verdict on the token; a socket timeout, an
+    OSError or anything else is the JWKS endpoint being unreachable.
+    """
+    if isinstance(exc, (TimeoutError, OSError)):
+        return True
+    try:
+        from jwt.exceptions import PyJWTError
+    except Exception:  # noqa: BLE001 — without pyjwt nothing here is a verdict
+        return True
+    return not isinstance(exc, PyJWTError)
+
+
 def _signing_key_for(token: str):
     """The JWKS signing key for this token. Split out so tests can stub it.
 
@@ -141,11 +161,32 @@ def _signing_key_for(token: str):
         if kid not in {key.key_id for key in client.get_signing_keys()}:
             with _jwks_refresh_lock:
                 now = time.monotonic()
-                if now < _jwks_refresh_after:
+                if now < _jwks_refresh_after.get(kid, 0.0):
                     raise AuthError(401, "invalid token")
-                _jwks_refresh_after = now + JWKS_REFRESH_COOLDOWN_SECONDS
-        return client.get_signing_key_from_jwt(token).key
-    except Exception:
+                _jwks_refresh_after[kid] = now + JWKS_REFRESH_COOLDOWN_SECONDS
+                _jwks_refresh_after.move_to_end(kid)
+                while len(_jwks_refresh_after) > 256:
+                    _jwks_refresh_after.popitem(last=False)
+        try:
+            return client.get_signing_key_from_jwt(token).key
+        except AuthError:
+            raise
+        except Exception as exc:
+            if _is_upstream_outage(exc):
+                raise
+            # A kid the freshly-fetched key set does not contain: a verdict.
+            _remember_negative_kid(kid)
+            raise AuthError(401, "invalid token") from exc
+    except AuthError:
+        raise
+    except Exception as exc:
+        # R-606: this used to cache the token's REAL kid on ANY failure —
+        # including a timeout or a 5xx raised inside the JWKS fetch — and
+        # `_negative_kid_active` then denied every later request with a 401
+        # served without an upstream attempt, so nothing re-probed. An
+        # upstream outage is not a verdict about this token's signature.
+        if _is_upstream_outage(exc):
+            raise AuthError(503, "authentication temporarily unavailable") from exc
         _remember_negative_kid(kid)
         raise
     finally:

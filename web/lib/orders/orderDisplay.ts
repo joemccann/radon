@@ -139,6 +139,24 @@ export function mapOrderStatus(
  * SELL fills when last rises to/through limit → delta = limit − last.
  * Negative delta means the market is through the limit.
  */
+/**
+ * R-607: the non-OPT single-leg branch read `priceData?.last ?? null`, and
+ * `??` does not reject `0`. IB broadcasts `last: 0` for a halted ticker, a
+ * pre-open contract, or a relay reconnect that has not ticked yet, so the
+ * Last Price cell showed a confident `$0.00` and `distanceToFill` computed
+ * `0 - limitPrice <= 0` and badged a resting BUY limit as THROUGH the market.
+ * A non-positive last is no price at all.
+ */
+export function resolveSingleLegLastPrice(
+  priceData?: { last?: number | null; lastIsCalculated?: boolean | null } | null,
+): { price: number | null; isCalculated: boolean } {
+  const last = priceData?.last;
+  if (last == null || !Number.isFinite(last) || last <= 0) {
+    return { price: null, isCalculated: false };
+  }
+  return { price: last, isCalculated: Boolean(priceData?.lastIsCalculated) };
+}
+
 export function distanceToFill(params: {
   action: string;
   limitPrice: number | null;

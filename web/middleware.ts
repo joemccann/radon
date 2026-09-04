@@ -166,6 +166,10 @@ export const isPublicRoute = createRouteMatcher([
   // Expired-demo landing page — the demo gate redirects signed-in expired
   // trial users here; it must bypass auth or the gate would loop on itself.
   "/trial-expired",
+  // Demo signup whose trial has not reached the session JWT yet — the demo
+  // gate redirects here, so it must bypass auth or the gate loops on itself.
+  // Renders a bare leaf with no shell, no account fetch and no identity.
+  "/demo-pending",
   // Crawler policy (app/robots.ts) — crawlers have no Clerk session; without
   // this exemption /robots.txt redirects to /sign-in and the disallow-all
   // policy is never served (Google indexed exactly that redirect URL).

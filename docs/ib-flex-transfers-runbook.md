@@ -131,7 +131,7 @@ If either shows up in the real XML, that is a follow-up code change with its own
 
 Recorded here only in case §1 is overridden and a second query id is created:
 
-- **File:** `/home/radon/radon-cloud/.env` on Hetzner, mode `0600`, owner `radon`. Add `IB_FLEX_FLOWS_QUERY_ID=<id>`.
+- **File:** `/etc/radon/env` on Hetzner, mode `0640`, owner `root:radon` (`/home/radon/radon-cloud/.env` is the compatibility symlink). Add `IB_FLEX_FLOWS_QUERY_ID=<id>`.
 - **Values containing `$` must be single-quoted** (repo rule; bash `set -a` expands `$VAR` under `set -u` and aborts silently from systemd). A numeric query id has no `$`, so this is a non-issue for this variable specifically.
 - **Who reads it:**
   - `radon-perf-twr.service` — `EnvironmentFile=/home/radon/radon-cloud/.env` (`cloud/services/radon-perf-twr.service:12`). It is `Type=oneshot` fired by `radon-perf-twr.timer` (Mon–Fri 20:45 America/New_York), and systemd re-reads `EnvironmentFile` at every `ExecStart` — **no restart needed**, the next timer firing picks it up.

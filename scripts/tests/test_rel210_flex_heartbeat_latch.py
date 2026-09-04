@@ -98,3 +98,50 @@ class TestFreshnessPairingIsDocumented:
             "watchdog services.py sets the cash-flow-sync window without "
             "documenting that freshness paging depends on flex-pull"
         )
+
+
+class TestARaisingCashFlowSyncAlsoLatches:
+    """R-609 (P1): the latch is armed only by a non-zero RETURN from
+    `cash_flow_sync.main`. An EXCEPTION out of the cash-flow write (a Turso
+    error mid-chunk, an XML parse error after the first chunk) releases the
+    claim and propagates to the batch loop's per-file `except Exception`, so
+    no error heartbeat is written at all and the next stale duplicate paints
+    `cash-flow-sync` green — the original incident, exactly."""
+
+    def test_a_raising_main_writes_an_error_heartbeat(
+        self, monkeypatch, tmp_path, heartbeats
+    ):
+        import cash_flow_sync
+
+        def _boom(_argv):
+            raise RuntimeError("turso mid-chunk")
+
+        monkeypatch.setattr(ingest, "claim_flex_delivery", lambda *a, **k: True)
+        monkeypatch.setattr(ingest, "release_flex_delivery", lambda _d: True)
+        monkeypatch.setattr(cash_flow_sync, "main", _boom)
+        failing = tmp_path / "new.xml"
+        failing.write_text(ACTIVITY_XML.read_text() + "<!-- new -->", encoding="utf-8")
+        with pytest.raises(RuntimeError):
+            ingest.ingest_path(failing)
+        assert heartbeats == ["error"], heartbeats
+
+    def test_a_later_duplicate_cannot_paint_a_raised_failure_green(
+        self, monkeypatch, tmp_path, heartbeats
+    ):
+        import cash_flow_sync
+
+        def _boom(_argv):
+            raise RuntimeError("turso mid-chunk")
+
+        xml = ACTIVITY_XML.read_text()
+        claims = iter([True, False])
+        monkeypatch.setattr(ingest, "claim_flex_delivery", lambda *a, **k: next(claims))
+        monkeypatch.setattr(ingest, "release_flex_delivery", lambda _d: True)
+        monkeypatch.setattr(cash_flow_sync, "main", _boom)
+        (tmp_path / "a_new.xml").write_text(xml + "<!-- new -->", encoding="utf-8")
+        monkeypatch.setattr(ingest, "flex_delivery_status", lambda _d: "applied")
+        (tmp_path / "b_dup.xml").write_text(xml, encoding="utf-8")
+
+        rc = ingest.main(["--inbox", str(tmp_path)])
+        assert rc == 1
+        assert heartbeats[-1] == "error", heartbeats

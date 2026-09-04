@@ -21,7 +21,9 @@ export const editorialNavLinks: EditorialNavLink[] = [
 
 // The one product destination on the page: the free demo instance
 // (public signups live there; app.radon.run is operator-allowlisted).
-export const DEMO_URL = "https://demo.radon.run";
+// Deep-links to /sign-up deliberately — the demo's root is an authenticated
+// route and 404s a signed-out visitor, so the bare origin is a dead CTA.
+export const DEMO_URL = "https://demo.radon.run/sign-up";
 
 // Data-source reference links (from README.md; UW carries the referral).
 export const IB_URL = "https://www.interactivebrokers.com/";

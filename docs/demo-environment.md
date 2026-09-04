@@ -119,3 +119,78 @@ Tests: 55 new Vitest (10 files) + 2 extended perimeter pins + 4 new pytest, all 
 - **Realtime feed entitlement pressure** (decision 5) → monitor IB data-farm capacity; fall back to delayed feed if it pressures prod.
 - **Prod AI-budget burn** (revised 2026-06-27) → demo reuses the prod Anthropic/Cerebras/Exa keys, so a demo quota bug spends the *prod* AI budget. The only guard is the `demo_ai_usage` per-user quota + Upstash tier-D (5/day); add a provider spend cap if abuse appears.
 - **Cost/ops** → second VM + Turso + Upstash + Cloudflare zone. No separate IB paper account needed (TEST_MODE).
+
+---
+
+## Outage 2026-08-13 → 2026-09-03: no new user could get a trial
+
+**Symptom.** Signups completed at Clerk and then every page and `/api/*` call
+returned `403 "Demo access is not active."` with no explanation. The last
+provisioned trial was `2026-08-13T17:30:04Z`; ~60 accounts created after that
+carry empty `publicMetadata`.
+
+**Cause.** Commit `4eaaf5e9` shipped two changes together:
+
+1. A webhook replay ledger — `claimDemoWebhookEvent` INSERTs into
+   `demo_webhook_events` *before* `provisionDemoTrial` runs
+   (`web/app/api/webhooks/clerk/route.ts`). The table was never created in the
+   demo Turso, so every `user.created` delivery threw and provisioned nothing.
+2. A default-deny in `web/lib/demo/demoGate.ts` — any signed-in user with no
+   `demoRole` is refused on the demo deployment. Correct on its own; combined
+   with (1) it turned a silent provisioning failure into a total wall.
+
+**Why the migration never ran.** The demo Turso is a full prod-shaped clone and
+shared ONE `schema_migrations` table with the main series (versions 1..69).
+`demo_migrations/0003` declared version 3, which the main series claimed on
+2026-06-29, so `apply_demo_migrations` read it as already applied and skipped it
+on every run. Every future demo migration numbered ≤ 69 was pre-swallowed the
+same way. This is a different failure from 2026-07-03 ("nobody ran the tool");
+here the tool ran and reported success.
+
+**Fixes.**
+
+| Change | Where |
+|---|---|
+| Demo series gets its own NAME-keyed ledger `demo_schema_migrations`; the shared table is never read or written | `scripts/db/demo_seed.py`, `scripts/db/demo_migrations/*.sql` |
+| `assert_not_prod` also requires the positive `radon-demo` marker | `scripts/db/demo_seed.py` |
+| A missing idempotency STORE degrades to at-least-once provisioning; every other claim failure still throws | `web/lib/demo/webhookLedger.ts` |
+| Provisioning failures page the operator (counts and reason only, never a user id or email) | `web/lib/notify/pushover.ts` |
+| Unprovisioned page requests redirect to a public `/demo-pending` leaf that bounds its own token-refresh retry; `/api/*` keeps the hard 403 | `web/app/demo-pending/`, `web/lib/demo/demoGate.ts`, `web/middleware.ts` |
+| A dead Upstash denies instead of throwing out of middleware as an opaque 500 | `web/lib/demo/rateLimit.ts` |
+| Seed dates anchor to the run date (`RADON_DEMO_SEED_TODAY` overrides) so the demo book never shows expired options | `scripts/db/demo_seed.py` |
+| Marketing CTA deep-links to `/sign-up`; the bare demo origin is a gated route that 404s a signed-out visitor | `site/lib/editorial-content.ts` |
+
+**Stranded users are NOT backfilled.** `clerk.radon.run` is the shared prod
+instance and "created after 2026-08-13 without `demoRole`" is not the set of
+demo signups — OAuth signups never carry the `unsafe_metadata.demo` marker, and
+`updateUserMetadata` replaces rather than merges. Stamping `demoRole` on a real
+prod account puts it behind demo expiry and paper-order routing; stamping the
+operator locks them out of `app.radon.run`. Affected users re-sign-up.
+
+**Set `PUSHOVER_TOKEN` / `PUSHOVER_USER` on the `radon-demo` Vercel project** to
+arm the provisioning alert; it no-ops silently while unset.
+
+### VM backend redeploy, 2026-09-04
+
+The demo VM was frozen at 2026-07-03 (~50 commits behind on `scripts/api`).
+Redeployed by shipping `scripts/ requirements.txt pyproject.toml` over ssh+tar
+to `/opt/radon-demo/app` and rebuilding (`docker compose build api && up -d`).
+`data/` on the VM is NOT shipped — it holds the copied `flow_reports/*.json`
+that the TEST_MODE per-ticker flow guard serves.
+
+Rollback: `radon-demo-api:rollback` (the pre-redeploy image) and
+`/opt/radon-demo/app.bak` are both kept on the VM.
+
+The redeploy surfaced one break: `TrustedHostMiddleware` gained a host pin
+after the VM's last deploy, and `demo-api.radon.run` was never on the list, so
+every proxied request returned `400 Invalid host header` while `127.0.0.1`
+health stayed 200. The host is now pinned in `scripts/api/server.py`
+`_ALLOWED_HOSTS` rather than left to `RADON_ALLOWED_HOSTS` on the VM, so a
+fresh VM cannot reproduce it. Pinned by
+`scripts/api/tests/test_loopback_browser_bypass.py`.
+
+Post-redeploy verification: `/health` 200 externally, `/health/lite` 401 without
+the service token and 200 with it, `POST /vcg/scan` and `/breadth/scan` 200 from
+the seeded snapshots, `RADON_API_TEST_MODE=1` confirmed in the running
+container, container `TURSO_DB_URL` on `radon-demo-joemccann`, no tailscale and
+no reachable IB port on any prod host.

@@ -126,18 +126,35 @@ def classify_checks(rows: list[dict]) -> tuple[str, list[dict]]:
     return "green", []
 
 
+#: Distinct from ``[]``. R-599: an unparseable answer used to read as "no
+#: checks reported yet", so a broken `gh` polled for the whole cap and then
+#: reported `no-checks-reported` — three hours spent learning nothing. A
+#: query that could not run is not a state of the PR.
+CHECKS_UNAVAILABLE: list[dict] = []
+
+#: Consecutive query failures after which ``watch`` gives up.
+MAX_CONSECUTIVE_QUERY_FAILURES = 3
+
+
 def gh_pr_checks(pr_number: int) -> list[dict]:
-    """`gh pr checks` exits 8 while pending and 1 on failure; the JSON is
-    what matters. Unparseable output reads as "no checks reported yet"."""
-    proc = subprocess.run(
-        ["gh", "pr", "checks", str(pr_number), "--json", "name,bucket,link"],
-        capture_output=True, text=True, check=False, timeout=120,
-    )
+    """Rows, or ``CHECKS_UNAVAILABLE`` when the query itself failed.
+
+    `gh pr checks` exits 8 while pending and 1 on failure, so the exit code
+    alone cannot separate "red" from "gh is broken" — but output that is not
+    a JSON list can only be the latter.
+    """
+    try:
+        proc = subprocess.run(
+            ["gh", "pr", "checks", str(pr_number), "--json", "name,bucket,link"],
+            capture_output=True, text=True, check=False, timeout=120,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return CHECKS_UNAVAILABLE
     try:
         rows = json.loads(proc.stdout or "[]")
     except json.JSONDecodeError:
-        return []
-    return rows if isinstance(rows, list) else []
+        return CHECKS_UNAVAILABLE
+    return rows if isinstance(rows, list) else CHECKS_UNAVAILABLE
 
 
 def watch(
@@ -151,8 +168,31 @@ def watch(
 ) -> dict:
     """Poll until green, red, or the cap. Never longer than ``cap_secs``."""
     start = clock()
+    consecutive_failures = 0
     while True:
         rows = run_checks(pr_number)
+        if rows is CHECKS_UNAVAILABLE:
+            consecutive_failures += 1
+            if consecutive_failures >= MAX_CONSECUTIVE_QUERY_FAILURES:
+                return {
+                    "state": "timeout",
+                    "elapsed_secs": int(clock() - start),
+                    "pending": [],
+                    "check": (
+                        f"gh pr checks unavailable "
+                        f"({consecutive_failures} consecutive failures)"
+                    ),
+                }
+            if clock() - start + interval > cap_secs:
+                return {
+                    "state": "timeout",
+                    "elapsed_secs": int(clock() - start),
+                    "pending": [],
+                    "check": "gh pr checks unavailable at the cap",
+                }
+            sleep(interval)
+            continue
+        consecutive_failures = 0
         state, decided = classify_checks(rows)
         elapsed = int(clock() - start)
         if state == "green":
@@ -235,9 +275,39 @@ def read_record(loop: str, *, root: Path | str | None = None) -> dict | None:
 def resumable(loop: str, *, root: Path | str | None = None) -> dict | None:
     """The record when its deliver did not reach green; else None."""
     record = read_record(loop, root=root)
-    if record and record.get("status") != "green" and record.get("pr"):
+    if record and record.get("status") != "green" and (
+        record.get("pr") or record.get("branch")
+    ):
+        # R-611: a branch-only record is what the wrapper writes BEFORE the
+        # agent starts, so a cap kill mid-phase is resumable from the branch
+        # even though no PR number exists yet.
         return record
     return None
+
+
+def status_from_record(loop: str, *, root: Path | str | None = None) -> str:
+    """The operator string, read from the durable record.
+
+    R-613: the wrapper used to grep the agent's own transcript for its
+    verdict line, so a marker recited inside agent prose could be mistaken
+    for the verdict and a cap kill left nothing behind at all. The record is
+    written by the phase itself and survives the kill.
+    """
+    record = read_record(loop, root=root)
+    if record is None:
+        return "INCOMPLETE (no deliver record — not resumable)"
+    status = record.get("status")
+    url = record.get("url")
+    if status == "green" and url:
+        return f"1 PR(s) green, ready to merge: {url}"
+    if status == "green":
+        return NOTHING_TO_MERGE
+    if record.get("pr") is None:
+        return (
+            "INCOMPLETE (deliver record has a branch but no PR — "
+            f"resume {record.get('branch') or 'the dated branch'})"
+        )
+    return f"INCOMPLETE: {record.get('check') or 'unnamed check'}"
 
 
 # --- CLI ---------------------------------------------------------------------
@@ -267,12 +337,20 @@ def main(argv: list[str] | None = None) -> int:
     p_record.add_argument("--branch", required=True)
     p_record.add_argument("--pr", type=int, default=None)
     p_record.add_argument("--url", default=None)
-    p_record.add_argument("--status", required=True, choices=("pending", "incomplete", "green"))
+    p_record.add_argument(
+        "--status", required=True,
+        choices=("launched", "pending", "incomplete", "green"),
+    )
     p_record.add_argument("--check", default=None)
     p_record.add_argument("--run-id", default=None)
 
     p_show = sub.add_parser("show", help="print the resume record as JSON")
     p_show.add_argument("--loop", required=True, choices=LOOPS)
+
+    p_dstatus = sub.add_parser(
+        "deliver-status", help="the operator string, read from the record (R-613)"
+    )
+    p_dstatus.add_argument("--loop", required=True, choices=LOOPS)
 
     args = parser.parse_args(argv)
 
@@ -296,6 +374,9 @@ def main(argv: list[str] | None = None) -> int:
             status=args.status, check=args.check, run_id=args.run_id,
         )
         print(path)
+        return 0
+    if args.cmd == "deliver-status":
+        print(status_from_record(args.loop))
         return 0
     if args.cmd == "show":
         record = read_record(args.loop) or {}

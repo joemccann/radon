@@ -19,6 +19,13 @@ export const fmtPriceOrCalculated = (n: number, isCalculated: boolean) => isCalc
 type ResolvedRealtimePrice = {
   price: number | null;
   isCalculated: boolean;
+  /**
+   * R-608: true only when the price came from the previous-session close.
+   * `isCalculated` covers that case AND a live bid/ask midpoint, and both
+   * render with the same `C` prefix — so a mark built entirely from stale
+   * closes was indistinguishable from a live mid.
+   */
+  isPreviousClose: boolean;
 };
 
 function isPositiveNumber(value: number | null | undefined): value is number {
@@ -45,7 +52,7 @@ export function resolveRealtimePrice(
       const mid = Number(((bid + ask) / 2).toFixed(4));
       // Case 1: last is outside the bid-ask spread (clearly stale)
       if (last < lo || last > hi) {
-        return { price: mid, isCalculated: true };
+        return { price: mid, isCalculated: true, isPreviousClose: false };
       }
       // Case 2: last is inside but spread is wide (>10% of mid) and last
       // diverges >5% from mid. Wide spreads make last unreliable — the mid
@@ -54,18 +61,30 @@ export function resolveRealtimePrice(
       const spreadPct = (hi - lo) / mid;
       const lastDivergence = Math.abs(last - mid) / mid;
       if (spreadPct > 0.10 && lastDivergence > 0.05) {
-        return { price: mid, isCalculated: true };
+        return { price: mid, isCalculated: true, isPreviousClose: false };
       }
     }
-    return { price: last, isCalculated: Boolean(priceData?.lastIsCalculated) };
+    return {
+      price: last,
+      isCalculated: Boolean(priceData?.lastIsCalculated),
+      isPreviousClose: false,
+    };
   }
 
   if (bid != null && ask != null) {
-    return { price: Number(((bid + ask) / 2).toFixed(4)), isCalculated: true };
+    return {
+      price: Number(((bid + ask) / 2).toFixed(4)),
+      isCalculated: true,
+      isPreviousClose: false,
+    };
   }
 
   if (isPositiveNumber(fallbackPrice)) {
-    return { price: fallbackPrice, isCalculated: fallbackIsCalculated };
+    return {
+      price: fallbackPrice,
+      isCalculated: fallbackIsCalculated,
+      isPreviousClose: false,
+    };
   }
 
   // Final fallback: previous-session close. WS broadcasts close on every tick
@@ -74,10 +93,10 @@ export function resolveRealtimePrice(
   // recent known price instead of "—".
   const close = isPositiveNumber(priceData?.close) ? priceData.close : null;
   if (close != null) {
-    return { price: close, isCalculated: true };
+    return { price: close, isCalculated: true, isPreviousClose: true };
   }
 
-  return { price: null, isCalculated: false };
+  return { price: null, isCalculated: false, isPreviousClose: false };
 }
 
 /* ─── Position math ───────────────────────────────────────── */

@@ -183,3 +183,73 @@ class TestRel223EmptyDbWithBindingRecovers:
         (tmp_path / "secret_store.key").unlink()
         with pytest.raises(SecretKeyMismatchError):
             _store(tmp_path)
+
+
+class TestAnUnopenableStoreIsADegradedSignal:
+    """R-621 (P2): `bootstrap_exported_names` swallowed an unopenable store
+    into an empty list and the caller logged only on the truthy branch — no
+    else, no health field, no abort. The API booted clean, exported nothing,
+    and every consumer silently fell back to whatever `.env` held, which
+    inverts the documented store-wins contract toward a rotated-out key."""
+
+    def _mod(self):
+        from scripts.api.routes import credentials
+
+        return credentials
+
+    def test_a_failed_open_is_recorded_and_logged_at_error(
+        self, tmp_path, monkeypatch, caplog
+    ):
+        mod = self._mod()
+        monkeypatch.setattr(mod, "_BOOTSTRAP_FAILURE", None, raising=False)
+
+        def _boom():
+            raise SecretStoreError("key file unreadable")
+
+        monkeypatch.setattr(mod, "_store", _boom)
+        with caplog.at_level(logging.ERROR):
+            assert mod.bootstrap_exported_names() == []
+        assert mod.bootstrap_failure() is not None
+        assert "key file unreadable" in mod.bootstrap_failure()
+        assert any(r.levelno >= logging.ERROR for r in caplog.records)
+
+    def test_a_successful_bootstrap_clears_the_signal(self, tmp_path, monkeypatch):
+        mod = self._mod()
+        monkeypatch.setattr(mod, "_BOOTSTRAP_FAILURE", "stale", raising=False)
+        monkeypatch.setenv("RADON_SECRET_STORE_PATH", str(tmp_path / "secrets.db"))
+        monkeypatch.setenv(
+            "RADON_SECRET_STORE_KEY_FILE", str(tmp_path / "secret_store.key")
+        )
+        monkeypatch.delenv("CREDENTIALS_DIRECTORY", raising=False)
+        _store(tmp_path).set_secret("UW_TOKEN", UW_SAMPLE, actor="operator")
+        mod.bootstrap_exported_names()
+        assert mod.bootstrap_failure() is None
+
+
+class TestAFailedSaveDoesNotConsumeTheValidationWindow:
+    """R-630 (P3): `_validator_last_run[service_id] = now` is stamped whether
+    or not the subsequent store write succeeds, and the PUT path raises the
+    429 BEFORE `store.set_secrets`. A save that 503s on the store write is
+    then refused for 5s as a COOLDOWN — surfaced to the operator as a
+    cooldown rather than the failed save it was."""
+
+    def test_the_stamp_is_rolled_back_when_the_save_fails(self, monkeypatch):
+        from scripts.api.routes import credentials as mod
+
+        mod._validator_last_run.clear()
+        mod.note_validation_failed("uw")
+        assert "uw" not in mod._validator_last_run
+
+    def test_a_rollback_of_an_unstamped_service_is_a_no_op(self):
+        from scripts.api.routes import credentials as mod
+
+        mod._validator_last_run.clear()
+        mod.note_validation_failed("never-ran")  # must not raise
+
+    def test_the_put_path_rolls_back_on_a_store_error(self):
+        src = (SCRIPTS_DIR / "api" / "routes" / "credentials.py").read_text()
+        body = "\n".join(
+            l for l in src.splitlines() if not l.lstrip().startswith("#")
+        )
+        save = body[body.index("credential store write failed"):][:400]
+        assert "note_validation_failed" in save

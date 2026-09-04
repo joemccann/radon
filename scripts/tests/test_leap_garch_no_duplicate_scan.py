@@ -229,8 +229,13 @@ def test_capacity_502_does_not_launch_a_direct_duplicate(tmp_path, name):
     )
     assert result.returncode != 0, result.stdout + result.stderr
     combined = (result.stdout + result.stderr).lower()
-    # 2s budget at a 1s delay: two waits, three POSTs, then give up.
-    assert stub.calls == [spec["path"]] * 3, stub.calls
+    # 2s budget at a 1s delay is three POSTs when the POSTs themselves are
+    # free, but the budget is wall clock: under CI load a slow POST eats a
+    # retry slot and only two fit. Pin what the wrapper guarantees — it
+    # re-POSTs the SAME endpoint and never anything else, and it gives up
+    # inside the budget rather than looping — not a count the clock owns.
+    assert set(stub.calls) == {spec["path"]}, stub.calls
+    assert 2 <= len(stub.calls) <= 3, stub.calls
     assert "capacity" in combined or "shed" in combined
 
 
