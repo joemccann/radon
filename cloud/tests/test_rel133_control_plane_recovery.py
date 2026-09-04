@@ -60,6 +60,7 @@ def test_a_missing_dropin_source_is_skipped_not_fatal(tmp_path) -> None:
     """A rollback to a pre-702ae26a checkout has no drop-ins. It must still deploy."""
     box = Sandbox(tmp_path)
     (box.cloud / API_DROPIN).unlink()
+    box.commit_sources()
     before = (box.rootfs / "etc/systemd/system/radon-api.service.d/runtime-container.conf").read_bytes()
 
     result = box.run()
@@ -74,6 +75,7 @@ def test_a_missing_unit_source_is_still_fatal(tmp_path) -> None:
     """The skip is scoped to drop-ins. A missing .service is still exit 66."""
     box = Sandbox(tmp_path)
     (box.cloud / API_UNIT).unlink()
+    box.commit_sources()
 
     result = box.run()
 
@@ -220,6 +222,7 @@ def test_a_dropin_executing_from_the_checkout_is_refused(tmp_path, mutation) -> 
     box = Sandbox(tmp_path)
     source = box.cloud / API_DROPIN
     source.write_text(source.read_text(encoding="utf-8") + mutation, encoding="utf-8")
+    box.commit_sources()
     installed = box.rootfs / "etc/systemd/system/radon-api.service.d/runtime-container.conf"
     before = installed.read_bytes()
 
@@ -234,6 +237,7 @@ def test_a_dropin_that_drops_the_execstart_reset_is_refused(tmp_path) -> None:
     source = box.cloud / API_DROPIN
     text = source.read_text(encoding="utf-8").replace("ExecStartPre=\n", "")
     source.write_text(text, encoding="utf-8")
+    box.commit_sources()
     installed = box.rootfs / "etc/systemd/system/radon-api.service.d/runtime-container.conf"
     before = installed.read_bytes()
 
