@@ -145,7 +145,7 @@ def _stub_bin(
             "done\n"
             'exec "$@"\n'
         ),
-        "git": "#!/bin/sh\nexit 0\n",
+        "git": '#!/bin/sh\n# REL-188: the wrapper calls a phase OK only on commit evidence, so the\n# stub reports a fresh HEAD and a current committer date.\ncase "$*" in\n  *"rev-parse HEAD"*) date +%s%N; exit 0 ;;\n  *"--format=%ct"*) date +%s; exit 0 ;;\nesac\nexit 0\n',
         "python3": "#!/bin/sh\nexit 0\n",
     }
     for name, body in stubs.items():

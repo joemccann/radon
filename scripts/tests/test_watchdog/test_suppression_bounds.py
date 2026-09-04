@@ -489,3 +489,112 @@ class TestRel202Exit143DwellBound:
             "journal_age_seconds": None,
         }
         assert units._is_deploy_collateral(unit, deploy, now) is True
+
+
+class TestGithubWitnessSuppressionCeiling:
+    """R-603 (P1, NF-10): a STALE verdict is upgraded to HEALTHY whenever the
+    newest external-health-probe run is green inside the staleness window. The
+    witness proves the workflow exited 0 — never that a row readable at
+    EXPECTED_SOURCE exists. Rename the source, rotate the secret to another DB
+    or drop the row and the probe writes happily, the watchdog reads nothing,
+    and every cycle re-suppresses the dead-man forever. Bound it."""
+
+    def _stale_read(self):
+        return patch(
+            "watchdog.external_probe.turso_http.fetch_external_probe",
+            return_value=None,
+        )
+
+    def _green_run(self, now):
+        return {
+            "status": "completed",
+            "conclusion": "success",
+            "updated_at": (now - timedelta(seconds=60)).isoformat().replace("+00:00", "Z"),
+        }
+
+    def test_a_green_witness_stops_suppressing_after_the_ceiling(self, db_conn, creds):
+        ceiling = external_probe.WITNESS_SUPPRESS_MAX_CONSECUTIVE
+        with self._stale_read():
+            for cycle in range(ceiling):
+                now = T0 + cycle * CYCLE
+                with patch(
+                    "watchdog.external_probe._latest_github_run",
+                    return_value=self._green_run(now),
+                ):
+                    outcome = external_probe.check_external_probe(now=now)
+                assert outcome.status == "healthy", (
+                    f"cycle {cycle + 1} is inside the witness ceiling ({ceiling})"
+                )
+
+            now = T0 + ceiling * CYCLE
+            with patch(
+                "watchdog.external_probe._latest_github_run",
+                return_value=self._green_run(now),
+            ):
+                outcome = external_probe.check_external_probe(now=now)
+        assert outcome.status != "healthy", (
+            "past the ceiling a green workflow must stop disarming the dead-man"
+        )
+
+    def test_a_readable_row_resets_the_counter(self, db_conn, creds):
+        """Non-consecutive suppressions must never accumulate: a cycle that
+        reads a fresh row restarts the count."""
+        ceiling = external_probe.WITNESS_SUPPRESS_MAX_CONSECUTIVE
+        for cycle in range(ceiling + 2):
+            now = T0 + cycle * CYCLE
+            with patch(
+                "watchdog.external_probe.turso_http.fetch_external_probe",
+                return_value=None,
+            ), patch(
+                "watchdog.external_probe._latest_github_run",
+                return_value=self._green_run(now),
+            ):
+                external_probe.check_external_probe(now=now)
+            # a healthy read in between
+            with patch(
+                "watchdog.external_probe.turso_http.fetch_external_probe",
+                return_value=None,
+            ), patch(
+                "watchdog.external_probe.reader.classify_external_probe",
+                return_value={"verdict": external_probe.reader.VERDICT_HEALTHY},
+            ):
+                healthy = external_probe.check_external_probe(now=now)
+            assert healthy.status == "healthy"
+
+
+class TestTheWitnessCannotKillTheBucket:
+    """R-617 (P2, NF-9): `prefer_ipv4()` sits OUTSIDE the `try` whose comment
+    says it exists to preserve the primary Turso verdict, and
+    `_latest_github_run()` is called unguarded, so an ImportError in
+    `utils.ipv4_first` raises out of the whole continuous bucket — on exactly
+    the cycle where the external probe is already failing."""
+
+    def test_an_import_failure_yields_an_outcome_not_an_exception(self):
+        import builtins
+
+        real_import = builtins.__import__
+
+        def _boom(name, *a, **k):
+            if name == "utils.ipv4_first" or name.endswith("ipv4_first"):
+                raise ImportError("moved")
+            return real_import(name, *a, **k)
+
+        with patch(
+            "watchdog.external_probe.turso_http.fetch_external_probe",
+            return_value=None,
+        ), patch.object(builtins, "__import__", _boom):
+            outcome = external_probe.check_external_probe(now=T0)
+        assert outcome.service == external_probe.SERVICE
+
+    def test_latest_github_run_swallows_an_import_failure(self):
+        import builtins
+
+        real_import = builtins.__import__
+
+        def _boom(name, *a, **k):
+            if name.endswith("ipv4_first"):
+                raise ImportError("moved")
+            return real_import(name, *a, **k)
+
+        with patch.object(builtins, "__import__", _boom):
+            assert external_probe._latest_github_run() is None

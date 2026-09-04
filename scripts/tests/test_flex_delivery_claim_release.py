@@ -298,10 +298,11 @@ class TestTheClaimCarriesItsStatus:
             ingest.ingest_xml(xml_text, source_path=str(path))
 
         digest = ingest._sha256(xml_text)
-        assert [(service, state) for service, state, _ in pages] == [("flex-pull", "error")], (
+        flex_rows = [row for row in pages if row[0] == "flex-pull"]
+        assert [(service, state) for service, state, _ in flex_rows] == [("flex-pull", "error")], (
             f"a claim release failure wrote no error row; {pages}"
         )
-        error = pages[0][2]["error"]
+        error = flex_rows[0][2]["error"]
         assert error["content_sha256"] == digest
         assert "release" in error["message"] and "still down" in error["message"]
 

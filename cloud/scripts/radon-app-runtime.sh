@@ -279,7 +279,19 @@ cmd_stop() {
   is_app_unit "$unit" || exit 64
   # Idempotent: ExecStopPost runs on every stop, including ones where the
   # container already exited on its own. R-232.
-  "$DOCKER" rm -f "$unit" >/dev/null 2>&1 || true
+  # R-628: `rm -f` failing is exactly the orphan case documented above, and
+  # the cleanup below then deletes the staged key out from under a container
+  # that is still running and still serving — its CREDENTIALS_DIRECTORY is a
+  # read-only bind of that directory, so the next in-container secret_store
+  # open fails on a missing key instead of a clear name conflict. A non-zero
+  # rm for a container that does NOT exist is the ordinary first-start case
+  # and stays benign; only a SURVIVING container aborts.
+  if ! "$DOCKER" rm -f "$unit" >/dev/null 2>&1; then
+    if "$DOCKER" inspect "$unit" >/dev/null 2>&1; then
+      echo "radon-app-runtime: docker rm -f ${unit} failed and the orphan container is still present; refusing to clear its staged credential" >&2
+      exit 75
+    fi
+  fi
   cleanup_runtime_credential "$unit"
 }
 
@@ -408,7 +420,19 @@ cmd_run() {
   # fails on `Conflict. The container name "/<unit>" is already in use`, and
   # Restart=always + RestartSec=5 + StartLimitBurst=5 parks the unit
   # start-limit-hit inside 25s while the orphan keeps writing to data/.
-  "$DOCKER" rm -f "$unit" >/dev/null 2>&1 || true
+  # R-628: `rm -f` failing is exactly the orphan case documented above, and
+  # the cleanup below then deletes the staged key out from under a container
+  # that is still running and still serving — its CREDENTIALS_DIRECTORY is a
+  # read-only bind of that directory, so the next in-container secret_store
+  # open fails on a missing key instead of a clear name conflict. A non-zero
+  # rm for a container that does NOT exist is the ordinary first-start case
+  # and stays benign; only a SURVIVING container aborts.
+  if ! "$DOCKER" rm -f "$unit" >/dev/null 2>&1; then
+    if "$DOCKER" inspect "$unit" >/dev/null 2>&1; then
+      echo "radon-app-runtime: docker rm -f ${unit} failed and the orphan container is still present; refusing to clear its staged credential" >&2
+      exit 75
+    fi
+  fi
   cleanup_runtime_credential "$unit"
 
   if [[ "$unit" == "radon-api.service" ]]; then

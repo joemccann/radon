@@ -44,6 +44,8 @@ export type OpenOrderDisplayRow = OpenOrderSingleRow | OpenOrderComboRow;
 export type ResolvedOpenOrderPrice = {
   price: number | null;
   isCalculated: boolean;
+  /** R-608: every contributing leg resolved from a previous-session close. */
+  isPreviousClose: boolean;
 };
 
 export type SignedComboPriceLeg = {
@@ -57,6 +59,7 @@ export type SignedComboPriceLeg = {
 const UNAVAILABLE_ORDER_PRICE: ResolvedOpenOrderPrice = {
   price: null,
   isCalculated: false,
+  isPreviousClose: false,
 };
 
 /**
@@ -71,6 +74,9 @@ export function resolveSignedComboPrice(
 
   let price = 0;
   let isCalculated = false;
+  // R-608: a combo whose every leg resolved from a previous-session close is
+  // not a live mark, and the `C` prefix alone does not say so.
+  let isPreviousClose = legs.length > 0;
   for (const leg of legs) {
     if ((leg.action !== "BUY" && leg.action !== "SELL") || !Number.isFinite(leg.ratio) || leg.ratio <= 0) {
       return UNAVAILABLE_ORDER_PRICE;
@@ -83,12 +89,14 @@ export function resolveSignedComboPrice(
     if (resolved.price == null) return UNAVAILABLE_ORDER_PRICE;
     price += (leg.action === "BUY" ? 1 : -1) * leg.ratio * resolved.price;
     isCalculated = isCalculated || resolved.isCalculated;
+    isPreviousClose = isPreviousClose && resolved.isPreviousClose;
   }
 
   if (!Number.isFinite(price)) return UNAVAILABLE_ORDER_PRICE;
   return {
     price: Math.round(price * 100) / 100,
     isCalculated,
+    isPreviousClose,
   };
 }
 

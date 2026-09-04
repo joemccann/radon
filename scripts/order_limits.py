@@ -385,6 +385,20 @@ def check_modify_limits(
             or 0
         )
 
+    if order_type != "stock" and not price and not (order_type == "combo" and legs is not None):
+        # R-632: the refusal below was keyed on `stock`, so an unpriceable
+        # OPT fell through with `limitPrice: 0`, never had its notional
+        # computed, and was bounded solely by the 500-contract band. A combo
+        # is exempt because `combo_max_loss()` derives its exposure from the
+        # legs, not from a premium.
+        return {
+            "code": "ORDER_PRICE_UNRESOLVED",
+            "message": (
+                f"{order_type} modify has no resolvable price (limit/aux/stop), "
+                "so its notional cannot be bounded — refused"
+            ),
+        }
+
     if order_type == "stock" and not price:
         # REL-211 (R-580): with no resolvable price the notional cap cannot
         # be computed, and a quantity-only modify was bounded solely by the
