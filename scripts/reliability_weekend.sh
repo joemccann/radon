@@ -356,7 +356,35 @@ phase_status() {
 DELIVER_READY_MARKER="NIGHTLY DELIVER READY:"
 DELIVER_INCOMPLETE_MARKER="NIGHTLY DELIVER INCOMPLETE:"
 
+# R-611 (P1): a deliver phase killed at its cap left NOTHING behind when the
+# agent had not yet written a record, so "resume the same branch and PR"
+# resumed nothing. The wrapper arms a branch-only record before the agent
+# starts; the agent overwrites it with the PR number and status as it goes.
+# Same isolation as prune_deadman_comments: origin/main's copy piped into a
+# system interpreter, never a python FILE from the agent-writable clone.
+arm_deliver_record() {
+  [[ "$PHASE" == "deliver" ]] || return 0
+  [[ -n "${TIMEOUT_BIN:-}" ]] || return 0
+  git -C "$REPO" show origin/main:scripts/nightly_deliver.py 2>/dev/null \
+    | "$TIMEOUT_BIN" 30 /usr/bin/python3 -I - record --loop "$LOOP_SLUG" \
+      --branch "${PR_BRANCH_PREFIX}$(date +%F)" --status launched >/dev/null 2>&1 || true
+  return 0
+}
+
 deliver_status() {
+  # R-613: the verdict is read from the DURABLE record the phase writes, not
+  # by grepping the agent's own transcript — a marker line recited inside
+  # agent prose is not a verdict, and a cap kill leaves no transcript line at
+  # all. The log grep survives only as the fallback for a record-less run.
+  local from_record=""
+  if [[ -n "${TIMEOUT_BIN:-}" ]]; then
+    from_record="$(git -C "$REPO" show origin/main:scripts/nightly_deliver.py 2>/dev/null \
+      | "$TIMEOUT_BIN" 30 /usr/bin/python3 -I - deliver-status --loop "$LOOP_SLUG" 2>/dev/null || true)"
+  fi
+  case "$from_record" in
+    ""|*"no deliver record"*) ;;
+    *) printf '%s' "$from_record"; return 0 ;;
+  esac
   # Last verdict line of THIS round's slice of the log (R-426 scoping).
   local line rest tok n="" urls="" check=""
   line="$(tail -c "+$((ROUND_LOG_MARK + 1))" "$RUN_LOG" 2>/dev/null \
@@ -762,6 +790,7 @@ run_phase() {
     return 0
   fi
   echo "[weekend] $PHASE start $STAMP repo=$REPO cap=${CAP_SECS}s${BILLING_IGNORED:+ ignored=${BILLING_IGNORED// /,}}" | tee -a "$RUN_LOG"
+  arm_deliver_record
   # NOT bare. Under `set -Eeuo pipefail` with the ERR trap armed, a failed
   # fetch made on_crash report and then the shell exit anyway — so
   # `run_phase audit` never returned and `run_phase remediate` was never run
