@@ -795,3 +795,32 @@ how this loop improves as the codebase grows.
 - 2026-09-03 (remediate): REL-210's process-lifetime error latch leaked across unrelated pytest
   tests sharing the interpreter and surfaced as an order-dependent red two tasks later. A
   process-scoped latch in production code needs a conftest autouse reset the same commit it ships.
+- 2026-09-04 (audit): **zsh does not word-split an unquoted variable, and the loop-squash exclusion
+  failed silently because of it.** `for c in $LOOPS` passed the whole string as ONE argument and
+  `git show` died with "ambiguous argument"; the file list that came back looked plausible (128
+  files) and was simply the unsplit range. The repo's own CLAUDE.md warns about this for download
+  loops. Write the shas as a literal list in the `for`, and sanity-check the split by printing each
+  squash's file count -- 134/24/1/14/68 immediately showed which commits were loop output. Same
+  family: `grep --include=*.py` needs the glob QUOTED or zsh tries to expand it and reports "no
+  matches found" for every sweep. Five of the seven standing sweeps returned empty on the first
+  try for that reason alone, which reads exactly like "the mechanism is gone".
+- 2026-09-04 (audit): **the loop's own dead-man is auditable and this is where the P0s were.** Both
+  P0s are in `nightly_issue_prune.py` / `report()`, shipped by `d396eacc` eight days after the
+  prune was introduced to reduce issue scrollback. The walk that found them was the only one
+  pointed at the wrapper scripts, and the decisive evidence was a six-line stub `gh` in `/tmp`:
+  making `pr list` exit 1 produced `pruned 1/1 comments`, rc 0. Budget one walk per cycle at the
+  loop machinery itself, and prefer a stub-binary repro over reading the fail-open path -- it took
+  one tool call and turned a plausible reading into a confirmed P0.
+- 2026-09-04 (audit): the delta was small enough (28 feature commits, 44 source files) that the
+  binding constraint was neither agent capacity nor dedup -- there were ZERO cross-walk duplicates
+  this run, against three or more in each of the previous four audits. What replaced dedup as the
+  main lead-side work was SEVERITY ARBITRATION: two walk ratings were raised (R-608, R-609) and
+  both raises came from asking the same question -- does the mechanism this suppression defers to
+  actually cover the failure it hides? Write the arbitration into the row, not just the number.
+- 2026-09-04 (audit): the executing regression walk's instruction "name one case the shipped test
+  does not cover and RUN it" produced four PARTIALs from four reviewed fixes, a 100% hit rate, and
+  two of them were P1s. The recurring shape is now explicit enough to hand the walk directly: an
+  incident fix pins the branch the incident exercised, so test the ADJACENT branch -- return-1
+  covered but not raise (REL-210), raise covered but not the False that the module actually
+  returns (REL-209), fully-empty covered but not truncated (REL-212), stock covered but not option
+  (REL-211). Ask "what is the other way this input arrives" per fix.
