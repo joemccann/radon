@@ -1,3 +1,44 @@
+# Task: Make every demo workstation surface deterministic (2026-09-04) [DONE]
+
+Restore representative demo data across performance, orders, instruments,
+options, scanners, flow, and regime pages, and prevent ordinary demo navigation
+from exhausting shared quotas.
+
+## Dependency graph
+
+- T1 depends_on: [] - Reproduce and classify all 14 reported demo failures; trace shared fixture, route, auth, cache, and quota paths.
+- T2 depends_on: [T1] - Add failing unit and Playwright regressions for every missing demo dataset and first-visit quota isolation.
+- T3 depends_on: [T2] - Implement deterministic performance, orders, cash-flow, instrument, option, scanner, and flow demo responses.
+- T4 depends_on: [T2] - Implement deterministic CRI, VCG, dispersion, GEX, TRIN, and BPI demo responses.
+- T5 depends_on: [T3, T4] - Eliminate demo request amplification and ensure sync/retry controls recover without consuming unrelated quotas.
+- T6 depends_on: [T5] - Run focused Vitest and Playwright coverage and visually verify every reported route.
+- T7 depends_on: [T6] - Run the full web test suite, typecheck, lint, production compile, and review the complete diff.
+- T8 depends_on: [T7] - Commit, push, open the PR, supervise exact-head CI to green, send the required Pushover notification, and record evidence.
+
+## Checklist
+
+- [x] T1 Reproduce and trace all reported failures.
+- [x] T2 Establish red regression coverage.
+- [x] T3 Restore non-regime demo datasets.
+- [x] T4 Restore regime demo datasets.
+- [x] T5 Correct request amplification and quota isolation.
+- [x] T6 Complete focused and visual verification.
+- [x] T7 Complete full verification and review.
+- [x] T8 Publish, supervise, notify, and document the PR.
+
+## Review
+
+- Request-time typed fixtures now keep all 14 reported demo surfaces populated with current, internally coherent sample data while preserving base open orders.
+- Demo ticker search, quote, depth, tape, fundamentals, and option snapshots are local and deterministic; demo navigation no longer opens broker tickets, relay sockets, or background chain-prefetch traffic.
+- Demo sync hooks perform one passive GET and manual GET refreshes, while every locally rate-limited route now declares an explicit durable tier; cached reads no longer consume producer budgets.
+- Verification: 70 focused Vitest tests and the dedicated demo Playwright test passed; 8,322 collected full-suite assertions passed, with one unrelated REL-148 suite retaining its pre-existing `web/web` collection path failure.
+- TypeScript and production compilation passed; ESLint reported 0 errors and 17 existing warnings. The post-build trace audit retained only the existing assistant and orders/place file-count/size failures.
+- Relevant surface Playwright coverage passed 30/31; the sole failure is the unchanged options-exposure sticky-header geometry baseline, after its demo data, controls, and table assertions passed.
+- CI curation passed 4/4 after the demo browser contract was added to the production-server smoke job; a demo-mode compile and the exact Playwright spec passed locally under `next start`.
+- PR #293 implementation head `760368c5` passed every applicable exact-head check, including the full Python matrix, eight Vitest shards, both coverage ratchets, demo Playwright, images, security, and Vercel.
+
+---
+
 # Task: Restore ARM defined-risk aggregate P&L (2026-09-04) [DONE]
 
 Recognize the reported three-leg ARM structure as defined risk and render its

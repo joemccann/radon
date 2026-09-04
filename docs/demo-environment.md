@@ -10,7 +10,7 @@ A public, Clerk-gated demo of Radon that real users can self-serve try for **max
 | 2 | Host | **New Hetzner VM** (hard physical isolation from prod) |
 | 3 | Demo data | **Separate Turso DB** (`radon-demo-*`) |
 | 4 | Rate limiting | **Upstash** Redis + `@upstash/ratelimit` |
-| 5 | Quote feed | **Realtime** (real entitled relay feed) |
+| 5 | Quote feed | **Request-time sample snapshots** (no IB ticket or WebSocket) |
 | 6 | AI keys | **Reuse the existing prod Anthropic/Cerebras/Exa keys** (revised 2026-06-27 — per-user `demo_ai_usage` quota + Upstash tier-D are the only spend guard; no separate provider cap) |
 | 7 | Signup gating | **Email-verify** required before a trial starts |
 
@@ -20,10 +20,10 @@ FastAPI short-circuits auth on `is_trusted_local_request` (`scripts/api/auth.py:
 
 ## Architecture
 
-- **New Hetzner VM** (own public IP) running its own docker-compose: `radon-nextjs-demo:3000`, `radon-api-demo:8321`, `ib-realtime-relay-demo:8765`, Caddy terminating TLS for `demo.radon.run`.
+- **New Hetzner VM** (own public IP) running FastAPI for bounded demo-only operations. The Vercel frontend does not require an IB relay for workstation reads.
 - **Cloudflare** (orange-cloud) in front: WAF + volumetric DDoS + IP rate-limiting before origin.
 - FastAPI runs **`RADON_API_TEST_MODE=1`** → every IB path stubbed at source (`server.py:1760` returns synthetic permIds without calling `ib_place_order.py`). **No IB Gateway container, no Tailscale route to `ib-gateway:4001`** — IB is physically unreachable.
-- **Realtime quote feed (decision 5):** the demo relay connects to the entitled market-data feed for realism. It is READ-ONLY market data; it can never trade. (Risk: shares IB data-farm entitlement capacity — monitor; fall back to a delayed feed if it pressures prod.)
+- **Sample quote feed (decision 5):** the client builds deterministic minute-bucketed quotes, depth, tape, fundamentals, and option marks for requested instruments. Demo pages never request an IB ticket or open a market-data WebSocket.
 - Same git repo deploys both; a **CI isolation guard** (`scripts/ci/check_demo_isolation.py`, run by the `py-coverage` job in `.github/workflows/ci.yml` — skipped with a workflow warning annotation until the `TURSO_DEMO_DB_URL` / `TURSO_DEMO_APP_DB_URL` secrets are provisioned, TEST_AUDIT T-130) rejects any demo deploy whose env carries a prod `TURSO_DB_URL` or a reachable IB host. It checks BOTH `TURSO_DEMO_DB_URL` and `TURSO_DB_URL` against the prod marker: every account route reads through `dbExecute` → `getDb()` → `TURSO_DB_URL`, so that variable is the isolation boundary (`getDemoDb()` serves only `/api/admin/demo-users`). The two being equal on the demo VM is the desired state. Until 2026-08-23 nothing invoked the guard and it never inspected `TURSO_DB_URL` at all (RELIABILITY_AUDIT R-156).
 
 ## Isolation model (three independent guarantees)
@@ -34,11 +34,13 @@ FastAPI short-circuits auth on `is_trusted_local_request` (`scripts/api/auth.py:
 
 **Synthetic demo dataset:** `scripts/db/demo_seed.py` seeds the demo Turso once with a fabricated-but-consistent `portfolio_snapshots` row (~500K net liq, 3-4 synthetic SPY/QQQ/TSLA positions), matching journal + open-orders rows, modeled on `marketing-mockups/portfolio-recreation.html`. Demo users' simulated orders land in `paper_fills` (`account='PAPER'`), never mutating the seed.
 
+**Workstation sample contract:** live-service-dependent read surfaces are completed at request time after the Clerk principal resolves to `demo`. Performance, current executions, cash flows, theta, ticker flow, option calendars/chains/exposure, CRI, VCG, GRG, GEX, dispersion, TRIN, and BPI therefore remain current without disk writers, Turso snapshots, FastAPI producers, or vendor credentials. Fixtures accept an injected clock, carry explicit sample provenance, and are covered at the route boundary. Seeded open orders remain intact when current-session executions are added.
+
 ## Guardrails (enforcement points)
 
 - **No real orders** — (backend) VM `RADON_API_TEST_MODE=1`; (UX) `web/app/api/orders/place/route.ts` detects `demoRole` via `auth()` and routes to `/paper/place` → `paper_fills`. Both present; neither load-bearing alone.
 - **AI quotas** — new `demo_ai_usage` table (PK user_id+endpoint+day_et); guard at the top of the 3 Next.js LLM routes (`assistant` 5/day, `ticker/seasonality` 10/day, `ticker/info` 20/day) where Clerk identity exists; 429 on exceed; reset 00:00 ET. Backstop (revised 2026-06-27): demo **reuses the prod AI keys**, so the per-user quota + the Upstash tier-D limiter (5/day) are the only AI-spend guard — no separate provider cap.
-- **Rate-limit / DOS** — Cloudflare edge (IP limits, Bot Fight, OWASP WAF) + a **greenfield** app-layer tiered sliding-window limiter via `@upstash/ratelimit` keyed by Clerk userId (Tier A reads ~100/hr, B expensive ~10/hr, C mutations 5/day, D AI 5/day). No rate-limiting exists today.
+- **Rate-limit / DOS** — Vercel edge controls plus an app-layer Upstash sliding-window limiter keyed by Clerk userId. Cached GETs use Tier A; only producer mutations use Tier B; writes, AI, WebSocket tickets, headlines, and shell polling retain their dedicated tiers. Every handler with a local limiter declares its durable tier explicitly. Demo sync hooks load one GET, suppress automatic producer POSTs/polling/retries, and make manual refresh another GET.
 - **Write spam** — per-trial caps in demo DB (journal ≤1000 + 10KB/note + 1/5s; alerts/watchlist bounded).
 
 ## Trial: 3 trading days
@@ -116,7 +118,7 @@ Tests: 55 new Vitest (10 files) + 2 extended perimeter pins + 4 new pytest, all 
 - **Edge-runtime middleware trap** → keep the trial-expiry gate free of `node:*` imports (Edge runtime; a prior prod bug — `feedback_middleware_edge_runtime`).
 - **FastAPI per-user blindness** → never rely on FastAPI to gate per-user; VM `TEST_MODE` + Next.js `auth()` are the two guarantees.
 - **Clerk webhook failure** → a user could exist without `demoRole`/expiry → unlimited access. Add a reconciliation sweep + default-deny (no `demoRole` = no demo access).
-- **Realtime feed entitlement pressure** (decision 5) → monitor IB data-farm capacity; fall back to delayed feed if it pressures prod.
+- **Sample-feed realism** (decision 5) → keep sample provenance visible and validate quote/depth/option relationships in fixture tests; never imply broker entitlement or execution availability.
 - **Prod AI-budget burn** (revised 2026-06-27) → demo reuses the prod Anthropic/Cerebras/Exa keys, so a demo quota bug spends the *prod* AI budget. The only guard is the `demo_ai_usage` per-user quota + Upstash tier-D (5/day); add a provider spend cap if abuse appears.
 - **Cost/ops** → second VM + Turso + Upstash + Cloudflare zone. No separate IB paper account needed (TEST_MODE).
 

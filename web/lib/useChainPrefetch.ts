@@ -20,6 +20,7 @@ export function useChainPrefetch(
   ticker: string,
   expirations: string[],
   selectedExpiry: string | null,
+  enabled: boolean = process.env.NEXT_PUBLIC_RADON_DEMO !== "1",
 ) {
   const cacheRef = useRef<StrikesCache>(new Map());
   const [prefetchedCount, setPrefetchedCount] = useState(0);
@@ -44,7 +45,7 @@ export function useChainPrefetch(
 
   // Background prefetch of non-selected expirations
   useEffect(() => {
-    if (expirations.length <= 1 || !selectedExpiry) return;
+    if (!enabled || expirations.length <= 1 || !selectedExpiry) return;
 
     // Cancel any in-flight prefetch
     if (abortRef.current) abortRef.current.abort();
@@ -99,7 +100,7 @@ export function useChainPrefetch(
     return () => {
       controller.abort();
     };
-  }, [ticker, expirations, selectedExpiry]);
+  }, [ticker, expirations, selectedExpiry, enabled]);
 
   return {
     cacheStrikes,

@@ -241,7 +241,7 @@ const CACHE_TTL_SECONDS = 20;
 export const radonCapability = "read";
 
 export async function GET(request: Request): Promise<Response> {
-  const access = await requireRouteAccess(undefined, { rate: { key: "ticker/info:route", limit: 20, windowMs: 60_000 } });
+  const access = await requireRouteAccess(undefined, { rate: { key: "ticker/info:route", limit: 20, windowMs: 60_000 }, durableRateTier: "D" });
   if (!access.ok) return access.response;
   const requestId = getRequestId();
   const { searchParams } = new URL(request.url);
