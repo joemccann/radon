@@ -370,6 +370,9 @@ def _stage(tmp_path: Path, loop: str, *, agent_rc: int = 0,
         f'  *"show origin/main:scripts/weekend_prune.py"*)\n'
         f'    echo "GIT show weekend_prune" >> "{order}"\n'
         f'    cat "{prune_src}" ;;\n'
+        # REL-188: the wrapper calls a phase OK only on commit evidence.
+        '  *"rev-parse HEAD"*) date +%s%N; exit 0 ;;\n'
+        '  *"--format=%ct"*) date +%s; exit 0 ;;\n'
         "esac\n"
         "exit 0\n",
     )
