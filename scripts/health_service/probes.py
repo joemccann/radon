@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import errno
 import json
+import os
 from datetime import datetime
 import math
 import socket
@@ -199,6 +200,32 @@ DEPENDENCY_UNITS = frozenset({
 DWELL_ESCALATE_UNITS = DEPENDENCY_UNITS
 GATEWAY_UNIT = "radon-ib-gateway.service"
 
+HOST_ROLES = frozenset({"app", "broker", "combined"})
+# The 2026-08-30 two-host split moved IB Gateway to the broker host, so on an
+# `app` host the local :4001 probe and radon-ib-gateway.service are absent by
+# design and permanently non-`up` — the dwell escalation above then collapsed
+# the public edge aggregate to `down` on every market-hours run. Same role
+# resolution cloud/scripts/drift_audit.py already uses (a389f891); the app
+# host's role comes from /etc/radon/env via the unit's EnvironmentFile, so no
+# repo import is needed. Every other role keeps today's behaviour exactly.
+ROLE_NOT_APPLICABLE = {"app": ("ib-gateway", GATEWAY_UNIT)}
+
+
+def resolve_host_role(environ=None) -> str:
+    environ = os.environ if environ is None else environ
+    raw = (environ.get("RADON_HOST_ROLE") or "").strip().strip("\"\'")
+    return raw if raw in HOST_ROLES else "combined"
+
+
+def not_applicable_names(host_role=None) -> tuple:
+    """Probe / unit names this host's role makes structurally inapplicable.
+
+    Reported in /status the way drift_audit reports its role skips — visible
+    and labelled — but excluded from the aggregate and degraded_reasons.
+    """
+    role = resolve_host_role() if host_role is None else host_role
+    return ROLE_NOT_APPLICABLE.get(role, ())
+
 
 def _now_et(now_et=None):
     if now_et is not None:
@@ -294,7 +321,7 @@ def _nested_api_state(probe_results: dict) -> str | None:
 
 def aggregate_state(probe_results: dict, units: dict,
                     health_service: str = "ok", units_age_secs=None,
-                    probes_age_secs=None, now_et=None) -> str:
+                    probes_age_secs=None, now_et=None, host_role=None) -> str:
     """Return the canonical state for this daemon's direct observations.
 
     The off-box ``external_probe`` row is deliberately excluded: folding an old
@@ -308,10 +335,11 @@ def aggregate_state(probe_results: dict, units: dict,
     # path failure still wins as "down". Nested FastAPI broker fields
     # (_nested_api_state) count as dependency too.
     _DOWNISH = {"down", "error", "failed", "unhealthy"}
+    not_applicable = not_applicable_names(host_role)
     serving_states = []
     dependency_states = []
     for name, value in (probe_results or {}).items():
-        if isinstance(value, dict):
+        if isinstance(value, dict) and name not in not_applicable:
             state = str(value.get("state", "unknown")).lower()
             target = dependency_states if name in DEPENDENCY_PROBES else serving_states
             target.append(state)
@@ -327,7 +355,7 @@ def aggregate_state(probe_results: dict, units: dict,
     dependency_stuck = False
     if units_current:
         for name, value in (units or {}).items():
-            if isinstance(value, dict):
+            if isinstance(value, dict) and name not in not_applicable:
                 state = str(value.get("state", "unknown")).lower()
                 is_dependency = name in DEPENDENCY_UNITS
                 target = dependency_states if is_dependency else serving_states
@@ -381,7 +409,7 @@ def aggregate_state(probe_results: dict, units: dict,
     return "unknown"
 
 
-def degraded_reasons(probe_results: dict, units: dict) -> list:
+def degraded_reasons(probe_results: dict, units: dict, host_role=None) -> list:
     """Names of the non-up dependencies behind a degraded aggregate (R-510).
 
     Always computed; empty when everything dependency-side is up. The off-box
@@ -389,13 +417,14 @@ def degraded_reasons(probe_results: dict, units: dict) -> list:
     (suppressed)", "newsfeed flap" and "2FA lock" stop being the same word.
     """
     _NON_UP = {"down", "error", "failed", "unhealthy", "starting", "unknown"}
+    not_applicable = not_applicable_names(host_role)
     reasons = []
     for name, value in (probe_results or {}).items():
-        if isinstance(value, dict) and name in DEPENDENCY_PROBES:
+        if isinstance(value, dict) and name in DEPENDENCY_PROBES and name not in not_applicable:
             if str(value.get("state", "unknown")).lower() in _NON_UP:
                 reasons.append(name)
     for name, value in (units or {}).items():
-        if isinstance(value, dict) and name in DEPENDENCY_UNITS:
+        if isinstance(value, dict) and name in DEPENDENCY_UNITS and name not in not_applicable:
             if str(value.get("state", "unknown")).lower() != "up":
                 reasons.append(name)
     if _nested_api_state(probe_results) == "down":
@@ -406,7 +435,7 @@ def degraded_reasons(probe_results: dict, units: dict) -> list:
 def build_status(probes: dict, units: dict, generated_at: str,
                  health_service: str = "ok", units_age_secs=None,
                  service_health=None, external_probe=None,
-                 probes_age_secs=None, now_et=None) -> dict:
+                 probes_age_secs=None, now_et=None, host_role=None) -> dict:
     """Assemble the always-200 /status body. Degraded sources are fields, never
     error codes (per feedback_http_status_for_real_errors.md).
 
@@ -415,6 +444,7 @@ def build_status(probes: dict, units: dict, generated_at: str,
     Tier-3 off-box probe row (dict) or None when there is none / no creds. Both
     degrade without touching the response code or the rest of the body.
     """
+    role = resolve_host_role() if host_role is None else host_role
     overall_state = aggregate_state(
         probes,
         units,
@@ -422,12 +452,15 @@ def build_status(probes: dict, units: dict, generated_at: str,
         units_age_secs,
         probes_age_secs,
         now_et=now_et,
+        host_role=role,
     )
     return {
         "schema_version": STATUS_SCHEMA_VERSION,
         "ok": overall_state == "up",
         "overall_state": overall_state,
-        "degraded_reasons": degraded_reasons(probes, units),
+        "degraded_reasons": degraded_reasons(probes, units, host_role=role),
+        "host_role": role,
+        "not_applicable": sorted(not_applicable_names(role)),
         "health_service": health_service,
         "generated_at": generated_at,
         "probes": probes,
