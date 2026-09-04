@@ -172,6 +172,10 @@ def _build(
         'case " $* " in\n'
         '  *" reset --hard "*)\n'
         '    if [ "${STUB_ATTACK_ON:-off}" = "git" ]; then "%s"; fi ;;\n'
+        # REL-188: the wrapper calls a phase OK only on commit evidence, so the
+        # stub reports a fresh HEAD and a current committer date.
+        '  *" rev-parse HEAD "*) date +%%s%%N; exit 0 ;;\n'
+        '  *"--format=%%ct"*) date +%%s; exit 0 ;;\n'
         "esac\n"
         "exit 0\n" % attack_sh,
     )
