@@ -237,6 +237,18 @@ silently with the previous quarter's surviving rows while
 the snapshot carries `holders_persisted` so a consumer can tell when the depth
 rows are behind the summary (R-227).
 
+## A failed weekly cycle carries its own next attempt
+
+`radon-equibles-ats.timer` fires once a week (Tuesday 09:15 UTC). Without a
+retry hint, one failed cycle re-paged the watchdog on every watchdog cycle for
+the seven days until the next attempt — 22 duplicate pages in a single daily
+digest. Every `state='error'` payload from `run()` now carries
+`next_attempt_at`, computed by `_next_scheduled_run()` from the timer
+constants, so the watchdog's embargo suppression covers the dead week. The
+no-series payload also carries `codes`, so a tarpitted or wedged client is
+distinguishable from a genuinely empty venue-share response instead of both
+reading as "no ticker produced a series".
+
 ---
 
 ## Reproducing this document
