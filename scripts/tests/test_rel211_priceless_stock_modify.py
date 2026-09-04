@@ -74,3 +74,44 @@ class TestStkWithLegsClassification:
         order_type, legs = _working_order_shape(order)
         assert order_type in ("combo", "option")
         assert order_type != "stock"
+
+
+def _option_order(**over):
+    base = {
+        "contract": {"secType": "OPT", "symbol": "NVDA", "strike": 200, "right": "C"},
+        "quantity": 1,
+        "action": "BUY",
+    }
+    base.update(over)
+    return base
+
+
+class TestPricelessOptionModifyAlsoFailsClosed:
+    """R-632: the fail-closed refusal was keyed on `order_type == 'stock'`,
+    so a priceless OPT fell through with `limitPrice: 0`, never had its
+    notional computed, and was bounded solely by the 500-contract band."""
+
+    def test_a_priceless_option_modify_under_the_qty_band_is_refused(self):
+        violation = check_modify_limits(_option_order(), new_quantity=400)
+        assert violation is not None, (
+            "a priceless OPT modify at 400 contracts passed every check"
+        )
+        assert "price" in violation["message"].lower()
+
+    def test_a_priced_option_modify_is_unchanged(self):
+        assert check_modify_limits(_option_order(limitPrice=2.5), new_quantity=4) is None
+
+    def test_a_priceless_combo_is_still_bounded_by_its_legs_not_refused(self):
+        """A combo's exposure comes from `combo_max_loss()` over its legs,
+        not from a premium, so the widened refusal must not swallow it."""
+        combo = {
+            "contract": {"secType": "BAG", "symbol": "NVDA"},
+            "quantity": 1,
+            "action": "BUY",
+            "legs": [
+                {"strike": 200, "right": "P", "action": "SELL", "ratio": 1},
+                {"strike": 190, "right": "P", "action": "BUY", "ratio": 1},
+            ],
+        }
+        violation = check_modify_limits(combo, new_quantity=1)
+        assert violation is None or "price" not in violation["message"].lower(), violation
