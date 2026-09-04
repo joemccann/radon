@@ -93,7 +93,10 @@ describe("catalystWhenLabel", () => {
   });
 
   it("renders calendar date only when event_time is missing", () => {
-    expect(catalystWhenLabel(row({ date: "2026-08-04", days_until: 0 }))).toBe("4 Aug");
+    // R-631: a SAME-DAY row with no time says so — it sorts last in its day
+    // bucket and an operator reading top-down as a clock would otherwise miss
+    // an 08:30 print sitting below the 14:00 events.
+    expect(catalystWhenLabel(row({ date: "2026-08-04", days_until: 0 }))).toBe("4 Aug time TBD");
     expect(catalystWhenLabel(row({ date: "2026-08-07", days_until: 3 }))).toBe("7 Aug");
   });
 });
@@ -142,5 +145,41 @@ describe("catalystPrintLabel", () => {
       catalystPrintLabel(row({ type: "economic", forecast: "220K", prev: "218K" })),
     ).toBe("F 220K  P 218K");
     expect(catalystPrintLabel(row({ type: "fda", ticker: "ABOS", title: "PDUFA" }))).toBe("");
+  });
+});
+
+describe("R-631: an untimed same-day catalyst says its time is unknown", () => {
+  it("labels a row with no event_time as time-unknown", () => {
+    const label = catalystWhenLabel({
+      ticker: "SPY",
+      date: "2026-09-04",
+      event_time: null,
+      days_until: 0,
+      category: "economic",
+    } as never);
+    expect(label).toMatch(/time TBD/i);
+  });
+
+  it("keeps the exact time when there is one", () => {
+    const label = catalystWhenLabel({
+      ticker: "SPY",
+      date: "2026-09-04",
+      event_time: "2026-09-04T18:00:00Z",
+      days_until: 0,
+      category: "economic",
+    } as never);
+    expect(label).toMatch(/14:00 ET/);
+    expect(label).not.toMatch(/TBD/i);
+  });
+
+  it("an unparseable event_time is also time-unknown, not silently dateless", () => {
+    const label = catalystWhenLabel({
+      ticker: "SPY",
+      date: "2026-09-04",
+      event_time: "not-a-timestamp",
+      days_until: 0,
+      category: "economic",
+    } as never);
+    expect(label).toMatch(/time TBD/i);
   });
 });

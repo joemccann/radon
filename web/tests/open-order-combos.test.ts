@@ -292,6 +292,9 @@ describe("resolveOpenOrderComboPrice", () => {
     expect(resolveOpenOrderComboPriceData([longPut, shortPut], prices)).toEqual({
       price: -1.73,
       isCalculated: true,
+      // R-608: both legs resolved from live bid/ask, so this is a live mid,
+      // not a previous-close mark — the distinction the `C` prefix lost.
+      isPreviousClose: false,
     });
   });
 

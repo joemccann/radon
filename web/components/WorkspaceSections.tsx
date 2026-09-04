@@ -72,6 +72,7 @@ import {
   isPartialFill,
   mapOrderStatus,
   resolveOrderIntent,
+  resolveSingleLegLastPrice,
   statusPillClass,
   summarizeOpenOrderRows,
 } from "@/lib/orders/orderDisplay";
@@ -2727,10 +2728,7 @@ function resolveOrderLastPriceData(
   if (pk) {
     const priceData = prices[pk];
     if (order.contract.secType === "OPT") return resolveRealtimePrice(priceData);
-    return {
-      price: priceData?.last ?? null,
-      isCalculated: Boolean(priceData?.lastIsCalculated),
-    };
+    return { ...resolveSingleLegLastPrice(priceData), isPreviousClose: false };
   }
 
   if (order.contract.secType !== "BAG") return { price: null, isCalculated: false };
@@ -2825,11 +2823,28 @@ function makeOpenOrderExtract(
 }
 
 /** Wrapper so usePriceDirection can be called per-order row (hooks can't go in map callbacks). */
-function OrderPriceCell({ price, isCalculated = false }: ResolvedOpenOrderPrice) {
+function OrderPriceCell({ price, isCalculated = false, isPreviousClose = false }: ResolvedOpenOrderPrice) {
   const { direction, flashDirection } = usePriceDirection(price);
+  // R-608: a mark derived entirely from the previous-session close carried the
+  // same `C` prefix as a live bid/ask midpoint, so the two were
+  // indistinguishable. Say which one this is.
+  const title = price == null
+    ? undefined
+    : isPreviousClose
+      ? "previous-session close; no live quote"
+      : isCalculated
+        ? "calculated from the live bid/ask midpoint"
+        : undefined;
   return (
-    <td className={`right last-price-cell ${flashDirection ? `last-price-${flashDirection}` : ""}`}>
+    <td
+      className={`right last-price-cell ${flashDirection ? `last-price-${flashDirection}` : ""}${isPreviousClose ? " last-price-prev-close" : ""}`}
+      title={title}
+      data-previous-close={isPreviousClose ? "true" : undefined}
+    >
       {price != null ? fmtPriceOrCalculated(price, isCalculated) : "—"}
+      {price != null && isPreviousClose && (
+        <span className="last-price-prev-close-mark" aria-label="previous-session close"> PC</span>
+      )}
       {direction === "up" && <ArrowUp size={11} className="price-trend-icon price-trend-up" aria-label="price up" />}
       {direction === "down" && <ArrowDown size={11} className="price-trend-icon price-trend-down" aria-label="price down" />}
     </td>
