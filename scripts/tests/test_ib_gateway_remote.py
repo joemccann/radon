@@ -399,14 +399,15 @@ class TestDaemon:
     def test_rogue_client_cert_is_tls_failure(self, tmp_path, certs):
         httpd = _start(_config(tmp_path, certs))
         try:
-            # The rogue ctx verifies the SERVER cert fine (real CA in its
-            # trust store), so the only failure left is the SERVER rejecting
-            # the rogue client cert at the handshake. SSLError ONLY: an
-            # HTTPError/URLError here would mean the handshake succeeded and
-            # the request reached the handler — a server trusting the rogue
-            # CA must fail this test.
-            with pytest.raises(ssl.SSLError):
+            # The rogue ctx verifies the SERVER cert (real CA in its trust
+            # store), so the only failure left is the SERVER rejecting the
+            # rogue client cert at the handshake. Same shape as a missing
+            # client cert: SSLError, or URLError(ECONNRESET) after
+            # QuietTLSServer.finish_request closes (CI scripts-i 2026-09-04).
+            # HTTPError still means the handshake succeeded.
+            with pytest.raises((ssl.SSLError, urllib.error.URLError, OSError)) as err:
                 _call(httpd, certs, "/restart", "POST", ctx=_ctx(certs, rogue=True))
+            _assert_mtls_handshake_rejected(err.value)
         finally:
             _stop(httpd)
 
