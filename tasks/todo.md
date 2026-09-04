@@ -1,4 +1,4 @@
-# Task: Make every demo workstation surface deterministic (2026-09-04)
+# Task: Make every demo workstation surface deterministic (2026-09-04) [DONE]
 
 Restore representative demo data across performance, orders, instruments,
 options, scanners, flow, and regime pages, and prevent ordinary demo navigation
@@ -24,7 +24,7 @@ from exhausting shared quotas.
 - [x] T5 Correct request amplification and quota isolation.
 - [x] T6 Complete focused and visual verification.
 - [x] T7 Complete full verification and review.
-- [ ] T8 Publish, supervise, notify, and document the PR.
+- [x] T8 Publish, supervise, notify, and document the PR.
 
 ## Review
 
@@ -35,6 +35,7 @@ from exhausting shared quotas.
 - TypeScript and production compilation passed; ESLint reported 0 errors and 17 existing warnings. The post-build trace audit retained only the existing assistant and orders/place file-count/size failures.
 - Relevant surface Playwright coverage passed 30/31; the sole failure is the unchanged options-exposure sticky-header geometry baseline, after its demo data, controls, and table assertions passed.
 - CI curation passed 4/4 after the demo browser contract was added to the production-server smoke job; a demo-mode compile and the exact Playwright spec passed locally under `next start`.
+- PR #293 implementation head `760368c5` passed every applicable exact-head check, including the full Python matrix, eight Vitest shards, both coverage ratchets, demo Playwright, images, security, and Vercel.
 
 ---
 
