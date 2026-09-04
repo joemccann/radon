@@ -106,6 +106,21 @@ class TestPythonImage:
         assert "--uid 1000" in text
         assert "chmod 755 /home/radon" in text
 
+    def test_pinned_python_playwright_installs_and_launches_headless_chromium(self) -> None:
+        text = PYTHON_DF.read_text(encoding="utf-8")
+        install = "python -m playwright install --with-deps --only-shell chromium"
+        launch = "chromium.launch(headless=True)"
+
+        assert "ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright" in text
+        assert install in text
+        assert "npx playwright" not in text
+        assert "bun x playwright" not in text
+        assert text.index("RUN python -m pip install") < text.index(install)
+        assert text.index(install) < text.index("COPY --chown=radon:radon scripts")
+        assert "sync_playwright" in text
+        assert launch in text
+        assert text.index("USER radon") < text.index(launch)
+
 
 class TestNodeImage:
     def test_base_copies_and_cmd(self) -> None:

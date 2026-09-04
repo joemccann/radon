@@ -18,8 +18,15 @@ RUN python -m pip install --no-cache-dir \
     -r requirements.txt \
     -r scripts/requirements-api.txt
 
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN python -m playwright install --with-deps --only-shell chromium \
+    && chmod -R a+rX /ms-playwright \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY --chown=radon:radon scripts ./scripts
 
 USER radon
+
+RUN python -c "from playwright.sync_api import sync_playwright; p = sync_playwright().start(); browser = p.chromium.launch(headless=True); page = browser.new_page(); page.set_content('<title>radon-browser-smoke</title>'); assert page.title() == 'radon-browser-smoke'; browser.close(); p.stop()"
 
 CMD ["uvicorn", "scripts.api.server:app", "--host", "0.0.0.0", "--port", "8321", "--proxy-headers", "--forwarded-allow-ips", "127.0.0.1"]

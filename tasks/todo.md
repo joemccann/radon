@@ -4528,3 +4528,35 @@ Goal: ≤640px position cards expose the desktop default-ON field set (position 
 - All figures route through the shared positionUtils / impliedValue helpers; the card still resolves ONE market value per position.
 - Full mobile Playwright project: 21–23 failures are pre-existing on main in this environment (same specs, verified in a main worktree); mobile-positions.spec.ts and mobile-same-day-pnl-parity.spec.ts pass.
 - Follow-up candidate (out of scope): InstrumentDetailModal still opens the desktop modal on mobile rather than a BottomSheet.
+# Task: Provision Chromium for the production radon-api runtime (2026-09-04)
+
+## Dependency graph
+
+- T1 depends_on: [] - Audit the current Python image, app-runtime mount contract, systemd API drop-in, production container, browser cache, and MenthorQ bootstrap requirements; choose the smallest durable fix.
+- T2 depends_on: [T1] - Add a failing regression that proves the production API runtime can resolve and launch the Playwright Chromium revision required by the installed Python package.
+- T3 depends_on: [T2] - Implement the minimal image or runtime provisioning change without adding mutable host coupling, exposing credentials, or broadening container privileges.
+- T4 depends_on: [T3] - Run focused cloud/runtime tests, build the production Python image, and smoke the exact browser executable and sandboxed launch path.
+- T5 depends_on: [T4] - Run full project Python verification, static checks, secret scan, and review the isolated diff before committing.
+- T6 depends_on: [T5] - Commit, push, open a PR, verify exact-head CI, send the required green notification, merge, and supervise exact-main production deployment.
+- T7 depends_on: [T6] - Verify the deployed API image contains the expected browser, rerun the local MenthorQ exposure request, and confirm HTTP 200 or isolate any remaining provider-auth requirement without touching IB Gateway/2FA.
+- T8 depends_on: [T7] - Record production evidence, residual risks, and cleanup of only task-created worktree state.
+
+## Checklist
+
+- [x] T1 Establish the image/runtime and production baseline.
+- [x] T2 Pin the missing-browser failure with a regression.
+- [x] T3 Provision Chromium in the production API runtime.
+- [ ] T4 Verify the exact production image and browser launch.
+- [x] T5 Complete full verification and diff review.
+- [ ] T6 Deliver through green PR CI and exact-main production deployment.
+- [ ] T7 Verify the live MenthorQ exposure path.
+- [ ] T8 Record final evidence and clean task artifacts.
+
+## Review
+
+- The Python image installs the Playwright 1.58-matched headless Chromium shell and Linux dependencies in an immutable shared path before application source is copied.
+- Build-time and workflow smokes launch a page as uid 1000; the workflow also reproduces the production capability restrictions and refuses registry fallback.
+- Focused cloud verification passed 132 tests with 2 declared skips after rebasing onto current main. The full Python suite passed 11,699 tests with 1 declared skip; two parallel-load timing failures passed serially.
+- YAML, shell syntax, diff hygiene, and gitleaks checks passed. Docker was unavailable locally, so the exact linux/amd64 image build remains gated by PR CI.
+
+---
