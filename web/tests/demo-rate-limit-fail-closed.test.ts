@@ -1,9 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { __resetRateLimitForTests, demoRateLimit } from "@/lib/demo/rateLimit";
+import {
+  __resetRateLimitForTests,
+  __setLimiterFactoryForTests,
+  demoRateLimit,
+} from "@/lib/demo/rateLimit";
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  __setLimiterFactoryForTests(null);
   __resetRateLimitForTests();
 });
 
@@ -21,5 +26,22 @@ describe("durable demo rate limiter configuration", () => {
     vi.stubEnv("NEXT_PUBLIC_RADON_DEMO", "");
     __resetRateLimitForTests();
     expect((await demoRateLimit("B", "user")).success).toBe(true);
+  });
+});
+
+describe("a dead Upstash instance denies, it does not crash the request", () => {
+  it("returns a structured deny instead of throwing out of middleware", async () => {
+    // An expired/deleted Redis makes limiter.limit() reject. Unhandled, that
+    // throws inside web/middleware.ts and every demo /api/* call becomes an
+    // opaque 500 rather than a 429 the client can act on.
+    vi.stubEnv("NEXT_PUBLIC_RADON_DEMO", "1");
+    __setLimiterFactoryForTests(() => ({
+      limit: async () => {
+        throw new Error("Upstash: WRONGPASS invalid or expired token");
+      },
+    }));
+    const result = await demoRateLimit("A", "user_1");
+    expect(result.success).toBe(false);
+    expect(result.remaining).toBe(0);
   });
 });
