@@ -121,7 +121,7 @@ def cancel_order(client: IBClient, order_id: int, perm_id: int,
     error_msgs = []
     def on_error(reqId, errorCode, errorString, advancedOrderRejectJson=""):
         if reqId == trade.order.orderId or reqId == -1:
-            error_msgs.append((errorCode, errorString))
+            error_msgs.append((reqId, errorCode, errorString))
 
     client.ib.errorEvent += on_error
 
@@ -156,10 +156,14 @@ def cancel_order(client: IBClient, order_id: int, perm_id: int,
         # 10147/201 are real rejects. 202 ("Order Canceled - reason:") is IB's
         # cancel confirmation — treating it as fatal left combo replacements
         # unplaced after the original was already gone at the broker.
-        fatal = [e for e in error_msgs if e[0] in (10147, 201)]
+        fatal = [e for e in error_msgs if e[1] in (10147, 201)]
         if fatal:
-            finish("error", f"IB rejected cancel: {fatal[0][1]}")
-        if any(code == 202 for code, _ in error_msgs):
+            finish("error", f"IB rejected cancel: {fatal[0][2]}")
+        # REL-233 (R-634): a broadcast 202 (reqId=-1) can belong to a
+        # DIFFERENT order on the same clientId. Only a 202 addressed to this
+        # orderId confirms; broadcasts confirm solely via the refreshed
+        # trade snapshot (gone / Cancelled) checked above.
+        if any(rid == trade.order.orderId and code == 202 for rid, code, _ in error_msgs):
             finish(
                 "ok",
                 f"Order cancelled (orderId={trade.order.orderId})",
@@ -167,7 +171,7 @@ def cancel_order(client: IBClient, order_id: int, perm_id: int,
                 finalStatus="Cancelled",
             )
 
-    if any(code == 202 for code, _ in error_msgs):
+    if any(rid == trade.order.orderId and code == 202 for rid, code, _ in error_msgs):
         finish(
             "ok",
             f"Order cancelled (orderId={trade.order.orderId})",
