@@ -869,3 +869,75 @@ the 86-88s deploy floor (CIP-004) with the gateway-wait p95 tail (CIP-006).
 - Outcome: `VALIDATING` (implemented, awaiting post-merge samples).
 - Residual bottleneck: python/web gate co-wall ~100-110s, then the 86-88s
   deploy floor (CIP-004) with the gateway-wait p95 tail (CIP-006).
+
+### 2026-09-05 - audit - branch `ci-performance/2026-09-05`
+
+- Audited range: `2b936ebc..391aaaea` (118 commits: PRs #272-#301). Runner
+  state: dedicated clone verified, stale lock reclaimed, tree clean at
+  `391aaaea`.
+- CI/deploy surface delta: `ci.yml` (CIP-005 stage 2 shard globs via PR
+  #272; e2e job gained a second `bun run build` with
+  `NEXT_PUBLIC_RADON_DEMO=1` plus `demo-workstation-data.spec.ts` via
+  PR #293), `app-images.yml` (`load: true` + hardened Playwright smoke on
+  the python image), python image gained Playwright Chromium (PR #285).
+- Samples (mixed warm, deploy-clean `main` successes, workflow createdAt ->
+  Deploy-to-VPS completedAt, 16 runs 33890263669..33938475254):
+  231 234 236 243 244 244 244 252 254 260 262 263 271 287 306 319 —
+  **p50 253s, p95 ~316s**. Push-to-production is UNCHANGED by the delta;
+  Deploy job wall 72-96s (CIP-004 floor intact). Queue delay negligible on
+  all 16.
+- Failed/cancelled runs (33934165998, 33933705972, 33932478962,
+  33929247644, 33911589496, 33892597609, 33892580953, 33892167740,
+  33891258539) excluded from performance windows; counted for reliability
+  only.
+- **New bottleneck evidence — e2e container apt tail.** The
+  `Playwright P0-financial smoke` job runs
+  `apt-get update -qq && apt-get install -y -qq unzip`
+  (`.github/workflows/ci.yml:725`, needed because
+  `mcr.microsoft.com/playwright:v1.58.2-jammy` ships without unzip and
+  setup-bun requires it). Step norm is 5-8s (runs 33890263669: 5s,
+  33917247042: 8s, 33934337009: 7s) but both 2026-09-05 successes hit a
+  degraded mirror: **319s in 33938475254 and 448s in 33935134766**, tripling
+  the job (130s norm -> 463/594s run wall). Off the deploy critical path
+  (job is non-gating for deploy) but it inflates PR time-to-green (the
+  deliver phase's watch clock) and runner minutes by up to ~7.5 min/run
+  with no retry/timeout defense.
+- Demo rebuild cost inside the same job measured at 22s build + 5s spec —
+  real but minor; the 09-05 wall explosions are apt, not the demo build.
+- CIP-005 stage 2 post-merge shard walls so far (2 mixed samples):
+  scripts-npsz 91s (was 119s, on target), scripts-gh 91s, scripts-rs
+  103s/108s — **rs is above the 85s revert-trigger line**; 3 more samples
+  needed before invoking it. Outcome stays `VALIDATING`
+  (`INSUFFICIENT_SAMPLE` for acceptance).
+
+#### CIP-007 - remove the unbounded apt-get network dependency from the e2e job (selected)
+
+- Hypothesis: provisioning unzip via apt with no timeout/retry exposes every
+  e2e run to Ubuntu-mirror latency; bounding or eliminating the network
+  fetch caps a measured 319-448s tail back to <10s.
+- Options for remediate, smallest first: (a) add
+  `-o Acquire::Retries=3 -o Acquire::http::Timeout=15` and a step
+  `timeout-minutes`; (b) eliminate apt entirely by extracting bun without
+  unzip (hermetic); either preserves the pinned setup-bun action and all
+  gates.
+- Expected: ~0s on the p50 (step norm already 5-8s), up to ~440s off the
+  tail per affected run; runner-minute reduction on degraded days;
+  confidence high (step-level timestamps), effort low, risk low
+  (provisioning-only, no test or gate change).
+- Validation: step duration across the next five mixed runs; no e2e spec
+  count change.
+
+#### CIP-008 - demo workstation rebuild serialized in e2e (ranked second)
+
+- 27s serialized per e2e run (`ci.yml:764-776`). Candidate: reuse
+  `web/.next/cache` between the two builds or split into a parallel job.
+  Deferred below CIP-007 tonight: small, and off the deploy path.
+
+#### CIP-004 / CIP-006 - unchanged evidence, remain DEFERRED
+
+- Deploy floor 72-96s and gateway-wait tail unchanged across the 16-run
+  window.
+
+Outcome for tonight: audit `DONE`; CIP-007 handed to remediate (with
+CIP-008 behind it). Residual bottleneck for the production clock stays the
+python/web gate co-wall then the deploy floor (CIP-004).
