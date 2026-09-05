@@ -26,6 +26,38 @@ Copy Agent Prompt on dossiers/gates plus 5-7 developer recipe cards.
 
 ---
 
+# Task: Ship libraries.dev UI pack C (2026-09-04)
+
+Wire `thinking-orbs` + `border-beam` on the terminal, and `border-beam` +
+light `metal-fx` on radon.run. No liquid-gooey, no img-fx, no product-pattern
+expansion.
+
+## Dependency graph
+
+- T1 depends_on: [] - Pin failing contracts for wait verbs, gate beams, CTA/marker accents, and package pins.
+- T2 depends_on: [T1] - Install approved packages with React 18+ peers into `web/` and `site/`.
+- T3 depends_on: [T2] - Wire app wait states, kit Gate 01-04 demo, optional IB connected beam.
+- T4 depends_on: [T2] - Wire marketing primary CTAs, gate/method markers, one hero beam.
+- T5 depends_on: [T3, T4] - Focused tests, dark-theme screenshots, bundle note, PR against main.
+
+## Checklist
+
+- [x] T1 Failing contracts.
+- [x] T2 Packages installed.
+- [x] T3 App wiring.
+- [x] T4 Marketing wiring.
+- [x] T5 Verify, screenshot, open PR. Do not merge.
+
+## Review
+
+- App: thinking-orbs on UW flow ingest, GEX rebuild, EngineTrace/TaskRuns; Gate 01-04 evaluating beam demoed on `/kit`.
+- Marketing: mono beam on primary Free demo CTAs and the hero flow plate; silver metal on gate/method markers.
+- Deferral: production evaluate has no sequential Gate 01-04 chips; contract lives on `/kit`.
+- Bundle gzip: thinking-orbs ~1.5KB, border-beam ~12KB, metal-fx ~20KB (site only).
+- Verification: focused Vitest 16/16 pack contracts; related flow/GEX/agent/footer green.
+
+---
+
 # Task: Make every demo workstation surface deterministic (2026-09-04) [DONE]
 
 Restore representative demo data across performance, orders, instruments,

@@ -1,0 +1,128 @@
+/**
+ * @vitest-environment jsdom
+ *
+ * Surface pins for pack C: thinking wait on existing flow/GEX/agent waits,
+ * Gate 01-04 beam only while evaluating, IB beam only when connected.
+ */
+import React from "react";
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("thinking-orbs", () => ({
+  ThinkingOrb: (props: { state: string; size?: number }) => (
+    <canvas data-testid="thinking-orb" data-state={props.state} data-size={String(props.size ?? 20)} />
+  ),
+}));
+
+vi.mock("border-beam", () => ({
+  BorderBeam: ({
+    children,
+    active,
+  }: {
+    children: React.ReactNode;
+    active?: boolean;
+  }) => (
+    <div data-testid="evaluating-beam" data-beam-active={active === false ? "false" : "true"}>
+      {children}
+    </div>
+  ),
+}));
+
+vi.mock("@/lib/useTickerFlowReport", () => ({
+  useTickerFlowReport: () => ({
+    data: null,
+    status: "scanning",
+    error: null,
+    refresh: () => {},
+  }),
+}));
+
+vi.mock("@/lib/useViewport", () => ({
+  useViewport: () => ({ isMobile: false, isTablet: false, hasMounted: true }),
+}));
+
+const mockUseGex = vi.fn();
+vi.mock("@/lib/useGex", () => ({
+  useGex: () => mockUseGex(),
+}));
+
+vi.mock("@/lib/useMarketHours", () => ({
+  MarketState: { OPEN: "OPEN", CLOSED: "CLOSED", EXTENDED: "EXTENDED" },
+}));
+
+afterEach(cleanup);
+
+describe("FourGateChips", () => {
+  it("beams only the evaluating gate", async () => {
+    const { FourGateChips } = await import("../components/fx/FourGateChips");
+    render(
+      <FourGateChips
+        states={{ "01": "evaluating", "02": "cleared", "03": "failed", "04": "idle" }}
+      />,
+    );
+
+    expect(screen.getByTestId("gate-chip-01").getAttribute("data-gate-state")).toBe("evaluating");
+    expect(screen.getByTestId("gate-chip-01").closest("[data-beam-active]")?.getAttribute("data-beam-active")).toBe("true");
+    expect(screen.getByTestId("gate-chip-02").closest("[data-beam-active]")).toBeNull();
+    expect(screen.getByTestId("gate-chip-03").closest("[data-beam-active]")).toBeNull();
+    expect(screen.getByTestId("gate-chip-04").closest("[data-beam-active]")).toBeNull();
+  });
+});
+
+describe("existing wait states", () => {
+  it("shows a thinking wait on UW flow ingest", async () => {
+    const TickerFlowReport = (await import("../components/flow-analysis/TickerFlowReport")).default;
+    const { container } = render(<TickerFlowReport ticker="NVDA" />);
+    const wait = container.querySelector('[data-testid="thinking-wait"]');
+    expect(wait).not.toBeNull();
+    expect(wait?.getAttribute("data-kind")).toBe("flow");
+    expect(container.querySelector(".spectral-loader")).not.toBeNull();
+  });
+
+  it("shows a thinking wait on GEX rebuild", async () => {
+    mockUseGex.mockReturnValue({
+      data: null,
+      loading: true,
+      error: null,
+      lastSync: null,
+      syncing: false,
+      syncNow: vi.fn(),
+    });
+    const GexPanel = (await import("../components/GexPanel")).default;
+    const { container } = render(<GexPanel />);
+    const wait = container.querySelector('[data-testid="thinking-wait"]');
+    expect(wait).not.toBeNull();
+    expect(wait?.getAttribute("data-kind")).toBe("gex");
+    expect(container.textContent).toContain("Sampling gamma exposure by strike");
+  });
+
+  it("shows a thinking wait on a running engine-trace step", async () => {
+    const EngineTrace = (await import("../components/agent/EngineTrace")).default;
+    const { container } = render(
+      <EngineTrace
+        steps={[{ id: "phase-route", label: "Routing request", state: "running" }]}
+      />,
+    );
+    const wait = container.querySelector('[data-testid="thinking-wait"]');
+    expect(wait).not.toBeNull();
+    expect(wait?.getAttribute("data-kind")).toBe("agent");
+  });
+});
+
+describe("IB connected beam", () => {
+  it("wraps the IB chip only when connected", async () => {
+    vi.resetModules();
+    vi.doMock("@/lib/IBStatusContext", () => ({
+      useIBStatusContext: () => ({ displayStatus: "connected" }),
+    }));
+    vi.doMock("@/lib/useServiceHealth", () => ({
+      useServiceHealth: () => ({ data: null, loading: false, error: null }),
+    }));
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
+    const { default: FooterTelemetryStrip } = await import("../components/FooterTelemetryStrip");
+    render(<FooterTelemetryStrip />);
+    const ib = screen.getByText("IB Gateway").closest("[data-testid='evaluating-beam']");
+    expect(ib?.getAttribute("data-beam-active")).toBe("true");
+    vi.unstubAllGlobals();
+  });
+});

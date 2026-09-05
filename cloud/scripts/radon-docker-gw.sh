@@ -34,7 +34,7 @@ else
 fi
 
 usage() {
-  echo "usage: radon-docker-gw {compose-up|compose-down|inspect-running|pgrep-jvm|pgrep-java|thread-dump <pid>|logs|stats|ps}" >&2
+  echo "usage: radon-docker-gw {compose-up|compose-down|config-check|inspect-running|pgrep-jvm|pgrep-java|thread-dump <pid>|logs|stats|ps}" >&2
   exit 64
 }
 
@@ -82,6 +82,15 @@ main() {
     compose-down)
       (( $# == 0 )) || usage
       compose down
+      ;;
+    # deploy.sh's preflight render check. Takes no env-file argument: a
+    # caller-supplied path is the one thing this shim exists to refuse, and in
+    # production the deploy's own ENV_FILE_DEFAULT is this same /etc/radon/env.
+    # Output is suppressed by the caller so a failure never prints expanded
+    # secret fragments.
+    config-check)
+      (( $# == 0 )) || usage
+      compose config --quiet
       ;;
     # stdout, stderr and the exit code pass through untouched: gateway_state()
     # reads the exit code and matches "No such object" on stderr to tell

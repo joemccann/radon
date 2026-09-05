@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { useIBStatusContext, type IBDisplayStatus } from "@/lib/IBStatusContext";
+import { ibStatusBeamActive } from "@/lib/librariesFx";
 import { useServiceHealth } from "@/lib/useServiceHealth";
+import EvaluatingBeam from "@/components/fx/EvaluatingBeam";
 
 type FlexTokenStatus = {
   days_remaining: number | null;
@@ -92,12 +94,14 @@ export default function FooterTelemetryStrip() {
 
   return (
     <div className="footer-strip" role="status" aria-label="System telemetry">
-      <Chip
-        leadingDot
-        label="IB Gateway"
-        value={ib.text}
-        tone={ib.cls}
-      />
+      <EvaluatingBeam active={ibStatusBeamActive(displayStatus)}>
+        <Chip
+          leadingDot
+          label="IB Gateway"
+          value={ib.text}
+          tone={ib.cls}
+        />
+      </EvaluatingBeam>
       <span className="footer-strip__sep" aria-hidden>/</span>
       <Chip
         label="Flex Token"

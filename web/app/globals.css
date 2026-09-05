@@ -21310,3 +21310,62 @@ body[data-mobile="true"] .alerts-rule__channel {
 }
 
 /* ══ end VIX-COR regime tab ════════════════════════════════════════════ */
+
+.thinking-wait {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+}
+
+.thinking-wait-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.four-gate-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.gate-chip {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 88px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-grid);
+  border-radius: 4px;
+  background: var(--bg-panel-raised);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.gate-chip__name {
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.gate-chip--evaluating {
+  border-color: color-mix(in srgb, var(--signal-core) 45%, var(--line-grid));
+  color: var(--signal-core-text);
+}
+
+.gate-chip--cleared {
+  color: var(--signal-core-text);
+}
+
+.gate-chip--failed {
+  color: var(--fault);
+}
+
+.gate-chip--idle {
+  opacity: 0.72;
+}

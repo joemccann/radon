@@ -1,5 +1,7 @@
 "use client";
 
+import ThinkingWait from "@/components/fx/ThinkingWait";
+
 /**
  * TaskRuns — live agent task status with nested sub-step telemetry. Adopted
  * from beautifului.dev "Task Rows". Replaces the static Workflow job list.
@@ -34,7 +36,7 @@ export default function TaskRuns({ tasks }: { tasks: AgentTask[] }) {
         <span className="task-runs__status">
           {active > 0 ? (
             <>
-              <span className="agent-dot agent-dot--warn agent-dot--pulse" aria-hidden="true" />
+              <ThinkingWait kind="agent" label="Agent runs active" />
               {active} ACTIVE
             </>
           ) : (
@@ -47,16 +49,16 @@ export default function TaskRuns({ tasks }: { tasks: AgentTask[] }) {
           <li key={task.id} className="task-runs__task" data-state={task.state}>
             <div className="task-runs__row">
               <span className="task-runs__index">{i + 1}</span>
-              <span
-                className={`agent-dot${
-                  task.state === "running"
-                    ? " agent-dot--warn agent-dot--pulse"
-                    : task.state === "done"
-                      ? " agent-dot--signal"
-                      : " agent-dot--muted"
-                }`}
-                aria-hidden="true"
-              />
+              {task.state === "running" ? (
+                <ThinkingWait kind="compute" label={task.title} />
+              ) : (
+                <span
+                  className={`agent-dot${
+                    task.state === "done" ? " agent-dot--signal" : " agent-dot--muted"
+                  }`}
+                  aria-hidden="true"
+                />
+              )}
               <span className="task-runs__task-title">{task.title}</span>
               {task.meta ? <span className="task-runs__task-meta">{task.meta}</span> : null}
               <span

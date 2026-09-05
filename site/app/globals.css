@@ -677,3 +677,15 @@ html[data-theme="dark"] .plate-shot .shot-dark {
     transition: none;
   }
 }
+
+.cta-beam,
+.hero-beam {
+  display: inline-block;
+  max-width: 100%;
+  border-radius: var(--radius-panel);
+}
+
+.hero-beam {
+  display: block;
+  overflow: visible !important;
+}

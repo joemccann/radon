@@ -23,6 +23,7 @@ OPS_SUDOERS = CLOUD / "config" / "sudoers.d" / "radon-ops"
 VERBS = (
     "compose-up",
     "compose-down",
+    "config-check",
     "inspect-running",
     "pgrep-jvm",
     "pgrep-java",
@@ -97,6 +98,16 @@ def test_compose_pins_file_project_and_env(box) -> None:
     assert f"-f {box.compose_file}" in line
     assert "--project-name cloud" in line
     assert line.endswith("up -d")
+
+
+def test_config_check_renders_the_pinned_body_and_env(box) -> None:
+    """deploy.sh's preflight render, without a caller-supplied env path."""
+    assert box.run("config-check").returncode == 0
+    line = box.log.read_text(encoding="utf-8").strip()
+    assert f"-f {box.compose_file}" in line
+    assert line.endswith("config --quiet")
+
+    assert box.run("config-check", "/tmp/somewhere.env").returncode == 64
 
 
 def test_compose_down_is_the_only_other_lifecycle_verb(box) -> None:
@@ -184,3 +195,32 @@ def test_sudoers_lists_each_verb_without_a_wildcard() -> None:
         assert f"/usr/local/sbin/radon-docker-gw {verb}" in text
     assert "/usr/local/sbin/radon-docker-gw *" not in text
     assert "radon ALL=(root) NOPASSWD: /usr/bin/docker compose" not in text
+
+
+def _preflight_body() -> str:
+    deploy = (CLOUD / "scripts" / "deploy.sh").read_text(encoding="utf-8")
+    start = deploy.index("preflight_env() {")
+    return deploy[start : deploy.index("\n}", start)]
+
+
+def test_deploy_preflight_prefers_the_shim_over_group_docker() -> None:
+    assert 'sudo -n "$DOCKER_GW" config-check' in _preflight_body()
+
+
+def test_deploy_preflight_falls_back_instead_of_deadlocking() -> None:
+    """Preferring one path and stopping there strands the deploy.
+
+    deploy.sh arrives from the new release BEFORE refresh-control-plane
+    installs the sudoers verb that permits the shim call, so `sudo -n` is
+    refused; if that were the only path, preflight would abort and the promote
+    that installs the verb would never run. It has to fall through to the
+    direct render, and only fail when neither works.
+    """
+    body = _preflight_body()
+    shim_at = body.index('sudo -n "$DOCKER_GW" config-check')
+    direct_at = body.index("docker compose --env-file")
+    fail_at = body.index("compose config validation failed")
+
+    assert shim_at < direct_at < fail_at, "direct render must sit between them"
+    assert "elif (" in body, "the direct render must be an elif fallback"
+    assert body.count("compose_check_ok=1") == 2

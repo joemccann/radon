@@ -1,4 +1,5 @@
 import { EditorialEyebrow } from "@/components/atoms/EditorialEyebrow";
+import { HeroBeam } from "@/components/atoms/HeroBeam";
 import { RevealOnScroll } from "@/components/atoms/RevealOnScroll";
 import { PlateFrame } from "@/components/molecules/PlateFrame";
 import { ProductPlate } from "@/components/molecules/ProductPlate";
@@ -97,15 +98,17 @@ export function EditorialHeroSection() {
         </RevealOnScroll>
 
         <RevealOnScroll className="mt-14">
-          <PlateFrame
-            figNo="Figure 1"
-            figTitle="Dark-pool buy-pressure leads realized price · NVDA · 30 sessions"
-            source="IB + UW"
-            confidence="High"
-            caption="Aggregated off-exchange buy-pressure rises into a measurable lead before the lit-market move. Radon scores the lead window, not the breakout. The breakout is where everyone else is already looking."
-          >
-            <FlowLeadFigure />
-          </PlateFrame>
+          <HeroBeam>
+            <PlateFrame
+              figNo="Figure 1"
+              figTitle="Dark-pool buy-pressure leads realized price · NVDA · 30 sessions"
+              source="IB + UW"
+              confidence="High"
+              caption="Aggregated off-exchange buy-pressure rises into a measurable lead before the lit-market move. Radon scores the lead window, not the breakout. The breakout is where everyone else is already looking."
+            >
+              <FlowLeadFigure />
+            </PlateFrame>
+          </HeroBeam>
         </RevealOnScroll>
 
         <RevealOnScroll className="mt-10">

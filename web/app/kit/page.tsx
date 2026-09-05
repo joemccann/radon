@@ -10,6 +10,8 @@ import {
   DenseNumericTable,
 } from "@/components/kit";
 import { MarkovStateGraph } from "@/components/instruments";
+import { FourGateChips } from "@/components/fx/FourGateChips";
+import ThinkingWait from "@/components/fx/ThinkingWait";
 import { useTheme } from "@/lib/ThemeContext";
 
 const MARKOV_DEMO_STATES = [
@@ -82,6 +84,52 @@ export default function KitPage() {
         <SignalSummary />
         <PortfolioConvexity />
         <CircularScan status="Scanning" />
+      </div>
+
+      <div
+        className="grid grid-cols-1 lg:grid-cols-2"
+        style={{
+          gap: 16,
+          marginBottom: 16,
+          background: "var(--bg-panel)",
+          border: "1px solid var(--border-dim)",
+          borderRadius: 4,
+          padding: 24,
+        }}
+        data-testid="libraries-fx-demo"
+      >
+        <div>
+          <p
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 10,
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
+              color: "var(--text-muted)",
+              marginBottom: 8,
+            }}
+          >
+            Four Gates / Evaluating Beam
+          </p>
+          <FourGateChips
+            states={{ "01": "evaluating", "02": "cleared", "03": "failed", "04": "idle" }}
+          />
+        </div>
+        <div>
+          <p
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 10,
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
+              color: "var(--text-muted)",
+              marginBottom: 8,
+            }}
+          >
+            Agent Wait / Thinking Orb
+          </p>
+          <ThinkingWait kind="evaluate" label="Evaluating gates" size={64} />
+        </div>
       </div>
 
       <div
