@@ -7,7 +7,7 @@ import {
   siteUrl,
 } from "./seo";
 
-export const AGENT_SURFACES_LAST_MODIFIED = "2026-09-02";
+export const AGENT_SURFACES_LAST_MODIFIED = "2026-09-05";
 
 // The hosted Streamable HTTP MCP endpoint (issue #232 chunk 1). Served by a
 // dedicated process behind the app.radon.run edge; mcp.radon.run does not
@@ -76,6 +76,7 @@ export const developersPage: AgentPage = {
         `OpenAPI at ${siteUrl}/openapi.json describes the public radon.run developer surface.`,
         `Sitemap at ${siteUrl}/sitemap.xml lists every public HTML URL.`,
         `Agent instructions at ${siteUrl}/agent-instructions name the jobs Radon is right for and how an agent should call it.`,
+        `Developer recipes at ${siteUrl}/developers/recipes are one-paste agent prompts for Flow, Gates, CRI, GEX, the structure catalog, and fractional Kelly.`,
       ],
     },
     {
@@ -86,6 +87,17 @@ export const developersPage: AgentPage = {
         `Radon Terminal auth docs: ${siteUrl}/developers/auth.`,
         `Radon Terminal MCP server: ${siteUrl}/developers/mcp.`,
         `Radon Terminal webhooks: ${siteUrl}/developers/webhooks.`,
+        `Radon Terminal developer recipes: ${siteUrl}/developers/recipes.`,
+      ],
+    },
+    {
+      id: "agent-prompt-payload",
+      heading: "Agent prompt payload",
+      paragraphs: [
+        "Copy agent prompt on dossier and gate surfaces, and the recipe cards below, copy the same plain-markdown shape. Field order is stable: title, When to use, Hard nos, How to call, Parameters / constraints, Definition of done for the agent.",
+        "Hard nos always start with: not a broker and no Robinhood routing; no undefined-risk or naked shorts as the default path; live execution requires Interactive Brokers and operator rails. Then capability-specific nos.",
+        "How to call is always: read llms.txt; fetch the canonical URL with Accept: text/markdown or the .md suffix; open the demo deep link when one exists; use hosted MCP tools when they are public, otherwise markdown plus demo.",
+        "These prompts are free. They are not a public order API.",
       ],
     },
     {
@@ -132,7 +144,7 @@ export const openapiPage: AgentPage = {
       id: "covers",
       heading: "What it covers",
       paragraphs: [
-        "GET /llms.txt, GET /openapi.json, GET /sitemap.xml, GET /robots.txt, GET /agent-instructions, GET /developers and the named auth, MCP, and webhook docs.",
+        "GET /llms.txt, GET /openapi.json, GET /sitemap.xml, GET /robots.txt, GET /agent-instructions, GET /developers, GET /developers/recipes, and the named auth, MCP, and webhook docs.",
         "HTML pages accept content negotiation: send Accept: text/markdown for the markdown representation of the same URL.",
       ],
     },
@@ -268,6 +280,39 @@ export const webhooksPage: AgentPage = {
   ],
 };
 
+export const recipesPage: AgentPage = {
+  slug: "developers/recipes",
+  navLabel: "Recipes",
+  title: "Radon Terminal developer recipes",
+  heading: "Radon Terminal developer recipes",
+  description:
+    "Seven one-paste Radon Terminal agent prompts: score flow, evaluate gates, read CRI and GEX, list convex structures, size with fractional Kelly, and bootstrap from llms.txt.",
+  eyebrow: "Developers · Recipes",
+  intro:
+    "Each card is one agent turn. Copy the prompt, replace TICKER or STRUCTURE_ID or MAX_GAIN and MAX_LOSS, and paste it into a coding agent. The payload shape is documented on the developer index.",
+  lastModified: AGENT_SURFACES_LAST_MODIFIED,
+  sections: [
+    {
+      id: "how",
+      heading: "How to use a recipe",
+      paragraphs: [
+        "Copy agent prompt puts the canonical markdown on the clipboard. View prompt shows the same text without copying.",
+        "Fetch the canonical URL in the prompt with Accept: text/markdown, or open the matching .md suffix. The free demo is the working UI without brokerage credentials.",
+        "The hosted MCP is read-only. Recipes that name demo_regime or demo_gex need a demo Clerk token. Everything else says not public yet; use markdown plus demo.",
+      ],
+    },
+    {
+      id: "placeholders",
+      heading: "Placeholders",
+      paragraphs: [
+        "TICKER is an equity or index symbol such as NVDA.",
+        "STRUCTURE_ID is a catalog name such as Long Call or Bull Call Spread.",
+        "MAX_GAIN and MAX_LOSS are the structure's dollar extremes for fractional Kelly.",
+      ],
+    },
+  ],
+};
+
 export const agentInstructionsPage: AgentPage = {
   slug: "agent-instructions",
   navLabel: "Agent instructions",
@@ -316,6 +361,7 @@ export const agentInstructionsPage: AgentPage = {
 
 export const agentPages: AgentPage[] = [
   developersPage,
+  recipesPage,
   openapiPage,
   authPage,
   mcpPage,
@@ -324,6 +370,7 @@ export const agentPages: AgentPage[] = [
 ];
 
 export const developersMetadata = pageMetadata(developersPage);
+export const recipesMetadata = pageMetadata(recipesPage);
 export const openapiMetadata = pageMetadata(openapiPage);
 export const authMetadata = pageMetadata(authPage);
 export const mcpMetadata = pageMetadata(mcpPage);
