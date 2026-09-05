@@ -220,6 +220,104 @@ require_regular_file() {
 # comparison instead of being published), then installs the staged copy at
 # the final mode and owner. Creates the target's parent so the guard runs
 # before any privileged directory is touched.
+# Shared with deploy-root-helper.sh and setup-vps.sh, byte-for-byte;
+# cloud/tests/test_rel234_compose_gate.py pins the copies identical. R-635.
+compose_body_is_valid() {
+  local candidate="$1" dest="$2"
+  local body render_env
+
+  # Comments must never satisfy or trip a structural gate.
+  body="$(grep -Ev '^[[:space:]]*#' "$candidate")" || body=""
+
+  printf '%s\n' "$body" | grep -Eq '^services:' || {
+    echo "compose validation failed: ${dest} declares no services" >&2
+    return 1
+  }
+  printf '%s\n' "$body" | grep -Eq '^[[:space:]]+container_name:[[:space:]]*ib-gateway[[:space:]]*$' || {
+    echo "compose validation failed: ${dest} does not pin container_name ib-gateway" >&2
+    return 1
+  }
+  if printf '%s\n' "$body" | grep -Eq '^[[:space:]]*privileged:[[:space:]]*true'; then
+    echo "compose validation failed: ${dest} requests privileged" >&2
+    return 1
+  fi
+  # The Gateway body's only volume is the named ib-config volume, so any
+  # short-form entry whose source is an absolute host path (quoted or not)
+  # is a host mount root must not perform. There is no allowlist.
+  if printf '%s\n' "$body" | grep -Eq "^[[:space:]]*-[[:space:]]*[\"']?/"; then
+    echo "compose validation failed: ${dest} binds an absolute host path" >&2
+    return 1
+  fi
+  if printf '%s\n' "$body" | grep -Eq "type:[[:space:]]*[\"']?bind"; then
+    echo "compose validation failed: ${dest} declares a long-form bind mount" >&2
+    return 1
+  fi
+  if printf '%s\n' "$body" | grep -Eq "source:[[:space:]]*[\"']?/"; then
+    echo "compose validation failed: ${dest} declares an absolute long-form source" >&2
+    return 1
+  fi
+  if printf '%s\n' "$body" | grep -q 'docker\.sock'; then
+    echo "compose validation failed: ${dest} mounts the docker socket" >&2
+    return 1
+  fi
+  if printf '%s\n' "$body" | grep -Eq '^[[:space:]]*pid:'; then
+    echo "compose validation failed: ${dest} joins a pid namespace" >&2
+    return 1
+  fi
+  if printf '%s\n' "$body" | grep -Eq "^[[:space:]]*network_mode:[[:space:]]*[\"']?host"; then
+    echo "compose validation failed: ${dest} requests host networking" >&2
+    return 1
+  fi
+  if printf '%s\n' "$body" | grep -Eq '^[[:space:]]*(cap_add|devices):'; then
+    echo "compose validation failed: ${dest} adds capabilities or devices" >&2
+    return 1
+  fi
+  if printf '%s\n' "$body" | grep -Eq "^[[:space:]]*user:[[:space:]]*[\"']?(root|0)[\"']?[[:space:]]*$"; then
+    echo "compose validation failed: ${dest} runs as root in the container" >&2
+    return 1
+  fi
+  # security_opt may only tighten: block form, no-new-privileges:true entries
+  # and nothing else. The inline form is refused outright.
+  if printf '%s\n' "$body" | grep -Eq '^[[:space:]]*security_opt:[[:space:]]*[^[:space:]]'; then
+    echo "compose validation failed: ${dest} uses inline security_opt" >&2
+    return 1
+  fi
+  if ! printf '%s\n' "$body" | awk '
+    /^[[:space:]]*security_opt:[[:space:]]*$/ { inso = 1; next }
+    inso == 1 && /^[[:space:]]*-[[:space:]]*/ {
+      entry = $0
+      sub(/^[[:space:]]*-[[:space:]]*/, "", entry)
+      gsub(/[" \t]/, "", entry)
+      if (entry != "no-new-privileges:true") { bad = 1; exit }
+      next
+    }
+    inso == 1 { inso = 0 }
+    END { exit bad }
+  '; then
+    echo "compose validation failed: ${dest} sets a security_opt beyond no-new-privileges" >&2
+    return 1
+  fi
+  # Render check where the tooling exists (the deploy host has it; a test
+  # host may not). RADON_COMPOSE_ENV_FILE is pointed at an empty file so the
+  # env_file directive resolves without reading production secrets.
+  if command -v docker >/dev/null 2>&1 && \
+     docker compose version >/dev/null 2>&1; then
+    render_env="$(mktemp)" || {
+      echo "compose validation failed: ${dest} render env could not be created" >&2
+      return 1
+    }
+    if ! RADON_COMPOSE_ENV_FILE="$render_env" docker compose \
+        -f "$candidate" --project-name radon-compose-validate \
+        config --quiet >/dev/null 2>&1; then
+      rm -f -- "$render_env"
+      echo "compose validation failed: ${dest} does not render with docker compose config" >&2
+      return 1
+    fi
+    rm -f -- "$render_env"
+  fi
+  return 0
+}
+
 stage_from_checkout() {
   local source="$1" target="$2" mode="$3"
   shift 3
@@ -1128,9 +1226,9 @@ install_app_runtime() {
 # radon-writable compose file hands root straight back through the shim.
 install_docker_gw() {
   local source="${CLOUD_DIR}/scripts/radon-docker-gw.sh"
-  local target="/usr/local/sbin/radon-docker-gw"
+  local target="${RADON_DOCKER_GW_TARGET:-/usr/local/sbin/radon-docker-gw}"
   local compose_source="${CLOUD_DIR}/docker-compose.yml"
-  local compose_target="/etc/radon/ib-gateway-compose.yml"
+  local compose_target="${RADON_COMPOSE_TARGET:-/etc/radon/ib-gateway-compose.yml}"
   local -a owner_args=(-o root -g root)
   [[ "${RADON_HELPER_SKIP_CHOWN:-0}" == "1" ]] && owner_args=()
   local staged
@@ -1157,13 +1255,51 @@ install_docker_gw() {
   fi
   mv -f "$staged" "$target"
 
+  # R-636: the compose body root will execute must not come from the
+  # radon-writable working tree. Install the git blob at HEAD, refuse a
+  # working-tree body that differs from that blob (a tamper is a stop, not a
+  # silent bypass), and run the shared validator before anything is staged.
+  # Same provenance shape as the deploy helper's refresh_control_plane.
   log_info "Installing ${compose_target}..."
-  staged="$(mktemp "${compose_target}.tmp.XXXXXX")"
-  if ! stage_from_checkout "$compose_source" "$staged" 0644 ${owner_args[@]+"${owner_args[@]}"}; then
-    rm -f "$staged"
+  local repo_root blob_sha work_sha
+  if ! repo_root="$(git -C "$CLOUD_DIR" rev-parse --show-toplevel 2>/dev/null)"; then
+    log_error "Compose provenance failed: ${CLOUD_DIR} is not a git checkout"
     return 1
   fi
-  mv -f "$staged" "$compose_target"
+  local compose_rel="${compose_source#"${repo_root}"/}"
+  if ! blob_sha="$(git -C "$repo_root" rev-parse "HEAD:${compose_rel}" 2>/dev/null)"; then
+    log_error "Compose provenance failed: ${compose_rel} is not committed at HEAD"
+    return 1
+  fi
+  if ! work_sha="$(git -C "$repo_root" hash-object -- "$compose_source")" \
+    || [[ "$work_sha" != "$blob_sha" ]]; then
+    log_error "Compose provenance failed: ${compose_source} differs from the committed blob"
+    return 1
+  fi
+  if [[ -L "$STAGE_DIR" ]]; then
+    log_error "Refusing symlinked staging dir ${STAGE_DIR}"
+    return 1
+  fi
+  if ! install -d -m 0700 "$STAGE_DIR" \
+    || ! staged="$(mktemp "${STAGE_DIR}/ib-gateway-compose.yml.XXXXXX")" \
+    || [[ -z "$staged" ]]; then
+    log_error "Could not create a root-only staging file under ${STAGE_DIR}"
+    return 1
+  fi
+  chmod 0600 "$staged"
+  if ! git -C "$repo_root" cat-file blob "$blob_sha" > "$staged"; then
+    rm -f "$staged"
+    log_error "Compose provenance failed: could not read blob ${blob_sha}"
+    return 1
+  fi
+  if ! compose_body_is_valid "$staged" "$compose_target"; then
+    rm -f "$staged"
+    log_error "Gateway compose body failed validation"
+    return 1
+  fi
+  mkdir -p "$(dirname "$compose_target")"
+  install -m 0644 ${owner_args[@]+"${owner_args[@]}"} "$staged" "$compose_target"
+  rm -f "$staged"
 
   log_success "Gateway docker shim installed"
 }
