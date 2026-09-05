@@ -11449,7 +11449,7 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
 
 .regime-history-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 16px;
   align-items: start;
 }
@@ -11583,7 +11583,7 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
 
 .regime-relationship-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 16px;
   align-items: start;
   padding: 16px;
