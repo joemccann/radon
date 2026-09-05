@@ -134,3 +134,97 @@ class TestWrapperWiring:
         start = text.index("resolve_green_main_sha() {")
         end = text.index("\n}", start)
         assert "|| true" in text[start:end], wrapper.name
+
+
+SENTINEL = "f" * 40
+TIP = "1" * 40
+
+FAKE_GIT = f"""#!/bin/bash
+printf '%s\\n' "$*" >> "$GIT_LOG"
+case "$*" in
+  *"rev-parse origin/main") echo "{TIP}" ;;
+  *"rev-parse --verify --quiet"*) exit 0 ;;
+esac
+exit 0
+"""
+
+
+def _extract_ground_truth(wrapper: Path) -> str:
+    text = wrapper.read_text(encoding="utf-8")
+    start = text.index("ground_truth() {")
+    end = text.index("\n}", start) + 2
+    return text[start:end]
+
+
+def _run_ground_truth(tmp_path: Path, snippet: str) -> list[str]:
+    """Execute a ground_truth snippet with a fake git + fake resolver.
+
+    Returns the argv lines the fake git recorded, in call order.
+    """
+    fakes = tmp_path / "fakes"
+    fakes.mkdir(exist_ok=True)
+    git = fakes / "git"
+    git.write_text(FAKE_GIT, encoding="utf-8")
+    git.chmod(0o755)
+    git_log = tmp_path / "git.log"
+    git_log.write_text("", encoding="utf-8")
+    driver = "\n".join(
+        [
+            "set -eo pipefail",
+            "fetch_origin_with_retry() { :; }",
+            f"resolve_green_main_sha() {{ echo {SENTINEL}; }}",
+            snippet,
+            "ground_truth",
+        ]
+    )
+    env = {
+        "PATH": f"{fakes}:/usr/bin:/bin",
+        "GIT_LOG": str(git_log),
+        "REPO": str(tmp_path),
+        "HOME": str(tmp_path),
+    }
+    proc = subprocess.run(
+        ["bash", "-c", driver], cwd=tmp_path, env=env,
+        capture_output=True, text=True, timeout=60,
+    )
+    assert proc.returncode == 0, proc.stderr
+    return git_log.read_text(encoding="utf-8").splitlines()
+
+
+def _ref_moves(git_lines: list[str]) -> list[str]:
+    """Targets of every ref-moving git call (checkout / reset --hard), in order."""
+    moves = []
+    for line in git_lines:
+        argv = line.split()
+        if "checkout" in argv or ("reset" in argv and "--hard" in argv):
+            moves.append(argv[-1])
+    return moves
+
+
+class TestWrapperBehaviour:
+    """REL-187: execute the branch-selection snippet — the resolver's answer must
+    be the ref the tree actually ends up on, not just a string in the source."""
+
+    @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
+    def test_the_tree_ends_on_the_resolver_sha(self, wrapper: Path, tmp_path):
+        lines = _run_ground_truth(tmp_path, _extract_ground_truth(wrapper))
+        moves = _ref_moves(lines)
+        assert moves, "no ref-moving git command ran"
+        assert moves[-1] == SENTINEL, f"final ref is {moves[-1]!r}, not the green SHA"
+        after_sentinel = moves[moves.index(SENTINEL) + 1:]
+        assert "origin/main" not in after_sentinel, "checked out origin/main after resolving"
+
+    def test_a_rel187_defective_wrapper_fails_the_assertion(self, tmp_path):
+        """Red proof: a wrapper that computes the green SHA then resets to
+        origin/main anyway (the REL-187 defect verbatim) must be caught."""
+        defective = (
+            "ground_truth() {\n"
+            "  fetch_origin_with_retry\n"
+            "  local green_sha\n"
+            '  green_sha="$(resolve_green_main_sha)"\n'
+            "  git checkout -f --quiet main\n"
+            "  git reset --hard --quiet origin/main\n"
+            "}\n"
+        )
+        moves = _ref_moves(_run_ground_truth(tmp_path, defective))
+        assert moves[-1] != SENTINEL  # the behavioural check above would fail this wrapper
