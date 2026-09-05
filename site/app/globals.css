@@ -687,4 +687,5 @@ html[data-theme="dark"] .plate-shot .shot-dark {
 
 .hero-beam {
   display: block;
+  overflow: visible !important;
 }

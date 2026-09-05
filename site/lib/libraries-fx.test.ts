@@ -34,7 +34,7 @@ describe("hero accent", () => {
   it("keeps a single calm mono beam for the flow plate", () => {
     expect(HERO_BEAM.colorVariant).toBe("mono");
     expect(HERO_BEAM.staticColors).toBe(true);
-    expect(HERO_BEAM.size).toBe("md");
+    expect(HERO_BEAM.size).toBe("line");
   });
 });
 

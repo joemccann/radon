@@ -7,10 +7,10 @@ export const CTA_BEAM = {
 };
 
 export const HERO_BEAM = {
-  size: "md" as const,
+  size: "line" as const,
   colorVariant: "mono" as const,
   staticColors: true,
-  strength: 0.4,
+  strength: 0.45,
   borderRadius: 4,
 };
 
