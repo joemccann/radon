@@ -117,12 +117,15 @@ export function loadSeen(storage: SeenStorage): Set<string> {
 /**
  * Toast identity for a fill. IB reports one execution per partial fill of the
  * same order, so grouping on the order collapses a fill sequence onto a single
- * toast that updates in place. Rows carrying neither id fall back to the
- * instrument + side, the tightest grouping still available.
+ * toast that updates in place. permId is preferred: it is stable for the life
+ * of the order, while orderId recycles per session/clientId, which merged an
+ * afternoon order into a morning order's running total (R-642). Rows carrying
+ * neither id fall back to the instrument + side, the tightest grouping still
+ * available.
  */
 export function fillGroupKey(fill: ExecutedOrder): string {
-  if (typeof fill.orderId === "number") return `order:${fill.orderId}`;
   if (typeof fill.permId === "number") return `perm:${fill.permId}`;
+  if (typeof fill.orderId === "number") return `order:${fill.orderId}`;
   const instrument = fill.contract?.conId ?? fill.contract?.symbol ?? fill.symbol;
   return `inst:${instrument}:${fill.side}`;
 }
