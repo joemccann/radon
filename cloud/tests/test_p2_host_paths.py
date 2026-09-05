@@ -159,9 +159,13 @@ def _env_harness(tmp_path: Path) -> tuple[Path, Path, Path, dict[str, str]]:
     env_file.write_text("NEXT_PUBLIC_X=1\nTURSO_AUTH_TOKEN=secret\n")
     env_file.chmod(0o666)  # start wrong: only the script may narrow it
 
+    # Minimal explicit env: never forward os.environ (T-446) — under the
+    # loop wrapper it carries live tokens that would land in captured
+    # output and pytest failure reports.
     env = {
-        **os.environ,
-        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        "PATH": f"{fake_bin}:{os.environ.get('PATH', '/usr/bin:/bin')}",
+        "HOME": str(tmp_path),
+        "TMPDIR": str(tmp_path),
         "RADON_SETUP_SOURCE_ONLY": "1",
         "RADON_DEPLOY_ENV_FILE": str(env_file),
         "RADON_APP_DIR": str(tmp_path / "app"),
@@ -170,21 +174,59 @@ def _env_harness(tmp_path: Path) -> tuple[Path, Path, Path, dict[str, str]]:
     return env_file, owner_state, fake_bin, env
 
 
-def _source_and_call(function: str, env: dict[str, str]) -> None:
+def _source_and_call(
+    function: str, env: dict[str, str], expected_returncode: int = 0
+) -> "subprocess.CompletedProcess[str]":
     import subprocess
 
-    subprocess.run(
+    proc = subprocess.run(
         ["bash", "-c", f"set -uo pipefail\nsource {_SETUP!s}\n{function}\n"],
         env=env,
         capture_output=True,
         text=True,
     )
+    assert proc.returncode == expected_returncode, (
+        f"{function} exited {proc.returncode} "
+        f"(expected {expected_returncode}): "
+        f"{proc.stdout[-1000:]}{proc.stderr[-1000:]}"
+    )
+    return proc
 
 
-@pytest.mark.parametrize("function", ["validate_env", "setup_node"])
-def test_env_file_ends_up_0640_root_radon(tmp_path, function: str) -> None:
+def test_harness_env_does_not_forward_ambient_environ(tmp_path, monkeypatch) -> None:
+    """T-446: live tokens from os.environ must not reach the subprocess.
+
+    Under the loop wrapper os.environ carries PUSHOVER_* etc; forwarding it
+    puts secrets into captured output and pytest failure reports (T-381).
+    """
+    import subprocess
+
+    monkeypatch.setenv("RADON_T446_CANARY", "leaked-secret")
+    _env_file, _owner, _bin, env = _env_harness(tmp_path)
+    assert "RADON_T446_CANARY" not in env
+    probe = subprocess.run(
+        ["bash", "-c", 'printf %s "${RADON_T446_CANARY:-ABSENT}"'],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert probe.returncode == 0
+    assert probe.stdout == "ABSENT", "canary leaked into subprocess environment"
+
+
+# setup_node chmods/chowns the env file, then intentionally stops at the
+# package.json/bun.lock artifact-contract check (the harness app dir is
+# empty), so its expected exit is 1 — and that specific stop, not earlier.
+@pytest.mark.parametrize(
+    ("function", "expected_rc"), [("validate_env", 0), ("setup_node", 1)]
+)
+def test_env_file_ends_up_0640_root_radon(
+    tmp_path, function: str, expected_rc: int
+) -> None:
     env_file, owner_state, _bin, env = _env_harness(tmp_path)
-    _source_and_call(function, env)
+    proc = _source_and_call(function, env, expected_rc)
+    if function == "setup_node":
+        assert "artifact contract is incomplete" in proc.stdout + proc.stderr
 
     assert oct(env_file.stat().st_mode & 0o7777) == "0o640", (
         f"{function} left the secret file at "
