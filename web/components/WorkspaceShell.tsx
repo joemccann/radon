@@ -74,7 +74,7 @@ export default function WorkspaceShell({ section, tickerParam, initialPortfolio 
     && activeSection !== "watchlist"
     && activeSection !== "admin"
     && activeSection !== "workflow";
-  const { toasts, exitingIds, addToast, dismissToast } = useToast();
+  const { toasts, exitingIds, addToast, upsertToast, dismissToast } = useToast();
   const marketState = useMarketHours();
   const isMarketActive = marketState !== MarketState.CLOSED;
   // CME Globex session gate for the header ES/NQ/RTY futures strip — runs ~23h,
@@ -427,7 +427,7 @@ export default function WorkspaceShell({ section, tickerParam, initialPortfolio 
     if (isDemoMode) return;
     portfolioSyncNow();
   }, [isDemoMode, portfolioSyncNow]);
-  useFillToasts(orders, addToast, onNewFills);
+  useFillToasts(orders, upsertToast, onNewFills);
 
   const syncing = isOrdersPage ? ordersSyncing : portfolioSyncing;
   const error = isOrdersPage ? ordersError : portfolioError;
@@ -525,7 +525,7 @@ export default function WorkspaceShell({ section, tickerParam, initialPortfolio 
 
   // R-149: no snapshot at all is a BLACKOUT, and "Awaiting first sample" read
   // as a benign startup state for the rest of the session.
-  const syncLabel = lastSync
+  const syncLabel = isDemoMode ? "Sample snapshot" : lastSync
     ? `Last sample ${new Date(lastSync).toLocaleTimeString([], { hour12: false })}`
     : error
       ? "Sync failed. Reconstruction incomplete."
@@ -580,19 +580,21 @@ export default function WorkspaceShell({ section, tickerParam, initialPortfolio 
           onSyncNow={syncNow}
         >
           {!isOptionsWorkspace ? <div className="sync-controls">
-            <span className={`sync-status ${error || snapshotState === "unknown" ? "sync-error" : syncing ? "sync-active" : ""}`}>
+            <span className={`sync-status ${!isDemoMode && (error || snapshotState === "unknown") ? "sync-error" : syncing ? "sync-active" : ""}`}>
               {syncLabel}
             </span>
-            <button
-              type="button"
-              className="sync-button"
-              onClick={syncNow}
-              disabled={syncing}
-              title={`Sync ${syncTarget} from IB Gateway`}
-            >
-              <RefreshCw size={14} className={syncing ? "spin" : ""} />
-              {syncing ? "Syncing…" : "Sync Now"}
-            </button>
+            {!isDemoMode ? (
+              <button
+                type="button"
+                className="sync-button"
+                onClick={syncNow}
+                disabled={syncing}
+                title={`Sync ${syncTarget} from IB Gateway`}
+              >
+                <RefreshCw size={14} className={syncing ? "spin" : ""} />
+                {syncing ? "Syncing…" : "Sync Now"}
+              </button>
+            ) : null}
           </div> : null}
         </Header>
 

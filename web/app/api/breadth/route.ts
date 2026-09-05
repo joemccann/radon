@@ -64,7 +64,7 @@ async function readCachedBreadth(): Promise<Record<string, unknown> | null> {
 export const radonCapability = { GET: "read", POST: "read.spawn" };
 
 export async function GET(): Promise<Response> {
-  const access = await requireRouteAccess(undefined, { rate: { key: "breadth:route", limit: 20, windowMs: 60_000 } });
+  const access = await requireRouteAccess(undefined, { rate: { key: "breadth:route", limit: 20, windowMs: 60_000 }, durableRateTier: "A" });
   if (!access.ok) return access.response;
   const requestId = getRequestId();
   const cached = await readCachedBreadth();
@@ -79,7 +79,7 @@ export async function GET(): Promise<Response> {
 }
 
 export async function POST(): Promise<Response> {
-  const access = await requireRouteAccess(undefined, { rate: { key: "breadth:route", limit: 20, windowMs: 60_000 } });
+  const access = await requireRouteAccess(undefined, { rate: { key: "breadth:route", limit: 20, windowMs: 60_000 }, durableRateTier: "B" });
   if (!access.ok) return access.response;
   try {
     const data = await radonFetch<Record<string, unknown>>("/breadth/scan", {

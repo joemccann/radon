@@ -73,7 +73,7 @@ async function readFlowAnalysisFromDisk(): Promise<TimestampedRead<Record<string
 export const radonCapability = { GET: "read", POST: "read.spawn" };
 
 export async function GET(): Promise<Response> {
-  const access = await requireRouteAccess(undefined, { rate: { key: "flow-analysis:route", limit: 20, windowMs: 60_000 } });
+  const access = await requireRouteAccess(undefined, { rate: { key: "flow-analysis:route", limit: 20, windowMs: 60_000 }, durableRateTier: "A" });
   if (!access.ok) return access.response;
   const requestId = getRequestId();
   // Fresher of DB row and disk JSON, so a stalled writer on either side

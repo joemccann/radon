@@ -32,6 +32,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -39,6 +40,10 @@ import {
 import { usePrices, type UsePricesReturn } from "./usePrices";
 import { optionKey, type IndexContract, type OptionContract } from "./pricesProtocol";
 import { useRealtimeAuth } from "./RealtimeAuthContext";
+import {
+  buildDemoRealtimeSample,
+  buildDemoSnapshotPrices,
+} from "./demo/demoRealtime";
 
 export type RealtimeSubscriptionRequest = {
   symbols: string[];
@@ -53,6 +58,7 @@ export type RealtimeSubscriptionRequest = {
  *  before it is committed to the wire. Sized to cover the post-navigation gap
  *  where the new shell's portfolio/orders GETs are still in flight. */
 export const SUBSCRIPTION_SHRINK_LINGER_MS = 5_000;
+const DEMO_QUOTE_REFRESH_MS = 60_000;
 
 const EMPTY_REQUEST: RealtimeSubscriptionRequest = {
   symbols: [],
@@ -128,7 +134,9 @@ const requestKey = (r: RealtimeSubscriptionRequest) =>
 
 export function RealtimePricesProvider({ children }: { children: ReactNode }) {
   const getToken = useRealtimeAuth();
+  const demoMode = process.env.NEXT_PUBLIC_RADON_DEMO === "1";
   const [applied, setApplied] = useState<RealtimeSubscriptionRequest>(EMPTY_REQUEST);
+  const [demoClock, setDemoClock] = useState(() => new Date());
   const appliedRef = useRef<RealtimeSubscriptionRequest>(EMPTY_REQUEST);
   const desiredRef = useRef<RealtimeSubscriptionRequest>(EMPTY_REQUEST);
   const shrinkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -176,15 +184,45 @@ export function RealtimePricesProvider({ children }: { children: ReactNode }) {
     if (shrinkTimerRef.current) clearTimeout(shrinkTimerRef.current);
   }, []);
 
-  const realtime = usePrices({
+  useEffect(() => {
+    if (!demoMode) return;
+    const refresh = () => setDemoClock(new Date());
+    refresh();
+    const interval = setInterval(refresh, DEMO_QUOTE_REFRESH_MS);
+    return () => clearInterval(interval);
+  }, [demoMode]);
+
+  const liveRealtime = usePrices({
     symbols: applied.symbols,
     contracts: applied.contracts,
     indexes: applied.indexes,
+    enabled: !demoMode,
     depthSymbol: applied.depthSymbol,
     depthSymbols: applied.depthSymbols,
     depthExpiry: applied.depthExpiry,
     getToken,
   });
+  const demoSample = useMemo(
+    () => buildDemoRealtimeSample(applied, demoClock),
+    [applied, demoClock],
+  );
+  const demoGetSnapshot = useCallback(
+    async (symbols: string[]) => buildDemoSnapshotPrices(symbols, new Date()),
+    [],
+  );
+  const demoReconnect = useCallback(() => {}, []);
+  const realtime: UsePricesReturn = demoMode
+    ? {
+        ...demoSample,
+        connected: false,
+        ibConnected: false,
+        ibIssue: null,
+        ibStatusMessage: null,
+        error: null,
+        reconnect: demoReconnect,
+        getSnapshot: demoGetSnapshot,
+      }
+    : liveRealtime;
 
   return (
     <RealtimePricesContext.Provider value={{ ...realtime, publishSubscriptions }}>

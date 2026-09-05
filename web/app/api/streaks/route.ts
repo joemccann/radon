@@ -33,6 +33,7 @@ export const radonCapability = "read.spawn";
 export async function GET(request: Request): Promise<Response> {
   const access = await requireRouteAccess(undefined, {
     rate: { key: "streaks:route", limit: 20, windowMs: 60_000 },
+    durableRateTier: "A",
   });
   if (!access.ok) return access.response;
 

@@ -18,7 +18,7 @@ export const runtime = "nodejs";
 export const radonCapability = "mutate.trading";
 
 export async function POST(request: Request): Promise<Response> {
-  const access = await requireRouteAccess(undefined, { rate: { key: "paper/place:route", limit: 20, windowMs: 60_000 } });
+  const access = await requireRouteAccess(undefined, { rate: { key: "paper/place:route", limit: 20, windowMs: 60_000 }, durableRateTier: "C" });
   if (!access.ok) return access.response;
   const requestId = getRequestId();
   let body: unknown;
