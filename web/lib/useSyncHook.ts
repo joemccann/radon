@@ -154,12 +154,24 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
       else reportFetchSuccess();
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw new Error((body as { error?: string }).error ?? `Sync failed (${res.status})`);
+        const failure = new Error(
+          (body as { error?: string }).error ?? `Sync failed (${res.status})`,
+        ) as Error & { scanFailed?: boolean };
+        // R-643: routes stamp `scan_succeeded: false` on a degraded fallback
+        // body; that failure must surface even over previously-good data.
+        if ((body as { scan_succeeded?: unknown }).scan_succeeded === false) failure.scanFailed = true;
+        throw failure;
       }
       const json = (await res.json()) as T;
       setData(json);
       setLastSync(extractTimestamp ? extractTimestamp(json) : new Date().toISOString());
-      setError(null);
+      // R-643: a 2xx body can still carry a body-level scan failure (cached
+      // fallback attached). Surface it instead of pretending the sync worked.
+      if ((json as { scan_succeeded?: unknown } | null)?.scan_succeeded === false) {
+        setError((json as { error?: string }).error ?? "Scan failed upstream - showing cached data");
+      } else {
+        setError(null);
+      }
 
       clearRetry();
       armRetry(json);
@@ -167,8 +179,9 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
       if (!networkResolved) reportFetchFailure();
       // Only show error if we don't already have valid cached data —
       // unless the caller explicitly wants the stale view marked as degraded.
+      const scanFailed = err instanceof Error && (err as Error & { scanFailed?: boolean }).scanFailed === true;
       setData((prev) => {
-        if (!prev || showBackgroundError) {
+        if (!prev || showBackgroundError || scanFailed) {
           setError(err instanceof Error ? err.message : "Sync failed");
         }
         return prev;
