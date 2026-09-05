@@ -1,3 +1,4 @@
+import { CtaBeam } from "@/components/atoms/CtaBeam";
 import { EditorialEyebrow } from "@/components/atoms/EditorialEyebrow";
 import { RevealOnScroll } from "@/components/atoms/RevealOnScroll";
 import { DEMO_URL } from "@/lib/editorial-content";
@@ -42,12 +43,14 @@ export function ColophonSection() {
         </RevealOnScroll>
 
         <RevealOnScroll className="flex flex-wrap items-center gap-x-6 gap-y-4">
-          <a
-            href={DEMO_URL}
-            className={`inline-block rounded-[4px] border border-signal-deep bg-signal-deep px-[22px] py-[13px] font-mono text-[12px] uppercase tracking-[0.06em] text-canvas transition-colors hover:bg-transparent hover:text-signal-deep ${focusRing}`}
-          >
-            Try the free demo
-          </a>
+          <CtaBeam>
+            <a
+              href={DEMO_URL}
+              className={`inline-block rounded-[4px] border border-signal-deep bg-signal-deep px-[22px] py-[13px] font-mono text-[12px] uppercase tracking-[0.06em] text-canvas transition-colors hover:bg-transparent hover:text-signal-deep ${focusRing}`}
+            >
+              Try the free demo
+            </a>
+          </CtaBeam>
           <a
             href="#pipeline"
             className={`inline-block rounded-[4px] border border-grid bg-transparent px-[22px] py-[13px] font-mono text-[12px] uppercase tracking-[0.06em] text-primary transition-colors hover:border-signal-deep hover:text-signal-deep ${focusRing}`}

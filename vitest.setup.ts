@@ -1,6 +1,28 @@
 import { afterEach, beforeEach } from "vitest";
 import { cleanup } from "@testing-library/react";
 
+function installMatchMediaShim(): void {
+  if (typeof window === "undefined") return;
+  if (typeof window.matchMedia === "function") return;
+
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    writable: true,
+    value: (query: string) => ({
+      matches: query.includes("dark"),
+      media: query,
+      onchange: null,
+      addListener() {},
+      removeListener() {},
+      addEventListener() {},
+      removeEventListener() {},
+      dispatchEvent() {
+        return false;
+      },
+    }),
+  });
+}
+
 function installLocalStorageShim(): void {
   if (typeof window === "undefined") return;
 
@@ -45,6 +67,7 @@ function installLocalStorageShim(): void {
 
 beforeEach(() => {
   installLocalStorageShim();
+  installMatchMediaShim();
 });
 
 // Global test isolation: unmount any @testing-library-rendered React tree after

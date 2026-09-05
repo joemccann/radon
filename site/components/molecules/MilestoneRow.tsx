@@ -1,3 +1,4 @@
+import { MarkerAccent } from "@/components/atoms/MarkerAccent";
 import type { Milestone } from "@/lib/editorial-content";
 
 type MilestoneRowProps = {
@@ -9,10 +10,12 @@ type MilestoneRowProps = {
 export function MilestoneRow({ milestone }: MilestoneRowProps) {
   return (
     <div className="grid grid-cols-[40px_1fr] items-start gap-[18px] border-b border-hairline-soft py-[26px] sm:grid-cols-[56px_1fr] sm:gap-7">
-      <span
-        aria-hidden="true"
-        className="milestone-no pt-[5px] font-mono text-[13px] font-semibold text-signal-deep"
-      />
+      <MarkerAccent>
+        <span
+          aria-hidden="true"
+          className="milestone-no inline-block min-w-[28px] pt-[5px] font-mono text-[13px] font-semibold text-signal-deep"
+        />
+      </MarkerAccent>
       <div>
         <h3 className="mb-[7px] font-serif text-[1.32rem] font-medium tracking-[-0.01em] text-primary">
           {milestone.name}

@@ -9,6 +9,7 @@ import InfoTooltip from "./InfoTooltip";
 import ShareReportModal from "./ShareReportModal";
 import GexLaplaceContour from "./instruments/GexLaplaceContour";
 import SpectralLoader from "./SpectralLoader";
+import ThinkingWait from "./fx/ThinkingWait";
 import RegimeSyncStatusBadge from "./RegimeSyncStatusBadge";
 import SortTh from "./SortTh";
 import { useSort } from "@/lib/useSort";
@@ -443,7 +444,10 @@ export default function GexPanel({ marketState }: GexPanelProps) {
           </div>
         </div>
         <div className="section-body">
-          <SpectralLoader label="Sampling gamma exposure by strike" />
+          <div className="thinking-wait-stack">
+            <ThinkingWait kind="gex" label="Sampling gamma exposure by strike" size={64} />
+            <SpectralLoader label="Sampling gamma exposure by strike" />
+          </div>
         </div>
       </div>
     );
@@ -508,6 +512,9 @@ export default function GexPanel({ marketState }: GexPanelProps) {
           />
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          {syncing ? (
+            <ThinkingWait kind="gex" label="Rebuilding gamma exposure" />
+          ) : null}
           <RegimeSyncStatusBadge
             state={freshnessState}
             className={freshnessBadgeClass}
