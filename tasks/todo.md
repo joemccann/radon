@@ -14,15 +14,19 @@ expansion.
 
 ## Checklist
 
-- [ ] T1 Failing contracts.
-- [ ] T2 Packages installed.
-- [ ] T3 App wiring.
-- [ ] T4 Marketing wiring.
-- [ ] T5 Verify, screenshot, open PR. Do not merge.
+- [x] T1 Failing contracts.
+- [x] T2 Packages installed.
+- [x] T3 App wiring.
+- [x] T4 Marketing wiring.
+- [x] T5 Verify, screenshot, open PR. Do not merge.
 
 ## Review
 
-- Pending.
+- App: thinking-orbs on UW flow ingest, GEX rebuild, EngineTrace/TaskRuns; Gate 01-04 evaluating beam demoed on `/kit`.
+- Marketing: mono beam on primary Free demo CTAs and the hero flow plate; silver metal on gate/method markers.
+- Deferral: production evaluate has no sequential Gate 01-04 chips; contract lives on `/kit`.
+- Bundle gzip: thinking-orbs ~1.5KB, border-beam ~12KB, metal-fx ~20KB (site only).
+- Verification: focused Vitest 16/16 pack contracts; related flow/GEX/agent/footer green.
 
 ---
 
