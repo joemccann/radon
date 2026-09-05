@@ -208,3 +208,28 @@ def test_removing_a_gate_from_an_if_expression_alone_fails_the_check() -> None:
             offenders[name] = missing
     # ... but the expression-level check catches it.
     assert offenders.get("stage-release") == ["web-coverage"], offenders
+
+
+def test_e2e_apt_provisioning_is_bounded() -> None:
+    """The e2e container's apt-get step must not hang on a degraded mirror.
+
+    2026-09-05: the unbounded ``apt-get update && apt-get install unzip``
+    step (norm 5-8s) hit a degraded Ubuntu mirror twice, running 319s and
+    448s and tripling the job wall (CIP-007). Every apt invocation in the
+    step must carry a retry cap and an HTTP timeout, and the step itself
+    must carry a ``timeout-minutes`` bound so a dead mirror fails fast
+    instead of eating the job's 25-minute budget.
+    """
+    job = _workflow()["jobs"]["e2e-financial-smoke"]
+    apt_steps = [
+        step
+        for step in job["steps"]
+        if "apt-get" in str(step.get("run", ""))
+    ]
+    assert apt_steps, "the e2e job no longer provisions via apt-get; retire this test"
+    for step in apt_steps:
+        run = step["run"]
+        for invocation in re.findall(r"apt-get[^&|;]*", run):
+            assert "Acquire::Retries=" in invocation, invocation
+            assert "Acquire::http::Timeout=" in invocation, invocation
+        assert step.get("timeout-minutes"), step
