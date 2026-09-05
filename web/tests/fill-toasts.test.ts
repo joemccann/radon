@@ -207,6 +207,17 @@ describe("fillGroupKey", () => {
     );
   });
 
+  it("prefers permId over a recycled orderId (R-642)", () => {
+    // IB orderIds recycle per session/clientId; permId is stable. An afternoon
+    // order reusing a morning orderId must not merge into the morning total.
+    const morning = makeFill({ execId: "r.1.01", orderId: 42, permId: 111 });
+    const afternoon = makeFill({ execId: "r.2.01", orderId: 42, permId: 222 });
+    expect(fillGroupKey(morning)).not.toBe(fillGroupKey(afternoon));
+    expect(fillGroupKey(morning)).toBe(
+      fillGroupKey(makeFill({ execId: "r.3.01", orderId: 43, permId: 111 })),
+    );
+  });
+
   it("separates distinct orders", () => {
     expect(fillGroupKey(makeFill({ orderId: 42 }))).not.toBe(
       fillGroupKey(makeFill({ orderId: 43 })),
