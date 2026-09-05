@@ -6,6 +6,7 @@ import { ScrollProgress } from "@/components/atoms/ScrollProgress";
 import { SectionHeading } from "@/components/atoms/SectionHeading";
 import { SectionRule } from "@/components/atoms/SectionRule";
 import { SignalPill } from "@/components/atoms/SignalPill";
+import { CopyAgentPromptBar } from "@/components/molecules/CopyAgentPromptBar";
 import { PlateFrame } from "@/components/molecules/PlateFrame";
 import { EditorialFooter } from "@/components/sections/EditorialFooter";
 import { EditorialHeader } from "@/components/sections/EditorialHeader";
@@ -200,6 +201,7 @@ export default function DefinedRiskOptionsStructuresPage() {
               {catalogCounts.conditional} are conditional: defined or undefined
               depending on how strikes and tenors are set.
             </RevealOnScroll>
+            <CopyAgentPromptBar capabilityId="structures" />
           </div>
         </section>
 

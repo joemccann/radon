@@ -1,5 +1,6 @@
 import { RevealOnScroll } from "@/components/atoms/RevealOnScroll";
 import { SectionHeading } from "@/components/atoms/SectionHeading";
+import { CopyAgentPromptBar } from "@/components/molecules/CopyAgentPromptBar";
 import { GateCard } from "@/components/molecules/GateCard";
 import { gates } from "@/lib/editorial-content";
 
@@ -26,11 +27,16 @@ export function ConvexitySection() {
             </a>
             .
           </p>
+          <CopyAgentPromptBar capabilityId="gates" />
         </RevealOnScroll>
 
         <RevealOnScroll className="gates">
-          {gates.map((gate) => (
-            <GateCard key={gate.no} gate={gate} />
+          {gates.map((gate, index) => (
+            <GateCard
+              key={gate.no}
+              gate={gate}
+              capabilityId={`gate-0${index + 1}`}
+            />
           ))}
         </RevealOnScroll>
       </div>

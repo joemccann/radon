@@ -5,6 +5,7 @@ import { RevealOnScroll } from "@/components/atoms/RevealOnScroll";
 import { ScrollProgress } from "@/components/atoms/ScrollProgress";
 import { SectionHeading } from "@/components/atoms/SectionHeading";
 import { SectionRule } from "@/components/atoms/SectionRule";
+import { CopyAgentPromptBar } from "@/components/molecules/CopyAgentPromptBar";
 import { PlateFrame } from "@/components/molecules/PlateFrame";
 import { EditorialFooter } from "@/components/sections/EditorialFooter";
 import { EditorialHeader } from "@/components/sections/EditorialHeader";
@@ -79,6 +80,7 @@ export default function InteractiveBrokersDarkPoolTerminalPage() {
               Unusual Whales supplies the off-exchange prints, because IB does
               not publish a public dark pool print feed.
             </RevealOnScroll>
+            <CopyAgentPromptBar capabilityId="ib-terminal" />
           </div>
         </section>
 

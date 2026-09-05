@@ -23,6 +23,7 @@ describe("developer resource pages", () => {
   it("publishes predictable developer URLs", () => {
     expect(agentPages.map((page) => page.slug)).toEqual([
       "developers",
+      "developers/recipes",
       "developers/openapi",
       "developers/auth",
       "developers/mcp",
@@ -30,10 +31,19 @@ describe("developer resource pages", () => {
       "agent-instructions",
     ]);
     expect(developersPage.heading).toBe("Radon Terminal developer resources");
+    expect(developersPage.sections.map((section) => section.id)).toContain(
+      "agent-prompt-payload",
+    );
+    expect(pageToMarkdown(developersPage)).toContain(
+      "Field order is stable: title, When to use, Hard nos, How to call, Parameters / constraints, Definition of done for the agent.",
+    );
     expect(openapiPage.heading).toBe("Radon Terminal OpenAPI spec");
     expect(authPage.heading).toBe("Radon Terminal auth docs");
     expect(mcpPage.heading).toBe("Radon Terminal MCP server");
     expect(webhooksPage.heading).toBe("Radon Terminal webhooks");
+    expect(agentPages.find((page) => page.slug === "developers/recipes")?.heading).toBe(
+      "Radon Terminal developer recipes",
+    );
   });
 
   it("keeps MCP and webhook copy honest", () => {

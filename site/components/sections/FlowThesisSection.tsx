@@ -1,5 +1,6 @@
 import { RevealOnScroll } from "@/components/atoms/RevealOnScroll";
 import { SectionHeading } from "@/components/atoms/SectionHeading";
+import { CopyAgentPromptBar } from "@/components/molecules/CopyAgentPromptBar";
 import { PlateFrame } from "@/components/molecules/PlateFrame";
 import { ScannerTable } from "@/components/organisms/ScannerTable";
 import { flowArgumentSteps } from "@/lib/editorial-content";
@@ -45,6 +46,8 @@ export function FlowThesisSection() {
                 </div>
               ))}
             </div>
+
+            <CopyAgentPromptBar capabilityId="flow" className="mt-5" />
 
             <p className="mt-5 text-[1.02rem] leading-[1.55] text-secondary">
               The wiring from Unusual Whales prints to Interactive Brokers

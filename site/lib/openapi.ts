@@ -31,7 +31,13 @@ const documentedPaths = [
     path: "/developers",
     summary: "Radon Terminal developer resources",
     description:
-      "Index of OpenAPI, auth docs, MCP server, and webhook status. Accept: text/markdown supported.",
+      "Index of OpenAPI, auth docs, MCP server, webhook status, and agent-prompt payload shape. Accept: text/markdown supported.",
+  },
+  {
+    path: "/developers/recipes",
+    summary: "Radon Terminal developer recipes",
+    description:
+      "Seven one-paste agent prompts for Flow, Gates, CRI, GEX, structures, Kelly, and llms.txt bootstrap.",
   },
   {
     path: "/developers/openapi",

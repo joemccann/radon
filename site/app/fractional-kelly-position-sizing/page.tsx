@@ -5,6 +5,7 @@ import { RevealOnScroll } from "@/components/atoms/RevealOnScroll";
 import { ScrollProgress } from "@/components/atoms/ScrollProgress";
 import { SectionHeading } from "@/components/atoms/SectionHeading";
 import { SectionRule } from "@/components/atoms/SectionRule";
+import { CopyAgentPromptBar } from "@/components/molecules/CopyAgentPromptBar";
 import { PlateFrame } from "@/components/molecules/PlateFrame";
 import { EditorialFooter } from "@/components/sections/EditorialFooter";
 import { EditorialHeader } from "@/components/sections/EditorialHeader";
@@ -76,6 +77,7 @@ export default function FractionalKellyPositionSizingPage() {
               maximum loss and the signal&apos;s odds, then hard-capped at 2.5%
               of bankroll per position. The cap is a ceiling, not a target.
             </RevealOnScroll>
+            <CopyAgentPromptBar capabilityId="kelly" />
           </div>
         </section>
 

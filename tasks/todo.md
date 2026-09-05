@@ -1,3 +1,31 @@
+# Task: Agent distribution pattern (issue 295) [IN PROGRESS]
+
+Copy Agent Prompt on dossiers/gates plus 5-7 developer recipe cards.
+
+## Dependency graph
+
+- T1 depends_on: [] - Payload builder, capability registry, and 7 recipes (red/green).
+- T2 depends_on: [T1] - Copy agent prompt control + View prompt modal.
+- T3 depends_on: [T2] - Wire buttons on dossiers, homepage flow/gates/CRI/GEX.
+- T4 depends_on: [T1] - /developers/recipes, payload-shape doc, llms.txt, sitemap.
+- T5 depends_on: [T3, T4] - Site lib tests, Playwright, screenshots, PR for #295.
+
+## Checklist
+
+- [x] T1 Canonical payload + recipes
+- [x] T2 Copy control
+- [x] T3 Dossier/gate wiring
+- [x] T4 Discovery
+- [x] T5 Verify and open PR
+
+## Review
+
+- Copy agent prompt is on all six dossiers, homepage Flow, the gate stack, Gates 01-04, and CRI/GEX cards.
+- Seven recipe cards live at /developers/recipes and are linked from developers, llms.txt, sitemap, and OpenAPI.
+- Verification: site lib 98 passed; focused 26 passed; Playwright agent-prompt-recipes 1 passed.
+
+---
+
 # Task: Ship libraries.dev UI pack C (2026-09-04)
 
 Wire `thinking-orbs` + `border-beam` on the terminal, and `border-beam` +
