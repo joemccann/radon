@@ -4,6 +4,7 @@ import { RevealOnScroll } from "@/components/atoms/RevealOnScroll";
 import { ScrollProgress } from "@/components/atoms/ScrollProgress";
 import { SectionHeading } from "@/components/atoms/SectionHeading";
 import { SectionRule } from "@/components/atoms/SectionRule";
+import { CopyAgentPromptBar } from "@/components/molecules/CopyAgentPromptBar";
 import { PlateFrame } from "@/components/molecules/PlateFrame";
 import { EditorialFooter } from "@/components/sections/EditorialFooter";
 import { EditorialHeader } from "@/components/sections/EditorialHeader";
@@ -128,6 +129,7 @@ export default function ConvexOptionsFromDarkPoolFlowPage() {
               publishes the working procedure: seven milestones run in order,
               with a stop on failure at any gate.
             </RevealOnScroll>
+            <CopyAgentPromptBar capabilityId="flow" />
           </div>
         </section>
 
@@ -158,6 +160,13 @@ export default function ConvexOptionsFromDarkPoolFlowPage() {
                 remains visible is a different thing from a gate that quietly
                 disappears.
               </p>
+              <CopyAgentPromptBar capabilityId="gates" />
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <CopyAgentPromptBar capabilityId="gate-01" className="" />
+                <CopyAgentPromptBar capabilityId="gate-02" className="" />
+                <CopyAgentPromptBar capabilityId="gate-03" className="" />
+                <CopyAgentPromptBar capabilityId="gate-04" className="" />
+              </div>
             </RevealOnScroll>
             <RevealOnScroll>
               <PlateFrame

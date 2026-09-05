@@ -6,6 +6,7 @@ import { RevealOnScroll } from "@/components/atoms/RevealOnScroll";
 import { ScrollProgress } from "@/components/atoms/ScrollProgress";
 import { SectionHeading } from "@/components/atoms/SectionHeading";
 import { SectionRule } from "@/components/atoms/SectionRule";
+import { CopyAgentPromptBar } from "@/components/molecules/CopyAgentPromptBar";
 import { PlateFrame } from "@/components/molecules/PlateFrame";
 import { EditorialFooter } from "@/components/sections/EditorialFooter";
 import { EditorialHeader } from "@/components/sections/EditorialHeader";
@@ -118,6 +119,7 @@ export default function CrashRiskIndexPage() {
               average. The inputs, the weights, and the thresholds are
               published here in full.
             </RevealOnScroll>
+            <CopyAgentPromptBar capabilityId="cri" />
           </div>
         </section>
 

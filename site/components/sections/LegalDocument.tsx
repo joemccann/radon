@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { EditorialEyebrow } from "@/components/atoms/EditorialEyebrow";
 import { EditorialFooter } from "@/components/sections/EditorialFooter";
 import { EditorialHeader } from "@/components/sections/EditorialHeader";
@@ -17,6 +18,7 @@ interface LegalDocumentProps {
   dateLabel?: string;
   intro: string;
   sections: LegalSection[];
+  afterIntro?: ReactNode;
 }
 
 const focusRing =
@@ -51,6 +53,7 @@ export function LegalDocument({
   dateLabel = "Effective",
   intro,
   sections,
+  afterIntro,
 }: LegalDocumentProps) {
   return (
     <div className="min-h-screen bg-canvas font-serif text-[17.5px] leading-[1.62] text-primary">
@@ -81,6 +84,8 @@ export function LegalDocument({
             <p className="max-w-[66ch] text-[1.12rem] leading-[1.55] text-secondary">
               {intro}
             </p>
+
+            {afterIntro}
 
             <nav
               aria-label="Contents"
