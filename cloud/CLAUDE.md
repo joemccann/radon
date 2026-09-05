@@ -66,6 +66,23 @@ steps. The shim refuses a symlinked or non-root-owned body, and
 `--project-name cloud` is pinned so the `cloud_ib-config` volume — the
 Gateway's Jts settings and 2FA state — survives the move.
 
+`config-check` is `deploy.sh`'s preflight compose render. It takes no
+env-file argument on purpose — a caller-supplied path is the one thing the
+shim refuses — and pins the same `/etc/radon/env` the deploy's
+`ENV_FILE_DEFAULT` resolves to in production. `preflight_env` falls back to a
+direct `docker compose config` only for a dev or test invocation against some
+other env file, where the caller brings its own docker access. Note the
+narrowing: preflight now renders the INSTALLED compose body, not the incoming
+release's. The incoming body is gated at install time instead, by provenance
+(git blob at the deployed commit) plus `compose_body_is_valid`.
+
+**The broker host gets none of this from CI.** `.github/workflows/ci.yml`
+deploys to a single `secrets.VPS_HOST`, and `sync-control-plane` reads
+`/home/radon/radon/.git`, which the broker does not have. Every control-plane
+change reaches it by hand: rsync the `cloud/` tree at the tested SHA to a
+root-owned path there, then run `bootstrap-control-plane.sh` with
+`RADON_BOOTSTRAP_CLOUD_ROOT` pointed at it.
+
 `inspect-running` passes docker's stdout, stderr and exit code through
 untouched: `gateway_state()` tells `missing` from `unknown` by matching
 "No such object" on stderr, and swallowing it wedges the watchdog's restart

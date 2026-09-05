@@ -270,13 +270,20 @@ describe("GET /api/iv-spread — absent and stale data are 200, never 4xx", () =
 });
 
 describe("GET /api/iv-spread — degradation passes through untransformed", () => {
+  // A stale_source payload's freshness rides `as_of`, not `scan_time`, so this
+  // fixture must be window-relative: the hardcoded default rotted out of the
+  // 48h budget two days after it was written and collapsed the response to the
+  // missing shape. Yesterday, not today: the route pins as_of to
+  // `<as_of>T22:15:00Z`, so `today` is a FUTURE timestamp for every run before
+  // 22:15Z. Yesterday keeps the effective age positive and between ~2h and
+  // ~26h at any hour -- the same window the frozen-clock sweep above asserts.
   it("passes a stale_source payload through verbatim", async () => {
-    // A stale_source payload's freshness rides `as_of`, not `scan_time`, so
-    // this fixture must be window-relative: the hardcoded default rotted out
-    // of the 48h budget two days after it was written and collapsed the
-    // response to the missing shape.
-    const today = new Date().toISOString().slice(0, 10);
-    await insertSnapshot(buildPayload({ status: "stale_source", as_of: today }));
+    const yesterday = new Date(Date.now() - 24 * 60 * 60_000)
+      .toISOString()
+      .slice(0, 10);
+    await insertSnapshot(
+      buildPayload({ status: "stale_source", as_of: yesterday }),
+    );
 
     const { GET } = await import("../app/api/iv-spread/route");
     const body = await (await GET()).json();
