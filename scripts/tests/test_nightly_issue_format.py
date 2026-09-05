@@ -8,6 +8,7 @@ rolling-dead-man description; run history stays in comments.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -205,6 +206,126 @@ class TestPhaseCommentShape:
         )
         assert nif.QUOTA_NEXT in body
         assert nif.RESUME_NEXT not in body
+
+
+class TestCiBuildTimeSavings:
+    """#196 deliver/report: every time-saving fix cites before/after/%."""
+
+    HEADER = "| Job | Before | After | % change |"
+
+    def test_measured_after_reports_percent_change_negative_is_faster(self):
+        table = nif.format_ci_build_time_savings(
+            [
+                {
+                    "job": "mixed warm p50",
+                    "before_secs": 238,
+                    "after_secs": 218,
+                }
+            ]
+        )
+        assert "**CI build time**" in table
+        assert "(after - before) / before * 100" in table
+        assert "negative = faster" in table
+        assert self.HEADER in table
+        assert "| mixed warm p50 | 238s | 218s | -8.4% |" in table
+        assert "TBD" not in table
+
+    def test_multiple_jobs_each_get_a_row(self):
+        table = nif.format_ci_build_time_savings(
+            [
+                {"job": "e2e wall", "before_secs": 400, "after_secs": 320},
+                {"job": "full gate p50", "before_secs": 238, "after_secs": 218},
+            ]
+        )
+        assert "| e2e wall | 400s | 320s | -20.0% |" in table
+        assert "| full gate p50 | 238s | 218s | -8.4% |" in table
+
+    def test_validating_after_is_pending_and_percent_is_tbd(self):
+        table = nif.format_ci_build_time_savings(
+            [
+                {
+                    "job": "mixed warm p50",
+                    "before_secs": 238,
+                    "after_status": "VALIDATING",
+                    "after_samples": 2,
+                    "required_samples": 5,
+                }
+            ]
+        )
+        assert "| mixed warm p50 | 238s | pending (VALIDATING, 2/5 samples) | TBD until 5 samples |" in table
+        assert "-8.4%" not in table
+
+    def test_missing_after_does_not_invent_a_time(self):
+        table = nif.format_ci_build_time_savings(
+            [{"job": "deploy", "before_secs": 88}]
+        )
+        assert "| deploy | 88s | pending | TBD until 5 samples |" in table
+        assert "88s |" in table
+        # After column is pending, not a fabricated second duration.
+        assert "| deploy | 88s | 88s |" not in table
+
+    def test_insufficient_sample_uses_the_status_and_keeps_before(self):
+        table = nif.format_ci_build_time_savings(
+            [
+                {
+                    "job": "python gate",
+                    "before_secs": 123,
+                    "after_status": "INSUFFICIENT_SAMPLE",
+                    "after_samples": 1,
+                    "required_samples": 5,
+                }
+            ]
+        )
+        assert "| python gate | 123s |" in table
+        assert "pending (INSUFFICIENT_SAMPLE, 1/5 samples)" in table
+        assert "TBD until 5 samples" in table
+
+    def test_zero_or_missing_before_is_refused(self):
+        with pytest.raises(ValueError, match="before"):
+            nif.format_ci_build_time_savings(
+                [{"job": "mixed warm p50", "before_secs": 0, "after_secs": 10}]
+            )
+        with pytest.raises(ValueError, match="before"):
+            nif.format_ci_build_time_savings([{"job": "mixed warm p50"}])
+
+    def test_empty_rows_are_refused(self):
+        with pytest.raises(ValueError, match="row"):
+            nif.format_ci_build_time_savings([])
+
+    def test_format_body_appends_the_table_to_what_was_done(self):
+        table = nif.format_ci_build_time_savings(
+            [{"job": "mixed warm p50", "before_secs": 238, "after_secs": 218}]
+        )
+        body = nif.format_body(
+            "Python gate tail stretched the mixed p50.",
+            "Landed CIP-001 on the dated branch.",
+            None,
+            ci_time_savings=table,
+        )
+        done = body.split("**What was done to fix it**", 1)[1].split("**Next**", 1)[0]
+        assert "Landed CIP-001 on the dated branch." in done
+        assert self.HEADER in done
+        assert "| mixed warm p50 | 238s | 218s | -8.4% |" in done
+
+    def test_cli_emits_the_table(self):
+        proc = subprocess.run(
+            [
+                sys.executable,
+                str(REPO / "scripts" / "nightly_issue_format.py"),
+                "ci-time-savings",
+                "--row",
+                json.dumps(
+                    {"job": "mixed warm p50", "before_secs": 238, "after_secs": 218}
+                ),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert self.HEADER in proc.stdout
+        assert "| mixed warm p50 | 238s | 218s | -8.4% |" in proc.stdout
 
 
 class TestSecuritySanitize:
