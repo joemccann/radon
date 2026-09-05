@@ -316,6 +316,11 @@ prune_deadman_comments() {
   local issue="$1"
   local posted="${2:-}"
   local keep="${posted##*issuecomment-}"
+  # R-657: no issuecomment- marker (or a non-numeric suffix) means the
+  # keep-id is unparseable; --keep "<whole url>" would match no comment id
+  # and the prune would delete EVERYTHING, including the comment just
+  # posted. No parseable id, no prune.
+  if [[ ! "$keep" =~ ^[0-9]+$ ]]; then return 0; fi
   if [[ "${RADON_WEEKEND_SKIP_ISSUE_PRUNE:-0}" == "1" ]]; then return 0; fi
   if [[ -z "${TIMEOUT_BIN:-}" || -z "$GH_BIN" ]]; then return 0; fi
   git -C "$REPO" show origin/main:scripts/nightly_issue_prune.py 2>/dev/null \
