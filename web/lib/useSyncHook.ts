@@ -80,6 +80,8 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
   const retryAttemptRef = useRef(0);
   /** R-106: one request per verb at a time. */
   const inFlightRef = useRef<Set<RetryMethod>>(new Set());
+  /** R-640: verbs requested while already in flight; re-fired once on settle. */
+  const pendingRef = useRef<Set<RetryMethod>>(new Set());
   const didInitialSync = useRef(false);
   const didInitialRead = useRef(false);
   const initialLoadKeyRef = useRef<string | null>(null);
@@ -127,7 +129,14 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
     // indefinitely — and the browser's 6-connection/host limit then
     // head-of-line-blocked every other API call in the tab. `usePortfolio`
     // and `useOrders` already do both of these; this hook did neither.
-    if (inFlightRef.current.has(method)) return;
+    if (inFlightRef.current.has(method)) {
+      // R-640: an event landing mid-flight (a fill-driven syncNow) used to be
+      // dropped outright — the in-flight response predates the fill, so the
+      // table stayed stale for a full producer period. Queue exactly one
+      // follow-up, re-fired in `finally` when the current request settles.
+      pendingRef.current.add(method);
+      return;
+    }
     inFlightRef.current.add(method);
     if (!background && method === "POST") {
       setSyncing(true);
@@ -168,6 +177,9 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
       inFlightRef.current.delete(method);
       if (!background && method === "POST") {
         setSyncing(false);
+      }
+      if (pendingRef.current.delete(method)) {
+        void requestRef.current(method, true);
       }
     }
   }, [armRetry, clearRetry, endpoint, extractTimestamp, showBackgroundError]);
