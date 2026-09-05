@@ -16,7 +16,13 @@ Copy Agent Prompt on dossiers/gates plus 5-7 developer recipe cards.
 - [x] T2 Copy control
 - [x] T3 Dossier/gate wiring
 - [x] T4 Discovery
-- [ ] T5 Verify and open PR
+- [x] T5 Verify and open PR
+
+## Review
+
+- Copy agent prompt is on all six dossiers, homepage Flow, the gate stack, Gates 01-04, and CRI/GEX cards.
+- Seven recipe cards live at /developers/recipes and are linked from developers, llms.txt, sitemap, and OpenAPI.
+- Verification: site lib 98 passed; focused 26 passed; Playwright agent-prompt-recipes 1 passed.
 
 ---
 
