@@ -27,6 +27,10 @@ describe("markdown page registry", () => {
       expect(body).toContain(`# ${page.heading}`);
       expect(body).toContain("Radon");
     }
+    const recipes = lookupMarkdown("/developers/recipes");
+    expect(recipes).toContain("Score flow for TICKER");
+    expect(recipes).toContain("## When to use");
+    expect(recipes).toContain("## Hard nos");
   });
 
   it("returns HTTP 404 markdown with sitemap and llms recovery links", () => {

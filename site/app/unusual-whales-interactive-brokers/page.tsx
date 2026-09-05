@@ -5,6 +5,7 @@ import { ScrollProgress } from "@/components/atoms/ScrollProgress";
 import { SectionHeading } from "@/components/atoms/SectionHeading";
 import { SectionRule } from "@/components/atoms/SectionRule";
 import { MilestoneRow } from "@/components/molecules/MilestoneRow";
+import { CopyAgentPromptBar } from "@/components/molecules/CopyAgentPromptBar";
 import { PlateFrame } from "@/components/molecules/PlateFrame";
 import { EditorialFooter } from "@/components/sections/EditorialFooter";
 import { EditorialHeader } from "@/components/sections/EditorialHeader";
@@ -123,6 +124,7 @@ export default function UnusualWhalesInteractiveBrokersPage() {
               </a>
               .
             </RevealOnScroll>
+            <CopyAgentPromptBar capabilityId="uw-ib" />
           </div>
         </section>
 

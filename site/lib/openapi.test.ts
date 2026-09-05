@@ -22,6 +22,7 @@ describe("public OpenAPI document", () => {
       "/llms.txt",
       "/openapi.json",
       "/developers",
+      "/developers/recipes",
       "/developers/openapi",
       "/developers/auth",
       "/developers/mcp",
