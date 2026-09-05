@@ -1,12 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   buildHeadlinesWebSocketUrl,
   headlinesUrlLeaksUpstream,
 } from "./headlinesSocket";
-import { DEMO_HEADLINES_POLL_MS } from "./demo/headlinesPolicy";
+import {
+  DEMO_HEADLINES_POLL_BACKOFF_MAX_MS,
+  DEMO_HEADLINES_POLL_MS,
+} from "./demo/headlinesPolicy";
 import { useRealtimeAuth } from "./RealtimeAuthContext";
 
 function reconnectDelayMs(attempt: number): number {
@@ -35,6 +38,12 @@ type ClientFrame =
 
 export function useHeadlines() {
   const getToken = useRealtimeAuth();
+  // REL-246 (R-654): the auth provider hands out a fresh getToken identity on
+  // every render. Keying the socket effect on it tore down and reopened the
+  // socket with attempt=0 on auth churn, defeating reconnect backoff. Mirror
+  // IBStatusContext: read the latest getter through a ref.
+  const getTokenRef = useRef(getToken);
+  getTokenRef.current = getToken;
   const [items, setItems] = useState<Headline[]>([]);
   const [status, setStatus] = useState<HeadlinesStatus>("connecting");
 
@@ -43,6 +52,9 @@ export function useHeadlines() {
       let stopped = false;
       let timer: ReturnType<typeof setTimeout> | null = null;
       let request: AbortController | null = null;
+      // REL-246 (R-663): back off the poll cadence on consecutive failures
+      // instead of re-arming at the fixed interval forever.
+      let failures = 0;
 
       async function refresh() {
         request = new AbortController();
@@ -54,15 +66,23 @@ export function useHeadlines() {
           if (!response.ok) throw new Error("Headline snapshot unavailable");
           const payload = await response.json() as { items?: unknown; degraded?: unknown };
           if (!Array.isArray(payload.items)) throw new Error("Invalid headline snapshot");
+          failures = 0;
           if (!stopped) {
             setItems(payload.items as Headline[]);
             setStatus(payload.degraded === true ? "down" : "live");
           }
         } catch {
+          failures += 1;
           if (!stopped) setStatus("down");
         } finally {
           request = null;
-          if (!stopped) timer = setTimeout(() => void refresh(), DEMO_HEADLINES_POLL_MS);
+          if (!stopped) {
+            const delay = Math.min(
+              DEMO_HEADLINES_POLL_MS * 2 ** Math.min(failures, 10),
+              DEMO_HEADLINES_POLL_BACKOFF_MAX_MS,
+            );
+            timer = setTimeout(() => void refresh(), delay);
+          }
         }
       }
 
@@ -116,7 +136,7 @@ export function useHeadlines() {
     async function open() {
       if (stopped) return;
       try {
-        const url = await buildHeadlinesWebSocketUrl(getToken);
+        const url = await buildHeadlinesWebSocketUrl(getTokenRef.current);
         // R-460: cleanup can run during the await above; a socket built after
         // it would never be closed (its onclose returns on `stopped`).
         if (stopped) return;
@@ -165,7 +185,9 @@ export function useHeadlines() {
       clearTimer();
       socket?.close();
     };
-  }, [getToken]);
+    // REL-246 (R-654): getToken is read via getTokenRef so auth-provider
+    // identity churn cannot recycle the socket.
+  }, []);
 
   return { items, status };
 }
