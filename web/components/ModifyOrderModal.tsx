@@ -316,6 +316,15 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, op
   const [newQuantity, setNewQuantity] = useState("");
   const [outsideRth, setOutsideRth] = useState(() => Boolean(order?.outsideRth));
   const [editableLegs, setEditableLegs] = useState<EditableComboLeg[]>([]);
+  // R-633: fills can land WHILE the dialog is open. The quantity field is
+  // seeded once per permId, so `quantityChanged` and the transmitted total
+  // must be computed against the fill count AT SEED TIME, never the live
+  // polled prop — otherwise a price-only submit on an untouched partial
+  // order flips quantityChanged and GROWS the order by the mid-edit fill.
+  const [fillSnapshot, setFillSnapshot] = useState<{ filled: number; total: number } | null>(
+    () => (order ? { filled: filledQuantity(order), total: order.totalQuantity } : null),
+  );
+  const [fillRaceNotice, setFillRaceNotice] = useState<string | null>(null);
 
   // Reset price only when a different order is selected (by permId), not on every re-render
   const orderPermId = order?.permId ?? null;
@@ -329,6 +338,8 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, op
     if (order?.totalQuantity != null) {
       setNewQuantity(String(remainingQuantity(order)));
     }
+    setFillSnapshot(order ? { filled: filledQuantity(order), total: order.totalQuantity } : null);
+    setFillRaceNotice(null);
     setOutsideRth(Boolean(order?.outsideRth));
     setEditableLegs(buildEditableComboLegs(order));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -514,7 +525,11 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, op
   const currentPrice = order.limitPrice ?? 0;
   // Compare against the remainder, so re-submitting an untouched partial
   // order is correctly seen as "no quantity change".
-  const currentQuantity = remainingQuantity(order);
+  // The SNAPSHOT remainder, not the live one: the field was seeded from the
+  // snapshot, so only the snapshot can say whether the operator edited it.
+  const currentQuantity = fillSnapshot
+    ? fillSnapshot.total - fillSnapshot.filled
+    : remainingQuantity(order);
   const alreadyFilled = filledQuantity(order);
   const parsedNew = parseFloat(newPrice);
   const parsedQuantity = parsePositiveInteger(newQuantity);
@@ -597,6 +612,24 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, op
   const submitModify = () => {
     if (!canSubmit || riskState?.okToSubmit !== true) return;
 
+    // R-633: refuse and re-prompt when fills advanced past the snapshot the
+    // quantity was seeded from. A quantity submit would carry stale math; a
+    // combo replace always re-orders the (stale) remainder. A price-only
+    // modify on a plain order transmits no quantity and may proceed.
+    const liveFilled = filledQuantity(order);
+    if (
+      fillSnapshot
+      && liveFilled !== fillSnapshot.filled
+      && (isComboOrder || quantityChanged)
+    ) {
+      setFillSnapshot({ filled: liveFilled, total: order.totalQuantity });
+      setNewQuantity(String(remainingQuantity(order)));
+      setFillRaceNotice(
+        `Fills advanced while editing: ${remainingQuantity(order)} now remaining. Quantity reseeded, review and resubmit.`,
+      );
+      return;
+    }
+
     if (isComboOrder && normalizedLegs) {
       onConfirm({
         replaceOrder: {
@@ -615,8 +648,13 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, op
     const request: ModifyOrderRequest = {};
     if (priceChanged) request.newPrice = parsedNew;
     // IB's modify assigns the NEW TOTAL (ib_order_manage.py), so the edited
-    // remainder has to carry the already-filled units back with it.
-    if (quantityChanged) request.newQuantity = toIbTotalQuantity(order, parsedQuantity!);
+    // remainder has to carry the already-filled units back with it. Use the
+    // SNAPSHOT fill count the field was seeded from (verified fresh above).
+    if (quantityChanged) {
+      request.newQuantity = fillSnapshot
+        ? fillSnapshot.filled + parsedQuantity!
+        : toIbTotalQuantity(order, parsedQuantity!);
+    }
     if (outsideRthChanged) request.outsideRth = outsideRth;
     onConfirm(request);
   };
@@ -876,6 +914,12 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, op
           surface="modify-order-modal"
           variant="info"
         />
+
+        {fillRaceNotice && (
+          <div className="modify-fill-race" role="alert">
+            {fillRaceNotice}
+          </div>
+        )}
 
         <div className="modify-actions">
           <button className="btn-secondary" onClick={onClose} disabled={loading}>
