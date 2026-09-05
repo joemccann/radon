@@ -7,6 +7,7 @@ import { classifyFlowSignal, type FlowDirection } from "@/lib/flowSignal";
 import { resolvePutCallRatio } from "@/lib/flowRatio";
 import SignalCard from "@/components/mobile/SignalCard";
 import SpectralLoader from "@/components/SpectralLoader";
+import ThinkingWait from "@/components/fx/ThinkingWait";
 import { useViewport } from "@/lib/useViewport";
 import DailyDarkPoolHistory from "@/components/flow-analysis/DailyDarkPoolHistory";
 import { flowReportErrorCopy } from "@/lib/flowReportError";
@@ -252,7 +253,10 @@ function MobileTickerFlowReport({
         {section === "overview" && (
           <>
             {!data && isAnalyzing && (
-              <SpectralLoader label={`Sampling ${ticker} flow · ${DEFAULT_LOOKBACK_DAYS} sessions`} />
+              <div className="thinking-wait-stack">
+                <ThinkingWait kind="flow" label={`Sampling ${ticker} flow · ${DEFAULT_LOOKBACK_DAYS} sessions`} size={64} />
+                <SpectralLoader label={`Sampling ${ticker} flow · ${DEFAULT_LOOKBACK_DAYS} sessions`} />
+              </div>
             )}
             {verdict && (
               <SignalCard
@@ -551,6 +555,7 @@ function AnalyzingPanel({
     <section className="section">
       <div className="section-body">
         <div className="ticker-flow-analyzing">
+          <ThinkingWait kind="flow" label={label} size={64} />
           <SpectralLoader label={label} />
           <ul className="ticker-flow-analyzing-steps">
             <li>Pulling dark pool prints across the last {lookbackDays} trading sessions</li>
