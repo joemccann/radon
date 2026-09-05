@@ -271,17 +271,25 @@ describe("GET /api/iv-spread — absent and stale data are 200, never 4xx", () =
 
 describe("GET /api/iv-spread — degradation passes through untransformed", () => {
   it("passes a stale_source payload through verbatim", async () => {
-    // as_of must stay inside the 48h data-age budget. A frozen 2026-09-02
-    // date collapses to missing once "today" is more than two sessions later.
-    const asOf = new Date(Date.now() - 12 * 3_600_000)
-      .toISOString()
-      .slice(0, 10);
-    await insertSnapshot(buildPayload({ status: "stale_source", as_of: asOf }));
+    // Pin Date. A frozen 2026-09-02 as_of collapsed to missing two sessions
+    // later; 12h-ago on this noon clock is still the same YYYY-MM-DD and
+    // pins to T22:15Z in the future. 30h-ago matches the hour-sweep budget.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const now = new Date(Date.UTC(2026, 8, 5, 12, 0, 0));
+      vi.setSystemTime(now);
+      const asOf = new Date(now.getTime() - 30 * 3_600_000)
+        .toISOString()
+        .slice(0, 10);
+      await insertSnapshot(buildPayload({ status: "stale_source", as_of: asOf }));
 
-    const { GET } = await import("../app/api/iv-spread/route");
-    const body = await (await GET()).json();
-    expect(body.status).toBe("stale_source");
-    expect(body.current.spread).toBeCloseTo(5.481468, 6);
+      const { GET } = await import("../app/api/iv-spread/route");
+      const body = await (await GET()).json();
+      expect(body.status).toBe("stale_source");
+      expect(body.current.spread).toBeCloseTo(5.481468, 6);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("keeps a null z_score / regime and an excluded session intact", async () => {
