@@ -24,6 +24,9 @@ export type ErrorCode =
   | "SETUP_ALREADY_COMPLETE"
   | "SETUP_REPO_ROOT_INVALID"
   | "AUTH_MISCONFIGURED"
+  // REL-245: a demo principal resolved against a DB not marked demo; the
+  // serving path refuses rather than expose the operator's live rows.
+  | "DEMO_DB_ISOLATION"
   | "BACKEND_UNAVAILABLE"
   | "INTERNAL_ERROR";
 
