@@ -761,9 +761,21 @@ jobs:
           e2e/mobile-orders-session.spec.ts
           e2e/orders-session-window.spec.ts
           e2e/vixts-tab.spec.ts
+      - name: Upload traces on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-traces
+          path: web/test-results/
+          retention-days: 7
       # Demo behavior is compile-time gated by NEXT_PUBLIC_RADON_DEMO. Rebuild
       # once with that boundary enabled so the transport-isolation spec proves
       # the deployed demo contract instead of silently skipping in prod mode.
+      # ⛔ STEP ORDER IS LOAD-BEARING (T-448): this rebuild overwrites web/.next
+      # with the demo bundle, so it must stay LAST — after the trace-upload
+      # step — or retried prod-bundle steps silently run against the demo
+      # build. This job is non-gating (absent from deploy.needs; see above).
+      # test_ci_demo_build_order.py pins this order.
       - name: Build demo workstation
         working-directory: web
         env:
@@ -776,13 +788,6 @@ jobs:
         run: >-
           npx playwright test
           e2e/demo-workstation-data.spec.ts
-      - name: Upload traces on failure
-        if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: playwright-traces
-          path: web/test-results/
-          retention-days: 7
 
   stage-release:
     name: Prestage VPS release
