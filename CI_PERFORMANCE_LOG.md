@@ -941,3 +941,40 @@ the 86-88s deploy floor (CIP-004) with the gateway-wait p95 tail (CIP-006).
 Outcome for tonight: audit `DONE`; CIP-007 handed to remediate (with
 CIP-008 behind it). Residual bottleneck for the production clock stays the
 python/web gate co-wall then the deploy floor (CIP-004).
+
+### 2026-09-05 - remediate - branch `ci-performance/2026-09-05`
+
+- **CIP-007 IMPLEMENTED** (commit `1bb2cfa2`). Both apt-get invocations in
+  the e2e job's unzip provisioning step now carry `Acquire::Retries=3` and
+  `Acquire::http::Timeout=15`, and the step is capped at
+  `timeout-minutes: 3`. A degraded mirror now fails fast (~90s worst case
+  with retries) instead of running 319-448s inside the job's 25-minute
+  budget.
+- Changed files: `.github/workflows/ci.yml` (e2e-financial-smoke apt step),
+  `scripts/tests/test_ci_gate_integrity.py`
+  (`test_e2e_apt_provisioning_is_bounded`, added first).
+- Red/green: new contract test FAILED against the unbounded step
+  (`Acquire::Retries` assertion), green after the `ci.yml` edit. Full
+  workflow contract set: 79 passed in 9.23s
+  (`test_ci_gate_integrity` + `test_ci_deploy_concurrency` +
+  `test_path_filter`). YAML parse clean.
+- Safety: provisioning-only; no test, spec, gate, `needs` edge, coverage,
+  provenance, health, stability-window or rollback surface touched.
+  setup-bun pin unchanged. Runner minutes strictly reduced on degraded
+  days, unchanged otherwise.
+- Expected: ~0s p50 effect (step norm 5-8s); caps the measured 319-448s
+  tail; up to ~7.5 runner-min/run saved on degraded days.
+- Revert trigger: the apt step failing on a healthy mirror in any of the
+  next five `main` runs.
+- Validation: step duration + conclusion across the next five mixed runs;
+  spec count unchanged (21 e2e specs).
+- Outcome: `VALIDATING`.
+- **CIP-008 DEFERRED** with rationale: `web/.next/cache` is already shared
+  between the two builds (same workspace, cache survives the rebuild), so
+  the 22s is post-cache demo-boundary compile; a parallel-job split would
+  duplicate checkout + bun install + build (~60s+ runner time) to save 27s
+  off a non-gating job. No safe material change tonight.
+- CIP-005 stage 2 remains `VALIDATING` (rs shard 103/108s vs 85s trigger;
+  needs 3 more post-merge samples). CIP-004 / CIP-006 unchanged, DEFERRED.
+- Residual bottleneck: python/web gate co-wall ~100-110s, then the 86-88s
+  deploy floor (CIP-004).
