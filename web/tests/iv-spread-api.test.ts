@@ -270,8 +270,17 @@ describe("GET /api/iv-spread — absent and stale data are 200, never 4xx", () =
 });
 
 describe("GET /api/iv-spread — degradation passes through untransformed", () => {
+  // Freshness for a stale_source payload rides the DATA age (as_of), pinned to
+  // T22:15:00Z against a 48h budget, so a hardcoded as_of degrades to `missing`
+  // the moment wall-clock drifts past it -- this went red on main at 22:15Z.
+  // Anchor it to yesterday so the fixture stays inside the budget at any hour.
   it("passes a stale_source payload through verbatim", async () => {
-    await insertSnapshot(buildPayload({ status: "stale_source" }));
+    const yesterday = new Date(Date.now() - 24 * 60 * 60_000)
+      .toISOString()
+      .slice(0, 10);
+    await insertSnapshot(
+      buildPayload({ status: "stale_source", as_of: yesterday }),
+    );
 
     const { GET } = await import("../app/api/iv-spread/route");
     const body = await (await GET()).json();
