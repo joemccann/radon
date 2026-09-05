@@ -16,8 +16,9 @@ describe("RegimePanel — responsive history chart layout", () => {
     expect(panelSource).not.toContain('<div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>'); 
   });
 
-  it("collapses the history grid to a single column below the narrow-screen breakpoint", () => {
-    expect(cssSource).toMatch(/\.regime-history-grid\s*\{[\s\S]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
-    expect(cssSource).toMatch(/@media\s*\(max-width:\s*960px\)\s*\{[\s\S]*\.regime-history-grid\s*\{[\s\S]*grid-template-columns:\s*1fr;/);
+  it("keeps the history grid as a single full-width column at every breakpoint", () => {
+    const historyGridRule = cssSource.match(/\.regime-history-grid\s*\{([^}]+)\}/)?.[1] ?? "";
+    expect(historyGridRule).toMatch(/grid-template-columns:\s*1fr/);
+    expect(historyGridRule).not.toMatch(/repeat\(2/);
   });
 });

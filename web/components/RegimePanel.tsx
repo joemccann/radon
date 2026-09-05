@@ -834,7 +834,7 @@ export default function RegimePanel({
         </>
       )}
 
-      {/* ── Row 5: 20-Session History Charts (side by side) ── */}
+      {/* ── Row 5: 20-Session History Charts (full-width stack) ── */}
 
       {data?.history && data.history.length > 0 && (() => {
         const vixVvixSeries: [ChartSeries, ChartSeries] = [

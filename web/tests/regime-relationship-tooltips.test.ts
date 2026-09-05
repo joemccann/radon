@@ -48,6 +48,12 @@ describe("Regime relationship state tooltips", () => {
     expect(source).toContain('data-testid="regime-zscore-hover-date"');
   });
 
+  it("renders hover telemetry hooks for the regime quadrant scatter", () => {
+    expect(source).toContain('data-testid="regime-quadrant-chart-overlay"');
+    expect(source).toContain('data-testid="regime-quadrant-hover-tooltip"');
+    expect(source).toContain('data-testid="regime-quadrant-hover-date"');
+  });
+
   it("colors the latest quadrant marker from the classified quadrant instead of a hardcoded warning tone", () => {
     expect(source).toContain('const latestQuadrantColor = quadrantTone(latest.quadrant);');
     expect(source).toContain('fill={isLatest ? latestQuadrantColor : "var(--signal-core)"}');
