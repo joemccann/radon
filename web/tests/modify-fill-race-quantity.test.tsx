@@ -226,7 +226,9 @@ describe("combo replace while a fill lands mid-dialog", () => {
       vega: null,
       impliedVol: null,
       undPrice: null,
-      timestamp: "2026-06-25T18:00:00.000Z",
+      // Fresh timestamp: the REL-236 quote gate disarms submit on stale
+      // quotes, and this suite exercises the fill race, not staleness.
+      timestamp: new Date().toISOString(),
       ...overrides,
     };
   }
