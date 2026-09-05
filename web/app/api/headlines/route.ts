@@ -73,17 +73,31 @@ export function normalizeFlashSnapshot(payload: unknown) {
 }
 
 async function fetchSnapshot() {
-  const response = await fetch(FLASH_URL, {
-    cache: "no-store",
-    headers: {
-      Accept: "application/json",
-      Origin: FLASH_ORIGIN,
-      "User-Agent": FLASH_USER_AGENT,
-    },
-    signal: AbortSignal.timeout(5_000),
-  });
-  if (!response.ok) throw new Error(`Headline provider returned ${response.status}`);
-  return normalizeFlashSnapshot(await response.json());
+  try {
+    const response = await fetch(FLASH_URL, {
+      cache: "no-store",
+      headers: {
+        Accept: "application/json",
+        Origin: FLASH_ORIGIN,
+        "User-Agent": FLASH_USER_AGENT,
+      },
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!response.ok) throw new Error(`Headline provider returned ${response.status}`);
+    const items = normalizeFlashSnapshot(await response.json());
+    // REL-246 (R-655): the flash feed carries no signal distinguishing a quiet
+    // tape from a blocked provider, so an empty payload is a provider failure —
+    // never cached as a healthy snapshot.
+    if (items.length === 0) throw new Error("Headline provider returned an empty snapshot");
+    return items;
+  } catch (error) {
+    // REL-246 (R-655): provider failures were silent; log so the watchdog
+    // sees the outage even when a stale cache absorbs it.
+    console.error("[headlines] provider snapshot failed", {
+      message: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
 }
 
 export async function GET() {
