@@ -817,11 +817,16 @@ describe("POST /api/gex", () => {
       history: [],
     }));
 
+    // REL-238 / R-643: the fallback keeps the cached body but must preserve
+    // the upstream failure status and stamp it in the body — a 200 +
+    // header-only warning hid dead scans from useSyncHook consumers.
     const res = await POST();
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(502);
     expect(res.headers.get("X-Sync-Warning")).toContain("GEX sync failed");
     const body = await res.json();
     expect(body.net_gex).toBe(321);
+    expect(body.is_stale).toBe(true);
+    expect(body.scan_succeeded).toBe(false);
   });
 });
 
@@ -897,11 +902,15 @@ describe("POST /api/regime", () => {
       spy_closes: [],
     }));
 
+    // REL-238 / R-643: status preserved + body-level failure markers (see the
+    // GEX fallback test above for the rationale).
     const res = await POST();
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(502);
     expect(res.headers.get("X-Sync-Warning")).toContain("CRI sync failed");
     const body = await res.json();
     expect(body.cri.score).toBe(18);
+    expect(body.is_stale).toBe(true);
+    expect(body.scan_succeeded).toBe(false);
   });
 });
 
