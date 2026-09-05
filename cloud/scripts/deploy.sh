@@ -208,16 +208,27 @@ preflight_env() {
   # have installed the verb never runs. The same applies in reverse once radon
   # leaves group `docker` and the direct call is the one that cannot work.
   # A genuinely unrenderable compose body still fails both.
-  local compose_check_ok=0
-  if [[ -x "$DOCKER_GW" && "$env_file" == "$ENV_FILE_DEFAULT" ]] \
-    && sudo -n "$DOCKER_GW" config-check >/dev/null 2>&1; then
-    compose_check_ok=1
-  elif (
+  local compose_check_ok=0 shim_attempted=0 shim_rc=0
+  if [[ -x "$DOCKER_GW" && "$env_file" == "$ENV_FILE_DEFAULT" ]]; then
+    shim_attempted=1
+    if sudo -n "$DOCKER_GW" config-check >/dev/null 2>&1; then
+      compose_check_ok=1
+    else
+      shim_rc=$?
+    fi
+  fi
+  if (( compose_check_ok == 0 )) && (
     cd "$CLOUD_DIR"
     RADON_COMPOSE_ENV_FILE="$env_file" \
       docker compose --env-file "$env_file" config --quiet >/dev/null 2>&1
   ); then
     compose_check_ok=1
+    # R-647: the fallback used to be silent, so a shim refusal (exit 78 on a
+    # tampered compose/env file) never surfaced while preflight stayed green.
+    # One countable line makes the direct path's use a journal grep.
+    if (( shim_attempted == 1 )); then
+      log_warn "[preflight] compose-render: shim refused (exit ${shim_rc}), direct render covered"
+    fi
   fi
   if (( compose_check_ok == 0 )); then
     log_error "[preflight] FAIL: docker compose config validation failed"

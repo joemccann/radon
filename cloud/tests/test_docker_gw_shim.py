@@ -222,5 +222,13 @@ def test_deploy_preflight_falls_back_instead_of_deadlocking() -> None:
     fail_at = body.index("compose config validation failed")
 
     assert shim_at < direct_at < fail_at, "direct render must sit between them"
-    assert "elif (" in body, "the direct render must be an elif fallback"
+    # REL-242 (R-647): the fallback is no longer a silent elif -- the shim's
+    # refusal is captured so the covered fallback logs one countable line --
+    # but the intent pinned here is unchanged: the direct render runs only
+    # when the shim did not already cover, and preflight fails only when
+    # neither path renders.
+    assert "(( compose_check_ok == 0 )) && (" in body, (
+        "the direct render must run only when the shim did not cover"
+    )
     assert body.count("compose_check_ok=1") == 2
+    assert "direct render covered" in body
