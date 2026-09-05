@@ -43,16 +43,22 @@ export function useChainPrefetch(
     return cacheRef.current.get(expiry) ?? null;
   }, []);
 
+  // R-662: key the effect on CONTENT, not array identity — a same-content
+  // re-render must leave the staggered worker uninterrupted. "|" cannot
+  // appear in an expiry string, so the join is collision-free.
+  const expirationsKey = expirations.join("|");
+
   // Background prefetch of non-selected expirations
   useEffect(() => {
-    if (!enabled || expirations.length <= 1 || !selectedExpiry) return;
+    const exps = expirationsKey ? expirationsKey.split("|") : [];
+    if (!enabled || exps.length <= 1 || !selectedExpiry) return;
 
     // Cancel any in-flight prefetch
     if (abortRef.current) abortRef.current.abort();
     const controller = new AbortController();
     abortRef.current = controller;
 
-    const toFetch = expirations.filter(
+    const toFetch = exps.filter(
       (exp) => exp !== selectedExpiry && !cacheRef.current.has(exp),
     );
 
@@ -100,7 +106,7 @@ export function useChainPrefetch(
     return () => {
       controller.abort();
     };
-  }, [ticker, expirations, selectedExpiry, enabled]);
+  }, [ticker, expirationsKey, selectedExpiry, enabled]);
 
   return {
     cacheStrikes,

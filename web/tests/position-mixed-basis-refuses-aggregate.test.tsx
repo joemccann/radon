@@ -245,21 +245,34 @@ describe("mixed basis separates capital from measurable leg P&L", () => {
   });
 });
 
-describe("unrealized breakdown omits a `mixed` position and counts it unmeasured (T-315)", () => {
-  it("computeUnrealizedBreakdown emits no row for it", () => {
-    expect(computeUnrealizedBreakdown(portfolioOf(MIXED))).toEqual([]);
+describe("unrealized breakdown includes a `mixed` position's measured leg P&L (R-656)", () => {
+  // R-656 rewrote the T-315 pins onto intent: rows already showed the per-leg
+  // P&L (see the PositionTable block above), so the header total must include
+  // it too or rows no longer sum to the total. The basis stays unmeasured:
+  // the entry column renders no blend and countUnmeasuredBasis still names it.
+  it("computeUnrealizedBreakdown emits a row with measured P&L and no blended entry", () => {
+    const rows = computeUnrealizedBreakdown(portfolioOf(MIXED));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].pnl).toBe(3500);
+    expect(rows[0].col1).toBe("---");
     expect(computeUnrealizedBreakdown(portfolioOf(CLEAN))).toHaveLength(1);
   });
 
-  it("sumUnrealizedBreakdown excludes it and countUnmeasuredBasis names it", () => {
+  it("sumUnrealizedBreakdown includes it; countUnmeasuredBasis still names it", () => {
     const both = { ...portfolioOf(CLEAN), positions: [CLEAN, { ...MIXED, id: 2 }] };
-    expect(sumUnrealizedBreakdown(both)).toBe(3500);
+    expect(sumUnrealizedBreakdown(both)).toBe(7000);
     expect(countUnmeasuredBasis(both)).toBe(1);
     expect(countUnmeasuredBasis(portfolioOf(CLEAN))).toBe(0);
   });
+
+  it("rows sum to the header total with a blended combo present", () => {
+    const both = { ...portfolioOf(CLEAN), positions: [CLEAN, { ...MIXED, id: 2 }] };
+    const rowSum = computeUnrealizedBreakdown(both).reduce((s, r) => s + r.pnl, 0);
+    expect(sumUnrealizedBreakdown(both)).toBeCloseTo(rowSum, 2);
+  });
 });
 
-describe("MetricCards Open P&L excludes a `mixed` position (T-315)", () => {
+describe("MetricCards Open P&L includes a `mixed` position's measured leg P&L (R-656)", () => {
   function openPnlCard(): HTMLElement {
     const label = Array.from(document.querySelectorAll(".metric-label")).find(
       (n) => n.textContent?.trim() === "Open P&L",
@@ -267,11 +280,11 @@ describe("MetricCards Open P&L excludes a `mixed` position (T-315)", () => {
     return label!.closest(".metric-card") as HTMLElement;
   }
 
-  it("totals only the measured position and labels the unmeasured one", () => {
+  it("totals both positions and labels the unmeasured basis", () => {
     const both = { ...portfolioOf(CLEAN), positions: [CLEAN, { ...MIXED, id: 2 }] };
     render(<MetricCards portfolio={both} prices={{}} section="portfolio" />);
     const card = openPnlCard();
-    expect(card.querySelector(".metric-value")?.textContent).toBe(BLENDED_PNL);
+    expect(card.querySelector(".metric-value")?.textContent).toBe("+$7,000");
     expect(card.querySelector(".metric-change")?.textContent).toContain("1 UNMEASURED BASIS");
   });
 

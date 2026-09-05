@@ -100,5 +100,8 @@ export function useToast() {
     [addToast, scheduleDismiss],
   );
 
-  return { toasts, exitingIds, addToast, upsertToast, dismissToast, removeToast };
+  /** True while the toast for `key` is still on screen (not dismissed). */
+  const hasToastKey = useCallback((key: string) => keyedIdsRef.current.has(key), []);
+
+  return { toasts, exitingIds, addToast, upsertToast, dismissToast, removeToast, hasToastKey };
 }

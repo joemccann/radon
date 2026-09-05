@@ -62,11 +62,37 @@ export function classifyRateTier(
   return "A";
 }
 
+// Every real first segment under web/app/api. The classifier runs in
+// middleware, BEFORE routing, on the raw pathname — without this allowlist a
+// nonsense segment (`/api/aaa1`, `/api/aaa2`, ...) minted an unbounded stream
+// of fresh per-resource tier-A budgets (R-652). Drift pin:
+// rel244-demo-rate-budget.test.ts fails when a new segment ships unlisted.
+export const KNOWN_API_SEGMENTS: ReadonlySet<string> = new Set([
+  "admin", "alerts", "assistant", "attribution", "backtest", "blotter",
+  "bookmarks", "bpi", "breadth", "cash-flows", "catalysts", "cor",
+  "credentials", "credit-spread", "discover", "dispersion", "divyield",
+  "equibles-ats-venue-share", "equibles-cot-positioning",
+  "equibles-filing-forensics", "equibles-short-crowding",
+  "equibles-smart-money-13f", "flex-token", "flow-analysis", "flow-surprise",
+  "futures", "futures-quote", "gamma-rotation", "garch-convergence", "gex",
+  "headlines", "hhlev", "hyad", "ib", "iei-hyg", "index-options",
+  "index-quote", "informed-flow", "internals", "iv-spread", "ivrank",
+  "journal", "knowledge", "leap", "llm-token-index", "ma-ratio",
+  "margin-debt", "menthorq", "models", "newsfeed", "options", "orders",
+  "paper", "performance", "pi", "portfolio", "preferences", "previous-close",
+  "prices", "probe", "profile", "regime", "risk-free-rate", "scanner",
+  "service-health", "setup", "share", "short-availability", "skew", "skew2d",
+  "straddle", "streaks", "ticker", "trin", "vcg", "vixcor", "vixts",
+  "vol-cone", "watchlist", "webhooks", "workflow", "yield-curve",
+]);
+
 /**
  * Cheap and expensive resources receive independent per-user budgets. A busy
  * dashboard may exhaust its own regime allowance, but cannot spend the first
  * scanner visit's allowance. Grouping on the first API segment keeps nested
- * routes together so changing a suffix cannot evade the cap.
+ * routes together so changing a suffix cannot evade the cap. Segments not on
+ * the route allowlist collapse to ONE shared bucket per user so invented
+ * paths cannot mint fresh allowances (R-652).
  */
 export function demoRateLimitKey(
   tier: DemoRateTier,
@@ -74,6 +100,7 @@ export function demoRateLimitKey(
   pathname: string,
 ): string {
   if (tier !== "A" && tier !== "B") return userId;
-  const resource = /^\/api\/([^/]+)/.exec(pathname)?.[1] ?? "api";
+  const segment = /^\/api\/([^/]+)/.exec(pathname)?.[1];
+  const resource = segment && KNOWN_API_SEGMENTS.has(segment) ? segment : "other";
   return `${userId}:resource:${resource}`;
 }

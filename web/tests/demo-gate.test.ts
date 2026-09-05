@@ -103,6 +103,9 @@ describe("handleDemoGate", () => {
   it("keeps a first scanner visit out of an exhausted regime budget", async () => {
     const usage = new Map<string, number>();
     const limiter = vi.fn(async (tier: string, key: string): Promise<DemoRateLimitResult> => {
+      // Intent: per-resource tier-A isolation. The K daily backstop (REL-244)
+      // is exercised elsewhere; keep it open so it does not mask the A keys.
+      if (tier !== "A") return { success: true, limit: 1000, remaining: 999, reset: 0 };
       const counterKey = `${tier}:${key}`;
       const next = (usage.get(counterKey) ?? 0) + 1;
       usage.set(counterKey, next);
@@ -128,7 +131,7 @@ describe("handleDemoGate", () => {
     );
 
     expect(scanner).toBeNull();
-    expect(limiter.mock.calls.at(-1)).toEqual([
+    expect(limiter.mock.calls.filter(([tier]) => tier === "A").at(-1)).toEqual([
       "A",
       "fresh-demo-user:resource:scanner",
     ]);
@@ -146,9 +149,12 @@ describe("handleDemoGate", () => {
       { now: NOW, rateLimiter: limiter },
     );
 
+    // Each read also charges the user-global K daily backstop (REL-244).
     expect(limiter.mock.calls).toEqual([
       ["A", "user:resource:scanner"],
+      ["K", "user"],
       ["A", "user:resource:scanner"],
+      ["K", "user"],
     ]);
   });
 

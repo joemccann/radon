@@ -80,6 +80,8 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
   const retryAttemptRef = useRef(0);
   /** R-106: one request per verb at a time. */
   const inFlightRef = useRef<Set<RetryMethod>>(new Set());
+  /** R-640: verbs requested while already in flight; re-fired once on settle. */
+  const pendingRef = useRef<Set<RetryMethod>>(new Set());
   const didInitialSync = useRef(false);
   const didInitialRead = useRef(false);
   const initialLoadKeyRef = useRef<string | null>(null);
@@ -127,7 +129,14 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
     // indefinitely — and the browser's 6-connection/host limit then
     // head-of-line-blocked every other API call in the tab. `usePortfolio`
     // and `useOrders` already do both of these; this hook did neither.
-    if (inFlightRef.current.has(method)) return;
+    if (inFlightRef.current.has(method)) {
+      // R-640: an event landing mid-flight (a fill-driven syncNow) used to be
+      // dropped outright — the in-flight response predates the fill, so the
+      // table stayed stale for a full producer period. Queue exactly one
+      // follow-up, re-fired in `finally` when the current request settles.
+      pendingRef.current.add(method);
+      return;
+    }
     inFlightRef.current.add(method);
     if (!background && method === "POST") {
       setSyncing(true);
@@ -145,12 +154,24 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
       else reportFetchSuccess();
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw new Error((body as { error?: string }).error ?? `Sync failed (${res.status})`);
+        const failure = new Error(
+          (body as { error?: string }).error ?? `Sync failed (${res.status})`,
+        ) as Error & { scanFailed?: boolean };
+        // R-643: routes stamp `scan_succeeded: false` on a degraded fallback
+        // body; that failure must surface even over previously-good data.
+        if ((body as { scan_succeeded?: unknown }).scan_succeeded === false) failure.scanFailed = true;
+        throw failure;
       }
       const json = (await res.json()) as T;
       setData(json);
       setLastSync(extractTimestamp ? extractTimestamp(json) : new Date().toISOString());
-      setError(null);
+      // R-643: a 2xx body can still carry a body-level scan failure (cached
+      // fallback attached). Surface it instead of pretending the sync worked.
+      if ((json as { scan_succeeded?: unknown } | null)?.scan_succeeded === false) {
+        setError((json as { error?: string }).error ?? "Scan failed upstream - showing cached data");
+      } else {
+        setError(null);
+      }
 
       clearRetry();
       armRetry(json);
@@ -158,8 +179,9 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
       if (!networkResolved) reportFetchFailure();
       // Only show error if we don't already have valid cached data —
       // unless the caller explicitly wants the stale view marked as degraded.
+      const scanFailed = err instanceof Error && (err as Error & { scanFailed?: boolean }).scanFailed === true;
       setData((prev) => {
-        if (!prev || showBackgroundError) {
+        if (!prev || showBackgroundError || scanFailed) {
           setError(err instanceof Error ? err.message : "Sync failed");
         }
         return prev;
@@ -168,6 +190,9 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
       inFlightRef.current.delete(method);
       if (!background && method === "POST") {
         setSyncing(false);
+      }
+      if (pendingRef.current.delete(method)) {
+        void requestRef.current(method, true);
       }
     }
   }, [armRetry, clearRetry, endpoint, extractTimestamp, showBackgroundError]);

@@ -285,6 +285,104 @@ rollback_bundle() {
   fi
 }
 
+# Shared with deploy-root-helper.sh and setup-vps.sh, byte-for-byte;
+# cloud/tests/test_rel234_compose_gate.py pins the copies identical. R-635.
+compose_body_is_valid() {
+  local candidate="$1" dest="$2"
+  local body render_env
+
+  # Comments must never satisfy or trip a structural gate.
+  body="$(grep -Ev '^[[:space:]]*#' "$candidate")" || body=""
+
+  printf '%s\n' "$body" | grep -Eq '^services:' || {
+    echo "compose validation failed: ${dest} declares no services" >&2
+    return 1
+  }
+  printf '%s\n' "$body" | grep -Eq '^[[:space:]]+container_name:[[:space:]]*ib-gateway[[:space:]]*$' || {
+    echo "compose validation failed: ${dest} does not pin container_name ib-gateway" >&2
+    return 1
+  }
+  if printf '%s\n' "$body" | grep -Eq '^[[:space:]]*privileged:[[:space:]]*true'; then
+    echo "compose validation failed: ${dest} requests privileged" >&2
+    return 1
+  fi
+  # The Gateway body's only volume is the named ib-config volume, so any
+  # short-form entry whose source is an absolute host path (quoted or not)
+  # is a host mount root must not perform. There is no allowlist.
+  if printf '%s\n' "$body" | grep -Eq "^[[:space:]]*-[[:space:]]*[\"']?/"; then
+    echo "compose validation failed: ${dest} binds an absolute host path" >&2
+    return 1
+  fi
+  if printf '%s\n' "$body" | grep -Eq "type:[[:space:]]*[\"']?bind"; then
+    echo "compose validation failed: ${dest} declares a long-form bind mount" >&2
+    return 1
+  fi
+  if printf '%s\n' "$body" | grep -Eq "source:[[:space:]]*[\"']?/"; then
+    echo "compose validation failed: ${dest} declares an absolute long-form source" >&2
+    return 1
+  fi
+  if printf '%s\n' "$body" | grep -q 'docker\.sock'; then
+    echo "compose validation failed: ${dest} mounts the docker socket" >&2
+    return 1
+  fi
+  if printf '%s\n' "$body" | grep -Eq '^[[:space:]]*pid:'; then
+    echo "compose validation failed: ${dest} joins a pid namespace" >&2
+    return 1
+  fi
+  if printf '%s\n' "$body" | grep -Eq "^[[:space:]]*network_mode:[[:space:]]*[\"']?host"; then
+    echo "compose validation failed: ${dest} requests host networking" >&2
+    return 1
+  fi
+  if printf '%s\n' "$body" | grep -Eq '^[[:space:]]*(cap_add|devices):'; then
+    echo "compose validation failed: ${dest} adds capabilities or devices" >&2
+    return 1
+  fi
+  if printf '%s\n' "$body" | grep -Eq "^[[:space:]]*user:[[:space:]]*[\"']?(root|0)[\"']?[[:space:]]*$"; then
+    echo "compose validation failed: ${dest} runs as root in the container" >&2
+    return 1
+  fi
+  # security_opt may only tighten: block form, no-new-privileges:true entries
+  # and nothing else. The inline form is refused outright.
+  if printf '%s\n' "$body" | grep -Eq '^[[:space:]]*security_opt:[[:space:]]*[^[:space:]]'; then
+    echo "compose validation failed: ${dest} uses inline security_opt" >&2
+    return 1
+  fi
+  if ! printf '%s\n' "$body" | awk '
+    /^[[:space:]]*security_opt:[[:space:]]*$/ { inso = 1; next }
+    inso == 1 && /^[[:space:]]*-[[:space:]]*/ {
+      entry = $0
+      sub(/^[[:space:]]*-[[:space:]]*/, "", entry)
+      gsub(/[" \t]/, "", entry)
+      if (entry != "no-new-privileges:true") { bad = 1; exit }
+      next
+    }
+    inso == 1 { inso = 0 }
+    END { exit bad }
+  '; then
+    echo "compose validation failed: ${dest} sets a security_opt beyond no-new-privileges" >&2
+    return 1
+  fi
+  # Render check where the tooling exists (the deploy host has it; a test
+  # host may not). RADON_COMPOSE_ENV_FILE is pointed at an empty file so the
+  # env_file directive resolves without reading production secrets.
+  if command -v docker >/dev/null 2>&1 && \
+     docker compose version >/dev/null 2>&1; then
+    render_env="$(mktemp)" || {
+      echo "compose validation failed: ${dest} render env could not be created" >&2
+      return 1
+    }
+    if ! RADON_COMPOSE_ENV_FILE="$render_env" docker compose \
+        -f "$candidate" --project-name radon-compose-validate \
+        config --quiet >/dev/null 2>&1; then
+      rm -f -- "$render_env"
+      echo "compose validation failed: ${dest} does not render with docker compose config" >&2
+      return 1
+    fi
+    rm -f -- "$render_env"
+  fi
+  return 0
+}
+
 cleanup() {
   local status="$?"
   trap - EXIT INT TERM
@@ -344,14 +442,8 @@ for index in "${!SOURCES[@]}"; do
     # The Gateway compose body radon-docker-gw runs as root. Same gate the
     # deploy helper's refresh_install_file applies.
     compose)
-      grep -Eq '^services:' "$staged_path" || \
-        die "compose validation failed: $relative_source declares no services"
-      grep -Eq '^[[:space:]]+container_name:[[:space:]]*ib-gateway[[:space:]]*$' "$staged_path" || \
-        die "compose validation failed: $relative_source does not pin container_name ib-gateway"
-      ! grep -Eq '^[[:space:]]*privileged:[[:space:]]*true' "$staged_path" || \
-        die "compose validation failed: $relative_source requests privileged"
-      ! grep -Eq '^[[:space:]]*-[[:space:]]*/[[:space:]]*:' "$staged_path" || \
-        die "compose validation failed: $relative_source binds the host root"
+      compose_body_is_valid "$staged_path" "$relative_source" || \
+        die "compose validation failed: $relative_source"
       ;;
     python)
       # Parse only. Importing or compiling to disk would execute or cache
@@ -477,6 +569,7 @@ if [[ "$bundle_is_current" == "1" ]] && \
   printf 'Control-plane bundle is already current.\n'
   exit 0
 fi
+
 
 atomic_install() {
   local source="$1"
