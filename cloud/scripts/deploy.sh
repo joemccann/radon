@@ -201,11 +201,17 @@ preflight_env() {
   # this deploy defaults to. The direct call remains for a dev or test
   # invocation against some other env file, where the caller has its own
   # docker access.
+  # Try BOTH paths and fail only when neither renders. Preferring one and
+  # stopping there deadlocks the deploy: this file arrives from the new release
+  # before refresh-control-plane installs the sudoers verb that permits the shim
+  # call, so `sudo -n` is refused, preflight aborts, and the promote that would
+  # have installed the verb never runs. The same applies in reverse once radon
+  # leaves group `docker` and the direct call is the one that cannot work.
+  # A genuinely unrenderable compose body still fails both.
   local compose_check_ok=0
-  if [[ -x "$DOCKER_GW" && "$env_file" == "$ENV_FILE_DEFAULT" ]]; then
-    if sudo -n "$DOCKER_GW" config-check >/dev/null 2>&1; then
-      compose_check_ok=1
-    fi
+  if [[ -x "$DOCKER_GW" && "$env_file" == "$ENV_FILE_DEFAULT" ]] \
+    && sudo -n "$DOCKER_GW" config-check >/dev/null 2>&1; then
+    compose_check_ok=1
   elif (
     cd "$CLOUD_DIR"
     RADON_COMPOSE_ENV_FILE="$env_file" \
