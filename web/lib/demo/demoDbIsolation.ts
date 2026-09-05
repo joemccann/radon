@@ -14,7 +14,7 @@
 
 export const PROD_DB_MARKER = "radon-joemccann";
 
-type EnvLike = { TURSO_DB_URL?: string };
+type EnvLike = Record<string, string | undefined>;
 
 /** Non-null message when a demo principal must NOT be served DB rows. */
 export function demoDbIsolationViolation(
