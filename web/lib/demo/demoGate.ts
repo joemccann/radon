@@ -106,13 +106,19 @@ export async function handleDemoGate(
       }
       return noStore(res);
     }
+    // Every windowed tier carries a user-global daily ceiling. A/B were the
+    // gap: their per-resource keys renewed hourly with no daily cap (R-652).
     const dailyTier = tier === "E"
       ? "F"
       : tier === "G"
         ? "H"
         : tier === "I"
           ? "J"
-          : null;
+          : tier === "A"
+            ? "K"
+            : tier === "B"
+              ? "L"
+              : null;
     if (dailyTier) {
       const daily = await limiter(dailyTier, userId);
       if (!daily.success) {
