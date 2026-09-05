@@ -656,6 +656,7 @@ begin_phase() {
   # REL-198 (R-533): rung carry across phases is intended; flag carry is
   # not — an audit-phase exhaustion mislabelled a successful remediate.
   ALL_MODELS_EXHAUSTED=0
+  SESSION_LIMITED=0
 }
 
 # Fresh ground truth. Any leftover state from a killed prior run is
@@ -748,6 +749,7 @@ MODEL_LADDER="${RADON_WEEKEND_MODEL_LADDER:-claude-fable-5[1m] claude-opus-5[1m]
 read -r -a MODEL_RUNGS <<< "$MODEL_LADDER"
 MODEL_INDEX=0
 ALL_MODELS_EXHAUSTED=0
+SESSION_LIMITED=0
 
 # Scoped to THIS round's slice of the log, like the ceiling detector: RUN_LOG
 # is per phase and every round appends to it, so a whole-file grep would let
@@ -760,6 +762,19 @@ is_quota_exhausted() {
   tail -c "+$((ROUND_LOG_MARK + 1))" "$RUN_LOG" 2>/dev/null \
     | grep -v '^\[' | tail -n 40 | grep -qiE \
     'out of usage credits|You.ve hit your (Opus|Sonnet) limit|Request rejected \(429\)|529 Overloaded|experiencing high load'
+}
+
+# 2026-09-05: the subscription's SHARED session (or weekly) cap is not a
+# per-model quota, so is_quota_exhausted deliberately excludes it and the
+# ladder cannot route around it. Nothing else claimed it either: every loop
+# that fired at midnight exited 1 into the generic `*)` arm and paged a bare
+# FAILED with no cause on a public rolling issue. Recognised here so the cap
+# is reported as INCOMPLETE-and-resumable, on the same round-scoped tail as
+# the quota detector.
+is_session_limited() {
+  tail -c "+$((ROUND_LOG_MARK + 1))" "$RUN_LOG" 2>/dev/null \
+    | grep -v '^\[' | tail -n 40 | grep -qiE \
+    'hit your (session|weekly) limit|session limit reached|usage limit reached'
 }
 
 is_transient_network_failure() {
@@ -829,6 +844,12 @@ run_phase() {
     # A quota drop is not one of the three transient-network attempts: it
     # costs no wall clock, and the next rung is a different quota, so it
     # retries immediately and `attempt` is untouched. Bounded by the ladder.
+    # A shared cap is not a dead rung: every model on the ladder is behind the
+    # same wall, so stop here rather than burning the ladder for nothing.
+    if (( RC != 0 )) && is_session_limited; then
+      SESSION_LIMITED=1
+      break
+    fi
     if (( RC != 0 )) && is_quota_exhausted; then
       if (( MODEL_INDEX + 1 < ${#MODEL_RUNGS[@]} )); then
         MODEL_INDEX=$((MODEL_INDEX + 1))
@@ -852,6 +873,10 @@ run_phase() {
   status="$(phase_status "$RC" "$RUN_LOG" "$ROUND_LOG_MARK")"
   # An exhausted ladder is not a generic non-zero exit: the operator needs the
   # cause and the one place it is fixed, or they re-fire into the same wall.
+  if (( SESSION_LIMITED )); then
+    status="INCOMPLETE (subscription session limit reached; the shared cap resets on its own clock)"
+    RC=75
+  fi
   if (( ALL_MODELS_EXHAUSTED )); then
     status="FAILED (all model quotas exhausted; top up at claude.ai/settings/usage)"
   fi
@@ -877,6 +902,8 @@ run_phase() {
     fi
   fi
   case "$status" in
+    "INCOMPLETE (subscription session limit"*)
+      report "$status" "the subscription's shared session or weekly cap was reached, so no model rung could run — this phase is INCOMPLETE; nothing was advanced and the next fire resumes it once the cap resets" ;;
     *"ready to merge: "*|"0 PR(s), nothing to merge")
       report "$status" "CI is green on every PR this cycle delivered; merging is the operator's call" ;;
     "INCOMPLETE: "*)
