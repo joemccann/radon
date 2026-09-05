@@ -155,8 +155,12 @@ async def test_failed_jwks_key_id_is_negative_cached(monkeypatch):
     class Client:
         def get_signing_key_from_jwt(self, token):
             nonlocal calls
+            import jwt as pyjwt
+
             calls += 1
-            raise ValueError("unknown kid")
+            # REL-235: must be a PyJWT verdict — a bare ValueError is now
+            # classified as an upstream outage and is never negative-cached.
+            raise pyjwt.exceptions.PyJWKClientError("unknown kid")
 
     monkeypatch.setattr(auth, "_get_jwks_client", lambda: Client())
     for _ in range(2):

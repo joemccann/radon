@@ -210,13 +210,37 @@ def _remember_negative_kid(kid: str) -> None:
         _jwks_negative.popitem(last=False)
 
 
+def _is_upstream_outage(exc: BaseException) -> bool:
+    """True when the failure says nothing about this token (REL-235, R-637).
+
+    Only a PyJWT signature/claim error is a verdict on the token; a socket
+    timeout, an OSError, a cancelled task or anything else is the JWKS
+    endpoint being unreachable. Mirrors scripts/mcp_hosted/auth.py (REL-229).
+    """
+    if isinstance(exc, (TimeoutError, OSError, asyncio.CancelledError)):
+        return True
+    try:
+        from jwt import PyJWKClientConnectionError
+        from jwt.exceptions import PyJWTError
+    except Exception:  # noqa: BLE001 — without pyjwt nothing here is a verdict
+        return True
+    # PyJWKClientConnectionError subclasses PyJWTError, but a wrapped
+    # connection failure says nothing about this token.
+    if isinstance(exc, PyJWKClientConnectionError):
+        return True
+    return not isinstance(exc, PyJWTError)
+
+
 def _finish_jwks_lookup(kid: str, task: asyncio.Task) -> None:
     if _jwks_inflight.get(kid) is task:
         _jwks_inflight.pop(kid, None)
     try:
         task.result()
-    except (asyncio.CancelledError, Exception):
-        _remember_negative_kid(kid)
+    except (asyncio.CancelledError, Exception) as exc:
+        # REL-235: an upstream outage is not a verdict about this token's
+        # signature — caching the kid here 401'd every valid token for 30s.
+        if not _is_upstream_outage(exc):
+            _remember_negative_kid(kid)
 
 
 async def _bounded_signing_key_lookup(token: str, kid: str):
@@ -250,6 +274,12 @@ async def _bounded_signing_key_lookup(token: str, kid: str):
     except asyncio.TimeoutError as exc:
         raise HTTPException(status_code=503, detail="Authentication unavailable") from exc
     except Exception as exc:
+        # REL-235: only a token verdict populates the negative cache; a
+        # timeout/OSError/5xx yields 503 and leaves the kid re-probeable.
+        if _is_upstream_outage(exc):
+            raise HTTPException(
+                status_code=503, detail="Authentication unavailable"
+            ) from exc
         _remember_negative_kid(kid)
         raise HTTPException(status_code=401, detail="Invalid token") from exc
 
