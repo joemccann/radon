@@ -252,6 +252,30 @@ class TestCancelOrder:
         assert data["finalStatus"] == "Cancelled"
 
     def test_cancel_succeeds_on_broadcast_202(self, capsys):
+        """REL-233 (R-634): a broadcast 202 (reqId=-1) confirms only via the
+        refreshed trade snapshot showing this order Cancelled."""
+        t = make_trade(status="Submitted")
+        t.order.clientId = 0
+        client = make_client([t])
+        client.ib.client.clientId = 0
+
+        def side_effect(order):
+            t.orderStatus.status = "Cancelled"
+            client.ib.errorEvent.emit(-1, 202, "Order Canceled - reason:")
+
+        client.cancel_order = MagicMock(side_effect=side_effect)
+
+        with pytest.raises(SystemExit) as exc:
+            cancel_order(client, 10, 12345, "127.0.0.1", 4001)
+        assert exc.value.code == 0
+        data = json.loads(capsys.readouterr().out)
+        assert data["status"] == "ok"
+
+    def test_cancel_broadcast_202_with_working_refresh_is_not_cancelled(self, capsys):
+        """REL-233 (R-634): a broadcast 202 for a DIFFERENT order on the same
+        clientId must not confirm this cancel while the refreshed trade is
+        still Submitted — /orders/replace would place on top of a working
+        order (doubled live exposure)."""
         t = make_trade(status="Submitted")
         t.order.clientId = 0
         client = make_client([t])
@@ -264,9 +288,10 @@ class TestCancelOrder:
 
         with pytest.raises(SystemExit) as exc:
             cancel_order(client, 10, 12345, "127.0.0.1", 4001)
-        assert exc.value.code == 0
+        assert exc.value.code == 1
         data = json.loads(capsys.readouterr().out)
-        assert data["status"] == "ok"
+        assert data["status"] == "error"
+        assert "Submitted" in data["message"]
 
     def test_cancel_still_errors_on_201_reject(self, capsys):
         t = make_trade(status="Submitted")
