@@ -248,3 +248,37 @@ describe("Correlation Risk Premium brush + hover", () => {
     expect(widthVal).toBeLessThan(15);
   });
 });
+
+describe("Regime quadrants scatter hover", () => {
+  it("shows date, quadrant, and series values for the nearest hovered point", () => {
+    const history = buildHistory(40);
+    render(
+      React.createElement(RegimeRelationshipView, {
+        history,
+      }),
+    );
+
+    const overlay = screen.getByTestId("regime-quadrant-chart-overlay");
+    overlay.getBoundingClientRect = () => ({
+      x: 0,
+      y: 0,
+      left: 0,
+      top: 0,
+      right: 760,
+      bottom: 240,
+      width: 760,
+      height: 240,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerMove(overlay, { clientX: 400, clientY: 100 });
+
+    const tooltip = screen.getByTestId("regime-quadrant-hover-tooltip");
+    expect(tooltip).toBeTruthy();
+    expect(screen.getByTestId("regime-quadrant-hover-date")).toBeTruthy();
+    expect(tooltip.textContent ?? "").toMatch(/Quadrant/i);
+    expect(tooltip.textContent ?? "").toMatch(/RVOL/i);
+    expect(tooltip.textContent ?? "").toMatch(/COR1M/i);
+    expect(tooltip.textContent ?? "").toMatch(/(Goldilocks|Fragile Calm|Stock Picker|Systemic Panic)/i);
+  });
+});

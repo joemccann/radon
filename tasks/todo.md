@@ -1,3 +1,21 @@
+# Task: /regime/cri chart layout + scatter hover [IN PROGRESS]
+
+Stack CRI charts full width to match sibling regime pages. Leave Correlation Risk Premium unchanged.
+
+## Dependency graph
+
+- T1 depends_on: [] - Failing layout/hover contracts for history, quadrants, divergence.
+- T2 depends_on: [T1] - Full-width stack + quadrant scatter tooltips.
+- T3 depends_on: [T2] - Focused Vitest + Playwright, screenshots, PR against main. Do not merge.
+
+## Checklist
+
+- [x] T1 Failing contracts
+- [x] T2 Layout + hover
+- [x] T3 Verify and open PR
+
+---
+
 # Task: Agent distribution pattern (issue 295) [IN PROGRESS]
 
 Copy Agent Prompt on dossiers/gates plus 5-7 developer recipe cards.

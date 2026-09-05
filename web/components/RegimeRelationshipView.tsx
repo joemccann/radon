@@ -88,6 +88,26 @@ export function resolveRelationshipTickCount(innerWidth: number): number {
   return Math.max(4, Math.min(7, Math.floor(innerWidth / 110)));
 }
 
+export function nearestRegimeScatterIndex(
+  points: ReadonlyArray<{ x: number; y: number }>,
+  pointerX: number,
+  pointerY: number,
+): number {
+  if (points.length === 0) return 0;
+  let best = 0;
+  let bestDist = Number.POSITIVE_INFINITY;
+  for (let index = 0; index < points.length; index += 1) {
+    const dx = points[index].x - pointerX;
+    const dy = points[index].y - pointerY;
+    const dist = dx * dx + dy * dy;
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = index;
+    }
+  }
+  return best;
+}
+
 function spreadStateColor(state: string): string {
   if (state === "Fear Premium") return "var(--positive)";
   if (state === "Realized Lead") return "var(--negative)";
@@ -144,6 +164,7 @@ type ZScoreHoverState = {
 };
 
 type SpreadHoverState = ZScoreHoverState;
+type QuadrantHoverState = ZScoreHoverState;
 
 type BrushDragMode = "left" | "right" | "window";
 
@@ -161,10 +182,12 @@ export default function RegimeRelationshipView({
 }: RegimeRelationshipViewProps) {
   const zScoreSvgRef = useRef<SVGSVGElement>(null);
   const spreadSvgRef = useRef<SVGSVGElement>(null);
+  const quadrantSvgRef = useRef<SVGSVGElement>(null);
   const brushRef = useRef<HTMLDivElement>(null);
   const dragStateRef = useRef<BrushDragState | null>(null);
   const [zScoreHover, setZScoreHover] = useState<ZScoreHoverState | null>(null);
   const [spreadHover, setSpreadHover] = useState<SpreadHoverState | null>(null);
+  const [quadrantHover, setQuadrantHover] = useState<QuadrantHoverState | null>(null);
   const entries = useMemo(
     () => buildRegimeRelationshipEntries(history, liveValues),
     [history, liveValues],
@@ -351,6 +374,14 @@ export default function RegimeRelationshipView({
   const spreadTooltipTop = spreadHover
     ? Math.max(12, Math.min(spreadHover.y - 54, spreadHover.height - 96))
     : 0;
+  const quadrantTooltipSideStyle = quadrantHover
+    ? quadrantHover.x > quadrantHover.width / 2
+      ? { right: quadrantHover.width - quadrantHover.x + 12 }
+      : { left: quadrantHover.x + 12 }
+    : {};
+  const quadrantTooltipTop = quadrantHover
+    ? Math.max(12, Math.min(quadrantHover.y - 54, quadrantHover.height - 96))
+    : 0;
 
   // Brush window dimensions as percentages of the brush track.
   const totalSpan = Math.max(entries.length - 1, 1);
@@ -415,6 +446,36 @@ export default function RegimeRelationshipView({
 
   function handleSpreadHover(event: ReactMouseEvent<HTMLElement | SVGRectElement>) {
     updateSpreadHover(event.clientX, event.clientY);
+  }
+
+  function updateQuadrantHover(clientX: number, clientY: number) {
+    const svgRect = quadrantSvgRef.current?.getBoundingClientRect();
+    if (!svgRect || entries.length === 0) return;
+
+    const pointerX = clientX - svgRect.left;
+    const pointerY = clientY - svgRect.top;
+    const chartX = (pointerX / svgRect.width) * CHART_WIDTH;
+    const chartY = (pointerY / svgRect.height) * CHART_HEIGHT;
+    const innerX = chartX - MARGIN.left;
+    const innerY = chartY - MARGIN.top;
+    const points = entries.map((entry) => ({
+      x: scatterXScale(entry.realizedVol),
+      y: scatterYScale(entry.cor1m),
+    }));
+    const index = nearestRegimeScatterIndex(points, innerX, innerY);
+
+    setQuadrantHover({
+      entry: entries[index],
+      index,
+      x: pointerX,
+      y: pointerY,
+      width: svgRect.width,
+      height: svgRect.height,
+    });
+  }
+
+  function handleQuadrantHover(event: ReactMouseEvent<HTMLElement | SVGRectElement>) {
+    updateQuadrantHover(event.clientX, event.clientY);
   }
 
   function applyPreset(slug: RangePresetSlug) {
@@ -751,7 +812,7 @@ export default function RegimeRelationshipView({
           </div>
         </section>
 
-        <section className="regime-relationship-panel" data-testid="regime-quadrant-card">
+        <section className="regime-relationship-panel regime-relationship-panel-wide" data-testid="regime-quadrant-card">
           <div className="regime-relationship-panel-head">
             <div>
               <div className="regime-panel-title">REGIME QUADRANTS</div>
@@ -771,108 +832,177 @@ export default function RegimeRelationshipView({
             </div>
           </div>
 
-          <svg
-            className="regime-relationship-chart"
-            data-testid="regime-quadrant-chart"
-            viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
-            role="img"
-            aria-label="RVOL versus COR1M regime quadrant"
+          <div
+            className="regime-relationship-chart-shell"
+            data-testid="regime-quadrant-chart-shell"
+            onPointerMove={handleQuadrantHover}
+            onMouseMove={handleQuadrantHover}
+            onPointerLeave={() => setQuadrantHover(null)}
+            onMouseLeave={() => setQuadrantHover(null)}
           >
-            <g transform={`translate(${MARGIN.left},${MARGIN.top})`}>
-              {scatterXScale.ticks(4).map((tick) => (
-                <g key={`scatter-x-${tick}`}>
-                  <line
-                    x1={scatterXScale(tick)}
-                    x2={scatterXScale(tick)}
-                    y1={0}
-                    y2={innerHeight}
-                    className="regime-relationship-grid-line"
-                  />
-                  <text
-                    x={scatterXScale(tick)}
-                    y={innerHeight + 20}
-                    textAnchor="middle"
-                    className="regime-relationship-axis-label"
-                  >
-                    {tick.toFixed(1)}
-                  </text>
-                </g>
-              ))}
-              {scatterYScale.ticks(4).map((tick) => (
-                <g key={`scatter-y-${tick}`}>
-                  <line
-                    x1={0}
-                    x2={innerWidth}
-                    y1={scatterYScale(tick)}
-                    y2={scatterYScale(tick)}
-                    className="regime-relationship-grid-line"
-                  />
-                  <text
-                    x={-10}
-                    y={scatterYScale(tick) + 4}
-                    textAnchor="end"
-                    className="regime-relationship-axis-label"
-                  >
-                    {tick.toFixed(1)}
-                  </text>
-                </g>
-              ))}
+            <svg
+              ref={quadrantSvgRef}
+              className="regime-relationship-chart"
+              data-testid="regime-quadrant-chart"
+              viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
+              role="img"
+              aria-label="RVOL versus COR1M regime quadrant"
+            >
+              <g transform={`translate(${MARGIN.left},${MARGIN.top})`}>
+                {scatterXScale.ticks(4).map((tick) => (
+                  <g key={`scatter-x-${tick}`}>
+                    <line
+                      x1={scatterXScale(tick)}
+                      x2={scatterXScale(tick)}
+                      y1={0}
+                      y2={innerHeight}
+                      className="regime-relationship-grid-line"
+                    />
+                    <text
+                      x={scatterXScale(tick)}
+                      y={innerHeight + 20}
+                      textAnchor="middle"
+                      className="regime-relationship-axis-label"
+                    >
+                      {tick.toFixed(1)}
+                    </text>
+                  </g>
+                ))}
+                {scatterYScale.ticks(4).map((tick) => (
+                  <g key={`scatter-y-${tick}`}>
+                    <line
+                      x1={0}
+                      x2={innerWidth}
+                      y1={scatterYScale(tick)}
+                      y2={scatterYScale(tick)}
+                      className="regime-relationship-grid-line"
+                    />
+                    <text
+                      x={-10}
+                      y={scatterYScale(tick) + 4}
+                      textAnchor="end"
+                      className="regime-relationship-axis-label"
+                    >
+                      {tick.toFixed(1)}
+                    </text>
+                  </g>
+                ))}
 
-              <line
-                x1={scatterXScale(realizedMean)}
-                x2={scatterXScale(realizedMean)}
-                y1={0}
-                y2={innerHeight}
-                className="regime-relationship-baseline"
-              />
-              <line
-                x1={0}
-                x2={innerWidth}
-                y1={scatterYScale(cor1mMean)}
-                y2={scatterYScale(cor1mMean)}
-                className="regime-relationship-baseline"
-              />
+                <line
+                  x1={scatterXScale(realizedMean)}
+                  x2={scatterXScale(realizedMean)}
+                  y1={0}
+                  y2={innerHeight}
+                  className="regime-relationship-baseline"
+                />
+                <line
+                  x1={0}
+                  x2={innerWidth}
+                  y1={scatterYScale(cor1mMean)}
+                  y2={scatterYScale(cor1mMean)}
+                  className="regime-relationship-baseline"
+                />
 
-              <text x={10} y={18} className="regime-relationship-quadrant-label">Fragile Calm</text>
-              <text x={innerWidth - 10} y={18} textAnchor="end" className="regime-relationship-quadrant-label">Systemic Panic</text>
-              <text x={10} y={innerHeight - 10} className="regime-relationship-quadrant-label">Goldilocks</text>
-              <text x={innerWidth - 10} y={innerHeight - 10} textAnchor="end" className="regime-relationship-quadrant-label">Stock Picker&apos;s</text>
+                <text x={10} y={18} className="regime-relationship-quadrant-label">Fragile Calm</text>
+                <text x={innerWidth - 10} y={18} textAnchor="end" className="regime-relationship-quadrant-label">Systemic Panic</text>
+                <text x={10} y={innerHeight - 10} className="regime-relationship-quadrant-label">Goldilocks</text>
+                <text x={innerWidth - 10} y={innerHeight - 10} textAnchor="end" className="regime-relationship-quadrant-label">Stock Picker&apos;s</text>
 
-              {entries.map((entry, index) => {
-                const isLatest = index === entries.length - 1;
-                return (
+                {entries.map((entry, index) => {
+                  const isLatest = index === entries.length - 1;
+                  return (
+                    <circle
+                      key={`scatter-point-${entry.date}`}
+                      data-testid={`regime-quadrant-point-${entry.date}`}
+                      cx={scatterXScale(entry.realizedVol)}
+                      cy={scatterYScale(entry.cor1m)}
+                      r={isLatest ? 6 : 3.5}
+                      fill={isLatest ? latestQuadrantColor : "var(--signal-core)"}
+                      opacity={isLatest ? 1 : 0.18 + (index / entries.length) * 0.45}
+                      stroke={isLatest ? latestQuadrantColor : "none"}
+                      className={isLatest ? "regime-relationship-marker" : undefined}
+                    />
+                  );
+                })}
+
+                {quadrantHover && (
                   <circle
-                    key={`scatter-point-${entry.date}`}
-                    cx={scatterXScale(entry.realizedVol)}
-                    cy={scatterYScale(entry.cor1m)}
-                    r={isLatest ? 6 : 3.5}
-                    fill={isLatest ? latestQuadrantColor : "var(--signal-core)"}
-                    opacity={isLatest ? 1 : 0.18 + (index / entries.length) * 0.45}
-                    stroke={isLatest ? latestQuadrantColor : "none"}
-                    className={isLatest ? "regime-relationship-marker" : undefined}
+                    cx={scatterXScale(quadrantHover.entry.realizedVol)}
+                    cy={scatterYScale(quadrantHover.entry.cor1m)}
+                    r={7}
+                    fill={quadrantTone(quadrantHover.entry.quadrant)}
+                    stroke={quadrantTone(quadrantHover.entry.quadrant)}
+                    className="regime-relationship-hover-marker"
                   />
-                );
-              })}
+                )}
 
-              <text
-                x={innerWidth / 2}
-                y={innerHeight + 30}
-                textAnchor="middle"
-                className="regime-relationship-axis-title"
+                <text
+                  x={innerWidth / 2}
+                  y={innerHeight + 30}
+                  textAnchor="middle"
+                  className="regime-relationship-axis-title"
+                >
+                  RVOL
+                </text>
+                <text
+                  x={-innerHeight / 2}
+                  y={-30}
+                  textAnchor="middle"
+                  transform="rotate(-90)"
+                  className="regime-relationship-axis-title"
+                >
+                  COR1M
+                </text>
+
+                <rect
+                  x={0}
+                  y={0}
+                  width={innerWidth}
+                  height={innerHeight}
+                  fill="transparent"
+                  pointerEvents="all"
+                  className="regime-relationship-chart-overlay"
+                  data-testid="regime-quadrant-chart-overlay"
+                  onPointerMove={handleQuadrantHover}
+                />
+              </g>
+            </svg>
+
+            {quadrantHover && (
+              <div
+                className="chart-tooltip regime-relationship-chart-tooltip"
+                data-testid="regime-quadrant-hover-tooltip"
+                style={{
+                  top: `${quadrantTooltipTop}px`,
+                  ...quadrantTooltipSideStyle,
+                }}
               >
-                RVOL
-              </text>
-              <text
-                x={-innerHeight / 2}
-                y={-30}
-                textAnchor="middle"
-                transform="rotate(-90)"
-                className="regime-relationship-axis-title"
-              >
-                COR1M
-              </text>
-            </g>
-          </svg>
+                <div className="chart-tooltip-date" data-testid="regime-quadrant-hover-date">
+                  {formatDateLabel(quadrantHover.entry.date)}
+                </div>
+                <div className="chart-tooltip-row">
+                  <span className="chart-tooltip-label">Quadrant</span>
+                  <span className="chart-tooltip-value">{quadrantHover.entry.quadrant}</span>
+                </div>
+                <div className="chart-tooltip-row">
+                  <span className="chart-tooltip-label">RVOL</span>
+                  <span className="chart-tooltip-value">{quadrantHover.entry.realizedVol.toFixed(2)}</span>
+                </div>
+                <div className="chart-tooltip-row">
+                  <span className="chart-tooltip-label">COR1M</span>
+                  <span className="chart-tooltip-value">{quadrantHover.entry.cor1m.toFixed(2)}</span>
+                </div>
+                <div className="chart-tooltip-row">
+                  <span className="chart-tooltip-label">RVOL z</span>
+                  <span className="chart-tooltip-value">{fmtSigned(quadrantHover.entry.realizedVolZ)}σ</span>
+                </div>
+                <div className="chart-tooltip-row">
+                  <span className="chart-tooltip-label">COR1M z</span>
+                  <span className="chart-tooltip-value">{fmtSigned(quadrantHover.entry.cor1mZ)}σ</span>
+                </div>
+              </div>
+            )}
+          </div>
 
           <div className="regime-state-key" data-testid="regime-state-key">
             <div className="regime-panel-title">STATE KEY</div>
@@ -905,7 +1035,7 @@ export default function RegimeRelationshipView({
           </div>
         </section>
 
-        <section className="regime-relationship-panel" data-testid="regime-zscore-card">
+        <section className="regime-relationship-panel regime-relationship-panel-wide" data-testid="regime-zscore-card">
           <div className="regime-relationship-panel-head">
             <div>
               <div className="regime-panel-title">
