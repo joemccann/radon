@@ -139,9 +139,12 @@ MAX_CONSECUTIVE_QUERY_FAILURES = 3
 def gh_pr_checks(pr_number: int) -> list[dict]:
     """Rows, or ``CHECKS_UNAVAILABLE`` when the query itself failed.
 
-    `gh pr checks` exits 8 while pending and 1 on failure, so the exit code
-    alone cannot separate "red" from "gh is broken" — but output that is not
-    a JSON list can only be the latter.
+    With ``--json``, gh exits 0 whenever the query itself succeeded (the
+    8-pending/1-failing exit codes belong to the non-JSON mode), so any
+    non-zero rc means the query failed — regardless of stdout. R-644: an
+    expired-auth gh exited 1 with EMPTY stdout, `json.loads("[]")` minted a
+    fresh empty list that was not the sentinel, the failure counter reset,
+    and watch() burned the full 3h cap (181 polls) learning nothing.
     """
     try:
         proc = subprocess.run(
@@ -149,6 +152,8 @@ def gh_pr_checks(pr_number: int) -> list[dict]:
             capture_output=True, text=True, check=False, timeout=120,
         )
     except (OSError, subprocess.SubprocessError):
+        return CHECKS_UNAVAILABLE
+    if proc.returncode != 0:
         return CHECKS_UNAVAILABLE
     try:
         rows = json.loads(proc.stdout or "[]")
