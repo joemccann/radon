@@ -30,6 +30,13 @@ Live file -> repo source of truth (install command, for when live is stale):
       sudo install -m 0644 services/journald-radon.conf /etc/systemd/journald.conf.d/radon.conf
   /etc/systemd/system/radon-.service.d/common.conf <- services/radon-.service.d/common.conf
       installed by setup-vps.sh:install_fleet_dropin
+  /usr/local/sbin/radon-deploy-root <- scripts/deploy-root-helper.sh
+  /usr/local/sbin/radon-app-runtime <- scripts/radon-app-runtime.sh
+  /usr/local/sbin/radon-docker-gw <- scripts/radon-docker-gw.sh
+      all three installed by bootstrap-control-plane.sh / refresh-control-plane
+  /etc/radon/ib-gateway-compose.yml <- git blob HEAD:cloud/docker-compose.yml
+      (R-636 provenance: the working tree is radon-writable and is NOT the
+      comparison basis; installed by install_docker_gw / refresh-control-plane)
   /etc/sudoers.d/radon* <- config/sudoers.d/*
       sudo visudo -cf config/sudoers.d/NAME && sudo install -m 0440 config/sudoers.d/NAME /etc/sudoers.d/NAME
   docker-compose actually running the ib-gateway container <- docker-compose.yml
@@ -119,7 +126,33 @@ FILE_PAIRS = [
         "services/radon-.service.d/common.conf",
         "fleet-dropin",
     ),
+    # R-649: root-run helper surfaces installed by the control plane.
+    (
+        "/usr/local/sbin/radon-deploy-root",
+        "scripts/deploy-root-helper.sh",
+        "radon-deploy-root",
+    ),
+    (
+        "/usr/local/sbin/radon-app-runtime",
+        "scripts/radon-app-runtime.sh",
+        "radon-app-runtime",
+    ),
+    (
+        "/usr/local/sbin/radon-docker-gw",
+        "scripts/radon-docker-gw.sh",
+        "radon-docker-gw",
+    ),
+    # R-636: the installed compose body's canonical source is the git blob at
+    # HEAD, never the radon-writable working tree (see the git: dispatch in
+    # _compare_file_pair).
+    (
+        "/etc/radon/ib-gateway-compose.yml",
+        "git:docker-compose.yml",
+        "ib-gateway-compose",
+    ),
 ]
+
+GIT_BLOB_PREFIX = "git:"
 
 UNIT_GLOBS = ("radon-*.service", "radon-*.timer")
 
@@ -443,9 +476,33 @@ def _line_delta(repo_text: str, live_text: str) -> str:
     return f"live vs repo: +{added}/-{removed} lines"
 
 
+def _read_repo_blob(relative: str) -> str | None:
+    """Read the canonical artifact from the git blob at HEAD (R-636).
+
+    The installed ib-gateway-compose.yml is provisioned from the committed
+    blob, so the working tree -- which the radon account can rewrite -- must
+    never be the comparison basis for it.
+    """
+    try:
+        proc = _run(
+            [
+                "git", "-c", f"safe.directory={GIT_REPO}", "-C", str(GIT_REPO),
+                "show", f"HEAD:{(REPO.relative_to(GIT_REPO) / relative).as_posix()}",
+            ]
+        )
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return None
+    if proc.returncode != 0:
+        return None
+    return proc.stdout
+
+
 def _compare_file_pair(live_path: str, repo_rel: str, label: str) -> dict | None:
     live = _read(Path(live_path))
-    repo = _read_repo(repo_rel)
+    if repo_rel.startswith(GIT_BLOB_PREFIX):
+        repo = _read_repo_blob(repo_rel[len(GIT_BLOB_PREFIX):])
+    else:
+        repo = _read_repo(repo_rel)
     if live is None and repo is None:
         return {"id": f"both-missing:{label}", "detail": f"{live_path} and {repo_rel}"}
     if live is None:
@@ -552,7 +609,9 @@ ROLE_SKIPPED_UNITS: dict[str, frozenset[str]] = {
 # Gateway runtime surfaces are absent by design on app-role hosts. Keep them
 # visible as role-skipped notes without weakening broker/combined audits.
 ROLE_SKIPPED_GATEWAY_SURFACES: dict[str, frozenset[str]] = {
-    "app": frozenset({"ib-gateway-control", "compose"}),
+    "app": frozenset(
+        {"ib-gateway-control", "compose", "radon-docker-gw", "ib-gateway-compose"}
+    ),
 }
 
 
