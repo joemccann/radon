@@ -1,3 +1,4 @@
+import { MarkerAccent } from "@/components/atoms/MarkerAccent";
 import { CopyAgentPrompt } from "@/components/molecules/CopyAgentPrompt";
 import { getCapabilityPrompt } from "@/lib/agent-prompts";
 import type { Gate } from "@/lib/editorial-content";
@@ -13,9 +14,11 @@ export function GateCard({ gate, capabilityId }: GateCardProps) {
       id={capabilityId}
       className={["gate", gate.disabled ? "gate-disabled" : ""].filter(Boolean).join(" ")}
     >
-      <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-signal-deep">
-        {gate.no}
-      </span>
+      <MarkerAccent>
+        <span className="inline-block font-mono text-[11px] uppercase tracking-[0.14em] text-signal-deep">
+          {gate.no}
+        </span>
+      </MarkerAccent>
       <h3 className="mb-2 mt-3 font-serif text-[1.28rem] font-medium text-primary">
         {gate.name}
       </h3>
