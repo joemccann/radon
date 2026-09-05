@@ -357,3 +357,105 @@ def test_replace_does_not_place_when_original_already_filled(trusted_client, mon
     assert response.status_code == 502
     place.assert_not_awaited()
     assert response.json()["detail"]["cancelled"] == []
+
+
+# ---------------------------------------------------------------------------
+# REL-233 (R-638) — _cancel_already_confirmed promoted wrapped 5xx failures to
+# Cancelled via substring match, and the structured-202 branch returned before
+# the already-filled check; replace then placed the replacement at full
+# quantity on top of a partial execution. The cancelled entry was fabricated
+# from the request with no broker-state verification.
+# ---------------------------------------------------------------------------
+
+
+class TestCancelConfirmationHardening:
+    def test_bare_order_canceled_text_is_not_confirmed(self):
+        from scripts.api.server import _cancel_already_confirmed
+
+        assert not _cancel_already_confirmed(
+            "Upstream 500: Order Canceled appeared in a wrapped traceback"
+        )
+
+    def test_structured_202_with_filled_text_is_not_confirmed(self):
+        from scripts.api.server import _cancel_already_confirmed
+
+        assert not _cancel_already_confirmed({
+            "ib_error_code": 202,
+            "message": "Order already Filled — cannot cancel",
+        })
+
+
+def test_replace_refuses_structured_202_when_broker_shows_partial_fill(
+    trusted_client, monkeypatch
+):
+    from unittest.mock import AsyncMock
+
+    from scripts.api import server
+
+    monkeypatch.setattr(server, "orders_whatif", AsyncMock(return_value={"status": "ok"}))
+    monkeypatch.setattr(
+        server,
+        "orders_cancel",
+        AsyncMock(side_effect=HTTPException(
+            status_code=502,
+            detail={
+                "ib_error_code": 202,
+                "message": "IB error 202: Order Canceled - reason:",
+            },
+        )),
+    )
+    monkeypatch.setattr(
+        server,
+        "_find_working_order",
+        AsyncMock(return_value={"orderId": 10, "status": "Submitted", "filled": 3}),
+    )
+    place = AsyncMock(return_value={"status": "ok", "orderId": 1})
+    monkeypatch.setattr(server, "_orders_place_after_rate_reservation", place)
+    server._order_rate_timestamps.clear()
+
+    try:
+        response = trusted_client.post("/orders/replace", json={
+            "cancelOrders": [{"orderId": 10}],
+            "replaceOrder": _replacement(),
+        })
+    finally:
+        server._order_rate_timestamps.clear()
+
+    assert response.status_code == 502
+    place.assert_not_awaited()
+    detail = response.json()["detail"]
+    assert detail["code"] == "REPLACE_PARTIAL"
+    assert detail["cancelled"] == []
+
+
+def test_replace_does_not_place_when_cancel_reports_order_still_submitted(
+    trusted_client, monkeypatch
+):
+    from unittest.mock import AsyncMock
+
+    from scripts.api import server
+
+    monkeypatch.setattr(server, "orders_whatif", AsyncMock(return_value={"status": "ok"}))
+    monkeypatch.setattr(
+        server,
+        "orders_cancel",
+        AsyncMock(side_effect=HTTPException(
+            status_code=502,
+            detail="Cancel failed — order still Submitted",
+        )),
+    )
+    place = AsyncMock(return_value={"status": "ok", "orderId": 1})
+    monkeypatch.setattr(server, "_orders_place_after_rate_reservation", place)
+    server._order_rate_timestamps.clear()
+
+    try:
+        response = trusted_client.post("/orders/replace", json={
+            "cancelOrders": [{"orderId": 10}],
+            "replaceOrder": _replacement(),
+        })
+    finally:
+        server._order_rate_timestamps.clear()
+
+    assert response.status_code == 502
+    place.assert_not_awaited()
+    assert response.json()["detail"]["cancelled"] == []
