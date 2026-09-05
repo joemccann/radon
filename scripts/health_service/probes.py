@@ -227,6 +227,35 @@ def not_applicable_names(host_role=None) -> tuple:
     return ROLE_NOT_APPLICABLE.get(role, ())
 
 
+def effective_not_applicable(probe_results: dict, units: dict,
+                             host_role=None) -> tuple:
+    """REL-243 (R-650): the role exclusion needs a positive precondition.
+
+    The app-role gateway suppression was unconditional, so `RADON_HOST_ROLE=app`
+    copied onto a host that IS running a local gateway dropped the :4001 probe
+    from the aggregate forever — edge-green with a dead gateway. The exclusion
+    now holds only while the nested `radon-api:broker` probe is observed up
+    (the broker is genuinely covered from elsewhere); anything else degrades to
+    counted once the gateway unit has been non-up past the existing 900s
+    dependency dwell. Inside the dwell the suppression still absorbs flaps, and
+    the broker failure itself is already counted as `radon-api:broker`.
+    """
+    names = not_applicable_names(host_role)
+    if not names:
+        return ()
+    if _nested_api_state(probe_results) == "up":
+        return names
+    gateway = (units or {}).get(GATEWAY_UNIT)
+    dwell = gateway.get("non_up_secs") if isinstance(gateway, dict) else None
+    if (
+        isinstance(dwell, (int, float))
+        and not isinstance(dwell, bool)
+        and dwell >= DEPENDENCY_DWELL_LIMIT_SECS
+    ):
+        return ()
+    return names
+
+
 def _now_et(now_et=None):
     if now_et is not None:
         return now_et
@@ -335,7 +364,7 @@ def aggregate_state(probe_results: dict, units: dict,
     # path failure still wins as "down". Nested FastAPI broker fields
     # (_nested_api_state) count as dependency too.
     _DOWNISH = {"down", "error", "failed", "unhealthy"}
-    not_applicable = not_applicable_names(host_role)
+    not_applicable = effective_not_applicable(probe_results, units, host_role)
     serving_states = []
     dependency_states = []
     for name, value in (probe_results or {}).items():
@@ -417,7 +446,7 @@ def degraded_reasons(probe_results: dict, units: dict, host_role=None) -> list:
     (suppressed)", "newsfeed flap" and "2FA lock" stop being the same word.
     """
     _NON_UP = {"down", "error", "failed", "unhealthy", "starting", "unknown"}
-    not_applicable = not_applicable_names(host_role)
+    not_applicable = effective_not_applicable(probe_results, units, host_role)
     reasons = []
     for name, value in (probe_results or {}).items():
         if isinstance(value, dict) and name in DEPENDENCY_PROBES and name not in not_applicable:
@@ -445,6 +474,8 @@ def build_status(probes: dict, units: dict, generated_at: str,
     degrade without touching the response code or the rest of the body.
     """
     role = resolve_host_role() if host_role is None else host_role
+    role_names = not_applicable_names(role)
+    effective = effective_not_applicable(probes, units, role)
     overall_state = aggregate_state(
         probes,
         units,
@@ -460,7 +491,11 @@ def build_status(probes: dict, units: dict, generated_at: str,
         "overall_state": overall_state,
         "degraded_reasons": degraded_reasons(probes, units, host_role=role),
         "host_role": role,
-        "not_applicable": sorted(not_applicable_names(role)),
+        "not_applicable": sorted(effective),
+        # REL-243: acknowledges that the role exclusion lost its positive
+        # precondition (nested broker probe not up) and outlived the dwell,
+        # so the excluded names are counted in the aggregate again.
+        "role_suppression_expired": bool(role_names) and not effective,
         "health_service": health_service,
         "generated_at": generated_at,
         "probes": probes,
