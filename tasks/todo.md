@@ -1,3 +1,21 @@
+# Task: CI performance deliver before/after/% [IN PROGRESS]
+
+Issue #196 deliver/report must cite before, after, and % change for time-saving fixes.
+
+## Dependency graph
+
+- T1 depends_on: [] - Failing contracts for the CI build-time table and skill wording.
+- T2 depends_on: [T1] - Helper + CLI + skill/ledger report format. No loop redesign.
+- T3 depends_on: [T2] - Focused pytest, PR against main. Do not merge.
+
+## Checklist
+
+- [x] T1 Failing contracts
+- [x] T2 Helper + skill
+- [ ] T3 Verify and open PR
+
+---
+
 # Task: /regime/cri chart layout + scatter hover [IN PROGRESS]
 
 Stack CRI charts full width to match sibling regime pages. Leave Correlation Risk Premium unchanged.

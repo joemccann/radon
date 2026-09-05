@@ -27,6 +27,11 @@ IDs continue as `CIP-###`.
   <= 5% / 15s; cold p50 regresses <= 10%; runner-seconds grow <= 20% unless the
   PR documents the trade; no test inventory, coverage, path ownership, gate
   dependency, provenance, health, recovery or rollback coverage shrinks.
+- **Deliver report:** every time-saving fix's #196 comment (and the deliver
+  write-up) includes `| Job | Before | After | % change |` from cited Actions
+  runs. `% change = (after - before) / before * 100` (negative = faster).
+  After still `VALIDATING` / `INSUFFICIENT_SAMPLE` prints pending +
+  `TBD until` N samples. Do not invent timings.
 - **Runner usage:** the repo is on a free plan (`/timing` reports
   `billable.UBUNTU.total_ms = 0`), so runner cost is tracked as the sum of job
   wall seconds per run ("runner-seconds").
