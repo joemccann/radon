@@ -4,10 +4,13 @@ import { useEffect, useRef } from "react";
 import type { OrdersData } from "./types";
 import type { ToastType } from "./useToast";
 import { shouldMarkDemoSignup } from "./demo/demoSignup";
+import type { ExecutedOrder } from "./types";
 import {
   diffNewFills,
   execKey,
+  fillGroupKey,
   formatFillToast,
+  mergeFill,
   hasSeenBaseline,
   loadSeen,
   primeSeen,
@@ -41,11 +44,14 @@ function safeSessionStorage(): SeenStorage | null {
  */
 export function useFillToasts(
   orders: OrdersData | null,
-  addToast: (type: ToastType, message: string, duration?: number) => string,
+  upsertToast: (key: string, type: ToastType, message: string, duration?: number) => string,
   onNewFills?: () => void,
 ): void {
   const primedRef = useRef(false);
   const seenRef = useRef<Set<string>>(new Set());
+  // Running total per order, so a partial-fill sequence rewrites one toast
+  // instead of stacking one per execution.
+  const groupsRef = useRef<Map<string, ExecutedOrder>>(new Map());
   // Read through a ref so a caller passing an inline closure cannot re-run the
   // diff effect (and re-fire the producer sync) on every render.
   const onNewFillsRef = useRef(onNewFills);
@@ -75,7 +81,10 @@ export function useFillToasts(
     const fresh = diffNewFills(seenRef.current, executed);
     if (fresh.length === 0) return;
     for (const fill of fresh) {
-      addToast("success", formatFillToast(fill), 0);
+      const group = fillGroupKey(fill);
+      const running = mergeFill(groupsRef.current.get(group) ?? null, fill);
+      groupsRef.current.set(group, running);
+      upsertToast(group, "success", formatFillToast(running), 0);
       const key = execKey(fill);
       if (key) seenRef.current.add(key);
     }
@@ -84,5 +93,5 @@ export function useFillToasts(
     // Without this the positions table waited on its own producer timer and
     // rendered pre-fill state underneath a FILLED toast.
     onNewFillsRef.current?.();
-  }, [orders, addToast]);
+  }, [orders, upsertToast]);
 }
