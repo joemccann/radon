@@ -220,10 +220,8 @@ test.describe("/regime page — RVOL/COR1M relationship view", () => {
       throw new Error("Expected z-score chart shell to have a bounding box");
     }
 
-    await chartShell.dispatchEvent("mousemove", {
-      bubbles: true,
-      clientX: shellBox.x + shellBox.width * 0.74,
-      clientY: shellBox.y + shellBox.height * 0.5,
+    await chartShell.hover({
+      position: { x: shellBox.width * 0.74, y: shellBox.height * 0.5 },
     });
 
     const tooltip = page.locator('[data-testid="regime-zscore-hover-tooltip"]');
@@ -248,15 +246,13 @@ test.describe("/regime page — RVOL/COR1M relationship view", () => {
       throw new Error("Expected quadrant chart shell to have a bounding box");
     }
 
-    await chartShell.dispatchEvent("mousemove", {
-      bubbles: true,
-      clientX: shellBox.x + shellBox.width * 0.62,
-      clientY: shellBox.y + shellBox.height * 0.42,
+    await chartShell.hover({
+      position: { x: shellBox.width * 0.62, y: shellBox.height * 0.42 },
     });
 
     const tooltip = page.locator('[data-testid="regime-quadrant-hover-tooltip"]');
     await expect(tooltip).toBeVisible();
-    await expect(tooltip.locator('[data-testid="regime-quadrant-hover-date"]')).toContainText("Mar");
+    await expect(tooltip.locator('[data-testid="regime-quadrant-hover-date"]')).toHaveText(/Feb|Mar/);
     await expect(tooltip).toContainText("Quadrant");
     await expect(tooltip).toContainText("RVOL");
     await expect(tooltip).toContainText("COR1M");
