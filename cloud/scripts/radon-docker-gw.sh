@@ -56,11 +56,36 @@ require_trusted_compose_file() {
   fi
 }
 
+# The env file feeds credentials and bind addresses into the body root runs.
+# A symlink, a non-root owner, or a group/other-writable file at that path is
+# the same radon->root escalation as a writable compose body. REL-234.
+require_trusted_env_file() {
+  local perms
+  if [[ -L "$COMPOSE_ENV_FILE" || ! -f "$COMPOSE_ENV_FILE" ]]; then
+    echo "radon-docker-gw: ${COMPOSE_ENV_FILE} env file must be a regular, non-symlink file" >&2
+    exit 78
+  fi
+  if ! perms="$(stat -c '%a' "$COMPOSE_ENV_FILE" 2>/dev/null)"; then
+    perms="$(stat -f '%Lp' "$COMPOSE_ENV_FILE")"
+  fi
+  if (( ( $((8#$perms)) & 18 ) != 0 )); then
+    echo "radon-docker-gw: ${COMPOSE_ENV_FILE} env file must not be group/other-writable" >&2
+    exit 78
+  fi
+  if [[ "${RADON_DOCKER_GW_TEST_MODE:-0}" != "1" ]]; then
+    if [[ "$(stat -c '%u' "$COMPOSE_ENV_FILE")" != "0" ]]; then
+      echo "radon-docker-gw: ${COMPOSE_ENV_FILE} env file must be owned by root" >&2
+      exit 78
+    fi
+  fi
+}
+
 # --project-name is pinned so the named volume stays cloud_ib-config no matter
 # where the file lives; moving it off the checkout must not orphan the
 # Gateway's Jts settings and 2FA state.
 compose() {
   require_trusted_compose_file
+  require_trusted_env_file
   RADON_COMPOSE_ENV_FILE="$COMPOSE_ENV_FILE" \
     "$DOCKER" compose \
     --env-file "$COMPOSE_ENV_FILE" \
