@@ -1,0 +1,44 @@
+# CI e2e curation ledger — every site/e2e/*.spec.ts must appear HERE (T-447).
+# scripts/tests/test_e2e_ci_curation.py enforces it.
+#
+# Why (TEST_AUDIT T-447): NO CI job runs site Playwright at all — the
+# e2e-financial-smoke job builds and serves web/, never site/. Every spec in
+# this directory is therefore a hold-out by construction, and until this file
+# existed, new site specs (agent-prompt-recipes, libraries-fx-pack) landed
+# reachable by zero CI jobs with nothing recording that fact. This ledger makes
+# the gap explicit, and the pytest guard reds when a spec exists here without
+# an entry.
+#
+# Promotion: a spec moves out of this ledger only when a CI job exists that
+# builds site/ (Next 16 + Tailwind v4), starts its production server, and runs
+# `npx playwright test` against it — verified green on a real runner first, per
+# the testing-weekend rails a non-verified CI job is riskier than this ledger.
+# Until then, verification is local: run from site/ against `next start` and
+# re-stamp the REVIEWED line below when a spec changes.
+#
+agent-prompt-recipes.spec.ts
+branding.spec.ts
+libraries-fx-pack.spec.ts
+surface-preview.spec.ts
+theme-toggle.spec.ts
+
+# ── REVIEWED annotations (mirrors web/e2e T-438 format) ──────────────────────
+#
+# REVIEWED 2026-09-05 agent-prompt-recipes.spec.ts — held out: no CI job runs
+#   site Playwright. Landed via PR #299 (cursor/agent-prompt-recipes-ci-ea14)
+#   with local Chromium runs against a site `next start`; clipboard permissions
+#   need a real browser context. Promote when a site Playwright CI job exists.
+# REVIEWED 2026-09-05 libraries-fx-pack.spec.ts — held out: no CI job runs site
+#   Playwright, and the spec writes theme screenshots to FX_SHOT_DIR (default
+#   /opt/cursor/artifacts, absent on the CI runner). Verified locally against a
+#   site `next start`. Promote when a site Playwright CI job exists and the
+#   shot dir is runner-safe.
+# REVIEWED 2026-09-05 branding.spec.ts — held out: no CI job runs site
+#   Playwright. Favicon/head assertions; stable since 2026-03-11. Promote with
+#   the rest when a site Playwright CI job exists.
+# REVIEWED 2026-09-05 surface-preview.spec.ts — held out: no CI job runs site
+#   Playwright. Layout-overflow guard on the product-plate metrics grid; stable
+#   since 2026-03-11. Promote when a site Playwright CI job exists.
+# REVIEWED 2026-09-05 theme-toggle.spec.ts — held out: no CI job runs site
+#   Playwright. Theme persistence via localStorage; stable since 2026-03-11.
+#   Promote when a site Playwright CI job exists.
