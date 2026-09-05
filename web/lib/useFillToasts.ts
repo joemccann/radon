@@ -46,6 +46,7 @@ export function useFillToasts(
   orders: OrdersData | null,
   upsertToast: (key: string, type: ToastType, message: string, duration?: number) => string,
   onNewFills?: () => void,
+  isToastLive?: (key: string) => boolean,
 ): void {
   const primedRef = useRef(false);
   const seenRef = useRef<Set<string>>(new Set());
@@ -82,6 +83,10 @@ export function useFillToasts(
     if (fresh.length === 0) return;
     for (const fill of fresh) {
       const group = fillGroupKey(fill);
+      // A dismissed toast's running total is forgotten: the next fill for the
+      // group opens a fresh toast reading its own quantity, not the cumulative
+      // total presented as a new fill (R-642).
+      if (isToastLive && !isToastLive(group)) groupsRef.current.delete(group);
       const running = mergeFill(groupsRef.current.get(group) ?? null, fill);
       groupsRef.current.set(group, running);
       upsertToast(group, "success", formatFillToast(running), 0);
@@ -93,5 +98,5 @@ export function useFillToasts(
     // Without this the positions table waited on its own producer timer and
     // rendered pre-fill state underneath a FILLED toast.
     onNewFillsRef.current?.();
-  }, [orders, upsertToast]);
+  }, [orders, upsertToast, isToastLive]);
 }
