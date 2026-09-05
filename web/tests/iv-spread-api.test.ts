@@ -271,7 +271,12 @@ describe("GET /api/iv-spread — absent and stale data are 200, never 4xx", () =
 
 describe("GET /api/iv-spread — degradation passes through untransformed", () => {
   it("passes a stale_source payload through verbatim", async () => {
-    await insertSnapshot(buildPayload({ status: "stale_source" }));
+    // as_of must stay inside the 48h data-age budget. A frozen 2026-09-02
+    // date collapses to missing once "today" is more than two sessions later.
+    const asOf = new Date(Date.now() - 12 * 3_600_000)
+      .toISOString()
+      .slice(0, 10);
+    await insertSnapshot(buildPayload({ status: "stale_source", as_of: asOf }));
 
     const { GET } = await import("../app/api/iv-spread/route");
     const body = await (await GET()).json();

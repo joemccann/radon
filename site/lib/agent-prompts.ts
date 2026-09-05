@@ -62,14 +62,36 @@ export function formatAgentPrompt(prompt: AgentPrompt): string {
   ].join("\n");
 }
 
+function writeClipboardFallback(text: string): boolean {
+  if (typeof document === "undefined") return false;
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.setAttribute("readonly", "");
+  area.style.position = "fixed";
+  area.style.left = "-9999px";
+  document.body.appendChild(area);
+  area.select();
+  try {
+    return document.execCommand("copy");
+  } finally {
+    document.body.removeChild(area);
+  }
+}
+
 export async function writeClipboard(
   text: string,
 ): Promise<"copied" | "failed"> {
   try {
     const clipboard = globalThis.navigator?.clipboard;
-    if (!clipboard?.writeText) return "failed";
-    await clipboard.writeText(text);
-    return "copied";
+    if (clipboard?.writeText) {
+      await clipboard.writeText(text);
+      return "copied";
+    }
+  } catch {
+    // fall through to the textarea path
+  }
+  try {
+    return writeClipboardFallback(text) ? "copied" : "failed";
   } catch {
     return "failed";
   }

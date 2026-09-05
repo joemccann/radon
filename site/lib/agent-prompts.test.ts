@@ -159,6 +159,7 @@ describe("writeClipboard", () => {
 
   it("reports failed when the clipboard is missing or throws", async () => {
     vi.stubGlobal("navigator", {});
+    vi.stubGlobal("document", undefined);
     await expect(writeClipboard("payload")).resolves.toBe("failed");
     vi.stubGlobal("navigator", {
       clipboard: {
@@ -166,5 +167,27 @@ describe("writeClipboard", () => {
       },
     });
     await expect(writeClipboard("payload")).resolves.toBe("failed");
+  });
+
+  it("falls back to a textarea copy when the clipboard API is missing", async () => {
+    const execCommand = vi.fn().mockReturnValue(true);
+    const area = {
+      value: "",
+      setAttribute: vi.fn(),
+      style: { position: "", left: "" },
+      select: vi.fn(),
+    };
+    vi.stubGlobal("navigator", {});
+    vi.stubGlobal("document", {
+      createElement: vi.fn(() => area),
+      body: {
+        appendChild: vi.fn(),
+        removeChild: vi.fn(),
+      },
+      execCommand,
+    });
+    await expect(writeClipboard("payload")).resolves.toBe("copied");
+    expect(area.value).toBe("payload");
+    expect(execCommand).toHaveBeenCalledWith("copy");
   });
 });

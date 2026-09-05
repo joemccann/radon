@@ -3,7 +3,9 @@ import { expect, test } from "../../web/node_modules/@playwright/test";
 test.describe("Copy agent prompt and developer recipes", () => {
   test("shows Copy agent prompt on a dossier and seven recipe cards", async ({
     page,
+    context,
   }) => {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     await page.goto("/crash-risk-index");
     const dossierCopy = page.getByRole("button", { name: "Copy agent prompt" });
     await expect(dossierCopy.first()).toBeVisible();
