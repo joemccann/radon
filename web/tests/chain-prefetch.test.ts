@@ -69,7 +69,8 @@ describe("useChainPrefetch hook", () => {
   });
 
   it("does not prefetch when there is only one expiration", () => {
-    expect(hookSource).toContain("expirations.length <= 1");
+    // R-662 keyed the effect on content; the guard now reads the parsed list.
+    expect(hookSource).toContain("exps.length <= 1");
   });
 
   it("fetches the correct API endpoint", () => {

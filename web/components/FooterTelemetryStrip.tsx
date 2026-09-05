@@ -19,6 +19,9 @@ type FlexTokenStatus = {
 
 type ChipTone = "ok" | "warn" | "dead" | "demo";
 
+// R-664: token expiry moves daily; 5 min keeps the chip honest without load.
+const FLEX_REFRESH_INTERVAL_MS = 5 * 60_000;
+
 function ibChipFor(status: IBDisplayStatus): { text: string; cls: ChipTone } {
   switch (status) {
     case "connected":
@@ -71,16 +74,25 @@ export default function FooterTelemetryStrip() {
   const { data: services, error: servicesError } = useServiceHealth();
   const [flex, setFlex] = useState<FlexTokenStatus | null>(null);
 
+  // R-664: refetch on focus and on a timer — a tab left open across days
+  // must not keep showing a stale expiry countdown from mount time.
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/flex-token", { signal: AbortSignal.timeout(10_000) })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d: FlexTokenStatus | null) => {
-        if (!cancelled && d) setFlex(d);
-      })
-      .catch(() => {});
+    const load = () => {
+      fetch("/api/flex-token", { signal: AbortSignal.timeout(10_000) })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d: FlexTokenStatus | null) => {
+          if (!cancelled && d) setFlex(d);
+        })
+        .catch(() => {});
+    };
+    load();
+    window.addEventListener("focus", load);
+    const timer = setInterval(load, FLEX_REFRESH_INTERVAL_MS);
     return () => {
       cancelled = true;
+      window.removeEventListener("focus", load);
+      clearInterval(timer);
     };
   }, []);
 

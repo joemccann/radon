@@ -658,6 +658,10 @@ async def _heartbeat_orders_sync_skip(
             f"orders sync shed for subprocess capacity ({streak} consecutive): {reason}"
         )
     else:
+        # R-658: a non-shed miss ends the shed run. Without this reset, sheds
+        # separated by an unrelated failure inherited the stale streak and
+        # escalated the NEXT shed straight to error.
+        _orders_sync_consecutive_sheds = 0
         if state is None:
             state = "error"
         extra["message"] = f"orders sync missed ({error_class}): {reason}"
@@ -713,6 +717,13 @@ async def _orders_sync_tick() -> None:
             gw = await check_ib_gateway()
         except Exception:
             logger.exception("orders-sync loop: gateway probe failed after pool disconnect")
+            # R-658: a raising probe used to return heartbeat-less, leaving
+            # the row stale in exactly the silence class this branch names.
+            await _heartbeat_orders_sync_skip(
+                "gateway probe raised after pool disconnect",
+                error_class="probe-failed",
+                state="error",
+            )
             return
         if gw.get("port_listening") and not gw.get("upstream_dead"):
             await _heartbeat_orders_sync_skip(
@@ -4984,7 +4995,11 @@ async def options_exposure(symbol: str, frequency: str = "eod"):
     except MenthorQDashboardBrowserUnavailable as exc:
         raise HTTPException(
             status_code=503,
-            detail="Options exposure browser runtime is unavailable",
+            detail=(
+                "Options exposure browser runtime is unavailable "
+                "(environment fault: chromium missing on this host; repair: "
+                "python -m playwright install --with-deps --only-shell chromium)"
+            ),
         ) from exc
     except MenthorQDashboardAuthEmbargoed as exc:
         raise HTTPException(
