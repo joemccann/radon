@@ -78,9 +78,10 @@ IBKR rejection text embeds literal `<br>` tokens. `web/lib/orderError.ts:formatO
 
 1. **Use subprocess with original clientId.** Master (0) sees all orders but can't modify (Error 10147/103). `ib_order_manage.py` reconnects as original.
 2. **Clear VOL fields before modify.** Reset `volatility`/`volatilityType` to IB sentinels (`1.7976931348623157e+308` / `2147483647`) to avoid Error 321.
-3. **Confirm against refreshed open-order snapshot**, not stale `Trade`. Disappearance after cancel = success.
+3. **Confirm against refreshed open-order snapshot**, not stale `Trade`. Disappearance after cancel = success. **IB error 202 on a combo replace is the CANCEL CONFIRMATION, not a reject** (4c34bc02): `/orders/replace` records a 202 or an already-`Cancelled` status as a successful cancel and proceeds to place; a `Filled` status during the cancel poll is the one hard abort. See `docs/incident-runbook.md#combo-replace-ib-202-cancel`.
 4. **Preserve upstream error detail.** Subprocess JSON → FastAPI `detail` → Next.js. Never collapse to 500.
 5. **Required regressions:** unit, route, browser.
+6. **Partially filled orders are edited in REMAINING quantity, transmitted as NEW TOTAL.** The operator edits the remaining (working) quantity — that's what the ticket prices and previews — but IB's modify takes the new TOTAL, which includes contracts already filled. `web/lib/orders/modifyQuantity.ts` (`filledQuantity`/`remainingQuantity`/`toIbTotalQuantity`) owns the translation; sending the remaining figure straight through silently shrinks the order by everything already filled. Tests: `modify-partial-fill-quantity.test.tsx`.
 
 ---
 
