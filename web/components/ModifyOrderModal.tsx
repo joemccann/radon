@@ -7,6 +7,7 @@ import { oldestQuoteTimestamp, optionKey } from "@/lib/pricesProtocol";
 import type { ModifyComboLeg, ModifyOrderRequest } from "@/lib/orderModify";
 import Modal from "./Modal";
 import { getQuoteMetrics } from "@/lib/quoteTelemetry";
+import { quoteSubmitGate } from "@/lib/order/quoteSubmitGate";
 import { applyRestingLimitToQuote } from "@/lib/modifyOrderQuote";
 import {
   filledQuantity,
@@ -48,6 +49,9 @@ type ModifyOrderModalProps = {
   /** R-112: the open-orders snapshot, so a close-out can see what is
    *  already working on the same BAG. */
   openOrders?: { open_orders?: unknown[] } | null;
+  /** R-641: live-feed connectivity. `false` disarms Modify; undefined means
+   *  unknown and only the quote-age gate applies. */
+  feedConnected?: boolean;
   onConfirm: (request: ModifyOrderRequest) => void;
   onClose: () => void;
 };
@@ -311,7 +315,7 @@ export function resolveOrderPriceData(
   return null;
 }
 
-export default function ModifyOrderModal({ order, loading, prices, portfolio, openOrders = null, onConfirm, onClose }: ModifyOrderModalProps) {
+export default function ModifyOrderModal({ order, loading, prices, portfolio, openOrders = null, feedConnected, onConfirm, onClose }: ModifyOrderModalProps) {
   const [newPrice, setNewPrice] = useState("");
   const [newQuantity, setNewQuantity] = useState("");
   const [outsideRth, setOutsideRth] = useState(() => Boolean(order?.outsideRth));
@@ -545,7 +549,13 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, op
   const quantityChanged = isValidQuantity && parsedQuantity !== currentQuantity;
   const legsChanged = isComboOrder && currentLegsSnapshot !== originalLegsSnapshot;
   const outsideRthChanged = outsideRth !== Boolean(order.outsideRth);
-  const canSubmit = !loading && riskState?.okToSubmit === true && (
+  // R-641: a half-open socket keeps painting last-tick marks into this modal.
+  // Stale marks (or a known-disconnected feed) disarm Modify at the wire.
+  const quoteGate = quoteSubmitGate({
+    quoteTimestamp: marketPriceData?.timestamp ?? null,
+    feedConnected,
+  });
+  const canSubmit = !loading && quoteGate.open && riskState?.okToSubmit === true && (
     isComboOrder
       ? Boolean(isValidPrice && isValidQuantity && normalizedLegs && (priceChanged || quantityChanged || legsChanged))
       : Boolean((priceChanged || quantityChanged || outsideRthChanged) && isValidPrice && isValidQuantity)
@@ -918,6 +928,12 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, op
         {fillRaceNotice && (
           <div className="modify-fill-race" role="alert">
             {fillRaceNotice}
+          </div>
+        )}
+
+        {!quoteGate.open && (
+          <div className="order-quote-gate-blocked" role="status" data-testid="quote-gate-blocked">
+            {quoteGate.reason}
           </div>
         )}
 

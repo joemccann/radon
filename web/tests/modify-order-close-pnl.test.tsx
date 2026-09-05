@@ -375,7 +375,9 @@ function cbrsHeldReversal(): PortfolioData {
 }
 
 function cbrsComboPrices(): Record<string, import("@/lib/pricesProtocol").PriceData> {
-  const ts = "2026-08-21T14:10:53.000Z";
+  // Fresh timestamp: the REL-236 quote-age gate disarms Modify on stale
+  // leg quotes; this suite pins close-out P&L math, not freshness.
+  const ts = new Date().toISOString();
   const blank = {
     lastIsCalculated: false,
     bidSize: null,
