@@ -114,6 +114,60 @@ export function loadSeen(storage: SeenStorage): Set<string> {
   }
 }
 
+/**
+ * Toast identity for a fill. IB reports one execution per partial fill of the
+ * same order, so grouping on the order collapses a fill sequence onto a single
+ * toast that updates in place. Rows carrying neither id fall back to the
+ * instrument + side, the tightest grouping still available.
+ */
+export function fillGroupKey(fill: ExecutedOrder): string {
+  if (typeof fill.orderId === "number") return `order:${fill.orderId}`;
+  if (typeof fill.permId === "number") return `perm:${fill.permId}`;
+  const instrument = fill.contract?.conId ?? fill.contract?.symbol ?? fill.symbol;
+  return `inst:${instrument}:${fill.side}`;
+}
+
+/**
+ * Running total for one group: quantity summed, price share-weighted. A fill
+ * with an unusable price contributes quantity only, so the average stays the
+ * mean of the prices actually reported.
+ */
+export function mergeFill(running: ExecutedOrder | null, fill: ExecutedOrder): ExecutedOrder {
+  if (running == null) return fill;
+  const runningQty = usableQuantity(running);
+  const fillQty = usableQuantity(fill);
+  return {
+    ...fill,
+    quantity: runningQty + fillQty,
+    avgPrice: weightedAvgPrice(running, runningQty, fill, fillQty),
+  };
+}
+
+function usableQuantity(fill: ExecutedOrder): number {
+  return typeof fill.quantity === "number" && Number.isFinite(fill.quantity) ? fill.quantity : 0;
+}
+
+function usablePrice(fill: ExecutedOrder): number | null {
+  return typeof fill.avgPrice === "number" && Number.isFinite(fill.avgPrice) ? fill.avgPrice : null;
+}
+
+function weightedAvgPrice(
+  running: ExecutedOrder,
+  runningQty: number,
+  fill: ExecutedOrder,
+  fillQty: number,
+): number | null {
+  const priced: Array<[number, number]> = [];
+  const runningPrice = usablePrice(running);
+  const fillPrice = usablePrice(fill);
+  if (runningPrice != null) priced.push([runningPrice, runningQty]);
+  if (fillPrice != null) priced.push([fillPrice, fillQty]);
+  if (priced.length === 0) return null;
+  const shares = priced.reduce((total, [, qty]) => total + qty, 0);
+  if (shares <= 0) return priced[priced.length - 1][0];
+  return priced.reduce((total, [price, qty]) => total + price * qty, 0) / shares;
+}
+
 /** Persist the seen set, bounded to the newest MAX_SEEN_KEYS entries. */
 export function saveSeen(storage: SeenStorage, seen: Set<string>): void {
   try {

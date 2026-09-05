@@ -271,7 +271,12 @@ describe("GET /api/iv-spread — absent and stale data are 200, never 4xx", () =
 
 describe("GET /api/iv-spread — degradation passes through untransformed", () => {
   it("passes a stale_source payload through verbatim", async () => {
-    await insertSnapshot(buildPayload({ status: "stale_source" }));
+    // A stale_source payload's freshness rides `as_of`, not `scan_time`, so
+    // this fixture must be window-relative: the hardcoded default rotted out
+    // of the 48h budget two days after it was written and collapsed the
+    // response to the missing shape.
+    const today = new Date().toISOString().slice(0, 10);
+    await insertSnapshot(buildPayload({ status: "stale_source", as_of: today }));
 
     const { GET } = await import("../app/api/iv-spread/route");
     const body = await (await GET()).json();
