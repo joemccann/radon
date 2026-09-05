@@ -365,7 +365,7 @@ function triggerBackgroundSync(expectedDate: string): void {
 export const radonCapability = "read";
 
 export async function GET(): Promise<Response> {
-  const access = await requireRouteAccess(undefined, { rate: { key: "menthorq/cta:route", limit: 20, windowMs: 60_000 } });
+  const access = await requireRouteAccess(undefined, { rate: { key: "menthorq/cta:route", limit: 20, windowMs: 60_000 }, durableRateTier: "A" });
   if (!access.ok) return access.response;
   const requestId = getRequestId();
   const expectedDate = latestClosedTradingDay();

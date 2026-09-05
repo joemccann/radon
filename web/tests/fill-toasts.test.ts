@@ -13,8 +13,10 @@ import {
   SEEN_STORAGE_KEY,
   diffNewFills,
   execKey,
+  fillGroupKey,
   formatFillToast,
   loadSeen,
+  mergeFill,
   primeSeen,
   saveSeen,
 } from "../lib/fillToasts";
@@ -195,5 +197,59 @@ describe("loadSeen / saveSeen", () => {
     const storage = new FakeStorage();
     storage.setItem(SEEN_STORAGE_KEY, JSON.stringify({ nope: true }));
     expect(loadSeen(storage).size).toBe(0);
+  });
+});
+
+describe("fillGroupKey", () => {
+  it("groups partial fills of one order together", () => {
+    expect(fillGroupKey(makeFill({ execId: "a.1.01", orderId: 42 }))).toBe(
+      fillGroupKey(makeFill({ execId: "a.2.01", orderId: 42 })),
+    );
+  });
+
+  it("separates distinct orders", () => {
+    expect(fillGroupKey(makeFill({ orderId: 42 }))).not.toBe(
+      fillGroupKey(makeFill({ orderId: 43 })),
+    );
+  });
+
+  it("falls back to instrument and side when the row carries no order id", () => {
+    expect(fillGroupKey(makeFill())).toBe(fillGroupKey(makeFill({ execId: "z.9.01" })));
+    expect(fillGroupKey(makeFill())).not.toBe(fillGroupKey(makeFill({ side: "BOT" })));
+  });
+});
+
+describe("mergeFill", () => {
+  it("returns the fill unchanged when nothing is running yet", () => {
+    const fill = makeFill({ quantity: 10, avgPrice: 4.5 });
+    expect(mergeFill(null, fill)).toBe(fill);
+  });
+
+  it("sums quantity and share-weights the price", () => {
+    const merged = mergeFill(
+      makeFill({ quantity: 10, avgPrice: 4.5 }),
+      makeFill({ quantity: 15, avgPrice: 4.6 }),
+    );
+    expect(merged.quantity).toBe(25);
+    expect(merged.avgPrice).toBeCloseTo(4.56, 10);
+    expect(formatFillToast(merged)).toBe("FILLED · SELL 25x EWY $175C @ $4.56");
+  });
+
+  it("keeps the reported price when the other side has none", () => {
+    const merged = mergeFill(
+      makeFill({ quantity: 10, avgPrice: null }),
+      makeFill({ quantity: 5, avgPrice: 4.2 }),
+    );
+    expect(merged.quantity).toBe(15);
+    expect(merged.avgPrice).toBeCloseTo(4.2, 10);
+  });
+
+  it("yields a null price when neither fill reports one", () => {
+    const merged = mergeFill(
+      makeFill({ quantity: 10, avgPrice: null }),
+      makeFill({ quantity: 5, avgPrice: null }),
+    );
+    expect(merged.avgPrice).toBeNull();
+    expect(formatFillToast(merged)).toBe("FILLED · SELL 15x EWY $175C");
   });
 });

@@ -6,6 +6,8 @@ import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 import { BPI_INDEX_SYMBOLS, type BpiIndexEntry, type BpiIndexSymbol } from "@/lib/bpi";
 import { getDb } from "@/lib/db";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
+import { requireRouteAccess } from "@/lib/routeAccess";
+import { buildDemoBpiFixture } from "@/lib/demo/fixtures/regime";
 
 // Disable Next.js static caching: this handler reads live disk state
 // (data/bpi.json) as the Turso fallback.
@@ -73,7 +75,12 @@ function withAllIndices(doc: BpiDoc): {
 export const radonCapability = "read";
 
 export async function GET(): Promise<Response> {
+  const access = await requireRouteAccess();
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
+  if (access.principal.kind === "demo") {
+    return setNoStoreResponseHeaders(NextResponse.json(buildDemoBpiFixture()), requestId);
+  }
   const result = await dbFirstRead({
     fromDb: readBpiFromDb,
     fromDisk: readBpiFromDisk,

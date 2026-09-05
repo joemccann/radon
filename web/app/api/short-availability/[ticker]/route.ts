@@ -22,7 +22,7 @@ type Params = { params: Promise<{ ticker: string }> };
 export const radonCapability = "read";
 
 export async function GET(_req: Request, ctx: Params): Promise<Response> {
-  const access = await requireRouteAccess(undefined, { rate: { key: "short-availability/[ticker]:route", limit: 20, windowMs: 60_000 } });
+  const access = await requireRouteAccess(undefined, { rate: { key: "short-availability/[ticker]:route", limit: 20, windowMs: 60_000 }, durableRateTier: "A" });
   if (!access.ok) return access.response;
   const requestId = getRequestId();
   const { ticker: raw } = await ctx.params;

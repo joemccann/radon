@@ -11,6 +11,7 @@ import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 import { radonFetch } from "@/lib/radonApi";
 import { backfillThetaEarningsPayload } from "@/lib/thetaEarningsBackfill";
 import { isCoverageFailedScan, pickUsableScanSnapshot } from "@/lib/scanCoverage";
+import { buildDemoThetaHarvester } from "@/lib/demo/fixtures/thetaHarvester";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -115,9 +116,24 @@ async function fetchEarningsBatch(tickers: string[]): Promise<{
 }
 
 export async function GET(): Promise<Response> {
-  const access = await requireRouteAccess(undefined, { rate: { key: "scanner/theta:route", limit: 20, windowMs: 60_000 } });
+  const access = await requireRouteAccess(undefined, { rate: { key: "scanner/theta:route", limit: 20, windowMs: 60_000 }, durableRateTier: "A" });
   if (!access.ok) return access.response;
   const requestId = getRequestId();
+  if (access.principal.kind === "demo") {
+    const now = new Date();
+    return setNoStoreResponseHeaders(
+      NextResponse.json({
+        ...buildDemoThetaHarvester({ now }),
+        cache_meta: {
+          last_refresh: now.toISOString(),
+          age_seconds: 0,
+          is_stale: false,
+          stale_threshold_seconds: STALE_THRESHOLD_SECONDS,
+        },
+      }),
+      requestId,
+    );
+  }
   const diskCacheMeta = buildCacheMeta(CACHE_PATH);
   // Fresher of the shared Turso snapshot and the host-local disk JSON.
   const result = await cachedRead("scanner:theta", READ_CACHE_TTL_MS, () =>

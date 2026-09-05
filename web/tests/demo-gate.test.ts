@@ -129,7 +129,7 @@ describe("handleDemoGate", () => {
 
     expect(scanner).toBeNull();
     expect(limiter.mock.calls.at(-1)).toEqual([
-      "B",
+      "A",
       "fresh-demo-user:resource:scanner",
     ]);
   });
@@ -147,8 +147,8 @@ describe("handleDemoGate", () => {
     );
 
     expect(limiter.mock.calls).toEqual([
-      ["B", "user:resource:scanner"],
-      ["B", "user:resource:scanner"],
+      ["A", "user:resource:scanner"],
+      ["A", "user:resource:scanner"],
     ]);
   });
 
