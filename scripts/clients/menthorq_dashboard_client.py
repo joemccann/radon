@@ -168,8 +168,14 @@ _BROWSER_MISSING_MARKERS = ("playwright install", "executable doesn't exist")
 
 
 def _is_browser_runtime_missing(exc: BaseException) -> bool:
+    # R-659: only a playwright-module ImportError is a missing browser
+    # runtime; any other ImportError (requests, pydantic) is a real
+    # dependency fault and must not suppress the credential-chain alarm.
     if isinstance(exc, ImportError):
-        return True
+        name = (exc.name or "").lower()
+        return name == "playwright" or name.startswith("playwright.") or (
+            "playwright" in str(exc).lower()
+        )
     return any(marker in str(exc).lower() for marker in _BROWSER_MISSING_MARKERS)
 
 

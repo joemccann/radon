@@ -85,3 +85,39 @@ describe("authless test bypass vs first-run setup gate", () => {
     expect(await response?.text()).toContain("authentication keys are not loaded");
   });
 });
+
+describe("authless flag production-absence assertion (R-666)", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("throws at boot when the flag is set on a live-Clerk production deployment", async () => {
+    const { assertAuthlessTestFlagAbsentInProduction } = await import("../middleware");
+    expect(() =>
+      assertAuthlessTestFlagAbsentInProduction("1", "pk_live_abc123"),
+    ).toThrow(/RADON_AUTHLESS_TEST/);
+  });
+
+  it("permits the flag on test-instance and keyless runners (e2e)", async () => {
+    const { assertAuthlessTestFlagAbsentInProduction } = await import("../middleware");
+    expect(() =>
+      assertAuthlessTestFlagAbsentInProduction("1", "pk_test_fake"),
+    ).not.toThrow();
+    expect(() =>
+      assertAuthlessTestFlagAbsentInProduction("1", undefined),
+    ).not.toThrow();
+    expect(() =>
+      assertAuthlessTestFlagAbsentInProduction(undefined, "pk_live_abc123"),
+    ).not.toThrow();
+  });
+
+  it("is invoked at middleware module scope so a bad boot fails, not serves", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const source = fs.readFileSync(
+      path.resolve(__dirname, "../middleware.ts"),
+      "utf8",
+    );
+    expect(source).toMatch(/^assertAuthlessTestFlagAbsentInProduction\(\);/m);
+  });
+});
