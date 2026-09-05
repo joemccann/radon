@@ -134,8 +134,13 @@ def _is_upstream_outage(exc: BaseException) -> bool:
     if isinstance(exc, (TimeoutError, OSError)):
         return True
     try:
+        from jwt import PyJWKClientConnectionError
         from jwt.exceptions import PyJWTError
     except Exception:  # noqa: BLE001 — without pyjwt nothing here is a verdict
+        return True
+    # REL-235 (R-637): PyJWKClientConnectionError subclasses PyJWTError, but
+    # a wrapped connection failure says nothing about this token.
+    if isinstance(exc, PyJWKClientConnectionError):
         return True
     return not isinstance(exc, PyJWTError)
 
