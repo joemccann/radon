@@ -197,7 +197,30 @@ def test_sudoers_lists_each_verb_without_a_wildcard() -> None:
     assert "radon ALL=(root) NOPASSWD: /usr/bin/docker compose" not in text
 
 
-def test_deploy_preflight_prefers_the_shim_over_group_docker() -> None:
+def _preflight_body() -> str:
     deploy = (CLOUD / "scripts" / "deploy.sh").read_text(encoding="utf-8")
-    assert "$DOCKER_GW\" config-check" in deploy or '"$DOCKER_GW" config-check' in deploy
-    assert 'sudo -n "$DOCKER_GW" config-check' in deploy
+    start = deploy.index("preflight_env() {")
+    return deploy[start : deploy.index("\n}", start)]
+
+
+def test_deploy_preflight_prefers_the_shim_over_group_docker() -> None:
+    assert 'sudo -n "$DOCKER_GW" config-check' in _preflight_body()
+
+
+def test_deploy_preflight_falls_back_instead_of_deadlocking() -> None:
+    """Preferring one path and stopping there strands the deploy.
+
+    deploy.sh arrives from the new release BEFORE refresh-control-plane
+    installs the sudoers verb that permits the shim call, so `sudo -n` is
+    refused; if that were the only path, preflight would abort and the promote
+    that installs the verb would never run. It has to fall through to the
+    direct render, and only fail when neither works.
+    """
+    body = _preflight_body()
+    shim_at = body.index('sudo -n "$DOCKER_GW" config-check')
+    direct_at = body.index("docker compose --env-file")
+    fail_at = body.index("compose config validation failed")
+
+    assert shim_at < direct_at < fail_at, "direct render must sit between them"
+    assert "elif (" in body, "the direct render must be an elif fallback"
+    assert body.count("compose_check_ok=1") == 2
