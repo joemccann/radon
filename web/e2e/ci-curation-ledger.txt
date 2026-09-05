@@ -71,6 +71,7 @@ ivrank-tab.spec.ts
 iwm-close-order-summary.spec.ts
 iwm-synthetic-mark-label.spec.ts
 iwm-ticker-detail-combo-sign.spec.ts
+libraries-fx-pack.spec.ts
 margin-debt-tab.spec.ts
 margin-warning-toast.spec.ts
 mobile-a11y-pwa.spec.ts
@@ -192,3 +193,7 @@ ws-connection-stability.spec.ts
 # REVIEWED 2026-09-04 demo-headlines.spec.ts — held out because it requires the
 #   demo build-time flag. Demo compile passed; Chromium passed locally with an
 #   inspected dashboard screenshot. Unit contracts remain in the CI Vitest gate.
+# REVIEWED 2026-09-05 libraries-fx-pack.spec.ts — held out: /kit is a design
+#   surface, not a financial path, and the spec writes dark-theme shots to
+#   /opt/cursor/artifacts (absent on the CI runner). Chromium passed locally
+#   against an authless next start; Vitest pack contracts stay in the CI gate.
