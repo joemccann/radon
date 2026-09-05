@@ -8,6 +8,7 @@ import {
   setNoStoreResponseHeaders,
 } from "@/lib/apiContracts";
 import { dbExecute } from "@/lib/dbExecute";
+import { demoDbIsolationViolation } from "@/lib/demo/demoDbIsolation";
 import { buildContractEntryDates, type JournalEntryRow } from "@/lib/entryDates";
 import {
   invalidatePortfolioReadCaches,
@@ -188,6 +189,23 @@ export async function GET(request?: Request): Promise<Response> {
   const access = await requireRouteAccess(request, { rate: { key: "portfolio:route", limit: 20, windowMs: 60_000 }, durableRateTier: "I" });
   if (!access.ok) return access.response;
   const requestId = getRequestId();
+  // REL-245: demo principal implies demo DB. On a prod-marked TURSO_DB_URL
+  // refuse before any DB read — never the operator's live portfolio.
+  if (access.principal.kind === "demo") {
+    const violation = demoDbIsolationViolation();
+    if (violation) {
+      console.error(`[Portfolio] ${violation}`);
+      return setNoStoreResponseHeaders(
+        jsonApiError({
+          message: "Demo portfolio is unavailable",
+          status: 403,
+          code: "DEMO_DB_ISOLATION",
+          requestId,
+        }),
+        requestId,
+      );
+    }
+  }
   const includeEntryDates = request
     ? new URL(request.url).searchParams.get("include") === "entry-dates"
     : false;
