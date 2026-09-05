@@ -271,9 +271,8 @@ describe("GET /api/iv-spread — absent and stale data are 200, never 4xx", () =
 
 describe("GET /api/iv-spread — degradation passes through untransformed", () => {
   it("passes a stale_source payload through verbatim", async () => {
-    // Pin Date. A frozen 2026-09-02 as_of collapsed to missing two sessions
-    // later; 12h-ago on this noon clock is still the same YYYY-MM-DD and
-    // pins to T22:15Z in the future. 30h-ago matches the hour-sweep budget.
+    // Pin Date. as_of: today pins to T22:15Z and is rejected as future
+    // before 22:14 UTC (60s skew). 30h-ago matches the hour-sweep budget.
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
       const now = new Date(Date.UTC(2026, 8, 5, 12, 0, 0));
