@@ -12,7 +12,7 @@ Stack CRI charts full width to match sibling regime pages. Leave Correlation Ris
 
 - [x] T1 Failing contracts
 - [x] T2 Layout + hover
-- [ ] T3 Verify and open PR
+- [x] T3 Verify and open PR
 
 ---
 
