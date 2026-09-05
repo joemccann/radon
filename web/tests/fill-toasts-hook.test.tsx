@@ -185,6 +185,56 @@ describe("useFillToasts", () => {
     expect(new Set(keys).size).toBe(2);
   });
 
+  it("starts a fresh running total after the group's toast is dismissed (R-642)", () => {
+    // Dismiss "FILLED BUY 900x" at 900/1000; the last 100 lots must toast as
+    // 100, not resurrect the cumulative 1000 as if it were a new fill.
+    const live = new Set<string>();
+    const upsertToast = vi.fn((key: string) => {
+      live.add(key);
+      return key;
+    });
+    const isToastLive = (key: string) => live.has(key);
+    const { rerender } = renderHook(
+      ({ orders }: HookProps) =>
+        useFillToasts(orders, upsertToast as never, undefined, isToastLive),
+      { initialProps: { orders: null as OrdersData | null } },
+    );
+    rerender({ orders: makeOrders(BASELINE) });
+
+    const first = makeFill({ execId: "d.1.01", permId: 9001, side: "BOT", quantity: 900, avgPrice: 4.5 });
+    rerender({ orders: makeOrders([...BASELINE, first]) });
+    expect(upsertToast).toHaveBeenCalledTimes(1);
+    const [groupKey, , firstMsg] = upsertToast.mock.calls[0] as [string, string, string];
+    expect(firstMsg).toContain("900x");
+
+    live.delete(groupKey); // operator dismissed the toast
+
+    const last = makeFill({ execId: "d.2.01", permId: 9001, side: "BOT", quantity: 100, avgPrice: 4.5 });
+    rerender({ orders: makeOrders([...BASELINE, first, last]) });
+    expect(upsertToast).toHaveBeenCalledTimes(2);
+    const [, , secondMsg] = upsertToast.mock.calls[1] as [string, string, string];
+    expect(secondMsg).toContain("100x");
+    expect(secondMsg).not.toContain("1000x");
+  });
+
+  it("does not merge a recycled orderId across different permIds (R-642)", () => {
+    const upsertToast = vi.fn();
+    const { rerender } = mountHook(upsertToast);
+    rerender({ orders: makeOrders(BASELINE) });
+
+    const morning = makeFill({ execId: "m.1.01", orderId: 42, permId: 111, quantity: 10 });
+    rerender({ orders: makeOrders([...BASELINE, morning]) });
+    const afternoon = makeFill({ execId: "m.2.01", orderId: 42, permId: 222, quantity: 5 });
+    rerender({ orders: makeOrders([...BASELINE, morning, afternoon]) });
+
+    expect(upsertToast).toHaveBeenCalledTimes(2);
+    const keys = upsertToast.mock.calls.map((call) => call[0] as string);
+    expect(new Set(keys).size).toBe(2);
+    const [, , secondMsg] = upsertToast.mock.calls[1] as [string, string, string];
+    expect(secondMsg).toContain("5x");
+    expect(secondMsg).not.toContain("15x");
+  });
+
   it("never toasts in demo mode", () => {
     vi.stubEnv("NEXT_PUBLIC_RADON_DEMO", "1");
     const upsertToast = vi.fn();

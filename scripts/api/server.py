@@ -658,6 +658,10 @@ async def _heartbeat_orders_sync_skip(
             f"orders sync shed for subprocess capacity ({streak} consecutive): {reason}"
         )
     else:
+        # R-658: a non-shed miss ends the shed run. Without this reset, sheds
+        # separated by an unrelated failure inherited the stale streak and
+        # escalated the NEXT shed straight to error.
+        _orders_sync_consecutive_sheds = 0
         if state is None:
             state = "error"
         extra["message"] = f"orders sync missed ({error_class}): {reason}"
@@ -713,6 +717,13 @@ async def _orders_sync_tick() -> None:
             gw = await check_ib_gateway()
         except Exception:
             logger.exception("orders-sync loop: gateway probe failed after pool disconnect")
+            # R-658: a raising probe used to return heartbeat-less, leaving
+            # the row stale in exactly the silence class this branch names.
+            await _heartbeat_orders_sync_skip(
+                "gateway probe raised after pool disconnect",
+                error_class="probe-failed",
+                state="error",
+            )
             return
         if gw.get("port_listening") and not gw.get("upstream_dead"):
             await _heartbeat_orders_sync_skip(
@@ -3124,8 +3135,9 @@ async def orders_replace(request: Request):
 
 
 _CANCEL_ALREADY_CONFIRMED_MARKERS = (
+    # REL-233 (R-638): bare "order canceled" dropped — that substring appears
+    # inside wrapped 5xx failure text and promoted real failures to Cancelled.
     "ib error 202",
-    "order canceled",  # IB spelling of error 202
     "already cancelled",
     "already apicancelled",
 )
@@ -3140,9 +3152,6 @@ def _cancel_already_confirmed(detail: object) -> bool:
     a second ticket on top of an execution.
     """
     if isinstance(detail, dict):
-        code = detail.get("ib_error_code")
-        if code == 202 or str(code) == "202":
-            return True
         text = str(
             detail.get("message")
             or detail.get("error")
@@ -3152,9 +3161,34 @@ def _cancel_already_confirmed(detail: object) -> bool:
     else:
         text = str(detail or "")
     lowered = text.lower()
+    # REL-233 (R-638): the filled check must precede the structured-202
+    # branch — a 202 alongside a fill must never be recorded as Cancelled.
     if "already filled" in lowered:
         return False
+    if isinstance(detail, dict):
+        code = detail.get("ib_error_code")
+        if code == 202 or str(code) == "202":
+            return True
     return any(marker in lowered for marker in _CANCEL_ALREADY_CONFIRMED_MARKERS)
+
+
+async def _cancel_confirmed_at_broker(target: dict) -> bool:
+    """Broker-state read behind a confirmed-looking cancel error (REL-233).
+
+    Gone from the working-order snapshot, or shown Cancelled with no fill,
+    confirms. Still working, or any executed quantity, refuses — the caller
+    must not place a full-size replacement on top of it. The snapshot read
+    is best-effort (R-145): an unreadable snapshot yields None and confirms.
+    """
+    payload = await _find_working_order(target.get("orderId"), target.get("permId"))
+    if payload is None:
+        return True
+    try:
+        if float(payload.get("filled") or 0) > 0:
+            return False
+    except (TypeError, ValueError):
+        pass
+    return str(payload.get("status") or "") in ("Cancelled", "ApiCancelled")
 
 
 async def _orders_replace_after_rate_reservation(cancel_orders, replacement):
@@ -3174,6 +3208,12 @@ async def _orders_replace_after_rate_reservation(cancel_orders, replacement):
                 result = await orders_cancel(_internal_json_request(target))
             except HTTPException as cancel_exc:
                 if not _cancel_already_confirmed(cancel_exc.detail):
+                    raise
+                # REL-233 (R-638): the Cancelled entry used to be fabricated
+                # from the request. Verify against the broker-state snapshot
+                # before placing the replacement: an order still working (or
+                # with any execution) must not be papered over as Cancelled.
+                if not await _cancel_confirmed_at_broker(target):
                     raise
                 cancelled.append({
                     "orderId": target.get("orderId"),
@@ -4955,7 +4995,11 @@ async def options_exposure(symbol: str, frequency: str = "eod"):
     except MenthorQDashboardBrowserUnavailable as exc:
         raise HTTPException(
             status_code=503,
-            detail="Options exposure browser runtime is unavailable",
+            detail=(
+                "Options exposure browser runtime is unavailable "
+                "(environment fault: chromium missing on this host; repair: "
+                "python -m playwright install --with-deps --only-shell chromium)"
+            ),
         ) from exc
     except MenthorQDashboardAuthEmbargoed as exc:
         raise HTTPException(

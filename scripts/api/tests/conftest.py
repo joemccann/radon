@@ -33,6 +33,27 @@ def _isolate_ib_2fa_lock_orphan_state(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_jwks_negative_cache():
+    """Reset auth's process-wide JWKS state around every test (REL-235).
+
+    `_jwks_negative` and `_jwks_inflight` are module globals with a 30 s TTL;
+    a kid cached in one test leaked a 401-from-cache into later tests (REL-210
+    lesson). The module can be imported as `api.auth` or `scripts.api.auth`
+    depending on the suite, so both module objects are cleared.
+    """
+    def _clear():
+        for name in ("api.auth", "scripts.api.auth"):
+            mod = sys.modules.get(name)
+            if mod is not None:
+                mod._jwks_negative.clear()
+                mod._jwks_inflight.clear()
+
+    _clear()
+    yield
+    _clear()
+
+
+@pytest.fixture(autouse=True)
 def _isolate_order_rate_budget():
     """Hand every test a fresh per-minute order budget.
 

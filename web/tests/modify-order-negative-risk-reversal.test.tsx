@@ -62,7 +62,9 @@ function priceData(overrides: Partial<PriceData> & { symbol: string }): PriceDat
     vega: null,
     impliedVol: null,
     undPrice: null,
-    timestamp: "2026-06-25T18:00:00.000Z",
+    // Fresh timestamp: the REL-236 quote-age gate disarms Modify on stale
+    // leg quotes; this suite pins signed-limit behavior, not freshness.
+    timestamp: new Date().toISOString(),
     ...overrides,
   };
 }

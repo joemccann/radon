@@ -13,6 +13,10 @@
 //   H — headlines    5,000/day (three persistent one-minute polling tabs)
 //   I — shell polls   60/min    (portfolio/orders/health/quote refreshes)
 //   J — shell polls   50,000/day (three persistent tabs through Globex)
+//   K — reads        1,000/day  (user-global daily ceiling over tier A;
+//                               per-resource A keys alone let one account
+//                               hold 100/hr per segment forever — R-652)
+//   L — expensive    50/day     (user-global daily ceiling over tier B)
 //
 // The limiter is constructed LAZILY from UPSTASH_REDIS_REST_URL / _TOKEN.
 // Production and demo deployments fail closed if it is unavailable; local
@@ -30,7 +34,8 @@ import {
 
 export type DemoRateTier =
   | "A" | "B" | "C" | "D" | "E"
-  | "F" | "G" | "H" | "I" | "J";
+  | "F" | "G" | "H" | "I" | "J"
+  | "K" | "L";
 
 export type DemoRateLimitResult = {
   success: boolean;
@@ -52,6 +57,8 @@ const TIER_CONFIG: Record<DemoRateTier, TierConfig> = {
   H: { limit: DEMO_HEADLINES_DAILY_LIMIT, window: "1 d" },
   I: { limit: 60, window: "1 m" },
   J: { limit: 50_000, window: "1 d" },
+  K: { limit: 1_000, window: "1 d" },
+  L: { limit: 50, window: "1 d" },
 };
 
 // Generous no-op result for builds without Upstash configured.

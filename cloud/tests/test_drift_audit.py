@@ -440,6 +440,8 @@ class TestRoleSkippedGatewayPlane:
         assert compose_checks == []
         assert known == [
             "role-skipped:ib-gateway-control",
+            "role-skipped:radon-docker-gw",
+            "role-skipped:ib-gateway-compose",
             "role-skipped:compose",
         ]
 

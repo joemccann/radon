@@ -45,7 +45,7 @@ async function readTrinFromDisk(): Promise<TimestampedRead<Record<string, unknow
 export const radonCapability = "read";
 
 export async function GET(): Promise<Response> {
-  const access = await requireRouteAccess();
+  const access = await requireRouteAccess(undefined, { rate: { key: "trin:route", limit: 20, windowMs: 60_000 }, durableRateTier: "A" });
   if (!access.ok) return access.response;
   const requestId = getRequestId();
   if (access.principal.kind === "demo") {

@@ -172,3 +172,28 @@ def test_route_maps_missing_browser_runtime_to_an_environment_detail(client):
     from monitor_daemon.handlers import menthorq_login_probe
 
     assert menthorq_login_probe._is_auth_failure(503, detail) is False
+
+
+def test_missing_browser_detail_carries_the_environment_repair(client):
+    """R-659: the escalated login-probe alarm relays this route detail
+    verbatim; it must name the environment fault and the repair so the
+    page is actionable without a shell session."""
+    from clients.menthorq_dashboard_client import MenthorQDashboardBrowserUnavailable
+
+    def _raise(*_args):
+        raise MenthorQDashboardBrowserUnavailable(
+            "dashboard browser runtime is unavailable"
+        )
+
+    provider = type("Provider", (), {"fetch_exposure": _raise})()
+
+    with patch("scripts.api.server.MenthorQDashboardClient", return_value=provider):
+        response = client.get("/options/exposure/SPX?frequency=eod")
+
+    detail = response.json()["detail"]
+    assert "environment fault" in detail.lower()
+    assert "playwright install" in detail.lower()
+
+    from monitor_daemon.handlers import menthorq_login_probe
+
+    assert menthorq_login_probe._is_auth_failure(503, detail) is False

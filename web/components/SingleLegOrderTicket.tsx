@@ -23,6 +23,7 @@ import {
   type PlaceOrderFeedback,
   type PlaceOrderTone,
 } from "@/lib/orders/placeOrderFeedback";
+import { quoteSubmitGate } from "@/lib/order/quoteSubmitGate";
 
 export type SingleLegOrderAction = "BUY" | "SELL";
 export type SingleLegOrderTif = "DAY" | "GTC";
@@ -70,6 +71,12 @@ export type SingleLegOrderTicketProps = {
   priceData?: PriceData | null;
   /** Instrument caption for the telemetry block (e.g. "AAPL $170 Call 2026-08-28"). */
   quoteLabel?: string;
+  /**
+   * R-641: live-feed connectivity from the caller (relay WS / IB status).
+   * `false` disarms submit outright; undefined means unknown and only the
+   * quote-age gate (from `priceData.timestamp`) applies.
+   */
+  feedConnected?: boolean;
   /** When true the quick buttons append the price (e.g. "BID 1.23"). */
   showQuickButtonPrices?: boolean;
   /** Whether the current form state is submittable. */
@@ -144,6 +151,7 @@ export default function SingleLegOrderTicket({
   ask,
   priceData,
   quoteLabel,
+  feedConnected,
   showQuickButtonPrices = false,
   isValid,
   limitPrice,
@@ -236,11 +244,16 @@ export default function SingleLegOrderTicket({
   });
   const formValid = isValid && typePriceValid && !isNaN(parsedQty) && parsedQty > 0;
   const riskState = useOrderRisk(riskInput, portfolio);
-  const canSubmit = singleLegSubmitPermitted(formValid, riskState);
+  // R-641: stale marks or a disconnected feed disarm submit at the wire.
+  const quoteGate = quoteSubmitGate({
+    quoteTimestamp: priceData?.timestamp ?? null,
+    feedConnected,
+  });
+  const canSubmit = singleLegSubmitPermitted(formValid, riskState) && quoteGate.open;
 
   const handlePlace = useCallback(async () => {
     if (!confirmStep) {
-      if (!formValid) return;
+      if (!formValid || !quoteGate.open) return;
       setConfirmStep(true);
       return;
     }
@@ -303,6 +316,7 @@ export default function SingleLegOrderTicket({
     suppressInlineSuccess,
     formValid,
     canSubmit,
+    quoteGate.open,
   ]);
 
   const quickLabel = (base: string, value: number | null) =>
@@ -456,6 +470,12 @@ export default function SingleLegOrderTicket({
         />
       )}
 
+      {!quoteGate.open && (
+        <div className="order-quote-gate-blocked" role="status" data-testid="quote-gate-blocked">
+          {quoteGate.reason}
+        </div>
+      )}
+
       <div className="order-submit">
         {confirmStep ? (
           <div className="order-confirm-row">
@@ -474,7 +494,7 @@ export default function SingleLegOrderTicket({
           <button
             className="btn-primary"
             onClick={handlePlace}
-            disabled={!formValid || loading}
+            disabled={!formValid || !quoteGate.open || loading}
             style={{ width: "100%" }}
           >
             Place Order

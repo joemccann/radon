@@ -642,3 +642,36 @@ class TestMissingBrowserRuntimeIsNotACredentialFault:
             MenthorQDashboardAuthError, match="authentication is unavailable"
         ):
             self._client(tmp_path)._bootstrap_dashboard_session()
+
+
+class TestBrowserRuntimeMissingNarrowing:
+    """R-659: _is_browser_runtime_missing was true for ANY ImportError, so an
+    unrelated dependency break (requests, pydantic) masqueraded as a missing
+    chromium and suppressed the credential-chain alarm."""
+
+    def test_unrelated_import_error_is_not_browser_missing(self):
+        from clients.menthorq_dashboard_client import _is_browser_runtime_missing
+
+        exc = ModuleNotFoundError("No module named 'requests'", name="requests")
+        assert _is_browser_runtime_missing(exc) is False
+        assert _is_browser_runtime_missing(ImportError("bad magic number")) is False
+
+    def test_playwright_import_error_is_browser_missing(self):
+        from clients.menthorq_dashboard_client import _is_browser_runtime_missing
+
+        exc = ModuleNotFoundError(
+            "No module named 'playwright'", name="playwright"
+        )
+        assert _is_browser_runtime_missing(exc) is True
+        sub = ModuleNotFoundError(
+            "No module named 'playwright.sync_api'", name="playwright.sync_api"
+        )
+        assert _is_browser_runtime_missing(sub) is True
+
+    def test_marker_matching_is_unchanged(self):
+        from clients.menthorq_dashboard_client import _is_browser_runtime_missing
+
+        assert _is_browser_runtime_missing(
+            RuntimeError("Executable doesn't exist at /ms-playwright")
+        ) is True
+        assert _is_browser_runtime_missing(RuntimeError("connection reset")) is False

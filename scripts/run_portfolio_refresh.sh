@@ -115,6 +115,8 @@ FASTAPI_URL="http://${FASTAPI_HOST}:${FASTAPI_PORT}/portfolio/sync"
 #             2026-08-14 17:00Z: POST /portfolio/sync 502 while /health 200)
 # A genuinely down FastAPI or a 4xx still fails after the budget and
 # pages through this unit; radon-api.service covers a dead listener.
+# REL-241: 3 curls at -m 30 + 2x8s sleeps = 106s worst case, inside the
+# unit's TimeoutStartSec=120 with margin (test_rel241_retry_budget.py).
 RETRY_LIMIT="${RADON_PORTFOLIO_REFRESH_RETRIES:-2}"
 RETRY_DELAY="${RADON_PORTFOLIO_REFRESH_RETRY_DELAY_SECS:-8}"
 
@@ -134,7 +136,7 @@ _retryable_portfolio_refresh() {
 echo "$(date): POST ${FASTAPI_URL}"
 attempt=0
 while :; do
-    HTTP_CODE=$(curl -fsS -X POST -m 35 -o /dev/null -w "%{http_code}" \
+    HTTP_CODE=$(curl -fsS -X POST -m 30 -o /dev/null -w "%{http_code}" \
         "${FASTAPI_URL}" 2>/tmp/portfolio-refresh.curl.err)
     CURL_EXIT=$?
     if [ "$CURL_EXIT" -eq 0 ] && [[ "$HTTP_CODE" == 2* ]]; then

@@ -314,9 +314,13 @@ def detect_structure_type(legs: list) -> Tuple[str, str]:
     # the same right; grouping already guarantees a common expiry. Extra long
     # legs can add premium at risk, but cannot create naked tail exposure.
     if opt_legs and len(opt_legs) == len(legs) and short_legs:
+        # Weight by multiplier: a mixed-multiplier combo (mini/adjusted leg)
+        # can have equal contract counts yet uncovered notional tail exposure.
+        def _units(l):
+            return float(l['position']) * float(l.get('multiplier') or 100)
         covered = all(
-            sum(max(0, l['position']) for l in opt_legs if l.get('right') == right)
-            >= sum(max(0, -l['position']) for l in opt_legs if l.get('right') == right)
+            sum(max(0.0, _units(l)) for l in opt_legs if l.get('right') == right)
+            >= sum(max(0.0, -_units(l)) for l in opt_legs if l.get('right') == right)
             for right in ('C', 'P')
         )
         if covered:
@@ -333,7 +337,9 @@ def _defined_option_combo_max_risk(legs: list, total_entry_cost: float) -> Optio
         return None
 
     min_pnl = float('inf')
-    for spot in [0.0, *strikes]:
+    # Probe above max(strikes) too: a negative upper-tail slope (e.g. from
+    # mixed multipliers) is invisible at the strike points themselves.
+    for spot in [0.0, *strikes, strikes[-1] * 2]:
         intrinsic_value = 0.0
         for leg in legs:
             strike = float(leg.get('strike', 0))

@@ -19,7 +19,13 @@ RUN python -m pip install --no-cache-dir \
     -r scripts/requirements-api.txt
 
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+# R-665: record what the unverified `playwright install` actually fetched.
+# The digest lives next to the browsers and is computed in the same layer,
+# so two images can be compared and an audit can pin the browser build.
 RUN python -m playwright install --with-deps --only-shell chromium \
+    && find /ms-playwright -type f -print0 | sort -z | xargs -0 sha256sum \
+       | sha256sum | cut -d' ' -f1 > /ms-playwright/.browsers.sha256 \
+    && echo "playwright browsers digest: $(cat /ms-playwright/.browsers.sha256)" \
     && chmod -R a+rX /ms-playwright \
     && rm -rf /var/lib/apt/lists/*
 

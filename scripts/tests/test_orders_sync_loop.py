@@ -395,3 +395,63 @@ async def test_orders_sync_loop_task_created_in_lifespan():
     assert "_orders_sync_loop" in created_tasks, (
         f"Expected '_orders_sync_loop' task; tasks created: {created_tasks}"
     )
+
+
+@pytest.mark.asyncio
+async def test_orders_sync_tick_gateway_probe_raise_heartbeats_error():
+    """R-658: a raising check_ib_gateway() used to return with NO heartbeat,
+    leaving the orders-sync row stale during the exact silence class the
+    pool-disconnected branch exists to name. Probe raise must still write
+    an error heartbeat row."""
+    srv._reset_orders_sync_shed_state()
+    captured, fake_hrana = _capture_hrana()
+
+    with patch.object(srv, "test_mode", False):
+        with patch.object(srv, "_is_orders_session_live_now_et", return_value=True):
+            with patch.object(srv, "_pool_has_any_connection", return_value=False):
+                with patch.object(
+                    srv,
+                    "check_ib_gateway",
+                    new=AsyncMock(side_effect=RuntimeError("probe exploded")),
+                ):
+                    with patch.object(
+                        srv, "_run_ib_script_with_recovery", new=AsyncMock()
+                    ) as mock_run:
+                        with patch.object(srv.db_http, "hrana_execute", new=fake_hrana):
+                            await srv._orders_sync_tick()
+
+    mock_run.assert_not_called()
+    assert captured, "expected an orders-sync heartbeat when the gateway probe raises"
+    sql, args = captured[0]
+    assert "INSERT INTO service_health" in sql
+    assert args[0] == "orders-sync"
+    assert args[1] == "error"
+    assert "probe-failed" in (args[4] or "")
+
+
+@pytest.mark.asyncio
+async def test_orders_sync_unrelated_failure_resets_shed_streak():
+    """R-658: the shed streak was reset only on success, so sheds separated
+    by an unrelated failure (pool-disconnected, sync-failed) kept the old
+    streak and escalated the NEXT shed straight to error. An unrelated
+    failure must reset the streak; the following shed starts at 1 (warn)."""
+    srv._reset_orders_sync_shed_state()
+    captured, fake_hrana = _capture_hrana()
+
+    with patch.object(srv.db_http, "hrana_execute", new=fake_hrana):
+        # Build a streak at the escalation threshold.
+        for _ in range(srv.ORDERS_SYNC_MAX_CONSECUTIVE_SHEDS):
+            await srv._heartbeat_orders_sync_skip("capacity", error_class="capacity-shed")
+        # Unrelated failure between sheds.
+        await srv._heartbeat_orders_sync_skip(
+            "ECONNREFUSED", error_class="sync-failed", state="error"
+        )
+        captured.clear()
+        # Next shed must NOT inherit the stale streak.
+        await srv._heartbeat_orders_sync_skip("capacity", error_class="capacity-shed")
+
+    assert captured
+    _, args = captured[0]
+    assert args[1] == "warn", "a post-reset shed must start a fresh streak, not escalate"
+    assert '"consecutive_sheds": 1' in (args[4] or "")
+    srv._reset_orders_sync_shed_state()
