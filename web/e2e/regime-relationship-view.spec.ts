@@ -233,4 +233,61 @@ test.describe("/regime page — RVOL/COR1M relationship view", () => {
     await expect(tooltip).toContainText("COR1M z-score");
     await expect(tooltip).toContainText("Divergence");
   });
+
+  test("shows a hover readout for the regime quadrant scatter", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 1800 });
+    await setupMocks(page);
+    await page.goto("/regime");
+
+    const chartShell = page.locator('[data-testid="regime-quadrant-chart-shell"]');
+    await expect(chartShell).toBeVisible();
+
+    const shellBox = await chartShell.boundingBox();
+    expect(shellBox).not.toBeNull();
+    if (!shellBox) {
+      throw new Error("Expected quadrant chart shell to have a bounding box");
+    }
+
+    await chartShell.dispatchEvent("mousemove", {
+      bubbles: true,
+      clientX: shellBox.x + shellBox.width * 0.62,
+      clientY: shellBox.y + shellBox.height * 0.42,
+    });
+
+    const tooltip = page.locator('[data-testid="regime-quadrant-hover-tooltip"]');
+    await expect(tooltip).toBeVisible();
+    await expect(tooltip.locator('[data-testid="regime-quadrant-hover-date"]')).toContainText("Mar");
+    await expect(tooltip).toContainText("Quadrant");
+    await expect(tooltip).toContainText("RVOL");
+    await expect(tooltip).toContainText("COR1M");
+  });
+
+  test("stacks relationship charts full width except the already-wide premium panel", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 1800 });
+    await setupMocks(page);
+    await page.goto("/regime");
+
+    const spread = page.locator('[data-testid="regime-spread-card"]');
+    const quadrant = page.locator('[data-testid="regime-quadrant-card"]');
+    const zscore = page.locator('[data-testid="regime-zscore-card"]');
+    await expect(spread).toBeVisible();
+    await expect(quadrant).toBeVisible();
+    await expect(zscore).toBeVisible();
+
+    const [spreadBox, quadrantBox, zscoreBox] = await Promise.all([
+      spread.boundingBox(),
+      quadrant.boundingBox(),
+      zscore.boundingBox(),
+    ]);
+
+    expect(spreadBox).not.toBeNull();
+    expect(quadrantBox).not.toBeNull();
+    expect(zscoreBox).not.toBeNull();
+    expect((quadrantBox?.y ?? 0)).toBeGreaterThan((spreadBox?.y ?? 0) + (spreadBox?.height ?? 0) - 24);
+    expect((zscoreBox?.y ?? 0)).toBeGreaterThan((quadrantBox?.y ?? 0) + (quadrantBox?.height ?? 0) - 24);
+    expect(Math.abs((spreadBox?.x ?? 0) - (quadrantBox?.x ?? 0))).toBeLessThan(20);
+    expect(Math.abs((quadrantBox?.x ?? 0) - (zscoreBox?.x ?? 0))).toBeLessThan(20);
+    expect(Math.abs((spreadBox?.width ?? 0) - (quadrantBox?.width ?? 0))).toBeLessThan(24);
+    expect(Math.abs((quadrantBox?.width ?? 0) - (zscoreBox?.width ?? 0))).toBeLessThan(24);
+  });
 });

@@ -105,8 +105,8 @@ export const SECTION_TOOLTIPS: Record<string, string> = {
     "and COR1M > 60 (panic herding). All three must fire to trigger.",
 
   "20-SESSION HISTORY":
-    "Left chart tracks VIX and VVIX across the last 20 trading sessions so you can see whether volatility and vol-of-vol are expanding together or cooling off. " +
-    "Right chart compares realized volatility with COR1M over the same window to show whether actual market turbulence is being joined by tighter stock-to-stock correlation. " +
+    "The VIX / VVIX chart tracks VIX and VVIX across the last 20 trading sessions so you can see whether volatility and vol-of-vol are expanding together or cooling off. " +
+    "The realized vol / COR1M chart compares realized volatility with COR1M over the same window to show whether actual market turbulence is being joined by tighter stock-to-stock correlation. " +
     "The latest point is the most recent session in view, and each point shows that session's reading.",
 
   "RELATIONSHIP VIEW":
