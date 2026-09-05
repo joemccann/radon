@@ -17,7 +17,7 @@ Handlers that run 24/7 (flex-token-check, journal-sync via the rehydrate-style i
 ## Handler Conventions
 
 - **Client ID:** every handler uses `client_id="auto"` via `scripts/clients/ib_client.py:_connect_auto_allocate`. Prior hardcoded values in the 20–49 range hit "client id already in use" after a single CLOSE_WAIT. Don't reintroduce.
-- **Heartbeat on every cycle:** even on `nochange` short-circuit, the handler must `record_service_health(<name>, "ok", ...)`. A stale error row latches as the banner state forever if you don't. See `feedback_service_health_heartbeat.md`.
+- **Heartbeat on every cycle:** even on `nochange` short-circuit, the handler must `record_service_health(<name>, "ok", ...)`. A stale error row latches as the banner state forever if you don't. See `feedback_service_health_heartbeat.md`. `"ok"` is for a successful run or a genuine no-op ONLY — a failed run or a missed tick records `warn`/`error`, never `ok` (31dbb954): heartbeating `ok` over a failure hides the fault from the banner exactly as effectively as not heartbeating at all.
 - **Soft failures don't burn the daily slot:** daily handlers must raise on retryable errors so `BaseHandler` doesn't latch `last_run`. Use `record_soft_failure` for short embargo retries (~5 min). See `feedback_dont_latch_last_run_on_soft_failure.md`.
 
 ---
