@@ -15,6 +15,7 @@ test.describe("Copy agent prompt and developer recipes", () => {
     await page.getByRole("button", { name: "View prompt" }).first().click();
     await expect(page.getByRole("dialog", { name: "Agent prompt" })).toBeVisible();
     await expect(page.getByRole("dialog")).toContainText("# Radon Terminal - Crash Risk Index");
+    await expect(page.getByRole("dialog")).toContainText("## Hard nos");
     await page.getByRole("button", { name: "Close" }).click();
 
     await page.goto("/developers");
