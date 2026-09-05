@@ -85,6 +85,48 @@ def test_the_five_delta_specs_are_curated() -> None:
     missing = sorted(expected - _curated())
     assert not missing, f"dropped from the curated CI list again: {missing}"
 
+# ── T-447: site/e2e has NO CI Playwright job at all ──────────────────────────
+#
+# The web guard above compares web/e2e to the ci.yml curated list. site/e2e has
+# no CI job that runs it, so every site spec is a hold-out by construction —
+# but until site/e2e/ci-curation-ledger.txt existed, nothing recorded that, and
+# agent-prompt-recipes.spec.ts / libraries-fx-pack.spec.ts landed reachable by
+# zero CI jobs invisibly. This guard reds when a site spec is missing from the
+# site ledger (or lingers after deletion), so future additions cannot be
+# silently invisible.
+
+_SITE_E2E = _ROOT / "site" / "e2e"
+_SITE_LEDGER = _SITE_E2E / "ci-curation-ledger.txt"
+
+
+def _site_ledger() -> set[str]:
+    return {
+        line.strip()
+        for line in _SITE_LEDGER.read_text().splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+
+
+def _site_tree() -> set[str]:
+    return {p.name for p in _SITE_E2E.glob("*.spec.ts")}
+
+
+def test_every_site_spec_is_in_the_site_ledger() -> None:
+    missing = sorted(_site_tree() - _site_ledger())
+    assert not missing, (
+        f"These site/e2e specs are not in site/e2e/ci-curation-ledger.txt: {missing}. "
+        "NO CI job runs site Playwright, so a spec absent from the ledger has "
+        "zero CI browser evidence and nothing says why. Add it to the ledger "
+        "with a dated REVIEWED entry, or add a verified-green site Playwright "
+        "CI job and curate it there."
+    )
+
+
+def test_site_ledger_has_no_stale_entries() -> None:
+    gone = sorted(_site_ledger() - _site_tree())
+    assert not gone, f"site/e2e/ci-curation-ledger.txt names specs that no longer exist: {gone}"
+
+
 # ── T-438: a CHANGED held-out spec needs evidence, not just a classification ──
 #
 # The guard above asks whether every spec is CLASSIFIED. It never asked whether

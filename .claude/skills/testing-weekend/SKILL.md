@@ -1005,3 +1005,13 @@ how this loop improves as the codebase grows.
   cycle touches; grep the branch's new tests for the entry point and confirm
   each one redirects the paths it will reach. That sweep is what proved this was
   the only unguarded `run_cycle` on the branch.
+- **2026-09-05 (audit): when the delta touches `package.json`/`bun.lock`, run the
+  dependency install BEFORE the vitest gate.** A new `thinking-orbs` dep merged
+  in-range was absent from this clone's `node_modules`, so the first vitest round
+  read 13 failed + 34 files failed at import — one cause, zero repo defects, a
+  full round of attribution lost. Pre-flight: `git diff <base>..HEAD --name-only
+  | grep -E 'package.json|bun.lock'` → if it hits, `bun install --frozen-lockfile`
+  in each affected project first. Also: `bun install` in `site/` repeatedly died
+  extracting the `next` tarball on this host; `npm install --prefix site` worked —
+  and it rewrites `package-lock.json` via bun's earlier migration, so
+  `git checkout -- site/package-lock.json` after.
