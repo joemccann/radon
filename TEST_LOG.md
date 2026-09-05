@@ -650,3 +650,10 @@ Closing gates ×3 (serial, detached script; reliability loop's cycle concurrent,
 | Collection union | CLEAN ×3 (pytest 595=595, cloud 49=49, all 41 new test files in a CI path set) |
 | Tree after gates | clean ×3 (T-275 sweep) |
 | Gate enforcement | `deploy:` identical base→HEAD; thresholds unmoved; 0 new skips; `main` still has no `required_status_checks` (T-222) |
+
+## Remediation 2026-09-05 (testing/2026-09-05)
+
+| Task | Status | Commits | Evidence |
+|---|---|---|---|
+| T-440 | DONE | (this commit) | New `web/tests/layout-authless-bypass.test.tsx`: real RootLayout, all 8 flag/token/header combos + 2 edge cells. Red per conjunction term via reverted layout mutations (drop flag term 2F/8P, drop token term 1F/9P, drop header term 2F/8P — `expected false to be true`). Green 10/10 at HEAD, no source change. Blast radius 4 files 22 passed. |
+| T-445 | DONE | (this commit) | New `web/tests/setup-complete-unknown-service-offline.test.ts`: real route handler with FastAPI probe rejecting — unknown-but-pattern-valid id → 400, zero credential-store PUTs. HEAD already fail-closed; red via fail-open mutation (`expected 200 to be 400`), reverted. Green 2/2. |
