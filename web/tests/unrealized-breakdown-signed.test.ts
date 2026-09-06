@@ -208,6 +208,72 @@ describe("computeUnrealizedBreakdown — signed entry and market value", () => {
     expect(rows[0].pnlPct).toBeCloseTo((448_930 - 468_505.27) / 468_505.27 * 100, 6);
   });
 
+  // T-315 blended-basis combo: measurable per-leg P&L, unpublishable entry.
+  // Kept out of makePortfolio so each test opts in explicitly.
+  const blendedPos: PortfolioPosition = {
+    id: 9,
+    ticker: "NVDA",
+    structure: "Vertical (C$170/C$180)",
+    structure_type: "Vertical",
+    risk_profile: "defined",
+    expiry: "2026-10-16",
+    contracts: 10,
+    direction: "LONG",
+    entry_cost: null,
+    basis_source: "mixed",
+    max_risk: null,
+    market_value: 9_000,
+    legs: [
+      {
+        direction: "LONG",
+        contracts: 10,
+        type: "Call",
+        strike: 170,
+        entry_cost: 10_000,
+        avg_cost: 10,
+        market_price: 12,
+        market_value: 12_000,
+      },
+      {
+        direction: "SHORT",
+        contracts: 10,
+        type: "Call",
+        strike: 180,
+        entry_cost: 4_000,
+        avg_cost: 4,
+        market_price: 3,
+        market_value: 3_000,
+      },
+    ],
+    kelly_optimal: null,
+    target: null,
+    stop: null,
+    entry_date: "2026-09-01",
+  } as PortfolioPosition;
+
+  test("blended-basis combo: col1 renders '---' and the eye-check does not NaN", () => {
+    const rows = computeUnrealizedBreakdown(makePortfolio([blendedPos]));
+    expect(rows).toHaveLength(1);
+    const row = rows[0];
+
+    // mv: +12000 - 3000 = 9000; leg basis: +10000 - 4000 = 6000; pnl = 3000
+    expect(row.col1).toBe("---");
+    expect(row.pnl).toBeCloseTo(3_000, 2);
+    expect(row.col2).toBe("+$9,000.00");
+
+    // Guarded eye-check helper: "---" must yield null, never NaN, so the
+    // col2 − col1 reconciliation is skipped (not silently NaN-passed) for
+    // entry-less rows.
+    const parseSigned = (s: string): number | null => {
+      const n = Number(s.replace(/[$,+]/g, ""));
+      return Number.isFinite(n) ? n : null;
+    };
+    expect(Number.isNaN(Number("---".replace(/[$,+]/g, "")))).toBe(true); // raw form NaNs
+    expect(parseSigned(row.col1)).toBeNull(); // guarded form does not
+    // The identity is still verifiable via the legs' P&L basis:
+    expect(parseSigned(row.col2)! - 6_000).toBeCloseTo(row.pnl, 2);
+  });
+
   test("sumUnrealizedBreakdown matches row P&L total", () => {
     const positions: PortfolioPosition[] = [
       {
@@ -268,12 +334,23 @@ describe("computeUnrealizedBreakdown — signed entry and market value", () => {
         stop: null,
         entry_date: "2026-07-09",
       },
+      blendedPos,
     ];
     const portfolio = makePortfolio(positions);
     const rows = computeUnrealizedBreakdown(portfolio);
+    expect(rows).toHaveLength(3); // blended combo keeps its row
     const rowSum = rows.reduce((s, r) => s + r.pnl, 0);
     expect(sumUnrealizedBreakdown(portfolio)).toBeCloseTo(rowSum, 2);
-    expect(rowSum).toBeCloseTo((3_150 - 44_383.38) + (40_040 - 40_076.51), 2);
+    // Independent expectation, not derived from either function under test:
+    // the blended combo's measured leg P&L (+3000) must be in BOTH totals.
+    expect(rowSum).toBeCloseTo(
+      (3_150 - 44_383.38) + (40_040 - 40_076.51) + 3_000,
+      2,
+    );
+    expect(sumUnrealizedBreakdown(portfolio)).toBeCloseTo(
+      (3_150 - 44_383.38) + (40_040 - 40_076.51) + 3_000,
+      2,
+    );
     expect(rows[0].pnlPct).toBeCloseTo((3_150 - 44_383.38) / 44_383.38 * 100, 6);
   });
 });
