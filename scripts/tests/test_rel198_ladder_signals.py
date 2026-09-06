@@ -89,7 +89,7 @@ class TestQuoteInACrashIsNotQuota:
         deep in its transcript (not in the CLI's final lines) is a crash,
         not quota exhaustion."""
         sys.path.insert(0, str(SCRIPTS / "tests"))
-        from test_weekend_model_ladder import _clone, _stub_bin
+        from _loop_harness import _clone, _stub_bin
 
         wrapper = LOOPS["reliability"]
         models_log = tmp_path / "models.txt"
