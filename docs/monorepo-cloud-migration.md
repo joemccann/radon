@@ -162,6 +162,10 @@ evidence; the next successful deploy performs bounded cleanup.
 
 ## Live cutover notes (2026-07-11)
 
+> **Completed; retained for rollback.** The cutover finished 2026-07-11.
+> The checklist below is historical record plus the reference sequence for a
+> rollback or host rebuild — it is not an active procedure to run.
+
 ### Order of operations that worked
 
 1. Deploy a readiness-gated release so `cloud/` and schema-v2 `radon-health` land (broker health advisory).

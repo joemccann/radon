@@ -80,7 +80,10 @@ refusal that the direct render covers emits the countable journal line
 `[preflight] compose-render: shim refused (exit N), direct render covered`
 (R-647/REL-242: the fallback deliberately does not abort the deploy, because
 the shim's sudoers verb arrives with the release being promoted). A compose
-body that fails both paths still fails preflight. Note the
+body that fails both paths still fails preflight: preferring one path
+would deadlock the deploy across the sudoers-verb / docker-group transition,
+since whichever mechanism the current host lacks would abort the promote that
+installs it (`deploy.sh:204-231`, bd7d7e4c). Note the
 narrowing: preflight now renders the INSTALLED compose body, not the incoming
 release's. The incoming body is gated at install time instead, by provenance
 (git blob at the deployed commit) plus `compose_body_is_valid`.

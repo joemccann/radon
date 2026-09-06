@@ -233,3 +233,27 @@ def test_e2e_apt_provisioning_is_bounded() -> None:
             assert "Acquire::Retries=" in invocation, invocation
             assert "Acquire::http::Timeout=" in invocation, invocation
         assert step.get("timeout-minutes"), step
+
+
+def test_e2e_starts_after_secret_scan_to_stay_under_the_job_slot_cap() -> None:
+    """CIP-009: the gate fan-out must not exceed the 20-job concurrency cap.
+
+    2026-09-06: ~25 jobs launched at the gate window against the plan's
+    20 concurrent-job cap, so one pytest gate shard queued ~37s for a slot
+    and the LATE START, not shard work, set the pytest gate wall
+    (runs 34009244091, 33983869958). With the shard merges the t=0 fan-out
+    is 20 exactly only if the non-gating Playwright job defers behind
+    secret-scan (the app-images pattern), freeing its slot for a gate
+    shard. The job must stay non-gating for deploy.
+    """
+    jobs = _workflow()["jobs"]
+    e2e = jobs["e2e-financial-smoke"]
+    assert "secret-scan" in e2e["needs"], (
+        "the non-gating e2e job must defer behind secret-scan so the t=0 "
+        "gate fan-out stays at the 20-job concurrency cap"
+    )
+    assert "changes" in e2e["needs"]
+    assert "e2e-financial-smoke" not in jobs["deploy"]["needs"], (
+        "the Playwright smoke stays non-gating; deferral must never make "
+        "it a deploy dependency"
+    )
