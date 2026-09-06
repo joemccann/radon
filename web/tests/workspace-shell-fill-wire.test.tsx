@@ -17,7 +17,7 @@
  * exactly one POST /api/portfolio on the wire.
  */
 import React from "react";
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExecutedOrder, OrderContract, OrdersData, PortfolioData } from "@/lib/types";
 import { SEEN_STORAGE_KEY } from "@/lib/fillToasts";
@@ -220,5 +220,27 @@ describe("WorkspaceShell fill-driven portfolio refresh (wire)", () => {
     await shell.pushOrders(makeOrders(BASELINE));
     await shell.pushOrders(makeOrders([...BASELINE, makeFill("c.7.01", 900_901)]));
     expect(portfolioPosts()).toHaveLength(0);
+  });
+});
+
+describe("WorkspaceShell dismissed fill toast forgets its running total (T-465 / R-642)", () => {
+  it("shows the next fill's own quantity, not the cumulative total, after dismissal", async () => {
+    const shell = await renderShell();
+    await shell.pushOrders(makeOrders(BASELINE));
+
+    // First fill for the group: toast reads its quantity.
+    await shell.pushOrders(makeOrders([...BASELINE, makeFill("d.1.01", 900_950, 2)]));
+    expect(screen.getByText("FILLED · BUY 2x VIX $30C @ $0.61")).toBeTruthy();
+
+    // Operator dismisses the toast (real ToastContainer, real dismissToast).
+    fireEvent.click(screen.getByLabelText("Dismiss"));
+
+    // Next fill for the SAME order (same permId): a fresh toast must read 3x,
+    // not the 5x cumulative total presented as a new fill.
+    await shell.pushOrders(
+      makeOrders([...BASELINE, makeFill("d.1.01", 900_950, 2), makeFill("d.2.01", 900_950, 3)]),
+    );
+    expect(screen.getByText("FILLED · BUY 3x VIX $30C @ $0.61")).toBeTruthy();
+    expect(screen.queryByText("FILLED · BUY 5x VIX $30C @ $0.61")).toBeNull();
   });
 });
