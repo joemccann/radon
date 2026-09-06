@@ -200,6 +200,13 @@ class TestRouting:
         )
         assert "lb_try_duration" not in block
 
+    def test_mcp_site_does_not_open_a_new_caddy_log_file(self, caddy_dir):
+        """Root `caddy validate` created /var/log/caddy/mcp.log as root:root.
+        The caddy user then could not start (8628705d took app.radon.run
+        down). Reuse an existing caddy-owned log or none."""
+        block = site_block(read_caddyfile(caddy_dir), "http://mcp.radon.run")
+        assert "/var/log/caddy/mcp.log" not in block
+
     def test_mcp_root_rewrites_to_mcp_path(self, caddy_dir):
         """https://mcp.radon.run (no path) is a valid connector URL."""
         block = site_block(read_caddyfile(caddy_dir), "http://mcp.radon.run")
