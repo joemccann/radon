@@ -164,16 +164,20 @@ class TestRouting:
         """Issue #232 dedicated host: mcp.radon.run is its own site, not a
         path on the app.radon.run catch-all (which would leak Next.js)."""
         content = strip_comments(read_caddyfile(caddy_dir))
-        assert re.search(r"(?m)^mcp\.radon\.run\s*\{", content)
+        assert re.search(r"(?m)^http://mcp\.radon\.run\s*\{", content)
+        assert not re.search(r"(?m)^mcp\.radon\.run\s*\{", content), (
+            "HTTPS mcp.radon.run must not exist until HTTP is live; load-time "
+            "ACME hangs reload and rolls the candidate back"
+        )
 
     def test_mcp_site_proxies_only_to_the_mcp_process(self, caddy_dir):
-        block = site_block(read_caddyfile(caddy_dir), "mcp.radon.run")
+        block = site_block(read_caddyfile(caddy_dir), "http://mcp.radon.run")
         assert "127.0.0.1:8334" in block
         assert "127.0.0.1:8321" not in block, "mcp.radon.run must never proxy to FastAPI"
         assert "127.0.0.1:3000" not in block, "mcp.radon.run must never proxy to Next.js"
 
     def test_mcp_site_keeps_the_path_prefix(self, caddy_dir):
-        block = site_block(read_caddyfile(caddy_dir), "mcp.radon.run")
+        block = site_block(read_caddyfile(caddy_dir), "http://mcp.radon.run")
         match = re.search(r"(handle_path|handle)\s+/mcp\*", block)
         assert match is not None, "mcp.radon.run must handle /mcp*"
         assert match.group(1) == "handle", (
@@ -182,7 +186,7 @@ class TestRouting:
 
     def test_mcp_site_bounds_the_request_body(self, caddy_dir):
         block = handle_block(
-            site_block(read_caddyfile(caddy_dir), "mcp.radon.run"), "/mcp*"
+            site_block(read_caddyfile(caddy_dir), "http://mcp.radon.run"), "/mcp*"
         )
         match = re.search(r"request_body\s*\{[^}]*max_size\s+(\d+)(KB|MB)", block)
         assert match, "mcp.radon.run /mcp* must set request_body { max_size ... }"
@@ -192,34 +196,17 @@ class TestRouting:
 
     def test_mcp_site_has_no_retry_loop(self, caddy_dir):
         block = reverse_proxy_block(
-            site_block(read_caddyfile(caddy_dir), "mcp.radon.run"), "127.0.0.1:8334"
+            site_block(read_caddyfile(caddy_dir), "http://mcp.radon.run"), "127.0.0.1:8334"
         )
         assert "lb_try_duration" not in block
 
     def test_mcp_root_rewrites_to_mcp_path(self, caddy_dir):
         """https://mcp.radon.run (no path) is a valid connector URL."""
-        block = site_block(read_caddyfile(caddy_dir), "mcp.radon.run")
+        block = site_block(read_caddyfile(caddy_dir), "http://mcp.radon.run")
         assert re.search(r"rewrite\s+\*\s+/mcp\b", block), (
             "mcp.radon.run / must rewrite to /mcp so the hostname itself is "
             "the Streamable HTTP endpoint"
         )
-
-    def test_mcp_site_uses_on_demand_tls(self, caddy_dir):
-        """Issuing the first cert during `systemctl reload caddy` hangs:
-        the still-running old process 308s HTTP-01, ACME never completes,
-        publish-caddy TERMs the reload (45s then 180s) and rolls back.
-        On-demand obtains the cert on the first handshake after reload."""
-        block = site_block(read_caddyfile(caddy_dir), "mcp.radon.run")
-        assert re.search(r"tls\s*\{[^}]*on_demand", block, re.DOTALL), block
-
-    def test_on_demand_tls_ask_is_loopback_and_mcp_only(self, caddy_dir):
-        content = strip_comments(read_caddyfile(caddy_dir))
-        ask = re.search(
-            r"(?m)^\s*ask\s+(http://127\.0\.0\.1:8330/caddy-tls-ask)\s*$",
-            content,
-        )
-        assert ask, "on_demand_tls ask must hit radon-health, already listening during reload"
-        assert "8335" not in content, "ask must not be served by the Caddy process being reloaded"
 
     def test_edge_health_status_maps_dial_errors_to_200(self, caddy_dir):
         content = read_caddyfile(caddy_dir)
@@ -248,15 +235,11 @@ class TestRetiredBetaStack:
 
 
 class TestTLS:
-    def test_explicit_tls_is_only_on_demand_for_mcp_host(self, caddy_dir):
-        """app.radon.run and media.radon.run keep automatic HTTPS at load.
-        mcp.radon.run is the only site that opts into on_demand, because a
-        first-hostname cert at reload hangs behind the still-running old
-        process 308ing HTTP-01."""
-        media = site_block(read_caddyfile(caddy_dir), "media.radon.run")
-        assert not re.search(r"\btls\b", media)
-        mcp = site_block(read_caddyfile(caddy_dir), "mcp.radon.run")
-        assert re.search(r"tls\s*\{[^}]*on_demand", mcp, re.DOTALL)
+    def test_no_explicit_tls_config(self, caddy_dir):
+        content = read_caddyfile(caddy_dir)
+        assert not re.search(r"^\s*tls\b", content, re.MULTILINE), (
+            "No explicit TLS config needed; Caddy auto-provisions certificates"
+        )
 
 
 class TestReverseProxyTargets:
