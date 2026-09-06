@@ -1024,3 +1024,45 @@ python/web gate co-wall then the deploy floor (CIP-004).
 - Residual after CIP-009: pytest gate work-wall (~103s scripts-rs, CIP-005)
   then the 74-96s deploy floor (CIP-004, DEFERRED).
 - Outcome for tonight: audit `DONE`; CIP-009 handed to remediate.
+
+### 2026-09-06 - remediate - branch `ci-performance/2026-09-06`
+
+- **CIP-009 IMPLEMENTED.** Gate fan-out cut from ~25 jobs to 20 at t=0 so
+  no gate shard queues past the 20-slot concurrency cap:
+  (a) cloud shard `mz` (28s) merged into `al` (44s; glob widened to
+  `test_[a-z]*.py`, edge omit unchanged, xdist loadfile unchanged);
+  (b) pytest shard `rest-api` (39s, `scripts/api/tests`) merged into
+  `rest` (40s), lead modules kept first for loadfile;
+  (c) non-gating `e2e-financial-smoke` deferred behind `secret-scan`
+  (the app-images pattern), freeing its t=0 slot for a gate shard while
+  staying OUT of the deploy `needs`.
+- Changed files: `.github/workflows/ci.yml`,
+  `scripts/tests/test_ci_deploy_concurrency.py` (shard-list contracts
+  updated red->green), `scripts/tests/test_ci_gate_integrity.py`
+  (`test_e2e_starts_after_secret_scan_to_stay_under_the_job_slot_cap`,
+  added first, red against the old `needs`).
+- Red/green: 2 contract tests red pre-edit, new e2e test red pre-edit;
+  full workflow contract set green after: 80 passed in 8.37s
+  (`test_ci_deploy_concurrency` + `test_ci_gate_integrity` +
+  `test_path_filter`). YAML parse clean.
+- Merged-shard proof: rest collects 1324 tests in one invocation (no
+  conftest clash; `scripts/api/tests` and `scripts/tests` are proper
+  packages); local run 1228 passed + 96 failed, the identical 96 fail in
+  `scripts/api/tests` alone on clean tree (macOS platform baseline,
+  diagnostic only — CI runs Linux). Cloud al merged glob collects
+  1767/1797 with edge's 30 deselected. Shard-union set-equality contract
+  green.
+- Safety: no test, spec, gate, coverage, provenance, health,
+  stability-window, or rollback surface removed; deploy `needs` closure
+  unchanged; e2e stays non-gating and still runs on every web delta;
+  py-coverage combine is pattern-globbed (`pytest-coverage-*`), count-free.
+- Expected: ~30-37s off mixed p50 (~256s -> ~220s); runner minutes
+  slightly reduced (two fewer job setups per run). Revert trigger: any
+  gate shard start-delay >10s vs peers, or merged-shard wall >103s
+  (current scripts-rs work-wall), across the next five mixed runs.
+- Validation: late-start delta and merged shard walls over the next five
+  post-merge mixed `main` runs. Outcome: `VALIDATING`.
+- CIP-007 stays `VALIDATING` (1/5 samples), CIP-005 `VALIDATING`,
+  CIP-004/006/008 `DEFERRED`.
+- Residual bottleneck: pytest gate work-wall (~103s scripts-rs, CIP-005)
+  then the 74-96s deploy floor (CIP-004).
