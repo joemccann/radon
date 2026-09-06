@@ -217,10 +217,12 @@ def test_ci_runs_cloud_infra_pytest() -> None:
 def test_caddy_wall_clock_tests_have_their_own_shard() -> None:
     cloud = _workflow()["jobs"]["cloud-tests"]
     matrix = cloud["strategy"]["matrix"]
-    assert [str(shard) for shard in matrix["shard"]] == ["al", "edge", "mz"]
+    # CIP-009: al and mz merged — the ~25-job gate fan-out queued one shard
+    # ~37s past the 20-slot concurrency cap, and the late start set the wall.
+    assert [str(shard) for shard in matrix["shard"]] == ["al", "edge"]
     rows = {str(row["shard"]): str(row["paths"]) for row in matrix["include"]}
     assert rows["edge"] == "cloud/tests/test_caddy_edge_timeouts.py"
-    assert rows["al"] == "cloud/tests/test_[a-l]*.py"
+    assert rows["al"] == "cloud/tests/test_[a-z]*.py"
     omits = {
         str(row["shard"]): str(row.get("omit", ""))
         for row in matrix["include"]
@@ -316,7 +318,6 @@ def test_pytest_shards_then_combines_coverage_ratchet() -> None:
         "scripts-npsz",
         "scripts-rs",
         "scripts-daemons",
-        "rest-api",
         "rest",
     ]
     assert "matrix.shard" in py_tests["concurrency"]["group"]
@@ -783,6 +784,5 @@ def test_cloud_shards_parallelise_except_the_wall_clock_edge_shard() -> None:
     cloud = _workflow()["jobs"]["cloud-tests"]
     rows = {str(row["shard"]): row for row in cloud["strategy"]["matrix"]["include"]}
     assert rows["al"]["xdist"] == "-n auto --dist loadfile"
-    assert rows["mz"]["xdist"] == "-n auto --dist loadfile"
     assert rows["edge"]["xdist"] == "", "the edge shard is wall-clock; keep it serial"
     assert "matrix.xdist" in _job_commands(cloud)
