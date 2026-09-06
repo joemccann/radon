@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+import re
 import shlex
 import subprocess
 import sys
@@ -569,6 +570,25 @@ def test_caddy_validation_output_is_not_relayed_to_the_unprivileged_caller(tmp_p
         "caddy validate output reached the unprivileged caller, leaking the "
         "content of whatever file the candidate imported"
     )
+
+
+def test_caddy_reload_timeout_outlasts_first_hostname_cert():
+    """Adding mcp.radon.run obtains a Let's Encrypt cert during reload.
+
+    publish-caddy TERMs `systemctl reload caddy` at this bound. 45s was
+    shorter than ACME: deploy db69ccb4 rolled the candidate back
+    (`caddy candidate reload failed`) and TLS on the dedicated host stayed
+    internal-error. The bound must outlast a first-hostname issuance.
+    """
+    text = ROOT_HELPER.read_text(encoding="utf-8")
+    start = text.index("reload_caddy() {")
+    body = text[start : text.index("\n}", start) + 2]
+    match = re.search(
+        r'kill-after=2s\s+(\d+)s\s+"\$SYSTEMCTL"\s+reload caddy',
+        body,
+    )
+    assert match, body
+    assert int(match.group(1)) >= 120, match.group(1)
 
 
 if __name__ == "__main__":  # pragma: no cover - convenience only
