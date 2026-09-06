@@ -96,6 +96,7 @@ export function OrderConfirmSummary({
     return (
       <div
         className={`order-confirm-summary order-confirm-summary-pending ${className}`.trim()}
+        data-testid="order-confirm-summary"
         data-coverage-status={summary.coverageStatus}
         role="status"
       >
@@ -129,6 +130,7 @@ export function OrderConfirmSummary({
   return (
     <div
       className={`order-confirm-summary ${variantClass} ${className}`.trim()}
+      data-testid="order-confirm-summary"
       data-undefined-risk={hasUndefinedRisk ? "true" : undefined}
     >
       <div className="order-confirm-description">{summary.description}</div>
