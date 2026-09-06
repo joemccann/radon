@@ -45,8 +45,8 @@ class TestControlSignalHygiene:
         body = _uncommented(LOOPS[loop])
         start = body.index("begin_phase()")
         fn = body[start : body.index("\n}", start)]
-        assert "ALL_MODELS_EXHAUSTED=0" in fn
-        assert "MODEL_INDEX" not in fn, "rung carry must be preserved"
+        assert "ALL_PROVIDERS_EXHAUSTED=0" in fn
+        assert "RUNG_INDEX" not in fn, "rung carry must be preserved"
 
     def test_kill_round_group_runs_before_the_pid_is_cleared(self, loop):
         """R-532: `ROUND_PID=\"\"` before `kill_round_group` made orphan
@@ -70,6 +70,10 @@ class TestControlSignalHygiene:
         fn = body[start : body.index("\n}", start)]
         assert re.search(r"tail -n \d+", fn), "no final-N-lines bound"
         assert "grep -v" in fn, "the wrapper's own marker lines are not excluded"
+        # 2026-09-06: the patterns themselves moved into quota_regex() so each
+        # provider carries its own cap signature. The scoping must not have
+        # moved with them.
+        assert "quota_regex" in fn, "the detector lost its per-provider patterns"
 
     def test_managed_settings_is_in_the_reroute_scan(self, loop):
         """R-536 (half): a managed-settings.json apiKeyHelper reaches the
@@ -91,7 +95,10 @@ class TestQuoteInACrashIsNotQuota:
         sys.path.insert(0, str(SCRIPTS / "tests"))
         from _loop_harness import _clone, _stub_bin
 
-        wrapper = LOOPS["reliability"]
+        # 2026-09-06: the reliability loop left the claude.ai subscription;
+        # the security loop is the claude-exclusive one now, so the R-530
+        # regression is asserted there.
+        wrapper = LOOPS["security"]
         models_log = tmp_path / "models.txt"
         gh_log = tmp_path / "gh.log"
         exhausted = tmp_path / "exhausted.txt"

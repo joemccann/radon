@@ -94,6 +94,12 @@ def _clone(tmp_path: Path, wrapper: Path) -> Path:
         (repo / "scripts" / helper).write_text("# stub\n", encoding="utf-8")
     for marker in MARKERS:
         (repo / marker).write_text("", encoding="utf-8")
+    # The four fallback loops drive codex and grok from a rendered prompt file
+    # under .claude/portable-prompts; a clone without them has no usable rung.
+    prompts = repo / ".claude" / "portable-prompts"
+    prompts.mkdir(parents=True, exist_ok=True)
+    for src in (REPO / ".claude" / "portable-prompts").glob("*.md"):
+        shutil.copy2(src, prompts / src.name)
     return repo
 
 
@@ -171,6 +177,14 @@ def _audit(
         "PATH": f"{bin_dir}:/usr/bin:/bin",
         "HOME": str(home),
         "RADON_WEEKEND_REPO": str(repo),
+        # 2026-09-06: the billing rails in this file are about the ANTHROPIC
+        # key path — an apiKeyHelper or ANTHROPIC_API_KEY must never move a
+        # claude rung off the subscription. That rail only has meaning on a
+        # claude rung, so pin one here. The four loops' real default ladder
+        # (codex, grok, NVIDIA, Cerebras) is asserted in
+        # test_provider_registry_parity.py, and its own rails in
+        # test_provider_failover.py.
+        "RADON_WEEKEND_PROVIDER_LADDER": "claude:claude-fable-5[1m]",
     }
     env.update(env_extra or {})
     proc = subprocess.run(

@@ -264,6 +264,11 @@ def _build(
         "STUB_CLAUDE_RC": str(agent_rc),
         "STUB_CLAUDE_SLEEP": str(agent_sleep),
         "STUB_TIMEOUT_124": "1" if timeout_124 else "0",
+        # 2026-09-06: this suite is about the wrapper being rewritten under a
+        # live run, and it stubs `claude` to exercise that. Pin a claude rung
+        # so the provider ladder is not what decides the outcome; the ladder
+        # itself is covered by test_provider_failover.py.
+        "RADON_WEEKEND_PROVIDER_LADDER": "claude:claude-fable-5[1m]",
     }
     env.update(extra_env or {})
 
