@@ -78,6 +78,7 @@ def _stub_bin(
     exhausted: Path,
     gh_log: Path,
     exhausted_line: str = QUOTA_LINE,
+    exhausted_exit: int = 1,
 ) -> Path:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -105,7 +106,7 @@ def _stub_bin(
             f'printf "%s\\n" "${{RADON_WEEKEND_MODEL:-<unset>}}" >> "{env_models}"\n'
             f'if grep -qxF -- "$model" "{exhausted}"; then\n'
             f"  echo \"{exhausted_line}\"\n"
-            "  exit 1\n"
+            f"  exit {exhausted_exit}\n"
             "fi\n"
             f'echo "{COMPLETION}"\n'
             "exit 0\n"
@@ -137,6 +138,7 @@ def _run(
     exhausted_models,
     ladder: str | None = None,
     exhausted_line: str = QUOTA_LINE,
+    exhausted_exit: int = 1,
 ):
     wrapper = LOOPS[loop]
     models_log = tmp_path / "models.txt"
@@ -144,7 +146,8 @@ def _run(
     exhausted = tmp_path / "exhausted.txt"
     exhausted.write_text("".join(f"{m}\n" for m in exhausted_models), encoding="utf-8")
     bin_dir = _stub_bin(
-        tmp_path, models_log, exhausted, gh_log, exhausted_line=exhausted_line
+        tmp_path, models_log, exhausted, gh_log, exhausted_line=exhausted_line,
+        exhausted_exit=exhausted_exit,
     )
     repo = _clone(tmp_path, wrapper)
     env = {

@@ -769,9 +769,13 @@ is_quota_exhausted() {
 # is reported as INCOMPLETE-and-resumable, on the same round-scoped tail as
 # the quota detector.
 is_session_limited() {
+  # R-667 (REL-248): match the CLI's own verdict line, never prose that merely
+  # QUOTES a cap phrase — these loops audit their own wrappers and routinely
+  # echo the trigger strings. The CLI prints its refusal as the final line, so
+  # scan only the last 3 non-empty non-wrapper lines for the real cap shape.
   tail -c "+$((ROUND_LOG_MARK + 1))" "$RUN_LOG" 2>/dev/null \
-    | grep -v '^\[' | tail -n 40 | grep -qiE \
-    'hit your (session|weekly) limit|session limit reached|usage limit reached'
+    | grep -v '^\[' | grep -v '^[[:space:]]*$' | tail -n 3 | grep -qiE \
+    "^You.ve hit your (session|weekly) limit.*resets"
 }
 
 is_transient_network_failure() {
@@ -843,7 +847,7 @@ run_phase() {
     # retries immediately and `attempt` is untouched. Bounded by the ladder.
     # A shared cap is not a dead rung: every model on the ladder is behind the
     # same wall, so stop here rather than burning the ladder for nothing.
-    if (( RC != 0 )) && is_session_limited; then
+    if is_session_limited; then
       SESSION_LIMITED=1
       break
     fi
@@ -897,7 +901,7 @@ run_phase() {
   fi
   case "$status" in
     "INCOMPLETE (subscription session limit"*)
-      report "$status" "the subscription's shared session or weekly cap was reached, so no model rung could run — this phase is INCOMPLETE; nothing was advanced and the next fire resumes it once the cap resets" ;;
+      report "$status" "the subscription's shared session or weekly cap was reached, so no model rung could run — this $PHASE phase is INCOMPLETE; committed work is durable on the branch and the next scheduled fire re-runs the phase (only a deliver phase records an explicit resume point)" ;;
     *"ready to merge: "*|"0 PR(s), nothing to merge")
       report "$status" "CI is green on every PR this cycle delivered; merging is the operator's call" ;;
     "INCOMPLETE: "*)
