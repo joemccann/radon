@@ -114,10 +114,12 @@ member: `setup-vps.sh` creates the system group and refuses to continue if it
 finds the account in it, and `radon-app-runtime` exits 78 before staging
 anything if the group is missing or `radon` has joined it.
 
-Residual: `radon` is in group `docker` (`setup-vps.sh`), which is
-root-equivalent on this host, so the group boundary is defense in depth
-against direct file reads, not against an operator-level compromise of that
-account.
+`radon` is deliberately NOT in group `docker` (root-equivalent on this
+host): `setup-vps.sh` never adds it and strips a membership left by an
+older provision (`gpasswd -d radon docker`); Gateway compose calls go
+through the root-owned `radon-docker-gw` shim instead. **Operator (live
+hosts provisioned before this change):** run `sudo gpasswd -d radon docker`,
+then verify with `id -nG radon` (no `docker` in the output).
 
 There is no escrow, and `secrets.db` is
 bound to its key by fingerprint (`key_binding` table): with rows present and
