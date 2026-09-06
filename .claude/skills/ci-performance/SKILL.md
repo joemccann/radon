@@ -323,8 +323,12 @@ default 10800).
    rebase or force-push over a commit you did not author.
 5. Record the outcome (`record ... --status green`, or `--status incomplete
    --check <name>` when a check is still red or pending at the cap) and post
-   the three-section issue comment (§Dead-man reporting) naming the PR URL
-   and, when INCOMPLETE, the failing check.
+   the three-section issue comment (§Dead-man reporting / §Required nightly
+   report) naming the PR URL and, when INCOMPLETE, the failing check. If this
+   cycle fixed or delivered a CI-time issue, that comment MUST include the
+   **CI build time** table from
+   `python3.13 scripts/nightly_issue_format.py ci-time-savings` (before,
+   after or pending, % change or TBD until N samples). Do not invent timings.
 6. Print, as the LAST stdout line of the phase, the verdict line from
    `python3.13 scripts/nightly_deliver.py verdict --loop ci-performance --ready <url>...`
    (or `--incomplete <check> --pr-url <url>`). The wrapper greps it:
@@ -458,15 +462,17 @@ and the formatter emits `Fixed with green deployment`. A single plain
 sentence still works when there is exactly one finding.
 
 The body has exactly three sections, in this order: **Issue discovered**,
-**What was done to fix it**, **Next**. Sample tables, SHA ranges, CIP
-inventories, and gate counts stay on the rolling GitHub issue and in
-`CI_PERFORMANCE_LOG.md`, not the PR. Title shape: `CI Performance
-<YYYY-MM-DD>: <plain-language issue>`. Create a new dated branch, or a
-new remediation PR after the audit PR merged, with `gh pr create --title
-<title> --body <body> --head <branch> --base main` (or `POST
-/repos/{owner}/{repo}/pulls` with `head`, `base`, `title`, and `body`).
-Formatter `--json` is `{title, body}` only; do not POST it as the create
-payload. Update an existing PR with
+**What was done to fix it**, **Next**. SHA ranges, CIP inventories, and
+full sample windows stay on the rolling GitHub issue and in
+`CI_PERFORMANCE_LOG.md`, not the PR. For a time-saving fix, `--fix` MUST
+include the compact **CI build time** table (or one bullet per job with
+before, after, and % change) from `ci-time-savings`. Title shape: `CI
+Performance <YYYY-MM-DD>: <plain-language issue>`. Create a new dated
+branch, or a new remediation PR after the audit PR merged, with
+`gh pr create --title <title> --body <body> --head <branch> --base main`
+(or `POST /repos/{owner}/{repo}/pulls` with `head`, `base`, `title`, and
+`body`). Formatter `--json` is `{title, body}` only; do not POST it as
+the create payload. Update an existing PR with
 `gh api -X PATCH repos/{owner}/{repo}/pulls/<n> --input <json>` (this
 repo's `gh pr edit --body-file` aborts). Verify with a grep for a phrase
 you just wrote.
@@ -510,7 +516,18 @@ night still comments.
 - top bottleneck and evidence;
 - selected `CIP-###` experiment or why none is safe;
 - changed files, exact tests/counts, and safety-contract results;
-- predicted or measured seconds and percentage saved;
+- **CI build time** table for every time-saving fix (or VALIDATING
+  delivery). Generate it with
+  `python3.13 scripts/nightly_issue_format.py ci-time-savings --row '{...}'`
+  and put it in **What was done to fix it** (or **Issue discovered** while
+  still VALIDATING). Required columns: `| Job | Before | After | % change |`.
+  `% change = (after - before) / before * 100` (negative = faster). Cite the
+  Actions runs that supplied the times; do not invent timings. If after
+  samples are still `VALIDATING` or `INSUFFICIENT_SAMPLE`, print the before
+  time, After = pending, and `% change` = `TBD until` N samples (N is 5
+  comparable after-runs unless the row says otherwise). One row per
+  affected job (for example e2e wall vs full gate). A zero-finding night
+  has no table;
 - runner-minute impact;
 - PR URL, operator action if required, and residual bottleneck.
 
@@ -565,3 +582,7 @@ each correction into a concrete rule that prevents recurrence.
   test shard to completion, so their per-shard step durations are valid
   Linux shard-timing samples even though they never count as production
   samples.
+- 2026-09-05 deliver: a time-saving fix that only said "predicted -16s"
+  left the operator without a comparable before/after. The #196 write-up
+  and `ci-time-savings` table now require Job | Before | After | % change
+  from cited runs, or pending + TBD until N samples. Do not invent timings.

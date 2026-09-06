@@ -201,3 +201,24 @@ class TestTheSkillCarriesTheNonNegotiableRails:
     def test_the_skill_declares_both_modes(self):
         text = SKILL.read_text(encoding="utf-8")
         assert "## Mode: audit" in text and "## Mode: remediate" in text
+        assert "## Mode: deliver" in text
+
+
+class TestDeliverReportsCiBuildTimeDelta:
+    """A time-saving fix on #196 must show before, after, and % change."""
+
+    def test_skill_requires_the_four_column_table_and_tbd_path(self):
+        text = " ".join(SKILL.read_text(encoding="utf-8").split())
+        assert "| Job | Before | After | % change |" in text
+        assert "TBD until" in text
+        assert "do not invent" in text
+        assert "(after - before) / before * 100" in text
+        assert "ci-time-savings" in text
+
+    def test_skill_puts_the_table_on_the_issue_writeup_and_deliver(self):
+        text = SKILL.read_text(encoding="utf-8")
+        report = text[text.index("## Required nightly report") :]
+        deliver = text[text.index("## Mode: deliver") : text.index("## Required nightly report")]
+        assert "CI build time" in report
+        assert "ci-time-savings" in report
+        assert "ci-time-savings" in deliver or "CI build time" in deliver
