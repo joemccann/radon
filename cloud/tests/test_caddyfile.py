@@ -160,6 +160,50 @@ class TestRouting:
         block = reverse_proxy_block(content, "127.0.0.1:8334")
         assert "lb_try_duration" not in block
 
+    def test_mcp_hostname_has_its_own_site(self, caddy_dir):
+        """Issue #232 dedicated host: mcp.radon.run is its own site, not a
+        path on the app.radon.run catch-all (which would leak Next.js)."""
+        content = strip_comments(read_caddyfile(caddy_dir))
+        assert re.search(r"(?m)^mcp\.radon\.run\s*\{", content)
+
+    def test_mcp_site_proxies_only_to_the_mcp_process(self, caddy_dir):
+        block = site_block(read_caddyfile(caddy_dir), "mcp.radon.run")
+        assert "127.0.0.1:8334" in block
+        assert "127.0.0.1:8321" not in block, "mcp.radon.run must never proxy to FastAPI"
+        assert "127.0.0.1:3000" not in block, "mcp.radon.run must never proxy to Next.js"
+
+    def test_mcp_site_keeps_the_path_prefix(self, caddy_dir):
+        block = site_block(read_caddyfile(caddy_dir), "mcp.radon.run")
+        match = re.search(r"(handle_path|handle)\s+/mcp\*", block)
+        assert match is not None, "mcp.radon.run must handle /mcp*"
+        assert match.group(1) == "handle", (
+            "mcp.radon.run /mcp* must use handle (not handle_path)"
+        )
+
+    def test_mcp_site_bounds_the_request_body(self, caddy_dir):
+        block = handle_block(
+            site_block(read_caddyfile(caddy_dir), "mcp.radon.run"), "/mcp*"
+        )
+        match = re.search(r"request_body\s*\{[^}]*max_size\s+(\d+)(KB|MB)", block)
+        assert match, "mcp.radon.run /mcp* must set request_body { max_size ... }"
+        size, unit = int(match.group(1)), match.group(2)
+        size_bytes = size * (1024 if unit == "KB" else 1024 * 1024)
+        assert size_bytes <= 1024 * 1024
+
+    def test_mcp_site_has_no_retry_loop(self, caddy_dir):
+        block = reverse_proxy_block(
+            site_block(read_caddyfile(caddy_dir), "mcp.radon.run"), "127.0.0.1:8334"
+        )
+        assert "lb_try_duration" not in block
+
+    def test_mcp_root_rewrites_to_mcp_path(self, caddy_dir):
+        """https://mcp.radon.run (no path) is a valid connector URL."""
+        block = site_block(read_caddyfile(caddy_dir), "mcp.radon.run")
+        assert re.search(r"rewrite\s+\*\s+/mcp\b", block), (
+            "mcp.radon.run / must rewrite to /mcp so the hostname itself is "
+            "the Streamable HTTP endpoint"
+        )
+
     def test_edge_health_status_maps_dial_errors_to_200(self, caddy_dir):
         content = read_caddyfile(caddy_dir)
         block = reverse_proxy_block(content, "127.0.0.1:8330")
@@ -312,6 +356,14 @@ def _balanced_block(text, start):
             if depth == 0:
                 return text[start:index + 1]
     raise AssertionError("unbalanced braces")
+
+
+def site_block(content, hostname):
+    """Brace-balanced body of the named site block (active config only)."""
+    active = strip_comments(content)
+    match = re.search(r"(?m)^" + re.escape(hostname) + r"\s*\{", active)
+    assert match, f"no site block for {hostname}"
+    return _balanced_block(active, match.end() - 1)
 
 
 def reverse_proxy_block(content, upstream):
