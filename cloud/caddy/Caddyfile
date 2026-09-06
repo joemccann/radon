@@ -17,9 +17,10 @@
     # during `systemctl reload caddy`. Load-time ACME hangs: the old
     # process still owns :80 and 308s HTTP-01 to HTTPS, so Let's Encrypt
     # never completes and publish-caddy TERMs the reload (db69ccb4 45s,
-    # 587c6ff1 180s).
+    # 587c6ff1 180s). Ask is radon-health :8330, already listening;
+    # an ask site on this same Caddy (8335) hung reload for 180s.
     on_demand_tls {
-        ask http://127.0.0.1:8335/ask
+        ask http://127.0.0.1:8330/caddy-tls-ask
     }
 }
 
@@ -248,19 +249,6 @@ media.radon.run {
             precompressed gzip
         }
     }
-}
-
-# Loopback ask for on-demand TLS. Only mcp.radon.run is allowed; anything
-# else pointing at this VPS must not mint a Let's Encrypt cert.
-http://127.0.0.1:8335 {
-    @mcp_ask {
-        path /ask
-        query domain=mcp.radon.run
-    }
-    handle @mcp_ask {
-        respond 200
-    }
-    respond 400
 }
 
 # mcp.radon.run — dedicated Streamable HTTP MCP host (issue #232).

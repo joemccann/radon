@@ -214,15 +214,12 @@ class TestRouting:
 
     def test_on_demand_tls_ask_is_loopback_and_mcp_only(self, caddy_dir):
         content = strip_comments(read_caddyfile(caddy_dir))
-        ask = re.search(r"(?m)^\s*ask\s+(http://127\.0\.0\.1:\d+/ask)\s*$", content)
-        assert ask, "on_demand_tls ask is required so on_demand is not an open issuer"
-        url = ask.group(1)
-        assert "on_demand_tls" in content
-        assert url.startswith("http://127.0.0.1:"), url
-        ask_site = site_block(content, "http://127.0.0.1:8335")
-        assert "mcp.radon.run" in ask_site
-        assert "127.0.0.1:3000" not in ask_site
-        assert "127.0.0.1:8321" not in ask_site
+        ask = re.search(
+            r"(?m)^\s*ask\s+(http://127\.0\.0\.1:8330/caddy-tls-ask)\s*$",
+            content,
+        )
+        assert ask, "on_demand_tls ask must hit radon-health, already listening during reload"
+        assert "8335" not in content, "ask must not be served by the Caddy process being reloaded"
 
     def test_edge_health_status_maps_dial_errors_to_200(self, caddy_dir):
         content = read_caddyfile(caddy_dir)
