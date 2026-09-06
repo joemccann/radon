@@ -12,6 +12,15 @@
     # with the upstream restarts the retry loop exists to absorb, and a
     # shorter grace hard-cut that loop during the one event it is for. R-258.
     grace_period 20s
+
+    # mcp.radon.run obtains its first cert on the first handshake, not
+    # during `systemctl reload caddy`. Load-time ACME hangs: the old
+    # process still owns :80 and 308s HTTP-01 to HTTPS, so Let's Encrypt
+    # never completes and publish-caddy TERMs the reload (db69ccb4 45s,
+    # 587c6ff1 180s).
+    on_demand_tls {
+        ask http://127.0.0.1:8335/ask
+    }
 }
 
 {$DOMAIN:app.radon.run} {
@@ -241,11 +250,28 @@ media.radon.run {
     }
 }
 
+# Loopback ask for on-demand TLS. Only mcp.radon.run is allowed; anything
+# else pointing at this VPS must not mint a Let's Encrypt cert.
+http://127.0.0.1:8335 {
+    @mcp_ask {
+        path /ask
+        query domain=mcp.radon.run
+    }
+    handle @mcp_ask {
+        respond 200
+    }
+    respond 400
+}
+
 # mcp.radon.run — dedicated Streamable HTTP MCP host (issue #232).
-# DNS: Vercel A record to the same VPS as app.radon.run. Caddy auto-issues
-# Let's Encrypt TLS on first request, same as media.radon.run.
+# DNS: Vercel A record to the same VPS as app.radon.run.
 # Serves ONLY the MCP process on 8334 — never FastAPI, never Next.js.
+# TLS is on_demand so reload does not wait for HTTP-01.
 mcp.radon.run {
+    tls {
+        on_demand
+    }
+
     encode zstd gzip
 
     header {
