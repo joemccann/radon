@@ -599,23 +599,37 @@ exit 0
     assert config.read_text(encoding="utf-8") == source.read_text(encoding="utf-8")
 
 
-def test_caddy_reload_timeout_outlasts_first_hostname_cert():
-    """Adding mcp.radon.run obtains a Let's Encrypt cert during reload.
+def test_publish_caddy_action_timeout_outlasts_reload_and_restart():
+    """publish-caddy is supervised at ROOT_MUTATION_ACTION_TIMEOUT (180s).
 
-    publish-caddy TERMs `systemctl reload caddy` at this bound. 45s was
-    shorter than ACME: deploy db69ccb4 rolled the candidate back
-    (`caddy candidate reload failed`) and TLS on the dedicated host stayed
-    internal-error. The bound must outlast a first-hostname issuance.
+    reload_caddy used that full 180s, so the supervisor killed the helper
+    before restart_caddy ran (11a0575d and 868ee0f2 both failed at 180s
+    with no restart). The action budget must cover reload + restart.
     """
     text = ROOT_HELPER.read_text(encoding="utf-8")
-    start = text.index("reload_caddy() {")
-    body = text[start : text.index("\n}", start) + 2]
-    match = re.search(
-        r'kill-after=2s\s+(\d+)s\s+"\$SYSTEMCTL"\s+reload caddy',
-        body,
+    reload_s = int(
+        re.search(
+            r'kill-after=2s\s+(\d+)s\s+"\$SYSTEMCTL"\s+reload caddy', text
+        ).group(1)
     )
-    assert match, body
-    assert int(match.group(1)) >= 120, match.group(1)
+    restart_s = int(
+        re.search(
+            r'kill-after=2s\s+(\d+)s\s+"\$SYSTEMCTL"\s+restart caddy', text
+        ).group(1)
+    )
+    start = text.index("root_action_timeout() {")
+    body = text[start : text.index("\n}", start) + 2]
+    assert "publish-caddy" in body
+    # Dedicated publish budget, or the shared mutation timeout if not split.
+    dedicated = re.search(
+        r'ROOT_PUBLISH_CADDY_ACTION_TIMEOUT=(\d+)', text
+    )
+    mutation = int(re.search(r'(?m)^  readonly ROOT_MUTATION_ACTION_TIMEOUT=(\d+)', text).group(1))
+    action_s = int(dedicated.group(1)) if dedicated else mutation
+    assert action_s >= reload_s + restart_s + 20, (
+        f"publish-caddy action {action_s}s cannot fit reload {reload_s}s "
+        f"+ restart {restart_s}s"
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover - convenience only
