@@ -204,6 +204,26 @@ class TestRouting:
             "the Streamable HTTP endpoint"
         )
 
+    def test_mcp_site_uses_on_demand_tls(self, caddy_dir):
+        """Issuing the first cert during `systemctl reload caddy` hangs:
+        the still-running old process 308s HTTP-01, ACME never completes,
+        publish-caddy TERMs the reload (45s then 180s) and rolls back.
+        On-demand obtains the cert on the first handshake after reload."""
+        block = site_block(read_caddyfile(caddy_dir), "mcp.radon.run")
+        assert re.search(r"tls\s*\{[^}]*on_demand", block, re.DOTALL), block
+
+    def test_on_demand_tls_ask_is_loopback_and_mcp_only(self, caddy_dir):
+        content = strip_comments(read_caddyfile(caddy_dir))
+        ask = re.search(r"(?m)^\s*ask\s+(http://127\.0\.0\.1:\d+/ask)\s*$", content)
+        assert ask, "on_demand_tls ask is required so on_demand is not an open issuer"
+        url = ask.group(1)
+        assert "on_demand_tls" in content
+        assert url.startswith("http://127.0.0.1:"), url
+        ask_site = site_block(content, "http://127.0.0.1:8335")
+        assert "mcp.radon.run" in ask_site
+        assert "127.0.0.1:3000" not in ask_site
+        assert "127.0.0.1:8321" not in ask_site
+
     def test_edge_health_status_maps_dial_errors_to_200(self, caddy_dir):
         content = read_caddyfile(caddy_dir)
         block = reverse_proxy_block(content, "127.0.0.1:8330")
@@ -231,11 +251,15 @@ class TestRetiredBetaStack:
 
 
 class TestTLS:
-    def test_no_explicit_tls_config(self, caddy_dir):
-        content = read_caddyfile(caddy_dir)
-        assert not re.search(r"^\s*tls\b", content, re.MULTILINE), (
-            "No explicit TLS config needed; Caddy auto-provisions certificates"
-        )
+    def test_explicit_tls_is_only_on_demand_for_mcp_host(self, caddy_dir):
+        """app.radon.run and media.radon.run keep automatic HTTPS at load.
+        mcp.radon.run is the only site that opts into on_demand, because a
+        first-hostname cert at reload hangs behind the still-running old
+        process 308ing HTTP-01."""
+        media = site_block(read_caddyfile(caddy_dir), "media.radon.run")
+        assert not re.search(r"\btls\b", media)
+        mcp = site_block(read_caddyfile(caddy_dir), "mcp.radon.run")
+        assert re.search(r"tls\s*\{[^}]*on_demand", mcp, re.DOTALL)
 
 
 class TestReverseProxyTargets:
