@@ -216,8 +216,10 @@ def test_a_changed_heldout_spec_carries_a_dated_ledger_annotation() -> None:
     annotations = _annotations()
     problems = []
     for spec in heldout_changed:
+        # T-469: %as (author date) is stable across rebase/amend/cherry-pick;
+        # %cs is rewritten to "now" and re-reds a correctly-stamped spec.
         changed_on = _git(
-            "log", "-1", "--format=%cs", base + "..HEAD", "--", "web/e2e/" + spec
+            "log", "-1", "--format=%as", base + "..HEAD", "--", "web/e2e/" + spec
         )
         stamped = annotations.get(spec)
         if stamped is None:
