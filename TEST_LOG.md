@@ -663,3 +663,40 @@ Closing gates ×3 (serial, detached script; reliability loop's cycle concurrent,
 | T-442 | DONE | (this commit) | New `web/tests/modify-partial-fill-wire.test.tsx`: OrderActionsProvider + ModifyOrderModal with stubbed fetch — asserts POST `/api/orders/modify` full URL + payload `{orderId:7, permId:7007, newQuantity:516}` and zero requests while the gate is closed. Red: wire-level newQuantity drop in OrderActionsContext → 1 failed / 11 passed while the existing prop-level test stayed GREEN (the finding); reverted. Existing test kept. Green: 4 files 18 passed landed. |
 | T-459 | DONE | (this commit) | New `web/tests/fill-driven-portfolio-refresh-wire.test.tsx`: real usePortfolio + real useFillToasts through WorkspaceShell's callback shape — POST `/api/portfolio` observed on a new execId, none on baseline/demo. Red: stale-ref mutation of useFillToasts → 1 failed / 5 passed; GREEN at HEAD (no live hook defect), mutation reverted. |
 | T-448 | DONE | (this commit) | ci.yml e2e-financial-smoke reordered: trace-upload now precedes the `NEXT_PUBLIC_RADON_DEMO=1` rebuild + demo spec, so retried prod-bundle steps are no longer poisoned; load-bearing-order + non-gating comments added at the step. New guard `scripts/tests/test_ci_demo_build_order.py` (red 2/2 against the old order). Green: 158 passed across all ci.yml guard suites landed. Promotion into `deploy.needs` left to the operator. |
+
+## Remediation 2026-09-06 (testing/2026-09-06)
+
+Backlog entered this run with 23 un-DONE findings from the 2026-09-05 second-pass
+audit (T-462…T-484: 2 P0, 10 P1, 11 P2) plus this cycle's T-485; all 24 are DONE.
+Two waves of ≤6 worktree subagents; every landing re-verified scoped in the main
+clone; T-463/T-472/T-473 sourced fixes only where a correct test failed against a
+real defect.
+
+| Task | Status | Commits | Evidence |
+|---|---|---|---|
+| T-462 | DONE | `50d6554b` | Source fix: `feedConnected` supplied from `useRealtimePrices().connected` at all 4 owner surfaces; new wire test `quote-gate-feed-wiring.test.tsx` red at HEAD (`1 failed`, gate open), green post-fix, re-reds on call-site mutation. Blast radius 22 files 115 passed. |
+| T-463 | DONE | `eee6d688` | New replace-path test: `Submitted/filled:0` snapshot behind structured-202 cancel → 502 `REPLACE_PARTIAL`, `place.assert_not_awaited()`. Red on `return True` mutation at server.py:3191. File 20 passed landed. |
+| T-464 | DONE | `b87943b8` | `workspace-shell-fill-wire.test.tsx` renders real WorkspaceShell; exactly one POST /api/portfolio on new execId; red on dropping `onNewFills` at :430. |
+| T-465 | DONE | `f38c3b9c` | `hasToastKey` unit + shell R-642 tests; red on `return true` mutation. 25 passed scoped. |
+| T-466 | DONE | `f70aa6fb` | Greps replaced with behavioural GETs (real `requireRouteAccess` recording wrapper, options by value, exhausted budget → 429, no upstream). Red via dead-object mutation both grep literals intact. 10 passed. |
+| T-467 | DONE | `84066e8e` | Digest pipeline executed against temp trees; empty tree now fails the build (`[ -s ]` guard, `xargs -r`, in-layer digest-shape + not-empty-digest consumer). Red: empty tree exited 0 at HEAD. 5 passed ×2. |
+| T-468 | DONE | `85727387` | `git_repo` fixture pins `GIT_CONFIG_GLOBAL/SYSTEM=/dev/null`, hooksPath/gpgsign off. Red: hostile hooksPath errored TestCli. 29 passed under hostile config. |
+| T-469 | DONE | `62bcf17c` | `%cs` → `%as`; red via amend with committer date advanced. File 6 passed. |
+| T-470 | DONE | `e199403b` | `RadonApiError(429)` tests on gex/regime/gamma-rotation: exact 429, `scan_succeeded:false`, no cached body. Red on both mutations (502 hardcode, `>=500`→`true`). 11 passed. |
+| T-471 | DONE | `8cc0e6ee` | Blended-basis fixture breaks the tautology (red `difference is 3000` under sum mutation); `col1 === "---"` NaN guard proven. 5 passed ×2. |
+| T-472 | DONE | `ca573484` | Wire tests: price-only submit carries no `newQuantity`; quantity submit under advanced fills → 0 wire calls + reseed + `.modify-fill-race` alert. Mutation-red both ways. |
+| T-473 | DONE | `ca9e3e72` | Real defect: display read live `filledQuantity(order)` while math read frozen snapshot. Red at HEAD (`'100 of 1000 filled'` vs `984x`). Fix: snapshot-derived display + `.modify-order-fill-stale` flag. 36 passed across 5 modal files. |
+| T-474 | DONE | `7064a8b9` | Retry-budget test now executes `run_portfolio_refresh.sh` with PATH-shim stubs; measured curl count + wall clock vs `TimeoutStartSec`; mirror test deleted. Red on loop-bound mutation (144s vs 120). |
+| T-475 | DONE | `132e8a4c` | Isolation invariant: trailing contiguous demo pair, both steps carry `NEXT_PUBLIC_RADON_DEMO:"1"`, no `failure()`+playwright re-run. Red: env dropped from spec step passed old tests, fails new. 3 passed. |
+| T-476 | DONE | `e087b2c1` | Both shell-body greps deleted; executed counterparts (POISONS matrix, sandbox refusal) already cover the arms. 62 passed both cloud files. |
+| T-477 | DONE | `840718c4` | Red: leaked `mockRadonFetch` called 2×. `mockReset()` in regime beforeEach + fixture date pinned to `mostRecentSessionDate()`. 41 passed. |
+| T-478 | DONE | `c1e7c5fb` | Red: `{mtimeMs:0}` leak into next test. Per-test `mockStat` reset + window-relative re-stamp in both files. 54 passed ×2. |
+| T-479 | DONE | `1cd02569` | testids added (OrderConfirmSummary, PositionTab/Table cells); 6 querySelector sites + `statValue()`/`cellUnder()` converted. Red: class rename → `within(null)` throw; post-fix rename invisible (35/35). |
+| T-480 | DONE | `2c2faef6` | Six real-timer 20ms sleeps → fake timers + `advanceTimersByTimeAsync`; armed-gate mutation still red. 12 passed ×2. |
+| T-481 | DONE | `b55e5d8b` | `_loop_harness.py` shared helper; sibling-test exec_module removed; simulated rename now inert. 89 passed. |
+| T-482 | DONE | `c2e8af42` | playwright-config test: `RADON_AUTHLESS_TEST=1` forces `pk_test_` key even under ambient `pk_live_`. Red with pin removed. 2 passed. |
+| T-483 | DONE | `5c2149ff` | Backoff tick covered: +60s no third fetch, +120s exactly three. Red on dropping `2**failures`. 4 passed ×2. |
+| T-484 | DONE | `108d0be4` | `_bash_toolchain.py` resolves bash ≥ 4 once; bootstrap + ib-gateway suites invoke through it and skip named when absent. Full cloud/tests byte-identical under both PATH orders: `1718 passed, 77 skipped, 0 failed` ×2 (was 33 vs 5). |
+| T-485 | DONE | `281e31a0` | hub.test.js store-down test captures stderr and asserts both failure lines fired before return — no pending `onUserConsoleLog` at teardown. Red: two gate logs (2026-09-02, 2026-09-06). Combined hub+regime ×3: unhandled-error count 0. |
+
+Closing 3× gate counts appended below after the runs.

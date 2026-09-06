@@ -158,7 +158,7 @@ function renderModifiedOrder(order: OpenOrder, portfolio: PortfolioData, price: 
     />,
   );
   fireEvent.change(screen.getByLabelText(/New Limit Price/i), { target: { value: price } });
-  return within(document.querySelector(".order-confirm-summary") as HTMLElement);
+  return within(screen.getByTestId("order-confirm-summary"));
 }
 
 describe("ModifyOrderModal close-out P&L", () => {
@@ -437,7 +437,7 @@ function renderCbrsModify(price: string, portfolio: PortfolioData) {
     />,
   );
   fireEvent.change(screen.getByLabelText(/New Net Price/i), { target: { value: price } });
-  return within(document.querySelector(".order-confirm-summary") as HTMLElement);
+  return within(screen.getByTestId("order-confirm-summary"));
 }
 
 describe("ModifyOrderModal combo close-out P&L", () => {
@@ -474,7 +474,7 @@ describe("ModifyOrderModal combo close-out P&L", () => {
       />,
     );
     fireEvent.change(screen.getByLabelText(/New Net Price/i), { target: { value: "8" } });
-    const summary = within(document.querySelector(".order-confirm-summary") as HTMLElement);
+    const summary = within(screen.getByTestId("order-confirm-summary"));
 
     expect(summary.getByText("Est. Realized P&L:")).toBeTruthy();
     expect(summary.getByText("$15,000")).toBeTruthy();
@@ -496,7 +496,7 @@ describe("ModifyOrderModal combo close-out P&L", () => {
       />,
     );
     fireEvent.change(screen.getByLabelText(/New Net Price/i), { target: { value: "8" } });
-    const summary = within(document.querySelector(".order-confirm-summary") as HTMLElement);
+    const summary = within(screen.getByTestId("order-confirm-summary"));
 
     expect(summary.queryByText("Est. Realized P&L:")).toBeNull();
     expect(summary.getByText("Max Loss:")).toBeTruthy();
@@ -515,7 +515,7 @@ describe("ModifyOrderModal combo close-out P&L", () => {
     );
     fireEvent.change(screen.getByLabelText(/New Quantity/i), { target: { value: "25" } });
     fireEvent.change(screen.getByLabelText(/New Net Price/i), { target: { value: "8" } });
-    const summary = within(document.querySelector(".order-confirm-summary") as HTMLElement);
+    const summary = within(screen.getByTestId("order-confirm-summary"));
 
     expect(summary.getByText("Close Credit:")).toBeTruthy();
     expect(summary.getByText("$20,000")).toBeTruthy();
@@ -537,7 +537,7 @@ describe("ModifyOrderModal combo close-out P&L", () => {
     );
     fireEvent.change(screen.getByLabelText(/New Quantity/i), { target: { value: "51" } });
     fireEvent.change(screen.getByLabelText(/New Net Price/i), { target: { value: "8" } });
-    const summary = within(document.querySelector(".order-confirm-summary") as HTMLElement);
+    const summary = within(screen.getByTestId("order-confirm-summary"));
 
     expect(summary.queryByText("Est. Realized P&L:")).toBeNull();
     expect(summary.getByText("Max Loss:")).toBeTruthy();

@@ -23,7 +23,7 @@
 
 import React from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 
 import { cleanup as cleanupHooks, renderHook } from "@testing-library/react";
 
@@ -165,11 +165,13 @@ describe("PositionTab renders no basis for a `mixed` position", () => {
     );
   }
 
+  const STAT_TESTIDS: Record<string, string> = {
+    "Entry Cost": "pos-stat-entry-cost",
+    "Avg Entry": "pos-stat-avg-entry",
+  };
+
   function statValue(label: string): string {
-    const el = Array.from(document.querySelectorAll(".pos-stat")).find(
-      (n) => n.querySelector(".pos-stat-label")?.textContent?.trim() === label,
-    );
-    return el?.querySelector(".pos-stat-value")?.textContent?.trim() ?? "";
+    return screen.getByTestId(STAT_TESTIDS[label]).textContent?.trim() ?? "";
   }
 
   it("Entry Cost reads --- rather than the $1,000 blend", () => {
@@ -194,13 +196,14 @@ describe("PositionTable renders no basis for a `mixed` position", () => {
     return Array.from(tr.querySelectorAll("td")).map((td) => td.textContent?.trim() ?? "");
   }
 
+  const CELL_TESTIDS: Record<string, string> = {
+    "P&L": "position-cell-pnl",
+    "Return %": "position-cell-pnl-pct",
+  };
+
   function cellUnder(header: string): string {
-    const headers = Array.from(document.querySelectorAll("thead th")).map(
-      (th) => th.textContent?.trim() ?? "",
-    );
-    const idx = headers.findIndex((h) => h.startsWith(header));
-    expect(idx).toBeGreaterThanOrEqual(0);
-    return cellTexts()[idx];
+    const tr = screen.getByText("META").closest("tr")!;
+    return within(tr as HTMLElement).getByTestId(CELL_TESTIDS[header]).textContent?.trim() ?? "";
   }
 
   it("no Entry Cost / Initial Value / Avg Entry cell carries the blend", () => {

@@ -350,19 +350,38 @@ describe("createHeadlinesHub", () => {
   });
 
   it("still boots and fans out when the store is down", async () => {
-    const hub = await boot({
-      store: {
-        load: async () => {
-          throw new Error("turso unreachable");
+    // T-485: the restore/persist failure paths write to process.stderr from
+    // async continuations. Under vitest that write becomes a pending
+    // onUserConsoleLog rpc message which can still be in flight when a later
+    // file's environment tears down (EnvironmentTeardownError with 0 failed
+    // tests — gate logs 2026-09-02 and 2026-09-06). Capture stderr here so
+    // the writes never reach the interceptor, and assert both failure lines
+    // actually fired before the test returns, so nothing is left in flight.
+    const stderrLines = [];
+    const realWrite = process.stderr.write;
+    process.stderr.write = (chunk, ...rest) => {
+      stderrLines.push(String(chunk));
+      return typeof rest[rest.length - 1] === "function" ? rest[rest.length - 1]() ?? true : true;
+    };
+    try {
+      const hub = await boot({
+        store: {
+          load: async () => {
+            throw new Error("turso unreachable");
+          },
+          put: async () => {
+            throw new Error("turso unreachable");
+          },
         },
-        put: async () => {
-          throw new Error("turso unreachable");
-        },
-      },
-    });
-    expect(hub.ingest(parseFrame(JSON.stringify(FLASH)))).toBe(true);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(hub.ring.map((row) => row.id)).toEqual(["h1"]);
+      });
+      expect(hub.ingest(parseFrame(JSON.stringify(FLASH)))).toBe(true);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(hub.ring.map((row) => row.id)).toEqual(["h1"]);
+      expect(stderrLines).toContain("[mktnews] ring restore failed: turso unreachable\n");
+      expect(stderrLines).toContain("[mktnews] ring persist failed: turso unreachable\n");
+    } finally {
+      process.stderr.write = realWrite;
+    }
   });
 
   it("caps the ring", async () => {

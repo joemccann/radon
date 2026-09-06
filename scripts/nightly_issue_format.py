@@ -32,6 +32,8 @@ Stdlib only.
 from __future__ import annotations
 
 import argparse
+import json
+import math
 import re
 import sys
 
@@ -99,11 +101,21 @@ _LOG_POINTER_RE = re.compile(
 _USAGE_KEEP = "claude.ai/settings/usage"
 
 
-def format_body(discovered: str, done: str, next_step: str | None) -> str:
+def format_body(
+    discovered: str,
+    done: str,
+    next_step: str | None,
+    *,
+    ci_time_savings: str | None = None,
+) -> str:
     nxt = (next_step or "").strip() or FIXED_NEXT
+    done_text = done.strip()
+    extra = (ci_time_savings or "").strip()
+    if extra:
+        done_text = f"{done_text}\n\n{extra}"
     return (
         f"**{HEADING_DISCOVERED}**\n{discovered.strip()}\n\n"
-        f"**{HEADING_DONE}**\n{done.strip()}\n\n"
+        f"**{HEADING_DONE}**\n{done_text}\n\n"
         f"**{HEADING_NEXT}**\n{nxt}\n"
     )
 
@@ -204,6 +216,99 @@ def sanitize_text(text: str) -> str:
     return sanitize(text)
 
 
+CI_TIME_HEADING = "CI build time"
+CI_TIME_FORMULA = (
+    "% change = (after - before) / before * 100 (negative = faster). "
+    "Cite Actions runs; do not invent timings."
+)
+CI_TIME_TABLE_HEADER = "| Job | Before | After | % change |"
+CI_TIME_TABLE_RULE = "|---|---|---|---|"
+DEFAULT_REQUIRED_SAMPLES = 5
+_PENDING_AFTER_STATUSES = frozenset({"VALIDATING", "INSUFFICIENT_SAMPLE"})
+
+
+def _format_secs(value: float) -> str:
+    if value.is_integer():
+        return f"{int(value)}s"
+    return f"{value:.1f}s"
+
+
+def _format_pct(before: float, after: float) -> str:
+    change = (after - before) / before * 100
+    if abs(change) < 0.05:
+        return "0.0%"
+    return f"{change:+.1f}%"
+
+
+def _row_before_secs(row: dict) -> float:
+    raw = row.get("before_secs", row.get("before"))
+    try:
+        value = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("before must be > 0; do not invent a baseline") from exc
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError("before must be > 0; do not invent a baseline")
+    return value
+
+
+def format_ci_build_time_savings(rows: list[dict] | None) -> str:
+    """Job | Before | After | % change for a time-saving #196 write-up.
+
+    After times come from cited Actions runs. Missing or VALIDATING /
+    INSUFFICIENT_SAMPLE after-samples stay pending; % change is TBD until
+    N comparable samples. Never invent an after time.
+    """
+    if not rows:
+        raise ValueError("at least one row is required")
+    lines = [
+        f"**{CI_TIME_HEADING}**",
+        CI_TIME_FORMULA,
+        "",
+        CI_TIME_TABLE_HEADER,
+        CI_TIME_TABLE_RULE,
+    ]
+    for row in rows:
+        job = " ".join(str((row or {}).get("job") or "").split())
+        if not job:
+            raise ValueError("each row needs a job name")
+        before = _row_before_secs(row)
+        try:
+            required = int(row.get("required_samples") or DEFAULT_REQUIRED_SAMPLES)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("required_samples must be a positive integer") from exc
+        if required < 1:
+            required = DEFAULT_REQUIRED_SAMPLES
+        status = str(row.get("after_status") or "").strip().upper()
+        after_raw = row.get("after_secs", row.get("after"))
+        pending = status in _PENDING_AFTER_STATUSES or after_raw in (None, "")
+        if pending:
+            after_cell = "pending"
+            if status in _PENDING_AFTER_STATUSES:
+                samples = row.get("after_samples")
+                if samples is None or samples == "":
+                    after_cell = f"pending ({status})"
+                else:
+                    after_cell = (
+                        f"pending ({status}, {int(samples)}/{required} samples)"
+                    )
+            pct_cell = f"TBD until {required} samples"
+        else:
+            try:
+                after_value = float(after_raw)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    "after must be a measured number of seconds"
+                ) from exc
+            if not math.isfinite(after_value) or after_value < 0:
+                raise ValueError("after must be a measured number of seconds")
+            after_cell = _format_secs(after_value)
+            pct_cell = _format_pct(before, after_value)
+        lines.append(
+            f"| {job} | {_format_secs(before)} | {after_cell} | {pct_cell} |"
+        )
+    return "\n".join(lines) + "\n"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="nightly_issue_format")
     sub = parser.add_subparsers(dest="mode", required=True)
@@ -218,9 +323,40 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Security loop: strip routes, file:line, secrets, accounts",
     )
+    savings = sub.add_parser(
+        "ci-time-savings",
+        help="CI build-time before/after/% table for a time-saving fix",
+    )
+    savings.add_argument(
+        "--row",
+        action="append",
+        default=[],
+        help=(
+            "JSON object: job, before_secs, optional after_secs, "
+            "after_status, after_samples, required_samples"
+        ),
+    )
     args = parser.parse_args(argv)
     if args.mode == "no-run-yet":
         sys.stdout.write(no_run_yet_body())
+        return 0
+    if args.mode == "ci-time-savings":
+        rows: list[dict] = []
+        for raw in args.row:
+            try:
+                parsed = json.loads(raw)
+            except json.JSONDecodeError as exc:
+                print(f"invalid --row JSON: {exc}", file=sys.stderr)
+                return 2
+            if not isinstance(parsed, dict):
+                print("each --row must be a JSON object", file=sys.stderr)
+                return 2
+            rows.append(parsed)
+        try:
+            sys.stdout.write(format_ci_build_time_savings(rows))
+        except ValueError as exc:
+            print(exc, file=sys.stderr)
+            return 2
         return 0
     sys.stdout.write(
         format_phase_comment(

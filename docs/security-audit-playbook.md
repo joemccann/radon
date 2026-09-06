@@ -155,9 +155,11 @@ line here whenever you ship a security fix.**
   `/home/radon/.ssh` and at `/var/lib/radon/media` are refused, and the Docker,
   NodeSource, and Caddy apt keys are fingerprint-pinned. The canonical env file is 0640 root:radon
   (group radon reads; the service account cannot rewrite it).
-  Accepted, operator-owned risk: `radon` stays in the docker group because the
-  IB Gateway container is driven by that account and Docker socket access is
-  root-equivalent by design.
+  Invariant: `radon` is NOT in the docker group (Docker socket access is
+  root-equivalent). Gateway container operations go through the root-owned
+  `radon-docker-gw` shim; `setup-vps.sh` strips any legacy membership and
+  refuses to re-add it. Finding `radon` in group `docker` on a host is a
+  defect, not an accepted risk.
   (`cloud/tests/test_setup_vps_privileged_paths.py`)
 
 ## Triage & patch policy
