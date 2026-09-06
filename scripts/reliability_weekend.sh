@@ -669,8 +669,8 @@ begin_phase() {
   RC=0
   # REL-198 (R-533): rung carry across phases is intended; flag carry is
   # not — an audit-phase exhaustion mislabelled a successful remediate.
-  ALL_MODELS_EXHAUSTED=0
-  SESSION_LIMITED=0
+  ALL_PROVIDERS_EXHAUSTED=0
+  EXHAUSTED_PROVIDERS=""
 }
 
 # Fresh ground truth. Any leftover state from a killed prior run is
@@ -739,11 +739,219 @@ RETRY_PAUSE_SECS=60
 # `claude -p` printed one line and exited 1. Pinning the model also takes the
 # operator's global default off the unattended path. Session/weekly caps are
 # shared across models and must not match here.
-MODEL_LADDER="${RADON_WEEKEND_MODEL_LADDER:-claude-fable-5[1m] claude-opus-5[1m] claude-opus-5 claude-sonnet-5}"
-read -r -a MODEL_RUNGS <<< "$MODEL_LADDER"
-MODEL_INDEX=0
-ALL_MODELS_EXHAUSTED=0
-SESSION_LIMITED=0
+LOOP_SKILL="reliability-weekend"
+LOOP_SLUG="weekend"
+PORTABLE_PROMPT_DIR="${RADON_PORTABLE_PROMPT_DIR:-$REPO/.claude/portable-prompts}"
+# `RADON_WEEKEND_MODEL_LADDER` still names claude rungs, for the loops that
+# have them; `RADON_WEEKEND_PROVIDER_LADDER` overrides the whole ladder.
+PROVIDER_LADDER="${RADON_WEEKEND_PROVIDER_LADDER:-codex:gpt-5.4 grok:grok-4.6 nvidia:nvidia/nemotron-3-ultra-550b-a55b cerebras:qwen-3.8-27b}"
+
+# --- provider ladder (byte-identical across all five loops) ------------------
+# A rung is `provider:model`. 2026-09-06: a Claude session cap is shared across
+# every Claude model, so a Claude-only ladder had nothing to route around it and
+# the night ended at INCOMPLETE 75. The ladder now crosses PROVIDERS. The four
+# non-security loops left the claude.ai subscription entirely — it is reserved
+# for the security loop, which stays claude-exclusive because it is the one loop
+# whose output is sanitized before reaching a public issue.
+#
+# A capped provider skips every remaining rung it owns: an account cap is a wall
+# no model on that account routes around. A per-model quota advances one rung.
+AGENT_CLI_ROOT="${RADON_AGENT_CLI_ROOT:-$HOME/.radon/agent-cli}"
+RUNG_INDEX=0
+ALL_PROVIDERS_EXHAUSTED=0
+EXHAUSTED_PROVIDERS=""
+read -r -a PROVIDER_RUNGS <<< "$PROVIDER_LADDER"
+
+rung_provider() { printf '%s' "${1%%:*}"; }
+rung_model() { printf '%s' "${1#*:}"; }
+
+# Resolved by absolute path, never bare `command -v`, for codex and grok: the
+# npm @openai/codex install on this host ships an empty vendor directory and
+# its shim is first on PATH, so a PATH lookup finds a binary that cannot run.
+provider_bin() {
+  case "$1" in
+    claude) command -v claude 2>/dev/null || true ;;
+    codex) printf '%s' "${RADON_WEEKEND_CODEX_BIN:-/opt/homebrew/bin/codex}" ;;
+    grok | nvidia | cerebras) printf '%s' "${RADON_WEEKEND_GROK_BIN:-$HOME/.grok/bin/grok}" ;;
+    *) return 1 ;;
+  esac
+}
+
+# Readiness is checked BEFORE a rung is selected, so it cannot depend on the
+# key already being exported — only the chosen rung's key ever is.
+provider_key_present() {
+  [[ -n "${!1:-}" ]] && return 0
+  grep -qE "^$1=." "$AGENT_CLI_ROOT/env" 2>/dev/null
+}
+
+# Cheap local checks only — no network, no token refresh. A provider that is
+# not installed or not signed in is SKIPPED, never a reason to end the night.
+provider_ready() {
+  local bin
+  bin="$(provider_bin "$1")" || return 1
+  [[ -n "$bin" && -x "$bin" ]] || return 1
+  case "$1" in
+    # claude: the binary is the whole check. Its CLI resolves a subscription
+    # from a credentials file, the keychain or an OAuth token, and guessing
+    # which from out here would skip the primary rung on a host that simply
+    # stores it somewhere else. An auth failure surfaces as a normal round
+    # failure, exactly as it did before the ladder crossed providers.
+    claude) : ;;
+    codex) [[ -r "${CODEX_HOME:-$HOME/.codex}/auth.json" ]] || return 1 ;;
+    grok) [[ -r "$HOME/.grok/auth.json" || -n "${XAI_API_KEY:-}" ]] || return 1 ;;
+    nvidia) provider_key_present NVIDIA_API_KEY && [[ -r "$AGENT_CLI_ROOT/grok-home-nvidia/config.toml" ]] || return 1 ;;
+    cerebras) provider_key_present CEREBRAS_API_KEY && [[ -r "$AGENT_CLI_ROOT/grok-home-cerebras/config.toml" ]] || return 1 ;;
+    *) return 1 ;;
+  esac
+  # A fallback rung is driven by a rendered prompt file, not a slash command.
+  # A missing one used to reach the shell as a redirect error mid-launch; it
+  # is a rung that cannot run, so treat it as one and skip cleanly.
+  if [[ "$1" != "claude" && -n "${PHASE:-}" ]]; then
+    [[ -r "$PORTABLE_PROMPT_DIR/$LOOP_SKILL.$PHASE.md" ]] || return 1
+  fi
+  return 0
+}
+
+# Provider keys live outside every clone (the credential rails refuse a key
+# file inside one, and `git clean` between phases would delete it anyway).
+# Only the key the CURRENT rung needs is exported; the others stay unset so a
+# rung cannot silently bill a provider it was not chosen for.
+load_provider_key() {
+  local want="$1" envf="$AGENT_CLI_ROOT/env" line key val
+  unset NVIDIA_API_KEY CEREBRAS_API_KEY XAI_API_KEY
+  case "$want" in nvidia | cerebras | grok) ;; *) return 0 ;; esac
+  [[ -r "$envf" ]] || return 0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in \#* | "") continue ;; esac
+    key="${line%%=*}"
+    val="${line#*=}"
+    [[ -n "$val" ]] || continue
+    case "$want:$key" in
+      nvidia:NVIDIA_API_KEY | cerebras:CEREBRAS_API_KEY | grok:XAI_API_KEY)
+        export "$key=$val" ;;
+    esac
+  done < "$envf"
+}
+
+use_rung() {
+  local rung="${PROVIDER_RUNGS[$RUNG_INDEX]}"
+  RUNG_PROVIDER="$(rung_provider "$rung")"
+  RUNG_MODEL="$(rung_model "$rung")"
+  RUNG_BIN="$(provider_bin "$RUNG_PROVIDER")"
+  # The security skill spawns a SECOND claude for its Stage 4 scan and a
+  # --model flag on the outer process does not reach it, so the rung travels
+  # as environment too. DOC-042; unchanged name and meaning.
+  export RADON_WEEKEND_PROVIDER="$RUNG_PROVIDER"
+  export RADON_WEEKEND_MODEL="$RUNG_MODEL"
+  # Anything but claude runs the portable prompt with no subagents; the phase
+  # narrows remediation to P0/P1 and says so in its own report.
+  if [[ "$RUNG_PROVIDER" == "claude" ]]; then
+    export RADON_WEEKEND_REDUCED=0
+  else
+    export RADON_WEEKEND_REDUCED=1
+  fi
+  load_provider_key "$RUNG_PROVIDER"
+}
+
+# `wide` retires every remaining rung of the current provider. Returns 1 when
+# no usable rung is left, which is the ONLY path to "all providers exhausted".
+# One entry per provider, first reason wins: the dead-man has to say WHY each
+# provider is out, or the operator re-fires into the same wall.
+note_exhausted() {
+  # "; " separated, not space separated: a reason contains spaces of its own.
+  case "; $EXHAUSTED_PROVIDERS" in
+    *"; $1="*) return 0 ;;
+  esac
+  EXHAUSTED_PROVIDERS="${EXHAUSTED_PROVIDERS:+$EXHAUSTED_PROVIDERS; }$1=$2"
+}
+
+advance_rung() {
+  local wide="${1:-}" reason="${2:-cap}" dead="$RUNG_PROVIDER" next
+  note_exhausted "$dead" "$reason"
+  while :; do
+    RUNG_INDEX=$((RUNG_INDEX + 1))
+    (( RUNG_INDEX < ${#PROVIDER_RUNGS[@]} )) || return 1
+    next="$(rung_provider "${PROVIDER_RUNGS[$RUNG_INDEX]}")"
+    [[ "$wide" == "wide" && "$next" == "$dead" ]] && continue
+    if ! provider_ready "$next"; then
+      echo "[$LOOP_SLUG] rung ${PROVIDER_RUNGS[$RUNG_INDEX]} skipped: provider not installed or not signed in" | tee -a "$RUN_LOG"
+      note_exhausted "$next" "not installed or not signed in"
+      continue
+    fi
+    use_rung
+    return 0
+  done
+}
+
+# Per-provider cap signatures, captured from the real CLIs rather than guessed.
+# Scoping is unchanged and deliberately narrow (R-426, R-530, R-667): this
+# round's slice only, never the wrapper's own `[loop]` marker lines.
+quota_regex() {
+  case "$1" in
+    claude) printf '%s' 'out of usage credits|You.ve hit your (Opus|Sonnet) limit|Request rejected \(429\)|529 Overloaded|experiencing high load' ;;
+    codex) printf '%s' 'You.ve hit your usage limit|usage limited|rate limit reached|429' ;;
+    grok | nvidia | cerebras) printf '%s' 'usage limit reached|out of credits|spending limit|usage balance exhausted|429' ;;
+    *) printf '%s' 'a\{0\}b' ;;
+  esac
+}
+
+# A SHARED account cap: not per-model, so no rung of that provider can route
+# around it. codex prints its own, verified 2026-09-06:
+#   "You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage
+#    to purchase more credits or try again at 7:52 PM."
+session_regex() {
+  case "$1" in
+    claude) printf '%s' "^You.ve hit your (session|weekly) limit.*resets" ;;
+    codex) printf '%s' "You.ve hit your usage limit.*(try again|purchase more credits)" ;;
+    grok | nvidia | cerebras) printf '%s' "(usage limit reached|usage balance exhausted).*(resets|try again)" ;;
+    *) printf '%s' 'a\{0\}b' ;;
+  esac
+}
+
+# One launch per rung. Backgrounded and `wait`ed, never foreground: bash defers
+# trap handling until a foreground child exits, and `-k` escalates to SIGKILL so
+# a CLI blocked on a hung child cannot make the cap advisory. R-384, R-386.
+launch_round() {
+  local remain="$1" prompt_file="$PORTABLE_PROMPT_DIR/$LOOP_SKILL.$PHASE.md"
+  case "$RUNG_PROVIDER" in
+    claude)
+      CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 "$TIMEOUT_BIN" -k "$KILL_AFTER_SECS" "$remain" \
+        "$RUNG_BIN" -p "/$LOOP_SKILL $PHASE" \
+        --model "$RUNG_MODEL" \
+        --dangerously-skip-permissions \
+        --output-format text >> "$RUN_LOG" 2>&1 &
+      ;;
+    codex)
+      # --sandbox workspace-write, never the bypass flag: parity with the
+      # claude rung's bounded grant, not a wider one.
+      "$TIMEOUT_BIN" -k "$KILL_AFTER_SECS" "$remain" \
+        "$RUNG_BIN" exec --model "$RUNG_MODEL" -C "$REPO" --color never \
+        --sandbox workspace-write --skip-git-repo-check \
+        - < "$prompt_file" >> "$RUN_LOG" 2>&1 &
+      ;;
+    grok)
+      "$TIMEOUT_BIN" -k "$KILL_AFTER_SECS" "$remain" \
+        "$RUNG_BIN" --prompt-file "$prompt_file" --model "$RUNG_MODEL" \
+        --cwd "$REPO" --always-approve --output-format plain >> "$RUN_LOG" 2>&1 &
+      ;;
+    nvidia | cerebras)
+      # grok's CLI hosts every OpenAI-compatible provider: it is the only agent
+      # CLI here that speaks /chat/completions. codex speaks only /responses,
+      # which neither NVIDIA NIM nor Cerebras serves (both 404, 2026-09-06).
+      GROK_HOME="$AGENT_CLI_ROOT/grok-home-$RUNG_PROVIDER" \
+        "$TIMEOUT_BIN" -k "$KILL_AFTER_SECS" "$remain" \
+        "$RUNG_BIN" --prompt-file "$prompt_file" --model "$RUNG_MODEL" \
+        --cwd "$REPO" --always-approve --output-format plain >> "$RUN_LOG" 2>&1 &
+      ;;
+    *)
+      echo "[$LOOP_SLUG] unknown provider $RUNG_PROVIDER" | tee -a "$RUN_LOG"
+      return 1
+      ;;
+  esac
+  ROUND_PID=$!
+}
+# --- end provider ladder -----------------------------------------------------
+use_rung
 
 # Scoped to THIS round's slice of the log, like the ceiling detector: RUN_LOG
 # is per phase and every round appends to it, so a whole-file grep would let
@@ -754,8 +962,7 @@ is_quota_exhausted() {
   # exhaustion. The CLI prints its refusal in its FINAL lines: scan only the
   # last 40 lines of the round slice, and never the wrapper's own markers.
   tail -c "+$((ROUND_LOG_MARK + 1))" "$RUN_LOG" 2>/dev/null \
-    | grep -v '^\[' | tail -n 40 | grep -qiE \
-    'out of usage credits|You.ve hit your (Opus|Sonnet) limit|Request rejected \(429\)|529 Overloaded|experiencing high load'
+    | grep -v '^\[' | tail -n 40 | grep -qiE "$(quota_regex "$RUNG_PROVIDER")"
 }
 
 # 2026-09-05: the subscription's SHARED session (or weekly) cap is not a
@@ -771,8 +978,7 @@ is_session_limited() {
   # echo the trigger strings. The CLI prints its refusal as the final line, so
   # scan only the last 3 non-empty non-wrapper lines for the real cap shape.
   tail -c "+$((ROUND_LOG_MARK + 1))" "$RUN_LOG" 2>/dev/null \
-    | grep -v '^\[' | grep -v '^[[:space:]]*$' | tail -n 3 | grep -qiE \
-    "^You.ve hit your (session|weekly) limit.*resets"
+    | grep -v '^\[' | grep -v '^[[:space:]]*$' | tail -n 3 | grep -qiE "$(session_regex "$RUNG_PROVIDER")"
 }
 
 is_transient_network_failure() {
@@ -805,7 +1011,15 @@ ROUND_LOG_MARK=0
 
 run_round() {
   local attempt=1 start_ts=$SECONDS remain
+  # The rung carried in from startup (or from the previous phase) has never
+  # been checked against THIS phase: its binary may be gone, its key unset, or
+  # its rendered prompt missing. Walk to the first rung that can actually run.
+  if ! provider_ready "$RUNG_PROVIDER"; then
+    echo "[$LOOP_SLUG] rung $RUNG_PROVIDER:$RUNG_MODEL is not usable for $PHASE" | tee -a "$RUN_LOG"
+    advance_rung "" "not installed or not signed in" || ALL_PROVIDERS_EXHAUSTED=1
+  fi
   while :; do
+    (( ALL_PROVIDERS_EXHAUSTED )) && break
     remain=$((CAP_SECS - (SECONDS - start_ts)))
     if [[ $remain -le 60 ]]; then RC=124; break; fi
     [[ -z "$TEST_ROUND_TIMEOUT_SECS" ]] || remain="$TEST_ROUND_TIMEOUT_SECS"
@@ -815,11 +1029,7 @@ run_round() {
     # wrapper was not acted on until `claude` finished on its own — which is
     # never, in the case that matters. `-k` escalates to SIGKILL so a claude
     # blocked on a hung child cannot make the cap advisory. R-384, R-386.
-    CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 "$TIMEOUT_BIN" -k "$KILL_AFTER_SECS" "$remain" claude -p "/reliability-weekend $PHASE" \
-      --model "${MODEL_RUNGS[$MODEL_INDEX]}" \
-      --dangerously-skip-permissions \
-      --output-format text >> "$RUN_LOG" 2>&1 &
-    ROUND_PID=$!
+    launch_round "$remain"
     local round_start=$SECONDS
     wait "$ROUND_PID"
     RC=$?
@@ -837,18 +1047,19 @@ run_round() {
     # retries immediately and `attempt` is untouched. Bounded by the ladder.
     # A shared cap is not a dead rung: every model on the ladder is behind the
     # same wall, so stop here rather than burning the ladder for nothing.
+    # A shared ACCOUNT cap retires the whole provider; a per-model quota
+    # advances one rung. Either way the night continues if a rung remains.
     if is_session_limited; then
-      SESSION_LIMITED=1
-      break
+      echo "[$LOOP_SLUG] $RUNG_PROVIDER:$RUNG_MODEL hit a shared account cap" | tee -a "$RUN_LOG"
+      advance_rung wide "session limit" || { ALL_PROVIDERS_EXHAUSTED=1; break; }
+      echo "[$LOOP_SLUG] continuing on $RUNG_PROVIDER:$RUNG_MODEL" | tee -a "$RUN_LOG"
+      continue
     fi
     if (( RC != 0 )) && is_quota_exhausted; then
-      if (( MODEL_INDEX + 1 < ${#MODEL_RUNGS[@]} )); then
-        MODEL_INDEX=$((MODEL_INDEX + 1))
-        echo "[weekend] ${MODEL_RUNGS[$((MODEL_INDEX - 1))]} is exhausted; dropping to ${MODEL_RUNGS[$MODEL_INDEX]}" | tee -a "$RUN_LOG"
-        continue
-      fi
-      ALL_MODELS_EXHAUSTED=1
-      break
+      echo "[$LOOP_SLUG] $RUNG_PROVIDER:$RUNG_MODEL is exhausted" | tee -a "$RUN_LOG"
+      advance_rung "" "quota exhausted" || { ALL_PROVIDERS_EXHAUSTED=1; break; }
+      echo "[$LOOP_SLUG] continuing on $RUNG_PROVIDER:$RUNG_MODEL" | tee -a "$RUN_LOG"
+      continue
     fi
     [[ $RC -eq 0 || $RC -eq 124 || $attempt -ge $MAX_ATTEMPTS ]] && break
     is_transient_network_failure || break
@@ -902,7 +1113,7 @@ run_phase() {
     set +e
     run_round
     set -e
-    [[ $RC -ne 0 && $round -lt $MAX_ROUNDS && $ALL_MODELS_EXHAUSTED -eq 0 && $SESSION_LIMITED -eq 0 ]] || break
+    [[ $RC -ne 0 && $round -lt $MAX_ROUNDS && $ALL_PROVIDERS_EXHAUSTED -eq 0 ]] || break
     # A daily job must finish inside its own day. launchd will not start a
     # second instance of a running label, so a cycle that overruns silently
     # eats the next fire and the dead-man goes quiet for a full day.
@@ -941,12 +1152,16 @@ run_phase() {
   fi
   # An exhausted ladder is not a generic non-zero exit: the operator needs the
   # cause and the one place it is fixed, or they re-fire into the same wall.
-  if (( SESSION_LIMITED )); then
-    status="INCOMPLETE (subscription session limit reached; the shared cap resets on its own clock)"
+  # Every rung tried and every one walled off. Named, with the reason per
+  # provider, so the operator does not re-fire into the same wall. 75 is
+  # this loop's incomplete-and-resumable code.
+  if (( ALL_PROVIDERS_EXHAUSTED )); then
+    status="INCOMPLETE (all agent providers exhausted: $EXHAUSTED_PROVIDERS)"
+    # The one place a claude cap is fixed, carried in the comment itself.
+    case "$EXHAUSTED_PROVIDERS" in
+      *claude=*) status="${status%)}; top up at claude.ai/settings/usage)" ;;
+    esac
     RC=75
-  fi
-  if (( ALL_MODELS_EXHAUSTED )); then
-    status="FAILED (all model quotas exhausted; top up at claude.ai/settings/usage)"
   fi
   # Deliver: the operator's merge cue is the verdict line, not exit 0. A cap
   # hit is the likeliest incomplete deliver, so it is named as one.
@@ -959,8 +1174,8 @@ run_phase() {
     fi
   fi
   case "$status" in
-    "INCOMPLETE (subscription session limit"*)
-      report "$status" "the subscription's shared session or weekly cap was reached, so no model rung could run — this $PHASE phase is INCOMPLETE; committed work is durable on the branch and the next scheduled fire re-runs the phase (only a deliver phase records an explicit resume point)" ;;
+    "INCOMPLETE (all agent providers exhausted"*)
+      report "$status" "every provider on the ladder reported an account cap, or was not installed or signed in — this phase is INCOMPLETE; nothing was advanced and the next fire retries from the top of the ladder" ;;
     *"ready to merge: "*|"0 PR(s), nothing to merge")
       report "$status" "CI is green on every PR this cycle delivered; merging is the operator's call" ;;
     "INCOMPLETE: "*)

@@ -25,7 +25,14 @@ SESSION_LIMIT_LINE = "You've hit your session limit · resets 5am (America/Los_A
 WEEKLY_LIMIT_LINE = "You've hit your weekly limit · resets Monday"
 
 
-@pytest.mark.parametrize("loop", sorted(LOOPS))
+# 2026-09-06: the claude model ladder now exists in ONE loop. The other four
+# left the claude.ai subscription entirely — it is reserved for the security
+# loop — and run codex, then grok, then NVIDIA, then Cerebras. Their ladder
+# behaviour is asserted in test_provider_failover.py; what stays here is the
+# claude-rung behaviour, against the loop that still has claude rungs.
+CLAUDE_LOOPS = ["security"]
+
+@pytest.mark.parametrize("loop", CLAUDE_LOOPS)
 class TestASharedSessionCapIsIncompleteNotFailed:
     def test_it_does_not_walk_the_model_ladder(self, tmp_path, loop):
         _proc, models, _calls = _run(
@@ -76,7 +83,7 @@ TRACEBACK_QUOTING_CAP = (
     "AssertionError: expected 'usage limit reached' and 'session limit reached' in calls"
 )
 
-@pytest.mark.parametrize("loop", sorted(LOOPS))
+@pytest.mark.parametrize("loop", CLAUDE_LOOPS)
 class TestQuotedCapProseIsNotACap:
     def test_a_crash_quoting_the_cap_still_walks_the_ladder(self, tmp_path, loop):
         # The round's transcript QUOTES the cap phrase mid-output, but its
