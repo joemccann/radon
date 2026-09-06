@@ -223,3 +223,70 @@ describe("GET /api/gex staleness (R-660)", () => {
     expect(body.is_stale).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// T-470: a 4xx upstream REJECTION must pass through exactly (no 502 rewrite)
+// and must NOT be masked by the >= 500 cache-fallback guard.
+// ---------------------------------------------------------------------------
+
+describe("POST scan routes: 4xx upstream status passthrough (T-470)", () => {
+  it("gex: RadonApiError 429 yields exactly 429 with no cached body", async () => {
+    const { RadonApiError } = await import("@/lib/radonApi");
+    mockRadonFetch.mockRejectedValue(new RadonApiError(429, "rate limited"));
+    mockReadFile.mockResolvedValue(JSON.stringify({
+      scan_time: "2026-09-05T13:00:00Z",
+      ticker: "SPX",
+      net_gex: 321,
+      history: [],
+    }));
+
+    const { POST } = await import("../app/api/gex/route");
+    const res = await POST();
+    expect(res.status).toBe(429);
+    const body = await res.json();
+    expect(body.scan_succeeded).toBe(false);
+    // No cached snapshot may be served for a client error.
+    expect(body.net_gex).toBeUndefined();
+    expect(body.is_stale).toBeUndefined();
+  });
+
+  it("regime: RadonApiError 429 yields exactly 429 with no cached body", async () => {
+    const { RadonApiError } = await import("@/lib/radonApi");
+    mockRadonFetch.mockRejectedValue(new RadonApiError(429, "rate limited"));
+    mockReadFile.mockResolvedValue(JSON.stringify({
+      scan_time: "2026-09-05T13:00:00Z",
+      date: "2026-09-05",
+      market_open: true,
+      cri: { score: 18, level: "LOW", components: { vix: 4, vvix: 4, correlation: 5, momentum: 5 } },
+      history: [],
+      spy_closes: [],
+    }));
+
+    const { POST } = await import("../app/api/regime/route");
+    const res = await POST();
+    expect(res.status).toBe(429);
+    const body = await res.json();
+    expect(body.scan_succeeded).toBe(false);
+    expect(body.cri).toBeUndefined();
+    expect(body.is_stale).toBeUndefined();
+  });
+
+  it("gamma-rotation: RadonApiError 429 yields exactly 429 with no cached body", async () => {
+    const { RadonApiError } = await import("@/lib/radonApi");
+    mockRadonFetch.mockRejectedValue(new RadonApiError(429, "rate limited"));
+    mockReadFile.mockResolvedValue(JSON.stringify({
+      scan_time: "2026-09-05T13:00:00Z",
+      signal: { grg_z: 1.23 },
+      assets: { SPY: { ticker: "SPY" }, TLT: { ticker: "TLT" } },
+      history: [],
+    }));
+
+    const { POST } = await import("../app/api/gamma-rotation/route");
+    const res = await POST();
+    expect(res.status).toBe(429);
+    const body = await res.json();
+    expect(body.scan_succeeded).toBe(false);
+    expect(body.signal).toBeUndefined();
+    expect(body.is_stale).toBeUndefined();
+  });
+});
