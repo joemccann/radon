@@ -1,3 +1,21 @@
+# Task: Caddy site for mcp.radon.run (issue #232)
+
+Vercel DNS already points mcp.radon.run at 5.78.148.38. Add a dedicated Caddy site that serves only MCP, and admit that Host on the FastMCP allowlist.
+
+## Dependency graph
+
+- T1 depends_on: [] - Failing Caddyfile + allowed-hosts tests for mcp.radon.run.
+- T2 depends_on: [T1] - Caddy site, FastMCP Host/Origin allowlist, cloud-services runbook.
+- T3 depends_on: [T2] - Focused tests, PR against main. Do not flip HOSTED_MCP_URL until live TLS.
+
+## Checklist
+
+- [x] T1 Failing tests
+- [x] T2 Caddy site + allowlist
+- [ ] T3 Verify and open PR
+
+---
+
 # Task: CI performance deliver before/after/% [IN PROGRESS]
 
 Issue #196 deliver/report must cite before, after, and % change for time-saving fixes.

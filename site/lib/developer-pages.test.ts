@@ -61,8 +61,8 @@ describe("developer resource pages", () => {
     expect(markdown).toContain(HOSTED_MCP_URL);
     expect(markdown).toContain("Streamable HTTP");
     expect(markdown).toContain("read-only");
-    // mcp.radon.run has no DNS record or Caddy site block yet; the docs must
-    // not point agents at a host that does not resolve.
+    // Dedicated host exists (DNS + Caddy) but is not the published consumer
+    // URL until live TLS is verified; keep agents on app.radon.run/mcp.
     expect(markdown).not.toContain("https://mcp.radon.run");
     // The hosted rungs are named, and the corpus stays local-only.
     expect(markdown).toContain("radon_identity");

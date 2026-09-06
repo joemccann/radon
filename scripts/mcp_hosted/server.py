@@ -234,15 +234,23 @@ def _operator_read_impl(
 # ── MCP registration ─────────────────────────────────────────────────
 
 # Keep the SDK's DNS-rebinding protection ON, but name the real fronting
-# hosts: Caddy forwards the original Host header (app.radon.run), which the
-# loopback-only default would 421.
+# hosts: Caddy forwards the original Host header (app.radon.run or
+# mcp.radon.run), which the loopback-only default would 421.
 _ALLOWED_HOSTS = [
     host.strip()
     for host in os.environ.get(
         "RADON_MCP_ALLOWED_HOSTS",
-        "app.radon.run,app.radon.run:*,127.0.0.1:*,localhost:*",
+        "app.radon.run,app.radon.run:*,mcp.radon.run,mcp.radon.run:*,127.0.0.1:*,localhost:*",
     ).split(",")
     if host.strip()
+]
+_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get(
+        "RADON_MCP_ALLOWED_ORIGINS",
+        "https://app.radon.run,https://mcp.radon.run",
+    ).split(",")
+    if origin.strip()
 ]
 
 mcp = FastMCP(
@@ -262,7 +270,7 @@ mcp = FastMCP(
     transport_security=TransportSecuritySettings(
         enable_dns_rebinding_protection=True,
         allowed_hosts=_ALLOWED_HOSTS,
-        allowed_origins=["https://app.radon.run"],
+        allowed_origins=_ALLOWED_ORIGINS,
     ),
 )
 

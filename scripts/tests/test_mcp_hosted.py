@@ -361,6 +361,17 @@ class TestHostedServerPins:
                     "never touch service secrets"
                 )
 
+    def test_default_allowed_hosts_include_mcp_hostname(self):
+        """Caddy forwards Host: mcp.radon.run on the dedicated site. The
+        SDK 421s any Host not on this list."""
+        assert "mcp.radon.run" in hosted._ALLOWED_HOSTS
+        assert "mcp.radon.run:*" in hosted._ALLOWED_HOSTS
+
+    def test_default_allowed_origins_include_mcp_hostname(self):
+        origins = hosted.mcp.settings.transport_security.allowed_origins
+        assert "https://mcp.radon.run" in origins
+        assert "https://app.radon.run" in origins
+
     def test_stateless_http_binds_loopback_by_default(self):
         assert hosted.mcp.settings.host == "127.0.0.1"
         assert hosted.mcp.settings.port == 8334
