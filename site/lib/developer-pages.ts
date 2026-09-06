@@ -10,8 +10,9 @@ import {
 export const AGENT_SURFACES_LAST_MODIFIED = "2026-09-05";
 
 // The hosted Streamable HTTP MCP endpoint (issue #232 chunk 1). Served by a
-// dedicated process behind the app.radon.run edge; mcp.radon.run does not
-// exist yet, so this path URL is the published one.
+// dedicated process behind the app.radon.run edge. mcp.radon.run has DNS and
+// a Caddy site; the published consumer URL stays this path until TLS on the
+// dedicated host is verified live.
 export const HOSTED_MCP_URL = "https://app.radon.run/mcp";
 
 export type AgentPage = {

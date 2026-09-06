@@ -400,16 +400,20 @@ JSON-RPC), documented for consumers at radon.run `/developers/mcp`.
   `setup-vps.sh`) derives from `/etc/radon/env` on every deploy; the unit
   never loads the full secret set and runs with `/etc/radon/env`
   inaccessible. Optional overrides `RADON_MCP_{HOST,PORT,SITE_BASE,EDGE_BASE,APP_BASE,DEMO_BASE}`
-  and `RADON_MCP_ALLOWED_HOSTS` (comma list; default
-  `app.radon.run,app.radon.run:*,127.0.0.1:*,localhost:*` — the SDK's
-  DNS-rebinding protection 421s any Host not on it, so a serving-host change
-  must update this list) are copied through when present in `/etc/radon/env`.
+  `RADON_MCP_ALLOWED_HOSTS` (comma list; default
+  `app.radon.run,app.radon.run:*,mcp.radon.run,mcp.radon.run:*,127.0.0.1:*,localhost:*`
+  — the SDK's DNS-rebinding protection 421s any Host not on it), and
+  `RADON_MCP_ALLOWED_ORIGINS` (default
+  `https://app.radon.run,https://mcp.radon.run`) are copied through when
+  present in `/etc/radon/env`.
 - **First enable** (install-units only auto-enables new timers):
   `sudo systemctl enable --now radon-mcp.service`, then
   `curl -s -X POST https://app.radon.run/mcp -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'`.
-- **`mcp.radon.run` does not exist** (no DNS record, no Caddy site block);
-  the published URL is the path-based one above. Moving to a dedicated host
-  needs a human DNS record first, then a Caddyfile site block.
+- **Dedicated host `mcp.radon.run`**: Vercel A record to the same VPS as
+  `app.radon.run`. Caddy site block proxies only `/mcp*` (and `/` rewritten
+  to `/mcp`) to `127.0.0.1:8334` — no Next.js, no FastAPI. The published
+  consumer URL remains `https://app.radon.run/mcp` until TLS on the dedicated
+  host is verified.
 
 ## MenthorQ Playwright session refresh
 
