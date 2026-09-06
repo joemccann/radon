@@ -1015,3 +1015,43 @@ how this loop improves as the codebase grows.
   extracting the `next` tarball on this host; `npm install --prefix site` worked —
   and it rewrites `package-lock.json` via bun's earlier migration, so
   `git checkout -- site/package-lock.json` after.
+
+- **2026-09-05 (audit, second pass): the `.radon-testing-runner` marker was
+  ABSENT and the skill's rail says refuse — but the WRAPPER self-heals on the
+  canonical path.** `scripts/testing_weekend.sh:517-526` admits
+  `~/radon-weekend/radon-testing` once and `touch`es the marker; only a
+  non-canonical path refuses. A directly-invoked `/testing-weekend` never runs
+  that code, so the rail as written would abort every manual run in the correct
+  clone. Resolve it the way the wrapper does: compare `pwd -P` against
+  `$HOME/radon-weekend/radon-testing`, stamp the marker on a match, refuse
+  otherwise — and say in the report that you stamped it.
+- **2026-09-05 (audit, second pass): 39 vitest FILES failed with only 14 failed
+  TESTS — that ratio IS the signal, and it is an environment read every time.**
+  The first pass had already hit this same morning (`thinking-orbs` missing),
+  yet it recurred because the clone's tree reset wiped `node_modules` again
+  while `package.json` was UNCHANGED in the range — so the 2026-09-05 pre-flight
+  rule ("check whether the delta touched package.json") did not fire. Better
+  rule: whenever failed-FILES greatly exceeds failed-TESTS, grep the vitest log
+  for `Failed to resolve import` / `Cannot find package` BEFORE attributing
+  anything, and re-run only the failed set after installing. Here that turned a
+  39-file red into `323 passed / 0 failed` with the repo untouched. Also: `bun`
+  is at `~/.bun/bin/bun`, not on the default PATH; `npm install --no-audit
+  <pkgs>` in `web/` worked and leaves an untracked `web/package-lock.json` that
+  must be deleted to keep the tree clean.
+- **2026-09-05 (audit, second pass): the darwin cloud "baseline" is a PATH
+  artifact, not a host property — filed as T-484.** Ledger entries have carried
+  10/12/34/35/37/33 for weeks, attributed to bash 3.2. This run's gate script
+  put `/opt/homebrew/bin` ahead of `/bin`, resolving `bash` to 5.3.9, and the
+  cloud gate read **5 failed** — all of them `test_caddy_edge_timeouts.py` with
+  `caddy` absent. The 2026-08-22 rail ("the baseline is a LIST, not a count")
+  is necessary but insufficient: record the RESOLVED `bash --version` and
+  `command -v caddy` next to the FAILED list, or the list itself is not
+  comparable run to run.
+- **2026-09-05 (audit, second pass): read-only agents can safely run CONCURRENTLY
+  with the gates if the prompt forbids running suites.** The 2026-08-29 rail
+  (gates before the fan-out, never alongside) exists because agents that ran
+  test suites drove load to 224. Four agents given an explicit "NEVER run a test
+  suite, npm, bun, a build, pytest or vitest — grep and read only" rail ran for
+  the whole pytest gate at load 3-6, and the gate's 1730s was uncontended. The
+  mechanism to remove is the agents' SUITE RUNS, not their existence; that
+  recovered roughly 30 minutes of otherwise-idle cap.
