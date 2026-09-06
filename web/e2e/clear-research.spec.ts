@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { installClearFixtures } from "./clear-fixtures";
+import { installClearRealtimeFixtures } from "./clear-realtime-fixtures";
 
 test.use({ serviceWorkers: "block", colorScheme: "light", reducedMotion: "reduce" });
 
@@ -19,6 +20,7 @@ for (const width of [360, 390, 768, 1440]) {
       test.setTimeout(90_000);
       await page.setViewportSize({ width, height: 900 });
       const requests = await installClearFixtures(page);
+      await installClearRealtimeFixtures(page);
       const errors: string[] = [];
       page.on("pageerror", (error) => errors.push(error.message));
       await page.goto(surface.path);
