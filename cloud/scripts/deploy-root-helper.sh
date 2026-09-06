@@ -649,6 +649,17 @@ reload_caddy() {
   fi
 }
 
+restart_caddy() {
+  # TERMing a hung reload leaves Type=notify in `reloading`. Later reloads
+  # wait out the helper timeout (HTTP-only mcp.radon.run still hung 180s
+  # on 3866d693). Restart unwedes and loads whatever is in CADDY_CONFIG.
+  if (( HELPER_TEST_MODE == 1 )); then
+    "$SYSTEMCTL" restart caddy
+  else
+    "$TIMEOUT" --signal=TERM --kill-after=2s 60s "$SYSTEMCTL" restart caddy
+  fi
+}
+
 # Staged 0600, never 0644. radon owns the source directory, so it can race the
 # regular-file check below by flipping the source to `ln -sf /etc/shadow`
 # between the test and this copy: install dereferences the symlink, and a
@@ -717,10 +728,18 @@ publish_caddy() {
     [[ -z "$rollback" ]] || "$RM" -f "$rollback"
     return 0
   fi
+  # Candidate is already live on disk. Restart the wedged unit so it
+  # actually loads it instead of rolling back and leaving the old
+  # Caddyfile in a still-reloading process.
+  if restart_caddy; then
+    [[ -z "$rollback" ]] || "$RM" -f "$rollback"
+    echo "caddy reload timed out; restarted caddy onto the candidate" >&2
+    return 0
+  fi
   if [[ -n "$rollback" ]]; then
     mv -f -- "$rollback" "$CADDY_CONFIG"
     "$SYNC" -f "$CADDY_CONFIG"
-    reload_caddy || echo "known-good caddy reload reconciliation also failed" >&2
+    restart_caddy || echo "known-good caddy restart reconciliation also failed" >&2
   else
     "$RM" -f "$CADDY_CONFIG"
   fi
