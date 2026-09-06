@@ -14,6 +14,11 @@ from pathlib import Path
 
 import pytest
 
+from _bash_toolchain import MODERN_BASH, requires_modern_bash
+
+# T-484: bootstrap-control-plane.sh uses exec {fd}<> (bash >= 4.1); which bash
+# resolves must not depend on the invoking shell's PATH order.
+pytestmark = requires_modern_bash
 
 CLOUD_ROOT = Path(__file__).resolve().parents[1]
 BOOTSTRAP = CLOUD_ROOT / "scripts" / "bootstrap-control-plane.sh"
@@ -220,7 +225,7 @@ class Sandbox:
 
     def run(self, **env_overrides: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            [str(BOOTSTRAP)],
+            [str(MODERN_BASH), str(BOOTSTRAP)],
             env={**self.env, **env_overrides},
             capture_output=True,
             text=True,
@@ -359,7 +364,7 @@ def _run_root_control_plane_verifier(sandbox: Sandbox) -> subprocess.CompletedPr
     sha256sum = shutil.which("sha256sum")
     assert true_bin and rm_bin and sha256sum
     return subprocess.run(
-        ["bash", str(ROOT_HELPER), "verify-control-plane"],
+        [str(MODERN_BASH), str(ROOT_HELPER), "verify-control-plane"],
         env={
             **os.environ,
             "RADON_DEPLOY_HELPER_TEST_MODE": "1",
@@ -393,7 +398,7 @@ def test_non_root_is_refused_before_lock_or_install(tmp_path: Path) -> None:
     env.pop("RADON_BOOTSTRAP_ALLOW_NONROOT")
 
     result = subprocess.run(
-        [str(BOOTSTRAP)],
+        [str(MODERN_BASH), str(BOOTSTRAP)],
         env={**env, "RADON_BOOTSTRAP_TEST_EUID": "1000"},
         capture_output=True,
         text=True,

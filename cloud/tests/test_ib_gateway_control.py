@@ -10,6 +10,10 @@ import time
 
 import pytest
 
+from _bash_toolchain import MODERN_BASH, requires_modern_bash
+
+# T-484: operator-radon.sh uses mapfile (bash >= 4); pin which bash runs it.
+pytestmark = requires_modern_bash
 
 CLOUD_ROOT = Path(__file__).resolve().parents[1]
 # Monorepo: cloud/ lives inside radon/. Legacy: cloud repo is a sibling of radon/.
@@ -88,7 +92,7 @@ exit 2
 
 def _run_control(env: dict[str, str], *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [str(CONTROL), *args],
+        [str(MODERN_BASH), str(CONTROL), *args],
         env=env,
         text=True,
         capture_output=True,
@@ -1032,7 +1036,7 @@ set -eu
     )
 
     result = subprocess.run(
-        ["bash", "-c", command],
+        [str(MODERN_BASH), "-c", command],
         env=env,
         text=True,
         capture_output=True,
@@ -1096,7 +1100,7 @@ def test_setup_never_replaces_live_helper_with_invalid_candidate(
     )
 
     result = subprocess.run(
-        ["bash", "-c", command], env=env, text=True,
+        [str(MODERN_BASH), "-c", command], env=env, text=True,
         capture_output=True, check=False,
     )
 
