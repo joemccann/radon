@@ -743,7 +743,7 @@ RETRY_PAUSE_SECS=60
 # operator's global default off the unattended path. Session/weekly caps are
 # shared across models and must not match here.
 LOOP_SKILL="documentation-nightly"
-LOOP_SLUG="documentation-nightly"
+LOOP_LOG_TAG="documentation-nightly"
 PORTABLE_PROMPT_DIR="${RADON_PORTABLE_PROMPT_DIR:-$REPO/.claude/portable-prompts}"
 # `RADON_WEEKEND_MODEL_LADDER` still names claude rungs, for the loops that
 # have them; `RADON_WEEKEND_PROVIDER_LADDER` overrides the whole ladder.
@@ -877,7 +877,7 @@ advance_rung() {
     next="$(rung_provider "${PROVIDER_RUNGS[$RUNG_INDEX]}")"
     [[ "$wide" == "wide" && "$next" == "$dead" ]] && continue
     if ! provider_ready "$next"; then
-      echo "[$LOOP_SLUG] rung ${PROVIDER_RUNGS[$RUNG_INDEX]} skipped: provider not installed or not signed in" | tee -a "$RUN_LOG"
+      echo "[$LOOP_LOG_TAG] rung ${PROVIDER_RUNGS[$RUNG_INDEX]} skipped: provider not installed or not signed in" | tee -a "$RUN_LOG"
       note_exhausted "$next" "not installed or not signed in"
       continue
     fi
@@ -947,7 +947,7 @@ launch_round() {
         --cwd "$REPO" --always-approve --output-format plain >> "$RUN_LOG" 2>&1 &
       ;;
     *)
-      echo "[$LOOP_SLUG] unknown provider $RUNG_PROVIDER" | tee -a "$RUN_LOG"
+      echo "[$LOOP_LOG_TAG] unknown provider $RUNG_PROVIDER" | tee -a "$RUN_LOG"
       return 1
       ;;
   esac
@@ -1025,7 +1025,7 @@ run_phase() {
   # been checked against THIS phase: its binary may be gone, its key unset, or
   # its rendered prompt missing. Walk to the first rung that can actually run.
   if ! provider_ready "$RUNG_PROVIDER"; then
-    echo "[$LOOP_SLUG] rung $RUNG_PROVIDER:$RUNG_MODEL is not usable for $PHASE" | tee -a "$RUN_LOG"
+    echo "[$LOOP_LOG_TAG] rung $RUNG_PROVIDER:$RUNG_MODEL is not usable for $PHASE" | tee -a "$RUN_LOG"
     advance_rung "" "not installed or not signed in" || ALL_PROVIDERS_EXHAUSTED=1
   fi
   while :; do
@@ -1060,15 +1060,15 @@ run_phase() {
     # A shared ACCOUNT cap retires the whole provider; a per-model quota
     # advances one rung. Either way the night continues if a rung remains.
     if is_session_limited; then
-      echo "[$LOOP_SLUG] $RUNG_PROVIDER:$RUNG_MODEL hit a shared account cap" | tee -a "$RUN_LOG"
+      echo "[$LOOP_LOG_TAG] $RUNG_PROVIDER:$RUNG_MODEL hit a shared account cap" | tee -a "$RUN_LOG"
       advance_rung wide "session limit" || { ALL_PROVIDERS_EXHAUSTED=1; break; }
-      echo "[$LOOP_SLUG] continuing on $RUNG_PROVIDER:$RUNG_MODEL" | tee -a "$RUN_LOG"
+      echo "[$LOOP_LOG_TAG] continuing on $RUNG_PROVIDER:$RUNG_MODEL" | tee -a "$RUN_LOG"
       continue
     fi
     if (( RC != 0 )) && is_quota_exhausted; then
-      echo "[$LOOP_SLUG] $RUNG_PROVIDER:$RUNG_MODEL is exhausted" | tee -a "$RUN_LOG"
+      echo "[$LOOP_LOG_TAG] $RUNG_PROVIDER:$RUNG_MODEL is exhausted" | tee -a "$RUN_LOG"
       advance_rung "" "quota exhausted" || { ALL_PROVIDERS_EXHAUSTED=1; break; }
-      echo "[$LOOP_SLUG] continuing on $RUNG_PROVIDER:$RUNG_MODEL" | tee -a "$RUN_LOG"
+      echo "[$LOOP_LOG_TAG] continuing on $RUNG_PROVIDER:$RUNG_MODEL" | tee -a "$RUN_LOG"
       continue
     fi
     [[ $RC -eq 0 || $RC -eq 124 || $attempt -ge $MAX_ATTEMPTS ]] && break

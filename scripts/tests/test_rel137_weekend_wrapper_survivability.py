@@ -208,11 +208,18 @@ class TestTheCapIsEnforceable:
     @pytest.mark.parametrize("name", sorted(LOOPS))
     def test_timeout_escalates_to_sigkill(self, name):
         body = _uncommented(LOOPS[name])
-        line = next(
-            ln
-            for ln in body.splitlines()
-            if "TIMEOUT_BIN" in ln and "claude" in ln
+        # 2026-09-06: launch_round() has one arm per provider and the claude
+        # arm names "$RUNG_BIN", not `claude`. EVERY arm must be -k guarded,
+        # or the cap is advisory for whichever provider is missing it.
+        launches = [
+            ln for ln in body.splitlines()
+            if "TIMEOUT_BIN" in ln and "-k" in ln
+        ]
+        assert len(launches) >= 4, (
+            f"{name}: expected one -k guarded launch per provider arm, found "
+            f"{len(launches)}"
         )
+        line = launches[0]
         assert re.search(r"-k\s+\"?\$?\{?[A-Za-z0-9_]", line), (
             "no --kill-after: only SIGTERM is sent, so a claude blocked on a "
             f"hung child makes the cap advisory: {line}"

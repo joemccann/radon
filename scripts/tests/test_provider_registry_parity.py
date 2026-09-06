@@ -61,7 +61,7 @@ def test_the_helper_is_byte_identical_across_the_five_wrappers(fn):
 def test_each_loop_declares_its_own_skill_and_slug(loop):
     body = LOOPS[loop].read_text(encoding="utf-8")
     assert re.search(r'^LOOP_SKILL="[a-z-]+"$', body, re.M), "no LOOP_SKILL"
-    assert re.search(r'^LOOP_SLUG="[a-z-]+"$', body, re.M), "no LOOP_SLUG"
+    assert re.search(r'^LOOP_LOG_TAG="[a-z-]+"$', body, re.M), "no LOOP_LOG_TAG"
 
 
 @pytest.mark.parametrize("loop", sorted(LOOPS))
