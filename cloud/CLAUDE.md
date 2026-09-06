@@ -88,6 +88,12 @@ narrowing: preflight now renders the INSTALLED compose body, not the incoming
 release's. The incoming body is gated at install time instead, by provenance
 (git blob at the deployed commit) plus `compose_body_is_valid`.
 
+That validator's deny-list refuses EVERY host-namespace join, not only
+`pid:` — `ipc:`, `userns_mode:`, `uts:` and `cgroup:` widen the container's
+runtime the same way (R-668/REL-249). The three copies (deploy-root-helper,
+bootstrap-control-plane, setup-vps) stay byte-identical; a parity test in
+`cloud/tests/test_rel234_compose_gate.py` pins them.
+
 **The broker host gets none of this from CI.** `.github/workflows/ci.yml`
 deploys to a single `secrets.VPS_HOST`, and `sync-control-plane` reads
 `/home/radon/radon/.git`, which the broker does not have. Every control-plane
