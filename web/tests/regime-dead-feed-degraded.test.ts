@@ -29,6 +29,16 @@ vi.mock("fs/promises", () => ({
 
 vi.mock("child_process", () => ({ spawn: mockSpawn }));
 
+// T-485: the real trigger logs from async continuations (`pending.catch`),
+// which leaves a vitest onUserConsoleLog rpc pending at environment teardown
+// and reds the gate with 0 failed tests. Stub it with a synchronous recorder
+// so the stale-payload revalidation attempt is still observable without any
+// post-test console traffic.
+const mockScanTrigger = vi.fn(() => true);
+vi.mock("@/lib/backgroundScan", () => ({
+  createBackgroundScanTrigger: () => mockScanTrigger,
+}));
+
 vi.mock("@/lib/db", () => ({
   resetDb: () => {},
   getDb: () => mockGetDb(),

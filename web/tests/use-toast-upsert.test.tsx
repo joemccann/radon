@@ -102,3 +102,50 @@ describe("useToast upsertToast", () => {
     expect(result.current.toasts.map((t) => t.message)).toEqual(["two"]);
   });
 });
+
+describe("useToast hasToastKey (T-465)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("reports a keyed toast live while on screen and false once dismissed", () => {
+    const { result } = renderHook(() => useToast());
+
+    expect(result.current.hasToastKey("perm:900777")).toBe(false);
+
+    act(() => {
+      result.current.upsertToast("perm:900777", "success", "FILLED · BUY 2x VIX $30C @ $0.61", 0);
+    });
+    expect(result.current.hasToastKey("perm:900777")).toBe(true);
+
+    // The key must die the moment dismissal STARTS (before the 150ms exit
+    // animation completes) — R-642's fresh-total decision reads it then.
+    act(() => {
+      result.current.dismissToast(result.current.toasts[0].id);
+    });
+    expect(result.current.hasToastKey("perm:900777")).toBe(false);
+
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+    expect(result.current.hasToastKey("perm:900777")).toBe(false);
+  });
+
+  it("also forgets the key on removeToast", () => {
+    const { result } = renderHook(() => useToast());
+
+    act(() => {
+      result.current.upsertToast("order:11", "success", "one", 0);
+    });
+    expect(result.current.hasToastKey("order:11")).toBe(true);
+
+    act(() => {
+      result.current.removeToast(result.current.toasts[0].id);
+    });
+    expect(result.current.hasToastKey("order:11")).toBe(false);
+  });
+});

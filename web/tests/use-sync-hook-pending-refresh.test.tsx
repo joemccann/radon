@@ -50,6 +50,19 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+// T-480: drain any queued follow-up on FAKE timers so the "nothing fired"
+// window cannot lose a wall-clock race to React's commit/effect flush.
+async function flushTimersFake() {
+  vi.useFakeTimers();
+  try {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
 describe("useSyncHook queues a sync requested while a POST is in flight (R-640)", () => {
   it("re-fires exactly one follow-up POST after the in-flight POST settles", async () => {
     const { calls, postResolvers } = deferredPostFetch();
@@ -82,8 +95,8 @@ describe("useSyncHook queues a sync requested while a POST is in flight (R-640)"
     // consumed, and two mid-flight events coalesced into one refresh.
     await act(async () => {
       postResolvers[1]();
-      await new Promise((resolve) => setTimeout(resolve, 20));
     });
+    await flushTimersFake();
     expect(calls).toHaveLength(3);
   });
 
@@ -95,8 +108,8 @@ describe("useSyncHook queues a sync requested while a POST is in flight (R-640)"
     await waitFor(() => expect(calls).toHaveLength(2));
     await act(async () => {
       postResolvers[0]();
-      await new Promise((resolve) => setTimeout(resolve, 20));
     });
+    await flushTimersFake();
     expect(calls).toHaveLength(2);
   });
 });

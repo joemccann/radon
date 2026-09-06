@@ -23,6 +23,17 @@ import { renderHook } from "@testing-library/react";
 import type { PortfolioData, PortfolioLeg, PortfolioPosition } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
 
+// T-462: the ticket now reads live-feed connectivity from
+// RealtimePricesContext at the owner surface; these specs exercise
+// pricing/risk with the feed up.
+vi.mock("@/lib/RealtimePricesContext", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    useRealtimePrices: () => ({ ...actual.useRealtimePrices(), connected: true }),
+  };
+});
+
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
 vi.mock("../components/Modal", () => ({

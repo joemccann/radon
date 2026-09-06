@@ -16,6 +16,7 @@ import {
   riskPriceForOrderType,
 } from "@/lib/order/stopOrder";
 import { useOrderActionsOptional } from "@/lib/OrderActionsContext";
+import { useRealtimePrices } from "@/lib/RealtimePricesContext";
 import { isIndexSymbol, hasFuturesSupport, hasIndexOptionsSupport } from "@/lib/indexSymbols";
 import { FuturesOrderForm } from "@/components/ticker-detail/FuturesOrderForm";
 import { IndexOptionOrderForm } from "@/components/ticker-detail/IndexOptionOrderForm";
@@ -328,6 +329,9 @@ function StockOrderForm({
   priceData: PriceData | null;
 }) {
   const orderActions = useOrderActionsOptional();
+  // T-462: the feed-disconnect arm of quoteSubmitGate is dead unless the
+  // owner surface supplies real connectivity.
+  const { connected: feedConnected } = useRealtimePrices();
   const defaultAction: SingleLegOrderAction = position != null ? "SELL" : "BUY";
   const [action, setAction] = useState<SingleLegOrderAction>(defaultAction);
   const [quantity, setQuantity] = useState(() => {
@@ -406,6 +410,7 @@ function StockOrderForm({
       mid={mid}
       ask={ask}
       priceData={priceData}
+      feedConnected={feedConnected}
       quoteLabel={ticker}
       showQuickButtonPrices={false}
       isValid={isValid}

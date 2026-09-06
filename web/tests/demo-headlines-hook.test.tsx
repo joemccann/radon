@@ -81,7 +81,8 @@ describe("useHeadlines demo transport", () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => SNAPSHOT })
-      .mockRejectedValueOnce(new Error("offline"));
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValue({ ok: true, json: async () => SNAPSHOT });
     vi.stubGlobal("fetch", fetchMock);
     const { useHeadlines } = await import("../lib/useHeadlines");
     const rendered = renderHook(() => useHeadlines());
@@ -99,6 +100,19 @@ describe("useHeadlines demo transport", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(rendered.result.current.status).toBe("down");
     expect(rendered.result.current.items).toEqual(SNAPSHOT.items);
+
+    // T-483: one failure re-arms the poll at POLL_MS * 2**1 = 120s, so 60s
+    // after the rejection NO third fetch may fire...
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    // ...and a further 60s (120s since the failure) fires exactly the third.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     rendered.unmount();
   });
 
