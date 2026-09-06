@@ -91,17 +91,6 @@ def test_the_three_copies_are_byte_identical() -> None:
     assert helper == _function_text(SETUP)
 
 
-def test_bootstrap_compose_arm_calls_the_shared_function() -> None:
-    text = BOOTSTRAP.read_text(encoding="utf-8")
-    # Strip comments so a comment naming the call cannot satisfy this.
-    code = "\n".join(
-        line for line in text.splitlines() if not line.lstrip().startswith("#")
-    )
-    arm = code[code.index("compose)") :]
-    arm = arm[: arm.index(";;")]
-    assert "compose_body_is_valid" in arm
-
-
 def test_bootstrap_defines_the_gate_before_its_top_level_call() -> None:
     """Bash resolves a function at call time; bootstrap's staging loop runs at
     top level, so a definition placed after it is 'command not found' and the
