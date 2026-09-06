@@ -978,3 +978,49 @@ python/web gate co-wall then the deploy floor (CIP-004).
   needs 3 more post-merge samples). CIP-004 / CIP-006 unchanged, DEFERRED.
 - Residual bottleneck: python/web gate co-wall ~100-110s, then the 86-88s
   deploy floor (CIP-004).
+
+### 2026-09-06 - audit - branch `ci-performance/2026-09-06`
+
+- Audited range: `391aaaea..7a7ca4ae` (67 commits: PRs #302-#308 plus direct
+  pushes). Runner state clean; lock `/tmp/radon-ci-perf.lock` held.
+- CI-surface delta: `ci.yml` CIP-007 apt bounding + T-448 trace-upload
+  reorder (e2e job, non-gating); `docker/app/Dockerfile.python` R-665
+  browser digest (build-layer only); cloud deploy scripts hardened
+  (REL-234/242, off the CI clock). No `needs` edge, shard, gate, or
+  provenance change on the deploy path.
+- Samples (mixed/full-stack, cache warm, successful `push` runs, primary
+  clock createdAt -> Deploy completedAt): 34009244091 ~272s,
+  33983869958 ~258s, 33983574603 ~270s, 33983111642 ~254s,
+  33938475254 ~242s, 33935134766 ~228s, 33917247042 ~320s(deploy 96s),
+  33913674034 245s, 33912581935 264s, 33911671244 261s. p50 ~256s,
+  p95 ~305s. Two cancelled (34009218862, 33911589496 - push-supersede),
+  4 failures 09-04/05 (test defects, excluded from perf). Note: run
+  updatedAt overstates the clock when the non-gating Playwright job tails
+  (33935134766 shows 594s updatedAt vs 228s to deploy) - never use
+  updatedAt for the primary clock.
+- Critical path (34009244091): path-filter 10s -> pytest gate wall 146s
+  (scripts-npsz ends 03:35:02) -> pytest ratchet 21s -> prestage 12s ->
+  deploy 74s.
+- **Top bottleneck / CIP-009: fan-out job-slot saturation.** The gate
+  fan-out launches ~25 concurrent jobs (8 vitest + 13 pytest + 2 images +
+  perimeter + non-gating Playwright) against the plan's 20-job concurrency
+  cap, so one gate shard queues until a slot frees and becomes the tail:
+  scripts-npsz started 03:33:30 vs peers 03:32:53 (+37s) in 34009244091;
+  scripts-gh started 18:23:32 vs 18:22:56 (+36s) in 33983869958. The late
+  shard, not the slowest shard's work (~103s scripts-rs), sets the pytest
+  gate wall. Candidates, in order: (a) merge small pytest shards
+  (cloud-mz 28s into cloud-al 44s; rest 40s + rest-api 39s) preserving the
+  fail-closed shard-union contract, cutting fan-out toward 20;
+  (b) if still over cap, defer the non-gating Playwright job's start off
+  the gate window. Expected ~30-37s off p50 (~256 -> ~220s), high
+  confidence on evidence, low risk, runner minutes roughly unchanged
+  (merges reduce per-job setup). Validation: late-start delta gone across
+  five post-merge mixed runs; shard-union contract green.
+- CIP-007 validation sample 1/5: apt step normal in 34009244091 (e2e job
+  139s, no mirror tail). Stays `VALIDATING`.
+- CIP-005 stage 2: scripts-rs 103s/100s/108s in range (trigger 85s) -
+  still `VALIDATING`, imbalance persists but is NOT the tail while
+  CIP-009 slot delay dominates.
+- Residual after CIP-009: pytest gate work-wall (~103s scripts-rs, CIP-005)
+  then the 74-96s deploy floor (CIP-004, DEFERRED).
+- Outcome for tonight: audit `DONE`; CIP-009 handed to remediate.
