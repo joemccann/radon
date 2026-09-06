@@ -572,6 +572,33 @@ def test_caddy_validation_output_is_not_relayed_to_the_unprivileged_caller(tmp_p
     )
 
 
+def test_publish_caddy_restarts_when_reload_fails(tmp_path):
+    """TERMing a hung reload leaves Type=notify in `reloading`. Later
+    `systemctl reload caddy` waits out the helper timeout and rolls back
+    (db69ccb4 through 3866d693, HTTP-only included). Restart unwedes and
+    loads the already-installed candidate."""
+    env, source, config, systemctl_log, _caddy_log = _publish_fixture(tmp_path)
+    fake_systemctl = tmp_path / "systemctl"
+    _write_executable(
+        fake_systemctl,
+        f"""#!/bin/bash
+printf '%s\\n' "$*" >> {shlex.quote(str(systemctl_log))}
+if [[ "${{1:-}}" == "reload" ]]; then
+  exit 1
+fi
+exit 0
+""",
+    )
+
+    result = _run_publish(env)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    commands = systemctl_log.read_text(encoding="utf-8")
+    assert "reload caddy" in commands
+    assert "restart caddy" in commands
+    assert config.read_text(encoding="utf-8") == source.read_text(encoding="utf-8")
+
+
 def test_caddy_reload_timeout_outlasts_first_hostname_cert():
     """Adding mcp.radon.run obtains a Let's Encrypt cert during reload.
 
