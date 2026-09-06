@@ -36,6 +36,9 @@ sys.path.insert(0, str(REPO / "scripts"))
 
 import weekend_prune  # noqa: E402
 
+# 2026-09-06: these suites stub `claude` and are about wrapper behaviour around the agent, not about which provider runs it. Pin a claude rung so the provider ladder is not what decides the outcome; the ladder itself is covered by test_provider_failover.py.
+CLAUDE_RUNG_LADDER = "claude:claude-fable-5[1m]"
+
 
 # --------------------------------------------------------------------------
 # Fixture: a miniature ~/radon-weekend.
@@ -428,6 +431,7 @@ def _stage(tmp_path: Path, loop: str, *, agent_rc: int = 0,
         "PATH": f"{bin_dir}:/usr/bin:/bin",
         "HOME": str(tmp_path / "home"),
         "RADON_WEEKEND_REPO": str(clone),
+        "RADON_WEEKEND_PROVIDER_LADDER": CLAUDE_RUNG_LADDER,
         "RADON_WEEKEND_FETCH_PAUSE_SECS": "0",
         "STUB_CLAUDE_RC": str(agent_rc),
         "STUB_PRUNE_RC": str(prune_rc),

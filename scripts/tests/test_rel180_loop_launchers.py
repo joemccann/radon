@@ -21,6 +21,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import weekend_notify  # noqa: E402
 
+# 2026-09-06: these suites stub `claude` and are about wrapper behaviour around the agent, not about which provider runs it. Pin a claude rung so the provider ladder is not what decides the outcome; the ladder itself is covered by test_provider_failover.py.
+CLAUDE_RUNG_LADDER = "claude:claude-fable-5[1m]"
+
 REPO = Path(__file__).resolve().parents[2]
 BASH = "/bin/bash"
 WRAPPERS = {
@@ -156,6 +159,7 @@ def _run(loop: str, repo: Path, bin_dir: Path, home: Path, *, timeout: int = 120
     env = {k: v for k, v in os.environ.items() if k not in _HOST_PUSHOVER_KEYS}
     env["PATH"] = f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '/usr/bin:/bin')}"
     env["RADON_WEEKEND_REPO"] = str(repo)
+    env["RADON_WEEKEND_PROVIDER_LADDER"] = CLAUDE_RUNG_LADDER
     env["HOME"] = str(home)
     for key in _HOST_PUSHOVER_KEYS:
         env.pop(key, None)

@@ -25,6 +25,9 @@ from pathlib import Path
 
 import pytest
 
+# 2026-09-06: these suites stub `claude` and are about wrapper behaviour around the agent, not about which provider runs it. Pin a claude rung so the provider ladder is not what decides the outcome; the ladder itself is covered by test_provider_failover.py.
+CLAUDE_RUNG_LADDER = "claude:claude-fable-5[1m]"
+
 REPO = Path(__file__).resolve().parents[2]
 RELIABILITY = REPO / "scripts" / "reliability_weekend.sh"
 TESTING = REPO / "scripts" / "testing_weekend.sh"
@@ -169,6 +172,7 @@ class TestSignalledRunReportsItsDeath:
                 **os.environ,
                 "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
                 "RADON_WEEKEND_REPO": str(repo),
+                "RADON_WEEKEND_PROVIDER_LADDER": CLAUDE_RUNG_LADDER,
             },
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -268,6 +272,7 @@ class TestTheCapIsEnforceable:
                 **os.environ,
                 "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
                 "RADON_WEEKEND_REPO": str(repo),
+                "RADON_WEEKEND_PROVIDER_LADDER": CLAUDE_RUNG_LADDER,
                 "RADON_WEEKEND_AUDIT_CAP_SECS": "70",
                 "RADON_WEEKEND_KILL_AFTER_SECS": "1",
                 # One second is enough in isolation but can expire before the
@@ -317,6 +322,7 @@ class TestTheCapIsEnforceable:
                 **env,
                 "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}",
                 "RADON_WEEKEND_REPO": str(repo),
+                "RADON_WEEKEND_PROVIDER_LADDER": CLAUDE_RUNG_LADDER,
                 "RADON_WEEKEND_TEST_ROUND_TIMEOUT_SECS": "1",
             },
             capture_output=True,

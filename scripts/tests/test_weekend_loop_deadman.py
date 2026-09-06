@@ -43,6 +43,9 @@ from pathlib import Path
 
 import pytest
 
+# 2026-09-06: these suites stub `claude` and are about wrapper behaviour around the agent, not about which provider runs it. Pin a claude rung so the provider ladder is not what decides the outcome; the ladder itself is covered by test_provider_failover.py.
+CLAUDE_RUNG_LADDER = "claude:claude-fable-5[1m]"
+
 REPO = Path(__file__).resolve().parents[2]
 RELIABILITY = REPO / "scripts" / "reliability_weekend.sh"
 TESTING = REPO / "scripts" / "testing_weekend.sh"
@@ -216,6 +219,7 @@ class TestPrologueDeathsAreReported:
                 **os.environ,
                 "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
                 "RADON_WEEKEND_REPO": str(repo),
+                "RADON_WEEKEND_PROVIDER_LADDER": CLAUDE_RUNG_LADDER,
             },
             capture_output=True,
             text=True,
@@ -402,10 +406,13 @@ def _claude_invocation_line(path: Path) -> str:
     one command so it can be handed to `bash -c`.
     """
     lines = path.read_text(encoding="utf-8").splitlines()
+    # 2026-09-06: the launch moved into launch_round()'s claude arm and the
+    # binary is now "$RUNG_BIN", so "claude -p" is no longer literal. The
+    # ceiling assignment is what identifies the claude launch line.
     start = next(
         i
         for i, line in enumerate(lines)
-        if "claude -p" in line
+        if "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0" in line
         and "TIMEOUT_BIN" in line
         and not line.lstrip().startswith("#")
     )
@@ -482,11 +489,11 @@ class TestBackgroundWorkIsNotSilentlyKilled:
                 f'PHASE=audit\nremain=30\nRUN_LOG="{run_log}"\n'
                 f'KILL_AFTER_SECS=60\n'
                 'TIMEOUT_BIN="$(command -v timeout)"\n'
-                # The line also pins the model rung it asks for, so the round's
+                # The line also pins the rung it asks for, so the round's
                 # ladder state has to exist here too — under `set -u` an unset
-                # MODEL_RUNGS kills the command before `claude` is ever reached
+                # RUNG_MODEL kills the command before `claude` is ever reached
                 # and this test would pass no judgement on the ceiling at all.
-                'MODEL_RUNGS=(stub-model)\nMODEL_INDEX=0\n'
+                'RUNG_BIN=claude\nRUNG_MODEL=stub-model\nLOOP_SKILL=stub-loop\n'
                 # Since REL-137 the round is backgrounded so bash can act on a
                 # SIGTERM while it is running; wait for it before reading back.
                 + _claude_invocation_line(LOOPS[name])
@@ -699,6 +706,7 @@ class TestAnAgentThatCommitsNothingIsNotReportedOk:
                 **_GIT_ENV,
                 "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
                 "RADON_WEEKEND_REPO": str(repo),
+                "RADON_WEEKEND_PROVIDER_LADDER": CLAUDE_RUNG_LADDER,
             },
             capture_output=True,
             text=True,
