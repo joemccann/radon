@@ -3,18 +3,21 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Search } from "lucide-react";
+import { Menu, Search } from "lucide-react";
 import { useUser } from "@clerk/nextjs";
 import { useIBStatusContext, type IBDisplayStatus } from "@/lib/IBStatusContext";
 import { useProfile } from "@/lib/useProfile";
 import { useOfflineStatus } from "@/lib/offline/OfflineStatusContext";
 import { resolveMobileConnectivityChip } from "@/lib/offline/offlineStatus";
+import ClearBrandMark from "../ClearBrandMark";
 
 type MobileAppBarProps = {
   title: string;
+  isPageHeading?: boolean;
   /** @deprecated read from useIBStatusContext().displayStatus directly. */
   ibConnected?: boolean;
   onOpenSearch?: () => void;
+  onOpenMore?: () => void;
 };
 
 function monogramFor(name: string | null, email: string | null): string {
@@ -47,17 +50,19 @@ function mobileStatusChip(status: IBDisplayStatus): {
   }
 }
 
-export default function MobileAppBar({ title, onOpenSearch }: MobileAppBarProps) {
-  return <AuthenticatedMobileAppBar title={title} onOpenSearch={onOpenSearch} />;
+export default function MobileAppBar({ title, isPageHeading, onOpenSearch, onOpenMore }: MobileAppBarProps) {
+  return <AuthenticatedMobileAppBar title={title} isPageHeading={isPageHeading} onOpenSearch={onOpenSearch} onOpenMore={onOpenMore} />;
 }
 
-function AuthenticatedMobileAppBar({ title, onOpenSearch }: MobileAppBarProps) {
+function AuthenticatedMobileAppBar({ title, isPageHeading, onOpenSearch, onOpenMore }: MobileAppBarProps) {
   const { profile } = useProfile();
   const { user } = useUser();
   return (
     <MobileAppBarView
       title={title}
+      isPageHeading={isPageHeading}
       onOpenSearch={onOpenSearch}
+      onOpenMore={onOpenMore}
       username={profile?.username ?? null}
       email={user?.primaryEmailAddress?.emailAddress ?? null}
       avatarUrl={profile?.avatar_url ?? user?.imageUrl ?? null}
@@ -67,7 +72,9 @@ function AuthenticatedMobileAppBar({ title, onOpenSearch }: MobileAppBarProps) {
 
 function MobileAppBarView({
   title,
+  isPageHeading,
   onOpenSearch,
+  onOpenMore,
   username,
   email,
   avatarUrl,
@@ -114,8 +121,14 @@ function MobileAppBarView({
     <header className={className} data-testid="mobile-app-bar">
       <div className="mobile-app-bar__inner">
         <div className="mobile-app-bar__brand">
-          <span className="mobile-app-bar__logo" aria-hidden />
-          <span className="mobile-app-bar__title" title={title}>{title}</span>
+          <Link href="/dashboard" prefetch={false} className="mobile-app-bar__home" aria-label="Radon home">
+            <ClearBrandMark size={25} />
+          </Link>
+          {isPageHeading ? (
+            <h1 className="mobile-app-bar__title" title={title}>{title}</h1>
+          ) : (
+            <span className="mobile-app-bar__title" title={title}>{title}</span>
+          )}
         </div>
         <div className="mobile-app-bar__actions">
           <span
@@ -150,6 +163,12 @@ function MobileAppBarView({
               <span className="mobile-app-bar__avatar-monogram">{monogram}</span>
             )}
           </Link>
+          {onOpenMore ? (
+            <button type="button" className="mobile-app-bar__search" onClick={onOpenMore}
+              aria-label="Open more navigation" data-testid="mobile-tab-more">
+              <Menu size={20} strokeWidth={1.7} aria-hidden />
+            </button>
+          ) : null}
         </div>
       </div>
     </header>

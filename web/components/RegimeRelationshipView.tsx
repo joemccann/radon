@@ -183,11 +183,13 @@ export default function RegimeRelationshipView({
   const zScoreSvgRef = useRef<SVGSVGElement>(null);
   const spreadSvgRef = useRef<SVGSVGElement>(null);
   const quadrantSvgRef = useRef<SVGSVGElement>(null);
+  const chartShellRef = useRef<HTMLDivElement>(null);
   const brushRef = useRef<HTMLDivElement>(null);
   const dragStateRef = useRef<BrushDragState | null>(null);
   const [zScoreHover, setZScoreHover] = useState<ZScoreHoverState | null>(null);
   const [spreadHover, setSpreadHover] = useState<SpreadHoverState | null>(null);
   const [quadrantHover, setQuadrantHover] = useState<QuadrantHoverState | null>(null);
+  const [chartWidth, setChartWidth] = useState(CHART_WIDTH);
   const entries = useMemo(
     () => buildRegimeRelationshipEntries(history, liveValues),
     [history, liveValues],
@@ -196,6 +198,28 @@ export default function RegimeRelationshipView({
     () => summarizeRegimeRelationship(entries),
     [entries],
   );
+  const hasChartData = entries.length >= 2;
+
+  // Match SVG coordinates to the actual full-width chart shell so axis text
+  // remains at its CSS font size instead of shrinking with a desktop viewBox.
+  useEffect(() => {
+    if (!hasChartData) return;
+    const shell = chartShellRef.current;
+    if (!shell) return;
+    const measureWidth = () => {
+      const width = shell.getBoundingClientRect().width;
+      if (!Number.isFinite(width) || width <= MARGIN.left + MARGIN.right) return;
+      setChartWidth((previous) => previous === width ? previous : width);
+    };
+    measureWidth();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", measureWidth);
+      return () => window.removeEventListener("resize", measureWidth);
+    }
+    const observer = new ResizeObserver(measureWidth);
+    observer.observe(shell);
+    return () => observer.disconnect();
+  }, [hasChartData]);
 
   // Initial range covers the last 252 sessions (or all when shorter).
   // We persist [startIdx, endIdx] inclusive into the full `entries` array.
@@ -281,7 +305,7 @@ export default function RegimeRelationshipView({
     return null;
   }
 
-  const innerWidth = CHART_WIDTH - MARGIN.left - MARGIN.right;
+  const innerWidth = chartWidth - MARGIN.left - MARGIN.right;
   const innerHeight = CHART_HEIGHT - MARGIN.top - MARGIN.bottom;
 
   // Slice the entries to the active range for the spread chart only.
@@ -393,11 +417,14 @@ export default function RegimeRelationshipView({
 
   function updateZScoreHover(clientX: number, clientY: number) {
     const svgRect = zScoreSvgRef.current?.getBoundingClientRect();
-    if (!svgRect) return;
+    if (!svgRect || svgRect.width <= 0 || svgRect.height <= 0) {
+      setZScoreHover(null);
+      return;
+    }
 
     const pointerX = clientX - svgRect.left;
     const pointerY = clientY - svgRect.top;
-    const chartX = (pointerX / svgRect.width) * CHART_WIDTH;
+    const chartX = (pointerX / svgRect.width) * chartWidth;
     const clampedInnerX = Math.max(0, Math.min(innerWidth, chartX - MARGIN.left));
     const index = Math.max(
       0,
@@ -420,11 +447,14 @@ export default function RegimeRelationshipView({
 
   function updateSpreadHover(clientX: number, clientY: number) {
     const svgRect = spreadSvgRef.current?.getBoundingClientRect();
-    if (!svgRect || visibleCount === 0) return;
+    if (!svgRect || svgRect.width <= 0 || svgRect.height <= 0 || visibleCount === 0) {
+      setSpreadHover(null);
+      return;
+    }
 
     const pointerX = clientX - svgRect.left;
     const pointerY = clientY - svgRect.top;
-    const chartX = (pointerX / svgRect.width) * CHART_WIDTH;
+    const chartX = (pointerX / svgRect.width) * chartWidth;
     const clampedInnerX = Math.max(0, Math.min(innerWidth, chartX - MARGIN.left));
     const localIndex = Math.max(
       0,
@@ -450,11 +480,14 @@ export default function RegimeRelationshipView({
 
   function updateQuadrantHover(clientX: number, clientY: number) {
     const svgRect = quadrantSvgRef.current?.getBoundingClientRect();
-    if (!svgRect || entries.length === 0) return;
+    if (!svgRect || svgRect.width <= 0 || svgRect.height <= 0 || entries.length === 0) {
+      setQuadrantHover(null);
+      return;
+    }
 
     const pointerX = clientX - svgRect.left;
     const pointerY = clientY - svgRect.top;
-    const chartX = (pointerX / svgRect.width) * CHART_WIDTH;
+    const chartX = (pointerX / svgRect.width) * chartWidth;
     const chartY = (pointerY / svgRect.height) * CHART_HEIGHT;
     const innerX = chartX - MARGIN.left;
     const innerY = chartY - MARGIN.top;
@@ -582,6 +615,7 @@ export default function RegimeRelationshipView({
           </div>
 
           <div
+            ref={chartShellRef}
             className="regime-relationship-chart-shell"
             data-testid="regime-spread-chart-shell"
             onPointerMove={handleSpreadHover}
@@ -591,7 +625,7 @@ export default function RegimeRelationshipView({
               ref={spreadSvgRef}
               className="regime-relationship-chart"
               data-testid="regime-spread-chart"
-              viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
+              viewBox={`0 0 ${chartWidth} ${CHART_HEIGHT}`}
               role="img"
               aria-label="COR1M minus RVOL spread across the visible history window"
             >
@@ -844,7 +878,7 @@ export default function RegimeRelationshipView({
               ref={quadrantSvgRef}
               className="regime-relationship-chart"
               data-testid="regime-quadrant-chart"
-              viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
+              viewBox={`0 0 ${chartWidth} ${CHART_HEIGHT}`}
               role="img"
               aria-label="RVOL versus COR1M regime quadrant"
             >
@@ -1073,7 +1107,7 @@ export default function RegimeRelationshipView({
               ref={zScoreSvgRef}
               className="regime-relationship-chart"
               data-testid="regime-zscore-chart"
-              viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
+              viewBox={`0 0 ${chartWidth} ${CHART_HEIGHT}`}
               role="img"
               aria-label="Normalized COR1M and RVOL z-score comparison"
             >

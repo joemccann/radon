@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 
 import TickerDetailContent, { resolveTickerPosition } from "../components/TickerDetailContent";
+import OptionsChainTab from "../components/ticker-detail/OptionsChainTab";
 import { TickerDetailProvider } from "../lib/TickerDetailContext";
 import { OrderActionsProvider } from "../lib/OrderActionsContext";
 import type { OrdersData, PortfolioData } from "../lib/types";
@@ -228,5 +229,25 @@ describe("Ticker chain position focus", () => {
   it("cross ticker posid cannot reach order builder", () => {
     expect(resolveTickerPosition(PORTFOLIO, "AAPL", 16)).toBeNull();
     expect(resolveTickerPosition(PORTFOLIO, "PLTR", 16)?.id).toBe(16);
+  });
+
+  it("opens an option chain for a held stock whose wire snapshot has no expiry", async () => {
+    // Equity snapshots have no option expiry. Exercise the JSON boundary rather
+    // than inventing an option date merely to satisfy the older shared type.
+    const stock = JSON.parse(JSON.stringify({
+      ...PORTFOLIO.positions[0],
+      structure: "Long Stock", structure_type: "Stock", expiry: null,
+      legs: [{ direction: "LONG", contracts: 100, type: "Stock", strike: null, entry_cost: 15_000, avg_cost: 150 }],
+    }));
+    const { container } = render(
+      <TickerDetailProvider>
+        <OptionsChainTab ticker="PLTR" prices={{ PLTR: PLTR_PRICE }} tickerPriceData={PLTR_PRICE} focusPosition={stock} focusPositionRequested />
+      </TickerDetailProvider>,
+    );
+    await waitFor(() => {
+      // A native select can visually select its first option while controlled
+      // expiry state is still null. Real strike rows prove initialization ran.
+      expect(container.querySelectorAll(".chain-strike")).toHaveLength(3);
+    });
   });
 });

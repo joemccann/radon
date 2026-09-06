@@ -140,16 +140,17 @@ test("Options workspace opens its Net GEX tab with the captured controls and cli
   await page.locator(".content").evaluate((content) => content.scrollTo({ top: content.scrollHeight }));
   const stickyHeader = await page.evaluate(() => {
     const content = document.querySelector<HTMLElement>(".content");
-    const headers = [...document.querySelectorAll<HTMLTableCellElement>("[data-testid='options-exposure-table-wrap'] th")];
+    // Strike cells use semantic row headers; only column headers are sticky.
+    const headers = [...document.querySelectorAll<HTMLTableCellElement>("[data-testid='options-exposure-table-wrap'] thead th")];
     if (!content || headers.length === 0) return null;
     return {
-      contentTop: content.getBoundingClientRect().top,
+      contentTop: content.getBoundingClientRect().top + Number.parseFloat(getComputedStyle(content).paddingTop),
       scrollTop: content.scrollTop,
       headerTops: headers.map((header) => header.getBoundingClientRect().top),
     };
   });
   expect(stickyHeader?.scrollTop).toBeGreaterThan(0);
-  expect(stickyHeader?.headerTops.every((top) => Math.abs(top - (stickyHeader?.contentTop ?? top)) <= 1)).toBe(true);
+  expect(stickyHeader?.headerTops.every((top) => Math.abs(top - (stickyHeader?.contentTop ?? top)) <= 1), JSON.stringify(stickyHeader)).toBe(true);
 
   await page.screenshot({
     path: resolve(process.cwd(), "../tasks/artifacts/options-exposure-desktop.png"),

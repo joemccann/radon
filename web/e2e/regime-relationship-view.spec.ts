@@ -131,7 +131,7 @@ test.describe("/regime page — RVOL/COR1M relationship view", () => {
   test("renders spread, quadrant, and normalized divergence panels without removing the raw history charts", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 1800 });
     await setupMocks(page);
-    await page.goto("/regime");
+    await page.goto("/regime/cri");
 
     await expect(page.locator('[data-testid="regime-history-grid"] [data-testid="cri-history-chart"]')).toHaveCount(2);
 
@@ -159,7 +159,7 @@ test.describe("/regime page — RVOL/COR1M relationship view", () => {
   test("shows tooltip definitions for all four relationship states", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 1800 });
     await setupMocks(page);
-    await page.goto("/regime");
+    await page.goto("/regime/cri");
 
     const stateKey = page.locator('[data-testid="regime-state-key"]');
     await expect(stateKey).toBeVisible();
@@ -177,7 +177,7 @@ test.describe("/regime page — RVOL/COR1M relationship view", () => {
   test("uses the classified quadrant tone for the latest scatter marker", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 1800 });
     await setupMocks(page);
-    await page.goto("/regime");
+    await page.goto("/regime/cri");
 
     const quadrantCard = page.locator('[data-testid="regime-quadrant-card"]');
     await expect(quadrantCard.locator('[data-testid="regime-current-quadrant"]')).toHaveText("FRAGILE CALM");
@@ -190,7 +190,7 @@ test.describe("/regime page — RVOL/COR1M relationship view", () => {
   test("shows a tooltip for the normalized divergence panel", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 1800 });
     await setupMocks(page);
-    await page.goto("/regime");
+    await page.goto("/regime/cri");
 
     const trigger = page.locator('[data-testid="regime-zscore-tooltip-trigger"]');
     await trigger.hover();
@@ -209,10 +209,11 @@ test.describe("/regime page — RVOL/COR1M relationship view", () => {
   test("shows a hover readout for the normalized divergence chart", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 1800 });
     await setupMocks(page);
-    await page.goto("/regime");
+    await page.goto("/regime/cri");
 
     const chartShell = page.locator('[data-testid="regime-zscore-chart-shell"]');
     await expect(chartShell).toBeVisible();
+    await chartShell.scrollIntoViewIfNeeded();
 
     const shellBox = await chartShell.boundingBox();
     expect(shellBox).not.toBeNull();
@@ -220,9 +221,10 @@ test.describe("/regime page — RVOL/COR1M relationship view", () => {
       throw new Error("Expected z-score chart shell to have a bounding box");
     }
 
-    await chartShell.hover({
-      position: { x: shellBox.width * 0.74, y: shellBox.height * 0.5 },
-    });
+    await page.mouse.move(
+      shellBox.x + shellBox.width * 0.74,
+      shellBox.y + shellBox.height * 0.5,
+    );
 
     const tooltip = page.locator('[data-testid="regime-zscore-hover-tooltip"]');
     await expect(tooltip).toBeVisible();
@@ -232,44 +234,39 @@ test.describe("/regime page — RVOL/COR1M relationship view", () => {
     await expect(tooltip).toContainText("Divergence");
   });
 
-  test("shows a hover readout for the regime quadrant scatter", async ({ page }) => {
+  test("shows and clears the exact nearest-point quadrant readout", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 1800 });
     await setupMocks(page);
-    await page.goto("/regime");
+    await page.goto("/regime/cri");
 
-    const chartShell = page.locator('[data-testid="regime-quadrant-chart-shell"]');
-    await expect(chartShell).toBeVisible();
+    const target = page.locator('[data-testid="regime-quadrant-point-2026-03-04"]');
+    await expect(target).toBeVisible();
+    await target.scrollIntoViewIfNeeded();
+    const targetBox = await target.boundingBox();
+    expect(targetBox).not.toBeNull();
+    if (!targetBox) throw new Error("Expected quadrant point to have a bounding box");
 
-    const shellBox = await chartShell.boundingBox();
-    expect(shellBox).not.toBeNull();
-    if (!shellBox) {
-      throw new Error("Expected quadrant chart shell to have a bounding box");
-    }
-
-    await chartShell.hover({
-      position: { x: shellBox.width * 0.62, y: shellBox.height * 0.42 },
-    });
+    await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2);
 
     const tooltip = page.locator('[data-testid="regime-quadrant-hover-tooltip"]');
     await expect(tooltip).toBeVisible();
-    await expect(tooltip.locator('[data-testid="regime-quadrant-hover-date"]')).toHaveText(/Feb|Mar/);
-    await expect(tooltip).toContainText("Quadrant");
-    await expect(tooltip).toContainText("RVOL");
-    await expect(tooltip).toContainText("COR1M");
+    await expect(tooltip.locator('[data-testid="regime-quadrant-hover-date"]')).toContainText("Mar 4");
+    await expect(tooltip).toContainText("Systemic Panic");
+    await expect(tooltip).toContainText("13.20");
+    await expect(tooltip).toContainText("21.20");
+
+    await page.mouse.move(4, 4);
+    await expect(tooltip).toBeHidden();
   });
 
-  test("stacks relationship charts full width except the already-wide premium panel", async ({ page }) => {
+  test("stacks all relationship charts full width on desktop", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 1800 });
     await setupMocks(page);
-    await page.goto("/regime");
+    await page.goto("/regime/cri");
 
     const spread = page.locator('[data-testid="regime-spread-card"]');
     const quadrant = page.locator('[data-testid="regime-quadrant-card"]');
     const zscore = page.locator('[data-testid="regime-zscore-card"]');
-    await expect(spread).toBeVisible();
-    await expect(quadrant).toBeVisible();
-    await expect(zscore).toBeVisible();
-
     const [spreadBox, quadrantBox, zscoreBox] = await Promise.all([
       spread.boundingBox(),
       quadrant.boundingBox(),
@@ -285,5 +282,37 @@ test.describe("/regime page — RVOL/COR1M relationship view", () => {
     expect(Math.abs((quadrantBox?.x ?? 0) - (zscoreBox?.x ?? 0))).toBeLessThan(20);
     expect(Math.abs((spreadBox?.width ?? 0) - (quadrantBox?.width ?? 0))).toBeLessThan(24);
     expect(Math.abs((quadrantBox?.width ?? 0) - (zscoreBox?.width ?? 0))).toBeLessThan(24);
+  });
+
+  test("keeps relationship charts inside the mobile viewport", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await setupMocks(page);
+    await page.goto("/regime/cri");
+
+    for (const testId of ["regime-spread-card", "regime-quadrant-card", "regime-zscore-card"]) {
+      const box = await page.locator(`[data-testid="${testId}"]`).boundingBox();
+      expect(box).not.toBeNull();
+      expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
+      expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(391);
+    }
+
+    const renderedAxisSize = await page
+      .locator('[data-testid="regime-quadrant-chart"] .regime-relationship-axis-label')
+      .first()
+      .evaluate((label) => {
+        const cssSize = Number.parseFloat(getComputedStyle(label).fontSize);
+        const scale = (label as SVGGraphicsElement).getScreenCTM()?.a ?? 0;
+        return cssSize * Math.abs(scale);
+      });
+    const renderedQuadrantSize = await page
+      .locator('[data-testid="regime-quadrant-chart"] .regime-relationship-quadrant-label')
+      .first()
+      .evaluate((label) => {
+        const cssSize = Number.parseFloat(getComputedStyle(label).fontSize);
+        const scale = (label as SVGGraphicsElement).getScreenCTM()?.a ?? 0;
+        return cssSize * Math.abs(scale);
+      });
+    expect(renderedAxisSize).toBeGreaterThanOrEqual(11.5);
+    expect(renderedQuadrantSize).toBeGreaterThanOrEqual(9.5);
   });
 });

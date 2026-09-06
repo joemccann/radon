@@ -134,7 +134,7 @@ export default function ShareReportModal({
           border: "1px solid var(--border-dim)",
           borderRadius: "3px",
           fontFamily: "var(--font-mono, monospace)",
-          fontSize: "9px",
+          fontSize: "var(--text-meta)",
           fontWeight: 700,
           letterSpacing: "0.08em",
           textTransform: "uppercase",
@@ -168,7 +168,7 @@ export default function ShareReportModal({
             borderRadius: "3px",
             background: "color-mix(in srgb, var(--negative) 6%, transparent)",
             fontFamily: "var(--font-mono, monospace)",
-            fontSize: "10px",
+            fontSize: "var(--text-meta)",
             color: "var(--negative)",
           }}
         >
@@ -215,7 +215,7 @@ export default function ShareReportModal({
                   borderRadius: "3px",
                   background: "color-mix(in srgb, var(--warn) 8%, transparent)",
                   fontFamily: "var(--font-mono, monospace)",
-                  fontSize: "10px",
+                  fontSize: "var(--text-meta)",
                   color: "var(--warn-text)",
                 }}
               >

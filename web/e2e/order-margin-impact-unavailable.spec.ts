@@ -235,9 +235,9 @@ test.describe("order margin impact unavailable state", () => {
 
     const builder = page.locator(".order-builder");
     await expect(builder).toBeVisible();
-    await expect(builder).toContainText("ORDER BUILDER : Bull Call Spread");
+    await expect(builder).toContainText("ORDER BUILDER : Call Ratio Spread");
 
-    await page.getByRole("button", { name: /place bull call spread/i }).click();
+    await builder.getByRole("button", { name: /Verify order/i }).click();
 
     const summary = page.locator(".order-confirm-summary");
     await expect(summary).toContainText("Margin Req:");

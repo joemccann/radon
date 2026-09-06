@@ -127,6 +127,7 @@ test.describe("/orders UX improvements", () => {
         makeOpenOrder({
           orderId: 10,
           permId: 10,
+          orderRef: "clear-confirm-vertical",
           symbol: "AMD",
           action: "BUY",
           limitPrice: 2,
@@ -143,6 +144,7 @@ test.describe("/orders UX improvements", () => {
         makeOpenOrder({
           orderId: 11,
           permId: 11,
+          orderRef: "clear-confirm-vertical",
           symbol: "AMD",
           action: "SELL",
           limitPrice: 1,

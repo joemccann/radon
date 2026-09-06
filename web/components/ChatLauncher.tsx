@@ -1,11 +1,18 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import ChatPanel from "@/components/ChatPanel";
+import dynamic from "next/dynamic";
 import { subscribeAsk } from "@/lib/agent/askBus";
 import type { PriceData } from "@/lib/pricesProtocol";
 import type { WorkspaceSection } from "@/lib/types";
 import type { PortfolioData } from "@/lib/types";
+
+// The assistant is already unmounted while closed. Keep its markdown/order
+// tooling out of the account's critical download without changing that state
+// lifecycle or the order-risk gate inside the panel.
+const ChatPanel = dynamic(() => import("@/components/ChatPanel"), {
+  loading: () => <div className="chat-panel" role="status">Opening assistant</div>,
+});
 
 /**
  * ChatLauncher — global ⌘J overlay. Mounted in WorkspaceShell so chat is

@@ -6,6 +6,7 @@ import TickerSearch from "./TickerSearch";
 import { useTickerNav } from "@/lib/useTickerNav";
 import { useIBStatusContext, type IBDisplayStatus } from "@/lib/IBStatusContext";
 import { pushRecentTicker } from "./CommandPalette";
+import styles from "./ClearShell.module.css";
 
 type HeaderProps = {
   activeLabel: string;
@@ -17,6 +18,8 @@ type HeaderProps = {
   onToggleTheme: () => void;
   theme?: "dark" | "light";
   children?: ReactNode;
+  navigation?: ReactNode;
+  compact?: boolean;
   /** Center slot — the live index-futures (ES/NQ/RTY) quote strip. With the
    *  header's space-between layout, a third flex child auto-centers. */
   futuresStrip?: ReactNode;
@@ -70,6 +73,8 @@ export default function Header({
   onToggleTheme,
   theme,
   children,
+  navigation,
+  compact = false,
   futuresStrip,
   onSearchUnavailable,
   lastSync,
@@ -105,7 +110,8 @@ export default function Header({
   );
 
   return (
-    <header className="header">
+    <header className={`header ${styles.header}${compact ? ` ${styles.compact}` : ""}`}>
+      <div className={styles.navigationSlot}>{navigation}</div>
       <div className={`telemetry-rail${isStale ? " telemetry-rail--stale" : ""}`} aria-label="Workspace telemetry">
         {isPageHeading ? (
           <h1 className="rail-section" title={activeLabel}>{activeLabel}</h1>
@@ -147,9 +153,11 @@ export default function Header({
           </>
         )}
       </div>
-      {futuresStrip ?? null}
-      <div className="header-actions" suppressHydrationWarning>
+      <div className={styles.contextTools}>
+        {futuresStrip ?? null}
         {children}
+      </div>
+      <div className="header-actions" suppressHydrationWarning>
         <button
           type="button"
           className="command-palette-trigger"
@@ -164,7 +172,7 @@ export default function Header({
           ref={searchRef}
           onSelect={handleSelect}
           onSearchUnavailable={onSearchUnavailable}
-          placeholder="Search ticker…"
+          placeholder="Search any instrument"
           className="search-input-wrapper"
           ariaLabel="Search ticker"
         />

@@ -1,9 +1,10 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
 const EXPIRY = "20260717";
+const FIXTURE_TIME = "2026-07-01T14:00:00.000Z";
 
 async function tapJs(locator: Locator) {
-  await locator.evaluate((el) => (el as HTMLElement).click());
+  await locator.click();
 }
 
 function priceData(symbol: string, last: number, bid: number, ask: number, overrides: Record<string, unknown> = {}) {
@@ -29,12 +30,15 @@ function priceData(symbol: string, last: number, bid: number, ask: number, overr
     vega: null,
     impliedVol: null,
     undPrice: null,
-    timestamp: new Date().toISOString(),
+    timestamp: FIXTURE_TIME,
     ...overrides,
   };
 }
 
 async function stubApis(page: Page) {
+  // The wing-IV calculation correctly rejects expired contracts. Keep this
+  // July-expiry scenario in its actual pre-expiry session.
+  await page.clock.setFixedTime(new Date(FIXTURE_TIME));
   await page.unrouteAll({ behavior: "ignoreErrors" });
   await page.route("**/api/portfolio", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ positions: [], last_sync: new Date().toISOString(), bankroll: 0, peak_value: 0, total_deployed_pct: 0, total_deployed_dollars: 0, remaining_capacity_pct: 100, position_count: 0, defined_risk_count: 0, undefined_risk_count: 0, avg_kelly_optimal: null, exposure: {}, violations: [] }) }),
@@ -164,8 +168,13 @@ test("mobile risk reversal ticket shows skew telemetry", async ({ page }) => {
   await expect(panel).toContainText("RISK REVERSAL SKEW");
   await expect(panel).toContainText("IV SKEW");
   await expect(panel).toContainText("+12.0 pt");
-  await expect(panel).toContainText("LONG LEG");
-  await expect(panel).toContainText("SHORT LEG");
+  // The mobile ticket uses the four-metric compact skew panel; direction
+  // remains explicit in the ticket's actual leg rows.
+  await expect(panel.locator(".short-strangle-skew__metric")).toHaveCount(4);
+  await expect(panel).toContainText("CALL IV30.0%");
+  await expect(panel).toContainText("PUT IV42.0%");
+  await expect(page.getByTestId("mobile-order-ticket-legs")).toContainText("BUY");
+  await expect(page.getByTestId("mobile-order-ticket-legs")).toContainText("SELL");
   await expect(panel).toContainText("NET Δ");
   await expect(panel).toContainText("+42 sh");
 });

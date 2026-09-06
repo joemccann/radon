@@ -5,6 +5,7 @@ import Providers from "@/components/Providers";
 import PwaRegister from "@/components/PwaRegister";
 import ThemeBootstrap from "@/components/ThemeBootstrap";
 import "./globals.css";
+import "./clear.css";
 
 // Local files keep both page loads and production builds independent of the
 // Google Fonts network. Variables preserve the existing typography contract.
@@ -25,6 +26,9 @@ const plexMono = localFont({
   ],
   variable: "--font-mono",
   display: "swap",
+  // Clear's critical account/navigation UI uses Inter. Let CSS request only
+  // the mono faces actually rendered instead of competing with it upfront.
+  preload: false,
 });
 
 // Inline custom properties outrank the :root fallbacks in globals.css. Using
@@ -42,7 +46,7 @@ export const viewport: Viewport = {
   viewportFit: "cover",
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#ffffff" },
-    { media: "(prefers-color-scheme: dark)", color: "#0a0f14" },
+    { media: "(prefers-color-scheme: dark)", color: "#101714" },
   ],
 };
 
@@ -105,7 +109,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <head>
         <ThemeBootstrap />
       </head>
-      <body className="app-root">
+      <body className="app-root radon-clear">
         <Providers authlessTestBypass={authlessTestBypass}>{children}</Providers>
         <PwaRegister />
       </body>

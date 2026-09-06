@@ -269,15 +269,18 @@ test.describe("AAOI Risk Reversal — corrected Max Loss + Gate 1 warning", () =
 
     // Set quantity to 50 contracts on each leg. The OrderBuilder shows a
     // quantity field per leg.
-    const qtyInputs = orderBuilder.locator(".order-builder-leg input[type='number']");
+    const qtyInputs = orderBuilder.getByRole("spinbutton", { name: "Quantity", exact: true });
     const qtyCount = await qtyInputs.count();
     expect(qtyCount).toBeGreaterThanOrEqual(2);
     for (let i = 0; i < qtyCount; i++) {
       await qtyInputs.nth(i).fill("50");
     }
 
-    // Click Place (first click switches to confirm step).
-    const placeBtn = orderBuilder.getByRole("button", { name: /^Place/i }).first();
+    // Pin the quoted scenario's $1 net debit without overwriting leg prices.
+    await orderBuilder.locator(".order-builder-limit-field input").fill("1.00");
+
+    // Review switches to confirmation without transmitting an order.
+    const placeBtn = orderBuilder.getByRole("button", { name: /Verify order/i }).first();
     await expect(placeBtn).toBeEnabled();
     await placeBtn.click();
 
@@ -300,8 +303,7 @@ test.describe("AAOI Risk Reversal — corrected Max Loss + Gate 1 warning", () =
     const maxLossText = (await maxLossValue.textContent()) ?? "";
     // Strip currency formatting and assert the dollar magnitude.
     const maxLossDollars = Number(maxLossText.replace(/[^0-9.-]/g, ""));
-    expect(maxLossDollars).toBeGreaterThan(700_000);
-    expect(maxLossDollars).toBeLessThan(800_000);
+    expect(maxLossDollars).toBe(755_000);
     // Sanity: the pre-fix value of $5,000 must NOT appear here.
     expect(maxLossDollars).not.toBe(5000);
   });

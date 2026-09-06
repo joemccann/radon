@@ -27,7 +27,7 @@
  */
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import type { PriceData } from "@/lib/pricesProtocol";
 import type { PortfolioData } from "@/lib/types";
@@ -89,7 +89,7 @@ const MU: PriceData = {
 } as PriceData;
 
 describe("assistant gate quote plumbing", () => {
-  it("ChatLauncher forwards the live quote map to ChatPanel", () => {
+  it("ChatLauncher forwards the live quote map to ChatPanel", async () => {
     render(
       <ChatLauncher
         activeSection="dashboard"
@@ -100,7 +100,7 @@ describe("assistant gate quote plumbing", () => {
 
     fireEvent.keyDown(document, { key: "j", ctrlKey: true });
 
-    expect(chatPanelProps.current).not.toBeNull();
+    await waitFor(() => expect(chatPanelProps.current).not.toBeNull(), { timeout: 5000 });
     expect(chatPanelProps.current?.prices).toEqual({ MU });
   });
 });

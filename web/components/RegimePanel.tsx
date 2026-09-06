@@ -570,6 +570,7 @@ export default function RegimePanel({
       {compact ? (
         /* ── MOBILE CRI layout ────────────────────────────── */
         <>
+          <h2 className="clear-risk-title">Crash risk index</h2>
           {/* Headline: score inline with level badge */}
           <div className="m-regime-headline" data-testid="regime-hero">
             <span
@@ -609,7 +610,7 @@ export default function RegimePanel({
                 padding: "6px 12px",
                 background: "color-mix(in srgb, var(--warning) 12%, transparent)",
                 color: "var(--warn-text)",
-                fontSize: "11px",
+                fontSize: "var(--text-meta)",
                 fontFamily: "var(--font-mono, monospace)",
                 letterSpacing: "0.08em",
                 fontWeight: 600,
@@ -722,7 +723,7 @@ export default function RegimePanel({
                 padding: "6px 12px",
                 background: "color-mix(in srgb, var(--warning) 12%, transparent)",
                 color: "var(--warning, #F5A623)",
-                fontSize: "11px",
+                fontSize: "var(--text-meta)",
                 fontFamily: "var(--font-mono, monospace)",
                 letterSpacing: "0.08em",
                 fontWeight: 600,

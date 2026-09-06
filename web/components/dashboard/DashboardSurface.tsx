@@ -5,17 +5,20 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { useViewport } from "@/lib/useViewport";
 import { useDashboardSectionVisibility } from "@/lib/useDashboardSectionVisibility";
 import DashboardNewsFeed from "@/components/DashboardNewsFeed";
-import { KpiStrip } from "./KpiStrip";
+import ClearOverview from "./ClearOverview";
+import styles from "./ClearOverview.module.css";
 import ScannerHero from "./ScannerHero";
 import CatalystsQuadrant from "./CatalystsQuadrant";
 import EngineStatePanel from "./EngineStatePanel";
 import type { PortfolioData } from "@/lib/types";
 import type { MarketState } from "@/lib/useMarketHours";
+import type { PriceData } from "@/lib/pricesProtocol";
 
 type DashboardSurfaceProps = {
   portfolio: PortfolioData | null;
   realizedPnl?: number;
   marketState: MarketState | null;
+  prices?: Record<string, PriceData>;
 };
 
 function DashboardSection({
@@ -74,25 +77,13 @@ function DashboardSection({
   );
 }
 
-/**
- * DashboardSurface — terminal dashboard. A full-width KPI telemetry strip,
- * then a two-column grid:
- *
- *   LEFT — Feed / 01: the paginated DashboardNewsFeed rail (tag bar,
- *     lightbox, bookmarks) inside the height-clamped scrollable
- *     .dashboard-surface__feed container.
- *
- *   RIGHT — Signals / 02: theta-harvester / 7-step-strength ranked tables,
- *     then the quadrant row: Catalysts / 03 grouped TODAY / THIS WEEK /
- *     POSITIONS, and Structure / 04 engine state (CRI · MARKOV · VCG · GEX).
- *
- * Orders live on /orders; flow surprise and the wider scanner matrix live on
- * their own surfaces.
- */
+/** Account-first Clear overview, followed by the complete market workspace.
+ * Feed filters/bookmarks/lightbox, scanners, catalysts, engine readings and
+ * persisted section visibility keep their existing implementations. */
 export default function DashboardSurface({
   portfolio,
-  realizedPnl = 0,
   marketState,
+  prices,
 }: DashboardSurfaceProps) {
   const { isHidden, toggle } = useDashboardSectionVisibility();
 
@@ -103,7 +94,11 @@ export default function DashboardSurface({
 
   return (
     <div className="dashboard-surface">
-      <KpiStrip portfolio={portfolio} realizedPnl={realizedPnl} />
+      <ClearOverview portfolio={portfolio} prices={prices} />
+      <div id="clear-market-intelligence" className={styles.intelligenceHeading}>
+        <h2>Market intelligence</h2>
+        <p>Your feed, candidates, catalysts, and market regime.</p>
+      </div>
       <div className="dashboard-surface__grid">
         <div className="dashboard-surface__feed">
           <DashboardSection id="feed" label="Live Market Feed" count="01" open={!isHidden("feed")} onToggle={toggle}>

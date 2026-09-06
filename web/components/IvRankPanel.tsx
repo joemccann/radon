@@ -175,7 +175,7 @@ export default function IvRankPanel() {
               }
               style={{
                 fontFamily: "var(--font-mono)",
-                fontSize: "9px",
+                fontSize: "var(--text-meta)",
                 letterSpacing: "0.08em",
                 color: "var(--warning)",
                 border: "1px solid var(--warning)",
@@ -189,7 +189,7 @@ export default function IvRankPanel() {
             </span>
           )}
           {clock && (
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: "9px", color: "var(--text-muted)" }}>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--text-muted)" }}>
               {clock}
             </span>
           )}
@@ -299,7 +299,7 @@ export default function IvRankPanel() {
         <div
           style={{
             fontFamily: "var(--font-mono)",
-            fontSize: "9px",
+            fontSize: "var(--text-meta)",
             color: "var(--text-muted)",
             marginTop: "8px",
           }}

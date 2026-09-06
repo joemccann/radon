@@ -67,7 +67,7 @@ test.describe("demo workstation transport", () => {
     await expect(page.getByRole("option", { name: /SNDK/ }).first()).toBeVisible();
 
     await expect(page.getByRole("button", { name: "Sync now" })).toHaveCount(0);
-    await expect(page.getByText("Sample snapshot", { exact: true })).toBeVisible();
+    await expect(page.locator('[data-integrity="demo"]')).toHaveText("Sample data");
     await page.screenshot({ path: testInfo.outputPath("demo-order-book.png"), fullPage: true });
 
     expect(apiRequests.filter((request) => request.endsWith(" /api/ib/ws-ticket"))).toEqual([]);
