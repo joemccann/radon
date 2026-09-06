@@ -2,9 +2,6 @@
 
 This document is the durable Phase 1 reference for remotely controlling the secure machine-local IBC service from an iPhone.
 
-Related report:
-- [IBC remote-control and cloud report](../reports/ibc-remote-control-and-cloud-options-2026-03-10.html)
-
 ## Canonical service surface
 
 The canonical IBC service commands are the secure machine-local wrappers in `/Users/joemccann/ibc/bin/`:
