@@ -69,9 +69,11 @@ Gateway's Jts settings and 2FA state — survives the move.
 `config-check` is `deploy.sh`'s preflight compose render. It takes no
 env-file argument on purpose — a caller-supplied path is the one thing the
 shim refuses — and pins the same `/etc/radon/env` the deploy's
-`ENV_FILE_DEFAULT` resolves to in production. `preflight_env` falls back to a
-direct `docker compose config` only for a dev or test invocation against some
-other env file, where the caller brings its own docker access. Note the
+`ENV_FILE_DEFAULT` resolves to in production. The preflight tries BOTH the
+shim call and a direct `docker compose config` and fails only when neither
+renders (`deploy.sh:204-215`, bd7d7e4c): preferring one path deadlocks the
+deploy across the sudoers-verb / docker-group transition, since whichever
+mechanism the current host lacks would abort the promote that installs it. Note the
 narrowing: preflight now renders the INSTALLED compose body, not the incoming
 release's. The incoming body is gated at install time instead, by provenance
 (git blob at the deployed commit) plus `compose_body_is_valid`.

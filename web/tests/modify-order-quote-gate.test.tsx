@@ -9,7 +9,7 @@
  */
 import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { OpenOrder, PortfolioData } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
 import type { ModifyOrderRequest } from "@/lib/orderModify";
@@ -30,6 +30,19 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
 });
+
+// T-480: drain any queued follow-up on FAKE timers so the "nothing fired"
+// window cannot lose a wall-clock race to React's commit/effect flush.
+async function flushTimersFake() {
+  vi.useFakeTimers();
+  try {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+  } finally {
+    vi.useRealTimers();
+  }
+}
 
 type RecordedCall = { url: string; method: string; body: unknown };
 
@@ -173,7 +186,7 @@ describe("ModifyOrderModal quote gate at the wire (R-641)", () => {
     fireEvent.change(priceInput(), { target: { value: "51.25" } });
     expect(submitBtn().disabled).toBe(true);
     fireEvent.click(submitBtn());
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await flushTimersFake();
     expect(orderCalls(calls)).toHaveLength(0);
   });
 
@@ -184,7 +197,7 @@ describe("ModifyOrderModal quote gate at the wire (R-641)", () => {
     fireEvent.change(priceInput(), { target: { value: "51.25" } });
     expect(submitBtn().disabled).toBe(true);
     fireEvent.click(submitBtn());
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await flushTimersFake();
     expect(orderCalls(calls)).toHaveLength(0);
   });
 });

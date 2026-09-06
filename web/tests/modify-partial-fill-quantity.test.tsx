@@ -15,9 +15,10 @@
  */
 import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { OpenOrder, PortfolioData } from "@/lib/types";
 import ModifyOrderModal from "@/components/ModifyOrderModal";
+import { OrderActionsProvider, useOrderActions } from "@/lib/OrderActionsContext";
 import {
   filledQuantity,
   isPartiallyFilled,
@@ -37,6 +38,7 @@ vi.mock("@/components/Modal", () => ({
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  vi.unstubAllGlobals();
 });
 
 /** The order from the report: VIX C30, 1000 requested, 16 filled. */
@@ -167,5 +169,124 @@ describe("ModifyOrderModal partial-fill wire contract", () => {
 
     expect(onConfirm).toHaveBeenCalledTimes(1);
     expect(onConfirm.mock.calls[0][0]).toEqual({ newQuantity: 400 });
+  });
+});
+
+/**
+ * T-472: the wire path with fills advancing MID-DIALOG. `toIbTotalQuantity`
+ * is only a `fillSnapshot == null` fallback the modal can never reach; the
+ * transmitted total must come from the SNAPSHOT, and a stale-snapshot
+ * quantity submit must hit the fillRaceNotice branch, never the wire.
+ * Wired to the REAL fetch owner (OrderActionsContext.requestModify).
+ */
+type RecordedCall = { url: string; method: string; body: unknown };
+
+function recordFetch(): RecordedCall[] {
+  const calls: RecordedCall[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) : init?.body;
+      calls.push({ url, method: init?.method ?? "GET", body });
+      return new Response(JSON.stringify({ status: "ok" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }),
+  );
+  return calls;
+}
+
+function WiredHarness({ order }: { order: OpenOrder }) {
+  const { requestModify } = useOrderActions();
+  return (
+    <ModifyOrderModal
+      order={order}
+      loading={false}
+      portfolio={PORTFOLIO}
+      onConfirm={(request) => {
+        void requestModify(order, request);
+      }}
+      onClose={() => {}}
+    />
+  );
+}
+
+function renderWired(order: OpenOrder) {
+  const calls = recordFetch();
+  const view = render(
+    <OrderActionsProvider>
+      <WiredHarness order={order} />
+    </OrderActionsProvider>,
+  );
+  const rerenderWith = (next: OpenOrder) =>
+    view.rerender(
+      <OrderActionsProvider>
+        <WiredHarness order={next} />
+      </OrderActionsProvider>,
+    );
+  return { calls, rerenderWith, container: view.container };
+}
+
+const priceInput = () =>
+  document.getElementById("modify-price-input") as HTMLInputElement;
+
+describe("T-472: fills advance 16 -> 100 while the dialog is open", () => {
+  it("price-only submit transmits NO newQuantity", async () => {
+    const { calls, rerenderWith } = renderWired(vixOrder());
+    expect(qtyInput().value).toBe("984");
+
+    fireEvent.change(priceInput(), { target: { value: "0.70" } });
+    rerenderWith(vixOrder({ filled: 100, remaining: 900 }));
+
+    await act(async () => {
+      fireEvent.click(submitBtn());
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe("/api/orders/modify");
+    expect(calls[0].method).toBe("POST");
+    expect("newQuantity" in (calls[0].body as object)).toBe(false);
+    expect(calls[0].body).toEqual({ orderId: 7, permId: 7007, newPrice: 0.7 });
+  });
+
+  it("quantity submit hits the fillRaceNotice reseed branch, not toIbTotalQuantity", async () => {
+    const { calls, rerenderWith } = renderWired(vixOrder());
+
+    fireEvent.change(qtyInput(), { target: { value: "500" } });
+    rerenderWith(vixOrder({ filled: 100, remaining: 900 }));
+
+    await act(async () => {
+      fireEvent.click(submitBtn());
+    });
+
+    // toIbTotalQuantity(live order, 500) would have sent newQuantity: 600 and
+    // the snapshot arithmetic 516 — neither may reach the wire.
+    expect(calls).toHaveLength(0);
+    // Refuse + reseed: field now shows the CURRENT remainder, operator warned.
+    expect(qtyInput().value).toBe("900");
+    expect(document.querySelector(".modify-fill-race")?.textContent).toMatch(/fill/i);
+  });
+});
+
+describe("T-473: info line and quantity field agree after fills advance", () => {
+  it("both describe the SNAPSHOT fill count, with the live advance flagged", () => {
+    const { rerenderWith, container } = renderWired(vixOrder());
+    rerenderWith(vixOrder({ filled: 100, remaining: 900 }));
+
+    const info = container.querySelector(".modify-order-info");
+    // The field is still seeded from the snapshot remainder...
+    expect(qtyInput().value).toBe("984");
+    expect(info?.textContent).toContain("984x");
+    // ...so the filled figure beside it must be the SAME snapshot count,
+    // not the live 100 the field's math knows nothing about.
+    expect(info?.querySelector(".modify-order-filled")?.textContent).toContain(
+      "16 of 1000 filled",
+    );
+    // The live advance is not hidden: it is visibly flagged as stale.
+    const stale = info?.querySelector(".modify-order-fill-stale");
+    expect(stale?.textContent).toContain("100");
+    expect(stale?.textContent).toMatch(/fill/i);
   });
 });

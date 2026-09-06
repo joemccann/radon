@@ -17,21 +17,9 @@ cap so the operator does not re-fire into it.
 
 from __future__ import annotations
 
-import importlib.util
-import sys
-from pathlib import Path
-
 import pytest
 
-_LADDER_TEST = Path(__file__).with_name("test_weekend_model_ladder.py")
-_spec = importlib.util.spec_from_file_location("_weekend_model_ladder", _LADDER_TEST)
-_ladder_mod = importlib.util.module_from_spec(_spec)
-sys.modules[_spec.name] = _ladder_mod
-_spec.loader.exec_module(_ladder_mod)
-
-LADDER = _ladder_mod.LADDER
-LOOPS = _ladder_mod.LOOPS
-_run = _ladder_mod._run
+from _loop_harness import LADDER, LOOPS, _run
 
 SESSION_LIMIT_LINE = "You've hit your session limit · resets 5am (America/Los_Angeles)"
 WEEKLY_LIMIT_LINE = "You've hit your weekly limit · resets Monday"

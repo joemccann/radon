@@ -19,6 +19,11 @@ const mockGetDb = vi.fn();
 vi.mock("fs/promises", () => ({ readFile: mockReadFile }));
 vi.mock("@/lib/db", () => ({ resetDb: () => {}, getDb: () => mockGetDb() }));
 vi.mock("@/lib/radonApi", () => ({ radonFetch: vi.fn(async () => ({})) }));
+// T-485 class: the real trigger logs from async continuations after the test
+// returns; stub it synchronously so no console rpc is pending at teardown.
+vi.mock("@/lib/backgroundScan", () => ({
+  createBackgroundScanTrigger: () => vi.fn(() => true),
+}));
 
 describe("/api/vcg with every source dead", () => {
   beforeEach(() => {

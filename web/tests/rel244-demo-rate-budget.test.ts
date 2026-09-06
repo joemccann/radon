@@ -8,7 +8,6 @@
 // R-661 — /api/trin and /api/dispersion called requireRouteAccess() bare,
 // so demo traffic on them never consumed the durable demo budget.
 import { readdirSync, statSync } from "node:fs";
-import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join, resolve } from "node:path";
 import { describe, it, expect, vi } from "vitest";
@@ -111,12 +110,67 @@ describe("R-652: tiers A/B gain a daily backstop", () => {
   });
 });
 
+// R-661 behavioural coverage: call the real GETs through a recording
+// requireRouteAccess that delegates to the REAL implementation with an
+// injected durable limiter. A literal moved into a dead branch or dropped
+// from the live call path fails here (the grep it replaces stayed green).
+const recordedAccessOptions: unknown[] = [];
+const mockDurableLimit = vi.fn<
+  (tier: string, key: string) => Promise<DemoRateLimitResult>
+>();
+const mockDbExecute = vi.fn(async () => ({ rows: [] }));
+const mockRouteReadFile = vi.fn(async () => {
+  throw new Error("disk must not be read");
+});
+
+vi.mock("@/lib/routeAccess", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/routeAccess")>("@/lib/routeAccess");
+  return {
+    ...actual,
+    requireRouteAccess: (request?: Request, options?: unknown) => {
+      recordedAccessOptions.push(options);
+      return actual.requireRouteAccess(request, options as never, {
+        authFn: async () => ({ userId: "demo-user", sessionClaims: { metadata: activeMeta } }),
+        env: { NEXT_PUBLIC_RADON_DEMO: "1" },
+        now: NOW,
+        rateLimitFn: (() => ({ ok: true })) as never,
+        durableRateLimitFn: mockDurableLimit as never,
+      });
+    },
+  };
+});
+vi.mock("@/lib/db", () => ({ getDb: () => ({ execute: mockDbExecute }), resetDb: () => {} }));
+vi.mock("fs/promises", () => {
+  const mocked = { readFile: (...args: unknown[]) => mockRouteReadFile(...(args as [])) };
+  return { ...mocked, default: mocked };
+});
+
 describe("R-661: trin and dispersion charge the durable demo budget", () => {
-  for (const route of ["trin", "dispersion"]) {
-    it(`${route} passes rate + durableRateTier to requireRouteAccess`, () => {
-      const text = readFileSync(resolve(WEB_ROOT, `app/api/${route}/route.ts`), "utf8");
-      expect(text, route).toContain(`rate: { key: "${route}:route"`);
-      expect(text, route).toContain('durableRateTier: "A"');
+  for (const route of ["trin", "dispersion"] as const) {
+    it(`${route} GET passes rate + durableRateTier to requireRouteAccess (by value)`, async () => {
+      recordedAccessOptions.length = 0;
+      mockDurableLimit.mockReset();
+      mockDurableLimit.mockResolvedValue(allow);
+      const { GET } = await import(`../app/api/${route}/route.ts`);
+      const res = await GET();
+      expect(res.status).toBe(200);
+      expect(recordedAccessOptions).toEqual([
+        { rate: { key: `${route}:route`, limit: 20, windowMs: 60_000 }, durableRateTier: "A" },
+      ]);
+      expect(mockDurableLimit).toHaveBeenCalledWith("A", `route:${route}:route:demo-user`);
+    });
+
+    it(`${route} GET returns 429 with no upstream read when the durable budget is exhausted`, async () => {
+      recordedAccessOptions.length = 0;
+      mockDurableLimit.mockReset();
+      mockDbExecute.mockClear();
+      mockRouteReadFile.mockClear();
+      mockDurableLimit.mockResolvedValue({ success: false, limit: 1000, remaining: 0, reset: NOW + 2000 });
+      const { GET } = await import(`../app/api/${route}/route.ts`);
+      const res = await GET();
+      expect(res.status).toBe(429);
+      expect(mockDbExecute).not.toHaveBeenCalled();
+      expect(mockRouteReadFile).not.toHaveBeenCalled();
     });
   }
 });

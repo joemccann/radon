@@ -428,6 +428,55 @@ def test_replace_refuses_structured_202_when_broker_shows_partial_fill(
     assert detail["cancelled"] == []
 
 
+def test_replace_refuses_structured_202_when_broker_shows_order_still_working(
+    trusted_client, monkeypatch
+):
+    """T-463: the status-string arm of _cancel_confirmed_at_broker.
+
+    Broker snapshot shows Submitted with zero filled behind a structured-202
+    cancel error — still-working, not confirmed-cancelled. Replace must abort
+    with REPLACE_PARTIAL and never place the replacement.
+    """
+    from unittest.mock import AsyncMock
+
+    from scripts.api import server
+
+    monkeypatch.setattr(server, "orders_whatif", AsyncMock(return_value={"status": "ok"}))
+    monkeypatch.setattr(
+        server,
+        "orders_cancel",
+        AsyncMock(side_effect=HTTPException(
+            status_code=502,
+            detail={
+                "ib_error_code": 202,
+                "message": "IB error 202: Order Canceled - reason:",
+            },
+        )),
+    )
+    monkeypatch.setattr(
+        server,
+        "_find_working_order",
+        AsyncMock(return_value={"orderId": 10, "status": "Submitted", "filled": 0}),
+    )
+    place = AsyncMock(return_value={"status": "ok", "orderId": 1})
+    monkeypatch.setattr(server, "_orders_place_after_rate_reservation", place)
+    server._order_rate_timestamps.clear()
+
+    try:
+        response = trusted_client.post("/orders/replace", json={
+            "cancelOrders": [{"orderId": 10}],
+            "replaceOrder": _replacement(),
+        })
+    finally:
+        server._order_rate_timestamps.clear()
+
+    assert response.status_code == 502
+    place.assert_not_awaited()
+    detail = response.json()["detail"]
+    assert detail["code"] == "REPLACE_PARTIAL"
+    assert detail["cancelled"] == []
+
+
 def test_replace_does_not_place_when_cancel_reports_order_still_submitted(
     trusted_client, monkeypatch
 ):

@@ -125,6 +125,30 @@
       ],
       "owners": ["docs/operations.md"],
       "note": "Store-wins-over-.env precedence, master-key loss recovery, and setup-mode entry/exit are operator contracts (DOC-051)."
+    },
+    {
+      "id": "mcp-hosted-auth",
+      "globs": ["scripts/mcp_hosted/auth.py"],
+      "owners": ["docs/cloud-services.md"],
+      "note": "JWKS verdict-vs-outage caching, per-kid refresh cooldown, and allowlist semantics are operator contracts (DOC-090)."
+    },
+    {
+      "id": "secret-store-staging",
+      "globs": [
+        "cloud/scripts/setup-vps.sh",
+        "cloud/scripts/radon-app-runtime.sh"
+      ],
+      "owners": ["docs/operations.md"],
+      "note": "Provisioning-time secret staging, group boundaries, and docker-group stripping are operator contracts (DOC-090)."
+    },
+    {
+      "id": "drift-audit",
+      "globs": [
+        "cloud/scripts/drift_audit.py",
+        "cloud/config/drift-allowlist.conf"
+      ],
+      "owners": ["docs/cloud-services.md"],
+      "note": "Drift-audit scope and allowlist semantics live in the cloud runbook (DOC-090)."
     }
   ]
 }
