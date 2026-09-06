@@ -9207,6 +9207,29 @@ Range `2b936ebc..391aaaea` — 118 commits / 395 files (154 test/spec files), au
 | T-459 | P2 | Render the shell; new execId ⇒ portfolio endpoint re-fetched. Stale-ref mutation must red. |
 | T-460 | P2 | Explicit `host_role=` in rel181/rel135 suites + one app-role case; one assert on the `pool-disconnected` branch message/state. |
 | T-461 | P2 | `ANCHOR_MONDAY` derived from injected now; suite green at any future date (verified with a frozen clock a year out). |
+| T-462 | P0 | Render `OrderTab`/`WorkspaceSections` (not the leaf modal) with the relay disconnected, stub `fetch`; assert zero requests and the blocked reason renders. Red today; red again when `feedConnected={...}` is removed from the call site. |
+| T-463 | P0 | Patch `_find_working_order` to `{"orderId":10,"status":"Submitted","filled":0}` behind a structured-202 cancel error; assert 502 `REPLACE_PARTIAL`, `cancelled == []`, `place.assert_not_awaited()`. Must red on `return True` at `server.py:3191`. |
+| T-464 | P1 | Render `WorkspaceShell` itself (mock only data hooks), stub `fetch`, push an orders payload with a new `execId`; assert exactly one `POST /api/portfolio`. Must red when `WorkspaceShell.tsx:430`'s third argument is removed. Delete the hand-cloned harness. |
+| T-465 | P1 | `useToast` test asserting `hasToastKey(key)` flips false after `dismissToast`, plus a WorkspaceShell test that a dismissed fill toast's next fill shows its own quantity. Red on either mutation. |
+| T-466 | P1 | Call the real `GET` of `app/api/trin/route.ts` with a mocked `requireRouteAccess`; assert the options argument BY VALUE and that a daily-tier `success:false` yields 429 with no upstream fetch. Delete the `readFileSync` grep. |
+| T-467 | P1 | Execute the digest pipeline against a temp tree: a populated tree must differ from the empty-input digest, and an empty tree must exit non-zero rather than record `e3b0c442…`. Plus a consumer assertion, or delete the digest. |
+| T-468 | P1 | Add `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_SYSTEM=/dev/null`, `GIT_TERMINAL_PROMPT=0`, `-c core.hooksPath=/dev/null -c commit.gpgsign=false` to the `git_repo` fixture. Red with a host `pre-commit` that exits 1; green after. |
+| T-469 | P1 | Switch the held-out-spec guard from `%cs` to `%as`. Red: stamp a spec today, `git commit --amend --no-edit` so `%cs` advances a day, assert fires. Green: amended tree passes. |
+| T-470 | P1 | Reject `radonFetch` with `new RadonApiError(429, …)` on gex/regime/gamma-rotation; assert status is exactly 429, no cached body, `scan_succeeded:false`. Red on hardcoding 502 and on widening `status >= 500`. |
+| T-471 | P1 | Add a `hasBlendedLegBasis` position to the `unrealized-breakdown-signed.test.ts:211` portfolio; parity must still hold AND a `col1 === "---"` row must not NaN the `:113` check. |
+| T-472 | P1 | Re-render the modal with `filled` 16->100: a price-only submit transmits no `newQuantity`; a quantity submit hits the `fillRaceNotice` reseed/refuse branch, not `toIbTotalQuantity`. |
+| T-473 | P1 | Re-render with `filled: 100, remaining: 900`; assert `.modify-order-info` and `#modify-quantity-input` describe the same fill count, or that the stale field is visibly flagged. |
+| T-474 | P2 | Run `run_portfolio_refresh.sh` with logging `curl`/`sleep` stubs and a forced 502; assert the curl COUNT and simulated wall clock against `TimeoutStartSec`. Red when the loop bound changes without the constants. |
+| T-475 | P2 | Assert the isolation invariant: demo build + demo spec are the trailing contiguous pair AND both carry `NEXT_PUBLIC_RADON_DEMO: "1"`, and no later step combines `failure()` with a `playwright test` re-run. Better: distinct `--distDir`. |
+| T-476 | P2 | Delete the two shell-body greps, or replace with a run of the real arm on a poisoned candidate asserting non-zero exit AND the target file unwritten. |
+| T-477 | P2 | Add `mockRadonFetch.mockReset()` to the `api-routes.test.ts:841` `beforeEach` and pin the fixture `date` to `mostRecentSessionDate()`. Red: assert `mockRadonFetch` uncalled against the leaked mock. |
+| T-478 | P2 | Reset and re-stamp `mockStat` from `beforeEach` with a window-relative mtime. Red: a test setting `mtimeMs: 0` makes the next test in file order observe a stale mtime. |
+| T-479 | P2 | Switch `.order-confirm-summary` and the `.pos-stat*` walkers to `getByTestId` / per-cell `data-testid`. Red today when the class is renamed in `globals.css`; invisible to the suite after. |
+| T-480 | P2 | Replace the six real-timer 20ms sleeps with `waitFor` (positive) and fake timers (negative). Red probe: lower the budget to 0 and see whether the negative assertions are decorative. |
+| T-481 | P2 | Move `LADDER`/`LOOPS`/`_run` into a non-test helper imported by both. Red: `git mv test_weekend_model_ladder.py test_ladder.py` currently fails `test_loop_session_limit.py` at collection. |
+| T-482 | P2 | Assert `playwright.config.ts`'s webServer env unsets `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` or forces `pk_test_` whenever it sets `RADON_AUTHLESS_TEST=1`. |
+| T-483 | P2 | After the rejection, advance 60_000 and assert no third fetch, then a further 60_000 and assert exactly three. |
+| T-484 | P2 | Pin the interpreter `cloud/tests` shells out to (skip with a named reason when bash>=4 is absent), or record resolved `bash --version` + `command -v caddy` with every FAILED list. Red/green: the baseline artifact must be identical with `/bin` vs `/opt/homebrew/bin` first on PATH. |
 
 ## 11 · Audit ledger
 
@@ -9231,6 +9254,8 @@ Delta findings continue the T-### numbering in dated `## Delta audit` sections.
 - Audited through: `2b936ebc` on 2026-09-04 — 31 new findings (T-409…T-439: 2 P0, 10 P1, 19 P2) over 50 commits / 282 files / +17076−1128, base `0202e32d`. Run on a **Friday** (weekend-false-red class dormant; reasoned about, not observed). The reliability loop was mid-gate in its own clone for the entire run, so these are LOAD SAMPLES: pytest **11546 passed / 0 failed / 1 skipped** in 2617s (43m, vs the usual ~275s — contention, not a regression); vitest 855 files / **8627 passed / 0 failed / 18 skipped**; cloud **37 failed** / 1634 passed on darwin. Cloud attributed by RUNNING THE BASE SHA in a worktree and diffing sorted FAILED lists: base `0202e32d` = **38 failed**, HEAD = 37 — two `test_setup_never_replaces_live_helper_with_invalid_candidate` params FIXED in range, one NEW (`test_app_runtime.py::test_run_api_cleans_staged_credential_on_pre_exec_failure`, deterministic 2/2 in isolation at load 6.3, darwin-only — CI green at this HEAD and the file is in the `al` shard; filed T-439). The recorded baseline moves 35 → 37; note base now reads 38 where 2026-09-03 recorded 35 at the same SHA, so the darwin list drifts on this host and must be re-derived, never trusted as a count. Round 2 of the gates was deliberately STOPPED to stay inside the phase cap, and the delta-touched determinism re-runs did not happen: the delta touches 133 test files, so per the 2026-08-16 lesson scoped re-runs would have collapsed into full-gate runs — saying so rather than pretending they ran. Collection union CLEAN on all three gates (pytest 595 files = shard-glob union 595, `comm` empty both ways; cloud 49 = al+edge+mz 49; all 41 new test files inside a CI path set) so T-122 holds. `deploy:` block byte-identical base→HEAD (14 jobs); `vitest.config.ts` byte-identical, thresholds unmoved (75/71/65); zero new skip/only/xfail in the delta; Playwright curated list 19/19 present, ledger unchanged. Only CI invocation change in range is the caddy pin (T-417). `main` still has NO `required_status_checks` (T-222). Tree clean after every gate (T-275 sweep, 0 lines ×3). T-381 secret sweep: no runner secrets are exported into this phase's shell, so the sweep is clean but weaker evidence than under the wrapper.
 
 - Audited through: `391aaaea` on 2026-09-05 — 22 new findings (T-440…T-461: 8 P1, 14 P2) over 118 commits / 395 files, base `2b936ebc`. Saturday run. pytest **11669 passed / 0 failed** (1642s under sibling-loop contention); vitest first read 13 failed + 34 files failed at import — ALL the delta's new `thinking-orbs` dep missing from this clone's node_modules; after `bun install` the failed set re-ran **322 passed / 0 failed** (environment fixed, repo untouched; `site/` needed npm — bun kept failing on the `next` tarball). cloud **33 failed** / 1692 passed on darwin, strict subset of 2026-09-04: zero NEW, four GONE (incl. T-439's red) — **baseline 37 → 33**. Post-gate tree clean ×3 (T-275); secret-name sweep clean (T-381). Delta-touched determinism 3× NOT run (154 touched test files collapses into full gates, 2026-08-16 rule). Shard-glob union clean (441/441 single-shard, T-122 holds); 40 of 42 new test files CI-reachable, the two `site/e2e` specs are not (T-447). `deploy.needs`/`if` byte-identical; thresholds unmoved; 3 new conditional skips with reasons; no `.only`/`xfail`. CI green on `main` at this HEAD (20 success / 5 skipped). `main` still has no `required_status_checks` (T-222, fifth audit running).
+
+- Audited through: `be64e1fc` on 2026-09-05 (**second pass**, same day, same clone) — 23 new findings (T-462…T-484: 2 P0, 10 P1, 11 P2) over 61 commits / 107 files / +5789-172, base `391aaaea` (the first pass's HEAD). Saturday run. The range CONTAINS the first pass's own remediation (T-440…T-461) and the reliability loop's REL-232…REL-247, re-triaged as ordinary delta per the 2026-08-22 rule. Gates serial round 1 BEFORE the fan-out, no sibling loop, load 3-6: pytest **11762 passed / 1 skipped / 0 failed** (1730s); vitest 39 files failed at IMPORT on ONE environment cause (`thinking-orbs` + `border-beam` declared at `web/package.json:37,46` but absent from this clone's node_modules — the first pass's lesson recurring after a tree reset), and the same 39 files re-ran **323 passed / 0 failed** once installed, repo untouched; cloud **5 failed / 1785 passed**, all in `test_caddy_edge_timeouts.py` with `caddy` ABSENT. The cloud baseline reads 5, not the recorded 33, because this run's gate PATH resolves `bash` to homebrew 5.3.9 instead of `/bin/bash` 3.2 — filed as T-484, and it means every previously recorded darwin baseline was a PATH artifact. Post-gate tree clean x3 (T-275). Zero new code skips/`.only`/`xfail` in the delta. `deploy:` block byte-identical base->HEAD (14 jobs, both coverage ratchets retained); no gate config touched, no threshold moved. Shard-glob union clean (449/449 matched exactly once, T-122 holds); all 27 new test files CI-reachable. CI green on `main` at this HEAD. `main` still has no `required_status_checks` (T-222, sixth audit running). Delta-touched determinism 3x NOT run: 47 touched test files across four roots collapses into full gates (2026-08-16 rule).
 
 ## Remediation 2026-08-29 — PR #140
 
@@ -9393,3 +9418,513 @@ One lead correction on landing: T-390's new file leaked the module-global
 fixed with a snapshot/restore fixture, not by weakening either test.
 T-408's enforcement half (a tsc step in ci.yml) is an operator decision and
 was deliberately not made here.
+
+## Delta audit 2026-09-05 (second pass)
+
+Range `391aaaea..be64e1fc` — 61 commits / 107 files / +5789−172, base `391aaaea`
+(the first pass's audited SHA; its own remediation T-440…T-461 and the
+reliability loop's REL-232…REL-247 both land inside this range and are
+re-triaged here as ordinary delta, per the 2026-08-22 rule).
+Saturday run — the weekend-false-red class is live.
+23 new findings: **2 P0, 10 P1, 11 P2** (T-462…T-484).
+
+Two findings converged across independent agents at the same file:line
+(T-462 from the source-coverage and blast-radius dimensions; T-464 from
+net-negative, source-coverage and blast-radius). Both were re-derived from
+source by the lead before numbering.
+
+---
+
+### T-462 — P0 — the REL-236 disconnect arm is dead in production; the new specs pin it at the leaf, not at the wire
+
+`web/lib/order/quoteSubmitGate.ts:30` closes the submit gate on
+`feedConnected === false`. Both consumers declare the prop optional —
+`web/components/ModifyOrderModal.tsx:54,318,556` and
+`web/components/SingleLegOrderTicket.tsx:79,154,250` — and **no production
+call site supplies it**. All four call sites verified by the lead:
+`web/components/WorkspaceSections.tsx:3256`,
+`web/components/ticker-detail/OrderTab.tsx:1127`,
+`web/components/ticker-detail/BookTab.tsx:399`,
+`web/components/InstrumentDetailModal.tsx:245`. A repo-wide grep for
+`feedConnected` outside the two components returns only an unrelated local
+in `web/components/mobile/MobileMoreDrawer.tsx:64`. Because the guard tests
+`=== false`, an absent prop is `undefined` and leaves the gate OPEN.
+
+The new specs `web/tests/order-ticket-quote-gate.test.tsx` and
+`web/tests/modify-order-quote-gate.test.tsx` pass `feedConnected` themselves
+from a test harness, so the gate is verified at the leaf component and
+nowhere at the surface that owns the fetch — exactly the CLAUDE.md "a gated
+action is tested at the wire, not at the button" class. Deleting the
+`feedConnected` field from both prop types and from both `quoteSubmitGate`
+calls reds nothing. Only the quote-age arm is live for a real user.
+
+**AC (red/green):** render `OrderTab` / `WorkspaceSections` (not the modal)
+with the IB/relay status disconnected, stub `fetch`, drive Modify/Place in
+its otherwise-armed state; assert zero requests fire and the blocked reason
+renders. Must red today, and must red again when `feedConnected={...}` is
+removed from the call site.
+
+### T-463 — P0 — `_cancel_confirmed_at_broker`'s status arm is untested on the replace money path
+
+`scripts/api/server.py:3191` —
+`return str(payload.get("status") or "") in ("Cancelled", "ApiCancelled")` —
+gates replacement placement at `server.py:3216`. Mutating 3191 to
+`return True` makes a broker snapshot of `{"status": "Submitted", "filled": 0}`
+read as confirmed-cancelled, so `/orders/replace` places a full-size
+replacement on top of a still-working order: doubled live exposure.
+
+Coverage proof (lead-run): `grep -rn "_cancel_confirmed_at_broker\|_find_working_order"
+scripts/api/tests/ scripts/tests/ web/tests/` returns exactly one hit,
+`scripts/api/tests/test_order_replace_state_machine.py:409`, which returns
+`filled: 3` and is therefore caught by the earlier `filled > 0` arm at
+`server.py:3186-3189`. The two happy-path tests (`:266`, `:297`) never patch
+`_find_working_order`, so they exercise the `payload is None → True` arm.
+The status-string arm has no test.
+
+**AC:** patch `_find_working_order` to `{"orderId": 10, "status": "Submitted",
+"filled": 0}` behind a structured-202 cancel error; assert 502
+`REPLACE_PARTIAL`, `cancelled == []`, `place.assert_not_awaited()`. Must go
+red on `return True` at 3191.
+
+### T-464 — P1 — `fill-driven-portfolio-refresh-wire` asserts against a hand-cloned WorkspaceShell that has already drifted
+
+`web/tests/fill-driven-portfolio-refresh-wire.test.tsx:59-73` defines a local
+`FillRefreshHarness` its own docblock calls "WorkspaceShell's exact wiring".
+It is not: `web/components/WorkspaceShell.tsx:430` calls
+`useFillToasts(orders, upsertToast, onNewFills, hasToastKey)` with four
+arguments; the harness at `:71` passes three (lead-verified by grep). The
+fourth is `isToastLive` (`web/lib/useFillToasts.ts:49`) and sits in the
+effect's dependency array (`:101`). The harness also models `isDemoMode` as
+a prop that flips, while production reads
+`process.env.NEXT_PUBLIC_RADON_DEMO` (`WorkspaceShell.tsx:420`), which never
+flips — so the demo→live scenario the docblock sells as the stale-ref
+regression is not a production state.
+
+Defect it passes over: remove or misorder the `onNewFills` argument at
+`WorkspaceShell.tsx:430` and every assertion still passes while the
+positions table silently stops refreshing on fills — the original R-640 /
+T-459 bug the file exists to pin.
+
+**AC:** render `WorkspaceShell` itself (mock only its data hooks), stub
+`fetch`, push an orders payload carrying a new `execId`, assert exactly one
+`POST /api/portfolio`. Must red when line 430's third argument is removed.
+
+### T-465 — P1 — `hasToastKey` has zero test coverage of its definition or its wiring
+
+`web/lib/useToast.ts:104` defines `hasToastKey` and `:106` exports it;
+`web/components/WorkspaceShell.tsx:77,430` is its only consumer.
+`grep -rn "hasToastKey" web/tests/` returns **no matches** (lead-verified).
+
+Scope note, narrower than first reported: `useFillToasts`'s `isToastLive`
+BRANCH is covered — `web/tests/fill-toasts-hook.test.tsx:199` injects its
+own predicate. What is uncovered is (a) `hasToastKey` itself flipping false
+after `dismissToast`, and (b) WorkspaceShell actually passing it. Making
+`hasToastKey` return `true` unconditionally at `useToast.ts:104` kills the
+R-642 "dismissed toast forgets its running total" behaviour with the whole
+suite green.
+
+**AC:** a `useToast` unit test asserting `hasToastKey(key)` flips false after
+`dismissToast`, plus a WorkspaceShell-level test that a dismissed fill
+toast's next fill shows its own quantity, not the cumulative total. Red on
+either mutation.
+
+### T-466 — P1 — R-661 route coverage is a `readFileSync` + `toContain` grep
+
+`web/tests/rel244-demo-rate-budget.test.ts:114-121` reads
+`app/api/trin/route.ts` and `app/api/dispersion/route.ts` as TEXT and
+asserts the substrings `rate: { key: "trin:route"` and
+`durableRateTier: "A"` are present (lead-verified at the cited lines).
+
+The literal can sit in a dead branch, a second `requireRouteAccess()` call,
+an unreached early return, or an object never passed to the gate. A demo
+user hammering `/api/trin` with zero budget consumed is the R-661 bug, and
+this test stays green through it. The same file's other tests (`:29-112`)
+drive `handleDemoGate` for real — the grep is the odd one out, and it is the
+half covering the newly-fixed routes.
+
+**AC:** call the real `GET` of `app/api/trin/route.ts` with a mocked
+`requireRouteAccess`; assert the recorded options argument BY VALUE, and
+that a limiter returning `success:false` on the daily tier yields 429 with
+no upstream fetch. Red when the option leaves the live call path, not merely
+the file.
+
+### T-467 — P1 — the Playwright digest test greps the Dockerfile, and the digest it pins has no consumer
+
+`scripts/tests/test_dockerfile_playwright_digest.py:13-30` asserts
+`Dockerfile.python` CONTAINS `"sha256sum"` and `"/ms-playwright/.browsers.sha256"`.
+The pipeline at `docker/app/Dockerfile.python:26-27`
+(`find … | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1`)
+produces a valid-looking digest OF NOTHING when `find` matches zero files —
+a misspelled `PLAYWRIGHT_BROWSERS_PATH`, an install writing elsewhere, or
+`--only-shell` fetching nothing all yield the well-known empty-stream
+sha256 and a green test. The chain is `&&`-joined under `RUN` with no
+`pipefail`, so a failing `find`/`xargs` mid-pipe is masked by `cut`'s exit
+status. Nothing in the repo reads `.browsers.sha256`, so the stated purpose
+is unimplemented. This is the 2026-08-27 Caddyfile shape: green test,
+artifact does nothing.
+
+**AC:** execute the digest pipeline against a temp tree; assert (a) a
+populated tree yields a digest differing from the empty-input digest, and
+(b) an empty/missing tree exits non-zero rather than recording
+`e3b0c442…`. Plus a consumer assertion, or delete the digest.
+
+### T-468 — P1 — the `git_repo` fixture inherits the host's global git config, so the operator's pre-commit hook runs inside the test
+
+`scripts/tests/test_nightly_green_base.py:63-79` runs `git init -q`, sets
+only `user.email`/`user.name`, then three `git commit` calls with
+`check=True`. It never neutralizes `GIT_CONFIG_GLOBAL` / `GIT_CONFIG_SYSTEM`.
+On this runner `git config --global core.hooksPath` is
+`/Users/joemccann/.git-hooks`, whose `pre-commit:6-15` runs `gitleaks` and
+a `tsc --noEmit` branch and `exit 1` on any hit — so every fixture commit
+executes them and a non-zero exit raises `CalledProcessError`, erroring all
+four `TestCli` tests (`:86,95,101,108`) for a reason unrelated to
+`nightly_green_base.py`. `commit.gpgsign`, `init.defaultBranch` and
+`init.templateDir` are equally unpinned.
+
+Counter-example in the same delta proving the repo knows the pattern:
+`cloud/tests/test_rel234_compose_gate.py:152` passes
+`env={**os.environ, "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null"}`.
+
+**AC:** RED — with `core.hooksPath` pointing at a dir whose `pre-commit` is
+`#!/bin/sh\nexit 1`, `TestCli` errors today. GREEN — after adding
+`GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_SYSTEM=/dev/null`,
+`GIT_TERMINAL_PROMPT=0` and `-c core.hooksPath=/dev/null -c commit.gpgsign=false`,
+the same setup passes.
+
+### T-469 — P1 — the held-out-spec guard keys off the COMMITTER date, so any rebase re-reds a correctly-stamped spec
+
+`scripts/tests/test_e2e_ci_curation.py:218-228` resolves
+`_git("log","-1","--format=%cs", base+"..HEAD", "--", "web/e2e/"+spec)` and
+fails when `stamped < changed_on`. `%cs` is the committer date, which git
+rewrites to *now* on every rebase, cherry-pick, amend and squash-merge. A
+spec stamped `# REVIEWED 2026-09-05` turns red the moment the branch is
+rebased on 2026-09-06 with a byte-identical diff and an unchanged stamp.
+`%cs` also renders in the commit's recorded timezone, so a commit written
+21:00 PT stamps the next calendar day against an operator writing "today"
+in local time. Base resolution (`:171-180`) falls back to `origin/main`, so
+on a long-lived branch the window is wide and sweeps in many specs.
+
+This is a self-inflicted guard: T-438 landed it, and the 2026-09-04 lesson
+already records it firing on the branch that added it.
+
+**AC:** RED — stamp a held-out spec today, commit, then
+`git commit --amend --no-edit` so `%cs` advances a day; the assert fires.
+GREEN — switch to `%as` (author date, stable across rebase) and the amended
+tree passes.
+
+### T-470 — P1 — upstream status passthrough and the `>= 500` cache-fallback guard are untested on three scan routes
+
+`web/app/api/gex/route.ts:201-202`, `web/app/api/regime/route.ts:365-366`,
+`web/app/api/gamma-rotation/route.ts:210-211`.
+
+Mutations no test catches: (a) hardcode `const status = 502`, dropping the
+`RadonApiError` status passthrough; (b) widen `if (status >= 500)` to
+`if (true)`, so a 4xx upstream REJECTION silently serves a cached snapshot
+instead of surfacing the client error. `rel238-scan-failure-surfaced.test.tsx:61,95,118`
+rejects with a plain `Error` and only asserts `status >= 500`, so neither
+mutation reds.
+
+**AC:** reject `radonFetch` with `new RadonApiError(429, "…")`; assert the
+response status is exactly 429, no cached body is served, and
+`scan_succeeded: false`. Red on both mutations.
+
+### T-471 — P1 — the `sumUnrealizedBreakdown` parity pin is now tautological
+
+`web/lib/unrealizedBreakdown.ts`: the row builder dropped its
+`if (entry == null …) return []` and the sum dropped
+`if (hasBlendedLegBasis(pos)) continue`, so both predicates are now
+identically `pnl != null`.
+`web/tests/unrealized-breakdown-signed.test.ts:211-275`
+("sumUnrealizedBreakdown matches row P&L total") previously compared two
+DIFFERENT exclusion sets; it now sums set S against set S and can never
+diverge. Both its fixtures (`:212-269`) are cleanly measurable.
+
+Related, same file: `:113` and `:170` assert
+`parseSigned(row.col2) - parseSigned(row.col1) ≈ row.pnl`, but `col1` can
+now be the literal `"---"`, which `parseSigned` will not turn into a
+number — NaN for any entry-less position. No current fixture reaches it; the
+guard is absent, not proven safe.
+
+**AC:** add a `hasBlendedLegBasis` position to the `:211` portfolio. Parity
+must still hold, AND a `col1 === "---"` row must not NaN the `:113` check.
+
+### T-472 — P1 — `modify-partial-fill-quantity.test.tsx` no longer exercises the wire path its name pins
+
+`web/components/ModifyOrderModal.tsx:534-536` now takes `currentQuantity`
+from `fillSnapshot`, and the submit branch computes
+`request.newQuantity = fillSnapshot.filled + parsedQuantity`, leaving
+`toIbTotalQuantity(order, …)` only as a `fillSnapshot == null` fallback.
+`fillSnapshot` is seeded non-null whenever `order` is non-null, so that
+fallback is unreachable from the modal.
+`web/tests/modify-partial-fill-quantity.test.tsx:152-160` ("sends filled +
+entered as the new TOTAL", asserting `{ newQuantity: 516 }`) still passes,
+but through the snapshot arithmetic; its sibling unit assertions at
+`:105-111` keep `toIbTotalQuantity` looking covered while the modal's use of
+it is dead.
+
+**AC:** re-render the modal with `filled` advanced 16→100 and submit a
+price-only change: assert no `newQuantity` is transmitted. Then advance
+`filled` and submit a QUANTITY change: assert the reseed/refuse branch
+(`fillRaceNotice`) fires rather than `toIbTotalQuantity`.
+
+### T-473 — P1 — display and math read different fill counts, and no untouched test re-renders the modal
+
+`web/components/ModifyOrderModal.tsx:537` keeps
+`alreadyFilled = filledQuantity(order)` (LIVE) and renders it at `:688`,
+while `currentQuantity` (`:534`) and `quantityChanged` (`:549`) use the
+FROZEN snapshot. `web/tests/modify-partial-fill-quantity.test.tsx:135-140`
+("shows the operator what already filled", asserting `984x` and `16`)
+renders once and never re-renders; a grep for `rerender` across the
+`modify-*` / `order*` / `orders-*` suites matched only the new
+`modify-fill-race-quantity.test.tsx`. So the divergence — info line says
+"16 filled, 984x" while the field is still seeded 984 after a live advance
+to 100 — has no untouched coverage.
+
+**AC:** re-render with `filled: 100, remaining: 900`; assert the
+`.modify-order-info` text and `#modify-quantity-input` describe the same
+fill count, or that the stale field is visibly flagged.
+
+---
+
+### T-474 — P2 — the retry-budget test mirrors the script's arithmetic instead of executing it
+
+`scripts/tests/test_rel241_retry_budget.py:32-59` regex-scrapes constants
+and asserts `(retries + 1) * curl_timeout + retries * delay + 10 <= TimeoutStartSec`.
+The `attempts = retries + 1` term (`:53`) is the test's OWN model of the loop
+shape in `scripts/run_portfolio_refresh.sh:120-151`, never executed. Change
+the loop bound to `while [ $attempt -le $RETRY_LIMIT ]` (3 retries → 4 curls)
+with the constants unchanged and the test still computes 3 attempts → 106s
+and passes, while the real worst case is 144s against `TimeoutStartSec=120`
+and systemd kills the oneshot as `Result=timeout` — the exact failure
+REL-241 exists to prevent. The regex `curl\s[^\n]*-m\s+(\d+)` is also
+positionally fragile: it takes the FIRST curl in the file.
+
+**AC:** run the real script with `curl`/`sleep` stubs that log invocations
+and force a 502; assert the curl invocation COUNT and the total simulated
+wall clock, then compare that measured number to `TimeoutStartSec`. Red when
+the loop bound changes without the constants changing.
+
+### T-475 — P2 — `test_ci_demo_build_order.py` pins step INDICES, not bundle isolation
+
+`scripts/tests/test_ci_demo_build_order.py:30-65` asserts the demo build's
+index exceeds the first `upload-artifact` index, the demo spec is at
+`demo_build + 1`, and is `len(steps) - 1`. The actual hazard is that
+`web/.next` is SHARED, not that steps are ordered: the prod-spec step can
+gain `if: failure()` re-run semantics, or a `continue-on-error` plus a later
+re-invocation inside the same `run` block, and the ordering assertion is
+untouched. Conversely, dropping `NEXT_PUBLIC_RADON_DEMO` from the SPEC step
+reds nothing — the predicate only checks the build step's env. The
+`"build" in str(s.get("run",""))` predicate also matches any future step
+whose script mentions "build".
+
+**AC:** assert the isolation invariant — the demo build and demo spec are
+the trailing contiguous pair AND both carry `NEXT_PUBLIC_RADON_DEMO: "1"`,
+and no later step combines `failure()` with a `playwright test` re-run.
+Better: build to a distinct `--distDir` so the bundles cannot collide, and
+delete the ordering test.
+
+### T-476 — P2 — two shell-body greps inside otherwise-executed cloud suites
+
+`cloud/tests/test_rel242_preflight_and_drift.py:143-152` asserts the string
+`compose_body_is_valid "$candidate"` appears in a slice of
+`refresh_install_file`'s body; `cloud/tests/test_rel234_compose_gate.py:94-102`
+asserts `compose_body_is_valid` appears in the `compose)` case arm. Both
+pass over the call being present with its exit status DISCARDED —
+`… || true`, or inside `if false; then`, or assigned and never tested —
+which under `set -uo pipefail` (not `-e`) reproduces R-635 exactly: gate
+present in source, gate not enforced. Mitigating: both files contain
+executed counterparts (`test_rel242…:155`, the `POISONS` matrix at
+`test_rel234…:118-125`), so these two add maintenance cost without coverage.
+
+**AC:** delete them, or replace with a run of the real arm carrying a
+poisoned candidate asserting non-zero exit AND the target file unwritten —
+which the neighbouring tests already do.
+
+### T-477 — P2 — `mockRadonFetch` is not reset in the `GET /api/regime` describe
+
+`web/tests/api-routes.test.ts:841-861`'s `beforeEach` resets
+`vi.resetModules()`, `mockReadFile` and `mockStat` but NOT `mockRadonFetch`.
+The fixture payload `date: "2026-04-22"` is stale per
+`web/lib/criStaleness.ts:56`, so `web/app/api/regime/route.ts:352` calls
+`triggerBackgroundScan()` → `radonFetch("/regime/scan")` against whatever
+the preceding `POST /api/gex` describe left behind (`:811` sets
+`mockRejectedValue(new Error("upstream down"))`). It survives only because
+`web/lib/backgroundScan.ts:56-60` swallows the rejection. It is a live order
+dependence: reorder or shard the file and the fired request changes identity.
+
+**AC:** add `expect(mockRadonFetch).not.toHaveBeenCalled()` (or assert the
+scan URL) to the cached-payload test — it fails against the leaked mock.
+Fix with `mockRadonFetch.mockReset()` in that `beforeEach` and pin the
+fixture `date` to `mostRecentSessionDate()`.
+
+### T-478 — P2 — a module-load-time `mockStat` default that no `beforeEach` restores
+
+`web/tests/rel238-scan-failure-surfaced.test.tsx:15` and
+`web/tests/api-routes.test.ts:96` both do
+`const mockStat = vi.fn().mockResolvedValue({ mtimeMs: Date.now() })`,
+evaluated ONCE at module import and frozen for the file. In `rel238-*` the
+`beforeEach` (`:41-49`) resets `mockReadFile`, `mockRadonFetch` and
+`mockExecute` — `mockStat` is absent, so any test that stubs it leaks into
+every later test, and the "fresh" mtime silently ages as the file runs.
+`api-routes.test.ts:95` documents the intent ("mtime 5 s ago (fresh)") while
+only one describe re-stamps it.
+
+**AC:** a test setting `mockStat.mockResolvedValue({mtimeMs: 0})` makes the
+NEXT test in file order observe a stale mtime. Fix by resetting and
+re-stamping from a `beforeEach` with a window-relative mtime.
+
+### T-479 — P2 — presentational CSS classes used as test hooks where a testid belongs
+
+`web/tests/modify-order-close-pnl.test.tsx:161,440,477,499,518,540` bind six
+assertions to `within(document.querySelector(".order-confirm-summary") as HTMLElement)`,
+a class whose only definition is a STYLE rule at `web/app/globals.css:9022`.
+Renaming it during a purely visual change nulls the selector, and the
+`as HTMLElement` cast turns that into a `within(null)` throw rather than a
+readable failure. Same shape in
+`web/tests/position-mixed-basis-refuses-aggregate.test.tsx:171-176,199-207`:
+`statValue()` walks `.pos-stat` / `.pos-stat-label` / `.pos-stat-value`, and
+`cellUnder()` (`:200-207`) resolves a column by HEADER INDEX into `td` order,
+so inserting any column shifts every assertion. 141 component files already
+carry `data-testid`.
+
+**AC:** rename `.order-confirm-summary` to `.order-confirm-panel` in
+`globals.css` and the component — the six tests throw today while the UI is
+unchanged. After switching to `getByTestId` and per-cell `data-testid`, the
+same rename is invisible.
+
+### T-480 — P2 — real-timer 20 ms sleeps carrying negative "nothing fired" assertions
+
+`web/tests/order-ticket-quote-gate.test.tsx:189,202`;
+`web/tests/modify-order-quote-gate.test.tsx:176,187`;
+`web/tests/use-sync-hook-pending-refresh.test.tsx:85,98` each do
+`await new Promise(r => setTimeout(r, 20))` on REAL timers and then assert
+`toHaveLength(0)` / `toHaveLength(2|3)`. The 20 ms budget is the entire
+margin and must exceed React's commit, effect flush and any queued
+microtask chain. This repo has already redded on a 41 ms margin (T-238), and
+`web/tests/footer-telemetry-flex-refresh.test.tsx:22` in the SAME delta
+shows the correct pattern (`vi.useFakeTimers()` + `advanceTimersByTime`).
+
+**AC:** lower the budget to `0`; if the negative assertions still hold the
+wait is decorative and should be deleted. Fix with `waitFor` for positive
+assertions and fake timers for the negative ones, so no assertion depends on
+wall time.
+
+### T-481 — P2 — a test module executes a sibling TEST file at import time
+
+`scripts/tests/test_loop_session_limit.py:26-33` builds a
+`spec_from_file_location` against `test_weekend_model_ladder.py` and calls
+`exec_module`, then lifts `LADDER`, `LOOPS` and the private `_run`.
+Collection of this file now depends on another test file existing, importing
+cleanly, and keeping a private helper; pytest separately imports the same
+source under its own name, so two module objects with two copies of every
+test class live in the process. Renaming or deleting the ladder test becomes
+a collection ERROR, not a skip.
+
+**AC:** `git mv scripts/tests/test_weekend_model_ladder.py scripts/tests/test_ladder.py`
+— `test_loop_session_limit.py` fails at collection today. Move
+`LADDER`/`LOOPS`/`_run` into a non-test helper (e.g.
+`scripts/tests/_loop_harness.py`) imported by both, and the rename is inert.
+
+### T-482 — P2 — the Playwright `RADON_AUTHLESS_TEST` / `pk_live_` invariant is unpinned
+
+`web/middleware.ts` now invokes `assertAuthlessTestFlagAbsentInProduction()`
+at TOP LEVEL, throwing when `RADON_AUTHLESS_TEST === "1"` and the
+publishable key starts with `pk_live_`. `web/playwright.config.ts:77-80`
+sets `RADON_AUTHLESS_TEST: "1"` on the e2e web server. If that server's
+environment ever carries a `pk_live_` key, middleware fails at IMPORT and
+every spec under `web/e2e/` fails at navigation rather than at its own
+assertion. No `pk_live` value was found in this clone, so the e2e env is not
+confirmed unsafe — only unpinned.
+
+**AC:** a test asserting `playwright.config.ts`'s webServer env either
+unsets `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` or forces a `pk_test_` value
+whenever it sets `RADON_AUTHLESS_TEST=1`.
+
+### T-483 — P2 — `demo-headlines-hook.test.tsx` stops one tick short of the cycle its name promises
+
+`web/tests/demo-headlines-hook.test.tsx:80-102` ("polls again and preserves
+the last snapshot when a refresh fails") advances exactly `60_000` and
+asserts two fetches — but that second call is the poll after the SUCCESSFUL
+first fetch. `web/lib/useHeadlines.ts` re-arms the demo poll at
+`min(POLL_MS * 2**failures, BACKOFF_MAX_MS)`
+(`web/lib/demo/headlinesPolicy.ts`, `POLL_MS = 60_000`), so the poll AFTER
+the failure needs 120s and is never advanced to. The backoff the name
+implies is untested.
+
+**AC:** after the rejection, advance 60_000 and assert no third fetch, then
+advance a further 60_000 and assert exactly three.
+
+### T-484 — P2 — the recorded darwin cloud baseline is an artifact of `/bin/bash` 3.2 being first on PATH, so every prior baseline comparison is unreliable
+
+The audit ledger records a darwin `cloud/tests` baseline of 10 → 12 → 34 →
+35 → 37 → 33 failures, attributed since 2026-08-29 to "bash 3.2 + missing
+`caddy`". This run's gate script exported
+`PATH="…:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:…"`, which resolves
+`bash` to `/opt/homebrew/bin/bash` **5.3.9** rather than `/bin/bash` 3.2, and
+the result is **5 failed / 1785 passed** — every one of them in
+`cloud/tests/test_caddy_edge_timeouts.py`, with `command -v caddy` returning
+ABSENT (both verified this run).
+
+So the ~30 "bash 3.2" reds were never a property of the tree or even of the
+host; they were a property of which `bash` the invoking shell happened to
+put first. A baseline that swings 33 → 5 on an environment variable cannot
+do the job the ledger asks of it — attributing a cloud red to the delta —
+and the 2026-08-22 "the baseline is a LIST, not a count" rail is necessary
+but insufficient, because the LIST moves too.
+
+**AC:** pin the interpreter the cloud suite shells out to. Either the tests
+resolve `bash` explicitly (and skip with a named reason when no bash >= 4 is
+present), or the loop's gate invocation records the resolved
+`bash --version` and `command -v caddy` alongside the FAILED list, so a
+baseline is only ever compared against a run with the same resolved
+toolchain. Red/green: run `cloud/tests` twice with `/bin` and with
+`/opt/homebrew/bin` first on PATH; the recorded baseline artifact must be
+identical, or the difference must be an explicit skip rather than a failure.
+
+---
+
+**Standing sweeps (this pass):**
+
+- **Gates, serial, round 1, launched BEFORE the agent fan-out** (2026-08-29
+  rail), no sibling loop running, load 3–6 throughout:
+  - `python3.13 -m pytest` → **11762 passed, 1 skipped, 0 failed**, 1730s.
+  - `npx vitest run` → 39 files failed at IMPORT with only 14 test failures,
+    one cause: `thinking-orbs` and `border-beam` (both declared at
+    `web/package.json:37,46`) absent from this clone's `node_modules`. This
+    is the 2026-09-05 first-pass lesson recurring after the clone's tree
+    reset. After installing the two packages, the same 39 files re-ran
+    **323 passed / 0 failed / rc=0**. Environment fixed, repo untouched;
+    the npm-generated `web/package-lock.json` was removed and the tree
+    verified clean.
+  - `python3.13 -m pytest cloud/tests` → **5 failed / 1785 passed / 7
+    skipped**, all five in `test_caddy_edge_timeouts.py`, `caddy` ABSENT on
+    this host. See T-484 for why this number is not comparable to the
+    recorded 33.
+- **Post-gate tree sweep (T-275):** clean after pytest, after vitest and
+  after cloud — 0 lines ×3.
+- **Skip / `.only` / `xfail` sweep:** parsed the delta patch for added
+  lines matching `test.skip|it.skip|describe.skip|pytest.mark.skip|pytest.skip|xfail|.only(`
+  — **2 hits, both prose inside `TEST_AUDIT.md`**. Zero new code skips.
+- **Gate-enforcement drift:** the `deploy:` block is **byte-identical**
+  base → HEAD, `deploy.needs` is 14 jobs, and both coverage ratchets
+  (`web-coverage`, `py-coverage`) are present. `vitest.config.ts`,
+  `pytest.ini`/`pyproject`/`.coveragerc` and `playwright.config.ts` are
+  untouched in the delta, so no threshold moved and no exclusion grew. The
+  only `ci.yml` change is T-448's own remediation (the trace-upload step
+  moved ahead of the demo rebuild, plus its guard comment) — a
+  strengthening, not a weakening.
+- **Shard-glob union:** all **449** `scripts/tests/test_*.py` files are
+  matched by exactly one of the 14 CI shard globs (match-count distribution
+  `{1: 449}`), so T-122 holds.
+- **CI reachability:** all 27 new test files land in CI-reachable
+  directories (`web/tests` 16, `scripts/tests` 8, `cloud/tests` 2,
+  `scripts/api/tests` 1).
+- **Branch protection (T-222, sixth consecutive audit):**
+  `gh api repos/joemccann/radon/branches/main/protection` still returns
+  `required_status_checks: null`. Unchanged, still open.
+- **CI at HEAD:** `CI (test gate + deploy)` **success** on `main` at
+  `be64e1fc`.
+- **Delta-touched determinism 3×: NOT RUN.** The delta touches 47 test
+  files across all four collection roots, which per the 2026-08-16 rule
+  collapses into full-gate runs. Saying so rather than pretending it
+  happened.
