@@ -41,6 +41,8 @@ chain-held-leg-prices.spec.ts
 chain-sticky-header.spec.ts
 chain-strikes-selector.spec.ts
 chat-launcher-focus.spec.ts
+clear-auth-pages.spec.ts
+clear-performance.spec.ts
 cor-tab.spec.ts
 crcl-spread-builder.spec.ts
 credit-spread-tab.spec.ts
@@ -197,3 +199,43 @@ ws-connection-stability.spec.ts
 #   surface, not a financial path, and the spec writes dark-theme shots to
 #   /opt/cursor/artifacts (absent on the CI runner). Chromium passed locally
 #   against an authless next start; Vitest pack contracts stay in the CI gate.
+# REVIEWED 2026-09-06 clear-auth-pages.spec.ts — held out because it exercises
+#   real Clerk sign-in/sign-up rendering and cannot run under CI authless mode.
+#   Chromium passed locally against the normal-auth production server (6 passed).
+# REVIEWED 2026-09-06 clear-performance.spec.ts — held out because it is an
+#   opt-in throttled performance lab and intentionally skips without
+#   RADON_PERF_TEST=1. Build, bundle, and page coverage remain in CI.
+# REVIEWED 2026-09-06 aaoi-risk-reversal-max-loss.spec.ts — compiled Chromium
+#   next start verification passed in the 21/21 desktop financial group.
+# REVIEWED 2026-09-06 options-exposure.spec.ts — compiled Chromium next start
+#   verification passed in the 21/21 desktop financial group.
+# REVIEWED 2026-09-06 order-cancel-error-propagation.spec.ts — compiled Chromium
+#   next start verification passed in the 21/21 desktop financial group.
+# REVIEWED 2026-09-06 order-margin-impact-unavailable.spec.ts — compiled
+#   Chromium next start verification passed in the 21/21 desktop group.
+# REVIEWED 2026-09-06 orders-ux-command-strip.spec.ts — compiled Chromium next
+#   start verification passed in the 21/21 desktop financial group.
+# REVIEWED 2026-09-06 regime-history-responsive.spec.ts — compiled Chromium
+#   next start verification passed in the 21/21 desktop financial group.
+# REVIEWED 2026-09-06 regime-history-tooltip.spec.ts — compiled Chromium next
+#   start verification passed in the 21/21 desktop financial group.
+# REVIEWED 2026-09-06 regime-relationship-view.spec.ts — compiled Chromium next
+#   start verification passed in the 21/21 desktop financial group.
+# REVIEWED 2026-09-06 mobile-a11y-pwa.spec.ts — compiled mobile Chromium next
+#   start verification passed in the 65/65 mobile financial group.
+# REVIEWED 2026-09-06 mobile-blotter.spec.ts — compiled mobile Chromium next
+#   start verification passed in the 65/65 mobile financial group.
+# REVIEWED 2026-09-06 mobile-cockpit-book-layout.spec.ts — compiled mobile
+#   Chromium next start verification passed in the 65/65 mobile group.
+# REVIEWED 2026-09-06 mobile-executed-journal.spec.ts — compiled mobile Chromium
+#   next start verification passed in the 65/65 mobile financial group.
+# REVIEWED 2026-09-06 mobile-newsfeed-layout.spec.ts — compiled mobile Chromium
+#   next start verification passed in the 65/65 mobile financial group.
+# REVIEWED 2026-09-06 mobile-order-ticket.spec.ts — compiled mobile Chromium
+#   next start verification passed in the 65/65 mobile financial group.
+# REVIEWED 2026-09-06 mobile-orders.spec.ts — compiled mobile Chromium next
+#   start verification passed in the 65/65 mobile financial group.
+# REVIEWED 2026-09-06 mobile-shell.spec.ts — compiled mobile Chromium next start
+#   verification passed in the 65/65 mobile financial group.
+# REVIEWED 2026-09-06 mobile-short-strangle-skew.spec.ts — compiled mobile
+#   Chromium next start verification passed in the 65/65 mobile group.

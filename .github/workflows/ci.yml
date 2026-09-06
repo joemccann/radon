@@ -750,6 +750,14 @@ jobs:
         run: >-
           npx playwright test
           e2e/account-metric-cards.spec.ts
+          e2e/clear-accessibility.spec.ts
+          e2e/clear-admin-component.spec.ts
+          e2e/clear-all-pages.spec.ts
+          e2e/clear-metric-accessibility.spec.ts
+          e2e/clear-overview.spec.ts
+          e2e/clear-research.spec.ts
+          e2e/clear-shell.spec.ts
+          e2e/clear-workspace-interactions.spec.ts
           e2e/order-combo.spec.ts
           e2e/realized-pnl.spec.ts
           e2e/share-pnl.spec.ts
