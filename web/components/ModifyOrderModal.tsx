@@ -534,7 +534,11 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, op
   const currentQuantity = fillSnapshot
     ? fillSnapshot.total - fillSnapshot.filled
     : remainingQuantity(order);
-  const alreadyFilled = filledQuantity(order);
+  // T-473: the info line must describe the SAME fill count the field's math
+  // uses — the snapshot. A mid-dialog fill advance is flagged, not blended in.
+  const alreadyFilled = fillSnapshot ? fillSnapshot.filled : filledQuantity(order);
+  const liveFilledNow = filledQuantity(order);
+  const fillsAdvanced = fillSnapshot != null && liveFilledNow !== fillSnapshot.filled;
   const parsedNew = parseFloat(newPrice);
   const parsedQuantity = parsePositiveInteger(newQuantity);
   const isComboOrder = order.contract.secType === "BAG" && editableLegs.length >= 2;
@@ -688,6 +692,11 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, op
           {alreadyFilled > 0 && (
             <span className="modify-order-filled">
               {alreadyFilled} of {order.totalQuantity} filled
+            </span>
+          )}
+          {fillsAdvanced && (
+            <span className="modify-order-fill-stale" role="alert">
+              fills advanced: {liveFilledNow} of {order.totalQuantity} now filled
             </span>
           )}
         </div>
