@@ -50,8 +50,24 @@ def _needs(job: dict) -> set[str]:
     return set(needs)
 
 
+# R-671 (REL-250): classify by mechanism, not by the one secret name. A job
+# reaches a host when it consumes any *HOST* secret, uses a remote-exec
+# action, or runs ssh/scp itself; renaming `VPS_HOST` must not silently
+# remove a job from the guarded population.
+_HOST_SECRET_RE = re.compile(r"secrets\.\w*HOST\w*", re.IGNORECASE)
+_REMOTE_EXEC_ACTION_RE = re.compile(r"\b(ssh|scp|sftp|rsync)-action\b", re.IGNORECASE)
+_REMOTE_EXEC_RUN_RE = re.compile(r"(?:^|&&|\||;)\s*(ssh|scp|sftp)\s", re.MULTILINE)
+
+
 def _touches_production_host(job: dict) -> bool:
-    return "secrets.VPS_HOST" in yaml.safe_dump(job, default_flow_style=False)
+    if _HOST_SECRET_RE.search(yaml.safe_dump(job, default_flow_style=False)):
+        return True
+    for step in job.get("steps") or []:
+        if _REMOTE_EXEC_ACTION_RE.search(str(step.get("uses", ""))):
+            return True
+        if _REMOTE_EXEC_RUN_RE.search(str(step.get("run", ""))):
+            return True
+    return False
 
 
 def _production_host_jobs() -> dict[str, dict]:
@@ -233,3 +249,52 @@ def test_e2e_apt_provisioning_is_bounded() -> None:
             assert "Acquire::Retries=" in invocation, invocation
             assert "Acquire::http::Timeout=" in invocation, invocation
         assert step.get("timeout-minutes"), step
+
+
+# R-671 (REL-250): the host-job population must derive from what a job DOES
+# (a renamed secret or a remote-exec action must not silently exit it), never
+# from the one literal string `secrets.VPS_HOST`.
+
+
+def test_a_renamed_host_secret_stays_in_the_population() -> None:
+    job = {
+        "runs-on": "ubuntu-latest",
+        "steps": [
+            {
+                "uses": "appleboy/ssh-action@v1.0.3",
+                "with": {"host": "${{ secrets.PROD_HOST }}", "script": "true"},
+            }
+        ],
+    }
+    assert _touches_production_host(job), (
+        "a job reaching a host via secrets.PROD_HOST left the guarded "
+        "population because the classifier matched only secrets.VPS_HOST"
+    )
+
+
+def test_a_remote_exec_action_is_flagged_without_any_host_secret() -> None:
+    job = {
+        "runs-on": "ubuntu-latest",
+        "steps": [
+            {"uses": "appleboy/scp-action@v0.1.7", "with": {"host": "203.0.113.7"}}
+        ],
+    }
+    assert _touches_production_host(job)
+
+
+def test_an_ssh_run_step_is_flagged() -> None:
+    job = {"steps": [{"run": "scp dist.tar deploy@prod:/srv/\nssh deploy@prod ./install.sh"}]}
+    assert _touches_production_host(job)
+
+
+def test_the_population_still_covers_every_literal_vps_host_job() -> None:
+    jobs = _workflow()["jobs"]
+    literal = {
+        name
+        for name, job in jobs.items()
+        if "secrets.VPS_HOST" in yaml.safe_dump(job, default_flow_style=False)
+    }
+    assert literal, "no job references secrets.VPS_HOST any more; re-derive this pin"
+    assert literal <= set(_production_host_jobs()), (
+        "the mechanism-derived population lost jobs the literal secret name still finds"
+    )
