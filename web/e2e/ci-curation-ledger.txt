@@ -41,8 +41,16 @@ chain-held-leg-prices.spec.ts
 chain-sticky-header.spec.ts
 chain-strikes-selector.spec.ts
 chat-launcher-focus.spec.ts
+clear-accessibility.spec.ts
+clear-admin-component.spec.ts
+clear-all-pages.spec.ts
 clear-auth-pages.spec.ts
+clear-metric-accessibility.spec.ts
+clear-overview.spec.ts
 clear-performance.spec.ts
+clear-research.spec.ts
+clear-shell.spec.ts
+clear-workspace-interactions.spec.ts
 cor-tab.spec.ts
 crcl-spread-builder.spec.ts
 credit-spread-tab.spec.ts
@@ -199,12 +207,36 @@ ws-connection-stability.spec.ts
 #   surface, not a financial path, and the spec writes dark-theme shots to
 #   /opt/cursor/artifacts (absent on the CI runner). Chromium passed locally
 #   against an authless next start; Vitest pack contracts stay in the CI gate.
+# REVIEWED 2026-09-06 clear-accessibility.spec.ts — held out: Clear chrome
+#   inventory, not a P0 financial path. Compiled Chromium passed locally
+#   against next start. Keep out of the 25-min smoke job until preflighted
+#   3x on the shared runner.
+# REVIEWED 2026-09-06 clear-admin-component.spec.ts — held out: isolated
+#   admin-component document, not a P0 financial path. Compiled Chromium
+#   passed locally against next start.
+# REVIEWED 2026-09-06 clear-all-pages.spec.ts — held out: 117-case route
+#   inventory would blow the 25-min smoke budget. Compiled Chromium passed
+#   locally (117 passed) against next start.
 # REVIEWED 2026-09-06 clear-auth-pages.spec.ts — held out because it exercises
 #   real Clerk sign-in/sign-up rendering and cannot run under CI authless mode.
 #   Chromium passed locally against the normal-auth production server (6 passed).
+# REVIEWED 2026-09-06 clear-metric-accessibility.spec.ts — held out: Clear
+#   metric keyboard/pointer inventory. Compiled Chromium passed locally
+#   against next start.
+# REVIEWED 2026-09-06 clear-overview.spec.ts — held out: Clear account
+#   overview chrome. Compiled Chromium passed locally against next start.
 # REVIEWED 2026-09-06 clear-performance.spec.ts — held out because it is an
 #   opt-in throttled performance lab and intentionally skips without
 #   RADON_PERF_TEST=1. Build, bundle, and page coverage remain in CI.
+# REVIEWED 2026-09-06 clear-research.spec.ts — held out: Clear research
+#   surface inventory across 4 widths. Compiled Chromium passed locally
+#   against next start.
+# REVIEWED 2026-09-06 clear-shell.spec.ts — held out: Clear navigation
+#   chrome across 5 widths. Compiled Chromium passed locally against next
+#   start.
+# REVIEWED 2026-09-06 clear-workspace-interactions.spec.ts — held out:
+#   Clear workspace interaction inventory. Compiled Chromium passed locally
+#   against next start.
 # REVIEWED 2026-09-06 aaoi-risk-reversal-max-loss.spec.ts — compiled Chromium
 #   next start verification passed in the 21/21 desktop financial group.
 # REVIEWED 2026-09-06 options-exposure.spec.ts — compiled Chromium next start
