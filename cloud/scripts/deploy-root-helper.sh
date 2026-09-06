@@ -113,6 +113,7 @@ if [[ "${RADON_DEPLOY_HELPER_TEST_MODE:-0}" == "1" ]]; then
   readonly ROOT_LOCK_FILE="${RADON_TEST_ROOT_LOCK_FILE:-${ACTIVE_STATE_FILE}.lock}"
   readonly TIMEOUT="${RADON_TEST_TIMEOUT:-}"
   readonly ROOT_MUTATION_ACTION_TIMEOUT="${RADON_TEST_ROOT_MUTATION_ACTION_TIMEOUT:-${RADON_TEST_ROOT_ACTION_TIMEOUT:-180}}"
+  readonly ROOT_PUBLISH_CADDY_ACTION_TIMEOUT="${RADON_TEST_ROOT_PUBLISH_CADDY_ACTION_TIMEOUT:-${RADON_TEST_ROOT_ACTION_TIMEOUT:-300}}"
   readonly ROOT_VERIFY_ACTION_TIMEOUT="${RADON_TEST_ROOT_VERIFY_ACTION_TIMEOUT:-${RADON_TEST_ROOT_ACTION_TIMEOUT:-30}}"
   readonly ROOT_COMMIT_ACTION_TIMEOUT="${RADON_TEST_ROOT_COMMIT_ACTION_TIMEOUT:-${RADON_TEST_ROOT_ACTION_TIMEOUT:-30}}"
   readonly ROOT_SYNC_ACTION_TIMEOUT="${RADON_TEST_ROOT_SYNC_ACTION_TIMEOUT:-${RADON_TEST_ROOT_ACTION_TIMEOUT:-300}}"
@@ -174,6 +175,7 @@ else
   readonly NODE=/usr/bin/node
   readonly DOCKER=/usr/bin/docker
   readonly ROOT_MUTATION_ACTION_TIMEOUT=180
+  readonly ROOT_PUBLISH_CADDY_ACTION_TIMEOUT=300
   readonly ROOT_VERIFY_ACTION_TIMEOUT=30
   readonly ROOT_COMMIT_ACTION_TIMEOUT=30
   readonly ROOT_SYNC_ACTION_TIMEOUT=300
@@ -642,10 +644,10 @@ reload_caddy() {
   if (( HELPER_TEST_MODE == 1 )); then
     "$SYSTEMCTL" reload caddy
   else
-    # First-hostname Let's Encrypt HTTP-01 runs inside this reload. 45s
-    # TERMed the mcp.radon.run issuance (db69ccb4), rolled the candidate
-    # back, and left TLS as internal-error on the dedicated host.
-    "$TIMEOUT" --signal=TERM --kill-after=2s 180s "$SYSTEMCTL" reload caddy
+    # Detect a wedged Type=notify `reloading` quickly. 180s filled the
+    # publish-caddy supervisor budget so restart_caddy never ran
+    # (11a0575d, 868ee0f2). grace_period is 20s; 30s is enough headroom.
+    "$TIMEOUT" --signal=TERM --kill-after=2s 30s "$SYSTEMCTL" reload caddy
   fi
 }
 
@@ -1877,7 +1879,12 @@ root_action_timeout() {
     stop-clean|restart-managed|recover)
       printf '%s\n' "$ROOT_MUTATION_ACTION_TIMEOUT"
       ;;
-    publish-caddy|sync-scheduled-units)
+    publish-caddy)
+      # Must outlast reload_caddy + restart_caddy. Shared 180s mutation
+      # budget was consumed by a wedged reload, so restart never ran.
+      printf '%s\n' "$ROOT_PUBLISH_CADDY_ACTION_TIMEOUT"
+      ;;
+    sync-scheduled-units)
       # Bounded like a mutation (stage/install/reload) but deliberately
       # outside the release-lifecycle job-cancel class above. A rejected
       # allowlist or hash mismatch must not cancel an in-flight deploy.
