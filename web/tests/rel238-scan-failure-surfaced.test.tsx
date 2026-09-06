@@ -43,6 +43,10 @@ vi.mock("@/lib/db", () => ({ getDb: () => ({ execute: mockExecute }), resetDb: (
 beforeEach(() => {
   vi.resetModules();
   mockReadFile.mockReset();
+  // T-478: re-stamp the stat default per test — the module-load-time value
+  // both freezes (ages as the file runs) and leaks any per-test stub.
+  mockStat.mockReset();
+  mockStat.mockResolvedValue({ mtimeMs: Date.now() });
   mockRadonFetch.mockReset();
   mockExecute.mockReset();
   mockExecute.mockResolvedValue({ rows: [] });
@@ -288,5 +292,22 @@ describe("POST scan routes: 4xx upstream status passthrough (T-470)", () => {
     expect(body.scan_succeeded).toBe(false);
     expect(body.signal).toBeUndefined();
     expect(body.is_stale).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T-478: the module-load-time mockStat default must be restored per test —
+// a test that stubs stat stale must not leak into the next test in file order.
+// ---------------------------------------------------------------------------
+
+describe("mockStat default restored between tests (T-478)", () => {
+  it("a test may stub stat stale for its own scenario", async () => {
+    mockStat.mockResolvedValue({ mtimeMs: 0 });
+    expect((await mockStat()).mtimeMs).toBe(0);
+  });
+
+  it("the next test observes a fresh window-relative mtime, not the leak", async () => {
+    const { mtimeMs } = await mockStat();
+    expect(Date.now() - mtimeMs).toBeLessThan(60_000);
   });
 });

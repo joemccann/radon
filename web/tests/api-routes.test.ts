@@ -95,6 +95,12 @@ const mockMkdir = vi.fn().mockResolvedValue(undefined);
 const mockWriteFile = vi.fn().mockResolvedValue(undefined);
 // Default stat: mtime 5 s ago (fresh) so portfolio GET doesn't trigger background spawn
 const mockStat = vi.fn().mockResolvedValue({ mtimeMs: Date.now() - 5_000 });
+// T-478: the module-load-time default freezes and leaks per-test stubs —
+// re-stamp a fresh window-relative mtime before every test.
+beforeEach(() => {
+  mockStat.mockReset();
+  mockStat.mockResolvedValue({ mtimeMs: Date.now() - 5_000 });
+});
 vi.mock("fs/promises", () => ({
   readFile: mockReadFile,
   readdir: mockReaddir,
