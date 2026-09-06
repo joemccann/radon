@@ -284,7 +284,7 @@ function PositionView({
         </div>
         <div className="pos-stat">
           <span className="pos-stat-label">Avg Entry</span>
-          <span className={`pos-stat-value ${avgEntry != null && toneClass(avgEntry) !== "neutral" ? toneClass(avgEntry) : ""}`}>
+          <span data-testid="pos-stat-avg-entry" className={`pos-stat-value ${avgEntry != null && toneClass(avgEntry) !== "neutral" ? toneClass(avgEntry) : ""}`}>
             {avgEntry == null ? "---" : fmtSignedPrice(avgEntry)}
           </span>
         </div>
@@ -296,7 +296,7 @@ function PositionView({
         </div>
         <div className="pos-stat">
           <span className="pos-stat-label">Entry Cost</span>
-          <span className="pos-stat-value" title={blendedBasis ? MIXED_BASIS_TITLE : undefined}>
+          <span data-testid="pos-stat-entry-cost" className="pos-stat-value" title={blendedBasis ? MIXED_BASIS_TITLE : undefined}>
             {entryCost == null ? "---" : fmtUsd(entryCost)}
           </span>
         </div>
