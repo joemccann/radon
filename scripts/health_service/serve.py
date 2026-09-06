@@ -11,6 +11,10 @@ Routes:
                    200, degraded sources are body fields. Detail is trust-split:
                    proxied (public-edge) callers get the aggregate verdict only
                    unless they carry the shared bearer token.
+  GET /caddy-tls-ask?domain= -> Caddy on-demand TLS permission. 200 only for
+                   mcp.radon.run. Served here so `systemctl reload caddy` does
+                   not wait on an ask listener in the same process being
+                   reloaded (8335 self-ask hung publish-caddy for 180s).
 """
 from __future__ import annotations
 
@@ -23,6 +27,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
 
 try:
     from . import probes, turso_http
@@ -34,6 +39,7 @@ except ImportError:  # pragma: no cover - loose-module fallback
 # --- config (env-overridable; defaults match the Hetzner VPS) ---
 BIND = os.environ.get("RADON_HEALTH_BIND", "127.0.0.1")
 PORT = int(os.environ.get("RADON_HEALTH_PORT", "8330"))
+CADDY_TLS_ASK_DOMAINS = frozenset({"mcp.radon.run"})
 FASTAPI_LITE_URL = os.environ.get("RADON_HEALTH_FASTAPI_URL", "http://127.0.0.1:8321/health/lite")
 RELAY = (os.environ.get("RADON_HEALTH_RELAY_HOST", "127.0.0.1"), int(os.environ.get("RADON_HEALTH_RELAY_PORT", "8765")))
 NEXTJS = (os.environ.get("RADON_HEALTH_NEXTJS_HOST", "127.0.0.1"), int(os.environ.get("RADON_HEALTH_NEXTJS_PORT", "3000")))
@@ -289,10 +295,16 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
-        raw = self.path.split("?", 1)[0]
-        path = raw.rstrip("/") or "/"
+        parsed = urlparse(self.path)
+        path = parsed.path.rstrip("/") or "/"
         if path == "/healthz":
             self._write(*healthz_response())
+        elif path == "/caddy-tls-ask":
+            domain = parse_qs(parsed.query).get("domain", [""])[0]
+            if domain in CADDY_TLS_ASK_DOMAINS:
+                self._write(200, {"allow": True})
+            else:
+                self._write(404, {"allow": False})
         elif path == "/status":
             try:
                 status, body = status_response(
