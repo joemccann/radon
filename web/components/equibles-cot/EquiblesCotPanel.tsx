@@ -178,7 +178,7 @@ export default function EquiblesCotPanel() {
             <InfoTooltip text="Net non-commercial (speculator) futures positioning against its own trailing history, alongside the commercial hedgers on the other side. Positioning extremes are contrarian: a speculative net pinned at the top of its own range means the trade is crowded and the marginal buyer is gone." />
           </div>
           {lastSync && (
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: "9px", color: "var(--text-muted)" }}>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--text-muted)" }}>
               {new Date(lastSync).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
             </span>
           )}
@@ -290,7 +290,7 @@ export default function EquiblesCotPanel() {
           data-testid="cot-methodnote"
           style={{
             fontFamily: "var(--font-mono)",
-            fontSize: "9px",
+            fontSize: "var(--text-meta)",
             color: "var(--text-muted)",
             lineHeight: "1.7",
             marginTop: "8px",

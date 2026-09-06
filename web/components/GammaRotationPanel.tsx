@@ -333,7 +333,7 @@ function GammaRotationBody({ data, lastSync, syncing, refreshFailed }: { data: G
           </span>
           <span>{data.data_date || "no date"}</span>
           {lastSync && (
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-muted)" }}>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--text-muted)" }}>
               {new Date(lastSync).toLocaleTimeString()}
             </span>
           )}
@@ -431,7 +431,7 @@ export default function GammaRotationPanel({ marketState }: GammaRotationPanelPr
           <div className="section-title"><Activity size={14} /> Gamma Rotation Gap</div>
         </div>
         <div className="section-body" style={{ padding: "24px", textAlign: "center" }}>
-          <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-muted)" }}>
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--text-muted)" }}>
             No Gamma Rotation Gap data available. Run a scan to populate SPY/TLT gamma rotation.
           </span>
         </div>

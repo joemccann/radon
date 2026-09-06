@@ -245,7 +245,7 @@ export default function RvRatioChart({ entries, stats, symbol, benchmark }: RvRa
         axis
           .selectAll(".tick text")
           .attr("fill", CHART_AXIS_MUTED)
-          .attr("font-size", "10px")
+          .attr("font-size", "var(--text-meta)")
           .attr("font-family", "IBM Plex Mono, monospace");
       });
 
@@ -256,7 +256,7 @@ export default function RvRatioChart({ entries, stats, symbol, benchmark }: RvRa
       .attr("y", -MARGIN.left + 12)
       .attr("text-anchor", "middle")
       .attr("fill", CHART_AXIS_MUTED)
-      .attr("font-size", "9px")
+      .attr("font-size", "var(--text-meta)")
       .attr("letter-spacing", "0.1em")
       .attr("font-family", "IBM Plex Mono, monospace")
       .text(`VOL RATIO (x ${benchmark})`);
@@ -278,7 +278,7 @@ export default function RvRatioChart({ entries, stats, symbol, benchmark }: RvRa
         axis
           .selectAll(".tick text")
           .attr("fill", CHART_AXIS_MUTED)
-          .attr("font-size", "10px")
+          .attr("font-size", "var(--text-meta)")
           .attr("font-family", "IBM Plex Mono, monospace")
           .attr("text-anchor", rotateXAxisLabels ? "end" : "middle")
           .attr("dx", rotateXAxisLabels ? "-0.4em" : "0")

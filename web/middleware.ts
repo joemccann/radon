@@ -63,12 +63,22 @@ const CAPTCHA_HOSTS = "https://challenges.cloudflare.com";
 // The host list lives in lib/imageHosts.ts so the profile avatar validator
 // cannot drift wider than what this directive permits.
 const IMAGE_HOSTS = IMAGE_HOST_SOURCES;
+const LOCAL_RELAY_ORIGIN = "ws://localhost:8765";
+const LOOPBACK_HOSTNAMES = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+
+function allowsLocalRelay(request: NextRequest): boolean {
+  return request.nextUrl.protocol === "http:"
+    && LOOPBACK_HOSTNAMES.has(request.nextUrl.hostname);
+}
 
 export function generateNonce(): string {
   return btoa(crypto.randomUUID());
 }
 
-export function buildCspWithNonce(nonce: string): string {
+export function buildCspWithNonce(
+  nonce: string,
+  allowLocalRelay = false,
+): string {
   const scriptSrc = [
     "script-src 'self'",
     `'nonce-${nonce}'`,
@@ -84,7 +94,7 @@ export function buildCspWithNonce(nonce: string): string {
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com data:",
     `img-src 'self' ${IMAGE_HOSTS} ${CLERK_HOSTS} data: blob:`,
-    "connect-src 'self' wss: https:",
+    `connect-src 'self' wss: https:${allowLocalRelay ? ` ${LOCAL_RELAY_ORIGIN}` : ""}`,
     // Clerk's clerk-js spawns a same-origin blob: Web Worker (bot/telemetry);
     // worker-src falls back to script-src, which would block it without this.
     "worker-src 'self' blob:",
@@ -106,7 +116,10 @@ export function buildCspWithNonce(nonce: string): string {
 // not call this emits no CSP, so it can never white-screen for a missing nonce.
 export function withNonceCsp(request: NextRequest): NextResponse {
   const nonce = generateNonce();
-  const csp = buildCspWithNonce(nonce);
+  // Localhost uses a direct tunnel to the relay rather than the production
+  // same-origin /ws reverse proxy. Admit that one plaintext origin only for
+  // HTTP loopback pages; deployed app/demo responses keep the strict policy.
+  const csp = buildCspWithNonce(nonce, allowsLocalRelay(request));
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set("x-nonce", nonce);
   // Next.js reads the nonce from the CSP request header to nonce its own

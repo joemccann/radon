@@ -1,5 +1,28 @@
 # Lessons
 
+## 2026-09-05 — API health is not authenticated browser relay health
+
+- A healthy FastAPI/IB pool, listening tunnel, and rejected anonymous handshake
+  do not prove the signed-in browser can obtain and use a WebSocket ticket.
+- Before claiming a connected localhost handoff, verify the actual authenticated
+  ticket-to-upgrade path and receipt of relay status frames. Otherwise state
+  that browser relay connectivity is unverified, even when API health is green.
+- Authless browser fixtures bypass enforced CSP. Exercise the normal compiled
+  response policy too: `connect-src 'self' wss: https:` rejects the cross-port
+  local default `ws://localhost:8765`, even with a healthy SSH relay tunnel.
+
+## 2026-09-05 — UI verification must exercise the compiled trading surface
+
+- A demo build replaces quote/depth state independently of WebSocket fixtures.
+  Use a non-demo production build for signed prices, IV, depth and order payload
+  checks; assert the expected feed/value before claiming those paths passed.
+- Use real pointer actions for mobile review controls. Synthetic clicks and
+  forced clicks can pass through overlapping navigation and hide regressions.
+- Fixed mobile actions inside instrument decks must reserve both application
+  tabs and instrument navigation. Test short/narrow viewports after compilation.
+- Pin historical fixture clocks and active date ranges. Never weaken financial
+  assertions to accommodate an expired option or a correctly filtered old fill.
+
 ## 2026-09-04 — Defined-risk combinations need whole-structure coverage
 
 - Classify multi-leg risk from the complete same-expiry payoff, including

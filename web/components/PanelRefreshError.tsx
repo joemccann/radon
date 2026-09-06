@@ -25,7 +25,7 @@ export default function PanelRefreshError({
         alignItems: "center",
         gap: "4px",
         fontFamily: "var(--font-mono)",
-        fontSize: "9px",
+        fontSize: "var(--text-meta)",
         color: "var(--fault)",
       }}
     >

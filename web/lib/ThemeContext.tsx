@@ -49,7 +49,7 @@ function readClientTheme(): Theme {
 // tags are owned by Next.js's viewport metadata API and mutating them
 // post-mount confuses hydration / re-renders (React #418). PWA chrome
 // follows the media-query themeColor pair declared in app/layout.tsx
-// (light → #ffffff, dark → #0a0f14) which switches on the OS-level
+// (light → #ffffff, dark → #101714) which switches on the OS-level
 // prefers-color-scheme; a user override via the in-app toggle does not
 // move the PWA status-bar color until next launch. Acceptable tradeoff.
 function applyThemeSideEffects(next: Theme) {

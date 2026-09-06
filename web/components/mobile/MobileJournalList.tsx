@@ -123,9 +123,9 @@ export default function MobileJournalList({ trades }: MobileJournalListProps) {
                   <div className="mobile-card__title" style={{ gap: 6 }}>
                     <span style={{ fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 15 }}>{t.ticker}</span>
                     {tone ? (
-                      <span className={`m-pill m-pill--${tone}`} style={{ minHeight: "auto", width: "auto", padding: "2px 8px", fontSize: 11 }}>{label}</span>
+                      <span className={`m-pill m-pill--${tone}`} style={{ minHeight: "auto", width: "auto", padding: "2px 8px", fontSize: "var(--text-meta)" }}>{label}</span>
                     ) : (
-                      <span className="m-pill" style={{ minHeight: "auto", width: "auto", padding: "2px 8px", fontSize: 11, color: "var(--text-muted)", borderColor: "var(--line-grid)" }}>{label}</span>
+                      <span className="m-pill" style={{ minHeight: "auto", width: "auto", padding: "2px 8px", fontSize: "var(--text-meta)", color: "var(--text-muted)", borderColor: "var(--line-grid)" }}>{label}</span>
                     )}
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
@@ -155,9 +155,9 @@ export default function MobileJournalList({ trades }: MobileJournalListProps) {
 
                 {/* Footer: date range + optional edge type */}
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 2 }}>
-                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-muted)" }}>{dateRange}</span>
+                  <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--text-muted)" }}>{dateRange}</span>
                   {t.edge_analysis?.edge_type ? (
-                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-muted)" }}>{t.edge_analysis.edge_type}</span>
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--text-muted)" }}>{t.edge_analysis.edge_type}</span>
                   ) : null}
                 </div>
               </Card>

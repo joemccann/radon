@@ -116,6 +116,13 @@ describe("GexLaplaceContour", () => {
     expect(container.querySelector('[data-testid="gex-level-marker-put-wall"]')).toBeTruthy();
   });
 
+  it("keeps financial marker labels at Clear's 12px minimum", () => {
+    const { container } = renderContour();
+    const labels = container.querySelectorAll('[data-testid^="gex-level-marker-"] text');
+    expect(labels.length).toBeGreaterThan(0);
+    labels.forEach((label) => expect(Number(label.getAttribute("font-size"))).toBeGreaterThanOrEqual(12));
+  });
+
   it("renders projection-geometry guides as decorative diagonals", () => {
     const { container } = renderContour();
     const guides = container.querySelectorAll('[data-testid="gex-projection-guide"]');

@@ -204,11 +204,11 @@ function PositionCard({ pos, prices, showExpiry, riskFreeRate, onLegClick }: { p
                 <TickerLink ticker={pos.ticker} positionId={pos.id} />
               </span>
               <span className={`pill ${riskPillClass(pos)}`}>{pos.direction}</span>
-              <span className="mobile-card__subtitle" data-testid={`mobile-position-${pos.ticker}-qty`} style={{ fontSize: 11 }}>
+              <span className="mobile-card__subtitle" data-testid={`mobile-position-${pos.ticker}-qty`} style={{ fontSize: "var(--text-meta)" }}>
                 {pos.contracts}x
               </span>
             </div>
-            <span className="mobile-card__subtitle" style={{ fontSize: 11 }}>
+            <span className="mobile-card__subtitle" style={{ fontSize: "var(--text-meta)" }}>
               {pos.structure}
               {/* nowrap keeps the date from breaking mid-token at the hyphens */}
               {expiryShown ? <> · <span style={{ whiteSpace: "nowrap" }}>{pos.expiry}</span></> : null}

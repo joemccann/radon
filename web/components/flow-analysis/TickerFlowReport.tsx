@@ -173,7 +173,7 @@ function MobileTickerFlowReport({
             <span
               style={{
                 fontFamily: "var(--font-mono)",
-                fontSize: 10,
+                fontSize: "var(--text-meta)",
                 fontWeight: 600,
                 padding: "2px 8px",
                 borderRadius: 4,
@@ -188,7 +188,7 @@ function MobileTickerFlowReport({
             </span>
           )}
           {isAnalyzing && (
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--warn-text)" }}>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--warn-text)" }}>
               {status === "loading" ? "LOADING" : "ANALYZING"}
             </span>
           )}
@@ -204,7 +204,7 @@ function MobileTickerFlowReport({
             alignItems: "center",
             gap: 4,
             fontFamily: "var(--font-mono)",
-            fontSize: 11,
+            fontSize: "var(--text-meta)",
             fontWeight: 600,
             color: isAnalyzing ? "var(--text-muted)" : "var(--signal-core)",
             background: "none",
@@ -287,7 +287,7 @@ function MobileTickerFlowReport({
                 style={{
                   marginTop: 12,
                   fontFamily: "var(--font-mono)",
-                  fontSize: 11,
+                  fontSize: "var(--text-meta)",
                   color: "var(--text-muted)",
                   lineHeight: 1.5,
                 }}
@@ -384,7 +384,7 @@ function MobileTickerFlowReport({
       {data?.fetched_at && (
         <div
           className="report-meta"
-          style={{ padding: "0 16px 12px", margin: 0, fontSize: 10 }}
+          style={{ padding: "0 16px 12px", margin: 0, fontSize: "var(--text-meta)" }}
         >
           {new Date(data.fetched_at).toLocaleString()}
           {isAnalyzing ? " · Refreshing..." : ""}

@@ -4,7 +4,7 @@ import {
   isIbDailyPnlFromCurrentSession,
   sessionPositions,
 } from "@/lib/ibDailyPnlSession";
-import { useState, useCallback, useMemo, type ReactNode } from "react";
+import { useState, useCallback, useId, useMemo, type KeyboardEvent, type ReactNode } from "react";
 import type { PortfolioData, AccountSummary, ExecutedOrder } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
 import { computeExposureDetailed, type ExposureDataWithBreakdown } from "@/lib/exposureBreakdown";
@@ -67,13 +67,30 @@ type CardDef = {
   subtitle?: ReactNode;
 };
 
+function activateMetricControl(event: KeyboardEvent<HTMLDivElement>) {
+  if (event.target !== event.currentTarget) return;
+  if (event.key !== "Enter" && event.key !== " ") return;
+  event.preventDefault();
+  if (!event.repeat) event.currentTarget.click();
+}
+
 function MetricCard({ card, onClick }: { card: CardDef; onClick?: () => void }) {
+  const descriptionId = useId();
   return (
-    <div className={`metric-card${onClick ? " metric-card-clickable" : ""}`} onClick={onClick}>
+    <div
+      className={`metric-card${onClick ? " metric-card-clickable" : ""}`}
+      onClick={onClick}
+      onKeyDown={onClick ? activateMetricControl : undefined}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      aria-label={onClick ? `View ${card.label} breakdown` : undefined}
+      aria-haspopup={onClick ? "dialog" : undefined}
+      aria-describedby={onClick ? `${descriptionId}-value ${descriptionId}-change${card.subtitle ? ` ${descriptionId}-subtitle` : ""}` : undefined}
+    >
       <div className="metric-label">{card.label}</div>
-      <div className={`metric-value ${card.tone !== "neutral" ? card.tone : ""}`}>{card.value}</div>
-      {card.subtitle ? <div className="metric-subtitle">{card.subtitle}</div> : null}
-      <div className={`metric-change ${card.tone}`}>{card.change}</div>
+      <div id={`${descriptionId}-value`} className={`metric-value ${card.tone !== "neutral" ? card.tone : ""}`}>{card.value}</div>
+      {card.subtitle ? <div id={`${descriptionId}-subtitle`} className="metric-subtitle">{card.subtitle}</div> : null}
+      <div id={`${descriptionId}-change`} className={`metric-change ${card.tone}`}>{card.change}</div>
     </div>
   );
 }
@@ -82,7 +99,15 @@ function MetricCard({ card, onClick }: { card: CardDef; onClick?: () => void }) 
 
 function SectionHeader({ label, collapsed, onToggle }: { label: string; collapsed: boolean; onToggle: () => void }) {
   return (
-    <div className="section-label-mono section-label-toggle" onClick={onToggle}>
+    <div
+      className="section-label-mono section-label-toggle"
+      role="button"
+      tabIndex={0}
+      aria-label={`${label} metrics`}
+      aria-expanded={!collapsed}
+      onClick={onToggle}
+      onKeyDown={activateMetricControl}
+    >
       <svg
         className={`section-chevron${collapsed ? "" : " section-chevron-open"}`}
         width="10"
@@ -486,6 +511,7 @@ function TodayPnlRow({
   onRealizedClick: () => void;
   onTotalClick: () => void;
 }) {
+  const realizedDescriptionId = useId();
   return (
     <>
       <SectionHeader label="TODAY'S P&L" collapsed={collapsed} onToggle={onToggle} />
@@ -517,12 +543,21 @@ function TodayPnlRow({
             <div className="metric-value">---</div>
             <div className="metric-change neutral">MARKET CLOSED</div>
           </div>
-          <div className="metric-card metric-card-clickable" onClick={onRealizedClick}>
+          <div
+            className="metric-card metric-card-clickable"
+            role="button"
+            tabIndex={0}
+            aria-label="View Realized breakdown"
+            aria-haspopup="dialog"
+            aria-describedby={`${realizedDescriptionId}-value ${realizedDescriptionId}-change`}
+            onClick={onRealizedClick}
+            onKeyDown={activateMetricControl}
+          >
             <div className="metric-label">Realized</div>
-            <div className={`metric-value ${tone(realizedPnl ?? 0) !== "neutral" ? tone(realizedPnl ?? 0) : ""}`}>
+            <div id={`${realizedDescriptionId}-value`} className={`metric-value ${tone(realizedPnl ?? 0) !== "neutral" ? tone(realizedPnl ?? 0) : ""}`}>
               {fmtSigned(realizedPnl ?? 0)}
             </div>
-            <div className="metric-change neutral">TODAY&apos;S FILLS</div>
+            <div id={`${realizedDescriptionId}-change`} className="metric-change neutral">TODAY&apos;S FILLS</div>
           </div>
           <div className="metric-card">
             <div className="metric-label">Total</div>

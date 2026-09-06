@@ -293,7 +293,7 @@ export default function VcgPanel({ marketState }: VcgPanelProps) {
                 BOUNCE
               </span>
             )}
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: "9px", color: "var(--text-muted)" }}>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--text-muted)" }}>
               {data.credit_proxy}
             </span>
             <ShareReportModal
@@ -304,7 +304,7 @@ export default function VcgPanel({ marketState }: VcgPanelProps) {
               shareContentTitle="VCG Share Preview"
             />
             {lastSync && (
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: "9px", color: "var(--text-muted)" }}>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--text-muted)" }}>
                 {new Date(lastSync).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
               </span>
             )}
@@ -365,13 +365,13 @@ export default function VcgPanel({ marketState }: VcgPanelProps) {
           <div className="metric-card" style={{ padding: "12px 16px" }}>
             {/* Severity tier row */}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingBottom: "8px", borderBottom: "1px solid var(--line-grid)" }}>
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: "10px", textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-muted)" }}>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-muted)" }}>
                 Severity Tier
               </span>
               <span
                 style={{
                   fontFamily: "var(--font-mono)",
-                  fontSize: "11px",
+                  fontSize: "var(--text-meta)",
                   fontWeight: 700,
                   color: tierColor(sig.tier),
                   background: sig.tier != null ? `${tierColor(sig.tier)}18` : "transparent",
@@ -386,17 +386,17 @@ export default function VcgPanel({ marketState }: VcgPanelProps) {
             {/* VVIX severity row */}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid var(--line-grid)" }}>
               <div>
-                <div style={{ fontFamily: "var(--font-mono)", fontSize: "10px", textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-muted)" }}>
+                <div style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-muted)" }}>
                   VVIX Severity
                 </div>
-                <div style={{ fontFamily: "var(--font-mono)", fontSize: "9px", color: "var(--text-muted)", marginTop: "2px" }}>
+                <div style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--text-muted)", marginTop: "2px" }}>
                   {vvixSeverityDesc(sig.vvix_severity)}
                 </div>
               </div>
               <span
                 style={{
                   fontFamily: "var(--font-mono)",
-                  fontSize: "11px",
+                  fontSize: "var(--text-meta)",
                   fontWeight: 700,
                   color: vvixSeverityColor(sig.vvix_severity),
                   textTransform: "uppercase",
@@ -409,14 +409,14 @@ export default function VcgPanel({ marketState }: VcgPanelProps) {
             </div>
             {/* EDR / Bounce rows */}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0" }}>
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: "var(--text-muted)" }}>EDR</span>
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: "11px", fontWeight: 700, color: sig.edr === 1 ? "var(--warning)" : "var(--text-muted)" }}>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--text-muted)" }}>EDR</span>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", fontWeight: 700, color: sig.edr === 1 ? "var(--warning)" : "var(--text-muted)" }}>
                 {sig.edr === 1 ? "ACTIVE" : "INACTIVE"}
               </span>
             </div>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingTop: "0" }}>
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: "var(--text-muted)" }}>Bounce</span>
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: "11px", fontWeight: 700, color: sig.bounce === 1 ? "var(--signal-core)" : "var(--text-muted)" }}>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--text-muted)" }}>Bounce</span>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", fontWeight: 700, color: sig.bounce === 1 ? "var(--signal-core)" : "var(--text-muted)" }}>
                 {sig.bounce === 1 ? "DETECTED" : "—"}
               </span>
             </div>
@@ -424,14 +424,14 @@ export default function VcgPanel({ marketState }: VcgPanelProps) {
 
           {/* Right: Attribution bars */}
           <div className="metric-card" style={{ padding: "12px 16px" }}>
-            <div style={{ fontFamily: "var(--font-mono)", fontSize: "10px", textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--text-muted)", marginBottom: "8px" }}>
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--text-muted)", marginBottom: "8px" }}>
               Attribution
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
               <div style={{ flex: 1, height: "6px", borderRadius: "3px", background: "var(--bg-panel-raised)", overflow: "hidden" }}>
                 <div style={{ width: `${Math.max(attr.vvix_pct, 0)}%`, height: "100%", background: "var(--extreme)", borderRadius: "3px" }} />
               </div>
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--text-primary)", minWidth: "60px" }}>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--text-primary)", minWidth: "60px" }}>
                 VVIX {attr.vvix_pct.toFixed(0)}%
               </span>
             </div>
@@ -439,18 +439,18 @@ export default function VcgPanel({ marketState }: VcgPanelProps) {
               <div style={{ flex: 1, height: "6px", borderRadius: "3px", background: "var(--bg-panel-raised)", overflow: "hidden" }}>
                 <div style={{ width: `${Math.max(attr.vix_pct, 0)}%`, height: "100%", background: "var(--signal-core)", borderRadius: "3px" }} />
               </div>
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--text-primary)", minWidth: "60px" }}>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--text-primary)", minWidth: "60px" }}>
                 VIX {attr.vix_pct.toFixed(0)}%
               </span>
             </div>
-            <div style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: "var(--text-muted)", borderTop: "1px solid var(--line-grid)", paddingTop: "8px" }}>
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--text-muted)", borderTop: "1px solid var(--line-grid)", paddingTop: "8px" }}>
               β₁(VVIX) = {fmtNum(sig.beta1_vvix, 6)} | β₂(VIX) = {fmtNum(sig.beta2_vix, 6)}
               {sig.sign_suppressed && (
                 <span style={{ color: "var(--warn-text)", marginLeft: "8px" }}>SIGN REVERSED</span>
               )}
             </div>
             {/* VVIX level */}
-            <div style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: "var(--text-muted)", marginTop: "6px" }}>
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--text-muted)", marginTop: "6px" }}>
               VVIX {fmtNum(sig.vvix)} · VIX {fmtNum(sig.vix)}
             </div>
           </div>

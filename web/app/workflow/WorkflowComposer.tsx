@@ -307,7 +307,7 @@ const paletteStyle: React.CSSProperties = {
 };
 
 const paletteHeadStyle: React.CSSProperties = {
-  fontSize: 11,
+  fontSize: "var(--text-meta)",
   textTransform: "uppercase",
   letterSpacing: "0.06em",
   color: "var(--text-muted)",
@@ -320,7 +320,7 @@ const paletteBtnStyle: React.CSSProperties = {
   width: "100%",
 };
 
-const emptyStyle: React.CSSProperties = { fontSize: 11, color: "var(--text-muted)" };
+const emptyStyle: React.CSSProperties = { fontSize: "var(--text-meta)", color: "var(--text-muted)" };
 
 const canvasStyle: React.CSSProperties = { flex: 1, minWidth: 0 };
 

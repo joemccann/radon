@@ -29,10 +29,10 @@ vi.mock("next/link", () => ({
 }));
 
 const CHAIN_SOURCE = readFileSync(
-  resolve(process.cwd(), "web/components/ticker-detail/OptionsChainTab.tsx"),
+  resolve(__dirname, "../components/ticker-detail/OptionsChainTab.tsx"),
   "utf8",
 );
-const CSS = readFileSync(resolve(process.cwd(), "web/app/globals.css"), "utf8");
+const CSS = readFileSync(resolve(__dirname, "../app/globals.css"), "utf8");
 
 function stripComments(text: string): string {
   return text

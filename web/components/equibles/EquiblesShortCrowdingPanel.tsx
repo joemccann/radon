@@ -78,7 +78,7 @@ function IntensityChip({
       data-testid={testId}
       style={{
         fontFamily: "var(--font-mono)",
-        fontSize: "9px",
+        fontSize: "var(--text-meta)",
         color: intensityColor(intensity),
         border: `1px solid ${intensityColor(intensity)}`,
         borderRadius: "4px",
@@ -205,7 +205,7 @@ export default function EquiblesShortCrowdingPanel() {
           </div>
           <span
             data-testid="short-crowding-vintage"
-            style={{ fontFamily: "var(--font-mono)", fontSize: "9px", color: "var(--text-muted)" }}
+            style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--text-muted)" }}
           >
             {vintage}
           </span>
@@ -258,7 +258,7 @@ export default function EquiblesShortCrowdingPanel() {
           data-testid="short-crowding-footnote"
           style={{
             fontFamily: "var(--font-mono)",
-            fontSize: "9px",
+            fontSize: "var(--text-meta)",
             color: "var(--text-muted)",
             marginTop: "8px",
           }}

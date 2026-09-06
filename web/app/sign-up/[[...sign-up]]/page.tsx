@@ -2,6 +2,7 @@ import { SignUp } from "@clerk/nextjs";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { shouldMarkDemoSignup } from "@/lib/demo/demoSignup";
+import AuthFrame from "@/components/AuthFrame";
 
 export default async function SignUpPage() {
   const { userId } = await auth();
@@ -11,8 +12,8 @@ export default async function SignUpPage() {
   }
 
   return (
-    <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "100vh" }}>
+    <AuthFrame>
       <SignUp unsafeMetadata={shouldMarkDemoSignup() ? { demo: true } : undefined} />
-    </div>
+    </AuthFrame>
   );
 }

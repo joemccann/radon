@@ -178,7 +178,7 @@ export default function StreaksPanel() {
               value={
                 <>
                   {formatCloseValue(current.close)}{" "}
-                  <span style={{ fontSize: "10px", color: changeColor }}>
+                  <span style={{ fontSize: "var(--text-meta)", color: changeColor }}>
                     {formatDayChangePct(current.day_change_pct)}
                   </span>
                 </>
@@ -231,7 +231,7 @@ export default function StreaksPanel() {
             <span
               style={{
                 fontFamily: "var(--font-mono)",
-                fontSize: "9px",
+                fontSize: "var(--text-meta)",
                 color: "var(--text-muted)",
               }}
             >
@@ -275,7 +275,7 @@ export default function StreaksPanel() {
               role="alert"
               style={{
                 fontFamily: "var(--font-mono)",
-                fontSize: "10px",
+                fontSize: "var(--text-meta)",
                 color: "var(--negative)",
               }}
             >

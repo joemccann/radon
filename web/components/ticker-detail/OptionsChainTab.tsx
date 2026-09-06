@@ -1078,7 +1078,9 @@ export default function OptionsChainTab({
   const [prefillUnavailable, setPrefillUnavailable] = useState<string | null>(null);
 
   const focusedExpiry = useMemo(
-    () => (focusPosition ? normalizeOptionExpiry(focusPosition.expiry) : null),
+    // Stock snapshots have no expiry. Only an actual option date may focus
+    // the chain; a held equity keeps the usual available-expiry selection.
+    () => (typeof focusPosition?.expiry === "string" ? normalizeOptionExpiry(focusPosition.expiry) : null),
     [focusPosition],
   );
 
@@ -1127,7 +1129,9 @@ export default function OptionsChainTab({
   useEffect(() => {
     if (initialFocusAppliedRef.current) return;
     if (expirations.length === 0) return;
-    if (focusPositionRequested && !focusedExpiry) return;
+    // A requested position may still be loading. Once a stock snapshot is
+    // present, its absent option expiry must not block the available chain.
+    if (focusPositionRequested && !focusPosition) return;
 
     // Priority: explicit URL deep-link > focused position > first >=7 DTE > first.
     // URL expiry arrives dashed (2026-07-17); compare in compact internal form.
@@ -1143,7 +1147,7 @@ export default function OptionsChainTab({
       setSelectedExpiry(nextExpiry);
     }
     initialFocusAppliedRef.current = true;
-  }, [expirations, focusedExpiry, chainUrl.urlExpiry]);
+  }, [expirations, focusPosition, focusPositionRequested, focusedExpiry, chainUrl.urlExpiry]);
 
   useEffect(() => {
     const signature = chainUrl.legsParamRaw ?? "";

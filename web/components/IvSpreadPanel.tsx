@@ -195,7 +195,7 @@ export default function IvSpreadPanel() {
               title="IB did not answer; showing the last good reading."
               style={{
                 fontFamily: "var(--font-mono)",
-                fontSize: "9px",
+                fontSize: "var(--text-meta)",
                 letterSpacing: "0.08em",
                 color: "var(--warning)",
                 border: "1px solid var(--warning)",
@@ -209,7 +209,7 @@ export default function IvSpreadPanel() {
             </span>
           )}
           {clock && (
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: "9px", color: "var(--text-muted)" }}>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--text-muted)" }}>
               {clock}
             </span>
           )}
@@ -321,7 +321,7 @@ export default function IvSpreadPanel() {
           data-testid="iv-spread-stats"
           style={{
             fontFamily: "var(--font-mono)",
-            fontSize: "9px",
+            fontSize: "var(--text-meta)",
             color: "var(--text-muted)",
             marginTop: "8px",
             whiteSpace: "pre-wrap",
@@ -333,7 +333,7 @@ export default function IvSpreadPanel() {
         <div
           style={{
             fontFamily: "var(--font-mono)",
-            fontSize: "9px",
+            fontSize: "var(--text-meta)",
             color: "var(--text-muted)",
             marginTop: "8px",
           }}

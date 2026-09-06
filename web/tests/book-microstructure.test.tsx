@@ -115,4 +115,10 @@ describe("MicrostructureStrip", () => {
     const { container } = render(<MicrostructureStrip depth={depth} />);
     expect(container.innerHTML).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
   });
+
+  it("keeps financial microprice context on the readable metadata token", () => {
+    const depth = book([level(99.0, 100)], [level(101.0, 100)]);
+    const { container } = render(<MicrostructureStrip depth={depth} />);
+    expect(container.querySelector<HTMLElement>(".microstructure-strip")?.style.fontSize).toBe("var(--text-meta)");
+  });
 });

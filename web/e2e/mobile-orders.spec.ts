@@ -88,7 +88,7 @@ test.describe("Mobile orders list", () => {
     await expect(card).toContainText("DAY");
 
     // Tap to open action sheet
-    await card.click({ force: true });
+    await card.click();
     await expect(page.getByTestId("mobile-order-action-sheet")).toBeVisible();
     await expect(page.getByTestId("mobile-order-action-modify")).toBeVisible();
     await expect(page.getByTestId("mobile-order-action-cancel")).toBeVisible();
@@ -102,10 +102,11 @@ test.describe("Mobile orders list", () => {
     await expect(tables).toHaveCount(0);
   });
 
-  test("action sheet items meet 56px touch target", async ({ page }) => {
+  test("action sheet items meet 44px touch target", async ({ page }) => {
     await setupMocks(page);
     await page.goto("/orders");
-    await page.getByTestId("mobile-order-single-9001").click({ force: true });
+    await page.getByTestId("mobile-order-single-9001").click();
+    await expect(page.getByTestId("mobile-order-action-sheet")).toBeVisible();
 
     const modify = page.getByTestId("mobile-order-action-modify");
     const cancel = page.getByTestId("mobile-order-action-cancel");
@@ -120,7 +121,7 @@ test.describe("Mobile orders list", () => {
   test("Escape dismisses the action sheet", async ({ page }) => {
     await setupMocks(page);
     await page.goto("/orders");
-    await page.getByTestId("mobile-order-single-9001").click({ force: true });
+    await page.getByTestId("mobile-order-single-9001").click();
     await expect(page.getByTestId("mobile-order-action-sheet")).toBeVisible();
 
     await page.keyboard.press("Escape");

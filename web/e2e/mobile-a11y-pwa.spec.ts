@@ -12,13 +12,13 @@
  * Plus PWA assertions:
  * - manifest.webmanifest is reachable + valid + advertises 192/512 icons,
  *   standalone display, theme_color, start_url.
- * - sw.js + sw-decisions.js are reachable; the SW is network-first with
- *   offline fallback (cache served only on network failure), and /ws,
- *   /_next/data, non-GET + non-allowlisted /api stay untouched.
+ * - sw.js + sw-decisions.js are reachable; only public static assets are
+ *   cached, while authenticated navigation, APIs, RSC data and sockets bypass.
  * - layout includes apple-mobile-web-app-capable meta + manifest <link>.
  */
 
 import { test, expect, type Page } from "@playwright/test";
+import vm from "node:vm";
 
 import { watchPortfolioRequests } from "./portfolio-request-guard";
 
@@ -78,8 +78,8 @@ test.describe("PWA shell assertions", () => {
     expect(manifest.short_name).toBe("Radon");
     expect(manifest.display).toBe("standalone");
     expect(manifest.start_url).toBeTruthy();
-    expect(manifest.theme_color).toBe("#0a0f14");
-    expect(manifest.background_color).toBe("#0a0f14");
+    expect(manifest.theme_color).toBe("#101714");
+    expect(manifest.background_color).toBe("#101714");
 
     const sizes = manifest.icons.map((i: { sizes: string }) => i.sizes);
     expect(sizes).toContain("192x192");
@@ -89,7 +89,7 @@ test.describe("PWA shell assertions", () => {
     expect(purposes).toContain("maskable");
   });
 
-  test("sw.js is network-first with offline fallback; cache served only on network failure", async ({ request }) => {
+  test("served service-worker policy caches only public assets and bypasses authenticated data", async ({ request }) => {
     const swRes = await request.get("/sw.js");
     expect(swRes.status()).toBe(200);
     const swBody = await swRes.text();
@@ -98,19 +98,28 @@ test.describe("PWA shell assertions", () => {
     expect(decisionsRes.status()).toBe(200);
     const decisionsBody = await decisionsRes.text();
 
-    // Request-class literals (the cache contract's classification lives in
-    // sw-decisions.js now; sw.js stays a thin importScripts adapter). Online
-    // behavior is byte-identical: cache is read ONLY when fetch() rejects.
-    const combined = swBody + decisionsBody;
-    expect(combined).toContain("/api/");
-    expect(combined).toContain("/_next/data/");
-    expect(combined).toContain("/ws");
-    expect(combined).toContain('"GET"');
-
-    // Offline marking contract: served-from-cache responses carry these headers.
-    expect(decisionsBody).toContain("X-Radon-Offline");
-    expect(decisionsBody).toContain("X-Radon-Cached-At");
-    expect(swBody).toContain("importScripts");
+    type Policy = {
+      classifyRequest: (input: { method: string; url: string; origin: string; mode: string }) => string;
+      KNOWN_CACHES: string[];
+      STATIC_CACHE: string;
+    };
+    const sandbox = { module: { exports: {} }, URL };
+    vm.runInNewContext(decisionsBody, sandbox);
+    const policy = sandbox.module.exports as Policy;
+    const origin = new URL(decisionsRes.url()).origin;
+    const classify = (path: string, mode = "cors", method = "GET") =>
+      policy.classifyRequest({ method, url: `${origin}${path}`, origin, mode });
+    for (const path of ["/api/portfolio", "/api/orders", "/_next/data/build/portfolio.json", "/ws", "/health"]) {
+      expect(classify(path), path).toBe("bypass");
+    }
+    expect(classify("/portfolio", "navigate")).toBe("bypass");
+    expect(classify("/api/orders/place", "cors", "POST")).toBe("ignore");
+    expect(classify("/_next/static/chunk.js")).toBe("static");
+    expect(classify("/icons/icon-192.png")).toBe("static");
+    expect(policy.KNOWN_CACHES).toEqual([policy.STATIC_CACHE]);
+    expect(policy.KNOWN_CACHES.join(" ")).not.toMatch(/radon-(pages|api)-/);
+    expect(swBody).toContain('importScripts("/sw-decisions.js")');
+    expect(swBody).toContain('if (kind === "static") event.respondWith(handleStatic(event))');
   });
 
   test("layout exposes apple-mobile-web-app meta + manifest link", async ({ page }) => {
@@ -176,10 +185,10 @@ test.describe("Touch target floor on visible interactive elements", () => {
     // Sample the canonical mobile chrome buttons that every user touches first.
     const checks = [
       "mobile-app-bar-search",
-      "mobile-tab-dashboard",
+      "mobile-tab-portfolio",
       "mobile-tab-positions",
-      "mobile-tab-orders",
-      "mobile-tab-scanner",
+      "mobile-tab-risk",
+      "mobile-tab-research",
       "mobile-tab-more",
     ];
 
