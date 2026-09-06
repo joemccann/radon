@@ -325,8 +325,10 @@ compose_body_is_valid() {
     echo "compose validation failed: ${dest} mounts the docker socket" >&2
     return 1
   fi
-  if printf '%s\n' "$body" | grep -Eq '^[[:space:]]*pid:'; then
-    echo "compose validation failed: ${dest} joins a pid namespace" >&2
+  # R-668 (REL-249): every host-namespace join is denied, not only pid — ipc,
+  # userns_mode, uts and cgroup widen the container's runtime the same way.
+  if printf '%s\n' "$body" | grep -Eq '^[[:space:]]*(pid|ipc|userns_mode|uts|cgroup):'; then
+    echo "compose validation failed: ${dest} joins a host namespace (pid/ipc/userns_mode/uts/cgroup)" >&2
     return 1
   fi
   if printf '%s\n' "$body" | grep -Eq "^[[:space:]]*network_mode:[[:space:]]*[\"']?host"; then
