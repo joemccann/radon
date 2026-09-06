@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import pytest
 
-from _loop_harness import LADDER, LOOPS, _run
+from _loop_harness import LADDER, LOOPS, QUOTA_LINE, _run
 
 SESSION_LIMIT_LINE = "You've hit your session limit · resets 5am (America/Los_Angeles)"
 WEEKLY_LIMIT_LINE = "You've hit your weekly limit · resets Monday"
@@ -76,9 +76,6 @@ TRACEBACK_QUOTING_CAP = (
     "AssertionError: expected 'usage limit reached' and 'session limit reached' in calls"
 )
 
-_ladder_QUOTA_LINE = _ladder_mod.QUOTA_LINE
-
-
 @pytest.mark.parametrize("loop", sorted(LOOPS))
 class TestQuotedCapProseIsNotACap:
     def test_a_crash_quoting_the_cap_still_walks_the_ladder(self, tmp_path, loop):
@@ -87,7 +84,7 @@ class TestQuotedCapProseIsNotACap:
         # walk to the next rung instead of stopping on a phantom shared cap.
         proc, models, calls = _run(
             tmp_path, loop, "audit", LADDER[:1],
-            exhausted_line=TRACEBACK_QUOTING_CAP + "\n" + _ladder_QUOTA_LINE,
+            exhausted_line=TRACEBACK_QUOTING_CAP + "\n" + QUOTA_LINE,
         )
         assert models == LADDER[:2], (models, proc.stdout, proc.stderr)
         assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
