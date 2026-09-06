@@ -642,7 +642,10 @@ reload_caddy() {
   if (( HELPER_TEST_MODE == 1 )); then
     "$SYSTEMCTL" reload caddy
   else
-    "$TIMEOUT" --signal=TERM --kill-after=2s 45s "$SYSTEMCTL" reload caddy
+    # First-hostname Let's Encrypt HTTP-01 runs inside this reload. 45s
+    # TERMed the mcp.radon.run issuance (db69ccb4), rolled the candidate
+    # back, and left TLS as internal-error on the dedicated host.
+    "$TIMEOUT" --signal=TERM --kill-after=2s 180s "$SYSTEMCTL" reload caddy
   fi
 }
 
