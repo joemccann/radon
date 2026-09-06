@@ -94,6 +94,215 @@ expansion.
 
 ---
 
+# Task: Port the recent CRI chart treatment into Clear Regime (2026-09-06)
+
+Port the verified CRI chart presentation from `34aabce7` into the current Clear-overhaul worktree: full-width analytical stacks and nearest-point quadrant telemetry, reconciled with current tokens, responsive layout and existing risk/data behavior.
+
+## Dependency graph
+
+- T1 depends_on: [] - Diff `34aabce7` against the current CRI implementation and inventory conflicts, data contracts and existing tests.
+- T2 depends_on: [] - Capture current `/regime/cri` desktop/mobile browser baseline and interaction failures.
+- T3 depends_on: [T1, T2] - Add or port red regressions for layout, hover telemetry and responsive behavior.
+- T4 depends_on: [T3] - Implement the minimal CRI component/CSS/copy changes using current Clear tokens.
+- T5 depends_on: [T4] - Run focused unit and Playwright checks; visually review desktop/mobile, dark theme and reduced motion.
+- T6 depends_on: [T5] - Run full tests, typecheck, lint and production build; update review evidence and leave localhost running.
+
+## Checklist
+
+- [x] T1 Source/history reconciliation.
+- [x] T2 Desktop/mobile baseline.
+- [x] T3 Red regression coverage.
+- [x] T4 CRI implementation.
+- [x] T5 Focused browser and visual verification.
+- [x] T6 Complete release verification and localhost handoff.
+
+## Review
+
+Complete. Scope remained CRI presentation/interaction only; no formula, source, order, auth or broker changes.
+
+- Verified `34aabce7` is the intended upstream CRI treatment and was absent from the pre-integration Clear worktree. Ported its full-width history/quadrant/divergence stack, named history copy and nearest-point quadrant telemetry without changing `lib/regimeRelationships.ts`, the premium ranges or brush semantics.
+- Red/green coverage: the initial port contract failed 8/28 focused assertions; the final five-file Vitest set passes 36/36. Responsive relationship tests also pin measured viewBoxes, delayed data, cleanup, preserved 21-session selection, coordinate scaling and zero-sized geometry.
+- Mobile browser TDD measured the direct port's axis text at 4.1047px. A shell-measured SVG coordinate width raises rendered axes to 12px and quadrant labels/titles to 10px at both 390px and 1440px without changing chart statistics.
+- Final compiled Playwright passes 11/11 at desktop and mobile with exact March 4 hover telemetry (`Systemic Panic`, RVOL `13.20`, COR1M `21.20`), contained tooltips, zero page errors, zero document overflow and zero missing Next chunks. Screenshots and measurements: `/tmp/radon-cri-compiled-final-20260906`.
+- Full Vitest passes 8,396 tests across 837 files. Typecheck passes. Lint passes with zero errors and 15 existing hook warnings. Production build passes with all 196 output-trace manifests audited; `git diff --check` passes.
+- The rebuilt normal-auth production app is running at `http://localhost:3000`. Local-only SSH forwards are restored on 28321/8765; API health is `status=ok`, all three IB pool connections report connected, and relay HTTP returns its expected 426 upgrade response. `local.sh` was not run; no live order or broker control action occurred.
+
+---
+
+# Task: Repair normal-auth localhost relay CSP (2026-09-05)
+
+The reproduced blocker is the enforced CSP, not the relay service. Admit only the exact local relay origin on loopback-rendered pages, preserve production CSP and ticket validation, rebuild, and verify an actual status frame on localhost.
+
+## Dependency graph
+
+- T1 depends_on: [] - Independently review the narrowest policy repair and its security boundary.
+- T2 depends_on: [T1] - Add red middleware regressions for loopback allowance and production denial.
+- T3 depends_on: [T2] - Implement the request-scoped CSP change without broad `ws:` access.
+- T4 depends_on: [T3] - Run focused security/realtime tests, full suite, typecheck, lint and production build.
+- T5 depends_on: [T4] - Restart only the owned Next preview, verify CSP plus ticket-to-upgrade-to-status, and update handoff evidence.
+
+## Checklist
+
+- [x] T1 Independent policy review.
+- [x] T2 Red CSP regression.
+- [x] T3 Narrow implementation.
+- [x] T4 Complete verification.
+- [x] T5 Working localhost handoff.
+
+## Review
+
+Repair complete, confidence high. No broker restart, authentication bypass, live order, commit or deployment.
+
+- `middleware.ts` now adds only `ws://localhost:8765`, only to CSP generated for HTTP loopback hostnames. App/demo deployed responses retain `connect-src 'self' wss: https:`; ticket validation is unchanged. Two independent reviewers agreed this is narrower than adding bare `ws:` or a new local proxy.
+- Red/green CSP regression: loopback assertions failed against the original policy, then 23 focused CSP/realtime/ticket tests passed. Tests pin localhost, IPv4 and IPv6 loopback; app/demo responses exclude the local relay and every response excludes bare `ws:`.
+- Complete Vitest: 8,381 passed across 836 files, zero failures, 200.14s (`/tmp/radon-relay-csp-unit.log`). Typecheck passed. Lint: zero errors, 15 existing warnings. Production build passed all 196 trace manifests (`/tmp/radon-relay-csp-build.log`). `git diff --check` passed.
+- Final production preview restarted at `http://localhost:3000` with normal Clerk authentication and no demo/authless flags. Actual local response is HTTP 200 with `connect-src 'self' wss: https: ws://localhost:8765`; current app.radon.run remains `connect-src 'self' wss: https:`.
+- A real Chromium page carrying the fixed CSP opened the local tunnel with a single-use relay ticket, received `{type: status, ib_connected: true, ib_issue: null}`, and recorded zero CSP violations. Normal anonymous Clerk forms/admin perimeter also passed 6/6 on the rebuilt preview (`/tmp/radon-relay-csp-auth.log`).
+- API health remains HTTP 200, status ok, IB authenticated, all three pool connections active. The owned Next preview and SSH forwards remain running. An already-open browser document must reload once to receive the new response policy.
+
+---
+
+# Task: Diagnose localhost relay offline after Clear handoff (2026-09-05)
+
+The user's authenticated browser reports `RELAY OFFLINE` despite the earlier API-health check. Diagnose the browser ticket/upgrade path and existing tunnel without changing authentication, live orders or broker infrastructure.
+
+## Dependency graph
+
+- T1 depends_on: [] - Check local frontend, API, relay listener and tunnel availability.
+- T2 depends_on: [] - Independently trace ticket creation, validation and WebSocket status handling.
+- T3 depends_on: [T1, T2] - Correlate runtime evidence, record the exact failure and correct the handoff claim.
+
+## Checklist
+
+- [x] T1 Runtime availability checks.
+- [x] T2 Authentication/relay source trace.
+- [x] T3 Evidence-backed diagnosis and handoff correction.
+
+## Review
+
+Diagnosis complete, confidence high. The normal compiled response's CSP rejects the local browser relay URL; the relay process itself is running. No implementation change or restart was made during this diagnostic request.
+
+- Local SSH listeners on 28321/8765 and Next on 3000 remain running. Cloud `radon-api` and `radon-relay` both report active. API health HTTP 200, status ok, IB authenticated, all three IB pool connections true. Relay HTTP 426 is its expected upgrade-required response.
+- Actual served CSP is `connect-src 'self' wss: https:` (`web/middleware.ts:87`); the compiled client's local fallback is `ws://localhost:8765` (`web/lib/realtimeSocketAuth.ts:26`). It is cross-origin from localhost:3000 and not admitted by that policy.
+- Isolated Playwright Chromium on the actual normal `/sign-in` response reproduces `securitypolicyviolation`, `effectiveDirective=connect-src`, `blockedURI=ws://localhost:8765/`, with WebSocket status error. No ticket, credential, or signed-in session was copied; the policy reproduction needs none.
+- Independent source review confirmed WebSocket.onerror becomes `Connection lost`, then disconnected status becomes `relay_offline`. Remote API logs show successful POST /ws-ticket responses near the screenshot time; API availability does not establish browser upgrade success.
+- The earlier browser route/quote fixtures used the authless branch, which returns before CSP. Corrected `web/DESIGN_VERIFICATION.md` and the handoff lesson: the prior full tests remain recorded, but the normal signed-in realtime path was not verified working. No live orders, auth-policy edits, broker restarts or deployment.
+
+---
+
+# Task: Implement Clear across the complete workstation (2026-09-05)
+
+User authorizes production UI implementation, multiple agents, complete desktop/mobile page coverage, and a running localhost handoff. Preserve all trading, authentication, data and realtime contracts. No commit, deployment, live orders, or broker infrastructure switch is in scope.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify references, scoped instructions, route inventory, baseline and local startup.
+- T2 depends_on: [T1] - Apply Clear semantic tokens and shared component treatments; root owns globals/theme.
+- T3 depends_on: [T1] - Implement responsive primary/secondary navigation; shell agent owns navigation components.
+- T4 depends_on: [T1] - Implement truthful Clear overview using existing portfolio/performance sources; overview agent owns dashboard components.
+- T5 depends_on: [T1] - Build exhaustive desktop/mobile route coverage and safe test fixtures; verification agent owns new coverage.
+- T6 depends_on: [T2, T3, T4] - Complete page-specific adaptations and repair interaction/responsive defects.
+- T7 depends_on: [T5, T6] - Run all-route browser coverage, visual review, focused and full tests, typecheck, lint, compile and performance checks.
+- T8 depends_on: [T7] - Record results, wait for all agents, and leave the implemented application available on localhost.
+
+## Checklist
+
+- [x] T1 Baseline, references, inventory and startup.
+- [x] T2 Clear tokens and shared surfaces.
+- [x] T3 Complete responsive navigation.
+- [x] T4 Truthful portfolio overview.
+- [x] T5 All-route desktop/mobile coverage.
+- [x] T6 Page-specific adaptations and repairs.
+- [x] T7 Full verification and visual review.
+- [x] T8 Localhost handoff and final evidence.
+
+## Review
+
+Implementation and verification complete. Detailed results and coverage boundaries: `web/DESIGN_VERIFICATION.md`; measured performance: `web/DESIGN_PERFORMANCE.md`; selected visual reference: `web/.claude-design/a.html`.
+
+- Inventory covers 61 App Router page files. Clear colors/typography/shared treatment, desktop/mobile navigation, public auth frame and truthful account overview implemented without replacing existing trading/state owners.
+- Initial shell verification: 55 focused assertions, five browser viewport journeys including a red/green 1024px menu-clipping regression. Overview: 24 focused assertions, 100% lines / 96.6% branches, six browser checks including negative P&L/critical margin/unavailable history.
+- Initial full web run: 8,335 passed, two failed plus one collection failure. Existing REL-148 cwd and IV-spread wall-clock fixture failures reproduced and corrected (22/22 focused green); GEX sort test passed alone (30/30). Final frozen-source full suite: 8,379 passed across 836 files, zero failures (`npm test -- --maxWorkers=2`, 187.18s).
+- Production compile exposed transitive live-data packaging in assistant/orders. Added scoped host-data exclusions and a red/green contract: complete build now passes all 196 trace manifests, maximum 51.39 MiB versus the previous order-route 18,158.71 MiB. No backup/data files deleted or runtime reads changed.
+- Temporary demo/dev and token-bound compiled verification servers are stopped. The final non-demo production build runs at `http://localhost:3000` with normal Clerk authentication, no authless bypass, and loopback SSH forwards to the existing cloud API/realtime relay. Sign-in is HTTP 200; API health is ok with IB authenticated and all three connections active. No broker gateway/schedulers switched and no live order transmitted.
+- Complete route inventory pins all 61 source pages. All 58 unguarded pages have populated desktop/mobile fixtures; real anonymous Clerk forms and the admin perimeter are verified separately, with actual admin components rendered in an isolated browser harness.
+- Repaired held-stock option-chain initialization, clipped mobile exposure values, and unreachable mobile Trade navigation. Research checks: 42 focused and 28 browser cases plus existing sticky-table regression. Account-card keyboard accessibility: 70 related tests and two browser viewport flows.
+- Trading regression verification: 17 mobile chain/ticket flows pass with real pointer events; review/cancel tests pass with exact signed max-loss and explicit combo correlation fixtures. Service workers are blocked in intercepted transport tests; route-level authorization and broker error propagation remain covered independently.
+- Production optimization removes unused font preloads, demand-loads the closed assistant, shares the mobile performance poller, and isolates the Performance route chunk. Throttled compiled measurements: first Performance navigation 759–781ms (about 66% faster), initial JS about 11.4% smaller, fonts 12.5% smaller. Actual cold account chart remains about 5.2s under 150ms latency / 1.6Mbps / 4x CPU; native loading-paragraph LCP is not a loaded-account or field percentile claim.
+- Final compiled comprehensive browser sweep: 125/125 passed, covering all 61 source pages with 116 loaded-page readability reports and 118 screenshots; operator content uses actual isolated component coverage, with the real anonymous guard checked separately. Final typography follow-up: 6/6. Normal localhost desktop/mobile Clerk forms and admin perimeter: 6/6, with no test bypass.
+- Final full mobile browser project: 96 passed, one existing desktop-only case skipped. Selected desktop regressions: 13 passed, one existing midprice test marked fixme. Dark/reduced-motion/reflow checks are included. Real pointer regressions cover ticket/navigation separation, 360px/393px ledger filters, short-screen Book sizing, and unavailable combo quotes without stock-price contamination.
+- Final typecheck and production build passed; output trace gate passed all 196 manifests. ESLint: zero errors, 15 existing warnings. `git diff --check` passed. A preceding concurrent full unit run hit one default-1s expiry-prefill timeout; its unchanged focused rerun passed 3/3 and the quiescent final full run passed 8,379/8,379.
+- All three agents completed. Normal frontend and SSH forwards remain running for handoff; browser-origin WebSocket requests without a ticket are still rejected with 401. No commit, PR, deployment, live order, or broker-mode change. Unrelated user changes preserved.
+
+---
+
+# Task: Record Clear as the selected direction (2026-09-05)
+
+The user selected A / Clear. Record the accepted desktop/mobile design and prepare a concrete production implementation plan from current source. This selection changes the design decision, not production application behavior.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify the selected reference, repository state and relevant implementation surfaces.
+- T2 depends_on: [T1] - Record the selection and accepted visual/interaction rules in design memory.
+- T3 depends_on: [T1, T2] - Write the implementation dependency graph, capability mapping and acceptance gates.
+- T4 depends_on: [T2, T3] - Verify document references, update selection state, and record the handoff.
+
+## Checklist
+
+- [x] T1 Verify reference and implementation surfaces.
+- [x] T2 Record accepted direction.
+- [x] T3 Prepare production implementation plan.
+- [x] T4 Verify and document handoff.
+
+## Review
+
+- A / Clear selected by the user. Recorded exact reference palette, typography, desktop/mobile hierarchy, controls, and preserved safety/data contracts in `web/DESIGN_MEMORY.md`.
+- Created `web/DESIGN_PLAN.md` with a ten-task dependency graph, verified source integration paths, complete capability grouping, data gates, user-flow acceptance criteria and production performance verification.
+- Independent source reviewer verified shell/theme, the 17-entry navigation catalogue, IB Flex NAV/TWR history, existing order-risk consumers, and the prototype/production mobile breakpoint mismatch. Reviewer completed; no production files changed.
+- Updated local design brief and README to mark A selected. Existing mockups remain available as references during the implementation handoff; no selected assets deleted, no deployment performed.
+- Verification: 41 document/source references exist; selection JSON reads `selectedVariant=A`; `git diff --check` passed. This turn changed documentation and local selection metadata only; no application tests were rerun or claimed.
+
+---
+
+# Task: Five clean-slate Radon design directions (2026-09-05)
+
+Deliver five distinct, interactive local mockups, each in desktop and mobile, for user selection. Existing brand/layout rules are waived by the user for this exercise. Shared synthetic fixtures; no live orders or production deployment. Local artifacts remain available during design selection.
+
+## Dependency graph
+
+- T1 depends_on: [] - Inspect current product flows, research online galleries, and define a shared comparison brief.
+- T2 depends_on: [T1] - Build directions A/B: approachable portfolio and focused dark trading desk.
+- T3 depends_on: [T1] - Build directions C/D: risk-first map and research-first workspace.
+- T4 depends_on: [T1] - Build direction E: compact professional ledger with mobile decision queue.
+- T5 depends_on: [T1] - Build comparison gallery, shared fixtures, interaction/feedback support, and isolated local preview.
+- T6 depends_on: [T2, T3, T4, T5] - Run parallel flow, mobile, typography/color, and performance reviews; repair defects; capture ten mockups.
+- T7 depends_on: [T6] - Record verification and source references; present all five desktop/mobile directions for selection.
+
+## Checklist
+
+- [x] T1 Product audit and research brief.
+- [x] T2 Directions A/B.
+- [x] T3 Directions C/D.
+- [x] T4 Direction E.
+- [x] T5 Comparison lab and feedback.
+- [x] T6 Verification and screenshots.
+- [x] T7 Review and user handoff.
+
+## Review
+
+- Built five distinct standalone concepts in `web/.claude-design/`: Clear, Aperture, Atlas, Thesis, Ledger. Each has responsive desktop/mobile compositions, synthetic shared account data, and working research/risk/positions/paper-review flows.
+- `index.html` compares both device versions, supports element feedback and local preference persistence. `comparison.html` embeds all ten images and fonts for offline viewing; `screenshots/five-directions.png` is the contact sheet. Local server: `http://127.0.0.1:4173`.
+- Three parallel agents implemented concepts and performed independent flow, mobile, typography, contrast, and performance reviews. Seven gallery references and official product references are recorded with visual-vs-text inspection provenance in `research.html` and source notes.
+- Root Playwright verification: 68 passed, 0 failed across all five concepts, 1440/390/360px layouts, research-to-paper-review, quantity/acknowledgement, stress, positions, search recovery, chart/filter coherence, gallery notes, and thumbnail geometry.
+- Independent interaction review: initial 14 passed / 4 failed reproduced a saved-dialog keyboard-focus escape; explicit Tab boundary wrapping fixed it, then 18 passed / 0 failed including range fill/axis restoration and focus return.
+- Independent mobile/type review: 12 viewport cases (360/390/768/1440px) had no overflow/errors; 36 dialog cases passed text contrast, keyboard trapping, Escape, and focus restoration. All five concepts' mobile targets measured at least 44px; meaningful secondary financial labels are at least 12px and reading text is 14px.
+- Full web suite: 8,321 tests passed, 1 failed, plus 1 collection failure (826 files passed / 2 failed). Failures in untouched `iv-spread-api` stale-source expectation and `rel148` cwd path. Root-cwd isolated rerun: rel148's 6 tests passed; combined 21 passed / 1 failed. Details in `performance-review.md`.
+- No production application source, dependencies, branch, or external application state changed. User's unrelated dirty files preserved. Local artifacts excluded with `/web/.claude-design/` in `.git/info/exclude`; only this task log is tracked. No commit, PR, or deployment.
+- Final performance: 20/20 isolated cold loads passed, all 12 source asset hashes unchanged, zero overflow/browser errors/external/API/WS requests. With 150ms latency, 1.6Mbps download and 4x CPU slowdown, FCP measured 648–768ms; complete cold-flow transfer was 244,044–250,804 bytes. These are diagnostic prototype samples, not app.radon.run measurements or production percentile claims.
+- All three subagents completed. Final frozen-asset root flow pass again passed 68/68; ten desktop/mobile screenshots and offline comparison board exported. User direction selection is the next stage; no production implementation begins during this comparison handoff.
+
+---
+
 # Task: Make every demo workstation surface deterministic (2026-09-04) [DONE]
 
 Restore representative demo data across performance, orders, instruments,

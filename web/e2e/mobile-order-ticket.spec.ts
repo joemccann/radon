@@ -46,11 +46,29 @@ async function stubChainApis(page: Page) {
   await page.route("**/api/prices**", (route) => route.abort());
 }
 
-// Programmatic click bypasses Playwright's geometry checks. Required because
-// BottomSheet footers can render below the 393×852 viewport when content is
-// long; force:true still rejects "outside viewport" but evaluate() always works.
+// Use actual pointer input so unreachable sheet controls fail verification.
 async function tapJs(locator: Locator) {
-  await locator.evaluate((el) => (el as HTMLElement).click());
+  await locator.click();
+}
+
+async function installComboQuotes(page: Page) {
+  // A combo intentionally cannot infer debit/credit without leg quotes.
+  // Exercise the real socket message boundary with deterministic NBBO marks.
+  await page.routeWebSocket(/(?:localhost|127\.0\.0\.1):8765|\/ws(?:\?|$)/, (socket) => {
+    socket.onMessage((raw) => {
+      if (JSON.parse(raw.toString()).action !== "subscribe") return;
+      const quote = (symbol: string, last: number) => ({
+        symbol, last, bid: last - 0.05, ask: last + 0.05,
+        timestamp: new Date().toISOString(), close: last,
+      });
+      socket.send(JSON.stringify({ type: "status", ib_connected: true, subscriptions: ["AAPL"] }));
+      socket.send(JSON.stringify({ type: "batch", updates: {
+        AAPL: quote("AAPL", 205),
+        AAPL_20260320_200_C: quote("AAPL_20260320_200_C", 3.5),
+        AAPL_20260320_210_C: quote("AAPL_20260320_210_C", 2),
+      } }));
+    });
+  });
 }
 
 test.describe("Mobile order ticket — single-leg flow", () => {
@@ -70,6 +88,12 @@ test.describe("Mobile order ticket — single-leg flow", () => {
     const strip = page.getByTestId("mobile-chain-pending-strip");
     await expect(strip).toBeVisible();
     await expect(strip).toContainText("1 LEG");
+
+    const stripBox = await strip.boundingBox();
+    const navigationBox = await page.locator(".cockpit--mobile .glyph-rail").boundingBox();
+    expect(stripBox).not.toBeNull();
+    expect(navigationBox).not.toBeNull();
+    expect(stripBox!.y + stripBox!.height).toBeLessThanOrEqual(navigationBox!.y + 1);
 
     await tapJs(strip);
     await expect(page.getByTestId("mobile-order-ticket")).toBeVisible();
@@ -149,9 +173,28 @@ test.describe("Mobile order ticket — single-leg flow", () => {
   });
 });
 
+for (const viewport of [{ width: 360, height: 640 }, { width: 393, height: 660 }]) {
+  test(`pending review clears instrument navigation at ${viewport.width}×${viewport.height}`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await stubChainApis(page);
+    await page.goto("/AAPL?tab=chain");
+    await page.getByTestId("mobile-chain-call-200").click();
+    await page.getByTestId("mobile-chain-detail-buy").click();
+    const strip = page.getByTestId("mobile-chain-pending-strip");
+    await expect(strip).toBeVisible();
+    const stripBox = await strip.boundingBox();
+    const railBox = await page.locator(".cockpit--mobile .glyph-rail").boundingBox();
+    expect(stripBox!.y + stripBox!.height).toBeLessThanOrEqual(railBox!.y + 1);
+    await strip.click();
+    await expect(page.getByTestId("mobile-order-ticket")).toBeVisible();
+    await expect(page.getByTestId("mobile-order-ticket-legs")).toContainText("$200");
+  });
+}
+
 test.describe("Mobile order ticket — combo flow", () => {
   test("BUY 200C + SELL 210C builds a combo payload with per-leg actions preserved", async ({ page }) => {
     await stubChainApis(page);
+    await installComboQuotes(page);
 
     let placeCallBody: unknown = null;
     await page.route("**/api/orders/place", async (route, request: Request) => {

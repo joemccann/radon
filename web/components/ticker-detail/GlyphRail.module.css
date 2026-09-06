@@ -1,0 +1,56 @@
+.rail :global(.glyph-k), .rail :global(.glyph-l) { font-size: 12px; letter-spacing: 0; }
+
+.mobile {
+  position: relative;
+  z-index: 45;
+  min-width: 0;
+}
+
+.mobile :global(.glyph) {
+  min-width: 44px;
+  min-height: 44px;
+  border-radius: var(--radius-sm);
+}
+
+.mobile :global(.glyph-k) { display: none; }
+.mobile :global(.glyph-l) {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 550;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.mobile .secondaryActive {
+  color: var(--signal-core-text);
+  background: var(--bg-hover);
+}
+
+.more {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 8px;
+  left: 8px;
+  display: grid;
+  padding: 6px;
+  max-height: 60dvh;
+  overflow-y: auto;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius-lg);
+}
+.more button {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  min-height: 44px;
+  padding: 12px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font: 500 14px/1.4 var(--font-sans);
+  text-align: left;
+  cursor: pointer;
+}
+.more button:hover, .more button[aria-pressed="true"] { background: var(--bg-hover); color: var(--signal-core-text); }
+.mobile button:focus-visible { outline: 2px solid var(--signal-core-text); outline-offset: -2px; }

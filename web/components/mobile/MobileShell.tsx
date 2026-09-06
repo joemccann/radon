@@ -1,13 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import MobileAppBar from "./MobileAppBar";
 import MobileTabBar from "./MobileTabBar";
 import MobileMoreDrawer from "./MobileMoreDrawer";
 import MobileTickerSearch from "./MobileTickerSearch";
+import styles from "../ClearShell.module.css";
 
 type MobileShellProps = {
   title: string;
+  isPageHeading?: boolean;
   ibConnected?: boolean;
   lastSync?: string | null;
 };
@@ -19,9 +21,10 @@ type MobileShellProps = {
  *
  * Render alongside the existing desktop layout in `WorkspaceShell` — does not wrap children.
  */
-export default function MobileShell({ title, ibConnected, lastSync }: MobileShellProps) {
+export default function MobileShell({ title, isPageHeading, ibConnected, lastSync }: MobileShellProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const closeDrawer = useCallback(() => setDrawerOpen(false), []);
 
   useEffect(() => {
     if (typeof document === "undefined") return;
@@ -32,16 +35,18 @@ export default function MobileShell({ title, ibConnected, lastSync }: MobileShel
   }, []);
 
   return (
-    <>
+    <div className={styles.mobileChrome}>
       <MobileAppBar
         title={title}
+        isPageHeading={isPageHeading}
         ibConnected={ibConnected}
         onOpenSearch={() => setSearchOpen(true)}
+        onOpenMore={() => setDrawerOpen(true)}
       />
       <MobileTabBar onOpenMore={() => setDrawerOpen(true)} />
       <MobileMoreDrawer
         open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
+        onClose={closeDrawer}
         ibConnected={ibConnected}
         lastSync={lastSync}
       />
@@ -49,6 +54,6 @@ export default function MobileShell({ title, ibConnected, lastSync }: MobileShel
         open={searchOpen}
         onClose={() => setSearchOpen(false)}
       />
-    </>
+    </div>
   );
 }

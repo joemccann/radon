@@ -121,7 +121,7 @@ export default function MarginDebtPanel() {
             <InfoTooltip text="FINRA member-firm margin debit balances vs the S&P 500, monthly since 1959. Year-over-year acceleration above +50% has preceded every major top (2000, 2007, 2021): extreme growth in borrowed exposure is froth, not health. YoY contraction marks forced deleveraging." />
           </div>
           {lastSync && (
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: "9px", color: "var(--text-muted)" }}>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--text-muted)" }}>
               {new Date(lastSync).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
             </span>
           )}
@@ -238,7 +238,7 @@ export default function MarginDebtPanel() {
         <div
           style={{
             fontFamily: "var(--font-mono)",
-            fontSize: "9px",
+            fontSize: "var(--text-meta)",
             color: "var(--text-muted)",
             marginTop: "8px",
           }}

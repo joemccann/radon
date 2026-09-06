@@ -104,27 +104,37 @@ test.describe("mobile newsfeed item layout (393x852)", () => {
     expect(visibleChips).toBe(5);
   });
 
-  test("footer's three children share a baseline within 1px", async ({ page }) => {
+  test("footer timestamp and bookmark share a baseline within 1px", async ({ page }, testInfo) => {
+    // Source pill was deliberately removed in 2c559f6c (2026-08-28).
+    // Its absence is part of the current article design, not a missing control.
+    await expect(page.getByTestId("news-feed-item").first().getByTestId("news-feed-link-pill")).toHaveCount(0);
     const centres = await page.getByTestId("news-feed-item").first().evaluate((item) => {
       const footer = item.querySelector("[data-testid='news-feed-footer']")!;
-      const pill = footer.querySelector("[data-testid='news-feed-link-pill']")!;
       const stamp = footer.querySelector("[data-testid='news-feed-timestamp']")!;
       const star = footer.querySelector("[data-testid='star-toggle']")!;
+      const footerStyle = getComputedStyle(footer);
       const centre = (el: Element) => {
         const r = el.getBoundingClientRect();
         return r.top + r.height / 2;
       };
       return {
-        pill: centre(pill),
         stamp: centre(stamp),
         star: centre(star),
         footerHeight: footer.getBoundingClientRect().height,
+        paddingTop: Number.parseFloat(footerStyle.paddingTop),
+        paddingBottom: Number.parseFloat(footerStyle.paddingBottom),
       };
     });
-    expect(Math.abs(centres.pill - centres.stamp)).toBeLessThanOrEqual(1);
     expect(Math.abs(centres.stamp - centres.star)).toBeLessThanOrEqual(1);
-    // One 24px row, not the old 44px row.
-    expect(centres.footerHeight).toBeLessThanOrEqual(28);
+    // Live Article (72aa96a3, 2026-08-22) added block padding around the
+    // unchanged compact row. Measure the row separately from that spacing.
+    expect(centres.paddingTop).toBe(14);
+    expect(centres.paddingBottom).toBe(6);
+    const rowHeight = centres.footerHeight - centres.paddingTop - centres.paddingBottom;
+    expect(rowHeight).toBeGreaterThanOrEqual(24);
+    expect(rowHeight).toBeLessThanOrEqual(28);
+    await testInfo.attach("footer-geometry", { body: JSON.stringify({ ...centres, rowHeight }), contentType: "application/json" });
+    await page.getByTestId("news-feed-item").first().screenshot({ path: testInfo.outputPath("mobile-newsfeed-footer.png") });
   });
 
   test("timestamp prints one line with no orphaned fragment", async ({ page }) => {
@@ -198,7 +208,7 @@ test.describe("mobile newsfeed item layout (393x852)", () => {
   });
 
   test("every shrunk control keeps its effective tap target", async ({ page }) => {
-    const areas: Record<"refresh" | "linkPill" | "star" | "tagChip", HitArea> =
+    const areas: Record<"refresh" | "star" | "tagChip", HitArea> =
       await page.evaluate(() => {
         function hit(el: Element) {
           const box = el.getBoundingClientRect();
@@ -221,14 +231,13 @@ test.describe("mobile newsfeed item layout (393x852)", () => {
         const pick = (sel: string, root: ParentNode = document) => root.querySelector(sel)!;
         return {
           refresh: hit(pick(".dashboard-news .news-feed-refresh")),
-          linkPill: hit(pick("[data-testid='news-feed-link-pill']", item)),
           star: hit(pick("[data-testid='star-toggle']", item)),
           tagChip: hit(pick("button.news-feed-tag-chip", item)),
         };
       });
 
     // 44px floor on the primary controls, box deliberately smaller.
-    for (const key of ["refresh", "linkPill", "star"] as const) {
+    for (const key of ["refresh", "star"] as const) {
       expect(areas[key].height, `${key} hit height`).toBeGreaterThanOrEqual(44);
       expect(areas[key].width, `${key} hit width`).toBeGreaterThanOrEqual(44);
     }

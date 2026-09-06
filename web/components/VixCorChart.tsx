@@ -274,7 +274,7 @@ export default function VixCorChart({ history, episodes, title, xTickFormat }: V
                     textAnchor="end"
                     dominantBaseline="middle"
                     fontFamily={MONO}
-                    fontSize={10}
+                    fontSize="var(--text-meta)"
                     fill={CHART_AXIS_MUTED}
                   >
                     {formatVix(tick)}
@@ -288,7 +288,7 @@ export default function VixCorChart({ history, episodes, title, xTickFormat }: V
                 x={0}
                 y={-4}
                 fontFamily={MONO}
-                fontSize={9}
+                fontSize="var(--text-meta)"
                 letterSpacing="0.08em"
                 fill={CHART_AXIS_MUTED}
               >
@@ -306,7 +306,7 @@ export default function VixCorChart({ history, episodes, title, xTickFormat }: V
                   textAnchor="end"
                   dominantBaseline="middle"
                   fontFamily={MONO}
-                  fontSize={10}
+                  fontSize="var(--text-meta)"
                   fill={CHART_AXIS_MUTED}
                 >
                   {tick.toFixed(2)}
@@ -338,7 +338,7 @@ export default function VixCorChart({ history, episodes, title, xTickFormat }: V
                 x={0}
                 y={-6}
                 fontFamily={MONO}
-                fontSize={9}
+                fontSize="var(--text-meta)"
                 letterSpacing="0.08em"
                 fill={CHART_AXIS_MUTED}
               >
@@ -362,7 +362,7 @@ export default function VixCorChart({ history, episodes, title, xTickFormat }: V
                   textAnchor="middle"
                   dominantBaseline="hanging"
                   fontFamily={MONO}
-                  fontSize={9}
+                  fontSize="var(--text-meta)"
                   fill={CHART_AXIS_MUTED}
                 >
                   {xTickFormat(new Date(times[index]))}

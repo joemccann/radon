@@ -357,7 +357,7 @@ export default function BreadthPanel({ marketState }: BreadthPanelProps) {
             <InfoTooltip text="Market breadth from NYSE internals: net advance/decline (AD-NYSE), TICK-NYSE, and the cumulative A/D line vs SPY. NET BREADTH 20D sums the last 20 daily net A/D readings (advancers minus decliners), which equals the 20-session change in the cumulative A/D line. DIVERGENCE flags BEARISH when SPY is up over 1% in 20 sessions while that sum is negative (fewer stocks rising than falling under a rising tape), and BULLISH on the mirror image." />
           </div>
           {lastSync && (
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: "9px", color: "var(--text-muted)" }}>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--text-muted)" }}>
               {new Date(lastSync).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
             </span>
           )}
@@ -449,7 +449,7 @@ export default function BreadthPanel({ marketState }: BreadthPanelProps) {
                   marginLeft: "auto",
                   marginBottom: "8px",
                   fontFamily: "var(--font-mono)",
-                  fontSize: "10px",
+                  fontSize: "var(--text-meta)",
                   letterSpacing: "0.08em",
                   whiteSpace: "nowrap",
                   color: "var(--text-muted)",

@@ -4,15 +4,16 @@
 
 import { createElement } from "react";
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import Sidebar from "../components/Sidebar";
+import { navItems } from "../lib/data";
 
 afterEach(() => {
   cleanup();
 });
 
-describe("Sidebar navigation", () => {
-  it("hides nav items marked hidden while keeping the rest of the sidebar visible", () => {
+describe("Clear workspace navigation", () => {
+  it("keeps four primary tasks visible and every existing workspace accessible in More", () => {
     render(
       createElement(Sidebar, {
         activeSection: "portfolio",
@@ -22,10 +23,15 @@ describe("Sidebar navigation", () => {
       }),
     );
 
-    expect(screen.getByRole("link", { name: /dashboard/i })).toBeTruthy();
-    expect(screen.getByRole("link", { name: /portfolio/i })).toBeTruthy();
-    // Performance un-shelved with the GIPS TWR panel (lib/data.ts hidden: false).
-    expect(screen.getByRole("link", { name: /performance/i })).toBeTruthy();
-    expect(screen.queryByRole("link", { name: /discover/i })).toBeNull();
+    const primary = within(screen.getByRole("navigation", { name: "Primary navigation" }));
+    expect(primary.getAllByRole("link").map((link) => link.textContent)).toEqual(["Portfolio", "Research", "Risk", "Positions"]);
+    expect(primary.getByRole("link", { name: "Portfolio" }).getAttribute("href")).toBe("/dashboard");
+    expect(primary.getByRole("link", { name: "Positions" }).getAttribute("href")).toBe("/portfolio");
+    expect(primary.getByRole("link", { name: "Positions" }).getAttribute("aria-current")).toBe("page");
+    fireEvent.click(screen.getByRole("button", { name: "Open all workspaces" }));
+    const overflow = within(screen.getByRole("navigation", { name: "All workspaces" }));
+    for (const item of navItems) {
+      expect(overflow.getByRole("link", { name: item.label, exact: true }).getAttribute("href")).toBe(item.href);
+    }
   });
 });

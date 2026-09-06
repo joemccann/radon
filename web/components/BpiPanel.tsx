@@ -100,7 +100,7 @@ function BpiSessionStaleMark() {
       style={{
         marginLeft: "8px",
         fontFamily: "var(--font-mono)",
-        fontSize: "9px",
+        fontSize: "var(--text-meta)",
         fontWeight: 700,
         letterSpacing: "0.08em",
         color: "var(--warning)",
@@ -290,7 +290,7 @@ export default function BpiPanel() {
           <div
             style={{
               fontFamily: "var(--font-mono)",
-              fontSize: "9px",
+              fontSize: "var(--text-meta)",
               color: "var(--text-muted)",
               marginTop: "8px",
             }}

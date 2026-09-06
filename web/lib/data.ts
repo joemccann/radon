@@ -36,9 +36,17 @@ export const NAV_GROUP_LABEL: Record<import("./types").NavGroupId, string> = {
 
 export const NAV_GROUP_ORDER: import("./types").NavGroupId[] = ["overview", "positions", "research", "risk", "operations"];
 
+/** The four recurring decisions in the Clear workstation, shared across viewports. */
+export const clearPrimaryNavigation: { label: string; href: string; sections: WorkspaceSection[] }[] = [
+  { label: "Portfolio", href: "/dashboard", sections: ["dashboard", "performance"] },
+  { label: "Research", href: "/scanner", sections: ["scanner", "discover", "flow-analysis", "options", "watchlist"] },
+  { label: "Risk", href: "/regime/cri", sections: ["regime", "cta"] },
+  { label: "Positions", href: "/portfolio", sections: ["portfolio", "orders"] },
+];
+
 export const navItems: WorkspaceNavItem[] = [
-  { label: "Dashboard", route: "dashboard", href: "/dashboard", icon: DashboardGlyph, group: "overview" },
-  { label: "Portfolio", route: "portfolio", href: "/portfolio", icon: PortfolioGlyph, group: "positions" },
+  { label: "Portfolio", route: "dashboard", href: "/dashboard", icon: DashboardGlyph, group: "overview" },
+  { label: "Positions", route: "portfolio", href: "/portfolio", icon: PortfolioGlyph, group: "positions" },
   { label: "Performance", route: "performance", href: "/performance", icon: PerformanceGlyph, hidden: false, group: "positions" },
   { label: "Orders", route: "orders", href: "/orders", icon: OrdersGlyph, group: "positions" },
   { label: "Scanner", route: "scanner", href: "/scanner", icon: ScannerGlyph, group: "research" },

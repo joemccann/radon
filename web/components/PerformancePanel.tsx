@@ -24,7 +24,7 @@ import ChartPanel from "./charts/ChartPanel";
 import MetricDefinitionModal from "./MetricDefinitionModal";
 import SectionEmptyState from "./SectionEmptyState";
 import SpectralLoader from "./SpectralLoader";
-import MobilePerformancePanel from "./mobile/MobilePerformancePanel";
+import { MobilePerformanceView } from "./mobile/MobilePerformancePanel";
 
 type PerformancePanelProps = {
   portfolioLastSync?: string | null;
@@ -414,7 +414,8 @@ function buildAdvancedCards(view: PerformanceView): CardDef[] {
 export default function PerformancePanel({ portfolioLastSync = null, marketState }: PerformancePanelProps) {
   const { isMobile, hasMounted } = useViewport();
   const isMarketActive = marketState !== MarketState.CLOSED;
-  const { data, loading, error, syncNow } = usePerformance(isMarketActive);
+  const performance = usePerformance(isMarketActive);
+  const { data, loading, error, syncNow } = performance;
   const view = useMemo(() => buildPerformanceView(data), [data]);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const requestedPortfolioSyncRef = useRef<string | null>(null);
@@ -437,7 +438,7 @@ export default function PerformancePanel({ portfolioLastSync = null, marketState
   const activeCard = useMemo(() => allCards.find((c) => c.id === activeCardId) ?? null, [activeCardId, allCards]);
 
   if (hasMounted && isMobile) {
-    return <MobilePerformancePanel portfolioLastSync={portfolioLastSync} marketState={marketState} />;
+    return <MobilePerformanceView performance={performance} />;
   }
 
   if (loading && !view) {

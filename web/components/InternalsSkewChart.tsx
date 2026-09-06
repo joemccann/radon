@@ -170,7 +170,7 @@ export default function InternalsSkewChart({
           g.selectAll(".tick line").attr("stroke", CHART_GRID);
           g.selectAll(".tick text")
             .attr("fill", "var(--text-muted)")
-            .attr("font-size", "10px")
+            .attr("font-size", "var(--text-meta)")
             .attr("font-family", MONO);
         });
 
@@ -185,7 +185,7 @@ export default function InternalsSkewChart({
           g.selectAll(".tick line").attr("stroke", CHART_GRID);
           g.selectAll(".tick text")
             .attr("fill", CHART_AXIS_MUTED)
-            .attr("font-size", "10px")
+            .attr("font-size", "var(--text-meta)")
             .attr("font-family", MONO);
         });
     },
@@ -366,7 +366,7 @@ export default function InternalsSkewChart({
       .attr("x", innerW + 26)
       .attr("text-anchor", "middle")
       .attr("fill", lineColor)
-      .attr("font-size", "9px")
+      .attr("font-size", "var(--text-meta)")
       .attr("font-family", MONO)
       .attr("dominant-baseline", "central");
 
@@ -477,7 +477,7 @@ export default function InternalsSkewChart({
         g.selectAll(".tick line").attr("stroke", CHART_GRID);
         g.selectAll(".tick text")
           .attr("fill", CHART_AXIS_MUTED)
-          .attr("font-size", "9px")
+          .attr("font-size", "var(--text-meta)")
           .attr("font-family", MONO);
       });
 

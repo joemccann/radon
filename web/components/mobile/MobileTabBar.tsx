@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Circle, ClipboardList, Sparkles, Menu } from "lucide-react";
+import { ChartNoAxesCombined, Circle, ScanSearch, Shield } from "lucide-react";
 import type { ComponentType, SVGProps } from "react";
 
 type MobileTab = {
@@ -14,11 +14,10 @@ type MobileTab = {
 };
 
 const TABS: MobileTab[] = [
-  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, matchPaths: ["/dashboard", "/"] },
-  { label: "Positions", href: "/portfolio", icon: Circle, matchPaths: ["/portfolio", "/performance"] },
-  { label: "Orders", href: "/orders", icon: ClipboardList, matchPaths: ["/orders"] },
-  { label: "Scanner", href: "/scanner", icon: Sparkles, matchPaths: ["/scanner", "/discover", "/flow-analysis"] },
-  { label: "More", icon: Menu, action: "openMore" },
+  { label: "Portfolio", href: "/dashboard", icon: ChartNoAxesCombined, matchPaths: ["/dashboard", "/performance", "/"] },
+  { label: "Research", href: "/scanner", icon: ScanSearch, matchPaths: ["/scanner", "/discover", "/flow-analysis", "/options", "/watchlist"] },
+  { label: "Risk", href: "/regime/cri", icon: Shield, matchPaths: ["/regime", "/cta"] },
+  { label: "Positions", href: "/portfolio", icon: Circle, matchPaths: ["/portfolio", "/orders"] },
 ];
 
 type MobileTabBarProps = {
@@ -62,6 +61,7 @@ export default function MobileTabBar({ onOpenMore }: MobileTabBarProps) {
             href={tab.href ?? "#"}
             prefetch={false}
             className={className}
+            aria-current={active ? "page" : undefined}
             data-testid={`mobile-tab-${tab.label.toLowerCase()}`}
           >
             <Icon size={20} strokeWidth={2} aria-hidden />

@@ -20,12 +20,12 @@ import { useMemo, useState, useCallback } from "react";
 
 import type { GexBucket } from "@/lib/useGex";
 
-const MARKER_LABEL_FONT_SIZE = 8;
-const MARKER_LABEL_CHAR_WIDTH = 5.1; // mono-font advance at the label font size
+const MARKER_LABEL_FONT_SIZE = 12; // Clear financial annotation floor
+const MARKER_LABEL_CHAR_WIDTH = MARKER_LABEL_FONT_SIZE * 0.64;
 const MARKER_LABEL_GAP = 6; // minimum horizontal breathing room between adjacent labels
-const MARKER_LANE_HEIGHT = 11; // vertical stride between stacked label rows
+const MARKER_LANE_HEIGHT = MARKER_LABEL_FONT_SIZE + 4;
 const MARKER_TRIANGLE_DROP = 9; // distance from axis to triangle base
-const MARKER_FIRST_LANE_DROP = 13; // distance from axis to the first label row baseline
+const MARKER_FIRST_LANE_DROP = MARKER_TRIANGLE_DROP + MARKER_LABEL_FONT_SIZE + 3;
 
 const MAX_MARKER_LANES = 5; // PUT WALL / CALL WALL / ACCEL / MAGNET / FLIP can all collide
 const MARKER_LANE_BAND = MARKER_FIRST_LANE_DROP + MARKER_LANE_HEIGHT * (MAX_MARKER_LANES - 1) + 6;
@@ -339,7 +339,7 @@ export default function GexLaplaceContour({
           display: "flex",
           gap: 18,
           fontFamily: "var(--font-mono)",
-          fontSize: 11,
+          fontSize: "var(--text-meta)",
           color: "var(--text-secondary)",
           letterSpacing: "0.04em",
         }}
@@ -415,7 +415,7 @@ export default function GexLaplaceContour({
           y={PADDING_TOP + 4}
           textAnchor="end"
           fontFamily="var(--font-mono)"
-          fontSize={9}
+          fontSize="var(--text-meta)"
           fill="var(--text-muted)"
         >
           {yTopLabel}
@@ -425,7 +425,7 @@ export default function GexLaplaceContour({
           y={centerY + 3}
           textAnchor="end"
           fontFamily="var(--font-mono)"
-          fontSize={9}
+          fontSize="var(--text-meta)"
           fill="var(--text-muted)"
         >
           0
@@ -435,7 +435,7 @@ export default function GexLaplaceContour({
           y={VIEWBOX_HEIGHT - PADDING_BOTTOM + 2}
           textAnchor="end"
           fontFamily="var(--font-mono)"
-          fontSize={9}
+          fontSize="var(--text-meta)"
           fill="var(--text-muted)"
         >
           {yBottomLabel}
@@ -480,7 +480,7 @@ export default function GexLaplaceContour({
               x={flipX + 4}
               y={PADDING_TOP + 10}
               fontFamily="var(--font-mono)"
-              fontSize={9}
+              fontSize="var(--text-meta)"
               fill="var(--warn)"
             >
               FLIP {fmtStrike(crossingStrike ?? 0)}
@@ -502,7 +502,7 @@ export default function GexLaplaceContour({
           y={PADDING_TOP - 10}
           textAnchor="middle"
           fontFamily="var(--font-mono)"
-          fontSize={10}
+          fontSize="var(--text-meta)"
           fill="var(--text-primary)"
         >
           SPOT {fmtPrice(spotPrice)}

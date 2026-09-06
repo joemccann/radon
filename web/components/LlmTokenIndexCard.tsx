@@ -123,7 +123,7 @@ export default function LlmTokenIndexCard() {
         style={{ display: "flex", gap: 16, alignItems: "center", marginBottom: 16 }}
       >
         <div>
-          <span style={{ color: "var(--text-muted)", fontSize: 11 }}>LATEST</span>
+          <span style={{ color: "var(--text-muted)", fontSize: "var(--text-meta)" }}>LATEST</span>
           <div
             style={{ fontSize: 24, fontWeight: 600, fontFamily: "var(--font-mono)" }}
             data-testid="llm-token-index-latest-value"
@@ -132,7 +132,7 @@ export default function LlmTokenIndexCard() {
           </div>
         </div>
         <div>
-          <span style={{ color: "var(--text-muted)", fontSize: 11 }}>
+          <span style={{ color: "var(--text-muted)", fontSize: "var(--text-meta)" }}>
             RAW (USD / Mtok)
           </span>
           <div
@@ -142,7 +142,7 @@ export default function LlmTokenIndexCard() {
           </div>
         </div>
         <div>
-          <span style={{ color: "var(--text-muted)", fontSize: 11 }}>WINDOW</span>
+          <span style={{ color: "var(--text-muted)", fontSize: "var(--text-meta)" }}>WINDOW</span>
           <div
             style={{
               fontSize: 24,

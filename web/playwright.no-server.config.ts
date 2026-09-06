@@ -12,6 +12,7 @@ export default defineConfig({
   workers: 1,
   reporter: "list",
   use: {
+    serviceWorkers: "block",
     baseURL: `http://localhost:${PORT}`,
     trace: "on-first-retry",
   },

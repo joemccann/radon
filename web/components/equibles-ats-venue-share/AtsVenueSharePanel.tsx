@@ -85,7 +85,7 @@ const FOOTNOTE_BLOCK: React.CSSProperties = {
 
 const MONO_FOOTNOTE: React.CSSProperties = {
   fontFamily: "var(--font-mono)",
-  fontSize: "9px",
+  fontSize: "var(--text-meta)",
   color: "var(--text-muted)",
   lineHeight: "1.7",
   letterSpacing: "0.02em",
@@ -118,7 +118,7 @@ function SignalChip({ row }: { row: AtsVenueShareRow }) {
       style={{
         color: classificationColor(row.classification),
         fontFamily: "var(--font-mono)",
-        fontSize: "10px",
+        fontSize: "var(--text-meta)",
         letterSpacing: "0.04em",
         border: `1px solid color-mix(in srgb, ${classificationColor(row.classification)} 35%, transparent)`,
         background: `color-mix(in srgb, ${classificationColor(row.classification)} 10%, transparent)`,
@@ -163,7 +163,7 @@ export default function AtsVenueSharePanel() {
             <InfoTooltip text="FINRA off-exchange volume is the denominator dark-pool prints lack. ATS share is the dark-pool slice of that off-exchange tape; rising ATS share WITH a larger average ATS print size is an institutional accumulation footprint, since size is being worked in the dark rather than internalized in odd lots. Either signal alone is noise. Short-volume share sits alongside because divergence, dark-pool share running ahead of short volume, is buying rather than hedging." />
           </div>
           {lastSync && (
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: "9px", color: "var(--text-muted)" }}>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--text-muted)" }}>
               {new Date(lastSync).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
             </span>
           )}

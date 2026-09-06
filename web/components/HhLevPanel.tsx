@@ -138,7 +138,7 @@ export default function HhLevPanel() {
             <InfoTooltip text={INFO_TOOLTIP} />
           </div>
           {clock && (
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: "9px", color: "var(--text-muted)" }}>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--text-muted)" }}>
               {clock}
             </span>
           )}
@@ -222,7 +222,7 @@ export default function HhLevPanel() {
         <div
           style={{
             fontFamily: "var(--font-mono)",
-            fontSize: "9px",
+            fontSize: "var(--text-meta)",
             color: "var(--text-muted)",
             marginTop: "8px",
           }}

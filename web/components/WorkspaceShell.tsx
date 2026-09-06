@@ -26,6 +26,7 @@ import { isIndexSymbol, indexExchangeFor } from "@/lib/indexSymbols";
 import { useWatchlist } from "@/lib/useWatchlist";
 import Sidebar from "@/components/Sidebar";
 import Header from "@/components/Header";
+import clearResearch from "@/components/ClearResearch.module.css";
 import MetricCards from "@/components/MetricCards";
 import ToastContainer from "@/components/Toast";
 import DashboardSurface from "@/components/dashboard/DashboardSurface";
@@ -41,6 +42,9 @@ const WorkspaceSections = dynamic(() => import("@/components/WorkspaceSections")
 });
 const PortfolioSections = dynamic(() => import("@/components/PortfolioSections"), {
   loading: () => <InstrumentSkeleton testId="portfolio-sections-skeleton" />,
+});
+const PerformancePanel = dynamic(() => import("@/components/PerformancePanel"), {
+  loading: () => <InstrumentSkeleton testId="performance-panel-skeleton" />,
 });
 import FooterTelemetryStrip from "@/components/FooterTelemetryStrip";
 import { useTickerDetail } from "@/lib/TickerDetailContext";
@@ -556,15 +560,16 @@ export default function WorkspaceShell({ section, tickerParam, initialPortfolio 
   const pricesForSections = sectionNeedsPrices ? prices : undefined;
 
   return (
-    <div className="app-shell" suppressHydrationWarning>
+    <div className={`app-shell clear-workstation ${clearResearch.surfaces}`} data-workspace-section={activeSection} suppressHydrationWarning>
       <a href="#main-content" className="skip-link">Skip to content</a>
       {showMobileChrome ? (
-        <MobileShell title={activeLabel} ibConnected={ibConnected} lastSync={lastSync} />
+        <MobileShell title={activeLabel} isPageHeading={headerOwnsPageHeading} ibConnected={ibConnected} lastSync={lastSync} />
       ) : null}
-      <Sidebar activeSection={activeSection} actionTone={actionTone} ibConnected={ibConnected} lastSync={lastSync} />
 
       <main id="main-content" className="main" tabIndex={-1}>
         <Header
+          compact={activeSection === "dashboard"}
+          navigation={<Sidebar activeSection={activeSection} actionTone={actionTone} ibConnected={ibConnected} lastSync={lastSync} />}
           activeLabel={activeLabel}
           isPageHeading={headerOwnsPageHeading}
           isFullscreen={isFullscreen}
@@ -610,6 +615,7 @@ export default function WorkspaceShell({ section, tickerParam, initialPortfolio 
           {activeSection === "dashboard" ? (
             <DashboardSurface
               portfolio={portfolio}
+              prices={prices}
               realizedPnl={todayRealizedPnl}
               marketState={marketState}
             />
@@ -619,6 +625,8 @@ export default function WorkspaceShell({ section, tickerParam, initialPortfolio 
 
           {activeSection === "portfolio" ? (
             <PortfolioSections portfolio={portfolio} prices={pricesForSections} />
+          ) : activeSection === "performance" ? (
+            <PerformancePanel portfolioLastSync={portfolioLastSync} marketState={marketState} />
           ) : activeSection !== "dashboard" ? (
             <WorkspaceSections
               section={activeSection}

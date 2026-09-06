@@ -226,7 +226,9 @@ export default function TickerDetailContent({
     : applicableFocusedBookKey ?? comboBookKey ?? chartPriceKey ?? comboBookKeys[0] ?? ticker;
   const bookDepth = depths?.[bookKey] ?? null;
   const bookPriceData = bookKey === comboBookKey
-    ? priceData
+    // The generic telemetry helper may fall back to the underlying when leg
+    // quotes are missing. That stock quote is never an implied spread price.
+    ? isSpreadNet ? priceData : null
     : bookKey === chartPriceKey
     ? priceData
     : prices[bookKey] ?? null;
