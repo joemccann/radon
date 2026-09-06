@@ -22,9 +22,16 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 # R-665: record what the unverified `playwright install` actually fetched.
 # The digest lives next to the browsers and is computed in the same layer,
 # so two images can be compared and an audit can pin the browser build.
+# T-467: an empty/missing browser tree must FAIL the build, never record the
+# empty-stream sha256 (e3b0c442...); the grep below is the digest's in-image
+# consumer — the build aborts unless a real 64-hex non-empty digest landed.
 RUN python -m playwright install --with-deps --only-shell chromium \
-    && find /ms-playwright -type f -print0 | sort -z | xargs -0 sha256sum \
-       | sha256sum | cut -d' ' -f1 > /ms-playwright/.browsers.sha256 \
+    && find /ms-playwright -type f -print0 | sort -z | xargs -0 -r sha256sum > /tmp/.browser-hashes \
+    && [ -s /tmp/.browser-hashes ] \
+    && sha256sum /tmp/.browser-hashes | cut -d' ' -f1 > /ms-playwright/.browsers.sha256 \
+    && rm /tmp/.browser-hashes \
+    && grep -qE '^[0-9a-f]{64}$' /ms-playwright/.browsers.sha256 \
+    && ! grep -q e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 /ms-playwright/.browsers.sha256 \
     && echo "playwright browsers digest: $(cat /ms-playwright/.browsers.sha256)" \
     && chmod -R a+rX /ms-playwright \
     && rm -rf /var/lib/apt/lists/*
