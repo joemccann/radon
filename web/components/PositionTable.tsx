@@ -558,12 +558,13 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
           </td>
         )}
         {columns.pnl && (
-          <td className={`right ${pnl != null ? (pnl >= 0 ? "positive" : "negative") : ""}`}>
+          <td data-testid="position-cell-pnl" className={`right ${pnl != null ? (pnl >= 0 ? "positive" : "negative") : ""}`}>
             {pnl != null ? `${pnl >= 0 ? "+" : "-"}${fmtUsd(Math.abs(pnl))}` : "—"}
           </td>
         )}
         {columns.pnl_pct && (
           <td
+            data-testid="position-cell-pnl-pct"
             className={`right ${pnlPct != null ? (pnlPct >= 0 ? "positive" : "negative") : ""}`}
             title={returnTitle}
           >

@@ -108,6 +108,7 @@ import { computeLegImpliedValue, computeOrderImpliedValue } from "@/lib/impliedV
 import { useRiskFreeRate } from "@/lib/useRiskFreeRate";
 import { useColumnVisibility } from "@/lib/useColumnVisibility";
 import { useViewport } from "@/lib/useViewport";
+import { useRealtimePrices } from "@/lib/RealtimePricesContext";
 import { ColumnsToggle, type ColumnsToggleEntry } from "./ColumnsToggle";
 import MobileOrderList from "./mobile/MobileOrderList";
 import MobileBlotterList from "./mobile/MobileBlotterList";
@@ -2956,6 +2957,9 @@ function OrdersSections({
   portfolio?: PortfolioData | null;
 }) {
   const { pendingCancels, pendingModifies, cancelledOrders, requestCancel, requestModify } = useOrderActions();
+  // T-462: the feed-disconnect arm of quoteSubmitGate is dead unless the
+  // owner surface supplies real connectivity.
+  const { connected: feedConnected } = useRealtimePrices();
   const { isMobile, hasMounted } = useViewport();
   const showMobileOrders = isMobile && hasMounted;
   const riskFreeRate = useRiskFreeRate();
@@ -3260,6 +3264,7 @@ function OrdersSections({
         portfolio={portfolio}
         // R-112: the close-out branch must know what is already working.
         openOrders={orders}
+        feedConnected={feedConnected}
         onConfirm={handleModify}
         onClose={() => setModifyTarget(null)}
       />

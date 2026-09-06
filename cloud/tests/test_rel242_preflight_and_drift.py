@@ -21,7 +21,6 @@ surfaces they do not own.
 
 from __future__ import annotations
 
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -33,23 +32,8 @@ from test_drift_audit import da  # noqa: E402
 
 CLOUD_ROOT = Path(__file__).resolve().parents[1]
 DEPLOY = CLOUD_ROOT / "scripts" / "deploy.sh"
-HELPER = CLOUD_ROOT / "scripts" / "deploy-root-helper.sh"
 
 SHIM_FALLBACK_MARKER = "shim refused (exit 78), direct render covered"
-
-
-def _strip_comments(text: str) -> str:
-    return "\n".join(
-        line for line in text.splitlines() if not line.lstrip().startswith("#")
-    )
-
-
-def _function_body(script: str, name: str) -> str:
-    match = re.search(
-        rf"^{name}\(\)\s*\{{\s*\n(.+?)\n\}}\s*$", script, re.MULTILINE | re.DOTALL
-    )
-    assert match, f"{name}() missing"
-    return match.group(1)
 
 
 def _write_executable(path: Path, body: str) -> None:
@@ -140,18 +124,6 @@ def test_shim_refusal_without_direct_cover_still_fails_preflight(tmp_path: Path)
 
 
 # --- R-648 residual: refresh path renders the incoming staged body ----------
-
-
-def test_refresh_install_file_validates_staged_compose_body() -> None:
-    """Pin: the ib-gateway-compose arm runs the shared validator (deny-list +
-    `docker compose config -q` render) against the staged candidate."""
-    body = _strip_comments(_function_body(HELPER.read_text(encoding="utf-8"), "refresh_install_file"))
-    arm = body.split("*/ib-gateway-compose.yml)", 1)[1].split(";;", 1)[0]
-    assert 'compose_body_is_valid "$candidate"' in arm
-    validator = _strip_comments(
-        _function_body(HELPER.read_text(encoding="utf-8"), "compose_body_is_valid")
-    )
-    assert "docker compose" in validator and "config --quiet" in validator
 
 
 def test_refresh_refuses_an_invalid_staged_compose_body(tmp_path: Path) -> None:

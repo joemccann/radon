@@ -7,6 +7,7 @@ being unreachable keeps the current tip rather than failing the run.
 from __future__ import annotations
 
 import json
+import os
 import stat
 import subprocess
 import sys
@@ -62,8 +63,20 @@ class TestCli:
     def git_repo(self, tmp_path):
         d = tmp_path / "repo"
         d.mkdir()
-        run = lambda *a: subprocess.run(["git", "-C", str(d), *a], check=True,
-                                        capture_output=True, text=True)
+        # T-468: never inherit the operator's global/system git config — a
+        # host core.hooksPath pre-commit (gitleaks, tsc) would run inside the
+        # fixture and error every commit for reasons unrelated to the SUT.
+        env = {
+            **os.environ,
+            "GIT_CONFIG_GLOBAL": "/dev/null",
+            "GIT_CONFIG_SYSTEM": "/dev/null",
+            "GIT_TERMINAL_PROMPT": "0",
+        }
+        run = lambda *a: subprocess.run(
+            ["git", "-C", str(d), "-c", "core.hooksPath=/dev/null",
+             "-c", "commit.gpgsign=false", *a],
+            check=True, capture_output=True, text=True, env=env,
+        )
         run("init", "-q")
         run("config", "user.email", "t@t")
         run("config", "user.name", "t")

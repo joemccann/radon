@@ -9256,6 +9256,7 @@ Delta findings continue the T-### numbering in dated `## Delta audit` sections.
 - Audited through: `391aaaea` on 2026-09-05 — 22 new findings (T-440…T-461: 8 P1, 14 P2) over 118 commits / 395 files, base `2b936ebc`. Saturday run. pytest **11669 passed / 0 failed** (1642s under sibling-loop contention); vitest first read 13 failed + 34 files failed at import — ALL the delta's new `thinking-orbs` dep missing from this clone's node_modules; after `bun install` the failed set re-ran **322 passed / 0 failed** (environment fixed, repo untouched; `site/` needed npm — bun kept failing on the `next` tarball). cloud **33 failed** / 1692 passed on darwin, strict subset of 2026-09-04: zero NEW, four GONE (incl. T-439's red) — **baseline 37 → 33**. Post-gate tree clean ×3 (T-275); secret-name sweep clean (T-381). Delta-touched determinism 3× NOT run (154 touched test files collapses into full gates, 2026-08-16 rule). Shard-glob union clean (441/441 single-shard, T-122 holds); 40 of 42 new test files CI-reachable, the two `site/e2e` specs are not (T-447). `deploy.needs`/`if` byte-identical; thresholds unmoved; 3 new conditional skips with reasons; no `.only`/`xfail`. CI green on `main` at this HEAD (20 success / 5 skipped). `main` still has no `required_status_checks` (T-222, fifth audit running).
 
 - Audited through: `be64e1fc` on 2026-09-05 (**second pass**, same day, same clone) — 23 new findings (T-462…T-484: 2 P0, 10 P1, 11 P2) over 61 commits / 107 files / +5789-172, base `391aaaea` (the first pass's HEAD). Saturday run. The range CONTAINS the first pass's own remediation (T-440…T-461) and the reliability loop's REL-232…REL-247, re-triaged as ordinary delta per the 2026-08-22 rule. Gates serial round 1 BEFORE the fan-out, no sibling loop, load 3-6: pytest **11762 passed / 1 skipped / 0 failed** (1730s); vitest 39 files failed at IMPORT on ONE environment cause (`thinking-orbs` + `border-beam` declared at `web/package.json:37,46` but absent from this clone's node_modules — the first pass's lesson recurring after a tree reset), and the same 39 files re-ran **323 passed / 0 failed** once installed, repo untouched; cloud **5 failed / 1785 passed**, all in `test_caddy_edge_timeouts.py` with `caddy` ABSENT. The cloud baseline reads 5, not the recorded 33, because this run's gate PATH resolves `bash` to homebrew 5.3.9 instead of `/bin/bash` 3.2 — filed as T-484, and it means every previously recorded darwin baseline was a PATH artifact. Post-gate tree clean x3 (T-275). Zero new code skips/`.only`/`xfail` in the delta. `deploy:` block byte-identical base->HEAD (14 jobs, both coverage ratchets retained); no gate config touched, no threshold moved. Shard-glob union clean (449/449 matched exactly once, T-122 holds); all 27 new test files CI-reachable. CI green on `main` at this HEAD. `main` still has no `required_status_checks` (T-222, sixth audit running). Delta-touched determinism 3x NOT run: 47 touched test files across four roots collapses into full gates (2026-08-16 rule).
+- Audited through: `7a7ca4ae` on 2026-09-06 — **1 new finding** (T-485, P2) over 6 commits / 5 files / +715−1, base `be64e1fc`. Sunday run, no sibling loop, load 2.5. The range is almost entirely the loops' own ledgers plus CIP-007 (one bounded apt step in `ci.yml` + an honest contract test, `9 passed` ×3). Gates: pytest **11763 passed / 0 failed** (1841s); vitest **8925 passed / 0 failed** but exit 1 on one unhandled `EnvironmentTeardownError` — the 2026-09-02 observation recurring UNCONTENDED, promoted to T-485; cloud **33 failed / 1757 passed** with `/bin/bash` 3.2 resolved and caddy PRESENT — sorted FAILED list byte-identical to the 2026-09-05 first-pass 33-list (zero new, zero gone), confirming T-484 from the other direction (caddy's 5 reds gone by installing caddy, the bash-class 33 back with bash 3.2). Post-gate tree clean (T-275); secret sweep vacuously clean (T-381); no new skips/`.only`/`xfail`; `deploy:` untouched; no threshold moved. CI green on `main` at this HEAD (`4dcbfdd2` run cancelled as superseded, not failed). `main` still has no `required_status_checks` (T-222, seventh audit running).
 
 ## Remediation 2026-08-29 — PR #140
 
@@ -9928,3 +9929,84 @@ identical, or the difference must be an explicit skip rather than a failure.
   files across all four collection roots, which per the 2026-08-16 rule
   collapses into full-gate runs. Saying so rather than pretending it
   happened.
+
+## Delta audit 2026-09-06
+
+Range `be64e1fc..7a7ca4ae`: 6 commits / 5 files / +715−1. Sunday run
+(weekend-false-red class LIVE; all gates green, none observed). The range is
+almost entirely the loops' own output: the 2026-09-05 second-pass audit merge
+(#308: `TEST_AUDIT.md` + this skill's lessons) and the ci-performance loop's
+CIP-007 (#302: `CI_PERFORMANCE_LOG.md`, one bounded apt-get step in
+`ci.yml:725-730`, and `scripts/tests/test_ci_gate_integrity.py:213-235`, a
+new contract test). No fan-out was launched — the lead read the entire
+non-ledger delta directly (two files).
+
+1 new finding: **1 P2** (T-485).
+
+### Delta review
+
+- **CIP-007 (`ci.yml` e2e apt step):** the change adds `Acquire::Retries=3`,
+  `Acquire::http::Timeout=15` and `timeout-minutes: 3` — a bounding, not a
+  gate weakening. Its contract test
+  `test_e2e_apt_provisioning_is_bounded` asserts every `apt-get` invocation
+  in the step carries both options plus the step bound, and self-retires
+  with a named message if the step disappears. Honest by inspection and
+  green 3×3 (`9 passed` ×3, 0.9 s each). `scripts/tests` is CI-reachable
+  (existing file, already in a shard). No finding.
+- **Gate drift:** the only `ci.yml` change is the apt step above; no test
+  invocation, shard glob, `deploy.needs`/`if`, coverage threshold or
+  exclusion changed (diff inspected directly). No new skip/`.only`/`xfail`
+  anywhere in the delta.
+
+### Findings
+
+### T-485 — P2 — vitest full-gate exit-1 on `EnvironmentTeardownError` with 0 failed tests is NOT load-class: it recurred uncontended
+
+The 2026-09-02 observation (note 1, `TEST_AUDIT.md:8339-8347`) recorded
+`EnvironmentTeardownError: Closing rpc while "onUserConsoleLog" was pending`
+attributed to `web/tests/regime-dead-feed-degraded.test.ts` and classed it
+as load (load 33, reliability loop concurrent). This run reproduced it
+byte-identically at load ~2.5 with NO sibling loop and an otherwise idle
+host: vitest exit 1 with **901 files / 8925 passed / 0 failed**, and the
+file `5 passed` ×3 in isolation. Two uncorrelated occurrences at opposite
+load profiles make this a real teardown race in the file (it logs to
+console from an async path still in flight at environment teardown —
+`[mktnews] ring restore/persist failed: turso unreachable` lines bracket
+the error), not contention noise. The hazard is unchanged from the
+observation but now demonstrated: any gate keyed on vitest's EXIT CODE
+(this loop's wrapper, a CI shard) reds a round in which every test passed.
+
+### Backlog rows
+
+| ID | Sev | Acceptance criteria |
+|---|---|---|
+| T-485 | P2 | Make `regime-dead-feed-degraded.test.ts` drain or silence its async console writers before teardown (await the in-flight persist/restore rejections, or stub the console path). Red: reproduce the unhandled rejection deterministically (e.g. resolve the pending log after teardown in a harness) or cite two gate logs; green: full-file run clean AND the unhandled-error count 0 across 3 full-suite runs. Never key the fix on widening the wrapper's exit-code read. |
+
+### Standing sweeps
+
+- **Gates (serial, detached, before everything else; load 2.5, no sibling
+  loop — `ps` checked):** pytest **11763 passed / 1 skipped / 0 failed**
+  (1841 s); vitest **8925 passed / 0 failed** across 901 files, exit 1 on
+  T-485's unhandled teardown error only; cloud **33 failed / 1757 passed /
+  7 skipped** (383 s).
+- **Cloud attribution (T-484 rule applied):** resolved `bash --version` =
+  `/bin/bash` **3.2.57** (homebrew bash absent today), `command -v caddy` =
+  `/opt/homebrew/bin/caddy` (**present** — installed since yesterday's
+  second pass). The 33 FAILED lines are 14× `test_bootstrap_control_plane.py`
+  + 19× `test_ib_gateway_control.py` (both bash≥4 classes), **zero** caddy
+  reds, and the sorted list is byte-identical to the 2026-09-05 first-pass
+  33-list (`comm` empty). T-484 confirmed from the other direction: caddy's
+  5 reds vanished by installing caddy, the bash-class 33 returned with
+  `/bin/bash`. Zero new, zero gone vs the comparable-PATH list.
+- **Delta-touched determinism 3×:** the delta touches ONE test file
+  (`test_ci_gate_integrity.py`) — `9 passed` ×3.
+- **Post-gate tree:** `git status --porcelain` empty after all three gates
+  (T-275 sweep clean).
+- **Secrets (T-381):** no wrapper-exported secrets in this manual shell;
+  sweep vacuously clean (weaker evidence than under the wrapper).
+- **Branch protection (T-222, seventh consecutive audit):** `main` still
+  returns no `required_status_checks`.
+- **CI at HEAD:** success on `main` at `7a7ca4ae` (the `4dcbfdd2` run was
+  cancelled as superseded mid-merge, not a failure).
+- **Open-PR pre-check (2026-08-27 rule):** 4 open PRs, none overlapping
+  T-485.
