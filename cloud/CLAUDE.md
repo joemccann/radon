@@ -62,18 +62,28 @@ under `/var/lib/radon` keep their ownership) and `scripts/jvm_forensics.py`.
 The compose body it runs lives at `/etc/radon/ib-gateway-compose.yml`, a
 control-plane artifact, NOT `cloud/docker-compose.yml` in the checkout: root
 acting on a file its caller can rewrite is the same escalation with extra
-steps. The shim refuses a symlinked or non-root-owned body, and
+steps. The shim refuses a symlinked or non-root-owned body, and likewise refuses
+`/etc/radon/env` when it is a symlink, not root-owned, or group/other-writable
+(`require_trusted_env_file`, REL-234 — both refusals exit 78; an exit 78 from
+`ib-gateway-control.sh` during recovery means fix the file's ownership/perms,
+not the Gateway), and
 `--project-name cloud` is pinned so the `cloud_ib-config` volume — the
 Gateway's Jts settings and 2FA state — survives the move.
 
 `config-check` is `deploy.sh`'s preflight compose render. It takes no
 env-file argument on purpose — a caller-supplied path is the one thing the
 shim refuses — and pins the same `/etc/radon/env` the deploy's
-`ENV_FILE_DEFAULT` resolves to in production. The preflight tries BOTH the
-shim call and a direct `docker compose config` and fails only when neither
-renders (`deploy.sh:204-215`, bd7d7e4c): preferring one path deadlocks the
-deploy across the sudoers-verb / docker-group transition, since whichever
-mechanism the current host lacks would abort the promote that installs it. Note the
+`ENV_FILE_DEFAULT` resolves to in production. When the shim refuses (or for a
+dev/test invocation against some other env file), `preflight_env` falls back to
+a direct `docker compose config` — including in production, where a shim
+refusal that the direct render covers emits the countable journal line
+`[preflight] compose-render: shim refused (exit N), direct render covered`
+(R-647/REL-242: the fallback deliberately does not abort the deploy, because
+the shim's sudoers verb arrives with the release being promoted). A compose
+body that fails both paths still fails preflight: preferring one path
+would deadlock the deploy across the sudoers-verb / docker-group transition,
+since whichever mechanism the current host lacks would abort the promote that
+installs it (`deploy.sh:204-231`, bd7d7e4c). Note the
 narrowing: preflight now renders the INSTALLED compose body, not the incoming
 release's. The incoming body is gated at install time instead, by provenance
 (git blob at the deployed commit) plus `compose_body_is_valid`.
