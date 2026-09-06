@@ -21,4 +21,27 @@ describe("playwright.config webServer env — Clerk publishable key", () => {
     const env = (webServer as { env?: Record<string, string> }).env ?? {};
     expect(env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY).toMatch(/^pk_test_/);
   });
+
+  it("forces a pk_test_ key over an ambient pk_live_ key whenever it sets RADON_AUTHLESS_TEST=1 (T-482)", async () => {
+    // middleware.ts throws at import when RADON_AUTHLESS_TEST === "1" and the
+    // publishable key starts with pk_live_. The webServer env must therefore
+    // never let an ambient live key through alongside the authless flag.
+    vi.stubEnv(
+      "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
+      "pk_live_bWFsaWNpb3VzLWFtYmllbnQta2V5JA",
+    );
+    vi.resetModules();
+    const config = (await import("../playwright.config")).default;
+    const webServer = config.webServer;
+    expect(webServer).toBeDefined();
+    expect(Array.isArray(webServer)).toBe(false);
+    const env = (webServer as { env?: Record<string, string> }).env ?? {};
+    expect(env.RADON_AUTHLESS_TEST).toBe("1");
+    // With the flag set, the key must be either unset or pinned to pk_test_.
+    const key = env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+    if (key !== undefined && key !== "") {
+      expect(key).toMatch(/^pk_test_/);
+    }
+    expect(key).not.toMatch(/^pk_live_/);
+  });
 });
