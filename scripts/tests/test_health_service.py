@@ -956,6 +956,15 @@ class TestServerSmoke:
             self._get(running, "/nope")
         assert exc.value.code == 404
 
+    def test_caddy_tls_ask_allows_mcp_host(self, running):
+        status, body = self._get(running, "/caddy-tls-ask?domain=mcp.radon.run")
+        assert status == 200 and body.get("allow") is True
+
+    def test_caddy_tls_ask_denies_other_hosts(self, running):
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            self._get(running, "/caddy-tls-ask?domain=evil.example")
+        assert exc.value.code == 404
+
 
 import urllib.error  # noqa: E402  (used in the 404 assertion above)
 
