@@ -49,6 +49,13 @@ POISONS = {
     "docker-sock": BASE
     + "    volumes:\n      - /var/run/docker.sock:/var/run/docker.sock\n",
     "pid-host": BASE + "    pid: host\n",
+    # R-668 (REL-249): the symmetric host-namespace joins the pid arm missed.
+    "ipc-host": BASE + "    ipc: host\n",
+    "ipc-host-quoted": BASE + '    ipc: "host"\n',
+    "userns-host": BASE + "    userns_mode: host\n",
+    "userns-host-quoted": BASE + "    userns_mode: 'host'\n",
+    "uts-host": BASE + "    uts: host\n",
+    "cgroup-host": BASE + "    cgroup: host\n",
     "long-form-bind": BASE
     + "    volumes:\n      - type: bind\n        source: /var/lib\n        target: /x\n",
     "cap-add": BASE + "    cap_add:\n      - SYS_ADMIN\n",
