@@ -127,6 +127,19 @@
       "note": "Store-wins-over-.env precedence, master-key loss recovery, and setup-mode entry/exit are operator contracts (DOC-051)."
     },
     {
+      "id": "deploy-provisioning",
+      "globs": [
+        "cloud/scripts/deploy.sh",
+        "cloud/scripts/deploy-root-helper.sh",
+        "cloud/scripts/setup-vps.sh",
+        "cloud/scripts/bootstrap-control-plane.sh",
+        "cloud/scripts/radon-docker-gw.sh",
+        "cloud/scripts/drift_audit.py"
+      ],
+      "owners": ["cloud/CLAUDE.md"],
+      "note": "Deploy/provisioning contracts (preflight fallback, shim trust gates, control-plane sync) drifted twice in one cycle (DOC-104/105); cloud/CLAUDE.md is their owner."
+    },
+    {
       "id": "mcp-hosted-auth",
       "globs": ["scripts/mcp_hosted/auth.py"],
       "owners": ["docs/cloud-services.md"],

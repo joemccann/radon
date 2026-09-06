@@ -2,7 +2,7 @@
 
 This document is the sanctioned chart-family and renderer contract for Radon.
 
-The machine-readable source of truth is [web/lib/chart-system-spec.json](/Users/joemccann/dev/apps/finance/radon/web/lib/chart-system-spec.json). Runtime helpers live in [web/lib/chartSystem.ts](/Users/joemccann/dev/apps/finance/radon/web/lib/chartSystem.ts). Downstream OG/report surfaces consume the same contract via [web/lib/og-theme.ts](/Users/joemccann/dev/apps/finance/radon/web/lib/og-theme.ts), [web/lib/og-charts.tsx](/Users/joemccann/dev/apps/finance/radon/web/lib/og-charts.tsx), and [scripts/performance_explainer_report.py](/Users/joemccann/dev/apps/finance/radon/scripts/performance_explainer_report.py).
+The machine-readable source of truth is [web/lib/chart-system-spec.json](../web/lib/chart-system-spec.json). Runtime helpers live in [web/lib/chartSystem.ts](../web/lib/chartSystem.ts). Downstream OG/report surfaces consume the same contract via [web/lib/og-theme.ts](../web/lib/og-theme.ts), [web/lib/og-charts.tsx](../web/lib/og-charts.tsx), and [scripts/performance_explainer_report.py](../scripts/performance_explainer_report.py).
 
 ## Purpose
 
