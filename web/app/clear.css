@@ -1,0 +1,429 @@
+/* Clear is the workstation's presentation layer. Calculations, data state,
+   table geometry and execution controls remain owned by their components. */
+
+.radon-clear {
+  font-variant-numeric: tabular-nums;
+}
+
+.radon-clear .main { min-width: 0; }
+
+.radon-clear .content {
+  padding: 24px clamp(24px, 4.6vw, 68px) 48px;
+  scrollbar-gutter: stable;
+}
+
+.radon-clear .content:has(> .dashboard-surface) { padding-top: 12px; }
+
+.radon-clear :is(.section, .instrument-panel, .admin-card, .preferences-group) {
+  border-radius: var(--radius-lg);
+  border-color: var(--line-grid);
+  box-shadow: none;
+}
+
+.radon-clear .section { margin-bottom: 28px; }
+
+.radon-clear .section-header {
+  min-height: 64px;
+  gap: 12px;
+  padding: 18px 22px;
+  flex-wrap: wrap;
+  background: transparent;
+}
+
+.radon-clear :is(.section-title, .modal-title, .instrument-section__title) {
+  font-family: var(--font-sans);
+  font-size: var(--text-panel-title);
+  line-height: 1.3;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  text-transform: none;
+}
+
+.radon-clear :is(.panel-eyebrow, .metric-label, .section-label-mono) {
+  font-family: var(--font-sans);
+  font-size: var(--text-meta);
+  font-weight: 500;
+  line-height: 1.45;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.radon-clear :is(.metrics-grid, .metrics-grid-3, .metrics-grid-5) {
+  gap: 0;
+  margin-bottom: 28px;
+  border-block: 1px solid var(--line-grid);
+}
+
+.radon-clear .metric-card {
+  margin: 0;
+  padding: 20px 24px;
+  border: 0;
+  border-right: 1px solid var(--line-grid);
+  background: transparent;
+}
+
+.radon-clear .metric-card:last-child { border-right: 0; }
+.radon-clear .metric-card:hover { background: var(--bg-subtle); }
+.radon-clear .metric-value { font-weight: 500; letter-spacing: -0.045em; }
+.radon-clear .metric-change { border-top: 0; padding-top: 2px; font-size: var(--text-meta); }
+
+.radon-clear :is(.panel-meta-rail, .instrument-section__rail, .performance-chart-meta) {
+  background: var(--bg-subtle);
+  border-color: var(--line-grid);
+  font-family: var(--font-sans);
+  font-size: var(--text-meta);
+  letter-spacing: 0;
+}
+
+.radon-clear :is(.panel-meta-rail-item .k, .performance-meta-label) {
+  font-size: var(--text-meta);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.radon-clear th {
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: var(--text-meta);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  background: var(--bg-subtle);
+}
+
+.radon-clear td { border-color: var(--line-grid); }
+.radon-clear tbody tr:hover { background: var(--bg-subtle); }
+
+.radon-clear :is(.btn-primary, .btn-secondary, .btn-danger, .btn-quick, .btn-sync, .btn-order-action) {
+  min-height: 40px;
+  padding: 9px 16px;
+  border-radius: var(--radius);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.radon-clear .btn-primary {
+  background: var(--signal-core);
+  border-color: var(--signal-core);
+  color: var(--text-on-accent);
+}
+
+.radon-clear :is(.btn-secondary, .btn-quick, .btn-sync) {
+  background: var(--bg-panel);
+  border-color: var(--line-grid);
+  color: var(--text-primary);
+}
+
+.radon-clear :is(.btn-secondary, .btn-quick, .btn-sync):hover:not(:disabled) {
+  background: var(--bg-subtle);
+  border-color: var(--text-muted);
+}
+
+.radon-clear :is(input, select, textarea) {
+  border-radius: var(--radius-sm);
+  accent-color: var(--signal-core);
+}
+
+.radon-clear :is(input, select, textarea):focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+.radon-clear :is(.pill, .order-status-pill) {
+  padding: 4px 9px;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  border-radius: var(--radius-capsule);
+}
+
+.radon-clear :is(.modal-content, .command-palette) {
+  border-radius: var(--radius-lg);
+  border-color: var(--line-grid);
+  background: var(--bg-panel);
+}
+
+.radon-clear :is(.modal-header, .modal-footer) { padding: 20px 24px; }
+.radon-clear .section-empty-state { padding: 36px 24px; }
+.radon-clear .section-empty-state__headline { font-size: 16px; }
+.radon-clear .section-empty-state__secondary { font-size: 14px; line-height: 1.6; }
+
+/* Research and risk retain their dense working views, with softer navigation
+   and clearer separation of the selected analysis from its context rail. */
+.radon-clear .scanner-mode-tabs { gap: 6px; padding-bottom: 8px; }
+.radon-clear .scanner-mode-tab {
+  min-height: 44px;
+  border-radius: var(--radius);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.radon-clear .scanner-mode-tab--active { background: var(--bg-panel-raised); color: var(--signal-core-text); }
+.radon-clear .regime-rail { background: var(--bg-subtle); border-radius: var(--radius-lg); }
+.radon-clear .regime-rail__item { min-height: 44px; padding-inline: 14px; }
+.radon-clear .regime-rail__name { font-family: var(--font-sans); font-size: 13px; letter-spacing: 0; }
+.radon-clear .regime-rail__item.active { background: var(--bg-panel-raised); border-left-color: var(--signal-core); }
+.radon-clear :is(.regime-hero, .regime-strip, .performance-hero) { background: var(--bg-subtle); border-radius: var(--radius-lg); }
+.radon-clear :is(.regime-strip-label, .regime-hero-label, .regime-panel-title) {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.radon-clear .performance-hero-value { font-weight: 500; letter-spacing: -0.055em; }
+.radon-clear .performance-chart-shell { background: var(--bg-panel); }
+.radon-clear .preferences-row { padding: 24px; }
+.radon-clear .preferences-row__label { font-size: 15px; }
+.radon-clear .preferences-row__description { font-size: 14px; line-height: 1.6; }
+.radon-clear .preferences-row__key { font-size: 12px; }
+
+.radon-clear :is(.profile-header, .profile-bookmark, .profile-watch) {
+  border-radius: var(--radius-lg);
+  border-color: var(--line-grid);
+  background: var(--bg-panel);
+}
+.radon-clear .profile-header { background: var(--bg-subtle); padding: 28px; }
+.radon-clear :is(.profile-field__label, .profile-field__hint, .profile-bookmark__meta) {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.radon-clear .profile-tab { min-height: 44px; font-family: var(--font-sans); font-size: 14px; }
+.radon-clear .profile-bookmark__headline { font-size: 16px; line-height: 1.45; }
+.radon-clear .trial-expired-panel { padding: 36px; border-radius: var(--radius-lg); background: var(--bg-subtle); }
+.radon-clear .trial-expired-title { font-size: 28px; font-weight: 500; letter-spacing: -0.04em; }
+.radon-clear .trial-expired-copy { font-size: 14px; }
+.radon-clear :is(.trial-expired-kicker, .trial-expired-countdown) { font: 500 12px var(--font-sans); letter-spacing: 0; text-transform: none; }
+.radon-clear .trial-expired-cta { display: inline-flex; align-items: center; min-height: 44px; border-radius: var(--radius); font: 600 14px var(--font-sans); letter-spacing: 0; text-transform: none; }
+
+.clear-auth { min-height: 100svh; padding: 36px clamp(24px, 6vw, 88px); }
+.clear-auth__brand { display: inline-flex; align-items: center; gap: 10px; color: var(--text-primary); font: 650 30px var(--font-sans); letter-spacing: -1.5px; text-decoration: none; }
+.clear-auth__layout { width: min(1080px, 100%); margin: clamp(48px, 12vh, 140px) auto; display: grid; grid-template-columns: 1fr 400px; gap: 72px; align-items: center; }
+.clear-auth__eyebrow { color: var(--signal-core-text); font-size: 13px; font-weight: 500; }
+.clear-auth__intro h1 { margin: 20px 0; font-size: clamp(38px, 4vw, 58px); line-height: 1.06; font-weight: 500; letter-spacing: -0.06em; }
+.clear-auth__intro p { max-width: 370px; font-size: 16px; line-height: 1.6; color: var(--text-secondary); }
+.clear-auth__principles { display: grid; gap: 15px; margin-top: 36px; color: var(--text-secondary); font-size: 13px; }
+.clear-auth__principles span { border-top: 1px solid var(--line-grid); padding-top: 15px; max-width: 370px; }
+.clear-auth__form { min-width: 0; }
+
+/* Clerk retains form/auth ownership; its public styling hooks share Clear's
+   surfaces and touch geometry, including subsequent verification steps. */
+.clear-auth .cl-rootBox { width: 100%; }
+.clear-auth :is(.cl-cardBox, .cl-card, .cl-footer) {
+  box-shadow: none;
+  background: var(--bg-panel);
+  background-image: none;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+}
+.clear-auth .cl-cardBox { width: 100%; border: 1px solid var(--line-grid); border-radius: var(--radius-lg); }
+.clear-auth .cl-card { border-radius: var(--radius-lg); }
+.clear-auth .cl-logoBox { display: none; }
+.clear-auth .cl-footer { border-top: 1px solid var(--line-grid); background: var(--bg-subtle); }
+.clear-auth .cl-formFieldInput { min-height: 44px; font-size: 16px; border-color: var(--line-grid); border-radius: var(--radius-sm); }
+.clear-auth .cl-formButtonPrimary {
+  min-height: 44px;
+  border: 1px solid var(--signal-core);
+  border-radius: var(--radius);
+  background: var(--signal-core);
+  background-image: none;
+  box-shadow: none;
+  color: var(--text-on-accent);
+  font: 600 14px var(--font-sans);
+}
+.clear-auth .cl-formButtonPrimary:hover { background: var(--signal-deep); border-color: var(--signal-deep); }
+.clear-auth .cl-footerActionLink { color: var(--signal-core-text); }
+
+/* Populated desktop/mobile audits identified legacy 8–11px annotations.
+   Keep the same data density, but make financial context readable. */
+body.radon-clear :is(
+  .ckh-lastlabel, .ckh-kind, .ckh-live, .ckh-poschip, .ckh-spr,
+  .book-kind, .book-feed-pill, .book-head-stat, .book-toggle-text,
+  .book-venue-lead, .book-t-mkt, .book-t-time, .price-bar-label,
+  .footer-strip__brand, .footer-strip__k, .footer-strip__v,
+  .futures-label, .futures-last, .futures-chg, .futures-delayed,
+  .regime-badge, .regime-cta-gauge-label, .regime-component-score,
+  .regime-trigger-label, .regime-trigger-value, .regime-relationship-note,
+  .cta-briefing-label, .cta-briefing-metric-label, .cta-briefing-regime-pill,
+  .ticker-flow-badge-conviction-label, .ticker-flow-metric-label,
+  .ticker-flow-hero-eyebrow, .ticker-flow-refresh, .mobile-drawer__signout,
+  .journal-pnl-strip__label, .journal-range-chip,
+  .history-range-chip, .freshness-rail-note, .freshness-rail-label,
+  .gex-level-label, .gex-range-anchor-label, .gex-day-badge,
+  .gex-metric-label, .gex-metric-sub, .gex-level-sub, .gex-range-title,
+  .gex-range-anchor-value, .gex-bias-title, .gex-chart-title,
+  .watchlist-eyebrow, .watchlist-row__label, .watchlist-row__status,
+  .watchlist-row__orders, .watchlist-row__added, .watchlist-row__change,
+  .existing-orders-title, .order-label, .act-flat-hint, .order-action-btn,
+  .snapshot-card__see-all, .snapshot-row__action, .alerts-form__label,
+  .alerts-rule__chip, .alerts-rule__fired, .alerts-rule__channel,
+  .report-meta, .flow-ticker-input-label, .flow-ticker-input-submit,
+  .strength-value, .columns-toggle-label, .columns-toggle-count,
+  .sync-button, .profile-photo-btn, .profile-tab__count,
+  .grg-badge, .grg-eyebrow, .grg-metric-label, .grg-state-pill,
+  .grg-chart-legend, .grg-metric-sub, .vol-cone-analysis-trade,
+  .ticker-back-nav, .chart-panel-kicker, .chart-legend-item, .orders-command-strip__value,
+  .performance-hero-subtitle, .preferences-badge, .preferences-row__meta,
+  .backtest-metric-label, .breadth-divergence-chip,
+  .mobile-card__metric-label, .mobile-chain__bid-ask, .mobile-chain__meta,
+  .mobile-chain__expiry-date, .mobile-chain__expiry-dte,
+  .mobile-chain__control-label, .mobile-chain__spot,
+  .mobile-chain__side-btn, .mobile-chain__ladder-head,
+  .pos-stat-label, .ratings-targets-title, .company-meta
+) {
+  font-size: var(--text-meta);
+  letter-spacing: 0;
+}
+
+body.radon-clear :is(
+  .book-colhead > span, .regime-cta-gauge-scale > span,
+  .grg-header-meta > span, .act-flat > span,
+  .grg-chart-head > span, .grg-asset-grid > span, .grg-asset-grid strong, .grg-card strong,
+  .gex-chart-legend, .m-breadth-divergence-row > span, .gex-status-badge
+) { font-size: var(--text-meta); }
+
+body.radon-clear :is(.regime-relationship-axis-label, .performance-axis-label, .grg-svg-label) {
+  font-size: var(--text-meta);
+}
+
+body.radon-clear :is(.journal-range-chip, .history-range-chip) { min-height: 36px; padding-inline: 12px; }
+body.radon-clear .mobile-card__metric-label { line-height: 1.4; }
+body.radon-clear .preferences-badge { white-space: nowrap; }
+body.radon-clear .cell-muted { font-size: var(--text-meta); color: var(--text-muted); opacity: 1; }
+body.radon-clear .watchlist-stats > span { font-size: var(--text-meta); }
+body.radon-clear :is(.snapshot-card__error, .snapshot-card__empty, .snapshot-tabs__meta) { font-size: var(--text-meta); }
+body.radon-clear :is(
+  .admin-tile-label, .admin-tile-sub, .admin-kv dt, .admin-pill,
+  .admin-unit-desc, .admin-unit-activity, .admin-card-note-inline, .admin-btn-sm
+) { font-size: var(--text-meta); }
+body.radon-clear :is(.regime-cta-row, .regime-strip-day-chg, .regime-strip-sub) { font-size: var(--text-meta); }
+body.radon-clear[data-mobile="true"] .orders-command-strip__stat:nth-child(4) .orders-command-strip__value { font-size: var(--text-meta); }
+/* The chain deck stops above instrument navigation. Its viewport-fixed review
+   strip must reserve that same rail, not sit underneath its pointer targets. */
+.radon-clear .cockpit--mobile .mobile-chain__pending-strip {
+  bottom: calc(var(--mobile-tab-bar-height) + var(--safe-bottom) + var(--m-rail-h));
+}
+body.radon-clear[data-mobile="true"] :is(
+  .m-chip, .m-segment__item, .scanner-mode-tab, .mobile-card__subtitle,
+  .m-cta-section-header__label, .m-cta-section-header__count,
+  .snapshot-tabs__meta, .snapshot-card__error
+) { font-size: var(--text-meta); letter-spacing: 0; }
+
+@media (min-width: 900px) {
+  .radon-clear .app-shell .content:has(> .watchlist-shell) { padding: 0; }
+  .radon-clear .watchlist-shell { padding: 28px clamp(20px, 3.4vw, 56px); }
+}
+
+@media (max-width: 1023px) {
+  .radon-clear .content { padding: 24px 20px 36px; }
+  .radon-clear .metric-card { padding: 16px; }
+  .clear-auth__layout { grid-template-columns: 1fr 360px; gap: 32px; }
+}
+
+@media (pointer: coarse) {
+  .radon-clear :is(.btn-primary, .btn-secondary, .btn-danger, .btn-quick, .btn-sync, .btn-order-action) { min-height: 44px; }
+}
+
+@media (max-width: 640px) {
+  .radon-clear .content { padding: 16px; }
+  body.radon-clear[data-mobile="true"] .content:has(> .dashboard-surface) { padding: 22px; }
+  .radon-clear .section { margin-bottom: 20px; }
+  .radon-clear .section-header { min-height: 56px; padding: 16px; }
+  .radon-clear :is(.section-title, .instrument-section__title) { font-size: 17px; }
+  .radon-clear .metric-card { padding: 16px 12px; }
+  .radon-clear .metric-value { font-size: 24px; }
+  .radon-clear .metric-label { font-size: 12px; }
+  .radon-clear .preferences-row { padding: 20px 16px; }
+  .radon-clear :is(.modal-header, .modal-footer) { padding: 16px; }
+  .radon-clear .profile-header { padding: 20px 16px; }
+  .radon-clear .trial-expired-panel { padding: 28px 24px; }
+  .clear-auth { padding: 24px 20px; }
+  .clear-auth__layout { grid-template-columns: minmax(0, 1fr); gap: 32px; margin: 40px auto; }
+  .clear-auth__intro h1 { font-size: 38px; }
+  .clear-auth__principles { display: none; }
+}
+
+/* Ledger tools remain in the reading column when populated trade counts,
+   freshness labels and cash totals are wider than a phone. */
+@media (max-width: 640px) {
+  .radon-clear #orders-historical .section-header > div:last-child {
+    width: 100%;
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+  .radon-clear #orders-historical .section-header > div > span:has(.table-search) {
+    flex: 1 1 100%;
+    min-width: 0;
+    order: -1;
+  }
+  .radon-clear #orders-historical .table-search {
+    display: flex;
+    width: 100%;
+    min-width: 0;
+  }
+  .radon-clear #orders-historical .table-search-input {
+    flex: 1 1 auto;
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    font-size: 16px;
+    letter-spacing: 0;
+  }
+  .radon-clear #orders-historical .table-search-clear {
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .radon-clear #orders-historical .table-search-count { font-size: var(--text-meta); }
+  .radon-clear #orders-historical .report-meta { flex: 1 1 auto; }
+  .radon-clear #orders-historical .sync-button { min-height: 44px; }
+  .radon-clear #orders-historical .historical-page-size select { height: 44px; min-height: 44px; }
+  .radon-clear :is(#orders-historical, #orders-cash) .pill { white-space: nowrap; }
+
+  .radon-clear #orders-cash .cash-flows-meta {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    min-width: 0;
+    gap: 12px;
+  }
+  .radon-clear #orders-cash .cash-flows-stat {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    min-width: 0;
+    font-size: var(--text-meta);
+    letter-spacing: 0;
+  }
+  .radon-clear #orders-cash .cash-flows-stat-value { font-size: 14px; }
+  .radon-clear #orders-cash .cash-flows-sync-lozenge {
+    grid-column: 1 / -1;
+    max-width: 100%;
+    font-size: var(--text-meta);
+    letter-spacing: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .radon-clear #orders-cash .filter-select {
+    grid-column: 1 / -1;
+    width: 100%;
+    min-width: 0;
+    height: 44px;
+    min-height: 44px;
+    font-family: var(--font-sans);
+    font-size: 16px;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+  .radon-clear #orders-cash .cash-flows-meta > .pill {
+    grid-column: 2;
+    grid-row: 2;
+    justify-self: end;
+    align-self: center;
+  }
+}

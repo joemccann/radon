@@ -184,7 +184,7 @@ export default function DispersionPanel() {
       title={STALE_BADGE_TITLE}
       style={{
         fontFamily: "var(--font-mono)",
-        fontSize: "9px",
+        fontSize: "var(--text-meta)",
         letterSpacing: "0.08em",
         color: "var(--text-muted)",
         border: "1px solid var(--border-dim)",
@@ -203,7 +203,7 @@ export default function DispersionPanel() {
       title={YAHOO_BADGE_TITLE}
       style={{
         fontFamily: "var(--font-mono)",
-        fontSize: "9px",
+        fontSize: "var(--text-meta)",
         letterSpacing: "0.08em",
         color: "var(--warning)",
         border: "1px solid var(--warning)",
@@ -233,7 +233,7 @@ export default function DispersionPanel() {
               title={data.scan_time ? `Writer last wrote ${data.scan_time}` : "No writer timestamp"}
               style={{
                 fontFamily: "var(--font-mono)",
-                fontSize: "9px",
+                fontSize: "var(--text-meta)",
                 color: writer.state === "behind" ? "var(--warning)" : "var(--text-muted)",
               }}
             >
@@ -326,7 +326,7 @@ export default function DispersionPanel() {
         <div
           style={{
             fontFamily: "var(--font-mono)",
-            fontSize: "9px",
+            fontSize: "var(--text-meta)",
             color: "var(--text-muted)",
             marginTop: "8px",
           }}

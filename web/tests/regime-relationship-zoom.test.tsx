@@ -12,12 +12,12 @@
  *   - Pointer-event interaction with the brush handles updates state.
  */
 import React from "react";
-import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { existsSync, readFileSync } from "fs";
 import { resolve } from "path";
 
-import RegimeRelationshipView from "../components/RegimeRelationshipView";
+import RegimeRelationshipView, { nearestRegimeScatterIndex } from "../components/RegimeRelationshipView";
 import type { RegimeRelationshipSource } from "../lib/regimeRelationships";
 
 // Resolve from the vitest cwd. Run-from-web/ and run-from-repo-root both work.
@@ -60,7 +60,11 @@ function countSpreadBars(): number {
   ).length;
 }
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe("Correlation Risk Premium preset range chips", () => {
   it("defaults the visible range to the last 252 trading sessions when history is longer", () => {
@@ -151,7 +155,7 @@ describe("Correlation Risk Premium brush + hover", () => {
     );
 
     const overlay = screen.getByTestId("regime-spread-chart-overlay");
-    overlay.getBoundingClientRect = () => ({
+    screen.getByTestId("regime-spread-chart").getBoundingClientRect = () => ({
       x: 0,
       y: 0,
       left: 0,
@@ -250,35 +254,146 @@ describe("Correlation Risk Premium brush + hover", () => {
 });
 
 describe("Regime quadrants scatter hover", () => {
-  it("shows date, quadrant, and series values for the nearest hovered point", () => {
-    const history = buildHistory(40);
-    render(
-      React.createElement(RegimeRelationshipView, {
-        history,
-      }),
-    );
+  const history: RegimeRelationshipSource[] = [
+    { date: "2026-03-02", realized_vol: 10, cor1m: 10 },
+    { date: "2026-03-03", realized_vol: 20, cor1m: 40 },
+    { date: "2026-03-04", realized_vol: 30, cor1m: 20 },
+  ];
 
+  it.each([760, 380])("shows the exact nearest session at a rendered width of %ipx", (width) => {
+    render(<RegimeRelationshipView history={history} />);
+    const svg = screen.getByTestId("regime-quadrant-chart");
     const overlay = screen.getByTestId("regime-quadrant-chart-overlay");
-    overlay.getBoundingClientRect = () => ({
-      x: 0,
-      y: 0,
-      left: 0,
-      top: 0,
-      right: 760,
-      bottom: 240,
-      width: 760,
-      height: 240,
+    const height = width * 240 / 760;
+    svg.getBoundingClientRect = () => ({
+      x: 100,
+      y: 200,
+      left: 100,
+      top: 200,
+      right: 100 + width,
+      bottom: 200 + height,
+      width,
+      height,
       toJSON: () => ({}),
     });
-
-    fireEvent.pointerMove(overlay, { clientX: 400, clientY: 100 });
+    const point = screen.getByTestId("regime-quadrant-point-2026-03-03");
+    const clientX = 100 + (Number(point.getAttribute("cx")) + 44) * width / 760;
+    const clientY = 200 + (Number(point.getAttribute("cy")) + 16) * height / 240;
+    // Construct a coordinate-bearing event without depending on jsdom's
+    // optional PointerEvent implementation.
+    fireEvent(overlay, new MouseEvent("pointermove", { bubbles: true, clientX, clientY }));
 
     const tooltip = screen.getByTestId("regime-quadrant-hover-tooltip");
-    expect(tooltip).toBeTruthy();
-    expect(screen.getByTestId("regime-quadrant-hover-date")).toBeTruthy();
-    expect(tooltip.textContent ?? "").toMatch(/Quadrant/i);
-    expect(tooltip.textContent ?? "").toMatch(/RVOL/i);
-    expect(tooltip.textContent ?? "").toMatch(/COR1M/i);
-    expect(tooltip.textContent ?? "").toMatch(/(Goldilocks|Fragile Calm|Stock Picker|Systemic Panic)/i);
+    expect(screen.getByTestId("regime-quadrant-hover-date").textContent).toBe("Mar 3");
+    expect(Array.from(tooltip.querySelectorAll(".chart-tooltip-row"), (row) => row.textContent)).toEqual([
+      "QuadrantSystemic Panic",
+      "RVOL20.00",
+      "COR1M40.00",
+      "RVOL z+0.00σ",
+      "COR1M z+1.09σ",
+    ]);
+
+    fireEvent.pointerLeave(screen.getByTestId("regime-quadrant-chart-shell"));
+    expect(screen.queryByTestId("regime-quadrant-hover-tooltip")).toBeNull();
+    expect(document.querySelector(".regime-relationship-hover-marker")).toBeNull();
+  });
+
+  it("returns a safe index for empty and single-point inputs and keeps the first distance tie", () => {
+    expect(nearestRegimeScatterIndex([], 10, 20)).toBe(0);
+    expect(nearestRegimeScatterIndex([{ x: 80, y: 40 }], -100, 200)).toBe(0);
+    expect(nearestRegimeScatterIndex([{ x: 0, y: 0 }, { x: 10, y: 0 }], 5, 0)).toBe(0);
+  });
+
+  it.each([{ entries: [] }, { entries: history.slice(0, 1) }])("does not render an interactive chart without two comparable sessions", ({ entries }) => {
+    render(<RegimeRelationshipView history={entries} />);
+    expect(screen.queryByTestId("regime-quadrant-chart")).toBeNull();
+    expect(screen.queryByTestId("regime-quadrant-hover-tooltip")).toBeNull();
+  });
+});
+
+describe("Regime relationship responsive coordinates", () => {
+  function mockChartResize(initialWidth: number) {
+    let width = initialWidth;
+    let resize: (() => void) | undefined;
+    const observe = vi.fn();
+    const disconnect = vi.fn();
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(callback: () => void) { resize = callback; }
+      observe = observe;
+      disconnect = disconnect;
+    });
+    const originalRect = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this.getAttribute("data-testid") !== "regime-spread-chart-shell") {
+        return originalRect.call(this);
+      }
+      return { x: 0, y: 0, left: 0, top: 0, right: width, bottom: 240, width, height: 240, toJSON: () => ({}) };
+    });
+    return {
+      observe,
+      disconnect,
+      resize(nextWidth: number) {
+        width = nextWidth;
+        act(() => resize?.());
+      },
+    };
+  }
+
+  function expectViewBoxes(width: number) {
+    for (const chart of ["spread", "quadrant", "zscore"]) {
+      expect(screen.getByTestId(`regime-${chart}-chart`).getAttribute("viewBox")).toBe(`0 0 ${width} 240`);
+    }
+  }
+
+  it("uses the measured shell width for all chart coordinates and preserves the selected brush range on resize", () => {
+    const observer = mockChartResize(260);
+    const { unmount } = render(<RegimeRelationshipView history={buildHistory(300)} />);
+    expect(observer.observe).toHaveBeenCalledWith(screen.getByTestId("regime-spread-chart-shell"));
+    expectViewBoxes(260);
+    const firstPoint = screen.getByTestId("regime-quadrant-point-2024-01-02");
+    const narrowPointX = Number(firstPoint.getAttribute("cx"));
+    expect(narrowPointX).toBeGreaterThan(0);
+    expect(narrowPointX).toBeLessThan(260 - 64);
+    expect(screen.getByTestId("regime-spread-brush").querySelector("svg")?.getAttribute("viewBox")).toBe("0 0 760 40");
+    fireEvent.click(screen.getByTestId("regime-spread-range-1m"));
+    expect(countSpreadBars()).toBe(21);
+    const spread = screen.getByTestId("regime-current-spread").textContent;
+    const quadrant = screen.getByTestId("regime-current-quadrant").textContent;
+
+    observer.resize(1024);
+    expectViewBoxes(1024);
+    expect(Number(firstPoint.getAttribute("cx")) / narrowPointX).toBeCloseTo((1024 - 64) / (260 - 64));
+    expect(countSpreadBars()).toBe(21);
+    expect(screen.getByTestId("regime-current-spread").textContent).toBe(spread);
+    expect(screen.getByTestId("regime-current-quadrant").textContent).toBe(quadrant);
+    observer.resize(0);
+    expectViewBoxes(1024);
+    unmount();
+    expect(observer.disconnect).toHaveBeenCalledOnce();
+  });
+
+  it("starts measurement when initially missing chart data becomes available", () => {
+    const observer = mockChartResize(390);
+    const { rerender } = render(<RegimeRelationshipView history={[]} />);
+    expect(observer.observe).not.toHaveBeenCalled();
+    rerender(<RegimeRelationshipView history={buildHistory(40)} />);
+    expectViewBoxes(390);
+    expect(observer.observe).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    { width: 0, height: 240 },
+    { width: 760, height: 0 },
+  ])("does not resolve hover from zero-sized SVG geometry ($width x $height)", ({ width, height }) => {
+    render(<RegimeRelationshipView history={buildHistory(40)} />);
+    for (const chart of ["spread", "quadrant", "zscore"]) {
+      screen.getByTestId(`regime-${chart}-chart`).getBoundingClientRect = () => ({
+        x: 0, y: 0, left: 0, top: 0, right: width, bottom: height, width, height, toJSON: () => ({}),
+      });
+      fireEvent(screen.getByTestId(`regime-${chart}-chart-overlay`), new MouseEvent("pointermove", {
+        bubbles: true, clientX: 100, clientY: 100,
+      }));
+      expect(screen.queryByTestId(`regime-${chart}-hover-tooltip`)).toBeNull();
+    }
   });
 });

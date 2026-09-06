@@ -3,6 +3,13 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 describe("host-data output tracing", () => {
+  it("keeps live host snapshots and backups out of transitive assistant/order bundles", async () => {
+    const { default: config } = await import("../next.config.mjs");
+    for (const route of ["/api/assistant", "/api/orders/place"]) {
+      expect(config.outputFileTracingExcludes[route]).toEqual(["../data/**/*"]);
+    }
+  });
+
   it("excludes the host-mounted data tree from disk-fallback API routes", async () => {
     const { default: config } = await import("../next.config.mjs");
 

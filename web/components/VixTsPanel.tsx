@@ -189,7 +189,7 @@ export default function VixTsPanel() {
             title={data.scan_time ? `Writer last wrote ${data.scan_time}` : "No writer timestamp"}
             style={{
               fontFamily: "var(--font-mono)",
-              fontSize: "9px",
+              fontSize: "var(--text-meta)",
               color: writer.state === "behind" ? "var(--warning)" : "var(--text-muted)",
             }}
           >
@@ -275,7 +275,7 @@ export default function VixTsPanel() {
         <div
           style={{
             fontFamily: "var(--font-mono)",
-            fontSize: "9px",
+            fontSize: "var(--text-meta)",
             color: "var(--text-muted)",
             marginTop: "8px",
           }}

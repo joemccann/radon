@@ -119,7 +119,7 @@ test.describe("/regime page — responsive history chart stack", () => {
   test("stacks the charts full width on wide screens", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 1400 });
     await setupMocks(page);
-    await page.goto("/regime");
+    await page.goto("/regime/cri");
 
     const charts = page.locator('[data-testid="cri-history-chart"]');
     await expect(charts.nth(1)).toBeVisible();
@@ -139,7 +139,7 @@ test.describe("/regime page — responsive history chart stack", () => {
   test("stacks the charts vertically on narrow screens", async ({ page }) => {
     await page.setViewportSize({ width: 820, height: 1600 });
     await setupMocks(page);
-    await page.goto("/regime");
+    await page.goto("/regime/cri");
 
     const charts = page.locator('[data-testid="cri-history-chart"]');
     await expect(charts.nth(1)).toBeVisible();

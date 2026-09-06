@@ -329,7 +329,7 @@ export default function CriHistoryChart<T extends { date: string }>({
         .attr("y", yTop - 4)
         .attr("text-anchor", "end")
         .attr("fill", color)
-        .attr("font-size", 9)
+        .attr("font-size", "var(--text-meta)")
         .attr("font-family", "var(--font-mono)")
         .text(band.label);
     }
@@ -354,7 +354,7 @@ export default function CriHistoryChart<T extends { date: string }>({
         .attr("y", y - 4)
         .attr("text-anchor", "end")
         .attr("fill", color)
-        .attr("font-size", 9)
+        .attr("font-size", "var(--text-meta)")
         .attr("font-family", "var(--font-mono)")
         .text(level.label);
     }
@@ -377,7 +377,7 @@ export default function CriHistoryChart<T extends { date: string }>({
         axis
           .selectAll(".tick text")
           .attr("fill", leftSeries.color)
-          .attr("font-size", "10px")
+          .attr("font-size", "var(--text-meta)")
           .attr("font-family", "IBM Plex Mono, monospace");
       });
 
@@ -397,7 +397,7 @@ export default function CriHistoryChart<T extends { date: string }>({
         axis
           .selectAll(".tick text")
           .attr("fill", rightSeries.color)
-          .attr("font-size", "10px")
+          .attr("font-size", "var(--text-meta)")
           .attr("font-family", "IBM Plex Mono, monospace");
       });
 
@@ -418,7 +418,7 @@ export default function CriHistoryChart<T extends { date: string }>({
         axis
           .selectAll(".tick text")
           .attr("fill", CHART_AXIS_MUTED)
-          .attr("font-size", "10px")
+          .attr("font-size", "var(--text-meta)")
           .attr("font-family", "IBM Plex Mono, monospace")
           .attr("text-anchor", rotateXAxisLabels ? "end" : "middle")
           .attr("dx", rotateXAxisLabels ? "-0.4em" : "0")

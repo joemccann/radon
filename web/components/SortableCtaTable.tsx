@@ -303,7 +303,7 @@ export default function SortableCtaTable({ sectionKey, rows, callout }: Sortable
       <div
         style={{
           fontFamily: "var(--font-mono, monospace)",
-          fontSize: "10px",
+          fontSize: "var(--text-meta)",
           fontWeight: 700,
           letterSpacing: "0.10em",
           color: "var(--text-muted)",
@@ -318,7 +318,7 @@ export default function SortableCtaTable({ sectionKey, rows, callout }: Sortable
         <span
           style={{
             marginLeft: "8px",
-            fontSize: "9px",
+            fontSize: "var(--text-meta)",
             fontWeight: 400,
             background: "color-mix(in srgb, var(--text-primary) 6%, transparent)",
             padding: "1px 5px",

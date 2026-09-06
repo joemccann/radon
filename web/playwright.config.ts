@@ -33,6 +33,10 @@ export default defineConfig({
   workers: 1,
   reporter: "list",
   use: {
+    // These suites intercept broker/API transport with page.route. A running
+    // service worker can own those requests before Playwright sees them.
+    // SW behavior has dedicated unit contracts; opt in explicitly for SW E2E.
+    serviceWorkers: "block",
     baseURL: `http://${HOST}:${PORT}`,
     extraHTTPHeaders: { "x-radon-authless-test": AUTHLESS_TEST_TOKEN },
     trace: "on-first-retry",

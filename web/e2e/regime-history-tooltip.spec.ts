@@ -113,7 +113,7 @@ async function setupMocks(page: import("@playwright/test").Page) {
 test.describe("/regime page — 20-session history tooltip", () => {
   test("keeps the info icon beside the title and explains the charts in plain English", async ({ page }) => {
     await setupMocks(page);
-    await page.goto("/regime");
+    await page.goto("/regime/cri");
 
     const header = page.locator('[data-testid="regime-history-header"]');
     const titleText = header.locator('[data-testid="regime-history-title-text"]');

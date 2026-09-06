@@ -1,0 +1,48 @@
+/* Clear presentation for measured research/risk surfaces. No data or order state. */
+.surfaces :global(.m-metric__label),
+.surfaces :global(.m-regime-sub),
+.surfaces :global(.regime-hero-timestamp),
+.surfaces :global(.regime-hero-scale),
+.surfaces :global(.regime-strip-sub),
+.surfaces :global(.regime-strip-ts),
+.surfaces :global(.regime-rail__group-head),
+.surfaces :global(.regime-rail__count),
+.surfaces :global(.regime-rail__foot),
+.surfaces :global(.regime-component-label),
+.surfaces :global(.regime-trigger-detail) {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 1.45;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.surfaces :global(.regime-rail__val) { font-size: 12px; white-space: normal; line-height: 1.4; text-align: right; }
+.surfaces :global(.regime-hero-scale) { padding-top: 6px; color: var(--text-muted); }
+.surfaces :global(.regime-hero-label), .surfaces :global(.regime-level-badge) { font-size: 12px; letter-spacing: 0; }
+.surfaces :global(.m-metric__value), .surfaces :global(.regime-strip-value), .surfaces :global(.m-regime-score) { font-family: var(--font-sans); font-variant-numeric: tabular-nums; }
+.surfaces :global(.regime-strip-value) { font-weight: 550; }
+.surfaces :global(.m-metric) { gap: 7px; }
+.surfaces :global(.m-regime-tabs button) { font-family: var(--font-sans); font-size: 12px; font-weight: 550; letter-spacing: 0; border-radius: var(--radius-sm); }
+.surfaces :global(.m-regime-components-grid), .surfaces :global(.m-regime-grid2x2) { border-radius: var(--radius-sm); overflow: hidden; }
+.surfaces :global(.m-signal-card) { border-radius: var(--radius-lg); overflow: hidden; }
+.surfaces :global(.m-signal-card__ticker) { font-family: var(--font-sans); font-size: 16px; font-weight: 600; }
+.surfaces :global(.m-signal-card__signals) { flex-direction: row; flex-wrap: wrap; border-top: 0; padding-top: 4px; padding-bottom: 16px; }
+.surfaces :global(.m-signal-card__signals .m-pill) { width: auto; min-height: 28px; padding: 4px 9px; font: 550 12px var(--font-sans); letter-spacing: 0; border: 0; border-radius: var(--radius-sm); }
+.surfaces :global(.m-signal-card__head) { padding-block: 16px 10px; }
+.surfaces :global(.m-signal-card__stats) { padding-block: 14px; }
+.surfaces :global(.section-label-toggle) { min-height: 40px; }
+.surfaces :global(.clear-risk-title) { margin: 12px 0 0; font: 550 20px/1.4 var(--font-sans); letter-spacing: -.025em; }
+
+@media (max-width: 640px) {
+  .surfaces :global(.metrics-grid), .surfaces :global(.metrics-grid-3), .surfaces :global(.metrics-grid-5) { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 16px; }
+  .surfaces :global(.metrics-grid-3 .metric-card:last-child) { grid-column: 1 / -1; }
+  .surfaces :global(.metric-card) { min-width: 0; padding: 14px 12px; }
+  .surfaces :global(.metric-card:nth-child(even)) { border-right: 0; }
+  .surfaces :global(.metric-card:nth-child(n+3)) { border-top: 1px solid var(--line-grid); }
+  .surfaces :global(.metric-value) { font-size: clamp(18px, 4.8vw, 22px); line-height: 1.3; letter-spacing: -.04em; }
+  .surfaces :global(.metric-change) { font-family: var(--font-sans); font-size: 12px; line-height: 1.5; letter-spacing: 0; text-transform: none; white-space: normal; }
+  .surfaces :global(.m-regime-headline) { padding-top: 8px; }
+  .surfaces :global(.m-regime-grid2x2 > div), .surfaces :global(.m-regime-components-grid > .m-metric) { padding: 14px; }
+  .surfaces :global(.regime-hero-scale) { font-size: 12px; }
+}

@@ -30,7 +30,7 @@ function sideStyle(side: string): React.CSSProperties {
     borderRadius: 4,
     padding: "1px 6px",
     fontFamily: "var(--font-mono)",
-    fontSize: 10,
+    fontSize: "var(--text-meta)",
     letterSpacing: "0.06em",
   };
 }
@@ -43,14 +43,14 @@ function biasStyle(bias: ReturnType<typeof informedFlowBadge>["bias"]): React.CS
     borderRadius: 4,
     padding: "1px 8px",
     fontFamily: "var(--font-mono)",
-    fontSize: 10,
+    fontSize: "var(--text-meta)",
     letterSpacing: "0.06em",
     textTransform: "uppercase",
   };
 }
 
 function agoStyle(): React.CSSProperties {
-  return { color: "var(--text-muted)", fontFamily: "var(--font-mono)", fontSize: 10 };
+  return { color: "var(--text-muted)", fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)" };
 }
 
 function CongressRow({ row }: { row: CongressTrade }) {

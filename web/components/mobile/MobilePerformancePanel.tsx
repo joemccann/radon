@@ -251,7 +251,7 @@ function MobileStatCard({ card, onClick }: { card: CardDef; onClick: () => void 
         <span
           style={{
             fontFamily: "var(--font-mono)",
-            fontSize: 10,
+            fontSize: "var(--text-meta)",
             textTransform: "uppercase",
             letterSpacing: "0.08em",
             color: "var(--text-muted)",
@@ -262,7 +262,7 @@ function MobileStatCard({ card, onClick }: { card: CardDef; onClick: () => void 
         <span
           style={{
             fontFamily: "var(--font-mono)",
-            fontSize: 10,
+            fontSize: "var(--text-meta)",
             letterSpacing: "0.06em",
             color:
               card.tone === "positive"
@@ -366,7 +366,7 @@ function MobilePerformanceChart({ data, view }: { data: PerformanceData; view: P
                 dominantBaseline="middle"
                 className="performance-axis-label"
                 data-testid="performance-axis-y-label"
-                style={{ fontSize: 9 }}
+                style={{ fontSize: "var(--text-meta)" }}
               >
                 {tick.label}
               </text>
@@ -391,7 +391,7 @@ function MobilePerformanceChart({ data, view }: { data: PerformanceData; view: P
                 textAnchor={index === 0 ? "start" : index === xAxisTicks.length - 1 ? "end" : "middle"}
                 className="performance-axis-label"
                 data-testid="performance-axis-x-label"
-                style={{ fontSize: 9 }}
+                style={{ fontSize: "var(--text-meta)" }}
               >
                 {tick.label}
               </text>
@@ -405,7 +405,7 @@ function MobilePerformanceChart({ data, view }: { data: PerformanceData; view: P
           style={{ padding: "8px 10px" }}
           {...(curveSuppressed ? { "data-testid": "performance-curve-suppressed" } : {})}
         >
-          <span className="performance-meta-label" style={{ fontSize: 9 }}>
+          <span className="performance-meta-label" style={{ fontSize: "var(--text-meta)" }}>
             {curveSuppressed ? "Curve suppressed" : isIndex ? "Portfolio (TWR index)" : "Portfolio"}
           </span>
           <span className="performance-meta-value" style={{ fontSize: 12 }}>
@@ -415,7 +415,7 @@ function MobilePerformanceChart({ data, view }: { data: PerformanceData; view: P
         {showBenchmark && view.benchmark ? (
           <>
             <div className="performance-meta-item" style={{ padding: "8px 10px" }}>
-              <span className="performance-meta-label" style={{ fontSize: 9 }}>
+              <span className="performance-meta-label" style={{ fontSize: "var(--text-meta)" }}>
                 {view.benchmarkSymbol} {isIndex ? "Indexed" : "Rebased"}
               </span>
               <span className="performance-meta-value" style={{ fontSize: 12 }}>
@@ -423,7 +423,7 @@ function MobilePerformanceChart({ data, view }: { data: PerformanceData; view: P
               </span>
             </div>
             <div className="performance-meta-item" style={{ padding: "8px 10px", gridColumn: "1 / -1" }}>
-              <span className="performance-meta-label" style={{ fontSize: 9 }}>
+              <span className="performance-meta-label" style={{ fontSize: "var(--text-meta)" }}>
                 Benchmark Return
               </span>
               <span className={`performance-meta-value ${toneClass(view.benchmark.benchmark_return)}`} style={{ fontSize: 12 }}>
@@ -444,14 +444,8 @@ type MobilePerformancePanelProps = {
 
 export default function MobilePerformancePanel({ portfolioLastSync = null, marketState }: MobilePerformancePanelProps) {
   const isMarketActive = marketState !== MarketState.CLOSED;
-  const { data, loading, error, syncNow } = usePerformance(isMarketActive);
-  const view = useMemo(() => buildPerformanceView(data), [data]);
-  const [activeCardId, setActiveCardId] = useState<string | null>(null);
-  // Open by default: this section holds every gated metric AND the reason each
-  // one is missing. A suppressed benchmark that states "SPY covers 83% of
-  // sessions" behind a collapsed accordion is the mobile form of the same
-  // unreachability that made the reasons dead copy in the first place.
-  const [advancedOpen, setAdvancedOpen] = useState(true);
+  const performance = usePerformance(isMarketActive);
+  const { data, syncNow } = performance;
   const requestedPortfolioSyncRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -461,6 +455,18 @@ export default function MobilePerformancePanel({ portfolioLastSync = null, marke
     requestedPortfolioSyncRef.current = portfolioLastSync;
     syncNow();
   }, [data, portfolioLastSync, syncNow]);
+
+  return <MobilePerformanceView performance={performance} />;
+}
+
+/** Responsive presentation shares the desktop owner's data and poller. The
+ * standalone wrapper above remains available to isolated mobile consumers. */
+export function MobilePerformanceView({ performance }: { performance: ReturnType<typeof usePerformance> }) {
+  const { data, loading, error } = performance;
+  const view = useMemo(() => buildPerformanceView(data), [data]);
+  const [activeCardId, setActiveCardId] = useState<string | null>(null);
+  // Keep gated metrics and the reasons for suppression discoverable.
+  const [advancedOpen, setAdvancedOpen] = useState(true);
 
   const coreCards = useMemo(() => (view ? buildCoreCards(view) : []), [view]);
   const advancedCards = useMemo(() => (view ? buildAdvancedCards(view) : []), [view]);
@@ -510,7 +516,7 @@ export default function MobilePerformancePanel({ portfolioLastSync = null, marke
               testId="performance-empty"
             />
             {error ? (
-              <div style={{ padding: "10px 16px", fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)" }}>
+              <div style={{ padding: "10px 16px", fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--text-secondary)" }}>
                 {error}
               </div>
             ) : null}
@@ -553,7 +559,7 @@ export default function MobilePerformancePanel({ portfolioLastSync = null, marke
                       borderRadius: 4,
                       background: "var(--bg-panel-raised)",
                       fontFamily: "var(--font-mono)",
-                      fontSize: 11,
+                      fontSize: "var(--text-meta)",
                       lineHeight: 1.5,
                       color: "var(--text-secondary)",
                     }}
@@ -569,7 +575,7 @@ export default function MobilePerformancePanel({ portfolioLastSync = null, marke
                 padding: "12px 16px",
                 borderTop: "1px solid var(--border-dim)",
                 fontFamily: "var(--font-mono)",
-                fontSize: 10,
+                fontSize: "var(--text-meta)",
                 lineHeight: 1.6,
                 color: "var(--text-muted)",
               }}
@@ -598,7 +604,7 @@ export default function MobilePerformancePanel({ portfolioLastSync = null, marke
       <div className="section performance-hero">
         <div className="section-body performance-hero-body" style={{ flexDirection: "column", alignItems: "stretch", padding: 16, gap: 12 }}>
           <div>
-            <div className="section-label-mono" data-testid="performance-period-label" style={{ fontSize: 10 }}>
+            <div className="section-label-mono" data-testid="performance-period-label" style={{ fontSize: "var(--text-meta)" }}>
               {curveLabel.toUpperCase()} {periodCopy}
             </div>
             <div className="performance-hero-value" style={{ fontSize: 28, margin: "8px 0 6px" }}>
@@ -609,21 +615,21 @@ export default function MobilePerformancePanel({ portfolioLastSync = null, marke
                 TWR
               </span>
             </div>
-            <div className="performance-hero-subtitle" data-testid="performance-hero-subtitle" style={{ fontSize: 10, lineHeight: 1.5 }}>
+            <div className="performance-hero-subtitle" data-testid="performance-hero-subtitle" style={{ fontSize: "var(--text-meta)", lineHeight: 1.5 }}>
               Ending equity {fmtUsdExact(view.endingEquity)}
               {view.benchmark ? ` / ${view.benchmark.symbol} ${fmtPct(view.benchmark.benchmark_return)}` : ""} / as of{" "}
               {view.navAsOf} / N={returnSessions}
             </div>
           </div>
           <div className="performance-hero-pills" style={{ justifyContent: "flex-start", gap: 6 }}>
-            <span className="pill neutral" data-testid="performance-source-pill" style={{ fontSize: 10 }}>
+            <span className="pill neutral" data-testid="performance-source-pill" style={{ fontSize: "var(--text-meta)" }}>
               {sourcePillLabel}
             </span>
-            <span className="pill neutral" style={{ fontSize: 10 }}>
+            <span className="pill neutral" style={{ fontSize: "var(--text-meta)" }}>
               {returnSessions} SESSIONS
             </span>
             {view.risk.max_drawdown.value != null ? (
-              <span className={`pill ${view.risk.max_drawdown.value < -0.1 ? "undefined" : "defined"}`} style={{ fontSize: 10 }}>
+              <span className={`pill ${view.risk.max_drawdown.value < -0.1 ? "undefined" : "defined"}`} style={{ fontSize: "var(--text-meta)" }}>
                 MAX DD {fmtPct(view.risk.max_drawdown.value)}
               </span>
             ) : null}
@@ -716,7 +722,7 @@ export default function MobilePerformancePanel({ portfolioLastSync = null, marke
             borderBottom: advancedOpen ? "1px solid var(--border-dim)" : "none",
             cursor: "pointer",
             fontFamily: "var(--font-mono)",
-            fontSize: 11,
+            fontSize: "var(--text-meta)",
             letterSpacing: "0.08em",
             textTransform: "uppercase",
             color: "var(--text-secondary)",
@@ -726,11 +732,11 @@ export default function MobilePerformancePanel({ portfolioLastSync = null, marke
           <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
             <TrendingDown size={12} />
             Advanced
-            <span className="pill neutral" style={{ fontSize: 9, marginLeft: 4 }} data-testid="mobile-advanced-count">
+            <span className="pill neutral" style={{ fontSize: "var(--text-meta)", marginLeft: 4 }} data-testid="mobile-advanced-count">
               {advancedOpen ? "OPEN" : "COLLAPSED"}
             </span>
             {advancedGatedCount > 0 ? (
-              <span className="pill neutral" style={{ fontSize: 9 }}>
+              <span className="pill neutral" style={{ fontSize: "var(--text-meta)" }}>
                 {advancedGatedCount} OF {advancedCards.length} GATED
               </span>
             ) : null}
@@ -762,7 +768,7 @@ export default function MobilePerformancePanel({ portfolioLastSync = null, marke
                   gap: 6,
                   padding: "12px 16px 8px",
                   fontFamily: "var(--font-mono)",
-                  fontSize: 10,
+                  fontSize: "var(--text-meta)",
                   letterSpacing: "0.08em",
                   textTransform: "uppercase",
                   color: "var(--text-muted)",
@@ -770,7 +776,7 @@ export default function MobilePerformancePanel({ portfolioLastSync = null, marke
               >
                 <TrendingDown size={12} />
                 Path
-                <span className="pill neutral" style={{ fontSize: 9, marginLeft: "auto" }}>
+                <span className="pill neutral" style={{ fontSize: "var(--text-meta)", marginLeft: "auto" }}>
                   DAILY
                 </span>
               </div>
@@ -795,7 +801,7 @@ export default function MobilePerformancePanel({ portfolioLastSync = null, marke
                   gap: 6,
                   padding: "12px 16px 8px",
                   fontFamily: "var(--font-mono)",
-                  fontSize: 10,
+                  fontSize: "var(--text-meta)",
                   letterSpacing: "0.08em",
                   textTransform: "uppercase",
                   color: "var(--text-muted)",
@@ -803,7 +809,7 @@ export default function MobilePerformancePanel({ portfolioLastSync = null, marke
               >
                 <History size={12} />
                 Period
-                <span className="pill neutral" style={{ fontSize: 9, marginLeft: "auto" }}>
+                <span className="pill neutral" style={{ fontSize: "var(--text-meta)", marginLeft: "auto" }}>
                   {view.navSource ? view.navSource.toUpperCase().replace(/_/g, " ") : "NAV"}
                 </span>
               </div>
@@ -822,7 +828,7 @@ export default function MobilePerformancePanel({ portfolioLastSync = null, marke
                   alignItems: "center",
                   gap: 6,
                   fontFamily: "var(--font-mono)",
-                  fontSize: 10,
+                  fontSize: "var(--text-meta)",
                   letterSpacing: "0.08em",
                   textTransform: "uppercase",
                   color: "var(--text-muted)",
@@ -831,56 +837,56 @@ export default function MobilePerformancePanel({ portfolioLastSync = null, marke
               >
                 <AlertTriangle size={12} />
                 Methodology
-                <span className="pill neutral" style={{ fontSize: 9, marginLeft: "auto" }}>
+                <span className="pill neutral" style={{ fontSize: "var(--text-meta)", marginLeft: "auto" }}>
                   {basisLabel.toUpperCase()}
                 </span>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
                 <div className="performance-meta-item" style={{ padding: "8px 10px" }}>
-                  <span className="performance-meta-label" style={{ fontSize: 9 }}>
+                  <span className="performance-meta-label" style={{ fontSize: "var(--text-meta)" }}>
                     Curve Type
                   </span>
-                  <span className="performance-meta-value" data-testid="methodology-curve-type" style={{ fontSize: 11 }}>
+                  <span className="performance-meta-value" data-testid="methodology-curve-type" style={{ fontSize: "var(--text-meta)" }}>
                     {view.methodology.curve_type}
                   </span>
                 </div>
                 <div className="performance-meta-item" style={{ padding: "8px 10px" }}>
-                  <span className="performance-meta-label" style={{ fontSize: 9 }}>
+                  <span className="performance-meta-label" style={{ fontSize: "var(--text-meta)" }}>
                     Return Basis
                   </span>
-                  <span className="performance-meta-value" data-testid="methodology-return-basis" style={{ fontSize: 11 }}>
+                  <span className="performance-meta-value" data-testid="methodology-return-basis" style={{ fontSize: "var(--text-meta)" }}>
                     {view.methodology.return_basis}
                   </span>
                 </div>
                 <div className="performance-meta-item" style={{ padding: "8px 10px" }}>
-                  <span className="performance-meta-label" style={{ fontSize: 9 }}>
+                  <span className="performance-meta-label" style={{ fontSize: "var(--text-meta)" }}>
                     Flow Convention
                   </span>
-                  <span className="performance-meta-value" style={{ fontSize: 11 }}>
+                  <span className="performance-meta-value" style={{ fontSize: "var(--text-meta)" }}>
                     {view.methodology.flow_convention ?? "bod"}
                   </span>
                 </div>
                 <div className="performance-meta-item" style={{ padding: "8px 10px" }}>
-                  <span className="performance-meta-label" style={{ fontSize: 9 }}>
+                  <span className="performance-meta-label" style={{ fontSize: "var(--text-meta)" }}>
                     Risk-Free Rate (T-bill)
                   </span>
-                  <span className="performance-meta-value" data-testid="methodology-rf" style={{ fontSize: 11 }}>
+                  <span className="performance-meta-value" data-testid="methodology-rf" style={{ fontSize: "var(--text-meta)" }}>
                     {riskFreeCopy}
                   </span>
                 </div>
                 <div className="performance-meta-item" style={{ padding: "8px 10px" }}>
-                  <span className="performance-meta-label" style={{ fontSize: 9 }}>
+                  <span className="performance-meta-label" style={{ fontSize: "var(--text-meta)" }}>
                     Stock History
                   </span>
-                  <span className="performance-meta-value" style={{ fontSize: 11 }}>
+                  <span className="performance-meta-value" style={{ fontSize: "var(--text-meta)" }}>
                     {view.priceSources.stocks}
                   </span>
                 </div>
                 <div className="performance-meta-item" style={{ padding: "8px 10px" }}>
-                  <span className="performance-meta-label" style={{ fontSize: 9 }}>
+                  <span className="performance-meta-label" style={{ fontSize: "var(--text-meta)" }}>
                     Option History
                   </span>
-                  <span className="performance-meta-value" style={{ fontSize: 11 }}>
+                  <span className="performance-meta-value" style={{ fontSize: "var(--text-meta)" }}>
                     {view.priceSources.options}
                   </span>
                 </div>
@@ -893,7 +899,7 @@ export default function MobilePerformancePanel({ portfolioLastSync = null, marke
                   borderRadius: 4,
                   background: "var(--bg-panel-raised)",
                   fontFamily: "var(--font-mono)",
-                  fontSize: 10,
+                  fontSize: "var(--text-meta)",
                   lineHeight: 1.6,
                   letterSpacing: "0.04em",
                   color: "var(--text-muted)",
@@ -926,7 +932,7 @@ export default function MobilePerformancePanel({ portfolioLastSync = null, marke
               <div
                 style={{
                   fontFamily: "var(--font-mono)",
-                  fontSize: 10,
+                  fontSize: "var(--text-meta)",
                   letterSpacing: "0.08em",
                   textTransform: "uppercase",
                   color: "var(--text-muted)",
@@ -943,7 +949,7 @@ export default function MobilePerformancePanel({ portfolioLastSync = null, marke
               <div
                 style={{
                   fontFamily: "var(--font-mono)",
-                  fontSize: 10,
+                  fontSize: "var(--text-meta)",
                   letterSpacing: "0.08em",
                   textTransform: "uppercase",
                   color: "var(--text-muted)",
@@ -953,7 +959,7 @@ export default function MobilePerformancePanel({ portfolioLastSync = null, marke
                 How It Is Calculated
               </div>
               <div style={{ background: "var(--bg-panel-raised)", border: "1px solid var(--border-dim)", borderRadius: 4, padding: "10px 12px" }}>
-                <code style={{ fontFamily: "var(--font-mono)", fontSize: 11, lineHeight: 1.6, whiteSpace: "pre-wrap", color: "var(--text-primary)" }}>
+                <code style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", lineHeight: 1.6, whiteSpace: "pre-wrap", color: "var(--text-primary)" }}>
                   {activeCard.formula}
                 </code>
               </div>
@@ -966,7 +972,7 @@ export default function MobilePerformancePanel({ portfolioLastSync = null, marke
                   borderRadius: 4,
                   background: "color-mix(in srgb, var(--warn) 8%, var(--bg-panel-raised))",
                   fontFamily: "var(--font-mono)",
-                  fontSize: 10,
+                  fontSize: "var(--text-meta)",
                   color: "var(--text-muted)",
                 }}
               >

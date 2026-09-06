@@ -353,8 +353,10 @@ export default function OptionsExposurePanel({ symbol }: OptionsExposurePanelPro
           No strikes match the current measurement controls.
         </div>
       ) : (
-        <div className={styles.tableWrap} data-testid="options-exposure-table-wrap">
-          <table className={styles.table} aria-label={`${data.symbol} options exposure by strike`} data-sortable-exempt="chain-layout" data-overflow-exempt="table-layout:fixed with per-column widths and ellipsis truncation; .tableWrap is overflow:visible by design">
+        <>
+        <p className={styles.scrollHint}>Scroll the table to compare exposure and open interest.</p>
+        <div className={styles.tableWrap} data-testid="options-exposure-table-wrap" role="region" aria-label={`${data.symbol} exposure table, horizontally scrollable`} tabIndex={0}>
+          <table className={styles.table} aria-label={`${data.symbol} options exposure by strike`} data-sortable-exempt="chain-layout" data-overflow-exempt="Readable financial columns scroll inside the focusable table region">
             <colgroup>
               <col className={styles.strikeColumn} />
               <col className={styles.levelColumn} />
@@ -433,6 +435,7 @@ export default function OptionsExposurePanel({ symbol }: OptionsExposurePanelPro
             </tbody>
           </table>
         </div>
+        </>
       )}
     </section>
   );

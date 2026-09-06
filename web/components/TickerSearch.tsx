@@ -411,12 +411,13 @@ const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
           style={{
             width: "100%",
             padding: "8px 12px",
-            fontFamily: "'IBM Plex Mono', monospace",
-            fontSize: "13px",
+            minHeight: "44px",
+            fontFamily: "var(--font-sans)",
+            fontSize: "14px",
             color: "var(--text-primary)",
             backgroundColor: "var(--bg-panel)",
             border: "1px solid var(--border-dim)",
-            borderRadius: "4px",
+            borderRadius: "var(--radius-sm)",
             outline: "none",
             transition: "border-color 150ms",
           }}

@@ -193,7 +193,7 @@ export default function VolConeChart({ rows, p10, p90, title }: VolConeChartProp
         axis
           .selectAll(".tick text")
           .attr("fill", CHART_AXIS_MUTED)
-          .attr("font-size", "10px")
+          .attr("font-size", "var(--text-meta)")
           .attr("font-family", "IBM Plex Mono, monospace");
       });
 
@@ -213,7 +213,7 @@ export default function VolConeChart({ rows, p10, p90, title }: VolConeChartProp
         axis
           .selectAll(".tick text")
           .attr("fill", CHART_AXIS_MUTED)
-          .attr("font-size", "10px")
+          .attr("font-size", "var(--text-meta)")
           .attr("font-family", "IBM Plex Mono, monospace")
           .attr("text-anchor", rotateXAxisLabels ? "end" : "middle")
           .attr("dx", rotateXAxisLabels ? "-0.4em" : "0")

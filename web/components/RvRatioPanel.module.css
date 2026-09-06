@@ -145,7 +145,7 @@
 .footnote {
   color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: var(--text-meta);
   letter-spacing: 0.04em;
   line-height: 1.5;
 }

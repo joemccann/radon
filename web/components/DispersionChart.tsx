@@ -212,7 +212,7 @@ export default function DispersionChart({ entries }: DispersionChartProps) {
                     textAnchor="end"
                     dominantBaseline="middle"
                     fontFamily={MONO}
-                    fontSize={10}
+                    fontSize="var(--text-meta)"
                     fill={CHART_AXIS_MUTED}
                   >
                     {formatZ(tick)}
@@ -236,7 +236,7 @@ export default function DispersionChart({ entries }: DispersionChartProps) {
                     y={y(level)}
                     dominantBaseline="middle"
                     fontFamily={MONO}
-                    fontSize={9}
+                    fontSize="var(--text-meta)"
                     letterSpacing="0.06em"
                     fill={CHART_AXIS_MUTED}
                   >
@@ -274,7 +274,7 @@ export default function DispersionChart({ entries }: DispersionChartProps) {
                   textAnchor="middle"
                   dominantBaseline="hanging"
                   fontFamily={MONO}
-                  fontSize={9}
+                  fontSize="var(--text-meta)"
                   fill={CHART_AXIS_MUTED}
                 >
                   {tickFormat(tick)}
