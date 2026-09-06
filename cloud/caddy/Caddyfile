@@ -259,11 +259,6 @@ http://mcp.radon.run {
         -Server
     }
 
-    log {
-        output file /var/log/caddy/mcp.log
-        format json
-    }
-
     # Same contract as app.radon.run /mcp*: keep the /mcp prefix, bound the
     # anonymous POST body, no retry loop (POST JSON-RPC has no idempotency key).
     handle /mcp* {
