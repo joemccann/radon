@@ -78,6 +78,7 @@ Read `tools/codemap/architecture.json` before searching for a module or reconstr
 - UI bugs require Playwright E2E coverage and visual browser verification. Use `chrome-cdp` when available; otherwise use Playwright.
 - Target 95% coverage on touched surfaces.
 - Always run the relevant focused tests. Run full project suites before commits when changes are code-bearing; if baselines are already red, report focused green results and unrelated baseline failures separately.
+- Local suites are worker-budgeted: `pytest -n auto` resolves to half the cores and an explicit `-n N` above that is clamped to it (root `conftest.py`); vitest runs `maxWorkers: 50%`. CI keeps every core. Never run pytest and vitest concurrently on the laptop. Overrides: `PYTEST_XDIST_AUTO_NUM_WORKERS` (lifts the pytest budget), `VITEST_MAX_WORKERS`.
 - For scoped Python changes, prefer `python3.13 scripts/run_pytest_affected.py --files ... -- -q` first, then broaden when needed.
 - For JS/UI changes, run focused Vitest, relevant Playwright E2E, and browser screenshot checks.
 

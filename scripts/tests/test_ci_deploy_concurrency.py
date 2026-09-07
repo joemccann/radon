@@ -259,8 +259,12 @@ def test_python_ci_jobs_cache_pip_and_pin_the_test_toolchain() -> None:
 
 
 def test_vitest_uses_all_ci_workers() -> None:
+    # The worker count is resolved by vitest.workers.ts: every core on CI,
+    # half on a developer machine (web/tests/vitest-config-contract.test.ts).
     config = (WORKFLOW.parents[2] / "vitest.config.ts").read_text(encoding="utf-8")
-    assert re.search(r'maxWorkers:\s*["\']100%["\']', config)
+    budget = (WORKFLOW.parents[2] / "vitest.workers.ts").read_text(encoding="utf-8")
+    assert re.search(r"maxWorkers:\s*resolveMaxWorkers\(process\.env\)", config)
+    assert re.search(r'env\.CI\s*\?\s*["\']100%["\']', budget)
     assert re.search(r"fileParallelism:\s*true", config)
 
 

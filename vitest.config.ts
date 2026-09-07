@@ -1,5 +1,6 @@
 import { defineConfig } from "vitest/config";
 import { resolve } from "path";
+import { resolveMaxWorkers } from "./vitest.workers";
 
 export default defineConfig({
   // Repo root so `web/tests/**` includes match when `npm run test` runs from `web/`.
@@ -51,7 +52,8 @@ export default defineConfig({
     ],
     environment: "node",
     fileParallelism: true,
-    maxWorkers: "100%",
+    // Half the cores locally, all of them on CI (vitest.workers.ts).
+    maxWorkers: resolveMaxWorkers(process.env),
     // Never retry (TEST_AUDIT T-161). A suite-wide retry turns any intermittent
     // failure in an order-safety or money-math file into a green deploy gate,
     // and it suppresses exactly the first-failure signal the repo's "re-run the
