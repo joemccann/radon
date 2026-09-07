@@ -90,7 +90,6 @@ describe("webhook replay ledger degrades only on a missing table", () => {
     expect(route.indexOf("claimWebhookEventOrDegrade")).toBeLessThan(
       route.indexOf("provisionDemoTrial("),
     );
-    expect(route).toContain("notifyDemoProvisioningFailure");
   });
 });
 
@@ -163,16 +162,8 @@ describe("/demo-pending perimeter", () => {
   });
 });
 
-describe("provisioning failures page the operator, without PII", () => {
-  it("sends counts and a reason only — never a user id or email", () => {
-    const notify = source("lib/notify/pushover.ts");
-    expect(notify).toContain("PUSHOVER_TOKEN");
-    expect(notify).toContain("PUSHOVER_USER");
-    // No-ops rather than throwing when unconfigured: alerting must never be
-    // able to fail a webhook that would otherwise have provisioned a trial.
-    expect(notify).toMatch(/if \(!token \|\| !user\)/);
-    const route = source("app/api/webhooks/clerk/route.ts");
-    expect(route).not.toMatch(/notifyDemoProvisioningFailure\([^)]*email/);
-    expect(route).not.toMatch(/notifyDemoProvisioningFailure\([^)]*userId/);
-  });
-});
+// "Provisioning failures page the operator, without PII" is now pinned
+// behaviourally in pushover-notify.test.ts (T-449): fetch is stubbed and the
+// credential no-op, the never-throw contract, and the PII-free wire payload —
+// including the route firing the alert on a failed provision — are all
+// asserted on the actual request, not as source text.
