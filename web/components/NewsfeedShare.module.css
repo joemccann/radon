@@ -1,0 +1,21 @@
+.root { min-width: 0; }
+.trigger, .panel button, .action { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 44px; padding: 8px 12px; border: 1px solid var(--line-grid); border-radius: 6px; background: var(--bg-panel); color: var(--text-primary); font: inherit; font-size: 12px; text-decoration: none; cursor: pointer; }
+.trigger { color: var(--signal-core-text); }
+.trigger:hover, .panel button:hover, .action:hover { background: var(--bg-panel-raised); }
+.root :is(button,a,textarea):focus-visible { outline: 2px solid var(--border-focus); outline-offset: 3px; }
+.panel { margin-top: 12px; padding: 16px; border: 1px solid var(--line-grid); border-radius: 8px; background: var(--bg-subtle); color: var(--text-primary); font-family: var(--font-sans); text-transform: none; letter-spacing: normal; }
+.heading { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin-bottom: 16px; font-size: 14px; }
+.heading span, .captionActions span, .note, .actions p { font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
+.layout { display: grid; grid-template-columns: 108px minmax(0,1fr); align-items: start; gap: 16px; }
+.preview { aspect-ratio: 9 / 16; display: grid; place-items: center; border: 1px solid var(--line-grid); font-size: 12px; text-align: center; }
+.preview img { display: block; width: 100%; height: auto; }
+.actions { display: grid; gap: 8px; }
+.actions p { margin: 0; }
+.panel button:disabled { cursor: default; opacity: .5; }
+.label { display: block; margin: 16px 0 8px; font-size: 12px; font-weight: 600; }
+.panel textarea { width: 100%; min-height: 100px; box-sizing: border-box; padding: 10px; resize: vertical; border: 1px solid var(--line-grid); border-radius: 6px; background: var(--bg-panel); color: var(--text-primary); font: 14px/1.5 var(--font-sans); }
+.captionActions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 8px; }
+.note { margin: 10px 0 0; }
+.error, .status { font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.status:empty { display: none; }
+@media (max-width: 640px) { .layout { grid-template-columns: 80px minmax(0,1fr); gap: 12px; } .panel { padding: 12px; } .actions button, .action { white-space: normal; text-align: center; } }

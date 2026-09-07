@@ -282,3 +282,9 @@ ws-connection-stability.spec.ts
 # REVIEWED 2026-09-06 demo-headlines.spec.ts — T-455 replaced the pinned
 #   2026-09-04 headline timestamp with a window-relative Date.now() fixture.
 #   Demo compile passed; Chromium passed locally against a demo next start.
+
+# REVIEWED 2026-09-07 newsfeed-sharing.spec.ts: local Chromium desktop/mobile
+#   PNG dimensions and MP4 decoding verified. Sharing export is outside the
+#   curated P0 financial smoke; 2/2 sharing cases passed with authenticated
+#   test bypass and synthetic research data.
+newsfeed-sharing.spec.ts

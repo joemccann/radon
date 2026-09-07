@@ -9,6 +9,7 @@ import { formatAbsolute, formatRelative, formatTime } from "@/lib/newsfeedTime";
 import { useDialogChrome } from "@/lib/useDialogChrome";
 import { useBookmarks } from "@/lib/useBookmarks";
 import styles from "./NewsfeedResearchMedia.module.css";
+import NewsfeedShare from "./NewsfeedShare";
 import StarToggle from "@/components/StarToggle";
 
 export type NewsfeedLightboxFocus = {
@@ -256,6 +257,7 @@ export default function NewsfeedLightbox({
                 {absolute}
               </span>
             </footer>
+            <NewsfeedShare key={post.id} post={post} imageUrl={imageUrl} />
             {onNavigate && (canNavigatePrev || canNavigateNext) ? (
               <p className="newsfeed-lightbox__hint" aria-hidden>
                 ← / → to cycle posts · Esc to close

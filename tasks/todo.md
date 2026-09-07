@@ -5158,3 +5158,44 @@ Research posts reuse canonical posts table, with companion research_post_sources
 - All ten wrapper failures passed serially against pristine d13f982d (10/10, 38.70s); five wrappers and their test module match the integrated worktree. Full-run timeout cause remains unknown; no implementation/test changes were needed.
 - D3a depends_on: [D3] - Main advanced to e4eaa255 during green PR checks; integrate its independently tested loop changes, regenerate conflicting source-map artifacts, run integrated research/contract tests, and repeat exact-head CI before merge.
 - D3a integrated validation passed 320/320; upstream e4eaa255 full CI and production deployment completed successfully. Research implementation is unchanged from the full-suite run.
+
+# News feed social sharing (2026-09-07)
+
+## Dependency graph
+- T1 depends_on: [] - Inspect feed, media, authentication, platform export requirements.
+- T2 depends_on: [T1] - Build client-side image/video export and caption helpers with tests.
+- T3 depends_on: [T1] - Add accessible share controls to feed and lightbox, retaining selected chart.
+- T4 depends_on: [T2, T3] - Verify focused/full tests, typecheck, desktop/mobile E2E and rendered exports.
+
+## Checklist
+- [x] T1 Scope: X composer; 1080x1920 image and MP4 downloads for Stories/Reels/TikTok; editable captions, source attribution; no publishing or public research endpoint.
+- [x] T2 Export engine and tests.
+- [x] T3 Share interface and integration.
+- [x] T4 Verification and review.
+
+## News sharing review
+- Local sharing only: X composer and caption copy; 1080x1920 PNG for Stories and six-second MP4 for Reels/TikTok. No external publishing or new public research endpoints.
+- Selected chart, publisher, document date and page/caption retained; original chart aspect ratio preserved. Unsupported MP4 browsers offer PNG; errors support retry; caption drafts survive feed refresh and chart selection.
+- Focused verification: 81 passed across six suites; 4 Playwright desktop/mobile scenarios passed, including real PNG header/dimensions and MP4 header/dimensions/duration decoding.
+- Visual inspection: portrait export and desktop/mobile sharing controls checked. Independent review approved with no remaining material findings.
+- Platform references: https://docs.x.com/x-for-websites/web-intents/overview ; https://www.postman.com/meta/instagram/folder/f95kq5e/reels-publishing ; https://developers.tiktok.com/docs/en/content-posting-api-reference-upload-video .
+- Final full suite: 865 files, 8,583 passed / 1 failed, using four workers and 30-second test/hook budgets. The unrelated order-dedup-surfaces lookup failure passed an isolated rerun: 8/8. Full-suite log: /tmp/radon-share-verified-full.log; rerun: /tmp/radon-share-order-rerun.log.
+- TypeScript, targeted ESLint and git diff --check passed. Next route types regenerated after browser checks. PR publication is authorized; no merge or deployment requested.
+
+# News sharing pull request (2026-09-07)
+
+## Dependency graph
+- T1 depends_on: [] - Verify branch, original work ownership, completed tests and CI requirements.
+- T2 depends_on: [T1] - Isolate the sharing diff on current main, commit and publish a pull request.
+- T3 depends_on: [T2] - Verify registered checks on the exact PR head, monitor to completion and repair failures.
+- T4 depends_on: [T3] - Send the required Pushover notification, confirm acceptance and document final evidence.
+
+## Checklist
+- [x] T1 Branch and verification inspection.
+- [x] T2 Focused commit and PR.
+- [ ] T3 Latest-head CI green.
+- [ ] T4 Notification and review.
+
+## PR integration review
+- PR https://github.com/joemccann/radon/pull/338 had 31 passing checks on f5c55ab6.
+- Integrated source-date main update ff2b31f8; retained both task records and regenerated the combined code map. Sharing implementation files are unchanged. Latest merge-head checks and notification pending.

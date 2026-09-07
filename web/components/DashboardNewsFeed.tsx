@@ -15,6 +15,7 @@ import { useNewsfeedTagFilter } from "../lib/useNewsfeedTagFilter";
 import { useBookmarks } from "../lib/useBookmarks";
 import NewsfeedTagBar from "./NewsfeedTagBar";
 import NewsfeedLightbox, { type NewsfeedLightboxFocus } from "./NewsfeedLightbox";
+import NewsfeedShare from "./NewsfeedShare";
 import StarToggle from "./StarToggle";
 import HeadlinesTape, { newestHeadlineTime } from "./dashboard/HeadlinesTape";
 import { useHeadlines } from "../lib/useHeadlines";
@@ -469,6 +470,7 @@ export default function DashboardNewsFeed() {
                     {` · ${post.source.documentDate} · pp. ${post.source.pages.join(", ")}`}
                     {!firstImage ? " · Text-only source evidence" : ""}
                   </p> : null}
+                  <NewsfeedShare post={post} imageUrl={firstImage ?? undefined} />
                   <div data-testid="news-feed-footer" className={`news-feed-footer ${styles.footer}`}>
                     <span
                       data-testid="news-feed-timestamp"

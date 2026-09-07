@@ -918,3 +918,8 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 
 ## 2026-09-07: Original-provider attribution only
 - Research feed copy must name the original bank/provider only. Do not name the subscription aggregator in publisher labels, titles, bodies or captions. Preserve original source files privately without rewriting evidence.
+
+## 2026-09-07 - Sequence final frontend verification
+
+- Run the full suite only after implementation agents finish and focused/browser fixes are complete. Starting it while source files are changing can produce mixed-revision results and force an expensive restart.
+- Bound test workers on the shared workstation. Run Next route type generation after the dev server has stopped, then typecheck the completed generated files; do not race typechecking against regeneration.
