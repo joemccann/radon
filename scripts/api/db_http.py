@@ -129,3 +129,48 @@ def hrana_execute(
         raise
     except Exception as exc:
         raise DbHttpError(f"{type(exc).__name__}: {exc}") from exc
+
+
+def hrana_transaction(statements: Sequence[tuple[str, Sequence[Any]]], timeout: float = HRANA_TIMEOUT_S) -> None:
+    """Commit a bounded batch atomically, rolling back after any failed step.
+
+    Mirrors @libsql/client executeHranaBatch's conditional steps. A lost
+    response is ambiguous; callers must retry using stable idempotency keys.
+    """
+    if not statements or len(statements) > 100:
+        raise ValueError("transaction requires 1..100 statements")
+    db_url, token = read_env()
+    origin = http_url_from_libsql(db_url)
+    if not origin or not token:
+        raise DbHttpError("TURSO_DB_URL / TURSO_AUTH_TOKEN not configured")
+    steps = [{"stmt": {"sql": "BEGIN IMMEDIATE", "args": [], "want_rows": False}}]
+    for sql, args in [*statements, ("COMMIT", ())]:
+        steps.append({"condition": {"type": "ok", "step": len(steps) - 1},
+                      "stmt": {"sql": sql, "args": [_encode_arg(a) for a in args], "want_rows": False}})
+    commit_index = len(steps) - 1
+    steps.append({"condition": {"type": "not", "cond": {"type": "ok", "step": commit_index}},
+                  "stmt": {"sql": "ROLLBACK", "args": [], "want_rows": False}})
+    payload = json.dumps({"requests": [{"type": "batch", "batch": {"steps": steps}}, {"type": "close"}]}).encode()
+    if len(payload) > 2_097_152:
+        raise ValueError("transaction payload exceeds 2 MiB")
+    req = urllib.request.Request(origin.rstrip("/") + "/v2/pipeline", data=payload, method="POST",
+                                 headers={"Content-Type": "application/json", "Authorization": "Bearer " + token})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            raw = response.read(_MAX_RESPONSE_BYTES + 1)
+        if len(raw) > _MAX_RESPONSE_BYTES:
+            raise DbHttpError("transaction response exceeds limit")
+        body = json.loads(raw)
+        first = (body.get("results") or [{}])[0]
+        result = (first.get("response") or {}).get("result") or {}
+        if first.get("type") != "ok" or (first.get("response") or {}).get("type") != "batch":
+            raise DbHttpError("transaction pipeline failed")
+        errors = result.get("step_errors", [])
+        results = result.get("step_results", [])
+        if any(errors[:commit_index + 1]) or len(results) <= commit_index or results[commit_index] is None:
+            raise DbHttpError("transaction failed or commit was skipped")
+    except DbHttpError:
+        raise
+    except Exception as exc:
+        # Do not include transport URLs, headers, or source contents in errors.
+        raise DbHttpError(f"research transaction transport failed: {type(exc).__name__}") from exc

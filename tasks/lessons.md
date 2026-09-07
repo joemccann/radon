@@ -906,3 +906,9 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 ## 2026-08-29 - CI acceleration requires a successful production measurement
 
 - Do not stop at local green checks or a faster failed workflow. Commit and push the implementation, follow the real run through every required gate and production deploy, compare end-to-end wall time with the named baseline, and iterate on any release-only failure until the measured deploy is both green and materially faster.
+
+## Dropbox research calibration (2026-09-07)
+
+- Preserve the operator-approved selection method in `scripts/research/policy.md`: incremental measured positioning/flow/volatility/market-structure evidence, specific macro transmission, counterevidence, source dates and explicit conditionality; no quota or repetitive summaries.
+- Research media must reuse the live feed presentation: original chart region, complete titles/axes/legends/source, lead preview and secondary thumbnails, article-context enlargement. Full pages are supplementary evidence; state when evidence is text-only.
+- A model reviewing a full page beside a crop can falsely attribute the original page’s missing labels to the crop. Inspect crops independently, require visible label transcription, retain failed attempts, and verify real rendered examples before enabling unattended publication.

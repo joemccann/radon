@@ -34,6 +34,8 @@ FastAPI short-circuits auth on `is_trusted_local_request` (`scripts/api/auth.py:
 
 **Synthetic demo dataset:** `scripts/db/demo_seed.py` seeds the demo Turso once with a fabricated-but-consistent `portfolio_snapshots` row (~500K net liq, 3-4 synthetic SPY/QQQ/TSLA positions), matching journal + open-orders rows, modeled on `marketing-mockups/portfolio-recreation.html`. Demo users' simulated orders land in `paper_fills` (`account='PAPER'`), never mutating the seed.
 
+**Newsfeed schema rollout:** the Vercel frontend and demo Turso have an independent migration lifecycle from production. `/api/newsfeed/posts` joins `research_post_sources` when migration `0071` exists. If that specific table is absent, it reads the newest 500 legacy posts and excludes every `research-*` ID before the limit. Network/auth failures and other SQL errors retain the existing error or last-good-cache behavior. No request performs schema writes or copies private research into the demo database.
+
 **Workstation sample contract:** live-service-dependent read surfaces are completed at request time after the Clerk principal resolves to `demo`. Performance, current executions, cash flows, theta, ticker flow, option calendars/chains/exposure, CRI, VCG, GRG, GEX, dispersion, TRIN, and BPI therefore remain current without disk writers, Turso snapshots, FastAPI producers, or vendor credentials. Fixtures accept an injected clock, carry explicit sample provenance, and are covered at the route boundary. Seeded open orders remain intact when current-session executions are added.
 
 ## Guardrails (enforcement points)

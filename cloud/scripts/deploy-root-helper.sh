@@ -51,6 +51,8 @@ readonly -a CONTROL_PLANE_SOURCES=(
   services/radon-relay.service.d/runtime-container.conf
   services/radon-monitor.service.d/runtime-container.conf
   services/radon-newsfeed.service.d/runtime-container.conf
+  services/radon-research.service
+  services/radon-research.service.d/runtime-container.conf
 )
 readonly -a CONTROL_PLANE_TARGETS=(
   /usr/local/sbin/radon-deploy-root
@@ -92,6 +94,8 @@ readonly -a CONTROL_PLANE_TARGETS=(
   /etc/systemd/system/radon-relay.service.d/runtime-container.conf
   /etc/systemd/system/radon-monitor.service.d/runtime-container.conf
   /etc/systemd/system/radon-newsfeed.service.d/runtime-container.conf
+  /etc/systemd/system/radon-research.service
+  /etc/systemd/system/radon-research.service.d/runtime-container.conf
 )
 readonly -a CONTROL_PLANE_MODES=(
   755 755 755 644 644 755 755 644
@@ -99,6 +103,7 @@ readonly -a CONTROL_PLANE_MODES=(
   644
   644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644
   644 644 644 644 644
+  644 644
 )
 
 if [[ "${RADON_DEPLOY_HELPER_TEST_MODE:-0}" == "1" ]]; then
@@ -575,6 +580,17 @@ is_core_service() {
     [[ "$candidate" == "$core" ]] && return 0
   done
   return 1
+}
+
+start_optional_research() {
+  # Installation is inert; only explicit operator enablement joins deploys.
+  local enabled_state
+  enabled_state="$(systemctl_bounded is-enabled radon-research.service 2>/dev/null)" || return 0
+  if [[ "$enabled_state" == "enabled" || "$enabled_state" == "enabled-runtime" ]]; then
+    systemctl_bounded reset-failed radon-research.service
+    systemctl_bounded --no-block start radon-research.service
+    wait_for_unit_state radon-research.service active
+  fi
 }
 
 reset_core_failures() {
@@ -1987,6 +2003,7 @@ case "$1" in
       wait_for_unit_state "$unit" active
     done
     resume_active_snapshot
+    start_optional_research
     ;;
   recover)
     reset_core_failures
@@ -1995,6 +2012,7 @@ case "$1" in
       wait_for_unit_state "$unit" active
     done
     resume_active_snapshot
+    start_optional_research
     ;;
   verify-restored)
     verify_restored_state

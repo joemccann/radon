@@ -34,6 +34,8 @@ const GUARDED_ADMIN_ACTION_ROUTES = [
   // this route was a loopback-trusted deputy (the Next.js server IS loopback
   // to FastAPI's /ws-ticket).
   "ib/ws-ticket",
+  // Subscription research bytes require the operator allowlist on every read.
+  "newsfeed/research/files/[asset]",
   // R-180: this POST SPAWNS garch_convergence.py. Its leap/scan sibling has
   // carried the same guard since R-079; the read-only GET stays below.
   "garch-convergence/scan",

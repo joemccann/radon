@@ -1,0 +1,35 @@
+# Dropbox research ingestion
+
+The operator approved the relevance policy and chart format on 2026-09-07. `scripts/research/policy.md` is the durable selection contract. Charts are original PDF regions with complete axes/legends, a lead preview, secondary thumbnails and the existing feed lightbox. PDF pages are supplementary evidence. Source report dates are distinct from folder and publication dates.
+
+## Components and data boundary
+
+- `research.dropbox`: offline OAuth refresh, account/namespace/folder identity checks, recursive per-date cursors and bounded read-only downloads. Only `/Joe McCann/Current` is accepted. No Dropbox writes.
+- `research.state`: private SQLite discovery, revisions, retries and outbox. Cursor advancement and queue insertion are transactional; remote publication acknowledgement follows successful commit. Revisions supersede unfinished work; known folder cursors remain watched for late arrivals.
+- `research.pdf`: local Firecrawl `pdf-inspector==1.17.0`, PDFium `5.13.0`, Pillow `12.3.0`. Extraction and rendering run in bounded subprocesses. PDFs over 100 pages or 100 MiB are held rather than partially published. Image-only pages receive visual review.
+- `research.pipeline`: tool-free multimodal selection and independent claim/crop verification using `ANTHROPIC_API_KEY`, default `claude-sonnet-4-6` (override `RADON_RESEARCH_MODEL`). Missing dates, incomplete charts, source conflicts and duplicate claims fail publication. Crops receive a separate crop-only inspection with visible label transcription before claim review. A failed crop gets at most one correction against its original page, aided by PDFium glyph bounds only for verified unrotated zero-origin frames, and must pass a fresh crop-only inspection. Source content never supplies executable instructions or destinations. Every numeric assertion must also match a literal quote from a cited source page, with numeric values, currencies and units checked locally. Image-only numeric claims and unsourced calculations are held; the human-approved seed retains its separately verified calculations. A 90-day feed corpus is read in bounded pages; comparison uses a lexical/recent shortlist, not a claim of exhaustive semantic novelty.
+- `research.publish`: validated assets and atomic `posts` plus `research_post_sources` writes over bounded Turso HTTP. Reserved `research-` IDs remain idempotent across outbox retries. No competing posts.json writer.
+- Private files live in `RADON_RESEARCH_DIR/assets`, default `/var/lib/radon/research/assets` inside containers, outside public media. The host bind source is `/var/lib/radon-private/research`, beneath a root-owned `0700` anchor; the child is owned by radon with mode `0700`. Worker mount is read/write; API mount is read-only. The authenticated Next route bypasses image optimization and caches. Research rows are excluded from demo reads and the public demo mirror.
+
+## Runtime setup and activation
+
+Existing private runtime credentials are `DROPBOX_APP_KEY`, `DROPBOX_REFRESH_TOKEN`, `DROPBOX_ACCOUNT_ID`, `DROPBOX_ROOT_NAMESPACE_ID`, `DROPBOX_FOLDER_ID`, `DROPBOX_FOLDER_PATH`. Keep them and provider/Turso credentials in `/etc/radon/env`; never commit or paste their values.
+
+Deployment order is mandatory:
+
+1. Apply migration `0071_research_post_sources.sql` before deploying the joined feed query (the API container already runs the migration runner at startup).
+2. Deploy source-aware feed, authenticated media route, demo exclusion and the Python image with pinned PDF dependencies.
+3. Provision the private research directory via the control-plane runtime helper. The optional `radon-research.service` is installed but is not implicitly enabled on hosts without configured credentials.
+4. Import and verify the private approved calibration batch. `PYTHONPATH=scripts python3.13 -m research.worker --root <private-root> --seed-reviewed <private-batch>` creates a durable outbox without publication; rerunning adds no duplicate work. Batch images require `image_sha256` and PDFs retain source hashes. Bundles must use paths within their private import parent.
+5. Run the same seed command with `--publish` only after the private endpoints and provenance schema are active. Verify six accepted items and charts against their source pages.
+6. Set `RADON_RESEARCH_PUBLISH=1` in the private runtime configuration, then enable/start `radon-research.service`. The default is dry-run/outbox preparation. No further per-item approval is required after calibrated automation is enabled.
+
+`python3.13 -m research.worker --daemon` waits 120 seconds between processing cycles, preserves yesterday/today in America/New_York and continues prior watched scopes. SIGTERM finishes the current bounded operation then exits; systemd restart recovers interrupted claims. Transient failures back off; after six processing attempts an item is held with a recorded error classification. `health.json` and `service_health` receive cycle heartbeats, including idle cycles. Journal output contains counts/error classes only.
+
+## Verification and limits
+
+Focused tests cover account/path enforcement, cursors, restart/revision handling, outbox replay, asset/hash privacy, atomic publication, source metadata, visual review gates and browser chart interactions. Native rendering has CPU/memory bounds on Linux and wall-clock/pixel bounds everywhere.
+
+Model-reviewed publication remains probabilistic: every proposal needs a second source/figure review and a recorded audit. The accepted calibration batch is a reference, not proof that future model selections match human judgement. Chart crop failures after the bounded correction are held; original pages and failed attempts are retained. Unresolved failures require inspection of private `evidence/<work-key>/review.json`, queue state and `health.json`. A corrected file revision is ingested anew. A whole-document duplicate may reach selection; claim-level comparison suppresses repeated publication.
+
+Provider references: [Dropbox change detection](https://developers.dropbox.com/detecting-changes-guide), [Claude vision messages](https://platform.claude.com/docs/en/build-with-claude/vision).

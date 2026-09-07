@@ -206,3 +206,16 @@ describe("NewsfeedLightbox", () => {
     expect(onNavigate).toHaveBeenCalledWith(1);
   });
 });
+
+ it("research thumbnails switch the original image and page caption without changing posts", () => {
+ const base = "/api/newsfeed/research/files/";
+ const first = base + "a".repeat(64) + ".png";
+ const second = base + "b".repeat(64) + ".png";
+ const source = {kind: "dropbox" as const, publisher: "Synthetic Bank", url: base + "c".repeat(64) + ".pdf", documentDate: "2026-09-07", folderDate: "2026-09-07", pages: [2,3], figures: [{url:first,page:2,caption:"First chart"},{url:second,page:3,caption:"Second chart"}], fileId:"fixture",revision:"r1",contentHash:"c".repeat(64)};
+ const {getByRole, getByText} = render(<NewsfeedLightbox focus={{post:{...POST, source, images:[first,second], href:source.url}, imageUrl:first}} onDismiss={vi.fn()} />);
+ fireEvent.click(getByRole("button", {name:"View chart 2: Second chart"}));
+ expect(document.querySelector(".newsfeed-lightbox__media > img")?.getAttribute("src")).toBe(second);
+ expect(getByText("Synthetic Bank · p. 3 · Second chart")).not.toBeNull();
+ expect(getByRole("link", {name:"Source PDF"}).getAttribute("href")).toBe(source.url);
+ cleanup();
+ });

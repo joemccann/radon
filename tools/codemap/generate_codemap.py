@@ -54,7 +54,8 @@ SKIP_DIRS = {
     "worktrees",
 }
 
-SKIP_FILES = {"codemap.data.js"}
+# Next generates these ignored declarations only after a local build.
+SKIP_FILES = {"codemap.data.js", "next-env.d.ts"}
 ARTIFACT_RELS = (
     "tools/codemap/codemap.json",
     "tools/codemap/codemap.data.js",

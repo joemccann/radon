@@ -1,21 +1,21 @@
 {
-  "generated_at": "2026-09-07T17:42:14Z",
-  "node_count": 3189,
-  "edge_count": 6467,
+  "generated_at": "2026-09-07T18:30:20Z",
+  "node_count": 3215,
+  "edge_count": 6489,
   "areas": {
-    "web": 1889,
+    "web": 1894,
     "site": 145,
-    "scripts": 1044,
-    "cloud": 65,
+    "scripts": 1062,
+    "cloud": 66,
     "lib": 28,
-    "tests": 15,
+    "tests": 17,
     "tools": 3
   },
   "groups": [
     {
       "id": "web/app",
       "area": "web",
-      "count": 205
+      "count": 206
     },
     {
       "id": "web/components",
@@ -25,7 +25,7 @@
     {
       "id": "web/e2e",
       "area": "web",
-      "count": 185
+      "count": 186
     },
     {
       "id": "web",
@@ -35,7 +35,7 @@
     {
       "id": "web/lib",
       "area": "web",
-      "count": 372
+      "count": 373
     },
     {
       "id": "web/public",
@@ -50,7 +50,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 874
+      "count": 876
     },
     {
       "id": "site/app",
@@ -90,7 +90,7 @@
     {
       "id": "scripts/api",
       "area": "scripts",
-      "count": 109
+      "count": 111
     },
     {
       "id": "scripts",
@@ -178,6 +178,11 @@
       "count": 4
     },
     {
+      "id": "scripts/research",
+      "area": "scripts",
+      "count": 10
+    },
+    {
       "id": "scripts/security",
       "area": "scripts",
       "count": 1
@@ -185,7 +190,7 @@
     {
       "id": "scripts/tests",
       "area": "scripts",
-      "count": 521
+      "count": 527
     },
     {
       "id": "scripts/trade_blotter",
@@ -215,7 +220,7 @@
     {
       "id": "cloud/tests",
       "area": "cloud",
-      "count": 56
+      "count": 57
     },
     {
       "id": "lib/tools",
@@ -230,7 +235,7 @@
     {
       "id": "tests",
       "area": "tests",
-      "count": 13
+      "count": 15
     },
     {
       "id": "tools/codemap",
@@ -284,14 +289,14 @@
     {
       "id": "web/lib/routeAccess.ts",
       "area": "web",
-      "in": 85,
+      "in": 86,
       "out": 4,
       "test": false
     },
     {
       "id": "web/lib/radonApi.ts",
       "area": "web",
-      "in": 86,
+      "in": 87,
       "out": 0,
       "test": false
     },
@@ -303,14 +308,14 @@
       "test": false
     },
     {
-      "id": "scripts/db/client.py",
+      "id": "scripts/api/__init__.py",
       "area": "scripts",
-      "in": 74,
+      "in": 77,
       "out": 0,
       "test": false
     },
     {
-      "id": "scripts/api/__init__.py",
+      "id": "scripts/db/client.py",
       "area": "scripts",
       "in": 74,
       "out": 0,
@@ -326,7 +331,7 @@
     {
       "id": "scripts/api/server.py",
       "area": "scripts",
-      "in": 43,
+      "in": 44,
       "out": 17,
       "test": false
     },

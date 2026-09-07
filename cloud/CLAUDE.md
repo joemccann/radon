@@ -144,6 +144,10 @@ is dropped by systemd regardless of `NotifyAccess=`, so `Type=notify` +
 - Canonical secrets: `/etc/radon/env` (regular file, mode `0640`, owner `root:radon`)
 - Compatibility secret symlink: `/home/radon/radon-cloud/.env` -> `/etc/radon/env`
 - Canonical media: `/var/lib/radon/media`
+- Private research: `/var/lib/radon-private` is a root-owned `0700` anchor;
+  its `research` child is radon-owned `0700`. The worker mounts that child
+  read-write and API read-only at `/var/lib/radon/research`. Seed through the
+  container mount; host user radon cannot traverse the anchor.
 - Compatibility media symlink: `/home/radon/radon-cloud/media` -> `/var/lib/radon/media`
 - Durable privileged deploy state: `/var/lib/radon/deploy`
 - Control-plane manifest/readiness:

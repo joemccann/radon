@@ -13,6 +13,7 @@ import os
 import re
 import sys
 import socket
+import shlex
 import stat
 import subprocess
 import tempfile
@@ -37,6 +38,7 @@ APP_UNITS = (
     "radon-relay.service",
     "radon-monitor.service",
     "radon-newsfeed.service",
+    "radon-research.service",
 )
 TEST_SHA = "d" * 40
 FORBIDDEN_UNITS = (
@@ -769,7 +771,11 @@ def test_run_api_cleans_staged_credential_on_pre_exec_failure(
     # The failing python is a stub because /usr/bin/false is a darwin
     # location, not guaranteed on non-usrmerge Linux.
     failing_python = tmp_path / "failing-python"
-    _write_executable(failing_python, "#!/bin/bash\nexit 1\n")
+    # Provisioning also uses Python now. Fail only the notify proxy so this
+    # regression continues to exercise its intended cleanup branch.
+    private_anchor = shlex.quote(str(tmp_path / 'state' / 'private'))
+    _write_executable(failing_python,
+        f'#!/bin/bash\nif [[ "${{2:-}}" == {private_anchor} ]]; then exec {shlex.quote(sys.executable)} "$@"; fi\nexit 1\n')
     result = _run(
         tmp_path,
         ["run", "radon-api.service"],
@@ -1066,3 +1072,60 @@ exit 0
         "bind mounts; continuing into the credential cleanup is not safe"
     )
     assert "rm -f" in result.stderr or "orphan" in result.stderr.lower(), result.stderr
+
+
+def test_research_runtime_is_private_and_uses_python_image(tmp_path):
+    result = _run(tmp_path, ["run", "radon-research.service"])
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text()
+    assert "radon-python:" in log and "python -m research.worker --daemon" in log
+    assert f"{tmp_path / 'state' / 'private' / 'research'}:/var/lib/radon/research:rw" in log
+    assert ":/var/lib/radon/media" not in log
+    assert ":/home/radon/radon/data" not in log
+    assert ":/var/lib/radon/ib-lease" not in log
+    assert (tmp_path / "state" / "private" / "research").stat().st_mode & 0o777 == 0o700
+
+
+def test_api_research_mount_is_read_only(tmp_path):
+    result = _run(tmp_path, ["run", "radon-api.service"])
+    assert result.returncode == 0, result.stderr
+    assert f"{tmp_path / 'state' / 'private' / 'research'}:/var/lib/radon/research:ro" in result.docker_log.read_text()
+
+
+def test_other_apps_cannot_read_private_research(tmp_path):
+    result = _run(tmp_path, ["run", "radon-newsfeed.service"])
+    assert result.returncode == 0, result.stderr
+    assert ":/var/lib/radon/research" not in result.docker_log.read_text()
+
+@pytest.mark.parametrize('attack', ['anchor_symlink', 'child_symlink', 'writable_parent', 'public_anchor'])
+def test_research_mount_refuses_untrusted_ancestors(tmp_path, attack):
+    state = tmp_path / 'state'
+    state.mkdir()
+    anchor = state / 'private'
+    outside = tmp_path / 'outside'
+    outside.mkdir(mode=0o700)
+    if attack == 'anchor_symlink':
+        anchor.symlink_to(outside, target_is_directory=True)
+    elif attack == 'child_symlink':
+        anchor.mkdir(mode=0o700)
+        (anchor / 'research').symlink_to(outside, target_is_directory=True)
+    elif attack == 'writable_parent':
+        state.chmod(0o777)
+    else:
+        anchor.mkdir(mode=0o755)
+    result = _run(tmp_path, ['run', 'radon-research.service'])
+    assert result.returncode == 78, result.stderr
+    assert not any(line.startswith('run ') for line in result.docker_log.read_text().splitlines())
+    assert outside.stat().st_mode & 0o777 == 0o700
+    assert list(outside.iterdir()) == []
+
+
+def test_api_private_anchor_rejection_cleans_staged_credentials(tmp_path):
+    state = tmp_path / 'state'
+    state.mkdir()
+    (state / 'private').mkdir(mode=0o755)
+    result = _run(tmp_path, ['run', 'radon-api.service'])
+    assert result.returncode == 78, result.stderr
+    credential_dir = Path(result.proxy_dir) / 'credentials' / 'radon-api.service'
+    assert not credential_dir.exists()
+    assert not any(line.startswith('run ') for line in result.docker_log.read_text().splitlines())

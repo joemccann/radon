@@ -14,6 +14,7 @@ EXPECTED_SERVICE_FILES = [
     "radon-ib-gateway-remote.service",
     "radon-monitor.service",
     "radon-newsfeed.service",
+    "radon-research.service",
     "radon-nextjs.service",
     "radon-refresh.service",
     "radon-refresh.timer",

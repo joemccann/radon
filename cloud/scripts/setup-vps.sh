@@ -59,6 +59,7 @@ readonly SERVICE_FILES=(
   radon-health.service
   radon-mcp.service
   radon-newsfeed.service
+  radon-research.service
   radon-refresh.service
   radon-refresh.timer
   radon-vcg-refresh.service
@@ -936,6 +937,8 @@ enable_services() {
   local timer_owned_services=()
   local base svc
   for svc in "${SERVICE_FILES[@]}"; do
+    # Research requires private runtime credentials and explicit activation.
+    [[ "$svc" == "radon-research.service" ]] && continue
     [[ "$svc" == "radon-ib-gateway-preheld-restart.service" ]] && continue
     # Broker-only. Combined/app copy the unit but do not enable it. Certs plus
     # `systemctl enable --now` happen on the broker after the split.

@@ -412,6 +412,12 @@ recovery, and rollback sequence, follow [`cloud/CLAUDE.md`](../cloud/CLAUDE.md)
 and [`docs/monorepo-cloud-migration.md`](monorepo-cloud-migration.md) rather
 than duplicating commands in this runbook.
 
+## Private Dropbox research runtime
+
+`radon-research.service` is optional and starts only after explicit activation. Its container receives a private read/write bind from `/var/lib/radon-private/research` to `/var/lib/radon/research`; the API receives the same bind read-only. The host anchor is root-owned `0700`, its research child is radon-owned `0700`, and provisioning rejects symlinked or writable ancestors. Seed approved batches through the container bind; host user radon cannot traverse the root-only anchor. Research files never enter the public media bind or demo mirror.
+
+The API credential staging/cleanup contract remains in force when research mount provisioning fails: decrypted credential files must be removed on failure as well as normal stop. The research worker receives no API master-key mount, public media mount, or IB lease mount. Dropbox offline credentials and the model provider key remain in restricted runtime configuration. Apply migration 71 and verify private media before publication, then enable the worker. Full import and activation order: [Dropbox research](dropbox-research.md).
+
 ## Production Build Constraint
 
 Next.js 16 prerender crashes on `/_global-error` and `/_not-found` because the root ClerkProvider context isn't materialised in isolated workers. `web/package.json` build pins `next build --experimental-build-mode=compile`. The error and not-found shells (`app/error.tsx`, `app/[ticker]/not-found.tsx`, `app/global-error.tsx`) use plain `<a>` and pure JSX (no `next/link`, `useEffect`, or `globals.css`) for the same reason.

@@ -5,7 +5,7 @@ set -euo pipefail
 # Does not take the deploy lifecycle lock. radon is not in group docker.
 # Never Gateway, Caddy, health, or the engine socket.
 
-readonly APP_UNITS="radon-api.service radon-nextjs.service radon-relay.service radon-monitor.service radon-newsfeed.service"
+readonly APP_UNITS="radon-api.service radon-nextjs.service radon-relay.service radon-monitor.service radon-newsfeed.service radon-research.service"
 
 # Where the media volume lands INSIDE the container. Fixed regardless of the
 # host path, because Caddy's root and the newsfeed's download dir must agree.
@@ -417,6 +417,53 @@ render_env_file() {
   printf '%s\n' "$out"
 }
 
+# Keep the root-owned mount anchor outside radon's writable state directory.
+# Once its root-owned ancestor chain is verified, radon cannot exchange the
+# child for a symlink between provisioning and the Docker bind operation.
+prepare_research_dir() {
+  local ids="$1" anchor=/var/lib/radon-private
+  [[ "${RADON_APP_RUNTIME_TEST_MODE:-0}" == "1" ]] && anchor="${STATE_DIR}/private"
+  "$PYTHON" - "$anchor" "$ids" "${RADON_APP_RUNTIME_TEST_MODE:-0}" <<'PY_RESEARCH'
+import os, stat, sys
+from pathlib import Path
+anchor = Path(sys.argv[1])
+uid, gid = map(int, sys.argv[2].split(':'))
+test = sys.argv[3] == '1'
+owner = os.getuid() if test else 0
+if test:
+    uid, gid = os.getuid(), os.getgid()
+
+def trusted(path, expected_owner, exact_mode=None):
+    info = path.lstat()
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != expected_owner
+            or info.st_mode & 0o022
+            or (exact_mode is not None and stat.S_IMODE(info.st_mode) != exact_mode)):
+        raise ValueError('Untrusted private research directory')
+
+try:
+    # Test roots are isolated fixtures. Production checks every ancestor.
+    parents = [anchor.parent] if test else list(reversed(anchor.parents))
+    for parent in parents:
+        trusted(parent, owner)
+    try:
+        anchor.mkdir(mode=0o700)
+    except FileExistsError:
+        pass
+    trusted(anchor, owner, 0o700)
+    child = anchor / 'research'
+    try:
+        child.mkdir(mode=0o700)
+        os.chown(child, uid, gid, follow_symlinks=False)
+    except FileExistsError:
+        pass
+    trusted(child, uid, 0o700)
+except (OSError, ValueError):
+    print('Private research directory ownership or permissions invalid', file=sys.stderr)
+    raise SystemExit(78) from None
+print(child)
+PY_RESEARCH
+}
+
 cmd_run() {
   local unit="${1:-}"
   local ids image workdir
@@ -430,7 +477,7 @@ cmd_run() {
   ids="$("$ID_BIN" -u radon):$("$ID_BIN" -g radon)"
   workdir=/home/radon/radon
   case "$unit" in
-    radon-api.service|radon-monitor.service) image="$(python_image)" ;;
+    radon-api.service|radon-monitor.service|radon-research.service) image="$(python_image)" ;;
     radon-nextjs.service)
       image="$(node_image)"
       workdir=/home/radon/radon/web
@@ -488,8 +535,10 @@ cmd_run() {
   # one thing an app genuinely writes outside media/ is the shared 2FA lease,
   # which now has its own subdirectory. Create it here: the container can no
   # longer mkdir it, because the parent is not mounted. R-381.
-  mkdir -p "$LEASE_DIR"
-  chown "$ids" "$LEASE_DIR" 2>/dev/null || true
+  if [[ "$unit" != "radon-research.service" ]]; then
+    mkdir -p "$LEASE_DIR"
+    chown "$ids" "$LEASE_DIR" 2>/dev/null || true
+  fi
 
   set -- \
     run \
@@ -505,10 +554,21 @@ cmd_run() {
     --env-file "$(render_env_file "$unit")" \
     --env RADON_DB_NO_REPLICA=1 \
     --env PYTHONPATH=/home/radon/radon/scripts \
-    -w "$workdir" \
-    -v "${DATA_DIR}:/home/radon/radon/data" \
-    -v "${MEDIA_DIR}:${MEDIA_DIR_IN_CONTAINER}" \
-    -v "${LEASE_DIR}:/var/lib/radon/ib-lease"
+    -w "$workdir"
+
+  if [[ "$unit" != "radon-research.service" ]]; then
+    set -- "$@" \
+      -v "${DATA_DIR}:/home/radon/radon/data" \
+      -v "${MEDIA_DIR}:${MEDIA_DIR_IN_CONTAINER}" \
+      -v "${LEASE_DIR}:/var/lib/radon/ib-lease"
+  fi
+  if [[ "$unit" == "radon-research.service" || "$unit" == "radon-api.service" ]]; then
+    local research_dir research_mode=ro
+    research_dir="$(prepare_research_dir "$ids")" || exit $?
+    [[ "$unit" == "radon-research.service" ]] && research_mode=rw
+    set -- "$@" --env RADON_RESEARCH_DIR=/var/lib/radon/research \
+      -v "${research_dir}:/var/lib/radon/research:${research_mode}"
+  fi
 
   # App-role Gateway control: mTLS client pair lives on the host at
   # /etc/radon/ib-remote. Mount that directory only, never /etc/radon
@@ -567,6 +627,9 @@ cmd_run() {
   case "$unit" in
     radon-api.service)
       set -- "$@" sh -c 'python scripts/db/migrate.py && python scripts/secret_store.py && exec uvicorn scripts.api.server:app --host 0.0.0.0 --port 8321 --proxy-headers --forwarded-allow-ips 127.0.0.1'
+      ;;
+    radon-research.service)
+      set -- "$@" python -m research.worker --daemon
       ;;
     radon-monitor.service)
       set -- "$@" python -m scripts.monitor_daemon.run --daemon

@@ -5084,3 +5084,44 @@ Goal: ≤640px position cards expose the desktop default-ON field set (position 
 - YAML, shell syntax, diff hygiene, and gitleaks checks passed. Docker was unavailable locally, so the exact linux/amd64 image build remains gated by PR CI.
 
 ---
+
+# Dropbox research production integration (2026-09-07)
+
+Approved reference: ~/.radon/dropbox-research/calibration-policy.md and batch-2026-09-06_07/review.html. User authorized continuation after accepting all six selections and media format. Implementation isolated from unrelated marketing edits.
+
+## Dependency graph
+- T1 depends_on: [] - Implement tested folder-bound Dropbox polling and durable revision queue.
+- T2 depends_on: [] - Add atomic research provenance publication and authenticated content-addressed media.
+- T3 depends_on: [T2] - Add source-aware live-feed charts/thumbnails/lightbox and API projection.
+- T4 depends_on: [T1,T2] - Integrate pinned Firecrawl extraction, source/vision evidence validation, calibrated relevance/novelty selection and publication outbox.
+- T5 depends_on: [T1,T2,T3,T4] - Verify end-to-end with accepted batch and failure/restart tests, full suites and browser evidence.
+- T6 depends_on: [T5] - Install/deploy watcher and private media, verify runtime health and idempotent publication.
+
+## Checklist
+- [x] T1 Dropbox client and durable queue.
+- [x] T2 Publication and private media.
+- [x] T3 Feed integration.
+- [x] T4 Automated evidence pipeline.
+- [x] T5 Verification.
+- [ ] T6 Runtime activation.
+
+## Contract
+Research posts reuse canonical posts table, with companion research_post_sources(post_id, provenance_json). API source object: kind="dropbox", publisher, url (same-origin authenticated original PDF), documentDate, folderDate, pages:number[], figures:{url,page,caption}[], fileId, revision, contentHash. Private URLs /api/newsfeed/research/files/<sha256>.<png|pdf>. Python authenticated files endpoint /newsfeed/research/files/{asset}. Persistent worker state under RADON_RESEARCH_DIR (default /var/lib/radon/research), never public media. Every source asset is content-addressed and validated; no Next image optimizer for private media.
+
+## Review in progress
+- Private approved import: six items, eleven PNG charts and five source PDFs; second import queues zero duplicates.
+- Live model trial found a false-positive crop review: ECB figure headings omitted and unrelated prose included. Independent crop-only verification now rejects this case; a bounded correction using verified PDFium glyph coordinates passes crop-only review and direct visual inspection. Final integrated trial and full suites remain pending.
+- TypeScript typecheck passed; full Python/web/cloud suites running. No production publication or watcher activation yet.
+
+- Final crop/numeric gates: 109 focused tests passed; real ECB crop correction visually verified. A wrong 72bps-prior claim is rejected against source text stating 74bps prior and 72bps current, without relying on novelty filtering.
+- Full web run: 8,531 passed, five failures; three research contract failures repaired and focused checks green, two timing failures passed unchanged in isolation (45 tests). Remaining root Vitest scopes: 497 passed across 54 files.
+
+- Live production client discovery: 18 eligible PDFs across September 6/7, zero additions on the second cursor poll. Approved publisher contract: six posts/eleven figures validated without remote writes.
+- Final focused evidence pipeline: 124 passed, 100% pipeline coverage; unsupported 70bps and duplicated ECB controls held. A manually source-corrected agriculture control passes; original automated agriculture remains held.
+- Full Python: 12,096 passed, three contract failures (generated codemap freshness, owner documentation, E2E curation); fixes are being verified after main integration.
+- Full cloud: 1,815 passed, 33 failed, seven skipped. Follow-up checks resolved all failures except an unchanged operator marker timeout reproduced against pristine HEAD. Final research/runtime/setup/confinement/Caddy checks are green.
+- Production web build and trace audit passed (197 manifests); production-server browser preflight 9/9. Research E2E is curated in CI. Final web focused 194/194 and typecheck passed.
+
+- Post-integration checks on main 1f4b9331 plus this change: 311 focused Python/API/contracts passed with 16 subtests; 30 codemap tests passed. All three full-Python contract failures are resolved. Staged secret scan found no leaks. Runtime activation remains pending deployment.
+
+- PR #333 first head: all checks passed except clean-checkout codemap freshness. Regression reproduced from ignored generated next-env.d.ts; collector excludes that generated file. Red/green test, 31 codemap tests and clean archive graph equivalence passed. Rolling/demo absent-research-table regression fixed; 242 web tests and typecheck passed.

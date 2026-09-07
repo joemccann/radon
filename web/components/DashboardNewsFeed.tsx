@@ -19,6 +19,7 @@ import StarToggle from "./StarToggle";
 import HeadlinesTape, { newestHeadlineTime } from "./dashboard/HeadlinesTape";
 import { useHeadlines } from "../lib/useHeadlines";
 import styles from "./DashboardNewsFeed.module.css";
+import researchStyles from "./NewsfeedResearchMedia.module.css";
 
 /** Chips beyond this count collapse behind a `+N` expander on mobile. */
 const VISIBLE_TAG_LIMIT = 4;
@@ -31,6 +32,7 @@ function buildPostSnapshot(post: NormalisedPost) {
     source: post.href,
     timestamp: post.isoTimestamp,
     image: post.images?.[0] ?? null,
+    thumbnail: post.images?.[0] ?? null,
   };
 }
 
@@ -346,11 +348,11 @@ export default function DashboardNewsFeed() {
           onClearAll={clearTags}
         />
         {loading ? (
-          <div className="news-feed-empty">Collecting Market Ear posts…</div>
+          <div className="news-feed-empty">Collecting market analysis…</div>
         ) : error ? (
           <div className="news-feed-error">{error}</div>
         ) : posts.length === 0 ? (
-          <div className="news-feed-empty">No Market Ear posts captured yet. Ensure the scraper is running.</div>
+          <div className="news-feed-empty">No market analysis captured yet.</div>
         ) : items.length === 0 ? (
           <div className="news-feed-empty news-feed-empty-filtered">
             <span>No posts match the selected filter.</span>
@@ -438,17 +440,35 @@ export default function DashboardNewsFeed() {
                           height={675}
                           sizes="(max-width: 1440px) 100vw, 60vw"
                           className={`news-feed-image ${styles.image}`}
+                          unoptimized={post.source?.kind === "dropbox"}
                           priority={false}
                         />
                         <span className="news-feed-image-zoom" aria-hidden>
                           ⤢
                         </span>
                       </button>
-                      <figcaption className={`news-feed-figcaption ${styles.figcaption}`}>
-                        <span>Chart · {post.title}</span>
+                      <figcaption className={`news-feed-figcaption ${styles.figcaption}${post.source ? ` ${researchStyles.feedCaption}` : ""}`}>
+                        <span>{post.source ? `${post.source.publisher} · p. ${post.source.figures[0]?.page} · ${post.source.figures[0]?.caption}` : `Chart · ${post.title}`}</span>
                       </figcaption>
+                      {post.source && post.source.figures.length > 1 ? (
+                        <div className={researchStyles.feedThumbnails} aria-label="Additional charts">
+                          {post.source.figures.slice(1).map((figure, index) => (
+                            <button type="button" key={figure.url} className={researchStyles.feedThumbnail}
+                              aria-label={`Open chart ${index + 2}: ${figure.caption}`}
+                              onClick={() => setLightboxFocus({ post, imageUrl: figure.url })}>
+                              <Image src={figure.url} alt={figure.caption} width={240} height={160} unoptimized />
+                              <span>p. {figure.page}</span>
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
                     </figure>
                   ) : null}
+                  {post.source ? <p className={researchStyles.feedSource}>
+                    <a href={post.href} target="_blank" rel="noopener noreferrer">{post.source.publisher} · Source PDF</a>
+                    {` · ${post.source.documentDate} · pp. ${post.source.pages.join(", ")}`}
+                    {!firstImage ? " · Text-only source evidence" : ""}
+                  </p> : null}
                   <div data-testid="news-feed-footer" className={`news-feed-footer ${styles.footer}`}>
                     <span
                       data-testid="news-feed-timestamp"
@@ -489,7 +509,7 @@ export default function DashboardNewsFeed() {
       <footer className="panel-meta-rail" aria-label="Feed calibration">
         <div className="panel-meta-rail-item">
           <span className="k">source</span>
-          <span className="v">{commentaryOpen ? "Market Ear" : "Headlines"}</span>
+          <span className="v">{commentaryOpen ? (posts.some(p => p.source) ? "Market Ear + Research" : "Market Ear") : "Headlines"}</span>
         </div>
         <div className="panel-meta-rail-item">
           <span className="k">capture.basis</span>

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createClient, type Client } from "@libsql/client";
 
 const SCHEMA_SQL = `
@@ -14,12 +14,16 @@ CREATE TABLE IF NOT EXISTS posts (
   tags_vision TEXT,
   created_at  TEXT    NOT NULL,
   updated_at  TEXT    NOT NULL
-);
+ );
+CREATE TABLE research_post_sources (post_id TEXT PRIMARY KEY, provenance_json TEXT NOT NULL);
 `;
 
+const guard = vi.hoisted(() => vi.fn());
+vi.mock("../lib/routeAccess", () => ({ requireRouteAccess: guard }));
 let db: Client;
 
 beforeEach(async () => {
+  guard.mockResolvedValue({ok:true, principal:{kind:"operator"}});
   db = createClient({ url: ":memory:" });
   for (const stmt of SCHEMA_SQL.split(";").map((s) => s.trim()).filter(Boolean)) {
     await db.execute(stmt);
@@ -29,6 +33,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   const dbModule = await import("../lib/db");
   dbModule.__resetDbForTests();
   db.close();
@@ -136,5 +141,69 @@ describe("/api/newsfeed/posts", () => {
     const data = await response.json();
     expect(data[0].images).toEqual([]);
     expect(data[0].tags).toEqual([]);
+  });
+});
+
+describe("research post visibility", () => {
+ it("joins provenance for operators but excludes research from demo responses", async () => {
+  const base = "/api/newsfeed/research/files/" + "a".repeat(64);
+  const source = {kind:"dropbox",publisher:"Synthetic Bank",url:base+".pdf",documentDate:"2026-09-07",folderDate:"2026-09-07",pages:[2],figures:[],fileId:"id:fixture",revision:"r1",contentHash:"a".repeat(64)};
+  await db.execute({sql:"INSERT INTO posts VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",args:["research-fixture","Private research","Evidence","2026-09-07T16:00:00Z","[]","[]","[]","[]","[]","2026-09-07T16:00:00Z","2026-09-07T16:00:00Z"]});
+  await db.execute({sql:"INSERT INTO research_post_sources VALUES (?, ?)",args:["research-fixture",JSON.stringify(source)]});
+  const {GET} = await import("../app/api/newsfeed/posts/route");
+  const response = await GET();
+  expect((await response.json())[0].source).toEqual(source);
+  expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+  guard.mockResolvedValue({ok:true,principal:{kind:"demo"}});
+  expect(await (await GET()).json()).toEqual([]);
+ });
+});
+
+
+describe("newsfeed during independent research schema rollout", () => {
+  it.each(["operator", "demo"])("serves only the newest 500 legacy rows without the research table for %s", async (kind) => {
+    guard.mockResolvedValue({ ok: true, principal: { kind } });
+    await db.execute("DROP TABLE research_post_sources");
+    const insert = (id: string, timestamp: string) => ({
+      sql: "INSERT INTO posts VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      args: [id, id, "body", timestamp, "[]", "[]", "[]", "[]", "[]", timestamp, timestamp],
+    });
+    await db.batch([
+      ...Array.from({ length: 501 }, (_, index) => insert(
+        `legacy-${index}`, new Date(Date.UTC(2026, 8, 7, 0, 0, index)).toISOString(),
+      )),
+      insert("research-private", "2026-09-08T00:00:00Z"),
+    ], "write");
+
+    // Reconnecting to a real database preserves its rows. Keep the in-memory
+    // fixture available when dbExecute resets the cached client after SQL errors.
+    const dbModule = await import("../lib/db");
+    const getDb = vi.spyOn(dbModule, "getDb").mockReturnValue(db);
+    const { GET } = await import("../app/api/newsfeed/posts/route");
+    const response = await GET();
+    expect(response.status).toBe(200);
+    expect(getDb).toHaveBeenCalledTimes(2);
+    const posts = await response.json();
+    expect(posts).toHaveLength(500);
+    expect(posts[0].id).toBe("legacy-500");
+    expect(posts.at(-1).id).toBe("legacy-1");
+    expect(posts.every((post: { id: string; source?: unknown }) => !post.id.startsWith("research-") && !post.source)).toBe(true);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+  });
+
+  it.each([
+    ["NETWORK_ERROR", "fetch failed"],
+    ["SQLITE_AUTH", "not authorized"],
+    ["SQLITE_ERROR", "SQLITE_ERROR: no such table: posts"],
+    ["SQLITE_ERROR", "SQLITE_ERROR: no such table: research_post_sources_backup"],
+    ["SQLITE_ERROR", "SQLITE_ERROR: no such column: r.provenance_json"],
+    ["NETWORK_ERROR", "SQLITE_ERROR: no such table: research_post_sources"],
+  ])("does not retry the legacy query for %s: %s", async (code, message) => {
+    const execute = vi.fn().mockRejectedValue(Object.assign(new Error(message), { code }));
+    const dbModule = await import("../lib/db");
+    dbModule.__setDbForTests({ execute } as unknown as Client);
+    const { GET } = await import("../app/api/newsfeed/posts/route");
+    expect((await GET()).status).toBe(503);
+    expect(execute).toHaveBeenCalledTimes(1);
   });
 });

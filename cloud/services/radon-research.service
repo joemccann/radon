@@ -1,0 +1,25 @@
+[Unit]
+Description=Radon private Dropbox research ingestion
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=radon
+UMask=0077
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/etc/radon/env
+Environment=PYTHONPATH=/home/radon/radon/scripts
+Environment=RADON_RESEARCH_DIR=/var/lib/radon/research
+Environment=RADON_DB_NO_REPLICA=1
+ExecStart=/home/radon/radon/.venv/bin/python -m research.worker --daemon
+Restart=on-failure
+RestartSec=60
+TimeoutStopSec=120
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
