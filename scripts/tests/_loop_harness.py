@@ -183,11 +183,17 @@ def _run(
 # the model — a ladder that silently stays on one provider is the bug these
 # tests exist to catch.
 
+# 2026-09-07: the codex and grok rungs name NO model. The vendor migrates its
+# own account default forward (~/.codex/config.toml already rewrote gpt-5.4 ->
+# gpt-5.6-terra), and the pinned id is what produced the 400 that killed three
+# loops. nvidia and cerebras still name one because the grok CLI resolves them
+# through a `[model."<key>"]` config block: the rung names that stable KEY and
+# scripts/agent_cli_bootstrap.sh resolves the live id behind it.
 FALLBACK_LADDER = [
-    "codex:gpt-5.4",
-    "grok:grok-4.6",
-    "nvidia:nvidia/nemotron-3-ultra-550b-a55b",
-    "cerebras:qwen-3.8-27b",
+    "codex",
+    "grok",
+    "nvidia:nvidia-latest",
+    "cerebras:cerebras-latest",
 ]
 CLAUDE_LADDER = ["claude:" + m for m in LADDER]
 
@@ -210,7 +216,27 @@ PROVIDER_BINARY = {
 }
 
 
-def _provider_stub(attempts, capped, cap_line, cap_exit):
+# The real 400 that killed reliability, ci-performance and documentation on
+# 2026-09-07. Not a cap and not a network blip: a permanent rejection of THIS
+# rung, which must cost one rung and none of the transient-network attempts.
+REJECTION_400_LINE = (
+    'ERROR: {"type":"error","status":400,"error":{"type":'
+    "\"invalid_request_error\",\"message\":\"The 'gpt-5.4' model is not "
+    'supported when using Codex with a ChatGPT account."}}'
+)
+# The same text QUOTED by a crashing round rather than printed as the CLI's own
+# final verdict. These loops audit their own wrappers and echo this string.
+REJECTION_QUOTED_OUTPUT = (
+    "Traceback (most recent call last):\n"
+    '  File "audit.py", line 12, in <module>\n'
+    "    " + REJECTION_400_LINE + "\n"
+    '  File "audit.py", line 31, in check\n'
+    "    raise SystemExit(1)\n"
+    "SystemExit: 1"
+)
+
+
+def _provider_stub(attempts, capped, cap_line, cap_exit, rejected, reject_out):
     """One stub body, shared by every provider binary.
 
     It derives its own provider from $0 plus GROK_HOME (the grok binary hosts
@@ -234,6 +260,10 @@ def _provider_stub(attempts, capped, cap_line, cap_exit):
         "  shift\n"
         "done\n"
         'printf "%s\\t%s\\t%s\\n" "$prov" "$model" "$args" >> "' + str(attempts) + '"\n'
+        'if grep -qxF -- "$prov" "' + str(rejected) + '"; then\n'
+        '  cat "' + str(reject_out) + '"\n'
+        "  exit 1\n"
+        "fi\n"
         'if grep -qxF -- "$prov" "' + str(capped) + '"; then\n'
         '  case "$prov" in\n'
         '    claude) echo "' + (cap_line or CLAUDE_SESSION_CAP_LINE) + '" ;;\n'
@@ -257,6 +287,8 @@ def _run_multi(
     authed=("claude", "codex", "grok", "nvidia", "cerebras"),
     cap_line=None,
     cap_exit=1,
+    reject_providers=(),
+    reject_output=None,
 ):
     """Run one phase against stubbed provider CLIs.
 
@@ -269,8 +301,16 @@ def _run_multi(
     capped = tmp_path / "capped.txt"
     capped.write_text("".join(p + "\n" for p in capped_providers), encoding="utf-8")
 
+    rejected = tmp_path / "rejected.txt"
+    rejected.write_text("".join(p + "\n" for p in reject_providers), encoding="utf-8")
+    reject_out = tmp_path / "reject_out.txt"
+    reject_out.write_text(
+        (REJECTION_400_LINE if reject_output is None else reject_output) + "\n",
+        encoding="utf-8",
+    )
+
     bin_dir = _stub_bin(tmp_path, tmp_path / "models.txt", capped, gh_log)
-    body = _provider_stub(attempts, capped, cap_line, cap_exit)
+    body = _provider_stub(attempts, capped, cap_line, cap_exit, rejected, reject_out)
     for prov in ("claude", "codex", "grok"):
         exe = bin_dir / PROVIDER_BINARY[prov]
         if prov in installed:

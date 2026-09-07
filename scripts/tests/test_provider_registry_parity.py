@@ -34,6 +34,7 @@ SHARED = [
     "advance_rung",
     "quota_regex",
     "session_regex",
+    "rejection_regex",
     "launch_round",
 ]
 

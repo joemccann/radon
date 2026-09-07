@@ -760,7 +760,16 @@ LOOP_LOG_TAG="ci-performance"
 PORTABLE_PROMPT_DIR="${RADON_PORTABLE_PROMPT_DIR:-$REPO/.claude/portable-prompts}"
 # `RADON_WEEKEND_MODEL_LADDER` still names claude rungs, for the loops that
 # have them; `RADON_WEEKEND_PROVIDER_LADDER` overrides the whole ladder.
-PROVIDER_LADDER="${RADON_WEEKEND_PROVIDER_LADDER:-codex:gpt-5.4 grok:grok-4.6 nvidia:nvidia/nemotron-3-ultra-550b-a55b cerebras:qwen-3.8-27b}"
+# 2026-09-07: a pinned codex model id (gpt-5.4) started answering HTTP 400
+# "not supported when using Codex with a ChatGPT account" once OpenAI migrated
+# the account default forward to gpt-5.6-terra, and three loops died with no
+# issue comment. Operator's decision: do not pin. A rung may name a provider
+# with NO model, which launches that CLI with no --model flag so the account
+# default in force that night is what runs. nvidia and cerebras still name one
+# because the grok CLI resolves them through a `[model."<key>"]` block: the
+# rung names that STABLE KEY and scripts/agent_cli_bootstrap.sh resolves the
+# live id behind it from the provider's own /v1/models.
+PROVIDER_LADDER="${RADON_WEEKEND_PROVIDER_LADDER:-codex grok nvidia:nvidia-latest cerebras:cerebras-latest}"
 
 # --- provider ladder (byte-identical across all five loops) ------------------
 # A rung is `provider:model`. 2026-09-06: a Claude session cap is shared across
@@ -779,7 +788,10 @@ EXHAUSTED_PROVIDERS=""
 read -r -a PROVIDER_RUNGS <<< "$PROVIDER_LADDER"
 
 rung_provider() { printf '%s' "${1%%:*}"; }
-rung_model() { printf '%s' "${1#*:}"; }
+# The model half of a rung is OPTIONAL. A bare `codex` or `grok` rung resolves
+# to the empty string, and launch_round then omits --model entirely rather than
+# passing an empty one.
+rung_model() { case "$1" in *:*) printf '%s' "${1#*:}" ;; *) : ;; esac; }
 
 # Resolved by absolute path, never bare `command -v`, for codex and grok: the
 # npm @openai/codex install on this host ships an empty vendor directory and
@@ -924,16 +936,37 @@ session_regex() {
   esac
 }
 
+# A PERMANENT rejection of THIS rung: the provider answered, understood the
+# request and refused it. 2026-09-07: `codex exec --model gpt-5.4` returned
+# HTTP 400 invalid_request_error ("The 'gpt-5.4' model is not supported when
+# using Codex with a ChatGPT account") for every round of three loops. A 400 is
+# neither a cap nor a transient network error, so nothing classified it and the
+# ladder never advanced. Scoped exactly like session_regex when it is applied:
+# this round's slice, no wrapper marker lines, a bounded tail — so prose that
+# merely QUOTES the text (these loops audit their own wrappers) is not one.
+rejection_regex() {
+  case "$1" in
+    *) printf '%s' 'invalid_request_error|model is not supported|model metadata for .* not found|unknown model|"status":[[:space:]]*400' ;;
+  esac
+}
+
 # One launch per rung. Backgrounded and `wait`ed, never foreground: bash defers
 # trap handling until a foreground child exits, and `-k` escalates to SIGKILL so
 # a CLI blocked on a hung child cannot make the cap advisory. R-384, R-386.
 launch_round() {
   local remain="$1" prompt_file="$PORTABLE_PROMPT_DIR/$LOOP_SKILL.$PHASE.md"
+  # A bare rung names no model on purpose: the CLI/account default is what runs
+  # and the vendor migrates it forward. An empty --model is NOT the same thing,
+  # so the flag is omitted entirely. `${a[@]+"${a[@]}"}` because bash 3.2 (the
+  # /bin/bash on this runner) errors on an empty "${a[@]}" under set -u.
+  # Reasoning effort is always medium, on every provider that takes one.
+  local -a model_flag=()
+  if [[ -n "$RUNG_MODEL" ]]; then model_flag=(--model "$RUNG_MODEL"); fi
   case "$RUNG_PROVIDER" in
     claude)
       CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 "$TIMEOUT_BIN" -k "$KILL_AFTER_SECS" "$remain" \
         "$RUNG_BIN" -p "/$LOOP_SKILL $PHASE" \
-        --model "$RUNG_MODEL" \
+        ${model_flag[@]+"${model_flag[@]}"} \
         --dangerously-skip-permissions \
         --output-format text >> "$RUN_LOG" 2>&1 &
       ;;
@@ -941,13 +974,15 @@ launch_round() {
       # --sandbox workspace-write, never the bypass flag: parity with the
       # claude rung's bounded grant, not a wider one.
       "$TIMEOUT_BIN" -k "$KILL_AFTER_SECS" "$remain" \
-        "$RUNG_BIN" exec --model "$RUNG_MODEL" -C "$REPO" --color never \
+        "$RUNG_BIN" exec ${model_flag[@]+"${model_flag[@]}"} \
+        -c model_reasoning_effort="medium" -C "$REPO" --color never \
         --sandbox workspace-write --skip-git-repo-check \
         - < "$prompt_file" >> "$RUN_LOG" 2>&1 &
       ;;
     grok)
       "$TIMEOUT_BIN" -k "$KILL_AFTER_SECS" "$remain" \
-        "$RUNG_BIN" --prompt-file "$prompt_file" --model "$RUNG_MODEL" \
+        "$RUNG_BIN" --prompt-file "$prompt_file" ${model_flag[@]+"${model_flag[@]}"} \
+        --reasoning-effort medium \
         --cwd "$REPO" --always-approve --output-format plain >> "$RUN_LOG" 2>&1 &
       ;;
     nvidia | cerebras)
@@ -956,7 +991,8 @@ launch_round() {
       # which neither NVIDIA NIM nor Cerebras serves (both 404, 2026-09-06).
       GROK_HOME="$AGENT_CLI_ROOT/grok-home-$RUNG_PROVIDER" \
         "$TIMEOUT_BIN" -k "$KILL_AFTER_SECS" "$remain" \
-        "$RUNG_BIN" --prompt-file "$prompt_file" --model "$RUNG_MODEL" \
+        "$RUNG_BIN" --prompt-file "$prompt_file" ${model_flag[@]+"${model_flag[@]}"} \
+        --reasoning-effort medium \
         --cwd "$REPO" --always-approve --output-format plain >> "$RUN_LOG" 2>&1 &
       ;;
     *)
@@ -995,6 +1031,14 @@ is_session_limited() {
   # scan only the last 3 non-empty non-wrapper lines for the real cap shape.
   tail -c "+$((ROUND_LOG_MARK + 1))" "$RUN_LOG" 2>/dev/null \
     | grep -v '^\[' | grep -v '^[[:space:]]*$' | tail -n 3 | grep -qiE "$(session_regex "$RUNG_PROVIDER")"
+}
+
+# The same narrow scoping as is_session_limited: the CLI prints its refusal as
+# its final line, so only the last 3 non-empty non-wrapper lines of THIS round
+# count. A Traceback quoting the 400 mid-run is not a rejection.
+is_rung_rejected() {
+  tail -c "+$((ROUND_LOG_MARK + 1))" "$RUN_LOG" 2>/dev/null \
+    | grep -v '^\[' | grep -v '^[[:space:]]*$' | tail -n 3 | grep -qiE "$(rejection_regex "$RUNG_PROVIDER")"
 }
 
 is_transient_network_failure() {
@@ -1075,6 +1119,15 @@ run_phase() {
     if is_session_limited; then
       echo "[$LOOP_LOG_TAG] $RUNG_PROVIDER:$RUNG_MODEL hit a shared account cap" | tee -a "$RUN_LOG"
       advance_rung wide "session limit" || { ALL_PROVIDERS_EXHAUSTED=1; break; }
+      echo "[$LOOP_LOG_TAG] continuing on $RUNG_PROVIDER:$RUNG_MODEL" | tee -a "$RUN_LOG"
+      continue
+    fi
+    # A permanent rejection is neither: it advances ONE rung (another model or
+    # provider may be fine, so `wide` would throw away good rungs) and spends
+    # none of the three transient-network attempts.
+    if (( RC != 0 )) && is_rung_rejected; then
+      echo "[$LOOP_LOG_TAG] $RUNG_PROVIDER:$RUNG_MODEL was rejected by the provider" | tee -a "$RUN_LOG"
+      advance_rung "" "rung rejected by provider" || { ALL_PROVIDERS_EXHAUSTED=1; break; }
       echo "[$LOOP_LOG_TAG] continuing on $RUNG_PROVIDER:$RUNG_MODEL" | tee -a "$RUN_LOG"
       continue
     fi

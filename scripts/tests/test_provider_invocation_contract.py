@@ -38,7 +38,10 @@ class TestTheWire:
         assert argv, "codex was never launched"
         first = argv[0]
         assert first.startswith("exec "), first
-        assert "--model gpt-5.4" in first, first
+        assert "--model" not in first.split(), (
+            f"the codex rung must not pin a model: {first}"
+        )
+        assert "model_reasoning_effort" in first, first
         assert "--sandbox workspace-write" in first, (
             "codex must get the same bounded grant the claude rung has, not "
             f"--dangerously-bypass-approvals-and-sandbox: {first}"
@@ -56,7 +59,10 @@ class TestTheWire:
         assert len(argv) >= 2, argv
         grok = argv[1]
         assert "--prompt-file" in grok, grok
-        assert "--model grok-4.6" in grok, grok
+        assert "--model" not in grok.split(), (
+            f"the grok rung must not pin a model: {grok}"
+        )
+        assert "--reasoning-effort medium" in grok, grok
         assert "--cwd" in grok, grok
         assert "--output-format plain" in grok, grok
 
