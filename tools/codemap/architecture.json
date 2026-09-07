@@ -1,10 +1,10 @@
 {
-  "generated_at": "2026-09-07T21:30:12Z",
-  "node_count": 3227,
+  "generated_at": "2026-09-07T22:07:52Z",
+  "node_count": 3228,
   "edge_count": 6508,
   "areas": {
     "web": 1899,
-    "site": 151,
+    "site": 152,
     "scripts": 1063,
     "cloud": 66,
     "lib": 28,
@@ -75,7 +75,7 @@
     {
       "id": "site/lib",
       "area": "site",
-      "count": 51
+      "count": 52
     },
     {
       "id": "site/scripts",
