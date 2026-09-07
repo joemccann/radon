@@ -93,8 +93,18 @@ def test_caddy_install_is_version_pinned_and_checksum_verified() -> None:
     assert steps, "no workflow step installs caddy"
     for run in steps:
         assert re.search(r'ver="\d+\.\d+\.\d+"', run), run
-        assert "_checksums.txt" in run, run
-        assert "sha512sum -c --ignore-missing" in run, run
+        # 2026-09-07: fetching caddy_<ver>_checksums.txt from the same host, in
+        # the same breath as the tarball, verified only that the download
+        # matched whatever that endpoint served — an attacker who can replace
+        # one can replace the other and the check still passes. The expected
+        # digest is now a reviewed literal in the workflow.
+        assert "_checksums.txt" not in run, (
+            "the digest must not be fetched from the same host as the artifact"
+        )
+        assert re.search(r'sha512="[0-9a-f]{128}"', run), (
+            f"no pinned sha512 literal in the caddy install step: {run}"
+        )
+        assert "sha512sum -c -" in run, run
 
 
 def test_ci_caddy_version_equals_the_production_apt_pin() -> None:

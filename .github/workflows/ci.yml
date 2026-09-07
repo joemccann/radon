@@ -549,12 +549,22 @@ jobs:
           set -euo pipefail
           # v2.11.4 was the latest stable release tag on 2026-09-02.
           ver="2.11.4"
+          # The expected digest is pinned HERE, in a reviewed file, not read
+          # from the same host that serves the tarball. Fetching
+          # the release's own checksum file alongside the artifact verified only that
+          # the download matched whatever that endpoint served in the same
+          # breath: an attacker who can replace one can replace the other, and
+          # the check passes. This literal was captured on 2026-09-07 and
+          # cross-checked against the digest api.github.com reports for the
+          # release asset (sha256:527fbf917c39189a1e3b31d34fa955601680b2d5c8055d2a87b8b9588dec7bb9,
+          # 17238873 bytes, uploaded 2026-06-03). Changing `ver` REQUIRES
+          # re-capturing both, out of band, in the same commit.
+          sha512="8220d1f013b6f27510247b2360c9e0ca9f018feebd82515f07635318b34ff9777ccc8fd0b6e6f2486ce3a33fe389fbb7db12d05baa474f4587509fb4f5ebf1c9"
           base="https://github.com/caddyserver/caddy/releases/download/v${ver}"
           tarball="caddy_${ver}_linux_amd64.tar.gz"
           dl="$(mktemp -d)"
           curl -fsSL "${base}/${tarball}" -o "${dl}/${tarball}"
-          curl -fsSL "${base}/caddy_${ver}_checksums.txt" -o "${dl}/caddy_${ver}_checksums.txt"
-          (cd "$dl" && sha512sum -c --ignore-missing "caddy_${ver}_checksums.txt")
+          echo "${sha512}  ${dl}/${tarball}" | sha512sum -c -
           tar -xzf "${dl}/${tarball}" -C "$dl" caddy
           sudo install -m 0755 "${dl}/caddy" /usr/local/bin/caddy
           caddy version
