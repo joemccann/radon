@@ -16,7 +16,7 @@ import { faqStructuredData } from "@/lib/faq-content";
 
 export default function LandingPage() {
   return (
-    <div className="min-h-screen bg-canvas font-serif text-[19px] leading-[1.62] text-primary">
+    <div className="min-h-screen bg-canvas font-sans text-[16px] leading-[1.55] text-primary">
       <ScrollProgress />
       <a
         href="#main-content"
@@ -30,13 +30,13 @@ export default function LandingPage() {
         <SectionRule />
         <FlowThesisSection />
         <SectionRule />
-        <ConvexitySection />
-        <SectionRule />
         <RegimeSection />
         <SectionRule />
         <PipelineSection />
         <SectionRule />
         <RegistrySection />
+        <SectionRule />
+        <ConvexitySection />
         <SectionRule />
         <EvidenceSection />
         <SectionRule />

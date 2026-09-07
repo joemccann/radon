@@ -72,7 +72,7 @@ export function ThemeToggle() {
       suppressHydrationWarning
       aria-label={ariaLabel}
       title={ariaLabel}
-      className="inline-flex items-center gap-2 rounded-[999px] border border-grid bg-panel px-3 py-2 min-h-[44px] min-w-[44px] font-mono text-[10px] uppercase tracking-[0.16em] text-primary transition-colors hover:bg-panel-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/60"
+      className="inline-flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-[8px] border border-grid bg-panel px-3 text-[12px] font-medium text-primary transition-colors hover:bg-panel-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/60"
       onClick={handleToggle}
     >
       {nextTheme === "light" ? <Sun size={14} /> : <Moon size={14} />}

@@ -20,13 +20,13 @@ export const PAGE_TITLE =
 export const PAGE_DESCRIPTION =
   "The seven-milestone method that turns a dark pool print into a convex, defined-risk options trade, with the thresholds and the stop rules stated.";
 export const PAGE_H1 =
-  "The flow finds the edge. The structure makes it convex.";
+  "A dark-pool print is not a trade until the structure is defined-risk.";
 
 // Frozen content dates for the TechArticle schema. Update on meaningful copy
 // changes; a request-time stamp gets ignored (same rationale as
 // SITE_CONTENT_LAST_MODIFIED in lib/seo.ts).
 export const DATE_PUBLISHED = "2026-07-03";
-export const DATE_MODIFIED = "2026-07-03";
+export const DATE_MODIFIED = "2026-09-07";
 
 // Mirrors the clusterPageMetadata helper specified for lib/seo.ts. Kept here
 // so this page ships without editing shared files; the integrator can lift it

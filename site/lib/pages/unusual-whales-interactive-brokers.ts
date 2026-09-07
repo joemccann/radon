@@ -21,14 +21,14 @@ export const NAV_LABEL = "Unusual Whales + Interactive Brokers";
 export const PAGE_TITLE =
   "Unusual Whales + Interactive Brokers | Radon Terminal";
 export const PAGE_DESCRIPTION =
-  "How Unusual Whales flow becomes Interactive Brokers orders: dark pool prints scored, gated, sized, and routed as defined-risk combo orders. Free demo.";
+  "How Unusual Whales flow becomes an Interactive Brokers expression: construct the view from dark-pool prints, then size a defined-risk combo. Free demo.";
 export const PAGE_HEADLINE =
   "Unusual Whales prints in. Interactive Brokers orders out.";
 
 // Frozen content dates (same rationale as SITE_CONTENT_LAST_MODIFIED in
 // lib/seo.ts): update when the copy meaningfully changes, never request-time.
 export const DATE_PUBLISHED = "2026-07-03";
-export const DATE_MODIFIED = "2026-07-03";
+export const DATE_MODIFIED = "2026-09-06";
 
 export const pageUrl = `${siteUrl}/${SLUG}`;
 
@@ -173,7 +173,7 @@ export const requirementRows: RequirementRow[] = [
   },
   {
     component: "Radon demo · demo.radon.run",
-    supplies: "Full instrument on seeded data",
+    supplies: "View construction and expression on seeded data",
     requiredFor: "Neither subscription",
   },
 ];
@@ -187,7 +187,7 @@ export const faqEntries: FaqEntry[] = [
   {
     question: "Can I act on Unusual Whales alerts without Radon?",
     answer:
-      "You can. An alert is a read, and nothing stops a trader from acting on it directly. What Radon adds is the discipline between read and order: reconciliation against the Interactive Brokers tape, four sequential gates, fractional Kelly sizing hard-capped at 2.5% of bankroll per position, a mandatory pre-trade risk check, and a journaled audit trail.",
+      "You can. An alert is a read, and nothing stops a trader from acting on it directly. What Radon adds is the rest of the view, then the expression: reconciliation against the Interactive Brokers tape, a structure that owns the idea, four sequential gates, fractional Kelly sizing hard-capped at 2.5% of bankroll per position, a mandatory pre-trade risk check, and a journaled audit trail.",
   },
   {
     question: "Which Unusual Whales data does Radon use?",

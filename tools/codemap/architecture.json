@@ -1,10 +1,10 @@
 {
-  "generated_at": "2026-09-07T18:30:20Z",
-  "node_count": 3215,
-  "edge_count": 6489,
+  "generated_at": "2026-09-07T19:40:42Z",
+  "node_count": 3221,
+  "edge_count": 6501,
   "areas": {
     "web": 1894,
-    "site": 145,
+    "site": 151,
     "scripts": 1062,
     "cloud": 66,
     "lib": 28,
@@ -60,7 +60,7 @@
     {
       "id": "site/components",
       "area": "site",
-      "count": 60
+      "count": 63
     },
     {
       "id": "site/e2e",
@@ -75,7 +75,7 @@
     {
       "id": "site/lib",
       "area": "site",
-      "count": 48
+      "count": 51
     },
     {
       "id": "site/scripts",
@@ -469,6 +469,13 @@
       "test": false
     },
     {
+      "id": "site/lib/seo.ts",
+      "area": "site",
+      "in": 31,
+      "out": 1,
+      "test": false
+    },
+    {
       "id": "scripts/perf_twr_builder.py",
       "area": "scripts",
       "in": 21,
@@ -487,13 +494,6 @@
       "area": "web",
       "in": 31,
       "out": 0,
-      "test": false
-    },
-    {
-      "id": "site/lib/seo.ts",
-      "area": "site",
-      "in": 30,
-      "out": 1,
       "test": false
     },
     {
