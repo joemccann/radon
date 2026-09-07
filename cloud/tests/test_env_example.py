@@ -98,6 +98,22 @@ class TestUWToken:
         assert "UW_TOKEN" in env_vars
 
 
+class TestDropboxResearchVariables:
+    REQUIRED = [
+        "DROPBOX_APP_KEY",
+        "DROPBOX_REFRESH_TOKEN",
+        "DROPBOX_ACCOUNT_ID",
+        "DROPBOX_ROOT_NAMESPACE_ID",
+        "DROPBOX_FOLDER_ID",
+        "DROPBOX_FOLDER_PATH",
+    ]
+
+    def test_contains_private_research_variables(self, root):
+        env_vars = parse_env_vars(read_env_example(root))
+        for var in self.REQUIRED:
+            assert var in env_vars, f"Missing Dropbox research variable: {var}"
+
+
 class TestIBSessionVariables:
     def test_contains_vnc_server_password(self, root):
         env_vars = parse_env_vars(read_env_example(root))
