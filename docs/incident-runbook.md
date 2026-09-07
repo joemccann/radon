@@ -510,22 +510,33 @@ on the daily 22:40 UTC timer.** Peak: 2026-08-23 23:57Z, page `c52496dd…`.
   `Result=exit-code` with a health `error` row. If `/health/lite` is down
   too → API, stand down.
 - **Remediation (code):** wall-clock `SWEEP_BUDGET_S=780` with per-ticker
-  `TICKER_FETCH_BUDGET_S=90` via `future.result(timeout=)` so a tarpitted
-  request is abandoned and the process exits, heartbeats `error`, and
-  leaves unfinished tickers for the next weekly fire.
+  `TICKER_FETCH_BUDGET_S=90` via daemon `thread.join(timeout=)` so a
+  tarpitted request is abandoned. The hung Session is replaced and the
+  walk continues; one tarpit must not mark the rest of the watchlist
+  `budget` and zero the week. Empty-cycle `last_error.message` includes
+  the `codes` so a timeout is not read as a missing series.
   `TimeoutStartSec` stays 900. Do not restart-flap the hung run; after the
   fix deploys, one `radon unit restart radon-equibles-ats.service` (next
   timer is 7d out). Unattended, that is `reset-failed` + start (unit is on
   `RERUNNABLE_ONESHOT_UNITS`); polkit grants those two verbs and never
   `restart`.
+- **Follow-on (2026-09-01 11:36Z, still showing 2026-09-07):** the
+  post-timeout rerun heartbeated `no ticker produced a series /
+  requested=33 / failed=33` with no `codes`. Duration matched
+  `TICKER_FETCH_BUDGET_S` (scan_time 11:35:09Z, updated 11:36:39Z).
+  Equibles recovered (siblings `ok` 2026-09-05..07; live
+  `/off-exchange-volume` AAPL 0.94s) but the Tuesday timer is the only
+  retry once the oneshot exits 0. Health row is that single cycle, not a
+  daily re-fail.
 - **Regression:**
   `test_equibles_ats_venue_share.py::TestSweepBudget`
   (`test_tarpitted_equibles_stops_inside_the_wall_clock_budget`,
   `test_tickers_finished_before_the_deadline_are_kept`,
+  `test_timeout_on_one_ticker_does_not_budget_skip_the_rest`,
   `test_sweep_budget_fits_inside_unit_start_timeout`),
   `test_systemd_services.py::TestEquiblesAtsScanBudget`.
 - **Code:** `scripts/fetch_equibles_ats_venue_share.py` (`SWEEP_BUDGET_S`,
-  `TICKER_FETCH_BUDGET_S`, `_fetch_ticker_bounded`),
+  `TICKER_FETCH_BUDGET_S`, `_fetch_ticker_bounded`, `_replace_wedged_client`),
   `cloud/services/radon-equibles-ats.service` (`TimeoutStartSec=900`).
 
 ---

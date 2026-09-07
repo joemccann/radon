@@ -637,6 +637,38 @@ class TestSweepBudget:
         assert self.health[-1]["state"] == "ok"
         assert len(self.db_writes) == 1
 
+    def test_timeout_on_one_ticker_does_not_budget_skip_the_rest(self, monkeypatch):
+        """2026-09-01 11:36Z: Equibles tarpitted the first watchlist name
+        for TICKER_FETCH_BUDGET_S (90s). The handler then marked every
+        remaining ticker `budget` and broke, so a 33-name universe wrote
+        `no ticker produced a series / requested=33 / failed=33` and sat
+        in error until the next Tuesday fire — even after Equibles recovered.
+        One hung Session must not zero the week."""
+        weeks = mondays(MIN_HISTORY_WEEKS + 4)
+        names = ["AAPL", "MSFT", "NVDA"]
+        off = {t: [off_exchange_row(w) for w in weeks] for t in names}
+        short = {t: [r for w in weeks for r in short_volume_week(w)] for t in names}
+        client = _StubClient(off, short)
+        real = self.mod._fetch_ticker_bounded
+
+        def hang_first(client_, ticker, start_s, end_s, timeout_s=0.0):
+            if ticker == "AAPL":
+                raise TimeoutError(f"{ticker}: fetch exceeded {timeout_s:.0f}s wall-clock")
+            return real(client_, ticker, start_s, end_s, timeout_s=timeout_s)
+
+        monkeypatch.setattr(self.mod, "_fetch_ticker_bounded", hang_first)
+        payload = self.mod.run(client=client, tickers=names)
+
+        assert payload["count"] == 2
+        assert set(payload["tickers"]) == {"MSFT", "NVDA"}
+        assert [e["ticker"] for e in payload["errors"]] == ["AAPL"]
+        assert payload["errors"][0]["code"] == "timeout"
+        assert {e["code"] for e in payload["errors"]} == {"timeout"}
+
+    def test_replace_wedged_client_leaves_an_injected_client_alone(self):
+        client = object()
+        assert self.mod._replace_wedged_client(client, owned=False) is client
+
     def test_sweep_budget_fits_inside_unit_start_timeout(self):
         service = (
             Path(__file__).resolve().parents[2]
@@ -825,11 +857,11 @@ class TestNextAttemptAt:
         self.mod.run(client=client, tickers=["AAPL", "ZZZZ"], now=now)
 
         error = self._errors()[0]
-        assert error["message"] == "no ticker produced a series"
+        assert error["message"] == "no ticker produced a series (not_found)"
         assert error["next_attempt_at"] is None
         assert "not_found" in error["codes"]
 
-    def test_wedged_client_empty_cycle_reports_timeout_and_budget_codes(self, monkeypatch):
+    def test_timeout_on_every_ticker_reports_timeout_codes(self, monkeypatch):
         now = datetime.now(timezone.utc)
 
         def wedged(_client, ticker, _start, _end, timeout_s=0.0):
@@ -840,10 +872,13 @@ class TestNextAttemptAt:
         self.mod.run(client=client, tickers=["AAPL", "MSFT", "NVDA"], now=now)
 
         error = self._errors()[0]
-        assert error["message"] == "no ticker produced a series"
+        assert error["message"] == "no ticker produced a series (timeout)"
         # A wedged client is the case R-615 must NOT silence for a week.
         assert error["next_attempt_at"] is None
-        assert error["codes"] == ["budget", "timeout"]
+        assert error["codes"] == ["timeout"]
+        # One hung Session used to mark the tail `budget` and break, so
+        # three timeouts collapsed into timeout+budget and zero series.
+        assert error["failed"] == 3
 
     def test_partial_cycle_error_carries_next_attempt(self):
         from clients.equibles_client import EquiblesNotFoundError
@@ -953,8 +988,8 @@ class TestNaiveNowDoesNotBreakTheErrorRow:
         def _client(*a, **k):
             raise _Boom("upstream down")
 
-        monkeypatch.setattr(mod, "load_universe", lambda: ["AAPL"], raising=False)
-        monkeypatch.setattr(mod, "EquiblesClient", _client, raising=False)
+        monkeypatch.setattr("clients.equibles_client.EquiblesClient", _client)
         with pytest.raises(Exception) as excinfo:
             mod.run(now=datetime(2026, 9, 1, 9, 0), tickers=["AAPL"])
         assert not isinstance(excinfo.value, TypeError), excinfo.value
+        assert rows and rows[0][0] == "error"

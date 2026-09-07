@@ -1,5 +1,17 @@
 # Lessons
 
+## 2026-09-07 — A weekly error row is one cycle, not a daily re-fail
+
+- `equibles-ats-venue-share` `no ticker produced a series / requested=33 /
+  failed=33` with no `codes` was the 2026-09-01 11:36Z rerun after the
+  Equibles tarpit, not six days of fresh failures. Duration matched
+  `TICKER_FETCH_BUDGET_S`; remaining names were marked `budget` and skipped.
+- Read `service_health_events` and sibling Equibles rows before treating a
+  frozen weekly writer as a live outage. Siblings `ok` plus a live
+  `/off-exchange-volume` probe means the row is waiting on Tuesday 09:15 UTC.
+- One hung Session must not zero the watchlist. Replace it and keep walking.
+  Put `codes` in `message`; the dashboard only renders that field.
+
 ## 2026-09-05 — API health is not authenticated browser relay health
 
 - A healthy FastAPI/IB pool, listening tunnel, and rejected anonymous handshake

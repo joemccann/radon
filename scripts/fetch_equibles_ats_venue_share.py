@@ -493,6 +493,32 @@ def _next_scheduled_run(now: datetime) -> str:
     return stamp.isoformat().replace("+00:00", "Z")
 
 
+def _error_codes(errors: list[dict[str, Any]]) -> list[str]:
+    return sorted({error["code"] for error in errors if error.get("code")})
+
+
+def _no_series_message(errors: list[dict[str, Any]]) -> str:
+    """Banner copy for an all-empty cycle. Codes go in the message because
+    ``formatServiceHealthError`` only renders ``message``, and the 2026-09-01
+    33/33 row read as a data-contract miss when it was a tarpit."""
+    codes = _error_codes(errors)
+    if not codes:
+        return "no ticker produced a series"
+    return f"no ticker produced a series ({', '.join(codes)})"
+
+
+def _replace_wedged_client(client: Any, *, owned: bool) -> Any:
+    """Drop a tarpitted Session. Injected clients stay with the caller."""
+    if not owned:
+        return client
+    try:
+        client.close()
+    except Exception:  # noqa: BLE001 — may still be mid-tarpit
+        pass
+    from clients.equibles_client import EquiblesClient
+    return EquiblesClient()
+
+
 def _embargo_until(cause: Optional[BaseException], now: datetime) -> Optional[str]:
     """`next_attempt_at`, but only for a CADENCE-BOUND failure.
 
@@ -729,7 +755,6 @@ def run(
     series_by_ticker: dict[str, list[dict[str, Any]]] = {}
     errors: list[dict[str, Any]] = []
     universe: list[str] = list(tickers) if tickers else []
-    client_wedged = False
     # Client construction is INSIDE the health-reporting try: an absent or
     # rejected EQUIBLES_API_KEY raises EquiblesAuthError from
     # EquiblesClient.__init__, and outside the try that killed the oneshot
@@ -744,7 +769,7 @@ def run(
         universe = list(tickers or watchlist_tickers())
         for index, ticker in enumerate(universe):
             remaining = deadline - time.monotonic()
-            if remaining <= 0 or client_wedged:
+            if remaining <= 0:
                 deferred = universe[index:]
                 print(
                     f"[ats-venue-share] wall-clock budget spent "
@@ -769,27 +794,19 @@ def run(
                 )
             except TimeoutError as exc:
                 # Abandon the shared Session: a timed-out worker may still hold
-                # it mid-request. Defer every remaining ticker and exit cleanly
-                # so systemd records Result=success instead of Result=timeout.
-                client_wedged = True
+                # it mid-request. Replace it and keep walking — one hung
+                # ticker zeroed the 2026-09-01 week (33/33 `budget` after the
+                # first 90s tarpit) and the Tuesday timer left that row up
+                # for six days after Equibles recovered.
                 errors.append(
                     {"ticker": ticker, "error": str(exc), "code": "timeout"}
                 )
-                deferred = universe[index + 1 :]
                 print(
-                    f"[ats-venue-share] {exc}; deferring "
-                    f"{len(deferred)} remaining ticker(s)",
+                    f"[ats-venue-share] {exc}; replacing session, continuing",
                     file=sys.stderr,
                 )
-                for skipped in deferred:
-                    errors.append(
-                        {
-                            "ticker": skipped,
-                            "error": "wall-clock budget spent",
-                            "code": "budget",
-                        }
-                    )
-                break
+                client = _replace_wedged_client(client, owned=owned_client)
+                continue
             except _CYCLE_FATAL:
                 # An exhausted allowance or a rejected key is not a gap in THIS
                 # ticker's data — every remaining ticker fails for the same
@@ -830,9 +847,9 @@ def run(
             "error",
             scan_time,
             error={
-                "message": "no ticker produced a series",
+                "message": _no_series_message(errors),
                 "next_attempt_at": _embargo_until(None, now),
-                "codes": sorted({e["code"] for e in errors if e.get("code")}),
+                "codes": _error_codes(errors),
                 "requested": len(universe),
                 "failed": len(errors),
             },
