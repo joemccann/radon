@@ -36,6 +36,13 @@ UP_PROBES = {
     "nextjs": {"state": "up"},
 }
 
+# T-460: every verdict here pins host_role explicitly. With the parameter
+# omitted, probes.resolve_host_role() reads RADON_HOST_ROLE from the ambient
+# environment, so this suite only held on hosts where scripts/conftest.py's
+# env scrub ran — a split-role host exporting `app` flipped
+# test_broker_weekend_clean_exit_does_not_escalate_past_dwell to "up".
+COMBINED = "combined"
+
 
 def _units(**states) -> dict:
     return {name.replace("__", "-") + ".service": dict(value) for name, value in states.items()}
@@ -47,13 +54,13 @@ class TestDependencyDwellBound:
         flap = {"radon-monitor.service": {"state": "down", "non_up_secs": 60.0}}
         death = {"radon-monitor.service": {"state": "down", "non_up_secs": 16 * 60.0}}
 
-        assert probes.aggregate_state(UP_PROBES, flap, "ok", 2.0) == "degraded"
-        assert probes.aggregate_state(UP_PROBES, death, "ok", 2.0) == "down"
+        assert probes.aggregate_state(UP_PROBES, flap, "ok", 2.0, host_role=COMBINED) == "degraded"
+        assert probes.aggregate_state(UP_PROBES, death, "ok", 2.0, host_role=COMBINED) == "down"
 
     def test_the_escalated_aggregate_pages_off_box(self):
         death = {"radon-monitor.service": {"state": "down", "non_up_secs": 16 * 60.0}}
         payload = probes.build_status(
-            UP_PROBES, death, "2026-08-29T00:00:00Z", "ok", 2.0
+            UP_PROBES, death, "2026-08-29T00:00:00Z", "ok", 2.0, host_role=COMBINED
         )
         verdict = edge_probe.classify_probes(
             {"reachable": True, "http_status": 200},
@@ -65,7 +72,7 @@ class TestDependencyDwellBound:
         """The 2026-08-29 fix this builds on must stay green."""
         flap = {"radon-newsfeed.service": {"state": "starting", "non_up_secs": 60.0}}
         payload = probes.build_status(
-            UP_PROBES, flap, "2026-08-29T00:00:00Z", "ok", 2.0
+            UP_PROBES, flap, "2026-08-29T00:00:00Z", "ok", 2.0, host_role=COMBINED
         )
         assert payload["overall_state"] == "degraded"
         verdict = edge_probe.classify_probes(
@@ -77,12 +84,12 @@ class TestDependencyDwellBound:
     def test_a_permanent_crash_loop_escalates_too(self):
         """A unit that never reaches active is non-up the whole time."""
         loop = {"radon-newsfeed.service": {"state": "down", "non_up_secs": 20 * 60.0}}
-        assert probes.aggregate_state(UP_PROBES, loop, "ok", 2.0) == "down"
+        assert probes.aggregate_state(UP_PROBES, loop, "ok", 2.0, host_role=COMBINED) == "down"
 
     def test_a_dependency_with_no_dwell_field_is_unchanged(self):
         """Missing telemetry must not invent an escalation."""
         legacy = {"radon-monitor.service": {"state": "down"}}
-        assert probes.aggregate_state(UP_PROBES, legacy, "ok", 2.0) == "degraded"
+        assert probes.aggregate_state(UP_PROBES, legacy, "ok", 2.0, host_role=COMBINED) == "degraded"
 
     def test_broker_weekend_clean_exit_does_not_escalate_past_dwell(self):
         """2026-08-30 page a45d6410: IBKR weekend session shutdown leaves
@@ -129,10 +136,10 @@ class TestDependencyDwellBound:
 
         saturday = datetime(2026, 8, 30, 22, 6, tzinfo=ZoneInfo("America/New_York"))
         assert probes.aggregate_state(
-            live_probes, weekend, "ok", 2.0, now_et=saturday
+            live_probes, weekend, "ok", 2.0, now_et=saturday, host_role=COMBINED
         ) == "degraded"
         payload = probes.build_status(
-            live_probes, weekend, "2026-08-30T22:06:00Z", "ok", 2.0,
+            live_probes, weekend, "2026-08-30T22:06:00Z", "ok", 2.0, host_role=COMBINED,
             now_et=saturday,
         )
         assert payload["overall_state"] == "degraded"
@@ -226,5 +233,5 @@ class TestServingVerdictIsNotSwallowed:
         }
         without_sidecar = {"radon-nextjs.service": {"state": "starting"}}
 
-        assert probes.aggregate_state(UP_PROBES, with_sidecar, "ok", 2.0) == "starting"
-        assert probes.aggregate_state(UP_PROBES, without_sidecar, "ok", 2.0) == "starting"
+        assert probes.aggregate_state(UP_PROBES, with_sidecar, "ok", 2.0, host_role=COMBINED) == "starting"
+        assert probes.aggregate_state(UP_PROBES, without_sidecar, "ok", 2.0, host_role=COMBINED) == "starting"
