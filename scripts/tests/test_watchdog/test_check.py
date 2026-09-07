@@ -35,6 +35,26 @@ def _seed_service_health(db_conn, service: str, state: str, updated_at: datetime
 
 
 class TestCheckOutcomes:
+    def test_dropbox_research_error_and_stale_rows_are_actionable(self, db_conn):
+        """REL-251: a live process that is stuck or errored must be visible."""
+        from watchdog import check
+
+        now = datetime(2026, 9, 7, 14, 0, tzinfo=timezone.utc)
+        _seed_service_health(
+            db_conn, "dropbox-research", "error", now - timedelta(minutes=1),
+            error={"message": "ModelError"},
+        )
+        error = check.check_service(
+            service="dropbox-research", kind="error", now=now, market_state="closed",
+        )
+        assert error.status == "error"
+
+        _seed_service_health(db_conn, "dropbox-research", "running", now - timedelta(minutes=16))
+        stale = check.check_service(
+            service="dropbox-research", kind="stale", now=now, market_state="closed",
+        )
+        assert stale.status == "stale"
+
     def test_fresh_ok_row_is_healthy(self, db_conn):
         from watchdog import check
 

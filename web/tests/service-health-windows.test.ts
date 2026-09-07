@@ -24,6 +24,13 @@ describe("SERVICE_FRESHNESS_WINDOWS", () => {
     expect(SERVICE_FRESHNESS_WINDOWS["fill-monitor"]).toBeDefined();
     expect(SERVICE_FRESHNESS_WINDOWS["cash-flow-sync"]).toBeDefined();
     expect(SERVICE_FRESHNESS_WINDOWS["replica-watchdog"]).toBeDefined();
+    expect(SERVICE_FRESHNESS_WINDOWS["dropbox-research"]).toMatchObject({
+      open: 15 * 60_000,
+      extended: 15 * 60_000,
+      closed: 15 * 60_000,
+      category: "scheduled",
+      requires_ib: false,
+    });
   });
 
   it("uses identical windows for market-aware services regardless of state when not market-gated", () => {

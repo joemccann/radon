@@ -13,10 +13,12 @@ from research.state import State, date_scopes
 from utils.atomic_io import atomic_save
 
 
-def heartbeat(root, state, error=None):
+def heartbeat(root, state, error=None, stage=None):
     stamp = datetime.now(timezone.utc).isoformat()
     payload = {'service': 'dropbox-research', 'state': state, 'updated_at': stamp,
                'last_error': {'message': type(error).__name__} if error else None}
+    if stage:
+        payload['stage'] = stage
     atomic_save(str(Path(root) / 'health.json'), payload)
     from api.db_http import hrana_execute
     try:
@@ -80,7 +82,10 @@ def cycle(root, client, state, pipeline, publisher, publish=False, limit=4):
             continue
         try:
             pdf = client.download(work['metadata'], Path(root) / 'downloads')
-            posts = pipeline.process(work, pdf, recent)
+            posts = pipeline.process(
+                work, pdf, recent,
+                progress=lambda stage: heartbeat(root, 'running', stage=stage),
+            )
             state.complete(work['key'], {'status': 'reviewed', 'items': len(posts)}, publications=posts)
             recent.extend(posts)
             processed += 1

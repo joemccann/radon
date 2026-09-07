@@ -114,3 +114,29 @@ def test_crop_failure_prevents_generic_claim_review_and_publication(tmp_path):
     work={"key":"failed-crop","folder_date":"2026-09-07","metadata":{"id":"id:one","name":"source.pdf"}}
     assert pipe.process(work,tmp_path/"source.pdf",[])==[]
     assert len(calls)==4 and not any("COMPARISON FEED" in prompt for prompt,_ in calls)
+
+
+def test_standalone_crop_review_rejects_insufficient_initial_budget(tmp_path):
+    from research.pipeline import DocumentDeadlineExceeded, REVIEWER_CALL_TIMEOUT_SECS
+    pipe,candidate,pages,sizes,calls,_=setup(tmp_path,[])
+    pipe.clock=lambda:0
+    pipe.document_budget_secs=REVIEWER_CALL_TIMEOUT_SECS-1
+    with pytest.raises(DocumentDeadlineExceeded,match="exhausted"):
+        pipe.prepare_figures(tmp_path/"source.pdf",tmp_path/"charts",candidate,pages,sizes,[])
+    assert calls==[]
+
+
+def test_standalone_crop_correction_does_not_renew_its_budget(tmp_path):
+    from research.pipeline import DocumentDeadlineExceeded, REVIEWER_CALL_TIMEOUT_SECS
+    pipe,candidate,pages,sizes,calls,_=setup(tmp_path,[])
+    now=[0]
+    pipe.clock=lambda:now[0]
+    pipe.document_budget_secs=2*REVIEWER_CALL_TIMEOUT_SECS
+    def review(prompt,images):
+        calls.append(prompt)
+        now[0]+=REVIEWER_CALL_TIMEOUT_SECS+1
+        return {"figures":[inspection(complete=False)]}
+    pipe.reviewer=SimpleNamespace(ask=review)
+    with pytest.raises(DocumentDeadlineExceeded,match="exhausted"):
+        pipe.prepare_figures(tmp_path/"source.pdf",tmp_path/"charts",candidate,pages,sizes,[])
+    assert len(calls)==1

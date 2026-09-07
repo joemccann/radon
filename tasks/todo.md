@@ -1,3 +1,23 @@
+# Task: Reliability remediate 2026-09-07 [IN PROGRESS]
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify P0/P1 backlog completion on the dated reliability branch.
+- T2 depends_on: [T1] - Run permanent drills and three sequential full-gate baselines.
+- T3 depends_on: [T2] - Append durable gate evidence and commit/push the phase record.
+
+## Checklist
+
+- [x] T1 Verify REL-251 and REL-252 completion.
+- [ ] T2 Permanent drills green; full gates incomplete because the runner terminated the required stage.
+- [x] T3 Record durable gate-stage evidence.
+
+## Review
+
+- [x] Reduced scope contains no un-DONE P0/P1 items.
+- [x] Permanent drills: Python 94 passed; Vitest 12 passed.
+- [ ] Full-gate stage has no DONE sentinel; continuation required.
+
 # Task: Merge main into testing/2026-09-06 [IN PROGRESS]
 
 Resolve the current branch's merge conflicts against `main` and re-verify the conflicted surfaces.
@@ -5126,6 +5146,56 @@ Research posts reuse canonical posts table, with companion research_post_sources
 
 - PR #333 first head: all checks passed except clean-checkout codemap freshness. Regression reproduced from ignored generated next-env.d.ts; collector excludes that generated file. Red/green test, 31 codemap tests and clean archive graph equivalence passed. Rolling/demo absent-research-table regression fixed; 242 web tests and typecheck passed.
 
+---
+
+# Task: Reliability delta audit 2026-09-07 [COMPLETE]
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify the ledger anchor and changed surface.
+- T2 depends_on: [T1] - Recheck standing money-path and health-catalog invariants.
+- T3 depends_on: [T1,T2] - Record deduplicated findings and actionable backlog rows.
+
+## Checklist
+
+- [x] T1 Verify `7a7ca4ae..0b77a6af`.
+- [x] T2 Recheck guards and catalog coverage.
+- [x] T3 Record R-672/R-673 and REL-251/REL-252.
+
+## Review
+
+- [x] Research worker health writer is absent from both freshness catalogs.
+- [x] Research document processing has no whole-document bound.
+
+---
+
+# Task: Reliability remediation 2026-09-07 [IN PROGRESS]
+
+Reduced-capability rung: remediate P1 findings only.
+
+## Dependency graph
+
+- T1 depends_on: [] - Add red catalog tests for `dropbox-research`.
+- T2 depends_on: [T1] - Register matching continuous freshness windows.
+- T3 depends_on: [] - Add red bounded-document and progress-heartbeat tests.
+- T4 depends_on: [T3] - Bound review work and preserve timed-out work for retry.
+- T5 depends_on: [T2,T4] - Run focused and required full gates; append reliability log.
+
+## Checklist
+
+- [x] T1 Catalog red test.
+- [x] T2 Catalog implementation.
+- [x] T3 Pipeline red test.
+- [x] T4 Pipeline implementation.
+- [x] T5 Focused verification and log; full Python gate baseline recorded.
+
+## Review
+
+- [x] REL-251 fault injection: error and stale `dropbox-research` rows are actionable in both catalogs.
+- [x] REL-252 100-page fault injection: document lease stops new reviewer calls and emits completed-stage heartbeats.
+- [x] Focused gates: Python 103 passed; Vitest 139 passed.
+- [x] Full Python run: 12,093 passed, 95 failed, 14 errors; failures are pre-existing remote, fixture, and host-wrapper environment surfaces.
+
 ## Production verification (2026-09-07)
 - PR #333 head 63fba7aa: 31 successful checks, seven non-applicable skips; Pushover accepted HTTP 200. Squash release 0b77a6af6e586b5702f4e8dac70f4cc37942a2b4 deployed successfully in run 34152165447.
 - Six approved posts and eleven ordered figures verified in canonical production tables; repeated publication wrote zero additional posts. All sixteen private assets returned matching hashes internally; both public media paths rejected anonymous access with HTTP 401.
@@ -5158,6 +5228,19 @@ Research posts reuse canonical posts table, with companion research_post_sources
 - All ten wrapper failures passed serially against pristine d13f982d (10/10, 38.70s); five wrappers and their test module match the integrated worktree. Full-run timeout cause remains unknown; no implementation/test changes were needed.
 - D3a depends_on: [D3] - Main advanced to e4eaa255 during green PR checks; integrate its independently tested loop changes, regenerate conflicting source-map artifacts, run integrated research/contract tests, and repeat exact-head CI before merge.
 - D3a integrated validation passed 320/320; upstream e4eaa255 full CI and production deployment completed successfully. Research implementation is unchanged from the full-suite run.
+
+# PR #337 conflict resolution
+- C1 depends_on: [] - Merge current main in an isolated checkout; preserve research date/attribution gates and the PR's budget/freshness protections.
+- C2 depends_on: [C1] - Regenerate source maps, review semantic integration, and run focused/full verification.
+- C3 depends_on: [C2,C2b] - Push the resolution to PR #337 and supervise all exact-head checks to green.
+- [x] C1 Resolve conflicts.
+- [x] C2 Verify integrated behavior.
+- [ ] C3 Push and verify CI.
+- C2a depends_on: [C1] - Broader checks found nine standalone crop-review deadline failures; add a bounded lazy-initialization regression and fix before full verification.
+- C2a red/green: the prior PR's standalone crop failures were deadline-initialization regressions, not unrelated fixture failures. Eleven crop cases failed before the fix, including two new budget controls; independent crop/runtime/date/publication checks passed 204/204 with no skips afterward.
+- Generated source maps are fresh; focused codemap suite passed 31/31.
+- C2b depends_on: [C2] - Main advanced to c8ae8fa8 during verification; integrate feed-sharing changes, regenerate combined artifacts, and verify the final web tree before pushing.
+- Full Python verification passed: 12,299 tests, one skip, 16 subtests (1,262.32s). Full web: 8,529 passed and 16 timed out; unchanged affected-file/freshness rerun passed 411/411. Typecheck and staged secret scan passed.
 
 # News feed social sharing (2026-09-07)
 
@@ -5199,3 +5282,7 @@ Research posts reuse canonical posts table, with companion research_post_sources
 ## PR integration review
 - PR https://github.com/joemccann/radon/pull/338 had 31 passing checks on f5c55ab6.
 - Integrated source-date main update ff2b31f8; retained both task records and regenerated the combined code map. Sharing implementation files are unchanged. Latest merge-head checks and notification pending.
+
+## PR #337 integration review
+- Latest main c8ae8fa8 integrated; Python implementation is unchanged from the 12,299-test full run. Final combined checks passed 267 research/codemap tests and 171 sharing/freshness tests. Existing source-date and attribution guards remain intact.
+- Latest main test gates passed but deployment rolled back to ff2b31f8 on research-worker stop timeout (run 34160677389); this PR conflict update does not constitute deployment.

@@ -151,10 +151,41 @@ def test_pipeline_page_budget_prevents_render(tmp_path):
     with pytest.raises(pipeline.EvidenceError,match="page budget"):pipe.process({"key":"x"},tmp_path/"source.pdf",[])
 
 
+def test_document_deadline_bounds_a_100_page_selection_and_emits_progress(tmp_path):
+    """REL-252: never start a reviewer call that cannot finish in the lease."""
+    class Clock:
+        now = 0
+        def __call__(self): return self.now
+    clock = Clock()
+    calls, stages = [], []
+    def ask(*_args):
+        calls.append(True)
+        clock.now += pipeline.REVIEWER_CALL_TIMEOUT_SECS
+        return {"candidates": []}
+    def extract(_pdf, out):
+        pages = []
+        for page in range(1, 101):
+            name = f"{page}.md"
+            (out / name).write_text("source")
+            pages.append({"page_number": page, "markdown_file": name})
+        return {"page_count": 100, "source_sha256": "a" * 64, "pages": pages}
+    def render(_pdf, out, pages, **_kwargs):
+        out.mkdir(parents=True, exist_ok=True)
+        return [{"page_number": page, "image_file": f"{page}.png", "width": 1, "height": 1} for page in pages]
+    pipe = pipeline.Pipeline(tmp_path, SimpleNamespace(ask=ask), None, render, extract,
+                             clock=clock, document_budget_secs=2 * pipeline.REVIEWER_CALL_TIMEOUT_SECS)
+    work = {"key": "deadline", "folder_date": "2026-09-07", "metadata": {"name": "large.pdf"}}
+    with pytest.raises(pipeline.DocumentDeadlineExceeded, match="deadline"):
+        pipe.process(work, tmp_path / "large.pdf", [], progress=stages.append)
+    assert len(calls) == 2
+    assert stages[:2] == ["extracted", "rendered-pages"]
+    assert stages[-1] == "selected-pages-9-16"
+
+
 def test_cycle_success_then_restart_does_not_reprocess(queue,monkeypatch):
     root,state=queue; monkeypatch.setattr(worker,"discover",lambda *a:0)
     calls=[]; published=[]
-    pipe=SimpleNamespace(process=lambda work,pdf,recent:calls.append(work["key"]) or [{"id":"research-one","title":"new"}])
+    pipe=SimpleNamespace(process=lambda work,pdf,recent,**kwargs:calls.append(work["key"]) or [{"id":"research-one","title":"new"}])
     client=SimpleNamespace(download=lambda *a:root/"source.pdf")
     publisher=SimpleNamespace(recent_posts=lambda **k:[],publish=lambda post:published.append(post["id"]))
     result=worker.cycle(root,client,state,pipe,publisher,publish=True)

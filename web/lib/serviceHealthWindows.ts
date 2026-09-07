@@ -501,6 +501,11 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // /health/lite only — no IB dependency.
   "host-metrics": { open: 10 * MIN, extended: 10 * MIN, closed: 10 * MIN, category: "scheduled", requires_ib: false },
 
+  // The Dropbox/PDF research worker is a continuous daemon.  A dependency
+  // stall leaves systemd active, so its 15-minute heartbeat is the stale
+  // signal that makes an in-process stop visible (REL-251).
+  "dropbox-research": { open: 15 * MIN, extended: 15 * MIN, closed: 15 * MIN, category: "scheduled", requires_ib: false },
+
   // ``performance`` is a mirror-fed scan (db.scan_mirror SNAPSHOT_UPSERTS)
   // that only runs when a user hits its FastAPI scan endpoint — on-demand
   // like scanner/discover. IB-primary with cache/UW/Yahoo fallbacks and

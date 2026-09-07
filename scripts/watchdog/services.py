@@ -362,6 +362,10 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # 24/7; uniform 10-min window mirrors web/lib/serviceHealthWindows.ts.
     # Reads /proc + systemctl + /health/lite only — no IB dependency.
     "host-metrics":     {"open": 10 * _MIN, "closed": 10 * _MIN, "requires_ib": False},
+    # radon-research.service is a continuous Dropbox/PDF reviewer.  Systemd
+    # remains active while a dependency stalls inside the worker, so its own
+    # heartbeat must be checked independently of unit state (REL-251).
+    "dropbox-research": {"open": 15 * _MIN, "closed": 15 * _MIN, "requires_ib": False},
     # preset-rebalance — WEEKLY index-constituent refresh inside the
     # monitor daemon (Sundays). Heartbeats via the DUR-14 structural
     # BaseHandler.run() write. 8-day window = weekly cadence + one day of
@@ -490,6 +494,7 @@ BUCKETS: dict[str, list[str]] = {
         # Minute-cadence host sampler heartbeat — the 10-min staleness
         # window flags a dead sampler within one continuous cycle.
         "host-metrics",
+        "dropbox-research",
         # Continuous journal gap SLI (5m) — error when missing_exec_id_count > 0.
         "journal-gap-sli",
         # 30s P1 auto-fix poller on the VPS. A stalled auto-fixer is silent

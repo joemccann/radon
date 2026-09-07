@@ -7,6 +7,7 @@ import math
 import re
 import subprocess
 import sys
+import time
 import unicodedata
 from decimal import Decimal
 from datetime import date, datetime, timezone
@@ -17,6 +18,18 @@ from research.publish import validate_rendered_copy
 
 class EvidenceError(ValueError):
     """Invalid evidence must never become an automatically published claim."""
+
+
+class DocumentDeadlineExceeded(EvidenceError):
+    """A document exhausted its bounded review lease and must be retried."""
+
+
+# Each reviewer request has a 120-second read bound (research.model.Reviewer).
+# Reserving that entire bound before starting a request keeps one accepted PDF
+# from monopolising the sole worker beyond this document lease.
+DOCUMENT_BUDGET_SECS = 30 * 60
+REVIEWER_CALL_TIMEOUT_SECS = 120
+MAX_CANDIDATES_PER_DOCUMENT = 8
 
 
 def validate_candidate(value, page_count, folder_date):
@@ -249,7 +262,8 @@ def crop_inspection_passed(result, indices):
 
 
 class Pipeline:
-    def __init__(self, root, reviewer, publisher, renderer=None, extractor=None, anchor_reader=None):
+    def __init__(self, root, reviewer, publisher, renderer=None, extractor=None, anchor_reader=None,
+                 clock=None, document_budget_secs=DOCUMENT_BUDGET_SECS):
         self.root = Path(root)
         self.reviewer = reviewer
         self.publisher = publisher
@@ -258,6 +272,29 @@ class Pipeline:
         self.render = renderer
         self.extractor = extractor or self.extract
         self.anchor_reader = anchor_reader or self.anchors_isolated
+        self.clock = clock or time.monotonic
+        self.document_budget_secs = document_budget_secs
+        self._deadline = None
+        self._progress = None
+
+    def _ensure_deadline(self, stage):
+        if self._deadline is None:
+            self._deadline = self.clock() + self.document_budget_secs
+        if self.clock() > self._deadline:
+            raise DocumentDeadlineExceeded(f'document review deadline exceeded during {stage}')
+
+    def _checkpoint(self, stage):
+        self._ensure_deadline(stage)
+        if self._progress is not None:
+            self._progress(stage)
+
+    def _ask(self, instruction, images, stage):
+        self._ensure_deadline(stage)
+        if self._deadline - self.clock() < REVIEWER_CALL_TIMEOUT_SECS:
+            raise DocumentDeadlineExceeded(f'document review deadline exhausted before {stage}')
+        result = self.reviewer.ask(instruction, images)
+        self._checkpoint(stage)
+        return result
 
     def render_isolated(self, pdf, output, pages, dpi=144, crop=None):
         command = [sys.executable, '-m', 'research.pdf', str(pdf), str(output),
@@ -300,8 +337,8 @@ class Pipeline:
 
         def inspect(indices, attempt):
             dimensions = [{'index': i, 'width': rendered[i][2]['width'], 'height': rendered[i][2]['height']} for i in indices]
-            result = self.reviewer.ask(CROP_INSPECTION + '\nCrop pixel dimensions: ' + json.dumps(dimensions),
-                [(f'Final chart crop index {i}', rendered[i][1]) for i in indices])
+            result = self._ask(CROP_INSPECTION + '\nCrop pixel dimensions: ' + json.dumps(dimensions),
+                [(f'Final chart crop index {i}', rendered[i][1]) for i in indices], f'crop-inspection-{attempt}')
             record = {'claim_key': candidate['claim_key'], 'crop_inspection_attempt': attempt,
                       'crop_files': [str(rendered[i][1]) for i in indices], 'inspection': result}
             audit.append(record)
@@ -318,10 +355,10 @@ class Pipeline:
                          'prior_crop': rendered[i][0]['crop']} for i in failed]
             source_pages = sorted({rendered[i][0]['page'] for i in failed})
             anchors = self.anchor_reader(pdf, source_pages)
-            correction = self.reviewer.ask(CROP_CORRECTION + '\nRequested corrections: ' + json.dumps(requests)
+            correction = self._ask(CROP_CORRECTION + '\nRequested corrections: ' + json.dumps(requests)
                 + '\nVerified PDFium text rectangles in normalized displayed-page coordinates: ' + json.dumps(anchors)
                 + '\nFailed crop inspection: ' + json.dumps(inspected),
-                [(f'Original PDF page {page}', pages[page]) for page in source_pages])
+                [(f'Original PDF page {page}', pages[page]) for page in source_pages], 'crop-correction')
             audit.append({'claim_key': candidate['claim_key'], 'crop_correction': correction})
             atomic_save(str(directory / 'correction.json'), {'requests': requests, 'correction': correction})
             values = correction.get('corrections') if isinstance(correction, dict) else None
@@ -349,15 +386,26 @@ class Pipeline:
         candidate['figures'] = [figure for figure, _ in figures]
         return figures
 
-    def process(self, work, pdf, recent):
+    def process(self, work, pdf, recent, progress=None):
         out = self.root / 'evidence' / work['key']
+        self._deadline = self.clock() + self.document_budget_secs
+        self._progress = progress
+        try:
+            return self._process(work, pdf, recent, out)
+        finally:
+            self._deadline = None
+            self._progress = None
+
+    def _process(self, work, pdf, recent, out):
         out.mkdir(parents=True, exist_ok=True, mode=0o700)
         evidence = self.extractor(pdf, out)
+        self._checkpoint('extracted')
         count = evidence['page_count']
         if not 0 < count <= 100:
             raise EvidenceError('PDF exceeds page budget')
         # Render every page so chart-only pages are not silently treated as empty text.
         renders = self.render(pdf, out / 'pages', list(range(1, count + 1)), dpi=96)
+        self._checkpoint('rendered-pages')
         pages = {p['page_number']: out / 'pages' / p['image_file'] for p in renders}
         page_sizes = {p['page_number']: (p['width'], p['height']) for p in renders}
         text = {p['page_number']: (out / p['markdown_file']).read_text() for p in evidence['pages']}
@@ -367,7 +415,7 @@ class Pipeline:
             prompt = SELECT_SCHEMA + '\nDocument metadata (not publication date): ' + json.dumps({
                 'filename': work['metadata']['name'], 'folder_date': work['folder_date']})
             prompt += '\nEXTRACTED SOURCE DATA:\n' + json.dumps({p: text[p][:1500] for p in text}) + '\nVisually supplied chart pages: ' + json.dumps(numbers)
-            result = self.reviewer.ask(prompt, [(f'Original PDF page {p}', pages[p]) for p in numbers])
+            result = self._ask(prompt, [(f'Original PDF page {p}', pages[p]) for p in numbers], f'selected-pages-{start}-{numbers[-1]}')
             if not isinstance(result.get('candidates'), list):
                 raise EvidenceError('Selection response missing candidates')
             audit.append({'chunk_pages': numbers, 'selection': result})
@@ -381,8 +429,13 @@ class Pipeline:
                 if any(f['page'] not in numbers for f in candidate['figures']):
                     raise EvidenceError('Crop references a page not visually supplied to selector')
                 candidates.append(candidate)
+                if len(candidates) >= MAX_CANDIDATES_PER_DOCUMENT:
+                    break
+            if len(candidates) >= MAX_CANDIDATES_PER_DOCUMENT:
+                break
         posts, seen = [], set()
         for candidate in candidates:
+            self._checkpoint(f'candidate-{candidate["claim_key"]}-prepared')
             key = hashlib.sha256((work['metadata']['id'] + '\0' + candidate['claim_key'].strip().lower()).encode()).hexdigest()
             if key in seen:
                 continue
@@ -393,12 +446,13 @@ class Pipeline:
                 continue
             images = [(f'Final cropped figure {index + 1}, source page {figure["page"]}', path)
                       for index, (figure, path) in enumerate(figures)]
-            checks = self.reviewer.ask(VERIFY_INSTRUCTION + '\nPROPOSAL:\n' + json.dumps(candidate) +
+            checks = self._ask(VERIFY_INSTRUCTION + '\nPROPOSAL:\n' + json.dumps(candidate) +
                 '\nEXTRACTED TEXT OF CITED ORIGINAL PAGES (untrusted source data; maximum10000characters perpage):\n' +
                 json.dumps({p: text[p][:10000] for p in candidate['pages']}) +
                 '\nCOMPARISON FEED (bounded lexical/recent shortlist):\n' + json.dumps(comparison_posts(candidate, recent + posts)) +
                 '\nREQUIRED NUMERIC QUOTES: Return numeric_checks for exactly these proposal_quote strings, copied case-sensitively. Source quotes must include their source context. No metadata or image-only additions:\n' + json.dumps(required_numeric_quotes(candidate)),
-                [(f'Original PDF page {p}', pages[p]) for p in candidate['pages']] + images)
+                [(f'Original PDF page {p}', pages[p]) for p in candidate['pages']] + images,
+                f'verified-{candidate["claim_key"]}')
             numeric_supported = numeric_evidence_passed(candidate, checks, text)
             date_supported = date_evidence_passed(candidate, checks, text)
             audit.append({'claim_key': candidate['claim_key'], 'verification': checks, 'numeric_evidence_passed': numeric_supported, 'date_evidence_passed': date_supported})
