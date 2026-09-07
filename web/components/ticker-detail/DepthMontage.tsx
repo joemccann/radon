@@ -82,6 +82,7 @@ export function DepthMontage({ book, onPriceClick }: { book: DepthBook; onPriceC
     return (
       <div
         className={`book-row book-reveal${best ? " best" : ""}${isOption && level.nbbo ? " nbbo" : ""}${clickable ? " book-row-fill" : ""}`}
+        data-testid="book-depth-row"
         data-lvlfirst={lvlfirst}
         style={{ ["--fill" as string]: fill, ["--i" as string]: index }}
         key={`${side}-${index}`}

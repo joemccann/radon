@@ -56,9 +56,9 @@ test.describe("demo workstation transport", () => {
 
     await page.goto("/NEM?tab=book");
 
-    await expect(page.locator(".book-feed-pill")).toHaveText("SAMPLE SMART DEPTH");
-    await expect(page.locator(".book-montage .book-row")).toHaveCount(10);
-    await expect(page.locator(".book-tape-cell .book-trow")).toHaveCount(8);
+    await expect(page.getByTestId("book-feed-pill")).toHaveText("SAMPLE SMART DEPTH");
+    await expect(page.getByTestId("book-depth-row")).toHaveCount(10);
+    await expect(page.getByTestId("book-tape-row")).toHaveCount(8);
     await expect(page.getByText("No real-time data", { exact: true })).toHaveCount(0);
 
     const search = page.getByRole("combobox", { name: "Search ticker" });

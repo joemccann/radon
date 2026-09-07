@@ -3,6 +3,11 @@ import { expect, test } from "@playwright/test";
 test.describe("demo dashboard headlines", () => {
   test.skip(process.env.NEXT_PUBLIC_RADON_DEMO !== "1", "demo-only transport");
 
+  // Window-relative so the fixture never rots into the past as the calendar
+  // advances (T-437/T-455) - a pinned date silently ages out of any
+  // freshness-sensitive rendering.
+  const HEADLINE_TIME = new Date(Date.now() - 60 * 1000).toISOString();
+
   test("renders the current snapshot without dialing a WebSocket", async ({ page }) => {
     const websocketUrls: string[] = [];
     let snapshotRequests = 0;
@@ -16,7 +21,7 @@ test.describe("demo dashboard headlines", () => {
           items: [{
             kind: "headline",
             id: "demo-browser-headline",
-            time: "2026-09-04T18:51:31.000Z",
+            time: HEADLINE_TIME,
             important: true,
             content: "Demo headline snapshot reached the dashboard.",
             impact: [{ symbol: "SPX", impact: "bullish" }],

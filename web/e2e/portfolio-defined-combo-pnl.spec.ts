@@ -96,8 +96,9 @@ test("ARM protected combo is defined risk and shows aggregate P&L", async ({ pag
   await setupMocks(page);
   await page.goto("/portfolio", { waitUntil: "domcontentloaded" });
 
-  const definedSection = page.locator(".section").filter({ hasText: "Defined Risk Positions" });
-  const armRow = definedSection.locator("tr").filter({ hasText: "ARM" });
+  const definedSection = page.getByTestId("defined-risk-section").filter({ hasText: "Defined Risk Positions" });
+  const positionTable = definedSection.getByTestId("position-table");
+  const armRow = positionTable.locator("tr").filter({ hasText: "ARM" });
   await expect(definedSection).toBeVisible();
   await expect(armRow).toHaveCount(1);
   await expect(armRow).toContainText("-$10,803");
@@ -105,9 +106,9 @@ test("ARM protected combo is defined risk and shows aggregate P&L", async ({ pag
   await expect(page.getByText("Undefined Risk Positions")).toHaveCount(0);
 
   await armRow.getByRole("button", { name: "Expand legs for ARM" }).click();
-  await expect(definedSection.locator("tr").filter({ hasText: "SHORT Call $260" })).toContainText("-$600");
-  await expect(definedSection.locator("tr").filter({ hasText: "LONG Call $270" })).toContainText("-$4,855");
-  await expect(definedSection.locator("tr").filter({ hasText: "LONG Put $220" })).toContainText("-$5,348");
+  await expect(positionTable.locator("tr").filter({ hasText: "SHORT Call $260" })).toContainText("-$600");
+  await expect(positionTable.locator("tr").filter({ hasText: "LONG Call $270" })).toContainText("-$4,855");
+  await expect(positionTable.locator("tr").filter({ hasText: "LONG Put $220" })).toContainText("-$5,348");
 
   const screenshotPath = testInfo.outputPath("arm-defined-combo-pnl.png");
   await page.screenshot({ path: screenshotPath, fullPage: true });

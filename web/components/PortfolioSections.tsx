@@ -101,7 +101,7 @@ export default function PortfolioSections({ portfolio, prices }: PortfolioSectio
   return (
     <>
       {definedPositions.length > 0 && (
-        <div className="section">
+        <div className="section" data-testid="defined-risk-section">
           <div className="section-header">
             <h2 className="section-title">
               <CheckCircle2 size={14} />

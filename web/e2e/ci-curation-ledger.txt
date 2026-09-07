@@ -271,3 +271,15 @@ ws-connection-stability.spec.ts
 #   verification passed in the 65/65 mobile financial group.
 # REVIEWED 2026-09-06 mobile-short-strangle-skew.spec.ts — compiled mobile
 #   Chromium next start verification passed in the 65/65 mobile group.
+# REVIEWED 2026-09-06 book-montage-spacing.spec.ts — T-454 moved the screenshot
+#   off a hardcoded /tmp path onto testInfo.outputPath and attached it to the
+#   report. Compiled Chromium passed locally against next start (7 passed in
+#   the T-454 remediation group).
+# REVIEWED 2026-09-06 mobile-combo-instrument-switcher.spec.ts — T-454 moved
+#   the VIX desktop cockpit test off bare CSS-class locators (.cockpit-host,
+#   .cockpit-head, .book-window, .book-kind, .act-ticket) onto data-testids
+#   with a visibility guard ahead of the negative act-ticket assertion.
+#   Compiled Chromium passed locally against next start (7 passed).
+# REVIEWED 2026-09-06 demo-headlines.spec.ts — T-455 replaced the pinned
+#   2026-09-04 headline timestamp with a window-relative Date.now() fixture.
+#   Demo compile passed; Chromium passed locally against a demo next start.

@@ -527,29 +527,31 @@ test("VIX 500x499 holdings show a per-contract implied quote", async ({ page }, 
   await stubApis(page);
 
   await page.goto("/VIX?posId=9");
-  await expect(page.locator(".cockpit-host")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("cockpit-host")).toBeVisible({ timeout: 30_000 });
 
   const implied = page.getByRole("button", { name: "Implied spread book" });
   const long = page.getByRole("button", { name: "$20 Call book" });
   const short = page.getByRole("button", { name: "$30 Call book" });
-  const header = page.locator(".cockpit-head");
-  const book = page.locator(".book-window");
+  const header = page.getByTestId("cockpit-head");
+  const book = page.getByTestId("book-window");
 
   await expect(implied).toHaveAttribute("aria-pressed", "true");
-  await expect(page.locator(".book-kind")).toHaveText("IMPLIED SPREAD");
+  await expect(page.getByTestId("book-kind")).toHaveText("IMPLIED SPREAD");
   await expect(header).toContainText("$0.78");
   await expect(header).toContainText("NET $0.04 / 5.13%");
   await expect(book).toContainText("$0.76");
   await expect(book).toContainText("$0.80");
   await expect(book).not.toContainText("390.62");
 
-  await expect(page.locator(".act-ticket")).toContainText("VIX Index");
-  await expect(page.locator(".act-ticket")).toContainText("$18.91");
-  await expect(page.locator(".act-ticket")).not.toContainText("$0.78");
+  const actTicket = page.getByTestId("act-ticket");
+  await expect(actTicket).toBeVisible();
+  await expect(actTicket).toContainText("VIX Index");
+  await expect(actTicket).toContainText("$18.91");
+  await expect(actTicket).not.toContainText("$0.78");
 
   await long.click();
   await expect(long).toHaveAttribute("aria-pressed", "true");
-  await expect(page.locator(".book-kind")).toHaveText("OPTION");
+  await expect(page.getByTestId("book-kind")).toHaveText("OPTION");
   await expect(header).toContainText("$1.40");
   await expect(header).toContainText("SPREAD $0.02 / 1.43%");
 
