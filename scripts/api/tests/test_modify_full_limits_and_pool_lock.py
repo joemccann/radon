@@ -184,3 +184,23 @@ class TestModifyEnforcesTheFullLimitSet:
         violation = check_modify_limits(None, new_quantity=100_000, new_price=1.0)
         assert violation is not None
         assert violation["code"] == "ORDER_QTY_LIMIT"
+
+    def test_an_unreadable_working_order_bounds_notional_when_both_given(self):
+        """qty under the contract cap but a price that blows the notional cap
+        must still be refused: with no snapshot the supplied values are the
+        only bound there is."""
+        from order_limits import check_modify_limits
+
+        violation = check_modify_limits(None, new_quantity=400, new_price=9_000.0)
+        assert violation is not None
+        assert violation["code"] == "ORDER_NOTIONAL_LIMIT"
+
+    def test_a_price_only_modify_of_an_unreadable_working_order_is_refused(self):
+        """A price-only modify with no readable snapshot skipped EVERY limit
+        (quantity, notional, combo) and forwarded the new price unchecked.
+        Fail closed, same convention as the unpriceable-stock refusal."""
+        from order_limits import check_modify_limits
+
+        violation = check_modify_limits(None, new_price=1_000_000.0)
+        assert violation is not None
+        assert violation["code"] == "ORDER_MODIFY_UNREADABLE"

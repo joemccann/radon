@@ -19,6 +19,10 @@ PRODUCTION_INVARIANTS = {
     # Monorepo Hetzner host topology (schedulers on VPS). Not "local".
     "RADON_MODE": "hetzner",
     "NODE_ENV": "production",
+    # Fail-closed allowlist interlock: every enforcement point compares the
+    # value exactly to "1", so a typo'd "true" would pass required-env
+    # presence while silently disabling the gate.
+    "RADON_REQUIRE_OPERATOR_ALLOWLIST": "1",
 }
 HOST_ROLES = frozenset({"combined", "app", "broker"})
 

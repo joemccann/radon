@@ -146,6 +146,12 @@ line here whenever you ship a security fix.**
   the module's existing ticker pattern and refused with 400 before any client is
   constructed.
   (`scripts/api/tests/test_internals_skew_history_route.py`)
+- **Transient secret-bearing scratch files are gitignored** — any wrapper or
+  script that stages a filtered copy of an env file (e.g. `web/.env.scrub`
+  between create and rm in the nightly wrappers) must write it under a
+  gitignored pattern, so a crash inside the window cannot leave a
+  commit-visible secret file in a PR-opening clone. Pinned by
+  `cloud/tests/test_env_example.py::TestGitignore`.
 - **Root provisioning never dereferences a path an unprivileged account can replace**
   — `cloud/scripts/setup-vps.sh` runs as root; every chmod/chown of the env file passes `require_regular_file` (a symlink is refused, never followed)
   and every unit, drop-in, journald conf, Caddyfile, helper, sudoers and polkit

@@ -85,6 +85,7 @@ test-results/
 .env.*.local
 .env.development
 .env.production
+.env.scrub
 *.pem
 *.key
 *.cert

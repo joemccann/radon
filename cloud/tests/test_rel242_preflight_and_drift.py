@@ -50,6 +50,7 @@ def _run_preflight(tmp_path: Path, *, shim_exit: int, docker_exit: int = 0):
         "IB_GATEWAY_MODE=cloud\n"
         "RADON_MODE=hetzner\n"
         "NODE_ENV=production\n"
+        "RADON_REQUIRE_OPERATOR_ALLOWLIST=1\n"
         "RADON_HOST_ROLE=combined\n"
         "IB_GATEWAY_HOST=127.0.0.1\n"
         "TRADING_MODE=paper\n"

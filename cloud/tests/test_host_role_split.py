@@ -73,6 +73,7 @@ def _valid_assignments(*, host: str = "127.0.0.1", role: str | None = None) -> d
             "IB_GATEWAY_HOST": host,
             "RADON_MODE": "hetzner",
             "NODE_ENV": "production",
+            "RADON_REQUIRE_OPERATOR_ALLOWLIST": "1",
             "TRADING_MODE": "live",
             "IB_GATEWAY_PORT": "4001",
         }

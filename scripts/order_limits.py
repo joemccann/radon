@@ -358,15 +358,35 @@ def check_modify_limits(
     lots was accepted with its assignment exposure never computed. REL-005's
     contract named modify as a chokepoint for max qty AND max notional.
 
-    An unreadable working order is NOT a bypass: the contract-quantity cap
-    still applies, exactly as before.
+    An unreadable working order is NOT a bypass: a quantity modify keeps the
+    contract-quantity cap (plus the notional cap when a price is supplied),
+    and a price-only modify is refused outright — with no snapshot there is
+    nothing to bound the new price against.
 
     R-431: the shape is read through `_working_order_shape`, because the Turso
     `open_orders` payload nests it one level down and reading the top level
     typed every real working order as an option.
     """
     if not isinstance(working_order, dict):
-        return check_quantity_limit(new_quantity) if new_quantity is not None else None
+        if new_quantity is not None:
+            if new_price is not None:
+                # Bound notional with the only shape available: the stricter
+                # option convention, same as check_quantity_limit.
+                return check_order_limits(
+                    {"type": "option", "quantity": new_quantity, "limitPrice": new_price}
+                )
+            return check_quantity_limit(new_quantity)
+        if new_price is not None:
+            # A price-only modify with no readable snapshot used to skip
+            # every limit and forward the price unchecked. Fail closed.
+            return {
+                "code": "ORDER_MODIFY_UNREADABLE",
+                "message": (
+                    "working order is unreadable, so a price-only modify "
+                    "cannot be bounded — refused"
+                ),
+            }
+        return None
 
     order_type, legs = _working_order_shape(working_order)
 

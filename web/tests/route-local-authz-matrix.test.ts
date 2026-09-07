@@ -178,6 +178,15 @@ describe("security report route-local authorization matrix", () => {
     }
   });
 
+  it("mints relay tickets for operators only", () => {
+    // The route declares radonCapability "admin"; without operatorOnly a
+    // deployment with no allowlist (the demo posture) would let any active
+    // principal mint a relay ticket from its own token.
+    const text = source("app/api/ib/ws-ticket/route.ts");
+    expect(text).toContain("requireRouteAccess");
+    expect(text).toContain("operatorOnly: true");
+  });
+
   it("requires operator capability and durable mutation budgets on live order routes", () => {
     for (const route of ["place", "cancel", "modify", "whatif"]) {
       const text = source(`app/api/orders/${route}/route.ts`);

@@ -3137,6 +3137,7 @@ class TestRequiredEnvironment:
                 "IB_GATEWAY_HOST": "127.0.0.1",
                 "RADON_MODE": "hetzner",
                 "NODE_ENV": "production",
+                "RADON_REQUIRE_OPERATOR_ALLOWLIST": "1",
             }
         )
         assignments["TRADING_MODE"] = trading_mode
@@ -3174,6 +3175,7 @@ class TestRequiredEnvironment:
                 "IB_GATEWAY_HOST": "127.0.0.1",
                 "RADON_MODE": "hetzner",
                 "NODE_ENV": "production",
+                "RADON_REQUIRE_OPERATOR_ALLOWLIST": "1",
             }
         )
         assignments["TRADING_MODE"] = trading_mode
@@ -3219,6 +3221,7 @@ class TestRequiredEnvironment:
                 "IB_GATEWAY_HOST": "127.0.0.1",
                 "RADON_MODE": "hetzner",
                 "NODE_ENV": "production",
+                "RADON_REQUIRE_OPERATOR_ALLOWLIST": "1",
                 "TRADING_MODE": "live",
                 "IB_GATEWAY_PORT": "4001",
                 key: unsafe_value,

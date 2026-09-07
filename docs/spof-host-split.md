@@ -133,6 +133,9 @@ App VM (current box):
   `docker ps` has no `ib-gateway`.
 - `check-env.py` refuses a public, CGNAT, or DNS `IB_GATEWAY_HOST` on the
   app role. It does not check that the address is inside `10.0.0.0/16`.
+- `check-env.py` pins `RADON_REQUIRE_OPERATOR_ALLOWLIST` to the exact value
+  `"1"` in `PRODUCTION_INVARIANTS`: enforcement points compare `==="1"`, so
+  any other truthy spelling would silently disable the fail-closed gate.
 
 Move window is off RTH plus one Mobile tap on the broker. App deploy must
 leave `auth_state=authenticated` on 4001.
