@@ -906,3 +906,8 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 ## 2026-08-29 - CI acceleration requires a successful production measurement
 
 - Do not stop at local green checks or a faster failed workflow. Commit and push the implementation, follow the real run through every required gate and production deploy, compare end-to-end wall time with the named baseline, and iterate on any release-only failure until the measured deploy is both green and materially faster.
+
+## 2026-09-07 - Oneshot health heartbeats are best-effort
+
+- `radon-trin.service` paged P1 (`3b8b2267`) because `fetch_trin.persist_result` let a Turso `TimeoutError` on `record_service_health(..., "ok")` abort a completed no-new-rows cycle. Sibling fetchers and `service_cycle._record` already swallow heartbeat write failures.
+- When a oneshot's sample/scan work finished and only the health upsert fails, exit 0, log non-fatal, and keep the JSON fallback write. A Python Turso canary that succeeds in the same minute means code_fix, not platform stand-down.

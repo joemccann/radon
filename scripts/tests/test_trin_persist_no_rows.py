@@ -115,3 +115,26 @@ class TestNoNewRowsIsNotAFreshScan:
 
         assert writer.health[-1][1] == "error"
         assert writer.snapshots == []
+
+    def test_turso_timeout_on_ok_heartbeat_does_not_fail_the_oneshot(
+        self, monkeypatch, tmp_path,
+    ):
+        """Page 3b8b2267 (2026-09-07): no-new-rows cycle completed, then
+        `record_service_health(..., "ok")` raised HranaHttpError
+        TimeoutError and the oneshot exited 1 (NRestarts=0 → P1). Sibling
+        fetchers treat the heartbeat as best-effort; trin must too so a
+        transient Turso blip does not page a successful sample cycle."""
+        import fetch_trin as trin
+
+        class _BoomWriter(_Writer):
+            def record_service_health(self, service, state, **kw):
+                raise TimeoutError("The read operation timed out")
+
+        writer = _BoomWriter()
+        monkeypatch.setattr(trin, "writer", writer, raising=False)
+        monkeypatch.setattr(trin, "TRIN_JSON", tmp_path / "trin.json")
+
+        trin.persist_result(_payload_with_history(), [], [])
+
+        assert (tmp_path / "trin.json").is_file()
+        assert writer.snapshots == []

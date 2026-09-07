@@ -396,6 +396,41 @@ their TLT position.
 
 ---
 
+## trin-health-heartbeat-turso-timeout
+
+**`radon-trin.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
+after a successful no-new-rows cycle when the Turso health upsert times out.**
+Page `3b8b2267`, 2026-09-07 16:30Z.
+
+- **Mechanism:** 5-minute RTH oneshot samples TRIN-NYSE. On a cycle that
+  adds no new samples and no new daily rows it still heartbeats `ok`
+  (feedback_service_health_heartbeat) and refreshes the JSON fallback.
+  `persist_result` called `writer.record_service_health` bare. A transient
+  Hrana `TimeoutError` on that upsert aborted the process after the sample
+  work finished, so systemd recorded `Result=exit-code` / `ExecMainStatus=1`.
+  Sibling fetchers (`fetch_ivrank`, `fetch_vol_cone`, `service_cycle._record`)
+  already treat the heartbeat as best-effort.
+- **Detection:** journal
+  `db.hrana_http.HranaHttpError: TimeoutError: The read operation timed out`
+  at `fetch_trin.persist_result` → `writer.record_service_health`; prior
+  5-minute cycles OK; only `radon-trin.service` failed; `:8321/health/lite`
+  authenticated; Python Turso canary succeeds in the same minute.
+- **Discriminating check:** traceback is the health upsert after a
+  no-new-rows (or post-snapshot) path, not a row/sample write. Canary
+  `hrana_execute('select 1')` succeeds ⇒ not a Turso platform outage
+  (stand down only when the canary also fails). `Result=signal` /
+  exit-code 143 inside a deploy window is
+  `deploy-stop-clean-oneshot-signal`.
+- **Remediation (code):** wrap the heartbeat in try/except
+  (`_heartbeat`); log `[trin] health row non-fatal` and still write
+  `data/trin.json`. Do not restart for the blip; the next timer recovers
+  the latched unit once the fixed binary is live.
+- **Regression:**
+  `test_trin_persist_no_rows.py::TestNoNewRowsIsNotAFreshScan::test_turso_timeout_on_ok_heartbeat_does_not_fail_the_oneshot`.
+- **Code:** `scripts/fetch_trin.py` (`_heartbeat`).
+
+---
+
 ## signals-refresh-curl-timeout-pages-p1
 
 **`radon-signals-refresh.service` oneshot pages P1 `Result=exit-code`

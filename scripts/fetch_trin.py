@@ -556,6 +556,20 @@ def _nothing_to_persist(payload: dict[str, Any], new_samples: list[Sample], new_
     return not new_samples and not new_daily and not payload["hourly"] and not payload["daily"]
 
 
+def _heartbeat(finished_at: str, health_error: Optional[dict[str, Any]]) -> None:
+    """Best-effort service_health row. A Turso blip must not fail the oneshot
+    after the sample cycle itself completed (page 3b8b2267 / 2026-09-07)."""
+    try:
+        if health_error is None:
+            writer.record_service_health(SERVICE, "ok", finished_at=finished_at)
+        else:
+            writer.record_service_health(
+                SERVICE, "error", finished_at=finished_at, error=health_error,
+            )
+    except Exception as exc:  # noqa: BLE001 — best-effort mirror
+        print(f"[trin] health row non-fatal: {exc}", file=sys.stderr)
+
+
 def persist_result(
     payload: dict[str, Any],
     new_samples: list[Sample],
@@ -587,14 +601,7 @@ def persist_result(
         # — but the SNAPSHOT is not rewritten, so `scan_time` keeps naming
         # the last cycle that actually produced data.
         writer.ensure_no_replica_for_writers()
-        if health_error is None:
-            writer.record_service_health(
-                SERVICE, "ok", finished_at=payload["scan_time"]
-            )
-        else:
-            writer.record_service_health(
-                SERVICE, "error", finished_at=payload["scan_time"], error=health_error,
-            )
+        _heartbeat(payload["scan_time"], health_error)
         _log("no new samples or daily rows; leaving the stored scan_time untouched")
         _write_json_cache(payload)
         return
@@ -605,12 +612,7 @@ def persist_result(
     if new_daily_rows:
         writer.upsert_trin_daily_rows(new_daily_rows, recorded_at=scan_time)
     writer.upsert_scan_snapshot(SERVICE, scan_time, payload)
-    if health_error is None:
-        writer.record_service_health(SERVICE, "ok", finished_at=scan_time)
-    else:
-        writer.record_service_health(
-            SERVICE, "error", finished_at=scan_time, error=health_error,
-        )
+    _heartbeat(scan_time, health_error)
     _write_json_cache(payload)
 
 
