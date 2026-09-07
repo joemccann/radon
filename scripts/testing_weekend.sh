@@ -972,9 +972,21 @@ launch_round() {
     codex)
       # --sandbox workspace-write, never the bypass flag: parity with the
       # claude rung's bounded grant, not a wider one.
+      #
+      # `.git` has to be named a writable root explicitly. codex's
+      # workspace-write policy protects version-control metadata by default, so
+      # every phase died on
+      #   fatal: cannot lock ref 'refs/heads/<loop>/<date>': Unable to create
+      #   '.../.git/refs/heads/....lock': Operation not permitted
+      # and the phase is scored on a COMMIT to the dated branch, so the rung
+      # could never complete one — 2026-09-07, every codex phase, silently.
+      # This widens the grant to this clone's own git directory and nothing
+      # else; the bypass flag stays off.
       "$TIMEOUT_BIN" -k "$KILL_AFTER_SECS" "$remain" \
         "$RUNG_BIN" exec ${model_flag[@]+"${model_flag[@]}"} \
-        -c model_reasoning_effort="medium" -C "$REPO" --color never \
+        -c model_reasoning_effort="medium" \
+        -c "sandbox_workspace_write={writable_roots=[\"$REPO/.git\"]}" \
+        -C "$REPO" --color never \
         --sandbox workspace-write --skip-git-repo-check \
         - < "$prompt_file" >> "$RUN_LOG" 2>&1 &
       ;;

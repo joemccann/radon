@@ -257,6 +257,18 @@ A rung can fail in three ways, and each is classified separately from this round
 
 **A per-model quota advances one rung; a shared account cap retires the whole provider.** Nothing else can route around an account cap, so `advance_rung wide` skips every remaining rung that provider owns. Cap signatures are per provider (`quota_regex` / `session_regex`), captured from the real CLIs — codex prints `You've hit your usage limit … try again at <time>`, claude prints `You've hit your session limit · resets <time>`. Detection scope is unchanged and deliberately narrow: this round's slice of the log only, never the wrapper's own `[loop]` marker lines, and only the final non-empty transcript lines, so prose that merely quotes a cap phrase (a Traceback, a test string; these loops audit their own wrappers) is not a cap (R-426, R-530, R-667). A provider that is not installed or not signed in is skipped with one log line, never a reason to end the night. Only when every rung is gone does the phase report `INCOMPLETE (all agent providers exhausted: codex=quota exhausted; grok=session limit; …)` and exit 75, with `; top up at claude.ai/settings/usage` appended when claude is among them. `RADON_WEEKEND_MODEL` and `RADON_WEEKEND_PROVIDER` are exported and re-exported after every advance, because the security skill spawns a second `claude` for its Stage 4 scan and a `--model` flag on the wrapper does not reach a child process.
 
+**The codex rung must be able to write `.git`.** Its `workspace-write` sandbox
+protects version-control metadata, so `git checkout -b <loop>/<date>` fails with
+`Unable to create '.../refs/heads/....lock': Operation not permitted` and the
+phase — scored on a commit to that branch — records INCOMPLETE with nothing
+naming the sandbox as the cause (2026-09-07, every codex phase on all four
+fallback loops). The launcher therefore passes
+`-c sandbox_workspace_write={writable_roots=["$REPO/.git"]}`, widening the grant
+to that clone's own git directory and nothing else;
+`--dangerously-bypass-approvals-and-sandbox` stays off, so the grant matches the
+claude rung's scope rather than exceeding it.
+`scripts/tests/test_provider_invocation_contract.py` asserts both halves.
+
 **A non-Claude CLI cannot load a Claude skill.** codex and grok get `.claude/portable-prompts/<skill>.<phase>.md` instead — the SKILL.md body with its frontmatter stripped, wrapped in a preamble, an OVERRIDES section (no subagents, Playwright instead of chrome-cdp, `RADON_WEEKEND_REDUCED=1` narrows remediation to P0/P1) and a CONTRACT section naming the exact strings the wrapper greps for. The files are committed and rendered by `scripts/render_loop_prompt.py --write`; `scripts/tests/test_portable_prompt_sync.py` fails when one drifts from a fresh render, which is what keeps editing a SKILL.md honest. The security loop has no portable prompt, by design. Provider credentials and the grok-hosted endpoint configs live outside every clone in `~/.radon/agent-cli/` (provisioned by `scripts/agent_cli_bootstrap.sh`), because the loops' credential rails refuse a key file inside the clone and `git clean` between phases would delete one anyway. grok's CLI hosts NVIDIA and Cerebras because it is the only agent CLI here that speaks `/chat/completions`; codex speaks only `/responses`, which neither serves. Only NVIDIA's own `nvidia/*` models are usable through that path — third-party NIM models (kimi-k3, deepseek-v4-pro, minimax-m3) answer correctly and then exit 1 on grok's usage deserializer.
 
 Do not hand-edit a wrapper while a cycle is running: the shell reads the script incrementally and an edit strands the live run at a stale byte offset. The same hazard applies to upgrading a provider CLI mid-run.

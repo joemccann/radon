@@ -116,3 +116,38 @@ class TestTheWrapperSource:
         body = LOOPS[loop].read_text(encoding="utf-8")
         assert "export RADON_WEEKEND_MODEL=" in body
         assert "export RADON_WEEKEND_PROVIDER=" in body
+
+
+@pytest.mark.parametrize("loop", sorted(LOOPS))
+class TestTheAgentCanReachGit:
+    """Every phase is scored on a COMMIT to the dated branch.
+
+    2026-09-07: codex's own workspace-write policy protects version-control
+    metadata, so every codex phase died with
+
+      fatal: cannot lock ref 'refs/heads/<loop>/<date>': Unable to create
+      '.../.git/refs/heads/....lock': Operation not permitted
+
+    and then scored INCOMPLETE for having no commit — silently, on all four
+    fallback loops, every run. A rung that cannot write .git can never satisfy
+    the contract, so the grant is asserted here rather than discovered at 00:00.
+    """
+
+    def test_codex_names_the_clone_git_dir_as_a_writable_root(self, loop):
+        body = LOOPS[loop].read_text(encoding="utf-8")
+        start = body.index("launch_round() {")
+        fn = body[start : body.index("\n}", start)]
+        assert "sandbox_workspace_write" in fn, (
+            "codex cannot create a branch under the default workspace-write "
+            "policy, so the phase can never commit and is scored INCOMPLETE"
+        )
+        assert 'writable_roots=[\\"$REPO/.git\\"]' in fn or "$REPO/.git" in fn, fn
+
+    def test_the_grant_is_scoped_and_the_bypass_flag_stays_off(self, loop):
+        """Widened to this clone's git directory, not to the whole machine."""
+        body = LOOPS[loop].read_text(encoding="utf-8")
+        assert "--dangerously-bypass-approvals-and-sandbox" not in body, (
+            "the codex rung must keep a bounded grant, matching the claude "
+            "rung's --dangerously-skip-permissions scope, not exceed it"
+        )
+        assert "--sandbox workspace-write" in body
