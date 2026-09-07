@@ -1,0 +1,497 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>radon · Code path</title>
+<style>
+  :root {
+    --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+    --text-meta: 12px;
+    --text-body: 14px;
+    --radius: 8px;
+    --radius-sm: 6px;
+    --radius-lg: 10px;
+    --touch-min: 44px;
+    --hit-min: 40px;
+    --header-h: 84px;
+    --inspector-w: 360px;
+    --ease-out: cubic-bezier(0.25, 1, 0.5, 1);
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-right: env(safe-area-inset-right, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-left: env(safe-area-inset-left, 0px);
+  }
+
+  [data-theme="light"] {
+    color-scheme: light;
+    --bg-canvas: #ffffff;
+    --bg-panel: #ffffff;
+    --bg-subtle: #f6f8f8;
+    --bg-hover: #e9f4ed;
+    --line-grid: #e4eae7;
+    --text-primary: #172624;
+    --text-secondary: #52645d;
+    --text-muted: #62716d;
+    --signal-core: #087f53;
+    --signal-core-text: #087f53;
+    --signal-strong: #087f53;
+    --warn: #96651c;
+    --fault: #b5453e;
+    --dislocation: #C026A0;
+    --extreme: #7C3AED;
+    --text-on-accent: #ffffff;
+    --area-web: #087f53;
+    --area-scripts: #7C3AED;
+    --area-site: #C026A0;
+    --area-cloud: #96651c;
+    --area-lib: #086541;
+    --area-tests: #62716d;
+    --area-tools: #2563EB;
+  }
+
+  [data-theme="dark"] {
+    color-scheme: dark;
+    --bg-canvas: #101714;
+    --bg-panel: #101714;
+    --bg-subtle: #162019;
+    --bg-hover: #202c25;
+    --line-grid: #2c3c32;
+    --text-primary: #edf4ef;
+    --text-secondary: #b0c1b7;
+    --text-muted: #96aa9e;
+    --signal-core: #76d5a1;
+    --signal-core-text: #76d5a1;
+    --signal-strong: #91e2b5;
+    --warn: #F5A623;
+    --fault: #E85D6C;
+    --dislocation: #e55fb5;
+    --extreme: #9e80f6;
+    --text-on-accent: #101714;
+    --area-web: #76d5a1;
+    --area-scripts: #9e80f6;
+    --area-site: #e55fb5;
+    --area-cloud: #F5A623;
+    --area-lib: #91e2b5;
+    --area-tests: #96aa9e;
+    --area-tools: #85b7eb;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--bg-canvas);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .shell-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    min-height: var(--header-h);
+    padding: 0 clamp(20px, 4.6vw, 68px);
+    padding-top: var(--safe-top);
+    border-bottom: 1px solid var(--line-grid);
+    background: var(--bg-canvas);
+    z-index: 20;
+  }
+  .brand-row { display: flex; align-items: center; gap: 22px; min-width: 0; }
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--text-primary);
+    text-decoration: none;
+    font-size: 28px;
+    font-weight: 650;
+    letter-spacing: -1.4px;
+    flex: none;
+  }
+  .brand svg { color: var(--signal-core-text); flex: none; }
+  .page-title {
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: -0.025em;
+    line-height: 1.3;
+  }
+  .header-actions { display: flex; align-items: center; gap: 8px; }
+  .icon-btn {
+    width: 36px;
+    height: var(--hit-min);
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+  }
+  .icon-btn:hover { color: var(--text-primary); background: var(--bg-subtle); }
+  .icon-btn:focus-visible { outline: 2px solid var(--signal-core); outline-offset: 2px; }
+
+  .metrics {
+    display: flex;
+    border-bottom: 1px solid var(--line-grid);
+    background: var(--bg-canvas);
+    z-index: 15;
+  }
+  .metric {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 16px 24px;
+    border-right: 1px solid var(--line-grid);
+  }
+  .metric:last-child { border-right: 0; }
+  .metric-label {
+    display: block;
+    color: var(--text-muted);
+    font-size: var(--text-meta);
+    font-weight: 500;
+    margin-bottom: 4px;
+  }
+  .metric-value {
+    display: block;
+    font-size: 28px;
+    font-weight: 500;
+    letter-spacing: -0.045em;
+    line-height: 1.1;
+  }
+
+  .workspace {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) var(--inspector-w);
+  }
+  .stage {
+    position: relative;
+    min-width: 0;
+    min-height: 0;
+    background: var(--bg-subtle);
+  }
+  #gl {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    cursor: grab;
+    touch-action: none;
+  }
+  #gl.dragging { cursor: grabbing; }
+  #labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+  .group-label {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    color: var(--text-muted);
+    font-size: var(--text-meta);
+    font-weight: 500;
+    white-space: nowrap;
+    background: color-mix(in srgb, var(--bg-canvas) 82%, transparent);
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+  }
+
+  .inspector {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    background: var(--bg-panel);
+    border-left: 1px solid var(--line-grid);
+    z-index: 12;
+  }
+  .inspector-toggle {
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    min-height: var(--touch-min);
+    padding: 0 16px;
+    border: 0;
+    border-bottom: 1px solid var(--line-grid);
+    background: var(--bg-panel);
+    color: var(--text-primary);
+    font: 600 14px var(--font-sans);
+    cursor: pointer;
+    text-align: left;
+  }
+  .inspector-body {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    flex: 1;
+    overflow: hidden;
+  }
+  .inspector-scroll {
+    flex: 0 1 auto;
+    max-height: 48%;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 20px 20px 12px;
+  }
+  .inspector-scroll.compact {
+    max-height: none;
+    min-height: auto;
+    flex: 0 0 auto;
+  }
+  .inspector-scroll.compact .filters-extra { display: none; }
+  .section-label {
+    color: var(--text-muted);
+    font-size: var(--text-meta);
+    font-weight: 500;
+    margin: 18px 0 8px;
+  }
+  .section-label:first-child { margin-top: 0; }
+
+  #search {
+    width: 100%;
+    min-height: var(--hit-min);
+    padding: 9px 12px;
+    font: 14px var(--font-sans);
+    color: var(--text-primary);
+    background: var(--bg-subtle);
+    border: 1px solid transparent;
+    border-radius: var(--radius);
+    outline: none;
+  }
+  #search:focus-visible { outline: 2px solid var(--signal-core); outline-offset: 2px; }
+  #search-results { margin-top: 6px; }
+  #search-results button,
+  .dep-list button {
+    display: block;
+    width: 100%;
+    min-height: 36px;
+    padding: 6px 8px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-secondary);
+    font: 12px/1.4 var(--font-mono);
+    text-align: left;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  #search-results button:hover,
+  .dep-list button:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+  .legend-row,
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 36px;
+    padding: 4px 8px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-secondary);
+    font: 500 13px var(--font-sans);
+    width: 100%;
+    cursor: pointer;
+    text-align: left;
+  }
+  .legend-row:hover,
+  .toggle-row:hover { background: var(--bg-subtle); color: var(--text-primary); }
+  .legend-row.off { opacity: 0.4; }
+  .swatch { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+  .count { margin-left: auto; color: var(--text-muted); font-size: var(--text-meta); font-variant-numeric: tabular-nums; }
+  .box {
+    width: 16px;
+    height: 16px;
+    border: 1px solid var(--line-grid);
+    border-radius: 4px;
+    display: grid;
+    place-items: center;
+    color: var(--signal-core-text);
+    font-size: 11px;
+    flex: none;
+  }
+
+  .btn-secondary {
+    margin-top: 14px;
+    min-height: var(--hit-min);
+    padding: 9px 16px;
+    border: 1px solid var(--line-grid);
+    border-radius: var(--radius);
+    background: var(--bg-panel);
+    color: var(--text-primary);
+    font: 600 13px var(--font-sans);
+    cursor: pointer;
+  }
+  .btn-secondary:hover { background: var(--bg-subtle); border-color: var(--text-muted); }
+  .btn-secondary:focus-visible { outline: 2px solid var(--signal-core); outline-offset: 2px; }
+
+  #selection {
+    flex: 1 1 auto;
+    min-height: 180px;
+    border-top: 1px solid var(--line-grid);
+    padding: 20px;
+    overflow-y: auto;
+  }
+  #sel-empty { color: var(--text-muted); font-size: 14px; line-height: 1.6; }
+  #sel-path {
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    word-break: break-all;
+    margin-bottom: 6px;
+  }
+  #sel-stats { color: var(--text-secondary); font-size: var(--text-meta); margin-bottom: 4px; }
+
+  .inspector-footer {
+    padding: 14px 20px calc(14px + var(--safe-bottom));
+    border-top: 1px solid var(--line-grid);
+    color: var(--text-muted);
+    font-size: var(--text-meta);
+    line-height: 1.55;
+    background: var(--bg-subtle);
+  }
+
+  #tooltip {
+    position: fixed;
+    pointer-events: none;
+    display: none;
+    z-index: 30;
+    max-width: 420px;
+    padding: 8px 10px;
+    background: var(--bg-panel);
+    color: var(--text-primary);
+    border: 1px solid var(--line-grid);
+    border-radius: var(--radius-sm);
+    font: 12px/1.4 var(--font-mono);
+    word-break: break-all;
+  }
+
+  .missing {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 32px;
+    color: var(--text-secondary);
+    font-size: 14px;
+    line-height: 1.6;
+    text-align: center;
+  }
+
+  @media (pointer: coarse) {
+    .icon-btn, .btn-secondary, #search, .legend-row, .toggle-row, .inspector-toggle {
+      min-height: var(--touch-min);
+    }
+    .icon-btn { width: var(--touch-min); }
+    #search { font-size: 16px; }
+  }
+
+  @media (max-width: 900px) {
+    .shell-header { min-height: 64px; padding-inline: 20px; }
+    .brand { font-size: 22px; letter-spacing: -1px; }
+    .page-title { font-size: 16px; }
+    .metrics { overflow-x: auto; }
+    .metric { flex: 0 0 42%; padding: 14px 16px; }
+    .metric-value { font-size: 22px; }
+    .workspace {
+      grid-template-columns: 1fr;
+      grid-template-rows: minmax(0, 1fr) auto;
+    }
+    .inspector {
+      border-left: 0;
+      border-top: 1px solid var(--line-grid);
+      max-height: 48vh;
+    }
+    .inspector-toggle { display: flex; }
+    .inspector.collapsed { max-height: none; }
+    .inspector.collapsed .inspector-body { display: none; }
+  }
+
+  @media (max-width: 640px) {
+    .brand-row { gap: 12px; }
+    .page-title { display: none; }
+    .metric { flex: 0 0 50%; padding: 12px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; }
+  }
+</style>
+</head>
+<body>
+  <header class="shell-header">
+    <div class="brand-row">
+      <span class="brand">
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true" focusable="false">
+          <path d="M4 22V6h9a6 6 0 0 1 0 12H9M15 18l7 4" stroke="currentColor" stroke-width="3.3" />
+          <circle cx="22" cy="6" r="2.3" fill="currentColor" />
+        </svg>
+        radon
+      </span>
+      <h1 class="page-title">Code path</h1>
+    </div>
+    <div class="header-actions">
+      <button type="button" class="icon-btn" id="theme-toggle" aria-label="Switch theme">
+        <svg id="theme-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+          <circle cx="12" cy="12" r="4" />
+          <path d="M12 3v2M12 19v2M5 12H3M21 12h-2M6.2 6.2l1.4 1.4M16.4 16.4l1.4 1.4M6.2 17.8l1.4-1.4M16.4 7.6l1.4-1.4" />
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="metrics" aria-label="Graph totals">
+    <div class="metric"><span class="metric-label">Files</span><span class="metric-value" id="m-files">-</span></div>
+    <div class="metric"><span class="metric-label">Internal edges</span><span class="metric-value" id="m-edges">-</span></div>
+    <div class="metric"><span class="metric-label">Product files</span><span class="metric-value" id="m-product">-</span></div>
+    <div class="metric"><span class="metric-label">Test files</span><span class="metric-value" id="m-tests">-</span></div>
+    <div class="metric"><span class="metric-label">Clusters</span><span class="metric-value" id="m-groups">-</span></div>
+  </div>
+
+  <div class="workspace">
+    <div class="stage">
+      <canvas id="gl"></canvas>
+      <div id="labels"></div>
+    </div>
+    <aside class="inspector" id="inspector">
+      <button type="button" class="inspector-toggle" id="inspector-toggle" aria-expanded="true">Filters and selection</button>
+      <div class="inspector-body">
+        <div class="inspector-scroll">
+          <div class="section-label">Search</div>
+          <input id="search" type="search" placeholder="File path" spellcheck="false" autocomplete="off" />
+          <div id="search-results"></div>
+          <div class="filters-extra">
+            <div class="section-label">Areas</div>
+            <div id="legend"></div>
+            <div class="section-label">Layers</div>
+            <button type="button" class="toggle-row" id="toggle-tests">
+              <span class="box" id="tests-box">✓</span>
+              <span>Test files</span>
+              <span class="count" id="tests-count"></span>
+            </button>
+          </div>
+          <button type="button" class="btn-secondary" id="reset">Reset view</button>
+        </div>
+        <div id="selection">
+          <div id="sel-empty">No file selected. Hover a node to inspect it. Click to trace its imports and importers. Drag to pan, scroll to zoom.</div>
+          <div id="sel-detail" hidden>
+            <div id="sel-path"></div>
+            <div id="sel-stats"></div>
+            <div class="section-label">Imports <span id="out-count"></span></div>
+            <div class="dep-list" id="sel-out"></div>
+            <div class="section-label">Imported by <span id="in-count"></span></div>
+            <div class="dep-list" id="sel-in"></div>
+          </div>
+        </div>
+        <footer class="inspector-footer" id="meta-footer"></footer>
+      </div>
+    </aside>
+  </div>
+  <div id="tooltip"></div>
+  <script src="codemap.data.js"></script>
+  <script src="viewer.js"></script>
+</body>
+</html>
