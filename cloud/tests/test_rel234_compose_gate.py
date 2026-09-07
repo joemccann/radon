@@ -64,6 +64,9 @@ POISONS = {
     "user-root": BASE + "    user: root\n",
     "security-opt": BASE + "    security_opt:\n      - seccomp:unconfined\n",
     "privileged": BASE + "    privileged: true\n",
+    # T-441: the unquoted grep let YAML's equally-true quoted forms through.
+    "privileged-quoted": BASE + '    privileged: "true"\n',
+    "privileged-single-quoted": BASE + "    privileged: 'true'\n",
     "commented-container-name": BASE.replace(
         "    container_name: ib-gateway\n", "    # container_name: ib-gateway\n"
     ),

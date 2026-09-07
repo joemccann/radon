@@ -34,17 +34,25 @@ import fetch_equibles_ats_venue_share as mod  # noqa: E402
 MIGRATION = Path(__file__).parents[1] / "db" / "migrations" / "0041_equibles_ats_venue_share.sql"
 
 
-# Fixed anchor Monday. Anchoring to the CURRENT in-progress week emitted
-# five consecutive days from this week's Monday, i.e. future-dated rows on any
-# Mon-Thu run, while run() caps the fetch at end_date = now.date().
-ANCHOR_MONDAY = date(2026, 8, 31)
+def anchor_monday() -> date:
+    """Monday of the last fully COMPLETED week, derived from the clock.
+
+    Derived, not pinned (T-461): a fixed date drifts a week further every
+    Monday from the live `datetime.now(timezone.utc)` the run()/scheduling
+    call sites pass. A full week back keeps every generated day in the past
+    on any weekday run — anchoring to the CURRENT in-progress week emitted
+    future-dated rows on Mon-Thu, while run() caps the fetch at
+    end_date = now.date()."""
+    today = datetime.now(timezone.utc).date()
+    return today - timedelta(days=today.weekday(), weeks=1)
 
 
 def mondays(count: int) -> list[str]:
-    """The `count` Mondays ending at the fixed ANCHOR_MONDAY, ascending."""
-    assert ANCHOR_MONDAY.weekday() == 0
+    """The `count` Mondays ending at the clock-derived anchor, ascending."""
+    anchor = anchor_monday()
+    assert anchor.weekday() == 0
     return [
-        (ANCHOR_MONDAY - timedelta(weeks=count - 1 - i)).isoformat()
+        (anchor - timedelta(weeks=count - 1 - i)).isoformat()
         for i in range(count)
     ]
 
@@ -86,6 +94,21 @@ def price_week(week: str, *, daily_volume=25_000_000.0, days=5) -> list[dict]:
         }
         for offset in range(days)
     ]
+
+
+class TestFixtureTracksTheClock:
+    """T-461: the anchor must follow the same clock the live
+    `datetime.now(timezone.utc)` call sites hand to run(). A pinned date
+    drifts a week further from that clock every Monday; this guard turns the
+    rot into a failure at the fixture, not in whichever coverage assertion
+    happens to flip first."""
+
+    def test_the_anchor_is_the_last_completed_monday(self):
+        anchor = date.fromisoformat(mondays(1)[0])
+        today = datetime.now(timezone.utc).date()
+        assert anchor.weekday() == 0
+        assert anchor < today  # a completed week: no generated day is future-dated
+        assert 7 <= (today - anchor).days <= 13  # tracks the clock; cannot rot
 
 
 # ── week bucketing ────────────────────────────────────────────────

@@ -88,6 +88,36 @@ class TestShedIsVisible:
 
         assert states[-1] != "error"
 
+    @pytest.mark.asyncio
+    async def test_a_pool_disconnected_miss_is_error_and_ends_the_shed_streak(self):
+        """T-460: the non-shed branch (`pool-disconnected`, server.py R-658).
+
+        A stuck pool with the gateway reachable is a miss, not a shed: the row
+        must read state='error' naming the miss, and the shed streak must
+        restart so sheds separated by the unrelated failure do not inherit it
+        and escalate the NEXT shed straight to error."""
+        captured: list = []
+
+        with patch.object(srv.db_http, "hrana_execute", side_effect=lambda *a: captured.append(a)):
+            srv._reset_orders_sync_shed_state()
+            for _ in range(srv.ORDERS_SYNC_MAX_CONSECUTIVE_SHEDS):
+                await srv._heartbeat_orders_sync_skip("subprocess capacity exhausted")
+            await srv._heartbeat_orders_sync_skip(
+                "pool disconnected while gateway reachable",
+                error_class="pool-disconnected",
+            )
+            await srv._heartbeat_orders_sync_skip("subprocess capacity exhausted")
+
+        miss_args = captured[-2][1]
+        assert miss_args[1] == "error", f"non-shed miss wrote state {miss_args[1]!r}"
+        assert (
+            "orders sync missed (pool-disconnected): "
+            "pool disconnected while gateway reachable"
+        ) in (miss_args[4] or "")
+        assert captured[-1][1][1] == "warn", (
+            "the shed after the miss inherited the stale streak"
+        )
+
 
 class TestGexGateIsPerTicker:
     def test_each_ticker_gets_its_own_gate(self):

@@ -1,10 +1,10 @@
 {
-  "generated_at": "2026-09-07T17:00:07Z",
-  "node_count": 3185,
-  "edge_count": 6448,
+  "generated_at": "2026-09-07T17:07:14Z",
+  "node_count": 3189,
+  "edge_count": 6467,
   "areas": {
-    "web": 1886,
-    "site": 144,
+    "web": 1889,
+    "site": 145,
     "scripts": 1044,
     "cloud": 65,
     "lib": 28,
@@ -50,7 +50,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 871
+      "count": 874
     },
     {
       "id": "site/app",
@@ -75,7 +75,7 @@
     {
       "id": "site/lib",
       "area": "site",
-      "count": 47
+      "count": 48
     },
     {
       "id": "site/scripts",
@@ -249,7 +249,7 @@
     {
       "id": "web/lib/pricesProtocol.ts",
       "area": "web",
-      "in": 191,
+      "in": 192,
       "out": 0,
       "test": false
     },
@@ -270,7 +270,7 @@
     {
       "id": "web/components/WorkspaceShell.tsx",
       "area": "web",
-      "in": 51,
+      "in": 52,
       "out": 42,
       "test": false
     },
@@ -347,7 +347,7 @@
     {
       "id": "web/components/RegimePanel.tsx",
       "area": "web",
-      "in": 2,
+      "in": 3,
       "out": 50,
       "test": false
     },

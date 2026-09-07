@@ -1055,3 +1055,14 @@ how this loop improves as the codebase grows.
   the whole pytest gate at load 3-6, and the gate's 1730s was uncontended. The
   mechanism to remove is the agents' SUITE RUNS, not their existence; that
   recovered roughly 30 minutes of otherwise-idle cap.
+
+- **2026-09-06 (remediate): a prior remediation's own preamble is not the
+  backlog — recount un-DONE findings across ALL audit sections at pre-flight.**
+  The morning run's table said "all 24 DONE" while 14 verified findings from
+  the FIRST-pass 2026-09-05 audit had no DONE/BLOCKED record anywhere; a
+  10-line grep of every backlog T-### against the log's status rows found them
+  in one tool call. A dangling "closing counts appended below" promise at the
+  log tail is also work the next run owns — supersede it explicitly, never
+  leave it implied. And when your branch fixes source under the source-fix
+  rule, expect repo guards (docs-ownership) to fire on the fix itself: that is
+  the guard working; update the owner doc, don't docs-skip past it wholesale.

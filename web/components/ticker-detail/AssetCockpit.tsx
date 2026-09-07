@@ -134,7 +134,7 @@ export default function AssetCockpit({
   };
 
   return (
-    <div className={`cockpit cockpit-host ${mobile ? "cockpit--mobile" : ""}`}>
+    <div className={`cockpit cockpit-host ${mobile ? "cockpit--mobile" : ""}`} data-testid="cockpit-host">
       <CockpitHeader
         ticker={ticker}
         kind={bookKind}
@@ -178,7 +178,7 @@ export default function AssetCockpit({
           (legs / P&L cards / close-out) always lives in the p-deck. */}
       {!mobile && (
         <div className="act-region">
-          <div className="act-ticket">
+          <div className="act-ticket" data-testid="act-ticket">
             <OrderTab
               ticker={ticker}
               position={ticketPosition}

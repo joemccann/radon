@@ -205,20 +205,25 @@ class TestFailClosed:
         script.chmod(script.stat().st_mode | stat.S_IEXEC)
         return script
 
-    def _run(self, gh_bin: Path, *, keep: str | None = None):
+    def _run(self, gh_bin: Path, *, keep: str | None = None, timeout: str = "10"):
         argv = [
             sys.executable,
             str(SCRIPTS / "nightly_issue_prune.py"),
             "--gh-bin", str(gh_bin),
             "--issue", "42",
             "--branch-prefix", "reliability/",
-            "--timeout", "10",
+            "--timeout", timeout,
         ]
         if keep is not None:
             argv += ["--keep", keep]
         return subprocess.run(argv, capture_output=True, text=True, timeout=60)
 
     def _listing_fails_gh(self, tmp_path: Path, *, failure: str) -> Path:
+        # T-453: the timeout arm blocks on signal.pause() — held until the
+        # CLI's own subprocess timeout kills it — instead of a real
+        # time.sleep(30) that burned 10s of wall clock per run and let the
+        # outer 60s harness cap raise TimeoutExpired BEFORE the assertions
+        # under contention.
         log = tmp_path / "delete-log.txt"
         return self._gh(
             tmp_path,
@@ -227,7 +232,7 @@ class TestFailClosed:
             "if args[:2] == ['pr', 'list']:\n"
             + (
                 "    sys.exit(1)\n" if failure == "nonzero"
-                else "    import time; time.sleep(30)\n"
+                else "    import signal; signal.pause()\n"
             )
             + "elif args[:1] == ['api'] and args[1:3] == ['-X', 'DELETE']:\n"
             "    open(LOG, 'a').write(args[3].rsplit('/', 1)[-1] + '\\n')\n"
@@ -237,7 +242,13 @@ class TestFailClosed:
 
     @pytest.mark.parametrize("failure", ["nonzero", "timeout"])
     def test_a_failed_pr_listing_deletes_nothing(self, tmp_path, failure):
-        proc = self._run(self._listing_fails_gh(tmp_path, failure=failure))
+        # `--timeout 0` expires against the signal-blocked gh immediately, so
+        # the timeout path exercises the same TimeoutExpired branch in under a
+        # second of wall clock.
+        cli_timeout = "0" if failure == "timeout" else "10"
+        proc = self._run(
+            self._listing_fails_gh(tmp_path, failure=failure), timeout=cli_timeout
+        )
         assert proc.returncode == 0, proc.stderr
         assert not (tmp_path / "delete-log.txt").exists(), proc.stderr
         assert "unknown" in proc.stderr

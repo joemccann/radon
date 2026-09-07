@@ -8,6 +8,7 @@ control). pull is a short root action via sudoers; run is systemd-only.
 
 from __future__ import annotations
 
+import functools
 import os
 import re
 import sys
@@ -48,6 +49,38 @@ FORBIDDEN_UNITS = (
 def _write_executable(path: Path, body: str) -> None:
     path.write_text(body, encoding="utf-8")
     path.chmod(0o755)
+
+
+# --- T-452: wall-clock budgets scale with measured host contention ------------
+# Fixed budgets in this file were sized on an idle darwin host; 2026-09-04
+# recorded a 9.5x contention factor under sibling loops (~170s worst case for
+# the run that carried a fixed 90s bound). The runtime's slow path is
+# start_notify_proxy's 50-iteration `sleep 0.1` poll, where every iteration is
+# a fork+exec. Calibrate that cost on this host at first use and scale each
+# budget by it: the floors keep the idle-host bounds unchanged and the ceiling
+# keeps a genuine hang red.
+
+PROXY_POLL_ITERATIONS = 50  # start_notify_proxy's `seq 1 50`
+PROXY_POLL_INTERVAL = 0.1  # start_notify_proxy's `sleep 0.1`
+PROXY_PARENT_POLL_INTERVAL = 0.25  # cmd_notify_proxy's inbound.settimeout
+BUDGET_CEILING = 540.0
+
+
+@functools.cache
+def _forked_sleep_seconds() -> float:
+    samples = 5
+    start = time.monotonic()
+    subprocess.run(
+        ["bash", "-c", f"for _ in $(seq 1 {samples}); do sleep {PROXY_POLL_INTERVAL}; done"],
+        check=True,
+        timeout=120,
+    )
+    return (time.monotonic() - start) / samples
+
+
+def _contention_budget(nominal: float, floor: float) -> float:
+    factor = max(1.0, _forked_sleep_seconds() / PROXY_POLL_INTERVAL)
+    return min(max(nominal * factor * 2, floor), BUDGET_CEILING)
 
 
 # Stub docker that answers `manifest inspect` (registry) and `image inspect`
@@ -451,7 +484,21 @@ def test_notify_proxy_outlives_the_run_handoff_and_relays_while_docker_runs(tmp_
     upstream = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
     upstream.bind(str(upstream_path))
     fake_docker = tmp_path / "docker"
-    _write_executable(fake_docker, "#!/bin/bash\nif [[ \"$1\" == run ]]; then sleep 3; fi\nexit 0\n")
+    docker_started = tmp_path / "docker-started"
+    docker_release = tmp_path / "docker-release"
+    # T-452: the fake docker used to `sleep 3`, which every test-side wait
+    # raced under contention. It now stays up until the test releases it, so
+    # "while docker runs" holds by construction (loop bounded so a leaked
+    # stub cannot outlive the run).
+    _write_executable(
+        fake_docker,
+        "#!/bin/bash\n"
+        'if [[ "$1" == run ]]; then\n'
+        f'  touch "{docker_started}"\n'
+        f'  for _ in $(seq 1 1200); do [[ -e "{docker_release}" ]] && exit 0; sleep 0.1; done\n'
+        "fi\n"
+        "exit 0\n",
+    )
     env = {**_runtime_env(tmp_path, fake_docker), "NOTIFY_SOCKET": str(upstream_path)}
     proxy_socket = Path(env["RADON_TEST_NOTIFY_PROXY_DIR"]) / "radon-relay.service.sock"
     proc = subprocess.Popen(
@@ -461,16 +508,25 @@ def test_notify_proxy_outlives_the_run_handoff_and_relays_while_docker_runs(tmp_
         stderr=subprocess.DEVNULL,
     )
     try:
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + _contention_budget(1.0, floor=5.0)
         while not proxy_socket.exists() and time.monotonic() < deadline:
             time.sleep(0.02)
         assert proxy_socket.exists()
-        time.sleep(0.8)  # past the proxy's parent poll interval
+        handoff_deadline = time.monotonic() + _contention_budget(1.0, floor=5.0)
+        while not docker_started.exists() and time.monotonic() < handoff_deadline:
+            time.sleep(0.02)
+        assert docker_started.exists(), "run never handed off to docker"
+        # A proxy orphaned by the handoff exits within one parent poll; give
+        # it a full interval past the exec before asserting it is alive. The
+        # release-gated docker means this wait no longer races the container
+        # exiting.
+        time.sleep(PROXY_PARENT_POLL_INTERVAL * 2)
         client = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
         client.sendto(b"READY=1\n", str(proxy_socket))
-        upstream.settimeout(5)
+        upstream.settimeout(_contention_budget(1.0, floor=5.0))
         assert b"READY=1" in upstream.recv(256)
     finally:
+        docker_release.touch()
         proc.kill()
         proc.wait(timeout=5)
         upstream.close()
@@ -706,11 +762,19 @@ def test_run_api_cleans_staged_credential_on_pre_exec_failure(
     # is not involved (it reproduces identically with an existing
     # /usr/bin/false, and /bin/false does not exist on darwin at all). Only
     # the harness bound was wrong; the assertions are unchanged.
+    # T-452: the fixed 90s bound still redded at the 9.5x contention factor
+    # recorded 2026-09-04 (~170s worst case), so the budget now scales with
+    # the measured cost of the same fork+exec sleep the script performs; the
+    # idle-host floor stays 90s and the ceiling keeps a genuine hang red.
+    # The failing python is a stub because /usr/bin/false is a darwin
+    # location, not guaranteed on non-usrmerge Linux.
+    failing_python = tmp_path / "failing-python"
+    _write_executable(failing_python, "#!/bin/bash\nexit 1\n")
     result = _run(
         tmp_path,
         ["run", "radon-api.service"],
-        extra_env={"RADON_TEST_PYTHON": "/usr/bin/false"},
-        timeout=90,
+        extra_env={"RADON_TEST_PYTHON": str(failing_python)},
+        timeout=_contention_budget(PROXY_POLL_ITERATIONS * PROXY_POLL_INTERVAL, floor=90.0),
     )
     assert result.returncode == 71, result.stderr
     host_dir = Path(result.proxy_dir) / "credentials" / "radon-api.service"  # type: ignore[attr-defined]

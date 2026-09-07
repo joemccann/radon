@@ -1,3 +1,26 @@
+# Task: Merge main into testing/2026-09-06 [IN PROGRESS]
+
+Resolve the current branch's merge conflicts against `main` and re-verify the conflicted surfaces.
+
+## Dependency graph
+
+- T1 depends_on: [] - Fetch `main`, create a merge base, and perform the merge.
+- T2 depends_on: [T1] - Resolve conflicts surgically in affected files.
+- T3 depends_on: [T2] - Run focused validation, scan changed files, and publish the merge commit.
+
+## Checklist
+
+- [x] T1 Merge main
+- [x] T2 Resolve conflicts
+- [x] T3 Verify and publish
+
+## Review
+
+- [x] Codemap artifacts regenerated from the merged tree.
+- [x] `python3 -m pytest scripts/tests/test_codemap.py scripts/tests/test_path_filter.py -q`
+
+---
+
 # Task: Keep the code-path map fresh on every code commit
 
 Regenerate `tools/codemap/*.json` when source files change, and point agents at the graph so they do not reconstruct imports.

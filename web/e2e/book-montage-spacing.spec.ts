@@ -30,7 +30,7 @@ async function stubApis(page: Page) {
   await page.route("**/api/ticker/**", json({}));
 }
 
-test("ask shares and a long MPID stay in separate cells with a gap", async ({ page }) => {
+test("ask shares and a long MPID stay in separate cells with a gap", async ({ page }, testInfo) => {
   await stubApis(page);
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/AAOI");
@@ -96,7 +96,9 @@ test("ask shares and a long MPID stay in separate cells with a gap", async ({ pa
   // Tape-hidden desktop book column (~520px montage).
   await paint(520);
   expect(await askGap()).toBeGreaterThanOrEqual(6);
-  await page.locator(".book-sides").screenshot({ path: "/tmp/book-montage-spacing.png" });
+  const screenshotPath = testInfo.outputPath("book-montage-spacing.png");
+  await page.locator(".book-sides").screenshot({ path: screenshotPath });
+  await testInfo.attach("book-montage-spacing", { path: screenshotPath, contentType: "image/png" });
 
   // Tight montage (tape visible on a 1280px cockpit): still no overlap.
   await paint(360);
