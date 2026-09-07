@@ -8,6 +8,7 @@ finish and every deploy must name the exact commit it intends to release.
 
 from __future__ import annotations
 
+import ast
 import fnmatch
 import json
 import re
@@ -42,10 +43,8 @@ TEST_JOBS = (
 def _declared_required_status_checks() -> set[str]:
     """Contexts the operator has declared as required status checks on `main`.
 
-    Empty today: `gh api repos/{owner}/{repo}/branches/main/protection` returns
-    no `required_status_checks` key at all. Adding a context here is a claim
-    about live GitHub state that this test cannot verify — apply it over the API
-    first, then declare it.
+    Verified against GitHub on 2026-09-07. Keep the offline mirror in sync
+    after changing branch protection.
     """
     if not REQUIRED_STATUS_CHECKS.exists():
         return set()
@@ -513,6 +512,42 @@ def test_coverage_ratchets_gate_the_deploy() -> None:
     assert "stage-release" in needs
     assert "merge_vitest_coverage" in _job_commands(jobs["web-coverage"])
     assert "fail-under=56" in _job_commands(jobs["py-coverage"])
+
+
+def test_required_matrix_checks_run_for_every_pr_and_filter_pushes() -> None:
+    """Job-level false conditions skip matrix expansion and its required names."""
+    jobs = _workflow()["jobs"]
+    required = _declared_required_status_checks()
+    matrices = {
+        name: job for name, job in jobs.items()
+        if "matrix" in job.get("strategy", {})
+        and any(
+            job["name"].replace("${{ matrix.shard }}", str(shard)) in required
+            for shard in job["strategy"]["matrix"]["shard"]
+        )
+    }
+    assert set(matrices) == {"web-tests", "py-tests", "cloud-tests"}
+    assert jobs["perimeter-smoke"]["name"] in required
+    matrices["perimeter-smoke"] = jobs["perimeter-smoke"]
+    for event in ("pull_request", "push"):
+        for web_changed, python_changed in ((False, False), (True, False), (False, True), (True, True)):
+            values = {
+                "github.event_name": event,
+                "needs.changes.outputs.web": str(web_changed).lower(),
+                "needs.changes.outputs.python": str(python_changed).lower(),
+            }
+            for name, job in matrices.items():
+                # These guards use equality clauses joined by OR. Parse values
+                # as literals; do not execute expressions from the workflow.
+                clauses = job["if"].split("||")
+                enabled = False
+                for clause in clauses:
+                    left, right = clause.strip().split(" == ")
+                    enabled |= values[left] == ast.literal_eval(right)
+                changed = web_changed if name in {"web-tests", "perimeter-smoke"} else python_changed
+                assert enabled == (event == "pull_request" or changed), (
+                    name, event, web_changed, python_changed, job["if"]
+                )
 
 
 def test_path_filter_skips_the_other_gate() -> None:

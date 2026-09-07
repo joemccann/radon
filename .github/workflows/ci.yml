@@ -220,7 +220,8 @@ jobs:
   web-tests:
     name: Vitest (shard ${{ matrix.shard }}/8)
     needs: [changes]
-    if: needs.changes.outputs.web == 'true'
+    # Required PR checks must run even when the changed paths are docs-only.
+    if: github.event_name == 'pull_request' || needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -319,7 +320,8 @@ jobs:
   py-tests:
     name: pytest (${{ matrix.shard }})
     needs: [changes]
-    if: needs.changes.outputs.python == 'true'
+    # Required PR checks must run even when the changed paths are docs-only.
+    if: github.event_name == 'pull_request' || needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -490,7 +492,8 @@ jobs:
   cloud-tests:
     name: pytest (cloud ${{ matrix.shard }})
     needs: [changes]
-    if: needs.changes.outputs.python == 'true'
+    # Required PR checks must run even when the changed paths are docs-only.
+    if: github.event_name == 'pull_request' || needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -598,7 +601,8 @@ jobs:
   perimeter-smoke:
     name: Perimeter smoke (next start + curl)
     needs: [changes]
-    if: needs.changes.outputs.web == 'true'
+    # Required PR checks must run even when the changed paths are docs-only.
+    if: github.event_name == 'pull_request' || needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     concurrency:
       group: ci-perimeter-smoke-${{ github.ref }}
@@ -946,10 +950,10 @@ jobs:
     name: Deploy to VPS
     # TEST_AUDIT T-160: the coverage-combine jobs are back on `needs`. They were
     # dropped so deploy could start the moment the shards went green, deferring
-    # enforcement to a "required workflow job" — but `main` carries no
-    # `required_status_checks` at all, so nothing enforced them and both
-    # ratchets (vitest lines/functions/branches, pytest --cov-fail-under=56)
-    # were advisory. Combine genuinely needs its own barrier VM, so this costs
+    # enforcement to a "required workflow job" before main had required
+    # status checks, so both ratchets were advisory. Branch protection now
+    # requires them for PRs; deploy.needs still enforces them on main pushes.
+    # Combine genuinely needs its own barrier VM, so this costs
     # the deploy critical path ~1min. Gating and that latency cannot both be
     # had; a coverage regression must be able to fail the release.
     needs: [secret-scan, changes, app-images, contract-cloud-tests, contract-script-tests, contract-root-tests, web-tests, web-coverage, py-tests, py-coverage, cloud-tests, perimeter-smoke, stage-release, prepull-images]

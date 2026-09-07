@@ -1,3 +1,47 @@
+# Task: CI performance audit 2026-09-07 [IN PROGRESS]
+
+Record the current production critical path and every safe, source-actionable optimization candidate.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify dedicated runner, lock, branch, ledger baseline, and GitHub access.
+- T2 depends_on: [T1] - Measure 20 recent Actions runs and audit gate/deploy safety closure.
+- T3 depends_on: [T2] - Rank candidates, append the ledger, verify, commit, and push the audit branch.
+
+## Checklist
+
+- [x] T1 Runner and baseline verification
+- [x] T2 Actions and safety audit
+- [x] T3 Ledger and branch publication
+
+## Review
+
+- [x] Fetched 30 recent push runs and measured 20 Deploy-job completion clocks.
+- [x] Verified protected gate closure, Production policy, immutable action pins, and deploy safety rails.
+- [x] Rejected non-material or safety-reducing changes; audit ledger is append-only.
+
+---
+
+# Task: CI performance remediate 2026-09-07 [COMPLETE]
+
+Apply every verified P0/P1 CI-performance finding from today's audit without changing protected delivery guarantees.
+
+## Dependency graph
+
+- T1 depends_on: [] - Resume the dated branch, integrate current main, and take the runner lock.
+- T2 depends_on: [T1] - Recheck reduced-cap P0/P1 eligibility against the audit evidence and protected gate closure.
+- T3 depends_on: [T2] - Validate workflow contracts, append the remediation result, and publish the dated branch.
+
+## Checklist
+
+- [x] T1 Branch synchronized with `origin/main`; exclusive runner lock held.
+- [x] T2 No verified P0/P1 source-actionable finding; protected 40s stability, exact-SHA images, and full gate closure retained.
+- [x] T3 Workflow contracts green and remediation ledger recorded.
+
+## Review
+
+- [x] `RADON_WEEKEND_REDUCED=1` constrained this phase to P0/P1; no lower-priority experiment was implemented.
+- [x] `87 passed` workflow safety contracts; no test inventory, gate, provenance, deploy, rollback, or health behavior changed.
 # Task: Document optional Dropbox research credentials [IN PROGRESS]
 
 Keep the optional private research worker configurable without making its
@@ -5328,3 +5372,29 @@ Reduced-capability rung: remediate P1 findings only.
 - Research-only production inactive wait now 150s, with unchanged 60s startup/other-unit waits and 180s outer mutation deadline. Canonical unit allows 120s shutdown plus cleanup.
 - Independent review approved; 12 focused tests pass, including simulated 125s stop and persistent-stop exit 71. Shell syntax and diff checks pass.
 - Full cloud suite completed: 1821 passed, 44 failed, 7 skipped in 435.39s. Failures are in unchanged Caddy/runtime/supervisor/Gateway test surfaces (missing local Caddy and subprocess/timing fixtures); representative supervisor TimeoutExpired(3s) reproduced on clean parent. Full log: /private/tmp/radon-deploy-final-cloud.log. Linux CI remains the authoritative release gate.
+
+# PR #339–342 CI repair and merge queue
+- T1 depends_on: [] - Inspect exact-head CI and prove cross-PR conflict dependencies.
+- T2 depends_on: [T1] - Integrate current main into PR339, resolve conflicts, verify and bring its CI green.
+- T3 depends_on: [T2] - Repair PR340 and verify its exact-head CI green.
+- T4 depends_on: [T3] - Repair PR341 and verify its exact-head CI green.
+- T5 depends_on: [T4] - Repair PR342 and verify its exact-head CI green.
+- T6 depends_on: [T2,T3,T4,T5] - Merge339,340,341,342 in order; refresh each against preceding merges, regenerate source maps, repeat exact-head checks, notify once per PR, and supervise each main deployment.
+- [x] T1 Four-way merge-tree audit; task-ledger and source-map conflicts form a sequential chain.
+- [x] T2 PR339 preparation green.
+- [x] T3 PR340 green and merged externally as 125b4655; deployment passed.
+- [x] T4 PR341 preparation green: 31 successful checks.
+- [x] T5 PR342 preparation green on f6092bb8.
+- [ ] T6 All four merged and production verified.
+- PR339 integration: both task histories retained; diff against current main remains two documentation files. CI gate/path/concurrency checks passed 87/87.
+
+## Required-check repair replan
+
+- T7 depends_on: [T2] - Ensure docs-only pull requests execute every branch-protected matrix check; add regression coverage without weakening gates.
+- T8 depends_on: [T7] - Run focused and full suites, regenerate maps if necessary, publish and verify all required contexts before resuming T6.
+- [x] T7 Missing matrix-check repair; 88 focused contracts pass, live protection unchanged.
+- [ ] T8 Required-context validation and resumed merges.
+
+Review: PR339 merge was rejected because skipped matrices emit template names rather than required shard names; no bypass attempted. PR340 notification accepted HTTP200; PR339 notification accepted before this missing-context issue was discovered, so do not send a duplicate.
+
+Verification: full root Python 12,282 passed, 19 skipped, 16 subtests. Full cloud 1,860 passed, 7 skipped, 6 failures; five missing-Caddy failures reproduce on unchanged main, and the operator-concurrency timing test passed unchanged on serial rerun (also green on baseline).
