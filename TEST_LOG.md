@@ -700,3 +700,35 @@ real defect.
 | T-485 | DONE | `281e31a0` | hub.test.js store-down test captures stderr and asserts both failure lines fired before return — no pending `onUserConsoleLog` at teardown. Red: two gate logs (2026-09-02, 2026-09-06). Combined hub+regime ×3: unhandled-error count 0. |
 
 Closing 3× gate counts appended below after the runs.
+
+## Remediation 2026-09-06 (second pass, testing/2026-09-06, second host)
+
+The morning remediation's table above records 24/24 DONE but its preamble
+under-counted the backlog: 14 findings from the 2026-09-05 FIRST-pass audit
+(T-441, T-443, T-449–T-458, T-460, T-461) had no DONE/BLOCKED record anywhere,
+and the promised closing 3× gate counts never landed (that run ended before
+appending them). This pass landed all 14 in two waves of worktree subagents
+(≤6 concurrent), every landing re-verified scoped in the main clone and pushed
+immediately. Host baseline note: this host lacks `sha256sum` (only
+`gsha256sum`), so 3 `test_refresh_control_plane.py` preflight-hash tests fail
+pre-existing — verified byte-identical at untouched HEAD `92341347` (0.11s).
+
+| Task | Status | Commits | Evidence |
+|---|---|---|---|
+| T-441 | DONE | `b92e4ec8`→landed `990804e6` range | Compose gate exercised through `refresh_install_file` (6 poison params + green install). Red: neutered-validator mutation, 6× `returncode=0`. REAL GAP: quoted `privileged: "true"` passed the grep at HEAD — regex tightened identically in `deploy-root-helper.sh`/`bootstrap-control-plane.sh`/`setup-vps.sh`; quoted poisons added to `test_rel234_compose_gate.py`. Landed scoped: shim+rel234+refresh 141 passed, 3 pre-existing env fails only. |
+| T-443 | DONE | same | `preflight_env()` executed with fake `sudo -n` refusing the shim verb; direct-render argv asserted in full. Red: inverted elif → 3 failed. Superseded byte-offset greps removed. |
+| T-449 | DONE | `dfd11992` | Fetch-stubbed behavioural pushover tests (no-creds no-op, 500 no-throw, PII-free payload) + signed webhook-route alert. Red via source mutations; route-text greps deleted. 6 passed; resilience file 13 passed. |
+| T-450 | DONE | `6589cb06` | `vitest.setup.ts` matchMedia shim now overridable (`setMatchMedia`), dark default preserved, self-installed stubs respected. Red: light-mode assertion impossible at HEAD (`expected 'dark' to be 'light'`). Green: 7 direct files 34 passed + 79 consumer files 620 passed (worktree); landed scoped 27 passed. |
+| T-451 | DONE | `dfd11992` | `WEB_ROOT` via `fileURLToPath(import.meta.url)`; red from cwd `/tmp` at HEAD, green from `/tmp` and repo root. |
+| T-452 | DONE | `a65d4366` | `timeout=90` → calibrated `_contention_budget()` (floor 90s idle-identical, ceiling 540s); `/usr/bin/false` → tmp exit-1 stub; sleep-race → release-file-gated fake docker + progress gate. Mutation reds: forced hang → `TimeoutExpired`; parent-death → `ConnectionRefusedError`. Landed file 60 passed in 47.7s. |
+| T-453 | DONE | `0d3e13f3` | Real `sleep(30)` → signal-based wait; timeout-param path 10.22s → 0.22s; masking demo recorded. File 48 passed, assertions unchanged. |
+| T-454 | DONE | `e48e7791` | Testid/role selectors in 4 specs, testids added to 6 components (T-479 pattern), `testInfo.outputPath` screenshots + attach. Verified under `next start` :3100 CI-equivalent env: 7 passed/1 skipped + demo 2 passed. Mutation drills: renamed classes leave old selectors blind (`count 0`) while testid specs stay green. T-438 ledger re-stamped REVIEWED 2026-09-06; curation guard 6 passed. |
+| T-455 | DONE | `e48e7791` | `demo-headlines.spec.ts` fixture now `Date.now()-60s` (T-437 pattern). |
+| T-456 | DONE | `7a4f5a7c` | Consumer-render assertions per FX constant (site CtaBeam/HeroBeam/MarkerAccent; web GATE_BEAM/FOUR_GATES/orb verbs/footer IB beam); mirrors replaced. `vitest.config.ts` site-app-alias fix so site importers resolve `@/`→`site/*`. Reds: spread deletes → 2+2 failed; predicate inversions → 4 failed. Landed scoped: web 18 passed, site 9 passed (site/lib sweep 111 passed in worktree). |
+| T-457 | DONE | `dfd11992` | Real `WorkspaceShell` demo-mode render: "Sample snapshot" present, sync producer action absent. Red via `{!isDemoMode ?`→`{true ?` mutation; source-text grep file deleted. |
+| T-458 | DONE | `1d5f2478` | Both layout files render real components; new `web/tests/cssCascade.tsx` resolves the winning declaration per rendered element (globals.css parsed once). Reds where old byte-pins stayed 10/10 green under the same mutations. 10 passed ×3, ~1.5s/run. |
+| T-460 | DONE | `0d3e13f3` | Explicit `host_role=` on all 18 rel181/rel135 calls; `TestAppRoleDropOut` app-role case; `pool-disconnected` branch `state="error"` message asserted. Red: `RADON_HOST_ROLE=app --noconftest` flipped rel135 at HEAD; mutations red the new cases. 39 passed across 3 files. |
+| T-461 | DONE | `0d3e13f3` | `ANCHOR_MONDAY` derived from the injected clock (last completed Monday); red frozen +1y at HEAD (fixture 372 days adrift guard); green real clock (64) and frozen a year out (65). |
+
+Closing 3× gate counts for THIS pass appended below after the runs (the
+morning pass's promised counts never landed; superseded by these).

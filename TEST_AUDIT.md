@@ -10010,3 +10010,13 @@ observation but now demonstrated: any gate keyed on vitest's EXIT CODE
   cancelled as superseded mid-merge, not a failure).
 - **Open-PR pre-check (2026-08-27 rule):** 4 open PRs, none overlapping
   T-485.
+
+## Remediation 2026-09-06 (second pass)
+
+The 14 un-DONE stragglers from the 2026-09-05 first-pass audit (T-441, T-443,
+T-449–T-458, T-460, T-461) — absent from the morning remediation's backlog
+count — are all DONE on `testing/2026-09-06`; full table in `TEST_LOG.md`
+§Remediation 2026-09-06 (second pass). One product fix rode along under the
+source-fix rule: the compose-body gate accepted quoted `privileged: "true"`
+(T-441's new test caught it red at HEAD); regex tightened in
+`deploy-root-helper.sh`, `bootstrap-control-plane.sh`, `setup-vps.sh`.
