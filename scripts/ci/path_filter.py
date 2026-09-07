@@ -72,6 +72,7 @@ PYTHON_PREFIXES = (
     "scripts/",
     "cloud/",
     "tests/",
+    "tools/",
     "pyproject.toml",
     "requirements.txt",
     "requirements-dev.txt",

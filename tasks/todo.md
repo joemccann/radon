@@ -1,3 +1,23 @@
+# Task: Refresh whole-repo code path map (supersedes PR 176)
+
+Rebuild the stale Aug 29 import graph against current main and restyle the viewer to Clear.
+
+## Dependency graph
+
+- T1 depends_on: [] - Failing generator, path-filter, and viewer-chrome tests.
+- T2 depends_on: [T1] - Walk tools/, skip worktrees/generated payload, regenerate JSON.
+- T3 depends_on: [T2] - Clear workstation viewer (light default, theme, metrics, inspector).
+- T4 depends_on: [T3] - Focused pytest, visual check, PR. Close #176.
+
+## Checklist
+
+- [x] T1 Failing tests
+- [x] T2 Generator + current graph
+- [x] T3 Clear viewer
+- [x] T4 Verify and open PR
+
+---
+
 # Task: Caddy site for mcp.radon.run (issue #232)
 
 Vercel DNS already points mcp.radon.run at 5.78.148.38. Add a dedicated Caddy site that serves only MCP, and admit that Host on the FastMCP allowlist.

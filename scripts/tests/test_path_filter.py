@@ -252,6 +252,13 @@ def test_scripts_only_change_still_runs_web_gate() -> None:
     assert (python, web) == (True, True)
 
 
+def test_tools_codemap_change_arms_python_gate() -> None:
+    python, web = classify(["tools/codemap/generate_codemap.py"])
+    assert python is True
+    python_html, _web_html = classify(["tools/codemap/index.html"])
+    assert python_html is True
+
+
 def test_python_change_does_not_duplicate_cross_tree_contract_job() -> None:
     selection = select_gates(["scripts/ib_sync.py", "web/lib/agent/turnSteps.ts"])
     assert (selection.python, selection.web, selection.contracts) == (True, True, False)
