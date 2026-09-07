@@ -90,9 +90,11 @@ release's. The incoming body is gated at install time instead, by provenance
 
 That validator's deny-list refuses EVERY host-namespace join, not only
 `pid:` — `ipc:`, `userns_mode:`, `uts:` and `cgroup:` widen the container's
-runtime the same way (R-668/REL-249). The three copies (deploy-root-helper,
-bootstrap-control-plane, setup-vps) stay byte-identical; a parity test in
-`cloud/tests/test_rel234_compose_gate.py` pins them.
+runtime the same way (R-668/REL-249), and the deny greps match quoted values
+too (`privileged: "true"` / `'true'` — the bare-`true` grep alone waved the
+quoted form through until T-441 caught it). The three copies
+(deploy-root-helper, bootstrap-control-plane, setup-vps) stay byte-identical;
+a parity test in `cloud/tests/test_rel234_compose_gate.py` pins them.
 
 **The broker host gets none of this from CI.** `.github/workflows/ci.yml`
 deploys to a single `secrets.VPS_HOST`, and `sync-control-plane` reads
