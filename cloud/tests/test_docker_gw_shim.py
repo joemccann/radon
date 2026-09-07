@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -197,38 +198,117 @@ def test_sudoers_lists_each_verb_without_a_wildcard() -> None:
     assert "radon ALL=(root) NOPASSWD: /usr/bin/docker compose" not in text
 
 
-def _preflight_body() -> str:
-    deploy = (CLOUD / "scripts" / "deploy.sh").read_text(encoding="utf-8")
-    start = deploy.index("preflight_env() {")
-    return deploy[start : deploy.index("\n}", start)]
+# --- deploy preflight executes, not greps (T-443) ---------------------------
+#
+# The former tests here byte-offset-compared deploy.sh's source (`shim_at <
+# direct_at < fail_at`, `compose_check_ok=1` counts). These run preflight_env()
+# instead: a fake `sudo -n` that refuses the shim verb reproduces the exact
+# deadlock scenario (deploy.sh arrives from the new release BEFORE
+# refresh-control-plane installs the sudoers verb), and the assertions are on
+# what actually executed -- the direct render's full argv, the countable
+# fallback line, and the shim-covered short circuit.
+
+DEPLOY = CLOUD / "scripts" / "deploy.sh"
+FALLBACK_MARKER = "direct render covered"
 
 
-def test_deploy_preflight_prefers_the_shim_over_group_docker() -> None:
-    assert 'sudo -n "$DOCKER_GW" config-check' in _preflight_body()
-
-
-def test_deploy_preflight_falls_back_instead_of_deadlocking() -> None:
-    """Preferring one path and stopping there strands the deploy.
-
-    deploy.sh arrives from the new release BEFORE refresh-control-plane
-    installs the sudoers verb that permits the shim call, so `sudo -n` is
-    refused; if that were the only path, preflight would abort and the promote
-    that installs the verb would never run. It has to fall through to the
-    direct render, and only fail when neither works.
-    """
-    body = _preflight_body()
-    shim_at = body.index('sudo -n "$DOCKER_GW" config-check')
-    direct_at = body.index("docker compose --env-file")
-    fail_at = body.index("compose config validation failed")
-
-    assert shim_at < direct_at < fail_at, "direct render must sit between them"
-    # REL-242 (R-647): the fallback is no longer a silent elif -- the shim's
-    # refusal is captured so the covered fallback logs one countable line --
-    # but the intent pinned here is unchanged: the direct render runs only
-    # when the shim did not already cover, and preflight fails only when
-    # neither path renders.
-    assert "(( compose_check_ok == 0 )) && (" in body, (
-        "the direct render must run only when the shim did not cover"
+def _run_preflight_env(tmp_path: Path, *, sudo_grants: bool, docker_exit: int = 0):
+    env_file = tmp_path / "env"
+    env_file.write_text(
+        "GATEWAY_MODE=cloud\n"
+        "IB_GATEWAY_MODE=cloud\n"
+        "RADON_MODE=hetzner\n"
+        "NODE_ENV=production\n"
+        "RADON_HOST_ROLE=combined\n"
+        "IB_GATEWAY_HOST=127.0.0.1\n"
+        "TRADING_MODE=paper\n"
+        "IB_GATEWAY_PORT=4002\n",
+        encoding="utf-8",
     )
-    assert body.count("compose_check_ok=1") == 2
-    assert "direct render covered" in body
+    env_file.chmod(0o600)
+    required = tmp_path / "required-env.txt"
+    required.write_text("", encoding="utf-8")
+
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    sudo_log = tmp_path / "sudo.log"
+    shim_log = tmp_path / "shim.log"
+    docker_log = tmp_path / "docker.log"
+    shim = tmp_path / "radon-docker-gw"
+    _write_executable(
+        shim, f"#!/bin/bash\nprintf '%s\\n' \"$*\" >> '{shim_log}'\nexit 0\n"
+    )
+    if sudo_grants:
+        # sudo -n <shim> config-check -> strip flags, run the shim directly.
+        sudo_tail = 'while [[ "$1" == -* ]]; do shift; done\nexec "$@"\n'
+    else:
+        # The sudoers verb is not installed yet: non-interactive sudo refuses.
+        sudo_tail = 'echo "sudo: a password is required" >&2\nexit 1\n'
+    _write_executable(
+        bindir / "sudo",
+        "#!/bin/bash\n" + f"printf '%s\\n' \"$*\" >> '{sudo_log}'\n" + sudo_tail,
+    )
+    _write_executable(
+        bindir / "docker",
+        f"#!/bin/bash\nprintf '%s\\n' \"$*\" >> '{docker_log}'\nexit {docker_exit}\n",
+    )
+
+    command = f"""
+set -uo pipefail
+export PATH='{bindir}':"$PATH"
+export RADON_DEPLOY_ENV_FILE='{env_file}'
+export RADON_REQUIRED_ENV_FILE='{required}'
+export RADON_ENV_CHECKER_PYTHON='{sys.executable}'
+export RADON_DOCKER_GW='{shim}'
+export RADON_CLOUD_DIR='{CLOUD}'
+source '{DEPLOY}'
+preflight_env
+"""
+    result = subprocess.run(
+        ["bash", "-c", command], capture_output=True, text=True, timeout=60
+    )
+    return result, {
+        "env_file": env_file,
+        "sudo_log": sudo_log,
+        "shim_log": shim_log,
+        "docker_log": docker_log,
+    }
+
+
+def test_preflight_direct_render_executes_when_sudo_refuses_the_shim_verb(
+    tmp_path: Path,
+) -> None:
+    result, logs = _run_preflight_env(tmp_path, sudo_grants=False)
+    combined = result.stdout + result.stderr
+
+    assert result.returncode == 0, combined
+    sudo_line = logs["sudo_log"].read_text(encoding="utf-8").strip()
+    assert sudo_line.startswith("-n ")
+    assert sudo_line.endswith(" config-check")
+    assert not logs["shim_log"].exists()
+    docker_line = logs["docker_log"].read_text(encoding="utf-8").strip()
+    assert docker_line == f"compose --env-file {logs['env_file']} config --quiet"
+    assert combined.count(FALLBACK_MARKER) == 1, combined
+    assert "shim refused (exit 1)" in combined
+
+
+def test_preflight_fails_only_when_neither_path_renders(tmp_path: Path) -> None:
+    result, logs = _run_preflight_env(tmp_path, sudo_grants=False, docker_exit=1)
+    combined = result.stdout + result.stderr
+
+    assert result.returncode != 0
+    assert "docker compose config validation failed" in combined
+    assert FALLBACK_MARKER not in combined
+    assert "config --quiet" in logs["docker_log"].read_text(encoding="utf-8")
+
+
+def test_preflight_skips_the_direct_render_when_the_shim_covers(
+    tmp_path: Path,
+) -> None:
+    result, logs = _run_preflight_env(tmp_path, sudo_grants=True)
+    combined = result.stdout + result.stderr
+
+    assert result.returncode == 0, combined
+    assert logs["shim_log"].read_text(encoding="utf-8").splitlines() == ["config-check"]
+    assert not logs["docker_log"].exists()
+    assert FALLBACK_MARKER not in combined

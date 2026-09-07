@@ -237,7 +237,7 @@ compose_body_is_valid() {
     echo "compose validation failed: ${dest} does not pin container_name ib-gateway" >&2
     return 1
   }
-  if printf '%s\n' "$body" | grep -Eq '^[[:space:]]*privileged:[[:space:]]*true'; then
+  if printf '%s\n' "$body" | grep -Eq "^[[:space:]]*privileged:[[:space:]]*[\"']?true"; then
     echo "compose validation failed: ${dest} requests privileged" >&2
     return 1
   fi
