@@ -19,6 +19,10 @@ Sub-directory CLAUDE.md files auto-load when cwd is anywhere under that subtree.
 - **`scripts/newsfeed/CLAUDE.md`** — Headless Playwright, tagging pipeline (vision + text), cookie-gated images, taxonomy.
 - **`scripts/health_service/CLAUDE.md`** — Isolated stdlib health daemon (`radon-health.service` :8330): stdlib-only isolation contract, `/healthz` + `/status`, never-502 edge floor, three-valued states. Decoupled from the cascade-stop on purpose.
 
+## Code path map
+
+Read `tools/codemap/architecture.json` before searching for a module or reconstructing imports. Full graph: `tools/codemap/codemap.json` (`meta`, `groups`, `nodes`, `edges`; `edges` are `[src, dst]` indexes into `nodes`). Do not walk the tree to reconstruct imports. Code commits regenerate those files via `python3.13 tools/codemap/pre_commit.py`; CI fails if they are stale (`python3.13 tools/codemap/generate_codemap.py`).
+
 ## Reference docs — read explicitly when needed
 
 - `docs/evaluation.md` — 7-milestone trade eval pipeline + signal interpretation + intraday dark-pool interpolation

@@ -3,14 +3,17 @@
 Walks every source area (web/, site/, scripts/, cloud/, lib/, tests/, tools/),
 resolves TS/JS and Python imports to repo-internal files, and emits:
 
-- tools/codemap/codemap.json     -- the graph (nodes, edges, groups, layout)
-- tools/codemap/codemap.data.js  -- same payload as `window.CODEMAP = ...` so
+- tools/codemap/codemap.json        -- the graph (nodes, edges, groups, layout)
+- tools/codemap/codemap.data.js     -- same payload as `window.CODEMAP = ...` so
   tools/codemap/index.html works from file:// (Chrome blocks file:// fetch)
+- tools/codemap/architecture.json   -- compact agent index (areas, clusters, hubs)
 
 Layout is precomputed here (per-directory clusters on a ring, phyllotaxis
 inside each cluster) so the WebGL viewer only renders and never simulates.
 
-Usage: python3 tools/codemap/generate_codemap.py
+Usage:
+  python3.13 tools/codemap/generate_codemap.py
+  python3.13 tools/codemap/generate_codemap.py --check
 """
 
 from __future__ import annotations
@@ -52,6 +55,12 @@ SKIP_DIRS = {
 }
 
 SKIP_FILES = {"codemap.data.js"}
+ARTIFACT_RELS = (
+    "tools/codemap/codemap.json",
+    "tools/codemap/codemap.data.js",
+    "tools/codemap/architecture.json",
+)
+HUB_LIMIT = 40
 
 JS_EXTS = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs")
 PY_EXTS = (".py",)
@@ -321,13 +330,96 @@ def build_graph(repo: Path) -> dict:
     }
 
 
-def main() -> int:
-    graph = build_graph(REPO)
+def fingerprint(graph: dict) -> str:
+    payload = {
+        **graph,
+        "meta": {key: value for key, value in graph["meta"].items() if key != "generated_at"},
+    }
+    return json.dumps(payload, separators=(",", ":"), sort_keys=True)
+
+
+def architecture_from(graph: dict) -> dict:
+    nodes = graph["nodes"]
+    groups = graph["groups"]
+    ranked = sorted(nodes, key=lambda node: (node["in"] + node["out"], node["in"], node["id"]), reverse=True)
+    return {
+        "generated_at": graph["meta"]["generated_at"],
+        "node_count": graph["meta"]["node_count"],
+        "edge_count": graph["meta"]["edge_count"],
+        "areas": graph["meta"]["areas"],
+        "groups": [{"id": grp["id"], "area": grp["area"], "count": grp["count"]} for grp in groups],
+        "hubs": [
+            {
+                "id": node["id"],
+                "area": groups[node["g"]]["area"],
+                "in": node["in"],
+                "out": node["out"],
+                "test": node["test"],
+            }
+            for node in ranked[:HUB_LIMIT]
+        ],
+        "graph": "tools/codemap/codemap.json",
+        "read": (
+            "Look up a path in graph.nodes[].id. graph.edges are [src, dst] indexes "
+            "into nodes. Do not walk the tree to reconstruct imports."
+        ),
+    }
+
+
+def is_source_rel(rel: str) -> bool:
+    if rel in ARTIFACT_RELS:
+        return False
+    parts = rel.split("/")
+    if not parts or parts[0] not in SOURCE_ROOTS:
+        return False
+    if any(part in SKIP_DIRS for part in parts):
+        return False
+    name = parts[-1]
+    if name in SKIP_FILES:
+        return False
+    return name.endswith(JS_EXTS + PY_EXTS)
+
+
+def should_refresh(rels: list[str]) -> bool:
+    return any(is_source_rel(rel) for rel in rels)
+
+
+def write_graph(graph: dict, out_dir: Path = OUT_DIR) -> bool:
+    json_path = out_dir / "codemap.json"
+    arch_path = out_dir / "architecture.json"
+    if json_path.is_file() and arch_path.is_file():
+        existing = json.loads(json_path.read_text(encoding="utf-8"))
+        if fingerprint(existing) == fingerprint(graph):
+            return False
     payload = json.dumps(graph, separators=(",", ":"))
-    (OUT_DIR / "codemap.json").write_text(payload + "\n", encoding="utf-8")
-    (OUT_DIR / "codemap.data.js").write_text(f"window.CODEMAP = {payload};\n", encoding="utf-8")
+    json_path.write_text(payload + "\n", encoding="utf-8")
+    (out_dir / "codemap.data.js").write_text(f"window.CODEMAP = {payload};\n", encoding="utf-8")
+    arch_path.write_text(json.dumps(architecture_from(graph), indent=2) + "\n", encoding="utf-8")
+    return True
+
+
+def committed_graph_is_fresh(repo: Path = REPO, out_dir: Path = OUT_DIR) -> bool:
+    json_path = out_dir / "codemap.json"
+    arch_path = out_dir / "architecture.json"
+    if not json_path.is_file() or not arch_path.is_file():
+        return False
+    existing = json.loads(json_path.read_text(encoding="utf-8"))
+    return fingerprint(existing) == fingerprint(build_graph(repo))
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = sys.argv[1:] if argv is None else argv
+    graph = build_graph(REPO)
+    if "--check" in args:
+        if committed_graph_is_fresh(REPO, OUT_DIR):
+            print("codemap: fresh")
+            return 0
+        print("codemap: stale; run python3.13 tools/codemap/generate_codemap.py", file=sys.stderr)
+        return 1
+    wrote = write_graph(graph)
     meta = graph["meta"]
-    print(f"codemap: {meta['node_count']} nodes, {meta['edge_count']} edges -> {OUT_DIR}")
+    action = "wrote" if wrote else "unchanged"
+    print(f"codemap: {action} {meta['node_count']} nodes, {meta['edge_count']} edges -> {OUT_DIR}")
     return 0
 
 

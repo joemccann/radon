@@ -9,16 +9,22 @@ from pathlib import Path
 import pytest
 
 from tools.codemap.generate_codemap import (
+    HUB_LIMIT,
     REPO,
+    architecture_from,
     build_graph,
     collect_files,
+    committed_graph_is_fresh,
     extract_js_deps,
     extract_py_deps,
+    fingerprint,
     group_of,
     is_test_path,
     resolve_js,
     resolve_py_module,
     resolve_py_relative,
+    should_refresh,
+    write_graph,
 )
 
 VIEWER = Path(__file__).resolve().parents[2] / "tools" / "codemap" / "index.html"
@@ -227,3 +233,53 @@ class TestViewerChrome:
         assert "compact" in js
         assert "—" not in html
         assert "–" not in html
+
+
+class TestRefreshGate:
+    def test_source_edits_refresh_and_artifacts_do_not(self) -> None:
+        assert should_refresh(["web/lib/radonApi.ts"]) is True
+        assert should_refresh(["scripts/api/server.py"]) is True
+        assert should_refresh(["tools/codemap/codemap.json"]) is False
+        assert should_refresh(["tools/codemap/architecture.json"]) is False
+        assert should_refresh(["docs/cloud-services.md"]) is False
+        assert should_refresh(["web/app/globals.css"]) is False
+
+    def test_architecture_lists_hubs_and_clusters(self, repo: Path) -> None:
+        graph = build_graph(repo)
+        architecture = architecture_from(graph)
+        assert architecture["node_count"] == graph["meta"]["node_count"]
+        assert architecture["edge_count"] == graph["meta"]["edge_count"]
+        assert architecture["areas"] == graph["meta"]["areas"]
+        assert {grp["id"] for grp in architecture["groups"]} == {grp["id"] for grp in graph["groups"]}
+        assert 1 <= len(architecture["hubs"]) <= HUB_LIMIT
+        assert architecture["graph"] == "tools/codemap/codemap.json"
+        assert "nodes" in architecture["read"]
+
+    def test_write_graph_is_idempotent_without_a_timestamp_bump(self, repo: Path, tmp_path: Path) -> None:
+        graph = build_graph(repo)
+        out = tmp_path / "codemap"
+        out.mkdir()
+        assert write_graph(graph, out) is True
+        first = json.loads((out / "codemap.json").read_text())
+        assert (out / "architecture.json").is_file()
+        assert write_graph(graph, out) is False
+        second = json.loads((out / "codemap.json").read_text())
+        assert first["meta"]["generated_at"] == second["meta"]["generated_at"]
+        assert fingerprint(first) == fingerprint(second)
+
+
+class TestCommittedArtifacts:
+    def test_matches_live_graph(self) -> None:
+        assert committed_graph_is_fresh(REPO), (
+            "tools/codemap is stale; run python3.13 tools/codemap/generate_codemap.py"
+        )
+
+
+class TestAgentRails:
+    def test_instruction_files_point_at_the_code_path_map(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        for rel in ("CLAUDE.md", "AGENTS.md", ".pi/AGENTS.md"):
+            text = (root / rel).read_text(encoding="utf-8")
+            assert "tools/codemap/architecture.json" in text, rel
+            assert "tools/codemap/codemap.json" in text, rel
+            assert "Do not walk the tree to reconstruct imports" in text, rel

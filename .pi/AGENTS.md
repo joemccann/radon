@@ -17,6 +17,10 @@ This root file is intentionally small. Scoped `AGENTS.md` files live beside subs
 
 When a scoped `AGENTS.md` and this root file conflict, prefer the more specific scoped file. When `AGENTS.md` and `CLAUDE.md` conflict, prefer the newer, more specific rule and update the Codex file during the work.
 
+## Code path map
+
+Read `tools/codemap/architecture.json` before searching for a module or reconstructing imports. Full graph: `tools/codemap/codemap.json` (`meta`, `groups`, `nodes`, `edges`; `edges` are `[src, dst]` indexes into `nodes`). Do not walk the tree to reconstruct imports. Code commits regenerate those files via `python3.13 tools/codemap/pre_commit.py`; CI fails if they are stale (`python3.13 tools/codemap/generate_codemap.py`).
+
 ## Response Format
 
 ⛔ **This is a HARD FORMAT, not a style preference.** Copied from `CLAUDE.md`. Every closing message uses this shape and nothing else:
@@ -58,6 +62,7 @@ When a scoped `AGENTS.md` and this root file conflict, prefer the more specific 
 - Track checklist progress as work completes and add a review section before final response.
 - After any user correction, update `tasks/lessons.md` with a rule that prevents repeating the mistake.
 - Never revert user changes. Check `git status --short --branch` before edits and ignore unrelated dirty files.
+- For architecture, module location, or imports, read `tools/codemap/architecture.json` then `tools/codemap/codemap.json`. Do not walk the tree to reconstruct imports.
 - Use `rg` / `rg --files` first for search.
 
 ## Pull Request Completion

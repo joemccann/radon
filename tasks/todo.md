@@ -1,3 +1,23 @@
+# Task: Keep the code-path map fresh on every code commit
+
+Regenerate `tools/codemap/*.json` when source files change, and point agents at the graph so they do not reconstruct imports.
+
+## Dependency graph
+
+- T1 depends_on: [] - Failing freshness, architecture, and agent-rail tests.
+- T2 depends_on: [T1] - Generator `--check`, compact architecture.json, pre-commit helper.
+- T3 depends_on: [T2] - CLAUDE.md / AGENTS.md rails; CI contract on source edits.
+- T4 depends_on: [T3] - Focused pytest, regenerate graph, PR.
+
+## Checklist
+
+- [x] T1 Failing tests
+- [x] T2 Generator + hook
+- [x] T3 Agent rails + CI contract
+- [x] T4 Verify and open PR
+
+---
+
 # Task: Refresh whole-repo code path map (supersedes PR 176)
 
 Rebuild the stale Aug 29 import graph against current main and restyle the viewer to Clear.

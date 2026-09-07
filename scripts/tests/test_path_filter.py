@@ -307,18 +307,38 @@ def test_write_output_appends_github_output(tmp_path: Path) -> None:
     assert "web=true\n" in output
     assert "contracts=true\n" in output
     assert "contract_cloud_tests=\n" in output
-    assert "contract_script_tests=scripts/tests/test_replica_safe_default.py\n" in output
+    assert "scripts/tests/test_replica_safe_default.py" in output
+    assert "scripts/tests/test_codemap.py::TestCommittedArtifacts::test_matches_live_graph" in output
     assert "contract_root_tests=\n" in output
 
 
 def test_cross_tree_targets_are_split_by_pytest_root() -> None:
     selection = select_gates(["web/lib/chat.ts", "web/lib/wsTicket.ts"])
     assert selection.contract_cloud_tests
-    assert selection.contract_script_tests == (
-        "scripts/tests/test_replica_safe_default.py",
+    assert "scripts/tests/test_replica_safe_default.py" in selection.contract_script_tests
+    assert (
+        "scripts/tests/test_codemap.py::TestCommittedArtifacts::test_matches_live_graph"
+        in selection.contract_script_tests
     )
     assert selection.contract_root_tests == (
         "tests/test_no_tracked_account_figures.py",
+    )
+
+
+def test_source_change_runs_codemap_freshness_contract() -> None:
+    selection = select_gates(["web/components/dashboard/ClearOverview.tsx"])
+    assert selection.python is False
+    assert (
+        "scripts/tests/test_codemap.py::TestCommittedArtifacts::test_matches_live_graph"
+        in selection.contract_tests
+    )
+
+
+def test_css_only_does_not_run_codemap_freshness() -> None:
+    selection = select_gates(["web/app/globals.css"])
+    assert (
+        "scripts/tests/test_codemap.py::TestCommittedArtifacts::test_matches_live_graph"
+        not in selection.contract_tests
     )
 
 
