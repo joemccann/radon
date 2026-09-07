@@ -923,3 +923,6 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 
 - Run the full suite only after implementation agents finish and focused/browser fixes are complete. Starting it while source files are changing can produce mixed-revision results and force an expensive restart.
 - Bound test workers on the shared workstation. Run Next route type generation after the dev server has stopped, then typecheck the completed generated files; do not race typechecking against regeneration.
+
+## Deployment completion (2026-09-07)
+- A merged feature with a reproducible deployment failure still needs a concrete repair when requested; trace supervisor, unit and outer deadlines together, add a failing regression, and verify the corrected release reaches production.

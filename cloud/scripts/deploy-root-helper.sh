@@ -171,6 +171,7 @@ else
   readonly TIMEOUT=/usr/bin/timeout
   readonly ROOT_LOCK_FILE=/run/radon-deploy-root.lock
   readonly STATE_WAIT_SECONDS=60
+  readonly RESEARCH_STOP_WAIT_SECONDS=150
   readonly PREHELD_WAIT_SECONDS=120
   readonly SLEEP=/usr/bin/sleep
   readonly CONTROL_PLANE_ROOT=""
@@ -372,7 +373,15 @@ systemctl_bounded() {
 wait_for_unit_state() {
   local unit="$1"
   local desired="$2"
-  local deadline=$((SECONDS + STATE_WAIT_SECONDS))
+  local wait_seconds="$STATE_WAIT_SECONDS"
+  # Research permits 120s for systemd shutdown, followed by ExecStopPost
+  # container cleanup. Keep this stop-only allowance below the 180s root
+  # supervisor budget; starts and test-mode waits retain their usual bounds.
+  if (( HELPER_TEST_MODE == 0 )) && \
+     [[ "$unit" == radon-research.service && "$desired" == inactive ]]; then
+    wait_seconds="$RESEARCH_STOP_WAIT_SECONDS"
+  fi
+  local deadline=$((SECONDS + wait_seconds))
   local state
   while :; do
     state="$(active_state "$unit")" || return 69

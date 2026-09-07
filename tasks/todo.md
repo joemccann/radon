@@ -5286,3 +5286,22 @@ Reduced-capability rung: remediate P1 findings only.
 ## PR #337 integration review
 - Latest main c8ae8fa8 integrated; Python implementation is unchanged from the 12,299-test full run. Final combined checks passed 267 research/codemap tests and 171 sharing/freshness tests. Existing source-date and attribution guards remain intact.
 - Latest main test gates passed but deployment rolled back to ff2b31f8 on research-worker stop timeout (run 34160677389); this PR conflict update does not constitute deployment.
+
+# Repair production deployment stop deadline (2026-09-07)
+
+## Dependency graph
+- T1 depends_on: [] - Reproduce research stop timeout and inspect lifecycle budgets.
+- T2 depends_on: [T1] - Add failing regression and align bounded shutdown wait with research service.
+- T3 depends_on: [T2] - Run full cloud suite, shell checks, and independent review.
+- T4 depends_on: [T3] - Publish repair PR, verify CI green, merge and verify production deployment.
+
+## Checklist
+- [x] T1 Run 34160677389 fails waiting for research inactive; recovery restores ff2b31f8.
+- [x] T2 Regression and fix: red 3 failed / 9 passed; green 12/12.
+- [x] T3 Verification: 12 focused passed, independent approval, full cloud 1821 passed / 44 failed / 7 skipped.
+- [ ] T4 Production repair.
+
+## Review
+- Research-only production inactive wait now 150s, with unchanged 60s startup/other-unit waits and 180s outer mutation deadline. Canonical unit allows 120s shutdown plus cleanup.
+- Independent review approved; 12 focused tests pass, including simulated 125s stop and persistent-stop exit 71. Shell syntax and diff checks pass.
+- Full cloud suite completed: 1821 passed, 44 failed, 7 skipped in 435.39s. Failures are in unchanged Caddy/runtime/supervisor/Gateway test surfaces (missing local Caddy and subprocess/timing fixtures); representative supervisor TimeoutExpired(3s) reproduced on clean parent. Full log: /private/tmp/radon-deploy-final-cloud.log. Linux CI remains the authoritative release gate.

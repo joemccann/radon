@@ -38,3 +38,68 @@ def test_fresh_setup_installs_research_but_does_not_enable_it(tmp_path):
     assert result.returncode == 0, result.stderr
     assert 'radon-api.service' in log.read_text()
     assert 'radon-research.service' not in log.read_text()
+
+
+def _state_wait_result(unit, desired, ready_at, *, test_mode=False, failed=False):
+    """Exercise the real poller with a simulated clock, without wall-clock sleeps."""
+    helper = HELPER.read_text()
+    poller = re.search(r'^wait_for_unit_state\(\) \{\n(.*?)^\}', helper, re.M | re.S).group(0)
+    # Read production budgets, including any future dedicated state budgets.
+    constants = '\n'.join(re.findall(r'^  readonly (\w*WAIT_SECONDS=\d+)$', helper, re.M))
+    script = constants + '\n' + poller + '''
+unset SECONDS
+SECONDS=0
+SLEEP=advance_clock
+advance_clock() { SECONDS=$((SECONDS + 1)); }
+active_state() {
+  if (( FAILED == 1 )); then echo failed
+  elif (( SECONDS >= READY_AT )); then echo "$DESIRED"
+  else echo deactivating
+  fi
+}
+if (( HELPER_TEST_MODE == 1 )); then STATE_WAIT_SECONDS=0; fi
+wait_for_unit_state "$UNIT" "$DESIRED"
+rc=$?
+printf 'elapsed=%s\\n' "$SECONDS"
+exit "$rc"
+'''
+    return subprocess.run(
+        ['bash', '-c', script], capture_output=True, text=True, timeout=5,
+        env={**os.environ, 'UNIT': unit, 'DESIRED': desired, 'READY_AT': str(ready_at),
+             'HELPER_TEST_MODE': str(int(test_mode)), 'FAILED': str(int(failed))},
+    )
+
+
+def test_research_stop_allows_systemd_timeout_and_container_cleanup():
+    result = _state_wait_result('radon-research.service', 'inactive', 125)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == 'elapsed=125'
+
+
+@pytest.mark.parametrize(('unit', 'desired', 'test_mode', 'expected_elapsed'), [
+    ('radon-research.service', 'inactive', False, 150),
+    ('radon-api.service', 'inactive', False, 60),
+    ('radon-research.service', 'active', False, 60),
+    ('radon-research.service', 'inactive', True, 0),
+])
+def test_state_wait_remains_bounded(unit, desired, test_mode, expected_elapsed):
+    result = _state_wait_result(unit, desired, 1000, test_mode=test_mode)
+    assert result.returncode == 71, result.stderr
+    assert result.stdout.strip() == f'elapsed={expected_elapsed}'
+    assert f'timed out waiting for {unit} to become {desired}' in result.stderr
+
+
+def test_research_failed_is_stopped_without_waiting():
+    result = _state_wait_result('radon-research.service', 'inactive', 1000, failed=True)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == 'elapsed=0'
+
+
+def test_research_stop_budget_fits_service_and_supervisor_deadlines():
+    helper = HELPER.read_text()
+    unit = (HELPER.parents[1] / 'services/radon-research.service').read_text()
+    stop_timeout = int(re.search(r'^TimeoutStopSec=(\d+)$', unit, re.M).group(1))
+    wait = int(re.search(r'^  readonly RESEARCH_STOP_WAIT_SECONDS=(\d+)$', helper, re.M).group(1))
+    supervisor = int(re.search(r'^  readonly ROOT_MUTATION_ACTION_TIMEOUT=(\d+)$', helper, re.M).group(1))
+    assert wait >= stop_timeout + 30, 'systemd shutdown must leave time for ExecStopPost cleanup'
+    assert supervisor >= wait + 30, 'the root supervisor must outlast state polling'
