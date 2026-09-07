@@ -24,6 +24,9 @@ sys.path.insert(0, str(REPO / "scripts"))
 
 import nightly_issue_format as nif  # noqa: E402
 
+# 2026-09-06: these suites stub `claude` and are about wrapper behaviour around the agent, not about which provider runs it. Pin a claude rung so the provider ladder is not what decides the outcome; the ladder itself is covered by test_provider_failover.py.
+CLAUDE_RUNG_LADDER = "claude:claude-fable-5[1m]"
+
 WRAPPERS = [
     REPO / "scripts" / "reliability_weekend.sh",
     REPO / "scripts" / "testing_weekend.sh",
@@ -778,6 +781,7 @@ class TestNotifyPhaseIsFenced:
                 "PATH": f"{bin_dir}{os.pathsep}/usr/bin{os.pathsep}/bin",
                 "HOME": str(tmp_path / "home"),
                 "RADON_WEEKEND_REPO": str(clone),
+                "RADON_WEEKEND_PROVIDER_LADDER": CLAUDE_RUNG_LADDER,
             },
             capture_output=True,
             text=True,
@@ -865,6 +869,7 @@ class TestNotifyPhaseIsFenced:
                 "PATH": f"{bin_dir}{os.pathsep}/usr/bin{os.pathsep}/bin",
                 "HOME": str(tmp_path / "home"),
                 "RADON_WEEKEND_REPO": str(clone),
+                "RADON_WEEKEND_PROVIDER_LADDER": CLAUDE_RUNG_LADDER,
             },
             capture_output=True,
             text=True,
@@ -948,6 +953,7 @@ class TestNotifyPhaseIsFenced:
                 "PATH": f"{bin_dir}{os.pathsep}/usr/bin{os.pathsep}/bin",
                 "HOME": str(tmp_path / "home"),
                 "RADON_WEEKEND_REPO": str(clone),
+                "RADON_WEEKEND_PROVIDER_LADDER": CLAUDE_RUNG_LADDER,
             },
             capture_output=True,
             text=True,
@@ -1115,6 +1121,7 @@ class TestARewrittenCloneFormatterCannotAuthorTheIssue:
                 "PATH": f"{bin_dir}{os.pathsep}/usr/bin{os.pathsep}/bin",
                 "HOME": str(tmp_path / "home"),
                 "RADON_WEEKEND_REPO": str(clone),
+                "RADON_WEEKEND_PROVIDER_LADDER": CLAUDE_RUNG_LADDER,
             },
             capture_output=True,
             text=True,

@@ -25,6 +25,9 @@ from pathlib import Path
 
 import pytest
 
+# 2026-09-06: these suites stub `claude` and are about wrapper behaviour around the agent, not about which provider runs it. Pin a claude rung so the provider ladder is not what decides the outcome; the ladder itself is covered by test_provider_failover.py.
+CLAUDE_RUNG_LADDER = "claude:claude-fable-5[1m]"
+
 REPO = Path(__file__).resolve().parents[2]
 RELIABILITY = REPO / "scripts" / "reliability_weekend.sh"
 TESTING = REPO / "scripts" / "testing_weekend.sh"
@@ -169,6 +172,7 @@ class TestSignalledRunReportsItsDeath:
                 **os.environ,
                 "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
                 "RADON_WEEKEND_REPO": str(repo),
+                "RADON_WEEKEND_PROVIDER_LADDER": CLAUDE_RUNG_LADDER,
             },
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -204,11 +208,18 @@ class TestTheCapIsEnforceable:
     @pytest.mark.parametrize("name", sorted(LOOPS))
     def test_timeout_escalates_to_sigkill(self, name):
         body = _uncommented(LOOPS[name])
-        line = next(
-            ln
-            for ln in body.splitlines()
-            if "TIMEOUT_BIN" in ln and "claude" in ln
+        # 2026-09-06: launch_round() has one arm per provider and the claude
+        # arm names "$RUNG_BIN", not `claude`. EVERY arm must be -k guarded,
+        # or the cap is advisory for whichever provider is missing it.
+        launches = [
+            ln for ln in body.splitlines()
+            if "TIMEOUT_BIN" in ln and "-k" in ln
+        ]
+        assert len(launches) >= 4, (
+            f"{name}: expected one -k guarded launch per provider arm, found "
+            f"{len(launches)}"
         )
+        line = launches[0]
         assert re.search(r"-k\s+\"?\$?\{?[A-Za-z0-9_]", line), (
             "no --kill-after: only SIGTERM is sent, so a claude blocked on a "
             f"hung child makes the cap advisory: {line}"
@@ -268,6 +279,7 @@ class TestTheCapIsEnforceable:
                 **os.environ,
                 "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
                 "RADON_WEEKEND_REPO": str(repo),
+                "RADON_WEEKEND_PROVIDER_LADDER": CLAUDE_RUNG_LADDER,
                 "RADON_WEEKEND_AUDIT_CAP_SECS": "70",
                 "RADON_WEEKEND_KILL_AFTER_SECS": "1",
                 # One second is enough in isolation but can expire before the
@@ -317,6 +329,7 @@ class TestTheCapIsEnforceable:
                 **env,
                 "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}",
                 "RADON_WEEKEND_REPO": str(repo),
+                "RADON_WEEKEND_PROVIDER_LADDER": CLAUDE_RUNG_LADDER,
                 "RADON_WEEKEND_TEST_ROUND_TIMEOUT_SECS": "1",
             },
             capture_output=True,

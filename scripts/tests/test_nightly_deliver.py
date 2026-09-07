@@ -450,9 +450,13 @@ class TestWrapperDeliverRecordContract:
         # The launch is whichever comes first AFTER the arm point: the inline
         # `claude -p` invocation, or the `run_round` call for the loops that
         # factored the round loop into a function. Both must follow it.
+        # 2026-09-06: the launch moved into launch_round(); the claude arm
+        # spells the binary "$RUNG_BIN", so `claude -p "/` is no longer
+        # literal anywhere in the round loop.
         launch_at = next(
             i for i, l in enumerate(lines)
-            if i > armed_at and ('claude -p "/' in l or l.strip() == "run_round")
+            if i > armed_at
+            and (l.strip().startswith("launch_round ") or l.strip() == "run_round")
         )
         assert armed_at < launch_at, wrapper.name
         # ...and nothing launches the agent before run_phase reaches the arm.

@@ -70,7 +70,19 @@ class TestTheLoopOwnsItsOwnLane:
 
     def test_the_wrapper_invokes_this_loops_skill(self):
         body = _uncommented(WRAPPER)
-        assert "/ci-performance $PHASE" in body, (
+        # 2026-09-06: the slash command is built from LOOP_SKILL now,
+        # because a non-claude rung is handed a rendered prompt file
+        # named for the same skill. Both must name THIS loop.
+        assert 'LOOP_SKILL="ci-performance"' in body, (
+            "the wrapper spawns the agent with another loop's skill"
+        )
+        assert '"/$LOOP_SKILL $PHASE"' in body, (
+            "the claude rung must still get a slash command"
+        )
+        assert '"$PORTABLE_PROMPT_DIR/$LOOP_SKILL.$PHASE.md"' in body, (
+            "a fallback rung must get this loop's rendered prompt"
+        )
+        assert True, (
             "the wrapper spawns the agent with another loop's slash command"
         )
         assert SKILL.is_file(), f"{SKILL} does not exist, so the run has no prompt"
