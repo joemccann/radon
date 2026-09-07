@@ -46,6 +46,25 @@ async function stubShellApis(page: Page, assistantError = false) {
   });
 }
 
+async function stubPendingAssistant(page: Page) {
+  await page.route("**/api/assistant", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    return route.fulfill({
+      status: 200,
+      contentType: "text/event-stream",
+      body: [
+        "event: start",
+        "data: {}",
+        "",
+        "event: result",
+        `data: ${JSON.stringify({ content: "Flow read.", model: "test-model", toolEvents: [] })}`,
+        "",
+        "",
+      ].join("\n"),
+    });
+  });
+}
+
 async function openChat(page: Page) {
   const dialog = page.getByRole("dialog", { name: "Radon chat" });
   // Wait for the launcher to report its ⌘J keydown listener attached, then send
@@ -96,5 +115,33 @@ test("Radon Chat renders safe recovery copy instead of provider JSON", async ({ 
 
   await dialog.getByTestId("chat-launcher-panel").screenshot({
     path: testInfo.outputPath("assistant-provider-error.png"),
+  });
+});
+
+test("Radon Chat keeps an active short turn grouped with the composer", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.addInitScript(() => window.localStorage.setItem("theme", "dark"));
+  await stubShellApis(page);
+  await stubPendingAssistant(page);
+  await page.goto("/alerts");
+
+  const dialog = await openChat(page);
+  const composer = dialog.getByLabel("Ask Radon");
+  await composer.fill("Read MU flow");
+  await composer.press("Enter");
+
+  const trace = dialog.getByRole("region", { name: "Engine trace" });
+  await expect(trace).toContainText("Routing request");
+
+  const traceBox = await trace.boundingBox();
+  const composerBox = await composer.locator("xpath=ancestor::form").boundingBox();
+  expect(traceBox).not.toBeNull();
+  expect(composerBox).not.toBeNull();
+  expect(composerBox!.y - (traceBox!.y + traceBox!.height)).toBeLessThanOrEqual(40);
+  expect(traceBox!.y + traceBox!.height).toBeLessThan(composerBox!.y);
+  expect(composerBox!.y + composerBox!.height).toBeLessThanOrEqual(900);
+
+  await dialog.getByTestId("chat-launcher-panel").screenshot({
+    path: testInfo.outputPath("active-short-turn-dark.png"),
   });
 });
