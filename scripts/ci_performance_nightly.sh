@@ -974,19 +974,32 @@ launch_round() {
       # --sandbox workspace-write, never the bypass flag: parity with the
       # claude rung's bounded grant, not a wider one.
       #
-      # `.git` has to be named a writable root explicitly. codex's
-      # workspace-write policy protects version-control metadata by default, so
-      # every phase died on
-      #   fatal: cannot lock ref 'refs/heads/<loop>/<date>': Unable to create
-      #   '.../.git/refs/heads/....lock': Operation not permitted
-      # and the phase is scored on a COMMIT to the dated branch, so the rung
-      # could never complete one — 2026-09-07, every codex phase, silently.
-      # This widens the grant to this clone's own git directory and nothing
-      # else; the bypass flag stays off.
+      # codex's workspace-write sandbox is narrower than the phase contract in
+      # three ways, each of which silently produced an INCOMPLETE on 2026-09-07:
+      #
+      #   .git                 protected by default, so `git checkout -b
+      #                        <loop>/<date>` failed with "Unable to create
+      #                        '.../refs/heads/....lock': Operation not
+      #                        permitted" and a phase scored on a COMMIT could
+      #                        never make one.
+      #   deliver record       lives one level ABOVE the clone at
+      #                        $WEEKEND_ROOT/.<loop>-deliver, so arming it raised
+      #                        "PermissionError: [Errno 1] Operation not
+      #                        permitted" and deliver reported
+      #                        check=runner-lock-held-and-gh-auth-unavailable.
+      #   network              off by default: `curl https://api.github.com`
+      #                        returns "Could not resolve host" (000), so `gh`
+      #                        cannot comment on the rolling issue, open a PR or
+      #                        read CI, and `git push` cannot reach origin.
+      #                        Verified: network_access=true -> 200.
+      #
+      # Each grant is the narrowest that lets the phase meet its own contract.
+      # The bypass flag stays off, so this remains a bounded grant matching the
+      # claude rung's scope rather than exceeding it.
       "$TIMEOUT_BIN" -k "$KILL_AFTER_SECS" "$remain" \
         "$RUNG_BIN" exec ${model_flag[@]+"${model_flag[@]}"} \
         -c model_reasoning_effort="medium" \
-        -c "sandbox_workspace_write={writable_roots=[\"$REPO/.git\"]}" \
+        -c "sandbox_workspace_write={network_access=true,writable_roots=[\"$REPO/.git\",\"$WEEKEND_ROOT/.$LOOP_SLUG-deliver\"]}" \
         -C "$REPO" --color never \
         --sandbox workspace-write --skip-git-repo-check \
         - < "$prompt_file" >> "$RUN_LOG" 2>&1 &

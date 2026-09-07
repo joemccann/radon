@@ -141,7 +141,35 @@ class TestTheAgentCanReachGit:
             "codex cannot create a branch under the default workspace-write "
             "policy, so the phase can never commit and is scored INCOMPLETE"
         )
-        assert 'writable_roots=[\\"$REPO/.git\\"]' in fn or "$REPO/.git" in fn, fn
+        assert "$REPO/.git" in fn, fn
+
+    def test_codex_can_write_the_deliver_record(self, loop):
+        """It lives one level ABOVE the clone, outside the workspace.
+
+        2026-09-07: arming it raised `PermissionError: [Errno 1] Operation not
+        permitted: '.../radon-weekend/.ci-performance-deliver'` and deliver
+        reported check=runner-lock-held-and-gh-auth-unavailable.
+        """
+        body = LOOPS[loop].read_text(encoding="utf-8")
+        start = body.index("launch_round() {")
+        fn = body[start : body.index("\n}", start)]
+        assert "-deliver" in fn and "WEEKEND_ROOT" in fn, (
+            "the deliver record path is not a writable root, so the deliver "
+            f"phase cannot arm or read its own verdict:\n{fn}"
+        )
+
+    def test_codex_has_network(self, loop):
+        """`gh` and `git push` are the phase contract.
+
+        Default workspace-write resolves nothing: `curl https://api.github.com`
+        returns "Could not resolve host" (000). With network_access=true it
+        returns 200. Without it a phase cannot comment on the rolling issue,
+        open its PR, read CI, or push a branch.
+        """
+        body = LOOPS[loop].read_text(encoding="utf-8")
+        start = body.index("launch_round() {")
+        fn = body[start : body.index("\n}", start)]
+        assert "network_access=true" in fn, fn
 
     def test_the_grant_is_scoped_and_the_bypass_flag_stays_off(self, loop):
         """Widened to this clone's git directory, not to the whole machine."""
