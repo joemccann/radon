@@ -5103,7 +5103,7 @@ Approved reference: ~/.radon/dropbox-research/calibration-policy.md and batch-20
 - [x] T3 Feed integration.
 - [x] T4 Automated evidence pipeline.
 - [x] T5 Verification.
-- [ ] T6 Runtime activation.
+- [x] T6 Runtime activation.
 
 ## Contract
 Research posts reuse canonical posts table, with companion research_post_sources(post_id, provenance_json). API source object: kind="dropbox", publisher, url (same-origin authenticated original PDF), documentDate, folderDate, pages:number[], figures:{url,page,caption}[], fileId, revision, contentHash. Private URLs /api/newsfeed/research/files/<sha256>.<png|pdf>. Python authenticated files endpoint /newsfeed/research/files/{asset}. Persistent worker state under RADON_RESEARCH_DIR (default /var/lib/radon/research), never public media. Every source asset is content-addressed and validated; no Next image optimizer for private media.
@@ -5125,3 +5125,36 @@ Research posts reuse canonical posts table, with companion research_post_sources
 - Post-integration checks on main 1f4b9331 plus this change: 311 focused Python/API/contracts passed with 16 subtests; 30 codemap tests passed. All three full-Python contract failures are resolved. Staged secret scan found no leaks. Runtime activation remains pending deployment.
 
 - PR #333 first head: all checks passed except clean-checkout codemap freshness. Regression reproduced from ignored generated next-env.d.ts; collector excludes that generated file. Red/green test, 31 codemap tests and clean archive graph equivalence passed. Rolling/demo absent-research-table regression fixed; 242 web tests and typecheck passed.
+
+## Production verification (2026-09-07)
+- PR #333 head 63fba7aa: 31 successful checks, seven non-applicable skips; Pushover accepted HTTP 200. Squash release 0b77a6af6e586b5702f4e8dac70f4cc37942a2b4 deployed successfully in run 34152165447.
+- Six approved posts and eleven ordered figures verified in canonical production tables; repeated publication wrote zero additional posts. All sixteen private assets returned matching hashes internally; both public media paths rejected anonymous access with HTTP 401.
+- Optional research service enabled and active at the exact release with zero restarts; September 6/7 cursors and eighteen eligible PDFs persisted. First unattended document completed against 3,862 feed items; three candidates held after crop correction failed inspection. Remaining queue continues in the background.
+- Approved relevance and chart presentation retained in policy and private profile. Production browser visual review awaits operator sign-in; production-build browser preflight passed 9/9.
+
+## Signed-in production verification (2026-09-07)
+- V1 depends_on: [] - Verify signed-in feed images, thumbnail switching and source context.
+- V2 depends_on: [] - Read watcher status and audit the first automatic publication against its retained source.
+- V3 depends_on: [V1,V2] - Record evidence and report any remaining operator action.
+- Live source-aware lightbox visually verified; original chart, caption/page, secondary thumbnails and article context render in production.
+
+# Research publication-date gate (2026-09-07)
+- D1 depends_on: [] - Disable automatic publication and preserve/retract unsupported automatic rows.
+- D2 depends_on: [] - Add source-literal publication-date evidence gate with red/green regressions for folder dates and copyright-only dates.
+- D3 depends_on: [D2,D5] - Run focused/full verification, regenerate source map, and deliver through exact-head green CI/deployment.
+- D4 depends_on: [D1,D3] - Revalidate pending output against corrected gate, resume watcher, and verify runtime.
+
+- D5 depends_on: [] - Correct existing original-bank attribution and enforce the same rule for future generated copy and seeds; regression tests required.
+
+- [x] D1 Automatic publication disabled; worker stopped and disabled. Unsupported automatic row backed up privately, retracted and cancelled in outbox; zero pending publication payloads.
+- [x] D2 Literal source-date gate implemented; retained failing production audit now fails independently of model approval.
+- [x] D5 Original-bank attribution corrected live and guarded for future rendered copy.
+- [ ] D3 Full verification and release.
+- [ ] D4 Corrected runtime reactivation.
+- Focused verification: 233 passed, 100% pipeline/publisher/seed coverage; independent review eight probes passed after closing named-month ranges and Unicode format-character bypasses.
+
+- Full Python follow-up: 12,273 passed, 11 failed, one skipped and 16 subtests passed. Failures are untouched process-timeout regressions; filing-forensics rerun passed unchanged (1/1). Wrapper baseline reruns are recorded in the release PR.
+- Integrated current main d13f982d (marketing-only implementation changes); regenerated source map has 3,222 nodes and 6,502 edges. Research, codemap and updated public-asset checks passed 266/266; staged secret scan found no leaks.
+- All ten wrapper failures passed serially against pristine d13f982d (10/10, 38.70s); five wrappers and their test module match the integrated worktree. Full-run timeout cause remains unknown; no implementation/test changes were needed.
+- D3a depends_on: [D3] - Main advanced to e4eaa255 during green PR checks; integrate its independently tested loop changes, regenerate conflicting source-map artifacts, run integrated research/contract tests, and repeat exact-head CI before merge.
+- D3a integrated validation passed 320/320; upstream e4eaa255 full CI and production deployment completed successfully. Research implementation is unchanged from the full-suite run.

@@ -5,9 +5,18 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import re
+import unicodedata
 
 from api.db_http import hrana_execute, hrana_transaction
 from research.assets import ASSET_RE, URL_PREFIX, read_asset, store_asset
+
+
+def validate_rendered_copy(title, content, publisher, figures, tags):
+    """Rendered attribution names the original research provider only."""
+    values = [title, content, publisher, *tags, *(figure.get('caption', '') for figure in figures)]
+    if any(re.search(r'zero[\s\-–—_]*hedge', ''.join(char for char in unicodedata.normalize('NFKC', value) if unicodedata.category(char) != 'Cf'), re.I)
+           for value in values if isinstance(value, str)):
+        raise ValueError('Rendered research copy must attribute the original provider only')
 
 
 def stable_post_id(file_id: str, finding_key: str) -> str:
@@ -69,6 +78,7 @@ def publish(post: dict) -> str:
     tags = post.get("tags", [])
     if not isinstance(tags, list) or not tags or len(tags) > 12 or any(not isinstance(tag, str) or not re.fullmatch(r"[A-Z0-9][A-Z0-9&-]{0,63}", tag) for tag in tags):
         raise ValueError("normalized research tags required")
+    validate_rendered_copy(title, content, source["publisher"], figures, tags)
     now = datetime.now(timezone.utc).isoformat()
     sql = """INSERT INTO posts (id,title,content,timestamp,images,raw_images,tags,tags_text,tags_vision,created_at,updated_at)
       VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET

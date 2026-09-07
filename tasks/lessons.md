@@ -912,3 +912,9 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 - Preserve the operator-approved selection method in `scripts/research/policy.md`: incremental measured positioning/flow/volatility/market-structure evidence, specific macro transmission, counterevidence, source dates and explicit conditionality; no quota or repetitive summaries.
 - Research media must reuse the live feed presentation: original chart region, complete titles/axes/legends/source, lead preview and secondary thumbnails, article-context enlargement. Full pages are supplementary evidence; state when evidence is text-only.
 - A model reviewing a full page beside a crop can falsely attribute the original page’s missing labels to the crop. Inspect crops independently, require visible label transcription, retain failed attempts, and verify real rendered examples before enabling unattended publication.
+
+## 2026-09-07: Publication dates need local source evidence
+- A model boolean is insufficient for document-date verification. Require a literal source excerpt that contains the exact report publication date and validate it locally. Folder dates, coverage windows, event dates and copyright years cannot establish publication dates. Audit the first automatic result before reporting full unattended verification complete.
+
+## 2026-09-07: Original-provider attribution only
+- Research feed copy must name the original bank/provider only. Do not name the subscription aggregator in publisher labels, titles, bodies or captions. Preserve original source files privately without rewriting evidence.

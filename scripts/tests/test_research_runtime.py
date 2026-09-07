@@ -102,7 +102,7 @@ def fixture_pipeline(tmp_path,responses,count=1):
     def extract(pdf,out):
         records=[]
         for page in range(1,count+1):
-            name=f"{page}.md"; (out/name).write_text("Source page")
+            name=f"{page}.md"; (out/name).write_text("Report date: 4 September 2026. Source page")
             records.append({"page_number":page,"markdown_file":name})
         return {"page_count":count,"source_sha256":"a"*64,"pages":records}
     def render(pdf,out,pages,**kwargs):
@@ -141,7 +141,7 @@ def test_pipeline_rejects_unseen_crop_page(tmp_path):
 
 
 def test_pipeline_deduplicates_same_claim_before_second_review(tmp_path):
-    gates=dict.fromkeys(("supported","material_new_evidence","dates_verified","charts_complete","not_market_ear","no_unresolved_conflicts"),True)|{"reason":"Verified"}
+    gates=dict.fromkeys(("supported","material_new_evidence","dates_verified","charts_complete","not_market_ear","no_unresolved_conflicts"),True)|{"reason":"Verified", "date_evidence":{"page":1,"date_text":"4 September 2026","source_quote":"Report date: 4 September 2026","role":"report","role_verified":True}}
     pipe,work=fixture_pipeline(tmp_path,[{"candidates":[item(),copy.deepcopy(item())]},gates])
     assert len(pipe.process(work,tmp_path/"source.pdf",[]))==1
 
@@ -339,7 +339,7 @@ def test_cli_rejects_fast_poll_and_concurrent_worker(cli,monkeypatch):
 def test_invalid_caption_holds_only_that_candidate_not_valid_siblings(tmp_path):
     invalid=item();invalid["figures"][0]["caption"]="x"*308
     valid=item()
-    gates=dict.fromkeys(("supported","material_new_evidence","dates_verified","charts_complete","not_market_ear","no_unresolved_conflicts"),True)|{"reason":"Verified"}
+    gates=dict.fromkeys(("supported","material_new_evidence","dates_verified","charts_complete","not_market_ear","no_unresolved_conflicts"),True)|{"reason":"Verified", "date_evidence":{"page":1,"date_text":"4 September 2026","source_quote":"Report date: 4 September 2026","role":"report","role_verified":True}}
     pipe,work=fixture_pipeline(tmp_path,[{"candidates":[invalid,valid]},gates])
     assert len(pipe.process(work,tmp_path/"source.pdf",[]))==1
     audit=json.loads((tmp_path/"evidence/one/review.json").read_text())["audit"]
@@ -353,3 +353,23 @@ def test_pipeline_does_not_accept_numeric_waiver_from_generic_verifier(tmp_path)
     assert pipe.process(work,tmp_path/"source.pdf",[])==[]
     audit=json.loads((tmp_path/"evidence/one/review.json").read_text())["audit"]
     assert next(row for row in audit if "numeric_evidence_passed" in row)["numeric_evidence_passed"] is False
+
+
+def test_seed_attributes_approved_goldman_report_to_original_bank(queue,approved_batch):
+    _,state=queue;directory,_,_=approved_batch
+    path=directory/'review-batch.json';batch=json.loads(path.read_text())
+    batch['candidates'][0]['document_index']=18
+    path.write_text(json.dumps(batch))
+    assert seed.seed_reviewed(directory,state,fake_publisher())==1
+    assert state.outbox()[0]['payload']['source']['publisher']=='Goldman Sachs'
+
+
+def test_intermediary_candidate_is_held_without_blocking_valid_sibling(tmp_path):
+    invalid=item();invalid['publisher']='Goldman Sachs via ZERO HEDGE'
+    checks=dict.fromkeys(('supported','material_new_evidence','dates_verified','charts_complete','not_market_ear','no_unresolved_conflicts'),True)
+    checks.update(reason='Verified',date_evidence={'page':1,'date_text':'4 September 2026','source_quote':'Report date: 4 September 2026','role':'report','role_verified':True})
+    pipe,work=fixture_pipeline(tmp_path,[{'candidates':[invalid,item()]},checks])
+    posts=pipe.process(work,tmp_path/'source.pdf',[])
+    assert len(posts)==1 and posts[0]['source']['publisher']==item()['publisher']
+    audit=json.loads((tmp_path/'evidence/one/review.json').read_text())['audit']
+    assert any(a.get('held')=='invalid candidate' and 'original provider' in a['validation_error'] for a in audit)

@@ -34,7 +34,7 @@ def seed_reviewed(directory, state, publisher):
         post = {'id': publisher.stable_post_id(document['id'], 'calibration:' + candidate['review_id']),
                 'title': candidate['title'], 'content': candidate['draft'], 'tags': candidate['tags'],
                 'timestamp': datetime.now(timezone.utc).isoformat(), 'images': [f['url'] for f in figures],
-                'source': {'kind': 'dropbox', 'publisher': {'1':'Morgan Stanley','11':'JPMorgan','13':'Deutsche Bank','15':'Deutsche Bank','18':'Goldman Sachs via ZeroHedge'}.get(str(candidate['document_index']), candidate.get('source_type', 'Research')),
+                'source': {'kind': 'dropbox', 'publisher': {'1':'Morgan Stanley','11':'JPMorgan','13':'Deutsche Bank','15':'Deutsche Bank','18':'Goldman Sachs'}.get(str(candidate['document_index']), candidate.get('source_type', 'Research')),
                            'url': publisher.store_asset(pdf), 'documentDate': candidate.get('source_date', candidate.get('source_article_date')),
                            'folderDate': source['folder_date'], 'pages': candidate['source_pages'], 'figures': figures,
                            'fileId': document['id'], 'revision': document['rev'], 'contentHash': document['content_hash']}}

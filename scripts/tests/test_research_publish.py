@@ -241,3 +241,25 @@ def test_store_rejects_unsupported_extension_and_symlink_root(tmp_path, monkeypa
     (tmp_path / "assets").symlink_to(real)
     monkeypatch.setenv("RADON_RESEARCH_DIR", str(tmp_path))
     with pytest.raises(ValueError, match="directory"): assets.store_asset(png)
+
+
+@pytest.mark.parametrize('field',['title','content','publisher','caption','tags'])
+@pytest.mark.parametrize('name',['ZeroHedge','ZEROHEDGE','ZERO HEDGE','zero\u00a0hedge','Zero-Hedge'])
+def test_intermediary_never_enters_rendered_research_copy(db,post,field,name):
+    if field=='publisher':post['source']['publisher']=name
+    elif field=='caption':post['source']['figures'][0]['caption']=name
+    elif field=='tags':post['tags']=[name]
+    else:post[field]=name
+    with pytest.raises(ValueError):publish.publish(post)
+    assert db.execute('SELECT count(*) FROM posts').fetchone()[0]==0
+
+
+def test_original_bank_attribution_is_accepted(db,post):
+    post['source']['publisher']='Goldman Sachs'
+    assert publish.publish(post)==post['id']
+
+
+@pytest.mark.parametrize('control',['\u200b','\u00ad','\u200d'])
+def test_invisible_format_controls_do_not_bypass_attribution_guard(control):
+    with pytest.raises(ValueError):
+        publish.validate_rendered_copy('Zero'+control+'Hedge','Research','Goldman Sachs',[],['MACRO'])
