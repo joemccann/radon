@@ -124,6 +124,53 @@ def test_changed_units_are_acknowledged_pending_install():
     )
 
 
+def _unit_mismatch_acks() -> set[str]:
+    """`unit-mismatch:<unit>` -> the units whose install-copy is still owed."""
+    acks: set[str] = set()
+    for line in ALLOWLIST.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        drift_id, _, _reason = line.partition(" ")
+        if drift_id.startswith("unit-mismatch:"):
+            acks.add(drift_id[len("unit-mismatch:"):])
+    return acks
+
+
+def test_a_unit_mismatch_ack_pins_the_content_the_installer_will_promote():
+    """A `unit-mismatch:` ack promises a bounded pending-install window.
+
+    `install-units` reads the unit blob at the verified main tip and refuses to
+    promote it unless its hash equals the manifest entry
+    (deploy-root-helper.sh, `manifest-mismatch`). So a pin that matches neither
+    the host nor the repo does not describe a pending install at all -- no
+    automated path can ever clear it, while the ack keeps the drift audit green
+    and suppresses the only signal that an internet-facing unit is running
+    without the hardening that already landed in the repo.
+
+    The manifest header already states the rule ("that hash is pre-recorded at
+    the content the operator is expected to install"); this asserts it.
+    """
+    installed = _manifest_hashes()
+    units = _unit_files()
+    unreachable = []
+    for name in sorted(_unit_mismatch_acks()):
+        pinned = installed.get(name)
+        if pinned is None:
+            continue
+        path = units.get(name)
+        if path is None:
+            continue
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        if pinned != digest:
+            unreachable.append(f"{name} (pinned {pinned[:8]}, repo {digest[:8]})")
+    assert not unreachable, (
+        "unit-mismatch acknowledgments whose manifest pin matches neither the "
+        "repo content nor anything install-units can promote, so the pending "
+        f"install can never complete: {unreachable}"
+    )
+
+
 # --- REL-045 (R-092, R-113): the `not-installed:` ack is a trapdoor.
 #
 # R-092: radon-ivrank.{service,timer} took the ack path instead of a manifest

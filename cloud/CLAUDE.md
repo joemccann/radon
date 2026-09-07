@@ -88,6 +88,15 @@ narrowing: preflight now renders the INSTALLED compose body, not the incoming
 release's. The incoming body is gated at install time instead, by provenance
 (git blob at the deployed commit) plus `compose_body_is_valid`.
 
+**`publish-caddy` stages from the trusted tip too.** The edge config decides
+which proxy and fetch-metadata headers survive on the way to the API's
+local-trust check, and `radon` both owns the checkout copy and holds a NOPASSWD
+grant for the verb. `caddy validate` proves the candidate parses and nothing
+about what it does, so `stage_caddy_candidate` reads the blob at the commit the
+remote reports for the release branch (`resolve_fetched_main_tip`) rather than
+the working tree - the same anchor the control-plane refresh uses. A
+checkout-only edit never reaches the live configuration.
+
 That validator's deny-list refuses EVERY host-namespace join, not only
 `pid:` — `ipc:`, `userns_mode:`, `uts:` and `cgroup:` widen the container's
 runtime the same way (R-668/REL-249). The three copies (deploy-root-helper,

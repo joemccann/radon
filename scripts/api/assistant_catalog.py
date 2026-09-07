@@ -100,9 +100,13 @@ CATALOG: dict[CatalogKey, Capability] = {
     ("POST", "/pi/exec"): "internal",
     ("POST", "/portfolio/background-sync"): "mutate.workspace",
     ("POST", "/portfolio/sync"): "mutate.workspace",
-    ("GET", "/preferences"): "read",
-    ("DELETE", "/preferences/{key}"): "mutate.workspace",
-    ("PUT", "/preferences/{key}"): "mutate.workspace",
+    # The preference registry holds the order-risk caps the placement funnel
+    # enforces (RADON_MAX_ORDER_NOTIONAL and friends in
+    # scripts/app_preferences.py), each with a hard_max well above its default.
+    # Chat must never reach this surface: same treatment as /credentials.
+    ("GET", "/preferences"): "admin",
+    ("DELETE", "/preferences/{key}"): "admin",
+    ("PUT", "/preferences/{key}"): "admin",
     ("GET", "/quote/{ticker}"): "read",
     ("GET", "/redoc"): "internal",
     ("POST", "/regime/scan"): "read.spawn",

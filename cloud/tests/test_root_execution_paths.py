@@ -412,6 +412,12 @@ def test_caddy_sudoers_publishes_through_the_fixed_root_helper():
         )
 
 
+def _git(repo: pathlib.Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-C", str(repo), *args], check=True, capture_output=True, text=True
+    )
+
+
 def _write_executable(path: pathlib.Path, body: str) -> None:
     path.write_text(body, encoding="utf-8")
     path.chmod(0o755)
@@ -449,9 +455,18 @@ exit {0 if caddy_valid else 1}
     fake_rm = tmp_path / "rm"
     _write_executable(fake_rm, '#!/bin/bash\nexec /bin/rm "$@"\n')
 
+    body = "app.radon.run {\n  respond \"ok\"\n}\n"
     source = tmp_path / "checkout" / "caddy" / "Caddyfile"
     source.parent.mkdir(parents=True, exist_ok=True)
-    source.write_text("app.radon.run {\n  respond \"ok\"\n}\n", encoding="utf-8")
+    source.write_text(body, encoding="utf-8")
+    # The trusted content source: a real git repo standing in for the release
+    # branch tip. `radon` owns `source` but cannot forge a blob at that commit.
+    repo = tmp_path / "release"
+    (repo / "cloud" / "caddy").mkdir(parents=True)
+    (repo / "cloud" / "caddy" / "Caddyfile").write_text(body, encoding="utf-8")
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "add", "-A")
+    _git(repo, "-c", "user.email=cp@test", "-c", "user.name=cp", "commit", "-q", "-m", "edge")
     config = tmp_path / "etc" / "caddy" / "Caddyfile"
     config.parent.mkdir(parents=True, exist_ok=True)
     config.write_text("# live known-good\n", encoding="utf-8")
@@ -467,6 +482,8 @@ exit {0 if caddy_valid else 1}
         "RADON_TEST_CADDY_SOURCE": str(source),
         "RADON_TEST_CADDY_CONFIG": str(config),
         "RADON_TEST_CADDY_BIN": str(fake_caddy),
+        "RADON_TEST_GIT_DIR": str(repo / ".git"),
+        "RADON_TEST_UNIT_REMOTE": str(repo),
     }
     return env, source, config, systemctl_log, caddy_log
 
@@ -507,6 +524,29 @@ def test_publish_caddy_refuses_a_symlinked_source(tmp_path):
     assert not systemctl_log.exists() or "reload caddy" not in systemctl_log.read_text(
         encoding="utf-8"
     )
+
+
+def test_publish_caddy_never_publishes_a_checkout_only_edge_config(tmp_path):
+    """The edge config decides which proxy and fetch-metadata headers reach the
+    API's local-trust check, so whoever chooses its bytes chooses that check's
+    answer. `radon` owns the checkout and holds a passwordless grant for this
+    verb, so the content must come from the commit the remote reports for the
+    release branch -- which it cannot forge -- and a checkout-only edit must be
+    inert.
+    """
+    env, source, config, systemctl_log, _caddy_log = _publish_fixture(tmp_path)
+    source.write_text(
+        "app.radon.run {\n  reverse_proxy 127.0.0.1:8321 {\n"
+        "    header_up -X-Forwarded-For\n  }\n}\n",
+        encoding="utf-8",
+    )
+
+    result = _run_publish(env)
+
+    assert "header_up -X-Forwarded-For" not in config.read_text(encoding="utf-8"), (
+        "a checkout-only edge config edit reached the live configuration"
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_publish_caddy_leaves_live_config_untouched_when_validation_fails(tmp_path):

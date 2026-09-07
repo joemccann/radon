@@ -33,6 +33,7 @@ const DENY_PREFIXES = [
   "/ws-ticket",
   "/demo",
   "/admin",
+  "/preferences",
   "/ib",
   "/trading",
   "/pi",

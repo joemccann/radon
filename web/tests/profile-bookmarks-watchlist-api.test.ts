@@ -246,6 +246,57 @@ describe("profile", () => {
       avatar_url: "https://media.radon.run/parallel.png",
     });
   });
+
+  it("rejects ui_preferences whose MERGED result exceeds the size limit", async () => {
+    const { PUT, GET } = await import("../app/api/profile/route");
+    const putPrefs = (tableId: string) =>
+      PUT(
+        req("http://localhost/api/profile", {
+          method: "PUT",
+          body: JSON.stringify({
+            ui_preferences: { columns: { [tableId]: { widths: "x".repeat(2000) } } },
+          }),
+        }),
+      );
+
+    // Each individual body is well under the 8KB per-request cap, so the
+    // incoming-only check accepts every one of them. The accumulated merge is
+    // what has to be bounded.
+    let rejected: Response | null = null;
+    for (let i = 0; i < 8; i += 1) {
+      const res = await putPrefs(`table_${i}`);
+      if (res.status !== 200) {
+        rejected = res;
+        break;
+      }
+    }
+    expect(rejected).not.toBeNull();
+    expect(rejected!.status).toBe(400);
+    expect((await jsonOf(rejected!)).code).toBe("VALIDATION_ERROR");
+
+    // The over-cap write must not have landed.
+    const stored = await db.execute("SELECT ui_preferences FROM user_profiles WHERE user_id = 'user_test_1'");
+    const raw = (stored.rows[0] as unknown as { ui_preferences: string | null }).ui_preferences ?? "";
+    expect(raw.length).toBeLessThanOrEqual(8 * 1024);
+    expect((await jsonOf(await GET())).ui_preferences).toBeTruthy();
+  });
+
+  it("still merges successive small ui_preferences updates", async () => {
+    const { PUT, GET } = await import("../app/api/profile/route");
+    for (const tableId of ["orders", "journal"]) {
+      const res = await PUT(
+        req("http://localhost/api/profile", {
+          method: "PUT",
+          body: JSON.stringify({ ui_preferences: { columns: { [tableId]: { pnl: true } } } }),
+        }),
+      );
+      expect(res.status).toBe(200);
+    }
+    const body = await jsonOf(await GET());
+    expect(body.ui_preferences).toMatchObject({
+      columns: { orders: { pnl: true }, journal: { pnl: true } },
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------

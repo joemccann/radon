@@ -34,6 +34,9 @@ echo "  - Docker containers and volumes"
 echo "  - Caddy and its config"
 echo "  - Python 3.13, Node.js 22, Docker CE"
 echo "  - /home/radon/ (repos, venv, data)"
+echo "  - /etc/radon/ secrets and the stored secret-store key"
+echo "  - /var/lib/radon/ host state"
+echo "  - radon sudoers and polkit grants"
 echo "  - The radon user account"
 echo ""
 echo "This will KEEP:"
@@ -118,10 +121,27 @@ log_info "Removing secret-store master credential..."
 rm -f /etc/credstore.encrypted/radon-secret-store-key
 rmdir /etc/credstore.encrypted 2>/dev/null || true
 
-# -- Remove sudoers -----------------------------------------------------------
+# -- Remove sudoers and polkit ------------------------------------------------
 
-log_info "Removing radon sudoers config..."
+log_info "Removing radon sudoers and polkit config..."
 rm -f /etc/sudoers.d/radon-deploy
+rm -f /etc/sudoers.d/radon-monitor
+rm -f /etc/sudoers.d/radon-ops
+rm -f /etc/sudoers.d/radon-caddy
+rm -f /etc/polkit-1/rules.d/50-radon-services.rules
+
+# -- Remove secrets and host state --------------------------------------------
+
+# setup-vps.sh writes the whole production credential set here (/etc/radon/env
+# and /etc/radon/mcp.env), and the API unit loads its secret-store key from the
+# systemd credential store. A reset that leaves these behind hands the next
+# owner of the machine live credentials.
+log_info "Shredding radon secrets and host state..."
+find /etc/radon -type f -exec shred -u {} + 2>/dev/null || true
+rm -rf /etc/radon
+shred -u /etc/credstore.encrypted/radon-secret-store-key 2>/dev/null || true
+rm -f /etc/credstore.encrypted/radon-secret-store-key
+rm -rf /var/lib/radon
 
 # -- Remove packages ----------------------------------------------------------
 

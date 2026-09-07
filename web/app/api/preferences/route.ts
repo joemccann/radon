@@ -56,7 +56,9 @@ function validationFailure(
   );
 }
 
-export const radonCapability = { GET: "read", PUT: "mutate.workspace", DELETE: "mutate.workspace" };
+// The preference registry holds the order-risk caps the placement funnel
+// enforces, so chat must never reach this surface (same pin as /credentials).
+export const radonCapability = { GET: "admin", PUT: "admin", DELETE: "admin" };
 
 export async function GET(): Promise<Response> {
   const access = await requireRouteAccess();

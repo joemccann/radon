@@ -109,7 +109,7 @@ const PINNED: Record<string, PinnedCapability> = {
   "performance": { GET: "read", POST: "read.spawn" },
   "pi": "internal",
   "portfolio": { GET: "read", POST: "mutate.workspace" },
-  "preferences": { GET: "read", PUT: "mutate.workspace", DELETE: "mutate.workspace" },
+  "preferences": { GET: "admin", PUT: "admin", DELETE: "admin" },
   "previous-close": "read",
   "prices": { GET: "read", POST: "read" },
   "probe/freshness": "internal",

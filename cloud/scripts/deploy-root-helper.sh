@@ -668,13 +668,24 @@ restart_caddy() {
 # world-readable candidate inside the radon-traversable /etc/caddy would then be
 # readable during the validate window. 0600 makes the race unprofitable even
 # when it is won.
+# Same trust boundary as the control-plane refresh: the edge config decides
+# which proxy and fetch-metadata headers survive on the way to the API's
+# local-trust check, and `radon` both owns CADDY_SOURCE and holds a NOPASSWD
+# grant for publish-caddy. `caddy validate` only proves the candidate parses,
+# not that it preserves those headers, so the bytes must come from the commit
+# GitHub reports as main rather than from the writable checkout.
 stage_caddy_candidate() {
   local candidate="$1"
+  local tip
+
+  tip="$(resolve_fetched_main_tip)" || return $?
   if (( HELPER_TEST_MODE == 1 )); then
-    "$INSTALL" -m 0600 "$CADDY_SOURCE" "$candidate"
+    "$INSTALL" -m 0600 /dev/null "$candidate" || return $?
   else
-    "$INSTALL" -m 0600 -o root -g root "$CADDY_SOURCE" "$candidate"
+    "$INSTALL" -m 0600 -o root -g root /dev/null "$candidate" || return $?
   fi
+  git_bounded --git-dir="$RADON_GIT_DIR" cat-file blob \
+    "${tip}:cloud/caddy/Caddyfile" > "$candidate"
 }
 
 # radon publishes Caddy config only through this fixed action. The retired

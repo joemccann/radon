@@ -71,6 +71,27 @@ class TestAssistantCatalog:
             ):
                 assert cap == "admin", f"{method} {path} must be admin"
 
+    def test_order_risk_cap_preferences_are_refused_to_the_assistant(self):
+        """/preferences is the order-risk cap surface, not workspace state.
+
+        scripts/app_preferences.py registers RADON_MAX_ORDER_NOTIONAL,
+        RADON_MAX_ORDER_QTY, RADON_MAX_ORDERS_PER_MIN and
+        RADON_MAX_COMBO_LOSS_DOLLARS there, each with a hard_max far above its
+        default. A capability the assistant may call is reachable from
+        prompt-injectable content, so widening the placement funnel's own caps
+        must be refused the same way /credentials is.
+        """
+        from scripts.api.assistant_catalog import capability_for, is_refused
+
+        for method, path in (
+            ("GET", "/preferences"),
+            ("PUT", "/preferences/{key}"),
+            ("DELETE", "/preferences/{key}"),
+        ):
+            cap = capability_for(method, path)
+            assert cap == "admin", f"{method} {path} pinned {cap!r}, must be admin"
+            assert is_refused(cap), f"{method} {path} must be refused to the assistant"
+
     def test_scan_posts_are_read_spawn(self):
         from scripts.api.assistant_catalog import capability_for
 

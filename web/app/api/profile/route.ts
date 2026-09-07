@@ -209,6 +209,20 @@ export async function PUT(req: Request): Promise<Response> {
       JSON.parse(uiResult.value ?? "{}") as Record<string, unknown>,
     );
     nextUiPreferences = JSON.stringify(merged);
+    // The per-request check above bounds only the incoming body. Preferences
+    // merge across requests, so an unbounded number of small, individually
+    // legal updates would otherwise grow the stored row without limit.
+    if (nextUiPreferences.length > MAX_UI_PREFERENCES_LENGTH) {
+      return setNoStoreResponseHeaders(
+        jsonApiError({
+          status: 400,
+          code: "VALIDATION_ERROR",
+          message: "ui_preferences exceeds size limit",
+          requestId,
+        }),
+        requestId,
+      );
+    }
   }
 
   let nextUsername: string | null = null;
