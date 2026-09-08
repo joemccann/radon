@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Network } from "lucide-react";
 import BrushMinimap from "./BrushMinimap";
 import CriHistoryChart, { type ChartSeries } from "./CriHistoryChart";
+import FreshnessRail from "./FreshnessRail";
 import HistoryRangeChips from "./HistoryRangeChips";
 import InfoTooltip from "./InfoTooltip";
 import MetricCell from "./mobile/MetricCell";
@@ -12,6 +13,7 @@ import SpectralLoader from "./SpectralLoader";
 import { RegimeStrip, RegimeStripCell } from "./RegimeStrip";
 import { chartSeriesColor } from "@/lib/chartSystem";
 import { presetRange, type RangePresetSlug } from "@/lib/historyRange";
+import { COR_REFRESH } from "@/lib/refreshSchedule";
 import {
   buildCorChartRows,
   corRegime,
@@ -203,6 +205,13 @@ export default function CorPanel() {
             />
           </RegimeStrip>
         )}
+
+        <FreshnessRail
+          schedule={COR_REFRESH}
+          asOf={current.date}
+          testId="cor-freshness-rail"
+          model="session"
+        />
       </div>
 
       {/* ── Implied correlation chart ─────────────────────── */}

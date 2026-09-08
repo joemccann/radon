@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { ATS_VENUE_SHARE_REFRESH, IV_RANK_REFRESH } from "@/lib/refreshSchedule";
+import { ATS_VENUE_SHARE_REFRESH, IV_RANK_REFRESH, MARGIN_DEBT_REFRESH } from "@/lib/refreshSchedule";
 import { computeFreshnessRail, formatCountdown } from "@/lib/freshnessRail";
 
 // 2026-08-26 is a Wednesday. The IV RANK timer fires 22:10 UTC = 18:10 ET.
@@ -130,5 +130,24 @@ describe("formatCountdown", () => {
 
   it("floors at zero rather than counting backwards", () => {
     expect(formatCountdown(-5_000)).toBe("0s");
+  });
+});
+
+describe("computeFreshnessRail — release model", () => {
+  it("counts down to the next check and never judges the held date", () => {
+    // Monthly FINRA margin statistics: the held month is weeks behind the
+    // session by construction. Wednesday 18:30 ET, next check 13:10 UTC.
+    const rail = computeFreshnessRail(MARGIN_DEBT_REFRESH, "2026-07-31", new Date("2026-08-26T22:30:00Z"), "release");
+    expect(rail.behind).toBe(false);
+    expect(rail.overdue).toBe(false);
+    expect(rail.awaitingSession).toBeNull();
+    expect(rail.msOverdue).toBe(0);
+    expect(rail.nextSampleAt.toISOString()).toBe("2026-08-27T13:10:00.000Z");
+    expect(rail.msRemaining).toBe((14 * 60 + 40) * 60 * 1000);
+  });
+
+  it("still reports an absent date as unknown", () => {
+    const rail = computeFreshnessRail(MARGIN_DEBT_REFRESH, null, new Date("2026-08-26T22:30:00Z"), "release");
+    expect(rail.unknown).toBe(true);
   });
 });

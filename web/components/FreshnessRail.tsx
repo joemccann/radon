@@ -16,16 +16,18 @@
 
 import { useEffect, useState } from "react";
 
-import { computeFreshnessRail, formatCountdown } from "@/lib/freshnessRail";
-import type { UtcSchedule } from "@/lib/refreshSchedule";
+import { computeFreshnessRail, formatCountdown, type FreshnessModel } from "@/lib/freshnessRail";
+import type { RefreshSchedule } from "@/lib/refreshSchedule";
 
 type FreshnessRailProps = {
-  schedule: UtcSchedule;
+  schedule: RefreshSchedule;
   /** Latest session the panel holds, `YYYY-MM-DD`. */
   asOf: string | null;
   testId: string;
   /** Test id for the as-of value, so existing assertions keep their anchor. */
   asOfTestId?: string;
+  /** See `FreshnessModel`. Defaults to a market-session series. */
+  model?: FreshnessModel;
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -57,7 +59,13 @@ function targetLabel(target: Date, now: Date): string {
   return `${target.toLocaleDateString([], { weekday: "short" })} ${time}`;
 }
 
-export default function FreshnessRail({ schedule, asOf, testId, asOfTestId }: FreshnessRailProps) {
+export default function FreshnessRail({
+  schedule,
+  asOf,
+  testId,
+  asOfTestId,
+  model = "session",
+}: FreshnessRailProps) {
   // The clock starts on the client. Reading it during render would put a
   // different countdown in the server HTML than in the first client paint —
   // the hydration-mismatch class this app has already been bitten by.
@@ -68,7 +76,7 @@ export default function FreshnessRail({ schedule, asOf, testId, asOfTestId }: Fr
     return () => clearInterval(id);
   }, []);
 
-  const rail = now ? computeFreshnessRail(schedule, asOf, now) : null;
+  const rail = now ? computeFreshnessRail(schedule, asOf, now, model) : null;
   // An unknown date is its own state: the rail used to render the calm
   // "Current" note with a ticking countdown over a panel holding no date at
   // all. R-306.
@@ -95,7 +103,9 @@ export default function FreshnessRail({ schedule, asOf, testId, asOfTestId }: Fr
       ? "Unknown"
       : rail.awaitingSession
         ? `Awaiting ${rail.awaitingSession}`
-        : "Current";
+        : model === "release"
+          ? "Latest release"
+          : "Current";
 
   return (
     <div
@@ -106,7 +116,7 @@ export default function FreshnessRail({ schedule, asOf, testId, asOfTestId }: Fr
         rail
           ? rail.overdue
             ? `Data as of ${asOf ?? "unknown"}. The ${targetLabel(rail.lastSampleAt, now!)} sample has not landed.`
-            : `Data as of ${asOf ?? "unknown"}. Next sample ${countdown} from now.`
+            : `Data as of ${asOf ?? "unknown"}. ${model === "release" ? "Next check" : "Next sample"} ${countdown} from now.`
           : undefined
       }
     >
@@ -135,7 +145,7 @@ export default function FreshnessRail({ schedule, asOf, testId, asOfTestId }: Fr
       </div>
 
       <div className="freshness-rail-side freshness-rail-side--end">
-        <div className="freshness-rail-label">Next sample</div>
+        <div className="freshness-rail-label">{model === "release" ? "Next check" : "Next sample"}</div>
         <div className="freshness-rail-countdown" data-testid={`${testId}-countdown`}>
           {countdown}
         </div>

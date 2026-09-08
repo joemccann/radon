@@ -5,6 +5,7 @@ import { Scale } from "lucide-react";
 import BrushMinimap from "./BrushMinimap";
 import PanelRefreshError from "./PanelRefreshError";
 import CriHistoryChart, { type ChartSeries } from "./CriHistoryChart";
+import FreshnessRail from "./FreshnessRail";
 import HistoryRangeChips from "./HistoryRangeChips";
 import InfoTooltip from "./InfoTooltip";
 import MetricCell from "./mobile/MetricCell";
@@ -19,6 +20,7 @@ import {
   presetSessions,
   type RangePresetSlug,
 } from "@/lib/historyRange";
+import { IEI_HYG_REFRESH } from "@/lib/refreshSchedule";
 import { formatRatio, stateLabel, stateTone, type IeiHygState } from "@/lib/ieiHyg";
 import { useIeiHyg } from "@/lib/useIeiHyg";
 import { useViewport } from "@/lib/useViewport";
@@ -199,6 +201,12 @@ export default function IeiHygPanel() {
             />
           </RegimeStrip>
         )}
+
+        <FreshnessRail
+          schedule={IEI_HYG_REFRESH}
+          asOf={current.date}
+          testId="iei-hyg-freshness-rail"
+        />
       </div>
 
       <div className="breadth-history-block" data-testid="iei-hyg-chart-section">

@@ -5,6 +5,7 @@ import { Activity } from "lucide-react";
 import BrushMinimap from "./BrushMinimap";
 import ChartPanel from "./charts/ChartPanel";
 import CriHistoryChart, { type ChartSeries } from "./CriHistoryChart";
+import FreshnessRail from "./FreshnessRail";
 import HistoryRangeChips from "./HistoryRangeChips";
 import InfoTooltip from "./InfoTooltip";
 import MetricCell from "./mobile/MetricCell";
@@ -24,6 +25,7 @@ import {
   type BreadthHistoryEntry,
   type BreadthIntradayPoint,
 } from "@/lib/useBreadth";
+import { BREADTH_REFRESH } from "@/lib/refreshSchedule";
 import { MarketState } from "@/lib/useMarketHours";
 import { useViewport } from "@/lib/useViewport";
 
@@ -418,6 +420,12 @@ export default function BreadthPanel({ marketState }: BreadthPanelProps) {
             />
           </RegimeStrip>
         )}
+
+        <FreshnessRail
+          schedule={BREADTH_REFRESH}
+          asOf={latest.session_date}
+          testId="breadth-freshness-rail"
+        />
       </div>
 
       {/* ── Cumulative A/D line vs SPY ─────────────────────── */}

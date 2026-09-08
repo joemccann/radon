@@ -5,6 +5,7 @@ import { Activity } from "lucide-react";
 import BrushMinimap from "./BrushMinimap";
 import PanelRefreshError from "./PanelRefreshError";
 import CriHistoryChart, { type ChartSeries } from "./CriHistoryChart";
+import FreshnessRail from "./FreshnessRail";
 import HistoryRangeChips from "./HistoryRangeChips";
 import InfoTooltip from "./InfoTooltip";
 import MetricCell from "./mobile/MetricCell";
@@ -13,6 +14,7 @@ import SpectralLoader from "./SpectralLoader";
 import { RegimeStrip, RegimeStripCell } from "./RegimeStrip";
 import { chartSeriesColor } from "@/lib/chartSystem";
 import { presetRange, presetSessions, type RangePresetSlug } from "@/lib/historyRange";
+import { CREDIT_SPREAD_REFRESH } from "@/lib/refreshSchedule";
 import {
   formatDateTick,
   formatPct,
@@ -171,6 +173,12 @@ export default function CreditSpreadPanel() {
             />
           </RegimeStrip>
         )}
+
+        <FreshnessRail
+          schedule={CREDIT_SPREAD_REFRESH}
+          asOf={current.date}
+          testId="credit-spread-freshness-rail"
+        />
       </div>
 
       <div className="breadth-history-block" data-testid="credit-spread-chart-section">

@@ -15,7 +15,7 @@
  * Spec: docs/indicators/vixts.md.
  */
 import React from "react";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
@@ -116,6 +116,7 @@ import VixTsPanel from "../components/VixTsPanel";
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   mockUseVixTs.mockReset();
 });
 
@@ -340,5 +341,26 @@ describe("VixTsPanel — writer freshness", () => {
     const stamp = screen.getByTestId("vixts-writer-age");
     expect(stamp.getAttribute("data-state")).toBe("unknown");
     expect(stamp.textContent).toContain("---");
+  });
+});
+
+describe("VixTsPanel — freshness rail", () => {
+  it("shows the Cboe session date and counts down to the 02:45 UTC slot", () => {
+    // 00:30 UTC on a Thursday: 2h15m short of radon-vixts.timer's 02:45 UTC
+    // slot. The neighbouring overnight Cboe pulls (straddle 02:15, cor 02:20,
+    // vixcor 02:35) all land on a different number from here.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-27T00:30:00Z"));
+    const data = buildData({ data_date: "2026-08-26" });
+    data.current = { ...data.current!, date: "2026-08-26" };
+    renderPanel(hookState({ data }));
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+    const rail = screen.getByTestId("vixts-freshness-rail");
+    expect(rail).toBeTruthy();
+    expect(rail.textContent).toContain("2026-08-26");
+    expect(screen.getByTestId("vixts-freshness-rail-countdown").textContent).toBe("2h 15m");
+    expect(rail.textContent).toContain("Next sample");
   });
 });

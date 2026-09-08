@@ -17,6 +17,9 @@ import {
   type RangePresetSlug,
 } from "@/lib/historyRange";
 import type { PriceData } from "@/lib/pricesProtocol";
+import { scanTimeToEtDate } from "@/lib/parseScanTime";
+import { VCG_REFRESH } from "@/lib/refreshSchedule";
+import FreshnessRail from "./FreshnessRail";
 
 type VcgPanelProps = {
   prices: Record<string, PriceData>;
@@ -251,6 +254,8 @@ export default function VcgPanel({ marketState }: VcgPanelProps) {
   const sig = data.signal;
   const attr = sig.attribution;
   const interpColor = interpretationColor(sig.interpretation);
+  const lastHistoryDate = data.history?.[data.history.length - 1]?.date ?? null;
+  const asOf = scanTimeToEtDate(data.scan_time) ?? lastHistoryDate;
 
   return (
     <>
@@ -310,6 +315,8 @@ export default function VcgPanel({ marketState }: VcgPanelProps) {
             )}
           </div>
         </div>
+
+        <FreshnessRail schedule={VCG_REFRESH} asOf={asOf} testId="vcg-freshness-rail" />
 
         <div className="metrics-grid">
           <div className="metric-card">

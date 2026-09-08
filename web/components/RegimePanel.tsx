@@ -51,6 +51,8 @@ import {
   resolveRegimeStripLiveState,
 } from "@/lib/regimeLiveStrip";
 import { useRegime } from "@/lib/useRegime";
+import FreshnessRail from "./FreshnessRail";
+import { CRI_REFRESH } from "@/lib/refreshSchedule";
 import { useVcg } from "@/lib/useVcg";
 import { useGex } from "@/lib/useGex";
 import { useDispersion } from "@/lib/useDispersion";
@@ -658,6 +660,8 @@ export default function RegimePanel({
             </div>
           </div>
 
+          <FreshnessRail schedule={CRI_REFRESH} asOf={data?.date ?? null} testId="cri-freshness-rail" />
+
           {/* Component scores 2x2 grid */}
           <div className="m-regime-components-grid">
             <MetricCell
@@ -789,6 +793,8 @@ export default function RegimePanel({
               />
             ) : null}
           </RegimeStrip>
+
+          <FreshnessRail schedule={CRI_REFRESH} asOf={data?.date ?? null} testId="cri-freshness-rail" />
 
           {/* ── Row 3+4: Components + Crash Trigger side by side ── */}
           <div className="regime-detail-grid">

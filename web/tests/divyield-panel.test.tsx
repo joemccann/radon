@@ -13,7 +13,7 @@
  * (no em dashes, no cadence claims).
  */
 import React from "react";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
@@ -86,6 +86,7 @@ import DivYieldPanel from "../components/DivYieldPanel";
 afterEach(() => {
   cleanup();
   mockUseDivYield.mockReset();
+  vi.useRealTimers();
 });
 
 // Window-relative dates: the series always ends "yesterday", never a
@@ -210,6 +211,31 @@ describe("DivYieldPanel — chart + controls", () => {
     for (const path of paths) {
       expect(path.getAttribute("d") ?? "").not.toContain("NaN");
     }
+  });
+});
+
+describe("DivYieldPanel — freshness rail", () => {
+  it("shows the payload date and counts down to the 22:40 UTC slot", () => {
+    // 21:00 UTC on a Wednesday: 1h40m short of radon-divyield.timer's
+    // 22:40 UTC slot. Any other schedule constant lands on a different number.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-26T21:00:00Z"));
+    renderPanel(
+      hookState({
+        data: buildData({
+          scan_time: "2026-08-26T21:00:00Z",
+          data_date: "2026-08-25",
+          current: { ...buildData().current!, date: "2026-08-25" },
+        }),
+      }),
+    );
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+    expect(screen.getByTestId("divyield-freshness-rail")).toBeTruthy();
+    expect(screen.getByTestId("divyield-freshness-rail").textContent).toContain("2026-08-25");
+    expect(screen.getByTestId("divyield-freshness-rail-countdown").textContent).toBe("1h 40m");
+    expect(screen.getByTestId("divyield-freshness-rail").textContent).toContain("Next sample");
   });
 });
 

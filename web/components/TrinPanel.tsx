@@ -5,6 +5,7 @@ import { Activity } from "lucide-react";
 import BrushMinimap from "./BrushMinimap";
 import PanelRefreshError from "./PanelRefreshError";
 import CriHistoryChart, { type ChartSeries } from "./CriHistoryChart";
+import FreshnessRail from "./FreshnessRail";
 import HistoryRangeChips from "./HistoryRangeChips";
 import InfoTooltip from "./InfoTooltip";
 import MetricCell from "./mobile/MetricCell";
@@ -19,6 +20,7 @@ import {
   presetSessions,
   type RangePresetSlug,
 } from "@/lib/historyRange";
+import { TRIN_REFRESH } from "@/lib/refreshSchedule";
 import { ZONE_HIGH, ZONE_LOW, formatTrin, stateLabel, stateTone, type TrinState } from "@/lib/trin";
 import { useTrin } from "@/lib/useTrin";
 import { useViewport } from "@/lib/useViewport";
@@ -221,6 +223,12 @@ export default function TrinPanel() {
             />
           </RegimeStrip>
         )}
+
+        <FreshnessRail
+          schedule={TRIN_REFRESH}
+          asOf={current.session_date}
+          testId="trin-freshness-rail"
+        />
       </div>
 
       <div className="breadth-history-block" data-testid="trin-chart-section">

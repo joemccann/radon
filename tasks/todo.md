@@ -5696,3 +5696,13 @@ Scope: preserve private source/queue state and novelty gates. Use bounded ingest
 - Production-safe probe confirmed Vast is reachable and returns HTTP 404 with `error=auth_error` for the stored key; no credential material was emitted.
 - Validator now classifies only Vast's explicit `auth_error` payload as invalid; unrelated 404s and transport failures remain non-blocking errors.
 - Focused verification: 56 pytest passed; Ruff check/format, codemap pre-commit, and diff check passed.
+# Regime freshness rails everywhere (2026-09-08)
+
+Audit: 30 regime tabs. FreshnessRail: ivrank, iv-spread, ma-ratio. Text "Next refresh": cot, ats, short. Lacking with a systemd writer (20): cri, vcg, gex, breadth, bpi, margin, straddle, cor, vixcor, vixts, dispersion, skew, skew2d, curve, credit, iei-hyg, trin, divyield, hyad, hhlev. Lacking with no scheduled writer (4, not applicable — nothing to derive from): grg (panel-triggered POST scan), streaks (computed per request), backtest, llm (AiInfrastructurePanel since #346, on-demand "Refresh snapshot"; LlmTokenIndexCard is no longer mounted).
+
+- [x] T1 depends_on: [] - Generalise `web/lib/refreshSchedule.ts` to rule-based schedules (weekday sets, multi-slot, intraday windows, America/New_York timers); add one constant per lacking writer; `freshnessRail.ts` derives the interval from previous/next slot. Pin every constant to its OnCalendar lines by parsing the unit file in `tests/refresh-schedule.test.ts`.
+- [x] T2 depends_on: [T1] - Workflow fan-out: wire `<FreshnessRail>` into each of the 20 panels with a render test asserting the rail and its countdown.
+- [x] T3 depends_on: [T2] - Full vitest suite green; tsc + eslint clean. (9220 passed from web/; the 10 cwd-dependent lib/tools + scanner-scrub failures pass from repo root, 23/23.)
+- [x] T4 depends_on: [T3] - Browser verification of every wired tab (chrome-cdp on local Next), screenshots. 19/20 rails rendered live with correct next-fire instants; TRIN shows its empty state locally (no samples in this environment), rail covered by its unit test.
+- [ ] T5 depends_on: [T4] - PR, mergeable, CI green, Pushover `radon PR green`.
+Dependency graph: T1 -> T2 -> T3 -> T4 -> T5.

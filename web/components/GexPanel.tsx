@@ -13,6 +13,8 @@ import ThinkingWait from "./fx/ThinkingWait";
 import RegimeSyncStatusBadge from "./RegimeSyncStatusBadge";
 import SortTh from "./SortTh";
 import { useSort } from "@/lib/useSort";
+import { GEX_REFRESH } from "@/lib/refreshSchedule";
+import FreshnessRail from "./FreshnessRail";
 
 type GexPanelProps = {
   marketState?: MarketState;
@@ -545,6 +547,8 @@ export default function GexPanel({ marketState }: GexPanelProps) {
           )}
         </div>
       </div>
+
+      <FreshnessRail schedule={GEX_REFRESH} asOf={data.data_date ?? null} testId="gex-freshness-rail" />
 
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         {/* ── Metrics Row ── */}

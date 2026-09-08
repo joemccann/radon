@@ -17,7 +17,7 @@
 
 import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
@@ -180,5 +180,27 @@ describe("CRI quadrant scatter hover", () => {
     expect(nearestRegimeScatterIndex(points, 12, 8)).toBe(0);
     expect(nearestRegimeScatterIndex(points, 78, 42)).toBe(1);
     expect(nearestRegimeScatterIndex(points, 200, 200)).toBe(2);
+  });
+});
+
+describe("RegimePanel — freshness rail", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("shows the CRI session date and counts down to the next radon-refresh slot", () => {
+    // 18:07 UTC on a Wednesday: eight minutes short of radon-refresh.timer's
+    // 18:15 slot. The VCG constant (5-min ET grid) would read 3m 00s here.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-02T18:07:00Z"));
+    render(<RegimePanel prices={{}} />);
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+    const rail = screen.getByTestId("cri-freshness-rail");
+    expect(rail).toBeTruthy();
+    expect(rail.textContent).toContain(CRI_DATA.date);
+    expect(screen.getByTestId("cri-freshness-rail-countdown").textContent).toBe("8m 00s");
+    expect(rail.textContent).toContain("Next sample");
   });
 });

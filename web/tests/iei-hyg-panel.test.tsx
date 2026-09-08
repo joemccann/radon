@@ -8,7 +8,7 @@
  * strip, the chart title, the brush, a null-DXY gap, and a NaN guard.
  */
 import React from "react";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
@@ -183,5 +183,35 @@ describe("IeiHygPanel", () => {
     mockUseIeiHyg.mockReturnValue(hookState({ data: buildData() }));
     const { container } = renderPanel();
     expect(container.textContent ?? "").not.toMatch(/refresh(es)? (daily|hourly|every)|updated (daily|hourly)/i);
+  });
+});
+
+describe("IeiHygPanel — freshness rail", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("shows the raw session date and counts down to the 21:55 UTC slot", () => {
+    // 20:30 UTC on a Wednesday: 1h25m short of radon-iei-hyg.timer's daily
+    // 21:55 UTC slot. No other schedule constant lands on 1h25m here.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-26T20:30:00Z"));
+    mockUseIeiHyg.mockReturnValue(
+      hookState({
+        data: buildData({
+          scan_time: "2026-08-25T21:55:00Z",
+          current: { ...buildData().current!, date: "2026-08-25", low_date: "2026-08-25" },
+        }),
+      }),
+    );
+    renderPanel();
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+    const rail = screen.getByTestId("iei-hyg-freshness-rail");
+    expect(rail).toBeTruthy();
+    expect(rail.textContent).toContain("2026-08-25");
+    expect(screen.getByTestId("iei-hyg-freshness-rail-countdown").textContent).toBe("1h 25m");
+    expect(rail.textContent).toContain("Next sample");
   });
 });
