@@ -122,9 +122,9 @@ export function useNewsfeedPosts(): NewsfeedPosts {
             timestampMs: Number.isFinite(ms) ? ms : 0,
             source,
             href: source?.url ?? buildPostHref(post.id),
-            // The one place raw scrape text becomes display text — every
-            // consumer downstream reads the same normalised body.
-            content: normalisePostContent(post.content || "", post.title || ""),
+            // Research bodies are authored Markdown: indentation, line breaks,
+            // and trailing spaces carry formatting that scrape rewrapping loses.
+            content: source ? (post.content || "") : normalisePostContent(post.content || "", post.title || ""),
             images: source ? source.figures.map(f => f.url) : Array.isArray(post.images) ? post.images : [],
           } satisfies NormalisedPost;
         })

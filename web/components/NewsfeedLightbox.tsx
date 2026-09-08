@@ -10,6 +10,7 @@ import { useDialogChrome } from "@/lib/useDialogChrome";
 import { useBookmarks } from "@/lib/useBookmarks";
 import styles from "./NewsfeedResearchMedia.module.css";
 import NewsfeedShare from "./NewsfeedShare";
+import NewsfeedPostContent from "./NewsfeedPostContent";
 import StarToggle from "@/components/StarToggle";
 
 export type NewsfeedLightboxFocus = {
@@ -223,9 +224,7 @@ export default function NewsfeedLightbox({
               <h2 className="newsfeed-lightbox__title">{post.title}</h2>
             </header>
 
-            {post.content ? (
-              <p className="newsfeed-lightbox__body">{post.content}</p>
-            ) : null}
+            <NewsfeedPostContent post={post} className="newsfeed-lightbox__body" />
 
             {tags.length > 0 ? (
               <div className="newsfeed-lightbox__tags">

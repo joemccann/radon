@@ -16,6 +16,7 @@ import { useBookmarks } from "../lib/useBookmarks";
 import NewsfeedTagBar from "./NewsfeedTagBar";
 import NewsfeedLightbox, { type NewsfeedLightboxFocus } from "./NewsfeedLightbox";
 import NewsfeedShare from "./NewsfeedShare";
+import NewsfeedPostContent from "./NewsfeedPostContent";
 import StarToggle from "./StarToggle";
 import HeadlinesTape, { newestHeadlineTime } from "./dashboard/HeadlinesTape";
 import { useHeadlines } from "../lib/useHeadlines";
@@ -421,9 +422,7 @@ export default function DashboardNewsFeed() {
                       ) : null}
                     </div>
                   ) : null}
-                  {post.content ? (
-                    <p className={`news-feed-summary ${styles.summary}`}>{post.content}</p>
-                  ) : null}
+                  <NewsfeedPostContent post={post} className={`news-feed-summary ${styles.summary}`} />
                   {firstImage ? (
                     <figure className={`news-feed-figure ${styles.figure}`}>
                       <button

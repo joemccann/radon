@@ -5769,3 +5769,27 @@ Keep the AI-cycle price cohort current as frontier models ship while preserving 
 Dependency graph: T1 -> T2 -> T3 -> T4 -> T5.
 
 ---
+# Task: Dropbox research rich text [IN PROGRESS]
+
+## Dependency graph
+
+- T1 depends_on: [] - Trace research content, shared rendering, and CI coverage.
+- T2 depends_on: [T1] - Render Dropbox Markdown in feed and lightbox, preserving source structure and existing plain-text posts.
+- T3 depends_on: [T1] - Add component and browser regressions for formatting, source links, and safe rendering.
+- T4 depends_on: [T2, T3] - Publish PR; wait for all exact-head CI checks, inspect browser screenshots, and send the required notification.
+
+## Checklist
+
+- [x] T1 Trace source metadata, normalization, feed, lightbox, and existing Markdown renderer.
+- [x] T2 Implement scoped rich-text rendering with preserved Markdown whitespace in feed and lightbox.
+- [x] T3 Add 6 component regressions and desktop/mobile Playwright assertions. Run suites only on GitHub runners.
+- [ ] T4 Review changes and complete exact-head CI and visual verification.
+
+## Review
+
+- Static review found no blocking issues; research typography uses Clear tokens and the existing safe Markdown renderer.
+- PR: https://github.com/joemccann/radon/pull/367. RED: 4 expected Markdown regressions failed on 0c7491ab2b1baf97dc21f7d4547dcbb3579bf287 (CI run 34282990355).
+- GREEN: a6035206 passed 31 applicable checks, including all 6 component regressions, 67 browser checks, and the demo transport check (CI run 34283301911). Reviewed 4 desktop/mobile screenshots; added scoped italic synthesis after visual review. Final-head verification pending.
+- Regenerate codemap from a clean index export so local generated sources do not enter the committed graph.
+
+---

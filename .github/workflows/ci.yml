@@ -785,6 +785,13 @@ jobs:
           e2e/vixts-tab.spec.ts
           e2e/newsfeed-research-media.spec.ts
           e2e/ai-infrastructure.spec.ts
+      - name: Upload research rendering screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: research-rendering-screenshots
+          path: web/test-results/**/research-*.png
+          retention-days: 7
       - name: Upload traces on failure
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
