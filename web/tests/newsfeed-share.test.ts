@@ -5,9 +5,19 @@ const post: SharePost = { id: "post-123", title: "Yen hedge demand jumps", conte
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("social captions", () => {
-  it("attributes public posts and preserves the full caption through the X intent", () => {
+  it("removes publisher profile links and handles without orphan URLs", () => {
+    const caption = buildShareCaption({ ...post, content: "Neutral positioning. https://x.com/zerohedge/status/123 https://twitter.com/themarketear @ZeroHedge @themarketear" });
+    expect(caption).toBe("Yen hedge demand jumps\n\nNeutral positioning.");
+  });
+
+  it.each(["The Market Ear", "themarketear", "ZeroHedge", "ZERO HEDGE", "Zero-Hedge"])("excludes %s from embedded text and edited X captions", publisher => {
+    const content = `Positioning is neutral. Source: ${publisher} https://www.zerohedge.com/markets/test https://themarketear.com/posts/test`;
+    expect(buildShareCaption({ ...post, title: `Outlook via ${publisher}`, content })).not.toMatch(/market[\s-]*ear|zero[\s-]*hedge/i);
+    expect(new URL(buildXShareUrl(content)).searchParams.get("text")).not.toMatch(/market[\s-]*ear|zero[\s-]*hedge/i);
+  });
+  it("omits feed attribution and preserves the full caption through the X intent", () => {
     const caption = buildShareCaption(post);
-    expect(caption).toBe("Yen hedge demand jumps\n\nPositioning is near neutral.\n\nSource: The Market Ear\n\nhttps://themarketear.com/posts/post-123");
+    expect(caption).toBe("Yen hedge demand jumps\n\nPositioning is near neutral.");
     const url = new URL(buildXShareUrl(caption));
     expect(url.origin + url.pathname).toBe("https://twitter.com/intent/tweet");
     expect(url.searchParams.get("text")).toBe(caption);
@@ -169,7 +179,16 @@ describe("share card rendering", () => {
     expect(canvas).toMatchObject({ width: 1080, height: 1920 });
     expect(harness.drawImage).not.toHaveBeenCalled();
     expect(harness.fillText).toHaveBeenCalledWith("RADON", 72, 164);
-    expect(harness.fillText).toHaveBeenCalledWith("Source: The Market Ear", 72, 1554);
+    expect(harness.fillText.mock.calls.flat().join(" ")).not.toMatch(/market.?ear|zero.?hedge/i);
+  });
+  it.each(["The Market Ear", "ZeroHedge"])("excludes %s from every rendered text surface", async publisher => {
+    const { renderShareCard } = await import("../lib/newsfeedShare");
+    const harness = renderHarness();
+    await renderShareCard({ ...post, title: `Outlook via ${publisher}`, content: `Neutral positioning. Source: ${publisher} https://zerohedge.com/test`, source: { kind: "dropbox", publisher, documentDate: "2026-09-03", folderDate: "2026-09-07", fileId: "id", revision: "r", contentHash: "h", url: "/private.pdf", pages: [2], figures: [{ url: "/chart.png", page: 2, caption: `Distribution via ${publisher}` }] } }, "/chart.png");
+    const text = harness.fillText.mock.calls.map(call => call[0]).join(" ");
+    expect(text).not.toMatch(/market[\s-]*ear|zero[\s-]*hedge|Source:/i);
+    expect(text).toContain("Neutral positioning.");
+    expect(text).toContain("Distribution");
   });
   it("fits the whole chart and labels truncated prose as an excerpt", async () => {
     const { renderShareCard } = await import("../lib/newsfeedShare");

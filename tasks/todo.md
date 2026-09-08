@@ -5400,6 +5400,38 @@ Review: PR339 merge was rejected because skipped matrices emit template names ra
 Verification: full root Python 12,282 passed, 19 skipped, 16 subtests. Full cloud 1,860 passed, 7 skipped, 6 failures; five missing-Caddy failures reproduce on unchanged main, and the operator-concurrency timing test passed unchanged on serial rerun (also green on baseline).
 
 
+# Social share publisher exclusions (2026-09-07)
+- [x] T1 depends_on: [] - Inspect sharing paths and preserve existing workspace changes.
+- [x] T2 depends_on: [T1] - Add red/green regressions and exclude The Market Ear/ZeroHedge names and links from outbound captions and card text.
+- [x] T3 depends_on: [T2] - Verify desktop/mobile browser exports and full web suite; review results.
+
+Dependency graph: T1 -> T2 -> T3.
+- [x] T4 depends_on: [] - Study verified @joemccann authored tweets and document an evidence-backed voice persona; establish whether X API access is required.
+- [x] T5 depends_on: [T2, T4] - Integrate persona-based social copy rewriting with factual preservation and publisher exclusions, then verify.
+Extended dependency graph: T1 -> T2 -> T3; T4 + T2 -> T5.
+
+
+## Social share review
+- Publisher exclusion regressions: red 7 failures, then focused 93 passing after voice integration and handle/link regression.
+- Browser: 8/8 desktop/mobile cases passed; original PNG/MP4 decoding and lightbox checks retained; rewritten caption/X/canvas parity, pending controls, retries and one generation request per panel verified.
+- Voice persona: docs/joe-mccann-social-voice.md, provisional evidence from 20 source items (18 older thread previews, two standalone posts). Public X profile blocked; recent authenticated timeline requested for improved calibration.
+- Live generation: configured Anthropic provider returned a validated factual draft; output at /tmp/radon-voice-live-check.json. No content published.
+- Full web suite coverage and TypeScript verification complete; PR creation requested and in progress.
+
+- Concurrent workspace cleanup stashed original edits and removed registered worktrees during verification. Recovered task files from exact stash 33d9239d1344ae759c9efa9135cf0c46b91872e6 into an independent repository at /Users/joemccann/.radon/work/social-voice-20260907/repo; shared checkout and stash unchanged.
+- Independent browser rerun: 8/8 passed; next typegen and tsc --noEmit passed; temporary dependency-root configuration restored.
+
+## Social sharing PR plan
+- [ ] T6 depends_on: [T3, T5] - Commit scoped changes from current main and open the PR.
+- [ ] T7 depends_on: [T6] - Verify the exact PR head has its expected CI suite; monitor and repair until green.
+- [ ] T8 depends_on: [T7] - Confirm normal-priority Pushover delivery and document the final PR evidence.
+Dependency graph: T3 + T5 -> T6 -> T7 -> T8.
+
+## Final local verification
+- Full web coverage completed across disjoint batches: 867 files / 8,618 passing tests. Node 25 fork run and Node 24 continuation were partitioned because of workstation load; timezone-mutating suites ran separately in forks (31/31), since threads cannot change process timezone. Journal snapshot timing failure passed rerun (2/2). Manifest: /tmp/radon-social-complete-suite.json.
+- Main integration: 128 focused tests passed. Browser: 8 desktop/mobile E2Es passed, real PNG/MP4 exports verified, rewritten card visually inspected. Next typegen, TypeScript, scoped ESLint and whitespace checks passed.
+- Scoped changes restored to current main after unrelated workspace cleanup; independent recovery copy retained outside registered worktrees.
+
 ## AI infrastructure implementation (PR126 follow-up)
 - [x] T1 Source contracts and reproducible retrieval verification. depends_on: []
 - [x] T2 Versioned observations, durable storage, collectors and scheduling. depends_on: [T1]

@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-09-08T00:25:56Z",
-  "node_count": 3253,
-  "edge_count": 6535,
+  "generated_at": "2026-09-08T01:51:28Z",
+  "node_count": 3257,
+  "edge_count": 6542,
   "areas": {
-    "web": 1908,
+    "web": 1912,
     "site": 152,
     "scripts": 1079,
     "cloud": 66,
@@ -15,7 +15,7 @@
     {
       "id": "web/app",
       "area": "web",
-      "count": 207
+      "count": 208
     },
     {
       "id": "web/components",
@@ -35,7 +35,7 @@
     {
       "id": "web/lib",
       "area": "web",
-      "count": 376
+      "count": 377
     },
     {
       "id": "web/public",
@@ -50,7 +50,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 881
+      "count": 883
     },
     {
       "id": "site/app",
@@ -294,7 +294,7 @@
     {
       "id": "web/lib/routeAccess.ts",
       "area": "web",
-      "in": 86,
+      "in": 87,
       "out": 4,
       "test": false
     },

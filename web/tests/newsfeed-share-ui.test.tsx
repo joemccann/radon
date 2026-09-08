@@ -5,7 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import NewsfeedShare from "@/components/NewsfeedShare";
 
 const engine = vi.hoisted(() => ({ buildShareCaption: vi.fn(), renderShareCard: vi.fn(), canvasToPng: vi.fn(), canvasToMp4: vi.fn(), supportsMp4Export: vi.fn() }));
-vi.mock("@/lib/newsfeedShare", () => engine);
+vi.mock("@/lib/newsfeedShare", async importOriginal => ({ ...await importOriginal<typeof import("@/lib/newsfeedShare")>(), ...engine }));
 const post = { id: "fixture", title: "Yen hedge demand", content: "Hedge demand increased.", timestamp: "2026-09-07T16:00:00Z", isoTimestamp: "2026-09-07T16:00:00Z", href: "https://example.com/source", images: ["/chart-1.png", "/chart-2.png"], tags: ["JPY"] };
 let createUrl: ReturnType<typeof vi.fn>;
 let revokeUrl: ReturnType<typeof vi.fn>;
@@ -13,6 +13,7 @@ let clipboard: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ title: post.title, content: post.content, caption: `${post.title}\n\n${post.content}` }) }));
   engine.buildShareCaption.mockReturnValue("Yen hedge demand\nHedge demand increased.");
   engine.renderShareCard.mockResolvedValue(document.createElement("canvas"));
   engine.canvasToPng.mockResolvedValue(new Blob(["png"], { type: "image/png" }));
@@ -26,7 +27,7 @@ beforeEach(() => {
   Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: clipboard } });
   vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
 });
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 async function openShare() {
   fireEvent.click(screen.getByRole("button", { name: "Share", exact: true }));
@@ -34,6 +35,40 @@ async function openShare() {
 }
 
 describe("news feed sharing", () => {
+  it("uses the voice draft for captions and image/video rendering", async () => {
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ title: "Hedge demand is back.", content: "Positioning is neutral. Source: ZeroHedge" }) } as Response);
+    render(<NewsfeedShare post={post} />);
+    await openShare();
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Hedge demand is back.\n\nPositioning is neutral.");
+    expect(engine.renderShareCard).toHaveBeenCalledWith(expect.objectContaining({ title: "Hedge demand is back.", content: "Positioning is neutral." }), undefined);
+    expect(fetch).toHaveBeenCalledWith("/api/newsfeed/share", expect.objectContaining({ method: "POST", cache: "no-store" }));
+  });
+
+  it("keeps outbound actions unavailable while rewriting and aborts on close", async () => {
+    vi.mocked(fetch).mockImplementation(() => new Promise(() => {}));
+    render(<NewsfeedShare post={post} />);
+    fireEvent.click(screen.getByRole("button", { name: "Share", exact: true }));
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Copy caption" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText("Compose on X").getAttribute("href")).toBeNull();
+    expect(engine.renderShareCard).not.toHaveBeenCalled();
+    await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+    const signal = vi.mocked(fetch).mock.calls[0][1]?.signal;
+    fireEvent.click(screen.getByRole("button", { name: "Share", exact: true }));
+    expect(signal?.aborted).toBe(true);
+  });
+
+  it("shows original copy on failure and retries voice generation", async () => {
+    vi.mocked(fetch).mockRejectedValueOnce(new Error("offline"));
+    render(<NewsfeedShare post={post} />);
+    await openShare();
+    expect(screen.getByRole("alert").textContent).toContain("Showing the original copy");
+    fireEvent.click(screen.getByRole("button", { name: "Retry voice rewrite" }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    await screen.findByAltText("Portrait share preview: Yen hedge demand");
+  });
+
   it("prepares only on demand and uses the selected source chart", async () => {
     render(<NewsfeedShare post={post} imageUrl="/chart-2.png" />);
     expect(engine.renderShareCard).not.toHaveBeenCalled();
@@ -136,7 +171,7 @@ describe("news feed sharing", () => {
     rerender(<NewsfeedShare post={{ ...post }} imageUrl="/chart-2.png" />);
     await screen.findByAltText("Portrait share preview: Yen hedge demand");
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("My carefully edited caption");
-    expect(engine.buildShareCaption).toHaveBeenCalledOnce();
+    expect(fetch).toHaveBeenCalledOnce();
     expect(engine.renderShareCard).toHaveBeenLastCalledWith(post, "/chart-2.png");
   });
 

@@ -18,7 +18,7 @@ const ROUTES = [
   "workflow/run", "service-health",
 ] as const;
 
-const SHARE_ROUTES = ["gex", "internals", "menthorq/cta", "regime", "vcg"] as const;
+const SHARE_ROUTES = ["gex", "internals", "menthorq/cta", "newsfeed", "regime", "vcg"] as const;
 const ADMIN_ROUTES = ["edge-health", "health", "host-metrics", "reliability", "slo"] as const;
 
 // Guarded routes outside the security-report ROUTES list — admin actions and

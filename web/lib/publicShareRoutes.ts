@@ -33,6 +33,7 @@ export const AUTHENTICATED_SHARE_GENERATOR_ROUTES = [
   "/api/gex/share",
   "/api/internals/share",
   "/api/menthorq/cta/share",
+  "/api/newsfeed/share",
   "/api/regime/share",
   "/api/vcg/share",
 ] as const;

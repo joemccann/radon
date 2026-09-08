@@ -9,31 +9,35 @@ const CANVAS = "#0a0f14";
 const SIGNAL = "#05AD98";
 const LINE = "#2e3947";
 
-function publicSourceUrl(post: SharePost): string | undefined {
-  // Research URLs and IDs identify private documents, never public permalinks.
-  if (post.source) return undefined;
-  try {
-    const url = new URL(post.href);
-    // Feed permalinks are the only established public source contract.
-    if (url.protocol !== "https:" || url.hostname !== "themarketear.com"
-      || url.username || url.password || !/^\/(posts\/[^/]+|newsfeed)\/?$/.test(url.pathname)) return undefined;
-    return `${url.origin}${url.pathname}`;
-  } catch { return undefined; }
+/** Shared outbound policy for captions, composer links and rendered card text. */
+export function sanitizeShareText(text: string): string {
+  return text
+    .replace(/https?:\/\/(?:www\.)?(?:x|twitter)\.com\/(?:themarketear|zerohedge)(?:[/?#][^\s<>]*)?/gi, "")
+    .replace(/(?:https?:\/\/|www\.)[^\s<>]*(?:themarketear|zerohedge)\.com[^\s<>]*/gi, "")
+    .replace(/(?:\b(?:source|via|per|according to)\s*:?\s*)?@?\b(?:the[\s-]*)?(?:market[\s-]*ear|zero[\s-]*hedge)(?:\.com(?:\/[^\s]*)?)?\b/gi, "")
+    .split("\n").map(line => line.replace(/[ \t]+/g, " ").trim().replace(/^[:;,·]\s*/, ""))
+    .filter(line => !/^(?:source\s*:|[·,:;-])+$/i.test(line))
+    .join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function shareSource(post: SharePost): string {
+  const publisher = post.source?.publisher;
+  if (!publisher || /(?:market[\s-]*ear|zero[\s-]*hedge)/i.test(publisher)) return "";
+  return `Source: ${cleanText(publisher)}${post.source?.documentDate ? ` · ${post.source.documentDate}` : ""}`;
 }
 
 function cleanText(text: string): string {
-  return text.replace(/(?:https?:\/\/[^\s]*)?\/api\/newsfeed\/research\/[^\s)]+/gi, "")
+  return sanitizeShareText(text).replace(/(?:https?:\/\/[^\s]*)?\/api\/newsfeed\/research\/[^\s)]+/gi, "")
     .replace(/\s+/g, " ").trim();
 }
 
 export function buildShareCaption(post: SharePost): string {
-  const source = post.source?.publisher || "The Market Ear";
-  return [cleanText(post.title), cleanText(post.content || ""), `Source: ${source}${post.source?.documentDate ? ` · ${post.source.documentDate}` : ""}`, publicSourceUrl(post)]
+  return [cleanText(post.title), cleanText(post.content || ""), shareSource(post)]
     .filter(Boolean).join("\n\n");
 }
 
 export function buildXShareUrl(caption: string): string {
-  return `https://twitter.com/intent/tweet?${new URLSearchParams({ text: caption })}`;
+  return `https://twitter.com/intent/tweet?${new URLSearchParams({ text: sanitizeShareText(caption) })}`;
 }
 
 /** Break long words as well as prose, so provider text cannot escape the card. */
@@ -144,7 +148,7 @@ export async function renderShareCard(post: SharePost, imageUrl: string | undefi
   ctx.fillRect(72, 1535, 936, 2);
   ctx.fillStyle = MUTED;
   ctx.font = `24px ${sans}`;
-  drawText(ctx, `Source: ${post.source?.publisher || "The Market Ear"}`, 72, 1554, 900, 30, 2);
+  drawText(ctx, shareSource(post), 72, 1554, 900, 30, 2);
   const figure = post.source?.figures.find(item => item.url === imageUrl);
   if (figure) {
     ctx.font = `22px ${sans}`;
