@@ -1145,3 +1145,76 @@ python/web gate co-wall then the deploy floor (CIP-004).
   CIP-005, CIP-007, and CIP-009 remain `VALIDATING`; CIP-004/006/008 remain
   `DEFERRED`. No operator action is required; residual bottleneck remains the
   mixed gate/image co-wall followed by the protected Deploy floor.
+
+### 2026-09-08 - audit - branch `ci-performance/2026-09-08`
+
+- Audited range: `e4eaa255..cc77928d` (11 commits). Dedicated clone markers,
+  GitHub auth, clean `origin/main` baseline, protected required contexts, and
+  Production policy passed. The stale `.weekend-runner.lock` PID `3035` was
+  not live; its record was preserved at
+  `/tmp/ci-performance-stale-lock-pid-3035-1788851222` before exclusive lock
+  reclaim.
+- Measured the latest 20 successful `ci.yml` push deployments (mixed/full
+  stack, normal/warm cache behavior): 34182021631, 34177063112, 34171361141,
+  34166458298, 34166071648, 34165771214, 34163840162, 34162884350,
+  34162540703, 34159969877, 34159444700, 34157062180, 34152165447,
+  34149839236, 34147406205, 34146092563, 34144867253, 34139478919,
+  34135766258, 34125447978. Primary clocks (createdAt -> successful Deploy
+  to VPS completedAt) were 269, 273, 316, 255, 247, 251, 235, 253, 263,
+  250, 277, 252, 320, 247, 266, 253, 260, 251, 366, 355 seconds: p50 258s,
+  p95 355s. First-job queue was 2-4s and is reported separately, not as a
+  code-performance gain. The 316/355/366s runs are retained as degraded-tail
+  reliability evidence, not pooled as an optimization win.
+- Representative current run
+  [34182021631](https://github.com/joemccann/radon/actions/runs/34182021631)
+  (269s): Path filter 10s -> pytest `scripts-rs` 115s -> pytest coverage
+  ratchet 14s -> prestage 22s -> Deploy 92s. Node image (115s) co-ends with
+  `scripts-rs`; Python image is 60s. Prepull is 19s and prestage confirms the
+  exact SHA pair is local before deployment. Deploy's protected 40-second
+  stability window, health/recovery/rollback behavior, and non-canceling
+  concurrency remain intact.
+- CI-surface delta adds required PR execution for the protected matrix checks
+  and a local-only worker budget; it does not alter main push fan-out, test
+  union, coverage ratchets, action pinning, image provenance, gate closure,
+  or deploy safety. `scripts-rs` is the recurring work tail (98-115s), but
+  reducing it cannot advance the representative path materially because the
+  required node image co-wall is 115s; repartitioning risks shard-union and
+  billed-runner regressions for at most a few seconds.
+- Safety closure re-verified: `stage-release` and `prepull-images` retain the
+  complete deploy-gate set at `.github/workflows/ci.yml:830,917`; Deploy
+  retains those host-preparation jobs and all gates at `:960`; branch
+  protection keeps all required contexts. Pinned actions, path-filter
+  fail-closed contracts, recursive shard-union checks, artifact checks, exact
+  SHA verification, health, recovery, rollback, cancellation, and the 40s
+  stability rail remain present.
+- Outcome: `NO_SAFE_CHANGE` / `INSUFFICIENT_SAMPLE`. No `CIP-010` is
+  allocated: no source-actionable candidate clears the 15-second / 10%
+  materiality floor without weakening a rail or increasing runner minutes.
+  CIP-005, CIP-007, and CIP-009 remain `VALIDATING`; CIP-004/006/008 remain
+  `DEFERRED`. Residual bottleneck is the required `scripts-rs`/node-image
+  co-wall followed by the protected deployment floor.
+
+### 2026-09-08 - remediate - branch `ci-performance/2026-09-08`
+
+- Runner state: dedicated markers, GitHub auth, remote dated branch, and an
+  exclusive `.weekend-runner.lock` were verified. `RADON_WEEKEND_REDUCED=1`
+  restricts this phase to P0/P1 findings.
+- Remediation eligibility: the current audit supplied no P0/P1
+  source-actionable finding. The measured `scripts-rs`/node-image co-wall
+  cannot yield the required material critical-path reduction without a risky
+  shard experiment, and the 40-second stability window, exact-SHA image pair,
+  and complete deploy-gate closure are protected rails. No `CIP-010` was
+  allocated and no lower-priority change was made.
+- Verification: `../venv-ci-performance/bin/python -m pytest
+  scripts/tests/test_ci_gate_integrity.py
+  scripts/tests/test_ci_deploy_concurrency.py scripts/tests/test_path_filter.py
+  -q` — **88 passed in 9.56s**; `git diff --check origin/main...HEAD` is
+  clean. This is a safety baseline, not a production timing claim.
+- Safety: no test inventory, coverage, path classification, gate dependency,
+  immutable action pin, artifact provenance, exact-SHA verification, health,
+  rollback, recovery, cancellation, or stability-window behavior changed.
+- Outcome: `NO_SAFE_CHANGE` / `INSUFFICIENT_SAMPLE` under reduced-cap scope.
+  CIP-005, CIP-007, and CIP-009 remain `VALIDATING`; CIP-004/006/008 remain
+  `DEFERRED`. No operator action is required; residual bottleneck remains the
+  required `scripts-rs`/node-image co-wall followed by the protected deployment
+  floor.
