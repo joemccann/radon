@@ -29,6 +29,7 @@ SOURCES = (
     "lambda",
 )
 KEYS = ("OPENROUTER_API_KEY", "ARTIFICIAL_ANALYSIS_API_KEY", "SEC_USER_AGENT", "EIA_API_KEY", "VAST_API_KEY")
+OPERATOR_FIELDS = (*KEYS, "RADON_AI_CYCLE_AA_BASKET")
 
 
 def windows(start, end, days=28):
@@ -42,14 +43,25 @@ def windows(start, end, days=28):
 
 
 def environment(env_file=None):
-    result = {key: os.environ[key] for key in KEYS if os.environ.get(key)}
+    result = {key: os.environ[key] for key in OPERATOR_FIELDS if os.environ.get(key)}
     if env_file:
         from dotenv import dotenv_values
 
         values = dotenv_values(env_file)
-        for key in KEYS:
+        for key in OPERATOR_FIELDS:
             if key not in result and values.get(key):
                 result[key] = values[key]
+    # The Profile credential store is the operator source of truth. Scheduled
+    # collectors are separate processes, so they must read it explicitly
+    # rather than relying on the FastAPI process's in-memory environment.
+    if os.environ.get("RADON_SECRET_STORE_PATH"):
+        from secret_store import SecretStore
+
+        store = SecretStore()
+        for key in OPERATOR_FIELDS:
+            stored = store.get_secret(key)
+            if stored:
+                result[key] = stored
     return result
 
 
@@ -71,7 +83,7 @@ def _main(argv=None):
     parser.add_argument("--max-requests", type=int, default=100)
     parser.add_argument(
         "--basket",
-        default=os.environ.get("RADON_AI_CYCLE_AA_BASKET", ""),
+        default="",
         help="Comma-separated verified AA model slugs; immutable across a cohort",
     )
     parser.add_argument("--import-disclosures", help="Verified issuer observations JSON")
@@ -95,6 +107,7 @@ def _main(argv=None):
         parser.error("Use --backfill for windows longer than 90 days")
     transport = Transport(Path(args.archive), max_requests=args.max_requests)
     env = environment(args.env_file)
+    basket = args.basket or env.get("RADON_AI_CYCLE_AA_BASKET", "")
     store = None
     if args.record:
         from .store import ObservationStore
@@ -132,7 +145,7 @@ def _main(argv=None):
                         effective_start,
                         last,
                         env=env,
-                        basket=tuple(filter(None, args.basket.split(","))),
+                        basket=tuple(filter(None, basket.split(","))),
                     )
                 status = dict(
                     source_id=source,

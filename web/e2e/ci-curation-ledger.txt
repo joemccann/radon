@@ -292,3 +292,7 @@ newsfeed-sharing.spec.ts
 # REVIEWED 2026-09-08 trin-tab.spec.ts - local Chromium desktop/mobile
 #   verification passed 4/4; x-axis bounding boxes and screenshots were checked
 #   at 1,440px and 390px with irregular market-session timestamps.
+
+# REVIEWED 2026-09-08 profile-credentials-tab.spec.ts - local Chromium
+#   desktop/mobile verification passed 2/2; LLM source cards, responsive input
+#   layout, and horizontal overflow were visually checked at 1,280px and 390px.

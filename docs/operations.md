@@ -70,6 +70,12 @@ restarting, not from the tab. Deleting a stored secret does not unset the
 already-exported value in the running process — it takes effect at the next
 FastAPI restart.
 
+The LLM regime collector runs as a separate systemd process, so
+`radon-ai-cycle.service` loads the same encrypted store and master key directly.
+Its Profile group exposes OpenRouter, Artificial Analysis (including the fixed
+model basket), Vast.ai, EIA and the SEC contact user agent. Stored values win
+over `/etc/radon/env` on the collector's next run.
+
 **An unopenable store is reported, never silently skipped.** A store that fails to open after the preflight used to fall back to the deployed `.env` values without a word, so a rotated credential kept serving the stale one. `bootstrap_exported_names()` now surfaces the failure instead of degrading quietly. The setup flow's two env files (`web/lib/setup/envFiles.ts`) are written as a pair that rolls back, so an interrupted save can no longer leave one file updated and the other stale, and the setup token now expires after `SETUP_TOKEN_TTL_MS` (1h from first use, `web/lib/setup/setupToken.ts`), so an abandoned wizard cannot leave a credential-writing token alive for the process lifetime.
 
 The first container cutover is a one-time migration: before any restart, copy

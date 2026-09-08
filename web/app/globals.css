@@ -21017,6 +21017,15 @@ body[data-mobile="true"] .alerts-rule__channel {
     justify-content: flex-start;
   }
 
+  .preferences-row--service {
+    grid-template-areas:
+      "head"
+      "description"
+      "fields"
+      "actions"
+      "error";
+  }
+
   .preferences-row__input {
     width: 100%;
     text-align: left;

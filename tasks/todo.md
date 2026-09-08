@@ -5625,3 +5625,25 @@ Dependency graph: U1 + U2 -> U3 -> U4.
 
 - Full cloud run: 1,866 passed, 32 failed, seven skipped. Failed subset rerun on unchanged baseline: 26 passed, six failed; repaired tree: 27 passed, five failed, all requiring unavailable local Caddy. New regressions pass; Linux CI remains the integrated release gate. Logs: /tmp/radon-dropbox-full-cloud.log, /tmp/radon-dropbox-cloud-baseline.log, /tmp/radon-dropbox-cloud-confirm.log.
 - Integrated unrelated ATS main release 37f18a9f; cloud and Docker implementation unchanged.
+
+# LLM source credentials in Profile (2026-09-08)
+
+- [x] T1 depends_on: [] - Inventory the Profile credentials contract and all LLM pipeline environment fields.
+- [x] T2 depends_on: [T1] - Add red regression coverage for every missing credential and configuration field.
+- [x] T3 depends_on: [T2] - Register fields across backend storage, validation, and Profile UI metadata.
+- [x] T4 depends_on: [T3] - Run focused API/UI tests and desktop/mobile browser verification.
+- [x] T5 depends_on: [T4] - Run full suites, commit, open a PR, and monitor exact-head CI until green.
+
+Dependency graph: T1 -> T2 -> T3 -> T4 -> T5.
+
+## Verification replan
+- [x] T5a depends_on: [T4] - Run Python and cloud suites sequentially after concurrent-run resource contention.
+- [x] T5b depends_on: [T5a] - Stop expensive local full-suite reruns per operator direction; retain focused UI/browser evidence and delegate the full matrix to GitHub CI.
+- [x] T5c depends_on: [T5b] - Commit, open the PR, and monitor exact-head CI until green.
+Dependency graph: T4 -> T5a -> T5b -> T5c -> T5.
+
+## Review
+- Focused credentials/API coverage: 125 passed; Profile Vitest: 8 passed; Profile Playwright: 2 passed with desktop/mobile visual inspection.
+- Full Python: 12,400 passed, 19 skipped, 90 deselected, 16 subtests; full cloud: 1,877 passed, 12 documented local Caddy skips.
+- GitHub CI is the authoritative full web and release gate per operator direction.
+- PR #361 repair head `5d5a6d0e` passed every applicable GitHub check, including all Vitest/Python shards, both coverage ratchets, Playwright, images, security, perimeter smoke, and previews.

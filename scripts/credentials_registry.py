@@ -12,12 +12,13 @@ field is stored encrypted in the secret store regardless.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
 GROUP_ORDER: Tuple[str, ...] = (
     "Market Data",
     "AI Providers",
+    "LLM Regime Sources",
     "Infrastructure",
     "Alerts & News",
 )
@@ -51,9 +52,7 @@ SERVICES: Tuple[CredentialService, ...] = (
         id="unusual_whales",
         label="Unusual Whales",
         group="Market Data",
-        fields=(
-            CredentialField("UW_TOKEN", "API token", placeholder="uw_..."),
-        ),
+        fields=(CredentialField("UW_TOKEN", "API token", placeholder="uw_..."),),
         validator="unusual_whales",
     ),
     CredentialService(
@@ -89,9 +88,7 @@ SERVICES: Tuple[CredentialService, ...] = (
         fields=(
             CredentialField("IB_FLEX_TOKEN", "Flex token"),
             CredentialField("IB_FLEX_QUERY_ID", "Blotter query id", secret=False),
-            CredentialField(
-                "IB_FLEX_NAV_QUERY_ID", "NAV query id", secret=False
-            ),
+            CredentialField("IB_FLEX_NAV_QUERY_ID", "NAV query id", secret=False),
         ),
         note=(
             "Never live-validated: a probe is a real Flex request and the "
@@ -103,9 +100,7 @@ SERVICES: Tuple[CredentialService, ...] = (
         id="anthropic",
         label="Anthropic",
         group="AI Providers",
-        fields=(
-            CredentialField("ANTHROPIC_API_KEY", "API key", placeholder="sk-ant-..."),
-        ),
+        fields=(CredentialField("ANTHROPIC_API_KEY", "API key", placeholder="sk-ant-..."),),
         validator="anthropic",
     ),
     CredentialService(
@@ -130,11 +125,65 @@ SERVICES: Tuple[CredentialService, ...] = (
         validator="exa",
     ),
     CredentialService(
+        id="openrouter",
+        label="OpenRouter",
+        group="LLM Regime Sources",
+        fields=(
+            CredentialField(
+                "OPENROUTER_API_KEY",
+                "Data API key",
+                placeholder="sk-or-v1-...",
+            ),
+        ),
+        validator="openrouter",
+        note="Validates against the public rankings dataset; paid credits are not required.",
+    ),
+    CredentialService(
         id="artificial_analysis",
         label="Artificial Analysis",
-        group="AI Providers",
-        fields=(CredentialField("ARTIFICIAL_ANALYSIS_API_KEY", "API key"),),
+        group="LLM Regime Sources",
+        fields=(
+            CredentialField("ARTIFICIAL_ANALYSIS_API_KEY", "API key"),
+            CredentialField(
+                "RADON_AI_CYCLE_AA_BASKET",
+                "Model basket",
+                secret=False,
+                placeholder="provider/model,provider/model",
+                required_for_validation=False,
+            ),
+        ),
         validator="artificial_analysis",
+        note="Use comma-separated current API model slugs for the fixed pricing basket.",
+    ),
+    CredentialService(
+        id="vast",
+        label="Vast.ai",
+        group="LLM Regime Sources",
+        fields=(CredentialField("VAST_API_KEY", "API key"),),
+        validator="vast",
+    ),
+    CredentialService(
+        id="eia",
+        label="U.S. Energy Information Administration",
+        group="LLM Regime Sources",
+        fields=(CredentialField("EIA_API_KEY", "API key"),),
+        validator="eia",
+        note="EIA API keys are free; production collection does not use DEMO_KEY.",
+    ),
+    CredentialService(
+        id="sec",
+        label="SEC EDGAR",
+        group="LLM Regime Sources",
+        fields=(
+            CredentialField(
+                "SEC_USER_AGENT",
+                "Application and contact email",
+                secret=False,
+                placeholder="Radon ops@example.com",
+            ),
+        ),
+        validator="sec",
+        note="SEC requires an identifying application name and monitored email; no API key or payment.",
     ),
     # -- Infrastructure ------------------------------------------------------
     CredentialService(
@@ -188,13 +237,9 @@ SERVICES: Tuple[CredentialService, ...] = (
         label="Backblaze B2 archive",
         group="Infrastructure",
         fields=(
-            CredentialField(
-                "RADON_ARCHIVE_S3_ENDPOINT", "S3 endpoint", secret=False
-            ),
+            CredentialField("RADON_ARCHIVE_S3_ENDPOINT", "S3 endpoint", secret=False),
             CredentialField("RADON_ARCHIVE_S3_BUCKET", "Bucket", secret=False),
-            CredentialField(
-                "RADON_ARCHIVE_S3_ACCESS_KEY_ID", "Access key id", secret=False
-            ),
+            CredentialField("RADON_ARCHIVE_S3_ACCESS_KEY_ID", "Access key id", secret=False),
             CredentialField("RADON_ARCHIVE_S3_SECRET_ACCESS_KEY", "Secret key"),
             CredentialField("RADON_ARCHIVE_S3_REGION", "Region", secret=False),
         ),
@@ -230,9 +275,7 @@ SERVICES: Tuple[CredentialService, ...] = (
 
 _BY_ID: Dict[str, CredentialService] = {service.id: service for service in SERVICES}
 _FIELDS_BY_NAME: Dict[str, CredentialField] = {
-    field_def.name: field_def
-    for service in SERVICES
-    for field_def in service.fields
+    field_def.name: field_def for service in SERVICES for field_def in service.fields
 }
 
 

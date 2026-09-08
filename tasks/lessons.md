@@ -947,3 +947,9 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 ## 2026-09-08 - One research filename cannot stop ingestion
 - Treat Dropbox metadata paths as remote identifiers, not local paths or URI selectors; retain absolute-root confinement while accepting valid filename punctuation.
 - Isolate discovery failures by scope and continue already validated queue work. Preserve failed cursors for replay and report the actual failing stage with credential-safe diagnostics.
+
+## 2026-09-08 - New data sources require Profile credential coverage
+- When a pipeline introduces a credential or operator-supplied configuration value, add it to the canonical credential registry and Profile credentials UI in the same change. Verify every collector-loaded field is represented; do not leave production-only environment setup as an undocumented side channel.
+
+## 2026-09-08 - Prefer CI for expensive full-suite verification
+- When the operator says local full suites consume too much workstation time, stop rerunning them. Run focused local checks, publish the PR promptly, and use the faster GitHub runners as the authoritative full-suite loop until the exact head is green.

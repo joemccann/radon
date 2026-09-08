@@ -26,7 +26,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict
 from urllib.parse import urlparse
 
 import requests
@@ -73,9 +73,7 @@ def _verdict_from_status_code(code: int, vendor: str) -> ValidationResult:
     if 200 <= code < 300:
         return ValidationResult("valid")
     if code in (401, 403):
-        return ValidationResult(
-            "invalid", f"{vendor} rejected the credential (HTTP {code})"
-        )
+        return ValidationResult("invalid", f"{vendor} rejected the credential (HTTP {code})")
     return ValidationResult("error", f"{vendor} answered HTTP {code}")
 
 
@@ -84,12 +82,8 @@ def _get(url: str, headers: Dict[str, str], vendor: str) -> ValidationResult:
     return _verdict_from_status_code(response.status_code, vendor)
 
 
-def _post(
-    url: str, headers: Dict[str, str], payload: dict, vendor: str
-) -> ValidationResult:
-    response = requests.post(
-        url, headers=headers, json=payload, timeout=HTTP_TIMEOUT_S
-    )
+def _post(url: str, headers: Dict[str, str], payload: dict, vendor: str) -> ValidationResult:
+    response = requests.post(url, headers=headers, json=payload, timeout=HTTP_TIMEOUT_S)
     return _verdict_from_status_code(response.status_code, vendor)
 
 
@@ -164,6 +158,41 @@ def _validate_artificial_analysis(values: Dict[str, str]) -> ValidationResult:
     )
 
 
+def _validate_openrouter(values: Dict[str, str]) -> ValidationResult:
+    return _get(
+        "https://openrouter.ai/api/v1/datasets/rankings-daily",
+        {"Authorization": f"Bearer {values['OPENROUTER_API_KEY']}"},
+        "OpenRouter",
+    )
+
+
+def _validate_vast(values: Dict[str, str]) -> ValidationResult:
+    return _get(
+        "https://console.vast.ai/api/v0/users/current/",
+        {"Authorization": f"Bearer {values['VAST_API_KEY']}"},
+        "Vast.ai",
+    )
+
+
+def _validate_eia(values: Dict[str, str]) -> ValidationResult:
+    return _get(
+        f"https://api.eia.gov/v2/?api_key={values['EIA_API_KEY']}",
+        {},
+        "EIA",
+    )
+
+
+def _validate_sec(values: Dict[str, str]) -> ValidationResult:
+    identity = values["SEC_USER_AGENT"].strip()
+    if "@" not in identity or identity.startswith("@"):
+        return ValidationResult("invalid", "SEC user agent must include an application name and contact email")
+    return _get(
+        "https://data.sec.gov/submissions/CIK0000320193.json",
+        {"User-Agent": identity},
+        "SEC EDGAR",
+    )
+
+
 def _validate_pushover(values: Dict[str, str]) -> ValidationResult:
     response = requests.post(
         "https://api.pushover.net/1/users/validate.json",
@@ -174,9 +203,7 @@ def _validate_pushover(values: Dict[str, str]) -> ValidationResult:
     if response.status_code == 200:
         return ValidationResult("valid")
     if 400 <= response.status_code < 500:
-        return ValidationResult(
-            "invalid", f"Pushover rejected the pair (HTTP {response.status_code})"
-        )
+        return ValidationResult("invalid", f"Pushover rejected the pair (HTTP {response.status_code})")
     return ValidationResult("error", f"Pushover answered HTTP {response.status_code}")
 
 
@@ -225,9 +252,7 @@ def _validate_turso(values: Dict[str, str]) -> ValidationResult:
 # -- Slow browser-login validators -------------------------------------------
 
 
-def _run_login_subprocess(
-    service_id: str, env_overlay: Dict[str, str]
-) -> ValidationResult:
+def _run_login_subprocess(service_id: str, env_overlay: Dict[str, str]) -> ValidationResult:
     env = dict(os.environ)
     env.update(env_overlay)
     proc = subprocess.run(
@@ -238,12 +263,8 @@ def _run_login_subprocess(
         timeout=SLOW_LOGIN_TIMEOUT_S,
     )
     if proc.returncode != 0:
-        detail = scrub_validation_message(
-            {"message": (proc.stderr or proc.stdout or "").strip()[-200:]}
-        )["message"]
-        return ValidationResult(
-            "error", f"login check for {service_id} failed to run: {detail}"
-        )
+        detail = scrub_validation_message({"message": (proc.stderr or proc.stdout or "").strip()[-200:]})["message"]
+        return ValidationResult("error", f"login check for {service_id} failed to run: {detail}")
     verdict = json.loads(proc.stdout.strip())
     status = verdict.get("status")
     if status not in _STATUSES:
@@ -283,6 +304,10 @@ VALIDATORS: Dict[str, Callable[[Dict[str, str]], ValidationResult]] = {
     "clerk": _validate_clerk,
     "equibles": _validate_equibles,
     "artificial_analysis": _validate_artificial_analysis,
+    "openrouter": _validate_openrouter,
+    "vast": _validate_vast,
+    "eia": _validate_eia,
+    "sec": _validate_sec,
     "pushover": _validate_pushover,
     "turso": _validate_turso,
     "menthorq": _validate_menthorq,
@@ -294,8 +319,7 @@ def _missing_fields(service, values: Dict[str, str]) -> list:
     return [
         field.name
         for field in service.fields
-        if field.required_for_validation
-        and not str(values.get(field.name, "") or "").strip()
+        if field.required_for_validation and not str(values.get(field.name, "") or "").strip()
     ]
 
 
@@ -316,13 +340,9 @@ def validate(service_id: str, values: Dict[str, str]) -> ValidationResult:
     except requests.Timeout:
         return ValidationResult("error", f"{service.label} check timed out")
     except requests.RequestException as exc:
-        return ValidationResult(
-            "error", f"{service.label} check failed: {exc.__class__.__name__}"
-        )
+        return ValidationResult("error", f"{service.label} check failed: {exc.__class__.__name__}")
     except subprocess.TimeoutExpired:
         return ValidationResult("error", f"{service.label} login check timed out")
     except Exception as exc:  # noqa: BLE001 - verdict, never a 500
         logger.warning("validator %s crashed: %s", service_id, exc)
-        return ValidationResult(
-            "error", f"{service.label} check crashed: {exc.__class__.__name__}"
-        )
+        return ValidationResult("error", f"{service.label} check crashed: {exc.__class__.__name__}")

@@ -217,6 +217,27 @@ def test_environment_loads_only_provider_credentials(tmp_path, monkeypatch):
     assert "PUSHOVER_TOKEN" not in env
 
 
+def test_environment_prefers_profile_credential_store(tmp_path, monkeypatch):
+    from secret_store import SecretStore
+
+    monkeypatch.setenv("RADON_SECRET_STORE_PATH", str(tmp_path / "secrets.db"))
+    monkeypatch.setenv("RADON_SECRET_STORE_KEY_FILE", str(tmp_path / "secret.key"))
+    monkeypatch.setenv("OPENROUTER_API_KEY", "stale-env-key")
+    store = SecretStore()
+    store.set_secrets(
+        {
+            "OPENROUTER_API_KEY": "profile-key",
+            "RADON_AI_CYCLE_AA_BASKET": "openai/gpt-a,anthropic/model-b",
+        },
+        actor="test",
+    )
+
+    env = environment()
+
+    assert env["OPENROUTER_API_KEY"] == "profile-key"
+    assert env["RADON_AI_CYCLE_AA_BASKET"] == "openai/gpt-a,anthropic/model-b"
+
+
 def test_transport_hashes_raw_and_sanitizes_errors(tmp_path):
     class Response:
         status_code = 200

@@ -12,7 +12,7 @@
 import { test, expect, type Page } from "@playwright/test";
 
 const CREDENTIALS_PAYLOAD = {
-  groups: ["Market Data", "AI Providers"],
+  groups: ["Market Data", "AI Providers", "LLM Regime Sources"],
   services: [
     {
       id: "unusual_whales",
@@ -33,6 +33,29 @@ const CREDENTIALS_PAYLOAD = {
           updated_at: "2026-09-01T00:00:00Z",
           updated_by: "op-1",
           env_fallback: false,
+        },
+      ],
+    },
+    {
+      id: "openrouter",
+      label: "OpenRouter",
+      group: "LLM Regime Sources",
+      validator: true,
+      slow: false,
+      note: "",
+      fields: [
+        {
+          name: "OPENROUTER_API_KEY",
+          label: "Data API key",
+          secret: true,
+          placeholder: "sk-or-v1-...",
+          configured: false,
+          hint: "",
+          version: 0,
+          updated_at: null,
+          updated_by: null,
+          env_fallback: false,
+          exported_only: false,
         },
       ],
     },
@@ -99,6 +122,8 @@ async function stubProfileApis(page: Page): Promise<void> {
 }
 
 test.describe("profile operator tabs", () => {
+  test.describe.configure({ timeout: 90_000 });
+
   test("preferences fold-in and credentials masked list render", async ({ page }) => {
     await stubProfileApis(page);
     await page.route("**/api/credentials", (route) =>
@@ -116,9 +141,24 @@ test.describe("profile operator tabs", () => {
     await page.getByRole("tab", { name: "Credentials" }).click();
     await expect(page.getByTestId("credentials-panel")).toBeVisible();
     await expect(page.getByTestId("credential-service-unusual-whales")).toBeVisible();
+    await expect(page.getByText("LLM Regime Sources")).toBeVisible();
+    const openRouter = page.getByTestId("credential-service-openrouter");
+    await expect(openRouter).toBeVisible();
     // Masked hint renders; no plaintext anywhere.
     await expect(page.getByTestId("credential-status-UW_TOKEN")).toContainText("cret");
-    await page.screenshot({ path: "test-results/profile-credentials-tab.png", fullPage: true });
+    await openRouter.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: "test-results/profile-credentials-llm-desktop.png" });
+    await page.setViewportSize({ width: 393, height: 852 });
+    await openRouter.scrollIntoViewIfNeeded();
+    const mobileInput = await page.locator("#cred-OPENROUTER_API_KEY").boundingBox();
+    const mobileSave = await page.getByTestId("credential-save-openrouter").boundingBox();
+    expect(mobileInput).not.toBeNull();
+    expect(mobileSave).not.toBeNull();
+    expect(mobileSave!.y).toBeGreaterThan(mobileInput!.y + mobileInput!.height);
+    await expect
+      .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
+      .toBe(true);
+    await page.screenshot({ path: "test-results/profile-credentials-llm-mobile.png" });
   });
 
   test("armed save PUTs the full path and a 422 shows the playful retry line", async ({ page }) => {

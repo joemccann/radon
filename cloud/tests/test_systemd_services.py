@@ -215,6 +215,25 @@ def unit(services_dir):
     return _load
 
 
+class TestAiCycleCredentials:
+    FILENAME = "radon-ai-cycle.service"
+
+    def test_loads_profile_credential_store(self, unit, services_dir):
+        svc = unit(self.FILENAME)["Service"]
+        assert svc["loadcredentialencrypted"] == (
+            "radon-secret-store-key:"
+            "/etc/credstore.encrypted/radon-secret-store-key"
+        )
+        lines = (services_dir / self.FILENAME).read_text(
+            encoding="utf-8"
+        ).splitlines()
+        assert (
+            "Environment=RADON_SECRET_STORE_PATH="
+            "/home/radon/radon/data/secret_store/secrets.db"
+        ) in lines
+        assert "scripts/secret_store.py" in svc["execstartpre"]
+
+
 # ---------------------------------------------------------------------------
 # Structural tests (all services)
 # ---------------------------------------------------------------------------

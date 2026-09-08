@@ -8,6 +8,7 @@ real validator or an explicit note saying why it cannot be checked live.
 import re
 
 import credential_validators
+from ai_cycle.collect import KEYS as AI_CYCLE_KEYS
 from credentials_registry import (
     GROUP_ORDER,
     SERVICES,
@@ -49,8 +50,7 @@ class TestRegistryIsHonest:
         for service in SERVICES:
             if service.validator is not None:
                 assert service.validator in credential_validators.VALIDATORS, (
-                    f"{service.id} declares validator {service.validator!r} "
-                    "which does not exist"
+                    f"{service.id} declares validator {service.validator!r} which does not exist"
                 )
 
     def test_slow_implies_validator(self):
@@ -61,9 +61,7 @@ class TestRegistryIsHonest:
     def test_unvalidatable_services_carry_a_note(self):
         for service in SERVICES:
             if service.validator is None:
-                assert service.note, (
-                    f"{service.id} has no validator and no note explaining why"
-                )
+                assert service.note, f"{service.id} has no validator and no note explaining why"
 
     def test_ib_flex_is_never_live_validated(self):
         """The Flex token already took a 24h-168h throttle embargo once."""
@@ -97,6 +95,16 @@ class TestExpectedSurface:
             "TWS_PASSWORD",
         ):
             assert expected in names, expected
+
+    def test_ai_cycle_operator_fields_are_profile_manageable(self):
+        names = fields_by_name()
+        for expected in (*AI_CYCLE_KEYS, "RADON_AI_CYCLE_AA_BASKET"):
+            assert expected in names, expected
+
+        service_ids = {
+            service_by_id(service_id).id for service_id in ("openrouter", "artificial_analysis", "vast", "eia", "sec")
+        }
+        assert service_ids == {"openrouter", "artificial_analysis", "vast", "eia", "sec"}
 
     def test_lookup_helpers(self):
         service = service_by_id("anthropic")
