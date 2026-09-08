@@ -1218,3 +1218,87 @@ python/web gate co-wall then the deploy floor (CIP-004).
   `DEFERRED`. No operator action is required; residual bottleneck remains the
   required `scripts-rs`/node-image co-wall followed by the protected deployment
   floor.
+
+### 2026-09-08 - audit (post-main delta) - branch `ci-performance/2026-09-08`
+
+- Runner state: dedicated `.radon-weekend-runner` and
+  `.radon-ci-performance-runner` markers and GitHub auth verified. A stale
+  `.weekend-runner.lock` PID `94470` was not live; its complete lock directory
+  was recoverably preserved at `/tmp/ci-performance-stale-lock-94470-1788905276`
+  before reclaim. The dated branch remains based on its prior audited merge;
+  `.codex` tool-injected files are immutable in this session, so a merge of
+  `origin/main` was correctly refused rather than overwriting them.
+- Audited range: `cc77928d..90071618` (18 commits). Changed production surfaces
+  include image/deploy support, cloud services/tests, scripts, and the
+  CI-performance wrapper/no-op contracts; no main-push CI DAG, required gate,
+  path-filter union, image provenance, or deploy safety edge changed.
+- Measured 20 successful `ci.yml` push deployments: mixed/full-stack runs
+  34282762384, 34282189377, 34280791988, 34279399373, 34276675858,
+  34274227210, 34269178378, 34264670821, 34260959262, 34257021149,
+  34182021631, 34177063112, 34171361141, 34166458298, 34166071648,
+  34165771214, and 34163840162 have primary clocks of 268, 281, 279, 380,
+  304, 384, 268, 256, 276, 266, 269, 273, 316, 255, 247, 251, and 235s
+  (p50 269s, p95 380s). Docs/control-plane runs 34260739908, 34258090170,
+  and 34257548131 are separately classified (166, 166, 159s; p50 166s).
+  First-job queue is 2-3s and excluded from code-performance claims. The 210s
+  Deploy jobs in 34279399373 and 34274227210 remain degraded-tail reliability
+  evidence, not comparable optimization wins. No explicit cold-cache sample
+  was identified; cache state is normal/warm and `INSUFFICIENT_SAMPLE` applies.
+- Representative run [34282762384](https://github.com/joemccann/radon/actions/runs/34282762384)
+  reconstructs the current predecessor path: Path filter 12s -> pytest
+  `scripts-rs` 108s -> pytest coverage 19s -> parallel prestage/prepull 16s
+  -> Deploy 101s = 268s from creation. Node/Python image builds are 89/74s;
+  the 17 mixed samples place `scripts-rs` at p50/p95 108/114s, node image
+  90/123s, Python image 60/74s, coverage 16/21s, prestage 15/28s, prepull
+  16/22s, and Deploy 94/210s. Runner minutes are unavailable from GitHub's
+  free-plan timing API; summed job wall time is unchanged because no change was
+  made.
+- Safety closure passed: the 24 protected contexts remain required; complete
+  gate closure is retained at `.github/workflows/ci.yml:830,917,960`; exact
+  SHA staging/prepull checks remain at `:898,947-948`; deploy remains
+  non-canceling at `:985-987`; the Production branch policy is enabled; and
+  `cloud/scripts/deploy.sh:83-85,1504` retains the 40-second stability gate,
+  health, recovery, and rollback rails. Immutable action pins, recursive
+  shard-union, fail-closed fallback, coverage ratchets, and artifact checks
+  remain intact.
+- Candidate ranking: no `CIP-010` allocated. Rebalancing `scripts-rs` is the
+  only observable source-level lead, but it is work-bound, has no demonstrated
+  >=15s path reduction before the node-image/deploy floors, and risks
+  shard-union coverage or increased runner minutes. Removing coverage, gate
+  dependencies, exact-SHA checks, prestage/prepull verification, or the 40s
+  stability window violates rails. Expected recurring savings: <15s;
+  confidence low; effort/risk and validation cost high.
+- Verification: `../venv-ci-performance/bin/python -m pytest
+  scripts/tests/test_ci_gate_integrity.py scripts/tests/test_ci_deploy_concurrency.py
+  scripts/tests/test_path_filter.py -q` — **88 passed in 12.55s**; current-main
+  `test_phase_noop_declaration.py` source was inspected because its tracked
+  path is blocked by the immutable injected `.codex` tree. `git diff --check`
+  is clean. Outcome: `NO_SAFE_CHANGE` / `INSUFFICIENT_SAMPLE`; CIP-005,
+  CIP-007, and CIP-009 remain `VALIDATING`; CIP-004/006/008 remain `DEFERRED`.
+  Residual bottleneck is the required `scripts-rs`/coverage/image fan-in then
+  the protected deployment floor. Revert trigger: any future optimization that
+  shrinks a protected closure, test inventory, provenance, or stability rail.
+
+### 2026-09-08 - remediate (post-main delta) - branch `ci-performance/2026-09-08`
+
+- Runner state: dedicated markers and GitHub auth remain valid; the dated
+  branch was synchronized with `origin/main` while preserving both append-only
+  ledger/task records. `RADON_WEEKEND_REDUCED=1` confines this phase to P0/P1.
+- Remediation eligibility: the post-main audit has no P0/P1 source-actionable
+  candidate. The `scripts-rs`/coverage/image co-wall has no demonstrated
+  >=15-second critical-path reduction before the required node-image and
+  protected deployment floors; a repartition would risk shard-union coverage
+  and runner minutes. The exact-SHA image pair, complete gate closure, and
+  40-second stability window remain non-negotiable rails. No CIP-010 allocated.
+- Verification: `test_ci_gate_integrity.py` + `test_ci_deploy_concurrency.py`
+  (**45 passed**), `test_path_filter.py` (**43 passed**), and the
+  ci-performance subset of `test_phase_noop_declaration.py` (**6 passed**);
+  `.github/workflows/ci.yml` YAML parsing, `bash -n
+  scripts/ci_performance_nightly.sh`, and both diff checks passed.
+- Safety/impact: no source workflow behavior changed; test inventory, coverage,
+  path classification, required-gate closure, immutable pins, provenance,
+  exact-SHA verification, health, rollback, recovery, cancellation, and the
+  stability window are unchanged. Runner-minute impact is zero. Outcome:
+  `NO_SAFE_CHANGE` / `INSUFFICIENT_SAMPLE`; CIP-005/CIP-007/CIP-009 remain
+  `VALIDATING`, CIP-004/CIP-006/CIP-008 remain `DEFERRED`. Residual bottleneck
+  remains the required gate/image co-wall followed by the protected deploy floor.
