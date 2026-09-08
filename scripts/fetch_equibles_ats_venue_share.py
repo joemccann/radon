@@ -630,10 +630,159 @@ def _read_prior_payload() -> Optional[dict[str, Any]]:
 
 # ── orchestration ─────────────────────────────────────────────────
 
+UNIVERSE_TIERS = ("portfolio", "watchlist", "ndx100", "r2k", "sp500")
+
+
 def watchlist_tickers() -> list[str]:
     from db.readers import read_watchlist_tickers
 
     return read_watchlist_tickers()
+
+
+def normalize_ats_symbol(raw: Any) -> Optional[str]:
+    text = str(raw or "").strip().upper()
+    if not text or not any(ch.isalpha() for ch in text):
+        return None
+    return text
+
+
+def unique_symbols(*groups: Iterable[Any]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for group in groups:
+        for raw in group:
+            symbol = normalize_ats_symbol(raw)
+            if symbol and symbol not in seen:
+                seen.add(symbol)
+                out.append(symbol)
+    return out
+
+
+def merge_ats_universe(
+    *,
+    portfolio: Iterable[Any],
+    watchlist: Iterable[Any],
+    ndx100: Iterable[Any],
+    r2k: Iterable[Any],
+    sp500: Iterable[Any],
+) -> dict[str, Any]:
+    """Order-preserving unique union. First seat wins, so a name on the
+    portfolio is not scanned again as SPX."""
+    tiers = {
+        "portfolio": unique_symbols(portfolio),
+        "watchlist": unique_symbols(watchlist),
+        "ndx100": unique_symbols(ndx100),
+        "r2k": unique_symbols(r2k),
+        "sp500": unique_symbols(sp500),
+    }
+    tickers = unique_symbols(*(tiers[name] for name in UNIVERSE_TIERS))
+    core = unique_symbols(tiers["portfolio"], tiers["watchlist"])
+    return {
+        "tickers": tickers,
+        "core": core,
+        "tiers": tiers,
+        "counts": {
+            **{name: len(tiers[name]) for name in UNIVERSE_TIERS},
+            "unique": len(tickers),
+            "core": len(core),
+        },
+    }
+
+
+def rotate_index_tail(indexes: list[str], offset: int) -> tuple[list[str], int]:
+    if not indexes:
+        return [], 0
+    start = offset % len(indexes)
+    return indexes[start:] + indexes[:start], start
+
+
+def next_index_offset(indexes: list[str], *, start: int, attempted: int) -> int:
+    if not indexes:
+        return 0
+    return (start + max(attempted, 0)) % len(indexes)
+
+
+def _preset_tickers(slug: str) -> list[str]:
+    try:
+        from utils.presets import load_preset
+        return list(load_preset(slug).tickers)
+    except Exception as exc:  # noqa: BLE001 — a missing preset degrades that tier
+        print(f"[ats-venue-share] preset {slug} unavailable: {exc}", file=sys.stderr)
+        return []
+
+
+def _portfolio_tickers() -> list[str]:
+    try:
+        from db.readers import read_portfolio_positions
+        return [pos.get("ticker") for pos in read_portfolio_positions()]
+    except Exception as exc:  # noqa: BLE001 — empty core, indexes still walk
+        print(f"[ats-venue-share] portfolio unavailable: {exc}", file=sys.stderr)
+        return []
+
+
+def scheduled_ats_universe(prior: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    """Portfolio ∪ watchlist every cycle, then a rotating index slice.
+
+    The weekly oneshot cannot finish Nasdaq-100 + Russell 2000 + S&P 500
+    inside TimeoutStartSec. Core names always lead the walk; the rest of
+    the unique union rotates so the indexes still fill over later Tuesdays.
+    """
+    merged = merge_ats_universe(
+        portfolio=_portfolio_tickers(),
+        watchlist=watchlist_tickers(),
+        ndx100=_preset_tickers("ndx100"),
+        r2k=_preset_tickers("r2k"),
+        sp500=_preset_tickers("sp500"),
+    )
+    core = list(merged["core"])
+    core_set = set(core)
+    indexes = [ticker for ticker in merged["tickers"] if ticker not in core_set]
+    stored = 0
+    try:
+        stored = int(((prior or {}).get("universe") or {}).get("index_offset") or 0)
+    except (TypeError, ValueError):
+        stored = 0
+    rotated, start = rotate_index_tail(indexes, stored)
+    return {
+        **merged,
+        "walk": core + rotated,
+        "indexes": indexes,
+        "index_offset": start,
+    }
+
+
+def _merge_prior_series(
+    current: dict[str, list[dict[str, Any]]],
+    prior_series: Optional[dict[str, Any]],
+) -> tuple[dict[str, list[dict[str, Any]]], list[str]]:
+    merged = dict(current)
+    carried: list[str] = []
+    for ticker, series in (prior_series or {}).items():
+        if ticker in merged or not series:
+            continue
+        merged[ticker] = series
+        carried.append(str(ticker))
+    return merged, sorted(carried)
+
+
+def _override_universe(tickers: list[str]) -> dict[str, Any]:
+    symbols = unique_symbols(tickers)
+    return {
+        "tickers": symbols,
+        "core": symbols,
+        "walk": symbols,
+        "indexes": [],
+        "index_offset": 0,
+        "counts": {
+            "portfolio": 0,
+            "watchlist": 0,
+            "ndx100": 0,
+            "r2k": 0,
+            "sp500": 0,
+            "unique": len(symbols),
+            "core": len(symbols),
+        },
+    }
 
 
 def _fetch_ticker(
@@ -755,6 +904,10 @@ def run(
     series_by_ticker: dict[str, list[dict[str, Any]]] = {}
     errors: list[dict[str, Any]] = []
     universe: list[str] = list(tickers) if tickers else []
+    schedule: dict[str, Any] = _override_universe(universe) if tickers else {}
+    attempted: list[str] = []
+    core_set: set[str] = set()
+    prior = _read_prior_payload()
     # Client construction is INSIDE the health-reporting try: an absent or
     # rejected EQUIBLES_API_KEY raises EquiblesAuthError from
     # EquiblesClient.__init__, and outside the try that killed the oneshot
@@ -766,18 +919,22 @@ def run(
             from clients.equibles_client import EquiblesClient
             client = EquiblesClient()
 
-        universe = list(tickers or watchlist_tickers())
+        schedule = _override_universe(tickers) if tickers else scheduled_ats_universe(prior)
+        universe = list(schedule["walk"])
+        core_set = set(schedule["core"])
         for index, ticker in enumerate(universe):
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 deferred = universe[index:]
+                core_deferred = [name for name in deferred if name in core_set]
                 print(
                     f"[ats-venue-share] wall-clock budget spent "
                     f"({len(series_by_ticker)}/{len(universe)}); "
-                    f"deferring {len(deferred)} ticker(s)",
+                    f"deferring {len(deferred)} ticker(s) "
+                    f"({len(core_deferred)} core)",
                     file=sys.stderr,
                 )
-                for skipped in deferred:
+                for skipped in core_deferred:
                     errors.append(
                         {
                             "ticker": skipped,
@@ -788,6 +945,7 @@ def run(
                 break
 
             ticker_timeout = min(TICKER_FETCH_BUDGET_S, remaining)
+            attempted.append(ticker)
             try:
                 series = _fetch_ticker_bounded(
                     client, ticker, start_s, end_s, timeout_s=ticker_timeout
@@ -841,7 +999,27 @@ def run(
             except Exception:  # noqa: BLE001 — best-effort; may be mid-tarpit
                 pass
 
+    must = list(schedule.get("core") or [])
+    coverage_base = must if must else attempted
+    covered_required = sum(1 for ticker in coverage_base if ticker in series_by_ticker)
+    covered = len(series_by_ticker)
+    indexes = list(schedule.get("indexes") or [])
+    index_attempted = sum(1 for ticker in attempted if ticker not in core_set)
+    next_offset = next_index_offset(
+        indexes,
+        start=int(schedule.get("index_offset") or 0),
+        attempted=index_attempted,
+    )
+    universe_meta = {
+        "order": list(UNIVERSE_TIERS),
+        "counts": schedule.get("counts") or {},
+        "core": len(must),
+        "this_cycle": covered,
+        "index_offset": next_offset,
+    }
+
     payload = build_payload(series_by_ticker, scan_time, errors)
+    payload["universe"] = universe_meta
     if not payload_has_data(payload):
         _record_health(
             "error",
@@ -850,57 +1028,64 @@ def run(
                 "message": _no_series_message(errors),
                 "next_attempt_at": _embargo_until(None, now),
                 "codes": _error_codes(errors),
-                "requested": len(universe),
+                "requested": len(coverage_base) or len(universe),
                 "failed": len(errors),
             },
         )
         return payload
 
-    # Coverage gate. `payload_has_data` passes on ONE ticker out of forty, so a
-    # cycle that served 3 and then died was written as `ok` AND replaced the
-    # complete snapshot underneath it. A thin cycle is reported, and the good
-    # snapshot is left alone. R-294.
-    covered = len(series_by_ticker)
-    if not has_sufficient_coverage(covered, len(universe)):
+    # Coverage is scored against the core (portfolio ∪ watchlist), not the
+    # ~2500-name index union. An unreached Russell/SPX tail is the budget
+    # working as designed, not a thin cycle. R-294 still blocks a core that
+    # landed one name out of forty.
+    if not has_sufficient_coverage(covered_required, len(coverage_base)):
         _record_health(
             "error",
             scan_time,
             error={
                 "message": (
-                    f"partial cycle: {covered}/{len(universe)} tickers covered, "
-                    f"below the {MIN_COVERAGE_RATIO:.0%} floor"
+                    f"partial cycle: {covered_required}/{len(coverage_base)} "
+                    f"core tickers covered, below the {MIN_COVERAGE_RATIO:.0%} floor"
                 ),
                 "next_attempt_at": _embargo_until(None, now),
-                "requested": len(universe),
-                "covered": covered,
+                "requested": len(coverage_base),
+                "covered": covered_required,
                 "failed": len(errors),
             },
         )
         return {**payload, "partial": True}
 
-    # REL-196 (R-558): a budget/timeout-dropped tail must neither vanish from
-    # the snapshot nor hide inside an `ok` row's error payload (the watchdog
-    # error bucket fires only on state == 'error'). Carry the prior snapshot's
-    # series for the dropped tickers forward — their rows are date-stamped, so
-    # nothing is presented as newer than it is — and record the drop as error.
-    dropped = sorted(
+    dropped_names = sorted(
         {e["ticker"] for e in errors if e.get("code") in ("timeout", "budget")}
     )
-    if dropped:
-        prior = _read_prior_payload() or {}
-        prior_series = prior.get("series") or {}
+    prior_series = (prior or {}).get("series") or {}
+    if tickers:
+        # --tickers is a deliberate slice: only carry the names this run
+        # actually deferred (R-558), not the whole prior snapshot.
+        merged = dict(series_by_ticker)
         carried = [
-            t for t in dropped
-            if t not in series_by_ticker and prior_series.get(t)
+            name for name in dropped_names
+            if name not in merged and prior_series.get(name)
         ]
-        if carried:
-            merged = dict(series_by_ticker)
-            for t in carried:
-                merged[t] = prior_series[t]
-            payload = {**build_payload(merged, scan_time, errors),
-                       "carried_forward": carried}
+        for name in carried:
+            merged[name] = prior_series[name]
+    else:
+        merged, carried = _merge_prior_series(series_by_ticker, prior_series)
+    if carried:
+        payload = {
+            **build_payload(merged, scan_time, errors),
+            "carried_forward": carried,
+            "universe": universe_meta,
+        }
     _write_db_cache(payload, scan_time)
     _write_json_cache(payload)
+    dropped = sorted(
+        {
+            e["ticker"]
+            for e in errors
+            if e.get("code") in ("timeout", "budget") and e.get("ticker") in core_set
+        }
+    )
     if dropped:
         _record_health(
             "error",
@@ -911,8 +1096,8 @@ def run(
                     f"timeout/budget: {', '.join(dropped)}"
                 ),
                 "next_attempt_at": _embargo_until(None, now),
-                "requested": len(universe),
-                "covered": covered,
+                "requested": len(coverage_base),
+                "covered": covered_required,
                 "failed": len(errors),
             },
         )
@@ -920,7 +1105,7 @@ def run(
         _record_health(
             "ok",
             scan_time,
-            error={"requested": len(universe), "covered": covered, "failed": len(errors)}
+            error={"requested": len(coverage_base), "covered": covered_required, "failed": len(errors)}
             if errors
             else None,
         )

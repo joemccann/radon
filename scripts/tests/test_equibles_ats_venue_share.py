@@ -111,6 +111,52 @@ class TestFixtureTracksTheClock:
         assert 7 <= (today - anchor).days <= 13  # tracks the clock; cannot rot
 
 
+# ── scheduled universe ────────────────────────────────────────────
+
+
+class TestAtsPriorityUniverse:
+    """Portfolio, then watchlist, then Nasdaq-100, Russell 2000, S&P 500.
+
+    The weekly oneshot cannot walk ~2500 names inside TimeoutStartSec, so
+    coverage is scored against the core (portfolio ∪ watchlist) and the
+    index tail rotates. Duplicates keep the first (highest-priority) seat.
+    """
+
+    def test_priority_order_is_unique_and_stable(self):
+        merged = mod.merge_ats_universe(
+            portfolio=["NVDA", "aapl"],
+            watchlist=["AAPL", "MSFT"],
+            ndx100=["MSFT", "TSLA"],
+            r2k=["IONQ", "TSLA"],
+            sp500=["JPM", "AAPL"],
+        )
+        assert merged["tickers"] == ["NVDA", "AAPL", "MSFT", "TSLA", "IONQ", "JPM"]
+        assert merged["core"] == ["NVDA", "AAPL", "MSFT"]
+        assert merged["counts"]["unique"] == 6
+        assert merged["counts"]["core"] == 3
+
+    def test_blank_and_non_ticker_tokens_are_dropped(self):
+        merged = mod.merge_ats_universe(
+            portfolio=["", None, "2026", "SPY"],
+            watchlist=[" spy ", "QQQ"],
+            ndx100=[],
+            r2k=[],
+            sp500=[],
+        )
+        assert merged["tickers"] == ["SPY", "QQQ"]
+
+    def test_index_tail_rotates_from_the_stored_offset(self):
+        rotated, start = mod.rotate_index_tail(["A", "B", "C", "D"], 2)
+        assert start == 2
+        assert rotated == ["C", "D", "A", "B"]
+
+    def test_empty_index_tail_does_not_divide(self):
+        assert mod.rotate_index_tail([], 9) == ([], 0)
+
+    def test_next_index_offset_advances_by_attempted_index_names(self):
+        assert mod.next_index_offset(["A", "B", "C", "D"], start=2, attempted=3) == 1
+
+
 # ── week bucketing ────────────────────────────────────────────────
 
 
@@ -572,6 +618,64 @@ class TestRun:
             ("get_off_exchange_volume", "AAPL"),
             ("get_short_volume", "AAPL"),
         ]
+
+    def test_scheduled_run_walks_portfolio_before_indexes(self, monkeypatch):
+        monkeypatch.setattr(
+            self.mod,
+            "scheduled_ats_universe",
+            lambda prior=None: {
+                "tickers": ["NVDA", "AAPL", "TSLA"],
+                "core": ["NVDA", "AAPL"],
+                "walk": ["NVDA", "AAPL", "TSLA"],
+                "counts": {
+                    "portfolio": 1, "watchlist": 1, "ndx100": 1,
+                    "r2k": 0, "sp500": 0, "unique": 3, "core": 2,
+                },
+                "index_offset": 0,
+                "indexes": ["TSLA"],
+            },
+        )
+        client = self._client(["NVDA", "AAPL", "TSLA"])
+        payload = self.mod.run(client=client)
+        assert payload["count"] == 3
+        assert payload["universe"]["counts"]["core"] == 2
+        assert self.health == ["ok"]
+
+    def test_index_tail_past_the_budget_does_not_fail_a_covered_core(
+        self, monkeypatch,
+    ):
+        monkeypatch.setattr(
+            self.mod,
+            "scheduled_ats_universe",
+            lambda prior=None: {
+                "tickers": ["AAPL", "TSLA", "IONQ"],
+                "core": ["AAPL"],
+                "walk": ["AAPL", "TSLA", "IONQ"],
+                "counts": {
+                    "portfolio": 1, "watchlist": 0, "ndx100": 1,
+                    "r2k": 1, "sp500": 0, "unique": 3, "core": 1,
+                },
+                "index_offset": 0,
+                "indexes": ["TSLA", "IONQ"],
+            },
+        )
+        clock = {"t": 0.0}
+        monkeypatch.setattr(self.mod.time, "monotonic", lambda: clock["t"])
+        monkeypatch.setattr(self.mod, "SWEEP_BUDGET_S", 5.0, raising=False)
+        real = self.mod._fetch_ticker_bounded
+
+        def spend_budget_after_core(client, ticker, start, end, timeout_s=0.0):
+            series = real(client, ticker, start, end, timeout_s=timeout_s)
+            clock["t"] = 10.0
+            return series
+
+        monkeypatch.setattr(self.mod, "_fetch_ticker_bounded", spend_budget_after_core)
+        client = self._client(["AAPL", "TSLA", "IONQ"])
+        payload = self.mod.run(client=client)
+        assert payload.get("partial") is not True
+        assert "AAPL" in payload["tickers"]
+        assert {e["ticker"] for e in payload["errors"]} == set()
+        assert self.health[-1] == "ok"
 
 
 class TestSweepBudget:

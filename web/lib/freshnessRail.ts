@@ -115,6 +115,29 @@ export function computeFreshnessRail(
   // calm state with a ticking countdown over a panel holding no date at all.
   // R-306.
   const unknown = !asOf;
+  const pastGrace = now.getTime() - lastSampleAt.getTime() > WRITER_GRACE_MS;
+  const lastSampleDate = lastSampleAt.toISOString().slice(0, 10);
+
+  // Weekly writers (ATS / COT) are job-slot freshness, not cash-session EOD.
+  // FINRA's off-exchange file is weeks in arrears, so comparing that week to
+  // lastPrintedSessionDate marked the rail overdue every day.
+  if (schedule.cadence === "weekly") {
+    const behind = !unknown && asOf!.slice(0, 10) < lastSampleDate;
+    const overdue = behind && pastGrace;
+    const msRemaining = Math.max(0, nextSampleAt.getTime() - now.getTime());
+    const elapsed = now.getTime() - lastSampleAt.getTime();
+    return {
+      nextSampleAt,
+      lastSampleAt,
+      msRemaining,
+      elapsedFraction: overdue ? 1 : Math.min(1, Math.max(0, elapsed / intervalMs(schedule))),
+      behind,
+      awaitingSession: null,
+      overdue,
+      unknown,
+      msOverdue: overdue ? Math.max(0, now.getTime() - expectedRunFor(schedule, asOf!, lastSampleAt)) : 0,
+    };
+  }
 
   const latestSession = lastPrintedSessionDate(now);
   const behind = !unknown && asOf! < latestSession;
@@ -124,7 +147,6 @@ export function computeFreshnessRail(
   // instant is the same question, without a second copy of the clock math.
   const ranAfterSessionClosed =
     behind && lastPrintedSessionDate(lastSampleAt) >= latestSession;
-  const pastGrace = now.getTime() - lastSampleAt.getTime() > WRITER_GRACE_MS;
   const overdue = ranAfterSessionClosed && pastGrace;
 
   const msRemaining = Math.max(0, nextSampleAt.getTime() - now.getTime());

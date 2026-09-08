@@ -961,7 +961,7 @@ Windows are registered in `scripts/watchdog/services.py` and
 | Allowance | Pro plan 100,000 requests/day, shared REST + MCP, resets 00:00 UTC. Every paginated page bills separately, so `max_pages` is bounded in the client. |
 | Env contract | root `.env.example`, `cloud/.env.example`, `cloud/config/required-env.txt` |
 | VPS secrets | `/etc/radon/env` (`EnvironmentFile=` on every unit) |
-| Ticker scope | `fetch_equibles_smart_money_13f.py` and `fetch_equibles_filing_forensics.py` read the Turso `watchlist` table. A ticker off the watchlist has no row, and both API routes serve `missing: true` for it. |
+| Ticker scope | `fetch_equibles_smart_money_13f.py` and `fetch_equibles_filing_forensics.py` read the Turso `watchlist` table. A ticker off the watchlist has no row, and both API routes serve `missing: true` for it. `fetch_equibles_ats_venue_share.py` walks portfolio, then watchlist, then Nasdaq-100, Russell 2000, S&P 500. |
 | Tables | `equibles_13f_snapshots` (the route's only read), `equibles_13f_holders` (write-only depth), `equibles_filing_forensics`, `equibles_short_interest` + `equibles_squeeze_scores`, `equibles_ats_venue_share`, `cot_positioning` |
 | Demo mirror | `equibles_13f_snapshots` + `equibles_filing_forensics` are mirrored per ticker by `scripts/db/mirror_market_snapshots_to_demo.js`. `equibles_13f_holders` is not — nothing reads it. |
 

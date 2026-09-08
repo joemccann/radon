@@ -130,11 +130,11 @@ each ticker fetch with an abandoned **daemon thread** (never a
 ThreadPoolExecutor — CPython's atexit join on executor workers blocks
 interpreter exit behind a tarpitted socket, REL-196/R-528). A
 timeout on one ticker replaces the shared Session and continues the walk;
-only a spent `SWEEP_BUDGET_S` defers the unreached tail. A timeout/budget-
-dropped tail records a `state='error'` health row naming the tickers, and
-their prior-snapshot series carry forward into the payload
-(`carried_forward`) so a covered-only batch never silently replaces a fuller
-snapshot (R-558).
+only a spent `SWEEP_BUDGET_S` defers the unreached tail. The scheduled
+universe is portfolio, then watchlist, then Nasdaq-100, Russell 2000, S&P
+500 (first seat wins). Coverage is scored against portfolio ∪ watchlist;
+the index tail rotates and prior series carry forward so a Tuesday that
+cannot finish ~2500 names still keeps last week's rows (R-558).
 
 ### 13F institutional
 

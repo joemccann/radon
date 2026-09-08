@@ -11,13 +11,14 @@
  * per covered ticker, the thin-history reason, and the upstream-error notice.
  */
 import React from "react";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   classificationColor,
   classificationLabel,
   countByClassification,
+  coverageScopeLabel,
   formatGap,
   formatPrintSize,
   formatSharePct,
@@ -109,6 +110,18 @@ describe("weekLabel — cadence copy derived from the data, never hardcoded", ()
 
   it("returns --- when no week is present", () => {
     expect(weekLabel(null)).toBe("---");
+  });
+});
+
+describe("coverageScopeLabel", () => {
+  it("names the priority order when the payload omits universe meta", () => {
+    expect(coverageScopeLabel(undefined)).toBe("PORTFOLIO, WATCHLIST, NDX, R2K, SPX");
+  });
+
+  it("uppercases the payload order", () => {
+    expect(coverageScopeLabel({ order: ["portfolio", "watchlist", "ndx100"] })).toBe(
+      "PORTFOLIO, WATCHLIST, NDX",
+    );
   });
 });
 
@@ -206,6 +219,7 @@ function mockState(overrides: Record<string, unknown> = {}) {
 afterEach(() => {
   cleanup();
   mockUseAtsVenueShare.mockReset();
+  vi.useRealTimers();
 });
 
 describe("AtsVenueSharePanel — gating", () => {
@@ -365,11 +379,27 @@ describe("AtsVenueSharePanel — method footnote spacing", () => {
 });
 
 describe("AtsVenueSharePanel — freshness copy derived from data + timer", () => {
-  it("states the data age and the next scheduled refresh", () => {
+  it("states the data age of the FINRA week the payload holds", () => {
     mockState({ data: data() });
     render(<AtsVenueSharePanel />);
     const note = screen.getByTestId("ats-venue-share-methodnote").textContent ?? "";
     expect(note).toMatch(/\(\d+d old\)/);
-    expect(note).toMatch(/Next refresh (Sun|Mon|Tue|Wed|Thu|Fri|Sat) \d{4}-\d{2}-\d{2} 09:15 UTC/);
+  });
+});
+
+describe("AtsVenueSharePanel — freshness rail", () => {
+  it("mounts the regime countdown to the Tuesday 09:15 UTC slot", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-26T19:00:00Z"));
+    mockState({
+      data: data({ scan_time: "2026-08-25T12:00:00Z" }),
+      lastSync: new Date("2026-08-25T12:00:00Z"),
+    });
+    render(<AtsVenueSharePanel />);
+    act(() => { vi.advanceTimersByTime(0); });
+    expect(screen.getByTestId("ats-venue-share-freshness-rail")).toBeTruthy();
+    expect(screen.getByTestId("ats-venue-share-freshness-rail-countdown").textContent).not.toBe("--");
+    expect(screen.getByTestId("ats-venue-share-freshness-rail").getAttribute("data-state")).toBe("current");
+    expect(screen.getByTestId("ats-venue-share-strip-coverage").textContent).not.toMatch(/WATCHLIST SCOPE/i);
   });
 });

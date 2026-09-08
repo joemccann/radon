@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { IV_RANK_REFRESH } from "@/lib/refreshSchedule";
+import { ATS_VENUE_SHARE_REFRESH, IV_RANK_REFRESH } from "@/lib/refreshSchedule";
 import { computeFreshnessRail, formatCountdown } from "@/lib/freshnessRail";
 
 // 2026-08-26 is a Wednesday. The IV RANK timer fires 22:10 UTC = 18:10 ET.
@@ -87,6 +87,31 @@ describe("computeFreshnessRail", () => {
     expect(rail.behind).toBe(false);
     expect(rail.awaitingSession).toBeNull();
     expect(rail.msRemaining).toBeGreaterThan(0);
+  });
+});
+
+describe("computeFreshnessRail — weekly FINRA-lagged writers", () => {
+  // ATS timer: Tuesday 09:15 UTC. Wednesday 2026-08-26 19:00Z sits between
+  // the 2026-08-25 fire and the 2026-09-01 fire.
+  const WED_AFTER_TUESDAY = new Date("2026-08-26T19:00:00Z");
+
+  it("counts down to the next Tuesday slot and is not session-behind", () => {
+    const rail = computeFreshnessRail(
+      ATS_VENUE_SHARE_REFRESH, "2026-08-25", WED_AFTER_TUESDAY,
+    );
+    expect(rail.nextSampleAt.toISOString()).toBe("2026-09-01T09:15:00.000Z");
+    expect(rail.behind).toBe(false);
+    expect(rail.overdue).toBe(false);
+    expect(rail.awaitingSession).toBeNull();
+  });
+
+  it("flags overdue when the Tuesday slot has passed and the scan date is older", () => {
+    const afterGrace = new Date("2026-08-25T10:30:00Z"); // slot 09:15 + 75m
+    const rail = computeFreshnessRail(
+      ATS_VENUE_SHARE_REFRESH, "2026-08-18", afterGrace,
+    );
+    expect(rail.overdue).toBe(true);
+    expect(rail.behind).toBe(true);
   });
 });
 

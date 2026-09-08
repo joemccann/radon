@@ -1,3 +1,21 @@
+# Task: ATS priority universe + freshness rail [COMPLETE]
+
+Widen `/regime/ats` beyond the watchlist and add the regime countdown rail.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests: priority unique universe, core coverage, weekly rail.
+- T2 depends_on: [T1] - Resolver, scheduled walk, carry-forward, panel rail.
+- T3 depends_on: [T2] - Focused pytest + vitest green.
+
+## Checklist
+
+- [x] T1 Failing tests for universe order, core coverage vs index tail, weekly countdown
+- [x] T2 Portfolio then watchlist then ndx100/r2k/sp500; FreshnessRail on ATS
+- [x] T3 Focused suites green
+
+---
+
 # Task: CI performance remediate 2026-09-08 [COMPLETE]
 
 Apply every verified P0/P1 CI-performance finding from the current audit without changing protected delivery guarantees.
