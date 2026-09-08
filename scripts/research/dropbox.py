@@ -87,7 +87,10 @@ class DropboxClient:
         return self.check(self.root + ('/' + relative if relative else ''))
 
     def check(self, path):
-        if not isinstance(path, str) or not path.startswith('/') or '\\' in path or ':' in path:
+        # Absolute Dropbox metadata paths may contain filename colons. The leading
+        # slash and root boundary exclude id:/ns:/rev: selectors; downloads use
+        # hashed local names, never the provider filename as a filesystem path.
+        if not isinstance(path, str) or not path.startswith('/') or '\\' in path:
             raise ReaderError('Invalid Dropbox path')
         if any(p in ('.', '..', '') for p in path.split('/')[1:]) or any(ord(c) < 32 for c in path):
             raise ReaderError('Invalid Dropbox path segment')

@@ -943,3 +943,7 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 ## 2026-09-07 - Social share publisher exclusions
 - Never include The Market Ear or ZeroHedge names, attribution, or links in generated social-share captions, posts, Story cards, or Reels/TikTok text. Apply the same exclusion to embedded text and edited outbound captions, not only the source footer.
 - Social exports should rewrite the supplied facts in Joe's documented voice, not simply reproduce the feed's narrator. Keep the evidence-backed persona provisional until a representative recent authored-tweet sample is available; exclude quoted/reposted text from calibration.
+
+## 2026-09-08 - One research filename cannot stop ingestion
+- Treat Dropbox metadata paths as remote identifiers, not local paths or URI selectors; retain absolute-root confinement while accepting valid filename punctuation.
+- Isolate discovery failures by scope and continue already validated queue work. Preserve failed cursors for replay and report the actual failing stage with credential-safe diagnostics.

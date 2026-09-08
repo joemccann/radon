@@ -47,6 +47,32 @@ class ReaderTests(unittest.TestCase):
         deleted={'.tag':'deleted','path_lower':ROOT+'/2026/old','path_display':ROOT+'/2026/old'}
         self.r._rpc=Mock(return_value={'entries':[item(ROOT+'/2026/nested/a.pdf'),deleted],'has_more':False,'cursor':'c'})
         self.assertEqual(len(self.r.list_page('2026')['entries']),2)
+    def test_colon_filename_lists_and_downloads_without_local_path_interpretation(self):
+        path = ROOT + '/2026/deutsche bank/research chartbook: the home straight....pdf'
+        entry = item(path)
+        self.r._rpc = Mock(return_value={'entries': [entry], 'has_more': False, 'cursor': 'next'})
+        self.assertEqual(self.r.list_page('2026', 'previous')['entries'], [entry])
+        received = dict(entry)
+        received.pop('.tag')
+        self.r._post = Mock(return_value=(b'pdf', {'Dropbox-API-Result': json.dumps(received)}))
+        target = self.r.download(entry, self.base / 'downloads')
+        self.assertEqual(target.read_bytes(), b'pdf')
+        self.assertRegex(target.name, r'^[a-f0-9]{64}\.pdf$')
+        download_args = json.loads(self.r._post.call_args.args[2]['Dropbox-API-Arg'])
+        self.assertEqual(download_args, {'path': path, 'rev': 'r1'})
+
+    def test_colon_does_not_weaken_remote_path_boundary(self):
+        for path in ['id:foo', 'ns:123/a.pdf', 'rev:123', ROOT + 'ish/a:b.pdf',
+                     ROOT + '/../a:b.pdf', ROOT + '/a:b\\c.pdf', ROOT + '/a:b\n.pdf']:
+            with self.subTest(path=path), self.assertRaises(ReaderError):
+                self.r.check(path)
+        with self.assertRaises(ReaderError):
+            self.r.path('2026/id:foo')
+        entry = item(ROOT + '/2026/a:b.pdf')
+        entry['path_display'] = ROOT + '/elsewhere/a:b.pdf'
+        with self.assertRaises(ReaderError):
+            self.r.validate(entry)
+
     def test_metadata_revision_and_hash(self):
         for field, value in [('rev','changed'), ('content_hash','changed'), ('path_lower', ROOT+'/other.pdf')]:
             entry=item(); received=dict(entry);received[field]=value

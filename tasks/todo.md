@@ -5572,3 +5572,23 @@ Perform the delta audit from `0b77a6af` through the dedicated runner head.
 - [x] Audit evidence: one P1 persistence finding, all required standing sweeps HOLD.
 
 ---
+
+# Dropbox filename resilience repair (2026-09-08)
+- [x] T1 depends_on: [] - Add red regressions and repair remote filename acceptance while preserving security boundaries.
+- [x] T2 depends_on: [] - Add red regressions and isolate discovery failures from other scopes and validated queued work; retain actionable error health.
+- [x] T3 depends_on: [T1,T2] - Independent review, focused/full Python verification and generated code map checks.
+- [ ] T4 depends_on: [T3] - Commit, PR exact-head CI, merge and verify deployed queue recovery and canonical accepted output.
+Dependency graph: T1 + T2 -> T3 -> T4.
+User authorized fixing the live service; preserve source files, cursors, date/novelty/attribution/media gates and existing posts. No trading actions.
+
+## Verification in progress
+- Reader red/green: colon listing/download failed before repair; 38 reader/state tests passed afterward. Exact live blocked cursor validated all 69 entries with patched code in a transient read-only interpreter.
+- Worker red/green: three isolation regressions and one CLI exit-code regression failed before repair; 75 runtime/pipeline tests pass. Independent review found no remaining blockers.
+- Full Python suite running; no production changes before reviewed release.
+
+## Local verification complete
+- Full Python coverage: 12,406 unique tests passed, 19 skipped, 90 integration deselected, 23 subtests passed. Full loadfile run completed every other file (11,990 passed/19 skipped before interruption); remaining serial wrapper file was rerun in full using load scheduling: 634/634 passed. No failures in either batch. Logs: /tmp/radon-dropbox-full-pytest.log and /tmp/radon-dropbox-final-shard.log; collection: /tmp/radon-dropbox-all-collected.txt.
+- Focused research: 263 passed, 18 skipped, 23 subtests. Touched coverage: Dropbox reader 100%, worker 97%. Independent review approved; whitespace and generated map checks pass.
+- Integrated main 1090a84a (unrelated chart changes); research source unchanged from full verification. Regenerated combined source maps; 294 integrated research/codemap tests passed, 18 skipped, 23 subtests.
+- Integrated main c9305ba8 (independently green loop no-op change); repair implementation remains unchanged. Combined research/codemap/new-loop regressions: 318 passed, 18 skipped, 23 subtests. Merge TypeScript, ESLint and secret scans passed on the prior chart integration.
+- Integrated subsequent security release 1ab63ddf; no research implementation changed. Focused research reverified and combined maps regenerated; latest-head CI is the final integrated release gate.

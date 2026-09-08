@@ -2,6 +2,7 @@
 from __future__ import annotations
 import argparse
 import fcntl
+import hashlib
 import json
 import os
 import signal
@@ -13,10 +14,20 @@ from research.state import State, date_scopes
 from utils.atomic_io import atomic_save
 
 
+class DiscoveryError(DropboxError):
+    """Safe summary of incomplete scopes after other scopes have been scanned."""
+    def __init__(self, discovered, failures, retry_after=0):
+        super().__init__('Dropbox discovery incomplete', retry_after=retry_after)
+        self.discovered = discovered
+        self.failures = failures
+
+
 def heartbeat(root, state, error=None, stage=None):
     stamp = datetime.now(timezone.utc).isoformat()
     payload = {'service': 'dropbox-research', 'state': state, 'updated_at': stamp,
                'last_error': {'message': type(error).__name__} if error else None}
+    if isinstance(error, DiscoveryError):
+        payload['last_error']['discovery_errors'] = error.failures
     if stage:
         payload['stage'] = stage
     atomic_save(str(Path(root) / 'health.json'), payload)
@@ -37,27 +48,44 @@ def discover(client, state, now=None):
     for scope in state.scopes():
         scopes.setdefault(scope, None)
     added = 0
+    failures = []
+    retry_after = 0
     for scope, folder_date in scopes.items():
-        cursor = state.cursor(scope)
-        reset = False
-        for _ in range(100):
-            try:
-                page = client.list_page(scope, cursor=cursor)
-            except DropboxError as error:
-                if error.status == 409 and cursor and not reset:
-                    state.reset_cursor(scope)
-                    cursor, reset = None, True
-                    continue
-                if error.status == 409 and not cursor:
-                    # Date folder not yet created or previously watched folder removed.
+        try:
+            cursor = state.cursor(scope)
+            reset = False
+            for _ in range(100):
+                try:
+                    page = client.list_page(scope, cursor=cursor)
+                except DropboxError as error:
+                    if error.status == 409 and cursor and not reset:
+                        state.reset_cursor(scope)
+                        cursor, reset = None, True
+                        continue
+                    if error.status == 409 and not cursor:
+                        # Date folder not yet created or previously watched folder removed.
+                        break
+                    raise
+                added += state.ingest_page(scope, page, folder_date)
+                cursor = page['cursor']
+                if not page.get('has_more'):
                     break
-                raise
-            added += state.ingest_page(scope, page, folder_date)
-            cursor = page['cursor']
-            if not page.get('has_more'):
+            else:
+                raise RuntimeError('Dropbox pagination limit exceeded')
+        except Exception as error:
+            # Failed pages stay unacknowledged for retry; no revision is skipped.
+            failure = {'stage': 'discovery', 'type': type(error).__name__,
+                       'scope_id': hashlib.sha256(scope.encode()).hexdigest()[:16]}
+            status = getattr(error, 'status', None)
+            if isinstance(status, int):
+                failure['status'] = status
+            failures.append(failure)
+            retry_after = max(retry_after, getattr(error, 'retry_after', 0) or 0)
+            if status == 429 or retry_after:
+                # Respect provider backoff before another listing or download.
                 break
-        else:
-            raise RuntimeError('Dropbox pagination limit exceeded')
+    if failures:
+        raise DiscoveryError(added, failures, retry_after)
     return added
 
 
@@ -72,12 +100,20 @@ def flush_outbox(state, publisher):
 
 def cycle(root, client, state, pipeline, publisher, publish=False, limit=4):
     published = flush_outbox(state, publisher) if publish else 0
-    added = discover(client, state)
+    discovery_errors = []
+    retry_after = 0
+    try:
+        added = discover(client, state)
+    except DiscoveryError as error:
+        added = error.discovered
+        discovery_errors = error.failures
+        retry_after = error.retry_after
     # Include pending outbox posts so dry-run and resumed cycles suppress duplicates too.
     recent = publisher.recent_posts(days=90) + [r['payload'] for r in state.outbox(limit=1000)]
     processed = 0
-    errors = []
-    for work in state.pending(limit=limit):
+    errors = [failure['type'] for failure in discovery_errors]
+    throttled = retry_after or any(failure.get('status') == 429 for failure in discovery_errors)
+    for work in ([] if throttled else state.pending(limit=limit)):
         if not state.claim(work['key']):
             continue
         try:
@@ -97,7 +133,12 @@ def cycle(root, client, state, pipeline, publisher, publish=False, limit=4):
                 delay = max(getattr(error, 'retry_after', 0) or 0, min(3600, 60 * 2 ** work['attempts']))
                 state.retry(work['key'], error, delay=delay)
     published += flush_outbox(state, publisher) if publish else 0
-    return {'discovered': added, 'processed': processed, 'published': published, 'errors': errors}
+    result = {'discovered': added, 'processed': processed, 'published': published, 'errors': errors}
+    if discovery_errors:
+        result['discovery_errors'] = discovery_errors
+    if retry_after:
+        result['retry_after'] = retry_after
+    return result
 
 
 def main():
@@ -138,12 +179,18 @@ def main():
         stopping = True
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
+    exit_status = 0
     while not stopping:
         delay = args.interval
         try:
             heartbeat(root, 'running')
             result = cycle(root, client, state, pipeline, publisher, args.publish)
-            heartbeat(root, 'error' if result['errors'] else 'ok', RuntimeError() if result['errors'] else None)
+            exit_status = 1 if result['errors'] else 0
+            error = RuntimeError() if result['errors'] else None
+            if result.get('discovery_errors'):
+                error = DiscoveryError(result['discovered'], result['discovery_errors'], result.get('retry_after', 0))
+            heartbeat(root, 'error' if error else 'ok', error)
+            delay = max(delay, result.get('retry_after', 0))
             print(json.dumps(result), flush=True)
         except Exception as error:
             heartbeat(root, 'error', error)
@@ -157,6 +204,8 @@ def main():
         while not stopping and time.monotonic() < deadline:
             time.sleep(min(1, max(0, deadline - time.monotonic())))
     state.close()
+    if not args.daemon and exit_status:
+        raise SystemExit(exit_status)
 
 
 if __name__ == '__main__':
