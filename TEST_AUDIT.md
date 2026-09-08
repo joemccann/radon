@@ -10020,3 +10020,12 @@ count — are all DONE on `testing/2026-09-06`; full table in `TEST_LOG.md`
 source-fix rule: the compose-body gate accepted quoted `privileged: "true"`
 (T-441's new test caught it red at HEAD); regex tightened in
 `deploy-root-helper.sh`, `bootstrap-control-plane.sh`, `setup-vps.sh`.
+
+## Remediation 2026-09-08
+
+`RADON_WEEKEND_REDUCED=1`: reconciled every verified un-DONE P0/P1 finding
+across the audit ledger before source work. None remain: T-462/T-463 and
+T-464…T-473 are recorded DONE in the 2026-09-06 remediation table; the only
+newer verified finding, T-485, is P2 and is outside this reduced-capability
+phase. No source change is warranted. Closing gate evidence is recorded in
+`TEST_LOG.md` for this branch.

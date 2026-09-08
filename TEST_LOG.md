@@ -760,3 +760,9 @@ morning pass's promised counts never landed; superseded by these).
   inverse of the T-311 shape; environment-tool dependence
   (`sha256sum` absent) satisfied by some earlier fixture in the full run.
   Left for the next audit to triage.
+
+## Remediation 2026-09-08 — branch testing/2026-09-08
+
+| Scope | Status | Evidence |
+|---|---|---|
+| Verified P0/P1 backlog | DONE | Reduced-capability rung (`RADON_WEEKEND_REDUCED=1`): reconciled all audit sections. T-462/T-463 and T-464…T-473 are already DONE; newer T-485 is P2 and deliberately out of scope. No source-actionable P0/P1 remains. Closing gates ×3 follow this committed reconciliation. |
