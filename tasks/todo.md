@@ -5675,3 +5675,24 @@ Scope: preserve private source/queue state and novelty gates. Use bounded ingest
 - P2 frozen after87 ingestion/runtime tests passed; ingestion branch-aware coverage96%. Actualspawn integration demonstrates newarrivals parsed atvirtual0/60seconds while modelreviewremainsblocked. Independentreview resolvedcacheintegrity, processgroup cleanup, cancelledoutbox andaggregatehealth concerns.
 
 - User changed verification policy: no test suites on this machine; use PR CI. Stopped local full suite at11,838 passed/19skipped withKeyboardInterrupt after906seconds; not a completed full-suite result. Integrated current maince4a9a56; preserved both task/lesson updates and regenerated maps. Final validation delegated to exact-head GitHub CI.
+
+## 2026-09-08 — Vast.ai credential verification
+
+### Dependency graph
+- T1 depends_on: [] — Trace Profile credential save/verify path and reproduce Vast response safely.
+- T2 depends_on: [T1] — Add a failing validator regression covering current Vast API behavior.
+- T3 depends_on: [T2] — Implement the minimal robust Vast verification fix.
+- T4 depends_on: [T3] — Run focused tests, regenerate codemap, and review the diff.
+- T5 depends_on: [T4] — Commit, push, open PR, watch exact-head CI green, and send Pushover.
+
+### Checklist
+- [x] T1 Trace and reproduce without exposing secrets.
+- [x] T2 Add red regression.
+- [x] T3 Fix validator.
+- [x] T4 Verify and document review.
+- [ ] T5 PR and green CI.
+
+### Review
+- Production-safe probe confirmed Vast is reachable and returns HTTP 404 with `error=auth_error` for the stored key; no credential material was emitted.
+- Validator now classifies only Vast's explicit `auth_error` payload as invalid; unrelated 404s and transport failures remain non-blocking errors.
+- Focused verification: 56 pytest passed; Ruff check/format, codemap pre-commit, and diff check passed.

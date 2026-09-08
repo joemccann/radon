@@ -960,3 +960,7 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 
 ## 2026-09-08 - Run test suites in GitHub CI
 - User instruction: do not run test suites on this machine going forward. Create the PR, resolve conflicts, and ensure CI is green; GitHub runners own suite execution. This supersedes earlier local-full-suite requirements. Local code edits, static inspection and generated-map maintenance remain appropriate.
+
+## 2026-09-08 — Credential verification must use provider-compatible transport
+
+- Verify new credentials against the provider from the server runtime, and classify only provider auth responses as invalid; TLS, proxy, DNS, and request-library behavior need a regression before claiming a key cannot be checked.

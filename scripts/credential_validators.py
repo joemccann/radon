@@ -167,11 +167,19 @@ def _validate_openrouter(values: Dict[str, str]) -> ValidationResult:
 
 
 def _validate_vast(values: Dict[str, str]) -> ValidationResult:
-    return _get(
+    response = requests.get(
         "https://console.vast.ai/api/v0/users/current/",
-        {"Authorization": f"Bearer {values['VAST_API_KEY']}"},
-        "Vast.ai",
+        headers={"Authorization": f"Bearer {values['VAST_API_KEY']}"},
+        timeout=HTTP_TIMEOUT_S,
     )
+    if response.status_code == 404:
+        try:
+            payload = response.json()
+        except (TypeError, ValueError):
+            payload = {}
+        if isinstance(payload, dict) and payload.get("error") == "auth_error":
+            return ValidationResult("invalid", "Vast.ai rejected the credential")
+    return _verdict_from_status_code(response.status_code, "Vast.ai")
 
 
 def _validate_eia(values: Dict[str, str]) -> ValidationResult:

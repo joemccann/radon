@@ -145,7 +145,10 @@ the browser-login services). The route bounds it: at most
 service per `VALIDATOR_COOLDOWN_S` (5s). A request inside the window gets
 `429` with `Retry-After` and code `VALIDATION_COOLDOWN`, and makes no vendor
 call; on the PUT path nothing is stored. Constants and the chokepoint
-(`_run_validator`) live in `scripts/api/routes/credentials.py`.
+(`_run_validator`) live in `scripts/api/routes/credentials.py`. Vast.ai returns
+HTTP 404 with `error=auth_error` for a rejected bearer key; its validator
+classifies that explicit provider response as invalid so Profile blocks the
+save, while unrelated 404 and transport failures remain retryable errors.
 
 **Values are validated at the persist chokepoint.** `PUT
 /credentials/{service}` rejects values the process environment cannot hold

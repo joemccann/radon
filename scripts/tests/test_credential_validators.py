@@ -16,9 +16,15 @@ import requests
 
 
 class _Response:
-    def __init__(self, status_code: int, text: str = ""):
+    def __init__(self, status_code: int, text: str = "", payload=None):
         self.status_code = status_code
         self.text = text
+        self._payload = payload
+
+    def json(self):
+        if self._payload is None:
+            raise ValueError("response has no JSON payload")
+        return self._payload
 
 
 @pytest.fixture()
@@ -137,6 +143,24 @@ class TestWireShapes:
         (call,) = http.calls
         assert call.url == "https://console.vast.ai/api/v0/users/current/"
         assert call.headers["Authorization"] == "Bearer vast-1"
+
+    def test_vast_auth_error_404_is_invalid(self, http):
+        http.box["response"] = _Response(
+            404,
+            payload={"success": False, "error": "auth_error", "msg": "Invalid user key"},
+        )
+        result = cv.validate("vast", {"VAST_API_KEY": "vast-bad"})
+        assert result.status == "invalid"
+        assert result.blocks_save is True
+
+    def test_vast_unrelated_404_remains_error(self, http):
+        http.box["response"] = _Response(
+            404,
+            payload={"success": False, "error": "not_found"},
+        )
+        result = cv.validate("vast", {"VAST_API_KEY": "vast-1"})
+        assert result.status == "error"
+        assert result.blocks_save is False
 
     def test_eia_key_query(self, http):
         cv.validate("eia", {"EIA_API_KEY": "eia-1"})
