@@ -1,23 +1,39 @@
 #!/usr/bin/env python3
-"""Render a nightly loop's Claude skill into a self-contained prompt file.
+"""Render a nightly loop's Claude skill for the CLIs that are not Claude Code.
 
 The four non-security loops moved off the claude.ai subscription on
-2026-09-06: they run on codex, then grok, then NVIDIA, then Cerebras. None of
-those CLIs can load a Claude Code skill or resolve a `/testing-weekend audit`
-slash command, so the skill body has to reach them as plain prompt text.
+2026-09-06: they run on codex, then grok, then NVIDIA, then Cerebras. Two
+artifacts come out of one source, `.claude/skills/<skill>/SKILL.md`.
 
-A rendered prompt is a deterministic concatenation of four parts:
+**Portable prompts** (`.claude/portable-prompts/<skill>.<phase>.md`) are what
+the wrapper actually pipes into a rung. A phase must run the same way every
+night whether or not the CLI decided a skill was relevant, so the driver stays
+an explicit prompt rather than a discovery-time suggestion. Each is a
+deterministic concatenation of four parts:
 
     PREAMBLE   how a generic agent CLI should read what follows
     BODY       SKILL.md, frontmatter stripped, byte for byte
     OVERRIDES  the Claude-only machinery the body assumes, and its replacement
     CONTRACT   the completion strings the wrapper greps for
 
-Rendered files are committed under `.claude/portable-prompts/` rather than
-built at run time: a nightly at 00:00 must not depend on this script, a
-network fetch, or a writable tree. `scripts/tests/test_portable_prompt_sync.py`
-fails when a rendered file drifts from a fresh render, which is what keeps
-editing SKILL.md honest.
+**Native codex skills** (`.codex/skills/<skill>/`) are the same manual in the
+layout codex's own skill discovery expects: a `SKILL.md` with `name` and
+`description` frontmatter, plus `agents/openai.yaml` carrying the interface
+block. Probed on this runner (codex-cli 0.153.4, 2026-09-08): codex reads
+`./.codex/skills/` relative to its working directory and does NOT read
+`.claude/skills/`. Without this, anything inside a run that reaches for the
+loop's own manual by name — a nested invocation, a `$skill` reference — finds
+nothing.
+
+grok needs no rendering at all: it scans `./.claude/skills/` natively at repo
+scope (`~/.grok/docs/user-guide/08-skills.md`, and probed on this runner), so
+the Claude skills already load there under their own names. NVIDIA and
+Cerebras run through the grok CLI and inherit that.
+
+Both artifacts are committed rather than built at run time: a nightly at 00:00
+must not depend on this script, a network fetch, or a writable tree.
+`scripts/tests/test_portable_prompt_sync.py` fails when either drifts from a
+fresh render, which is what keeps editing SKILL.md honest.
 
     python3 scripts/render_loop_prompt.py --check    # CI / test path
     python3 scripts/render_loop_prompt.py --write    # after editing a SKILL.md
@@ -31,6 +47,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 SKILLS = REPO / ".claude" / "skills"
 OUT_DIR = REPO / ".claude" / "portable-prompts"
+CODEX_SKILL_DIR = REPO / ".codex" / "skills"
 
 PHASES = ("audit", "remediate", "deliver")
 
@@ -141,6 +158,107 @@ BRANCH_PREFIX = {
 }
 
 
+# The phase-agnostic head of a native codex skill. The portable prompt names
+# its phase because the wrapper pipes one file per phase; a skill is one
+# document covering all three, and the phase arrives in the invocation.
+CODEX_HEAD = """\
+---
+name: {skill}
+description: {description}
+---
+
+# {title}
+
+You are running as a NON-INTERACTIVE agent CLI. There is no human to ask: a
+question asked here is a night lost. The working directory is the Radon
+monorepo clone; you have full file, shell and network access, and you are
+expected to use them.
+
+This manual covers three phases — **audit**, **remediate** and **deliver**.
+Run only the phase you were asked for.
+
+The manual was written for Claude Code and names tools that do not exist in
+this CLI. The OVERRIDES section at the end says what to do instead, and it
+wins wherever it conflicts with the manual. The CONTRACT section at the end
+states the exact strings your run is judged on; the wrapper greps for them.
+
+---
+
+"""
+
+# codex reads the interface block from agents/openai.yaml, not from the
+# frontmatter. Shape copied from an installed skill rather than invented.
+CODEX_AGENT_YAML = """\
+interface:
+  display_name: "{display}"
+  short_description: "{short}"
+  default_prompt: "Use ${skill} to run the {slug} nightly loop's audit, remediate or deliver phase."
+"""
+
+CODEX_DISPLAY = {
+    "reliability-weekend": ("Radon Reliability Weekend",
+                            "Nightly reliability delta-audit and remediation"),
+    "testing-weekend": ("Radon Testing Weekend",
+                        "Nightly test-suite audit and remediation"),
+    "documentation-nightly": ("Radon Documentation Nightly",
+                              "Nightly documentation audit and remediation"),
+    "ci-performance": ("Radon CI Performance",
+                       "Nightly CI and deploy critical-path optimizer"),
+}
+
+
+def _frontmatter(skill: str) -> dict:
+    """`name:` and `description:` from SKILL.md, as written.
+
+    Deliberately not a YAML parse: these two keys are single-line scalars in
+    every loop skill, and a dependency here would be one more thing between an
+    edited SKILL.md and a rendered artifact.
+    """
+    text = (SKILLS / skill / "SKILL.md").read_text(encoding="utf-8")
+    out = {}
+    if not text.startswith("---\n"):
+        return out
+    end = text.index("\n---\n", 3)
+    for line in text[4:end].splitlines():
+        for key in ("name", "description"):
+            if line.startswith(key + ": "):
+                out[key] = line[len(key) + 2 :].strip()
+    return out
+
+
+def _title(skill: str) -> str:
+    """The manual's own H1, so the native skill opens the way the manual does."""
+    for line in _body(skill).splitlines():
+        if line.startswith("# "):
+            return line[2:].strip()
+    return skill
+
+
+def render_codex_skill(skill: str) -> str:
+    slug = LOOPS[skill]
+    fm = _frontmatter(skill)
+    contract = (
+        CONTRACT_COMMON
+        + CONTRACT_COMMIT.format(prefix=BRANCH_PREFIX[skill])
+        + CONTRACT_DELIVER.format(slug=slug)
+    )
+    return (
+        CODEX_HEAD.format(
+            skill=skill,
+            description=fm.get("description", skill),
+            title=_title(skill),
+        )
+        + _body(skill)
+        + OVERRIDES.format(contract=contract)
+    )
+
+
+def render_codex_agent(skill: str) -> str:
+    display, short = CODEX_DISPLAY[skill]
+    return CODEX_AGENT_YAML.format(display=display, short=short, skill=skill,
+                                   slug=LOOPS[skill])
+
+
 def _body(skill: str) -> str:
     """SKILL.md with its YAML frontmatter removed, byte for byte otherwise."""
     text = (SKILLS / skill / "SKILL.md").read_text(encoding="utf-8")
@@ -169,6 +287,14 @@ def target(skill: str, phase: str) -> Path:
     return OUT_DIR / f"{skill}.{phase}.md"
 
 
+def codex_targets(skill: str) -> list[tuple[Path, str]]:
+    d = CODEX_SKILL_DIR / skill
+    return [
+        (d / "SKILL.md", render_codex_skill(skill)),
+        (d / "agents" / "openai.yaml", render_codex_agent(skill)),
+    ]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     g = ap.add_mutually_exclusive_group(required=True)
@@ -178,19 +304,22 @@ def main() -> int:
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     drift = []
+    pending: list[tuple[Path, str]] = []
     for skill in sorted(LOOPS):
         for phase in PHASES:
-            path = target(skill, phase)
-            fresh = render(skill, phase)
-            if args.write:
-                path.write_text(fresh, encoding="utf-8")
-                print(f"wrote {path.relative_to(REPO)} ({len(fresh)} bytes)")
-            else:
-                have = path.read_text(encoding="utf-8") if path.exists() else ""
-                if have != fresh:
-                    drift.append(str(path.relative_to(REPO)))
+            pending.append((target(skill, phase), render(skill, phase)))
+        pending.extend(codex_targets(skill))
+    for path, fresh in pending:
+        if args.write:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(fresh, encoding="utf-8")
+            print(f"wrote {path.relative_to(REPO)} ({len(fresh)} bytes)")
+        else:
+            have = path.read_text(encoding="utf-8") if path.exists() else ""
+            if have != fresh:
+                drift.append(str(path.relative_to(REPO)))
     if drift:
-        print("stale portable prompts (run --write):", file=sys.stderr)
+        print("stale rendered skills (run --write):", file=sys.stderr)
         for d in drift:
             print(f"  {d}", file=sys.stderr)
         return 1

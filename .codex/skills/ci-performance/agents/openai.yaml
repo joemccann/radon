@@ -1,0 +1,4 @@
+interface:
+  display_name: "Radon CI Performance"
+  short_description: "Nightly CI and deploy critical-path optimizer"
+  default_prompt: "Use $ci-performance to run the ci-performance nightly loop's audit, remediate or deliver phase."

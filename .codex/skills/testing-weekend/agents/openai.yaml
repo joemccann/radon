@@ -1,0 +1,4 @@
+interface:
+  display_name: "Radon Testing Weekend"
+  short_description: "Nightly test-suite audit and remediation"
+  default_prompt: "Use $testing-weekend to run the testing nightly loop's audit, remediate or deliver phase."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Radon Documentation Nightly"
+  short_description: "Nightly documentation audit and remediation"
+  default_prompt: "Use $documentation-nightly to run the documentation nightly loop's audit, remediate or deliver phase."
