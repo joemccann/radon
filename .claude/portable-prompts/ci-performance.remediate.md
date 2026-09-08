@@ -369,11 +369,11 @@ the last thing you emit, unindented, at column 0:
 NIGHTLY PHASE NO-OP: loop=ci-performance phase=<audit|remediate> <one-line reason>
 ```
 
-For example:
+For example (indented here on purpose — see the third rule below):
 
 ```
-NIGHTLY PHASE NO-OP: loop=ci-performance phase=audit no new findings in the delta range
-NIGHTLY PHASE NO-OP: loop=ci-performance phase=remediate 0 source-actionable P0/P1 items
+    NIGHTLY PHASE NO-OP: loop=ci-performance phase=audit no new findings in the delta range
+    NIGHTLY PHASE NO-OP: loop=ci-performance phase=remediate 0 source-actionable P0/P1 items
 ```
 
 Rules, all of them enforced by `scripts/tests/test_phase_noop_declaration.py`:
@@ -381,8 +381,10 @@ Rules, all of them enforced by `scripts/tests/test_phase_noop_declaration.py`:
 - The line must name THIS loop and THIS phase. A line copied from a sibling
   loop or a different phase does not count.
 - It must start at column 0. This loop audits its own wrapper and quotes this
-  contract; an indented mention inside a code fence is prose, not a
-  declaration, and the wrapper will not accept it.
+  contract, and you will `cat` this very file into your transcript; an
+  indented mention inside a code fence is prose, not a declaration, and the
+  wrapper will not accept it. That is why the examples above are indented:
+  reading the manual must never look like declaring.
 - It is a declaration of completion, not an excuse. Emit it only when the phase
   ran end to end. If you stopped early, ran out of cap, or could not verify
   something, say so and let the phase score INCOMPLETE — that is what 75 is

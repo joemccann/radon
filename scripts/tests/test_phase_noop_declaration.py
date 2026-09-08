@@ -124,3 +124,63 @@ def test_a_commit_still_wins_without_any_declaration(tmp_path, loop):
     proc, _, calls, _ = _h._run_multi(tmp_path, loop, "audit", committed=True)
     assert proc.returncode == 0, proc.stdout[-2000:]
     assert INCOMPLETE not in calls
+
+
+# --- 2026-09-08 15:06 re-run: the declaration was printed and still scored 75 --
+# documentation/audit printed the line at column 0, last, naming its loop and
+# phase — and the wrapper reported INCOMPLETE anyway. Two defects, one run.
+
+
+@pytest.mark.parametrize("loop", FALLBACK)
+def test_the_declaration_survives_a_large_log_under_pipefail(tmp_path, loop):
+    """`grep -q` exits on the first match; `tail` is still writing; SIGPIPE.
+
+    The wrappers run under `set -o pipefail`, so a pipeline whose consumer quit
+    early returns 141 from the producer even though the match was found, and
+    `! phase_declared_noop` read that as "not declared". The unit tests never
+    saw it because a stub's output fits in the pipe buffer before grep exits.
+    Live, the declaration sat above 6,000 lines of transcript.
+    """
+    filler = "\n".join(f"transcript line {i}: reading files, running checks" for i in range(8000))
+    report = f"{_noop_line(loop, 'audit')}\n\n{filler}\n"
+    assert len(report) > 256 * 1024, "filler must exceed any pipe buffer"
+    proc, _, calls, _ = _h._run_multi(
+        tmp_path, loop, "audit", committed=False, agent_output=report,
+    )
+    assert proc.returncode == 0, (
+        f"{loop}/audit lost its declaration under pipefail: exit "
+        f"{proc.returncode}\n{proc.stdout[-1500:]}"
+    )
+    assert INCOMPLETE not in calls
+
+
+@pytest.mark.parametrize("loop", FALLBACK)
+def test_an_echoed_skill_manual_is_not_a_declaration(tmp_path, loop):
+    """The agent `cat`s its own SKILL.md into the transcript; the manual's
+    worked examples must not read as the agent declaring.
+
+    The documentation audit dumped the skill twice. Its example block held two
+    concrete lines at column 0 naming this loop and a real phase, so an agent
+    that merely READ the manual, then stalled with no commit, would score OK —
+    T-379's exact hole, reopened by the fix for its false positive.
+    """
+    skill_dir = {
+        "reliability": "reliability-weekend",
+        "testing": "testing-weekend",
+        "ci-performance": "ci-performance",
+        "documentation": "documentation-nightly",
+    }[loop]
+    manual = (_h.REPO / ".claude" / "skills" / skill_dir / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    assert "NIGHTLY PHASE NO-OP" in manual, "the manual must still teach the line"
+    echoed = "$ cat .claude/skills/" + skill_dir + "/SKILL.md\n" + manual + "\n" \
+        "I have read the manual and am thinking about what to do.\n"
+    proc, _, calls, _ = _h._run_multi(
+        tmp_path, loop, "audit", committed=False, agent_output=echoed,
+    )
+    assert proc.returncode == 75, (
+        f"{loop}/audit scored OK after only echoing its manual — a worked "
+        "example in SKILL.md is being read as a declaration"
+    )
+    assert INCOMPLETE in calls

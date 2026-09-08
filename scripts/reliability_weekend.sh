@@ -491,9 +491,17 @@ phase_committed() {
 # INCOMPLETE: only the printed line is a declaration.
 PHASE_NOOP_MARKER="NIGHTLY PHASE NO-OP:"
 phase_declared_noop() {
+  # NOT `grep -q`. Under `set -o pipefail` a consumer that exits on the first
+  # match leaves `tail` writing into a closed pipe: SIGPIPE, 141, and the
+  # pipeline reports failure on the very line it just found. The stub-sized
+  # logs in the unit tests fit in the pipe buffer, so they never saw it; the
+  # 2026-09-08 15:06 documentation audit printed the line above 6,000 more
+  # lines of transcript and was scored INCOMPLETE. Reading to EOF costs a
+  # few milliseconds once per phase.
   tail -c "+$((ROUND_LOG_MARK + 1))" "$RUN_LOG" 2>/dev/null \
     | grep -v '^\[' \
-    | grep -qE "^${PHASE_NOOP_MARKER} loop=${LOOP_SLUG} phase=${PHASE}([[:space:]]|$)"
+    | grep -E "^${PHASE_NOOP_MARKER} loop=${LOOP_SLUG} phase=${PHASE}([[:space:]]|$)" \
+    > /dev/null
 }
 
 on_crash() {
