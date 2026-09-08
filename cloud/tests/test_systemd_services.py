@@ -8,6 +8,8 @@ import pathlib
 import pytest
 
 EXPECTED_SERVICE_FILES = [
+    "radon-aa-frontier-refresh.service",
+    "radon-aa-frontier-refresh.timer",
     "radon-ai-cycle.service",
     "radon-ai-cycle.timer",
     "radon-api.service",
@@ -232,6 +234,39 @@ class TestAiCycleCredentials:
             "/home/radon/radon/data/secret_store/secrets.db"
         ) in lines
         assert "scripts/secret_store.py" in svc["execstartpre"]
+
+    def test_waits_for_frontier_refresh_without_requiring_success(self, unit):
+        section = unit(self.FILENAME)["Unit"]
+        assert section["wants"] == "radon-aa-frontier-refresh.service"
+        assert "radon-aa-frontier-refresh.service" in section["after"].split()
+        assert "requires" not in section
+
+
+class TestAaFrontierRefresh:
+    SERVICE = "radon-aa-frontier-refresh.service"
+    TIMER = "radon-aa-frontier-refresh.timer"
+
+    def test_loads_encrypted_profile_store_and_is_bounded(self, unit, services_dir):
+        svc = unit(self.SERVICE)["Service"]
+        assert svc["type"] == "oneshot"
+        assert svc["timeoutstartsec"] == "120"
+        assert svc["loadcredentialencrypted"] == (
+            "radon-secret-store-key:"
+            "/etc/credstore.encrypted/radon-secret-store-key"
+        )
+        lines = (services_dir / self.SERVICE).read_text(encoding="utf-8").splitlines()
+        assert (
+            "Environment=RADON_SECRET_STORE_PATH="
+            "/home/radon/radon/data/secret_store/secrets.db"
+        ) in lines
+        assert "scripts/secret_store.py" in svc["execstartpre"]
+        assert svc["execstart"].endswith("-m scripts.aa_frontier_refresh")
+
+    def test_runs_daily_before_ai_cycle_with_catchup(self, unit):
+        timer = unit(self.TIMER)["Timer"]
+        assert timer["oncalendar"] == "*-*-* 07:00:00 UTC"
+        assert timer["persistent"] == "true"
+        assert int(timer["randomizeddelaysec"]) <= 300
 
 
 # ---------------------------------------------------------------------------

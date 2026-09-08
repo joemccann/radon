@@ -132,12 +132,46 @@ def test_gpu_missing_bundle_is_ineligible_not_assumed_single_gpu():
 
 
 def test_aa_missing_expensive_member_suppresses_entire_basket():
-    payload = {"data": [{"slug": "cheap", "pricing": {"price_1m_input_tokens": 1, "price_1m_output_tokens": 2}}]}
+    payload = {
+        "data": [
+            {
+                "id": "stable-cheap-id",
+                "slug": "cheap",
+                "name": "Cheap frontier",
+                "model_creator": {"id": "creator-id"},
+                "pricing": {"price_1m_input_tokens": 1, "price_1m_output_tokens": 2},
+            }
+        ]
+    }
     with pytest.raises(SourceError):
         parse_aa(payload, HASH, FETCHED, ["cheap", "expensive"])
     row = parse_aa(payload, HASH, FETCHED, ["cheap"])[0]
     assert row["value"] == 3
-    assert row["metadata"]["required_members"] == ["cheap"]
+    assert row["series_id"] == "stable-cheap-id"
+    assert row["metadata"]["required_members"] == ["stable-cheap-id"]
+    assert row["metadata"]["model_slug"] == "cheap"
+    assert row["methodology_version"] == "aa-frontier-id-v1"
+
+
+def test_aa_slug_rename_preserves_series_and_cohort_identity():
+    def payload(slug):
+        return {
+            "data": [
+                {
+                    "id": "stable-model-id",
+                    "slug": slug,
+                    "name": "Frontier model",
+                    "model_creator": {"id": "creator-id"},
+                    "pricing": {"price_1m_input_tokens": 2, "price_1m_output_tokens": 8},
+                }
+            ]
+        }
+
+    before = parse_aa(payload("old-slug"), HASH, FETCHED, ["old-slug"])[0]
+    after = parse_aa(payload("new-slug"), HASH, FETCHED, ["new-slug"])[0]
+
+    assert before["series_id"] == after["series_id"] == "stable-model-id"
+    assert before["cohort_version"] == after["cohort_version"]
 
 
 def test_sec_keeps_ytd_period_and_reviewed_tag_mapping():

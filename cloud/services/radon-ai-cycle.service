@@ -1,6 +1,7 @@
 [Unit]
 Description=Radon AI infrastructure observations (daily source collection)
-After=network.target
+Wants=radon-aa-frontier-refresh.service
+After=network.target radon-aa-frontier-refresh.service
 StartLimitIntervalSec=300
 StartLimitBurst=3
 

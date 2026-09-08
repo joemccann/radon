@@ -173,6 +173,8 @@ class TestDeadManDoesNotCryWolf:
 # every timer-owned unit CI may publish. Growing it is a review decision.
 EXPECTED_AUTO_SYNC_UNITS = (
     # AI evidence daily collector: deliberately authorize these two scheduled units.
+    "radon-aa-frontier-refresh.service",
+    "radon-aa-frontier-refresh.timer",
     "radon-ai-cycle.service",
     "radon-ai-cycle.timer",
     "radon-bpi.service",

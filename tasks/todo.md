@@ -5706,3 +5706,31 @@ Audit: 30 regime tabs. FreshnessRail: ivrank, iv-spread, ma-ratio. Text "Next re
 - [x] T4 depends_on: [T3] - Browser verification of every wired tab (chrome-cdp on local Next), screenshots. 19/20 rails rendered live with correct next-fire instants; TRIN shows its empty state locally (no samples in this environment), rail covered by its unit test.
 - [ ] T5 depends_on: [T4] - PR, mergeable, CI green, Pushover `radon PR green`.
 Dependency graph: T1 -> T2 -> T3 -> T4 -> T5.
+
+# Task: Refresh the Artificial Analysis frontier basket daily [IN PROGRESS]
+
+Keep the AI-cycle price cohort current as frontier models ship while preserving a last-known-good basket when the upstream catalog or selection contract is invalid.
+
+## Dependency graph
+
+- T1 depends_on: [] - Define deterministic frontier-provider selection and red regression tests from the current Artificial Analysis schema.
+- T2 depends_on: [T1] - Implement catalog refresh, validation, atomic secret-store update, audit output, and idempotence.
+- T3 depends_on: [T2] - Add a bounded daily systemd oneshot/timer ordered before AI-cycle collection and wire deployment inventory.
+- T4 depends_on: [T2, T3] - Run focused tests, codemap generation, durability checks, and review the final diff.
+- T5 depends_on: [T4] - Commit, open the PR, follow exact-head GitHub CI through green, and verify production deployment.
+
+## Checklist
+
+- [x] T1 Selection contract and failing regressions
+- [x] T2 Refresh implementation and safe persistence
+- [x] T3 Daily service/timer and deployment wiring
+- [x] T4 Focused verification and review
+- [ ] T5 PR, green CI, and production verification
+
+## Review
+
+- [x] Red import regression preceded implementation; 24 worker durability tests cover frontier selection, stable IDs, anti-churn, catalog truncation, state corruption, write failures, idempotence, and encrypted-store persistence.
+- [x] Focused validation: 278 affected Python tests, 546 cloud/service topology tests, 133 service-health Vitest tests, and 31 codemap tests passed.
+- [x] Live 644-row catalog resolved all eight providers deterministically without exposing credential material.
+
+---

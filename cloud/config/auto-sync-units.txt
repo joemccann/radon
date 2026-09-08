@@ -1,6 +1,8 @@
 # Units CI may publish via `radon-deploy-root sync-scheduled-units`.
 # Content is taken from git objects at the GitHub main tip, not the live checkout.
 # Control-plane units are rejected. The helper never starts, stops, or enables.
+radon-aa-frontier-refresh.service
+radon-aa-frontier-refresh.timer
 radon-ai-cycle.service
 radon-ai-cycle.timer
 radon-bpi.service

@@ -411,18 +411,29 @@ def parse_aa(payload, digest, fetched, basket):
     if not basket:
         raise SourceError("Fixed model membership must be explicitly configured")
     models = {m["slug"]: m for m in payload["data"]}
+    if len(models) != len(payload["data"]):
+        raise SourceError("Artificial Analysis model slugs must be unique")
     if not set(basket).issubset(models):
         raise SourceError("Required fixed-model basket member missing")
-    cohort = hashlib.sha256(json.dumps(sorted(basket)).encode()).hexdigest()[:16]
+    selected = [models[slug] for slug in basket]
+    model_ids = [model.get("id") for model in selected]
+    if any(not isinstance(model_id, str) or not model_id for model_id in model_ids):
+        raise SourceError("Artificial Analysis stable model identity missing")
+    if len(model_ids) != len(set(model_ids)):
+        raise SourceError("Artificial Analysis stable model identities must be unique")
+    cohort_members = sorted(model_ids)
+    cohort = hashlib.sha256(json.dumps(cohort_members).encode()).hexdigest()[:16]
     result = []
-    for slug in basket:
-        price = models[slug]["pricing"]
+    for slug, model in zip(basket, selected):
+        price = model["pricing"]
         inp, out = number(price["price_1m_input_tokens"]), number(price["price_1m_output_tokens"])
+        model_id = model["id"]
+        creator = model.get("model_creator") if isinstance(model.get("model_creator"), dict) else {}
         result.append(
             observation(
                 "artificial-analysis",
                 "C3",
-                slug,
+                model_id,
                 inp + out,
                 "USD/task-bundle",
                 fetched[:10],
@@ -432,18 +443,22 @@ def parse_aa(payload, digest, fetched, basket):
                 cohort=cohort,
                 metadata={
                     "entity": slug,
-                    "label": slug,
+                    "label": model.get("name") or slug,
+                    "model_id": model_id,
+                    "model_slug": slug,
+                    "creator_id": creator.get("id"),
                     "input_price": inp,
                     "output_price": out,
                     "input_tokens": 1_000_000,
                     "output_tokens": 1_000_000,
-                    "required_members": sorted(basket),
-                    "cohort_members": sorted(basket),
+                    "required_members": cohort_members,
+                    "cohort_members": cohort_members,
                     "coverage_numerator": len(basket),
                     "coverage_denominator": len(basket),
                     "definition": "Fixed 1M input + 1M output uncached list-price bundle",
                     "license": "Internal attribution; redistribution rights must be confirmed",
                 },
+                methodology_version="aa-frontier-id-v1",
             )
         )
     return result

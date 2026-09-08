@@ -146,14 +146,14 @@ SERVICES: Tuple[CredentialService, ...] = (
             CredentialField("ARTIFICIAL_ANALYSIS_API_KEY", "API key"),
             CredentialField(
                 "RADON_AI_CYCLE_AA_BASKET",
-                "Model basket",
+                "Model basket (managed daily)",
                 secret=False,
-                placeholder="provider/model,provider/model",
+                placeholder="model-slug,model-slug",
                 required_for_validation=False,
             ),
         ),
         validator="artificial_analysis",
-        note="Use comma-separated current API model slugs for the fixed pricing basket.",
+        note="The daily frontier refresh maintains this value; edit it only as a temporary recovery override.",
     ),
     CredentialService(
         id="vast",

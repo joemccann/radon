@@ -1,6 +1,6 @@
 # AI infrastructure collection operations
 
-The `/regime/llm` AI infrastructure view reads cached observations. Browser requests never scrape providers or place trades. All automatic source collection runs through `python3.13 -m scripts.ai_cycle` from the repository root. The daily systemd service is `radon-ai-cycle.service`, scheduled by `radon-ai-cycle.timer` at 07:15 UTC.
+The `/regime/llm` AI infrastructure view reads cached observations. Browser requests never scrape providers or place trades. All automatic source collection runs through `python3.13 -m scripts.ai_cycle` from the repository root. `radon-aa-frontier-refresh.timer` refreshes the model cohort at 07:00 UTC, then `radon-ai-cycle.timer` collects observations at 07:15 UTC.
 
 ## Collection and verification
 
@@ -19,7 +19,7 @@ Omitting both modes is equivalent to `--verify`. `--record` without `--database`
 
 `--env-file PATH` reads only `OPENROUTER_API_KEY`, `ARTIFICIAL_ANALYSIS_API_KEY`, `SEC_USER_AGENT`, `EIA_API_KEY`, `VAST_API_KEY`, and `RADON_AI_CYCLE_AA_BASKET`. Environment variables take precedence over that file. When `RADON_SECRET_STORE_PATH` is configured, values saved under **Profile → Credentials → LLM Regime Sources** take final precedence. The scheduled service loads the same encrypted store and master key as the API, so Profile rotations apply on its next run without editing `/etc/radon/env`. Credentials are never copied into source URLs, status reasons or logs. `SEC_USER_AGENT` must identify the application and a real contact email. Production EIA collection requires its own registered key; `DEMO_KEY` was used only for the isolated public-access probe.
 
-Artificial Analysis additionally requires `RADON_AI_CYCLE_AA_BASKET` or `--basket slug1,slug2`. These must be verified current API slugs, not guessed legacy IDs. The immutable cohort hashes sorted membership; any missing member suppresses the entire basket. The fixed bundle is one million input plus one million output tokens, uncached, at published list prices. Confirm appropriate product redistribution rights before exposing licensed AA data outside permitted internal use. The old 70/30 price index remains legacy history.
+Artificial Analysis additionally requires `RADON_AI_CYCLE_AA_BASKET` or `--basket slug1,slug2`. The daily frontier refresher maintains the encrypted Profile value with one scored, priced text model from each configured major provider. It accepts only a complete catalog, retains a frontier incumbent until a strictly newer qualifying release appears, excludes previews and specialist models, and preserves the last-known-good basket on every upstream or schema failure. Stable model and creator IDs define cohort identity; mutable slugs are only the current API lookup projection. State is checksum-verified and written atomically under `~/.radon/ai-cycle/`. Any missing member suppresses the entire basket. The fixed bundle is one million input plus one million output tokens, uncached, at published list prices. Confirm appropriate product redistribution rights before exposing licensed AA data outside permitted internal use. The old 70/30 price index remains legacy history.
 
 ## History and request bounds
 

@@ -167,6 +167,7 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # calendar day (provider model lists move on release cadence, not market
     # cadence, so weekend runs heartbeat like any other). Uniform 26h window.
     # Provider HTTP only — no IB dependency.
+    "aa-frontier-basket": {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     "ai-cycle":         {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     "model-catalog":    {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     # yield-curve — radon-yield-curve.timer, daily 22:30 UTC every calendar
@@ -540,6 +541,7 @@ BUCKETS: dict[str, list[str]] = {
         # Daily 03:10 UTC LLM provider frontier model list refresh — hourly
         # check surfaces a missed run within 1h of the 26h window expiring.
         "model-catalog",
+        "aa-frontier-basket",
         "ai-cycle",
         # Daily 22:30 UTC Treasury yield-curve pull — hourly check surfaces
         # a missed run within 1h of the 26h window expiring.

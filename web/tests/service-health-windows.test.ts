@@ -523,6 +523,15 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
     expect(requiresIb("model-catalog")).toBe(false);
   });
 
+  it("aa-frontier-basket is monitored on its daily non-IB cadence", () => {
+    expect(SERVICE_FRESHNESS_WINDOWS["aa-frontier-basket"]).toBeDefined();
+    expect(getServiceCategory("aa-frontier-basket")).toBe("scheduled");
+    for (const state of ["open", "extended", "closed"] as MarketState[]) {
+      expect(getFreshnessWindowMs("aa-frontier-basket", state)).toBe(26 * HOUR);
+    }
+    expect(requiresIb("aa-frontier-basket")).toBe(false);
+  });
+
   // ``vixts`` — radon-vixts.timer fires daily 02:45 UTC every calendar day,
   // ten minutes behind radon-vixcor so the Cboe CDN hits stay staggered
   // (weekend and holiday runs are 304 heartbeats), so a uniform 26h window

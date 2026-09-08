@@ -437,8 +437,12 @@ enable_services
     calls = log.read_text().splitlines()
     for suffix in ("service", "timer"):
         assert any(f"/services/radon-ai-cycle.{suffix} /etc/systemd/system/radon-ai-cycle.{suffix} 0644 -o root -g root" in call for call in calls if call.startswith("stage "))
+        assert any(f"/services/radon-aa-frontier-refresh.{suffix} /etc/systemd/system/radon-aa-frontier-refresh.{suffix} 0644 -o root -g root" in call for call in calls if call.startswith("stage "))
     disabled = next(call.split()[2:] for call in calls if call.startswith("systemctl disable "))
     enabled = next(call.split()[2:] for call in calls if call.startswith("systemctl enable "))
     assert "radon-ai-cycle.service" in disabled
+    assert "radon-aa-frontier-refresh.service" in disabled
     assert "radon-ai-cycle.timer" in enabled
+    assert "radon-aa-frontier-refresh.timer" in enabled
     assert "radon-ai-cycle.service" not in enabled
+    assert "radon-aa-frontier-refresh.service" not in enabled

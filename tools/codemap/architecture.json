@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-09-08T21:22:51Z",
-  "node_count": 3272,
-  "edge_count": 6624,
+  "generated_at": "2026-09-08T21:38:30Z",
+  "node_count": 3274,
+  "edge_count": 6627,
   "areas": {
     "web": 1918,
     "site": 152,
-    "scripts": 1088,
+    "scripts": 1090,
     "cloud": 66,
     "lib": 28,
     "tests": 17,
@@ -83,6 +83,11 @@
       "count": 2
     },
     {
+      "id": "scripts",
+      "area": "scripts",
+      "count": 151
+    },
+    {
       "id": "scripts/ai_cycle",
       "area": "scripts",
       "count": 10
@@ -96,11 +101,6 @@
       "id": "scripts/api",
       "area": "scripts",
       "count": 114
-    },
-    {
-      "id": "scripts",
-      "area": "scripts",
-      "count": 150
     },
     {
       "id": "scripts/backtest",
@@ -195,7 +195,7 @@
     {
       "id": "scripts/tests",
       "area": "scripts",
-      "count": 538
+      "count": 539
     },
     {
       "id": "scripts/trade_blotter",
@@ -418,6 +418,13 @@
       "test": false
     },
     {
+      "id": "scripts/db/hrana_http.py",
+      "area": "scripts",
+      "in": 35,
+      "out": 2,
+      "test": false
+    },
+    {
       "id": "web/components/PositionTable.tsx",
       "area": "web",
       "in": 22,
@@ -434,13 +441,6 @@
     {
       "id": "web/lib/TickerDetailContext.tsx",
       "area": "web",
-      "in": 34,
-      "out": 2,
-      "test": false
-    },
-    {
-      "id": "scripts/db/hrana_http.py",
-      "area": "scripts",
       "in": 34,
       "out": 2,
       "test": false
