@@ -107,6 +107,7 @@ Complete the reduced-rung P0/P1 backlog without leaving evidence archives corrup
 
 - [x] RED: focused suite could not import missing `archive_raw`; GREEN: 84 passed in the runner venv.
 - [x] Permanent drills: Python 94 passed; Vitest 12 passed.
+- [ ] Detached full-gate stage has no `DONE` sentinel; 2026-09-08 retry also exited before `pytest_rc`; continuation must re-run all three gates.
 - [ ] Detached full-gate stage has no `DONE` sentinel; continuation must re-run all three gates.
 
 ---
@@ -5577,6 +5578,7 @@ Graph extension: T6 -> T7 -> T8.
 - T7 green evidence: 125 focused tests, nine large-body regressions, three-copy parity and shell syntax all passed. Full cloud rerun and latest-head CI remain T8 gates.
 - T8 local verification: final full cloud suite 1,882 passed, six skipped after the Compose repair; latest-head CI is the remaining release gate.
 - T8 release evidence: repaired head6fa1f028 passed all31 applicable checks, including both cloud shards, coverage and Playwright. All agents completed; worktree code is verified. Latest ledger-head status remains visible on PR346 and is checked before notification.
+# Task: Reliability audit 2026-09-08 [COMPLETE]
 
 # Regime chart x-axis formatting (2026-09-08)
 
@@ -5612,6 +5614,7 @@ Perform the delta audit from `0b77a6af` through the dedicated runner head.
 
 ## Review
 
+- [x] Audit evidence: R-674 P1 persistence finding; second pass through `90071618` found no additional defect; all required standing sweeps HOLD.
 - [x] Audit evidence: one P1 persistence finding, all required standing sweeps HOLD.
 
 ---

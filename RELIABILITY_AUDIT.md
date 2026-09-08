@@ -219,6 +219,7 @@ Delta findings continue the R-### numbering in dated `## Delta audit` sections.
 - Audited through: `7a7ca4ae` on 2026-09-06 -- delta audit, 5 new findings (R-667...R-671; 0 P0, 0 P1, 2 P2, 3 P3), backlog REL-248...REL-250. Anchor `391aaaea` verified (`rev-parse --verify` resolves to `391aaaeaed239cca79026df354059a862b141f05`, `merge-base --is-ancestor` confirms). The range is 5 first-parent commits, ALL loop output/machinery (own remediation #303, testing #305/#308, ci-performance #302, wrapper fix #307) — no product feature commits, so two walks only: an EXECUTING regression walk over #303's P1 fixes and a loop-machinery walk, both returning literal repro output. All seven standing sweeps HOLD (parity suites `38 passed`). Executing walk: REL-232/REL-233/REL-235 HOLD with adjacent cases run; REL-234 PARTIAL (R-668: compose gate misses `ipc: host`/`userns_mode: host` at all three install paths, walk-executed rc=0). Both P2s carry executed repros; R-667 is the #307 cap detector classifying quoted prose as a session cap (stub-agent repro: crash -> rc 75, ladder suppressed). `git ls-remote` run BEFORE numbering: no `reliability/*` branch existed. All REL-232...REL-247 landed DONE, so no roll-forward beyond this section's REL-248...REL-250. See `## Delta audit 2026-09-06`.
 - Audited through: `0b77a6af` on 2026-09-07 — delta audit, 2 new findings (R-672…R-673; 0 P0, 2 P1), backlog REL-251…REL-252. Anchor `7a7ca4ae` verified (`rev-parse --verify` resolves; ancestor of HEAD); range is 88 commits / 68 files, led by the Dropbox research ingestion and its app-runtime deployment. Standing sweeps HOLD: `_NON_IDEMPOTENT_IB_SCRIPTS`, halt chokepoints, exit-order acknowledgement, daemon-state Hrana writer, and the function-level order-limit scan remain present; no changed `placeOrder` / `place_order` path bypasses the guard. Remote branch discovery could not run because this runner could not resolve `github.com`; no remote state was modified.
 - Audited through: `cc77928d` on 2026-09-08 — delta audit, 1 new finding (R-674; 0 P0, 1 P1), backlog REL-253. Anchor `0b77a6af` verified (`rev-parse --verify` resolves; ancestor of HEAD); range is 13 commits / 68 files. Standing sweeps HOLD: halt chokepoints, `_NON_IDEMPOTENT_IB_SCRIPTS`, order limits, exit-order acknowledgement, daemon-state Hrana, all new order sites, and both watchdog catalogs for the new `ai-cycle` timer.
+- Audited through: `90071618` on 2026-09-08 (second pass) — 0 new findings. Anchor `cc77928d` verified; range is 12 commits. The order-admission, daily frontier refresh, research-ingestion, credential, indicator-freshness, and loop surfaces were inspected serially. Standing sweeps HOLD: no new unguarded placement site; halt/order-limit/exit-ack/Hrana chokepoints and both catalog entries for the new `aa-frontier-basket` writer remain present.
 
 ## 7. Exit criteria check (A5)
 
@@ -2456,3 +2457,18 @@ new changed-surface instance.
 | ID | Sev | Findings | Task | Acceptance |
 |---|---|---|---|---|
 | REL-253 | P1 | R-674 | **Make AI-cycle raw evidence writes crash-safe and self-repairing.** Atomically stage and fsync payloads in the archive directory, replace only after the full digest is verified, and replace an existing file whose bytes do not match its digest. | Red first: seed `<sha>.json` with a truncated payload, collect the matching response, and assert the final file hashes to `<sha>` with full bytes. Inject a write interruption before replacement and assert no partial final path becomes visible; existing valid content-addressed files remain untouched. |
+
+---
+
+## Delta audit 2026-09-08 (second pass)
+
+Anchor `cc77928d` verified (`git rev-parse --verify` resolves and
+`git merge-base --is-ancestor` confirms it is an ancestor). Range
+`cc77928d..90071618` is 12 commits. Serial review covered subprocess admission,
+frontier-basket persistence and telemetry, research ingestion, credentials,
+indicator freshness, deployment, and loop changes. Standing sweeps HOLD: no
+delta `placeOrder` or `place_order` bypasses `trading_halt` / `order_limits`;
+halt chokepoints, `_NON_IDEMPOTENT_IB_SCRIPTS`, exit-order acknowledgement and
+daemon-state Hrana remain wired; `aa-frontier-basket` is present in both watchdog
+catalogs. `NEW_FINDINGS` and REL-021b remain standing P2 candidates with no new
+changed-surface instance. No new finding was verified.
