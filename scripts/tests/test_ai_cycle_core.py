@@ -1,5 +1,6 @@
 """Numerical and point-in-time contracts for AI infrastructure evidence."""
 
+import json
 import math
 from datetime import date, timedelta
 
@@ -79,6 +80,68 @@ def test_batch_validation_before_writes():
     with pytest.raises(ValueError):
         store.append_observations([observation(), {**observation(), "value": None}])
     assert store.read_observations() == []
+
+
+def test_cloud_writes_retry_transient_hrana_timeouts(monkeypatch):
+    from scripts.db import hrana_http
+
+    calls = []
+
+    def flaky(sql, args):
+        calls.append((sql, args))
+        if len(calls) < 3:
+            raise hrana_http.HranaHttpError("TimeoutError: read operation timed out")
+
+    monkeypatch.setattr(hrana_http, "hrana_execute", flaky)
+    monkeypatch.setattr("scripts.ai_cycle.store.time.sleep", lambda _delay: None)
+    ObservationStore()._execute("INSERT OR IGNORE INTO test VALUES (?)", (1,))
+    assert len(calls) == 3
+
+
+def test_cloud_writes_fail_fast_on_statement_errors(monkeypatch):
+    from scripts.db import hrana_http
+
+    calls = []
+
+    def broken(sql, args):
+        calls.append((sql, args))
+        raise hrana_http.HranaHttpError("SQLITE_CONSTRAINT: invalid row")
+
+    monkeypatch.setattr(hrana_http, "hrana_execute", broken)
+    with pytest.raises(hrana_http.HranaHttpError):
+        ObservationStore()._execute("INSERT INTO test VALUES (?)", (1,))
+    assert len(calls) == 1
+
+
+def test_source_status_cloud_write_is_retry_idempotent(monkeypatch):
+    from scripts.db import hrana_http
+
+    calls = []
+    monkeypatch.setattr(hrana_http, "hrana_execute", lambda sql, args: calls.append((sql, args)))
+    store = ObservationStore()
+    store._initialized = True
+    store.record_source_status(
+        dict(source_id="openrouter", status="available", reason="fixture", checked_at="2026-09-08T00:00:00Z")
+    )
+    assert "WHERE NOT EXISTS" in calls[0][0]
+    assert calls[0][1][:2] == calls[0][1][2:]
+
+
+def test_snapshot_reads_cloud_history_in_safe_large_pages(monkeypatch):
+    store = ObservationStore()
+    payload = json.dumps(observation())
+    calls = []
+
+    def query(sql, args):
+        calls.append((sql, args))
+        if len(calls) == 1:
+            return [(row_id, payload) for row_id in range(1, 501)]
+        return [(501, payload)]
+
+    monkeypatch.setattr(store, "_query", query)
+    assert len(store.read_snapshot_observations("2026-09-08T00:00:00Z")) == 501
+    assert all("LIMIT 500" in sql for sql, _args in calls)
+    assert calls[1][1][0] == 500
 
 
 @pytest.mark.parametrize(

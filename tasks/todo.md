@@ -5758,4 +5758,14 @@ Keep the AI-cycle price cohort current as frontier models ship while preserving 
 - [x] Focused validation: 278 affected Python tests, 546 cloud/service topology tests, 133 service-health Vitest tests, and 31 codemap tests passed.
 - [x] Live 644-row catalog resolved all eight providers deterministically without exposing credential material.
 
+# AI-cycle Turso write retry (2026-09-08)
+
+- [x] T1 depends_on: [] - Reproduce the production backfill crash and identify the timed-out Turso status write.
+- [x] T2 depends_on: [T1] - Add red regressions for bounded transient retries, non-transient fail-fast behavior, and idempotent status writes.
+- [x] T3 depends_on: [T2] - Implement bounded retries, idempotent status writes, and production-measured snapshot paging that remains below Hrana's response cap.
+- [ ] T4 depends_on: [T3] - Run focused verification, open the repair PR, and monitor exact-head GitHub CI.
+- [ ] T5 depends_on: [T4] - Verify deployment, resume the production backfill, and audit provider counts/ranges and the live payload.
+
+Dependency graph: T1 -> T2 -> T3 -> T4 -> T5.
+
 ---
