@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-09-07T23:44:23Z",
-  "node_count": 3230,
-  "edge_count": 6508,
+  "generated_at": "2026-09-08T00:25:56Z",
+  "node_count": 3253,
+  "edge_count": 6535,
   "areas": {
-    "web": 1899,
+    "web": 1908,
     "site": 152,
-    "scripts": 1065,
+    "scripts": 1079,
     "cloud": 66,
     "lib": 28,
     "tests": 17,
@@ -15,17 +15,17 @@
     {
       "id": "web/app",
       "area": "web",
-      "count": 206
+      "count": 207
     },
     {
       "id": "web/components",
       "area": "web",
-      "count": 240
+      "count": 242
     },
     {
       "id": "web/e2e",
       "area": "web",
-      "count": 187
+      "count": 188
     },
     {
       "id": "web",
@@ -35,7 +35,7 @@
     {
       "id": "web/lib",
       "area": "web",
-      "count": 374
+      "count": 376
     },
     {
       "id": "web/public",
@@ -50,7 +50,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 878
+      "count": 881
     },
     {
       "id": "site/app",
@@ -83,6 +83,11 @@
       "count": 2
     },
     {
+      "id": "scripts/ai_cycle",
+      "area": "scripts",
+      "count": 10
+    },
+    {
       "id": "scripts/alerts",
       "area": "scripts",
       "count": 2
@@ -90,7 +95,7 @@
     {
       "id": "scripts/api",
       "area": "scripts",
-      "count": 111
+      "count": 113
     },
     {
       "id": "scripts",
@@ -190,7 +195,7 @@
     {
       "id": "scripts/tests",
       "area": "scripts",
-      "count": 529
+      "count": 531
     },
     {
       "id": "scripts/trade_blotter",
@@ -261,7 +266,7 @@
     {
       "id": "web/lib/apiContracts.ts",
       "area": "web",
-      "in": 111,
+      "in": 112,
       "out": 0,
       "test": false
     },
@@ -296,7 +301,7 @@
     {
       "id": "web/lib/radonApi.ts",
       "area": "web",
-      "in": 87,
+      "in": 89,
       "out": 0,
       "test": false
     },
@@ -434,17 +439,17 @@
       "test": false
     },
     {
+      "id": "scripts/db/hrana_http.py",
+      "area": "scripts",
+      "in": 34,
+      "out": 2,
+      "test": false
+    },
+    {
       "id": "web/components/ticker-detail/OrderTab.tsx",
       "area": "web",
       "in": 12,
       "out": 23,
-      "test": false
-    },
-    {
-      "id": "web/lib/chartSystem.ts",
-      "area": "web",
-      "in": 33,
-      "out": 0,
       "test": false
     },
     {
@@ -455,10 +460,10 @@
       "test": false
     },
     {
-      "id": "scripts/db/hrana_http.py",
-      "area": "scripts",
-      "in": 31,
-      "out": 2,
+      "id": "web/lib/chartSystem.ts",
+      "area": "web",
+      "in": 32,
+      "out": 0,
       "test": false
     },
     {

@@ -59,7 +59,7 @@ export const REGIME_TAB_LABEL: Record<RegimeTab, string> = {
   bpi: "BULLISH %",
   cor: "COR",
   streaks: "STREAKS",
-  llm: "LLM",
+  llm: "AI infrastructure",
   backtest: "BACKTEST",
 };
 

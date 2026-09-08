@@ -8,6 +8,8 @@ import pathlib
 import pytest
 
 EXPECTED_SERVICE_FILES = [
+    "radon-ai-cycle.service",
+    "radon-ai-cycle.timer",
     "radon-api.service",
     "radon-ib-gateway.service",
     "radon-ib-gateway-preheld-restart.service",

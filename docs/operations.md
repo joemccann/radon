@@ -296,6 +296,7 @@ Do not hand-edit a wrapper while a cycle is running: the shell reads the script 
 | `radon-newsfeed` | 120s loop | Headless Playwright scraper for The Market Ear |
 | `radon-monitor` | 30s loop | Fills, exit orders, journal sync, cash flow handler |
 | `radon-health` | always-on | **Isolated** stdlib health daemon on `:8330` (see Health monitoring below). NO dependency on `radon-ib-gateway`; a Gateway stop never touches it. |
+| `radon-ai-cycle.timer` | Daily 07:15 UTC, up to 5 min jitter | Versioned AI infrastructure observations. Partial provider access is explicit; `ai-cycle` heartbeat has a 26h freshness budget. [Collection and source configuration](ai-infrastructure-operations.md). |
 | `radon-refresh.timer` | 60s | Schedules data-refresh sweeps |
 | `radon-vcg-refresh.timer` | Mon-Fri 13-21 UTC every 5 min | Autonomous VCG scan |
 | `radon-portfolio-sync.timer` | Mon-Fri 04:00-19:59 ET every 60s | Autonomous portfolio sync. Window matches `fill_monitor`'s `session_window=equity_ext` (04:00-20:00 ET) so outsideRth fills reach the positions table instead of waiting for the next cash open; `run_portfolio_refresh.sh` re-checks `is_equity_ext_session_et()` and exits 0 on holidays and outside the session. |

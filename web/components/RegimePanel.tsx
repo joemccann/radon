@@ -34,7 +34,7 @@ import AtsVenueSharePanel from "./equibles-ats-venue-share/AtsVenueSharePanel";
 import EquiblesShortCrowdingPanel from "./equibles/EquiblesShortCrowdingPanel";
 import GammaRotationPanel from "./GammaRotationPanel";
 import StreaksPanel from "./StreaksPanel";
-import LlmTokenIndexCard from "./LlmTokenIndexCard";
+import AiInfrastructurePanel from "./AiInfrastructurePanel";
 import BacktestPanel from "./BacktestPanel";
 import SpectralLoader from "./SpectralLoader";
 import SectionEmptyState from "./SectionEmptyState";
@@ -507,7 +507,7 @@ export default function RegimePanel({
   }
 
   if (activeTab === "llm") {
-    return renderShell(<LlmTokenIndexCard />);
+    return renderShell(<AiInfrastructurePanel />);
   }
 
   // While the first payload is being fetched OR an explicit sync is running,

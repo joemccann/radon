@@ -68,7 +68,7 @@ export function classifyRateTier(
 // of fresh per-resource tier-A budgets (R-652). Drift pin:
 // rel244-demo-rate-budget.test.ts fails when a new segment ships unlisted.
 export const KNOWN_API_SEGMENTS: ReadonlySet<string> = new Set([
-  "admin", "alerts", "assistant", "attribution", "backtest", "blotter",
+  "admin", "ai-cycle", "alerts", "assistant", "attribution", "backtest", "blotter",
   "bookmarks", "bpi", "breadth", "cash-flows", "catalysts", "cor",
   "credentials", "credit-spread", "discover", "dispersion", "divyield",
   "equibles-ats-venue-share", "equibles-cot-positioning",

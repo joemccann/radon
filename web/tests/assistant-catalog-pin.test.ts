@@ -87,6 +87,7 @@ const PINNED: Record<string, PinnedCapability> = {
   "knowledge/search": "read",
   "leap": "read",
   "leap/scan": "read.spawn",
+  "ai-cycle": "read",
   "llm-token-index": "read",
   "margin-debt": "read",
   "menthorq/[command]/image": "read",

@@ -32,7 +32,7 @@ for FastAPI and scripts, plus `web/.env` for Next.js.
 | **MarketDataWorks (MDW)** | Inbound shared-secret used by MDW → FastAPI pushes that feed CTA enrichment. Validates `X-API-Key` header. | `MDW_API_KEY` | Vendor-issued |
 | **The Market Ear** | Real-time intraday news scraped by `scripts/newsfeed/`. Headless Playwright login; session cached at `data/newsfeed-storage.json` (~30d), full re-auth ~6h. | `THEMARKETEAR_EMAIL`, `THEMARKETEAR_PASSWORD` | [themarketear.com](https://themarketear.com/) (paid subscription) |
 | **Cerebras** | Newsfeed text tagger (gpt-oss-120b → qwen-3 fallback). Falls back to Anthropic when unset. | `CEREBRAS_API_KEY` | [cerebras.ai](https://www.cerebras.ai/inference) |
-| **Artificial Analysis** | LLM Token Expenditure Index (`/regime/llm`, daily timer). Free tier 1000 req/day. | `ARTIFICIAL_ANALYSIS_API_KEY` | [artificialanalysis.ai](https://artificialanalysis.ai/login) → Insights dashboard |
+| **Artificial Analysis** | Legacy LLM list-price proxy and fixed inference basket (`/regime/llm`). New collector reserves a 450-request UTC daily budget; entitlement and redistribution rights require verification. | `ARTIFICIAL_ANALYSIS_API_KEY` | [artificialanalysis.ai](https://artificialanalysis.ai/login) → Insights dashboard |
 | **Exa** | Company and market research surfaces. | `EXA_API_KEY` | [dashboard.exa.ai](https://dashboard.exa.ai/api-keys) |
 
 ## Infrastructure (production)
@@ -56,3 +56,7 @@ for FastAPI and scripts, plus `web/.env` for Next.js.
 | **Yahoo Finance** | Last-resort price fallback when IB, UW and Robinhood all fail. Never the first or second source. | none | Public API |
 
 **Robinhood non-dependencies (deliberate):** no pip package — `requests` speaks the MCP JSON-RPC directly; unofficial wrappers (robin-stocks, meow-meow-hood, private `api.robinhood.com` scrapers) are forbidden; the Banking MCP (`banking-agent.robinhood.com`) is out of scope; the crypto REST surface (`trading.robinhood.com`) is out of scope; execution stays on IB; the `rh_crowding` series is descriptive retail-crowding context only and cannot trip the three gates (convexity, edge, fractional Kelly).
+
+## AI infrastructure evidence
+
+`/regime/llm` now groups Demand, Compute, Delivery and Finance. The collector uses OpenRouter, Vercel AI Gateway, GPU Rental Prices, Artificial Analysis, SEC, EIA and Vast for their specific published measurements. Missing credentials and unsupported feeds remain visible source states. Issuer disclosures require reviewed imports; no automatic filing-text extraction is claimed. See [source configuration and limits](ai-infrastructure-operations.md) and [primary-statement reconciliation](ai-infrastructure-verification.md).

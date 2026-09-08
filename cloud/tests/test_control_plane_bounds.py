@@ -172,6 +172,9 @@ class TestDeadManDoesNotCryWolf:
 # Pinned to the full scheduled-unit set main adopted in PR #73 (2026-08-22):
 # every timer-owned unit CI may publish. Growing it is a review decision.
 EXPECTED_AUTO_SYNC_UNITS = (
+    # AI evidence daily collector: deliberately authorize these two scheduled units.
+    "radon-ai-cycle.service",
+    "radon-ai-cycle.timer",
     "radon-bpi.service",
     "radon-bpi.timer",
     "radon-breadth.service",

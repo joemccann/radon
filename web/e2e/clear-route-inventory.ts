@@ -22,7 +22,7 @@ const regimeLoaded: Record<string, string> = {
   curve: '[data-testid="yield-curve-chart-section"]', dispersion: '[data-testid="dispersion-chart-section"]', divyield: '[data-testid="divyield-chart-section"]',
   gex: '[data-testid="gex-laplace-chart"]', grg: '[data-testid="grg-chart"]', hhlev: '[data-testid="hhlev-chart-section"]', hyad: '[data-testid="hyad-chart-section"]',
   "iei-hyg": '[data-testid="iei-hyg-chart-section"]', "iv-spread": '[data-testid="iv-spread-chart-section"]', ivrank: '[data-testid="ivrank-chart-section"]',
-  llm: '[data-testid="llm-token-index-chart"]', "ma-ratio": '[data-testid="ma-ratio-chart-section"]', margin: '[data-testid="margin-debt-chart-section"]',
+  llm: '[data-testid="ai-infrastructure-panel"]', "ma-ratio": '[data-testid="ma-ratio-chart-section"]', margin: '[data-testid="margin-debt-chart-section"]',
   short: '[data-testid="short-crowding-table"]', skew: '[data-testid="skew-chart-section"]', skew2d: '[data-testid="skew2d-chart-section"]',
   straddle: '[data-testid="straddle-chart-section"]', streaks: '[data-testid="streaks-chart-section"]', trin: '[data-testid="trin-chart-section"]',
   vcg: '[data-testid="vcg-history-chart-section"]', vixcor: '[data-testid="vixcor-chart-section"]', vixts: '[data-testid="vixts-chart-section"]',

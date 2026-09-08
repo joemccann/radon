@@ -191,6 +191,7 @@ export default function ClearOverview({ portfolio, prices = EMPTY_PRICES }: { po
           <p>Explore ranked structures, institutional flow, and the catalysts behind your next decision.</p>
           <Link href="/scanner" className={styles.primary}>Explore research <ArrowRight size={17} aria-hidden="true" /></Link>
           <Link href="/watchlist" className={styles.secondaryAction}>Open your watchlist</Link>
+          <Link href="/regime/llm" className={styles.textLink}>AI infrastructure evidence <ArrowUpRight size={15} aria-hidden="true" /></Link>
           <a href="#clear-market-intelligence" className={styles.textLink}>News, signals &amp; catalysts <ArrowRight size={15} aria-hidden="true" /></a>
         </section>
       </aside>

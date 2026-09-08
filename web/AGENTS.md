@@ -83,3 +83,13 @@ Applies under `web/`. Mirrors `web/CLAUDE.md`; prefer the Claude file if it is n
 - Dashboard uses the Clear account overview and quiet risk/research rail; the complete newsfeed, scanner, catalysts and engine sections remain below it with existing visibility controls.
 - Mobile shell activates at `<=640px`; PWA service worker must bypass `/api`, `/_next/data`, and `/ws`.
 - The realtime prices socket is owned by `RealtimePricesProvider` in root `Providers`, never by the per-page `WorkspaceShell` (App Router remounts pages on navigation; a shell-owned socket reconnects and re-tickets on every route change). Shells publish subscriptions via `publishSubscriptions`; do not call `usePrices` from page-level components. `TickerSearch` connects on first focus, not on mount. Pins: `web/tests/realtime-socket-ownership-contract.test.ts`, `web/tests/realtime-prices-navigation-persistence.test.tsx`.
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

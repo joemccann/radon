@@ -1478,62 +1478,64 @@ compose_body_is_valid() {
   # Comments must never satisfy or trip a structural gate.
   body="$(grep -Ev '^[[:space:]]*#' "$candidate")" || body=""
 
-  printf '%s\n' "$body" | grep -Eq '^services:' || {
+  # Early-exiting consumers must not SIGPIPE a producer under pipefail:
+  # a failed producer inverts both required matches and forbidden-match guards.
+  grep -Eq '^services:' <<< "$body" || {
     echo "compose validation failed: ${dest} declares no services" >&2
     return 1
   }
-  printf '%s\n' "$body" | grep -Eq '^[[:space:]]+container_name:[[:space:]]*ib-gateway[[:space:]]*$' || {
+  grep -Eq '^[[:space:]]+container_name:[[:space:]]*ib-gateway[[:space:]]*$' <<< "$body" || {
     echo "compose validation failed: ${dest} does not pin container_name ib-gateway" >&2
     return 1
   }
-  if printf '%s\n' "$body" | grep -Eq "^[[:space:]]*privileged:[[:space:]]*[\"']?true"; then
+  if grep -Eq "^[[:space:]]*privileged:[[:space:]]*[\"']?true" <<< "$body"; then
     echo "compose validation failed: ${dest} requests privileged" >&2
     return 1
   fi
   # The Gateway body's only volume is the named ib-config volume, so any
   # short-form entry whose source is an absolute host path (quoted or not)
   # is a host mount root must not perform. There is no allowlist.
-  if printf '%s\n' "$body" | grep -Eq "^[[:space:]]*-[[:space:]]*[\"']?/"; then
+  if grep -Eq "^[[:space:]]*-[[:space:]]*[\"']?/" <<< "$body"; then
     echo "compose validation failed: ${dest} binds an absolute host path" >&2
     return 1
   fi
-  if printf '%s\n' "$body" | grep -Eq "type:[[:space:]]*[\"']?bind"; then
+  if grep -Eq "type:[[:space:]]*[\"']?bind" <<< "$body"; then
     echo "compose validation failed: ${dest} declares a long-form bind mount" >&2
     return 1
   fi
-  if printf '%s\n' "$body" | grep -Eq "source:[[:space:]]*[\"']?/"; then
+  if grep -Eq "source:[[:space:]]*[\"']?/" <<< "$body"; then
     echo "compose validation failed: ${dest} declares an absolute long-form source" >&2
     return 1
   fi
-  if printf '%s\n' "$body" | grep -q 'docker\.sock'; then
+  if grep -q 'docker\.sock' <<< "$body"; then
     echo "compose validation failed: ${dest} mounts the docker socket" >&2
     return 1
   fi
   # R-668 (REL-249): every host-namespace join is denied, not only pid — ipc,
   # userns_mode, uts and cgroup widen the container's runtime the same way.
-  if printf '%s\n' "$body" | grep -Eq '^[[:space:]]*(pid|ipc|userns_mode|uts|cgroup):'; then
+  if grep -Eq '^[[:space:]]*(pid|ipc|userns_mode|uts|cgroup):' <<< "$body"; then
     echo "compose validation failed: ${dest} joins a host namespace (pid/ipc/userns_mode/uts/cgroup)" >&2
     return 1
   fi
-  if printf '%s\n' "$body" | grep -Eq "^[[:space:]]*network_mode:[[:space:]]*[\"']?host"; then
+  if grep -Eq "^[[:space:]]*network_mode:[[:space:]]*[\"']?host" <<< "$body"; then
     echo "compose validation failed: ${dest} requests host networking" >&2
     return 1
   fi
-  if printf '%s\n' "$body" | grep -Eq '^[[:space:]]*(cap_add|devices):'; then
+  if grep -Eq '^[[:space:]]*(cap_add|devices):' <<< "$body"; then
     echo "compose validation failed: ${dest} adds capabilities or devices" >&2
     return 1
   fi
-  if printf '%s\n' "$body" | grep -Eq "^[[:space:]]*user:[[:space:]]*[\"']?(root|0)[\"']?[[:space:]]*$"; then
+  if grep -Eq "^[[:space:]]*user:[[:space:]]*[\"']?(root|0)[\"']?[[:space:]]*$" <<< "$body"; then
     echo "compose validation failed: ${dest} runs as root in the container" >&2
     return 1
   fi
   # security_opt may only tighten: block form, no-new-privileges:true entries
   # and nothing else. The inline form is refused outright.
-  if printf '%s\n' "$body" | grep -Eq '^[[:space:]]*security_opt:[[:space:]]*[^[:space:]]'; then
+  if grep -Eq '^[[:space:]]*security_opt:[[:space:]]*[^[:space:]]' <<< "$body"; then
     echo "compose validation failed: ${dest} uses inline security_opt" >&2
     return 1
   fi
-  if ! printf '%s\n' "$body" | awk '
+  if ! awk '
     /^[[:space:]]*security_opt:[[:space:]]*$/ { inso = 1; next }
     inso == 1 && /^[[:space:]]*-[[:space:]]*/ {
       entry = $0
@@ -1544,7 +1546,7 @@ compose_body_is_valid() {
     }
     inso == 1 { inso = 0 }
     END { exit bad }
-  '; then
+  ' <<< "$body"; then
     echo "compose validation failed: ${dest} sets a security_opt beyond no-new-privileges" >&2
     return 1
   fi

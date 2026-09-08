@@ -77,6 +77,7 @@ CATALOG: dict[CatalogKey, Capability] = {
     ("GET", "/knowledge/prior-evals"): "read",
     ("POST", "/knowledge/search"): "read",
     ("POST", "/leap/scan"): "read.spawn",
+    ("GET", "/ai-cycle"): "read",
     ("GET", "/llm-token-index"): "read",
     ("GET", "/market-calendar"): "read",
     ("POST", "/market-calendar/refresh"): "read.spawn",

@@ -5398,3 +5398,37 @@ Reduced-capability rung: remediate P1 findings only.
 Review: PR339 merge was rejected because skipped matrices emit template names rather than required shard names; no bypass attempted. PR340 notification accepted HTTP200; PR339 notification accepted before this missing-context issue was discovered, so do not send a duplicate.
 
 Verification: full root Python 12,282 passed, 19 skipped, 16 subtests. Full cloud 1,860 passed, 7 skipped, 6 failures; five missing-Caddy failures reproduce on unchanged main, and the operator-concurrency timing test passed unchanged on serial rerun (also green on baseline).
+
+
+## AI infrastructure implementation (PR126 follow-up)
+- [x] T1 Source contracts and reproducible retrieval verification. depends_on: []
+- [x] T2 Versioned observations, durable storage, collectors and scheduling. depends_on: [T1]
+- [x] T3 Comparable transforms, financial reconciliation, legacy preservation. depends_on: [T2]
+- [x] T4 Four-view UI, source evidence, dashboard/ticker handoff. depends_on: [T3]
+- [x] T5 Publication-time shadow evaluation and limitation report. depends_on: [T2,T3]
+- [x] T6 Focused tests, full suites, browser verification, PR green, show-me handoff. depends_on: [T4,T5]
+Graph: T1 -> T2 -> T3 -> T4 -> T6; T2 -> T5; T3 -> T5 -> T6.
+Specification: docs/ai-infrastructure-plan.md; execution contract: docs/ai-infrastructure-contract.md.
+Worktree: /Users/joemccann/dev/apps/finance/radon-ai-infrastructure, branch feat/ai-infrastructure-evidence.
+Enabled observations must be reproducible; unentitled/experimental sources stay explicit unavailable and never fabricate values. Shadow validation ships as a reproducible evaluator; no invented history or claimed predictive validity.
+
+### Review
+- Implemented in the isolated worktree with collector, core and UI agents; all feature work reviewed and frozen.
+- Verified 1,962 source observations, five issuer cash-flow mappings and 25 rolling TTM coverage points. Three of 15 indicator groups have available evidence; missing entitlements/cohorts remain explicit.
+- Production build and typecheck pass; six Playwright scenarios and an actual-source capture sweep pass, with 15 screenshots and zero page errors or horizontal overflow.
+- Full suites and exact-head PR CI remain release gates. No production collection, order execution, merge or deployment performed.
+- Final full application Python: 12,392 passed, 19 skipped, 16 subtests passed across two disjoint partitions; all initial failures resolved and rerun green.
+- Full cloud rerun: 1,873 passed, six skipped; deployment inventory/bootstrap and optional-env contracts repaired. Final focused AI/code-map/watchdog/order-worker contracts: 140 passed.
+- Full root Vitest: 9,103 passed across 924 files; final TypeScript check passed. Exact-head PR checks remain pending before final handoff.
+- PR346 integration: merged main00b6aa22, regenerated maps; updated application partition 11,759 passed plus one owner-doc failure, repaired with146/146 ownership/code-map/Equibles regressions. Combined application coverage now12,394 tests including the unchanged634-test partition.
+- Release verification: PR346 head5fa75a9b has all applicable CI checks green, including coverage and Playwright; 15-image show-me artifact verified with seven selectors and desktop/mobile checks. Final release-head status is tracked on PR346 before notification.
+
+### Final-head CI repair
+- [x] T7 Fix the existing compose-validation producer/grep pipeline race with deterministic regression coverage. depends_on: [T6]
+- [x] T8 Verify the repair, publish and supervise all latest-head checks before final notification. depends_on: [T7]
+Graph extension: T6 -> T7 -> T8.
+- Evidence: run34172973979 cloud al rejected the poisoned body with a spurious no-services diagnostic after printf received SIGPIPE. Preserve every compose safety gate and its three-copy parity.
+- T7 red evidence: six deterministic large-body/small-pipe failures across all three Compose validators; trusted-body rejection and privileged-body acceptance both reproduced.
+- T7 green evidence: 125 focused tests, nine large-body regressions, three-copy parity and shell syntax all passed. Full cloud rerun and latest-head CI remain T8 gates.
+- T8 local verification: final full cloud suite 1,882 passed, six skipped after the Compose repair; latest-head CI is the remaining release gate.
+- T8 release evidence: repaired head6fa1f028 passed all31 applicable checks, including both cloud shards, coverage and Playwright. All agents completed; worktree code is verified. Latest ledger-head status remains visible on PR346 and is checked before notification.

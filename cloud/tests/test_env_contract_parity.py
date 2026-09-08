@@ -31,6 +31,7 @@ CONTRACT = CLOUD / "config" / "required-env.txt"
 # rather than an oversight. Adding a key here is the explicit alternative to
 # adding it to required-env.txt.
 EXEMPT: dict[str, str] = {
+    "RADON_AI_CYCLE_DB_PATH": "optional isolated SQLite verification override; unset selects the production direct-cloud store",
     # Set by the unit itself, not by the env file: the fleet drop-in
     # radon-.service.d/common.conf and per-unit `Environment=` lines own these.
     "RADON_DB_NO_REPLICA": "set by cloud/services/radon-.service.d/common.conf",

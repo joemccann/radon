@@ -66,6 +66,8 @@ const SETUP_TOKEN_GUARDED_ROUTES = [
 // lands either here or in a guarded list above; the filesystem pin below
 // fails until that decision is made (the publicShareRoutes.ts discipline).
 const MIDDLEWARE_PERIMETER_ONLY_ROUTES = [
+  // AI infrastructure is a cache-only research read, like llm-token-index.
+  "ai-cycle",
   "bookmarks", "bookmarks/[post_id]", "bpi", "catalysts",
   // cor/skew2d/vol-cone/equibles-*: read-only market-data indicators (R-079
   // classification) — same posture as bpi/margin-debt/straddle.

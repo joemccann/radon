@@ -103,7 +103,11 @@ runtime the same way (R-668/REL-249), and the deny greps match quoted values
 too (`privileged: "true"` / `'true'` — the bare-`true` grep alone waved the
 quoted form through until T-441 caught it). The three copies
 (deploy-root-helper, bootstrap-control-plane, setup-vps) stay byte-identical;
-a parity test in `cloud/tests/test_rel234_compose_gate.py` pins them.
+a parity test in `cloud/tests/test_rel234_compose_gate.py` pins them. Their
+body predicates consume here-strings, never `printf | grep -q` or another
+early-exit producer pipeline: under `pipefail`, SIGPIPE can reject a safe body
+or bypass a forbidden match. Large-body regressions exercise both outcomes
+in all three copies.
 
 **The broker host gets none of this from CI.** `.github/workflows/ci.yml`
 deploys to a single `secrets.VPS_HOST`, and `sync-control-plane` reads
@@ -344,6 +348,16 @@ Immutable runners under `~/.radon-deploy-runners/` are extracted `a-w`.
 **Backblaze B2 (portfolio cold-archive, production required):** `RADON_ARCHIVE_S3_ENDPOINT`, `RADON_ARCHIVE_S3_BUCKET`, `RADON_ARCHIVE_S3_ACCESS_KEY_ID`, `RADON_ARCHIVE_S3_SECRET_ACCESS_KEY`, `RADON_ARCHIVE_S3_REGION` (+ optional `RADON_ARCHIVE_S3_PREFIX`). S3-compatible API to bucket `radon-archive`. Used by `radon-portfolio-archive.service` / `scripts/archive_portfolio_snapshots.py`. Not Cloudflare R2. Full contract: root `.env.example`, `docs/cloud-services.md` "Portfolio archive".
 
 ## Systemd And Drift
+
+`setup-vps.sh` includes `radon-ai-cycle.service` and its timer in the full-host
+installation inventory. Setup installs both units and enables only the timer;
+existing hosts receive the same pair through the hash-pinned `install-units`
+path. The timer collects AI infrastructure observations daily at 07:15 UTC
+with up to five minutes of jitter. Provider credentials are optional source
+entitlements; missing keys leave those measurements unavailable. Collection,
+reviewed disclosures and source limits are documented in
+[`docs/ai-infrastructure-operations.md`](../docs/ai-infrastructure-operations.md).
+
 
 Canonical unit files are copied root-owned to `/etc/systemd/system`; they are
 not symlinked from the checkout.

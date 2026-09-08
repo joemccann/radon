@@ -415,3 +415,30 @@ class TestFileTree:
         for relative_path in planned_files:
             full = root / relative_path
             assert full.exists(), f"required cloud file {relative_path} is missing"
+
+
+def test_bootstrap_installs_ai_cycle_pair_and_enables_only_timer(tmp_path, scripts_dir, services_dir):
+    """Exercise real bootstrap inventory and classification with no host writes."""
+    log = tmp_path / "bootstrap-calls.log"
+    script = r'''
+source "$SETUP"
+stage_from_checkout() { printf 'stage %s\n' "$*" >> "$CALLS"; }
+rm() { :; }
+systemctl() { printf 'systemctl %s\n' "$*" >> "$CALLS"; }
+copy_systemd_services
+enable_services
+'''
+    result = subprocess.run(
+        ["bash", "-c", script],
+        env={**os.environ, "RADON_SETUP_SOURCE_ONLY": "1", "RADON_CLOUD_DIR": str(services_dir.parent), "SETUP": str(scripts_dir / "setup-vps.sh"), "CALLS": str(log)},
+        capture_output=True, text=True, timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    calls = log.read_text().splitlines()
+    for suffix in ("service", "timer"):
+        assert any(f"/services/radon-ai-cycle.{suffix} /etc/systemd/system/radon-ai-cycle.{suffix} 0644 -o root -g root" in call for call in calls if call.startswith("stage "))
+    disabled = next(call.split()[2:] for call in calls if call.startswith("systemctl disable "))
+    enabled = next(call.split()[2:] for call in calls if call.startswith("systemctl enable "))
+    assert "radon-ai-cycle.service" in disabled
+    assert "radon-ai-cycle.timer" in enabled
+    assert "radon-ai-cycle.service" not in enabled

@@ -22,7 +22,9 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -303,3 +305,57 @@ def test_shim_refuses_a_group_or_other_writable_env_file(
     result = _shim_run(box, "compose-up")
     assert result.returncode == 78
     assert "writable" in result.stderr
+
+
+@pytest.mark.parametrize("which", sorted(SCRIPTS))
+@pytest.mark.parametrize("case", ["trusted", "privileged", "security-opt"])
+def test_large_compose_body_has_no_pipefail_inversion(which, case, tmp_path):
+    """Early grep/awk exit must neither reject safe bodies nor bypass deny rules.
+
+    Two MiB exceeds normal pipe capacity on Darwin and Linux. On Linux the
+    grep shim additionally shrinks its input pipe to one page before exec,
+    making the CI producer-SIGPIPE condition independent of scheduling/load.
+    Only process-local pipes and temporary artifacts are touched.
+    """
+    real_grep = shutil.which("grep")
+    assert real_grep
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    grep = bindir / "grep"
+    grep.write_text(
+        f"#!{sys.executable}\n"
+        "import fcntl, os, sys\n"
+        "if hasattr(fcntl, 'F_SETPIPE_SZ'):\n"
+        "    try: fcntl.fcntl(0, fcntl.F_SETPIPE_SZ, 4096)\n"
+        "    except OSError: pass\n"
+        f"os.execv({real_grep!r}, [{real_grep!r}, *sys.argv[1:]])\n"
+    )
+    grep.chmod(0o755)
+    padding = "x-padding: " + "a" * (2 * 1024 * 1024) + "\n"
+    if case == "trusted":
+        body, expected = BASE + padding, None
+    elif case == "privileged":
+        # Required positive matches come last so a failure here specifically
+        # exercises the deny predicate, not the earlier services requirement.
+        body, expected = "privileged: 'true'\n" + padding + BASE, "requests privileged"
+    else:
+        body = "security_opt:\n  - seccomp:unconfined\n" + padding + BASE
+        expected = "sets a security_opt beyond no-new-privileges"
+    candidate = tmp_path / "large.yml"
+    candidate.write_text(body)
+    snippet = (
+        "set -uo pipefail\ndocker() { return 1; }\n"
+        + _function_text(SCRIPTS[which])
+        + '\ncompose_body_is_valid "$CANDIDATE" test-large\n'
+    )
+    result = subprocess.run(
+        ["bash", "-c", snippet],
+        env={**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}", "CANDIDATE": str(candidate)},
+        capture_output=True, text=True, timeout=15,
+    )
+    if expected is None:
+        assert result.returncode == 0, result.stderr
+    else:
+        assert result.returncode != 0, f"{which} accepted {case}: {result.stderr}"
+        assert expected in result.stderr
+    assert "Broken pipe" not in result.stderr
