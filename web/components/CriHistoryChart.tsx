@@ -3,6 +3,7 @@
 import { useRef, useEffect, useMemo, useState } from "react";
 import * as d3 from "d3";
 import ChartPanel from "./charts/ChartPanel";
+import { buildTimeXAxisTickValues, chartXAxisTickAnchor } from "@/lib/chartXAxis";
 
 export interface CriHistoryEntry {
   date: string;
@@ -69,6 +70,8 @@ interface CriHistoryChartProps<T extends { date: string }> {
   liveValues?: Partial<Record<keyof T, number>>;
   /** X-axis tick label override; defaults to "%b %-d" (e.g. "Mar 5"). */
   xTickFormat?: (d: Date) => string;
+  /** Minimum rendered distance between x-axis labels. Increase for long labels. */
+  xTickMinSpacing?: number;
 }
 
 const MARGIN = { top: 20, right: 56, bottom: 44, left: 48 };
@@ -82,35 +85,13 @@ function defaultFormat(v: number): string {
   return v.toFixed(2);
 }
 
-export function buildCriHistoryXAxisTickValues(dates: Date[], innerWidth: number): Date[] {
-  if (dates.length <= 1) return dates;
-
-  const maxLabels = Math.max(4, Math.min(7, Math.floor(innerWidth / 110)));
-  if (dates.length <= maxLabels) return dates;
-
-  const step = (dates.length - 1) / (maxLabels - 1);
-  const indices = new Set<number>();
-  for (let i = 0; i < maxLabels; i += 1) {
-    indices.add(Math.round(i * step));
-  }
-  indices.add(0);
-  indices.add(dates.length - 1);
-
-  return [...indices]
-    .sort((a, b) => a - b)
-    .map((index) => dates[index]);
-}
-
-export function shouldRotateCriHistoryXAxisLabels(innerWidth: number, tickCount: number): boolean {
-  return tickCount > 5 || innerWidth < 560;
-}
-
 export default function CriHistoryChart<T extends { date: string }>({
   history,
   series,
   title,
   liveValues,
   xTickFormat,
+  xTickMinSpacing,
   sharedAxis = false,
   referenceLevels,
   referenceBands,
@@ -402,14 +383,14 @@ export default function CriHistoryChart<T extends { date: string }>({
       });
 
     // X-axis — use explicit sparse ticks so labels stay legible on 20-session charts
-    const xTickValues = buildCriHistoryXAxisTickValues(dates, innerW);
-    const rotateXAxisLabels = shouldRotateCriHistoryXAxisLabels(innerW, xTickValues.length);
+    const xTickValues = buildTimeXAxisTickValues(dates, innerW, xTickMinSpacing);
     const xAxis = d3
       .axisBottom(xScale)
       .tickValues(xTickValues)
       .tickFormat((d) => (xTickFormat ?? d3.timeFormat("%b %-d"))(d as Date));
 
     g.append("g")
+      .attr("data-testid", "chart-x-axis")
       .attr("transform", `translate(0,${innerH})`)
       .call(xAxis)
       .call((axis) => {
@@ -420,10 +401,9 @@ export default function CriHistoryChart<T extends { date: string }>({
           .attr("fill", CHART_AXIS_MUTED)
           .attr("font-size", "var(--text-meta)")
           .attr("font-family", "IBM Plex Mono, monospace")
-          .attr("text-anchor", rotateXAxisLabels ? "end" : "middle")
-          .attr("dx", rotateXAxisLabels ? "-0.4em" : "0")
-          .attr("dy", rotateXAxisLabels ? "0.6em" : "0.9em")
-          .attr("transform", rotateXAxisLabels ? "rotate(-24)" : null);
+          .attr("text-anchor", (_d, index, nodes) => chartXAxisTickAnchor(index, nodes.length))
+          .attr("dx", "0")
+          .attr("dy", "0.9em");
       });
 
     // Invisible overlay for tooltip — supports both mouse hover and touch drag.
@@ -468,7 +448,7 @@ export default function CriHistoryChart<T extends { date: string }>({
       .on("touchend touchcancel", function () {
         setTooltip({ visible: false, x: 0, y: 0, d: null });
       });
-  }, [chartData, width, series, leftSeries, rightSeries, xTickFormat, sharedAxis, referenceLevels, referenceBands]);
+  }, [chartData, width, series, leftSeries, rightSeries, liveValues, xTickFormat, xTickMinSpacing, sharedAxis, referenceLevels, referenceBands]);
 
   const showEmpty = !chartData || chartData.length < 2;
   const tooltipSideStyle =

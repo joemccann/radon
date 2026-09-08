@@ -70,13 +70,12 @@ function formatSessionTime(raw: string | null | undefined): string {
 }
 
 function formatHourlyTick(d: Date): string {
-  return d.toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    timeZone: SESSION_TZ,
-  });
+  const date = d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: SESSION_TZ });
+  const time = d
+    .toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: SESSION_TZ })
+    .replace(" AM", "a")
+    .replace(" PM", "p");
+  return `${date} ${time}`;
 }
 
 export default function TrinPanel() {
@@ -245,6 +244,7 @@ export default function TrinPanel() {
           series={chartSeries}
           title="TRIN 60 MIN"
           xTickFormat={formatHourlyTick}
+          xTickMinSpacing={180}
           sharedAxis
           referenceLevels={[
             { value: ZONE_LOW, label: `LOW ZONE ${formatTrin(ZONE_LOW)}`, color: "var(--negative)" },

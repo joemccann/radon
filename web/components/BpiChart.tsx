@@ -4,11 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import * as d3 from "d3";
 
 import ChartPanel from "./charts/ChartPanel";
-import {
-  buildCriHistoryXAxisTickValues,
-  shouldRotateCriHistoryXAxisLabels,
-} from "./CriHistoryChart";
 import { chartSeriesColor } from "@/lib/chartSystem";
+import { buildTimeXAxisTickValues, chartXAxisTickAnchor } from "@/lib/chartXAxis";
 import type { BpiChartEntry, BpiThresholds } from "@/lib/bpi";
 
 /**
@@ -230,9 +227,9 @@ export default function BpiChart({ entries, thresholds, indexSymbol }: BpiChartP
       .text("PERCENT ON P&F BUY SIGNAL");
 
     // X-axis with the shared sparse-tick idiom.
-    const xTickValues = buildCriHistoryXAxisTickValues(dates, innerW);
-    const rotateXAxisLabels = shouldRotateCriHistoryXAxisLabels(innerW, xTickValues.length);
+    const xTickValues = buildTimeXAxisTickValues(dates, innerW);
     g.append("g")
+      .attr("data-testid", "chart-x-axis")
       .attr("transform", `translate(0,${innerH})`)
       .call(
         d3
@@ -248,10 +245,9 @@ export default function BpiChart({ entries, thresholds, indexSymbol }: BpiChartP
           .attr("fill", CHART_AXIS_MUTED)
           .attr("font-size", "var(--text-meta)")
           .attr("font-family", "IBM Plex Mono, monospace")
-          .attr("text-anchor", rotateXAxisLabels ? "end" : "middle")
-          .attr("dx", rotateXAxisLabels ? "-0.4em" : "0")
-          .attr("dy", rotateXAxisLabels ? "0.6em" : "0.9em")
-          .attr("transform", rotateXAxisLabels ? "rotate(-24)" : null);
+          .attr("text-anchor", (_d, index, nodes) => chartXAxisTickAnchor(index, nodes.length))
+          .attr("dx", "0")
+          .attr("dy", "0.9em");
       });
 
     // Tooltip overlay — mouse hover + touch drag, bisection over the slice.

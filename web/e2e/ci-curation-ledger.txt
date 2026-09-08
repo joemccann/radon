@@ -288,3 +288,7 @@ ws-connection-stability.spec.ts
 #   curated P0 financial smoke; 2/2 sharing cases passed with authenticated
 #   test bypass and synthetic research data.
 newsfeed-sharing.spec.ts
+
+# REVIEWED 2026-09-08 trin-tab.spec.ts - local Chromium desktop/mobile
+#   verification passed 4/4; x-axis bounding boxes and screenshots were checked
+#   at 1,440px and 390px with irregular market-session timestamps.
