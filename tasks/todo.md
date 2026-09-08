@@ -5858,3 +5858,11 @@ Dependency graph: T1 -> T2 -> T3 -> T4 -> T5.
 - Regenerate codemap from a clean index export so local generated sources do not enter the committed graph.
 
 ---
+
+# NOAA signed-temperature repair (2026-09-08)
+
+- [x] T1 depends_on: [] - Reproduce winter-window rejection against the authoritative NOAA daily-summary response.
+- [x] T2 depends_on: [T1] - Add a negative-temperature regression and parse signed finite weather measurements.
+- [ ] T3 depends_on: [T2] - Run focused checks, ship through exact-head CI/deployment, resume, and audit NOAA coverage.
+
+Dependency graph: T1 -> T2 -> T3.

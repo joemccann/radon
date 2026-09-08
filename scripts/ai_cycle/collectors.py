@@ -128,6 +128,15 @@ def number(value):
     return parsed
 
 
+def temperature_celsius(value):
+    if isinstance(value, bool):
+        raise SourceError("Boolean is not a temperature measurement")
+    parsed = float(value)
+    if not math.isfinite(parsed) or not -100 <= parsed <= 100:
+        raise SourceError("Temperature measurement is outside physical validation bounds")
+    return parsed
+
+
 def observation(
     source,
     indicator,
@@ -550,7 +559,9 @@ def parse_noaa(payload, digest, fetched, start=None, end=None):
         seen.add((station, day))
         if row.get("TMAX") in (None, "") or row.get("TMIN") in (None, ""):
             continue
-        mean = (number(row["TMAX"]) + number(row["TMIN"])) / 2
+        maximum = temperature_celsius(row["TMAX"])
+        minimum = temperature_celsius(row["TMIN"])
+        mean = (maximum + minimum) / 2
         result.append(
             observation(
                 "noaa",
@@ -567,8 +578,8 @@ def parse_noaa(payload, digest, fetched, start=None, end=None):
                 metadata={
                     "label": f"{row.get('NAME') or station} daily mean temperature",
                     "station": station,
-                    "tmax_c": number(row["TMAX"]),
-                    "tmin_c": number(row["TMIN"]),
+                    "tmax_c": maximum,
+                    "tmin_c": minimum,
                     "definition": "Mean of NOAA daily maximum and minimum air temperature; weather control only.",
                     "license": "U.S. government public data",
                 },

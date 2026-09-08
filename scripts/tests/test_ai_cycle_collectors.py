@@ -298,7 +298,7 @@ def test_eia_dom_and_unit_fail_closed():
 def test_noaa_skips_incomplete_station_days_without_losing_complete_rows():
     rows = parse_noaa(
         [
-            {"STATION": "USW00093738", "DATE": "2026-09-06", "TMAX": "30", "TMIN": "20"},
+            {"STATION": "USW00093738", "DATE": "2026-09-06", "TMAX": "30", "TMIN": "-10"},
             {"STATION": "USW00013743", "DATE": "2026-09-06", "TMAX": "", "TMIN": "19"},
         ],
         HASH,
@@ -307,7 +307,8 @@ def test_noaa_skips_incomplete_station_days_without_losing_complete_rows():
         "2026-09-06",
     )
     assert len(rows) == 1
-    assert rows[0]["value"] == 25
+    assert rows[0]["value"] == 10
+    assert rows[0]["metadata"]["tmin_c"] == -10
 
 
 def test_disclosure_cannot_import_unverified_memo_values():
