@@ -239,6 +239,28 @@ Hetzner host systemd is the production surface. Laptop dev uses launchd plists i
 
 **A phase is OK only on evidence (REL-187 / REL-188).** `ground_truth` resets the clone to the newest `ci.yml` push run that concluded success and that the tip descends from, not the raw tip, so a loop firing minutes after a red push does not spend its cycle on a tree CI already rejected; GitHub unreachable keeps the checked-out tip with a logged warning. And an `audit` or `remediate` phase whose agent exits 0 without committing to the nightly branch reports `INCOMPLETE (agent exited 0 without committing to the nightly branch)` and exits 75 rather than `OK`. Deliver is keyed on its verdict line instead, since a PR green first time needs no new commit.
 
+**A finished no-op is declared, not inferred.** HEAD alone cannot separate the
+stall that check was built for from a phase that ran end to end and honestly
+had nothing to commit, and on 2026-09-08 it scored the second as the first:
+testing's audit found no findings in its delta range and documentation's
+remediate found 0 source-actionable P0/P1 items, both ran to completion on the
+codex rung, and both were posted to their rolling issues as INCOMPLETE with
+exit 75. The four fallback loops therefore accept one declaration line from the
+agent, printed unindented at column 0 as the last thing it emits:
+
+```
+NIGHTLY PHASE NO-OP: loop=<slug> phase=<audit|remediate> <one-line reason>
+```
+
+`phase_declared_noop()` reads it under the same scoping discipline as the
+TRUNCATED (R-426) and cap (R-530, R-667) detectors — this round's log slice
+only, wrapper markers dropped, anchored at column 0 and naming this loop and
+this phase — because these loops audit their own wrappers and quote this
+contract, and a mention inside a fence must not satisfy it. A commit still
+wins on its own, silence is still INCOMPLETE, and the security loop is
+unaffected: it scores on its own completion marker, not on a commit.
+Contract: `scripts/tests/test_phase_noop_declaration.py`.
+
 **Cycle shape (2026-09-02).** `audit` (cap 2h, `RADON_WEEKEND_AUDIT_CAP_SECS`) records verified findings; `remediate` (cap 6h, `RADON_WEEKEND_REMEDIATE_CAP_SECS`) implements EVERY verified source-actionable finding as root-cause commits on one dated branch `<loop>/<YYYY-MM-DD>`; `deliver` (cap 3h, `RADON_WEEKEND_DELIVER_CAP_SECS`) pushes that branch, opens or updates ONE PR via `scripts/github_pr_output.py`, polls CI with `scripts/nightly_deliver.py watch`, fixes red checks on the branch, and ends by printing a verdict line the wrapper turns into the cycle's final notification. Deliver runs even when remediate exited non-zero (committed fixes are durable; CI decides). The loop never merges: the operator merges from the Pushover / issue line. An INCOMPLETE deliver records branch + PR number outside the clone (`~/radon-weekend/.<loop>-deliver/record.json`; the security loop also mirrors it in its private run-record) and the next fire resumes that branch and PR before opening a new one.
 
 | Loop | Fires (local) | Clone | Wrapper / plist | Issue label |

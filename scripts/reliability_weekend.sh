@@ -447,6 +447,25 @@ phase_committed() {
   [[ -n "$epoch" && "$epoch" -ge "$PHASE_START_EPOCH" ]]
 }
 
+# T-379's check reads "HEAD did not move" as proof the agent stalled, and that
+# is one of two causes. The other is a phase that ran to completion and had
+# nothing to commit: on 2026-09-08 testing/audit found no findings in its delta
+# range and documentation/remediate found 0 source-actionable P0/P1 items. Both
+# printed their full report on the codex rung and both were scored INCOMPLETE
+# with exit 75, on the rolling issue, for doing exactly what the contract asked.
+# HEAD alone cannot tell a stall from a finished no-op, so the agent declares
+# it. Scoped like the TRUNCATED (R-426) and cap (R-530, R-667) detectors: THIS
+# round's slice, wrapper markers dropped, and anchored at column 0 naming this
+# loop and phase — these loops audit their own wrappers and quote this contract,
+# so an indented mention inside a fence must not satisfy it. Silence is still
+# INCOMPLETE: only the printed line is a declaration.
+PHASE_NOOP_MARKER="NIGHTLY PHASE NO-OP:"
+phase_declared_noop() {
+  tail -c "+$((ROUND_LOG_MARK + 1))" "$RUN_LOG" 2>/dev/null \
+    | grep -v '^\[' \
+    | grep -qE "^${PHASE_NOOP_MARKER} loop=${LOOP_SLUG} phase=${PHASE}([[:space:]]|$)"
+}
+
 on_crash() {
   report "CRASHED (exit $?)" "wrapper died before the agent finished"
 }
@@ -1233,7 +1252,8 @@ run_phase() {
   # unfinished phase must exit non-zero so neither the dead-man nor launchd is
   # told it succeeded. The deliver phase is keyed on its verdict line below,
   # not on a commit: a PR that went green first time needs no new commit.
-  if [[ "$status" == OK && "$PHASE" != "deliver" ]] && ! phase_committed; then
+  if [[ "$status" == OK && "$PHASE" != "deliver" ]] \
+     && ! phase_committed && ! phase_declared_noop; then
     status="$INCOMPLETE_STATUS"
     RC=75
   fi

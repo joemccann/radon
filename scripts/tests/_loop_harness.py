@@ -78,6 +78,18 @@ def _clone(tmp_path: Path, wrapper: Path) -> Path:
     return repo
 
 
+# A clone whose HEAD never moves: `git rev-parse HEAD` returns the same value
+# the wrapper recorded at phase start, so phase_committed() is false.
+_GIT_FROZEN = (
+    "#!/bin/sh\n"
+    'case "$*" in\n'
+    '  *"rev-parse HEAD"*) echo frozen; exit 0 ;;\n'
+    '  *"--format=%ct"*) echo 1; exit 0 ;;\n'
+    "esac\n"
+    "exit 0\n"
+)
+
+
 def _stub_bin(
     tmp_path: Path,
     models_log: Path,
@@ -85,6 +97,7 @@ def _stub_bin(
     gh_log: Path,
     exhausted_line: str = QUOTA_LINE,
     exhausted_exit: int = 1,
+    committed: bool = True,
 ) -> Path:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -127,7 +140,14 @@ def _stub_bin(
             "done\n"
             'exec "$@"\n'
         ),
-        "git": '#!/bin/sh\n# REL-188: the wrapper calls a phase OK only on commit evidence, so the\n# stub reports a fresh HEAD and a current committer date.\ncase "$*" in\n  *"rev-parse HEAD"*) date +%s%N; exit 0 ;;\n  *"--format=%ct"*) date +%s; exit 0 ;;\nesac\nexit 0\n',
+        # `committed=False` is the phase that ran, printed a real report and
+        # legitimately had nothing to commit: HEAD never moves. That is the
+        # shape testing/audit and documentation/remediate had on 2026-09-08.
+        "git": (
+            '#!/bin/sh\n# REL-188: the wrapper calls a phase OK only on commit evidence, so the\n# stub reports a fresh HEAD and a current committer date.\ncase "$*" in\n  *"rev-parse HEAD"*) date +%s%N; exit 0 ;;\n  *"--format=%ct"*) date +%s; exit 0 ;;\nesac\nexit 0\n'
+            if committed
+            else _GIT_FROZEN
+        ),
         "python3": "#!/bin/sh\nexit 0\n",
     }
     for name, body in stubs.items():
@@ -236,7 +256,9 @@ REJECTION_QUOTED_OUTPUT = (
 )
 
 
-def _provider_stub(attempts, capped, cap_line, cap_exit, rejected, reject_out):
+def _provider_stub(
+    attempts, capped, cap_line, cap_exit, rejected, reject_out, agent_output=None,
+):
     """One stub body, shared by every provider binary.
 
     It derives its own provider from $0 plus GROK_HOME (the grok binary hosts
@@ -272,8 +294,10 @@ def _provider_stub(attempts, capped, cap_line, cap_exit, rejected, reject_out):
         "  esac\n"
         "  exit " + str(cap_exit) + "\n"
         "fi\n"
-        'echo "' + COMPLETION + '"\n'
-        "exit 0\n"
+        + "cat <<'RADON_AGENT_EOF'\n"
+        + (COMPLETION if agent_output is None else agent_output)
+        + "\nRADON_AGENT_EOF\n"
+        + "exit 0\n"
     )
 
 
@@ -289,6 +313,8 @@ def _run_multi(
     cap_exit=1,
     reject_providers=(),
     reject_output=None,
+    committed=True,
+    agent_output=None,
 ):
     """Run one phase against stubbed provider CLIs.
 
@@ -309,8 +335,13 @@ def _run_multi(
         encoding="utf-8",
     )
 
-    bin_dir = _stub_bin(tmp_path, tmp_path / "models.txt", capped, gh_log)
-    body = _provider_stub(attempts, capped, cap_line, cap_exit, rejected, reject_out)
+    bin_dir = _stub_bin(
+        tmp_path, tmp_path / "models.txt", capped, gh_log, committed=committed,
+    )
+    body = _provider_stub(
+        attempts, capped, cap_line, cap_exit, rejected, reject_out,
+        agent_output=agent_output,
+    )
     for prov in ("claude", "codex", "grok"):
         exe = bin_dir / PROVIDER_BINARY[prov]
         if prov in installed:

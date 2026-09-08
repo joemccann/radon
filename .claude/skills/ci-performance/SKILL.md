@@ -339,6 +339,47 @@ default 10800).
    fire resumes the same branch and PR from the record. An exit-0 deliver
    phase without the line is INCOMPLETE. Never emit the line anywhere else.
 
+## Declaring a no-op phase
+
+The wrapper scores `audit` and `remediate` on a commit landing on the nightly
+branch during the phase: exit 0 with an unmoved HEAD is `INCOMPLETE (agent
+exited 0 without committing to the nightly branch)`, exit 75. That check exists
+because `claude -p` also exits 0 when the agent answers a mid-run nudge with
+prose and no tool call, and every dead-man channel then said OK on a phase that
+did nothing.
+
+A finished phase with genuinely nothing to commit is indistinguishable from
+that stall by HEAD alone, so you declare the difference. When you have done the
+full phase — the whole delta range read, every sweep run, the report written —
+and the honest result is that there is nothing to commit, print exactly this as
+the last thing you emit, unindented, at column 0:
+
+```
+NIGHTLY PHASE NO-OP: loop=ci-performance phase=<audit|remediate> <one-line reason>
+```
+
+For example:
+
+```
+NIGHTLY PHASE NO-OP: loop=ci-performance phase=audit no new findings in the delta range
+NIGHTLY PHASE NO-OP: loop=ci-performance phase=remediate 0 source-actionable P0/P1 items
+```
+
+Rules, all of them enforced by `scripts/tests/test_phase_noop_declaration.py`:
+
+- The line must name THIS loop and THIS phase. A line copied from a sibling
+  loop or a different phase does not count.
+- It must start at column 0. This loop audits its own wrapper and quotes this
+  contract; an indented mention inside a code fence is prose, not a
+  declaration, and the wrapper will not accept it.
+- It is a declaration of completion, not an excuse. Emit it only when the phase
+  ran end to end. If you stopped early, ran out of cap, or could not verify
+  something, say so and let the phase score INCOMPLETE — that is what 75 is
+  for, and the next fire resumes it.
+- Never emit it when you did commit. A commit is its own evidence.
+- Silence is still INCOMPLETE. Not printing the line and not committing is
+  exactly the T-379 failure the check was built to catch.
+
 ## Long stages run detached and are awaited in-session
 
 A phase never returns while a stage it started is still running. "Waiting
