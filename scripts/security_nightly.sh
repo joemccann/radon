@@ -421,6 +421,15 @@ deliver_status() {
   fi
   case "$from_record" in
     ""|*"no deliver record"*) ;;
+    # A branch-only record is the one arm_deliver_record() wrote BEFORE the
+    # agent started (R-611). It proves the phase launched, not what the agent
+    # concluded, so it is not a verdict: fall through to this round's verdict
+    # line. A finished deliver with nothing to ship prints `prs=0` and never
+    # touches the record, and read as a verdict the launch stub scored every
+    # such night INCOMPLETE (2026-09-08 15:06, all five loops in the phase
+    # tests). A cap kill leaves no verdict line, so it still lands INCOMPLETE
+    # below — and the record itself, untouched, still makes it resumable.
+    *"deliver record has a branch but no PR"*) ;;
     *"ready to merge:"*)
       if _deliver_urls_verified "${from_record#*ready to merge:}"; then
         printf '%s' "$from_record"

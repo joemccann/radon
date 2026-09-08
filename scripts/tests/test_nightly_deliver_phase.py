@@ -355,6 +355,73 @@ class TestTheDeliverNotifyLine:
         assert result.returncode == 0, _why(result, cfg)
         assert "**0 PR(s), nothing to merge**" in _comments(cfg)[0], _comments(cfg)
 
+    # --- 2026-09-08 15:06 re-run: the record path, which every test above
+    # leaves dead (the git stub serves nothing for `show origin/main:...`) ----
+    #
+    # arm_deliver_record() writes a branch-only `launched` record before the
+    # agent starts (R-611), so a cap kill mid-phase is resumable. When the
+    # agent then finishes with nothing to deliver, that record is still what
+    # deliver_status() reads first, and status_from_record() renders it as
+    # "INCOMPLETE (deliver record has a branch but no PR)". The agent's own
+    # verdict line — `NIGHTLY DELIVER READY: prs=0`, in this round's slice —
+    # never got a look. Every night with nothing to deliver would exit 75.
+
+    @staticmethod
+    def _serve_the_helper_from_git(cfg: dict) -> None:
+        """`git show origin/main:scripts/nightly_deliver.py` returns the real
+        helper, which is what makes the record path live in this test."""
+        helper = REPO / "scripts" / "nightly_deliver.py"
+        _executable(
+            cfg["clone"].parent / "bin" / "git",
+            "#!/bin/bash\n"
+            'case "$*" in\n'
+            '  *"rev-parse HEAD"*) date +%s%N; exit 0 ;;\n'
+            '  *"--format=%ct"*) date +%s; exit 0 ;;\n'
+            f'  *"show origin/main:scripts/nightly_deliver.py"*) cat "{helper}"; exit 0 ;;\n'
+            "esac\n"
+            "exit 0\n",
+        )
+
+    @pytest.mark.parametrize("loop", LOOP_IDS)
+    def test_a_branch_only_record_defers_to_this_rounds_verdict(self, tmp_path, loop):
+        cfg = _build(tmp_path, loop, deliver_lines=_ready(loop, []))
+        self._serve_the_helper_from_git(cfg)
+        result = _run(cfg, "deliver")
+        record = nd.read_record(loop, root=Path(cfg["env"]["HOME"]) / "radon-weekend")
+        assert record and record.get("pr") is None, (
+            "precondition: the wrapper armed a branch-only record", record
+        )
+        assert result.returncode == 0, _why(result, cfg)
+        assert "**0 PR(s), nothing to merge**" in _comments(cfg)[0], _comments(cfg)
+
+    @pytest.mark.parametrize("loop", LOOP_IDS)
+    def test_a_branch_only_record_with_no_verdict_is_still_incomplete(self, tmp_path, loop):
+        """The cap-kill shape R-611 exists for: nothing recorded by the agent,
+        nothing printed. Deferring to the log must not turn that into OK."""
+        cfg = _build(tmp_path, loop, deliver_lines="echo 'still waiting on CI'\n")
+        self._serve_the_helper_from_git(cfg)
+        result = _run(cfg, "deliver")
+        assert result.returncode == 75, _why(result, cfg)
+        assert "INCOMPLETE" in _comments(cfg)[0], _comments(cfg)
+
+    @pytest.mark.parametrize("loop", LOOP_IDS)
+    def test_a_recorded_incomplete_check_still_beats_the_log(self, tmp_path, loop):
+        """R-613 unchanged: a record the agent wrote wins over its prose."""
+        cfg = _build(
+            tmp_path, loop,
+            deliver_lines=(
+                "python3.13 -c 'pass' 2>/dev/null\n"
+                f"git show origin/main:scripts/nightly_deliver.py | /usr/bin/python3 -I - record "
+                f"--loop {loop} --branch x/2026-09-08 --pr 7 --url {URL1} "
+                "--status incomplete --check pytest-scripts-rs >/dev/null\n"
+                + _ready(loop, [URL1])
+            ),
+        )
+        self._serve_the_helper_from_git(cfg)
+        result = _run(cfg, "deliver")
+        assert result.returncode == 75, _why(result, cfg)
+        assert "**INCOMPLETE: pytest-scripts-rs**" in _comments(cfg)[0], _comments(cfg)
+
     @pytest.mark.parametrize("loop", LOOP_IDS)
     def test_a_red_check_at_the_cap_is_incomplete_and_names_the_check(self, tmp_path, loop):
         cfg = _build(tmp_path, loop, deliver_lines=_incomplete(loop, "pytest-scripts-npsz", URL1))

@@ -277,6 +277,19 @@ wins on its own, silence is still INCOMPLETE, and the security loop is
 unaffected: it scores on its own completion marker, not on a commit.
 Two hazards found on the first live run (2026-09-08 15:06) and pinned by the same test file: the detector must read its slice to EOF rather than `grep -q`, because under `set -o pipefail` an early exit hands `tail` a SIGPIPE and the pipeline fails on the line it just matched; and the manual's own worked examples are indented inside their fence, because the agent `cat`s SKILL.md into the transcript and a column-0 example there would let an agent that only READ the manual score as having declared. Contract: `scripts/tests/test_phase_noop_declaration.py`.
 
+**A deliver with nothing to ship is finished, not launched.** `deliver_status()`
+reads the durable record before the transcript (R-613), and
+`arm_deliver_record()` writes a branch-only `launched` record before the agent
+starts so a cap kill is resumable (R-611). Those two met on the first live
+no-op deliver: the launch stub was read as the verdict and every loop with
+`prs=0` scored `INCOMPLETE (deliver record has a branch but no PR)`, exit 75.
+A branch-only record now falls through to this round's own verdict line — the
+agent's `NIGHTLY DELIVER READY: prs=0` is the finished state, a missing
+verdict line is still INCOMPLETE, and a record the agent actually wrote
+(`--status green`, or `--status incomplete --check <name>`) still wins over its
+prose. Contract: `scripts/tests/test_nightly_deliver_phase.py`
+(`branch_only_record`).
+
 **Cycle shape (2026-09-02).** `audit` (cap 2h, `RADON_WEEKEND_AUDIT_CAP_SECS`) records verified findings; `remediate` (cap 6h, `RADON_WEEKEND_REMEDIATE_CAP_SECS`) implements EVERY verified source-actionable finding as root-cause commits on one dated branch `<loop>/<YYYY-MM-DD>`; `deliver` (cap 3h, `RADON_WEEKEND_DELIVER_CAP_SECS`) pushes that branch, opens or updates ONE PR via `scripts/github_pr_output.py`, polls CI with `scripts/nightly_deliver.py watch`, fixes red checks on the branch, and ends by printing a verdict line the wrapper turns into the cycle's final notification. Deliver runs even when remediate exited non-zero (committed fixes are durable; CI decides). The loop never merges: the operator merges from the Pushover / issue line. An INCOMPLETE deliver records branch + PR number outside the clone (`~/radon-weekend/.<loop>-deliver/record.json`; the security loop also mirrors it in its private run-record) and the next fire resumes that branch and PR before opening a new one.
 
 | Loop | Fires (local) | Clone | Wrapper / plist | Issue label |
