@@ -83,6 +83,16 @@ def _literal(value):
     return re.sub(r'\s+', ' ', unicodedata.normalize('NFKC', value)).strip()
 
 
+def _source_literal(value):
+    # Extraction uses Markdown. Remove only complete, unescaped strong-emphasis
+    # wrappers at token boundaries; keep mathematical operators and all signs,
+    # units and intervening text. Ambiguous/nested markup remains literal.
+    value = unicodedata.normalize('NFKC', value)
+    value = re.sub(r'(?<![\w\\*_])(?P<mark>\*\*|__)(?P<body>[^\s*_](?:[^*_\n]*?[^\s*_])?)(?P=mark)(?![\w*_])',
+                   lambda match: match.group('body'), value)
+    return _literal(value)
+
+
 _NUMBER = re.compile(
     r'(?P<prefix>(?<!\w)(?:Q|Fig(?:ure)?\.?|USD|EUR|GBP|JPY|CHF|CAD|AUD|NZD|CNY|HKD|SGD)\s*|[$€£¥])?'
     r'(?P<value>[+\-−]?(?:(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+))'
@@ -100,8 +110,12 @@ def _numeric_assertions(text):
     for match in _NUMBER.finditer(text):
         raw = match.group('value').replace(',', '').replace('−', '-')
         # A hyphen between digits is a range separator, not a negative value.
-        if raw.startswith('-') and match.start() and text[match.start()-1].isdigit():
+        start, end = match.span()
+        if raw.startswith('-') and start and text[start-1].isdigit():
             raw = raw[1:]
+            # Exclude the range separator from the quote as well as its value.
+            # Otherwise an isolated required quote such as '-3%' changes sign.
+            start += 1
         prefix = (match.group('prefix') or '').strip().lower().rstrip('.')
         unit = re.sub(r'\s+', '', match.group('unit') or '').lower().lstrip('-–')
         unit = aliases.get(unit, unit)
@@ -111,8 +125,21 @@ def _numeric_assertions(text):
             unit = 'figure:' + unit
         elif prefix:
             unit = prefix + ':' + unit
-        found.append((match.span(), (Decimal(raw), unit)))
+        found.append(((start, end), (Decimal(raw), unit)))
     return found
+
+
+def _numeric_quote_positions(quote, original, original_numbers):
+    """Keep every excerpt's numeric interpretation identical to its context."""
+    numbers = _numeric_assertions(quote)
+    for match in re.finditer(re.escape(quote), original):
+        start, end = match.span()
+        if any(left < start < right or left < end < right
+               for (left, right), _ in original_numbers):
+            continue
+        if all(((start + left, start + right), value) in original_numbers
+               for (left, right), value in numbers):
+            yield start
 
 
 def date_evidence_passed(candidate, result, page_text):
@@ -130,7 +157,7 @@ def date_evidence_passed(candidate, result, page_text):
     raw, quote = evidence.get('date_text'), evidence.get('source_quote')
     if not isinstance(raw, str) or not raw.strip() or len(raw) > 40 or not isinstance(quote, str) or not quote.strip() or len(quote) > 1000:
         return False
-    raw, quote, original = _literal(raw), _literal(quote), _literal(page_text[page])
+    raw, quote, original = _source_literal(raw), _source_literal(quote), _source_literal(page_text[page])
     if raw not in quote or quote not in original:
         return False
     # Parse complete, unambiguous dates only. Numeric slash dates are held.
@@ -193,24 +220,22 @@ def numeric_evidence_passed(candidate, result, page_text):
         if (not isinstance(quote, str) or not quote.strip() or len(quote) > 2000
                 or not isinstance(source, str) or not source.strip() or len(source) > 3000):
             return False
-        quote, source = _literal(quote), _literal(source)
-        if quote not in proposal or source not in _literal(page_text[check['page']]):
+        quote, source = _literal(quote), _source_literal(source)
+        if quote not in proposal or source not in _source_literal(page_text[check['page']]):
             return False
         claims = _numeric_assertions(quote)
-        original = _literal(page_text[check['page']])
+        original = _source_literal(page_text[check['page']])
         original_numbers = _numeric_assertions(original)
         # A literal substring must not strip a decimal point, sign or currency.
-        occurrences = [m.start() for m in re.finditer(re.escape(source), original)]
-        if not any(all(not (left < start < right or left < start + len(source) < right)
-                       for (left, right), _ in original_numbers) for start in occurrences):
+        if not any(True for _ in _numeric_quote_positions(source, original, original_numbers)):
             return False
         grounded = {value for _, value in _numeric_assertions(source)}
         if not claims or any(value not in grounded for _, value in claims):
             return False
-        start = 0
-        while (start := proposal.find(quote, start)) >= 0:
-            covered.append((start, start + len(quote)))
-            start += 1
+        positions = list(_numeric_quote_positions(quote, proposal, assertions))
+        if not positions:
+            return False
+        covered.extend((start, start + len(quote)) for start in positions)
     return all(any(left <= start and end <= right for left, right in covered)
                for (start, end), _ in assertions)
 
@@ -426,6 +451,15 @@ class Pipeline:
                 except EvidenceError as error:
                     audit.append({'held': 'invalid candidate', 'validation_error': str(error)})
                     continue
+                # The selector can cite the report-date page separately from
+                # its chart pages. Supply that explicit citation to the final
+                # reviewer; it still must independently verify role and literal
+                # grounding. Never infer a date or exceed the evidence budget.
+                date_evidence = candidate.get('date_evidence')
+                date_page = date_evidence.get('page') if isinstance(date_evidence, dict) else None
+                if (type(date_page) is int and date_page in text
+                        and date_page not in candidate['pages'] and len(candidate['pages']) < 8):
+                    candidate['pages'].append(date_page)
                 if any(f['page'] not in numbers for f in candidate['figures']):
                     raise EvidenceError('Crop references a page not visually supplied to selector')
                 candidates.append(candidate)

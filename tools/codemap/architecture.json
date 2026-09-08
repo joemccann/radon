@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-09-08T20:55:31Z",
-  "node_count": 3269,
-  "edge_count": 6572,
+  "generated_at": "2026-09-08T21:03:56Z",
+  "node_count": 3272,
+  "edge_count": 6583,
   "areas": {
     "web": 1918,
     "site": 152,
-    "scripts": 1085,
+    "scripts": 1088,
     "cloud": 66,
     "lib": 28,
     "tests": 17,
@@ -185,7 +185,7 @@
     {
       "id": "scripts/research",
       "area": "scripts",
-      "count": 10
+      "count": 11
     },
     {
       "id": "scripts/security",
@@ -195,7 +195,7 @@
     {
       "id": "scripts/tests",
       "area": "scripts",
-      "count": 536
+      "count": 538
     },
     {
       "id": "scripts/trade_blotter",

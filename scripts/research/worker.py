@@ -22,7 +22,7 @@ class DiscoveryError(DropboxError):
         self.failures = failures
 
 
-def heartbeat(root, state, error=None, stage=None):
+def heartbeat(root, state, error=None, stage=None, local_only=False):
     stamp = datetime.now(timezone.utc).isoformat()
     payload = {'service': 'dropbox-research', 'state': state, 'updated_at': stamp,
                'last_error': {'message': type(error).__name__} if error else None}
@@ -31,6 +31,8 @@ def heartbeat(root, state, error=None, stage=None):
     if stage:
         payload['stage'] = stage
     atomic_save(str(Path(root) / 'health.json'), payload)
+    if local_only:
+        return True
     from api.db_http import hrana_execute
     try:
         hrana_execute('''INSERT INTO service_health(service,state,last_attempt_finished_at,last_error,updated_at)
@@ -43,10 +45,12 @@ def heartbeat(root, state, error=None, stage=None):
     return True
 
 
-def discover(client, state, now=None):
-    scopes = dict(date_scopes(now))
-    for scope in state.scopes():
-        scopes.setdefault(scope, None)
+def discover(client, state, now=None, current_only=False, on_page=None):
+    dates = date_scopes(now)
+    scopes = dict(dates[-1:] if current_only else dates)
+    if not current_only:
+        for scope in state.scopes():
+            scopes.setdefault(scope, None)
     added = 0
     failures = []
     retry_after = 0
@@ -67,6 +71,8 @@ def discover(client, state, now=None):
                         break
                     raise
                 added += state.ingest_page(scope, page, folder_date)
+                if on_page is not None:
+                    on_page()
                 cursor = page['cursor']
                 if not page.get('has_more'):
                     break
@@ -92,6 +98,9 @@ def discover(client, state, now=None):
 def flush_outbox(state, publisher):
     published = 0
     for row in state.outbox(limit=100):
+        # Discovery may cancel a snapshot row; already-dispatched HTTP is the boundary.
+        if not state.outbox_current(row['id'], row['work_key']):
+            continue
         publisher.publish(row['payload'])
         state.published(row['id'])
         published += 1
@@ -146,7 +155,7 @@ def main():
     parser.add_argument('--daemon', action='store_true')
     parser.add_argument('--publish', action='store_true', default=os.environ.get('RADON_RESEARCH_PUBLISH') == '1')
     parser.add_argument('--root', default=os.environ.get('RADON_RESEARCH_DIR', '/var/lib/radon/research'))
-    parser.add_argument('--interval', type=int, default=120)
+    parser.add_argument('--interval', type=int, default=60)
     parser.add_argument('--seed-reviewed', type=Path)
     args = parser.parse_args()
     if args.interval < 30:
@@ -169,16 +178,23 @@ def main():
         published = flush_outbox(state, publisher) if args.publish else 0
         print(json.dumps({'seeded': count, 'published': published}))
         return
-    from research.model import Reviewer
-    from research.pipeline import Pipeline
-    pipeline = Pipeline(root, Reviewer(), publisher)
-    client = DropboxClient.from_env().connect()
     stopping = False
     def stop(_signal, _frame):
         nonlocal stopping
         stopping = True
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
+    if args.daemon:
+        from research.ingestion import run_daemon
+        try:
+            run_daemon(root, state, min(args.interval, 60), args.publish, lambda: stopping)
+        finally:
+            state.close()
+        return
+    from research.model import Reviewer
+    from research.pipeline import Pipeline
+    pipeline = Pipeline(root, Reviewer(), publisher)
+    client = DropboxClient.from_env().connect()
     exit_status = 0
     while not stopping:
         delay = args.interval

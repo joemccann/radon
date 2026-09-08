@@ -331,18 +331,23 @@ def test_cli_once_error_is_nonzero_and_redacted(cli,monkeypatch,capsys):
 
 
 @pytest.mark.parametrize("failure",[False,True])
-def test_cli_daemon_honors_stop_signal_after_cycle(cli,monkeypatch,failure):
+def test_cli_daemon_honors_stop_signal_and_closes_state(cli,monkeypatch,failure):
     import sys
+    from research import ingestion
     root,_,events,handlers=cli
     monkeypatch.setattr(sys,"argv",["research-worker","--root",str(root),"--daemon","--interval","30"])
+    def daemon(root, state, interval, publish, stopping):
+        assert interval == 30 and not stopping()
+        handlers[worker.signal.SIGTERM](None,None)
+        assert stopping()
+        if failure:
+            raise RuntimeError('consumer failed')
+    monkeypatch.setattr(ingestion, 'run_daemon', daemon)
     if failure:
-        def fail(*a,**kw):raise worker.DropboxError("throttle",status=429,retry_after=120)
-        monkeypatch.setattr(worker,"cycle",fail)
+        with pytest.raises(RuntimeError): worker.main()
     else:
-        monkeypatch.setattr(worker,"cycle",lambda *a,**k:{"processed":0,"errors":["EvidenceError"]})
-    monkeypatch.setattr(worker.time,"sleep",lambda _:handlers[worker.signal.SIGTERM](None,None))
-    worker.main()
-    assert events[-2:]==["error","close"]
+        worker.main()
+    assert events == ['recover','close']
 
 
 def test_cli_seed_only_never_connects_dropbox_or_model(cli,monkeypatch,capsys):
@@ -495,26 +500,15 @@ def test_discovery_heartbeat_retains_safe_diagnostics_locally_and_remotely(tmp_p
     assert json.loads(saved[0][3]) == local['last_error']
 
 
-def test_cli_partial_discovery_failure_retains_error_and_honors_backoff(cli, monkeypatch):
+def test_cli_daemon_interval_is_capped_at_one_minute(cli, monkeypatch):
     import sys
-    root, _, _, handlers = cli
-    monkeypatch.setattr(sys, 'argv', ['worker', '--root', str(root), '--daemon', '--interval', '30'])
-    failures = [{'stage': 'discovery', 'type': 'DropboxError', 'status': 429}]
-    result = {'discovered': 1, 'processed': 0, 'errors': ['DropboxError'], 'discovery_errors': failures, 'retry_after': 500}
-    monkeypatch.setattr(worker, 'cycle', lambda *a, **kw: result)
-    health = []
-    monkeypatch.setattr(worker, 'heartbeat', lambda root, status, error=None: health.append((status, error)))
-    clock = SimpleNamespace(now=0)
-    monkeypatch.setattr(worker.time, 'monotonic', lambda: clock.now)
-    def sleep(seconds):
-        clock.now += seconds
-        if clock.now >= 500:
-            handlers[worker.signal.SIGTERM](None, None)
-    monkeypatch.setattr(worker.time, 'sleep', sleep)
+    from research import ingestion
+    root, _, events, _ = cli
+    monkeypatch.setattr(sys, 'argv', ['worker', '--root', str(root), '--daemon', '--interval', '120'])
+    intervals = []
+    monkeypatch.setattr(ingestion, 'run_daemon', lambda root, state, interval, *args: intervals.append(interval))
     worker.main()
-    assert len(health) == 2 and health[-1][0] == 'error'
-    assert health[-1][1].failures == failures
-    assert clock.now == 500
+    assert intervals == [60] and events == ['recover', 'close']
 
 
 def test_cli_once_partial_discovery_failure_closes_and_exits_nonzero(cli, monkeypatch, capsys):

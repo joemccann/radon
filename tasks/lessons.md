@@ -953,3 +953,10 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 
 ## 2026-09-08 - Prefer CI for expensive full-suite verification
 - When the operator says local full suites consume too much workstation time, stop rerunning them. Run focused local checks, publish the PR promptly, and use the faster GitHub runners as the authoritative full-suite loop until the exact head is green.
+
+## 2026-09-08 - Dropbox arrival latency
+- A sleep after a batch of long model reviews is not a polling SLA. Keep current-day discovery and document parsing independent from slow review; explicitly report actual host identity and deployment placement.
+- Replay rejection examples against source evidence before describing zero publication as legitimate filtering. Preserve range context and account for extraction markup without relaxing value/sign/unit provenance.
+
+## 2026-09-08 - Run test suites in GitHub CI
+- User instruction: do not run test suites on this machine going forward. Create the PR, resolve conflicts, and ensure CI is green; GitHub runners own suite execution. This supersedes earlier local-full-suite requirements. Local code edits, static inspection and generated-map maintenance remain appropriate.

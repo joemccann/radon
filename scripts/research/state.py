@@ -57,6 +57,10 @@ class State:
           metadata TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
           attempts INTEGER NOT NULL DEFAULT 0, available_at REAL NOT NULL DEFAULT 0,
           error TEXT, result TEXT, UNIQUE(file_id,rev));
+        CREATE TABLE IF NOT EXISTS ingestion(
+          work_key TEXT PRIMARY KEY, status TEXT NOT NULL DEFAULT 'pending',
+          attempts INTEGER NOT NULL DEFAULT 0, available_at REAL NOT NULL DEFAULT 0,
+          pdf TEXT, error TEXT);
         CREATE TABLE IF NOT EXISTS outbox(
           id TEXT PRIMARY KEY, work_key TEXT NOT NULL, payload TEXT NOT NULL,
           status TEXT NOT NULL DEFAULT 'pending');
@@ -129,6 +133,40 @@ class State:
             self.db.execute('INSERT INTO cursors VALUES(?,?,?) ON CONFLICT(scope) DO UPDATE SET cursor=excluded.cursor,folder_date=excluded.folder_date', (scope,page['cursor'],folder_date))
         return added
 
+    def unparsed(self, limit=20):
+        rows = self.db.execute("""SELECT w.*, COALESCE(i.attempts,0) AS parse_attempts
+            FROM work w LEFT JOIN ingestion i ON i.work_key=w.key
+            WHERE w.status='pending' AND (i.status IS NULL OR i.status='pending')
+            AND COALESCE(i.available_at,0)<=?
+            ORDER BY COALESCE(i.attempts,0)>0, w.folder_date DESC, w.rowid DESC LIMIT ?""", (time.time(),limit))
+        return [{**dict(r), 'metadata':json.loads(r['metadata'])} for r in rows]
+
+    def claim_parse(self, key):
+        with self.db:
+            self.db.execute("INSERT OR IGNORE INTO ingestion(work_key) SELECT key FROM work WHERE key=? AND status='pending'", (key,))
+            return bool(self.db.execute("""UPDATE ingestion SET status='parsing',attempts=attempts+1
+                WHERE work_key=? AND status='pending' AND available_at<=?
+                AND EXISTS(SELECT 1 FROM work WHERE key=? AND status='pending')""", (key,time.time(),key)).rowcount)
+
+    def parsed(self, key, pdf):
+        with self.db:
+            self.db.execute("UPDATE ingestion SET status='ready',pdf=?,error=NULL WHERE work_key=? AND status='parsing'", (pdf,key))
+
+    def parse_retry(self, key, error, delay=60):
+        with self.db:
+            self.db.execute("""UPDATE ingestion SET status=CASE WHEN attempts>=6 THEN 'held' ELSE 'pending' END,
+                error=?,available_at=? WHERE work_key=? AND status='parsing'""",
+                (type(error).__name__,time.time()+max(0,delay),key))
+            self.db.execute('''UPDATE work SET status='complete',result=?,error=? WHERE key=? AND status='pending'
+                AND EXISTS(SELECT 1 FROM ingestion WHERE work_key=? AND status='held')''',
+                (json.dumps({'status':'held','stage':'extraction','error':type(error).__name__}),type(error).__name__,key,key))
+
+    def ready(self, limit=20):
+        rows = self.db.execute("""SELECT w.*,i.pdf FROM work w JOIN ingestion i ON i.work_key=w.key
+            WHERE w.status='pending' AND i.status='ready' AND w.available_at<=?
+            ORDER BY w.attempts>0,w.folder_date DESC,w.rowid DESC LIMIT ?""", (time.time(),limit))
+        return [{**dict(r), 'metadata':json.loads(r['metadata'])} for r in rows]
+
     def pending(self, limit=20):
         rows = self.db.execute("SELECT * FROM work WHERE status='pending' AND available_at<=? ORDER BY rowid LIMIT ?", (time.time(),limit))
         return [{**dict(r), 'metadata':json.loads(r['metadata'])} for r in rows]
@@ -136,6 +174,10 @@ class State:
     def claim(self, key):
         with self.db:
             return bool(self.db.execute("UPDATE work SET status='processing',attempts=attempts+1 WHERE key=? AND status='pending' AND available_at<=?", (key,time.time())).rowcount)
+
+    def is_processing(self, key):
+        row = self.db.execute('SELECT status FROM work WHERE key=?', (key,)).fetchone()
+        return bool(row and row[0] == 'processing')
 
     def complete(self, key, result=None, publications=()):
         with self.db:
@@ -166,11 +208,17 @@ class State:
 
     def recover(self):
         with self.db:
+            self.db.execute("UPDATE ingestion SET status='pending' WHERE status='parsing'")
             return self.db.execute("UPDATE work SET status='pending' WHERE status='processing'").rowcount
 
     def outbox(self, limit=20):
         return [{'id':r['id'], 'work_key':r['work_key'], 'payload':json.loads(r['payload'])}
                 for r in self.db.execute("SELECT * FROM outbox WHERE status='pending' ORDER BY rowid LIMIT ?", (limit,))]
+
+    def outbox_current(self, publication_id, key):
+        return bool(self.db.execute("""SELECT 1 FROM outbox o JOIN work w ON w.key=o.work_key
+            WHERE o.id=? AND o.work_key=? AND o.status='pending' AND w.status='complete'""",
+            (publication_id,key)).fetchone())
 
     def published(self, publication_id):
         with self.db:

@@ -5659,3 +5659,19 @@ Dependency graph: T1 -> T2 -> T3 -> T4.
 
 ## Review
 - Red: package invocation failed with `ModuleNotFoundError: secret_store`; green: 52 collector tests and the deployed-unit credential contract pass.
+
+# Dropbox minute ingestion and publication repair (2026-09-08)
+- [x] P1 depends_on: [] - Verify deployment host and current scheduling; design independent current-day discovery and prompt parsing.
+- [x] P2 depends_on: [P1] - Implement 60-second current-day polling independent of review, durable parse staging and prompt review wake-up; regressions for slow review, retries and midnight rollover.
+- [x] P3 depends_on: [] - Repair demonstrated numerical/source-format validation false negatives without weakening provenance, signs, units or date gates; regression tests.
+- [ ] P4 depends_on: [P2,P3] - Independent review, full relevant suites, exact-head PR CI, deployment and live cadence/publication verification.
+Dependency graph: P1 -> P2; P2 + P3 -> P4.
+Scope: preserve private source/queue state and novelty gates. Use bounded ingestion resources; a slow model review must not block discovery or text parsing. Host migration, if needed, must preserve single-writer ownership.
+
+## Minute-ingestion review
+- Live host5.78.148.38 reports RADON_HOST_ROLE=app and IB_GATEWAY_HOST=10.0.0.4; Linux/Hetzner hostname remainsib-gateway. No host migration required.
+- P3 red/green:97 numeric/date/pipeline tests pass, including25 new format/range/context cases. No newdependencies; preservegenuine unsupportedclaims/date/cropfailures.
+
+- P2 frozen after87 ingestion/runtime tests passed; ingestion branch-aware coverage96%. Actualspawn integration demonstrates newarrivals parsed atvirtual0/60seconds while modelreviewremainsblocked. Independentreview resolvedcacheintegrity, processgroup cleanup, cancelledoutbox andaggregatehealth concerns.
+
+- User changed verification policy: no test suites on this machine; use PR CI. Stopped local full suite at11,838 passed/19skipped withKeyboardInterrupt after906seconds; not a completed full-suite result. Integrated current maince4a9a56; preserved both task/lesson updates and regenerated maps. Final validation delegated to exact-head GitHub CI.
