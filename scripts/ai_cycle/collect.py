@@ -147,7 +147,7 @@ def _main(argv=None):
         store.initialize()
     checkpoint = Path(args.checkpoint) if args.checkpoint else None
     completed = set(json.loads(checkpoint.read_text())) if checkpoint and checkpoint.exists() else set()
-    report, row_count = [], 0
+    report, row_count, budget_exhausted = [], 0, False
     for source in selected:
         # Event-only disclosures have no provider check without an explicit import.
         # Preserve their last reviewed status and publication vintage on daily runs.
@@ -185,17 +185,21 @@ def _main(argv=None):
                 )
                 if store:
                     store.append_observations(rows)
-                    if rows:
-                        completed.add(key)
-                        if checkpoint:
-                            checkpoint.parent.mkdir(parents=True, exist_ok=True)
-                            temp = checkpoint.with_suffix(".tmp")
-                            temp.write_text(json.dumps(sorted(completed)))
-                            temp.replace(checkpoint)
+                    completed.add(key)
+                    if checkpoint:
+                        checkpoint.parent.mkdir(parents=True, exist_ok=True)
+                        temp = checkpoint.with_suffix(".tmp")
+                        temp.write_text(json.dumps(sorted(completed)))
+                        temp.replace(checkpoint)
                 row_count += len(rows)
             except (SourceError, KeyError, TypeError, ValueError, OSError) as exc:
                 reason = (
                     str(exc) if isinstance(exc, SourceError) else "Source schema or local archive validation failed"
+                )
+                budget_exhausted = reason in (
+                    "Per-run time budget exhausted",
+                    "Per-run request budget exhausted",
+                    "Local OpenRouter daily request reserve reached; retry tomorrow",
                 )
                 state = (
                     "restricted"
@@ -210,6 +214,10 @@ def _main(argv=None):
             if store:
                 store.record_source_status(status)
             report.append({**status, "start": first, "end": last})
+            if budget_exhausted:
+                break
+        if budget_exhausted:
+            break
     print(
         json.dumps(
             {

@@ -5638,6 +5638,20 @@ Graph extension: T6 -> T7 -> T8.
 
 Dependency graph: T1 -> T2 -> T3 -> T4 -> T5.
 
+# AI-cycle bounded-resume completion (2026-09-08)
+
+- [x] T1 depends_on: [] - Reproduce the production SIGTERM and identify exhausted-budget status churn plus repeated successful empty windows.
+- [x] T2 depends_on: [T1] - Add red regressions for checkpointing successful empty windows and stopping cleanly at the first exhausted budget.
+- [x] T3 depends_on: [T2] - Implement clean bounded completion without changing provider/schema failure semantics.
+- [ ] T4 depends_on: [T3] - Run focused checks, open the repair PR, and monitor exact-head CI.
+- [ ] T5 depends_on: [T4] - Deploy, resume to terminal success, and verify final API/source coverage.
+
+Dependency graph: T1 -> T2 -> T3 -> T4 -> T5.
+
+## Review
+
+- Red/green: two regressions failed before the repair and pass after it; 101 AI-cycle core/collector tests and Ruff checks pass.
+
 ## Review
 
 - Inventory: 19 shared history routes plus eight independent regime chart implementations reviewed; all affected time and index axes use responsive tick spacing and inward endpoint anchors.
