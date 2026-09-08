@@ -208,6 +208,14 @@ supervisor still caps the complete action at 180 seconds and fails closed into
 recovery if shutdown does not complete. `cloud/tests/test_research_deploy.py`
 pins these nested budgets and exercises delayed shutdown with a simulated clock.
 
+A failed batched stop retries loaded units, tolerating a retired inventory entry
+only when successful probes report `LoadState=not-found`, `ActiveState=inactive`
+and an empty `FragmentPath`. Unknown states, probe errors and loaded-unit stop
+failures remain fatal. Recovery preserves the inventory and active snapshot.
+The Python image keeps application source root-owned and provisions only
+`/home/radon/radon/logs` for the runtime user; its non-root build smoke verifies
+log creation, writing and rotation while source directories remain unwritable.
+
 ## Privileged Bootstrap
 
 `scripts/bootstrap-control-plane.sh` is the only live-host upgrade path for the

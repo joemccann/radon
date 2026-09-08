@@ -1250,7 +1250,13 @@ if command == "show":
     unit = args[1]
     if data["list_mode"] == "show-fail" and unit == "radon-demo-mirror.service":
         raise SystemExit(9)
-    if "--property=Type" in args:
+    if data["units"].get(unit, {{}}).get("show_fail"):
+        raise SystemExit(9)
+    if "--property=LoadState" in args:
+        print(data["units"].get(unit, {{}}).get("load", "loaded"))
+    elif "--property=FragmentPath" in args:
+        print(data["units"].get(unit, {{}}).get("fragment", ""))
+    elif "--property=Type" in args:
         print(data["units"].get(unit, {{"type": "simple"}})["type"])
     else:
         print(data["units"].get(unit, {{"state": "inactive"}})["state"])
@@ -1269,6 +1275,8 @@ if command == "reset-failed":
 if command in {{"stop", "start", "restart"}}:
     with log_path.open("a", encoding="utf-8") as handle:
         handle.write(command + " " + " ".join(args[1:]) + "\\n")
+    if command == "stop" and any(data["units"].get(unit, {{}}).get("load", "loaded") != "loaded" or data["units"].get(unit, {{}}).get("stop_fail") for unit in args[1:]):
+        raise SystemExit(5)
     for unit in args[1:]:
         if unit not in data["units"]:
             continue
@@ -1313,6 +1321,53 @@ for path in paths:
             "RADON_TEST_REPLICA_PREFIX": str(tmp_path / "replica.db"),
         }
         return env, state_file, systemctl_log, rm_log, active_state
+
+    @pytest.mark.parametrize("suffix", ["timer", "service"])
+    @pytest.mark.parametrize("load,state,fragment,show_fail,expected", [
+        ("not-found", "inactive", "", False, 0),
+        ("not-found", "active", "", False, 69),
+        ("not-found", "failed", "", False, 69),
+        ("not-found", "inactive", "/unexpected/unit", False, 69),
+        ("not-found", "inactive", "", True, 69),
+        ("error", "inactive", "", False, 69),
+        ("", "inactive", "", False, 69),
+    ])
+    def test_stop_recovery_only_tolerates_provably_absent_inventory_units(
+        self, tmp_path, suffix, load, state, fragment, show_fail, expected
+    ):
+        import json
+        env, state_file, systemctl_log, rm_log, active_state = self._root_helper_fixture(tmp_path)
+        # Preserve the durable pre-failure snapshot before a legacy unit vanishes.
+        first = subprocess.run(["bash", str(ROOT_HELPER), "stop-clean"], env=env, capture_output=True, text=True)
+        assert first.returncode == 0, first.stderr
+        inventory = active_state.with_name(active_state.name + ".inventory")
+        missing = "radon-ib-watchdog." + suffix
+        inventory.write_text(inventory.read_text() + missing + "\n")
+        original_inventory = inventory.read_bytes()
+        original_snapshot = active_state.read_bytes()
+        data = json.loads(state_file.read_text())
+        data["units"][missing] = dict(state=state, type="timer" if suffix == "timer" else "simple", load=load, fragment=fragment, show_fail=show_fail)
+        state_file.write_text(json.dumps(data))
+        rm_log.unlink()
+        result = subprocess.run(["bash", str(ROOT_HELPER), "stop-clean"], env=env, capture_output=True, text=True)
+        assert result.returncode == expected, result.stdout + result.stderr
+        assert inventory.read_bytes() == original_inventory
+        assert active_state.read_bytes() == original_snapshot
+        assert rm_log.exists() is (expected == 0)
+        if expected == 0:
+            recovered = subprocess.run(["bash", str(ROOT_HELPER), "recover"], env=env, capture_output=True, text=True)
+            assert recovered.returncode == 0, recovered.stderr
+            assert missing not in [unit for line in systemctl_log.read_text().splitlines() if line.startswith("start ") for unit in line.split()[1:]]
+
+    def test_loaded_stop_failure_remains_fatal(self, tmp_path):
+        import json
+        env, state_file, _, rm_log, _ = self._root_helper_fixture(tmp_path)
+        data = json.loads(state_file.read_text())
+        data["units"]["radon-margin-debt-refresh.timer"]["stop_fail"] = True
+        state_file.write_text(json.dumps(data))
+        result = subprocess.run(["bash", str(ROOT_HELPER), "stop-clean"], env=env, capture_output=True, text=True)
+        assert result.returncode == 5, result.stderr
+        assert not rm_log.exists()
 
     def test_quiesces_dynamic_main_tree_units_and_restores_exact_scheduled_state(
         self, tmp_path: Path

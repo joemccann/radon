@@ -133,6 +133,27 @@ class TestPythonImage:
         assert launch in text
         assert text.index("USER radon") < text.index(launch)
 
+    def test_monitor_logs_are_writable_without_owning_application_code(self) -> None:
+        text = PYTHON_DF.read_text(encoding="utf-8")
+        provision = "install -d -o radon -g radon -m 0755 /home/radon/radon/logs"
+        assert provision in text
+        assert text.index(provision) < text.index("USER radon")
+        # Require a real build-time filesystem check under the final runtime uid,
+        # including rotation (which also needs directory write permission).
+        smoke = text.split("# Monitor log permissions smoke", 1)[1]
+        assert text.index("USER radon") < text.index("# Monitor log permissions smoke")
+        for check in (
+            "assert os.geteuid() == 1000",
+            'assert not os.access(".", os.W_OK)',
+            'assert not os.access("scripts", os.W_OK)',
+            'assert not os.access("scripts/monitor_daemon/run.py", os.W_OK)',
+            "log_dir.mkdir(exist_ok=True)",
+            "RotatingFileHandler(",
+            "handler.emit(",
+            "handler.doRollover()",
+        ):
+            assert check in smoke
+
 
 class TestNodeImage:
     def test_base_copies_and_cmd(self) -> None:

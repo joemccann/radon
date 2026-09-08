@@ -561,6 +561,35 @@ snapshot_active_units() {
   "$RM" -f "$RESTORED_STATE_FILE"
 }
 
+stop_inventory_units() {
+  (( $# > 0 )) || return 0
+  # Keep the normal batched stop unchanged. A retired unit in the durable
+  # inventory can reject the batch even though it has nothing left to stop.
+  systemctl_bounded --no-block stop "$@" && return 0
+  local unit load state fragment
+  local loaded=()
+  for unit in "$@"; do
+    load="$(systemctl_bounded show "$unit" --property=LoadState --value 2>/dev/null)" || return 69
+    case "$load" in
+      loaded) loaded+=("$unit") ;;
+      not-found)
+        state="$(active_state "$unit")" || return 69
+        fragment="$(systemctl_bounded show "$unit" --property=FragmentPath --value 2>/dev/null)" || return 69
+        if [[ "$state" != inactive || -n "$fragment" ]]; then
+          echo "could not prove absent inventory unit ${unit} is inactive" >&2
+          return 69
+        fi
+        ;;
+      *)
+        echo "could not verify load state for ${unit}" >&2
+        return 69
+        ;;
+    esac
+  done
+  # Loaded units still require a successful stop; never mask their failures.
+  (( ${#loaded[@]} == 0 )) || systemctl_bounded --no-block stop "${loaded[@]}"
+}
+
 stop_release_consumers() {
   local unit state
   local timers=()
@@ -570,12 +599,12 @@ stop_release_consumers() {
     [[ -n "$unit" ]] || continue
     if [[ "$unit" == *.timer ]]; then timers+=("$unit"); else services+=("$unit"); fi
   done < "$INVENTORY_FILE"
-  (( ${#timers[@]} == 0 )) || systemctl_bounded --no-block stop "${timers[@]}"
+  (( ${#timers[@]} == 0 )) || stop_inventory_units "${timers[@]}"
   for unit in "${timers[@]}"; do
     wait_for_unit_state "$unit" inactive || return $?
   done
   wait_for_preheld_restart
-  (( ${#services[@]} == 0 )) || systemctl_bounded --no-block stop "${services[@]}"
+  (( ${#services[@]} == 0 )) || stop_inventory_units "${services[@]}"
   for unit in "${services[@]}"; do
     wait_for_unit_state "$unit" inactive || return $?
   done
