@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-09-08T21:38:30Z",
-  "node_count": 3274,
-  "edge_count": 6627,
+  "generated_at": "2026-09-08T21:46:56Z",
+  "node_count": 3275,
+  "edge_count": 6629,
   "areas": {
     "web": 1918,
     "site": 152,
-    "scripts": 1090,
+    "scripts": 1091,
     "cloud": 66,
     "lib": 28,
     "tests": 17,
@@ -100,7 +100,7 @@
     {
       "id": "scripts/api",
       "area": "scripts",
-      "count": 114
+      "count": 115
     },
     {
       "id": "scripts/backtest",
@@ -308,7 +308,7 @@
     {
       "id": "scripts/api/__init__.py",
       "area": "scripts",
-      "in": 78,
+      "in": 79,
       "out": 0,
       "test": false
     },

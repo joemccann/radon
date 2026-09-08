@@ -15,6 +15,7 @@ async def test_subprocess_budget_rejects_without_spawning(monkeypatch):
         "_active_subprocesses",
         subprocess_mod.MAX_CONCURRENT_SUBPROCESSES,
     )
+    monkeypatch.setattr(subprocess_mod, "SUBPROCESS_ADMISSION_WAIT_S", 0.0)
     spawned = False
 
     async def fake_spawn(*args, **kwargs):
@@ -38,6 +39,7 @@ async def test_subprocess_budget_logs_exhaustion(monkeypatch, caplog):
         "_active_subprocesses",
         subprocess_mod.MAX_CONCURRENT_SUBPROCESSES,
     )
+    monkeypatch.setattr(subprocess_mod, "SUBPROCESS_ADMISSION_WAIT_S", 0.0)
     caplog.set_level("WARNING", logger="radon.subprocess")
     result = await subprocess_mod.run_script("scanner.py", [])
     assert result.ok is False
