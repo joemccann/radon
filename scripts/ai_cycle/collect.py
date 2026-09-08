@@ -8,13 +8,12 @@ Examples: python -m scripts.ai_cycle --verify --sources vercel,gpu-rental
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-from .collectors import SourceError, Transport, collect_source, now_iso, parse_disclosures
+from .collectors import SourceError, Transport, archive_raw, collect_source, now_iso, parse_disclosures
 
 SOURCES = (
     "openrouter",
@@ -121,9 +120,7 @@ def _main(argv=None):
             try:
                 if source == "issuer-disclosures" and args.import_disclosures:
                     raw = Path(args.import_disclosures).read_bytes()
-                    digest = hashlib.sha256(raw).hexdigest()
-                    Path(args.archive).mkdir(parents=True, exist_ok=True)
-                    (Path(args.archive) / (digest + ".json")).write_bytes(raw)
+                    digest = archive_raw(Path(args.archive), raw)
                     rows = parse_disclosures(json.loads(raw), digest, checked)
                 else:
                     effective_start = (

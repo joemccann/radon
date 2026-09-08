@@ -1,6 +1,8 @@
 """Regression fixtures for source identity, exact counts and fail-closed schemas."""
 
+import hashlib
 import json
+import os
 
 import pytest
 
@@ -8,6 +10,7 @@ from scripts.ai_cycle.collect import environment, windows
 from scripts.ai_cycle.collectors import (
     SourceError,
     Transport,
+    archive_raw,
     parse_aa,
     parse_disclosures,
     parse_eia,
@@ -20,6 +23,42 @@ from scripts.ai_cycle.collectors import (
 
 HASH = "a" * 64
 FETCHED = "2026-09-07T12:00:00+00:00"
+
+
+def test_archive_raw_repairs_corrupt_content_addressed_file(tmp_path):
+    raw = b'{"rows": ["complete"]}'
+    digest = hashlib.sha256(raw).hexdigest()
+    path = tmp_path / f"{digest}.json"
+    path.write_bytes(raw[:8])
+
+    assert archive_raw(tmp_path, raw) == digest
+    assert path.read_bytes() == raw
+
+
+def test_archive_raw_never_publishes_partial_file_when_replace_interrupts(tmp_path, monkeypatch):
+    raw = b'{"rows": ["complete"]}'
+    digest = hashlib.sha256(raw).hexdigest()
+
+    def interrupted_replace(source, destination):
+        raise OSError("interrupted before replacement")
+
+    monkeypatch.setattr(os, "replace", interrupted_replace)
+    with pytest.raises(OSError, match="interrupted"):
+        archive_raw(tmp_path, raw)
+
+    assert not (tmp_path / f"{digest}.json").exists()
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_archive_raw_leaves_valid_content_addressed_file_untouched(tmp_path, monkeypatch):
+    raw = b'{"rows": ["complete"]}'
+    digest = hashlib.sha256(raw).hexdigest()
+    path = tmp_path / f"{digest}.json"
+    path.write_bytes(raw)
+
+    monkeypatch.setattr(os, "replace", lambda *_: pytest.fail("valid artifact was replaced"))
+    assert archive_raw(tmp_path, raw) == digest
+    assert path.read_bytes() == raw
 
 
 def test_openrouter_exact_int_and_unknown_paid_other():

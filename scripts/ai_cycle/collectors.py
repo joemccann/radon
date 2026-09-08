@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import os
+import tempfile
 import time
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
@@ -54,6 +55,41 @@ class SourceError(ValueError):
 
 def now_iso():
     return datetime.now(timezone.utc).isoformat()
+
+
+def archive_raw(archive: Path, raw: bytes) -> str:
+    """Durably publish raw evidence only after its digest is verified."""
+    digest = hashlib.sha256(raw).hexdigest()
+    archive = Path(archive)
+    archive.mkdir(parents=True, exist_ok=True)
+    path = archive / f"{digest}.json"
+    try:
+        if path.read_bytes() == raw:
+            return digest
+    except FileNotFoundError:
+        pass
+
+    fd, temporary = tempfile.mkstemp(dir=archive, prefix=".raw-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(raw)
+            handle.flush()
+            os.fsync(handle.fileno())
+        if hashlib.sha256(Path(temporary).read_bytes()).hexdigest() != digest:
+            raise SourceError("Raw evidence digest verification failed")
+        os.replace(temporary, path)
+        directory = os.open(archive, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    except BaseException:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+        raise
+    return digest
 
 
 def public_url(url):
@@ -185,11 +221,7 @@ class Transport:
         finally:
             if "response" in locals():
                 response.close()
-        digest = hashlib.sha256(raw).hexdigest()
-        self.archive.mkdir(parents=True, exist_ok=True)
-        path = self.archive / (digest + ".json")
-        if not path.exists():
-            path.write_bytes(raw)
+        digest = archive_raw(self.archive, raw)
         return payload, digest, now_iso()
 
 

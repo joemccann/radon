@@ -218,6 +218,7 @@ Delta findings continue the R-### numbering in dated `## Delta audit` sections.
 - Audited through: `391aaaea` on 2026-09-05 -- delta audit, 34 new findings (R-633...R-666; 0 P0, 5 P1, 19 P2, 10 P3), backlog REL-232...REL-247. Anchor `2b936ebc` verified (`rev-parse --verify` resolves to `2b936ebc6cae4a4eba20cabfa0153fd8dfca34fa`, `merge-base --is-ancestor` confirms); the four 2026-09-04 loop squashes split by their merge second parents, leaving 38 feature commits / 137 source files; six subsystem walks plus one EXECUTING walk all finished, none lost. `git ls-remote` run BEFORE numbering: no `reliability/*` branch existed. All seven standing sweeps HOLD; NF-8 stays CLOSED (parity suites `49 passed`). Executing walk: REL-227/REL-230/REL-187/188 HOLD; REL-229 PARTIAL P1 (R-637, fix landed in mcp_hosted only), REL-225 PARTIAL P2 (R-644), REL-224 PARTIAL P3 (R-657), each with literal output. All five P1s lead-verified by reading the cited lines. One severity arbitration recorded in-row (R-650, opposing walk verdicts). Dominant new class: client-side races against the live-updating order prop (R-633/R-640/R-642). NF-3 recurs (R-641), NF-10 twice (R-650, R-655). See `## Delta audit 2026-09-05`.
 - Audited through: `7a7ca4ae` on 2026-09-06 -- delta audit, 5 new findings (R-667...R-671; 0 P0, 0 P1, 2 P2, 3 P3), backlog REL-248...REL-250. Anchor `391aaaea` verified (`rev-parse --verify` resolves to `391aaaeaed239cca79026df354059a862b141f05`, `merge-base --is-ancestor` confirms). The range is 5 first-parent commits, ALL loop output/machinery (own remediation #303, testing #305/#308, ci-performance #302, wrapper fix #307) — no product feature commits, so two walks only: an EXECUTING regression walk over #303's P1 fixes and a loop-machinery walk, both returning literal repro output. All seven standing sweeps HOLD (parity suites `38 passed`). Executing walk: REL-232/REL-233/REL-235 HOLD with adjacent cases run; REL-234 PARTIAL (R-668: compose gate misses `ipc: host`/`userns_mode: host` at all three install paths, walk-executed rc=0). Both P2s carry executed repros; R-667 is the #307 cap detector classifying quoted prose as a session cap (stub-agent repro: crash -> rc 75, ladder suppressed). `git ls-remote` run BEFORE numbering: no `reliability/*` branch existed. All REL-232...REL-247 landed DONE, so no roll-forward beyond this section's REL-248...REL-250. See `## Delta audit 2026-09-06`.
 - Audited through: `0b77a6af` on 2026-09-07 — delta audit, 2 new findings (R-672…R-673; 0 P0, 2 P1), backlog REL-251…REL-252. Anchor `7a7ca4ae` verified (`rev-parse --verify` resolves; ancestor of HEAD); range is 88 commits / 68 files, led by the Dropbox research ingestion and its app-runtime deployment. Standing sweeps HOLD: `_NON_IDEMPOTENT_IB_SCRIPTS`, halt chokepoints, exit-order acknowledgement, daemon-state Hrana writer, and the function-level order-limit scan remain present; no changed `placeOrder` / `place_order` path bypasses the guard. Remote branch discovery could not run because this runner could not resolve `github.com`; no remote state was modified.
+- Audited through: `cc77928d` on 2026-09-08 — delta audit, 1 new finding (R-674; 0 P0, 1 P1), backlog REL-253. Anchor `0b77a6af` verified (`rev-parse --verify` resolves; ancestor of HEAD); range is 13 commits / 68 files. Standing sweeps HOLD: halt chokepoints, `_NON_IDEMPOTENT_IB_SCRIPTS`, order limits, exit-order acknowledgement, daemon-state Hrana, all new order sites, and both watchdog catalogs for the new `ai-cycle` timer.
 
 ## 7. Exit criteria check (A5)
 
@@ -2430,3 +2431,28 @@ Anchor `7a7ca4ae` verified (`git rev-parse --verify` resolves to `7a7ca4aea4da74
 |---|---|---|---|---|
 | REL-251 | P1 | R-672 | **Register and exercise `dropbox-research` as a continuous scheduled writer.** Add matching non-IB freshness windows to both watchdog catalogs, include the service in the appropriate staleness bucket, and pin its error/stale behavior. | Red first: a seeded `dropbox-research` error row and an aged `running` row each reach the watchdog and web stale/degraded state; a fresh running row remains healthy; both catalogs reject a one-sided registration. |
 | REL-252 | P1 | R-673 | **Bound research work per document and make in-flight progress observable.** Cap accepted candidates/reviewer calls with a whole-document monotonic deadline, preserve the work item for retry/hold on exhaustion, and heartbeat each completed stage. | Red first: a 100-page fixture plus reviewers that consume their per-call timeout cannot exceed the configured document budget; a later queued item is reached on the next cycle; a mid-document heartbeat advances and an exhausted document records a safe error class. |
+
+---
+
+## Delta audit 2026-09-08
+
+Anchor `0b77a6af` verified (`git rev-parse --verify` resolves to
+`0b77a6af6e586b5702f4e8dac70f4cc37942a2b4`; `git merge-base --is-ancestor`
+confirms it is an ancestor). Range `0b77a6af..cc77928d` is 13 commits and 68
+changed files. The changed source surface covers the AI-cycle collector and
+timer, Dropbox research runtime, external ATS ingestion, deployment scripts,
+and internal web generation. Standing sweeps HOLD: all placement paths are
+unchanged; the existing halt, order-limit, exit acknowledgement, and Hrana
+writer chokepoints remain wired; `ai-cycle` is present in both watchdog
+catalogs. `NEW_FINDINGS` and REL-021b remain standing P2 candidates with no
+new changed-surface instance.
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-674 | P1 | `scripts/ai_cycle/collectors.py:188-192`; `scripts/ai_cycle/collect.py:123-126` | **AI-cycle raw evidence can be permanently torn on interruption.** Both paths write a content-addressed raw payload directly to its final digest path. A process or host failure after truncation leaves that path present but partial; later collection sees `path.exists()` and never repairs it. The stored observation retains the digest of the complete response while the audit archive contains unverifiable, corrupt evidence, defeating source reconstruction. |
+
+### Backlog (continuing)
+
+| ID | Sev | Findings | Task | Acceptance |
+|---|---|---|---|---|
+| REL-253 | P1 | R-674 | **Make AI-cycle raw evidence writes crash-safe and self-repairing.** Atomically stage and fsync payloads in the archive directory, replace only after the full digest is verified, and replace an existing file whose bytes do not match its digest. | Red first: seed `<sha>.json` with a truncated payload, collect the matching response, and assert the final file hashes to `<sha>` with full bytes. Inject a write interruption before replacement and assert no partial final path becomes visible; existing valid content-addressed files remain untouched. |
