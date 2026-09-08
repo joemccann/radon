@@ -5647,3 +5647,15 @@ Dependency graph: T4 -> T5a -> T5b -> T5c -> T5.
 - Full Python: 12,400 passed, 19 skipped, 90 deselected, 16 subtests; full cloud: 1,877 passed, 12 documented local Caddy skips.
 - GitHub CI is the authoritative full web and release gate per operator direction.
 - PR #361 repair head `5d5a6d0e` passed every applicable GitHub check, including all Vitest/Python shards, both coverage ratchets, Playwright, images, security, perimeter smoke, and previews.
+
+# AI-cycle production import repair (2026-09-08)
+
+- [x] T1 depends_on: [] - Reproduce the deployed one-shot failure and confirm the encrypted Artificial Analysis key exists without reading its value.
+- [x] T2 depends_on: [T1] - Add a subprocess regression for the real package invocation and correct secret-store import resolution.
+- [ ] T3 depends_on: [T2] - Run focused checks, open the repair PR, and monitor exact-head GitHub CI until green.
+- [ ] T4 depends_on: [T3] - Verify successful deployment, trigger the production one-shot, and confirm the Artificial Analysis result and timer health.
+
+Dependency graph: T1 -> T2 -> T3 -> T4.
+
+## Review
+- Red: package invocation failed with `ModuleNotFoundError: secret_store`; green: 52 collector tests and the deployed-unit credential contract pass.

@@ -55,7 +55,7 @@ def environment(env_file=None):
     # collectors are separate processes, so they must read it explicitly
     # rather than relying on the FastAPI process's in-memory environment.
     if os.environ.get("RADON_SECRET_STORE_PATH"):
-        from secret_store import SecretStore
+        from scripts.secret_store import SecretStore
 
         store = SecretStore()
         for key in OPERATOR_FIELDS:
