@@ -117,6 +117,39 @@ def test_rejects_ssh_config_without_ipv4_and_strict_host_key(tmp_path):
         pull.validate_ssh_config(bad)
 
 
+def test_global_directive_above_host_block_is_validated(tmp_path):
+    # ssh_config is first-match-wins: a global directive placed ABOVE the
+    # Host block is what actually connects, so it must be validated too.
+    import flex_sftp_pull as pull
+
+    bad = tmp_path / "ssh_config"
+    good = _ssh_config(tmp_path / "good_config").read_text()
+    bad.write_text("StrictHostKeyChecking accept-new\n" + good)
+    with pytest.raises(pull.FlexSftpError, match="ssh_config"):
+        pull.validate_ssh_config(bad)
+
+
+def test_include_directive_fails_closed(tmp_path):
+    import flex_sftp_pull as pull
+
+    bad = tmp_path / "ssh_config"
+    bad.write_text("Include ~/.ssh/other_config\n" + _ssh_config(tmp_path / "good_config").read_text())
+    with pytest.raises(pull.FlexSftpError, match="ssh_config"):
+        pull.validate_ssh_config(bad)
+
+
+def test_match_directive_fails_closed(tmp_path):
+    import flex_sftp_pull as pull
+
+    bad = tmp_path / "ssh_config"
+    bad.write_text(
+        _ssh_config(tmp_path / "good_config").read_text()
+        + "Match host *\n  StrictHostKeyChecking no\n"
+    )
+    with pytest.raises(pull.FlexSftpError, match="ssh_config"):
+        pull.validate_ssh_config(bad)
+
+
 def test_list_dir_uses_sftp_dash4_and_batch_stdin(tmp_path):
     import flex_sftp_pull as pull
 

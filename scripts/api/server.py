@@ -3972,6 +3972,11 @@ async def theta_harvester_scan(
     ticker = ticker.upper().strip()
     if ticker and not re.fullmatch(r"[A-Z]{1,6}", ticker):
         raise HTTPException(status_code=400, detail="ticker must be 1-6 letters")
+    # Preset is interpolated into subprocess args and the cooldown cache key:
+    # allowlist its shape the same way the ticker is validated.
+    preset = preset.strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,32}", preset):
+        raise HTTPException(status_code=400, detail="preset must be 1-32 chars [A-Za-z0-9_-]")
     if not (0 <= min_dte <= max_dte <= 400):
         raise HTTPException(status_code=400, detail="require 0 <= min_dte <= max_dte <= 400")
     if not (0.0 <= min_credit <= 1000.0):

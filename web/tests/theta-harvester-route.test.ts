@@ -290,6 +290,24 @@ describe("POST /api/scanner/theta/scan", () => {
     );
   });
 
+  it("forwards the SANITIZED preset, not the raw body value (RC-B10)", async () => {
+    mocks.radonFetch.mockResolvedValueOnce(thetaPayload);
+    const { POST } = await import("../app/api/scanner/theta/scan/route");
+    const req = new Request("http://localhost/api/scanner/theta/scan", {
+      method: "POST",
+      // Raw value differs from the sanitized preset the cooldown cache keys
+      // on; forwarding it raw defeats the FastAPI cache match.
+      body: JSON.stringify({ preset: "  ndx100  " }),
+    });
+
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+    expect(mocks.radonFetch).toHaveBeenCalledWith(
+      "/theta-harvester/scan?preset=ndx100",
+      { method: "POST", timeout: 430_000 },
+    );
+  });
+
   it("runs the FastAPI scan endpoint for a specific ticker", async () => {
     mocks.radonFetch.mockResolvedValueOnce({ ...thetaPayload, universe: "explicit", requested_tickers: ["MU"] });
     const { POST } = await import("../app/api/scanner/theta/scan/route");

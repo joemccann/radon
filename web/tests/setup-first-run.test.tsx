@@ -377,10 +377,11 @@ describe("setup completion writes only registry-known, backend-accepted values",
     expect(writeSetupEnvFiles).not.toHaveBeenCalled();
   });
 
-  it("a backend 400 is an error outcome, not an offline write", async () => {
+  it("a backend 400 is an error outcome, not an offline write, and does not latch setup", async () => {
     replies["PUT /credentials/clerk"] = { status: 400, detail: "CLERK_SECRET_KEY must be a non-empty string" };
     const res = await complete({ clerk: { CLERK_SECRET_KEY: "sk_live_1" } });
-    expect(res.status).toBe(200);
+    // RC-B1: Clerk did not persist anywhere, so completion must not latch.
+    expect(res.status).toBe(502);
     const body = (await res.json()) as {
       backend: boolean;
       outcomes: Array<{ stored: boolean; validation: { status: string } }>;

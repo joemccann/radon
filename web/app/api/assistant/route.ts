@@ -73,6 +73,43 @@ const MAX_IMAGES_PER_MESSAGE = 4;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const BASE64_PATTERN = /^[A-Za-z0-9+/]+={0,2}$/;
 
+// RC-B4: aggregate turn caps. The per-message limits above reset with every
+// message, so without these one request could carry an unbounded payload
+// into the model loop.
+export const MAX_MESSAGES_PER_TURN = 40;
+export const MAX_IMAGE_BLOCKS_PER_TURN = 8;
+export const MAX_TURN_PAYLOAD_BYTES = 10 * 1024 * 1024;
+
+type PayloadViolation = { status: 400 | 413; error: string };
+
+function turnPayloadViolation(rawMessages: unknown): PayloadViolation | null {
+  if (!Array.isArray(rawMessages)) return null;
+  if (rawMessages.length > MAX_MESSAGES_PER_TURN) {
+    return { status: 400, error: `At most ${MAX_MESSAGES_PER_TURN} messages per turn.` };
+  }
+  let bytes = 0;
+  let images = 0;
+  for (const item of rawMessages) {
+    try {
+      bytes += (JSON.stringify(item) ?? "").length;
+    } catch {
+      return { status: 400, error: "Messages must be JSON-serializable." };
+    }
+    if (bytes > MAX_TURN_PAYLOAD_BYTES) {
+      return { status: 413, error: "Turn payload too large." };
+    }
+    const content = (item as { content?: unknown })?.content;
+    if (!Array.isArray(content)) continue;
+    for (const block of content) {
+      if ((block as { type?: unknown })?.type === "image") images += 1;
+    }
+    if (images > MAX_IMAGE_BLOCKS_PER_TURN) {
+      return { status: 400, error: `At most ${MAX_IMAGE_BLOCKS_PER_TURN} image blocks per turn.` };
+    }
+  }
+  return null;
+}
+
 function decodedBase64Bytes(data: string): number {
   return Math.floor((data.length * 3) / 4);
 }
@@ -256,6 +293,11 @@ export async function POST(request: NextRequest): Promise<Response> {
   } catch {
     if (mock) return NextResponse.json({ error: "No messages supplied." }, { status: 400 });
     return NextResponse.json({ error: "Invalid JSON payload." }, { status: 400 });
+  }
+
+  const violation = turnPayloadViolation(body?.messages);
+  if (violation) {
+    return NextResponse.json({ error: violation.error }, { status: violation.status });
   }
 
   const messages = safeMessages(body?.messages);

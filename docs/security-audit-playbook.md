@@ -167,6 +167,16 @@ line here whenever you ship a security fix.**
   refuses to re-add it. Finding `radon` in group `docker` on a host is a
   defect, not an accepted risk.
   (`cloud/tests/test_setup_vps_privileged_paths.py`)
+- **Startup never dies on stored data, and nothing unexportable persists** — a
+  credential value `os.environ` cannot hold is refused at the validation
+  chokepoint before any store write, and every boot-time env-export site skips
+  and logs a row it cannot export instead of aborting the FastAPI lifespan.
+  (`scripts/api/tests/test_credential_value_env_safety.py`)
+- **Order-limit inputs fail closed** — a supplied quantity/price/strike that is
+  not a finite parseable number refuses the order (never coerces to 0/None and
+  skips a bound); a future with no valid contract multiplier refuses; a stock
+  leg in a BAG never nulls the combo loss computation.
+  (`scripts/tests/test_order_limits_fail_open_inputs.py`)
 
 ## Triage & patch policy
 

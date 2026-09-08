@@ -7,7 +7,6 @@ FROM python:3.13-slim
 RUN groupadd --gid 1000 radon \
     && useradd --system --uid 1000 --gid 1000 --create-home --home-dir /home/radon --shell /usr/sbin/nologin radon \
     && mkdir -p /home/radon/radon/scripts \
-    && chown -R radon:radon /home/radon \
     && chmod 755 /home/radon
 
 WORKDIR /home/radon/radon
@@ -36,7 +35,7 @@ RUN python -m playwright install --with-deps --only-shell chromium \
     && chmod -R a+rX /ms-playwright \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --chown=radon:radon scripts ./scripts
+COPY scripts ./scripts
 
 USER radon
 

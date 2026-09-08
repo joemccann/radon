@@ -31,7 +31,7 @@ export function makeFakeDemoDb(): FakeDemoDb {
         const [user_id, email, demo_role, started_at, expires_at, created_at] = a as string[];
         const existing = users.get(user_id);
         users.set(user_id, existing
-          ? { ...existing, email: email ?? null, demo_role: demo_role ?? null }
+          ? { ...existing, email: email ?? null }
           : {
               user_id,
               email: email ?? null,

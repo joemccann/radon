@@ -341,10 +341,10 @@ class TestImageBuildUsesRemoteCache:
 
         python = DOCKERFILE_PYTHON.read_text(encoding="utf-8")
         assert python.index("COPY requirements.txt ./requirements.txt") < python.index(
-            "COPY --chown=radon:radon scripts ./scripts"
+            "COPY scripts ./scripts"
         )
         assert python.index("COPY scripts/requirements-api.txt") < python.index(
-            "COPY --chown=radon:radon scripts ./scripts"
+            "COPY scripts ./scripts"
         )
 
 

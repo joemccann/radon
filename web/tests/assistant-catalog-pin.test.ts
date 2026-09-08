@@ -34,7 +34,7 @@ const PINNED: Record<string, PinnedCapability> = {
   "alerts": { GET: "read", POST: "mutate.workspace" },
   "alerts/[id]": "mutate.workspace",
   "assistant": "internal",
-  "attribution": "read",
+  "attribution": "read.spawn",
   "backtest/[strategy]": "read",
   "blotter": { GET: "read", POST: "mutate.workspace" },
   "bookmarks": { GET: "read", POST: "mutate.workspace" },

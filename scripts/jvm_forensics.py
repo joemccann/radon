@@ -126,11 +126,17 @@ class _Capture:
         self.result.steps[step] = "ok"
         return proc.stdout or ""
 
+    @staticmethod
+    def _write_private(path: Path, content: str) -> None:
+        """Write one capture artifact readable by the owner only."""
+        path.write_text(content)
+        os.chmod(path, 0o600)
+
     def _persist(self, step: str, filename: str, content: Optional[str]) -> None:
         if content is None:
             return
         try:
-            (self.result.capture_dir / filename).write_text(content)
+            self._write_private(self.result.capture_dir / filename, content)
         except OSError as exc:
             self.result.steps[step] = f"error:write:{exc}"
 
@@ -141,6 +147,7 @@ class _Capture:
         try:
             capture_dir = self.output_dir / stamp
             capture_dir.mkdir(parents=True, exist_ok=True)
+            os.chmod(capture_dir, 0o700)
         except OSError as exc:
             self.result.steps["mkdir"] = f"error:{exc}"
             return False
@@ -194,8 +201,9 @@ class _Capture:
             "steps": self.result.steps,
         }
         try:
-            (self.result.capture_dir / "manifest.json").write_text(
-                json.dumps(manifest, indent=2)
+            self._write_private(
+                self.result.capture_dir / "manifest.json",
+                json.dumps(manifest, indent=2),
             )
         except OSError as exc:
             LOG.warning("manifest write failed: %s", exc)

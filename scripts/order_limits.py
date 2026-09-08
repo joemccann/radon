@@ -25,6 +25,7 @@ Kelly policy (that stays in the evaluation pipeline).
 
 from __future__ import annotations
 
+import math
 from typing import Any, Optional
 
 try:  # scripts/ on sys.path (subprocess scripts, pytest)
@@ -69,6 +70,23 @@ def workflow_max_orders() -> int:
     return app_preferences.get_int("RADON_WORKFLOW_MAX_ORDERS")
 
 
+def _finite(value: Any) -> Optional[float]:
+    """float(value) when it is a finite number; None otherwise (RC-D4).
+
+    NaN passes every ``>`` cap comparison and an unparseable string used to
+    coerce to 0/None and silently skip the dollar bounds.
+    """
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _is_stk_leg(leg: dict) -> bool:
+    return str(leg.get("sec_type") or leg.get("secType") or "").upper() == "STK"
+
+
 def _combo_risk_per_unit(legs: Any) -> Optional[float]:
     """Worst-case loss of ONE combo unit, in dollars; None when unpriceable.
 
@@ -90,12 +108,17 @@ def _combo_risk_per_unit(legs: Any) -> Optional[float]:
     for leg in legs:
         if not isinstance(leg, dict):
             return None
+        if _is_stk_leg(leg):
+            # RC-D2: a stock leg has no strike to pair, but it must not null
+            # the whole computation — the option legs' worst case still gets
+            # priced (the buy-write's short call used to skip the loss cap).
+            continue
+        strike = _finite(leg.get("strike") or 0)
         try:
-            strike = float(leg.get("strike") or 0)
             ratio = int(leg.get("ratio", 1) or 1)
         except (TypeError, ValueError):
             return None
-        if strike <= 0 or ratio <= 0:
+        if strike is None or strike <= 0 or ratio <= 0:
             return None
         right = str(leg.get("right") or "").upper()[:1]
         side = "short" if str(leg.get("action") or "").upper().startswith("SELL") else "long"
@@ -164,9 +187,28 @@ def order_notional(params: dict) -> Optional[float]:
     quantity, price = _quantity_and_price(params)
     if quantity is None or price is None:
         return None
-    multiplier = 1 if str(params.get("type", "")).lower() == "stock" else _OPTION_MULTIPLIER
+    order_type = str(params.get("type", "")).lower()
+    if order_type == "stock":
+        multiplier: Optional[float] = 1
+    elif order_type == "future":
+        # RC-D1: pricing a 1000-multiplier future with the option's 100
+        # under-counted its notional 10x. No valid multiplier → None here;
+        # check_order_limits refuses the order outright before this point.
+        multiplier = _future_multiplier(params)
+        if multiplier is None:
+            return None
+    else:
+        multiplier = _OPTION_MULTIPLIER
     premium = quantity * price * multiplier
     return premium or None
+
+
+def _future_multiplier(params: dict) -> Optional[float]:
+    """The caller-supplied contract multiplier; None when absent/invalid."""
+    multiplier = _finite(params.get("multiplier"))
+    if multiplier is None or multiplier <= 0:
+        return None
+    return multiplier
 
 
 def combo_max_loss(params: dict) -> Optional[float]:
@@ -190,10 +232,35 @@ def combo_max_loss(params: dict) -> Optional[float]:
 
 def check_order_limits(params: dict) -> Optional[dict[str, Any]]:
     """Return {"code", "message"} on violation, None when within limits."""
-    try:
-        quantity = abs(float(params.get("quantity") or 0))
-    except (TypeError, ValueError):
-        quantity = 0
+    # RC-D4: a supplied-but-unusable number must refuse, never coerce to
+    # 0/None and skip the dollar bounds. Absent/empty optional fields keep
+    # their existing meaning.
+    for field in ("quantity", "limitPrice", "stopPrice"):
+        raw = params.get(field)
+        if raw is None or raw == "":
+            continue
+        if _finite(raw) is None:
+            return {
+                "code": "ORDER_INPUT_UNPARSEABLE",
+                "message": (
+                    f"{field} {raw!r} is not a finite number, so the order "
+                    "cannot be bounded — refused"
+                ),
+            }
+
+    quantity = abs(_finite(params.get("quantity") or 0) or 0)
+
+    if str(params.get("type", "")).lower() == "future" and _future_multiplier(params) is None:
+        # RC-D1: with no contract multiplier the notional cannot be computed.
+        # Fail closed rather than guess (the option's 100 under-counted a
+        # 1000-multiplier future 10x).
+        return {
+            "code": "ORDER_FUTURE_MULTIPLIER",
+            "message": (
+                "future order carries no valid contract multiplier, so its "
+                "notional cannot be bounded — refused"
+            ),
+        }
 
     is_stock = str(params.get("type", "")).lower() == "stock"
     qty_cap = max_stock_order_qty() if is_stock else max_order_qty()
@@ -245,12 +312,9 @@ def check_order_limits(params: dict) -> Optional[dict[str, Any]]:
                     "code": "ORDER_COMBO_STRIKE",
                     "message": "combo leg is not an object — refused",
                 }
-            if str(leg.get("sec_type") or leg.get("secType") or "").upper() == "STK":
+            if _is_stk_leg(leg):
                 continue
-            try:
-                strike = float(leg.get("strike") or 0)
-            except (TypeError, ValueError):
-                strike = 0.0
+            strike = _finite(leg.get("strike") or 0) or 0.0
             if strike <= 0:
                 return {
                     "code": "ORDER_COMBO_STRIKE",
@@ -298,12 +362,9 @@ def _legs_are_priceable(legs: Any) -> bool:
     for leg in legs:
         if not isinstance(leg, dict):
             return False
-        if str(leg.get("sec_type") or leg.get("secType") or "").upper() == "STK":
+        if _is_stk_leg(leg):
             continue
-        try:
-            if float(leg.get("strike") or 0) <= 0:
-                return False
-        except (TypeError, ValueError):
+        if (_finite(leg.get("strike") or 0) or 0.0) <= 0:
             return False
     return True
 

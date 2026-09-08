@@ -49,8 +49,21 @@ export function createAssistantTurnBudget(signal?: AbortSignal): AssistantTurnBu
 }
 
 // The test seam principal passes operatorOnly in requireRouteAccess; mirror it.
-function isOperator(principal: DispatchPrincipal): boolean {
+export function isOperatorPrincipal(principal: DispatchPrincipal): boolean {
   return principal.kind === "operator" || principal.kind === "test";
+}
+
+/**
+ * Takes one spawn attempt from the per-turn budget. Returns the refusal
+ * message when the budget is exhausted; shared by call_api, fetch_backend,
+ * and the named spawn tools so every path counts against the same cap.
+ */
+export function consumeSpawnBudget(budget: AssistantTurnBudget): string | null {
+  if (budget.spawnAttempts >= MAX_SPAWN_PER_TURN) {
+    return `read.spawn cap: at most ${MAX_SPAWN_PER_TURN} spawn attempts per turn.`;
+  }
+  budget.spawnAttempts += 1;
+  return null;
 }
 
 function neutralizeMarkup(text: string): string {
@@ -76,7 +89,7 @@ function stripDangerousKeys(value: unknown, depth: number, neutralize: boolean):
   return out;
 }
 
-function fencePayload(payload: unknown, status = 200): Record<string, unknown> {
+export function fencePayload(payload: unknown, status = 200): Record<string, unknown> {
   const neutralized = stripDangerousKeys(payload, 0, true);
   const json = JSON.stringify(neutralized) ?? "null";
   if (json.length > MAX_RESULT_CHARS) {
@@ -241,18 +254,13 @@ export async function callApi(
   const authz = authorize(methodRaw, path);
   if (!authz.ok) return { ok: false, error: authz.error };
 
-  if (authz.operation.operatorOnly && !isOperator(principal)) {
+  if (authz.operation.operatorOnly && !isOperatorPrincipal(principal)) {
     return { ok: false, error: "Operator-only API. This principal cannot run it." };
   }
 
   if (authz.capability === "read.spawn") {
-    if (budget.spawnAttempts >= MAX_SPAWN_PER_TURN) {
-      return {
-        ok: false,
-        error: `read.spawn cap: at most ${MAX_SPAWN_PER_TURN} spawn attempts per turn.`,
-      };
-    }
-    budget.spawnAttempts += 1;
+    const refusal = consumeSpawnBudget(budget);
+    if (refusal) return { ok: false, error: refusal };
   }
 
   let body: unknown;

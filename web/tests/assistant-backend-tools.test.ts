@@ -115,9 +115,10 @@ describe("assistant backend tools", () => {
       quantity: 10,
     }, PRINCIPAL);
     expect(result.ok).toBe(true);
-    const data = result.data as { spreads: Array<{ buyStrike: number; maxPayoutDollars: number }> };
-    expect(data.spreads[0].buyStrike).toBe(480);
-    expect(data.spreads[0].maxPayoutDollars).toBeCloseTo(13_000, 0);
+    // RC-B7: non-knowledge tool results are fenced; the payload lives in body.
+    const fenced = result.data as { body: { spreads: Array<{ buyStrike: number; maxPayoutDollars: number }> } };
+    expect(fenced.body.spreads[0].buyStrike).toBe(480);
+    expect(fenced.body.spreads[0].maxPayoutDollars).toBeCloseTo(13_000, 0);
   });
 
   it("run_evaluate posts evaluate.py to /pi/exec without mutating", async () => {

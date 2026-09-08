@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-09-08T18:07:22Z",
-  "node_count": 3259,
-  "edge_count": 6547,
+  "generated_at": "2026-09-08T18:46:29Z",
+  "node_count": 3269,
+  "edge_count": 6568,
   "areas": {
-    "web": 1913,
+    "web": 1918,
     "site": 152,
-    "scripts": 1080,
+    "scripts": 1085,
     "cloud": 66,
     "lib": 28,
     "tests": 17,
@@ -50,7 +50,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 883
+      "count": 888
     },
     {
       "id": "site/app",
@@ -95,7 +95,7 @@
     {
       "id": "scripts/api",
       "area": "scripts",
-      "count": 113
+      "count": 114
     },
     {
       "id": "scripts",
@@ -195,7 +195,7 @@
     {
       "id": "scripts/tests",
       "area": "scripts",
-      "count": 532
+      "count": 536
     },
     {
       "id": "scripts/trade_blotter",
@@ -266,7 +266,7 @@
     {
       "id": "web/lib/apiContracts.ts",
       "area": "web",
-      "in": 112,
+      "in": 113,
       "out": 0,
       "test": false
     },
@@ -292,6 +292,13 @@
       "test": false
     },
     {
+      "id": "web/lib/radonApi.ts",
+      "area": "web",
+      "in": 91,
+      "out": 0,
+      "test": false
+    },
+    {
       "id": "web/lib/routeAccess.ts",
       "area": "web",
       "in": 87,
@@ -299,9 +306,9 @@
       "test": false
     },
     {
-      "id": "web/lib/radonApi.ts",
-      "area": "web",
-      "in": 89,
+      "id": "scripts/api/__init__.py",
+      "area": "scripts",
+      "in": 78,
       "out": 0,
       "test": false
     },
@@ -310,13 +317,6 @@
       "area": "scripts",
       "in": 77,
       "out": 1,
-      "test": false
-    },
-    {
-      "id": "scripts/api/__init__.py",
-      "area": "scripts",
-      "in": 77,
-      "out": 0,
       "test": false
     },
     {
@@ -336,7 +336,7 @@
     {
       "id": "scripts/api/server.py",
       "area": "scripts",
-      "in": 44,
+      "in": 45,
       "out": 17,
       "test": false
     },
@@ -453,6 +453,13 @@
       "test": false
     },
     {
+      "id": "scripts/api/auth.py",
+      "area": "scripts",
+      "in": 33,
+      "out": 0,
+      "test": false
+    },
+    {
       "id": "web/lib/OrderActionsContext.tsx",
       "area": "web",
       "in": 31,
@@ -462,13 +469,6 @@
     {
       "id": "web/lib/chartSystem.ts",
       "area": "web",
-      "in": 32,
-      "out": 0,
-      "test": false
-    },
-    {
-      "id": "scripts/api/auth.py",
-      "area": "scripts",
       "in": 32,
       "out": 0,
       "test": false

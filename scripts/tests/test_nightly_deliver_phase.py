@@ -164,6 +164,10 @@ def _build(tmp_path: Path, loop: str, *, deliver_lines: str = "", extra_env: dic
         'case "$1 $2" in\n'
         '  "issue list") echo 42 ;;\n'
         '  "pr list") echo "" ;;\n'
+        '  "pr view")\n'
+        '    case "$*" in\n'
+        '      *"github.com/joemccann/radon/pull/"*) echo ok ;;\n'
+        '    esac ;;\n'
         '  "issue comment")\n'
         "    while [ $# -gt 0 ]; do\n"
         '      if [ "$1" = "--body" ]; then shift\n'
@@ -387,6 +391,35 @@ class TestTheDeliverNotifyLine:
         cfg = _build(tmp_path, loop, deliver_lines=f"echo '{line}'\n")
         _run(cfg, "deliver")
         assert f"**{nd.notify_status(line)}**" in _pushover(cfg) or nd.notify_status(line) in _pushover(cfg)
+
+    @pytest.mark.parametrize("loop", LOOP_IDS)
+    def test_a_foreign_pr_url_is_never_rendered_as_ready_to_merge(self, tmp_path, loop):
+        # The verdict line is agent-asserted text. A URL it names is only a
+        # merge cue after the wrapper independently confirms it is a
+        # same-repo open PR on this loop's branch prefix (the stub gh's
+        # `pr view` confirms joemccann/radon URLs only).
+        foreign = "https://github.com/attacker/radon/pull/9"
+        cfg = _build(tmp_path, loop, deliver_lines=_ready(loop, [foreign]))
+        result = _run(cfg, "deliver")
+        assert result.returncode == 75, _why(result, cfg)
+        comment = _comments(cfg)[0]
+        assert "ready to merge" not in comment, comment
+        assert "INCOMPLETE" in comment, comment
+        assert foreign not in _pushover(cfg), _pushover(cfg)
+
+    @pytest.mark.parametrize("loop", LOOP_IDS)
+    def test_deliver_status_verifies_before_rendering_ready(self, loop):
+        body = _uncommented(_wrapper(loop))
+        start = body.index("deliver_status() {")
+        fn = body[start:body.index("\n}", start)]
+        assert "_deliver_urls_verified" in fn, (
+            f"{loop}: deliver_status renders ready-to-merge without verification"
+        )
+        helper_start = body.index("_deliver_urls_verified() {")
+        helper = body[helper_start:body.index("\n}", helper_start)]
+        for needle in ('"$GH_BIN" pr view', 'state == \\"OPEN\\"',
+                       ".isCrossRepository == false", "$PR_BRANCH_PREFIX"):
+            assert needle in helper, (loop, needle)
 
     @pytest.mark.parametrize("loop", LOOP_IDS)
     def test_audit_and_remediate_are_untouched_by_the_verdict_rule(self, tmp_path, loop):

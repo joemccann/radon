@@ -82,14 +82,23 @@ def _host_block_directives(text: str, alias: str) -> list[tuple[str, str]]:
     literal is what connects — while a raw `in text` scan saw the required line
     and passed. A commented-out requirement, or one scoped to an unrelated
     `Host` block, satisfied the same scan. R-418.
+
+    Global directives ABOVE the first `Host` block also apply to the alias
+    (they come first, so they win); they are collected too. `Include` and
+    `Match` pull in configuration this validator cannot see, so their mere
+    presence fails closed.
     """
     directives: list[tuple[str, str]] = []
-    in_block = False
+    in_block = True  # pre-Host globals apply to every host, alias included
     for raw in text.splitlines():
         line = raw.split("#", 1)[0].strip()
         if not line:
             continue
         key, _, value = line.partition(" ")
+        if key.lower() in {"include", "match"}:
+            raise FlexSftpError(
+                f"ssh_config: unsupported directive {key!r} is not validatable"
+            )
         if key.lower() == "host":
             patterns = value.replace(",", " ").split()
             in_block = any(p == alias or p == "*" for p in patterns)

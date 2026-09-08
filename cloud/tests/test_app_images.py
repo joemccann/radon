@@ -106,6 +106,18 @@ class TestPythonImage:
         assert "--uid 1000" in text
         assert "chmod 755 /home/radon" in text
 
+    def test_application_code_is_not_writable_by_the_runtime_user(self) -> None:
+        """Code COPYs must stay root-owned; only genuinely writable paths
+        (the radon home itself, created by useradd) belong to the runtime
+        user. A `--chown` on the code COPY or a recursive chown over the
+        home tree hands the import tree to the uid the service runs as."""
+        text = PYTHON_DF.read_text(encoding="utf-8")
+        copy_lines = [line for line in text.splitlines() if line.startswith("COPY ")]
+        assert copy_lines, "expected COPY lines in Dockerfile.python"
+        for line in copy_lines:
+            assert "--chown" not in line, line
+        assert "chown -R radon:radon /home/radon" not in text
+
     def test_pinned_python_playwright_installs_and_launches_headless_chromium(self) -> None:
         text = PYTHON_DF.read_text(encoding="utf-8")
         install = "python -m playwright install --with-deps --only-shell chromium"
@@ -116,7 +128,7 @@ class TestPythonImage:
         assert "npx playwright" not in text
         assert "bun x playwright" not in text
         assert text.index("RUN python -m pip install") < text.index(install)
-        assert text.index(install) < text.index("COPY --chown=radon:radon scripts")
+        assert text.index(install) < text.index("COPY scripts ./scripts")
         assert "sync_playwright" in text
         assert launch in text
         assert text.index("USER radon") < text.index(launch)

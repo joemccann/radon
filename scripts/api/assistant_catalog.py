@@ -27,7 +27,9 @@ CATALOG: dict[CatalogKey, Capability] = {
     ("GET", "/admin/services"): "admin",
     ("POST", "/admin/services/{unit}/{action}"): "admin",
     ("POST", "/admin/stack/restart"): "admin",
-    ("GET", "/attribution"): "read",
+    # read.spawn: backed by a subprocess, so MAX_SPAWN_PER_TURN caps
+    # assistant fan-out (same rationale as /streaks/{ticker}).
+    ("GET", "/attribution"): "read.spawn",
     ("GET", "/backtest"): "read",
     ("GET", "/backtest/{strategy}"): "read",
     # refresh spawns a 180s subprocess that persists to Turso: a mutation.

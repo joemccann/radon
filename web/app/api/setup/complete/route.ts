@@ -161,6 +161,9 @@ export async function POST(request: Request): Promise<Response> {
 
   const outcomes: ServiceOutcome[] = [];
   const collected: Record<string, string> = {};
+  // Services whose values only reach .env (backend unreachable): they count
+  // as persisted only if the env write below actually lands.
+  const envOnlyServices = new Set<string>();
   let backend = true;
 
   for (const { service, values } of plan) {
@@ -207,6 +210,7 @@ export async function POST(request: Request): Promise<Response> {
         stored: false,
         validation: { status: "error", message: "backend unreachable; written to .env only" },
       });
+      envOnlyServices.add(service);
       Object.assign(collected, values);
     }
   }
@@ -237,6 +241,31 @@ export async function POST(request: Request): Promise<Response> {
   }
   if (Object.keys(encodable).length > 0) {
     written = await writeSetupEnvFiles(encodable, repoRoot);
+  }
+  // RC-B1: latching is one-shot (it exits setup mode and burns the token), so
+  // it must not flip unless the Clerk credentials actually persisted — stored
+  // through FastAPI, or written to .env on the unreachable path. A run whose
+  // Clerk store failed returns its outcomes with the token still valid so the
+  // wizard retries. A plan that never carried Clerk keeps prior behavior.
+  const clerkPlanned = plan.some((entry) => entry.service === "clerk");
+  const clerkPersisted =
+    outcomes.some((outcome) => outcome.service === "clerk" && outcome.stored) ||
+    (envOnlyServices.has("clerk") && written.length > 0);
+  if (clerkPlanned && !clerkPersisted) {
+    return setNoStoreResponseHeaders(
+      NextResponse.json(
+        {
+          ok: false,
+          backend,
+          outcomes,
+          written,
+          restart_required: false,
+          error: "Authentication credentials were not stored; setup is not complete. Fix the reported services and retry.",
+        },
+        { status: 502 },
+      ),
+      requestId,
+    );
   }
   await markSetupComplete(repoRoot);
   consumeSetupToken();
