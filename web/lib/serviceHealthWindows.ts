@@ -242,6 +242,7 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // cadence, so weekend runs heartbeat like any other and a uniform 26h
   // window applies. Provider HTTP only, no IB.
   "aa-frontier-basket": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+  "ai-cycle-backfill": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
   "ai-cycle": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
   "model-catalog": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 

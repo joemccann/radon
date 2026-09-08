@@ -51,6 +51,8 @@ readonly CADDY_VERSION="2.11.4"
 readonly SERVICE_FILES=(
   radon-aa-frontier-refresh.service
   radon-aa-frontier-refresh.timer
+  radon-ai-cycle-backfill.service
+  radon-ai-cycle-backfill.timer
   radon-ai-cycle.service
   radon-ai-cycle.timer
   radon-ib-gateway.service

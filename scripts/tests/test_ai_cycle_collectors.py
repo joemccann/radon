@@ -9,15 +9,17 @@ from pathlib import Path
 
 import pytest
 
-from scripts.ai_cycle.collect import environment, windows
+from scripts.ai_cycle.collect import SOURCE_HISTORY_STARTS, environment, source_windows, windows
 from scripts.ai_cycle.collectors import (
     SourceError,
     Transport,
     archive_raw,
+    collect_gpu_history,
     parse_aa,
     parse_disclosures,
     parse_eia,
     parse_gpu,
+    parse_noaa,
     parse_openrouter,
     parse_sec,
     parse_vercel,
@@ -131,6 +133,41 @@ def test_gpu_missing_bundle_is_ineligible_not_assumed_single_gpu():
     assert row["metadata"]["cohort_eligible"] is False
 
 
+def test_gpu_history_uses_dated_snapshots_and_deduplicates_latest():
+    payload = {
+        "date": "2026-07-05",
+        "offers": [
+            {
+                "provider": "lambda",
+                "gpu": "h100-sxm",
+                "vram_gb": 80,
+                "kind": "on-demand",
+                "region": "us",
+                "gpu_count": 8,
+                "interconnect": "NVLink",
+                "tenancy": "dedicated",
+                "term": "on-demand",
+                "usd_hr": 3.99,
+                "source_url": "https://lambda.ai/pricing",
+            }
+        ],
+    }
+
+    class FakeTransport:
+        def fetch(self, url):
+            if "contents/data" in url:
+                return (
+                    [{"name": "2026-07-05.json", "download_url": "https://raw.example/2026-07-05.json"}],
+                    HASH,
+                    FETCHED,
+                )
+            return payload, HASH, FETCHED
+
+    rows = collect_gpu_history(FakeTransport(), "2026-07-05", "2026-07-05")
+    assert len(rows) == 1
+    assert rows[0]["period_end"] == "2026-07-05"
+
+
 def test_aa_missing_expensive_member_suppresses_entire_basket():
     payload = {
         "data": [
@@ -204,6 +241,34 @@ def test_sec_keeps_ytd_period_and_reviewed_tag_mapping():
     assert row["published_at"] == "2026-08-01T23:59:59Z"
 
 
+def test_sec_maps_full_hardware_basket_and_ifrs_annual_facts():
+    payload = {
+        "facts": {
+            "ifrs-full": {
+                "Inventories": {
+                    "label": "Inventories",
+                    "units": {
+                        "USD": [
+                            {
+                                "end": "2025-12-31",
+                                "val": 42,
+                                "filed": "2026-04-10",
+                                "form": "20-F",
+                                "accn": "456",
+                                "fy": 2025,
+                            }
+                        ]
+                    },
+                }
+            }
+        }
+    }
+    row = parse_sec(payload, HASH, FETCHED, "TSM", "2009-01-01", "2026-09-06")[0]
+    assert row["indicator_id"] == "H2"
+    assert row["metadata"]["taxonomy"] == "ifrs-full"
+    assert row["cohort_version"] == "sec-ifrs-full-v1"
+
+
 def test_eia_dom_and_unit_fail_closed():
     payload = {
         "response": {
@@ -221,13 +286,28 @@ def test_eia_dom_and_unit_fail_closed():
     }
     row = parse_eia(payload, HASH, FETCHED)[0]
     assert row["unit"] == "MWh/hour"
-    assert row["period_start"].startswith("2026-09-06T03")
-    assert row["period_end"].startswith("2026-09-06T04")
-    assert row["methodology_version"] == "eia-hour-ending-v2"
-    assert row["metadata"]["timestamp_convention"] == "hour-ending UTC"
+    assert row["period_start"] == "2026-09-06"
+    assert row["period_end"] == "2026-09-06"
+    assert row["methodology_version"] == "eia-daily-hour-ending-v3"
+    assert "hour" in row["metadata"]["timestamp_convention"]
     payload["response"]["data"][0]["subba"] = "AEP"
     with pytest.raises(SourceError):
         parse_eia(payload, HASH, FETCHED)
+
+
+def test_noaa_skips_incomplete_station_days_without_losing_complete_rows():
+    rows = parse_noaa(
+        [
+            {"STATION": "USW00093738", "DATE": "2026-09-06", "TMAX": "30", "TMIN": "20"},
+            {"STATION": "USW00013743", "DATE": "2026-09-06", "TMAX": "", "TMIN": "19"},
+        ],
+        HASH,
+        FETCHED,
+        "2026-09-06",
+        "2026-09-06",
+    )
+    assert len(rows) == 1
+    assert rows[0]["value"] == 25
 
 
 def test_disclosure_cannot_import_unverified_memo_values():
@@ -243,6 +323,21 @@ def test_public_url_removes_secrets_and_rejects_userinfo():
 
 def test_windows_bound_and_no_overlap():
     assert list(windows("2026-01-01", "2026-02-01")) == [("2026-01-01", "2026-01-28"), ("2026-01-29", "2026-02-01")]
+
+
+def test_backfill_windows_clamp_to_authoritative_source_floors():
+    assert SOURCE_HISTORY_STARTS["openrouter"] == "2025-01-01"
+    assert SOURCE_HISTORY_STARTS["vercel"] == "2025-10-01"
+    assert SOURCE_HISTORY_STARTS["eia"] == "2019-01-01"
+    assert list(source_windows("vercel", "2009-01-01", "2026-01-01", backfill=True))[0] == (
+        "2025-10-01",
+        "2025-12-29",
+    )
+    assert list(source_windows("openrouter", "2009-01-01", "2025-01-09", backfill=True)) == [
+        ("2025-01-01", "2025-01-07"),
+        ("2025-01-08", "2025-01-09"),
+    ]
+    assert list(source_windows("artificial-analysis", "2009-01-01", "2026-01-01", backfill=True)) == []
 
 
 def test_environment_loads_only_provider_credentials(tmp_path, monkeypatch):
@@ -345,14 +440,79 @@ def test_apps_same_host_and_daily_window():
     from scripts.ai_cycle.collectors import parse_apps
 
     rows = parse_apps(
-        {"data": [{"app_id": 1, "app_name": "A", "rank": 1, "total_tokens": "9007199254740993", "total_requests": 12}]},
+        {
+            "data": [
+                {"app_id": 1, "app_name": "A", "rank": 1, "total_tokens": "90", "total_requests": 10},
+                {"app_id": 2, "app_name": "B", "rank": 2, "total_tokens": "10", "total_requests": 2},
+            ],
+            "meta": {"as_of": FETCHED},
+        },
         HASH,
         FETCHED,
         "2026-09-06",
     )
+    assert {row["series_id"] for row in rows} == {
+        "returned_requests",
+        "tokens_per_request",
+        "top10_token_concentration",
+    }
     assert rows[0]["lineage_group"] == "openrouter"
-    assert rows[0]["value"] == 9007199254740993
-    assert rows[0]["metadata"]["truncated"] is True
+    assert next(row for row in rows if row["series_id"] == "returned_requests")["value"] == 12
+    assert next(row for row in rows if row["series_id"] == "tokens_per_request")["value"] == pytest.approx(100 / 12)
+    assert all(row["metadata"]["truncated"] is True for row in rows)
+
+
+def test_eia_compacts_hourly_observations_into_daily_average_and_peak():
+    payload = {
+        "response": {
+            "total": 3,
+            "data": [
+                {
+                    "period": "2026-09-02T01",
+                    "parent": "PJM",
+                    "subba": "DOM",
+                    "value": 100,
+                    "value-units": "megawatthours",
+                },
+                {
+                    "period": "2026-09-02T02",
+                    "parent": "PJM",
+                    "subba": "DOM",
+                    "value": 120,
+                    "value-units": "megawatthours",
+                },
+                {
+                    "period": "2026-09-02T03",
+                    "parent": "PJM",
+                    "subba": "DOM",
+                    "value": 80,
+                    "value-units": "megawatthours",
+                },
+            ],
+        }
+    }
+    rows = parse_eia(payload, HASH, FETCHED)
+    assert [(row["series_id"], row["value"]) for row in rows] == [
+        ("PJM.DOM.daily-average-load", pytest.approx(100)),
+        ("PJM.DOM.daily-peak-load", 120),
+    ]
+    assert rows[0]["metadata"]["source_observations"] == 3
+    assert rows[0]["methodology_version"] == "eia-daily-hour-ending-v3"
+
+
+def test_noaa_fixed_dom_weather_cohort_is_daily_and_requires_temperature_coverage():
+    payload = [
+        {"STATION": "USW00093738", "NAME": "Dulles", "DATE": "2025-09-01", "TMAX": "27.2", "TMIN": "10.0"},
+        {"STATION": "USW00013743", "NAME": "Washington National", "DATE": "2025-09-01", "TMAX": "28.0", "TMIN": "12.0"},
+    ]
+    rows = parse_noaa(payload, HASH, FETCHED)
+    assert len(rows) == 2
+    assert rows[0]["source_id"] == "noaa"
+    assert rows[0]["unit"] == "degC"
+    assert rows[0]["value"] == pytest.approx(18.6)
+    assert rows[0]["cohort_version"] == "pjm-dom-weather-control-v1"
+    with pytest.raises(SourceError, match="temperature"):
+        parse_noaa([{"STATION": "USW00093738", "DATE": "2025-09-01"}], HASH, FETCHED)
 
 
 def test_vast_alternative_machine_offers_are_deduplicated():
@@ -403,9 +563,22 @@ def test_production_heartbeat_on_failure(monkeypatch):
     assert calls[0][1]["timeout"] == 8
 
 
+def test_production_backfill_uses_separate_health_identity(monkeypatch):
+    from scripts.ai_cycle import collect
+
+    monkeypatch.delenv("RADON_AI_CYCLE_DB_PATH", raising=False)
+    monkeypatch.setattr(collect, "_main", lambda flags: 0)
+    calls = []
+    import scripts.db.hrana_http as db
+
+    monkeypatch.setattr(db, "write_service_health_http", lambda *a, **k: calls.append((a, k)))
+    assert collect.main(["--record", "--backfill", "--start", "2009-01-01"]) == 0
+    assert calls[0][0] == ("ai-cycle-backfill", "ok")
+
+
 @pytest.mark.parametrize(
     "source",
-    ["openrouter", "artificial-analysis", "eia", "vast", "sec", "portkey", "noaa", "lambda", "issuer-disclosures"],
+    ["openrouter", "artificial-analysis", "eia", "vast", "sec", "portkey", "lambda", "issuer-disclosures"],
 )
 def test_missing_entitlements_never_calls_provider(source, tmp_path):
     from scripts.ai_cycle.collectors import collect_source
@@ -590,8 +763,9 @@ def test_eia_form930_midnight_is_previous_operating_hour():
         }
     }
     row = parse_eia(payload, HASH, "2026-09-07T00:00:00+00:00")[0]
-    assert row["period_start"] == "2026-09-06T23:00:00+00:00"
-    assert row["period_end"] == "2026-09-07T00:00:00+00:00"
+    assert row["period_start"] == "2026-09-06"
+    assert row["period_end"] == "2026-09-06"
+    assert row["metadata"]["source_observations"] == 1
     assert row["value"] == 123
     assert row["metadata"]["methodology_source_url"] == "https://www.eia.gov/survey/form/eia_930/instructions.pdf"
 

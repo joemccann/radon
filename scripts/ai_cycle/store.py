@@ -146,11 +146,12 @@ class ObservationStore:
         return self._read("ai_cycle_observations", "available_at", as_of)
 
     def read_snapshot_observations(self, as_of=None):
-        from datetime import datetime, timedelta
-
         at = utc(as_of)
-        cutoff = utc(datetime.fromisoformat(at.replace("Z", "+00:00")) - timedelta(days=1500))
-        daily_cutoff = utc(datetime.fromisoformat(at.replace("Z", "+00:00")) - timedelta(days=400))
+        # Publisher floors are explicit: SEC XBRL begins in 2009, while the
+        # oldest continuous operational series (EIA/NOAA) begins in July 2018.
+        # Keep these stable instead of silently moving the chart window forward.
+        cutoff = utc("2009-01-01T00:00:00Z")
+        daily_cutoff = utc("2018-07-01T00:00:00Z")
         rows, cursor, deadline = [], 0, time.monotonic() + 12
         while True:
             if time.monotonic() > deadline or len(rows) >= 100000:

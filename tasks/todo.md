@@ -16,6 +16,31 @@ Widen `/regime/ats` beyond the watchlist and add the regime countdown rail.
 
 ---
 
+# LLM historical coverage and source provenance (2026-09-08)
+
+Backfill every AI-infrastructure metric to the earliest authoritative, technically
+and legally available observation; keep snapshot-only sources honest; label every
+rendered section with its originating provider and surface actual provider health.
+
+## Dependency graph
+
+- [x] T1 depends_on: [] - Inventory charts, collectors, provider contracts, existing production coverage, authoritative historical endpoints, date floors, access, rate, and redistribution limits.
+- [x] T2 depends_on: [T1] - Add red regressions for earliest-window selection, resumable provider-specific backfill, source status completeness, and explicit UI provenance.
+- [x] T3 depends_on: [T2] - Implement bounded historical collectors/backfill orchestration and preserve append-only vintages, checkpoints, rate limits, and snapshot-only semantics.
+- [x] T4 depends_on: [T3] - Label every LLM section and chart with linked source providers; render availability, restriction, error, and observation coverage without converting missing data to zero.
+- [x] T5 depends_on: [T3,T4] - Run focused Python/Vitest/Playwright and browser visual checks; verify every configured provider fetches or reports an exact actionable status.
+- [ ] T6 depends_on: [T5] - Commit, open PR, supervise exact-head GitHub CI through green, notify, merge, deploy, execute production backfill, and verify live earliest dates/provider rendering.
+
+Graph: T1 -> T2 -> T3 -> T4 -> T5 -> T6; T3 -> T5.
+
+## Review
+
+- Publisher floors and limits are documented from originating sources: SEC 2009, NOAA July 2018, EIA DOM January 2019, OpenRouter January 2025, Vercel October 2025, and GPU Rental Prices July 2026; current-only and unsupported histories remain explicit.
+- Live bounded validation collected 10,446 SEC rows across ten issuers, 812 Vercel rows, 439 GPU history rows and 32 NOAA rows without production writes.
+- Focused validation: 95 Python collector/core tests, 7 Vitest component tests, Ruff checks, codemap pre-commit, and desktop/mobile Playwright source-label visuals passed. Full suites move to GitHub CI per operator direction.
+
+---
+
 # Task: CI performance remediate 2026-09-08 [COMPLETE]
 
 Apply every verified P0/P1 CI-performance finding from the current audit without changing protected delivery guarantees.

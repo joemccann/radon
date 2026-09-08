@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { AI_PANES, aiDate, aiObservationDate, aiNumber, historyGroups, sourceHref, type AiHistoryPoint, type AiIndicator, type AiPane, type AiSnapshot } from "@/lib/aiInfrastructure";
+import { AI_PANES, aiDate, aiObservationDate, aiNumber, historyGroups, sourceHref, type AiHistoryPoint, type AiIndicator, type AiPane, type AiSnapshot, type AiSource } from "@/lib/aiInfrastructure";
 import { useAiInfrastructure } from "@/lib/useAiInfrastructure";
 import LlmTokenIndexCard from "./LlmTokenIndexCard";
 import styles from "./AiInfrastructure.module.css";
@@ -69,7 +69,7 @@ function SourceDrawer({ indicator, data, close, opener }: { indicator: AiIndicat
   </dialog>;
 }
 
-function Indicator({ indicator, inspect }: { indicator: AiIndicator; inspect: (opener: HTMLButtonElement) => void }) {
+function Indicator({ indicator, sources, inspect }: { indicator: AiIndicator; sources: AiSource[]; inspect: (opener: HTMLButtonElement) => void }) {
   const groups = useMemo(() => historyGroups(indicator.history), [indicator.history]);
   const [seriesIndex, setSeriesIndex] = useState(() => Math.max(0, groups.findIndex(points => points[0].series_id === indicator.metrics[0]?.id || points[0].series_id === `${indicator.metrics[0]?.id}:${indicator.metrics[0]?.methodology_version}:${indicator.metrics[0]?.cohort_version}`)));
   const selectedGroup = groups[Math.min(seriesIndex, groups.length - 1)];
@@ -77,6 +77,14 @@ function Indicator({ indicator, inspect }: { indicator: AiIndicator; inspect: (o
   return <article className={styles.indicator} data-testid={`ai-indicator-${indicator.id}`}>
     <header className={styles.heading}><div><span className={styles.eyebrow}>{indicator.id} · {indicator.priority}</span><h3>{indicator.title}</h3></div><span className={styles.status} data-status={indicator.status}>{indicator.status.replaceAll("_", " ")}</span></header>
     <p className={styles.note}>{indicator.reason}</p>
+    <div className={styles.sourceLabels} aria-label={`${indicator.title} data sources`}>
+      {sources.map(source => <div className={styles.sourceLabel} data-testid={`ai-source-${source.id}`} key={source.id}>
+        <span className={styles.eyebrow}>Source</span>
+        <SourceLink url={source.url}>{source.name}</SourceLink>
+        <span className={styles.sourceState} data-status={source.status}>{source.status.replaceAll("_", " ")}</span>
+        <small>{source.observation_count > 0 && source.observed_from && source.observed_through ? `${aiDate(source.observed_from)} to ${aiDate(source.observed_through)} · ${source.observation_count.toLocaleString("en-US")} observations` : "No collected observations"}</small>
+      </div>)}
+    </div>
     {indicator.metrics.length ? <dl className={styles.metrics}>{metrics.map(metric => <div key={`${metric.source_id}-${metric.id}-${metric.methodology_version}-${metric.cohort_version}`}><dt>{metric.label}</dt><dd>{aiNumber(metric.value)} <small>{metric.unit}</small></dd><span>{metric.measurement} · {aiObservationDate(metric.period_end)}</span></div>)}</dl> : <p className={styles.empty}>No verified observations. Collection or source verification is incomplete.</p>}
     {groups.length > 1 ? <label className={styles.seriesSelect}>Observation series<select value={Math.min(seriesIndex, groups.length - 1)} onChange={event => setSeriesIndex(Number(event.target.value))}>{groups.map((points, index) => <option key={`${points[0].source_id}-${points[0].series_id}-${points[0].unit}`} value={index}>{points[0].label} · {points[0].unit}</option>)}</select></label> : null}
     {selectedGroup ? <AiSeriesChart key={`${selectedGroup[0].source_id}-${selectedGroup[0].series_id}-${selectedGroup[0].unit}`} points={selectedGroup} /> : null}
@@ -99,7 +107,7 @@ export function AiInfrastructureView({ data, error, loading, refresh }: { data: 
     {error ? <div className={styles.error} role="alert"><strong>Snapshot could not be refreshed</strong><p>{error}</p>{data ? <p>Previous snapshot remains visible below. Do not treat it as current evidence.</p> : null}</div> : null}
     <div className={styles.evidenceBar}><div><span className={styles.eyebrow}>Experimental research state</span><strong>{error || !data || !available || data.shadow.state === "insufficient_evidence" ? "Insufficient evidence" : data.shadow.state === "watch" ? "Research watch" : "No active shadow watch"}</strong><p>{data?.shadow.reason ?? "Verified source observations are required before evaluating the cycle."}</p></div><dl><div><dt>Available indicators</dt><dd>{available} / {data?.indicators.length ?? 0}</dd></div><div><dt>Snapshot as of</dt><dd>{aiObservationDate(data?.as_of)}</dd></div><div><dt>Eligible weeks</dt><dd>{data?.shadow.eligible_weeks ?? 0}</dd></div></dl></div>
     <div className={styles.tabs} role="tablist" aria-label="AI infrastructure views">{AI_PANES.map((item, i) => <button key={item.id} id={`ai-tab-${item.id}`} role="tab" type="button" tabIndex={item.id === pane ? 0 : -1} aria-selected={item.id === pane} aria-controls={`ai-pane-${item.id}`} onClick={() => setPane(item.id)} onKeyDown={event => { if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return; event.preventDefault(); const next = event.key === "Home" ? 0 : event.key === "End" ? 3 : (i + (event.key === "ArrowRight" ? 1 : 3)) % 4; setPane(AI_PANES[next].id); document.getElementById(`ai-tab-${AI_PANES[next].id}`)?.focus(); }}>{item.title}</button>)}</div>
-    <div id={`ai-pane-${pane}`} role="tabpanel" aria-labelledby={`ai-tab-${pane}`}><div className={styles.paneIntro}><h2>{active.question}</h2><p>{active.note}</p></div>{indicators.length ? indicators.map(indicator => <Indicator key={indicator.id} indicator={indicator} inspect={opener => { sourceOpener.current = opener; setSelectedId(indicator.id); }} />) : <p className={styles.empty}>{loading ? "Retrieving source observations…" : "No verified observations in this view. Source coverage is not established."}</p>}</div>
+    <div id={`ai-pane-${pane}`} role="tabpanel" aria-labelledby={`ai-tab-${pane}`}><div className={styles.paneIntro}><h2>{active.question}</h2><p>{active.note}</p></div>{indicators.length ? indicators.map(indicator => <Indicator key={indicator.id} indicator={indicator} sources={(data?.sources ?? []).filter(source => indicator.source_ids.includes(source.id))} inspect={opener => { sourceOpener.current = opener; setSelectedId(indicator.id); }} />) : <p className={styles.empty}>{loading ? "Retrieving source observations…" : "No verified observations in this view. Source coverage is not established."}</p>}</div>
     <aside className={styles.guardrail}><strong>Research context, not a trade signal</strong><p>Signal → structure → Kelly math → decision. Review institutional flow, next-day OI, event pricing and current portfolio risk in ticker research. This context supplies neither an edge gate nor a Kelly probability.</p></aside>
     <details className={styles.legacy} onToggle={event => setLegacy(event.currentTarget.open)}><summary>Legacy inference price series · methodology v1</summary>{legacy ? <LlmTokenIndexCard /> : null}</details>
     {selected && data ? <SourceDrawer opener={sourceOpener.current} indicator={selected} data={data} close={() => setSelectedId(null)} /> : null}

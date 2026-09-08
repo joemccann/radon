@@ -6,21 +6,21 @@ _SOURCE_ROWS = [
         "OpenRouter",
         "https://openrouter.ai/docs/cookbook/administration/data-api",
         "daily",
-        "Authenticated data API; internal use subject to account terms",
+        "Authenticated data API; public rankings data is CC BY 4.0 with attribution",
     ),
     (
         "vercel",
         "Vercel AI Gateway",
         "https://vercel.com/docs/ai-gateway/leaderboards",
         "daily",
-        "Public publisher export; attribution required; redistribution unverified",
+        "Public publisher export under CC BY 4.0; attribution required",
     ),
     (
         "gpu-rental",
         "GPU Rental Prices",
-        "https://gpurentalprices.com/data",
+        "https://github.com/adriannutiu/gpu-rental-prices/tree/main/data/snapshots",
         "daily",
-        "Secondary asking-price discovery; automation access unverified",
+        "Public historical snapshots under CC BY 4.0; upstream asking-price provenance retained",
     ),
     ("lambda", "Lambda", "https://lambda.ai/pricing", "daily", "Public asking prices; bundle terms retained"),
     (
@@ -46,7 +46,7 @@ _SOURCE_ROWS = [
     ),
     (
         "vast",
-        "Vast",
+        "Vast.ai",
         "https://docs.vast.ai/api-reference/search/search-offers",
         "daily",
         "Authenticated read-only offers; account entitlement required",
@@ -61,9 +61,9 @@ _SOURCE_ROWS = [
     (
         "noaa",
         "NOAA",
-        "https://www.ncei.noaa.gov/products/land-based-station/integrated-surface-database",
-        "hourly",
-        "Public weather observations; coverage must be verified",
+        "https://www.ncei.noaa.gov/access/services/data/v1",
+        "daily",
+        "Public U.S. government daily summaries; fixed-station coverage is reported",
     ),
     (
         "portkey",

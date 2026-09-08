@@ -21,6 +21,13 @@
 .tabs button[aria-selected=true] { color: var(--signal-core-text); background: var(--bg-panel-raised); font-weight: 600; }
 .paneIntro { padding: 28px 0 10px; }.paneIntro p { color: var(--text-muted); max-width: 760px; }
 .indicator { padding: 26px 0; border-bottom: 1px solid var(--line-grid); }
+.sourceLabels { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 18px; }
+.sourceLabel { min-width: min(100%, 250px); padding: 10px 12px; border: 1px solid var(--line-grid); border-radius: 6px; background: var(--bg-subtle); display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; }
+.sourceLabel > a, .sourceLabel > span:not(.eyebrow) { font-weight: 550; }
+.sourceLabel > small { grid-column: 1 / -1; color: var(--text-muted); font-size: 12px; }
+.sourceState { color: var(--text-muted); font-size: 12px; text-align: right; }
+.sourceState[data-status=available] { color: var(--signal-core-text); }
+.sourceState[data-status=error], .sourceState[data-status=restricted] { color: var(--negative); }
 .status { font-size: 12px; border: 1px solid var(--line-grid); border-radius: 6px; padding: 5px 9px; white-space: nowrap; color: var(--text-muted); }
 .status[data-status=stale], .status[data-status=incomplete] { color: var(--warning); }
 .metrics { display: grid; grid-template-columns: repeat(auto-fit,minmax(180px,1fr)); gap: 24px; padding-block: 12px; margin: 0; }.metrics dt { font-size: 12px; color: var(--text-muted); }.metrics dd { font-size: 25px; margin: 5px 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }.metrics small, .metrics span { font-size: 12px; color: var(--text-muted); }.metrics small { font-weight: 400; }

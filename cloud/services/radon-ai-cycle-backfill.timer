@@ -1,0 +1,11 @@
+[Unit]
+Description=Radon AI infrastructure resumable historical backfill
+
+[Timer]
+# Resume publisher-specific history before the daily frontier and snapshot jobs.
+OnCalendar=*-*-* 05:30:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

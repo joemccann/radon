@@ -10,7 +10,11 @@ export interface AiIndicator {
   id: string; title: string; pane: AiPane; priority: string; status: string; reason: string;
   methodology: string; tickers: string[]; source_ids: string[]; metrics: AiMetric[]; history: AiHistoryPoint[];
 }
-export interface AiSource { id: string; name: string; url: string; status: string; reason: string; checked_at: string | null; cadence: string; license: string; lineage_group: string }
+export interface AiSource {
+  id: string; name: string; url: string; status: string; reason: string; checked_at: string | null;
+  cadence: string; license: string; lineage_group: string; observation_count: number;
+  observed_from: string | null; observed_through: string | null;
+}
 export interface AiSnapshot {
   version: 1; generated_at: string; as_of: string; indicators: AiIndicator[]; sources: AiSource[];
   shadow: { status: "experimental"; state: "insufficient_evidence" | "watch" | "clear"; reason: string; evaluated_at: string; eligible_weeks: number };

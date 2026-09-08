@@ -10,6 +10,8 @@ import pytest
 EXPECTED_SERVICE_FILES = [
     "radon-aa-frontier-refresh.service",
     "radon-aa-frontier-refresh.timer",
+    "radon-ai-cycle-backfill.service",
+    "radon-ai-cycle-backfill.timer",
     "radon-ai-cycle.service",
     "radon-ai-cycle.timer",
     "radon-api.service",
@@ -265,6 +267,28 @@ class TestAaFrontierRefresh:
     def test_runs_daily_before_ai_cycle_with_catchup(self, unit):
         timer = unit(self.TIMER)["Timer"]
         assert timer["oncalendar"] == "*-*-* 07:00:00 UTC"
+        assert timer["persistent"] == "true"
+        assert int(timer["randomizeddelaysec"]) <= 300
+
+
+class TestAiCycleBackfill:
+    SERVICE = "radon-ai-cycle-backfill.service"
+    TIMER = "radon-ai-cycle-backfill.timer"
+
+    def test_is_resumable_bounded_and_loads_profile_store(self, unit, services_dir):
+        svc = unit(self.SERVICE)["Service"]
+        assert svc["type"] == "oneshot"
+        assert svc["timeoutstartsec"] == "600"
+        assert svc["loadcredentialencrypted"].startswith("radon-secret-store-key:")
+        command = svc["execstart"]
+        assert "--backfill --start 2009-01-01" in command
+        assert "--checkpoint /home/radon/.radon/ai-cycle/backfill-checkpoint.json" in command
+        assert "--max-requests 400" in command
+        assert "scripts/secret_store.py" in svc["execstartpre"]
+
+    def test_runs_before_daily_collection_and_catches_up(self, unit):
+        timer = unit(self.TIMER)["Timer"]
+        assert timer["oncalendar"] == "*-*-* 05:30:00 UTC"
         assert timer["persistent"] == "true"
         assert int(timer["randomizeddelaysec"]) <= 300
 

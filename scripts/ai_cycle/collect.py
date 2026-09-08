@@ -30,6 +30,22 @@ SOURCES = (
 )
 KEYS = ("OPENROUTER_API_KEY", "ARTIFICIAL_ANALYSIS_API_KEY", "SEC_USER_AGENT", "EIA_API_KEY", "VAST_API_KEY")
 OPERATOR_FIELDS = (*KEYS, "RADON_AI_CYCLE_AA_BASKET")
+HEALTH_SERVICE = "ai-cycle"
+BACKFILL_HEALTH_SERVICE = "ai-cycle-backfill"
+SOURCE_HISTORY_STARTS = {
+    "sec": "2009-01-01",
+    "noaa": "2018-07-01",
+    "eia": "2019-01-01",
+    "openrouter": "2025-01-01",
+    "vercel": "2025-10-01",
+    "gpu-rental": "2026-07-05",
+}
+SOURCE_WINDOW_DAYS = {
+    "openrouter": 7,
+    "vercel": 90,
+    "eia": 90,
+    "noaa": 90,
+}
 
 
 def windows(start, end, days=28):
@@ -40,6 +56,21 @@ def windows(start, end, days=28):
         stop = min(current + timedelta(days=days - 1), last)
         yield current.isoformat(), stop.isoformat()
         current = stop + timedelta(days=1)
+
+
+def source_windows(source, start, end, *, backfill):
+    """Return only windows the originating publisher can actually reconstruct."""
+    if not backfill:
+        return [(start, end)]
+    floor = SOURCE_HISTORY_STARTS.get(source)
+    if not floor:
+        return []
+    first = max(date.fromisoformat(start), date.fromisoformat(floor)).isoformat()
+    if date.fromisoformat(first) > date.fromisoformat(end):
+        return []
+    if source in ("sec", "gpu-rental"):
+        return [(first, end)]
+    return list(windows(first, end, SOURCE_WINDOW_DAYS[source]))
 
 
 def environment(env_file=None):
@@ -99,8 +130,8 @@ def _main(argv=None):
     start = args.start or (end - timedelta(days=6)).isoformat()
     if args.backfill and not args.start:
         parser.error("--backfill requires --start")
-    if (end - date.fromisoformat(start)).days > 3660:
-        parser.error("Backfill is bounded to ten years per invocation")
+    if (end - date.fromisoformat(start)).days > 7305:
+        parser.error("Backfill is bounded to twenty years per invocation")
     if date.fromisoformat(start) > end:
         parser.error("--start must precede --end")
     if not args.backfill and (end - date.fromisoformat(start)).days > 89:
@@ -117,15 +148,12 @@ def _main(argv=None):
     checkpoint = Path(args.checkpoint) if args.checkpoint else None
     completed = set(json.loads(checkpoint.read_text())) if checkpoint and checkpoint.exists() else set()
     report, row_count = [], 0
-    periods = list(windows(start, args.end)) if args.backfill else [(start, args.end)]
     for source in selected:
         # Event-only disclosures have no provider check without an explicit import.
         # Preserve their last reviewed status and publication vintage on daily runs.
         if source == "issuer-disclosures" and not args.import_disclosures:
             continue
-        # Snapshot-only feeds cannot reconstruct history by repeated current fetches.
-        source_windows = periods if source in ("openrouter", "vercel", "eia") else [(start, args.end)]
-        for first, last in source_windows:
+        for first, last in source_windows(source, start, args.end, backfill=args.backfill):
             key = f"{source}:{first}:{last}"
             if key in completed:
                 continue
@@ -200,6 +228,7 @@ def main(argv=None):
     import sys
 
     flags = list(sys.argv[1:] if argv is None else argv)
+    backfill = "--backfill" in flags
     production = (
         "--record" in flags
         and not any(flag == "--database" or flag.startswith("--database=") for flag in flags)
@@ -210,29 +239,32 @@ def main(argv=None):
         code = _main(flags)
     except BaseException:
         if production:
-            from scripts.db.hrana_http import write_service_health_http
-
-            write_service_health_http(
-                "ai-cycle",
+            _write_health(
+                backfill,
                 "error",
-                started_at=started,
-                finished_at=now_iso(),
-                error={"message": "Collection failed; inspect sanitized source statuses"},
-                timeout=8,
+                started,
+                {"message": "Collection failed; inspect sanitized source statuses"},
             )
         raise
     if production:
-        from scripts.db.hrana_http import write_service_health_http
-
-        write_service_health_http(
-            "ai-cycle",
+        _write_health(
+            backfill,
             "ok" if code == 0 else "error",
-            started_at=started,
-            finished_at=now_iso(),
-            error=None if code == 0 else {"message": "Enabled publisher collection failed; inspect source statuses"},
-            timeout=8,
+            started,
+            None if code == 0 else {"message": "Enabled publisher collection failed; inspect source statuses"},
         )
     return code
+
+
+def _write_health(backfill, state, started, error):
+    """Keep both literal health identities discoverable by fleet parity checks."""
+    from scripts.db.hrana_http import write_service_health_http
+
+    kwargs = dict(started_at=started, finished_at=now_iso(), error=error, timeout=8)
+    if backfill:
+        write_service_health_http(BACKFILL_HEALTH_SERVICE, state, **kwargs)
+    else:
+        write_service_health_http(HEALTH_SERVICE, state, **kwargs)
 
 
 if __name__ == "__main__":

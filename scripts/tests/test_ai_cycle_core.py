@@ -220,6 +220,33 @@ def test_fractional_vintage_order_is_chronological():
     assert len(store.read_observations("2026-08-03T00:00:00.124Z")) == 1
 
 
+def test_snapshot_keeps_fixed_historical_floor_and_reports_source_coverage():
+    store = ObservationStore(":memory:")
+    rows = [
+        {
+            **observation(),
+            "indicator_id": "H2",
+            "source_id": "sec",
+            "lineage_group": "sec",
+            "series_id": "NVDA.InventoryNet",
+            "period_start": "2010-01-01",
+            "period_end": "2010-01-01",
+            "published_at": "2010-02-01T00:00:00Z",
+            "fetched_at": "2026-08-03T00:00:00Z",
+        },
+        {**observation(), "period_start": "2025-01-01", "period_end": "2025-01-01"},
+    ]
+    store.append_observations(rows)
+    snapshot = build_snapshot(store, "2026-08-04T00:00:00Z")
+    sources = {source["id"]: source for source in snapshot["sources"]}
+    assert sources["sec"]["observed_from"] == "2010-01-01T00:00:00.000000Z"
+    assert sources["sec"]["observed_through"] == "2010-01-01T00:00:00.000000Z"
+    assert sources["sec"]["observation_count"] == 1
+    assert sources["openrouter"]["observed_from"] == "2025-01-01T00:00:00.000000Z"
+    hardware = next(item for item in snapshot["indicators"] if item["id"] == "H2")
+    assert hardware["history"][0]["date"] == "2010-01-01T00:00:00.000000Z"
+
+
 def test_snapshot_derives_complete_demand_and_fixed_basket():
     store = ObservationStore(":memory:")
     rows = []
@@ -377,6 +404,35 @@ def test_latest_gateway_cohort_does_not_mark_retired_models_stale():
     assert panel["status"] == "available"
     assert [row["id"] for row in panel["metrics"]] == ["current"]
     assert len(panel["history"]) == 2
+
+
+def test_compact_application_metrics_lead_legacy_per_app_rows():
+    store = ObservationStore(":memory:")
+    rows = []
+    for series, method in [
+        ("app.legacy.total_tokens", "1"),
+        ("returned_requests", "openrouter-app-aggregate-v2"),
+        ("tokens_per_request", "openrouter-app-aggregate-v2"),
+        ("top10_token_concentration", "openrouter-app-aggregate-v2"),
+    ]:
+        rows.append(
+            {
+                **observation(),
+                "indicator_id": "D2",
+                "series_id": series,
+                "methodology_version": method,
+                "period_start": "2026-08-31",
+                "period_end": "2026-08-31",
+                "fetched_at": "2026-09-01T00:00:00Z",
+            }
+        )
+    store.append_observations(rows)
+    panel = next(row for row in build_snapshot(store, "2026-09-01T01:00:00Z")["indicators"] if row["id"] == "D2")
+    assert [metric["id"] for metric in panel["metrics"][:3]] == [
+        "returned_requests",
+        "tokens_per_request",
+        "top10_token_concentration",
+    ]
 
 
 def test_same_fetch_sec_revisions_choose_latest_publication_not_insert_order():

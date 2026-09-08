@@ -12,6 +12,7 @@ test.describe("AI infrastructure", () => {
     await page.goto("/regime/llm");
     await expect(page.getByRole("button", { name: "Refresh snapshot" })).toBeEnabled({ timeout: 45000 });
     await expect(page.getByRole("heading", { name: "AI infrastructure", exact: true })).toBeVisible();
+    await expect(page.getByTestId("ai-indicator-D1").getByTestId("ai-source-fixture")).toContainText("Fixture publisher");
     for (const name of ["Demand", "Compute", "Delivery", "Finance"]) {
       await page.getByRole("tab", { name, exact: true }).click(); await expect(page.getByRole("tab", { name, exact: true })).toHaveAttribute("aria-selected", "true"); await expect(page.getByRole("slider", { name: /Inspect .* history/ })).toBeVisible();
     }
@@ -21,6 +22,7 @@ test.describe("AI infrastructure", () => {
     for (const theme of ["light", "dark"]) {
       await page.evaluate(theme => document.documentElement.setAttribute("data-theme", theme), theme);
       await page.screenshot({ path: `test-results/ai-infrastructure-${theme}-desktop.png`, fullPage: true });
+      await page.getByTestId("ai-indicator-F1").getByTestId("ai-source-fixture").screenshot({ path: `test-results/ai-infrastructure-source-${theme}-desktop.png` });
     }
     await page.getByText("Legacy inference price series · methodology v1").click(); await expect(page.getByTestId("llm-token-index-card")).toBeVisible();
   });

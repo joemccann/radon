@@ -22,7 +22,15 @@ URLS = {
     "artificial-analysis": "https://artificialanalysis.ai/api/v2/data/llms/models",
     "eia": "https://api.eia.gov/v2/electricity/rto/region-sub-ba-data/data/",
     "vast": "https://console.vast.ai/api/v0/bundles/",
+    "noaa": "https://www.ncei.noaa.gov/access/services/data/v1",
 }
+GPU_HISTORY_INDEX = "https://api.github.com/repos/adriannutiu/gpu-rental-prices/contents/data/snapshots"
+NOAA_DOM_STATIONS = (
+    "USW00093738",  # Washington Dulles
+    "USW00013743",  # Washington National
+    "USW00093721",  # Baltimore/Washington
+    "USW00013740",  # Richmond
+)
 ISSUERS = {
     "MSFT": "0000789019",
     "AMZN": "0001018724",
@@ -31,7 +39,11 @@ ISSUERS = {
     "ORCL": "0001341439",
     "NVDA": "0001045810",
     "DELL": "0001571996",
+    "SMCI": "0001375365",
+    "MU": "0000723125",
+    "TSM": "0001046179",
 }
+HARDWARE_ISSUERS = {"NVDA", "DELL", "SMCI", "MU", "TSM"}
 FACT_TAGS = {
     "NetCashProvidedByUsedInOperatingActivities",
     "PaymentsToAcquirePropertyPlantAndEquipment",
@@ -46,6 +58,14 @@ FACT_TAGS = {
     "LongTermDebtCurrent",
     "LongTermDebtNoncurrent",
     "CashAndCashEquivalentsAtCarryingValue",
+}
+IFRS_FACT_TAGS = {
+    "CashFlowsFromUsedInOperatingActivities",
+    "Inventories",
+    "CurrentTradeReceivables",
+    "Revenue",
+    "RevenueFromContractsWithCustomers",
+    "PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities",
 }
 
 
@@ -352,58 +372,60 @@ def parse_gpu(payload, digest, fetched):
 def parse_sec(payload, digest, fetched, entity, start, end):
     result = []
     url = f"https://data.sec.gov/api/xbrl/companyfacts/CIK{ISSUERS[entity]}.json"
-    for tag, item in payload["facts"].get("us-gaap", {}).items():
-        if tag not in FACT_TAGS:
-            continue
-        for fact in item.get("units", {}).get("USD", []):
-            if (
-                fact.get("form") not in ("10-K", "10-Q")
-                or not start <= fact["end"] <= end
-                or fact.get("filed", "9999") > fetched[:10]
-            ):
+    taxonomies = (("us-gaap", FACT_TAGS, ("10-K", "10-Q")), ("ifrs-full", IFRS_FACT_TAGS, ("20-F",)))
+    for taxonomy, tags, forms in taxonomies:
+        for tag, item in payload["facts"].get(taxonomy, {}).items():
+            if tag not in tags:
                 continue
-            result.append(
-                observation(
-                    "sec",
-                    "F1" if entity not in ("NVDA", "DELL") else "H2",
-                    f"{entity}.{tag}",
-                    fact["val"],
-                    "USD",
-                    fact.get("start", fact["end"]),
-                    fact["end"],
-                    digest,
-                    fetched,
-                    published=fact["filed"] + "T23:59:59Z",
-                    url=url,
-                    cohort="sec-us-gaap-v1",
-                    metadata={
-                        "entity": entity,
-                        "label": f"{entity} {item.get('label', tag)}",
-                        "tag": tag,
-                        "form": fact["form"],
-                        "accession": fact["accn"],
-                        "fiscal_year": fact.get("fy"),
-                        "fiscal_period": fact.get("fp"),
-                        "duration": "ytd" if fact.get("start") else "instant",
-                        "verified_statement": entity in ("MSFT", "AMZN", "GOOGL", "META", "ORCL")
-                        and tag
-                        in (
-                            "NetCashProvidedByUsedInOperatingActivities",
-                            "PaymentsToAcquireProductiveAssets"
+            for fact in item.get("units", {}).get("USD", []):
+                if (
+                    fact.get("form") not in forms
+                    or not start <= fact["end"] <= end
+                    or fact.get("filed", "9999") > fetched[:10]
+                ):
+                    continue
+                result.append(
+                    observation(
+                        "sec",
+                        "H2" if entity in HARDWARE_ISSUERS else "F1",
+                        f"{entity}.{tag}",
+                        fact["val"],
+                        "USD",
+                        fact.get("start", fact["end"]),
+                        fact["end"],
+                        digest,
+                        fetched,
+                        published=fact["filed"] + "T23:59:59Z",
+                        url=url,
+                        cohort=f"sec-{taxonomy}-v1",
+                        metadata={
+                            "entity": entity,
+                            "label": f"{entity} {item.get('label', tag)}",
+                            "tag": tag,
+                            "form": fact["form"],
+                            "accession": fact["accn"],
+                            "fiscal_year": fact.get("fy"),
+                            "fiscal_period": fact.get("fp"),
+                            "duration": "ytd" if fact.get("start") else "instant",
+                            "verified_statement": entity in ("MSFT", "AMZN", "GOOGL", "META", "ORCL")
+                            and tag
+                            in (
+                                "NetCashProvidedByUsedInOperatingActivities",
+                                "PaymentsToAcquireProductiveAssets"
+                                if entity == "AMZN"
+                                else "PaymentsToAcquirePropertyPlantAndEquipment",
+                            ),
+                            "statement_check": "Reviewed issuer taxonomy mapping; later rows schema-validated, not individually audited",
+                            "mapping_version": "cash-flow-tags-v1",
+                            "cash_capex_definition": "Gross productive-asset purchases, before sales and incentives"
                             if entity == "AMZN"
-                            else "PaymentsToAcquirePropertyPlantAndEquipment",
-                        ),
-                        "statement_check": "Reviewed issuer taxonomy mapping; later rows schema-validated, not individually audited",
-                        "mapping_version": "cash-flow-tags-v1",
-                        "cash_capex_definition": "Gross productive-asset purchases, before sales and incentives"
-                        if entity == "AMZN"
-                        else "Cash PP&E purchases; finance lease principal excluded",
-                        "publication_precision": "day; conservative end-of-day",
-                        "definition": item.get("description", ""),
-                        "taxonomy": "us-gaap",
-                    },
+                            else "Cash PP&E purchases; finance lease principal excluded",
+                            "publication_precision": "day; conservative end-of-day",
+                            "definition": item.get("description", ""),
+                            "taxonomy": taxonomy,
+                        },
+                    )
                 )
-            )
     return result
 
 
@@ -465,7 +487,7 @@ def parse_aa(payload, digest, fetched, basket):
 
 
 def parse_eia(payload, digest, fetched):
-    result = []
+    by_day = defaultdict(list)
     response = payload["response"]
     if int(response.get("total", len(response["data"]))) > len(response["data"]):
         raise SourceError("EIA window truncated; use a shorter window")
@@ -478,31 +500,83 @@ def parse_eia(payload, digest, fetched):
         start = end - timedelta(hours=1)
         if end > datetime.fromisoformat(fetched.replace("Z", "+00:00")):
             continue
+        by_day[start.date().isoformat()].append(number(row["value"]))
+    result = []
+    for day, values in sorted(by_day.items()):
+        common = {
+            "timestamp_convention": "source hours ending UTC; grouped by interval start date",
+            "methodology_source_url": "https://www.eia.gov/survey/form/eia_930/instructions.pdf",
+            "parent": "PJM",
+            "subba": "DOM",
+            "source_observations": len(values),
+            "definition": "Daily summary of observed one-hour energy; numerically equivalent to interval-average MW. Not AI load.",
+            "weather_adjusted": False,
+        }
+        for series, value, label in (
+            ("PJM.DOM.daily-average-load", sum(values) / len(values), "DOM daily average grid load"),
+            ("PJM.DOM.daily-peak-load", max(values), "DOM daily peak grid load"),
+        ):
+            result.append(
+                observation(
+                    "eia",
+                    "P1",
+                    series,
+                    value,
+                    "MWh/hour",
+                    day,
+                    day,
+                    digest,
+                    fetched,
+                    methodology_version="eia-daily-hour-ending-v3",
+                    metadata={**common, "label": label},
+                )
+            )
+    return result
+
+
+def parse_noaa(payload, digest, fetched, start=None, end=None):
+    """Parse fixed DOM-area daily station temperatures from NCEI."""
+    if not isinstance(payload, list):
+        raise SourceError("NOAA daily summary schema changed")
+    seen, result = set(), []
+    for row in payload:
+        station, day = row.get("STATION"), row.get("DATE")
+        if station not in NOAA_DOM_STATIONS or not isinstance(day, str):
+            raise SourceError("NOAA station cohort changed")
+        if (start and day < start) or (end and day > end):
+            continue
+        if (station, day) in seen:
+            raise SourceError("Duplicate NOAA station day")
+        seen.add((station, day))
+        if row.get("TMAX") in (None, "") or row.get("TMIN") in (None, ""):
+            continue
+        mean = (number(row["TMAX"]) + number(row["TMIN"])) / 2
         result.append(
             observation(
-                "eia",
+                "noaa",
                 "P1",
-                "PJM.DOM.hourly-load",
-                number(row["value"]),
-                "MWh/hour",
-                start.isoformat(),
-                end.isoformat(),
+                f"{station}.daily-mean-temperature",
+                mean,
+                "degC",
+                day,
+                day,
                 digest,
                 fetched,
-                methodology_version="eia-hour-ending-v2",
+                url=URLS["noaa"],
+                cohort="pjm-dom-weather-control-v1",
                 metadata={
-                    "label": "DOM observed hourly grid load",
-                    "timestamp_convention": "hour-ending UTC",
-                    "publisher_period": row["period"],
-                    "methodology_source_url": "https://www.eia.gov/survey/form/eia_930/instructions.pdf",
-                    "supersedes_methodology_version": "1",
-                    "parent": "PJM",
-                    "subba": "DOM",
-                    "definition": "One-hour energy; numerically equivalent to interval-average MW. Not AI load.",
-                    "weather_adjusted": False,
+                    "label": f"{row.get('NAME') or station} daily mean temperature",
+                    "station": station,
+                    "tmax_c": number(row["TMAX"]),
+                    "tmin_c": number(row["TMIN"]),
+                    "definition": "Mean of NOAA daily maximum and minimum air temperature; weather control only.",
+                    "license": "U.S. government public data",
                 },
+                methodology_version="noaa-daily-summary-v1",
             )
         )
+    if payload and not result:
+        raise SourceError("NOAA temperature coverage is incomplete")
     return result
 
 
@@ -544,41 +618,93 @@ def parse_disclosures(payload, digest, fetched):
 
 
 def parse_apps(payload, digest, fetched, day):
-    result = []
     if day >= fetched[:10]:
         raise SourceError("App history requires a completed UTC day")
-    seen = set()
+    seen, parsed = set(), []
     for item in payload["data"]:
         entity = str(item["app_id"])
         if entity in seen:
             raise SourceError("Duplicate app identifier")
         seen.add(entity)
-        for field, unit in [("total_tokens", "tokens"), ("total_requests", "requests")]:
-            if isinstance(item[field], bool) or not str(item[field]).isdigit():
-                raise SourceError("App count must be a non-negative integer")
-            result.append(
-                observation(
-                    "openrouter",
-                    "D2",
-                    f"app.{entity}.{field}",
-                    int(item[field]),
-                    unit,
-                    day,
-                    day,
-                    digest,
-                    fetched,
-                    url="https://openrouter.ai/api/v1/datasets/app-rankings",
-                    metadata={
-                        "entity": entity,
-                        "label": item["app_name"] + " " + unit,
-                        "rank": item["rank"],
-                        "truncated": True,
-                        "population": "Returned top-100 public app cohort only",
-                        "publisher_as_of": payload.get("meta", {}).get("as_of"),
-                        "license": "CC BY 4.0",
-                    },
-                )
-            )
+        if any(
+            isinstance(item[field], bool) or not str(item[field]).isdigit()
+            for field in ("total_tokens", "total_requests")
+        ):
+            raise SourceError("App count must be a non-negative integer")
+        parsed.append((int(item["rank"]), entity, int(item["total_tokens"]), int(item["total_requests"])))
+    total_tokens = sum(item[2] for item in parsed)
+    total_requests = sum(item[3] for item in parsed)
+    if total_tokens and not total_requests:
+        raise SourceError("App token activity has no requests")
+    cohort_members = sorted(item[1] for item in parsed)
+    cohort = hashlib.sha256(json.dumps(cohort_members).encode()).hexdigest()[:16]
+    top10 = sum(item[2] for item in sorted(parsed)[:10])
+    values = (
+        ("returned_requests", total_requests, "requests", "Returned public-app requests"),
+        (
+            "tokens_per_request",
+            total_tokens / total_requests if total_requests else 0,
+            "tokens/request",
+            "Returned public-app tokens per request",
+        ),
+        (
+            "top10_token_concentration",
+            top10 / total_tokens if total_tokens else 0,
+            "ratio",
+            "Top-10 public-app token concentration",
+        ),
+    )
+    return [
+        observation(
+            "openrouter",
+            "D2",
+            series,
+            value,
+            unit,
+            day,
+            day,
+            digest,
+            fetched,
+            url="https://openrouter.ai/api/v1/datasets/app-rankings",
+            cohort=cohort,
+            metadata={
+                "label": label,
+                "truncated": True,
+                "population": "Returned top-100 public app cohort only; hidden and private apps excluded",
+                "publisher_as_of": payload.get("meta", {}).get("as_of"),
+                "cohort_members": cohort_members,
+                "coverage_numerator": len(parsed),
+                "response_row_count": 3,
+                "license": "CC BY 4.0",
+                "citation": "Source: OpenRouter (openrouter.ai/apps)",
+            },
+            methodology_version="openrouter-app-aggregate-v2",
+        )
+        for series, value, unit, label in values
+    ]
+
+
+def collect_gpu_history(transport, start, end):
+    listing, _digest, _fetched = transport.fetch(GPU_HISTORY_INDEX)
+    if not isinstance(listing, list):
+        raise SourceError("GPU Rental Prices history index schema changed")
+    result, days = [], set()
+    for item in listing:
+        name, url = item.get("name"), item.get("download_url")
+        if not isinstance(name, str) or not name.endswith(".json") or not isinstance(url, str):
+            continue
+        day = name.removesuffix(".json")
+        if not start <= day <= end:
+            continue
+        payload, digest, fetched = transport.fetch(public_url(url))
+        rows = parse_gpu(payload, digest, fetched)
+        if payload.get("date") != day:
+            raise SourceError("GPU Rental Prices snapshot date mismatch")
+        result.extend(rows)
+        days.add(day)
+    latest, digest, fetched = transport.fetch(URLS["gpu-rental"])
+    if start <= latest.get("date", "") <= end and latest["date"] not in days:
+        result.extend(parse_gpu(latest, digest, fetched))
     return result
 
 
@@ -683,7 +809,7 @@ def collect_source(source, transport, start, end, *, env=None, basket=()):
             )
         return result
     if source == "gpu-rental":
-        return parse_gpu(*transport.fetch(URLS[source]))
+        return collect_gpu_history(transport, start, end)
     if source == "artificial-analysis":
         key = env.get("ARTIFICIAL_ANALYSIS_API_KEY")
         if not key:
@@ -748,10 +874,27 @@ def collect_source(source, transport, start, end, *, env=None, basket=()):
                 },
             )
         )
+    if source == "noaa":
+        return parse_noaa(
+            *transport.fetch(
+                URLS[source],
+                params={
+                    "dataset": "daily-summaries",
+                    "stations": ",".join(NOAA_DOM_STATIONS),
+                    "startDate": start,
+                    "endDate": end,
+                    "format": "json",
+                    "units": "metric",
+                    "includeAttributes": "false",
+                    "includeStationName": "true",
+                },
+            ),
+            start,
+            end,
+        )
     raise SourceError(
         {
             "portkey": "Automated access and completed-day methodology unverified",
-            "noaa": "Weather station coverage unverified; residual disabled",
             "vast": "Authenticated offer schema and entitlement not verified",
             "lambda": "Direct HTML pricing semantics require a verified cohort import",
             "issuer-disclosures": "Requires reviewed issuer disclosure import; unattended release retrieval is not enabled",

@@ -78,6 +78,15 @@ def build_snapshot(store, as_of=None):
     now = datetime.fromisoformat(as_of.replace("Z", "+00:00"))
     response_issues = set()
     rows = latest_vintages(store.read_snapshot_observations(as_of=as_of), response_issues)
+    coverage = {}
+    for row in rows:
+        source = coverage.setdefault(
+            row["source_id"],
+            {"observation_count": 0, "observed_from": row["period_end"], "observed_through": row["period_end"]},
+        )
+        source["observation_count"] += 1
+        source["observed_from"] = min(source["observed_from"], row["period_end"])
+        source["observed_through"] = max(source["observed_through"], row["period_end"])
     rows += derived_observations(rows, as_of)
     statuses = {row["source_id"]: row for row in store.read_source_statuses(as_of=as_of)}
     sources = []
@@ -89,6 +98,9 @@ def build_snapshot(store, as_of=None):
                 "status": status.get("status", "unavailable"),
                 "reason": status.get("reason", "No successful collection has been recorded."),
                 "checked_at": status.get("checked_at"),
+                "observation_count": coverage.get(id, {}).get("observation_count", 0),
+                "observed_from": coverage.get(id, {}).get("observed_from"),
+                "observed_through": coverage.get(id, {}).get("observed_through"),
             }
         )
     indicators = []
@@ -136,6 +148,8 @@ def build_snapshot(store, as_of=None):
                 metadata = metric["metadata"]
                 lab_tokens = metadata.get("dataset") == "labs" and metadata.get("metric") in ("tokens", "token")
                 return (0 if lab_tokens else 1, -metric["value"] if lab_tokens else 0, metric["id"])
+            if indicator_id == "D2":
+                return (0 if metric["methodology_version"] == "openrouter-app-aggregate-v2" else 1, metric["id"])
             return (
                 0
                 if "ttm_coverage" in metric["id"]
