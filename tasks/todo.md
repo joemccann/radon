@@ -5568,6 +5568,14 @@ Verification: full root Python 12,282 passed, 19 skipped, 16 subtests. Full clou
 - [x] T3 depends_on: [T2] - Verify desktop/mobile browser exports and full web suite; review results.
 
 Dependency graph: T1 -> T2 -> T3.
+
+# Large AI-cycle snapshot deadline hierarchy (2026-09-08)
+
+- [x] T1 depends_on: [] - Measure the complete 79,078-observation production read/build and reproduce the API 503 at the old 18-second ceiling.
+- [x] T2 depends_on: [T1] - Pin and implement bounded store, API, and Next deadlines with explicit headroom at each layer.
+- [ ] T3 depends_on: [T2] - Run focused checks, ship through CI/deployment, and verify the full live payload returns HTTP 200.
+
+Dependency graph: T1 -> T2 -> T3.
 - [x] T4 depends_on: [] - Study verified @joemccann authored tweets and document an evidence-backed voice persona; establish whether X API access is required.
 - [x] T5 depends_on: [T2, T4] - Integrate persona-based social copy rewriting with factual preservation and publisher exclusions, then verify.
 Extended dependency graph: T1 -> T2 -> T3; T4 + T2 -> T5.

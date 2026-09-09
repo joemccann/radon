@@ -9,7 +9,7 @@ export const radonCapability = "read";
 export async function GET(): Promise<Response> {
   const requestId = getRequestId();
   try {
-    const data = await radonFetch("/ai-cycle", { timeout: 25_000, cache: "no-store" });
+    const data = await radonFetch("/ai-cycle", { timeout: 45_000, cache: "no-store" });
     const response = NextResponse.json(data);
     setNoStoreResponseHeaders(response, requestId);
     return response;

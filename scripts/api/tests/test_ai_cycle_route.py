@@ -1,4 +1,5 @@
 """Cache-only route: bounded concurrent reads, visible failures, no collection."""
+
 from __future__ import annotations
 
 import asyncio
@@ -9,6 +10,13 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from scripts.api.routes import ai_cycle as route
+
+
+def test_snapshot_deadlines_leave_headroom_between_layers():
+    from scripts.ai_cycle.store import _SNAPSHOT_READ_DEADLINE_SECONDS
+
+    assert _SNAPSHOT_READ_DEADLINE_SECONDS == 30
+    assert route._READ_DEADLINE_SECONDS == 35
 
 
 @pytest.fixture(autouse=True)
@@ -69,6 +77,7 @@ def test_concurrent_readers_share_one_task(monkeypatch):
 
     async def run():
         from fastapi import Response
+
         return await asyncio.gather(*(route.ai_cycle(Response()) for _ in range(5)))
 
     assert asyncio.run(run()) == [{"version": 1}] * 5

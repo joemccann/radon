@@ -17,7 +17,7 @@ describe("AI infrastructure read proxy", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual(payload);
     expect(response.headers.get("cache-control")).toContain("no-store");
-    expect(fetchMock).toHaveBeenCalledWith("/ai-cycle", { timeout: 25_000, cache: "no-store" });
+    expect(fetchMock).toHaveBeenCalledWith("/ai-cycle", { timeout: 45_000, cache: "no-store" });
   });
   it("preserves upstream failure status and detail", async () => {
     fetchMock.mockRejectedValue(new RadonApiError(503, "Snapshot store unavailable"));

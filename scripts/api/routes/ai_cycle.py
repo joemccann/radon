@@ -1,4 +1,5 @@
 """Read-only AI infrastructure observations; collection belongs to the timer."""
+
 from __future__ import annotations
 
 import asyncio
@@ -11,7 +12,7 @@ from fastapi import APIRouter, HTTPException, Response
 router = APIRouter()
 logger = logging.getLogger("radon.ai_cycle")
 _CACHE_SECONDS = 60
-_READ_DEADLINE_SECONDS = 20
+_READ_DEADLINE_SECONDS = 35
 _cached: dict | None = None
 _cached_at = 0.0
 _inflight: asyncio.Task | None = None
@@ -56,5 +57,8 @@ async def ai_cycle(response: Response):
         # The operator gets a stable error; credentials/transport URLs never
         # escape through exceptions from database clients.
         logger.warning("AI infrastructure read failed: %s", type(exc).__name__)
-        raise HTTPException(status_code=503, detail="AI infrastructure observations are temporarily unavailable",
-                            headers={"Cache-Control": "private, no-store"}) from None
+        raise HTTPException(
+            status_code=503,
+            detail="AI infrastructure observations are temporarily unavailable",
+            headers={"Cache-Control": "private, no-store"},
+        ) from None
