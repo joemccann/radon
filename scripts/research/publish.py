@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import hashlib
+from html import unescape
 import json
 import re
 import unicodedata
@@ -12,8 +13,10 @@ from research.assets import ASSET_RE, URL_PREFIX, read_asset, store_asset
 
 
 def validate_rendered_copy(title, content, publisher, figures, tags):
-    """Rendered attribution names the original research provider only."""
+    """Hold invalid authored copy without changing verified claims or evidence."""
     values = [title, content, publisher, *tags, *(figure.get('caption', '') for figure in figures)]
+    if any('\u2014' in unescape(value) for value in values if isinstance(value, str)):
+        raise ValueError('Rendered research copy must not contain em dashes')
     if any(re.search(r'zero[\s\-–—_]*hedge', ''.join(char for char in unicodedata.normalize('NFKC', value) if unicodedata.category(char) != 'Cf'), re.I)
            for value in values if isinstance(value, str)):
         raise ValueError('Rendered research copy must attribute the original provider only')

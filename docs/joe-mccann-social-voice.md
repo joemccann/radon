@@ -16,6 +16,12 @@ Provisional inference from the ThreadReader previews: lead with the call or sali
 
 ## Product constraints, distinct from observed persona
 
+User correction, 2026-09-08: never use em dashes in authored Dropbox PDF summaries, research display copy, social captions, or text rendered into share images and videos. Use natural sentence breaks, commas, colons or parentheses. This applies to existing rendered copy and model-generated text, including HTML-encoded em dashes. Preserve negative signs, numeric ranges, source evidence, original PDFs and chart pixels.
+
+Apply the documented voice to research summaries as well as social rewrites: useful observation first, concrete evidence and timeframe next, only a supported implication. Write like Joe talking to another trader. Use natural contractions. Cut generic report narration such as "the report concludes" and "this highlights" when it adds no attribution or uncertainty. Keep necessary attribution next to the claim. Stop when the evidence runs out. Humanizing copy must not remove a source hedge or invent Joe's personal research, holdings or conviction.
+
+Recheck on 2026-09-08 found the same [direct X post](https://x.com/joemccann/status/1985760457576362102) and [quantitative BTC example](https://mobile.twstalker.com/joemccann/status/2019546649782284621). This does not expand the 20-item corpus or establish a representative current timeline. The explicit punctuation rule comes from Joe's instruction, independently of historical source phrasing.
+
 Write fresh copy from the supplied story’s facts. Prefer a compact hook, concrete supporting observation, and restrained implication. Keep uncertainty and attribution to legitimate underlying researchers where supplied. Do not invent Joe’s holdings, research, calls, experience, confidence, or trading instructions. Do not convert an indexed chart level into a price target or percent return. Do not manufacture sample sizes or causal claims. No automatic memes, slogan sign-offs, forced profanity, hashtags, emoji, or generic engagement bait. User explicitly forbids The Market Ear and ZeroHedge names, handles, domains, source credits, or links in every social output, including captions, posts, reel text, and share URLs. This is an export rule, not a claim about Joe’s historical vocabulary.
 
 ## Suggested generation instruction

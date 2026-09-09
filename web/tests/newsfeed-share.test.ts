@@ -1,10 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildShareCaption, buildXShareUrl, canvasToMp4, canvasToPng, supportsMp4Export, wrapShareText, type SharePost } from "../lib/newsfeedShare";
+import { buildShareCaption, buildXShareUrl, canvasToMp4, canvasToPng, sanitizeShareText, supportsMp4Export, wrapShareText, type SharePost } from "../lib/newsfeedShare";
 
 const post: SharePost = { id: "post-123", title: "Yen hedge demand jumps", content: "Positioning is near neutral.", timestamp: "2026-09-07", isoTimestamp: "2026-09-07T18:00:00Z", href: "https://themarketear.com/posts/post-123" };
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("social captions", () => {
+  it.each(["—", "&mdash;", "&#8212;", "&#x2014;"])("sanitizes %s in source captions and manually edited X copy", dash => {
+    const content = `Positioning ${dash} still neutral. Returns: -2.5%.`;
+    expect(sanitizeShareText(content)).toBe("Positioning, still neutral. Returns: -2.5%.");
+    const caption = buildShareCaption({ ...post, title: `Yen ${dash} the setup`, content });
+    expect(caption).toBe("Yen, the setup\n\nPositioning, still neutral. Returns: -2.5%.");
+    expect(new URL(buildXShareUrl(content)).searchParams.get("text")).toBe("Positioning, still neutral. Returns: -2.5%.");
+  });
   it("removes publisher profile links and handles without orphan URLs", () => {
     const caption = buildShareCaption({ ...post, content: "Neutral positioning. https://x.com/zerohedge/status/123 https://twitter.com/themarketear @ZeroHedge @themarketear" });
     expect(caption).toBe("Yen hedge demand jumps\n\nNeutral positioning.");
@@ -180,6 +187,20 @@ describe("share card rendering", () => {
     expect(harness.drawImage).not.toHaveBeenCalled();
     expect(harness.fillText).toHaveBeenCalledWith("RADON", 72, 164);
     expect(harness.fillText.mock.calls.flat().join(" ")).not.toMatch(/market.?ear|zero.?hedge/i);
+  });
+  it("removes em dashes from every authored canvas surface, including source and figure caption", async () => {
+    const { renderShareCard } = await import("../lib/newsfeedShare");
+    const harness = renderHarness();
+    await renderShareCard({ ...post, title: "Flows — still firm", content: "Demand &mdash; unchanged. Range: 10—20%.", source: {
+      kind: "dropbox", publisher: "Synthetic Bank — Research", documentDate: "2026-09-03", folderDate: "2026-09-07", fileId: "id", revision: "r", contentHash: "h", url: "/private.pdf", pages: [2],
+      figures: [{ url: "/chart.png", page: 2, caption: "Distribution &#8212; August" }],
+    } }, "/chart.png");
+    const text = harness.fillText.mock.calls.map(call => call[0]).join(" ");
+    expect(text).not.toMatch(/—|&(?:mdash|#8212|#x2014);/i);
+    expect(text).toContain("Flows, still firm");
+    expect(text).toContain("10 to 20%");
+    expect(text).toContain("Synthetic Bank, Research");
+    expect(text).toContain("Distribution, August");
   });
   it.each(["The Market Ear", "ZeroHedge"])("excludes %s from every rendered text surface", async publisher => {
     const { renderShareCard } = await import("../lib/newsfeedShare");

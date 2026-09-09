@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { normalisePostContent } from "./newsfeedText";
+import { withoutEmDashes } from "./copyPunctuation";
 import { readOfflineMeta } from "./offline/offlineStatus";
 import {
   reportFetchFailure,
@@ -118,13 +119,16 @@ export function useNewsfeedPosts(): NewsfeedPosts {
           const ms = ts.getTime();
           return {
             ...post,
+            title: source ? withoutEmDashes(post.title || "") : post.title,
+            tags: source && Array.isArray(post.tags)
+              ? post.tags.map(tag => typeof tag === "string" ? withoutEmDashes(tag) : tag) : post.tags,
             isoTimestamp: Number.isFinite(ms) ? ts.toISOString() : stamp,
             timestampMs: Number.isFinite(ms) ? ms : 0,
             source,
             href: source?.url ?? buildPostHref(post.id),
             // Research bodies are authored Markdown: indentation, line breaks,
             // and trailing spaces carry formatting that scrape rewrapping loses.
-            content: source ? (post.content || "") : normalisePostContent(post.content || "", post.title || ""),
+            content: source ? withoutEmDashes(post.content || "") : normalisePostContent(post.content || "", post.title || ""),
             images: source ? source.figures.map(f => f.url) : Array.isArray(post.images) ? post.images : [],
           } satisfies NormalisedPost;
         })

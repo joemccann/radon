@@ -1,4 +1,5 @@
 import type { MarketEarPost } from "./useNewsfeedPosts";
+import { withoutEmDashes } from "./copyPunctuation";
 
 export type SharePost = MarketEarPost & { href: string; isoTimestamp: string };
 
@@ -11,7 +12,7 @@ const LINE = "#2e3947";
 
 /** Shared outbound policy for captions, composer links and rendered card text. */
 export function sanitizeShareText(text: string): string {
-  return text
+  return withoutEmDashes(text)
     .replace(/https?:\/\/(?:www\.)?(?:x|twitter)\.com\/(?:themarketear|zerohedge)(?:[/?#][^\s<>]*)?/gi, "")
     .replace(/(?:https?:\/\/|www\.)[^\s<>]*(?:themarketear|zerohedge)\.com[^\s<>]*/gi, "")
     .replace(/(?:\b(?:source|via|per|according to)\s*:?\s*)?@?\b(?:the[\s-]*)?(?:market[\s-]*ear|zero[\s-]*hedge)(?:\.com(?:\/[^\s]*)?)?\b/gi, "")

@@ -283,12 +283,6 @@ ws-connection-stability.spec.ts
 #   2026-09-04 headline timestamp with a window-relative Date.now() fixture.
 #   Demo compile passed; Chromium passed locally against a demo next start.
 
-# REVIEWED 2026-09-07 newsfeed-sharing.spec.ts: local Chromium desktop/mobile
-#   PNG dimensions and MP4 decoding verified. Sharing export is outside the
-#   curated P0 financial smoke; 2/2 sharing cases passed with authenticated
-#   test bypass and synthetic research data.
-newsfeed-sharing.spec.ts
-
 # REVIEWED 2026-09-08 trin-tab.spec.ts - local Chromium desktop/mobile
 #   verification passed 4/4; x-axis bounding boxes and screenshots were checked
 #   at 1,440px and 390px with irregular market-session timestamps.

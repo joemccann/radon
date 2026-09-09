@@ -1,3 +1,5 @@
+import { withoutEmDashes } from "./copyPunctuation";
+
 /** Research media stays on the authenticated same-origin path. */
 export type ResearchSource = {
   kind: "dropbox";
@@ -29,5 +31,9 @@ export function parseResearchSource(value: unknown): ResearchSource | undefined 
     || !Array.isArray(s.figures) || !s.figures.every(f => f && typeof f.url === "string"
       && PRIVATE_RESEARCH_ASSET.test(f.url) && f.url.endsWith(".png")
       && Number.isInteger(f.page) && f.page > 0 && s.pages.includes(f.page) && typeof f.caption === "string")) return undefined;
-  return s;
+  return {
+    ...s,
+    publisher: withoutEmDashes(s.publisher),
+    figures: s.figures.map(figure => ({ ...figure, caption: withoutEmDashes(figure.caption) })),
+  };
 }

@@ -128,6 +128,28 @@ describe("Dropbox research rich text", () => {
     expect(within(item).getByText(/Text-only source evidence/)).not.toBeNull();
   });
 
+  it("removes em dashes from stored research titles, Markdown, source labels and chart captions in both views", async () => {
+    fetchMock.mockResolvedValue({ ok: true, headers: new Headers(), json: async () => [{
+      ...post,
+      title: "Investor flows — the evidence",
+      content: `${markdown}\n\nDemand &mdash; still firm. Range: 10—20%.`,
+      source: { ...source, publisher: "Synthetic Bank — Research", figures: [{ url: chart, page: 1, caption: "Investor flows &#8212; August" }] },
+    }] });
+    render(<DashboardNewsFeed />);
+    const item = await screen.findByTestId("news-feed-item");
+    expectFormattedResearch(item.querySelector<HTMLElement>(".news-feed-summary")!);
+    expect(item.textContent).not.toMatch(/—|&(?:mdash|#8212|#x2014);/i);
+    expect(item.textContent).toContain("Range: 10 to 20%.");
+    expect(within(item).getByRole("link", { name: "Synthetic Bank, Research · Source PDF" }).getAttribute("href")).toBe(pdf);
+    expect(item.textContent).toContain("Investor flows, August");
+    fireEvent.click(within(item).getByRole("button", { name: "Open lightbox for: Investor flows, the evidence" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog.textContent).not.toMatch(/—|&(?:mdash|#8212|#x2014);/i);
+    expect(dialog.textContent).toContain("Investor flows, the evidence");
+    expect(dialog.textContent).toContain("Investor flows, August");
+    expectFormattedResearch(dialog.querySelector<HTMLElement>(".newsfeed-lightbox__body")!);
+  });
+
   it("retains plain text and scrape cleanup for posts without a research source", async () => {
     fetchMock.mockResolvedValue({ ok: true, headers: new Headers(), json: async () => [{ ...post, id: "market-ear-post", source: undefined, content: '\"**Literal stars** remain source text.' }] });
     render(<DashboardNewsFeed />);

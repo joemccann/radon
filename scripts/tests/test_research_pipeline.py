@@ -31,6 +31,24 @@ def test_invalid_evidence_cannot_publish(field,value):
     with pytest.raises(EvidenceError):validate_candidate(item,2,'2026-09-07')
 
 
+@pytest.mark.parametrize('field', ['title', 'content', 'publisher', 'caption'])
+@pytest.mark.parametrize('dash', ['\u2014', '&mdash;', '&#8212;', '&#x2014;'])
+def test_candidate_holds_authored_em_dashes_before_evidence_review(field, dash):
+    item = candidate()
+    target = item['figures'][0] if field == 'caption' else item
+    target[field] = f'Flows {dash} new demand'
+    with pytest.raises(EvidenceError, match='em dash'):
+        validate_candidate(item, 2, '2026-09-07')
+
+
+def test_candidate_preserves_literal_source_quotes_with_em_dashes():
+    item = candidate()
+    item['date_evidence'] = {'source_quote': 'Report\u2014September 4, 2026'}
+    original = copy.deepcopy(item)
+    assert validate_candidate(item, 2, '2026-09-07') == original
+    assert item == original
+
+
 @pytest.mark.parametrize('crop', [[0,0,1,float('nan')],[0,0,1,float('inf')],[-.1,0,.9,1],[.5,.5,.5,.6],[0,0,.01,.01]])
 def test_crop_geometry_is_finite_and_meaningful(crop):
     item=candidate();item['figures'][0]['crop']=crop

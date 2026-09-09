@@ -23,8 +23,8 @@ test.beforeEach(async ({ page }) => {
 
 test("news sharing rewrites caption and portrait analysis in the author's voice", async ({ page }, testInfo) => {
   test.setTimeout(90_000);
-  const rewritten = { title: "Calendar bulls have a chart", content: "Positioning is the tell. Seasonality is the setup." };
-  const rewrittenCaption = `${rewritten.title}\n\n${rewritten.content}`;
+  const rewritten = { title: "Seasonality — the setup", content: "Positioning &mdash; the tell. Returns: -2.5%." };
+  const rewrittenCaption = "Seasonality, the setup\n\nPositioning, the tell. Returns: -2.5%.";
   let requests = 0;
   let releaseRewrite!: () => void;
   const rewriteReady = new Promise<void>(resolve => { releaseRewrite = resolve; });
@@ -58,8 +58,9 @@ test("news sharing rewrites caption and portrait analysis in the author's voice"
   await expect(panel.getByRole("button", { name: "Download Story image" })).toBeEnabled();
   expect(new URL((await panel.getByRole("link", { name: "Compose on X" }).getAttribute("href"))!).searchParams.get("text")).toBe(rewrittenCaption);
   const drawn = await page.evaluate(() => (window as unknown as { shareCapture: ShareCapture }).shareCapture.drawn.join(" "));
-  expect(drawn).toContain(rewritten.title);
-  expect(drawn).toContain(rewritten.content);
+  expect(drawn).toContain("Seasonality, the setup");
+  expect(drawn).toContain("Positioning, the tell. Returns: -2.5%.");
+  expect(drawn).not.toMatch(/—|&(?:mdash|#8212|#x2014);/i);
   expect(requests).toBe(1);
   await panel.screenshot({ path: testInfo.outputPath("rewritten-share.png") });
   const download = page.waitForEvent("download");
@@ -133,15 +134,17 @@ for (const width of [1440, 393]) {
       expect(drawn).not.toMatch(excludedPublisher);
       const compose = panel.getByRole("link", { name: "Compose on X" });
       expect(new URL((await compose.getAttribute("href"))!).searchParams.get("text")).not.toMatch(excludedPublisher);
-      await caption.fill("Seasonality improves. Source: The Market Ear https://themarketear.com/posts/example ZeroHedge https://zerohedge.com/markets/example");
+      await caption.fill("Seasonality — still improving. Range: 10&#8212;20%. Source: The Market Ear https://themarketear.com/posts/example ZeroHedge https://zerohedge.com/markets/example");
       const outbound = new URL((await compose.getAttribute("href"))!).searchParams.get("text");
-      expect(outbound).toContain("Seasonality improves.");
+      expect(outbound).toContain("Seasonality, still improving. Range: 10 to 20%.");
       expect(outbound).not.toMatch(excludedPublisher);
+      expect(outbound).not.toMatch(/—|&(?:mdash|#8212|#x2014);/i);
       await panel.getByRole("button", { name: "Copy caption", exact: true }).click();
       await expect(panel.getByRole("status")).toHaveText("Caption copied.");
       const copied = await page.evaluate(() => (window as unknown as { shareCapture: ShareCapture }).shareCapture.copied);
       expect(copied).toBe(outbound);
       expect(copied).not.toMatch(excludedPublisher);
+      expect(copied).not.toMatch(/—|&(?:mdash|#8212|#x2014);/i);
       await caption.fill("Seasonality improves.");
       await panel.screenshot({ path: testInfo.outputPath(`publisher-free-share-${width}.png`) });
       await panel.getByRole("img").screenshot({ path: testInfo.outputPath(`publisher-free-card-${width}.png`) });

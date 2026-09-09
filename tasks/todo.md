@@ -5888,6 +5888,31 @@ Dependency graph: T1 -> T2 -> T3 -> T4 -> T5.
 - Regenerate codemap from a clean index export so local generated sources do not enter the committed graph.
 
 ---
+# Task: Research and social copy in Joe's voice [IN PROGRESS]
+
+## Dependency graph
+
+- T1 depends_on: [] - Inspect authored copy paths and documented @joemccann voice; isolate unrelated work.
+- T2 depends_on: [T1] - Enforce human voice and no em dashes in research generation/publication.
+- T3 depends_on: [T1] - Enforce no em dashes in existing research renderings and every social-share output; strengthen voice instructions.
+- T4 depends_on: [T2, T3] - Add regressions, publish PR, verify exact-head CI and browser artifacts, and notify.
+
+## Checklist
+
+- [x] T1 Read voice profile and source samples; create isolated worktree.
+- [x] T2 Research generation and publication.
+- [x] T3 Web rendering and social exports.
+- [ ] T4 GitHub-runner validation, visual verification, and delivery.
+
+## Review
+
+- No local test suites. Original PDF/chart evidence remains intact; changes apply to authored text. Preserve all financial grounding gates.
+- PR: https://github.com/joemccann/radon/pull/378. RED: GitHub run 34291166890, head 3a07ebdb, reproduced four voice-output failures and additional research/share regressions before production changes.
+- Added 63 unit regressions and browser assertions. Static review added nested URL-parentheses coverage; promoted social browser tests to CI and removed their held-out ledger entry.
+- GitHub run 34291510793 exposed sentence commas being captured as part of numeric claims after punctuation normalization. Restrict grouping commas to those followed by a digit; retain changed-value/sign rejection.
+- GREEN: 0067a67a passed all 31 applicable checks (run 34291738638), including 75 browser checks and the demo check. Reviewed research feed/lightbox and social export screenshots. Final merge-head verification pending after main advanced.
+
+---
 
 # NOAA signed-temperature repair (2026-09-08)
 

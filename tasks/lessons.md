@@ -1,5 +1,11 @@
 # Lessons
 
+## 2026-09-08: Joe's research and social copy
+
+- Never emit em dashes in generated Dropbox PDF summaries, rendered research copy, or social-share captions, images, and videos. Enforce this at output boundaries as well as in model instructions.
+- Use Joe McCann's documented @joemccann voice: direct, conversational, concise, numbers first when useful. Preserve evidence, attribution, uncertainty, and numeric meaning. Do not invent personal trades or experience.
+- Preserve original source PDFs and chart evidence. Voice changes apply to authored summaries and captions, not source artifacts.
+
 ## 2026-09-07 — A weekly error row is one cycle, not a daily re-fail
 
 - `equibles-ats-venue-share` `no ticker produced a series / requested=33 /

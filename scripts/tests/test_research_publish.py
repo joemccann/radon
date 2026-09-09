@@ -221,6 +221,44 @@ def test_required_stable_id_components():
     with pytest.raises(ValueError): publish.stable_post_id("id:a", "")
 
 
+@pytest.mark.parametrize("field", ["title", "content", "publisher", "caption", "tag"])
+@pytest.mark.parametrize("dash", ["\u2014", "&mdash;", "&#8212;", "&#x2014;"])
+def test_authored_em_dash_never_reaches_publication(db, post, field, dash):
+    text = f"Rates {dash} positioning"
+    if field in ("title", "content"):
+        post[field] = text
+    elif field == "publisher":
+        post["source"][field] = text
+    elif field == "caption":
+        post["source"]["figures"][0][field] = text
+    else:
+        post["tags"] = [text]
+    with pytest.raises(ValueError):
+        publish.publish(post)
+    assert db.execute("SELECT count(*) FROM posts").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("dash", ["\u2014", "&mdash;", "&#8212;", "&#x2014;"])
+def test_rendered_copy_gate_checks_tags_before_caller_normalization(dash):
+    with pytest.raises(ValueError, match="em dash"):
+        publish.validate_rendered_copy("Rates", "New evidence.", "JPMorgan", [], [f"FLOW{dash}RATES"])
+
+
+def test_publication_preserves_evidence_quotes_assets_and_financial_punctuation(db, post):
+    post["content"] = "Demand fell -5.65%. The 2-3% range isn't a forecast."
+    post["source"]["source_quote"] = "Source wording\u2014unchanged."
+    post["source"]["date_evidence"] = {"source_quote": "Report\u2014September 5, 2026"}
+    before = copy.deepcopy(post)
+    names = [post["source"]["url"].rsplit("/", 1)[1], post["images"][0].rsplit("/", 1)[1]]
+    original_bytes = [(assets.assets_dir() / name).read_bytes() for name in names]
+    publish.publish(post)
+    assert post == before
+    assert db.execute("SELECT content FROM posts").fetchone()[0] == before["content"]
+    source = json.loads(db.execute("SELECT provenance_json FROM research_post_sources").fetchone()[0])
+    assert source == before["source"]
+    assert [(assets.assets_dir() / name).read_bytes() for name in names] == original_bytes
+
+
 def test_invalid_figure_page_or_asset_extension(db, post):
     invalid = copy.deepcopy(post)
     invalid["source"]["figures"][0]["page"] = 10
