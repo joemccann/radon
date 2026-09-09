@@ -1032,10 +1032,20 @@ launch_round() {
   if [[ -n "$RUNG_MODEL" ]]; then model_flag=(--model "$RUNG_MODEL"); fi
   case "$RUNG_PROVIDER" in
     claude)
+      # --disallowedTools: three security rounds in a row (2026-09-08) ran
+      # 17-27 minutes, wrote ZERO bytes here and exited 0. Every transcript
+      # ended on ScheduleWakeup — the /loop heartbeat — "while <stage> runs
+      # detached; notifications are the primary wake signal". Under -p there
+      # is no later: the turn ends, the process exits 0, the final text and
+      # the completion marker are never printed. The skill already says to
+      # wait in-session on the rc file; the model reached for the harness
+      # tool anyway, so it is taken off the table, with Monitor (whose
+      # notifications are what it was waiting on) and CronCreate.
       CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 "$TIMEOUT_BIN" -k "$KILL_AFTER_SECS" "$remain" \
         "$RUNG_BIN" -p "/$LOOP_SKILL $PHASE" \
         ${model_flag[@]+"${model_flag[@]}"} \
         --dangerously-skip-permissions \
+        --disallowedTools ScheduleWakeup Monitor CronCreate \
         --output-format text >> "$RUN_LOG" 2>&1 &
       ;;
     codex)

@@ -133,6 +133,14 @@ The agent then waits IN-SESSION with a bounded loop on that rc file:
 30; done`, reading results from the rc file and logs, never from a harness
 background-task notification.
 
+**Never yield the turn to wait.** You are running under `claude -p`. There is
+no later: `ScheduleWakeup`, `Monitor`, `CronCreate` and "standing by for the
+completion notification" all END THE PROCESS with exit 0 and nothing printed,
+and the phase is scored INCOMPLETE with an empty log — three rounds in a row
+did exactly this on 2026-09-08. The wrapper now removes those tools from your
+list; if you find yourself wanting one, the correct move is the bounded
+`until` loop above, in the foreground, in this turn.
+
 Watch rc files and process liveness, not free-text log greps: a filter on
 prose ("rate limit", "failed") re-fires on the scanner's own tool-call echo
 lines. Under CPU contention from sibling loops, prefer serial suites over

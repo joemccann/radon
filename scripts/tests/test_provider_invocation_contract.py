@@ -179,3 +179,52 @@ class TestTheAgentCanReachGit:
             "rung's --dangerously-skip-permissions scope, not exceed it"
         )
         assert "--sandbox workspace-write" in body
+
+
+# --- the claude rung, 2026-09-08 ---------------------------------------------
+# Three security rounds in a row (remediate and deliver at 01:13/01:40, audit at
+# 15:06) ran 17-27 minutes, wrote ZERO bytes to the run log and exited 0. Their
+# transcripts all end the same way: the model calls ScheduleWakeup — the /loop
+# heartbeat tool — with "fallback heartbeat while <stage> runs detached;
+# notifications are the primary wake signal". Under `claude -p` there is no
+# later: the turn ends, the process exits 0, the final text is never printed,
+# and the phase-completion marker is absent. The one round that completed
+# ended with the marker as its final text instead.
+#
+# The skill already says to wait in-session on the rc file, never on a harness
+# notification. The model reached for the harness tool anyway, so the wrapper
+# takes it off the table: --disallowedTools removes ScheduleWakeup, Monitor
+# (whose task-notification semantics are what the model was waiting on) and
+# CronCreate from the toolset. Probed on this runner with claude 2.1.263: the
+# model then reports neither tool in its list.
+
+WAKEUP_TOOLS = ("ScheduleWakeup", "Monitor", "CronCreate")
+
+
+class TestTheClaudeWire:
+    @pytest.mark.parametrize("phase", ["audit", "remediate", "deliver"])
+    def test_the_security_loop_denies_the_wakeup_tools(self, tmp_path, phase):
+        argv = _argv(tmp_path, "security", phase=phase)
+        assert argv, "claude was never launched"
+        first = argv[0]
+        assert first.startswith("-p /security-nightly " + phase), first
+        assert "--disallowedTools" in first.split(), (
+            "the claude rung must deny the /loop wakeup tools, or a phase that "
+            f"'waits for a notification' exits 0 having printed nothing: {first}"
+        )
+        for tool in WAKEUP_TOOLS:
+            assert tool in first.split(), f"{tool} not denied: {first}"
+        assert "--dangerously-skip-permissions" in first, first
+        assert "--output-format text" in first, first
+
+    def test_the_denial_is_in_the_claude_arm_of_every_wrapper(self):
+        """The four fallback loops never take the claude rung, but launch_round
+        is pinned byte-identical across the five, so the arm lives in all of
+        them and must carry the same denial."""
+        for name, path in LOOPS.items():
+            text = path.read_text(encoding="utf-8")
+            arm_start = text.index("    claude)\n", text.index("launch_round() {"))
+            arm = text[arm_start : text.index(";;", arm_start)]
+            assert "--disallowedTools" in arm, f"{name}: {arm}"
+            for tool in WAKEUP_TOOLS:
+                assert tool in arm, f"{name} does not deny {tool}"
