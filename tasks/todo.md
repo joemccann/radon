@@ -1,3 +1,24 @@
+# Task: Reliability audit 2026-09-09 [IN PROGRESS]
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify runner rails, ledger anchor, dated branch, and delta.
+- T2 depends_on: [T1] - Audit changed source surfaces and standing reliability sweeps.
+- T3 depends_on: [T2] - Append the ledger/findings, validate frozen IDs, commit, push, and update the nightly PR.
+
+## Checklist
+
+- [x] T1 Dedicated markers, anchor `15e74ff1`, and `reliability/2026-09-09` verified.
+- [x] T2 Changed-surface and standing-sweep review.
+- [x] T3 Audit ledger publication, commit, push, PR #383, and rolling-issue report.
+
+## Review
+
+- [x] 12 commits / 28 changed source files reviewed; zero new source-actionable findings.
+- [x] `80e41b2a` pushed; PR #383 opened and issue #81 commented; Pushover accepted the audit notice.
+
+---
+
 # Task: Testing-weekend remediate 2026-09-08 [IN PROGRESS]
 
 ## Dependency graph
@@ -179,6 +200,26 @@ Complete the reduced-rung P0/P1 backlog without leaving evidence archives corrup
 - [x] Permanent drills: Python 94 passed; Vitest 12 passed.
 - [ ] Detached full-gate stage has no `DONE` sentinel; 2026-09-08 retry also exited before `pytest_rc`; continuation must re-run all three gates.
 - [ ] Detached full-gate stage has no `DONE` sentinel; continuation must re-run all three gates.
+
+---
+
+# Task: Reliability remediate 2026-09-09 [BLOCKED]
+
+## Dependency graph
+
+- T1 depends_on: [] - Resume the dated branch and reconcile reduced-rung P0/P1 backlog.
+- T2 depends_on: [T1] - Re-run the permanent fault-injection drills with resolved paths.
+- T3 depends_on: [T2] - Run three serial detached full gates and append durable results.
+
+## Checklist
+
+- [x] T1 REL-251 through REL-253 are source-DONE; reduced rung admits no new P0/P1 task.
+- [ ] T2 BLOCKED: detached drill stage was terminated before its required sentinel.
+- [ ] T3 BLOCKED: the third detached closing-gate attempt produced no `DONE` sentinel.
+
+## Review
+
+- [ ] Three genuine detached attempts across 2026-09-08/09 terminated before the stage sentinel; no gate count is claimed.
 
 ---
 
