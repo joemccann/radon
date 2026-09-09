@@ -247,7 +247,7 @@ export default function OptionsExposurePanel({ symbol }: OptionsExposurePanelPro
         </div>
         <div className={styles.telemetry}>
           <time dateTime={data.source_time}>{formatTimestamp(data.source_time)}</time>
-          <span>SPOT {formatStrike(data.spot)}</span>
+          <span>{data.spot === null ? "SPOT UNAVAILABLE" : `SPOT ${formatStrike(data.spot)}`}</span>
           <button
             type="button"
             className={styles.exportButton}
@@ -262,6 +262,11 @@ export default function OptionsExposurePanel({ symbol }: OptionsExposurePanelPro
       </header>
       {exportError ? (
         <div className={styles.exportError} role="alert">{exportError}</div>
+      ) : null}
+      {data.spot === null ? (
+        <p className={styles.measurementNotice} role="status">
+          Provider spot price is unavailable. Showing all strikes without a spot marker.
+        </p>
       ) : null}
 
       <div className={styles.controls} data-testid="options-exposure-controls">
@@ -282,7 +287,8 @@ export default function OptionsExposurePanel({ symbol }: OptionsExposurePanelPro
           <span>Strike range</span>
           <select
             aria-label="Strike range"
-            value={String(strikeWindow)}
+            value={data.spot === null ? "all" : String(strikeWindow)}
+            disabled={data.spot === null}
             onChange={(event) => {
               const next = event.target.value;
               setStrikeWindow(next === "all" ? "all" : Number(next) as OptionsExposureStrikeWindow);

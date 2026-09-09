@@ -7,11 +7,27 @@ import {
   EXPOSURE_STRIKE_OPTIONS,
   aggregateOptionsExposure,
   isOptionsExposurePayload,
+  nearestStrike,
   selectStrikeWindow,
 } from "@/lib/optionsExposure";
 import { EXPOSURE_FIXTURE } from "./options-exposure-fixture";
 
 describe("options exposure transforms", () => {
+  it("accepts explicit missing spot only as a partial measurement", () => {
+    expect(isOptionsExposurePayload({ ...EXPOSURE_FIXTURE, spot: null, complete: false })).toBe(true);
+    expect(isOptionsExposurePayload({ ...EXPOSURE_FIXTURE, spot: null, complete: true })).toBe(false);
+    for (const spot of [undefined, 0, -1, NaN, Infinity, true, "100"]) {
+      expect(isOptionsExposurePayload({ ...EXPOSURE_FIXTURE, spot, complete: false })).toBe(false);
+    }
+  });
+
+  it("shows all strikes and no spot marker when provider spot is missing", () => {
+    const rows = Array.from({ length: 40 }, (_, index) => ({
+      strike: 50 + index * 5, value: index, putOi: 0, callOi: 0,
+    }));
+    expect(selectStrikeWindow(rows, null, 5)).toEqual([...rows].reverse());
+    expect(nearestStrike(rows.map((row) => row.strike), null)).toBeNull();
+  });
   it("declares the captured control contract and defaults", () => {
     expect(EXPOSURE_METRIC_OPTIONS.map((option) => option.label)).toEqual([
       "Net GEX",

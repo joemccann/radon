@@ -290,3 +290,10 @@ ws-connection-stability.spec.ts
 # REVIEWED 2026-09-08 profile-credentials-tab.spec.ts - local Chromium
 #   desktop/mobile verification passed 2/2; LLM source cards, responsive input
 #   layout, and horizontal overflow were visually checked at 1,280px and 390px.
+
+# REVIEWED 2026-09-09 options-exposure.spec.ts - missing-spot behavior verified
+#   with Playwright using the actual OptionsExposurePanel/hook/CSS and live
+#   normalized SNDK/SPX data at 1280px/393px (4/4); table controls, spot labels,
+#   absent spot marker, PNG downloads and screenshots checked; no page errors
+#   or document overflow. Full Next route-level specs remain held out: local
+#   Next startup was blocked by dependency resolution, not claimed executed.

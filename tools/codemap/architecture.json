@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-09-09T02:57:44Z",
-  "node_count": 3282,
-  "edge_count": 6650,
+  "generated_at": "2026-09-09T17:46:58Z",
+  "node_count": 3284,
+  "edge_count": 6653,
   "areas": {
-    "web": 1925,
+    "web": 1926,
     "site": 152,
-    "scripts": 1091,
+    "scripts": 1092,
     "cloud": 66,
     "lib": 28,
     "tests": 17,
@@ -50,7 +50,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 891
+      "count": 892
     },
     {
       "id": "site/app",
@@ -195,7 +195,7 @@
     {
       "id": "scripts/tests",
       "area": "scripts",
-      "count": 539
+      "count": 540
     },
     {
       "id": "scripts/trade_blotter",

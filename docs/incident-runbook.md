@@ -884,6 +884,40 @@ Incident: 2026-08-15 00:24Z, P1 page `34ab3e3c…`.
 
 ## menthorq-dashboard-session-expiry
 
+### 2026-09-09: discriminate payload rejection before reminting
+
+- **Observed:** `/options/exposure/SNDK` returned 503 in 2.95s with
+  `Options exposure data is unavailable`. Session exchange and both gateway
+  endpoints returned 200 for SNDK and SPX. The dashboard jar was current.
+- **Mechanism:** live EOD cubes had `spot_price: null`, with 5,413 SNDK cells
+  and 12,424 SPX cells. `_normalize` required a numeric positive spot and
+  rejected the entire exposure cube. This was not a credential failure.
+- **Discriminating check:** compare the sanitized FastAPI detail with direct
+  session/gateway statuses, then run `_normalize` on the actual cube. Never
+  log tokens, cookies, passwords or raw transport exceptions.
+- **Fix:** preserve explicit null spot as a partial measurement. The table and
+  PNG export show `SPOT UNAVAILABLE`, all strikes and no spot marker. Invalid
+  non-null prices, mismatched symbols and malformed arrays remain errors.
+- **Auth defenses tested separately:** durable Auth.js expiry governs ahead of
+  ephemeral Cognito expiry; an ambient token rejected by either data endpoint
+  gets one recovery attempt; both legs are refetched. Explicit tokens remain
+  caller-owned. Process-local serialized resolution bounds concurrent cold
+  logins. Jar revision/config changes bypass the prior failure's embargo, so
+  an atomic remint no longer requires an API restart. Session writes use
+  private atomic replacement; browser/storage faults retain their own types.
+- **Budgets:** auth queue, session exchange, login and retry share 40 seconds;
+  each data call uses the remaining 45-second request allowance. These bound
+  admission/per-operation waits, not an absolute OS/DNS/cleanup wall time.
+  Do not widen the 50-second proxy to hide auth failures.
+- **Regression:** `scripts/tests/test_menthorq_auth_recovery.py`,
+  `scripts/tests/test_menthorq_dashboard_client.py`,
+  `scripts/api/tests/test_options_exposure.py`,
+  `web/tests/options-exposure-{transform,panel,missing-spot-export}.test.*`,
+  `web/e2e/options-exposure.spec.ts`.
+- **Availability limit:** no software retry can guarantee fresh third-party
+  data through provider outages, account revocation or interactive challenges.
+  Do not substitute another provider's GEX or invent a spot price.
+
 **A third-party session died and nothing noticed for 11 days.** 2026-08-07, P2.
 
 - **Mechanism:** `/options/net-gex` → `/api/options/exposure` → FastAPI

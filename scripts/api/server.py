@@ -86,6 +86,7 @@ from clients.menthorq_dashboard_client import (
     MenthorQDashboardBrowserUnavailable,
     MenthorQDashboardClient,
     MenthorQDashboardPayloadError,
+    MenthorQDashboardStorageError,
     MenthorQDashboardTimeoutError,
     MenthorQDashboardUpstreamError,
 )
@@ -5009,6 +5010,11 @@ async def options_exposure(symbol: str, frequency: str = "eod"):
                 "(environment fault: chromium missing on this host; repair: "
                 "python -m playwright install --with-deps --only-shell chromium)"
             ),
+        ) from exc
+    except MenthorQDashboardStorageError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Options exposure session storage is unavailable",
         ) from exc
     except MenthorQDashboardAuthEmbargoed as exc:
         raise HTTPException(

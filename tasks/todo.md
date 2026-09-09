@@ -1,3 +1,27 @@
+# Task: MenthorQ exposure availability 2026-09-09 [IMPLEMENTED; PR CI PENDING]
+
+## Dependency graph
+
+- T1 depends_on: [] - Reproduce live SNDK failure and discriminate authentication from payload validation.
+- T2 depends_on: [T1] - Red/green missing-spot contracts through normalization, table and PNG.
+- T3 depends_on: [T1] - Adversarial auth recovery, durable cookie and atomic persistence regressions.
+- T4 depends_on: [T2,T3] - Focused suites, browser verification, live-payload replay and final review.
+
+## Checklist
+
+- [x] T1 Live API 503; session and both provider endpoints 200; SNDK/SPX spot is null.
+- [x] T2 Missing-spot recovery; red/green normalization, table, export and malformed-price tests.
+- [x] T3 Auth hardening; 12 initial failing regressions, then malformed-JWT/API-storage red/green cases.
+- [x] T4 137 focused Python/codemap tests, 54 exposure Vitest tests, TypeScript and scoped ESLint passed; live-data browser table/PNG verification passed for SNDK/SPX at 1280px/393px.
+
+## Review
+
+- Live provider payloads replayed locally: SNDK 5,413 cells and SPX 12,424 cells; null spot remains partial, with no fabricated price.
+- Full local suites were attempted; credential-store environment tests and other unrelated baseline failures prevent a full-local-green claim. Four credential-store failures reproduced independently; full Next E2E setup was blocked by local dependency resolution, while the actual-component Playwright harness passed all four live-data cases.
+- Reviewed bounded auth recovery, caller-owned explicit tokens, durable-cookie precedence, atomic persistence, typed failures and strict malformed-cube rejection. External outages/revoked access remain availability limits.
+- Production remains unchanged. User authorized a PR and exact-head CI supervision; GitHub checks and the accepted Pushover delivery will be recorded at completion.
+- PR #386 first run: 28 passed, two artifact/ledger checks failed. Added the dated browser-evidence annotation and regenerate codemap from a clean committed-tree snapshot to exclude eight ignored local `.claude-design` scripts.
+
 # Task: CI performance remediate 2026-09-09 [COMPLETE]
 
 Apply each eligible P0/P1 finding from the 2026-09-09 performance audit while

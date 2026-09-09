@@ -90,7 +90,9 @@ Unit files in `radon-cloud/services/`; enumerated by `setup-vps.sh SERVICE_FILES
 
 ## Options exposure (MenthorQ dashboard)
 
-`GET /options/exposure/{symbol}` uses `MenthorQDashboardClient` and a dedicated Playwright jar at `data/menthorq_dashboard/menthorq_dashboard_storage_state.json` (not the CTA jar). Next.js `OPTIONS_PROXY_TIMEOUT_MS` is 50s; request-path login is 25s / `REQUEST_PATH_AUTH_BUDGET_SECONDS` 40s. Auth failures embargo 300s process-wide; restart `radon-api` after a remint so the embargo dies.
+`GET /options/exposure/{symbol}` uses `MenthorQDashboardClient` and a dedicated Playwright jar at `data/menthorq_dashboard/menthorq_dashboard_storage_state.json` (not the CTA jar). Next.js `OPTIONS_PROXY_TIMEOUT_MS` is 50s; auth queue/exchange/login share `REQUEST_PATH_AUTH_BUDGET_SECONDS` 40s; data calls consume the remaining 45s request allowance. Auth failures embargo unchanged config/jar for 300s; an atomic remint is detected without an API restart. Durable Auth.js cookie expiry governs before ephemeral Cognito expiry; rejected ambient tokens get one recovery attempt. Browser and storage faults are not credential failures.
+
+A provider cube can have `spot_price: null` while all exposure arrays remain valid. Serve it with `spot: null` and `complete: false`; the table and PNG show spot unavailable and no spot marker. Never fabricate a price or discard the cube for an explicitly absent spot.
 
 Bootstrap: WordPress login, then click OIDC `input[name=authorize]` (page stays on `wp-login.php` with `client_id=aws_cognito_client_id`), then wait for `dashboard.menthorq.io`. Skipping Authorize is the 2026-08-20 remint hole. Probe: `menthorq-login-probe`. Cookie metadata: `menthorq-session`.
 

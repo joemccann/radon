@@ -76,6 +76,19 @@
   text-align: right;
 }
 
+.measurementNotice {
+  margin: 0;
+  padding: 10px 18px;
+  color: var(--text-secondary);
+  font-size: var(--text-meta);
+  border-bottom: 1px solid var(--line-grid);
+}
+
+.field select:disabled {
+  cursor: not-allowed;
+  color: var(--text-muted);
+}
+
 .controls {
   display: grid;
   grid-template-columns: minmax(140px, 0.7fr) minmax(150px, 0.8fr) minmax(170px, 0.9fr) minmax(310px, 2fr);
