@@ -11,6 +11,7 @@ import type {
 } from "./types";
 import { PI_COMMAND_ALIASES, PI_COMMAND_SET } from "./data";
 import { assistantErrorMessage } from "./assistant/errorCopy";
+import { isTickerRouteSegment } from "./tickerRoute";
 import { placeOrderFeedback } from "./orders/placeOrderFeedback";
 import {
   createTimestamp,
@@ -575,8 +576,9 @@ export function resolveSectionFromPath(pathname: string | null, fallback: Worksp
     return "profile";
   }
 
-  // Dynamic ticker route: /AAPL, /GOOG, etc. (1-5 alpha chars)
-  if (/^\/[A-Za-z]{1,5}$/.test(pathname)) {
+  // Dynamic ticker route: /AAPL, /GOOG, /VIX3M, etc.
+  const segments = pathname.split("/");
+  if (segments.length === 2 && isTickerRouteSegment(segments[1])) {
     return "ticker-detail";
   }
 

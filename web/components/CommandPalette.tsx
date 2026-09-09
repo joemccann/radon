@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { navItems, NAV_GROUP_LABEL, PI_COMMANDS, sectionDescription } from "@/lib/data";
 import { useWatchlist } from "@/lib/useWatchlist";
+import { isIndexSymbol } from "@/lib/indexSymbols";
 
 type PaletteItem = {
   id: string;
@@ -160,7 +161,7 @@ export default function CommandPalette({ open, onClose, portfolioSymbols }: Comm
         if (item) handleSelect(item);
         else if (query.trim()) {
           const sym = query.trim().toUpperCase();
-          if (/^[A-Z]{1,6}(\.[A-Z])?$/.test(sym)) {
+          if (/^[A-Z]{1,6}(\.[A-Z])?$/.test(sym) || isIndexSymbol(sym)) {
             pushRecentTicker(sym);
             onClose();
             router.push(`/${sym}`);

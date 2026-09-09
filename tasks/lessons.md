@@ -970,3 +970,6 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 ## 2026-09-08 — Credential verification must use provider-compatible transport
 
 - Verify new credentials against the provider from the server runtime, and classify only provider auth responses as invalid; TLS, proxy, DNS, and request-library behavior need a regression before claiming a key cannot be checked.
+
+## 2026-09-08 — Full test suites run in CI, not on the laptop
+- Never launch full `pytest`/`vitest` locally. Push, read `gh run view --log-failed`, fix, push, repeat until green. Targeted single-file red/green runs are fine.
