@@ -29,9 +29,10 @@ describe("ChatPanel streaming UX", () => {
     vi.restoreAllMocks();
   });
 
-  it("first run is the composer alone (starter cards removed 2026-08-29)", () => {
-    const { container } = render(<ChatPanel activeSection="portfolio" />);
-    expect(container.querySelector(".chat-empty-state")).toBeNull();
+  it("first run offers editable starters and an available composer", () => {
+    render(<ChatPanel activeSection="portfolio" />);
+    expect(screen.getByRole("heading", { name: /What do you want to understand/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Review portfolio risk/ })).toBeTruthy();
     expect(screen.getByLabelText("Ask Radon")).toBeTruthy();
   });
 

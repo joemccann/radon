@@ -13,7 +13,7 @@
 
 import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import AskComposer from "../components/agent/AskComposer";
 
@@ -53,6 +53,7 @@ async function pasteFiles(textarea: HTMLTextAreaElement, files: File[]) {
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
 });
 
 describe("AskComposer — pasting an image", () => {
@@ -94,6 +95,7 @@ describe("AskComposer — pasting an image", () => {
   it("rejects a disallowed image type (image/svg+xml)", async () => {
     const { send, textarea } = renderComposer();
     await pasteFiles(textarea, [imageFile("payload.svg", "image/svg+xml")]);
+    expect(screen.getByRole("alert").textContent).toContain("use a PNG, JPEG, GIF, or WebP image");
 
     expect(screen.queryAllByRole("img")).toHaveLength(0);
     expect(send.disabled).toBe(true);
@@ -107,12 +109,14 @@ describe("AskComposer — pasting an image", () => {
     );
 
     await waitFor(() => expect(screen.getAllByRole("img")).toHaveLength(4));
+    expect(screen.getByRole("alert").textContent).toContain("attach up to 4 images");
   });
 
-  it("drops an image whose decoded size exceeds 5 MB", async () => {
+  it("explains why an image larger than 5 MB was rejected", async () => {
     const { send, textarea } = renderComposer();
     const oversized = imageFile("huge.png", "image/png", new Uint8Array(5 * 1024 * 1024 + 1));
     await pasteFiles(textarea, [oversized]);
+    expect(screen.getByRole("alert").textContent).toContain("images must be 5 MB or smaller");
 
     await waitFor(() => {
       expect(screen.queryAllByRole("img")).toHaveLength(0);
@@ -237,5 +241,92 @@ describe("AskComposer — paste does not disturb existing composer behavior", ()
     fireEvent.compositionEnd(textarea);
     fireEvent.keyDown(textarea, { key: "Enter" });
     expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
+});
+
+
+describe("AskComposer — picker and pending image reads", () => {
+  function deferReads() {
+    const readers: { result: string | null; onload: null | (() => void); onerror: null | (() => void) }[] = [];
+    class DeferredReader {
+      result: string | null = null;
+      onload: null | (() => void) = null;
+      onerror: null | (() => void) = null;
+      readAsDataURL() { readers.push(this); }
+    }
+    vi.stubGlobal("FileReader", DeferredReader);
+    return readers;
+  }
+
+  it("attaches chosen files through the visible picker action", async () => {
+    const { onSubmit } = renderComposer();
+    const picker = screen.getByLabelText("Choose images") as HTMLInputElement;
+    const click = vi.spyOn(picker, "click");
+    fireEvent.click(screen.getByRole("button", { name: "Attach images" }));
+    expect(click).toHaveBeenCalledTimes(1);
+    fireEvent.change(picker, { target: { files: [imageFile("picked.png", "image/png")] } });
+    await screen.findByRole("img", { name: "picked.png" });
+    fireEvent.click(screen.getByLabelText("Send"));
+    expect(onSubmit.mock.calls[0][2][0]).toMatchObject({ name: "picked.png", data: PNG_BASE64 });
+  });
+
+  it("blocks Enter and Send until pending image reads finish", async () => {
+    const readers = deferReads();
+    const { onSubmit, textarea, send } = renderComposer();
+    fireEvent.change(textarea, { target: { value: "Read this chart" } });
+    fireEvent.paste(textarea, { clipboardData: clipboardWithFiles([imageFile("chart.png", "image/png")]) });
+    expect(send.disabled).toBe(true);
+    expect(screen.getByRole("status").textContent).toContain("Preparing images");
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(onSubmit).not.toHaveBeenCalled();
+    await act(async () => {
+      readers[0].result = `data:image/png;base64,${PNG_BASE64}`;
+      readers[0].onload?.();
+    });
+    expect(send.disabled).toBe(false);
+    fireEvent.click(send);
+    expect(onSubmit.mock.calls[0][2]).toHaveLength(1);
+  });
+
+  it("does not leak an old pending image into a replaced draft", async () => {
+    const readers = deferReads();
+    const { onSubmit, textarea, rerender } = renderComposer();
+    fireEvent.paste(textarea, { clipboardData: clipboardWithFiles([imageFile("old.png", "image/png")]) });
+    const restored = { id: "restored", mediaType: "image/png" as const, data: PNG_BASE64, name: "restored.png" };
+    rerender(<AskComposer onSubmit={onSubmit} draft={{ id: 1, text: "Try again", attachments: [restored] }} />);
+    await act(async () => {
+      readers[0].result = `data:image/png;base64,${PNG_BASE64}`;
+      readers[0].onload?.();
+    });
+    expect(screen.queryByRole("img", { name: "old.png" })).toBeNull();
+    expect(screen.getByRole("img", { name: "restored.png" })).toBeTruthy();
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(onSubmit).toHaveBeenCalledWith("Try again", "", [restored]);
+  });
+
+  it("reserves image slots across overlapping pastes", async () => {
+    const readers = deferReads();
+    const { textarea } = renderComposer();
+    fireEvent.paste(textarea, { clipboardData: clipboardWithFiles(["a", "b", "c"].map((name) => imageFile(`${name}.png`, "image/png"))) });
+    fireEvent.paste(textarea, { clipboardData: clipboardWithFiles(["d", "e"].map((name) => imageFile(`${name}.png`, "image/png"))) });
+    expect(readers).toHaveLength(4);
+    expect(screen.getByRole("alert").textContent).toContain("e.png: attach up to 4 images");
+    await act(async () => {
+      for (const reader of readers) {
+        reader.result = `data:image/png;base64,${PNG_BASE64}`;
+        reader.onload?.();
+      }
+    });
+    expect(screen.getAllByRole("img")).toHaveLength(4);
+  });
+
+  it("reports a read failure and releases the pending send lock", async () => {
+    const readers = deferReads();
+    const { textarea, send } = renderComposer();
+    fireEvent.change(textarea, { target: { value: "Read chart" } });
+    fireEvent.paste(textarea, { clipboardData: clipboardWithFiles([imageFile("broken.png", "image/png")]) });
+    await act(async () => { readers[0].onerror?.(); });
+    expect(screen.getByRole("alert").textContent).toContain("broken.png: could not attach");
+    expect(send.disabled).toBe(false);
   });
 });

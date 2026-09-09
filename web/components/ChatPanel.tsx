@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, Copy, Check } from "lucide-react";
+import { ArrowDown, ArrowUpRight, Copy, Check, Plus, X, RotateCcw, Pencil, Activity } from "lucide-react";
 import { ApprovalGate, AskComposer, EngineTrace } from "@/components/agent";
 import { buildTurnSteps, describeEngines } from "@/lib/agent/turnSteps";
 import { assistantErrorMessage } from "@/lib/assistant/errorCopy";
@@ -17,6 +17,7 @@ import type {
 } from "@/lib/types";
 import { createTimestamp } from "@/lib/utils";
 import {
+  buildUserMessage,
   placeProposedOrder,
   requestAssistantTurn,
   requestPiReply,
@@ -36,8 +37,7 @@ import {
 } from "@/lib/quoteTelemetry";
 
 type ChatPanelProps = {
-  /** Retained for callers (WorkspaceShell hands it down); the composer-only
-      surface no longer varies by section since the starter prompts left. */
+  /** Workspace context is displayed as location, not claimed as loaded data. */
   activeSection: WorkspaceSection;
   portfolio?: PortfolioData | null;
   /**
@@ -45,6 +45,7 @@ type ChatPanelProps = {
    * takes focus on every ⌘J open (replaces the old composerRef focus effect).
    */
   isOpen?: boolean;
+  onClose?: () => void;
   /**
    * A prompt handed over from another surface (e.g. a newsfeed follow-up chip).
    * Sent once on arrival, then reported back via onSeedConsumed.
@@ -68,21 +69,25 @@ const NO_PRICES: Record<string, PriceData> = {};
  * flash that the old `isBusy` boolean produced.
  */
 type ChatStatus = "idle" | "submitted" | "streaming" | "done" | "error";
+type TurnEvidence = { tools: AssistantToolEvent[]; model: string | null; failed?: boolean; stopped?: boolean };
 
 const STICK_THRESHOLD_PX = 80;
 
 function CopyButton({ content }: { content: string }) {
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
   const onCopy = useCallback(() => {
-    void navigator.clipboard?.writeText(content).then(() => {
+    if (!navigator.clipboard) { setCopyFailed(true); return; }
+    void navigator.clipboard.writeText(content).then(() => {
+      setCopyFailed(false);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1500);
-    });
+    }).catch(() => setCopyFailed(true));
   }, [content]);
   return (
     <button type="button" className="chat-action-btn" onClick={onCopy} aria-label="Copy message">
       {copied ? <Check size={11} /> : <Copy size={11} />}
-      {copied ? "Copied" : "Copy"}
+      {copyFailed ? "Select text to copy" : copied ? "Copied" : "Copy"}
     </button>
   );
 }
@@ -194,11 +199,19 @@ const DEGRADED_AFTER_FAILURES = 3;
 
 export default function ChatPanel({
   portfolio,
+  activeSection,
+  onClose,
   isOpen = true,
   seedPrompt = null,
   onSeedConsumed,
   prices = NO_PRICES,
 }: ChatPanelProps) {
+  const [draft, setDraft] = useState<{ id: number; text: string; attachments?: ChatImageAttachment[] }>();
+  const [selectedModel, setSelectedModel] = useState("");
+  const [evidence, setEvidence] = useState<Record<string, TurnEvidence>>({});
+  const [editing, setEditing] = useState(false);
+  const editHistoryRef = useRef<Message[] | null>(null);
+  const requestRef = useRef<{ prompt: string; attachments: ChatImageAttachment[]; history: Message[] } | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [status, setStatus] = useState<ChatStatus>("idle");
   const [lastError, setLastError] = useState("");
@@ -209,6 +222,7 @@ export default function ChatPanel({
   // Tool telemetry for the turn in flight. Reset per send so a finished turn's
   // trace can't leak into the next one.
   const [turnTools, setTurnTools] = useState<AssistantToolEvent[]>([]);
+  const [traceExpanded, setTraceExpanded] = useState(true);
   const [turnModel, setTurnModel] = useState<string | null>(null);
   const [isPlacing, setPlacing] = useState(false);
   const [riskState, setRiskState] = useState<OrderRiskState | null>(null);
@@ -261,15 +275,14 @@ export default function ChatPanel({
     attachments: ChatImageAttachment[] = [],
     modelId = "",
   ) => {
-    // One controller per turn: a new send supersedes the previous stream.
-    streamAbortRef.current?.abort();
-    streamAbortRef.current = new AbortController();
     const cleaned = prompt.trim();
-    // An attachment alone is a complete turn: the composer enables Send with no
-    // text once an image is pasted, so an empty prompt must not drop it here.
-    if ((!cleaned && !attachments.length) || isBusy) {
-      return;
-    }
+    if ((!cleaned && !attachments.length) || streamAbortRef.current || isPlacing) return;
+    const controller = new AbortController();
+    streamAbortRef.current = controller;
+    const history = editHistoryRef.current ?? messages;
+    editHistoryRef.current = null;
+    setEditing(false);
+    requestRef.current = { prompt: cleaned, attachments, history };
     // A new turn invalidates any prior model-controlled destructive intent.
     setProposal(null);
     setRiskState(null);
@@ -282,10 +295,11 @@ export default function ChatPanel({
       ...(attachments.length ? { attachments } : {}),
     };
 
-    const conversation: ApiMessage[] = messages.map((message) => ({
-      role: message.role,
-      content: message.content,
-    }));
+    const conversation: ApiMessage[] = history
+      .filter((message) => !evidence[message.id]?.failed && !evidence[message.id]?.stopped)
+      .map((message) => message.role === "user"
+        ? buildUserMessage(message.content, message.attachments ?? [])
+        : { role: message.role, content: message.content });
 
     // A new turn always re-pins to the bottom so a prior scroll-up can't wedge
     // auto-scroll off for the rest of the session.
@@ -300,22 +314,24 @@ export default function ChatPanel({
       content: "",
     };
 
-    setMessages((current) => [...current, userMessage, assistantMessage]);
+    setMessages([...history, userMessage, assistantMessage]);
     setStatus("submitted");
     setLastError("");
+    setTraceExpanded(true);
     setTurnTools([]);
     setTurnModel(null);
 
     // A PI command runs a script and never sees an image, so a turn carrying a
     // pasted image always goes to the assistant rather than silently dropping it.
-    const piCommand = attachments.length ? null : routeToPiPrompt(cleaned);
+    const piCommand = !attachments.length && cleaned.startsWith("/") ? routeToPiPrompt(cleaned) : null;
 
     try {
       if (piCommand) {
-        const assistantContent = await requestPiReply(piCommand);
+        const assistantContent = await requestPiReply(piCommand, controller.signal);
+        if (controller.signal.aborted) return;
         setStatus("streaming");
         await streamMessage(assistantId, assistantContent, setMessages, {
-          signal: streamAbortRef.current?.signal,
+          signal: controller.signal,
         });
       } else {
         // The route streams its envelope: `start` lands within milliseconds of
@@ -328,25 +344,38 @@ export default function ChatPanel({
           attachments,
           modelId,
           (event) => {
+            if (controller.signal.aborted) return;
             if (event.type === "start") setStatus("streaming");
             else setTurnTools((current) => [...current, event.event]);
           },
+          controller.signal,
         );
+        if (controller.signal.aborted) return;
+        setEvidence((current) => ({ ...current, [assistantId]: { tools: turn.toolEvents, model: turn.model, failed: turn.failed } }));
         setTurnTools(turn.toolEvents);
         setTurnModel(turn.model);
         setStatus("streaming");
         await streamMessage(assistantId, turn.content, setMessages, {
-          signal: streamAbortRef.current?.signal,
+          signal: controller.signal,
         });
         // F7: never auto-execute. A destructive order proposal is surfaced as
         // a confirm card the operator must explicitly accept.
+        if (controller.signal.aborted) return;
+        if (turn.failed) {
+          setConsecutiveFailures((n) => n + 1);
+          setStatus("error");
+          return;
+        }
         if (turn.proposal) {
           setProposal(turn.proposal);
         }
       }
+      if (controller.signal.aborted) return;
       setConsecutiveFailures(0);
       setStatus("done");
     } catch (error) {
+      if (controller.signal.aborted) return;
+      setEvidence((current) => ({ ...current, [assistantId]: { tools: [], model: null, failed: true } }));
       const isPiCommand = Boolean(piCommand);
       const errorMessage =
         isPiCommand && error instanceof Error
@@ -368,6 +397,8 @@ export default function ChatPanel({
       setLastError(isPiCommand ? errorMessage : "");
       setConsecutiveFailures((n) => n + 1);
       setStatus("error");
+    } finally {
+      if (streamAbortRef.current === controller) streamAbortRef.current = null;
     }
   };
 
@@ -380,10 +411,11 @@ export default function ChatPanel({
   onSeedConsumedRef.current = onSeedConsumed;
 
   useEffect(() => {
-    if (!seedPrompt) return;
-    void sendMessageRef.current(seedPrompt);
+    if (!seedPrompt || !isOpen) return;
+    if (streamAbortRef.current || isPlacing) return;
+    void sendMessageRef.current(seedPrompt, [], selectedModel);
     onSeedConsumedRef.current?.();
-  }, [seedPrompt]);
+  }, [seedPrompt, isBusy, isPlacing, selectedModel, isOpen]);
 
   const confirmProposal = async () => {
     if (!proposal || isPlacing || !riskState?.okToSubmit) return;
@@ -417,92 +449,119 @@ export default function ChatPanel({
 
   const lastAssistantId = [...messages].reverse().find((m) => m.role === "assistant")?.id ?? null;
 
+  const setComposerDraft = (text: string, attachments: ChatImageAttachment[] = []) => {
+    setDraft((current) => ({ id: (current?.id ?? 0) + 1, text, attachments }));
+  };
+  const stopResponse = useCallback(() => {
+    if (!streamAbortRef.current) return;
+    streamAbortRef.current.abort();
+    streamAbortRef.current = null;
+    setStatus("done");
+    setProposal(null);
+    if (lastAssistantId) {
+      setMessages((current) => current.map((message) => message.id === lastAssistantId
+        ? { ...message, content: message.content || "Response stopped." } : message));
+      setEvidence((current) => ({ ...current, [lastAssistantId]: { tools: [], model: null, stopped: true } }));
+    }
+  }, [lastAssistantId]);
+  const stopRef = useRef(stopResponse);
+  stopRef.current = stopResponse;
+  useEffect(() => { if (!isOpen) stopRef.current(); }, [isOpen]);
+
+  const retry = () => {
+    const request = requestRef.current;
+    if (!request || isBusy || isPlacing) return;
+    editHistoryRef.current = request.history;
+    void sendMessage(request.prompt, request.attachments, selectedModel);
+  };
+  const newConversation = () => {
+    if (isPlacing) return;
+    stopResponse();
+    onSeedConsumed?.();
+    setConsecutiveFailures(0);
+    setMessages([]);
+    setEvidence({});
+    setProposal(null);
+    setRiskState(null);
+    setStatus("idle");
+    setLastError("");
+    setEditing(false);
+    editHistoryRef.current = null;
+    requestRef.current = null;
+    setComposerDraft("");
+  };
+  const sectionName = activeSection === "dashboard" ? "Portfolio overview"
+    : activeSection === "portfolio" ? "Positions"
+    : activeSection.replace(/-/g, " ").replace(/^./, (c) => c.toUpperCase());
+  const starters = [
+    { title: "Review portfolio risk", detail: "Concentration, exposure and downside", prompt: "Review my current portfolio risk. Identify concentration, exposure and downside, and cite the data and its freshness." },
+    { title: "Investigate market flow", detail: "Positioning behind the price", prompt: "Help me investigate institutional flow. Ask which ticker to analyze, then compare dark-pool activity with price and explain what supports or contradicts the signal." },
+    { title: "Pressure-test a trade", detail: "Structure, payoff and counterevidence", prompt: "Help me pressure-test an options trade. Ask for the ticker and thesis, then compare defined-risk structures, payoff, and evidence against the trade." },
+  ];
+
   return (
     <div className="chat-panel" data-empty={messages.length === 0 ? "true" : undefined}>
-      {/* Composer-only surface (design-lab Variant A): with no messages the
-          panel is just the composer, so the launcher sizes it to content. */}
+      <header className="chat-header">
+        <div className="chat-identity"><Activity size={20} aria-hidden="true" /><div>
+          <h2>Radon AI</h2><span>Research & analysis</span>
+        </div></div>
+        <div className="chat-header-actions">
+          <button type="button" className="chat-header-button" onClick={newConversation} disabled={isPlacing} aria-label="New conversation"><Plus size={16} /><span>New chat</span></button>
+          {onClose ? <button type="button" className="chat-header-button" onClick={onClose} aria-label="Close chat"><X size={18} /></button> : null}
+        </div>
+      </header>
+      <div className="chat-context"><span>Viewing <strong>{sectionName}</strong></span><span>Data retrieved when needed</span></div>
       <div className="chat-shell">
+        <div className="chat-transcript-wrap">
           {messages.length ? (
-          <div className="chat-transcript-wrap">
-              <div
-                ref={messagesRef}
-                className="chat-messages"
-                data-testid="chat-messages"
-                role="log"
-                aria-live="polite"
-                aria-atomic="false"
-                aria-busy={status === "streaming" || status === "submitted"}
-                onScroll={onTranscriptScroll}
-              >
-                {messages.map((message) => {
-                  const isAssistant = message.role === "assistant";
-                  const isPending = isAssistant && !message.content;
-                  const isStreamingThis =
-                    isAssistant && message.id === lastAssistantId && status === "streaming";
-                  const canCopy = isAssistant && message.content && !isStreamingThis;
-                  return (
-                    <div
-                      key={message.id}
-                      className={`chat-message ${message.role}${isStreamingThis ? " streaming" : ""}`}
-                      data-testid={`chat-message-${message.role}`}
-                    >
-                      <div className="chat-meta">
-                        <span className="chat-role" data-testid="chat-role">{isAssistant ? "Radon" : "You"}</span>
-                        <span className="chat-time">{message.timestamp}</span>
-                      </div>
-                      <div className="chat-message-body" data-testid="chat-message-body">
-                        {isPending ? (
-                          <EngineTrace
-                            steps={buildTurnSteps(turnTools, status === "error" ? "error" : "submitted")}
-                            engines={describeEngines(turnModel)}
-                          />
-                        ) : (
-                          <>
-                            {message.attachments?.length ? (
-                              // Same thumbnail treatment the composer used, so
-                              // the operator sees exactly what they sent.
-                              <div className="ask-composer__attachments" aria-label="Attached images">
-                                {message.attachments.map((attachment) => (
-                                  <span key={attachment.id} className="ask-composer__thumb">
-                                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                                    <img
-                                      src={`data:${attachment.mediaType};base64,${attachment.data}`}
-                                      alt={attachment.name || "Pasted image"}
-                                    />
-                                  </span>
-                                ))}
-                              </div>
-                            ) : null}
-                            <MarkdownRenderer content={message.content} />
-                            {isStreamingThis ? (
-                              <span className="chat-cursor" aria-hidden="true" />
-                            ) : null}
-                          </>
-                        )}
-                      </div>
-                      {canCopy ? (
-                        <div className="chat-actions">
-                          <CopyButton content={message.content} />
-                        </div>
-                      ) : null}
-                    </div>
-                  );
-                })}
-              </div>
-
-            <button
-              type="button"
-              className="chat-jump-btn"
-              data-hidden={!showJump}
-              onClick={jumpToBottom}
-              aria-label="Scroll to latest"
-              tabIndex={showJump ? 0 : -1}
-            >
-              <ArrowDown size={11} />
-              Latest
-            </button>
-          </div>
-          ) : null}
+            <div ref={messagesRef} className="chat-messages" data-testid="chat-messages"
+              role="log" aria-label="Conversation" aria-live="polite" aria-atomic="false"
+              aria-busy={isBusy} onScroll={onTranscriptScroll}>
+              {messages.map((message, index) => {
+                const isAssistant = message.role === "assistant";
+                const isCurrent = message.id === lastAssistantId;
+                const isPending = isAssistant && !message.content && isCurrent && isBusy;
+                const isStreamingThis = isAssistant && isCurrent && status === "streaming";
+                const meta = evidence[message.id];
+                return <div key={message.id} className={`chat-message ${message.role}${isStreamingThis ? " streaming" : ""}`} data-testid={`chat-message-${message.role}`}>
+                  <div className="chat-meta"><span className="chat-role" data-testid="chat-role">{isAssistant ? "Radon" : "You"}</span><span className="chat-time">{message.timestamp}</span></div>
+                  <div className="chat-message-body" data-testid="chat-message-body">
+                    {isPending ? <EngineTrace steps={buildTurnSteps(turnTools, "submitted")} engines={turnModel ? describeEngines(turnModel) : []} collapsed={!traceExpanded} onToggle={() => setTraceExpanded((expanded) => !expanded)} /> : <>
+                      {message.attachments?.length ? <div className="ask-composer__attachments" aria-label="Attached images">{message.attachments.map((attachment) => <span key={attachment.id} className="ask-composer__thumb">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={`data:${attachment.mediaType};base64,${attachment.data}`} alt={attachment.name || "Pasted image"} />
+                      </span>)}</div> : null}
+                      <MarkdownRenderer content={message.content} />
+                      {isStreamingThis ? <span className="chat-cursor" aria-hidden="true" /> : null}
+                    </>}
+                  </div>
+                  {!isStreamingThis && meta?.tools.length ? <details className="chat-evidence"><summary>Activity · {meta.tools.length} tool {meta.tools.length === 1 ? "call" : "calls"}</summary>
+                    <ol>{buildTurnSteps(meta.tools, "done").map((step) => <li key={step.id}><span>{step.label}</span><span>{step.meta}</span></li>)}</ol>
+                  </details> : null}
+                  {isAssistant && message.content && !isBusy ? <div className="chat-actions">
+                    <CopyButton content={message.content} />
+                    {isCurrent && requestRef.current ? <button type="button" className="chat-action-btn" onClick={retry} disabled={isPlacing}><RotateCcw size={14} />{meta?.failed || meta?.stopped ? "Try again" : "Regenerate"}</button> : null}
+                    {meta?.model ? <span className="chat-response-model">{meta.model}</span> : null}
+                    {meta?.stopped && message.content !== "Response stopped." ? <span className="chat-response-model">Response stopped</span> : null}
+                  </div> : null}
+                  {!isAssistant && !isBusy ? <div className="chat-actions"><button type="button" className="chat-action-btn" disabled={isPlacing} onClick={() => {
+                    editHistoryRef.current = messages.slice(0, index);
+                    setEditing(true);
+                    setComposerDraft(message.content, message.attachments);
+                  }}><Pencil size={14} />Edit prompt</button></div> : null}
+                </div>;
+              })}
+            </div>
+          ) : <div className="chat-welcome">
+            <span className="chat-welcome-eyebrow">Your research workspace</span>
+            <h3>What do you want{" "}<br />to understand?</h3>
+            <p>Connect your portfolio, market flow and trade ideas.{" "}<br className="chat-desktop-break" /> Start with a question, or shape one below.</p>
+            <div className="chat-starters">{starters.map((starter) => <button type="button" key={starter.title} onClick={() => setComposerDraft(starter.prompt)}>
+              <span><strong>{starter.title}</strong>{" "}<span>{starter.detail}</span></span><ArrowUpRight size={18} aria-hidden="true" />
+            </button>)}</div>
+          </div>}
+          {messages.length ? <button type="button" className="chat-jump-btn" data-hidden={!showJump} onClick={jumpToBottom} aria-label="Scroll to latest" tabIndex={showJump ? 0 : -1}><ArrowDown size={14} />Latest</button> : null}
+        </div>
 
           {consecutiveFailures >= DEGRADED_AFTER_FAILURES ? (
             <div className="chat-degraded" role="status">
@@ -516,7 +575,7 @@ export default function ChatPanel({
               sized alternatives (split clips, hold), map them into `options` and
               pass the confirmed option id through to placeProposedOrder. */}
           {proposal ? (
-            <>
+            <div className="chat-approval-area" aria-label="Order review">
               {/* The order-risk chokepoint stays mandatory: the gate renders the
                   risk verdict and confirmProposal refuses unless okToSubmit. */}
               <OrderRiskGate
@@ -544,17 +603,22 @@ export default function ChatPanel({
                 onConfirm={() => void confirmProposal()}
                 onDismiss={cancelProposal}
               />
-            </>
+            </div>
           ) : null}
 
           <div className="chat-composer">
+            {editing ? <div className="chat-editing">Editing previous prompt<button type="button" onClick={() => { editHistoryRef.current = null; setEditing(false); setComposerDraft(""); }}>Cancel edit</button></div> : null}
             <AskComposer
-              busy={isBusy}
+              draft={draft}
+              onModelChange={setSelectedModel}
+              onStop={isBusy ? stopResponse : undefined}
+              busy={isBusy || isPlacing}
               focusKey={isOpen}
               onSubmit={(text, modelId, attachments) =>
                 void sendMessage(text, attachments, modelId)
               }
             />
+            <p className="chat-footnote">Verify sources and timestamps. Orders require your confirmation.</p>
           </div>
         </div>
     </div>
