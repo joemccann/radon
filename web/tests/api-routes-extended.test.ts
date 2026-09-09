@@ -1576,6 +1576,7 @@ describe("POST /api/assistant — extended", () => {
   it("calls Anthropic API and returns response", async () => {
     process.env.ASSISTANT_MOCK = "0";
     process.env.ANTHROPIC_API_KEY = "test-key";
+    process.env.LLM_PROVIDER = "anthropic";
 
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -1598,6 +1599,8 @@ describe("POST /api/assistant — extended", () => {
       }) as any,
     );
     expect(res.status).toBe(200);
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
 
     const body = await assistantDonePayload<{ content: string; model: string }>(res);
     expect(body.content).toBe("AAPL shows strong accumulation");

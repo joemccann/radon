@@ -9257,12 +9257,72 @@ Delta findings continue the T-### numbering in dated `## Delta audit` sections.
 
 - Audited through: `be64e1fc` on 2026-09-05 (**second pass**, same day, same clone) — 23 new findings (T-462…T-484: 2 P0, 10 P1, 11 P2) over 61 commits / 107 files / +5789-172, base `391aaaea` (the first pass's HEAD). Saturday run. The range CONTAINS the first pass's own remediation (T-440…T-461) and the reliability loop's REL-232…REL-247, re-triaged as ordinary delta per the 2026-08-22 rule. Gates serial round 1 BEFORE the fan-out, no sibling loop, load 3-6: pytest **11762 passed / 1 skipped / 0 failed** (1730s); vitest 39 files failed at IMPORT on ONE environment cause (`thinking-orbs` + `border-beam` declared at `web/package.json:37,46` but absent from this clone's node_modules — the first pass's lesson recurring after a tree reset), and the same 39 files re-ran **323 passed / 0 failed** once installed, repo untouched; cloud **5 failed / 1785 passed**, all in `test_caddy_edge_timeouts.py` with `caddy` ABSENT. The cloud baseline reads 5, not the recorded 33, because this run's gate PATH resolves `bash` to homebrew 5.3.9 instead of `/bin/bash` 3.2 — filed as T-484, and it means every previously recorded darwin baseline was a PATH artifact. Post-gate tree clean x3 (T-275). Zero new code skips/`.only`/`xfail` in the delta. `deploy:` block byte-identical base->HEAD (14 jobs, both coverage ratchets retained); no gate config touched, no threshold moved. Shard-glob union clean (449/449 matched exactly once, T-122 holds); all 27 new test files CI-reachable. CI green on `main` at this HEAD. `main` still has no `required_status_checks` (T-222, sixth audit running). Delta-touched determinism 3x NOT run: 47 touched test files across four roots collapses into full gates (2026-08-16 rule).
 - Audited through: `7a7ca4ae` on 2026-09-06 — **1 new finding** (T-485, P2) over 6 commits / 5 files / +715−1, base `be64e1fc`. Sunday run, no sibling loop, load 2.5. The range is almost entirely the loops' own ledgers plus CIP-007 (one bounded apt step in `ci.yml` + an honest contract test, `9 passed` ×3). Gates: pytest **11763 passed / 0 failed** (1841s); vitest **8925 passed / 0 failed** but exit 1 on one unhandled `EnvironmentTeardownError` — the 2026-09-02 observation recurring UNCONTENDED, promoted to T-485; cloud **33 failed / 1757 passed** with `/bin/bash` 3.2 resolved and caddy PRESENT — sorted FAILED list byte-identical to the 2026-09-05 first-pass 33-list (zero new, zero gone), confirming T-484 from the other direction (caddy's 5 reds gone by installing caddy, the bash-class 33 back with bash 3.2). Post-gate tree clean (T-275); secret sweep vacuously clean (T-381); no new skips/`.only`/`xfail`; `deploy:` untouched; no threshold moved. CI green on `main` at this HEAD (`4dcbfdd2` run cancelled as superseded, not failed). `main` still has no `required_status_checks` (T-222, seventh audit running).
+- Audited through: `fcaa1c67` on 2026-09-08 — **4 new findings** (T-486…T-489: 4 P1) over 101 commits / 539 files. Full gates: pytest 12,392 passed / 2 failed; vitest 9,116 passed / 3 failed; cloud 1,808 passed / 4 failed. Every red reproduced in its owning file; 214 touched tests make scoped 3× reruns equivalent to full gates. No new code skip/only/xfail, exclusion growth, threshold decrease, or unclassified E2E spec.
 
 ## Remediation 2026-08-29 — PR #140
 
 All **35 un-DONE P0/P1 findings** from the same cycle's audit are DONE:
 T-250…T-283 plus T-311. The 27 P2s are DEFERRED. Evidence per task, with
 red/green counts, is in `TEST_LOG.md` under `## Remediation 2026-08-29`.
+
+## Delta audit 2026-09-08
+
+Range: `7a7ca4ae..fcaa1c67` (101 commits, 539 files, 214 touched test files).
+The range includes prior loop remediation and was re-triaged normally. The
+three required gates were serial; every red below reproduced in isolation.
+
+### Findings
+
+### T-486 — P1 — the dated testing branch is behind `origin/main`, so its own append-only ledger gate is deterministically red
+
+`scripts/tests/test_docs_contract.py:685-712` compares every ledger count to
+`origin/main`. This branch has 670 `R-` rows vs main's 671 and 291 `REL-` rows
+vs main's 292; the focused contract is 2 failed / 3 passed. `git log
+HEAD..origin/main` shows newer main commits and `git diff HEAD..origin/main --
+RELIABILITY_AUDIT.md RELIABILITY_LOG.md` contains the missing rows. A nightly
+branch that cannot pass its repository gate cannot supply a trustworthy
+dead-man PR.
+
+### T-487 — P1 — env-file durability tests read the runner's live `UW_TOKEN`, so their fixture assertions cannot run hermetically
+
+`web/tests/setup-env-files-durability.test.ts:45-55,186-203` invokes
+`loadEnvConfig()` and asserts `UW_TOKEN` from its temporary `.env` while leaving
+the ambient process value intact. The full gate and isolated file both receive
+the runner UUID `07d5bfb6-97a8-400d-8306-88b329ee3de8` instead of fixture values
+`RX$ab'cd` and `fresh` (2 failed / 14 passed). This is test isolation, not a
+product assertion.
+
+### T-488 — P1 — deploy-root process-supervision fixtures no longer model the release-consumer inventory command, so four safety tests never reach their kill-path assertions
+
+`cloud/tests/test_deploy_corrections.py:315-321,1495-1533` supplies narrow
+`systemctl` fakes. The helper exits `68: could not enumerate release consumer
+units` before those fakes create/kill the child process, producing 4 failed /
+127 passed / 3 skipped in isolation. The timeout and TERM assertions are now
+dead evidence until the fake implements the inventory invocation used by the
+helper.
+
+### T-489 — P1 — the Anthropic route test observes an empty streamed completion while asserting a mocked content payload
+
+`web/tests/api-routes-extended.test.ts:1576-1605` mocks a text completion then
+asserts it through `assistantDonePayload`; both the full gate and isolated file
+receive `content: ""` (1 failed / 54 passed in the file). The test must execute
+the route's current completion protocol or the route must preserve the mocked
+text; currently neither outcome is protected.
+
+### Backlog rows
+
+| ID | Sev | Acceptance criteria |
+|---|---|---|
+| T-486 | P1 | Rebase/merge the dated branch onto current `origin/main` without dropping the two ledger rows; `TestRootLedgersAreAppendOnly` is 5 passed. |
+| T-487 | P1 | Poison ambient `UW_TOKEN`, then prove both temporary-file cases read their fixture values. |
+| T-488 | P1 | Make every supervisor/root-helper fake implement the inventory command; each timeout/TERM test reaches its child-kill assertion. |
+| T-489 | P1 | Demonstrate the mocked completion event reaches `assistantDonePayload`; mutation of the text event red-fails. |
+
+### Standing sweeps
+
+- Gates: pytest 12,392 passed / 2 failed; vitest 923 files, 9,116 passed / 3 failed; cloud 1,808 passed / 4 failed / 76 skipped.
+- Determinism: omitted because 214 touched test files would collapse to three full gates; each gate red was instead rerun in its owning file.
+- Gate drift: branch protection lists the required pytest and vitest ratchets; thresholds, exclusions, and curated-E2E classification were unchanged; no new code skip/only/xfail.
 
 Method: 9 worktree agents in three waves (capped at ~6 concurrent per the
 2026-08-26 rail), with the lead cherry-picking serially, re-deriving the
@@ -10023,9 +10083,13 @@ source-fix rule: the compose-body gate accepted quoted `privileged: "true"`
 
 ## Remediation 2026-09-08
 
-`RADON_WEEKEND_REDUCED=1`: reconciled every verified un-DONE P0/P1 finding
-across the audit ledger before source work. None remain: T-462/T-463 and
-T-464…T-473 are recorded DONE in the 2026-09-06 remediation table; the only
-newer verified finding, T-485, is P2 and is outside this reduced-capability
-phase. No source change is warranted. Closing gate evidence is recorded in
-`TEST_LOG.md` for this branch.
+`RADON_WEEKEND_REDUCED=1`: T-486 through T-489 are in scope. T-486 merged
+current `origin/main`; T-487 and T-489 are DONE. T-488 is BLOCKED after three
+fixture attempts: the macOS GNU-timeout process tree outlives the fixed
+five-second harness bound after inventory modelling reaches the kill path.
+The exact operator action is to reproduce and repair this on Linux CI without
+widening the contract timeout. Closing gate evidence is recorded in `TEST_LOG.md`.
+
+Closing gates are incomplete on this runner: both detached stages died before
+their first pytest output and without a `DONE` sentinel. No full-gate result is
+claimed; the next run must resume the three serial rounds.
