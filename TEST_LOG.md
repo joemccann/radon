@@ -777,3 +777,30 @@ morning pass's promised counts never landed; superseded by these).
 | T-489 | DONE | Ambient xAI selection made the Anthropic-shaped mock parse empty; pinning `LLM_PROVIDER=anthropic` makes the streamed done payload contain the mocked text, green 1/1. |
 
 Closing gates: INCOMPLETE. Detached stages `/tmp/tw-2026-09-08/closing-gates.rc` and `closing-gates-2.rc` prewrote all nine steps but both exited with zero-byte pytest logs and no `DONE` sentinel. No gate count is claimed; resume with a runner that preserves detached children.
+
+## Delta audit 2026-09-09 (audit mode)
+
+Range `fcaa1c67..964b6b77`: 34 commits, 267 files, 98 touched test files.
+Serial gates: pytest 12,709 passed / 21 failed (all new T-490 stale Codex
+rendered-manual contracts); vitest 934 files / 9,276 passed; cloud 1,841
+passed / 4 failed (all standing T-488). One new P1, T-490; no invocation,
+exclusion, threshold, or coverage-measurement drift; 98 touched test files
+make scoped determinism reruns equivalent to full gates.
+
+## Remediation 2026-09-09
+
+| Task | Status | Evidence |
+|---|---|---|
+| T-490 | BLOCKED | RED: `test_portable_prompt_sync.py` 52 passed / 21 failed, all eight native Codex artifacts absent. Attempts: renderer write failed `PermissionError` on `.codex`; check still reported all eight stale; direct tracked-file patch denied by CLI policy. Operator: render in a checkout with writable `.codex`, run the focused contract, commit generated files. |
+
+Closing gates: not run. The focused P1 remains deterministically red and this
+runner cannot materialize its tracked artifacts; no green gate count is claimed.
+
+## Operator completion 2026-09-09
+
+T-490 is DONE. In writable checkout `/Users/joemccann/.radon/work/pr385-operator`,
+`python3.13 scripts/render_loop_prompt.py --write` completed for all four loop
+skills and `python3.13 -m pytest scripts/tests/test_portable_prompt_sync.py -q`
+passed 73 / 73. `render_loop_prompt.py --check` also passed. The renderer left
+the tree clean because all eight tracked Codex artifacts already match the
+current templates byte-for-byte; there is no generated artifact delta to commit.

@@ -9258,6 +9258,7 @@ Delta findings continue the T-### numbering in dated `## Delta audit` sections.
 - Audited through: `be64e1fc` on 2026-09-05 (**second pass**, same day, same clone) — 23 new findings (T-462…T-484: 2 P0, 10 P1, 11 P2) over 61 commits / 107 files / +5789-172, base `391aaaea` (the first pass's HEAD). Saturday run. The range CONTAINS the first pass's own remediation (T-440…T-461) and the reliability loop's REL-232…REL-247, re-triaged as ordinary delta per the 2026-08-22 rule. Gates serial round 1 BEFORE the fan-out, no sibling loop, load 3-6: pytest **11762 passed / 1 skipped / 0 failed** (1730s); vitest 39 files failed at IMPORT on ONE environment cause (`thinking-orbs` + `border-beam` declared at `web/package.json:37,46` but absent from this clone's node_modules — the first pass's lesson recurring after a tree reset), and the same 39 files re-ran **323 passed / 0 failed** once installed, repo untouched; cloud **5 failed / 1785 passed**, all in `test_caddy_edge_timeouts.py` with `caddy` ABSENT. The cloud baseline reads 5, not the recorded 33, because this run's gate PATH resolves `bash` to homebrew 5.3.9 instead of `/bin/bash` 3.2 — filed as T-484, and it means every previously recorded darwin baseline was a PATH artifact. Post-gate tree clean x3 (T-275). Zero new code skips/`.only`/`xfail` in the delta. `deploy:` block byte-identical base->HEAD (14 jobs, both coverage ratchets retained); no gate config touched, no threshold moved. Shard-glob union clean (449/449 matched exactly once, T-122 holds); all 27 new test files CI-reachable. CI green on `main` at this HEAD. `main` still has no `required_status_checks` (T-222, sixth audit running). Delta-touched determinism 3x NOT run: 47 touched test files across four roots collapses into full gates (2026-08-16 rule).
 - Audited through: `7a7ca4ae` on 2026-09-06 — **1 new finding** (T-485, P2) over 6 commits / 5 files / +715−1, base `be64e1fc`. Sunday run, no sibling loop, load 2.5. The range is almost entirely the loops' own ledgers plus CIP-007 (one bounded apt step in `ci.yml` + an honest contract test, `9 passed` ×3). Gates: pytest **11763 passed / 0 failed** (1841s); vitest **8925 passed / 0 failed** but exit 1 on one unhandled `EnvironmentTeardownError` — the 2026-09-02 observation recurring UNCONTENDED, promoted to T-485; cloud **33 failed / 1757 passed** with `/bin/bash` 3.2 resolved and caddy PRESENT — sorted FAILED list byte-identical to the 2026-09-05 first-pass 33-list (zero new, zero gone), confirming T-484 from the other direction (caddy's 5 reds gone by installing caddy, the bash-class 33 back with bash 3.2). Post-gate tree clean (T-275); secret sweep vacuously clean (T-381); no new skips/`.only`/`xfail`; `deploy:` untouched; no threshold moved. CI green on `main` at this HEAD (`4dcbfdd2` run cancelled as superseded, not failed). `main` still has no `required_status_checks` (T-222, seventh audit running).
 - Audited through: `fcaa1c67` on 2026-09-08 — **4 new findings** (T-486…T-489: 4 P1) over 101 commits / 539 files. Full gates: pytest 12,392 passed / 2 failed; vitest 9,116 passed / 3 failed; cloud 1,808 passed / 4 failed. Every red reproduced in its owning file; 214 touched tests make scoped 3× reruns equivalent to full gates. No new code skip/only/xfail, exclusion growth, threshold decrease, or unclassified E2E spec.
+- Audited through: `964b6b77` on 2026-09-09 — **1 new finding** (T-490: P1) over 34 commits / 267 files. Full gates: pytest 12,709 passed / 21 failed; vitest 9,276 passed; cloud 1,841 passed / 4 failed. The 98 touched test files make scoped 3× reruns equivalent to full gates. No coverage threshold decrease, exclusion growth, or new `.only`/`xfail`; one new conditional `jq` skip is covered by CI's Ubuntu toolchain.
 
 ## Remediation 2026-08-29 — PR #140
 
@@ -10093,3 +10094,57 @@ widening the contract timeout. Closing gate evidence is recorded in `TEST_LOG.md
 Closing gates are incomplete on this runner: both detached stages died before
 their first pytest output and without a `DONE` sentinel. No full-gate result is
 claimed; the next run must resume the three serial rounds.
+
+## Delta audit 2026-09-09
+
+Range: `fcaa1c67..964b6b77` (34 commits, 267 files, 98 touched test files).
+
+### Findings
+
+### T-490 — P1 — Codex loop manuals are stale, so all loop-contract tests red while fallback runners can receive old rails
+
+`scripts/tests/test_portable_prompt_sync.py:107-177` requires every
+`.codex/skills/<loop>/SKILL.md` and `agents/openai.yaml` to equal a fresh
+render. The full pytest gate reports 21 deterministic failures across the four
+loop skills, and `python3.13 scripts/render_loop_prompt.py --check` names all
+eight stale artifacts. This is the non-Claude fallback path introduced by
+`ff8b6018`: a stale manual can omit current safety rails.
+
+### Backlog rows
+
+| ID | Sev | Acceptance criteria |
+|---|---|---|
+| T-490 | P1 | Run `python3.13 scripts/render_loop_prompt.py --write`; all eight committed Codex artifacts match fresh renders and `test_portable_prompt_sync.py` is green. Mutation: alter a rendered artifact and show its contract red. |
+
+### Standing sweeps
+
+- Gates serial: pytest **12,709 passed / 21 failed / 19 skipped / 90 deselected** (1812 s), all T-490; vitest **934 files / 9,276 passed / 0 failed** (126 s); cloud **1,841 passed / 4 failed / 76 skipped** (378 s), every red is already-filed T-488 at `cloud/tests/test_deploy_corrections.py:1495-1586`.
+- Determinism omitted: 98 delta-touched test files span collection roots, so scoped 3× reruns collapse into full gates. Gate reds are deterministic in their owning contracts.
+- Gate drift/ratchet: `.github/workflows/ci.yml:784-808` adds two curated browser specs and artifact uploads only; invocations, exclusions, deploy dependencies, and thresholds are unchanged. No new blanket coverage exclude.
+- Skip sweep: `scripts/tests/test_loop_pr_selection.py:82` conditionally skips without `jq`; `jq-1.8.1` is present here and CI Ubuntu supplies it. No new executable `test.skip`, `it.skip`, `xfail`, or `.only`.
+- Post-gate tree: clean except this audit's documentation/task updates; no gate-created repository artifact.
+
+## Remediation 2026-09-09
+
+`RADON_WEEKEND_REDUCED=1`: T-490 is the sole in-scope P1 and is **BLOCKED**
+after three genuine attempts. The focused red is `52 passed / 21 failed` in
+`scripts/tests/test_portable_prompt_sync.py`: all eight tracked
+`.codex/skills/*/{SKILL.md,agents/openai.yaml}` artifacts are absent. Attempt
+one, `render_loop_prompt.py --write`, wrote portable prompts then failed with
+`PermissionError` creating `.codex`; attempt two confirmed `--check` still
+names all eight files; attempt three, a direct tracked-artifact patch, was
+rejected by this CLI's filesystem policy. Operator action: run
+`python3.13 scripts/render_loop_prompt.py --write` in a checkout where the
+repository `.codex/` directory is writable, then run
+`python3.13 -m pytest scripts/tests/test_portable_prompt_sync.py -q` and
+commit the eight generated artifacts. Full gates are not claimed because the
+known P1 remains red.
+
+### T-490 operator resolution — 2026-09-09
+
+DONE. The operator commands ran in writable checkout
+`/Users/joemccann/.radon/work/pr385-operator`. The renderer completed, the
+focused portable-render contract passed 73 / 73, and renderer check mode passed.
+All eight Codex artifacts are tracked and already match fresh renders exactly,
+so the write produced no artifact diff. The earlier absence was local to the
+restricted audit checkout rather than stale committed content.

@@ -19,28 +19,46 @@
 
 ---
 
-# Task: Testing-weekend remediate 2026-09-08 [IN PROGRESS]
+# Task: Testing-weekend audit 2026-09-09 [IN PROGRESS]
 
 ## Dependency graph
 
-- T1 depends_on: [] - Integrate `origin/main` and verify the dated-ledger gate (T-486).
-- T2 depends_on: [T1] - Make env-file durability tests hermetic (T-487).
-- T3 depends_on: [T1] - Extend release-supervision fakes to the inventory path (T-488).
-- T4 depends_on: [T1] - Exercise the Anthropic streamed completion payload (T-489).
-- T5 depends_on: [T2,T3,T4] - Run three serial full gates and publish the remediation record.
+- T1 depends_on: [] - Verify runner rails, ledger base, branch, and toolchain.
+- T2 depends_on: [T1] - Run serial CI-gated suites and delta-scoped determinism checks.
+- T3 depends_on: [T1,T2] - Inspect delta, blast radius, gates, skips, and ratchet integrity.
+- T4 depends_on: [T3] - Append the audit ledger/findings, commit, push, and open or update the nightly PR.
 
 ## Checklist
 
-- [x] T1 Integrate and verify ledger gate.
-- [x] T2 T-487 red/green.
-- [x] T3 T-488 BLOCKED after three macOS timeout-harness attempts.
-- [x] T4 T-489 red/green.
-- [ ] T5 Closing gates incomplete: both detached stages exited without a `DONE` sentinel; resume all three serial rounds.
+- [x] T1 Dedicated runner markers, clean tree, branch, and ledger base verified.
+- [x] T2 Serial gates recorded; 98 touched test files make scoped 3× reruns full-gate equivalent.
+- [x] T3 Delta and standing sweeps complete.
+- [x] T4 Audit committed as `7c36bcf1`, pushed, and published as PR #385.
 
 ## Review
 
-- [x] `RADON_WEEKEND_REDUCED=1`: P0/P1 only; T-486 through T-489 were reconciled.
-- [ ] Closing-gate stage is incomplete; no full-suite count is claimed.
+- [x] T-490 cites the rendering contract and reproduces deterministically in the full gate.
+
+---
+
+# Task: Testing-weekend remediate 2026-09-09 [COMPLETE]
+
+## Dependency graph
+
+- T1 depends_on: [] - Regenerate stale Codex loop artifacts for T-490.
+- T2 depends_on: [T1] - Verify the portable-render contract and append remediation evidence.
+- T3 depends_on: [T2] - Run three serial full gates and publish the remediation record.
+
+## Checklist
+
+- [x] T1 Operator reran the renderer in writable checkout `/Users/joemccann/.radon/work/pr385-operator`; all eight Codex artifacts are tracked and byte-identical to fresh renders.
+- [x] T2 Portable-render contract passed: 73 passed / 0 failed; `render_loop_prompt.py --check` also passed.
+- [x] T3 Full verification is delegated to PR #385 exact-head GitHub CI per operator policy.
+
+## Review
+
+- [x] `RADON_WEEKEND_REDUCED=1`: T-490 was the sole source-actionable P1.
+- [x] T-490 is resolved: the requested write and focused test both succeeded; no generated diff exists because current main already contains the exact renderer output.
 # Task: CI performance audit 2026-09-08 (post-main delta) [COMPLETE]
 
 Measure the production critical path after `cc77928d`, verify delivery rails,
