@@ -1,3 +1,47 @@
+# Task: CI performance remediate 2026-09-09 [COMPLETE]
+
+Apply each eligible P0/P1 finding from the 2026-09-09 performance audit while
+preserving the full test, provenance, and deployment-safety closure.
+
+## Dependency graph
+
+- T1 depends_on: [] - Resume dated branch and verify dedicated runner, audit eligibility, and reduced scope.
+- T2 depends_on: [T1] - Run focused workflow, path-filter, YAML, shell, and diff safety gates serially.
+- T3 depends_on: [T2] - Append the remediation decision, commit, and push the dated branch.
+
+## Checklist
+
+- [x] T1 `RADON_WEEKEND_REDUCED=1`; audit contains no source-actionable P0/P1 candidate.
+- [x] T2 88 workflow/path-filter safety contracts, YAML parsing, shell syntax, and diff checks passed serially.
+- [x] T3 Append-only remediation decision committed and pushed on the dated branch.
+
+## Review
+
+- [x] `RADON_WEEKEND_REDUCED=1` barred P2/P3 work; no lower-priority shard, cache, or deploy experiment was substituted.
+
+---
+
+# Task: CI performance audit 2026-09-09 [COMPLETE]
+
+Measure the latest organic production runs, verify the changed non-gating
+Playwright surface and deployment rails, then publish a ranked audit record.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify dedicated runner, lock recovery, branch, auth, and audited range.
+- T2 depends_on: [T1] - Measure twenty successful push deployments and inspect DAG, cache, image, and rollout paths.
+- T3 depends_on: [T2] - Revalidate safety contracts, record candidates, commit, push, and open/update the dated PR.
+
+## Checklist
+
+- [x] T1 Dedicated markers, stale-lock preservation, branch, authentication, and `90071618..964b6b77` delta verified.
+- [x] T2 Twenty Actions run payloads collected; latest mixed run critical path reconstructed.
+- [x] T3 Safety-contract verification and audit publication.
+
+## Review
+
+- [x] 20 organic deployment payloads measured: p50 281s, p95 385s; 88 focused safety contracts passed.
+- [x] The added Playwright coverage is non-gating, while the deploy closure, exact-SHA pair, rollback, and 40-second stability floor remain intact.
 # Task: Reliability audit 2026-09-09 [IN PROGRESS]
 
 ## Dependency graph
