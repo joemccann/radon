@@ -1111,3 +1111,33 @@ def test_explicit_malformed_disclosure_import_records_failure(tmp_path, capsys):
     assert status["source_id"] == "issuer-disclosures"
     assert status["status"] == "error"
     assert json.loads(capsys.readouterr().out)["sources"][0]["status"] == "error"
+
+
+@pytest.mark.parametrize("record", [False, True])
+def test_opendesi_default_fetch_failure_never_replays_bundled_fixture(tmp_path, monkeypatch, capsys, record):
+    from scripts.ai_cycle import collect
+    from scripts.ai_cycle.store import ObservationStore
+
+    calls = []
+
+    def fail(source, *args, **kwargs):
+        calls.append(source)
+        raise SourceError("Publisher transport failed")
+
+    monkeypatch.setattr(collect, "collect_source", fail)
+    db = tmp_path / "live.sqlite"
+    flags = ["--record", "--database", str(db)] if record else ["--verify"]
+    assert collect.main([*flags, "--sources", "open-design-arena", "--end", "2026-09-09", "--archive", str(tmp_path / "raw")]) == 1
+    assert calls == ["open-design-arena"]
+    report = json.loads(capsys.readouterr().out)
+    assert report["observations"] == 0
+    assert report["sources"][0]["status"] == "error"
+    if record:
+        assert ObservationStore(db).read_observations() == []
+
+
+def test_opendesi_import_requires_explicit_capture_timestamp(tmp_path):
+    from scripts.ai_cycle.collect import main
+
+    with pytest.raises(SystemExit):
+        main(["--verify", "--sources", "open-design-arena", "--end", "2026-09-09", "--import-opendesi", str(FIXTURE_HTML), "--archive", str(tmp_path)])
