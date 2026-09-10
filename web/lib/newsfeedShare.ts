@@ -1,4 +1,5 @@
 import type { MarketEarPost } from "./useNewsfeedPosts";
+import { getImageSource } from "./newsfeedSource";
 import { withoutEmDashes } from "./copyPunctuation";
 
 export type SharePost = MarketEarPost & { href: string; isoTimestamp: string };
@@ -21,8 +22,8 @@ export function sanitizeShareText(text: string): string {
     .join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
-function shareSource(post: SharePost): string {
-  const publisher = post.source?.publisher;
+function shareSource(post: SharePost, imageUrl = post.images?.[0]): string {
+  const publisher = post.source?.publisher ?? getImageSource(post, imageUrl);
   if (!publisher || /(?:market[\s-]*ear|zero[\s-]*hedge)/i.test(publisher)) return "";
   return `Source: ${cleanText(publisher)}${post.source?.documentDate ? ` · ${post.source.documentDate}` : ""}`;
 }
@@ -32,8 +33,10 @@ function cleanText(text: string): string {
     .replace(/\s+/g, " ").trim();
 }
 
-export function buildShareCaption(post: SharePost): string {
-  return [cleanText(post.title), cleanText(post.content || ""), shareSource(post)]
+export function buildShareCaption(post: SharePost, imageUrl = post.images?.[0]): string {
+  const content = cleanText(post.content || "");
+  const source = shareSource(post, imageUrl);
+  return [cleanText(post.title), content, source && !content.endsWith(source) ? source : ""]
     .filter(Boolean).join("\n\n");
 }
 
@@ -149,7 +152,7 @@ export async function renderShareCard(post: SharePost, imageUrl: string | undefi
   ctx.fillRect(72, 1535, 936, 2);
   ctx.fillStyle = MUTED;
   ctx.font = `24px ${sans}`;
-  drawText(ctx, shareSource(post), 72, 1554, 900, 30, 2);
+  drawText(ctx, shareSource(post, imageUrl), 72, 1554, 900, 30, 2);
   const figure = post.source?.figures.find(item => item.url === imageUrl);
   if (figure) {
     ctx.font = `22px ${sans}`;

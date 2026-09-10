@@ -77,6 +77,34 @@ describe("NewsfeedLightbox", () => {
     expect(getByText("PINNING")).not.toBeNull();
   });
 
+  it("shows the provider for the selected Market Ear image without leaking it to another chart", () => {
+    const first = POST.images![0];
+    const second = "https://media.radon.run/images/x1-second.png";
+    const third = "https://media.radon.run/images/x1-third.png";
+    const post = {
+      ...POST,
+      images: [first, second, third],
+      imageSources: { [first]: "Ramp", [second]: "Goldman Sachs" },
+    };
+    const { rerender, getByText, queryByText } = render(
+      <NewsfeedLightbox focus={{ post, imageUrl: first }} onDismiss={vi.fn()} />,
+    );
+    expect(getByText("Source: Ramp").closest(".newsfeed-lightbox__media")).not.toBeNull();
+    expect(queryByText("Source: Goldman Sachs")).toBeNull();
+
+    rerender(<NewsfeedLightbox focus={{ post, imageUrl: second }} onDismiss={vi.fn()} />);
+    expect(getByText("Source: Goldman Sachs").closest(".newsfeed-lightbox__media")).not.toBeNull();
+    expect(queryByText("Source: Ramp")).toBeNull();
+
+    rerender(<NewsfeedLightbox focus={{ post, imageUrl: third }} onDismiss={vi.fn()} />);
+    expect(queryByText(/^Source:/)).toBeNull();
+  });
+
+  it("does not invent an image source for a legacy Market Ear post", () => {
+    const { queryByText } = render(<NewsfeedLightbox focus={FOCUS} onDismiss={vi.fn()} />);
+    expect(queryByText(/^Source:/)).toBeNull();
+  });
+
   it("fires onDismiss when the scrim is clicked", () => {
     const onDismiss = vi.fn();
     const { getByTestId } = render(

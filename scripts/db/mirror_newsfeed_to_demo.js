@@ -106,14 +106,15 @@ async function recordHealth(src, state, detail, now) {
   });
 }
 
-const UPSERT_SQL = `INSERT INTO posts (id, title, content, timestamp, images, raw_images, tags, tags_text, tags_vision, created_at, updated_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+const UPSERT_SQL = `INSERT INTO posts (id, title, content, timestamp, images, raw_images, image_sources, tags, tags_text, tags_vision, created_at, updated_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(id) DO UPDATE SET
     title       = excluded.title,
     content     = excluded.content,
     timestamp   = excluded.timestamp,
     images      = excluded.images,
     raw_images  = excluded.raw_images,
+    image_sources = excluded.image_sources,
     tags        = excluded.tags,
     tags_text   = excluded.tags_text,
     tags_vision = excluded.tags_vision,
@@ -141,7 +142,7 @@ export async function runNewsfeedMirror({
 
   try {
     const { rows } = await attempt("source_read", () => src.execute({
-      sql: `SELECT id, title, content, timestamp, images, raw_images, tags, tags_text, tags_vision, created_at, updated_at
+      sql: `SELECT id, title, content, timestamp, images, raw_images, image_sources, tags, tags_text, tags_vision, created_at, updated_at
             FROM posts WHERE id NOT GLOB 'research-*' ORDER BY timestamp DESC LIMIT ?`,
       args: [limit],
     }));
@@ -157,7 +158,7 @@ export async function runNewsfeedMirror({
       sql: UPSERT_SQL,
       args: [
         r.id, r.title, r.content ?? null, r.timestamp,
-        r.images ?? "[]", r.raw_images ?? "[]",
+        r.images ?? "[]", r.raw_images ?? "[]", r.image_sources ?? "{}",
         r.tags ?? "[]", r.tags_text ?? "[]", r.tags_vision ?? "[]",
         r.created_at, r.updated_at,
       ],

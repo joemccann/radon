@@ -16,6 +16,7 @@ import { useBookmarks } from "../lib/useBookmarks";
 import NewsfeedTagBar from "./NewsfeedTagBar";
 import NewsfeedLightbox, { type NewsfeedLightboxFocus } from "./NewsfeedLightbox";
 import NewsfeedShare from "./NewsfeedShare";
+import { getImageSource } from "@/lib/newsfeedSource";
 import NewsfeedPostContent from "./NewsfeedPostContent";
 import StarToggle from "./StarToggle";
 import HeadlinesTape, { newestHeadlineTime } from "./dashboard/HeadlinesTape";
@@ -367,6 +368,7 @@ export default function DashboardNewsFeed() {
             <ul className={`news-feed-list ${styles.list}`}>
             {items.map((post) => {
               const firstImage = post.images?.[0] ?? null;
+              const imageSource = getImageSource(post, firstImage);
               const relative = formatRelative(post.isoTimestamp);
               const time = formatTime(post.isoTimestamp);
               const compact = formatCompact(post.isoTimestamp);
@@ -447,8 +449,8 @@ export default function DashboardNewsFeed() {
                           ⤢
                         </span>
                       </button>
-                      <figcaption className={`news-feed-figcaption ${styles.figcaption}${post.source ? ` ${researchStyles.feedCaption}` : ""}`}>
-                        <span>{post.source ? `${post.source.publisher} · p. ${post.source.figures[0]?.page} · ${post.source.figures[0]?.caption}` : `Chart · ${post.title}`}</span>
+                      <figcaption className={`news-feed-figcaption ${styles.figcaption}${post.source || imageSource ? ` ${researchStyles.feedCaption}` : ""}`}>
+                        <span>{post.source ? `${post.source.publisher} · p. ${post.source.figures[0]?.page} · ${post.source.figures[0]?.caption}` : imageSource ? `Source: ${imageSource}` : `Chart · ${post.title}`}</span>
                       </figcaption>
                       {post.source && post.source.figures.length > 1 ? (
                         <div className={researchStyles.feedThumbnails} aria-label="Additional charts">

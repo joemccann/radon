@@ -30,7 +30,7 @@ for (const width of [1440, 393]) {
       content: `${post.content} Source: ZeroHedge https://zerohedge.com/markets/example`,
     };
     const rewritten = { title: "Seasonality — the setup", content: "Positioning &mdash; the tell. Returns: -2.5%." };
-    const rewrittenCaption = "Seasonality, the setup\n\nPositioning, the tell. Returns: -2.5%.";
+    const rewrittenCaption = "Seasonality, the setup\n\nPositioning, the tell. Returns: -2.5%.\n\nSource: Synthetic Bank · 2026-09-07";
     let requests = 0;
     let releaseRewrite!: () => void;
     const rewriteReady = new Promise<void>(resolve => { releaseRewrite = resolve; });
@@ -119,6 +119,7 @@ for (const width of [1440, 393]) {
       const drawn = await page.evaluate(() => (window as unknown as { shareCapture: ShareCapture }).shareCapture.drawn.join(" "));
       expect(drawn).toContain("Seasonality, the setup");
       expect(drawn).toContain("Positioning, the tell. Returns: -2.5%.");
+      expect(drawn).toContain("Source: Synthetic Bank · 2026-09-07");
       expect(drawn).not.toMatch(/—|&(?:mdash|#8212|#x2014);/i);
       expect(requests).toBe(1);
       await panel.screenshot({ path: testInfo.outputPath("rewritten-share.png") });

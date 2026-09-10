@@ -1,6 +1,6 @@
 import { requireRouteAccess } from "@/lib/routeAccess";
 import { NextResponse } from "next/server";
-import { parseResearchSource } from "@/lib/newsfeedSource";
+import { parseImageSources, parseResearchSource } from "@/lib/newsfeedSource";
 import { cachedRead } from "@/lib/dbCache";
 import { dbExecute } from "@/lib/dbExecute";
 
@@ -21,6 +21,7 @@ type PostRow = {
   timestamp: string;
   images: string | null;
   raw_images: string | null;
+  image_sources?: string | null;
   tags: string | null;
   tags_text: string | null;
   tags_vision: string | null;
@@ -39,13 +40,15 @@ function parseStringArray(json: string | null): string[] {
 }
 
 function rowToPost(row: PostRow) {
+  const images = parseStringArray(row.images);
   return {
     id: row.id,
     ...(parseResearchSource(row.provenance_json) ? { source: parseResearchSource(row.provenance_json) } : {}),
     title: row.title,
     content: row.content ?? "",
     timestamp: row.timestamp,
-    images: parseStringArray(row.images),
+    images,
+    imageSources: parseImageSources(row.image_sources, images),
     rawImages: parseStringArray(row.raw_images),
     tags: parseStringArray(row.tags),
     tags_text: parseStringArray(row.tags_text),
@@ -66,10 +69,12 @@ async function fetchPosts() {
   // 500 wide rows — give the bounded chokepoint more headroom than the
   // default 3s single-row path without removing the hang ceiling.
   const options = { timeoutMs: 8_000, label: "newsfeed-posts" };
+  // Select the available post columns during independent additive migrations.
+  // rowToPost is the API field allowlist; absent image_sources becomes {}.
   let result;
   try {
     result = await dbExecute({
-      sql: `SELECT p.id, p.title, p.content, p.timestamp, p.images, p.raw_images, p.tags, p.tags_text, p.tags_vision, p.created_at, p.updated_at, r.provenance_json
+      sql: `SELECT p.*, r.provenance_json
             FROM posts p LEFT JOIN research_post_sources r ON r.post_id = p.id
             ORDER BY p.timestamp DESC
             LIMIT 500`,
@@ -81,7 +86,7 @@ async function fetchPosts() {
     // (or cachedRead's last-good result), never silently changing the feed.
     if (!isMissingResearchSourceTable(error)) throw error;
     result = await dbExecute({
-      sql: `SELECT id, title, content, timestamp, images, raw_images, tags, tags_text, tags_vision, created_at, updated_at, NULL AS provenance_json
+      sql: `SELECT posts.*, NULL AS provenance_json
             FROM posts
             WHERE id NOT GLOB 'research-*'
             ORDER BY timestamp DESC

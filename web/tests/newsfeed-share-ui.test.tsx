@@ -11,10 +11,11 @@ let createUrl: ReturnType<typeof vi.fn>;
 let revokeUrl: ReturnType<typeof vi.fn>;
 let clipboard: ReturnType<typeof vi.fn>;
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.resetAllMocks();
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ title: post.title, content: post.content, caption: `${post.title}\n\n${post.content}` }) }));
-  engine.buildShareCaption.mockReturnValue("Yen hedge demand\nHedge demand increased.");
+  const actual = await vi.importActual<typeof import("@/lib/newsfeedShare")>("@/lib/newsfeedShare");
+  engine.buildShareCaption.mockImplementation(actual.buildShareCaption);
   engine.renderShareCard.mockResolvedValue(document.createElement("canvas"));
   engine.canvasToPng.mockResolvedValue(new Blob(["png"], { type: "image/png" }));
   engine.canvasToMp4.mockResolvedValue(new Blob(["mp4"], { type: "video/mp4" }));
@@ -44,6 +45,34 @@ describe("news feed sharing", () => {
     expect(fetch).toHaveBeenCalledWith("/api/newsfeed/share", expect.objectContaining({ method: "POST", cache: "no-store" }));
   });
 
+  it.each([
+    { imageUrl: "/chart-1.png", provider: "Ramp", otherProvider: "Goldman Sachs" },
+    { imageUrl: "/chart-2.png", provider: "Goldman Sachs", otherProvider: "Ramp" },
+  ])("preserves $provider in copied and X captions when the rewrite omits the selected image source", async ({ imageUrl, provider, otherProvider }) => {
+    const attributed = {
+      ...post,
+      imageSources: { "/chart-1.png": "Ramp", "/chart-2.png": "Goldman Sachs" },
+    };
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({ title: "Hedge demand is back.", content: "Positioning remains neutral." }),
+    } as Response);
+    render(<NewsfeedShare post={attributed} imageUrl={imageUrl} />);
+    await openShare();
+    const caption = (screen.getByRole("textbox", { name: "Post caption" }) as HTMLTextAreaElement).value;
+    expect(caption).toContain("Hedge demand is back.");
+    expect(caption).toContain("Positioning remains neutral.");
+    expect(caption).toContain(`Source: ${provider}`);
+    expect(caption).not.toContain(otherProvider);
+    fireEvent.click(screen.getByRole("button", { name: "Copy caption" }));
+    await waitFor(() => expect(clipboard).toHaveBeenCalledWith(caption));
+    const compose = screen.getByRole("link", { name: "Compose on X" });
+    expect(new URL(compose.getAttribute("href")!).searchParams.get("text")).toBe(caption);
+    expect(engine.renderShareCard).toHaveBeenLastCalledWith(
+      expect.objectContaining({ imageSources: attributed.imageSources }), imageUrl,
+    );
+  });
+
   it("keeps Compose on X available while rewriting and aborts on close", async () => {
     vi.mocked(fetch).mockImplementation(() => new Promise(() => {}));
     render(<NewsfeedShare post={post} />);
@@ -51,7 +80,7 @@ describe("news feed sharing", () => {
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Copy caption" }) as HTMLButtonElement).disabled).toBe(true);
     const compose = screen.getByRole("link", { name: "Compose on X" });
-    expect(new URL(compose.getAttribute("href")!).searchParams.get("text")).toBe("Yen hedge demand\nHedge demand increased.");
+    expect(new URL(compose.getAttribute("href")!).searchParams.get("text")).toBe("Yen hedge demand\n\nHedge demand increased.");
     expect(compose.getAttribute("aria-disabled")).not.toBe("true");
     expect(compose.getAttribute("target")).toBe("_blank");
     expect((screen.getByRole("button", { name: "Download Story image" }) as HTMLButtonElement).disabled).toBe(true);
