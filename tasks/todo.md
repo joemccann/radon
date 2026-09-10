@@ -6171,3 +6171,13 @@ No local test suites. Change only Compose availability; retain caption and media
 
 - RED: GitHub CI run 34437337990, head da04fa6432459b320d36718b38b40c437d6be773, Vitest shard 4/8: 2 intended failures (missing Compose link), 1,332 passed. Both new loading-state assertions reproduce the missing href.
 - Fix: remove the voice-loading condition from the X intent href. Existing buildXShareUrl continues to sanitize captions; media readiness and caption editing behavior remain intact. Browser tests capture real mocked popup navigation during voice/PNG waits at 1440px and 393px.
+
+# PR 393 CI integration repair (2026-09-10)
+
+Dependency graph: T1 -> T2 -> T3.
+- [x] T1 depends_on: [] - Inspect current-head CI and check mergeability against main.
+- [ ] T2 depends_on: [T1] - Update source contracts for downloader options and retained share attribution.
+- [ ] T3 depends_on: [T2] - Push and verify exact-head GitHub CI and browser artifacts; primary handles merge.
+
+## Review
+No local suites. CI 34494032484 reproduces outdated download signature matching. Main 1998fb77 merges cleanly.
