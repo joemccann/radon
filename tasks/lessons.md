@@ -1,4 +1,9 @@
 # Lessons
+## 2026-09-10 — Run the PR test loop on GitHub
+
+- The operator requires PR test suites to run on GitHub, not the laptop, because GitHub has more compute. Do not start local suites for PR preparation or CI repairs unless explicitly requested.
+- Push the scoped change, inspect exact-head GitHub failures, repair in-scope defects, and keep watching until all applicable checks are green.
+
 
 ## 2026-09-10 — A scoring walk is not a trading day
 

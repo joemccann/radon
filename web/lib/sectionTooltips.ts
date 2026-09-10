@@ -88,7 +88,8 @@ export const SECTION_TOOLTIPS: Record<string, string> = {
 
   "Historical Trades (30 Days)":
     "Trade blotter derived from the Turso journal (live fill writers + rehydrate). " +
-    "Shows cost basis, proceeds, realized P&L, and commission per completed or open trade. " +
+    "Shows recorded quantity-weighted Avg Fill (before commissions), cost basis, proceeds, realized P&L, and commission. " +
+    "Aggregate labels identify collapsed records that may combine buys and sells, not separate entry or exit prices. " +
     "Session fills on Today's Executed may land here after journal_sync / fill_monitor " +
     "with open/close labels; use Refresh to re-pull. Not a live IB session blotter.",
 
