@@ -664,6 +664,13 @@ class TestSecurityRemediationSchedules:
     def test_cta_timeout_covers_retry_envelope(self, unit):
         assert int(unit("radon-cta-sync.service")["Service"]["timeoutstartsec"]) >= 1800
 
+    def test_cta_sync_documents_vision_cascade_order(self, services_dir):
+        raw = (services_dir / "radon-cta-sync.service").read_text()
+        assert (
+            "anthropic -> grok -> cursor -> codex -> gemini -> nvidia -> cerebras"
+            in raw
+        )
+
     def test_leap_fallback_uses_venv_and_has_time_budget(self, unit):
         service = unit("radon-leap.service")["Service"]
         assert "/home/radon/radon/.venv/bin/python" in service.get("environment", "")

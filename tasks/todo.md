@@ -1,3 +1,23 @@
+# Task: CTA vision cascade 2026-09-10 [IN PROGRESS]
+
+Never hard-fail radon-cta-sync.service on Anthropic Vision credit exhaustion.
+Joe's order: subscription (anthropic -> grok -> cursor -> codex -> gemini),
+then NVIDIA, then Cerebras. Do not merge.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests for credit/billing fallthrough and exact order.
+- T2 depends_on: [T1] - Shared vision_cascade helper + MenthorQClient wiring.
+- T3 depends_on: [T2] - Service comment, ops messaging, focused pytest, draft PR.
+
+## Checklist
+
+- [x] T1 Failing cascade tests.
+- [x] T2 Helper + client + classifier.
+- [ ] T3 Docs, CI watch, no merge.
+
+---
+
 # Task: Financial research workbench 2026-09-10 [IN PROGRESS]
 
 ## Scope and acceptance
