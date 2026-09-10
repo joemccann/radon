@@ -1,3 +1,27 @@
+# Task: CI performance remediate 2026-09-10 [COMPLETE]
+
+Apply every eligible P0/P1 finding from the latest completed CI-performance
+audit while preserving the full test, provenance, and deployment-safety
+closure.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify dedicated runner, exclusive lock, dated branch, and reduced scope.
+- T2 depends_on: [T1] - Recheck post-audit main delta for P0/P1 CI-performance candidates.
+- T3 depends_on: [T2] - Run focused workflow safety baseline and publish the CIP-010 decision record.
+
+## Checklist
+
+- [x] T1 Dedicated markers, GitHub authentication, fresh dated branch, and reclaimed stale lock verified.
+- [x] T2 `964b6b77..9dce4b3a` changes no CI workflow, cache, image, or deploy surface; no P0/P1 candidate exists.
+- [x] T3 88 workflow/path-filter contracts, Ruby YAML parse, shell syntax, and diff checks passed serially.
+
+## Review
+
+- [x] `RADON_WEEKEND_REDUCED=1` excluded P2/P3 work; no lower-priority experiment was substituted.
+
+---
+
 # Task: Reliability remediate 2026-09-10 [IN PROGRESS]
 
 ## Dependency graph
