@@ -118,7 +118,7 @@ for (const width of [1440, 393]) {
     await credited.getByRole("button", { name: "Open lightbox for: Adoption slows" }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog.locator(".newsfeed-lightbox__media").getByText("Source: Ramp", { exact: true })).toBeVisible();
-    await page.screenshot({ path: testInfo.outputPath(`research-market-ear-lightbox-${width}.png`) });
+    await page.screenshot({ path: testInfo.outputPath(`research-market-ear-lightbox-${width}.png`), animations: "disabled" });
     await testInfo.attach(`research-market-ear-lightbox-${width}`, {
       path: testInfo.outputPath(`research-market-ear-lightbox-${width}.png`), contentType: "image/png",
     });
