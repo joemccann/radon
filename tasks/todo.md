@@ -19,12 +19,12 @@ Implement the 13 requested capabilities as integrated, source-grounded workflows
 - [x] T4 Reliability evaluator, readable PDF manifests/retrieval and operator governance export.
 - [x] T5 Formula XLSX, PPTX, valuation/comps, dated portfolio exports, ticket checklist and marketing section.
 - [ ] T6 Browser and exact-head CI green.
-- [ ] T7 Visual walkthrough and delivery.
+- [ ] T7 Visual walkthrough created at docs/research/show-me-financial-workbench.html; delivery/notification waits for green CI.
 
 ## Review
-Implementation complete; exact-head CI and final reviewer verification pending. Preserve original workspace dirty files. No merge or deployment requested.
+Implementation complete; exact-head CI pending on PR https://github.com/joemccann/radon/pull/398. Independent visual reviewer confirmed all original findings resolved. Preserve original workspace dirty files. No merge or deployment requested.
 
-- No local test suites executed. TypeScript static checks and changed-source ESLint passed before final integration.
+- No local test suites executed. TypeScript static checks, staged-source ESLint and secret scan passed for c0eb7728.
 - Browser: illustrative source intake produced 1 source / 6 cited facts; valid XLSX downloaded; 1440px desktop and 393px mobile, zero page errors and app width 393/393.
 - Independent reviews repaired fiscal-period substitution, financing-role smuggling, future-source prompts/exports, missing plaintext provenance, and Labs state loss.
 - Marketing page exposed a pre-existing decorative WebGL crash; bounded fallback preserves content with regression coverage. New section fits mobile; existing plate-caption overflow remains outside the added section.
