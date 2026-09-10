@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-09-10T17:25:35Z",
-  "node_count": 3286,
-  "edge_count": 6663,
+  "generated_at": "2026-09-10T17:42:14Z",
+  "node_count": 3288,
+  "edge_count": 6670,
   "areas": {
-    "web": 1928,
+    "web": 1930,
     "site": 152,
     "scripts": 1092,
     "cloud": 66,
@@ -35,7 +35,7 @@
     {
       "id": "web/lib",
       "area": "web",
-      "count": 380
+      "count": 381
     },
     {
       "id": "web/public",
@@ -50,7 +50,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 893
+      "count": 894
     },
     {
       "id": "site/app",
@@ -252,7 +252,7 @@
     {
       "id": "web/lib/types.ts",
       "area": "web",
-      "in": 266,
+      "in": 268,
       "out": 1,
       "test": false
     },
@@ -288,7 +288,7 @@
       "id": "web/components/WorkspaceSections.tsx",
       "area": "web",
       "in": 19,
-      "out": 73,
+      "out": 74,
       "test": false
     },
     {

@@ -47,6 +47,7 @@ import { useGarchConvergence } from "@/lib/useGarchConvergence";
 import { useVolCone } from "@/lib/useVolCone";
 import { useBlotter } from "@/lib/useBlotter";
 import { formatTradeDate } from "@/lib/blotter/formatTradeDate";
+import { blotterFillPrice, formatBlotterFillPrice, FILL_PRICE_HELP, AGGREGATE_FILL_PRICE_HELP } from "@/lib/blotter/fillPrice";
 import { isEarlierLocalDay } from "@/lib/holdTime";
 import CashFlowsSection from "@/components/CashFlowsSection";
 import { useSort } from "@/lib/useSort";
@@ -903,14 +904,12 @@ function blotterShareData(t: BlotterTrade): SharePnlData {
     const openExecs = t.executions.filter((e) => e.side === firstSide);
     const closeExecs = t.executions.filter((e) => e.side !== firstSide);
     if (openExecs.length > 0) {
-      const totalQty = openExecs.reduce((s, e) => s + e.quantity, 0);
-      const totalVal = openExecs.reduce((s, e) => s + e.price * e.quantity, 0);
-      entryPrice = totalQty > 0 ? totalVal / totalQty : null;
+      const fill = blotterFillPrice({ executions: openExecs });
+      entryPrice = fill.aggregated ? null : fill.price;
     }
     if (closeExecs.length > 0) {
-      const totalQty = closeExecs.reduce((s, e) => s + e.quantity, 0);
-      const totalVal = closeExecs.reduce((s, e) => s + e.price * e.quantity, 0);
-      exitPrice = totalQty > 0 ? totalVal / totalQty : null;
+      const fill = blotterFillPrice({ executions: closeExecs });
+      exitPrice = fill.aggregated ? null : fill.price;
     }
   }
   // Derive entry and exit times from executions
@@ -3873,7 +3872,7 @@ function OrdersSections({
 
 const BLOTTER_STALE_THRESHOLD_DAYS = 1;
 
-type BlotterSortKey = "date" | "symbol" | "contract_desc" | "sec_type" | "status" | "net_quantity" | "total_commission" | "realized_pnl" | "cost_basis" | "proceeds";
+type BlotterSortKey = "date" | "symbol" | "contract_desc" | "sec_type" | "status" | "net_quantity" | "fill_price" | "total_commission" | "realized_pnl" | "cost_basis" | "proceeds";
 
 function getTradeDate(item: BlotterTrade): string {
   if (item.executions.length === 0) return "";
@@ -3908,6 +3907,7 @@ const blotterExtract = (item: BlotterTrade, key: BlotterSortKey): string | numbe
     case "sec_type": return item.sec_type;
     case "status": return item.is_closed ? "Closed" : "Open";
     case "net_quantity": return item.total_quantity ?? item.net_quantity;
+    case "fill_price": return blotterFillPrice(item).price;
     case "total_commission": return item.total_commission;
     case "realized_pnl": return item.realized_pnl;
     case "cost_basis": return item.cost_basis;
@@ -4127,6 +4127,7 @@ export function HistoricalTradesSection({
                 </select>
               </label>
             </div>
+            <div className="historical-trades-table-scroll" style={{ overflowX: "auto" }}>
             <table>
               <thead>
                 <tr>
@@ -4136,6 +4137,7 @@ export function HistoricalTradesSection({
                   <SortTh<BlotterSortKey> label="Type" sortKey="sec_type" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                   <SortTh<BlotterSortKey> label="Status" sortKey="status" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                   <SortTh<BlotterSortKey> label="Qty" sortKey="net_quantity" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  <SortTh<BlotterSortKey> label="Avg Fill" sortKey="fill_price" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                   <SortTh<BlotterSortKey> label="Commission" sortKey="total_commission" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                   <SortTh<BlotterSortKey> label="Realized P&L" sortKey="realized_pnl" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                   <SortTh<BlotterSortKey> label="Cost Basis" sortKey="cost_basis" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
@@ -4145,6 +4147,7 @@ export function HistoricalTradesSection({
               </thead>
               <tbody>
                 {pageRows.map((t, i) => {
+                  const fill = blotterFillPrice(t);
                   const realizedBasis = t.realized_cost_basis != null ? Math.abs(t.realized_cost_basis) : (t.cost_basis != null ? Math.abs(t.cost_basis) : 0);
                   const realizedPct = t.realized_pnl != null && realizedBasis > 0 ? (t.realized_pnl / realizedBasis) * 100 : null;
                   const partiallyRealized = !t.is_closed && (t.realized_quantity ?? 0) > 0;
@@ -4164,6 +4167,12 @@ export function HistoricalTradesSection({
                         </span>
                       </td>
                       <td className="right">{t.total_quantity ?? t.net_quantity}</td>
+                      <td className="right" title={fill.aggregated ? AGGREGATE_FILL_PRICE_HELP : FILL_PRICE_HELP}>
+                        <span data-testid="historical-fill-price">{formatBlotterFillPrice(fill.price)}</span>
+                        {fill.aggregated && fill.price != null && (
+                          <div className="cell-muted">Aggregate</div>
+                        )}
+                      </td>
                       <td className="right">{t.total_commission != null ? fmtPrice(t.total_commission) : "---"}</td>
                       {/* Colour only a KNOWN value. `(t.realized_pnl ?? 0) >= 0`
                           painted a null P&L green while the text correctly
@@ -4189,6 +4198,7 @@ export function HistoricalTradesSection({
                 })}
               </tbody>
             </table>
+            </div>
             {totalPages > 1 && (
               <div className="pagination">
                 <button disabled={safePage === 0} onClick={() => setPage(safePage - 1)}>
