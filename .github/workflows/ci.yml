@@ -426,6 +426,19 @@ jobs:
           compression-level: 0
           retention-days: 3
 
+      # The full Python matrix owns this report. Cross-tree contract jobs
+      # are omitted when Python runs, so placing it there orphaned the artifact.
+      # Run once on the shard that owns MCP tests, even if a preceding test fails.
+      - name: Evaluate hosted MCP golden contracts
+        if: ${{ !cancelled() && matrix.shard == 'scripts-jm' }}
+        run: PYTHONPATH=scripts python -m mcp_hosted.evaluate --output /tmp/mcp-evaluation.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() && matrix.shard == 'scripts-jm' }}
+        with:
+          name: mcp-golden-contract-report
+          path: /tmp/mcp-evaluation.json
+          if-no-files-found: error
+
   py-coverage:
     name: pytest coverage ratchet
     needs: [py-tests]
@@ -785,6 +798,7 @@ jobs:
           e2e/mobile-orders-session.spec.ts
           e2e/orders-session-window.spec.ts
           e2e/vixts-tab.spec.ts
+          e2e/research-workbench.spec.ts
           e2e/newsfeed-research-media.spec.ts
           e2e/newsfeed-sharing.spec.ts
           e2e/ai-infrastructure.spec.ts

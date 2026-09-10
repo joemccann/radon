@@ -50,3 +50,33 @@ def test_configured_auth_rejects_missing_bearer(client, monkeypatch):
     monkeypatch.setattr(server, "verify_api_key", lambda req: None)
     monkeypatch.setenv("CLERK_JWKS_URL", "https://clerk.example/.well-known/jwks.json")
     assert client.get("/newsfeed/research/files/" + "a" * 64 + ".png").status_code == 401
+
+
+def test_authenticated_manifest_and_literal_retrieval(client, tmp_path):
+    import json
+    from research.assets import store_asset
+    from research.manifest import build_manifest
+    (tmp_path/'page-0001.md').write_text('Capex guidance -12.5%.')
+    value = build_manifest({'source_sha256':'a'*64,'pages':[{'page_number':1,'markdown_file':'page-0001.md','needs_ocr':False}]},tmp_path)
+    path = tmp_path/'manifest.json';path.write_text(json.dumps(value))
+    asset = store_asset(path).rsplit('/',1)[-1]
+    full = client.get('/newsfeed/research/evidence/'+asset)
+    assert full.status_code == 200 and full.json() == value
+    assert full.headers['cache-control'] == 'private, no-store'
+    found = client.get('/newsfeed/research/evidence/'+asset,params={'query':'capex'})
+    assert found.json()['results'][0]['text'] == 'Capex guidance -12.5%.'
+    assert found.json()['results'][0]['source_sha256'] == 'a'*64
+    assert client.get('/newsfeed/research/evidence/'+asset,params={'query':'unknown'}).json()['results'] == []
+    assert client.get('/newsfeed/research/evidence/'+asset,params={'query':'!?'}).status_code == 400
+    assert client.get('/newsfeed/research/evidence/'+asset,params={'query':'x'*201}).status_code == 422
+    binary = client.get('/newsfeed/research/files/'+asset)
+    assert binary.headers['content-type'] == 'application/json'
+
+
+def test_manifest_missing_bearer_fails_closed(client, monkeypatch):
+    from scripts.api import server, auth
+    monkeypatch.setattr(server, 'is_trusted_local_request', lambda req:False)
+    monkeypatch.setattr(auth, 'is_trusted_local_request', lambda req:False)
+    monkeypatch.setattr(server, 'verify_api_key', lambda req:None)
+    monkeypatch.setenv('CLERK_JWKS_URL','https://clerk.example/.well-known/jwks.json')
+    assert client.get('/newsfeed/research/evidence/'+'a'*64+'.json').status_code == 401

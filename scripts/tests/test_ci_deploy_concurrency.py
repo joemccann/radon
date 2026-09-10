@@ -825,3 +825,38 @@ def test_cloud_shards_parallelise_except_the_wall_clock_edge_shard() -> None:
     assert rows["al"]["xdist"] == "-n auto --dist loadfile"
     assert rows["edge"]["xdist"] == "", "the edge shard is wall-clock; keep it serial"
     assert "matrix.xdist" in _job_commands(cloud)
+
+
+def test_mcp_golden_report_runs_once_in_the_full_python_matrix() -> None:
+    """A full Python PR suppresses cross-tree jobs; its report cannot live there."""
+    jobs = _workflow()["jobs"]
+    evaluation_steps = [
+        (name, step)
+        for name, job in jobs.items()
+        for step in job.get("steps", [])
+        if "-m mcp_hosted.evaluate" in step.get("run", "")
+    ]
+    assert len(evaluation_steps) == 1
+    job_name, evaluate = evaluation_steps[0]
+    assert job_name == "py-tests"
+    assert "github.event_name == 'pull_request'" in jobs[job_name]["if"]
+    assert "matrix.shard == 'scripts-jm'" in evaluate["if"]
+    assert "!cancelled()" in evaluate["if"]
+    assert "--live" not in evaluate["run"], "CI must use offline contracts, never providers"
+    assert "--output /tmp/mcp-evaluation.json" in evaluate["run"]
+    assert evaluate.get("continue-on-error", "false") == "false"
+    uploads = [
+        (name, step)
+        for name, job in jobs.items()
+        for step in job.get("steps", [])
+        if step.get("with", {}).get("name") == "mcp-golden-contract-report"
+    ]
+    assert len(uploads) == 1, "matrix shards cannot race on one artifact name"
+    upload_job, upload = uploads[0]
+    assert upload_job == job_name
+    assert upload["if"] == evaluate["if"]
+    assert upload["with"]["path"] == "/tmp/mcp-evaluation.json"
+    assert upload["with"]["if-no-files-found"] == "error"
+    steps = jobs[job_name]["steps"]
+    assert steps.index(upload) > steps.index(evaluate)
+    assert "-r requirements.txt" in _job_commands(jobs[job_name])

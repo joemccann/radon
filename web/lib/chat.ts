@@ -560,6 +560,7 @@ export function resolveSectionFromPath(pathname: string | null, fallback: Worksp
     return "alerts";
   }
 
+  if (pathname.startsWith("/research-workbench")) return "research-workbench";
   if (pathname.startsWith("/workflow")) {
     return "workflow";
   }
