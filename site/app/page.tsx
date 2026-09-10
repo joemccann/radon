@@ -1,3 +1,4 @@
+import { ResearchExecutionSection } from "@/components/sections/ResearchExecutionSection";
 import { ScrollProgress } from "@/components/atoms/ScrollProgress";
 import { SectionRule } from "@/components/atoms/SectionRule";
 import { ColophonSection } from "@/components/sections/ColophonSection";
@@ -39,6 +40,8 @@ export default function LandingPage() {
         <ConvexitySection />
         <SectionRule />
         <EvidenceSection />
+        <SectionRule />
+        <ResearchExecutionSection />
         <SectionRule />
         <FaqSection />
         <SectionRule />

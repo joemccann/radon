@@ -274,7 +274,7 @@ def test_invalid_figure_page_or_asset_extension(db, post):
 
 def test_store_rejects_unsupported_extension_and_symlink_root(tmp_path, monkeypatch):
     unsupported = tmp_path / "bad.svg"; unsupported.write_bytes(b"<svg/>")
-    with pytest.raises(ValueError, match="PNG and PDF"): assets.store_asset(unsupported)
+    with pytest.raises(ValueError, match="PNG, PDF and JSON"): assets.store_asset(unsupported)
     png = tmp_path / "chart.png"; png.write_bytes(b"\x89PNG\r\n\x1a\n chart")
     real = tmp_path / "real"; real.mkdir()
     (tmp_path / "assets").symlink_to(real)
@@ -302,3 +302,27 @@ def test_original_bank_attribution_is_accepted(db,post):
 def test_invisible_format_controls_do_not_bypass_attribution_guard(control):
     with pytest.raises(ValueError):
         publish.validate_rendered_copy('Zero'+control+'Hedge','Research','Goldman Sachs',[],['MACRO'])
+
+
+def test_publication_manifest_binds_exact_source_pdf(db, tmp_path, monkeypatch):
+    from research.manifest import build_manifest
+    # Reuse the real asset/publish fixture construction without external data.
+    monkeypatch.setenv('RADON_RESEARCH_DIR', str(tmp_path/'research'))
+    pdf = tmp_path/'source.pdf';pdf.write_bytes(b'%PDF-1.4 fixture')
+    url = publish.store_asset(pdf)
+    digest = hashlib.sha256(pdf.read_bytes()).hexdigest()
+    (tmp_path/'page-0001.md').write_text('Report date: 7 September 2026. Capex 20.')
+    manifest = build_manifest({'source_sha256':digest,'pages':[{'page_number':1,'markdown_file':'page-0001.md','needs_ocr':False}]},tmp_path)
+    file = tmp_path/'manifest.json';file.write_text(json.dumps(manifest))
+    evidence_url = publish.store_asset(file)
+    post = {'id':'research-'+'d'*32,'title':'Capex research','content':'Capex 20.',
+        'timestamp':'2026-09-07T12:00:00+00:00','images':[],'tags':['CAPEX'],
+        'source':{'kind':'dropbox','publisher':'Research','url':url,'evidenceUrl':evidence_url,
+            'fileId':'id:test','revision':'r1','contentHash':'a'*64,'documentDate':'2026-09-07',
+            'folderDate':'2026-09-07','pages':[1],'figures':[]}}
+    publish.publish(post)
+    saved = json.loads(db.execute('SELECT provenance_json FROM research_post_sources').fetchone()[0])
+    assert saved['evidenceUrl'] == evidence_url
+    other = tmp_path/'other.pdf';other.write_bytes(b'%PDF-1.4 different')
+    post['source']['url'] = publish.store_asset(other)
+    with pytest.raises(ValueError, match='original source PDF'): publish.publish(post)

@@ -12,3 +12,10 @@ describe("private research files", () => {
   it("rejects traversal and arbitrary paths", async () => { expect((await GET(request, {params:Promise.resolve({asset:"../secret.pdf"})})).status).toBe(404); expect(upstream).not.toHaveBeenCalled(); });
   it("streams original bytes without public caching", async () => { upstream.mockResolvedValue(new Response(new Uint8Array([137,80,78,71]))); const response = await GET(request, {params:Promise.resolve({asset})}); expect([...new Uint8Array(await response.arrayBuffer())]).toEqual([137,80,78,71]); expect(response.headers.get("Cache-Control")).toBe("private, no-store"); expect(response.headers.get("Content-Type")).toBe("image/png"); expect(upstream.mock.calls[0][1]).toMatchObject({token:"test-only",cache:"no-store"}); });
 });
+it("serves content-addressed JSON manifests as private JSON", async () => {
+  upstream.mockResolvedValue(new Response('{"schema_version":1}'));
+  const response = await GET(request, { params: Promise.resolve({ asset: "b".repeat(64)+".json" }) });
+  expect(response.headers.get("Content-Type")).toBe("application/json");
+  expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+  expect(await response.json()).toEqual({ schema_version: 1 });
+});

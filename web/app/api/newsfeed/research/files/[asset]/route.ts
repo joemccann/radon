@@ -10,7 +10,7 @@ export async function GET(request: Request, context: { params: Promise<{ asset: 
   const access = await requireRouteAccess(request, { operatorOnly: true });
   if (!access.ok) return access.response;
   const { asset } = await context.params;
-  if (!/^[a-f0-9]{64}\.(png|pdf)$/.test(asset)) {
+  if (!/^[a-f0-9]{64}\.(png|pdf|json)$/.test(asset)) {
     return new Response("Not found", { status: 404, headers: privateHeaders });
   }
   try {
@@ -19,7 +19,7 @@ export async function GET(request: Request, context: { params: Promise<{ asset: 
     });
     return new Response(upstream.body, {
       headers: { ...privateHeaders,
-        "Content-Type": asset.endsWith(".pdf") ? "application/pdf" : "image/png",
+        "Content-Type": asset.endsWith(".json") ? "application/json" : asset.endsWith(".pdf") ? "application/pdf" : "image/png",
         "Content-Disposition": `inline; filename="${asset}"`,
       },
     });
