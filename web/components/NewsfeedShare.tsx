@@ -124,7 +124,7 @@ function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: s
         {preview ? <img src={preview} alt={`Portrait share preview: ${sanitizeShareText(post.title)}`} /> : <span>{error ? "Preview unavailable" : "Preparing preview…"}</span>}
       </div>
       <div className={styles.actions}>
-        <a className={styles.action} href={rewriting ? undefined : buildXShareUrl(caption)} aria-disabled={rewriting} target="_blank" rel="noopener noreferrer">Compose on X</a>
+        <a className={styles.action} href={buildXShareUrl(caption)} target="_blank" rel="noopener noreferrer">Compose on X</a>
         <button type="button" disabled={!preview || busy || rewriting} onClick={() => void download(false)}>Download Story image</button>
         <button type="button" disabled={!preview || busy || rewriting || !mp4} onClick={() => void download(true)}>{busy ? "Exporting…" : "Download Reels / TikTok video"}</button>
         <p>Save the image or video, then upload in your social app. Attach images separately on X.</p>

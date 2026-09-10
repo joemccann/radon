@@ -6131,3 +6131,28 @@ Dependency graph: T1 -> T2; T1 -> T3; T2 + T3 -> T4 -> T5.
 
 ### Review
 Pending.
+
+# Social Compose on X availability (2026-09-09)
+
+## Specification
+Compose on X must immediately open X's composer using the current sanitized caption, independent of voice rewriting, chart rendering, PNG preparation, and video export. When the rewrite finishes, subsequent clicks use the updated caption. Media exports retain their readiness checks. Opening a composer must not publish anything automatically.
+
+## Dependency graph
+- T1 depends_on: [] - Inspect loading state and record regression contract.
+- T2 depends_on: [T1] - Add unit regressions for immediate Compose and asynchronous caption updates.
+- T3 depends_on: [T1] - Add browser regression with delayed rewrite/preview and captured composer navigation (parallel agent).
+- T4 depends_on: [T2,T3] - Publish failing regression head to GitHub CI, then apply minimal fix.
+- T5 depends_on: [T4] - Await exact-head green CI, inspect browser screenshots, document evidence and notify.
+
+## Checklist
+- [x] T1 Source and user screenshot inspected; isolated worktree protects unrelated working changes.
+- [x] T2 Unit regression.
+- [x] T3 Browser regression.
+- [x] T4 Red CI and minimal fix.
+- [ ] T5 Green CI and visual verification.
+
+## Review
+No local test suites. Change only Compose availability; retain caption and media generation behavior.
+
+- RED: GitHub CI run 34437337990, head da04fa6432459b320d36718b38b40c437d6be773, Vitest shard 4/8: 2 intended failures (missing Compose link), 1,332 passed. Both new loading-state assertions reproduce the missing href.
+- Fix: remove the voice-loading condition from the X intent href. Existing buildXShareUrl continues to sanitize captions; media readiness and caption editing behavior remain intact. Browser tests capture real mocked popup navigation during voice/PNG waits at 1440px and 393px.

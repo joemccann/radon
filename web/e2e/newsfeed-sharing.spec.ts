@@ -21,52 +21,119 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test("news sharing rewrites caption and portrait analysis in the author's voice", async ({ page }, testInfo) => {
-  test.setTimeout(90_000);
-  const rewritten = { title: "Seasonality — the setup", content: "Positioning &mdash; the tell. Returns: -2.5%." };
-  const rewrittenCaption = "Seasonality, the setup\n\nPositioning, the tell. Returns: -2.5%.";
-  let requests = 0;
-  let releaseRewrite!: () => void;
-  const rewriteReady = new Promise<void>(resolve => { releaseRewrite = resolve; });
-  await page.route("**/api/newsfeed/share", async route => {
-    requests += 1;
-    await rewriteReady;
-    await route.fulfill({ json: { ...rewritten, caption: rewrittenCaption } });
-  });
-  await page.addInitScript(() => {
-    const capture: ShareCapture = { drawn: [], copied: "" };
-    Object.assign(window, { shareCapture: capture });
-    const fillText = CanvasRenderingContext2D.prototype.fillText;
-    CanvasRenderingContext2D.prototype.fillText = function (...args: Parameters<typeof fillText>) {
-      capture.drawn.push(args[0]);
-      return fillText.apply(this, args);
+for (const width of [1440, 393]) {
+  test(`news sharing composes on X while voice and preview are pending at ${width}px`, async ({ page, context }, testInfo) => {
+    test.setTimeout(90_000);
+    const fixture = {
+      ...post,
+      title: "The Market Ear: Yen hedge demand — increases",
+      content: `${post.content} Source: ZeroHedge https://zerohedge.com/markets/example`,
     };
+    const rewritten = { title: "Seasonality — the setup", content: "Positioning &mdash; the tell. Returns: -2.5%." };
+    const rewrittenCaption = "Seasonality, the setup\n\nPositioning, the tell. Returns: -2.5%.";
+    let requests = 0;
+    let releaseRewrite!: () => void;
+    const rewriteReady = new Promise<void>(resolve => { releaseRewrite = resolve; });
+    await page.route("**/api/newsfeed/share", async route => {
+      requests += 1;
+      await rewriteReady;
+      await route.fulfill({ json: { ...rewritten, caption: rewrittenCaption } });
+    });
+    // Context routing also catches the first navigation in target="_blank" pages.
+    await context.route(/^https:\/\/(?:twitter|x)\.com\/intent\/tweet\?/, route => route.fulfill({
+      contentType: "text/html", body: "<title>Mock X composer</title><p>Compose draft</p>",
+    }));
+    await page.setViewportSize({ width, height: 1000 });
+    await page.addInitScript(() => {
+      const capture: ShareCapture = { drawn: [], copied: "" };
+      Object.assign(window, { shareCapture: capture });
+      const fillText = CanvasRenderingContext2D.prototype.fillText;
+      CanvasRenderingContext2D.prototype.fillText = function (...args: Parameters<typeof fillText>) {
+        capture.drawn.push(args[0]);
+        return fillText.apply(this, args);
+      };
+      const toBlob = HTMLCanvasElement.prototype.toBlob;
+      let released = false;
+      const pending: Array<() => void> = [];
+      const previewGate = {
+        pending: false,
+        release() {
+          released = true;
+          pending.splice(0).forEach(resume => resume());
+        },
+      };
+      Object.assign(window, { previewGate });
+      HTMLCanvasElement.prototype.toBlob = function (...args: Parameters<typeof toBlob>) {
+        if (!released && this.width === 1080 && this.height === 1920) {
+          previewGate.pending = true;
+          pending.push(() => toBlob.apply(this, args));
+          return;
+        }
+        return toBlob.apply(this, args);
+      };
+    });
+    await page.route("**/api/newsfeed/posts**", route => route.fulfill({ json: [fixture] }));
+    await page.route("**/api/newsfeed/research/files/*.png", route => route.fulfill({ contentType: "image/svg+xml", body: svg }));
+    try {
+      await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
+      const item = page.getByTestId("news-feed-item").filter({ hasText: "Yen hedge demand" });
+      await item.getByRole("button", { name: "Share", exact: true }).click();
+      const panel = item.getByRole("region", { name: "Share news item" });
+      const caption = panel.getByRole("textbox", { name: "Post caption" });
+      const compose = panel.getByRole("link", { name: "Compose on X" });
+      async function openComposer(expectedText: string) {
+        await expect(compose).toBeEnabled();
+        const popupReady = page.waitForEvent("popup");
+        await compose.click();
+        const popup = await popupReady;
+        try {
+          await expect(popup).toHaveTitle("Mock X composer");
+          expect(new URL(popup.url()).searchParams.get("text")).toBe(expectedText);
+        } finally { await popup.close(); }
+      }
+      await expect(panel.getByRole("status")).toHaveText("Writing in your voice…");
+      await expect(caption).toBeDisabled();
+      await expect(panel.getByText("Preparing preview…", { exact: true })).toBeVisible();
+      await expect(panel.getByRole("button", { name: "Download Story image" })).toBeDisabled();
+      await expect(panel.getByRole("button", { name: "Download Reels / TikTok video" })).toBeDisabled();
+      const fallbackCaption = await caption.inputValue();
+      expect(fallbackCaption).toContain("Yen hedge demand, increases");
+      expect(fallbackCaption).toContain(post.content);
+      expect(fallbackCaption).not.toMatch(excludedPublisher);
+      expect(fallbackCaption).not.toMatch(/—|&(?:mdash|#8212|#x2014);/i);
+      await openComposer(fallbackCaption);
+      await panel.screenshot({ path: testInfo.outputPath(`share-compose-during-rewrite-${width}.png`) });
+
+      releaseRewrite();
+      await expect(caption).toHaveValue(rewrittenCaption);
+      await expect.poll(() => page.evaluate(() => (window as unknown as { previewGate: { pending: boolean } }).previewGate.pending), { timeout: 30_000 }).toBe(true);
+      await expect(caption).toBeEnabled();
+      await expect(panel.getByText("Preparing preview…", { exact: true })).toBeVisible();
+      await expect(panel.getByRole("button", { name: "Download Story image" })).toBeDisabled();
+      await expect(panel.getByRole("button", { name: "Download Reels / TikTok video" })).toBeDisabled();
+      await openComposer(rewrittenCaption);
+      await panel.screenshot({ path: testInfo.outputPath(`share-compose-during-preview-${width}.png`) });
+      await page.evaluate(() => (window as unknown as { previewGate: { release: () => void } }).previewGate.release());
+      await expect(panel.getByRole("button", { name: "Download Story image" })).toBeEnabled();
+      expect(new URL((await compose.getAttribute("href"))!).searchParams.get("text")).toBe(rewrittenCaption);
+      const drawn = await page.evaluate(() => (window as unknown as { shareCapture: ShareCapture }).shareCapture.drawn.join(" "));
+      expect(drawn).toContain("Seasonality, the setup");
+      expect(drawn).toContain("Positioning, the tell. Returns: -2.5%.");
+      expect(drawn).not.toMatch(/—|&(?:mdash|#8212|#x2014);/i);
+      expect(requests).toBe(1);
+      await panel.screenshot({ path: testInfo.outputPath("rewritten-share.png") });
+      const download = page.waitForEvent("download");
+      await panel.getByRole("button", { name: "Download Story image" }).click();
+      await (await download).saveAs(testInfo.outputPath("rewritten-share-card.png"));
+    } finally {
+      releaseRewrite();
+      if (!page.isClosed()) {
+        await page.evaluate(() => (window as unknown as { previewGate?: { release: () => void } }).previewGate?.release());
+      }
+      await page.unrouteAll({ behavior: "wait" });
+    }
   });
-  await page.route("**/api/newsfeed/posts**", route => route.fulfill({ json: [post] }));
-  await page.route("**/api/newsfeed/research/files/*.png", route => route.fulfill({ contentType: "image/svg+xml", body: svg }));
-  await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
-  const item = page.getByTestId("news-feed-item").filter({ hasText: post.title });
-  await item.getByRole("button", { name: "Share", exact: true }).click();
-  const panel = item.getByRole("region", { name: "Share news item" });
-  await expect(panel.getByRole("status")).toHaveText("Writing in your voice…");
-  await expect(panel.getByRole("textbox", { name: "Post caption" })).toBeDisabled();
-  await expect(panel.getByRole("button", { name: "Download Story image" })).toBeDisabled();
-  await expect(panel.getByRole("button", { name: "Download Reels / TikTok video" })).toBeDisabled();
-  await expect(panel.getByText("Compose on X", { exact: true })).not.toHaveAttribute("href");
-  releaseRewrite();
-  await expect(panel.getByRole("textbox", { name: "Post caption" })).toHaveValue(rewrittenCaption);
-  await expect(panel.getByRole("button", { name: "Download Story image" })).toBeEnabled();
-  expect(new URL((await panel.getByRole("link", { name: "Compose on X" }).getAttribute("href"))!).searchParams.get("text")).toBe(rewrittenCaption);
-  const drawn = await page.evaluate(() => (window as unknown as { shareCapture: ShareCapture }).shareCapture.drawn.join(" "));
-  expect(drawn).toContain("Seasonality, the setup");
-  expect(drawn).toContain("Positioning, the tell. Returns: -2.5%.");
-  expect(drawn).not.toMatch(/—|&(?:mdash|#8212|#x2014);/i);
-  expect(requests).toBe(1);
-  await panel.screenshot({ path: testInfo.outputPath("rewritten-share.png") });
-  const download = page.waitForEvent("download");
-  await panel.getByRole("button", { name: "Download Story image" }).click();
-  await (await download).saveAs(testInfo.outputPath("rewritten-share-card.png"));
-});
+}
 
 test("news sharing retains sanitized fallback and retries a failed voice rewrite", async ({ page }) => {
   test.setTimeout(90_000);

@@ -44,18 +44,42 @@ describe("news feed sharing", () => {
     expect(fetch).toHaveBeenCalledWith("/api/newsfeed/share", expect.objectContaining({ method: "POST", cache: "no-store" }));
   });
 
-  it("keeps outbound actions unavailable while rewriting and aborts on close", async () => {
+  it("keeps Compose on X available while rewriting and aborts on close", async () => {
     vi.mocked(fetch).mockImplementation(() => new Promise(() => {}));
     render(<NewsfeedShare post={post} />);
     fireEvent.click(screen.getByRole("button", { name: "Share", exact: true }));
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Copy caption" }) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText("Compose on X").getAttribute("href")).toBeNull();
+    const compose = screen.getByRole("link", { name: "Compose on X" });
+    expect(new URL(compose.getAttribute("href")!).searchParams.get("text")).toBe("Yen hedge demand\nHedge demand increased.");
+    expect(compose.getAttribute("aria-disabled")).not.toBe("true");
+    expect(compose.getAttribute("target")).toBe("_blank");
+    expect((screen.getByRole("button", { name: "Download Story image" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Download Reels / TikTok video" }) as HTMLButtonElement).disabled).toBe(true);
     expect(engine.renderShareCard).not.toHaveBeenCalled();
     await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
     const signal = vi.mocked(fetch).mock.calls[0][1]?.signal;
     fireEvent.click(screen.getByRole("button", { name: "Share", exact: true }));
     expect(signal?.aborted).toBe(true);
+  });
+
+  it("updates the X intent after rewriting without waiting for the preview", async () => {
+    let resolveRewrite!: (response: Response) => void;
+    vi.mocked(fetch).mockImplementation(() => new Promise<Response>(resolve => { resolveRewrite = resolve; }));
+    engine.renderShareCard.mockImplementation(() => new Promise(() => {}));
+    render(<NewsfeedShare post={post} />);
+    fireEvent.click(screen.getByRole("button", { name: "Share", exact: true }));
+    const compose = screen.getByRole("link", { name: "Compose on X" });
+    expect(new URL(compose.getAttribute("href")!).searchParams.get("text")).toContain(post.title);
+    await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+    await act(async () => {
+      resolveRewrite({ ok: true, json: async () => ({ title: "Hedge demand is back.", content: "Positioning remains neutral." }) } as Response);
+    });
+    await waitFor(() => expect(engine.renderShareCard).toHaveBeenCalledOnce());
+    expect(new URL(compose.getAttribute("href")!).searchParams.get("text")).toBe("Hedge demand is back.\n\nPositioning remains neutral.");
+    expect(compose.getAttribute("aria-disabled")).not.toBe("true");
+    expect(screen.getByText("Preparing preview…")).not.toBeNull();
+    expect((screen.getByRole("button", { name: "Download Story image" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("shows original copy on failure and retries voice generation", async () => {
