@@ -221,6 +221,7 @@ Delta findings continue the R-### numbering in dated `## Delta audit` sections.
 - Audited through: `cc77928d` on 2026-09-08 — delta audit, 1 new finding (R-674; 0 P0, 1 P1), backlog REL-253. Anchor `0b77a6af` verified (`rev-parse --verify` resolves; ancestor of HEAD); range is 13 commits / 68 files. Standing sweeps HOLD: halt chokepoints, `_NON_IDEMPOTENT_IB_SCRIPTS`, order limits, exit-order acknowledgement, daemon-state Hrana, all new order sites, and both watchdog catalogs for the new `ai-cycle` timer.
 - Audited through: `90071618` on 2026-09-08 (second pass) — 0 new findings. Anchor `cc77928d` verified; range is 12 commits. The order-admission, daily frontier refresh, research-ingestion, credential, indicator-freshness, and loop surfaces were inspected serially. Standing sweeps HOLD: no new unguarded placement site; halt/order-limit/exit-ack/Hrana chokepoints and both catalog entries for the new `aa-frontier-basket` writer remain present.
 - Audited through: `964b6b77` on 2026-09-09 — 0 new findings. Anchor `15e74ff1` verified (`rev-parse --verify` resolves; ancestor of HEAD); range is 12 commits / 28 changed source files. Serial review covered AI-cycle collection and archive durability, loop completion reporting, CI artifacts, research publishing, ticker routing, and chat attachment/stream recovery. All standing sweeps HOLD: no delta placement or health writer, existing halt/order-limit/exit-ack/Hrana chokepoints remain wired, and `NEW_FINDINGS` plus the REL-021b remainder have no changed-surface instance.
+- Audited through: `9dce4b3a` on 2026-09-10 — 0 new findings. Anchor `1ed5aa84` verified (`rev-parse --verify` resolves; ancestor of HEAD); range is 5 commits / 42 changed files. Serial review covered compact AI-cycle snapshot persistence and serving, Ramp curated ingestion, MenthorQ session recovery, and the related control-plane timeout increase. All standing sweeps HOLD: no delta placement or health writer, halt/order-limit/exit-ack/Hrana chokepoints remain wired, and `NEW_FINDINGS` plus the REL-021b remainder have no changed-surface instance. Focused pytest could not start because this runner's `python3.13` lacks pytest.
 
 ## 7. Exit criteria check (A5)
 
@@ -2494,3 +2495,23 @@ The delta adds no `placeOrder` / `place_order` or `service_health` writer, so
 no new bypass or catalog gap exists. `NEW_FINDINGS` and REL-021b remain
 standing P2 candidates with no changed-surface instance. No new finding was
 verified.
+
+---
+
+## Delta audit 2026-09-10
+
+Anchor `1ed5aa84` verified (`git rev-parse --verify` resolves to
+`1ed5aa84e2d9a97fa261b7982c827edaa1da2c1e`; `git merge-base --is-ancestor`
+confirms it is an ancestor). Range `1ed5aa84..9dce4b3a` is 5 commits and 42
+changed files. Serial review covered compact AI-cycle snapshot persistence and
+serving, Ramp curated ingestion, MenthorQ session recovery, and the
+AI-cycle control-plane timeout increase. Standing sweeps HOLD: halt
+chokepoints (`scripts/ib_place_order.py:240-242`), order limits
+(`scripts/ib_place_order.py:253-255`), `_NON_IDEMPOTENT_IB_SCRIPTS`
+(`scripts/api/server.py:5540,5649,5727`), exit-order acknowledgement
+(`scripts/monitor_daemon/handlers/exit_orders.py:185-220`), and daemon-state
+Hrana writes (`scripts/db/writer.py:2360-2373`) remain wired. The delta adds
+no `placeOrder` / `place_order` or `service_health` writer, so no new bypass
+or catalog gap exists. `NEW_FINDINGS` and REL-021b remain standing P2
+candidates with no changed-surface instance. Focused pytest could not start:
+this runner's `python3.13` lacks pytest. No new finding was verified.
