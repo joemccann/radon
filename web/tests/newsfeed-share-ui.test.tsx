@@ -44,6 +44,36 @@ describe("news feed sharing", () => {
     expect(fetch).toHaveBeenCalledWith("/api/newsfeed/share", expect.objectContaining({ method: "POST", cache: "no-store" }));
   });
 
+  it.each([
+    { imageUrl: "/chart-1.png", provider: "Ramp", otherProvider: "Goldman Sachs" },
+    { imageUrl: "/chart-2.png", provider: "Goldman Sachs", otherProvider: "Ramp" },
+  ])("preserves $provider in copied and X captions when the rewrite omits the selected image source", async ({ imageUrl, provider, otherProvider }) => {
+    const actual = await vi.importActual<typeof import("@/lib/newsfeedShare")>("@/lib/newsfeedShare");
+    engine.buildShareCaption.mockImplementation(actual.buildShareCaption);
+    const attributed = {
+      ...post,
+      imageSources: { "/chart-1.png": "Ramp", "/chart-2.png": "Goldman Sachs" },
+    };
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({ title: "Hedge demand is back.", content: "Positioning remains neutral." }),
+    } as Response);
+    render(<NewsfeedShare post={attributed} imageUrl={imageUrl} />);
+    await openShare();
+    const caption = (screen.getByRole("textbox", { name: "Post caption" }) as HTMLTextAreaElement).value;
+    expect(caption).toContain("Hedge demand is back.");
+    expect(caption).toContain("Positioning remains neutral.");
+    expect(caption).toContain(`Source: ${provider}`);
+    expect(caption).not.toContain(otherProvider);
+    fireEvent.click(screen.getByRole("button", { name: "Copy caption" }));
+    await waitFor(() => expect(clipboard).toHaveBeenCalledWith(caption));
+    const compose = screen.getByRole("link", { name: "Compose on X" });
+    expect(new URL(compose.getAttribute("href")!).searchParams.get("text")).toBe(caption);
+    expect(engine.renderShareCard).toHaveBeenLastCalledWith(
+      expect.objectContaining({ imageSources: attributed.imageSources }), imageUrl,
+    );
+  });
+
   it("keeps Compose on X available while rewriting and aborts on close", async () => {
     vi.mocked(fetch).mockImplementation(() => new Promise(() => {}));
     render(<NewsfeedShare post={post} />);

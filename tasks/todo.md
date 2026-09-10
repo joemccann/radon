@@ -6139,13 +6139,13 @@ Preserve explicit per-image provider attribution (for example Ramp) from Market 
 Dependency graph: T1 -> T2; T1 -> T3; T2 + T3 -> T4 -> T5.
 
 - [x] T1 depends_on: [] - Inspect extraction, persistence, API and caption contracts.
-- [ ] T2 depends_on: [T1] - Add source extraction and persistence regression coverage and implementation.
-- [ ] T3 depends_on: [T1] - Add source rendering/API regression coverage and implementation.
+- [x] T2 depends_on: [T1] - Add source extraction and persistence regression coverage and implementation.
+- [x] T3 depends_on: [T1] - Add source rendering/API regression coverage and implementation.
 - [ ] T4 depends_on: [T2, T3] - Review integration, regenerate maps, publish PR and verify exact-head CI and browser artifacts.
 - [ ] T5 depends_on: [T4] - Record review and send confirmed green notification.
 
 ## Review
-Pending.
+PR #393; regression head d233c7a9 after merging latest main. GitHub CI run 34493441591. No local suites. Per-image captions use explicit figure credit text, persisted with the exact public image URL. Additive migration 0073 preserves legacy/default empty metadata.
 
 # Social Compose on X availability (2026-09-09)
 

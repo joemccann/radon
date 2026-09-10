@@ -148,6 +148,18 @@ function absolutizeMedia(images) {
   });
 }
 
+function serialiseImageSources(post) {
+  const sources = post.imageSources;
+  if (!sources || typeof sources !== "object" || Array.isArray(sources)) return "{}";
+  const images = new Set(absolutizeMedia(post.images));
+  return JSON.stringify(Object.fromEntries(Object.entries(sources).flatMap(([url, source]) => {
+    const [key] = absolutizeMedia([url]);
+    return images.has(key) && typeof source === "string" && source.trim()
+      ? [[key, source.trim()]]
+      : [];
+  })));
+}
+
 // Embedded replicas were retired on 2026-05-20 after WAL conflicts between
 // multi-writer hosts (feedback_libsql_replica_one_writer.md). Mirrors
 // web/lib/db.ts: direct-to-cloud is the default; a replica requires an
@@ -197,14 +209,15 @@ export async function upsertPost(post) {
   const db = getDb();
   const now = new Date().toISOString();
   await withDbBounds("upsertPost", () => db.execute({
-    sql: `INSERT INTO posts (id, title, content, timestamp, images, raw_images, tags, tags_text, tags_vision, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    sql: `INSERT INTO posts (id, title, content, timestamp, images, raw_images, image_sources, tags, tags_text, tags_vision, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(id) DO UPDATE SET
             title       = excluded.title,
             content     = excluded.content,
             timestamp   = excluded.timestamp,
             images      = excluded.images,
             raw_images  = excluded.raw_images,
+            image_sources = excluded.image_sources,
             tags        = excluded.tags,
             tags_text   = excluded.tags_text,
             tags_vision = excluded.tags_vision,
@@ -216,6 +229,7 @@ export async function upsertPost(post) {
       post.timestamp,
       JSON.stringify(absolutizeMedia(post.images ?? [])),
       JSON.stringify(post.rawImages ?? []),
+      serialiseImageSources(post),
       JSON.stringify(post.tags ?? []),
       JSON.stringify(post.tags_text ?? []),
       JSON.stringify(post.tags_vision ?? []),
@@ -235,14 +249,15 @@ export async function upsertPosts(posts) {
   for (let i = 0; i < posts.length; i += CHUNK) {
     const slice = posts.slice(i, i + CHUNK);
     const stmts = slice.map((post) => ({
-      sql: `INSERT INTO posts (id, title, content, timestamp, images, raw_images, tags, tags_text, tags_vision, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      sql: `INSERT INTO posts (id, title, content, timestamp, images, raw_images, image_sources, tags, tags_text, tags_vision, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
               title       = excluded.title,
               content     = excluded.content,
               timestamp   = excluded.timestamp,
               images      = excluded.images,
               raw_images  = excluded.raw_images,
+              image_sources = excluded.image_sources,
               tags        = excluded.tags,
               tags_text   = excluded.tags_text,
               tags_vision = excluded.tags_vision,
@@ -254,6 +269,7 @@ export async function upsertPosts(posts) {
         post.timestamp,
         JSON.stringify(absolutizeMedia(post.images ?? [])),
         JSON.stringify(post.rawImages ?? []),
+        serialiseImageSources(post),
         JSON.stringify(post.tags ?? []),
         JSON.stringify(post.tags_text ?? []),
         JSON.stringify(post.tags_vision ?? []),

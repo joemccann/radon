@@ -257,3 +257,37 @@ describe("Market Ear image source attribution", () => {
     expect(post.imageSources).toEqual({});
   });
 });
+
+
+describe("newsfeed before image source migration", () => {
+  it.each([
+    { kind: "operator", researchTable: true },
+    { kind: "demo", researchTable: true },
+    { kind: "operator", researchTable: false },
+    { kind: "demo", researchTable: false },
+  ])("serves $kind posts without image_sources when research table exists: $researchTable", async ({ kind, researchTable }) => {
+    guard.mockResolvedValue({ ok: true, principal: { kind } });
+    await db.execute("ALTER TABLE posts DROP COLUMN image_sources");
+    await db.execute("ALTER TABLE posts ADD COLUMN internal_diagnostic TEXT");
+    if (!researchTable) await db.execute("DROP TABLE research_post_sources");
+    const stamp = "2026-09-10T12:00:00Z";
+    const image = "https://media.radon.run/images/legacy.png";
+    await db.execute({
+      sql: "INSERT INTO posts (id, title, timestamp, images, created_at, updated_at, internal_diagnostic) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      args: ["legacy-chart", "Legacy chart", stamp, JSON.stringify([image]), stamp, stamp, "private diagnostic"],
+    });
+    // A missing research table resets the client's connection; keep this
+    // in-memory database available for the legacy query just as production does.
+    const dbModule = await import("../lib/db");
+    vi.spyOn(dbModule, "getDb").mockReturnValue(db);
+    const { GET } = await import("../app/api/newsfeed/posts/route");
+    const response = await GET();
+    expect(response.status).toBe(200);
+    const posts = await response.json();
+    expect(posts).toHaveLength(1);
+    expect(posts[0]).toMatchObject({ id: "legacy-chart", images: [image], imageSources: {} });
+    expect(posts[0]).not.toHaveProperty("internal_diagnostic");
+    expect(posts[0]).not.toHaveProperty("provenance_json");
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+  });
+});
