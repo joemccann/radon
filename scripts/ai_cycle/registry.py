@@ -80,6 +80,13 @@ _SOURCE_ROWS = [
         "Public published research curated from credential-free HTML; Ramp Data API out of scope for v1",
     ),
     (
+        "open-design-arena",
+        "OpenDesign Arena",
+        "https://open-design.ai/llm-arena-for-design/",
+        "snapshot",
+        "Public design-task leaderboard HTML; LLM/model-quality only, never GPU scarcity",
+    ),
+    (
         "ib",
         "Interactive Brokers",
         "https://www.interactivebrokers.com/",
@@ -151,6 +158,15 @@ _ROWS = [
         ["ramp"],
         ["MSFT", "AMZN", "GOOGL", "META", "ORCL"],
         "Monthly median, top-10% and top-1% AI spend per employee from Ramp card and bill-pay transactions. Paid usage only; free tools excluded. Top-1% cohort is volatile.",
+    ),
+    (
+        "D6",
+        "OpenDesign Arena model quality",
+        "demand",
+        "P2",
+        ["open-design-arena"],
+        [],
+        "Published design-task average score, cost per artifact and completion time by model and task family (overall, web, mobile, desktop, dashboard, landing). LLM/model-quality only; never GPU scarcity or Silicon Data.",
     ),
     (
         "C1",

@@ -118,7 +118,7 @@ def build_snapshot(store, as_of=None):
         newest = {}
         for row in observations:
             newest[(row["series_id"], row["source_id"], row["methodology_version"], row["cohort_version"])] = row
-        if id in ("D1", "D2", "D3", "D5", "C1", "C2", "C3", "C4") and observations:
+        if id in ("D1", "D2", "D3", "D5", "D6", "C1", "C2", "C3", "C4") and observations:
             latest_day = max(row["period_end"][:10] for row in observations)
             newest = {key: row for key, row in newest.items() if row["period_end"][:10] == latest_day}
         metrics = []
@@ -156,6 +156,9 @@ def build_snapshot(store, as_of=None):
                 return (0 if lab_tokens else 1, -metric["value"] if lab_tokens else 0, metric["id"])
             if indicator_id == "D2":
                 return (0 if metric["methodology_version"] == "openrouter-app-aggregate-v2" else 1, metric["id"])
+            if indicator_id == "D6":
+                overall_score = metric["id"].startswith("overall.") and metric["id"].endswith(".avg_score")
+                return (0 if overall_score else 1, metric["id"])
             return (
                 0
                 if "ttm_coverage" in metric["id"]
@@ -205,6 +208,11 @@ def build_snapshot(store, as_of=None):
                 )
             if id == "D4":
                 state, reason = "experimental", "Publisher methodology and traffic independence remain unverified."
+            if id == "D6":
+                state, reason = (
+                    "experimental",
+                    "OpenDesign Arena LLM/model-quality stub; design-task scores only, never GPU scarcity.",
+                )
             failed = [
                 statuses.get(source, {}).get("status") for source in {row["source_id"] for row in newest.values()}
             ]

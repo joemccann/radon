@@ -1,3 +1,22 @@
+# Task: OpenDesign Arena collector stub 2026-09-10 [IN PROGRESS]
+
+Thin LLM/model-quality collector for OpenDesign Arena on Demand `D6`.
+No GPU scarcity mix, no preference/radar UI, no merge.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests for HTML parse, broken markup, Demand snapshot and live transport.
+- T2 depends_on: [T1] - Fixture, parser, registry, collect wiring, contract note.
+- T3 depends_on: [T2] - Focused pytest, PR, CI watch. Do not merge.
+
+## Checklist
+
+- [x] T1 Failing parse/status/snapshot tests.
+- [x] T2 Collector stub + captured fixture + D6 Demand registry.
+- [ ] T3 Focused green and draft PR.
+
+---
+
 # Task: Historical trade fill prices 2026-09-10 [IMPLEMENTED; PR CI PENDING]
 
 ## Dependency graph
@@ -6297,6 +6316,20 @@ Isolated worktree /tmp/radon-focus-audit-20260910 protects existing user changes
 - CI 34505111914 at 43bbc58c passed the original ownership assertions and 88 existing browser cases; exposed palette inset precedence after production CSS grouped selectors into :is(), plus a modal animation changing offsetParent in the geometry test. Use a local offset custom property and compare settled parent-relative bounds.
 - Exact-head green CI and browser screenshot review pending.
 
+## PR #394 final integration and freshness repair (2026-09-10)
+- [x] T1 (depends_on: []): Inspect collector ingestion, provenance, and upstream changes.
+- [x] T2 (depends_on: [T1]): Resolve main integration and add CI regressions for default live collection and dated offline imports.
+- [x] T3 (depends_on: [T2]): Repair freshness ownership and update source operations documentation.
+- [ ] T4 (depends_on: [T3]): Verify every applicable exact-head GitHub check, then hand off merge to the sweep coordinator.
+Dependency graph: T1 -> T2 -> T3 -> T4.
+
+### PR #394 integration review
+- Regression-first GitHub run `34507551064`, scripts-ac job `102973431318`: 4 failed / 2215 passed. Default fixture replay and undated imports reproduced; the prior snapshot test also depended on wall-clock time.
+- Default collection now uses live HTML with no fixture fallback; explicit imports retain verified capture time and actual ingestion time separately. Snapshot tests use a fixed ingestion clock.
+- All suite execution is delegated to GitHub runners. Final exact-head CI remains pending before coordinator merge.
+
+---
+
 # PR 395 final integration (2026-09-10)
 
 Dependency graph: T1 -> T2 -> T3.
@@ -6308,3 +6341,5 @@ Dependency graph: T1 -> T2 -> T3.
 No local suites. Review confirms quantity-weighted prices preserve zero and signed premiums, reject incomplete executions, and label collapsed journal fills aggregate. Generated codemap conflicts are regenerated from the merged source.
 
 - Integration verification: head 4d92842e passed every applicable check; GitHub CI 34507570000 ran 99 browser regressions plus one demo test. Desktop 1280px/mobile 393px full `/orders` screenshots reviewed (artifact 10164611383). Reintegrating main 722b1121 for the final merge gate; no local suites.
+
+- PR #394 intermediate integration `892f24b1`: 31 applicable checks green, source shard 2225 passed, browser 96 passed plus one demo. Final integration includes historical-fill PR #395 at `aae5e1e5`; repeat exact-head checks before merge.

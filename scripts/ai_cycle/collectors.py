@@ -6,8 +6,10 @@ import hashlib
 import json
 import math
 import os
+import re
 import tempfile
 import time
+from email.utils import parsedate_to_datetime
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -23,6 +25,7 @@ URLS = {
     "eia": "https://api.eia.gov/v2/electricity/rto/region-sub-ba-data/data/",
     "vast": "https://console.vast.ai/api/v0/bundles/",
     "noaa": "https://www.ncei.noaa.gov/access/services/data/v1",
+    "open-design-arena": "https://open-design.ai/llm-arena-for-design/",
 }
 GPU_HISTORY_INDEX = "https://api.github.com/repos/adriannutiu/gpu-rental-prices/contents/data/snapshots"
 NOAA_DOM_STATIONS = (
@@ -213,7 +216,7 @@ class Transport:
             json.dump({"date": today, "used": used + 1, "last_request": time.time()}, handle)
             handle.truncate()
 
-    def fetch(self, url, *, params=None, headers=None, body=None):
+    def _download(self, url, *, params=None, headers=None, body=None):
         if time.monotonic() >= self.deadline:
             raise SourceError("Per-run time budget exhausted")
         if self.requests >= self.max_requests:
@@ -241,17 +244,30 @@ class Transport:
                 if size > 20_000_000:
                     raise SourceError("Publisher response exceeds 20 MB limit")
                 chunks.append(chunk)
-            raw = b"".join(chunks)
-            payload = json.loads(raw)
+            return b"".join(chunks), dict(getattr(response, "headers", {}) or {})
         except requests.RequestException:
             raise SourceError("Publisher transport failed") from None
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            raise SourceError("Publisher response is not JSON") from None
         finally:
             if "response" in locals():
                 response.close()
+
+    def fetch(self, url, *, params=None, headers=None, body=None):
+        raw, _headers = self._download(url, params=params, headers=headers, body=body)
+        try:
+            payload = json.loads(raw)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            raise SourceError("Publisher response is not JSON") from None
         digest = archive_raw(self.archive, raw)
         return payload, digest, now_iso()
+
+    def fetch_html(self, url, *, headers=None):
+        raw, response_headers = self._download(url, headers=headers)
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            raise SourceError("Publisher response is not HTML text") from None
+        digest = archive_raw(self.archive, raw)
+        return text, digest, now_iso(), {"last_modified": response_headers.get("Last-Modified")}
 
 
 def parse_openrouter(payload, digest, fetched, start, end):
@@ -725,6 +741,175 @@ def parse_ramp_curated(payload, digest, fetched):
     return result
 
 
+OPENDESI_UA = "RadonAICycle/1.0 (open-design-arena collector; +https://github.com/joemccann/radon)"
+_OPENDESI_FAMILIES = {
+    "quality ranking": "overall",
+    "model quality vs cost": "overall",
+    "web app ranking": "web",
+    "web app model quality vs cost": "web",
+    "mobile app ranking": "mobile",
+    "mobile app model quality vs cost": "mobile",
+    "desktop app ranking": "desktop",
+    "desktop app model quality vs cost": "desktop",
+    "dashboard ranking": "dashboard",
+    "dashboard model quality vs cost": "dashboard",
+    "landing page ranking": "landing",
+    "landing page model quality vs cost": "landing",
+}
+_WEIGHT_ROW = re.compile(r'<li class="weight-row"[^>]*data-weight-row="([^"]+)"[^>]*>(.*?)</li>', re.S)
+_WEIGHT_FIELDS = re.compile(
+    r"Average score:\s*([0-9]+(?:\.[0-9]+)?)/100;.*?"
+    r"Average cost:\s*\$([0-9]+(?:\.[0-9]+)?);.*?"
+    r"Average time:\s*([0-9]+(?:\.[0-9]+)?)\s*min",
+    re.S,
+)
+_HEADING_SPLIT = re.compile(r"<h3>\s*([^<]+?)\s*</h3>", re.I)
+_RANK_ROW = re.compile(r"<div class=\"ranking-row\"([^>]*)>", re.I)
+_COST_POINT = re.compile(r'<span class="cost-point(?:\s[^"]*)?"([^>]*)>', re.I)
+_ATTR = re.compile(r'([A-Za-z0-9:_-]+)="([^"]*)"')
+
+
+def _opendesi_slug(name):
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+
+
+def _opendesi_family(title):
+    key = re.sub(r"[\s·]+", " ", title.lower().replace("&middot;", " ")).strip()
+    return _OPENDESI_FAMILIES.get(key)
+
+
+def _opendesi_attrs(tag):
+    return {name: value for name, value in _ATTR.findall(tag)}
+
+
+def _http_published(value):
+    if not value:
+        return None
+    try:
+        parsed = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).isoformat()
+
+
+def parse_opendesi(html, digest, fetched, *, published=None, captured_at=None, url=None):
+    """Parse the public OpenDesign Arena leaderboard. LLM/model-quality only."""
+    if not isinstance(html, str) or not html.strip():
+        raise SourceError("OpenDesign Arena HTML structure broke; page was empty")
+    overall = {}
+    for model, body in _WEIGHT_ROW.findall(html):
+        fields = _WEIGHT_FIELDS.search(body)
+        if not fields:
+            raise SourceError("OpenDesign Arena HTML structure broke; overall model fields missing")
+        if model in overall:
+            raise SourceError("OpenDesign Arena HTML structure broke; duplicate overall model row")
+        overall[model] = {
+            "avg_score": number(fields.group(1)),
+            "usd_per_artifact": number(fields.group(2)),
+            "avg_minutes": number(fields.group(3)),
+        }
+    if not overall:
+        raise SourceError("OpenDesign Arena HTML structure broke; overall model rows were not found")
+
+    family_scores, family_costs = {}, {}
+    parts = _HEADING_SPLIT.split(html)
+    for title, body in zip(parts[1::2], parts[2::2]):
+        family = _opendesi_family(title)
+        if not family:
+            continue
+        if "ranking" in title.lower():
+            for tag in _RANK_ROW.findall(body):
+                attrs = _opendesi_attrs(tag)
+                model, score = attrs.get("data-ranking-row"), attrs.get("data-score")
+                if not model or score is None:
+                    raise SourceError("OpenDesign Arena HTML structure broke; ranking row missing model or score")
+                key = (family, model)
+                value = number(score)
+                if key in family_scores and family_scores[key] != value:
+                    raise SourceError("OpenDesign Arena HTML structure broke; conflicting family scores")
+                family_scores[key] = value
+        if "quality vs cost" in title.lower():
+            for tag in _COST_POINT.findall(body):
+                attrs = _opendesi_attrs(tag)
+                model, cost = attrs.get("data-name"), attrs.get("data-cost")
+                if not model or cost is None:
+                    raise SourceError("OpenDesign Arena HTML structure broke; cost point missing model or cost")
+                key = (family, model)
+                value = number(cost)
+                if key in family_costs and family_costs[key] != value:
+                    raise SourceError("OpenDesign Arena HTML structure broke; conflicting family costs")
+                family_costs[key] = value
+
+    for model, fields in overall.items():
+        published_score = family_scores.get(("overall", model))
+        if published_score is not None and published_score != fields["avg_score"]:
+            raise SourceError("OpenDesign Arena HTML structure broke; overall score conflict")
+
+    asof = published or captured_at or fetched
+    day = (captured_at or fetched)[:10]
+    common = {
+        "definition": (
+            "OpenDesign Arena published design-task evaluation. LLM/model-quality only; "
+            "not GPU scarcity or Silicon Data."
+        ),
+        "lane": "llm-model-quality",
+        "asof": asof,
+        "capture_mode": "offline-import" if captured_at else "live",
+        "captured_at": captured_at or fetched,
+        "license": "Public leaderboard page; retain OpenDesign attribution",
+    }
+    result, seen = [], set()
+
+    def emit(family, model, metric, value, unit):
+        series = f"{family}.{_opendesi_slug(model)}.{metric}"
+        key = (series, family, model)
+        if key in seen:
+            raise SourceError("Duplicate OpenDesign Arena observation")
+        seen.add(key)
+        result.append(
+            observation(
+                "open-design-arena",
+                "D6",
+                series,
+                value,
+                unit,
+                day,
+                day,
+                digest,
+                fetched,
+                published=published,
+                url=url or URLS["open-design-arena"],
+                cohort="opendesi-arena-v1",
+                methodology_version="opendesi-arena-html-v1",
+                metadata={
+                    **common,
+                    "entity": model,
+                    "label": f"{model} {family} {metric.replace('_', ' ')}",
+                    "model": model,
+                    "task_family": family,
+                },
+            )
+        )
+
+    for model, fields in overall.items():
+        emit("overall", model, "avg_score", fields["avg_score"], "score")
+        emit("overall", model, "usd_per_artifact", fields["usd_per_artifact"], "USD/artifact")
+        emit("overall", model, "avg_minutes", fields["avg_minutes"], "minutes")
+    for (family, model), score in family_scores.items():
+        if family == "overall":
+            continue
+        emit(family, model, "avg_score", score, "score")
+    for (family, model), cost in family_costs.items():
+        if family == "overall":
+            continue
+        emit(family, model, "usd_per_artifact", cost, "USD/artifact")
+    if not result:
+        raise SourceError("OpenDesign Arena HTML structure broke; no observations extracted")
+    return result
+
+
 def parse_disclosures(payload, digest, fetched):
     """Explicit reviewed semantic ingestion; no memo values or guessed tags."""
     result = []
@@ -1019,6 +1204,9 @@ def collect_source(source, transport, start, end, *, env=None, basket=()):
                 },
             )
         )
+    if source == "open-design-arena":
+        html, digest, fetched, meta = transport.fetch_html(URLS[source], headers={"User-Agent": OPENDESI_UA})
+        return parse_opendesi(html, digest, fetched, published=_http_published(meta.get("last_modified")))
     if source == "noaa":
         return parse_noaa(
             *transport.fetch(
