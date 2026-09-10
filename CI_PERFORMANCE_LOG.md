@@ -1410,3 +1410,32 @@ python/web gate co-wall then the deploy floor (CIP-004).
   `INSUFFICIENT_SAMPLE`; CIP-005/CIP-007/CIP-009 remain `VALIDATING`, and
   CIP-004/CIP-006/CIP-008 remain `DEFERRED`. Residual bottleneck remains the
   required `scripts-rs`/image co-wall followed by the protected Deploy floor.
+
+### 2026-09-10 - remediate - branch `ci-performance/2026-09-10`
+
+- Runner state: dedicated markers, GitHub authentication, `origin/main`, a
+  fresh dated branch, and exclusive lock ownership were verified. The stale
+  lock PID `6814` was not live and was recoverably preserved at
+  `/tmp/ci-performance-stale-lock-6814-1789024085` before reclamation.
+  `RADON_WEEKEND_REDUCED=1` limits remediation to P0/P1 findings.
+- Remediation eligibility: the last completed audit contains no P0/P1
+  source-actionable finding. The post-audit main delta `964b6b77..9dce4b3a`
+  changes AI-cycle, MenthorQ, cloud-unit, documentation, and test surfaces,
+  but no CI workflow, cache, Docker image, path-filter, required-gate, or
+  deployment surface. The prior measured `scripts-rs`/image co-wall remains
+  below the materiality floor and is not an eligible substitute. CIP-010
+  records this reduced-scope decision, not an experiment; no lower-priority
+  change was made.
+- Verification: `../venv-ci-performance/bin/python -m pytest
+  scripts/tests/test_ci_gate_integrity.py scripts/tests/test_ci_deploy_concurrency.py
+  scripts/tests/test_path_filter.py -q` — **88 passed in 10.95s**; Ruby YAML
+  parsing of `.github/workflows/ci.yml`, `bash -n
+  scripts/ci_performance_nightly.sh`, and `git diff --check origin/main...HEAD`
+  passed. These are safety baselines, not production timing claims.
+- Safety/impact: no test inventory, coverage, path classification, required
+  gate closure, immutable pin, artifact provenance, exact-SHA verification,
+  health, recovery, rollback, cancellation, or stability behavior changed.
+  Runner-minute impact is zero. Outcome: `NO_SAFE_CHANGE` /
+  `INSUFFICIENT_SAMPLE`; CIP-005/CIP-007/CIP-009 remain `VALIDATING`, and
+  CIP-004/CIP-006/CIP-008 remain `DEFERRED`. Residual bottleneck remains the
+  required `scripts-rs`/image co-wall followed by the protected Deploy floor.
