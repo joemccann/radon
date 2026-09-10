@@ -5,6 +5,7 @@ import { Activity } from "lucide-react";
 import BrushMinimap from "./BrushMinimap";
 import PanelRefreshError from "./PanelRefreshError";
 import CriHistoryChart, { type ChartSeries } from "./CriHistoryChart";
+import FreshnessRail from "./FreshnessRail";
 import HistoryRangeChips from "./HistoryRangeChips";
 import InfoTooltip from "./InfoTooltip";
 import MetricCell from "./mobile/MetricCell";
@@ -19,6 +20,7 @@ import {
   presetSessions,
   type RangePresetSlug,
 } from "@/lib/historyRange";
+import { TRIN_REFRESH } from "@/lib/refreshSchedule";
 import { ZONE_HIGH, ZONE_LOW, formatTrin, stateLabel, stateTone, type TrinState } from "@/lib/trin";
 import { useTrin } from "@/lib/useTrin";
 import { useViewport } from "@/lib/useViewport";
@@ -70,13 +72,12 @@ function formatSessionTime(raw: string | null | undefined): string {
 }
 
 function formatHourlyTick(d: Date): string {
-  return d.toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    timeZone: SESSION_TZ,
-  });
+  const date = d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: SESSION_TZ });
+  const time = d
+    .toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: SESSION_TZ })
+    .replace(" AM", "a")
+    .replace(" PM", "p");
+  return `${date} ${time}`;
 }
 
 export default function TrinPanel() {
@@ -164,7 +165,7 @@ export default function TrinPanel() {
           </div>
           <PanelRefreshError error={error} testId="trin-refresh-error" />
           {lastSync && (
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: "9px", color: "var(--text-muted)" }}>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--text-muted)" }}>
               {new Date(lastSync).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
             </span>
           )}
@@ -222,6 +223,12 @@ export default function TrinPanel() {
             />
           </RegimeStrip>
         )}
+
+        <FreshnessRail
+          schedule={TRIN_REFRESH}
+          asOf={current.session_date}
+          testId="trin-freshness-rail"
+        />
       </div>
 
       <div className="breadth-history-block" data-testid="trin-chart-section">
@@ -245,6 +252,7 @@ export default function TrinPanel() {
           series={chartSeries}
           title="TRIN 60 MIN"
           xTickFormat={formatHourlyTick}
+          xTickMinSpacing={180}
           sharedAxis
           referenceLevels={[
             { value: ZONE_LOW, label: `LOW ZONE ${formatTrin(ZONE_LOW)}`, color: "var(--negative)" },

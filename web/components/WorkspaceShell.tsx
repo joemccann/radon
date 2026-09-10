@@ -14,7 +14,7 @@ import { useAutoSyncOnStale } from "@/lib/useAutoSyncOnStale";
 import { useSnapshotStaleness } from "@/lib/useSnapshotStaleness";
 import { useToast } from "@/lib/useToast";
 import { useOrderActions } from "@/lib/OrderActionsContext";
-import { usePrices } from "@/lib/usePrices";
+import { useRealtimePrices } from "@/lib/RealtimePricesContext";
 import { hasUsableIndexPrice, mergeIndexFallbackPrices, useIndexQuoteFallback } from "@/lib/useIndexQuoteFallback";
 import { useFuturesQuoteFallback } from "@/lib/useFuturesQuoteFallback";
 import { computeRealizedPnlFromFills } from "@/lib/realized-pnl";
@@ -26,6 +26,7 @@ import { isIndexSymbol, indexExchangeFor } from "@/lib/indexSymbols";
 import { useWatchlist } from "@/lib/useWatchlist";
 import Sidebar from "@/components/Sidebar";
 import Header from "@/components/Header";
+import clearResearch from "@/components/ClearResearch.module.css";
 import MetricCards from "@/components/MetricCards";
 import ToastContainer from "@/components/Toast";
 import DashboardSurface from "@/components/dashboard/DashboardSurface";
@@ -42,6 +43,9 @@ const WorkspaceSections = dynamic(() => import("@/components/WorkspaceSections")
 const PortfolioSections = dynamic(() => import("@/components/PortfolioSections"), {
   loading: () => <InstrumentSkeleton testId="portfolio-sections-skeleton" />,
 });
+const PerformancePanel = dynamic(() => import("@/components/PerformancePanel"), {
+  loading: () => <InstrumentSkeleton testId="performance-panel-skeleton" />,
+});
 import FooterTelemetryStrip from "@/components/FooterTelemetryStrip";
 import { useTickerDetail } from "@/lib/TickerDetailContext";
 import { assessMargin, rankOf, type MarginLevel } from "@/lib/marginWarning";
@@ -50,7 +54,6 @@ import OfflineBanner from "@/components/OfflineBanner";
 import { useOfflineStatus } from "@/lib/offline/OfflineStatusContext";
 import { deriveLiveDataError } from "@/lib/offline/offlineStatus";
 import { useTheme } from "@/lib/ThemeContext";
-import { useRealtimeAuth } from "@/lib/RealtimeAuthContext";
 import CommandPalette from "@/components/CommandPalette";
 
 type WorkspaceShellProps = {
@@ -61,7 +64,6 @@ type WorkspaceShellProps = {
 
 export default function WorkspaceShell({ section, tickerParam, initialPortfolio }: WorkspaceShellProps) {
   const { theme: resolvedTheme, toggleTheme } = useTheme();
-  const getRealtimeToken = useRealtimeAuth();
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const pathname = usePathname();
@@ -76,7 +78,7 @@ export default function WorkspaceShell({ section, tickerParam, initialPortfolio 
     && activeSection !== "watchlist"
     && activeSection !== "admin"
     && activeSection !== "workflow";
-  const { toasts, exitingIds, addToast, dismissToast } = useToast();
+  const { toasts, exitingIds, addToast, upsertToast, dismissToast, hasToastKey } = useToast();
   const marketState = useMarketHours();
   const isMarketActive = marketState !== MarketState.CLOSED;
   // CME Globex session gate for the header ES/NQ/RTY futures strip — runs ~23h,
@@ -265,22 +267,41 @@ export default function WorkspaceShell({ section, tickerParam, initialPortfolio 
     ibIssue,
     ibStatusMessage,
     error: priceError,
-  } = usePrices({
-    symbols: allSymbols,
-    contracts: allContracts,
-    indexes: allIndexes,
-    // Single focused depth ticket for the open ticker-detail subject. The
-    // detail view publishes the resolved book key (option key for single-leg
-    // options, else the ticker); null releases the ticket. Never forces a
-    // connection on its own — the subject already streams L1.
-    depthSymbol: tickerDetail.depthSymbol,
-    depthSymbols: tickerDetail.depthSymbols,
-    // For a futures-backed depth subject (VIX), the order-ticket selected
-    // expiry decides which listed future the relay resolves under that key.
-    // Null → relay falls back to front-month.
-    depthExpiry: tickerDetail.depthFutureExpiry,
-    getToken: getRealtimeToken,
-  });
+    publishSubscriptions,
+  } = useRealtimePrices();
+
+  // The realtime socket is owned by RealtimePricesProvider in the root
+  // Providers tree — it survives App Router navigations, which REMOUNT this
+  // per-page shell. Each shell instance only publishes WHAT to stream; the
+  // provider diffs the set over the already-open socket (no reconnect, no new
+  // ws-ticket, no snapshot resync on a route change). Deliberately NO effect
+  // cleanup: last write wins, so a page swap can never empty the set mid-swap.
+  // Pin: web/tests/realtime-prices-navigation-persistence.test.tsx.
+  useEffect(() => {
+    publishSubscriptions({
+      symbols: allSymbols,
+      contracts: allContracts,
+      indexes: allIndexes,
+      // Single focused depth ticket for the open ticker-detail subject. The
+      // detail view publishes the resolved book key (option key for single-leg
+      // options, else the ticker); null releases the ticket. Never forces a
+      // connection on its own — the subject already streams L1.
+      depthSymbol: tickerDetail.depthSymbol,
+      depthSymbols: tickerDetail.depthSymbols,
+      // For a futures-backed depth subject (VIX), the order-ticket selected
+      // expiry decides which listed future the relay resolves under that key.
+      // Null → relay falls back to front-month.
+      depthExpiry: tickerDetail.depthFutureExpiry,
+    });
+  }, [
+    publishSubscriptions,
+    allSymbols,
+    allContracts,
+    allIndexes,
+    tickerDetail.depthSymbol,
+    tickerDetail.depthSymbols,
+    tickerDetail.depthFutureExpiry,
+  ]);
 
   const missingIndexFallbackSymbols = useMemo(
     () => allIndexes
@@ -397,15 +418,23 @@ export default function WorkspaceShell({ section, tickerParam, initialPortfolio 
     prevMarginLevelRef.current = level;
   }, [portfolio?.account_summary, addToast]);
 
-  // Persistent per-execution fill toasts, diffed from the global orders poll.
-  useFillToasts(orders, addToast);
-
-  const syncing = isOrdersPage ? ordersSyncing : portfolioSyncing;
-  const error = isOrdersPage ? ordersError : portfolioError;
   // Demo deployment is seed-data only (no IB gateway, no realtime relay), so the
   // connection-derived "Live data degraded" banner would always be on and read
   // as broken. Suppress it in demo; production (flag unset) is unchanged.
   const isDemoMode = process.env.NEXT_PUBLIC_RADON_DEMO === "1";
+
+  // Persistent per-execution fill toasts, diffed from the global orders poll.
+  // A new fill also drives the portfolio producer: positions changed, and the
+  // snapshot's own 60s timer would otherwise leave the table pre-fill under a
+  // FILLED toast. Demo has no IB gateway, so it stays read-only.
+  const onNewFills = useCallback(() => {
+    if (isDemoMode) return;
+    portfolioSyncNow();
+  }, [isDemoMode, portfolioSyncNow]);
+  useFillToasts(orders, upsertToast, onNewFills, hasToastKey);
+
+  const syncing = isOrdersPage ? ordersSyncing : portfolioSyncing;
+  const error = isOrdersPage ? ordersError : portfolioError;
   // Options measurements are backed by dedicated sources, not the IB
   // portfolio/order relay. Their panels report source-specific faults.
   // While the browser is offline the OfflineBanner is the single
@@ -500,7 +529,7 @@ export default function WorkspaceShell({ section, tickerParam, initialPortfolio 
 
   // R-149: no snapshot at all is a BLACKOUT, and "Awaiting first sample" read
   // as a benign startup state for the rest of the session.
-  const syncLabel = lastSync
+  const syncLabel = isDemoMode ? "Sample snapshot" : lastSync
     ? `Last sample ${new Date(lastSync).toLocaleTimeString([], { hour12: false })}`
     : error
       ? "Sync failed. Reconstruction incomplete."
@@ -531,15 +560,16 @@ export default function WorkspaceShell({ section, tickerParam, initialPortfolio 
   const pricesForSections = sectionNeedsPrices ? prices : undefined;
 
   return (
-    <div className="app-shell" suppressHydrationWarning>
+    <div className={`app-shell clear-workstation ${clearResearch.surfaces}`} data-workspace-section={activeSection} suppressHydrationWarning>
       <a href="#main-content" className="skip-link">Skip to content</a>
       {showMobileChrome ? (
-        <MobileShell title={activeLabel} ibConnected={ibConnected} lastSync={lastSync} />
+        <MobileShell title={activeLabel} isPageHeading={headerOwnsPageHeading} ibConnected={ibConnected} lastSync={lastSync} />
       ) : null}
-      <Sidebar activeSection={activeSection} actionTone={actionTone} ibConnected={ibConnected} lastSync={lastSync} />
 
       <main id="main-content" className="main" tabIndex={-1}>
         <Header
+          compact={activeSection === "dashboard"}
+          navigation={<Sidebar activeSection={activeSection} actionTone={actionTone} ibConnected={ibConnected} lastSync={lastSync} />}
           activeLabel={activeLabel}
           isPageHeading={headerOwnsPageHeading}
           isFullscreen={isFullscreen}
@@ -555,19 +585,21 @@ export default function WorkspaceShell({ section, tickerParam, initialPortfolio 
           onSyncNow={syncNow}
         >
           {!isOptionsWorkspace ? <div className="sync-controls">
-            <span className={`sync-status ${error || snapshotState === "unknown" ? "sync-error" : syncing ? "sync-active" : ""}`}>
+            <span className={`sync-status ${!isDemoMode && (error || snapshotState === "unknown") ? "sync-error" : syncing ? "sync-active" : ""}`}>
               {syncLabel}
             </span>
-            <button
-              type="button"
-              className="sync-button"
-              onClick={syncNow}
-              disabled={syncing}
-              title={`Sync ${syncTarget} from IB Gateway`}
-            >
-              <RefreshCw size={14} className={syncing ? "spin" : ""} />
-              {syncing ? "Syncing…" : "Sync Now"}
-            </button>
+            {!isDemoMode ? (
+              <button
+                type="button"
+                className="sync-button"
+                onClick={syncNow}
+                disabled={syncing}
+                title={`Sync ${syncTarget} from IB Gateway`}
+              >
+                <RefreshCw size={14} className={syncing ? "spin" : ""} />
+                {syncing ? "Syncing…" : "Sync Now"}
+              </button>
+            ) : null}
           </div> : null}
         </Header>
 
@@ -583,6 +615,7 @@ export default function WorkspaceShell({ section, tickerParam, initialPortfolio 
           {activeSection === "dashboard" ? (
             <DashboardSurface
               portfolio={portfolio}
+              prices={prices}
               realizedPnl={todayRealizedPnl}
               marketState={marketState}
             />
@@ -592,6 +625,8 @@ export default function WorkspaceShell({ section, tickerParam, initialPortfolio 
 
           {activeSection === "portfolio" ? (
             <PortfolioSections portfolio={portfolio} prices={pricesForSections} />
+          ) : activeSection === "performance" ? (
+            <PerformancePanel portfolioLastSync={portfolioLastSync} marketState={marketState} />
           ) : activeSection !== "dashboard" ? (
             <WorkspaceSections
               section={activeSection}

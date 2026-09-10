@@ -66,6 +66,41 @@ function exposurePayload(frequency: "eod" | "intraday", symbol = "MU") {
   };
 }
 
+for (const width of [1280, 393]) {
+  test(`Missing provider spot keeps SNDK exposure and PNG usable at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await mockWorkspace(page);
+    await page.route("**/api/options/exposure?*", (route) => {
+      const payload = exposurePayload("eod", "SNDK");
+      return route.fulfill({
+        status: 200, contentType: "application/json",
+        body: JSON.stringify({ ...payload, spot: null, complete: false }),
+      });
+    });
+    await page.goto("/options/net-gex?symbol=SNDK");
+    await expect(page.getByRole("table", { name: "SNDK options exposure by strike" })).toBeVisible();
+    await expect(page.getByText("SPOT UNAVAILABLE", { exact: true })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: "Showing all strikes" })).toBeVisible();
+    await expect(page.getByLabel("Strike range")).toBeDisabled();
+    await expect(page.getByLabel("Strike range")).toHaveValue("all");
+    await expect(page.locator('[data-spot="true"]')).toHaveCount(0);
+    await expect(page.locator('tbody tr[data-testid^="exposure-row-"]')).toHaveCount(strikes.length);
+    await page.getByLabel("Exposure metric").selectOption("net_dex");
+    await expect(page.getByRole("columnheader", { name: "Net DEX" })).toBeVisible();
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export chart as PNG" }).click();
+    const download = await downloadPromise;
+    expect(await download.failure()).toBeNull();
+    expect(download.suggestedFilename()).toMatch(/radon-SNDK-net_dex-.*\.png/);
+    await download.saveAs(resolve(process.cwd(), `../tasks/artifacts/options-missing-spot-export-${width}.png`));
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+    await page.screenshot({
+      path: resolve(process.cwd(), `../tasks/artifacts/options-missing-spot-${width}.png`),
+      fullPage: true,
+    });
+  });
+}
+
 async function mockWorkspace(page: Page, { holdExposure = false }: { holdExposure?: boolean } = {}) {
   let exposureRequests = 0;
   let releaseExposure = () => undefined;
@@ -140,16 +175,17 @@ test("Options workspace opens its Net GEX tab with the captured controls and cli
   await page.locator(".content").evaluate((content) => content.scrollTo({ top: content.scrollHeight }));
   const stickyHeader = await page.evaluate(() => {
     const content = document.querySelector<HTMLElement>(".content");
-    const headers = [...document.querySelectorAll<HTMLTableCellElement>("[data-testid='options-exposure-table-wrap'] th")];
+    // Strike cells use semantic row headers; only column headers are sticky.
+    const headers = [...document.querySelectorAll<HTMLTableCellElement>("[data-testid='options-exposure-table-wrap'] thead th")];
     if (!content || headers.length === 0) return null;
     return {
-      contentTop: content.getBoundingClientRect().top,
+      contentTop: content.getBoundingClientRect().top + Number.parseFloat(getComputedStyle(content).paddingTop),
       scrollTop: content.scrollTop,
       headerTops: headers.map((header) => header.getBoundingClientRect().top),
     };
   });
   expect(stickyHeader?.scrollTop).toBeGreaterThan(0);
-  expect(stickyHeader?.headerTops.every((top) => Math.abs(top - (stickyHeader?.contentTop ?? top)) <= 1)).toBe(true);
+  expect(stickyHeader?.headerTops.every((top) => Math.abs(top - (stickyHeader?.contentTop ?? top)) <= 1), JSON.stringify(stickyHeader)).toBe(true);
 
   await page.screenshot({
     path: resolve(process.cwd(), "../tasks/artifacts/options-exposure-desktop.png"),

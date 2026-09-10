@@ -46,6 +46,20 @@ describe("demoUsers accessor", () => {
     expect(row?.status).toBe("active");
   });
 
+  it("provision retry cannot overwrite demo_role (RC-B11)", async () => {
+    const db = await seed();
+    await upsertDemoUser({
+      db,
+      userId: "user_1",
+      email: "a2@demo.test",
+      demoRole: "escalated",
+      startedAt: "2026-06-25T10:00:00-04:00",
+      expiresAt: "2026-06-29T16:00:00-04:00",
+      now: T0,
+    });
+    expect((await getDemoUser(db, "user_1"))?.demo_role).toBe("trial");
+  });
+
   it("provision retry cannot reactivate a revoked trial", async () => {
     const db = await seed();
     await revokeDemoUser({ db, userId: "user_1", now: T0 });

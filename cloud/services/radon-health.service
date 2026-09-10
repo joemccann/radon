@@ -13,6 +13,8 @@ StartLimitIntervalSec=60
 StartLimitBurst=5
 
 [Service]
+# REL-194 (R-554): bounded liveness probe for the hosted MCP on this host.
+Environment=RADON_MCP_PROBE_URL=http://127.0.0.1:8334/mcp
 Type=simple
 User=radon
 WorkingDirectory=/home/radon/radon

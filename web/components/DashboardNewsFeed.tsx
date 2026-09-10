@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
-import { ArrowUpRight, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
+import { ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 
 import { estimateReadMinutes } from "../lib/newsfeedReadTime";
 import { formatAbsolute, formatCompact, formatRelative, formatTime } from "../lib/newsfeedTime";
@@ -15,8 +15,13 @@ import { useNewsfeedTagFilter } from "../lib/useNewsfeedTagFilter";
 import { useBookmarks } from "../lib/useBookmarks";
 import NewsfeedTagBar from "./NewsfeedTagBar";
 import NewsfeedLightbox, { type NewsfeedLightboxFocus } from "./NewsfeedLightbox";
+import NewsfeedShare from "./NewsfeedShare";
+import NewsfeedPostContent from "./NewsfeedPostContent";
 import StarToggle from "./StarToggle";
+import HeadlinesTape, { newestHeadlineTime } from "./dashboard/HeadlinesTape";
+import { useHeadlines } from "../lib/useHeadlines";
 import styles from "./DashboardNewsFeed.module.css";
+import researchStyles from "./NewsfeedResearchMedia.module.css";
 
 /** Chips beyond this count collapse behind a `+N` expander on mobile. */
 const VISIBLE_TAG_LIMIT = 4;
@@ -29,11 +34,11 @@ function buildPostSnapshot(post: NormalisedPost) {
     source: post.href,
     timestamp: post.isoTimestamp,
     image: post.images?.[0] ?? null,
+    thumbnail: post.images?.[0] ?? null,
   };
 }
 
 const PAGE_SIZE = 18;
-const SOURCE_NAME = "Market Ear";
 
 export type { MarketEarPost };
 
@@ -92,6 +97,8 @@ function PaginationBar({
 
 export default function DashboardNewsFeed() {
   const { posts, loading, refreshing, error, lastUpdated, refresh } = useNewsfeedPosts();
+  const { items: headlines, status: headlinesStatus } = useHeadlines();
+  const [feedTab, setFeedTab] = useState<"commentary" | "headlines">("commentary");
   const [currentPage, setCurrentPage] = useState(1);
   const [lightboxFocus, setLightboxFocus] = useState<NewsfeedLightboxFocus | null>(null);
   const sectionRef = useRef<HTMLElement>(null);
@@ -240,10 +247,27 @@ export default function DashboardNewsFeed() {
     scrollToTop();
   }, [safePage, totalPages, scrollToTop]);
 
-  const lastSample = lastUpdated
-    ? new Date(lastUpdated).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })
-    : "—";
-  const captureBasis = error ? "fault" : loading ? "awaiting" : "scraper";
+  const commentaryOpen = feedTab === "commentary";
+  // R-463: the footer's freshness fields belong to the OPEN tab. Under
+  // Headlines they read the selected transport's status and newest print time,
+  // not the commentary scraper's.
+  const newestHeadlineMs = newestHeadlineTime(headlines);
+  const sampleAt = commentaryOpen ? (lastUpdated ? new Date(lastUpdated) : null) : (newestHeadlineMs == null ? null : new Date(newestHeadlineMs));
+  const lastSample = sampleAt
+    ? sampleAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })
+    : "---";
+  const captureBasis = commentaryOpen
+    ? (error ? "fault" : loading ? "awaiting" : "scraper")
+    : (headlinesStatus === "down"
+      ? "fault"
+      : headlinesStatus === "connecting"
+        ? "awaiting"
+        : process.env.NEXT_PUBLIC_RADON_DEMO === "1"
+          ? "flash"
+          : "hub");
+  const live = commentaryOpen
+    ? !loading && !error && posts.length > 0
+    : headlinesStatus === "live";
 
   const paginationBar = showPagination ? (
     <PaginationBar
@@ -265,9 +289,10 @@ export default function DashboardNewsFeed() {
           <h3 className="panel-title">Live market analysis</h3>
         </div>
         <div className={`news-feed-actions ${styles.actions}`}>
-          {!loading && !error && posts.length > 0 ? (
+          {live ? (
             <span className={`news-feed-live-badge ${styles.liveBadge}`}>LIVE</span>
           ) : null}
+          {commentaryOpen ? (
           <button
             type="button"
             className={`news-feed-refresh news-feed-refresh--rail ${styles.refresh}`}
@@ -278,20 +303,58 @@ export default function DashboardNewsFeed() {
             <RefreshCw size={12} className={refreshing ? "spin" : ""} aria-hidden />
             {refreshing ? "Refreshing" : "Refresh"}
           </button>
+          ) : null}
         </div>
       </header>
+      <div
+        className="feed-tabs"
+        role="tablist"
+        aria-label="Feed source"
+      >
+        <button
+          type="button"
+          role="tab"
+          id="feed-tab-commentary"
+          data-testid="feed-tab-commentary"
+          aria-selected={commentaryOpen}
+          aria-controls="feed-panel-commentary"
+          className={`feed-tabs__tab${commentaryOpen ? " feed-tabs__tab--on" : ""}`}
+          onClick={() => setFeedTab("commentary")}
+        >
+          Commentary
+        </button>
+        <button
+          type="button"
+          role="tab"
+          id="feed-tab-headlines"
+          data-testid="feed-tab-headlines"
+          aria-selected={!commentaryOpen}
+          aria-controls="feed-panel-headlines"
+          className={`feed-tabs__tab${!commentaryOpen ? " feed-tabs__tab--on" : ""}`}
+          onClick={() => setFeedTab("headlines")}
+        >
+          Headlines
+        </button>
+      </div>
       <div className="dashboard-news__body section-body">
+        {commentaryOpen ? (
+          <div
+            id="feed-panel-commentary"
+            role="tabpanel"
+            aria-labelledby="feed-tab-commentary"
+            data-testid="feed-panel-commentary"
+          >
         <NewsfeedTagBar
           selectedTags={selectedTags}
           onRemove={toggleTag}
           onClearAll={clearTags}
         />
         {loading ? (
-          <div className="news-feed-empty">Collecting Market Ear posts…</div>
+          <div className="news-feed-empty">Collecting market analysis…</div>
         ) : error ? (
           <div className="news-feed-error">{error}</div>
         ) : posts.length === 0 ? (
-          <div className="news-feed-empty">No Market Ear posts captured yet. Ensure the scraper is running.</div>
+          <div className="news-feed-empty">No market analysis captured yet.</div>
         ) : items.length === 0 ? (
           <div className="news-feed-empty news-feed-empty-filtered">
             <span>No posts match the selected filter.</span>
@@ -318,7 +381,6 @@ export default function DashboardNewsFeed() {
                   <h3 className={`news-feed-headline ${styles.headline}`}>{post.title}</h3>
                   <div data-testid="news-feed-meta" className={`news-feed-meta ${styles.meta}`}>
                     <span title={absolute}>{absolute}</span>
-                    <span className="news-feed-meta__source">{SOURCE_NAME}</span>
                     <span>{readMinutes} min read</span>
                   </div>
                   {postTags.length > 0 ? (
@@ -360,9 +422,7 @@ export default function DashboardNewsFeed() {
                       ) : null}
                     </div>
                   ) : null}
-                  {post.content ? (
-                    <p className={`news-feed-summary ${styles.summary}`}>{post.content}</p>
-                  ) : null}
+                  <NewsfeedPostContent post={post} className={`news-feed-summary ${styles.summary}`} />
                   {firstImage ? (
                     <figure className={`news-feed-figure ${styles.figure}`}>
                       <button
@@ -380,29 +440,37 @@ export default function DashboardNewsFeed() {
                           height={675}
                           sizes="(max-width: 1440px) 100vw, 60vw"
                           className={`news-feed-image ${styles.image}`}
+                          unoptimized={post.source?.kind === "dropbox"}
                           priority={false}
                         />
                         <span className="news-feed-image-zoom" aria-hidden>
                           ⤢
                         </span>
                       </button>
-                      <figcaption className={`news-feed-figcaption ${styles.figcaption}`}>
-                        <span>Chart · {post.title}</span>
-                        <span>Source · {SOURCE_NAME}</span>
+                      <figcaption className={`news-feed-figcaption ${styles.figcaption}${post.source ? ` ${researchStyles.feedCaption}` : ""}`}>
+                        <span>{post.source ? `${post.source.publisher} · p. ${post.source.figures[0]?.page} · ${post.source.figures[0]?.caption}` : `Chart · ${post.title}`}</span>
                       </figcaption>
+                      {post.source && post.source.figures.length > 1 ? (
+                        <div className={researchStyles.feedThumbnails} aria-label="Additional charts">
+                          {post.source.figures.slice(1).map((figure, index) => (
+                            <button type="button" key={figure.url} className={researchStyles.feedThumbnail}
+                              aria-label={`Open chart ${index + 2}: ${figure.caption}`}
+                              onClick={() => setLightboxFocus({ post, imageUrl: figure.url })}>
+                              <Image src={figure.url} alt={figure.caption} width={240} height={160} unoptimized />
+                              <span>p. {figure.page}</span>
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
                     </figure>
                   ) : null}
+                  {post.source ? <p className={researchStyles.feedSource}>
+                    <a href={post.href} target="_blank" rel="noopener noreferrer">{post.source.publisher} · Source PDF</a>
+                    {` · ${post.source.documentDate} · pp. ${post.source.pages.join(", ")}`}
+                    {!firstImage ? " · Text-only source evidence" : ""}
+                  </p> : null}
+                  <NewsfeedShare post={post} imageUrl={firstImage ?? undefined} />
                   <div data-testid="news-feed-footer" className={`news-feed-footer ${styles.footer}`}>
-                    <a
-                      data-testid="news-feed-link-pill"
-                      className={`news-feed-link-pill ${styles.linkPill}`}
-                      href={post.href}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      <ArrowUpRight size={11} aria-hidden />
-                      <span>Source link</span>
-                    </a>
                     <span
                       data-testid="news-feed-timestamp"
                       className={`news-feed-timestamp ${styles.timestamp}`}
@@ -427,11 +495,22 @@ export default function DashboardNewsFeed() {
             {paginationBar}
           </>
         )}
+          </div>
+        ) : (
+          <div
+            id="feed-panel-headlines"
+            role="tabpanel"
+            aria-labelledby="feed-tab-headlines"
+            data-testid="feed-panel-headlines"
+          >
+            <HeadlinesTape items={headlines} status={headlinesStatus} />
+          </div>
+        )}
       </div>
       <footer className="panel-meta-rail" aria-label="Feed calibration">
         <div className="panel-meta-rail-item">
           <span className="k">source</span>
-          <span className="v">Market Ear</span>
+          <span className="v">{commentaryOpen ? (posts.some(p => p.source) ? "Market Ear + Research" : "Market Ear") : "Headlines"}</span>
         </div>
         <div className="panel-meta-rail-item">
           <span className="k">capture.basis</span>

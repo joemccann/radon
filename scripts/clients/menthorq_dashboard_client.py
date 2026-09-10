@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import json
 import math
 import os
@@ -35,6 +36,7 @@ from typing import Any
 
 import requests
 
+from utils.atomic_io import atomic_save
 from utils.env_loader import load_env_file
 
 
@@ -75,6 +77,8 @@ CONSENT_PROBE_SECONDS = 1.5
 _AUTH_FAILURE_EMBARGO_SECONDS = 300.0
 _auth_embargo_until = 0.0
 _auth_embargo_lock = threading.Lock()
+_auth_resolution_lock = threading.Lock()
+_auth_failure_signature: str | None = None
 
 
 def _auth_embargo_active() -> bool:
@@ -82,16 +86,18 @@ def _auth_embargo_active() -> bool:
         return time.monotonic() < _auth_embargo_until
 
 
-def _trip_auth_embargo() -> None:
-    global _auth_embargo_until
+def _trip_auth_embargo(signature: str | None = None) -> None:
+    global _auth_embargo_until, _auth_failure_signature
     with _auth_embargo_lock:
         _auth_embargo_until = time.monotonic() + _AUTH_FAILURE_EMBARGO_SECONDS
+        _auth_failure_signature = signature
 
 
 def _reset_auth_embargo_for_tests() -> None:
-    global _auth_embargo_until
+    global _auth_embargo_until, _auth_failure_signature
     with _auth_embargo_lock:
         _auth_embargo_until = 0.0
+        _auth_failure_signature = None
 
 
 _FREQUENCIES = {"eod", "intraday"}
@@ -135,6 +141,15 @@ class MenthorQDashboardAuthEmbargoed(MenthorQDashboardAuthError):
     """
 
 
+class MenthorQDashboardBrowserUnavailable(MenthorQDashboardError):
+    """The headless browser runtime is missing; the credentials were never used.
+
+    Deliberately NOT an auth error: an image built without chromium used to
+    surface as "dashboard authentication is unavailable", which the daily
+    login probe latches as a broken credential chain.
+    """
+
+
 class MenthorQDashboardStorageError(MenthorQDashboardError):
     """The session jar could not be written locally (disk full, permissions).
 
@@ -153,6 +168,21 @@ class MenthorQDashboardUpstreamError(MenthorQDashboardError):
 
 class MenthorQDashboardPayloadError(MenthorQDashboardError):
     """The dashboard API returned a structurally invalid payload."""
+
+
+_BROWSER_MISSING_MARKERS = ("playwright install", "executable doesn't exist")
+
+
+def _is_browser_runtime_missing(exc: BaseException) -> bool:
+    # R-659: only a playwright-module ImportError is a missing browser
+    # runtime; any other ImportError (requests, pydantic) is a real
+    # dependency fault and must not suppress the credential-chain alarm.
+    if isinstance(exc, ImportError):
+        name = (exc.name or "").lower()
+        return name == "playwright" or name.startswith("playwright.") or (
+            "playwright" in str(exc).lower()
+        )
+    return any(marker in str(exc).lower() for marker in _BROWSER_MISSING_MARKERS)
 
 
 def _finite_number(value: Any) -> float:
@@ -176,6 +206,8 @@ def _jwt_expiry(token: str) -> float | None:
         payload_segment = token.split(".")[1]
         padded = payload_segment + "=" * (-len(payload_segment) % 4)
         payload = json.loads(base64.urlsafe_b64decode(padded).decode())
+        if not isinstance(payload, dict):
+            return None
         expiry = payload.get("exp")
         return float(expiry) if expiry is not None else None
     except (
@@ -205,14 +237,24 @@ def _storage_state_expired(path: Path) -> bool:
         cookies = payload.get("cookies") if isinstance(payload, dict) else None
         if not isinstance(cookies, list):
             return False
-        deadlines = [
-            cookie["expires"]
+        auth_cookies = [
+            (cookie["name"], cookie.get("expires"))
             for cookie in cookies
             if isinstance(cookie, dict)
             and isinstance(cookie.get("name"), str)
             and cookie["name"].startswith(_AUTH_COOKIE_PREFIXES)
-            and isinstance(cookie.get("expires"), (int, float))
-            and cookie["expires"] > 0
+        ]
+        # Cognito is an ephemeral login-domain cookie, not the dashboard
+        # credential. Match the monitor's durable-cookie precedence.
+        durable = [
+            expires for name, expires in auth_cookies
+            if name.startswith("__Secure-authjs.session-token")
+        ]
+        governing = durable or [expires for _, expires in auth_cookies]
+        deadlines = [
+            value for value in governing
+            if isinstance(value, (int, float)) and not isinstance(value, bool)
+            and value > 0
         ]
         return bool(deadlines) and min(deadlines) <= time.time()
     except Exception:  # noqa: BLE001 — never let the fast path add failures
@@ -257,6 +299,7 @@ class MenthorQDashboardClient:
         # so an expired one fails loudly. The ENV override is ambient
         # operational config and degrades to the jar instead.
         self._token_is_explicit = bool((access_token or "").strip())
+        self._configured_token = self._access_token
         configured_path = os.environ.get("MENTHORQ_DASHBOARD_STORAGE_STATE", "").strip()
         self._storage_state_path = Path(
             storage_state_path or configured_path or DEFAULT_STORAGE_STATE_PATH
@@ -269,6 +312,21 @@ class MenthorQDashboardClient:
         )
         self._username = (username or os.environ.get("MENTHORQ_USER", "")).strip() or None
         self._password = (password or os.environ.get("MENTHORQ_PASS", "")).strip() or None
+        self._rejected_token: str | None = None
+        self._auth_deadline: float | None = None
+        self._request_deadline: float | None = None
+
+    def _auth_signature(self) -> str:
+        """Non-secret identity of the config and jar revision for backoff."""
+        try:
+            info = self._storage_state_path.stat()
+            revision = (info.st_ino, info.st_mtime_ns, info.st_size)
+        except OSError:
+            revision = None
+        return hashlib.sha256(json.dumps([
+            str(self._storage_state_path.resolve()), revision,
+            self._username, self._password, self._configured_token,
+        ]).encode()).hexdigest()
 
     def _remaining_ms(self, deadline: float, cap_seconds: float) -> int:
         """Milliseconds left before ``deadline``, clamped to ``cap_seconds``.
@@ -282,7 +340,8 @@ class MenthorQDashboardClient:
             raise MenthorQDashboardAuthError(
                 "dashboard authentication budget exhausted"
             )
-        return int(min(remaining, max(0.0, cap_seconds)) * 1000)
+        # Playwright timeout=0 means unbounded, not "no time left".
+        return max(1, int(min(remaining, max(0.0, cap_seconds)) * 1000))
 
     def fetch_exposure(self, symbol: str, frequency: str = "eod") -> dict[str, Any]:
         """Fetch one uncached symbol/frequency cube plus its EOD level overlay."""
@@ -292,25 +351,69 @@ class MenthorQDashboardClient:
         if frequency not in _FREQUENCIES:
             raise ValueError("frequency must be eod or intraday")
 
-        token = self._resolve_access_token()
+        # Shared across jar exchange, login, retries and both data requests.
+        # Reserve five seconds below the Next.js 50s proxy deadline.
+        started = time.monotonic()
+        self._auth_deadline = started + REQUEST_PATH_AUTH_BUDGET_SECONDS
+        self._request_deadline = started + 45.0
         exposure_url = (
             f"{API_ROOT}/options/net-gex-by-expiration/{symbol}?frequency={frequency}"
         )
         levels_url = f"{API_ROOT}/gamma-levels/{symbol}/eod"
-        exposure = self._request_json(exposure_url, token)
-        levels = self._request_json(levels_url, token)
-        return self._normalize(symbol, frequency, exposure, levels)
+        try:
+            token = self._resolve_access_token()
+            for attempt in range(2):
+                try:
+                    exposure = self._request_json(exposure_url, token)
+                    levels = self._request_json(levels_url, token)
+                    return self._normalize(symbol, frequency, exposure, levels)
+                except MenthorQDashboardAuthError:
+                    if self._token_is_explicit:
+                        raise
+                    if attempt:
+                        _trip_auth_embargo(self._auth_signature())
+                        raise
+                    # A revoked/opaque override cannot be detected by JWT exp.
+                    # Never replay the rejected token, even if session says OK.
+                    self._rejected_token = token
+                    self._access_token = None
+                    token = self._resolve_access_token()
+            raise AssertionError("unreachable")
+        finally:
+            self._auth_deadline = None
+            self._request_deadline = None
 
     def _resolve_access_token(self) -> str:
-        if _auth_embargo_active():
-            raise MenthorQDashboardAuthEmbargoed(
-                "dashboard authentication embargoed after a recent failure"
-            )
-        try:
+        # Explicit tokens are caller-owned: no browser or global backoff.
+        if self._token_is_explicit:
             return self._resolve_access_token_uncached()
-        except MenthorQDashboardAuthError:
-            _trip_auth_embargo()
-            raise
+        deadline = self._auth_deadline or (
+            time.monotonic() + REQUEST_PATH_AUTH_BUDGET_SECONDS
+        )
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or not _auth_resolution_lock.acquire(timeout=remaining):
+            raise MenthorQDashboardTimeoutError("dashboard authentication is busy")
+        previous_deadline = self._auth_deadline
+        self._auth_deadline = deadline
+        try:
+            signature = self._auth_signature()
+            with _auth_embargo_lock:
+                embargoed = (
+                    time.monotonic() < _auth_embargo_until
+                    and _auth_failure_signature in {None, signature}
+                )
+            if embargoed:
+                raise MenthorQDashboardAuthEmbargoed(
+                    "dashboard authentication embargoed after a recent failure"
+                )
+            try:
+                return self._resolve_access_token_uncached()
+            except MenthorQDashboardAuthError:
+                _trip_auth_embargo(self._auth_signature())
+                raise
+        finally:
+            self._auth_deadline = previous_deadline
+            _auth_resolution_lock.release()
 
     def _resolve_access_token_uncached(self) -> str:
         token = self._access_token
@@ -334,6 +437,11 @@ class MenthorQDashboardClient:
                 else:
                     try:
                         token = self._token_from_storage_state()
+                        expiry = _jwt_expiry(token)
+                        if token == self._rejected_token or (
+                            expiry is not None and expiry <= time.time()
+                        ):
+                            token = None
                     except MenthorQDashboardAuthError:
                         token = None
             if token is None:
@@ -342,7 +450,7 @@ class MenthorQDashboardClient:
                 token = self._bootstrap_dashboard_session()
 
         expiry = _jwt_expiry(token)
-        if expiry is not None and expiry <= time.time():
+        if token == self._rejected_token or (expiry is not None and expiry <= time.time()):
             raise MenthorQDashboardAuthError("dashboard authentication is unavailable")
         return token
 
@@ -359,6 +467,9 @@ class MenthorQDashboardClient:
 
         browser = None
         context = None
+        deadline = self._auth_deadline or (
+            time.monotonic() + REQUEST_PATH_AUTH_BUDGET_SECONDS
+        )
         try:
             from playwright.sync_api import sync_playwright
 
@@ -366,6 +477,7 @@ class MenthorQDashboardClient:
                 browser = playwright.chromium.launch(
                     headless=True,
                     args=["--disable-blink-features=AutomationControlled"],
+                    timeout=self._remaining_ms(deadline, self._timeout_seconds),
                 )
                 # Same WAF constraint as the bootstrap: without a real UA the
                 # challenge returns HTML and response.json() raises. This is
@@ -378,7 +490,7 @@ class MenthorQDashboardClient:
                 )
                 response = context.request.get(
                     SESSION_URL,
-                    timeout=int(self._timeout_seconds * 1000),
+                    timeout=self._remaining_ms(deadline, self._timeout_seconds),
                 )
                 if not response.ok:
                     raise MenthorQDashboardAuthError(
@@ -400,9 +512,13 @@ class MenthorQDashboardClient:
                     )
                 self._persist_dashboard_storage_state(context)
                 return token.strip()
-        except MenthorQDashboardAuthError:
+        except MenthorQDashboardError:
             raise
         except Exception as exc:
+            if _is_browser_runtime_missing(exc):
+                raise MenthorQDashboardBrowserUnavailable(
+                    "dashboard browser runtime is unavailable"
+                ) from exc
             raise MenthorQDashboardAuthError(
                 "dashboard authentication is unavailable"
             ) from exc
@@ -433,7 +549,9 @@ class MenthorQDashboardClient:
         prevent.
         """
 
-        deadline = time.monotonic() + REQUEST_PATH_AUTH_BUDGET_SECONDS
+        deadline = self._auth_deadline or (
+            time.monotonic() + REQUEST_PATH_AUTH_BUDGET_SECONDS
+        )
         browser = None
         context = None
         try:
@@ -443,6 +561,7 @@ class MenthorQDashboardClient:
                 browser = playwright.chromium.launch(
                     headless=True,
                     args=["--disable-blink-features=AutomationControlled"],
+                    timeout=self._remaining_ms(deadline, self._login_timeout_seconds),
                 )
                 # MenthorQ sits behind AWS WAF (the jar carries an
                 # aws-waf-token). Playwright's default UA announces
@@ -477,9 +596,9 @@ class MenthorQDashboardClient:
                     raise MenthorQDashboardAuthError(
                         "dashboard authentication is unavailable"
                     )
-                username.fill(self._username or "")
-                password.fill(self._password or "")
-                submit.click()
+                username.fill(self._username or "", timeout=self._remaining_ms(deadline, self._timeout_seconds))
+                password.fill(self._password or "", timeout=self._remaining_ms(deadline, self._timeout_seconds))
+                submit.click(timeout=self._remaining_ms(deadline, self._timeout_seconds))
 
                 # WordPress OpenID consent stays on wp-login.php
                 # (`client_id=aws_cognito_client_id` in the query). A real
@@ -496,7 +615,7 @@ class MenthorQDashboardClient:
                         timeout=self._remaining_ms(deadline, CONSENT_PROBE_SECONDS),
                     )
                     if authorize.count() >= 1:
-                        authorize.click()
+                        authorize.click(timeout=self._remaining_ms(deadline, CONSENT_PROBE_SECONDS))
                 except MenthorQDashboardAuthError:
                     raise
                 except Exception:
@@ -540,9 +659,13 @@ class MenthorQDashboardClient:
                                 return token.strip()
                     page.wait_for_timeout(500)
                 raise MenthorQDashboardAuthError("dashboard authentication is unavailable")
-        except MenthorQDashboardAuthError:
+        except MenthorQDashboardError:
             raise
         except Exception as exc:
+            if _is_browser_runtime_missing(exc):
+                raise MenthorQDashboardBrowserUnavailable(
+                    "dashboard browser runtime is unavailable"
+                ) from exc
             raise MenthorQDashboardAuthError(
                 "dashboard authentication is unavailable"
             ) from exc
@@ -562,7 +685,7 @@ class MenthorQDashboardClient:
         try:
             self._storage_state_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
             self._storage_state_path.parent.chmod(0o700)
-            context.storage_state(path=str(self._storage_state_path))
+            atomic_save(str(self._storage_state_path), context.storage_state())
             self._ensure_private_storage_state()
         except OSError as exc:
             raise MenthorQDashboardStorageError(
@@ -570,6 +693,12 @@ class MenthorQDashboardClient:
             ) from exc
 
     def _request_json(self, url: str, token: str) -> dict[str, Any]:
+        timeout = self._timeout_seconds
+        if self._request_deadline is not None:
+            remaining = self._request_deadline - time.monotonic()
+            if remaining <= 0:
+                raise MenthorQDashboardTimeoutError("dashboard provider timed out")
+            timeout = min(timeout, remaining)
         try:
             response = self._http.get(
                 url,
@@ -577,7 +706,7 @@ class MenthorQDashboardClient:
                     "Accept": "application/json",
                     "Authorization": f"Bearer {token}",
                 },
-                timeout=self._timeout_seconds,
+                timeout=timeout,
             )
         except requests.Timeout as exc:
             raise MenthorQDashboardTimeoutError("dashboard provider timed out") from exc
@@ -611,8 +740,9 @@ class MenthorQDashboardClient:
             source_time = exposure["timestamp"]
             if not isinstance(source_time, str) or not source_time:
                 raise ValueError("missing timestamp")
-            spot = _finite_number(exposure["spot_price"])
-            if spot <= 0:
+            raw_spot = exposure["spot_price"]
+            spot = None if raw_spot is None else _finite_number(raw_spot)
+            if spot is not None and spot <= 0:
                 raise ValueError("invalid spot")
 
             raw_strikes = exposure["strikes"]
@@ -725,5 +855,5 @@ class MenthorQDashboardClient:
                 "oi_call": "contracts",
                 "oi_put": "contracts",
             },
-            "complete": all(level["value"] is not None for level in levels),
+            "complete": spot is not None and all(level["value"] is not None for level in levels),
         }

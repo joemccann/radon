@@ -16,7 +16,7 @@
 import React from "react";
 import { readFileSync } from "fs";
 import { join } from "path";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import BpiPanel from "@/components/BpiPanel";
@@ -336,5 +336,46 @@ describe("BpiChart pins", () => {
 
     const tooltip = container.querySelector(".chart-tooltip");
     expect(tooltip?.textContent).toContain("BPI");
+  });
+});
+
+describe("BpiPanel — freshness rail", () => {
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it("shows the as-of session and counts down to the 23:30 UTC re-run", () => {
+    // 22:00 UTC on a Wednesday: the 21:30 run has fired, the 23:30 re-run is
+    // 1h30m out. Every other evening constant sits inside 22:10..22:45 UTC
+    // (minutes, not hours), so the number pins radon-bpi.timer.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-26T22:00:00Z"));
+    useBpiMock.mockReturnValue(hookResult({ data: buildBpiResponseFixture({ endDate: "2026-08-26" }) }));
+    render(<BpiPanel />);
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+    const rail = screen.getByTestId("bpi-freshness-rail");
+    expect(rail).toBeTruthy();
+    expect(rail.textContent).toContain("2026-08-26");
+    expect(screen.getByTestId("bpi-freshness-rail-countdown").textContent).toBe("1h 30m");
+    expect(rail.textContent).toContain("Next sample");
+    // The strip's own AS OF cell keeps its anchor.
+    expect(screen.getByTestId("bpi-strip-session").textContent).toContain("2026-08-26");
+  });
+
+  it("renders the rail on the mobile grid too", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-26T22:00:00Z"));
+    viewportMock.mockReturnValue(MOBILE_VIEWPORT);
+    useBpiMock.mockReturnValue(hookResult({ data: buildBpiResponseFixture({ endDate: "2026-08-26" }) }));
+    render(<BpiPanel />);
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+    expect(screen.getByTestId("bpi-mobile-grid")).toBeTruthy();
+    expect(screen.getByTestId("bpi-freshness-rail-countdown").textContent).toBe("1h 30m");
+    viewportMock.mockReturnValue(DESKTOP_VIEWPORT);
   });
 });

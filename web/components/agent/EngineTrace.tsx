@@ -1,5 +1,7 @@
 "use client";
 
+import ThinkingWait from "@/components/fx/ThinkingWait";
+
 /**
  * EngineTrace — expandable reasoning trace for engine turns (Spectral, Eigen,
  * Markov, Laplace). Adopted from beautifului.dev "Thinking", re-skinned to the
@@ -48,7 +50,11 @@ export default function EngineTrace({
         onClick={onToggle}
         aria-expanded={!collapsed}
       >
-        <span className={`agent-dot${running ? " agent-dot--pulse agent-dot--warn" : " agent-dot--signal"}`} aria-hidden="true" />
+        {running ? (
+          <ThinkingWait kind="agent" label="Agent working" />
+        ) : (
+          <span className="agent-dot agent-dot--signal" aria-hidden="true" />
+        )}
         <span className="engine-trace__title">Engine trace</span>
         <span className="engine-trace__chips">
           {engines.map((e) => (
@@ -62,16 +68,16 @@ export default function EngineTrace({
           <ol className="engine-trace__steps">
             {steps.map((step) => (
               <li key={step.id} className="engine-trace__step" data-state={step.state}>
-                <span
-                  className={`agent-dot${
-                    step.state === "running"
-                      ? " agent-dot--pulse agent-dot--warn"
-                      : step.state === "done"
-                        ? " agent-dot--signal"
-                        : " agent-dot--muted"
-                  }`}
-                  aria-hidden="true"
-                />
+                {step.state === "running" ? (
+                  <ThinkingWait kind="agent" label={step.label} />
+                ) : (
+                  <span
+                    className={`agent-dot${
+                      step.state === "done" ? " agent-dot--signal" : " agent-dot--muted"
+                    }`}
+                    aria-hidden="true"
+                  />
+                )}
                 <span className="engine-trace__step-label">{step.label}</span>
                 <span className="engine-trace__step-meta">{step.meta ?? "—"}</span>
               </li>

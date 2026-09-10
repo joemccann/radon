@@ -12,15 +12,32 @@ A contract only yields figures when its journal history is COMPLETE: a
 close that meets an empty or smaller open position means fills are missing,
 and every figure for that contract is dropped rather than trusted (same
 principle as the ``ib_sync`` journal-basis guard).
+
+Completeness is enforced on TWO axes, and one of them is bounded. A row
+that cannot name its contract, or that names an impossible one (a
+non-positive strike, a right outside ``C``/``P``, an expiry that is not a
+real calendar date), poisons its whole ticker so the contract falls back to
+IB's figure — R-274, extended by R-320. What this module CANNOT detect is a
+contract field corrupted into a different but still-listable contract (a
+strike of 600 where the fill was 60, an expiry shifted to another real
+Wednesday): that row mints a well-formed key, forms its own bucket, and is
+indistinguishable from a legitimate second position held on the same
+ticker. Closing that residue needs an authoritative contract set — IB
+positions or contract details — which this entry point does not receive.
+Callers holding one should cross-check before trusting a figure here.
 """
 
 from __future__ import annotations
 
 import logging
+from datetime import date
 from typing import Any, Iterable, Optional, Sequence
 
 from .journal_basis import (
     _bucket_key,
+    _normalize_expiry,
+    _normalize_right,
+    _normalize_strike,
     _fetch_journal_rows_for_tickers,
     _claim_exec_parts,
     _exec_id_parts,
@@ -60,8 +77,11 @@ def realized_pnl_by_exec_id(rows: Iterable[Any]) -> dict[str, float]:
     """Map each single-execution closing journal row to its realized P&L.
 
     ``rows`` are ``(payload, filled_at, written_at)`` journal rows for any
-    number of tickers. Only option rows with a full contract key take part;
-    BAG envelopes (``right == "?"``) and stock rows are ignored.
+    number of tickers. Only option rows whose contract key both normalises
+    and describes a contract that could exist take part; BAG envelopes
+    (``right == "?"``) and stock rows are ignored, and anything else that
+    fails either test poisons its ticker rather than being dropped. See the
+    module header for the residual case this cannot see (R-320).
     """
     buckets: dict[str, list[dict[str, Any]]] = {}
     unusable: set[str] = set()
@@ -206,7 +226,7 @@ def _ordered(rows: Iterable[Any]) -> list[Any]:
 def _journal_entry(row: Any) -> Optional[dict[str, Any]]:
     payload = _payload_from_row(row)
     key = _bucket_key(payload)
-    if key is None:
+    if key is None or not _is_plausible_contract(payload):
         return None
     try:
         qty = abs(float(payload.get("contracts")))
@@ -260,10 +280,49 @@ def _is_option_shaped(payload: dict[str, Any]) -> bool:
         return False
     if str(payload.get("right") or "").strip() == _BAG_RIGHT:
         return False
-    return any(
-        str(payload.get(field) or "").strip() not in {"", "None"}
-        for field in _OPTION_SHAPE_FIELDS
-    )
+    # PRESENCE, not truthiness: a numeric 0 strike and an empty-string right
+    # are both malformed VALUES of a field the row chose to name, which is
+    # precisely the corruption case. Reading them as "field absent" routed
+    # them to the stock exclusion. R-320.
+    return any(field in payload for field in _OPTION_SHAPE_FIELDS)
+
+
+def _is_plausible_contract(payload: dict[str, Any]) -> bool:
+    """Whether a key that NORMALISES also describes a contract that can exist.
+
+    ``_bucket_key`` only asks whether each field parses. A strike of ``0``
+    parses to ``"0.0"`` and an expiry of ``20261340`` is eight digits, so
+    both mint a well-formed key for a contract that cannot be listed — the
+    row then forms its own phantom bucket, taking its quantity AND its cost
+    out of the real one, and the replay prices the close against a basis
+    that is short by exactly the missing open. R-320.
+
+    ``right`` needs no check here: ``_normalize_right`` already collapses
+    anything outside ``C``/``P`` to ``""``, which fails ``_bucket_key``.
+    """
+    strike = _normalize_strike(payload.get("strike"))
+    try:
+        if strike is None or float(strike) <= 0:
+            return False
+    except (TypeError, ValueError):
+        return False
+    if _normalize_right(payload.get("right")) not in {"C", "P"}:
+        return False
+    expiry = _normalize_expiry(payload.get("expiry"))
+    try:
+        date(int(expiry[0:4]), int(expiry[4:6]), int(expiry[6:8]))
+    except ValueError:
+        return False
+    # A calendar-valid date is not enough: an option cannot be FILLED after it
+    # has expired, so an `expiry` before the row's own session date is a
+    # corruption (`19700101`, or a field swap copying an earlier fill date).
+    # Both mint a well-formed key, form a phantom bucket that takes its cost out
+    # of the real one, and publish a fabricated figure with no warning. Equality
+    # is legitimate -- 0DTE is a real trade. R-407.
+    row_date = str(payload.get("date") or "").replace("-", "")[:8]
+    if len(row_date) == 8 and row_date.isdigit() and expiry < row_date:
+        return False
+    return True
 
 
 def _unusable_fill_key(row: Any) -> Optional[str]:
@@ -287,7 +346,7 @@ def _unusable_fill_key(row: Any) -> Optional[str]:
     if str(payload.get("action") or "").strip().upper() == "CLOSED":
         return None
     key = _bucket_key(payload)
-    if key is not None:
+    if key is not None and _is_plausible_contract(payload):
         return key
     if not _is_option_shaped(payload):
         return None
@@ -302,18 +361,55 @@ def _replay_contract(
     realized: dict[str, float] = {}
     position_qty = 0.0
     avg_basis_per_unit = 0.0
-    seen_fingerprints: dict[tuple, set[str]] = {}
+    seen_fingerprints: dict[tuple, dict[str, Any]] = {}
+    basis_tainted = False
+    position_may_be_short = False
 
     for entry in entries:
         if not _claim_exec_parts(counted_parts, entry["parts"], key):
             continue
-        if _already_journaled_under_other_namespace(seen_fingerprints, entry, key):
-            continue
         qty = entry["qty"]
         is_buy = entry["is_buy"]
-        cash = entry["notional"] + entry["commission"] if is_buy else entry["notional"] - entry["commission"]
         signed_qty = qty if is_buy else -qty
         same_direction = position_qty == 0 or (position_qty > 0) == is_buy
+
+        cash = entry["notional"] + entry["commission"] if is_buy else entry["notional"] - entry["commission"]
+
+        suppressed, proven_duplicate = _already_journaled_under_other_namespace(
+            seen_fingerprints, entry, key, cash
+        )
+        if suppressed:
+            # T-184: the fingerprint is (contract, session date, signed qty) and
+            # cannot see price, so it cannot separate a cross-writer duplicate
+            # from two genuinely distinct equal-size same-day partials — hence
+            # the suppression, and hence the carried taint.
+            #
+            # But CASH is decidable, and it is the only thing the taint is about.
+            # An identical-cash suppression is a PROVEN duplicate (R-049: one
+            # fill written by the realtime daemon under a dotted API execId and
+            # again by Flex rehydrate under a numeric tradeID), and the
+            # post-suppression basis is exactly right. Tainting there discarded
+            # every later figure for the contract and fell back to IB's drifted
+            # avgCost number — on every contract Flex has rehydrated, which is
+            # the normal production state. R-383.
+            # A suppressed OPENING fill takes its cost out of the average along
+            # with its quantity. At IDENTICAL cash the average is invariant to
+            # whether the fill is counted once or twice, so the basis is exact
+            # either way and there is nothing to taint.
+            # That holds for ONE duplicate per counted fill. A second equal-cash
+            # row from the same writer has no counted counterpart left to be a
+            # duplicate of; suppressing it drops a real lot and the inventory is
+            # short by one, so the taint is carried (T-316).
+            if same_direction:
+                if not proven_duplicate:
+                    basis_tainted = True
+            else:
+                # A suppressed REDUCING fill is different: cash equality says
+                # nothing about the QUANTITY, and the position is left possibly
+                # long, which misprices figures once a later opening fill blends
+                # against that phantom inventory. Always carried.
+                position_may_be_short = True
+            continue
 
         if entry["is_close"] and same_direction:
             logger.warning(
@@ -324,6 +420,8 @@ def _replay_contract(
             return {}
 
         if same_direction:
+            if position_may_be_short:
+                basis_tainted = True
             current_basis = avg_basis_per_unit * abs(position_qty)
             position_qty += signed_qty
             avg_basis_per_unit = (current_basis + cash) / abs(position_qty)
@@ -340,9 +438,26 @@ def _replay_contract(
         basis_closed = avg_basis_per_unit * qty
         pnl = cash - basis_closed if position_qty > 0 else basis_closed - cash
         position_qty += signed_qty
+        # The withhold decision belongs to THIS fill, which was priced against
+        # the tainted basis; the reset below applies from the next one on.
+        withheld = basis_tainted
         if position_qty == 0:
             avg_basis_per_unit = 0.0
+            # A flat position already resets the basis, and the taint is a
+            # statement ABOUT that basis. Carrying it past zero withheld every
+            # figure for the rest of the journal's history on a contract
+            # re-entered even once after a single suppressed open. R-406.
+            basis_tainted = False
+            position_may_be_short = False
         if len(entry["parts"]) == 1:
+            if withheld:
+                logger.warning(
+                    "journal_realized: %s withholding %s — a cross-writer fill "
+                    "suppression left the replayed basis unreliable, journal "
+                    "incomplete, keeping IB realizedPNL",
+                    key, entry["parts"][0],
+                )
+                continue
             realized[entry["parts"][0]] = round(pnl, 4)
 
     return realized
@@ -355,23 +470,48 @@ def _id_namespaces(parts: list[str]) -> set[str]:
 
 
 def _already_journaled_under_other_namespace(
-    seen: dict[tuple, set[str]], entry: dict[str, Any], key: str
-) -> bool:
-    """True when this fill (contract, session date, signed qty) was already
-    replayed from a row keyed in the OTHER id namespace — the same close
-    written by both writers (T-124). Two equal same-day partials from ONE
-    writer share a namespace and both count, as in the backfill."""
+    seen: dict[tuple, dict[str, Any]], entry: dict[str, Any], key: str, cash: float
+) -> tuple[bool, bool]:
+    """``(suppressed, proven_duplicate)`` for this fill.
+
+    Suppressed when this fill (contract, session date, signed qty) was already
+    replayed from a row keyed in the OTHER id namespace — the same close written
+    by both writers (T-124). Two equal same-day partials from ONE writer share a
+    namespace and both count, as in the backfill.
+
+    ``proven_duplicate`` reports whether the suppressed row is the other
+    writer's copy of a row already counted: it carries the SAME cash, and the
+    counted rows under this fingerprint have not all been claimed by earlier
+    suppressions. The fingerprint cannot see price, but this can, and it is the
+    difference between a proven cross-writer duplicate (basis after suppression
+    is exact) and a distinct partial (basis is short by one). R-383, T-316.
+    """
     fingerprint = entry.get("fingerprint")
     namespaces = _id_namespaces(entry["parts"])
     if fingerprint is None or not namespaces:
-        return False
-    prior = seen.setdefault(fingerprint, set())
-    if prior and prior.isdisjoint(namespaces):
+        return False, False
+    prior = seen.setdefault(
+        fingerprint, {"namespaces": set(), "cash": cash, "counted": 0, "suppressed": 0}
+    )
+    if prior["namespaces"] and prior["namespaces"].isdisjoint(namespaces):
+        prior["suppressed"] += 1
+        has_counterpart = prior["suppressed"] <= prior["counted"]
+        matched = has_counterpart and round(prior["cash"], 4) == round(cash, 4)
+        if not has_counterpart:
+            logger.warning(
+                "journal_realized: %s skipped %s — %s fill(s) already counted under %s "
+                "and each has a cross-writer duplicate; this one is a distinct partial "
+                "the fingerprint cannot separate, inventory short by %s",
+                key, "+".join(entry["parts"]), prior["counted"],
+                "/".join(sorted(prior["namespaces"])), entry["qty"],
+            )
+            return True, False
         logger.info(
-            "journal_realized: %s skipped %s — same fill already journaled under %s",
-            key, "+".join(entry["parts"]), "/".join(sorted(prior)),
+            "journal_realized: %s skipped %s — same fill already journaled under %s (cash %s)",
+            key, "+".join(entry["parts"]), "/".join(sorted(prior["namespaces"])),
+            "matches" if matched else "DIFFERS",
         )
-        return True
-    prior |= namespaces
-    return False
-
+        return True, matched
+    prior["namespaces"] |= namespaces
+    prior["counted"] += 1
+    return False, False

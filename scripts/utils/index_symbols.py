@@ -19,6 +19,12 @@ from typing import Optional
 INDEX_SYMBOLS: dict[str, str] = {
     # Volatility (CBOE Indexes feed)
     "VIX": "CBOE",
+    # Cboe VIX term structure: 1-day, 9-day, 3-month, 6-month, 1-year
+    "VIX1D": "CBOE",
+    "VIX9D": "CBOE",
+    "VIX3M": "CBOE",
+    "VIX6M": "CBOE",
+    "VIX1Y": "CBOE",
     "VXN": "CBOE",
     "VVIX": "CBOE",
     "VXX": "CBOE",

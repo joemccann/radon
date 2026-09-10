@@ -5,6 +5,7 @@ import { Activity } from "lucide-react";
 import BrushMinimap from "./BrushMinimap";
 import PanelRefreshError from "./PanelRefreshError";
 import CriHistoryChart, { type ChartSeries } from "./CriHistoryChart";
+import FreshnessRail from "./FreshnessRail";
 import HistoryRangeChips from "./HistoryRangeChips";
 import InfoTooltip from "./InfoTooltip";
 import MetricCell from "./mobile/MetricCell";
@@ -13,6 +14,7 @@ import SpectralLoader from "./SpectralLoader";
 import { RegimeStrip, RegimeStripCell } from "./RegimeStrip";
 import { chartSeriesColor } from "@/lib/chartSystem";
 import { presetRange, presetSessions, type RangePresetSlug } from "@/lib/historyRange";
+import { CREDIT_SPREAD_REFRESH } from "@/lib/refreshSchedule";
 import {
   formatDateTick,
   formatPct,
@@ -125,7 +127,7 @@ export default function CreditSpreadPanel() {
           </div>
           <PanelRefreshError error={error} testId="credit-spread-refresh-error" />
           {lastSync && (
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: "9px", color: "var(--text-muted)" }}>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--text-muted)" }}>
               {new Date(lastSync).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
             </span>
           )}
@@ -171,6 +173,12 @@ export default function CreditSpreadPanel() {
             />
           </RegimeStrip>
         )}
+
+        <FreshnessRail
+          schedule={CREDIT_SPREAD_REFRESH}
+          asOf={current.date}
+          testId="credit-spread-freshness-rail"
+        />
       </div>
 
       <div className="breadth-history-block" data-testid="credit-spread-chart-section">
@@ -207,7 +215,7 @@ export default function CreditSpreadPanel() {
         <div
           style={{
             fontFamily: "var(--font-mono)",
-            fontSize: "9px",
+            fontSize: "var(--text-meta)",
             color: "var(--text-muted)",
             marginTop: "8px",
           }}

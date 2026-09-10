@@ -114,6 +114,8 @@ readonly -a SOURCES=(
   scripts/drift_audit.py
   scripts/disk_cleanup.py
   scripts/radon-app-runtime.sh
+  scripts/radon-docker-gw.sh
+  docker-compose.yml
   config/sudoers.d/radon-deploy
   config/sudoers.d/radon-monitor
   config/sudoers.d/radon-ops
@@ -124,6 +126,7 @@ readonly -a SOURCES=(
   services/radon-ib-watchdog.service
   services/radon-ib-watchdog.timer
   services/radon-ib-gateway.service
+  services/radon-ib-gateway-remote.service
   services/radon-api.service
   services/radon-monitor.service
   services/radon-relay.service
@@ -139,6 +142,13 @@ readonly -a SOURCES=(
   services/radon-drift-audit.timer
   services/radon-nextjs-db-watchdog.service
   services/radon-nextjs-db-watchdog.timer
+  services/radon-api.service.d/runtime-container.conf
+  services/radon-nextjs.service.d/runtime-container.conf
+  services/radon-relay.service.d/runtime-container.conf
+  services/radon-monitor.service.d/runtime-container.conf
+  services/radon-newsfeed.service.d/runtime-container.conf
+  services/radon-research.service
+  services/radon-research.service.d/runtime-container.conf
 )
 readonly -a LOGICAL_TARGETS=(
   /usr/local/sbin/radon-deploy-root
@@ -147,6 +157,8 @@ readonly -a LOGICAL_TARGETS=(
   /usr/local/lib/radon/drift_audit.py
   /usr/local/lib/radon/disk_cleanup.py
   /usr/local/sbin/radon-app-runtime
+  /usr/local/sbin/radon-docker-gw
+  /etc/radon/ib-gateway-compose.yml
   /etc/sudoers.d/radon-deploy
   /etc/sudoers.d/radon-monitor
   /etc/sudoers.d/radon-ops
@@ -157,6 +169,7 @@ readonly -a LOGICAL_TARGETS=(
   /etc/systemd/system/radon-ib-watchdog.service
   /etc/systemd/system/radon-ib-watchdog.timer
   /etc/systemd/system/radon-ib-gateway.service
+  /etc/systemd/system/radon-ib-gateway-remote.service
   /etc/systemd/system/radon-api.service
   /etc/systemd/system/radon-monitor.service
   /etc/systemd/system/radon-relay.service
@@ -172,20 +185,32 @@ readonly -a LOGICAL_TARGETS=(
   /etc/systemd/system/radon-drift-audit.timer
   /etc/systemd/system/radon-nextjs-db-watchdog.service
   /etc/systemd/system/radon-nextjs-db-watchdog.timer
+  /etc/systemd/system/radon-api.service.d/runtime-container.conf
+  /etc/systemd/system/radon-nextjs.service.d/runtime-container.conf
+  /etc/systemd/system/radon-relay.service.d/runtime-container.conf
+  /etc/systemd/system/radon-monitor.service.d/runtime-container.conf
+  /etc/systemd/system/radon-newsfeed.service.d/runtime-container.conf
+  /etc/systemd/system/radon-research.service
+  /etc/systemd/system/radon-research.service.d/runtime-container.conf
 )
 readonly -a MODES=(
-  0755 0755 0755 0644 0644 0755
+  0755 0755 0755 0644 0644 0755 0755 0644
   0440 0440 0440 0440
   0644
   0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644
+  0644 0644 0644 0644 0644 0644
   0644 0644 0644 0644 0644
+  0644 0644
 )
 readonly -a KINDS=(
-  shell shell shell python python shell
+  shell shell shell python python shell shell compose
   sudoers sudoers sudoers sudoers
   polkit
   systemd systemd systemd systemd systemd systemd systemd systemd systemd systemd
   systemd systemd systemd systemd systemd systemd systemd systemd systemd systemd
+  systemd
+  dropin dropin dropin dropin dropin
+  systemd dropin
 )
 
 [[ "${#SOURCES[@]}" -eq "${#LOGICAL_TARGETS[@]}" && \
@@ -231,25 +256,141 @@ STAGE_DIR=""
 BACKUP_DIR=""
 TRANSACTION_ACTIVE=0
 TRANSACTION_COMMITTED=0
-DAEMON_RELOAD_ATTEMPTED=0
+DAEMON_RELOAD_FAILED=0
 declare -a TRANSACTION_TARGETS=()
 declare -a BACKUP_EXISTED=()
 
-rollback_bundle() {
-  local index target
-  for ((index=${#TRANSACTION_TARGETS[@]} - 1; index >= 0; index--)); do
-    target="${TRANSACTION_TARGETS[$index]}"
-    rm -f -- "$target"
-    if [[ "${BACKUP_EXISTED[$index]:-0}" == "1" ]]; then
-      mkdir -p "$(dirname "$target")"
-      cp -a -- "$BACKUP_DIR/$index" "$target"
-    fi
-  done
-  if [[ "$DAEMON_RELOAD_ATTEMPTED" == "1" ]]; then
-    # The in-memory unit graph may reflect the rejected bundle. A second
-    # reload is intentionally forbidden, so readiness remains withdrawn.
-    rm -f -- "$READY_PATH"
+restore_target() {
+  local index="$1" target="$2"
+  rm -f -- "$target"
+  if [[ "${BACKUP_EXISTED[$index]:-0}" == "1" ]]; then
+    mkdir -p "$(dirname "$target")"
+    cp -a -- "$BACKUP_DIR/$index" "$target"
   fi
+}
+
+rollback_bundle() {
+  # READY_PATH is the last transaction target. Put it back LAST, so the root
+  # helper's KILL (5s after its TERM) landing mid-rollback leaves readiness
+  # withdrawn rather than published over a half-restored bundle.
+  local index ready_index=$(( ${#TRANSACTION_TARGETS[@]} - 1 ))
+  for ((index=ready_index - 1; index >= 0; index--)); do
+    restore_target "$index" "${TRANSACTION_TARGETS[$index]}"
+  done
+  if [[ "$DAEMON_RELOAD_FAILED" == "1" ]]; then
+    # systemd refused the reload, so the in-memory unit graph is unknown. A
+    # second reload is intentionally forbidden, so readiness stays withdrawn.
+    rm -f -- "$READY_PATH"
+  else
+    # Every other uncommitted exit (the root sync's deadline TERM, a readiness
+    # publish failure) restored the previous bundle above, and the previous
+    # marker describes that bundle. Leaving it withdrawn sent the next deploy
+    # job to the legacy runner on a host whose app units carry container
+    # drop-ins. R-440.
+    restore_target "$ready_index" "$READY_PATH"
+  fi
+}
+
+# Shared with deploy-root-helper.sh and setup-vps.sh, byte-for-byte;
+# cloud/tests/test_rel234_compose_gate.py pins the copies identical. R-635.
+compose_body_is_valid() {
+  local candidate="$1" dest="$2"
+  local body render_env
+
+  # Comments must never satisfy or trip a structural gate.
+  body="$(grep -Ev '^[[:space:]]*#' "$candidate")" || body=""
+
+  # Early-exiting consumers must not SIGPIPE a producer under pipefail:
+  # a failed producer inverts both required matches and forbidden-match guards.
+  grep -Eq '^services:' <<< "$body" || {
+    echo "compose validation failed: ${dest} declares no services" >&2
+    return 1
+  }
+  grep -Eq '^[[:space:]]+container_name:[[:space:]]*ib-gateway[[:space:]]*$' <<< "$body" || {
+    echo "compose validation failed: ${dest} does not pin container_name ib-gateway" >&2
+    return 1
+  }
+  if grep -Eq "^[[:space:]]*privileged:[[:space:]]*[\"']?true" <<< "$body"; then
+    echo "compose validation failed: ${dest} requests privileged" >&2
+    return 1
+  fi
+  # The Gateway body's only volume is the named ib-config volume, so any
+  # short-form entry whose source is an absolute host path (quoted or not)
+  # is a host mount root must not perform. There is no allowlist.
+  if grep -Eq "^[[:space:]]*-[[:space:]]*[\"']?/" <<< "$body"; then
+    echo "compose validation failed: ${dest} binds an absolute host path" >&2
+    return 1
+  fi
+  if grep -Eq "type:[[:space:]]*[\"']?bind" <<< "$body"; then
+    echo "compose validation failed: ${dest} declares a long-form bind mount" >&2
+    return 1
+  fi
+  if grep -Eq "source:[[:space:]]*[\"']?/" <<< "$body"; then
+    echo "compose validation failed: ${dest} declares an absolute long-form source" >&2
+    return 1
+  fi
+  if grep -q 'docker\.sock' <<< "$body"; then
+    echo "compose validation failed: ${dest} mounts the docker socket" >&2
+    return 1
+  fi
+  # R-668 (REL-249): every host-namespace join is denied, not only pid — ipc,
+  # userns_mode, uts and cgroup widen the container's runtime the same way.
+  if grep -Eq '^[[:space:]]*(pid|ipc|userns_mode|uts|cgroup):' <<< "$body"; then
+    echo "compose validation failed: ${dest} joins a host namespace (pid/ipc/userns_mode/uts/cgroup)" >&2
+    return 1
+  fi
+  if grep -Eq "^[[:space:]]*network_mode:[[:space:]]*[\"']?host" <<< "$body"; then
+    echo "compose validation failed: ${dest} requests host networking" >&2
+    return 1
+  fi
+  if grep -Eq '^[[:space:]]*(cap_add|devices):' <<< "$body"; then
+    echo "compose validation failed: ${dest} adds capabilities or devices" >&2
+    return 1
+  fi
+  if grep -Eq "^[[:space:]]*user:[[:space:]]*[\"']?(root|0)[\"']?[[:space:]]*$" <<< "$body"; then
+    echo "compose validation failed: ${dest} runs as root in the container" >&2
+    return 1
+  fi
+  # security_opt may only tighten: block form, no-new-privileges:true entries
+  # and nothing else. The inline form is refused outright.
+  if grep -Eq '^[[:space:]]*security_opt:[[:space:]]*[^[:space:]]' <<< "$body"; then
+    echo "compose validation failed: ${dest} uses inline security_opt" >&2
+    return 1
+  fi
+  if ! awk '
+    /^[[:space:]]*security_opt:[[:space:]]*$/ { inso = 1; next }
+    inso == 1 && /^[[:space:]]*-[[:space:]]*/ {
+      entry = $0
+      sub(/^[[:space:]]*-[[:space:]]*/, "", entry)
+      gsub(/[" \t]/, "", entry)
+      if (entry != "no-new-privileges:true") { bad = 1; exit }
+      next
+    }
+    inso == 1 { inso = 0 }
+    END { exit bad }
+  ' <<< "$body"; then
+    echo "compose validation failed: ${dest} sets a security_opt beyond no-new-privileges" >&2
+    return 1
+  fi
+  # Render check where the tooling exists (the deploy host has it; a test
+  # host may not). RADON_COMPOSE_ENV_FILE is pointed at an empty file so the
+  # env_file directive resolves without reading production secrets.
+  if command -v docker >/dev/null 2>&1 && \
+     docker compose version >/dev/null 2>&1; then
+    render_env="$(mktemp)" || {
+      echo "compose validation failed: ${dest} render env could not be created" >&2
+      return 1
+    }
+    if ! RADON_COMPOSE_ENV_FILE="$render_env" docker compose \
+        -f "$candidate" --project-name radon-compose-validate \
+        config --quiet >/dev/null 2>&1; then
+      rm -f -- "$render_env"
+      echo "compose validation failed: ${dest} does not render with docker compose config" >&2
+      return 1
+    fi
+    rm -f -- "$render_env"
+  fi
+  return 0
 }
 
 cleanup() {
@@ -308,6 +449,12 @@ for index in "${!SOURCES[@]}"; do
       "$NODE_BIN" --check < "$staged_path" || \
         die "polkit syntax validation failed: $relative_source"
       ;;
+    # The Gateway compose body radon-docker-gw runs as root. Same gate the
+    # deploy helper's refresh_install_file applies.
+    compose)
+      compose_body_is_valid "$staged_path" "$relative_source" || \
+        die "compose validation failed: $relative_source"
+      ;;
     python)
       # Parse only. Importing or compiling to disk would execute or cache
       # candidate code during a privileged transaction.
@@ -316,6 +463,41 @@ for index in "${!SOURCES[@]}"; do
       ;;
     systemd)
       SYSTEMD_CANDIDATES+=("$staged_path")
+      ;;
+    dropin)
+      # Kept byte-for-byte in step with dropin_body_is_valid() in
+      # deploy-root-helper.sh; test_rel133_control_plane_recovery.py pins the
+      # two gates against each other. R-394.
+      # NOT Type=simple only: R-391 moved the monitor and relay drop-ins to
+      # Type=notify + WatchdogSec because forcing simple made systemd stop
+      # requiring keepalives, and a relay with a dead socket sat
+      # `active (running)` forever. Both gates refused what the repo ships.
+      grep -qE '^Type=(simple|notify)$' "$staged_path" || \
+        die "drop-in must set Type=simple or Type=notify: $relative_source"
+      grep -q '^ExecStart=/usr/local/sbin/radon-app-runtime run %n$' "$staged_path" || \
+        die "drop-in must ExecStart radon-app-runtime: $relative_source"
+      grep -q '^ExecStartPre=$' "$staged_path" || \
+        die "drop-in must reset ExecStartPre: $relative_source"
+      grep -q 'radon-ib-gateway' "$staged_path" && \
+        die "drop-in must not mention radon-ib-gateway: $relative_source"
+      grep -qE '^Exec[A-Za-z]*=[^ ]*/home/radon' "$staged_path" && \
+        die "drop-in must not execute from /home/radon: $relative_source"
+      # A drop-in is only parsed by `systemd-analyze verify` beside its base
+      # unit, so stage the pair and hand the BASE unit to the verifier. Without
+      # this the artifacts that define five root-run units skipped verification
+      # entirely. R-394.
+      dropin_base_name="$(basename "$(dirname "$relative_source")" .d)"
+      dropin_base_source="$CLOUD_ROOT/services/$dropin_base_name"
+      if [[ -f "$dropin_base_source" && ! -L "$dropin_base_source" ]]; then
+        dropin_verify_dir="$STAGE_DIR/verify/$index"
+        mkdir -p "$dropin_verify_dir/${dropin_base_name}.d"
+        install -m 0644 "$dropin_base_source" "$dropin_verify_dir/$dropin_base_name"
+        install -m 0644 "$staged_path" \
+          "$dropin_verify_dir/${dropin_base_name}.d/$(basename "$relative_source")"
+        SYSTEMD_CANDIDATES+=("$dropin_verify_dir/$dropin_base_name")
+      else
+        die "drop-in has no base unit to verify against: $relative_source"
+      fi
       ;;
     *)
       die "unknown validator for: $relative_source"
@@ -398,6 +580,7 @@ if [[ "$bundle_is_current" == "1" ]] && \
   exit 0
 fi
 
+
 atomic_install() {
   local source="$1"
   local target="$2"
@@ -459,8 +642,10 @@ cmp -s "$STAGED_MANIFEST" "$MANIFEST_PATH" || \
 mode_matches "$MANIFEST_PATH" 0644 && ownership_matches "$MANIFEST_PATH" || \
   die "installed control-plane manifest metadata verification failed"
 
-DAEMON_RELOAD_ATTEMPTED=1
-"$SYSTEMCTL_BIN" daemon-reload || die "systemd daemon reload failed"
+"$SYSTEMCTL_BIN" daemon-reload || {
+  DAEMON_RELOAD_FAILED=1
+  die "systemd daemon reload failed"
+}
 
 atomic_install "$STAGED_READY" "$READY_PATH" 0644 || \
   die "failed to publish control-plane readiness"

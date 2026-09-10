@@ -11,6 +11,8 @@ export const runtime = "nodejs";
  * Runs IB reconciliation, imports new IB trades into the Turso journal table.
  * Returns { imported, skipped } counts.
  */
+export const radonCapability = "mutate.workspace";
+
 export async function POST(): Promise<Response> {
   const access = await requireRouteAccess(undefined, {
     operatorOnly: true,

@@ -44,6 +44,8 @@ function fmtTimePST(isoTime: string): string {
   }
 }
 
+export const radonCapability = "internal";
+
 export async function GET(request: Request) {
   const limit = rateLimit(clientIp(request), { limit: SHARE_PNL_LIMIT, windowMs: SHARE_WINDOW_MS });
   if (!limit.ok) {

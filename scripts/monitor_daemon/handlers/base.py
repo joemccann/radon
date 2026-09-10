@@ -89,6 +89,9 @@ class BaseHandler(ABC):
     name: str = "base"
     interval_seconds: int = 60
     requires_market_hours: bool = True
+    # "rth" (default) = 09:30-16:00 ET. "equity_ext" = 04:00-20:00 ET so
+    # outsideRth stock fills still reach /orders after the cash close.
+    session_window: str = "rth"
 
     # Minutes past the close during which a market-hours handler may still
     # run. Consulted by the daemon gate only when the market is closed and

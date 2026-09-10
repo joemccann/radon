@@ -12,6 +12,17 @@
 import { radonFetch, RadonApiError } from "@/lib/radonApi";
 import type { LlmTool } from "@/lib/llm/provider";
 import { backendQueryPath, isBackendPathAllowed } from "@/lib/assistant/backend";
+import { authorize } from "@/lib/assistant/catalog";
+import {
+  callApi,
+  consumeSpawnBudget,
+  createAssistantTurnBudget,
+  fencePayload,
+  isOperatorPrincipal,
+  listApis,
+  type AssistantTurnBudget,
+  type PrincipalKind,
+} from "@/lib/assistant/dispatch";
 import { rankVerticalSpreads, type ChainContract, type SpreadKind } from "@/lib/assistant/spreads";
 import {
   fetchJournalRowsInRange,
@@ -35,6 +46,11 @@ export type AssistantTool = LlmTool & {
   run?: (input: Record<string, unknown>, token?: string) => Promise<unknown>;
   /** Renders a one-line confirm summary for destructive proposals. */
   summarize?: (input: Record<string, unknown>) => string;
+  /**
+   * The tool's backend target is read.spawn or internal/exec, so each call
+   * consumes the same per-turn spawn budget call_api enforces (RC-B6).
+   */
+  spawns?: true;
 };
 
 export type ToolResult = {
@@ -45,8 +61,11 @@ export type ToolResult = {
 
 export type AssistantPrincipal = {
   userId: string;
+  kind?: PrincipalKind;
   token?: string;
 };
+
+export { createAssistantTurnBudget, type AssistantTurnBudget };
 
 const READ_TIMEOUT_MS = 130_000;
 const KNOWLEDGE_TIMEOUT_MS = 30_000;
@@ -445,13 +464,27 @@ async function runEvaluate(input: Record<string, unknown>, token?: string): Prom
 
 async function runFetchBackend(
   input: Record<string, unknown>,
-  token?: string,
+  principal: AssistantPrincipal,
+  budget: AssistantTurnBudget,
 ): Promise<unknown> {
   const methodRaw = typeof input.method === "string" ? input.method.trim().toUpperCase() : "GET";
   const method = methodRaw === "POST" ? "POST" : "GET";
   const path = typeof input.path === "string" ? input.path : "";
   if (!isBackendPathAllowed(method, path)) {
     throw new Error(`Backend path is not allowed: ${method} ${path}`);
+  }
+  // Mirror call_api's authz + caps (RC-B5/B6): the fetch_backend path must
+  // enforce the operation's operatorOnly flag and count read.spawn attempts
+  // against the same per-turn budget.
+  const authz = authorize(method, path);
+  if (authz.ok) {
+    if (authz.operation.operatorOnly && !isOperatorPrincipal(principal)) {
+      throw new Error("Operator-only API. This principal cannot run it.");
+    }
+    if (authz.capability === "read.spawn") {
+      const refusal = consumeSpawnBudget(budget);
+      if (refusal) throw new Error(refusal);
+    }
   }
   const query =
     input.query && typeof input.query === "object" && !Array.isArray(input.query)
@@ -464,7 +497,7 @@ async function runFetchBackend(
   return radonFetch(backendQueryPath(path, query), {
     method,
     timeout: READ_TIMEOUT_MS,
-    token,
+    token: principal.token,
   });
 }
 
@@ -509,6 +542,7 @@ export const ASSISTANT_TOOLS: AssistantTool[] = [
     description:
       "Fetch institutional dark-pool / OTC flow analysis for a ticker. Returns net premium, sweep activity, and directional bias.",
     destructive: false,
+    spawns: true,
     input_schema: {
       type: "object",
       properties: {
@@ -527,6 +561,7 @@ export const ASSISTANT_TOOLS: AssistantTool[] = [
     name: "run_scan",
     description: "Run the market-wide flow scan and return the ranked convex opportunities.",
     destructive: false,
+    spawns: true,
     input_schema: {
       type: "object",
       properties: {},
@@ -538,6 +573,7 @@ export const ASSISTANT_TOOLS: AssistantTool[] = [
     name: "get_gex",
     description: "Fetch the current Gamma Exposure (GEX) levels: flip point, walls, magnets, and dealer bias.",
     destructive: false,
+    spawns: true,
     input_schema: {
       type: "object",
       properties: {},
@@ -742,6 +778,7 @@ export const ASSISTANT_TOOLS: AssistantTool[] = [
     description:
       "Run the full 7-milestone Radon evaluation (flow, OI, edge, structure, Kelly, decision) for a ticker. Use when the operator wants a complete thesis, not just a chain.",
     destructive: false,
+    spawns: true,
     input_schema: {
       type: "object",
       properties: {
@@ -773,7 +810,50 @@ export const ASSISTANT_TOOLS: AssistantTool[] = [
       },
       required: ["path"],
     },
-    run: (input, token) => runFetchBackend(input, token),
+  },
+  {
+    name: "list_apis",
+    description:
+      "Search the Radon HTTP API catalog. Use this before call_api when you do not know the exact path. Returns matching operations (method, path, capability, summary, input hint).",
+    destructive: false,
+    input_schema: {
+      type: "object",
+      properties: {
+        q: { type: "string", description: "Search query, e.g. watchlist or gex scan" },
+      },
+      required: ["q"],
+    },
+    run: (input) => Promise.resolve(listApis(input)),
+  },
+  {
+    name: "call_api",
+    description:
+      "Call a catalogued Radon HTTP API as the current signed-in user. Watchlist is GET/POST /api/watchlist and DELETE /api/watchlist/{symbol}. Do not guess paths; use list_apis first. Orders cannot be placed through this tool (use place_order). Admin, IB restart, and /pi/exec are refused.",
+    destructive: false,
+    input_schema: {
+      type: "object",
+      properties: {
+        method: {
+          type: "string",
+          enum: ["GET", "POST", "PUT", "PATCH", "DELETE"],
+          description: "HTTP method. Default GET.",
+        },
+        path: {
+          type: "string",
+          description: "HTTP path beginning with /, e.g. /api/watchlist or /quote/AAPL",
+        },
+        query: {
+          type: "object",
+          additionalProperties: { type: "string" },
+          description: "Optional query string fields",
+        },
+        body: {
+          type: "object",
+          description: "JSON body for POST/PUT/PATCH/DELETE. Ignored on GET. Max 8KB.",
+        },
+      },
+      required: ["path"],
+    },
   },
   {
     name: "place_order",
@@ -861,6 +941,7 @@ export async function executeTool(
   name: string,
   input: Record<string, unknown>,
   principal: AssistantPrincipal,
+  budget: AssistantTurnBudget = createAssistantTurnBudget(),
 ): Promise<ToolResult> {
   if (!principal?.userId) {
     return { ok: false, error: "Verified principal required." };
@@ -869,12 +950,35 @@ export async function executeTool(
   if (!tool) {
     return { ok: false, error: `Unknown tool: ${name}` };
   }
-  if (tool.destructive || !tool.run) {
+  if (tool.destructive) {
     return { ok: false, error: `Tool ${name} is destructive and requires user confirmation.` };
   }
+  // A cancelled turn starts no new work; nobody is left to render it (R-453).
+  if (budget.signal?.aborted) {
+    return { ok: false, error: "Turn cancelled; no further tool calls." };
+  }
   try {
+    if (name === "call_api") {
+      return callApi(input, principal, budget);
+    }
+    if (name === "fetch_backend") {
+      const data = await runFetchBackend(input, principal, budget);
+      return { ok: true, data: fencePayload(data) };
+    }
+    if (!tool.run) {
+      return { ok: false, error: `Tool ${name} cannot be executed.` };
+    }
+    // RC-B6: named tools whose backend target spawns a subprocess share the
+    // per-turn spawn budget with call_api and fetch_backend.
+    if (tool.spawns) {
+      const refusal = consumeSpawnBudget(budget);
+      if (refusal) return { ok: false, error: refusal };
+    }
     const data = await tool.run(input, principal.token);
-    return { ok: true, data };
+    // RC-B7: every non-knowledge result is neutralized + fenced before it
+    // enters the model's instruction stream (knowledge tools go through the
+    // loop's isolation pass instead).
+    return { ok: true, data: isKnowledgeTool(name) ? data : fencePayload(data) };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Tool execution failed.";
     return { ok: false, error: message };

@@ -164,7 +164,7 @@ class TestUnitFilesystemSandbox:
         assert "/home/radon/radon-cloud/.env" in unit
 
     # TEST_AUDIT T-134: a0716084 moved the host secrets to /etc/radon/env
-    # (setup-vps.sh, 0600 radon:radon) and this unit runs User=radon. The
+    # (setup-vps.sh, 0640 root:radon) and this unit runs User=radon. The
     # test above matched "/home/radon/radon-cloud/.env" against a COMMENT,
     # so the sandbox stayed pinned to a path the delta emptied while the
     # agent could read IB Flex, Clerk and UW secrets off the new one.

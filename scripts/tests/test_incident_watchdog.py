@@ -6,6 +6,9 @@ testable with pinned clocks and synthetic bodies.
 """
 
 import json
+import os
+import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -448,3 +451,38 @@ class TestScopedResolution:
             by_fingerprint[payload["fingerprint"]] = payload["status"]
         assert by_fingerprint["service-down:fastapi"] == "resolved"
         assert by_fingerprint["watchdog-probe-dead:freshness"] == "open"
+
+
+class TestSystemdDashMImport:
+    """systemd ExecStart is `python -m scripts.incident_watchdog --once`
+    from the repo root with no PYTHONPATH. pytest prepends scripts/, so
+    in-process imports cannot see this topology."""
+
+    def test_dash_m_once_resolves_db_without_pythonpath(self):
+        """Page 05511a4f (2026-08-28 16:05Z): R-325's
+        `from db.service_cycle import service_cycle` raised
+        ModuleNotFoundError: No module named 'db' and parked the oneshot
+        Result=exit-code / NRestarts=0.
+        """
+        repo = Path(__file__).resolve().parents[2]
+        env = os.environ.copy()
+        env["PYTHONPATH"] = ""
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import runpy\n"
+                "runpy.run_module('scripts.incident_watchdog.__main__',"
+                " run_name='not_main')\n"
+                "from db.service_cycle import service_cycle\n"
+                "print(service_cycle.__module__)\n",
+            ],
+            cwd=repo,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert "db.service_cycle" in proc.stdout
+        assert "No module named 'db'" not in proc.stderr

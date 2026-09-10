@@ -4,6 +4,8 @@
 **Author:** AI Boom Watch  
 **Type:** quant memo. Primary sources only. Confidence labeled. Not a forecast.
 
+**Historical scope:** This memo preserves the 27 Aug 2026 research snapshot and the explicitly dated 28 Aug supplements. Its prices, availability, source observations, and proposed build steps are historical. For the current implementation, see [AI infrastructure design](ai-infrastructure-plan.md), [collection operations](ai-infrastructure-operations.md), and [source verification](ai-infrastructure-verification.md).
+
 **How to use this:** pane-1 (OpenRouter levels, Vercel mix/spend, Portkey levels if the scrape holds, gpurentalprices GPU $, residual load) is the tradeable tape. Capex and interconnect queues confirm 2–4 quarters late. Cash conversion is already flashing *financed build*, not *demand peak*. Do not blend these into one 0–100 index.
 
 ---

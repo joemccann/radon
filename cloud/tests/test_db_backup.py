@@ -3,7 +3,9 @@
 import importlib.util
 import io
 import pathlib
+import re
 import sqlite3
+import time
 import sys
 
 import pytest
@@ -103,8 +105,14 @@ class TestSelectPrunable:
 
     def test_keeps_dump_inside_retention_boundary(self):
         now = 1_000_000 * DAY
-        entries = [("radon-edge.sql.gz", now - 30 * DAY + 60)]
+        entries = [("radon-edge.sql.gz", now - db_backup.RETENTION_DAYS * DAY + 60)]
         assert db_backup.select_prunable(entries, now) == []
+
+    def test_local_retention_is_the_operator_window(self):
+        # 2026-08-29: 7 days on-box, B2 holds a year. Thirty days of ~570 MB
+        # dumps were 13 G of the 75 G root fs the night it filled.
+        assert db_backup.RETENTION_DAYS == 7
+        assert db_backup.REMOTE_RETENTION_DAYS > db_backup.RETENTION_DAYS
 
     def test_never_touches_non_dump_files(self):
         now = 1_000_000 * DAY
@@ -115,6 +123,33 @@ class TestSelectPrunable:
         now = 1_000_000 * DAY
         entries = [("radon-x.sql.gz", now - 8 * DAY)]
         assert db_backup.select_prunable(entries, now, retention_days=7) == ["radon-x.sql.gz"]
+
+    def test_offbox_names_gate_the_prune_when_given(self):
+        # R-445: with a B2 config present, age alone never unlinks; the dump
+        # must also be in the confirmed off-box set.
+        now = 1_000_000 * DAY
+        entries = [("radon-a.sql.gz", now - 9 * DAY), ("radon-b.sql.gz", now - 8 * DAY)]
+        assert db_backup.select_prunable(entries, now, offbox={"radon-b.sql.gz"}) == [
+            "radon-b.sql.gz"
+        ]
+        assert db_backup.select_prunable(entries, now, offbox=set()) == []
+        assert db_backup.select_prunable(entries, now, offbox=None) == [
+            "radon-a.sql.gz",
+            "radon-b.sql.gz",
+        ]
+
+
+class TestRetentionTextMatchesTheWindow:
+    def test_no_thirty_day_local_window_claims_remain(self):
+        # 1cb81bc9 cut RETENTION_DAYS to 7; five docstrings and comments kept
+        # describing a 30-day / 30-dump local window. R-445.
+        source = (ROOT / "scripts" / "db_backup.py").read_text(encoding="utf-8")
+        stale = [
+            line.strip()
+            for line in source.splitlines()
+            if re.search(r"\b30[- ](day|dump)s?\b", line)
+        ]
+        assert stale == []
 
 
 def _make_source_db():
@@ -251,3 +286,36 @@ class TestDumpRoundTrip:
         db_backup.dump_database(TrackingDb(src), io.StringIO(), batch_size=1)
         assert statements[0] == "BEGIN TRANSACTION"
         assert statements[-1] == "ROLLBACK"
+
+
+class TestRel185LocalRetentionValve:
+    """REL-185 (R-517): a sustained B2 outage must not grow the local dump
+    dir without bound — a hard count valve prunes the oldest over the cap
+    even when nothing is off-box-confirmed, and says so distinctly."""
+
+    def _aged_entries(self, n: int) -> list[tuple[str, float]]:
+        now = time.time()
+        return [
+            (f"radon-{i:03d}.sql.gz", now - (100 - i) * 86_400)
+            for i in range(n)
+        ]
+
+    def test_unconfirmed_dumps_over_the_cap_are_pruned_oldest_first(self):
+        entries = self._aged_entries(100)
+        now = time.time()
+        # Nothing confirmed: the age-based prune keeps everything (R-445)...
+        assert db_backup.select_prunable(entries, now, offbox=set()) == []
+        # ...but the valve bounds the count.
+        valve = db_backup.select_hard_valve(entries)
+        assert len(valve) == 100 - db_backup.LOCAL_DUMP_HARD_CAP
+        assert valve[0] == "radon-000.sql.gz"  # oldest first
+        kept = {name for name, _ in entries} - set(valve)
+        assert f"radon-099.sql.gz" in kept  # newest always kept
+
+    def test_under_the_cap_the_valve_is_inert(self):
+        entries = self._aged_entries(db_backup.LOCAL_DUMP_HARD_CAP)
+        assert db_backup.select_hard_valve(entries) == []
+
+    def test_non_dump_files_never_counted_or_pruned(self):
+        entries = self._aged_entries(5) + [("stray.txt", 0.0)] * 40
+        assert db_backup.select_hard_valve(entries) == []

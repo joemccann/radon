@@ -69,7 +69,7 @@ export function MicrostructureStrip({
         borderRadius: "4px",
         background: "color-mix(in srgb, var(--bg-panel-raised) 60%, transparent)",
         fontFamily: "var(--font-mono)",
-        fontSize: "11px",
+        fontSize: "var(--text-meta)",
       }}
     >
       <Metric label="IMBALANCE">

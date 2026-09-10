@@ -8,6 +8,7 @@ CI Python now uses astral-sh/setup-uv (node24) instead of setup-python.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import yaml
@@ -65,3 +66,74 @@ def test_node20_action_pins_are_gone() -> None:
     blob = "\n".join(p.read_text(encoding="utf-8") for p in WORKFLOWS.glob("*.yml"))
     for sha in NODE20_PINS:
         assert sha not in blob, f"stale node20 pin {sha}"
+
+
+# Binaries fetched inside `run:` steps are pinned like actions are. A
+# `releases/latest` download is a mutable reference: the artifact under it
+# changes without any diff in this repo.
+def _run_scripts() -> list[tuple[str, str]]:
+    found = []
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+        for job_name, job in (workflow.get("jobs") or {}).items():
+            for step in job.get("steps") or []:
+                run = step.get("run")
+                if run:
+                    found.append((f"{path.name}:{job_name}:{step.get('name', '')}", run))
+    return found
+
+
+def test_run_steps_never_download_releases_latest() -> None:
+    offenders = [where for where, run in _run_scripts() if "releases/latest" in run]
+    assert offenders == [], f"unpinned releases/latest download in {offenders}"
+
+
+def test_caddy_install_is_version_pinned_and_checksum_verified() -> None:
+    steps = [run for where, run in _run_scripts() if "caddyserver/caddy" in run]
+    assert steps, "no workflow step installs caddy"
+    for run in steps:
+        assert re.search(r'ver="\d+\.\d+\.\d+"', run), run
+        # 2026-09-07: fetching caddy_<ver>_checksums.txt from the same host, in
+        # the same breath as the tarball, verified only that the download
+        # matched whatever that endpoint served — an attacker who can replace
+        # one can replace the other and the check still passes. The expected
+        # digest is now a reviewed literal in the workflow.
+        assert "_checksums.txt" not in run, (
+            "the digest must not be fetched from the same host as the artifact"
+        )
+        assert re.search(r'sha512="[0-9a-f]{128}"', run), (
+            f"no pinned sha512 literal in the caddy install step: {run}"
+        )
+        assert "sha512sum -c -" in run, run
+
+
+def test_ci_caddy_version_equals_the_production_apt_pin() -> None:
+    """T-417: CI's frozen caddy must be the version production installs.
+
+    The pin itself is correct supply-chain hardening, but it replaced a
+    ``releases/latest`` fetch whose whole purpose was to let
+    cloud/tests/test_caddy_edge_timeouts.py observe a ``lb_retry_match``
+    semantics change. Frozen CI + an unpinned ``apt-get install -y caddy``
+    against the Cloudsmith ``stable`` repo means CI tests a binary
+    production stopped running, on the one path (POST /api/orders/place)
+    that has no idempotency key and whose failure mode is a duplicate
+    order. Version equality restores the signal: a bump is now a
+    deliberate two-line diff that re-runs the edge tests.
+    """
+    ci_runs = [run for where, run in _run_scripts() if "caddyserver/caddy" in run]
+    assert ci_runs, "no workflow step installs caddy"
+    ci_versions = {m for run in ci_runs for m in re.findall(r'ver="(\d+\.\d+\.\d+)"', run)}
+    assert len(ci_versions) == 1, f"workflows disagree on the caddy version: {ci_versions}"
+
+    setup = (ROOT / "cloud" / "scripts" / "setup-vps.sh").read_text(encoding="utf-8")
+    prod = re.findall(r'readonly CADDY_VERSION="(\d+\.\d+\.\d+)"', setup)
+    assert len(prod) == 1, "setup-vps.sh must declare exactly one CADDY_VERSION"
+    assert re.search(r'apt-get install -y caddy="\$\{CADDY_VERSION\}"', setup), (
+        "setup-vps.sh must install the pinned caddy version, not the "
+        "floating Cloudsmith `stable` head"
+    )
+    assert prod[0] == ci_versions.pop(), (
+        "CI caddy `ver=` and setup-vps.sh CADDY_VERSION have drifted. "
+        "CI would then exercise lb_retry_match on a binary production does "
+        "not run. Bump both together."
+    )

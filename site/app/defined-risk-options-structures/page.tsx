@@ -6,10 +6,11 @@ import { ScrollProgress } from "@/components/atoms/ScrollProgress";
 import { SectionHeading } from "@/components/atoms/SectionHeading";
 import { SectionRule } from "@/components/atoms/SectionRule";
 import { SignalPill } from "@/components/atoms/SignalPill";
+import { CopyAgentPromptBar } from "@/components/molecules/CopyAgentPromptBar";
 import { PlateFrame } from "@/components/molecules/PlateFrame";
+import { ClusterCta } from "@/components/sections/ClusterCta";
 import { EditorialFooter } from "@/components/sections/EditorialFooter";
 import { EditorialHeader } from "@/components/sections/EditorialHeader";
-import { DEMO_URL } from "@/lib/editorial-content";
 import {
   catalogCounts,
   faqEntries,
@@ -146,7 +147,7 @@ function StructureFamilyTable({
 
 export default function DefinedRiskOptionsStructuresPage() {
   return (
-    <div className="min-h-screen bg-canvas font-serif text-[19px] leading-[1.62] text-primary">
+    <div className="min-h-screen bg-canvas font-sans text-[16px] leading-[1.55] text-primary">
       <ScrollProgress />
       <a
         href="#main-content"
@@ -200,6 +201,7 @@ export default function DefinedRiskOptionsStructuresPage() {
               {catalogCounts.conditional} are conditional: defined or undefined
               depending on how strikes and tenors are set.
             </RevealOnScroll>
+            <CopyAgentPromptBar capabilityId="structures" />
           </div>
         </section>
 
@@ -293,7 +295,7 @@ export default function DefinedRiskOptionsStructuresPage() {
             </RevealOnScroll>
             <RevealOnScroll>
               <PlateFrame
-                figNo="Table 1"
+                figNo="Figure 1"
                 figTitle={`The structure catalog · ${catalogCounts.total} entries · ${catalogCounts.families} families`}
                 source="options-structures.json"
                 confidence="Canonical"
@@ -336,7 +338,7 @@ export default function DefinedRiskOptionsStructuresPage() {
             </RevealOnScroll>
             <RevealOnScroll className="mb-[42px]">
               <PlateFrame
-                figNo="Table 2"
+                figNo="Figure 2"
                 figTitle="Guard decision ladder · evaluated top down"
                 source="options-structures.md"
                 confidence="Canonical"
@@ -391,7 +393,7 @@ export default function DefinedRiskOptionsStructuresPage() {
             </RevealOnScroll>
             <RevealOnScroll className="mb-[42px]">
               <PlateFrame
-                figNo="Exhibit 3"
+                figNo="Figure 3"
                 figTitle={`Allowed with undefined risk · ${catalogCounts.undefinedAllowed} of ${catalogCounts.allowed} allows`}
                 source="options-structures.json"
                 confidence="Canonical"
@@ -470,7 +472,7 @@ export default function DefinedRiskOptionsStructuresPage() {
             </RevealOnScroll>
             <RevealOnScroll className="mb-[42px]">
               <PlateFrame
-                figNo="Table 4"
+                figNo="Figure 4"
                 figTitle="Registry plays · catalog structures they select"
                 source="Registry"
                 confidence="Canonical"
@@ -555,35 +557,11 @@ export default function DefinedRiskOptionsStructuresPage() {
 
         <SectionRule />
 
-        {/* TODO(integrator): swap for the shared ClusterCta organism. */}
-        <section id="cta" className="px-8 py-[clamp(64px,9vw,128px)]">
-          <div className="mx-auto max-w-[1140px]">
-            <RevealOnScroll>
-              <h2 className="editorial-thesis mb-[18px] text-primary">
-                Run it against the live tape.
-              </h2>
-              <p className="mb-9 max-w-[58ch] text-secondary">
-                The free demo shows the scanner, the regime models, and the
-                gate discipline this catalog feeds, on seeded data with no
-                brokerage connection.
-              </p>
-              <div className="flex flex-wrap items-center gap-7">
-                <a
-                  href={DEMO_URL}
-                  className="inline-block rounded-[4px] border border-grid px-[18px] py-[11px] font-mono text-[12px] uppercase tracking-[0.06em] text-primary transition-colors hover:border-signal-deep hover:text-signal-deep"
-                >
-                  Try the free demo
-                </a>
-                <Link
-                  href="/#registry"
-                  className="font-mono text-[12px] uppercase tracking-[0.06em] text-secondary underline decoration-grid underline-offset-4 transition-colors hover:text-signal-deep hover:decoration-signal-deep"
-                >
-                  See the plays built from these structures →
-                </Link>
-              </div>
-            </RevealOnScroll>
-          </div>
-        </section>
+        <ClusterCta
+          body="The free demo shows the scanner, the structures, and the expression path this catalog feeds, on seeded data with no brokerage connection."
+          secondaryHref="/#registry"
+          secondaryLabel="See the plays built from these structures"
+        />
 
         <EditorialFooter />
       </main>

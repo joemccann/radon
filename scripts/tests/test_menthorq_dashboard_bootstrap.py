@@ -40,10 +40,10 @@ class _FakeLocator:
     def count(self):
         return 1
 
-    def fill(self, value):
+    def fill(self, value, **_kwargs):
         self._page.filled[self._selector] = value
 
-    def click(self):
+    def click(self, **_kwargs):
         self._page.clicked.append(self._selector)
         self._page.url = self._page.post_submit_url
 
@@ -230,7 +230,7 @@ class TestBootstrapReachesTheDashboard:
         )
         orig_click = _FakeLocator.click
 
-        def _click(self):
+        def _click(self, **_kwargs):
             if self._selector == 'input[name="authorize"]':
                 self._page.clicked.append(self._selector)
                 self._page.url = (
@@ -268,15 +268,23 @@ class TestBootstrapReachesTheDashboard:
         assert recorder["storage_state_calls"] == 0, "never persist a jar for a failed login"
 
     def test_expired_session_payload_is_rejected(self, tmp_path, monkeypatch):
-        from clients.menthorq_dashboard_client import MenthorQDashboardAuthError
+        from clients import menthorq_dashboard_client as mq
 
         recorder, _page = _install_fake_playwright(
             monkeypatch,
             post_submit_url="https://dashboard.menthorq.io/en/options/exposure?symbol=MU",
             payload={"accessToken": "a.b.c", "expiresAt": int(time.time()) - 60},
         )
-        with pytest.raises(MenthorQDashboardAuthError):
+        # The fake page's wait_for_timeout returns instantly, so the session
+        # poll spins on time.monotonic() until the request budget runs out.
+        # This test needs the budget to run OUT, not to run out slowly: it
+        # burned a real 40.0s on the scripts-jm shard (CIP-001). The
+        # production default stays pinned by test_menthorq_bootstrap_deadline.
+        monkeypatch.setattr(mq, "REQUEST_PATH_AUTH_BUDGET_SECONDS", 0.5)
+        started = time.monotonic()
+        with pytest.raises(mq.MenthorQDashboardAuthError):
             _client(tmp_path)._bootstrap_dashboard_session()
+        assert time.monotonic() - started < 5.0, "the expired-session poll must exit on the injected budget"
         assert recorder["storage_state_calls"] == 0
 
 

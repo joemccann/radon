@@ -35,11 +35,38 @@ ACKNOWLEDGING_DRIFT_PREFIXES = ("unit-mismatch:", "not-installed:")
 
 
 def _unit_files() -> dict[str, pathlib.Path]:
-    return {
+    """Every unit artifact the host installs, keyed by its manifest name.
+
+    T-236: this used to glob the TOP LEVEL only, which left
+    services/radon-.service.d/common.conf -- the systemd prefix drop-in that
+    applies RADON_DB_NO_REPLICA=1 to EVERY radon-* unit (the DUR-07
+    belt-and-braces; setup-vps.sh:install_fleet_dropin installs it, and
+    drift_audit.py tracks it as `fleet-dropin`) -- with no sha256 pin at all.
+    Editing it silently was exactly the "repo and host diverge with nothing at
+    commit time saying so" hole this module exists to close, on the one file
+    whose blast radius is the whole fleet.
+
+    Drop-in confs are keyed by their path relative to services/ (e.g.
+    `radon-.service.d/common.conf`) because `common.conf` is not unique across
+    drop-in directories. install-units' manifest regex only matches bare
+    `radon-*.{service,timer}` names, so such a line is ignored there by design
+    (see test_install_units.py's malformed-line case) -- that file is installed
+    by setup-vps.sh, not by the per-release unit installer. The pin is what
+    makes an edit to it visible at review time.
+
+    `*.conf.example` is deliberately excluded: the container-cutover examples
+    are not installed anywhere (cloud/tests/test_host_runtime_without_ghcr.py
+    asserts neither bootstrap nor setup references them).
+    """
+    units = {
         p.name: p
         for p in SERVICES_DIR.iterdir()
         if p.is_file() and p.suffix in {".service", ".timer"}
     }
+    for dropin in SERVICES_DIR.glob("*.service.d/*.conf"):
+        if dropin.is_file():
+            units[dropin.relative_to(SERVICES_DIR).as_posix()] = dropin
+    return units
 
 
 def _manifest_hashes() -> dict[str, str]:
@@ -94,6 +121,53 @@ def test_changed_units_are_acknowledged_pending_install():
     assert not unacknowledged, (
         "units changed in services/ without a manifest bump or drift-allowlist "
         f"acknowledgment (root install-copy still owed): {unacknowledged}"
+    )
+
+
+def _unit_mismatch_acks() -> set[str]:
+    """`unit-mismatch:<unit>` -> the units whose install-copy is still owed."""
+    acks: set[str] = set()
+    for line in ALLOWLIST.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        drift_id, _, _reason = line.partition(" ")
+        if drift_id.startswith("unit-mismatch:"):
+            acks.add(drift_id[len("unit-mismatch:"):])
+    return acks
+
+
+def test_a_unit_mismatch_ack_pins_the_content_the_installer_will_promote():
+    """A `unit-mismatch:` ack promises a bounded pending-install window.
+
+    `install-units` reads the unit blob at the verified main tip and refuses to
+    promote it unless its hash equals the manifest entry
+    (deploy-root-helper.sh, `manifest-mismatch`). So a pin that matches neither
+    the host nor the repo does not describe a pending install at all -- no
+    automated path can ever clear it, while the ack keeps the drift audit green
+    and suppresses the only signal that an internet-facing unit is running
+    without the hardening that already landed in the repo.
+
+    The manifest header already states the rule ("that hash is pre-recorded at
+    the content the operator is expected to install"); this asserts it.
+    """
+    installed = _manifest_hashes()
+    units = _unit_files()
+    unreachable = []
+    for name in sorted(_unit_mismatch_acks()):
+        pinned = installed.get(name)
+        if pinned is None:
+            continue
+        path = units.get(name)
+        if path is None:
+            continue
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        if pinned != digest:
+            unreachable.append(f"{name} (pinned {pinned[:8]}, repo {digest[:8]})")
+    assert not unreachable, (
+        "unit-mismatch acknowledgments whose manifest pin matches neither the "
+        "repo content nor anything install-units can promote, so the pending "
+        f"install can never complete: {unreachable}"
     )
 
 
@@ -173,4 +247,42 @@ def test_every_unit_is_either_manifest_pinned_or_acked_for_a_real_reason():
     assert not orphans, (
         "units in services/ with neither a manifest entry nor an ack — they "
         f"install nowhere and nothing reports it: {orphans}"
+    )
+
+
+def test_the_fleet_wide_prefix_dropin_is_pinned():
+    """T-236: name the one file this guard used to miss, so a future refactor
+    of `_unit_files()` that narrows the glob back to the top level reds here
+    rather than silently unpinning the fleet.
+
+    `radon-.service.d/common.conf` is a systemd PREFIX drop-in: systemd applies
+    it to every unit named `radon-*`, so an unreviewed edit reaches radon-api,
+    radon-monitor, radon-nextjs and every timer oneshot at once.
+    """
+    name = "radon-.service.d/common.conf"
+    units = _unit_files()
+    assert name in units, (
+        f"{name} is not covered by the manifest guard -- the fleet-wide "
+        "drop-in can be edited with no sha256 pin"
+    )
+    digest = hashlib.sha256(units[name].read_bytes()).hexdigest()
+    assert _manifest_hashes().get(name) == digest, (
+        f"{name} content does not match its config/installed-units.sha256 "
+        "entry; bump it in the same commit as the setup-vps install_fleet_dropin "
+        "copy that puts it on the host"
+    )
+
+
+def test_radon_mcp_stripped_unit_is_pinned_without_mismatch_ack():
+    """DOC-073: after the host install-copy, a leftover unit-mismatch ack
+    stale-allowlists and a wrong digest makes install-units skip forever."""
+    name = "radon-mcp.service"
+    path = _unit_files()[name]
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    assert _manifest_hashes().get(name) == digest, (
+        f"{name} digest {digest} is not pinned (got "
+        f"{_manifest_hashes().get(name)}); install-units skips on mismatch"
+    )
+    assert name not in _acknowledged_units(), (
+        f"{name} still has a drift-allowlist ack after the host install-copy"
     )

@@ -30,7 +30,8 @@ vi.mock("@/lib/db", () => ({ resetDb: () => {},
 
 async function seedSchema(client: Client): Promise<void> {
   await client.execute(`CREATE TABLE user_profiles (
-    user_id TEXT PRIMARY KEY, username TEXT, avatar_url TEXT, updated_at TEXT NOT NULL)`);
+    user_id TEXT PRIMARY KEY, username TEXT, avatar_url TEXT,
+    ui_preferences TEXT, updated_at TEXT NOT NULL)`);
   await client.execute(`CREATE TABLE bookmarks (
     id TEXT PRIMARY KEY, user_id TEXT NOT NULL, post_id TEXT NOT NULL,
     snapshot TEXT, saved_at TEXT NOT NULL, UNIQUE(user_id, post_id))`);
@@ -125,6 +126,37 @@ describe("profile", () => {
     expect(fetched.username).toBe("Joe Trader");
   });
 
+  it("PUT runs behind requireRouteAccess: allowlist denies, permitted caller saves", async () => {
+    const saved = process.env.ALLOWED_USER_IDS;
+    process.env.ALLOWED_USER_IDS = "user_someone_else";
+    try {
+      const { PUT } = await import("../app/api/profile/route");
+      const denied = await PUT(
+        req("http://localhost/api/profile", {
+          method: "PUT",
+          body: JSON.stringify({ username: "Intruder" }),
+        }),
+      );
+      expect(denied.status).toBe(403);
+      expect((await jsonOf(denied)).code).toBe("FORBIDDEN");
+      const rows = await db.execute("SELECT COUNT(*) AS n FROM user_profiles");
+      expect(Number(rows.rows[0].n)).toBe(0);
+
+      process.env.ALLOWED_USER_IDS = "user_test_1";
+      const allowed = await PUT(
+        req("http://localhost/api/profile", {
+          method: "PUT",
+          body: JSON.stringify({ username: "Joe Trader" }),
+        }),
+      );
+      expect(allowed.status).toBe(200);
+      expect((await jsonOf(allowed)).username).toBe("Joe Trader");
+    } finally {
+      if (saved === undefined) delete process.env.ALLOWED_USER_IDS;
+      else process.env.ALLOWED_USER_IDS = saved;
+    }
+  });
+
   it("PUT rejects oversized username", async () => {
     const { PUT } = await import("../app/api/profile/route");
     const res = await PUT(
@@ -212,6 +244,57 @@ describe("profile", () => {
     expect(await jsonOf(await GET())).toMatchObject({
       username: "Parallel",
       avatar_url: "https://media.radon.run/parallel.png",
+    });
+  });
+
+  it("rejects ui_preferences whose MERGED result exceeds the size limit", async () => {
+    const { PUT, GET } = await import("../app/api/profile/route");
+    const putPrefs = (tableId: string) =>
+      PUT(
+        req("http://localhost/api/profile", {
+          method: "PUT",
+          body: JSON.stringify({
+            ui_preferences: { columns: { [tableId]: { widths: "x".repeat(2000) } } },
+          }),
+        }),
+      );
+
+    // Each individual body is well under the 8KB per-request cap, so the
+    // incoming-only check accepts every one of them. The accumulated merge is
+    // what has to be bounded.
+    let rejected: Response | null = null;
+    for (let i = 0; i < 8; i += 1) {
+      const res = await putPrefs(`table_${i}`);
+      if (res.status !== 200) {
+        rejected = res;
+        break;
+      }
+    }
+    expect(rejected).not.toBeNull();
+    expect(rejected!.status).toBe(400);
+    expect((await jsonOf(rejected!)).code).toBe("VALIDATION_ERROR");
+
+    // The over-cap write must not have landed.
+    const stored = await db.execute("SELECT ui_preferences FROM user_profiles WHERE user_id = 'user_test_1'");
+    const raw = (stored.rows[0] as unknown as { ui_preferences: string | null }).ui_preferences ?? "";
+    expect(raw.length).toBeLessThanOrEqual(8 * 1024);
+    expect((await jsonOf(await GET())).ui_preferences).toBeTruthy();
+  });
+
+  it("still merges successive small ui_preferences updates", async () => {
+    const { PUT, GET } = await import("../app/api/profile/route");
+    for (const tableId of ["orders", "journal"]) {
+      const res = await PUT(
+        req("http://localhost/api/profile", {
+          method: "PUT",
+          body: JSON.stringify({ ui_preferences: { columns: { [tableId]: { pnl: true } } } }),
+        }),
+      );
+      expect(res.status).toBe(200);
+    }
+    const body = await jsonOf(await GET());
+    expect(body.ui_preferences).toMatchObject({
+      columns: { orders: { pnl: true }, journal: { pnl: true } },
     });
   });
 });

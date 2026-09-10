@@ -42,6 +42,13 @@ SCANNER = "leap_scanner_uw.py"
 PATH = "/leap/scan"
 SHED_BODY = b'{"detail": "Subprocess capacity exhausted (3 active, lane cap 3, hard cap 4)"}'
 SCRIPT_FAIL_BODY = b'{"detail": "Script leap_scanner_uw.py failed (code 1)"}'
+SLEEP_LOG = "sleeps.log"
+
+
+def _sleeps(tmp_path: Path) -> list[int]:
+    """Seconds the ladder ASKED to wait, in order (T-283)."""
+    log = tmp_path / SLEEP_LOG
+    return [int(x) for x in log.read_text().split()] if log.exists() else []
 
 
 def _free_port() -> int:
@@ -129,6 +136,34 @@ class _Stub:
         self._server.server_close()
 
 
+CLOCK_LOG = "clock.n"
+
+
+def _clock(bin_dir: Path, tmp_path: Path, step: int) -> Path:
+    """A scripted epoch: call n returns ``1700000000 + n * step``.
+
+    The wrapper reads the clock exactly twice per ladder iteration (attempt
+    start, attempt end), so ``step`` IS the wall time each attempt appears to
+    take. ``step=1`` is the instant-502 case that CI kept sampling as one
+    phantom second.
+    """
+    counter = tmp_path / CLOCK_LOG
+    path = bin_dir / "clock"
+    _executable(
+        path,
+        textwrap.dedent(
+            f"""\
+            #!/bin/bash
+            n=$(cat {str(counter)!r} 2>/dev/null || echo 0)
+            n=$((n + 1))
+            echo "$n" > {str(counter)!r}
+            echo $((1700000000 + n * {step}))
+            """
+        ),
+    )
+    return path
+
+
 def _repo(tmp_path: Path, marker: Path) -> tuple[Path, Path]:
     repo = tmp_path / "repo"
     scripts_dir = repo / "scripts"
@@ -151,6 +186,19 @@ def _repo(tmp_path: Path, marker: Path) -> tuple[Path, Path]:
 
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
+    # T-283: the retry ladder's wait is RECORDED, not spent. Driving it off
+    # real sleeps inside a `SECONDS` deadline made these cases load-bound —
+    # two of the three reds in the 2026-08-29 gate at load ~200 were here,
+    # both `assert 1 >= 2` because the budget was gone before the first retry.
+    _executable(
+        bin_dir / "sleep-recorder",
+        textwrap.dedent(
+            f"""\
+            #!/bin/bash
+            echo "$1" >> {str(tmp_path / SLEEP_LOG)!r}
+            """
+        ),
+    )
     py = bin_dir / "python3.13"
     _executable(
         py,
@@ -163,6 +211,7 @@ def _repo(tmp_path: Path, marker: Path) -> tuple[Path, Path]:
             """
         ),
     )
+    _clock(bin_dir, tmp_path, 1)
     return repo, py
 
 
@@ -173,6 +222,7 @@ def _run(
     *,
     shed_wait: str = "30",
     delay: str = "1",
+    clock_step: int = 1,
 ) -> subprocess.CompletedProcess[str]:
     env = {
         **os.environ,
@@ -180,6 +230,10 @@ def _run(
         "RADON_LEAP_REFRESH_FASTAPI_PORT": str(port),
         "RADON_LEAP_SHED_WAIT_SECS": shed_wait,
         "RADON_LEAP_REFRESH_RETRY_DELAY_SECS": delay,
+        "RADON_LEAP_SLEEP_CMD": str(repo.parent / "bin" / "sleep-recorder"),
+        "RADON_LEAP_NOW_CMD": str(
+            _clock(repo.parent / "bin", repo.parent, clock_step)
+        ),
     }
     return subprocess.run(
         ["bash", str(repo / "scripts" / WRAPPER)],
@@ -203,6 +257,7 @@ def test_capacity_502_then_ok_retries_without_direct_fallback(tmp_path: Path) ->
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert stub.calls == [PATH, PATH], stub.calls
+    assert _sleeps(tmp_path) == [1], _sleeps(tmp_path)
     assert not marker.exists(), "direct fallback must not run after a capacity shed"
     combined = (result.stdout + result.stderr).lower()
     assert "retry" in combined
@@ -222,6 +277,7 @@ def test_script_failed_502_does_not_retry_as_shed(tmp_path: Path) -> None:
 
     assert result.returncode != 0, result.stdout + result.stderr
     assert stub.calls == [PATH], stub.calls
+    assert _sleeps(tmp_path) == [], _sleeps(tmp_path)
     assert not marker.exists()
     combined = (result.stdout + result.stderr).lower()
     assert "indeterminate" in combined
@@ -235,12 +291,61 @@ def test_persistent_capacity_shed_no_duplicate_still_fails(tmp_path: Path) -> No
     port = _free_port()
 
     with _Stub(port, always_status=502, fail_body=SHED_BODY) as stub:
-        result = _run(repo, py, port, shed_wait="3", delay="1")
+        result = _run(repo, py, port, shed_wait="30", delay="10")
 
+    slept = _sleeps(tmp_path)
     assert result.returncode != 0, result.stdout + result.stderr
-    assert len(stub.calls) >= 2, stub.calls
-    assert all(c == PATH for c in stub.calls)
+    # The ladder is exact in retry COUNT: a 30s budget at a 10s delay buys
+    # three waits and a fourth POST, then gives up. The per-step VALUES are
+    # not pinned — the wrapper also charges whole seconds of attempt wall time
+    # against the budget at `date +%s` granularity, so an attempt that
+    # straddles a clock tick clips the final delay. Budgeting 30s against a
+    # 10s step keeps that jitter far below one rung; the old 3s/1s pinning of
+    # [1, 1, 1] made a single straddled tick drop a whole retry.
+    assert stub.calls == [PATH] * 4, stub.calls
+    assert len(slept) == 3, slept
+    assert all(d > 0 for d in slept), slept
+    assert sum(slept) <= 30, slept
     assert not marker.exists()
     combined = (result.stdout + result.stderr).lower()
     assert "capacity" in combined or "shed" in combined
     assert "fallback" not in combined
+
+
+def test_instant_shed_never_bills_a_phantom_second(tmp_path: Path) -> None:
+    """CI 2026-09-04, shards scripts-jm/scripts-gh: the ladder ran three POSTs
+    instead of four. `date +%s` is whole-second, so an instant 502 whose
+    request happened to straddle a boundary billed one second it never spent,
+    and a 3s budget bought two waits instead of three. With the clock pinned to
+    a 1s-per-attempt step -- the tightest reading an instant attempt can
+    produce -- the ladder must still be exact.
+    """
+    marker = tmp_path / "direct-ran"
+    repo, py = _repo(tmp_path, marker)
+    port = _free_port()
+
+    with _Stub(port, always_status=502, fail_body=SHED_BODY) as stub:
+        result = _run(repo, py, port, shed_wait="3", delay="1", clock_step=1)
+
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert stub.calls == [PATH] * 4, stub.calls
+    assert _sleeps(tmp_path) == [1, 1, 1], _sleeps(tmp_path)
+    assert not marker.exists()
+
+
+def test_slow_attempt_still_bills_its_wall_time(tmp_path: Path) -> None:
+    """REL-208 (R-573) must survive the granularity correction: an attempt that
+    genuinely takes 5s bills 4s of the budget, so a 10s budget gives up after
+    three POSTs rather than running the unit past TimeoutStartSec.
+    """
+    marker = tmp_path / "direct-ran"
+    repo, py = _repo(tmp_path, marker)
+    port = _free_port()
+
+    with _Stub(port, always_status=502, fail_body=SHED_BODY) as stub:
+        result = _run(repo, py, port, shed_wait="10", delay="1", clock_step=5)
+
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert stub.calls == [PATH] * 3, stub.calls
+    assert _sleeps(tmp_path) == [1, 1], _sleeps(tmp_path)
+    assert not marker.exists()

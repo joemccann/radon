@@ -292,7 +292,6 @@ class TestCollectorsAreNotBlind:
             "fill-monitor",
             "journal-sync",
             "flex-token-check",
-            "cash-flow-sync",
             "preset-rebalance",
         }
         missing = expected - names
@@ -301,7 +300,10 @@ class TestCollectorsAreNotBlind:
         # still carries its service_name, but `create_daemon()` does not
         # register it, so it writes no heartbeat and must not be demanded of
         # either catalog. The class-level literal is still discoverable.
+        # `cash-flow-sync` left the same way on 2026-09-02: the sFTP ingest
+        # (flex_delivery_ingest) writes the row directly now.
         assert "exit-orders" not in names
+        assert "cash-flow-sync" not in names
         assert "exit-orders" in _build_handler_service_names(scheduled_only=False)
 
     def test_scan_mirror_collector_sees_mirror_fed_scans(self):
@@ -322,6 +324,7 @@ class TestCollectorsAreNotBlind:
             "credit-spread",
             "catalysts",
             "informed-flow",
+            "cash-flow-sync",
         }
         missing = expected - names
         assert not missing, (

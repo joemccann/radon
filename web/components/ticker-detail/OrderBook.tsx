@@ -104,11 +104,11 @@ export function OrderBook({
   );
 
   return (
-    <div className="book-window">
+    <div className="book-window" data-testid="book-window">
       <div className="book-window-head">
         <span className="book-sym">
           {symbolLabel}
-          <span className="book-kind">{kindLabel}</span>
+          <span className="book-kind" data-testid="book-kind">{kindLabel}</span>
         </span>
         <span className="book-head-stat">
           {head.lastLabel} <b>{head.last != null ? fmtDepthPrice(head.last) : "---"}</b>
@@ -123,7 +123,7 @@ export function OrderBook({
           SPRD <b>{fmtSpread(head.bid, head.ask)}</b>
         </span>
         <span className="book-head-spacer" />
-        {depth?.feed && <span className="book-feed-pill">{depth.feed}</span>}
+        {depth?.feed && <span className="book-feed-pill" data-testid="book-feed-pill">{depth.feed}</span>}
         {tapeAvailable && <button
           type="button"
           className="book-toggle"

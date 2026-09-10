@@ -19,6 +19,13 @@ export const fmtPriceOrCalculated = (n: number, isCalculated: boolean) => isCalc
 type ResolvedRealtimePrice = {
   price: number | null;
   isCalculated: boolean;
+  /**
+   * R-608: true only when the price came from the previous-session close.
+   * `isCalculated` covers that case AND a live bid/ask midpoint, and both
+   * render with the same `C` prefix — so a mark built entirely from stale
+   * closes was indistinguishable from a live mid.
+   */
+  isPreviousClose: boolean;
 };
 
 function isPositiveNumber(value: number | null | undefined): value is number {
@@ -45,7 +52,7 @@ export function resolveRealtimePrice(
       const mid = Number(((bid + ask) / 2).toFixed(4));
       // Case 1: last is outside the bid-ask spread (clearly stale)
       if (last < lo || last > hi) {
-        return { price: mid, isCalculated: true };
+        return { price: mid, isCalculated: true, isPreviousClose: false };
       }
       // Case 2: last is inside but spread is wide (>10% of mid) and last
       // diverges >5% from mid. Wide spreads make last unreliable — the mid
@@ -54,18 +61,30 @@ export function resolveRealtimePrice(
       const spreadPct = (hi - lo) / mid;
       const lastDivergence = Math.abs(last - mid) / mid;
       if (spreadPct > 0.10 && lastDivergence > 0.05) {
-        return { price: mid, isCalculated: true };
+        return { price: mid, isCalculated: true, isPreviousClose: false };
       }
     }
-    return { price: last, isCalculated: Boolean(priceData?.lastIsCalculated) };
+    return {
+      price: last,
+      isCalculated: Boolean(priceData?.lastIsCalculated),
+      isPreviousClose: false,
+    };
   }
 
   if (bid != null && ask != null) {
-    return { price: Number(((bid + ask) / 2).toFixed(4)), isCalculated: true };
+    return {
+      price: Number(((bid + ask) / 2).toFixed(4)),
+      isCalculated: true,
+      isPreviousClose: false,
+    };
   }
 
   if (isPositiveNumber(fallbackPrice)) {
-    return { price: fallbackPrice, isCalculated: fallbackIsCalculated };
+    return {
+      price: fallbackPrice,
+      isCalculated: fallbackIsCalculated,
+      isPreviousClose: false,
+    };
   }
 
   // Final fallback: previous-session close. WS broadcasts close on every tick
@@ -74,10 +93,10 @@ export function resolveRealtimePrice(
   // recent known price instead of "—".
   const close = isPositiveNumber(priceData?.close) ? priceData.close : null;
   if (close != null) {
-    return { price: close, isCalculated: true };
+    return { price: close, isCalculated: true, isPreviousClose: true };
   }
 
-  return { price: null, isCalculated: false };
+  return { price: null, isCalculated: false, isPreviousClose: false };
 }
 
 /* ─── Position math ───────────────────────────────────────── */
@@ -114,19 +133,58 @@ export function getMultiplier(pos: PortfolioPosition): number {
   return pos.structure_type === "Stock" || pos.legs.some((leg) => leg.type === "Stock") ? 1 : 100;
 }
 
-export function resolveEntryCost(pos: PortfolioPosition): number {
+/** Tooltip for any cell suppressed by `hasBlendedLegBasis`. */
+export const MIXED_BASIS_TITLE =
+  "No aggregate basis: some legs were filled this session and others carry IB's prior avgCost.";
+
+/**
+ * T-253: `basis_source: "mixed"` means SOME legs carry this session's fill
+ * VWAP while others still carry IB's lagged avgCost — roll the short leg of a
+ * debit vertical intraday and hold the long leg overnight and that is what
+ * ships. Any aggregate over those legs is the basis of a trade that was never
+ * placed, so `ib_sync.collapse_positions` publishes `entry_cost` and
+ * `max_risk` as `null` and every cell that would present one renders no value.
+ */
+export function hasBlendedLegBasis(pos: PortfolioPosition): boolean {
+  return pos.basis_source === "mixed";
+}
+
+/**
+ * Signed aggregate basis, or `null` when the legs disagree about their basis
+ * source (T-315): the blend is the basis of a trade that was never placed, so
+ * capital, average-entry, return, and close-ticket calculations must not use it.
+ */
+export function resolveEntryCost(pos: PortfolioPosition): number | null {
+  if (hasBlendedLegBasis(pos)) return null;
   if (pos.legs.length > 1) {
     return pos.legs.reduce((s, l) => {
       const sign = l.direction === "LONG" ? 1 : -1;
       return s + sign * Math.abs(l.entry_cost);
     }, 0);
   }
-  return pos.entry_cost;
+  // Only a multi-leg position can be `mixed` (one leg cannot disagree with
+  // itself), so a single leg always has a published aggregate.
+  return pos.entry_cost ?? 0;
 }
 
-export function getAvgEntry(pos: PortfolioPosition): number {
+/**
+ * The signed basis a pure combo close of `quantity` of `comboUnits` held
+ * units retires, for the ticket's realised P&L. `null` when the position has
+ * no aggregate basis, so the ticket prints no realised figure at all.
+ */
+export function resolveClosingBasis(
+  pos: PortfolioPosition,
+  quantity: number,
+  comboUnits: number,
+): number | null {
+  const entryCost = resolveEntryCost(pos);
+  return entryCost == null ? null : entryCost * (quantity / comboUnits);
+}
+
+export function getAvgEntry(pos: PortfolioPosition): number | null {
   const mult = getMultiplier(pos);
   const raw = resolveEntryCost(pos);
+  if (raw == null) return null;
   const denom = Math.abs(pos.contracts) * mult;
   // A multi-leg combo carries the net credit/debit sign (credit → negative),
   // per the "credits negative" convention. `Math.abs(pos.contracts)` keeps a
@@ -145,8 +203,9 @@ export function getAvgEntry(pos: PortfolioPosition): number {
   return isShort ? -magnitude : magnitude;
 }
 
-export function getInitialValue(pos: PortfolioPosition): number {
+export function getInitialValue(pos: PortfolioPosition): number | null {
   const raw = resolveEntryCost(pos);
+  if (raw == null) return null;
   // A multi-leg combo carries the net credit/debit sign (credit → negative).
   if (pos.legs.length > 1) return raw;
   // Single-leg: mirror getAvgEntry. A SHORT option's initial value is a premium
@@ -288,6 +347,11 @@ function isNetDebitPaid(pos: PortfolioPosition, entryCost: number): boolean {
  * and not at all otherwise (R-146). Opening credits stay unavailable.
  */
 export function resolveReturnCapital(pos: PortfolioPosition): ReturnCapitalBasis | null {
+  // A blended leg basis is not a denominator. Gate 3 sizes the 2.5% bankroll
+  // cap off this amount, and neither the max risk nor the net debit of a
+  // partially rolled structure was ever actually paid (T-253).
+  if (hasBlendedLegBasis(pos)) return null;
+
   if (normalizedRiskProfile(pos) === "defined") {
     const maxRisk = pos.max_risk;
     if (maxRisk != null && Number.isFinite(maxRisk) && maxRisk > 0) {
@@ -318,7 +382,7 @@ export function resolveReturnCapital(pos: PortfolioPosition): ReturnCapitalBasis
   }
 
   const entryCost = resolveEntryCost(pos);
-  if (isNetDebitPaid(pos, entryCost)) {
+  if (entryCost != null && isNetDebitPaid(pos, entryCost)) {
     const entryDate = String(pos.entry_date ?? "").trim();
     return {
       amount: entryCost,
@@ -350,14 +414,29 @@ export function describeReturnCapital(basis: ReturnCapitalBasis | null): string 
   return `Return on exact opening capital · ${amount} · as of ${basis.asOf}`;
 }
 
-/** Unrealized P&L $ = market value − signed entry cost. */
+/** Signed sum of leg entry values, available even when their sources differ. */
+function resolveLegPnlBasis(pos: PortfolioPosition): number | null {
+  if (pos.legs.length < 2) return resolveEntryCost(pos);
+  if (pos.legs.some((leg) => !Number.isFinite(leg.entry_cost))) return null;
+  return pos.legs.reduce((sum, leg) => {
+    const sign = leg.direction === "LONG" ? 1 : -1;
+    return sum + sign * Math.abs(leg.entry_cost);
+  }, 0);
+}
+
+/**
+ * Unrealized P&L $ = the signed sum of every leg's market value minus entry
+ * value. A mixed-provenance combo still has measurable per-leg P&L even though
+ * its aggregate basis remains unavailable for Return %, risk, and close-outs.
+ */
 export function getPnlDollars(
   pos: PortfolioPosition,
   marketValue?: number | null,
 ): number | null {
   const mv = marketValue !== undefined ? marketValue : resolveMarketValue(pos);
-  if (mv == null) return null;
-  return mv - resolveEntryCost(pos);
+  const entryCost = resolveLegPnlBasis(pos);
+  if (mv == null || entryCost == null) return null;
+  return mv - entryCost;
 }
 
 /**
@@ -417,13 +496,10 @@ function integerGcd(a: number, b: number): number {
   return a;
 }
 
-/** Natural executable spread market from cross-sided leg quotes. */
-export function resolveNaturalSpreadQuote(
+function netPositionLegs(
   ticker: string,
   position: PortfolioPosition,
-  prices: Record<string, PriceData>,
-): { bid: number; ask: number; mid: number; asOf?: string } | null {
-  if (position.legs.length < 2) return null;
+): Array<[key: string, signedContracts: number]> | null {
   const signedByKey = new Map<string, number>();
   for (const leg of position.legs) {
     if (!Number.isInteger(leg.contracts) || leg.contracts <= 0) return null;
@@ -433,7 +509,37 @@ export function resolveNaturalSpreadQuote(
     signedByKey.set(key, (signedByKey.get(key) ?? 0) + signed);
   }
   const netLegs = [...signedByKey.entries()].filter(([, signed]) => signed !== 0);
-  if (netLegs.length < 2) return null;
+  return netLegs.length >= 2 ? netLegs : null;
+}
+
+/**
+ * Scale between one executable integer-ratio BAG and one reporting contract.
+ *
+ * IB requires BAG ratios reduced by GCD, but portfolio `contracts` is the
+ * display denominator used by Avg Entry / Last. A nearly balanced 500x499
+ * holding is therefore one enormous executable BAG yet 500 reporting units.
+ */
+export function positionSpreadQuoteScale(
+  ticker: string,
+  position: PortfolioPosition,
+): number | null {
+  const netLegs = netPositionLegs(ticker, position);
+  const displayContracts = Math.abs(position.contracts);
+  if (!netLegs || !Number.isInteger(displayContracts) || displayContracts <= 0) return null;
+  const bagUnits = netLegs.map(([, signed]) => Math.abs(signed)).reduce(integerGcd);
+  const scale = displayContracts / bagUnits;
+  return Number.isFinite(scale) && scale > 0 ? scale : null;
+}
+
+/** Natural executable spread market from cross-sided leg quotes. */
+export function resolveNaturalSpreadQuote(
+  ticker: string,
+  position: PortfolioPosition,
+  prices: Record<string, PriceData>,
+): { bid: number; ask: number; mid: number; asOf?: string } | null {
+  if (position.legs.length < 2) return null;
+  const netLegs = netPositionLegs(ticker, position);
+  if (!netLegs) return null;
   const divisor = netLegs.map(([, signed]) => Math.abs(signed)).reduce(integerGcd);
   let bid = 0;
   let ask = 0;
@@ -470,8 +576,9 @@ export function resolveSpreadPriceData(
 
   const natural = resolveNaturalSpreadQuote(ticker, position, prices);
   if (!natural) return null;
-  const lo = Math.round(natural.bid * 100) / 100;
-  const hi = Math.round(natural.ask * 100) / 100;
+  const displayScale = positionSpreadQuoteScale(ticker, position) ?? 1;
+  const lo = Math.round((natural.bid / displayScale) * 100) / 100;
+  const hi = Math.round((natural.ask / displayScale) * 100) / 100;
   const mid = Number((((lo + hi) / 2)).toFixed(2));
 
   return {
@@ -612,7 +719,7 @@ export function getOptionDailyChg(pos: PortfolioPosition, prices?: Record<string
   // when the entire position was opened today.
   if (isSameDay(pos)) {
     const ec = resolveEntryCost(pos);
-    if (ec === 0) return null;
+    if (ec == null || ec === 0) return null;
     const rtMv = computeRtMv(pos, prices);
     const mv = rtMv ?? resolveMarketValue(pos);
     if (mv == null) return null;
@@ -658,7 +765,7 @@ export function getStockDailyChg(pos: PortfolioPosition, prices?: Record<string,
 
   if (isSameDay(pos)) {
     const entryCost = resolveEntryCost(pos);
-    if (entryCost === 0) return null;
+    if (entryCost == null || entryCost === 0) return null;
     const todayPnl = getTodayPnlDollars(pos, prices);
     if (todayPnl == null) return null;
     return (todayPnl / Math.abs(entryCost)) * 100;
@@ -701,8 +808,7 @@ export function getTodayPnlDollars(pos: PortfolioPosition, prices?: Record<strin
   if (isSameDay(pos)) {
     const rtMv = computeRtMv(pos, prices);
     const mv = rtMv ?? resolveMarketValue(pos);
-    if (mv == null) return null;
-    return mv - resolveEntryCost(pos);
+    return getPnlDollars(pos, mv);
   }
 
   // Prefer IB's per-position daily P&L for overnight positions

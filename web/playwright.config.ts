@@ -33,6 +33,10 @@ export default defineConfig({
   workers: 1,
   reporter: "list",
   use: {
+    // These suites intercept broker/API transport with page.route. A running
+    // service worker can own those requests before Playwright sees them.
+    // SW behavior has dedicated unit contracts; opt in explicitly for SW E2E.
+    serviceWorkers: "block",
     baseURL: `http://${HOST}:${PORT}`,
     extraHTTPHeaders: { "x-radon-authless-test": AUTHLESS_TEST_TOKEN },
     trace: "on-first-retry",
@@ -78,6 +82,13 @@ export default defineConfig({
       ...process.env,
       RADON_AUTHLESS_TEST: "1",
       RADON_AUTHLESS_TEST_TOKEN: AUTHLESS_TEST_TOKEN,
+      // Pin a Clerk publishable STUB (after the process.env spread, so it
+      // always wins): whether specs exercise the realtime socket must not
+      // depend on ambient NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY / web/.env.
+      // pk_test_* is a non-secret instance identifier, never a credential.
+      // Auth in e2e comes from the authless token above, not Clerk.
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:
+        "pk_test_cmFkb24tZTJlLXN0dWIuY2xlcmsuYWNjb3VudHMuZGV2JA",
     },
   },
 });

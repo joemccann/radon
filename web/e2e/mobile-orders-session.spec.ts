@@ -2,8 +2,14 @@
  * E2E: mobile /orders session capsule at 393x852.
  */
 import { test, expect, type Page } from "@playwright/test";
+import type { CashFlowResponse } from "../lib/useCashFlows";
 
 const OPEN_NOW = new Date("2026-07-09T15:00:00.000Z");
+const CASH_FLOWS_EMPTY = {
+  rows: [], count: 0, from_date: "2026-04-10",
+  summary: { deposits: 0, withdrawals: 0, dividends: 0, net: 0 },
+  last_synced_at: null,
+} satisfies CashFlowResponse;
 
 test.use({ viewport: { width: 393, height: 852 } });
 
@@ -64,6 +70,7 @@ function makeOpenOrder(overrides: Record<string, unknown> = {}) {
 
 async function stubOrdersPage(page: Page, orders: unknown) {
   await page.unrouteAll({ behavior: "ignoreErrors" });
+  await page.route("**/api/**", (route) => route.fulfill({ status: 503, json: { error: "Unmocked test endpoint" } }));
   await page.route("**/api/portfolio**", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(PORTFOLIO_EMPTY) }),
   );
@@ -81,7 +88,7 @@ async function stubOrdersPage(page: Page, orders: unknown) {
     }),
   );
   await page.route("**/api/cash-flows**", (route) =>
-    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ rows: [], summary: {} }) }),
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(CASH_FLOWS_EMPTY) }),
   );
   await page.route("**/api/prices**", (route) => route.abort());
   await page.route("**/api/ib-status", (route) =>
@@ -130,7 +137,7 @@ test.describe("Mobile orders session window", () => {
     await expect(optionCard.getByTestId("mobile-order-session")).toHaveText("RTH");
     await expect(stkCard.getByTestId("mobile-order-session")).toHaveText("EXT");
 
-    await optionCard.click({ force: true });
+    await optionCard.click();
     const summary = page.getByTestId("mobile-order-sheet-summary");
     await expect(summary).toContainText("Session");
     await expect(summary).toContainText(/will not fill after 16:00 ET/i);

@@ -200,7 +200,13 @@ export function parseIbHealth(
 
 /* ─── Provider ────────────────────────────────────────── */
 
-export function IBStatusProvider({ children }: { children: ReactNode }) {
+export function IBStatusProvider({
+  children,
+  authlessTestBypass = false,
+}: {
+  children: ReactNode;
+  authlessTestBypass?: boolean;
+}) {
   // Demo deployment is seed-data only — there is no IB gateway and no realtime
   // relay by design. Short-circuit with a static neutral "demo" context so we
   // never open the WS or poll /health (which 404s on /edge-health/status) and
@@ -224,11 +230,21 @@ export function IBStatusProvider({ children }: { children: ReactNode }) {
       </IBStatusContext.Provider>
     );
   }
-  return <AuthenticatedIBStatusProvider>{children}</AuthenticatedIBStatusProvider>;
+  return (
+    <AuthenticatedIBStatusProvider authlessTestBypass={authlessTestBypass}>
+      {children}
+    </AuthenticatedIBStatusProvider>
+  );
 }
 
-function AuthenticatedIBStatusProvider({ children }: { children: ReactNode }) {
-  if (process.env.NODE_ENV === "test") {
+function AuthenticatedIBStatusProvider({
+  children,
+  authlessTestBypass,
+}: {
+  children: ReactNode;
+  authlessTestBypass: boolean;
+}) {
+  if (process.env.NODE_ENV === "test" || authlessTestBypass) {
     return <IBStatusCoreProvider getToken={undefined}>{children}</IBStatusCoreProvider>;
   }
   return <ClerkIBStatusProvider>{children}</ClerkIBStatusProvider>;

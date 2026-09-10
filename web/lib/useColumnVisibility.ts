@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { hydrateUiPreferences, saveUiColumns } from "@/lib/uiPreferences";
 
 /**
  * Persistent per-table column visibility state.
@@ -28,15 +29,18 @@ export function useColumnVisibility<K extends string>(
 ): ColumnVisibility<K> {
   const storageKey = `${STORAGE_PREFIX}${tableId}`;
   const alwaysOnSet = new Set<K>(alwaysOn);
+  const userEditedRef = useRef(false);
 
   const [visible, setVisible] = useState<Record<K, boolean>>(() => ({ ...defaults }));
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
     let next = { ...defaults };
+    let hadLocal = false;
     try {
       const raw = window.localStorage.getItem(storageKey);
       if (raw) {
+        hadLocal = true;
         const saved = JSON.parse(raw) as Partial<Record<K, boolean>>;
         for (const key of Object.keys(saved) as K[]) {
           if (key in next && typeof saved[key] === "boolean") next[key] = saved[key]!;
@@ -48,6 +52,26 @@ export function useColumnVisibility<K extends string>(
     for (const key of alwaysOnSet) next[key] = true;
     setVisible(next);
     setHydrated(true);
+
+    // Cross-device restore: the profile row fills in only when this device
+    // has no localStorage entry yet — a device-local choice stays untouched.
+    if (!hadLocal) {
+      let active = true;
+      void hydrateUiPreferences().then((prefs) => {
+        if (!active) return;
+        const server = prefs.columns?.[tableId];
+        if (!server) return;
+        const merged = { ...defaults };
+        for (const key of Object.keys(server) as K[]) {
+          if (key in merged && typeof server[key] === "boolean") merged[key] = server[key];
+        }
+        for (const key of alwaysOnSet) merged[key] = true;
+        setVisible(merged);
+      });
+      return () => {
+        active = false;
+      };
+    }
     // Storage hydration is intentionally post-mount to preserve SSR parity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storageKey]);
@@ -63,9 +87,15 @@ export function useColumnVisibility<K extends string>(
     }
   }, [hydrated, storageKey, visible]);
 
+  useEffect(() => {
+    if (!hydrated || !userEditedRef.current) return;
+    saveUiColumns(tableId, visible);
+  }, [hydrated, tableId, visible]);
+
   const toggle = useCallback(
     (key: K) => {
       if (alwaysOnSet.has(key)) return;
+      userEditedRef.current = true;
       setVisible((prev) => ({ ...prev, [key]: !prev[key] }));
     },
     // alwaysOnSet is derived from the same `alwaysOn` array — referentially stable per render.
@@ -74,6 +104,7 @@ export function useColumnVisibility<K extends string>(
   );
 
   const reset = useCallback(() => {
+    userEditedRef.current = true;
     const reset: Record<K, boolean> = { ...defaults };
     for (const key of alwaysOnSet) reset[key] = true;
     setVisible(reset);

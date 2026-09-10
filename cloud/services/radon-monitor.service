@@ -1,9 +1,9 @@
 [Unit]
 Description=Radon monitor daemon
 After=network.target radon-ib-gateway.service radon-api.service
-PartOf=radon-ib-gateway.service
-# Ordering only. Monitor reconnects after Gateway recovery; deploy/app starts
-# must not pull Gateway while holding the shared deploy lock.
+# Ordering only. Do not PartOf= the Gateway: a broker restart must not
+# cascade-stop the monitor. Monitor reconnects after Gateway recovery;
+# deploy/app starts must not pull Gateway while holding the shared deploy lock.
 
 # DUR-02 (2026-06-12): brake crash loops — after StartLimitBurst starts inside
 # StartLimitIntervalSec, systemd parks the unit as failed (Result=start-limit-hit)

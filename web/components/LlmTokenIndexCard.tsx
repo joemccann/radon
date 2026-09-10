@@ -1,24 +1,8 @@
 "use client";
 
-/**
- * LLM Compute Premium card — Regime tab.
- *
- * Renders the Radon LLM Token Expenditure Index as a line chart matching
- * the CRI/VCG visual treatment. The index is normalised to 1.0 on the
- * first persisted day so the chart reads like Silicon Data's compute-cost
- * series (1.0 base → climbs/falls thereafter as the basket of frontier
- * model prices moves).
- *
- * Data source: GET /api/llm-token-index → /llm-token-index FastAPI route
- *              → Turso llm_token_index table → daily systemd timer
- *              → Artificial Analysis API.
- *
- * Brand tokens only — no raw hex, 4px max border-radius (CLAUDE.md).
- */
+/** Preserved v1 inference price history. Membership and price direction do not establish scarcity. */
 
 import { useMemo } from "react";
-import CriHistoryChart, { type ChartSeries } from "./CriHistoryChart";
-import { chartSeriesColor } from "@/lib/chartSystem";
 import {
   useLlmTokenIndex,
   type LlmTokenIndexRow,
@@ -47,47 +31,19 @@ function formatChange(rows: LlmTokenIndexRow[]): {
 
 const HISTORY_DAYS = 180;
 
-const SERIES: [ChartSeries<LlmTokenIndexRow>, ChartSeries<LlmTokenIndexRow>] = [
-  {
-    key: "index_value",
-    label: "Index",
-    color: chartSeriesColor("primary"),
-    axis: "left",
-    format: (v: number) => v.toFixed(2),
-  },
-  {
-    key: "raw_avg_usd",
-    label: "USD / Mtok",
-    color: chartSeriesColor("extreme"),
-    axis: "right",
-    format: (v: number) => `$${v.toFixed(2)}`,
-  },
-];
-
 export default function LlmTokenIndexCard() {
   const { data, loading, error } = useLlmTokenIndex(HISTORY_DAYS);
 
   const rows = data?.rows ?? [];
   const change = useMemo(() => formatChange(rows), [rows]);
   const latest = rows[rows.length - 1] ?? null;
-  const direction =
-    change.pct == null
-      ? "neutral"
-      : change.pct > 0
-        ? "negative" // rising compute cost reads as risk-on / supply constraint
-        : "positive";
-  const directionColor =
-    direction === "positive"
-      ? "var(--positive)"
-      : direction === "negative"
-        ? "var(--negative)"
-        : "var(--text-secondary)";
+  const directionColor = "var(--text-secondary)";
 
   return (
     <div className="regime-panel" data-testid="llm-token-index-card">
       <div className="section-header">
         <div className="section-title">
-          <span>LLM COMPUTE PREMIUM</span>
+          <span>Legacy inference price basket</span>
         </div>
         {latest && (
           <span
@@ -111,19 +67,18 @@ export default function LlmTokenIndexCard() {
           margin: "4px 0 12px",
         }}
       >
-        Weighted median price per million tokens across a basket of frontier
-        models (Claude, GPT-4o, Gemini 2.5 Pro, DeepSeek V3, Llama 405B,
-        Mistral Large). Normalised to 1.0 at the series base date. Rising
-        index means inference is getting more expensive.
+        Preserved methodology v1: median model price using a 70% input and 30% output
+        token blend, normalized to the first observation. Available membership can change.
+        This series measures quoted inference prices, not compute scarcity or actual spend.
       </p>
 
       {/* Summary row */}
       <div
         className="regime-hero-meta"
-        style={{ display: "flex", gap: 16, alignItems: "center", marginBottom: 16 }}
+        style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center", marginBottom: 16 }}
       >
         <div>
-          <span style={{ color: "var(--text-muted)", fontSize: 11 }}>LATEST</span>
+          <span style={{ color: "var(--text-muted)", fontSize: "var(--text-meta)" }}>LATEST</span>
           <div
             style={{ fontSize: 24, fontWeight: 600, fontFamily: "var(--font-mono)" }}
             data-testid="llm-token-index-latest-value"
@@ -132,7 +87,7 @@ export default function LlmTokenIndexCard() {
           </div>
         </div>
         <div>
-          <span style={{ color: "var(--text-muted)", fontSize: 11 }}>
+          <span style={{ color: "var(--text-muted)", fontSize: "var(--text-meta)" }}>
             RAW (USD / Mtok)
           </span>
           <div
@@ -142,7 +97,7 @@ export default function LlmTokenIndexCard() {
           </div>
         </div>
         <div>
-          <span style={{ color: "var(--text-muted)", fontSize: 11 }}>WINDOW</span>
+          <span style={{ color: "var(--text-muted)", fontSize: "var(--text-meta)" }}>WINDOW</span>
           <div
             style={{
               fontSize: 24,
@@ -179,11 +134,14 @@ export default function LlmTokenIndexCard() {
 
       {rows.length >= 2 && (
         <div data-testid="llm-token-index-chart">
-          <CriHistoryChart<LlmTokenIndexRow>
-            history={rows}
-            series={SERIES}
-            title="LLM Compute Premium (180d)"
-          />
+          <svg viewBox="0 0 660 180" role="img" aria-label="Legacy inference price basket, normalized index" style={{ width: "100%", height: "auto" }}>
+            <polyline fill="none" stroke="var(--text-secondary)" strokeWidth="2" points={rows.map((row, i) => {
+              const min = Math.min(...rows.map(point => point.index_value));
+              const max = Math.max(...rows.map(point => point.index_value));
+              return `${20 + i / (rows.length - 1) * 620},${160 - (row.index_value - min) / (max - min || 1) * 140}`;
+            }).join(" ")} />
+          </svg>
+          <p style={{ color: "var(--text-muted)", fontSize: 12 }}>{rows[0].date} to {latest?.date} · normalized index only</p>
         </div>
       )}
     </div>

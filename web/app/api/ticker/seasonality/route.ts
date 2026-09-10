@@ -150,8 +150,10 @@ async function extractViaVision(ticker: string, requestId: string): Promise<Mont
 const SEASONALITY_CACHE_SECONDS = 900;
 const STALE_REVALIDATE_SECONDS = 3600;
 
+export const radonCapability = "read";
+
 export async function GET(request: Request): Promise<Response> {
-  const access = await requireRouteAccess(undefined, { rate: { key: "ticker/seasonality:route", limit: 20, windowMs: 60_000 } });
+  const access = await requireRouteAccess(undefined, { rate: { key: "ticker/seasonality:route", limit: 20, windowMs: 60_000 }, durableRateTier: "D" });
   if (!access.ok) return access.response;
   const requestId = getRequestId();
   const { searchParams } = new URL(request.url);

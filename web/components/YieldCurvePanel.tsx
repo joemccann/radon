@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Percent } from "lucide-react";
 import BrushMinimap from "./BrushMinimap";
 import CriHistoryChart, { type ChartSeries } from "./CriHistoryChart";
+import FreshnessRail from "./FreshnessRail";
 import HistoryRangeChips from "./HistoryRangeChips";
 import InfoTooltip from "./InfoTooltip";
 import MetricCell from "./mobile/MetricCell";
@@ -12,6 +13,7 @@ import SpectralLoader from "./SpectralLoader";
 import { RegimeStrip, RegimeStripCell } from "./RegimeStrip";
 import { chartSeriesColor } from "@/lib/chartSystem";
 import { presetRange, presetSessions, type RangePresetSlug } from "@/lib/historyRange";
+import { YIELD_CURVE_REFRESH } from "@/lib/refreshSchedule";
 import {
   formatDateTick,
   formatEtTime,
@@ -135,7 +137,7 @@ export default function YieldCurvePanel() {
             <InfoTooltip text={INFO_TOOLTIP} />
           </div>
           {lastSync && (
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: "9px", color: "var(--text-muted)" }}>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--text-muted)" }}>
               {new Date(lastSync).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
             </span>
           )}
@@ -203,6 +205,12 @@ export default function YieldCurvePanel() {
             />
           </RegimeStrip>
         )}
+
+        <FreshnessRail
+          schedule={YIELD_CURVE_REFRESH}
+          asOf={current.date}
+          testId="yield-curve-freshness-rail"
+        />
       </div>
 
       {/* ── S&P 500 vs 10Y-2Y spread chart ────────────────── */}
@@ -240,7 +248,7 @@ export default function YieldCurvePanel() {
         <div
           style={{
             fontFamily: "var(--font-mono)",
-            fontSize: "9px",
+            fontSize: "var(--text-meta)",
             color: "var(--text-muted)",
             marginTop: "8px",
           }}

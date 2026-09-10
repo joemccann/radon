@@ -24,6 +24,8 @@ const STRATEGIES = new Set([
   "vcg",
 ]);
 
+export const radonCapability = "read";
+
 export async function GET(
   request: Request,
   context: { params: Promise<{ strategy: string }> },

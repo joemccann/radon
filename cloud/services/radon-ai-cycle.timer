@@ -1,0 +1,11 @@
+[Unit]
+Description=Radon AI infrastructure daily collection
+
+[Timer]
+# Complete UTC days only. Collection is independent of equity market hours.
+OnCalendar=*-*-* 07:15:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

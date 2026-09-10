@@ -1,7 +1,4 @@
-"""Newsfeed connector — one doc per themarketear `posts` row. Content is the
-headline plus body text. Posts carry no canonical source URL, so metadata.url
-is the first mirrored media.radon.run image when present; tickers are the
-short all-caps tags (heuristic — the table has no ticker column)."""
+"""Newsfeed connector with original research provenance and legacy media fallback."""
 from __future__ import annotations
 
 import json
@@ -22,15 +19,25 @@ _TICKER_TAG = re.compile(r"[A-Z]{1,5}$")
 _BATCH_ROWS = 200
 
 _BATCH_SQL = (
-    "SELECT id, title, content, timestamp, tags, images FROM posts "
+    "SELECT id, title, content, timestamp, tags, images, NULL FROM posts "
     "WHERE id > ? ORDER BY id LIMIT ?"
+)
+_RESEARCH_BATCH_SQL = (
+    "SELECT p.id, p.title, p.content, p.timestamp, p.tags, p.images, s.provenance_json "
+    "FROM posts p LEFT JOIN research_post_sources s ON s.post_id = p.id "
+    "WHERE p.id > ? ORDER BY p.id LIMIT ?"
 )
 
 
 def _post_rows(db) -> Iterator[tuple]:
+    # Older databases can still ingest legacy posts before migration 71.
+    has_sources = bool(db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='research_post_sources'"
+    ).fetchall())
+    sql = _RESEARCH_BATCH_SQL if has_sources else _BATCH_SQL
     cursor = ""
     while True:
-        batch = db.execute(_BATCH_SQL, (cursor, _BATCH_ROWS)).fetchall()
+        batch = db.execute(sql, (cursor, _BATCH_ROWS)).fetchall()
         if not batch:
             return
         yield from batch
@@ -38,12 +45,15 @@ def _post_rows(db) -> Iterator[tuple]:
 
 
 def fetch(db) -> Iterator[KnowledgeDoc]:
-    for post_id, title, body, timestamp, tags_json, images_json in _post_rows(db):
+    for post_id, title, body, timestamp, tags_json, images_json, provenance_json in _post_rows(db):
         content = _merge_title_and_body(title, body)
         if not content:
             continue
         tags = _json_list(tags_json)
         images = _json_list(images_json)
+        provenance = json.loads(provenance_json) if provenance_json else None
+        if provenance is not None and not isinstance(provenance, dict):
+            raise ValueError("invalid research provenance")
         yield KnowledgeDoc(
             source=SOURCE,
             scope=SCOPE,
@@ -53,7 +63,8 @@ def fetch(db) -> Iterator[KnowledgeDoc]:
             metadata={
                 "tags": tags,
                 "tickers": [tag for tag in tags if _TICKER_TAG.fullmatch(str(tag))],
-                "url": images[0] if images else None,
+                "url": provenance.get("url") if provenance else (images[0] if images else None),
+                **({"source": provenance} if provenance else {}),
             },
             created_at=timestamp,
             last_activity_at=timestamp,

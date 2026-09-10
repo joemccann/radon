@@ -1,35 +1,34 @@
 @import "tailwindcss";
 
 @theme {
-  --color-canvas: #0a0f14;
-  --color-panel: #0f1519;
-  --color-panel-raised: #151c22;
-  --color-grid: #1e293b;
-  --color-focus: #05AD98;
-  --color-primary: #e2e8f0;
-  --color-secondary: #94a3b8;
-  /* WCAG AA: >=4.5:1 for small text on canvas, panel, panel-raised, figure-bg. */
-  --color-muted: #72859c;
-  --color-accent: #05AD98;
-  --color-signal-strong: #0FCFB5;
-  --color-signal-deep: #048A7A;
-  --color-warn: #F5A623;
-  --color-negative: #E85D6C;
-  --color-dislocation: #D946A8;
-  --color-extreme: #8B5CF6;
-  --color-neutral: #94a3b8;
+  /* Clear paper defaults (light). Dark overrides live on html[data-theme="dark"]. */
+  --color-canvas: #ffffff;
+  --color-panel: #ffffff;
+  --color-panel-raised: #e9f4ed;
+  --color-grid: #e4eae7;
+  --color-focus: #087f53;
+  --color-primary: #172624;
+  --color-secondary: #62716d;
+  --color-muted: #7a8a85;
+  --color-accent: #087f53;
+  --color-signal-strong: #0a9a65;
+  --color-signal-deep: #066944;
+  --color-warn: #96651c;
+  --color-negative: #b5453e;
+  --color-dislocation: #C026A0;
+  --color-extreme: #7C3AED;
+  --color-neutral: #62716d;
 
-  /* Editorial journal-plate tokens (dark defaults; light overrides below) */
-  --color-hairline-soft: #16202b;
-  --color-figure-bg: #0d1318;
-  --color-chart-grid: #131c26;
+  --color-hairline-soft: #e4eae7;
+  --color-figure-bg: #f6f8f8;
+  --color-chart-grid: #edf1ef;
 
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
-  --font-serif: "Newsreader", Georgia, "Times New Roman", serif;
-  --font-display: "Söhne", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Inter", ui-sans-serif, system-ui, sans-serif;
 
-  --radius-panel: 4px;
+  --radius-panel: 8px;
   --radius-badge: 999px;
 
   --ease-editorial: cubic-bezier(0.22, 0.61, 0.36, 1);
@@ -40,34 +39,32 @@
   color: var(--color-primary);
 }
 
-html[data-theme="light"] {
-  --color-canvas: #FFFFFF;
-  --color-panel: #FFFFFF;
-  --color-panel-raised: #F1F5F9;
-  --color-grid: #BBBFBF;
-  --color-primary: #000000;
-  --color-secondary: #636363;
-  --color-muted: #878787;
-  --color-neutral: #475569;
-  --color-focus: #048A7A;
-  --color-accent: #05AD98;
-  --color-signal-strong: #048A7A;
-  --color-signal-deep: #037066;
-  --color-warn: #D4901B;
-  --color-negative: #D4183D;
-  --color-dislocation: #C026A0;
-  --color-extreme: #7C3AED;
-
-  /* Editorial light: grid token already maps to the editorial hairline */
-  --color-hairline-soft: #E2E6E6;
-  --color-figure-bg: #FCFDFD;
-  --color-chart-grid: #EEF1F1;
+html[data-theme="dark"] {
+  --color-canvas: #101714;
+  --color-panel: #101714;
+  --color-panel-raised: #202c25;
+  --color-grid: #2c3c32;
+  --color-primary: #edf4ef;
+  --color-secondary: #b0c1b7;
+  --color-muted: #96aa9e;
+  --color-neutral: #b0c1b7;
+  --color-focus: #76d5a1;
+  --color-accent: #76d5a1;
+  --color-signal-strong: #91e2b5;
+  --color-signal-deep: #68bf8f;
+  --color-warn: #F5A623;
+  --color-negative: #E85D6C;
+  --color-dislocation: #e55fb5;
+  --color-extreme: #9e80f6;
+  --color-hairline-soft: #2c3c32;
+  --color-figure-bg: #162019;
+  --color-chart-grid: #2c3c32;
 }
 
-html[data-theme="light"] body {
+html[data-theme="dark"] body {
   background-color: var(--color-canvas);
   color: var(--color-primary);
-  -webkit-font-smoothing: auto;
+  -webkit-font-smoothing: antialiased;
 }
 
 /* The Editorial header supplies its own translucent blur treatment via
@@ -76,6 +73,12 @@ html[data-theme="light"] body {
 
 html {
   scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
 }
 
 section[id] {
@@ -199,10 +202,9 @@ a {
 }
 
 /* ============================================================
-   EDITORIAL QUANT RESEARCH — journal-plate landing
-   Light-first serif (Newsreader) + IBM Plex Mono figures.
-   Color comes from the shared @theme tokens above so light/dark
-   tracks the site theme attribute with no parallel system.
+   CLEAR — marketing landing aligned to app.radon.run
+   Light-first Inter + IBM Plex Mono figures. Color comes from
+   the shared @theme tokens so light/dark tracks data-theme.
    ============================================================ */
 
 ::selection {
@@ -210,14 +212,14 @@ a {
   color: var(--color-primary);
 }
 
-/* ---------- Eyebrow with 22px leading line ---------- */
+/* ---------- Clear metadata eyebrow ---------- */
 .editorial-eyebrow {
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--color-signal-deep);
-  font-weight: 500;
+  font-weight: 600;
   display: inline-flex;
   align-items: center;
   gap: 10px;
@@ -231,27 +233,27 @@ a {
   display: inline-block;
 }
 
-/* ---------- Display + thesis serif headings ---------- */
+/* ---------- Display + thesis (Inter, Clear optical size) ---------- */
 .editorial-display {
-  font-family: var(--font-serif);
-  font-size: clamp(2.7rem, 6.2vw, 4.6rem);
-  line-height: 1.02;
-  letter-spacing: -0.022em;
-  font-weight: 500;
+  font-family: var(--font-sans);
+  font-size: clamp(2.6rem, 6vw, 4.35rem);
+  line-height: 1.05;
+  letter-spacing: -0.035em;
+  font-weight: 600;
   text-wrap: balance;
 }
 
 .editorial-display em {
-  font-style: italic;
+  font-style: normal;
   color: var(--color-signal-deep);
 }
 
 .editorial-thesis {
-  font-family: var(--font-serif);
-  font-size: clamp(1.9rem, 3.6vw, 2.85rem);
-  line-height: 1.06;
-  letter-spacing: -0.018em;
-  font-weight: 500;
+  font-family: var(--font-sans);
+  font-size: clamp(1.85rem, 3.4vw, 2.7rem);
+  line-height: 1.12;
+  letter-spacing: -0.035em;
+  font-weight: 550;
   max-width: 18ch;
   text-wrap: balance;
 }
@@ -262,11 +264,12 @@ main p {
 }
 
 .editorial-pull {
-  font-family: var(--font-serif);
-  font-style: italic;
-  font-size: clamp(1.5rem, 3vw, 2.1rem);
+  font-family: var(--font-sans);
+  font-style: normal;
+  font-size: clamp(1.45rem, 2.8vw, 2rem);
   line-height: 1.28;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.03em;
+  font-weight: 550;
   color: var(--color-primary);
   border-left: 2px solid var(--color-accent);
   padding-left: 1.1em;
@@ -676,4 +679,16 @@ html[data-theme="dark"] .plate-shot .shot-dark {
     transform: none;
     transition: none;
   }
+}
+
+.cta-beam,
+.hero-beam {
+  display: inline-block;
+  max-width: 100%;
+  border-radius: var(--radius-panel);
+}
+
+.hero-beam {
+  display: block;
+  overflow: visible !important;
 }

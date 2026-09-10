@@ -98,6 +98,22 @@ class TestUWToken:
         assert "UW_TOKEN" in env_vars
 
 
+class TestDropboxResearchVariables:
+    REQUIRED = [
+        "DROPBOX_APP_KEY",
+        "DROPBOX_REFRESH_TOKEN",
+        "DROPBOX_ACCOUNT_ID",
+        "DROPBOX_ROOT_NAMESPACE_ID",
+        "DROPBOX_FOLDER_ID",
+        "DROPBOX_FOLDER_PATH",
+    ]
+
+    def test_contains_private_research_variables(self, root):
+        env_vars = parse_env_vars(read_env_example(root))
+        for var in self.REQUIRED:
+            assert var in env_vars, f"Missing Dropbox research variable: {var}"
+
+
 class TestIBSessionVariables:
     def test_contains_vnc_server_password(self, root):
         env_vars = parse_env_vars(read_env_example(root))
@@ -178,6 +194,18 @@ class TestGitignore:
         env_patterns = [line.strip() for line in lines if not line.strip().startswith("#")]
         assert ".env" in env_patterns, ".gitignore must include .env"
 
+    def test_gitignore_includes_env_scrub(self, root):
+        # Nightly wrappers stage a scrubbed copy of web/.env at web/.env.scrub
+        # between create and rm; a crash in that window must not leave a
+        # commit-visible secret file in a PR-opening clone.
+        gitignore = root.parent / ".gitignore"
+        patterns = [
+            line.strip()
+            for line in gitignore.read_text().splitlines()
+            if not line.strip().startswith("#")
+        ]
+        assert ".env.scrub" in patterns, ".gitignore must include .env.scrub"
+
 
 class TestOperatorAllowlistInterlock:
     """REL-029 (R-054): the fail-closed allowlist interlock must be enforced.
@@ -203,6 +231,31 @@ class TestOperatorAllowlistInterlock:
     def test_env_example_pins_interlock_on(self, root):
         env_vars = parse_env_vars(read_env_example(root))
         assert env_vars.get("RADON_REQUIRE_OPERATOR_ALLOWLIST") == "1"
+
+    def test_check_env_pins_the_interlock_value(self, root):
+        """Every enforcement point compares the value exactly to "1"
+        (middleware.ts, routeAccess.ts, auth.py), so a typo'd value like
+        "true" passes required-env presence yet silently disables the
+        fail-closed gate. check-env.py must pin the literal value too.
+        """
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "radon_check_env", root / "scripts" / "check-env.py"
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        assert mod.PRODUCTION_INVARIANTS.get("RADON_REQUIRE_OPERATOR_ALLOWLIST") == "1"
+        errors = mod.production_invariant_errors(
+            {
+                "IB_GATEWAY_MODE": "cloud",
+                "RADON_MODE": "hetzner",
+                "NODE_ENV": "production",
+                "RADON_HOST_ROLE": "combined",
+                "RADON_REQUIRE_OPERATOR_ALLOWLIST": "true",
+            }
+        )
+        assert any("RADON_REQUIRE_OPERATOR_ALLOWLIST" in e for e in errors)
 
 
 class TestDemoMigrationEnvContract:

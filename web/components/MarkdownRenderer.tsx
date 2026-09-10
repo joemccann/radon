@@ -4,10 +4,11 @@ import { normalizeTextLines } from "@/lib/utils";
 
 type MarkdownRendererProps = {
   content: string;
+  preserveWhitespace?: boolean;
 };
 
-export default function MarkdownRenderer({ content }: MarkdownRendererProps) {
-  const normalized = normalizeTextLines(content);
+export default function MarkdownRenderer({ content, preserveWhitespace = false }: MarkdownRendererProps) {
+  const normalized = preserveWhitespace ? content : normalizeTextLines(content);
   // Empty input renders nothing. The decision of what to show for an in-flight
   // or empty assistant turn belongs to ChatPanel (typing indicator), not here —
   // inventing "No output." copy was the source of the streaming flash.

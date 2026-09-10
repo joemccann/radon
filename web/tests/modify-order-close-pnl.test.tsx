@@ -47,6 +47,25 @@ function optionOrder(action: "BUY" | "SELL", quantity: number, limitPrice: numbe
   };
 }
 
+function stockOrder(action: "BUY" | "SELL", quantity: number, limitPrice: number): OpenOrder {
+  return {
+    orderId: 96,
+    permId: action === "BUY" ? 653624859 : 653624860,
+    symbol: "SNDK",
+    contract: { conId: 123456, symbol: "SNDK", secType: "STK" },
+    action,
+    orderType: "LMT",
+    totalQuantity: quantity,
+    limitPrice,
+    auxPrice: null,
+    status: "Submitted",
+    filled: 0,
+    remaining: quantity,
+    avgFillPrice: null,
+    tif: "DAY",
+  };
+}
+
 function portfolioWithLeg(direction: "LONG" | "SHORT", contracts: number, avgCost: number): PortfolioData {
   const position: PortfolioPosition = {
     id: 1,
@@ -103,6 +122,31 @@ function portfolioWithLeg(direction: "LONG" | "SHORT", contracts: number, avgCos
   };
 }
 
+function portfolioWithShortStock(shares: number, avgCost: number): PortfolioData {
+  const portfolio = portfolioWithLeg("SHORT", shares, avgCost);
+  portfolio.positions = [{
+    ...portfolio.positions[0],
+    structure: "Short Stock",
+    structure_type: "Stock",
+    risk_profile: "Undefined",
+    expiry: "",
+    contracts: shares,
+    direction: "SHORT",
+    entry_cost: -(shares * avgCost),
+    legs: [{
+      direction: "SHORT",
+      contracts: shares,
+      type: "Stock",
+      strike: 0,
+      entry_cost: -(shares * avgCost),
+      avg_cost: avgCost,
+      market_price: null,
+      market_value: null,
+    }],
+  }];
+  return portfolio;
+}
+
 function renderModifiedOrder(order: OpenOrder, portfolio: PortfolioData, price: string) {
   render(
     <ModifyOrderModal
@@ -114,7 +158,7 @@ function renderModifiedOrder(order: OpenOrder, portfolio: PortfolioData, price: 
     />,
   );
   fireEvent.change(screen.getByLabelText(/New Limit Price/i), { target: { value: price } });
-  return within(document.querySelector(".order-confirm-summary") as HTMLElement);
+  return within(screen.getByTestId("order-confirm-summary"));
 }
 
 describe("ModifyOrderModal close-out P&L", () => {
@@ -165,6 +209,7 @@ describe("ModifyOrderModal close-out P&L", () => {
     expect(summary.getByText("$38,000")).toBeTruthy();
     expect(summary.getByText("Est. Realized P&L:")).toBeTruthy();
     expect(summary.getByText("$535")).toBeTruthy();
+    expect(summary.getByTestId("order-confirm-estimated-pnl").textContent).toBe("$535 (+1.4%)");
     expect(summary.queryByText("Max Gain:")).toBeNull();
     expect(summary.queryByText("Max Loss:")).toBeNull();
   });
@@ -180,6 +225,38 @@ describe("ModifyOrderModal close-out P&L", () => {
     expect(summary.getByText("$800")).toBeTruthy();
     expect(summary.getByText("Est. Realized P&L:")).toBeTruthy();
     expect(summary.getByText("$200")).toBeTruthy();
+    expect(summary.getByTestId("order-confirm-estimated-pnl").textContent).toBe("$200 (+20.0%)");
+  });
+
+  it("shows a signed negative percentage when the modified close realizes a loss", () => {
+    const summary = renderModifiedOrder(
+      optionOrder("SELL", 4, 100),
+      portfolioWithLeg("LONG", 4, 9_366.25),
+      "90",
+    );
+
+    expect(summary.getByTestId("order-confirm-estimated-pnl").textContent).toBe("-$1,465 (-3.9%)");
+  });
+
+  it("shows the correct positive percentage when modifying a buy-to-cover stock order", () => {
+    const summary = renderModifiedOrder(
+      stockOrder("BUY", 100, 55),
+      portfolioWithShortStock(100, 60),
+      "50",
+    );
+
+    expect(summary.getByText("Cost to Cover:")).toBeTruthy();
+    expect(summary.getByTestId("order-confirm-estimated-pnl").textContent).toBe("$1,000 (+16.7%)");
+  });
+
+  it("omits the percentage when the signed entry basis is zero", () => {
+    const summary = renderModifiedOrder(
+      optionOrder("SELL", 4, 100),
+      portfolioWithLeg("LONG", 4, 0),
+      "95",
+    );
+
+    expect(summary.getByTestId("order-confirm-estimated-pnl").textContent).toBe("$38,000");
   });
 
   it("does not classify quantity beyond the held contracts as a pure close", () => {
@@ -298,7 +375,9 @@ function cbrsHeldReversal(): PortfolioData {
 }
 
 function cbrsComboPrices(): Record<string, import("@/lib/pricesProtocol").PriceData> {
-  const ts = "2026-08-21T14:10:53.000Z";
+  // Fresh timestamp: the REL-236 quote-age gate disarms Modify on stale
+  // leg quotes; this suite pins close-out P&L math, not freshness.
+  const ts = new Date().toISOString();
   const blank = {
     lastIsCalculated: false,
     bidSize: null,
@@ -358,7 +437,7 @@ function renderCbrsModify(price: string, portfolio: PortfolioData) {
     />,
   );
   fireEvent.change(screen.getByLabelText(/New Net Price/i), { target: { value: price } });
-  return within(document.querySelector(".order-confirm-summary") as HTMLElement);
+  return within(screen.getByTestId("order-confirm-summary"));
 }
 
 describe("ModifyOrderModal combo close-out P&L", () => {
@@ -369,6 +448,7 @@ describe("ModifyOrderModal combo close-out P&L", () => {
     expect(summary.getByText("$40,000")).toBeTruthy();
     expect(summary.getByText("Est. Realized P&L:")).toBeTruthy();
     expect(summary.getByText("$15,000")).toBeTruthy();
+    expect(summary.getByTestId("order-confirm-estimated-pnl").textContent).toBe("$15,000 (+60.0%)");
     expect(summary.queryByText("Max Gain:")).toBeNull();
     expect(summary.queryByText("Max Loss:")).toBeNull();
     expect(summary.queryByText("$1,035,835")).toBeNull();
@@ -394,7 +474,7 @@ describe("ModifyOrderModal combo close-out P&L", () => {
       />,
     );
     fireEvent.change(screen.getByLabelText(/New Net Price/i), { target: { value: "8" } });
-    const summary = within(document.querySelector(".order-confirm-summary") as HTMLElement);
+    const summary = within(screen.getByTestId("order-confirm-summary"));
 
     expect(summary.getByText("Est. Realized P&L:")).toBeTruthy();
     expect(summary.getByText("$15,000")).toBeTruthy();
@@ -416,7 +496,7 @@ describe("ModifyOrderModal combo close-out P&L", () => {
       />,
     );
     fireEvent.change(screen.getByLabelText(/New Net Price/i), { target: { value: "8" } });
-    const summary = within(document.querySelector(".order-confirm-summary") as HTMLElement);
+    const summary = within(screen.getByTestId("order-confirm-summary"));
 
     expect(summary.queryByText("Est. Realized P&L:")).toBeNull();
     expect(summary.getByText("Max Loss:")).toBeTruthy();
@@ -435,11 +515,12 @@ describe("ModifyOrderModal combo close-out P&L", () => {
     );
     fireEvent.change(screen.getByLabelText(/New Quantity/i), { target: { value: "25" } });
     fireEvent.change(screen.getByLabelText(/New Net Price/i), { target: { value: "8" } });
-    const summary = within(document.querySelector(".order-confirm-summary") as HTMLElement);
+    const summary = within(screen.getByTestId("order-confirm-summary"));
 
     expect(summary.getByText("Close Credit:")).toBeTruthy();
     expect(summary.getByText("$20,000")).toBeTruthy();
     expect(summary.getByText("$7,500")).toBeTruthy();
+    expect(summary.getByTestId("order-confirm-estimated-pnl").textContent).toBe("$7,500 (+60.0%)");
     expect(summary.queryByText("Max Gain:")).toBeNull();
   });
 
@@ -456,7 +537,7 @@ describe("ModifyOrderModal combo close-out P&L", () => {
     );
     fireEvent.change(screen.getByLabelText(/New Quantity/i), { target: { value: "51" } });
     fireEvent.change(screen.getByLabelText(/New Net Price/i), { target: { value: "8" } });
-    const summary = within(document.querySelector(".order-confirm-summary") as HTMLElement);
+    const summary = within(screen.getByTestId("order-confirm-summary"));
 
     expect(summary.queryByText("Est. Realized P&L:")).toBeNull();
     expect(summary.getByText("Max Loss:")).toBeTruthy();

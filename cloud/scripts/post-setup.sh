@@ -30,9 +30,12 @@ log_step()  { echo -e "\n${CYAN}━━━ $* ━━━${NC}"; }
 # ---------------------------------------------------------------------------
 log_step "Step 1: Write .env to VPS"
 
+# Canonical file is root:radon 0640. Deliver via root; radon can read
+# (group) but cannot rewrite secrets.
 if [[ -f "$ENV_FILE" ]]; then
   log_info "Using ${ENV_FILE}"
-  scp "$ENV_FILE" "${VPS_RADON}:~/radon-cloud/.env"
+  scp "$ENV_FILE" "${VPS_ROOT}:/tmp/radon.env"
+  ssh "${VPS_ROOT}" 'install -m 0640 -o root -g radon /tmp/radon.env /etc/radon/env && rm -f /tmp/radon.env'
 else
   log_warn "No .env.production found at ${ENV_FILE}"
   echo "  Create it with your production values, or enter them now."
@@ -40,18 +43,18 @@ else
   read -p "  Paste the path to your .env file (or press Enter to write interactively): " env_path
 
   if [[ -n "$env_path" ]] && [[ -f "$env_path" ]]; then
-    scp "$env_path" "${VPS_RADON}:~/radon-cloud/.env"
+    scp "$env_path" "${VPS_ROOT}:/tmp/radon.env"
+    ssh "${VPS_ROOT}" 'install -m 0640 -o root -g radon /tmp/radon.env /etc/radon/env && rm -f /tmp/radon.env'
   else
     echo ""
     echo "  Opening nano on the VPS to edit .env..."
     echo "  Fill in your values, save (Ctrl+O), and exit (Ctrl+X)."
     echo ""
-    ssh -t "${VPS_RADON}" "cp ~/radon/cloud/.env.example ~/radon-cloud/.env && chmod 0600 ~/radon-cloud/.env && nano ~/radon-cloud/.env"
+    ssh -t "${VPS_ROOT}" "install -m 0640 -o root -g radon /home/radon/radon/cloud/.env.example /etc/radon/env && nano /etc/radon/env"
   fi
 fi
 
-ssh "${VPS_RADON}" 'chmod 0600 ~/radon-cloud/.env'
-ssh "${VPS_RADON}" '/home/radon/radon/.venv/bin/python /home/radon/radon/cloud/scripts/check-env.py /home/radon/radon-cloud/.env /home/radon/radon/cloud/config/required-env.txt'
+ssh "${VPS_RADON}" '/home/radon/radon/.venv/bin/python /home/radon/radon/cloud/scripts/check-env.py /etc/radon/env /home/radon/radon/cloud/config/required-env.txt'
 log_info ".env configured"
 
 # ---------------------------------------------------------------------------
@@ -60,7 +63,7 @@ log_info ".env configured"
 log_step "Step 2: Write public web env and rebuild Next.js"
 
 ssh "${VPS_ROOT}" 'for unit in radon-nextjs.service radon-relay.service radon-newsfeed.service; do if systemctl is-active --quiet "$unit"; then echo "Refusing live rebuild while $unit is active; use scripts/deploy.sh with the exact tested commit SHA" >&2; exit 78; fi; done'
-ssh "${VPS_ROOT}" 'set -o pipefail; tmp=$(mktemp); grep -E '\''^NEXT_PUBLIC_[A-Z0-9_]+='\'' /home/radon/radon-cloud/.env > "$tmp" || true; install -m 0600 -o radon -g radon "$tmp" /home/radon/radon/web/.env; rm -f "$tmp"; cd /home/radon/radon/web && sudo -u radon /home/radon/radon/.venv/bin/python /home/radon/radon/cloud/scripts/run_with_env.py /home/radon/radon-cloud/.env -- bun run build 2>&1 | tail -5'
+ssh "${VPS_ROOT}" 'set -o pipefail; tmp=$(mktemp); grep -E '\''^NEXT_PUBLIC_[A-Z0-9_]+='\'' /etc/radon/env > "$tmp" || true; install -m 0600 -o radon -g radon "$tmp" /home/radon/radon/web/.env; rm -f "$tmp"; cd /home/radon/radon/web && sudo -u radon /home/radon/radon/.venv/bin/python /home/radon/radon/cloud/scripts/run_with_env.py /etc/radon/env -- bun run build 2>&1 | tail -5'
 
 log_info "Next.js rebuilt with production env vars"
 

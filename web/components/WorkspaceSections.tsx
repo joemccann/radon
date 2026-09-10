@@ -1,6 +1,7 @@
 "use client";
 
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   Bell,
@@ -53,12 +54,15 @@ import { useTableFilter } from "@/lib/useTableFilter";
 import TableSearch from "./TableSearch";
 import SortTh from "./SortTh";
 import { usePriceDirection } from "@/lib/usePriceDirection";
-import { fmtPrice, fmtUsd, legPriceKey } from "@/lib/positionUtils";
+import { fmtPrice, fmtPriceOrCalculated, fmtUsd, legPriceKey, resolveRealtimePrice } from "@/lib/positionUtils";
 import {
   buildOpenOrderDisplayRows,
   type OpenOrderDisplayRow,
   buildExecutedGroupDescription,
   resolveOpenOrderComboPrice,
+  resolveOpenOrderComboPriceData,
+  resolveSignedComboPrice,
+  type ResolvedOpenOrderPrice,
   findPortfolioLegDirection,
 } from "@/lib/openOrderCombos";
 import {
@@ -68,11 +72,13 @@ import {
   isPartialFill,
   mapOrderStatus,
   resolveOrderIntent,
+  resolveSingleLegLastPrice,
   statusPillClass,
-  summarizeOpenOrders,
+  summarizeOpenOrderRows,
 } from "@/lib/orders/orderDisplay";
 import {
   classifyDisplayRowSession,
+  isExtendedFillLive,
   summarizeSessionWindows,
 } from "@/lib/orders/sessionWindow";
 import SessionWindowChip from "./orders/SessionWindowChip";
@@ -102,6 +108,7 @@ import { computeLegImpliedValue, computeOrderImpliedValue } from "@/lib/impliedV
 import { useRiskFreeRate } from "@/lib/useRiskFreeRate";
 import { useColumnVisibility } from "@/lib/useColumnVisibility";
 import { useViewport } from "@/lib/useViewport";
+import { useRealtimePrices } from "@/lib/RealtimePricesContext";
 import { ColumnsToggle, type ColumnsToggleEntry } from "./ColumnsToggle";
 import MobileOrderList from "./mobile/MobileOrderList";
 import MobileBlotterList from "./mobile/MobileBlotterList";
@@ -120,7 +127,6 @@ import AdminWorkspace from "./admin/AdminWorkspace";
 import PreferencesSection from "./PreferencesSection";
 import ProfileContent from "./profile/ProfileContent";
 import WatchlistContent from "./watchlist/WatchlistContent";
-import PerformancePanel from "./PerformancePanel";
 import OptionsWorkspacePanel from "./OptionsWorkspacePanel";
 import InfoTooltip from "./InfoTooltip";
 import SharePnlButton, { type SharePnlData } from "./SharePnlButton";
@@ -325,13 +331,24 @@ function resolveOpeningLegBasis(
   };
 }
 
-/** Net cash received by a group's closing option fills in dollars
- *  (SLD positive, BOT negative). Null when any fill is unpriced or sideless. */
+/** Net cash received by a group's closing fills in dollars
+ *  (SLD positive, BOT negative). Options use the ×100 multiplier, stocks ×1.
+ *  Null when any fill is unpriced or sideless. */
 function closedGroupCloseCash(group: PositionFillGroup): number | null {
-  const optFills = group.fills.filter((f) => f.contract.secType === "OPT");
-  if (optFills.length === 0) return null;
+  let priced = group.fills.filter(
+    (f) => f.contract.secType === "OPT" || f.contract.secType === "STK",
+  );
+  // REL-219 (R-582): a mixed group (same-day opening BUYs + a partial close)
+  // must sum CLOSING cash only, or the P&L identity below derives an entry
+  // basis from mixed open+close cash and the return % is fabricated. The
+  // realizedPNL-bearing fills are exactly the ones group.totalPnL came from.
+  const closing = priced.filter(
+    (f) => f.realizedPNL != null && Math.abs(f.realizedPNL) > 0.01,
+  );
+  if (closing.length > 0 && closing.length < priced.length) priced = closing;
+  if (priced.length === 0) return null;
   let closeCash = 0;
-  for (const fill of optFills) {
+  for (const fill of priced) {
     if (fill.avgPrice == null || !Number.isFinite(fill.avgPrice)) return null;
     const cashSign = fill.side === "SLD" || fill.side === "SELL"
       ? 1
@@ -339,7 +356,8 @@ function closedGroupCloseCash(group: PositionFillGroup): number | null {
         ? -1
         : 0;
     if (cashSign === 0) return null;
-    closeCash += cashSign * fill.avgPrice * Math.abs(fill.quantity) * 100;
+    const multiplier = fill.contract.secType === "OPT" ? 100 : 1;
+    closeCash += cashSign * fill.avgPrice * Math.abs(fill.quantity) * multiplier;
   }
   return closeCash;
 }
@@ -469,7 +487,12 @@ export function positionGroupShareData(
       const openCash = closedGroupOpenCash(group);
       if (openCash != null) {
         const comboUnits = Math.max(group.totalQuantity, 1);
-        entryPrice = -(openCash / 100) / comboUnits;
+        // Per-group multiplier: ×100 only when the group carries an option
+        // (OPT/BAG) fill; a stock-only group's basis is already per share.
+        const groupMultiplier = group.fills.some(
+          (f) => f.contract.secType === "OPT" || f.contract.secType === "BAG",
+        ) ? 100 : 1;
+        entryPrice = -(openCash / groupMultiplier) / comboUnits;
         if (entryNotional === 0) {
           entryNotional = Math.abs(openCash);
         }
@@ -604,10 +627,12 @@ export function groupExecutedOrders(
   };
 
   const isClosingFill = (fill: ExecutedOrder): boolean => {
-    if (fill.contract.secType !== "OPT") return false;
     // Primary signal: IB populated realizedPNL on the commission report.
+    // Applies to every sec type — a stock (or future) SELL-to-close / BUY-to-cover
+    // carries realizedPNL just as an option close does.
     if (fill.realizedPNL != null && Math.abs(fill.realizedPNL) > 0.01) return true;
-    // Fallback: this fill closes against an existing portfolio leg.
+    // Fallback (options only): this fill closes against an existing portfolio leg.
+    if (fill.contract.secType !== "OPT") return false;
     // BOT against a SHORT leg, or SLD against a LONG leg = reduces the position.
     const basis = portfolioLegBasisFor(fill);
     if (!basis) return false;
@@ -1147,7 +1172,7 @@ function FlowSectionsBody() {
                 <span
                   style={{
                     marginLeft: 4,
-                    fontSize: 10,
+                    fontSize: "var(--text-meta)",
                     fontFamily: "var(--font-mono)",
                     opacity: 0.7,
                   }}
@@ -1344,6 +1369,20 @@ function scannerDirTone(dir: string): "pos" | "neg" | "mut" {
   if (dir === "ACCUMULATION") return "pos";
   if (dir === "DISTRIBUTION") return "neg";
   return "mut";
+}
+
+/**
+ * Open a flow row's ticker on the chain deck. Dark-pool prints carry no
+ * contract, so this is a ticker-level link: `?deck=c` lands on the chain with
+ * its default ATM window and an empty builder. Null when there is nothing to
+ * trade — a blank ticker, or a row the scanner itself could not read.
+ */
+export function flowOrderHref(row: ScannerSignal): string | null {
+  const ticker = row.ticker.trim();
+  if (!ticker) return null;
+  if (row.signal === "NONE" || row.signal === "ERROR") return null;
+  const params = new URLSearchParams({ deck: "c", src: "flow" });
+  return `/${encodeURIComponent(ticker.toUpperCase())}?${params.toString()}`;
 }
 
 function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
@@ -1637,7 +1676,7 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
         <div className="m-scanner-header">
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <Sparkles size={13} style={{ color: "var(--text-muted)" }} />
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", color: "var(--text-primary)", textTransform: "uppercase" }}>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", fontWeight: 600, letterSpacing: "0.08em", color: "var(--text-primary)", textTransform: "uppercase" }}>
               Scanner
             </span>
             <InfoTooltip
@@ -1649,7 +1688,7 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
             <span
               style={{
                 fontFamily: "var(--font-mono)",
-                fontSize: 10,
+                fontSize: "var(--text-meta)",
                 fontWeight: 600,
                 padding: "1px 6px",
                 borderRadius: 4,
@@ -1661,7 +1700,7 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
               {data?.signals_found ?? 0}
             </span>
             {lastSync && (
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-muted)", marginLeft: 4 }}>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--text-muted)", marginLeft: 4 }}>
                 {new Date(lastSync).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
               </span>
             )}
@@ -1677,7 +1716,7 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
               alignItems: "center",
               gap: 4,
               fontFamily: "var(--font-mono)",
-              fontSize: 11,
+              fontSize: "var(--text-meta)",
               fontWeight: 600,
               color: syncing ? "var(--text-muted)" : "var(--signal-core)",
               background: "none",
@@ -1837,21 +1876,37 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
                 </tr>
               </thead>
               <tbody>
-                {sorted.map((row) => (
-                  <tr key={`scanner-${row.ticker}`}>
-                    <td><TickerLink ticker={row.ticker} /></td>
-                    <td><span className={signalClass(row.signal)}>{row.signal}</span></td>
-                    <td><span className={`pill ${dirClass(row.direction)}`}>{row.direction}</span></td>
-                    <td className="right">
-                      {row.score.toFixed(1)}
-                      <SigMeter value={row.score} tone={row.direction === "ACCUMULATION" ? "pos" : row.direction === "DISTRIBUTION" ? "neg" : "mut"} />
-                    </td>
-                    <td className="right">{row.strength.toFixed(1)}</td>
-                    <td className="right">{row.buy_ratio != null ? `${(row.buy_ratio * 100).toFixed(1)}%` : "—"}</td>
-                    <td className="right">{row.sustained_days > 0 ? `${row.sustained_days}d` : "—"}</td>
-                    <td className="right">{row.num_prints.toLocaleString()}</td>
-                  </tr>
-                ))}
+                {sorted.map((row) => {
+                  const orderHref = flowOrderHref(row);
+                  return (
+                    <tr key={`scanner-${row.ticker}`}>
+                      <td>
+                        {orderHref ? (
+                          <Link
+                            href={orderHref}
+                            className="ticker-link"
+                            data-testid={`flow-order-link-${row.ticker}`}
+                            title={`Open the ${row.ticker.toUpperCase()} options chain`}
+                          >
+                            {row.ticker}
+                          </Link>
+                        ) : (
+                          <TickerLink ticker={row.ticker} />
+                        )}
+                      </td>
+                      <td><span className={signalClass(row.signal)}>{row.signal}</span></td>
+                      <td><span className={`pill ${dirClass(row.direction)}`}>{row.direction}</span></td>
+                      <td className="right">
+                        {row.score.toFixed(1)}
+                        <SigMeter value={row.score} tone={row.direction === "ACCUMULATION" ? "pos" : row.direction === "DISTRIBUTION" ? "neg" : "mut"} />
+                      </td>
+                      <td className="right">{row.strength.toFixed(1)}</td>
+                      <td className="right">{row.buy_ratio != null ? `${(row.buy_ratio * 100).toFixed(1)}%` : "—"}</td>
+                      <td className="right">{row.sustained_days > 0 ? `${row.sustained_days}d` : "—"}</td>
+                      <td className="right">{row.num_prints.toLocaleString()}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -1899,6 +1954,35 @@ function discoverBiasTone(bias: string): "pos" | "neg" | "warn" | "mut" {
   if (bias === "BULLISH" || bias === "CALLS") return "pos";
   if (bias === "BEARISH" || bias === "PUTS") return "neg";
   return "mut";
+}
+
+/**
+ * Deep-link a discover candidate into its chain deck. Mirrors `leapOrderHref`
+ * minus the contract params: discover rows are ticker-level (calls / puts are
+ * alert counts, not strikes), so there is no expiry, strike, or right to seed
+ * the order builder with. Null when the row cannot name a ticker.
+ */
+export function discoverOrderHref(candidate: DiscoverCandidate): string | null {
+  const ticker = candidate.ticker.trim().toUpperCase();
+  if (!ticker) return null;
+  const params = new URLSearchParams({ deck: "c", src: "discover" });
+  return `/${encodeURIComponent(ticker)}?${params.toString()}`;
+}
+
+function DiscoverTickerCell({ candidate }: { candidate: DiscoverCandidate }) {
+  const href = discoverOrderHref(candidate);
+  if (!href) return <TickerLink ticker={candidate.ticker} />;
+  const ticker = candidate.ticker.trim().toUpperCase();
+  return (
+    <Link
+      href={href}
+      className="ticker-link"
+      data-testid={`discover-order-link-${ticker}`}
+      title={`Open the ${ticker} options chain`}
+    >
+      {candidate.ticker}
+    </Link>
+  );
 }
 
 export const DISCOVER_MOBILE_SORT_KEYS: { key: DiscoverSortKey; label: string }[] = [
@@ -1986,41 +2070,55 @@ function DiscoverSections() {
 
         {mobileSortedCandidates.length > 0 && (
           <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "8px 16px 16px" }} data-testid="mobile-discover-list">
-            {mobileSortedCandidates.map((c) => (
-              <SignalCard
-                key={`discover-mobile-${c.ticker}`}
-                ticker={c.ticker}
-                score={Math.round(c.score)}
-                signals={[
-                  {
-                    label: c.dp_direction === "ACCUMULATION" ? "ACCUM" : c.dp_direction === "DISTRIBUTION" ? "DISTRIB" : c.dp_direction,
-                    tone: discoverDpTone(c.dp_direction),
-                  },
-                  {
-                    label: c.options_bias,
-                    tone: discoverBiasTone(c.options_bias),
-                  },
-                ]}
-                stats={[
-                  {
-                    label: "Buy Ratio",
-                    value: `${(c.dp_buy_ratio * 100).toFixed(1)}%`,
-                  },
-                  {
-                    label: "Premium",
-                    value: fmtPremium(c.total_premium),
-                  },
-                  {
-                    label: "Sweeps",
-                    value: String(c.sweeps),
-                  },
-                  {
-                    label: "Alerts",
-                    value: String(c.alerts),
-                  },
-                ]}
-              />
-            ))}
+            {mobileSortedCandidates.map((c) => {
+              const orderHref = discoverOrderHref(c);
+              const card = (
+                <SignalCard
+                  key={`discover-mobile-${c.ticker}`}
+                  ticker={c.ticker}
+                  score={Math.round(c.score)}
+                  signals={[
+                    {
+                      label: c.dp_direction === "ACCUMULATION" ? "ACCUM" : c.dp_direction === "DISTRIBUTION" ? "DISTRIB" : c.dp_direction,
+                      tone: discoverDpTone(c.dp_direction),
+                    },
+                    {
+                      label: c.options_bias,
+                      tone: discoverBiasTone(c.options_bias),
+                    },
+                  ]}
+                  stats={[
+                    {
+                      label: "Buy Ratio",
+                      value: `${(c.dp_buy_ratio * 100).toFixed(1)}%`,
+                    },
+                    {
+                      label: "Premium",
+                      value: fmtPremium(c.total_premium),
+                    },
+                    {
+                      label: "Sweeps",
+                      value: String(c.sweeps),
+                    },
+                    {
+                      label: "Alerts",
+                      value: String(c.alerts),
+                    },
+                  ]}
+                />
+              );
+              if (!orderHref) return card;
+              return (
+                <Link
+                  key={`discover-mobile-${c.ticker}`}
+                  href={orderHref}
+                  className="m-signal-card-link"
+                  data-testid={`discover-order-link-${c.ticker.trim().toUpperCase()}`}
+                >
+                  {card}
+                </Link>
+              );
+            })}
           </div>
         )}
       </div>
@@ -2077,7 +2175,7 @@ function DiscoverSections() {
               <tbody>
                 {sorted.map((c) => (
                   <tr key={c.ticker}>
-                    <td><TickerLink ticker={c.ticker} /></td>
+                    <td><DiscoverTickerCell candidate={c} /></td>
                     <td className="right">
                       <span className={scoreClass(c.score)}>{c.score.toFixed(1)}</span>
                     </td>
@@ -2261,7 +2359,7 @@ function JournalSections() {
               {syncing ? "SYNCING..." : "SYNC IB"}
             </button>
             {lastSyncResult && (
-              <span className="pill defined" style={{ fontSize: "9px" }}>
+              <span className="pill defined" style={{ fontSize: "var(--text-meta)" }}>
                 {lastSyncResult.imported > 0
                   ? `+${lastSyncResult.imported} IMPORTED`
                   : "UP TO DATE"}
@@ -2543,37 +2641,133 @@ function orderPriceKey(contract: OpenOrder["contract"]): string | null {
   return contract.symbol;
 }
 
+function normalizedOptionRight(right: string | null | undefined): "C" | "P" | null {
+  if (right === "C" || right === "CALL") return "C";
+  if (right === "P" || right === "PUT") return "P";
+  return null;
+}
+
+function portfolioLegMatchesComboLeg(
+  position: PortfolioPosition,
+  leg: PortfolioPosition["legs"][number],
+  comboLeg: NonNullable<OpenOrder["contract"]["comboLegs"]>[number],
+): boolean {
+  if (comboLeg.conId > 0 && leg.con_id != null && leg.con_id > 0) {
+    return comboLeg.conId === leg.con_id;
+  }
+  const comboRight = normalizedOptionRight(comboLeg.right);
+  const comboExpiry = comboLeg.expiry?.replace(/-/g, "") ?? "";
+  if (!comboRight || comboLeg.strike == null || comboExpiry.length !== 8) return false;
+  const legRight = leg.type === "Call" ? "C" : leg.type === "Put" ? "P" : null;
+  const legExpiry = (leg.expiry ?? position.expiry).replace(/-/g, "");
+  return legRight === comboRight && leg.strike === comboLeg.strike && legExpiry === comboExpiry;
+}
+
+function matchingPortfolioLeg(
+  position: PortfolioPosition,
+  comboLeg: NonNullable<OpenOrder["contract"]["comboLegs"]>[number],
+) {
+  return position.legs.find((leg) => portfolioLegMatchesComboLeg(position, leg, comboLeg)) ?? null;
+}
+
+function positionMatchesComboLegs(
+  position: PortfolioPosition,
+  comboLegs: NonNullable<OpenOrder["contract"]["comboLegs"]>,
+): boolean {
+  if (
+    position.legs.length !== comboLegs.length
+    || !Number.isFinite(position.contracts)
+    || position.contracts === 0
+  ) {
+    return false;
+  }
+
+  const unmatchedLegs = [...position.legs];
+  return comboLegs.every((comboLeg) => {
+    const direction = comboLeg.action === "BUY" ? "LONG" : comboLeg.action === "SELL" ? "SHORT" : null;
+    if (!direction || !Number.isFinite(comboLeg.ratio) || comboLeg.ratio <= 0) return false;
+    const index = unmatchedLegs.findIndex((leg) => {
+      if (leg.direction !== direction) return false;
+      const ratio = Math.abs(leg.contracts / position.contracts);
+      if (Math.abs(ratio - comboLeg.ratio) > Number.EPSILON) return false;
+      return portfolioLegMatchesComboLeg(position, leg, comboLeg);
+    });
+    if (index < 0) return false;
+    unmatchedLegs.splice(index, 1);
+    return true;
+  });
+}
+
+function matchingBagPosition(
+  order: OpenOrder,
+  portfolio: PortfolioData | null | undefined,
+): PortfolioPosition | null {
+  if (!portfolio) return null;
+  const candidates = portfolio.positions.filter(
+    (position) => position.ticker.toUpperCase() === order.contract.symbol.toUpperCase() && position.legs.length > 1,
+  );
+  const comboLegs = order.contract.comboLegs;
+  if (!comboLegs?.length) return candidates.length === 1 ? candidates[0] : null;
+  const matches = candidates.filter((position) => positionMatchesComboLegs(position, comboLegs));
+  return matches.length === 1 ? matches[0] : null;
+}
+
 /**
  * Resolve the "last price" for an order.
  * For STK/OPT: use the WS price directly.
- * For BAG (spread): find the matching portfolio position and compute
- * the net mid from each leg's WS bid/ask (long leg mid − short leg mid).
+ * For BAG (spread): resolve each structural leg with the same stale-last /
+ * calculated-mid policy as the portfolio, then aggregate one signed BAG unit.
  */
-function resolveOrderLastPrice(
+function resolveOrderLastPriceData(
   order: OpenOrder,
   prices: Record<string, PriceData> | undefined,
   portfolio: PortfolioData | null | undefined,
-): number | null {
-  if (!prices) return null;
+): ResolvedOpenOrderPrice {
+  if (!prices) return { price: null, isCalculated: false, isPreviousClose: false };
   const pk = orderPriceKey(order.contract);
-  if (pk) return prices[pk]?.last ?? null;
-
-  // BAG: compute net mid from portfolio legs
-  if (order.contract.secType !== "BAG" || !portfolio) return null;
-  const pos = portfolio.positions.find((p) => p.ticker === order.contract.symbol && p.legs.length > 1);
-  if (!pos) return null;
-
-  let netMid = 0;
-  for (const leg of pos.legs) {
-    const key = legPriceKey(pos.ticker, pos.expiry, leg);
-    if (!key) return null;
-    const lp = prices[key];
-    if (!lp || lp.bid == null || lp.ask == null) return null;
-    const mid = (lp.bid + lp.ask) / 2;
-    const sign = leg.direction === "LONG" ? 1 : -1;
-    netMid += sign * mid;
+  if (pk) {
+    const priceData = prices[pk];
+    if (order.contract.secType === "OPT") return resolveRealtimePrice(priceData);
+    return { ...resolveSingleLegLastPrice(priceData), isPreviousClose: false };
   }
-  return Math.round(netMid * 100) / 100;
+
+  if (order.contract.secType !== "BAG") return { price: null, isCalculated: false, isPreviousClose: false };
+  const position = matchingBagPosition(order, portfolio);
+
+  const comboLegs = order.contract.comboLegs;
+  if (comboLegs?.length) {
+    const resolved = resolveSignedComboPrice(comboLegs.map((comboLeg) => {
+      const right = normalizedOptionRight(comboLeg.right);
+      const expiry = comboLeg.expiry?.replace(/-/g, "") ?? "";
+      const symbol = (comboLeg.symbol || order.contract.symbol).toUpperCase();
+      const key = right && comboLeg.strike != null && expiry.length === 8
+        ? optionKey({ symbol, expiry, strike: comboLeg.strike, right })
+        : null;
+      const fallbackLeg = position ? matchingPortfolioLeg(position, comboLeg) : null;
+      return {
+        action: comboLeg.action,
+        ratio: comboLeg.ratio,
+        priceData: key ? prices[key] : null,
+        fallbackPrice: fallbackLeg?.market_price,
+        fallbackIsCalculated: fallbackLeg?.market_price_is_calculated,
+      };
+    }));
+    if (resolved.price != null) return resolved;
+  }
+
+  if (!position || !Number.isFinite(position.contracts) || position.contracts === 0) {
+    return { price: null, isCalculated: false, isPreviousClose: false };
+  }
+  return resolveSignedComboPrice(position.legs.map((leg) => {
+    const key = legPriceKey(position.ticker, position.expiry, leg);
+    return {
+      action: leg.direction === "LONG" ? "BUY" : "SELL",
+      ratio: Math.abs(leg.contracts / position.contracts),
+      priceData: key ? prices[key] : null,
+      fallbackPrice: leg.market_price,
+      fallbackIsCalculated: leg.market_price_is_calculated,
+    };
+  }));
 }
 
 function makeOpenOrderExtract(
@@ -2593,7 +2787,7 @@ function makeOpenOrderExtract(
       case "lastPrice":
         return item.kind === "combo"
           ? resolveOpenOrderComboPrice(item.orders, prices)
-          : resolveOrderLastPrice(item.order, prices, portfolio);
+          : resolveOrderLastPriceData(item.order, prices, portfolio).price;
       case "deltaFill": {
         if (item.kind === "combo") {
           const last = resolveOpenOrderComboPrice(item.orders, prices);
@@ -2607,7 +2801,7 @@ function makeOpenOrderExtract(
         return distanceToFill({
           action: item.order.action,
           limitPrice: item.order.limitPrice,
-          lastPrice: resolveOrderLastPrice(item.order, prices, portfolio),
+          lastPrice: resolveOrderLastPriceData(item.order, prices, portfolio).price,
         })?.delta ?? null;
       }
       case "implied":
@@ -2629,11 +2823,29 @@ function makeOpenOrderExtract(
 }
 
 /** Wrapper so usePriceDirection can be called per-order row (hooks can't go in map callbacks). */
-function OrderPriceCell({ price }: { price: number | null }) {
+function OrderPriceCell({ price, isCalculated = false, isPreviousClose = false }: ResolvedOpenOrderPrice) {
   const { direction, flashDirection } = usePriceDirection(price);
+  // R-608: a mark derived entirely from the previous-session close carried the
+  // same `C` prefix as a live bid/ask midpoint, so the two were
+  // indistinguishable. Say which one this is.
+  const title = price == null
+    ? undefined
+    : isPreviousClose
+      ? "previous-session close; no live quote"
+      : isCalculated
+        ? "calculated from the live bid/ask midpoint"
+        : undefined;
   return (
-    <td className={`right last-price-cell ${flashDirection ? `last-price-${flashDirection}` : ""}`}>
-      {price != null ? fmtPrice(price) : "—"}
+    <td
+      className={`right last-price-cell ${flashDirection ? `last-price-${flashDirection}` : ""}${isPreviousClose ? " last-price-prev-close" : ""}`}
+      title={title}
+      data-previous-close={isPreviousClose ? "true" : undefined}
+      data-testid="order-last-price"
+    >
+      {price != null ? fmtPriceOrCalculated(price, isCalculated) : "—"}
+      {price != null && isPreviousClose && (
+        <span className="last-price-prev-close-mark" aria-label="previous-session close"> PC</span>
+      )}
       {direction === "up" && <ArrowUp size={11} className="price-trend-icon price-trend-up" aria-label="price up" />}
       {direction === "down" && <ArrowDown size={11} className="price-trend-icon price-trend-down" aria-label="price down" />}
     </td>
@@ -2744,6 +2956,9 @@ function OrdersSections({
   portfolio?: PortfolioData | null;
 }) {
   const { pendingCancels, pendingModifies, cancelledOrders, requestCancel, requestModify } = useOrderActions();
+  // T-462: the feed-disconnect arm of quoteSubmitGate is dead unless the
+  // owner surface supplies real connectivity.
+  const { connected: feedConnected } = useRealtimePrices();
   const { isMobile, hasMounted } = useViewport();
   const showMobileOrders = isMobile && hasMounted;
   const riskFreeRate = useRiskFreeRate();
@@ -3025,8 +3240,8 @@ function OrdersSections({
   }
 
   const canModify = (o: OpenOrder) => o.orderType === "LMT" || o.orderType === "STP LMT";
-  const openOrdersSummary = summarizeOpenOrders(orders.open_orders);
   const now = new Date();
+  const openOrdersSummary = summarizeOpenOrderRows(openOrderRows, now);
   const sessionCounts = summarizeSessionWindows(openOrderRows, now);
   const lastSyncLabel = orders.last_sync
     ? formatRelativeTime(orders.last_sync)
@@ -3048,6 +3263,7 @@ function OrdersSections({
         portfolio={portfolio}
         // R-112: the close-out branch must know what is already working.
         openOrders={orders}
+        feedConnected={feedConnected}
         onConfirm={handleModify}
         onClose={() => setModifyTarget(null)}
       />
@@ -3247,7 +3463,8 @@ function OrdersSections({
                     const comboQtyLabel = partialLeg
                       ? formatFillQuantity(partialLeg)
                       : String(o.totalQuantity);
-                    const comboLast = resolveOpenOrderComboPrice(o.orders, prices);
+                    const comboPrice = resolveOpenOrderComboPriceData(o.orders, prices);
+                    const comboLast = comboPrice.price;
                     const comboDistance = distanceToFill({
                       action: o.orders[0]?.action ?? "BUY",
                       limitPrice: o.limitPrice,
@@ -3285,7 +3502,7 @@ function OrdersSections({
                             style={{
                               marginLeft: "8px",
                               fontFamily: "var(--font-mono)",
-                              fontSize: "11px",
+                              fontSize: "var(--text-meta)",
                               color: "var(--text-secondary)",
                             }}
                           >
@@ -3306,7 +3523,7 @@ function OrdersSections({
                           </td>
                         )}
                         {orderColumns.lastPrice && (
-                          <OrderPriceCell price={comboLast} />
+                          <OrderPriceCell {...comboPrice} />
                         )}
                         {orderColumns.deltaFill && (
                           <td className="right">
@@ -3375,7 +3592,8 @@ function OrdersSections({
                   const isPendingCancel = pendingCancels.has(o.order.permId);
                   const isPendingModify = pendingModifies.has(o.order.permId);
                   const isPending = isPendingCancel || isPendingModify;
-                  const singleLast = resolveOrderLastPrice(o.order, prices, portfolio);
+                  const singlePrice = resolveOrderLastPriceData(o.order, prices, portfolio);
+                  const singleLast = singlePrice.price;
                   const singleDistance = distanceToFill({
                     action: o.order.action,
                     limitPrice: o.order.limitPrice,
@@ -3386,6 +3604,7 @@ function OrdersSections({
                     remaining: o.order.remaining,
                     isPendingCancel,
                     isPendingModify,
+                    extendedFillLive: isExtendedFillLive(session),
                   });
                   const intent = resolveOrderIntent(o.order, portfolio?.positions);
                   const singleRowClass = [
@@ -3414,7 +3633,7 @@ function OrdersSections({
                             style={{
                               marginLeft: "8px",
                               fontFamily: "var(--font-mono)",
-                              fontSize: "11px",
+                              fontSize: "var(--text-meta)",
                               color: "var(--text-secondary)",
                             }}
                           >
@@ -3445,7 +3664,7 @@ function OrdersSections({
                         </td>
                       )}
                       {orderColumns.lastPrice && (
-                        <OrderPriceCell price={singleLast} />
+                        <OrderPriceCell {...singlePrice} />
                       )}
                       {orderColumns.deltaFill && (
                         <td className="right">
@@ -3577,7 +3796,7 @@ function OrdersSections({
                         </td>
                         <td>
                           <TickerLink ticker={group.symbol} />
-                          <span style={{ marginLeft: "8px", fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--text-secondary)" }}>
+                          <span style={{ marginLeft: "8px", fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--text-secondary)" }}>
                             {group.description.replace(/^(Opened|Closed)\s+\w+\s*/, "")}
                           </span>
                           {isCancelled && <XCircle size={12} className="cancelled-icon" />}
@@ -3612,12 +3831,12 @@ function OrdersSections({
                           <tr key={`${e.execId}-${i}`} className="exec-fill-row">
                             <td></td>
                             <td style={{ paddingLeft: "24px" }}>
-                              <span style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--text-secondary)" }}>
+                              <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--text-secondary)" }}>
                                 {isBAG ? `${e.symbol}` : e.symbol}
                               </span>
                             </td>
                             <td>
-                              <span className={`pill ${displaySide === "BUY" ? "accum" : "distrib"}`} style={{ fontSize: "9px" }}>
+                              <span className={`pill ${displaySide === "BUY" ? "accum" : "distrib"}`} style={{ fontSize: "var(--text-meta)" }}>
                                 {displaySide}
                               </span>
                             </td>
@@ -4004,7 +4223,7 @@ type WorkspaceSectionsProps = {
   marketState?: MarketState;
 };
 
-function WorkspaceSections({ section, portfolio, portfolioLastSync, orders, prices, depths, tape, tickerParam, theme, marketState }: WorkspaceSectionsProps) {
+function WorkspaceSections({ section, portfolio, orders, prices, depths, tape, tickerParam, theme, marketState }: WorkspaceSectionsProps) {
   switch (section) {
     case "dashboard":
       return null;
@@ -4018,7 +4237,9 @@ function WorkspaceSections({ section, portfolio, portfolioLastSync, orders, pric
       // into every non-portfolio workspace bundle.
       return null;
     case "performance":
-      return <PerformancePanel portfolioLastSync={portfolioLastSync} marketState={marketState} />;
+      // WorkspaceShell loads the isolated performance chunk directly, just
+      // as it does for portfolio. No scanner/order bundle is needed here.
+      return null;
     case "orders":
       return <OrdersSections orders={orders ?? null} prices={prices} portfolio={portfolio} />;
     case "scanner":

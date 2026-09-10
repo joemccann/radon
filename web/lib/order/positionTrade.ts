@@ -21,7 +21,7 @@
 
 import type { PortfolioData, PortfolioPosition, PortfolioLeg } from "@/lib/types";
 import type { OptionOrderRiskInput } from "@/lib/order";
-import { resolveEntryCost } from "@/lib/positionUtils";
+import { resolveClosingBasis } from "@/lib/positionUtils";
 import { fmtSignedPrice } from "@/lib/format";
 
 export type TradeTarget = { kind: "combo" } | { kind: "leg"; index: number };
@@ -317,7 +317,7 @@ export function buildPositionTradeOrder(params: {
           description,
           totalCost,
           closeOut: {
-            entryCostDollars: resolveEntryCost(position) * (quantity / comboUnits),
+            entryCostDollars: resolveClosingBasis(position, quantity, comboUnits),
           },
         },
       };

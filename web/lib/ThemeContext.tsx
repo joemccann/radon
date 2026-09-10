@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { hydrateUiPreferences, saveUiTheme } from "@/lib/uiPreferences";
 
 type Theme = "dark" | "light";
 
@@ -48,7 +49,7 @@ function readClientTheme(): Theme {
 // tags are owned by Next.js's viewport metadata API and mutating them
 // post-mount confuses hydration / re-renders (React #418). PWA chrome
 // follows the media-query themeColor pair declared in app/layout.tsx
-// (light → #ffffff, dark → #0a0f14) which switches on the OS-level
+// (light → #ffffff, dark → #101714) which switches on the OS-level
 // prefers-color-scheme; a user override via the in-app toggle does not
 // move the PWA status-bar color until next launch. Acceptable tradeoff.
 function applyThemeSideEffects(next: Theme) {
@@ -72,6 +73,25 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Cross-device sync: the profile row's stored theme fills in when THIS
+  // device has no explicit choice yet. An explicit localStorage value stays
+  // authoritative locally (it is what ThemeBootstrap painted pre-hydration).
+  useEffect(() => {
+    let active = true;
+    void hydrateUiPreferences().then((prefs) => {
+      if (!active || !prefs.theme) return;
+      try {
+        const explicit = window.localStorage.getItem(STORAGE_KEY);
+        if (explicit === "dark" || explicit === "light") return;
+        window.localStorage.setItem(STORAGE_KEY, prefs.theme);
+      } catch {}
+      setThemeState(prefs.theme);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   useEffect(() => {
     applyThemeSideEffects(theme);
   }, [theme]);
@@ -92,6 +112,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     try {
       window.localStorage.setItem(STORAGE_KEY, next);
     } catch {}
+    saveUiTheme(next);
   }, []);
 
   const toggleTheme = useCallback(() => {

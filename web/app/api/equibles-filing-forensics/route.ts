@@ -85,6 +85,8 @@ async function readFlaggedList(): Promise<Dossier> {
   return { dossiers, count: dossiers.length };
 }
 
+export const radonCapability = "read";
+
 export async function GET(request: Request): Promise<Response> {
   const requestId = getRequestId();
   const rawTicker = new URL(request.url).searchParams.get("ticker");

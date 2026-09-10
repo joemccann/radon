@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 """Cash-flow sync — Monitor daemon handler.
 
+NOT REGISTERED since 2026-09-02. Cash flows come from the sFTP-delivered
+statement (radon-flex-pull.timer -> flex_delivery_ingest -> cash_flow_sync
+--from-file), and that ingest writes the `cash-flow-sync` heartbeat. This
+handler's daily no-source run exited EXIT_FLEX_SEND_DISABLED and painted
+"Flex Web Service is file-ingest only" over rows the delivery had already
+synced. The class stays for its embargo bookkeeping contracts
+(R-104/R-108/R-109); registering it again means a weekday SendRequest.
+
 Pulls IB CashTransaction rows (deposits, withdrawals, dividends, interest,
 fees) from the NAV Flex Query and persists to the `cash_flows` Turso
 table once per ET trading day at 08:00 ET (pre-open; see FIRE_HOUR_ET).

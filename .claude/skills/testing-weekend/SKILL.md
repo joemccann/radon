@@ -1,6 +1,6 @@
 ---
 name: testing-weekend
-description: Weekend testing loop - daily delta-audit of test-suite health for everything merged since the last audited SHA (new findings appended to TEST_AUDIT.md), then red/green remediation of new P0/P1 findings on a PR branch. Runs unattended on the always-on runner via scripts/testing_weekend.sh, one daily cycle at 00:00 local that runs audit then remediate; invoke as /testing-weekend audit or /testing-weekend remediate.
+description: Weekend testing loop - daily delta-audit of test-suite health for everything merged since the last audited SHA (new findings appended to TEST_AUDIT.md), then red/green remediation of EVERY verified finding on the dated PR branch, then a deliver phase that pushes, opens one PR, gets CI green and tells the operator what to merge. Runs unattended on the always-on runner via scripts/testing_weekend.sh, one daily cycle at 00:10 local that runs audit, remediate, then deliver; invoke as /testing-weekend audit, /testing-weekend remediate or /testing-weekend deliver.
 ---
 
 # Testing Weekend Loop
@@ -11,9 +11,10 @@ standard is the one set by the 2026-08-07 audit (`TEST_AUDIT.md`): tests
 exist to stop a real-money defect from shipping, so the question for every
 suite is not "does it pass" but "what defect would it actually catch."
 
-The mode is the first argument: `audit` or `remediate`. The unattended job
-fires once a day at 00:00 local and runs `audit` then `remediate`
-sequentially in this loop's own clone.
+The mode is the first argument: `audit`, `remediate` or `deliver`. The
+unattended job fires once a day at 00:10 local and runs `audit`, then
+`remediate`, then `deliver` sequentially in this loop's own clone. The loop
+never merges; the human merge is the deploy trigger.
 
 ## Hard rails (both modes — violating any of these is a failed run)
 
@@ -24,8 +25,9 @@ sequentially in this loop's own clone.
    `testing/<YYYY-MM-DD>` and a PR. The human merge is the deploy
    trigger.
 3. **Never run against the operator's working clone.** Refuse (exit
-   nonzero, say why) unless the file `.radon-weekend-runner` exists in the
-   repo root — that marker means this is the dedicated runner clone.
+   nonzero, say why) unless BOTH `.radon-weekend-runner` and
+   `.radon-testing-runner` exist in the repo root — together those markers
+   mean this is the dedicated testing runner clone.
 4. **Respect the frozen contracts.** `TEST_AUDIT.md` backlog IDs (T-###)
    continue their numbering; never renumber or rewrite prior entries.
    `TEST_LOG.md` is append-only. The PART A audit body (§1–§10) is frozen —
@@ -35,9 +37,13 @@ sequentially in this loop's own clone.
    on inspection, lowering a coverage ratchet. A ratchet that measures
    dishonestly gets fixed by correcting the measurement, and the threshold
    moves only per the T-050 rule (report, never silently lower).
-6. **Bounded.** The wrapper enforces a wall-clock cap. Pace so the run
-   finishes cleanly: leave un-started work logged as `DEFERRED`, never
-   half-applied. Commit after every completed task, never mid-task.
+6. **Bounded per phase, complete overall.** The wrapper enforces a
+   wall-clock cap per phase. Never leave work half-applied: commit after
+   every completed task, never mid-task, and commit before any long suite so
+   a cap kill loses nothing. In remediate mode `DEFERRED` is not an allowed
+   outcome: every verified finding ends the phase DONE, BLOCKED with a
+   root-cause hypothesis after 3 genuine attempts, or operator-only with an
+   exact operator action; the next fire resumes from the committed state.
 7. **Stay off the reliability loop's lane.** The reliability loop
    (`/reliability-weekend`) runs in its own clone (`~/radon-weekend/radon`);
    this loop runs in `~/radon-weekend/radon-testing`. Never operate in the
@@ -90,14 +96,31 @@ loop's job; yours is whether the tests guarding it are real.
    add backlog rows with red/green acceptance criteria. Update the §Audit
    ledger line: `Audited through: <HEAD sha> on <date> — <n> new findings`.
 6. Commit to the nightly branch, push the branch, and open (or update)
-   the nightly PR titled `Testing <date>` with the delta summary
-   in the body. Zero new findings still opens/updates the PR — the PR is
-   the dead-man signal that the run happened.
+   the nightly PR via §Pull request output. Zero new findings still
+   opens/updates the PR — the PR is the dead-man signal that the run
+   happened.
 
 ## Mode: remediate (second phase of the daily cycle)
 
-Goal: work the newest un-DONE P0/P1 backlog items (this run's first,
-then any older non-P2 stragglers), exactly by the PART B contract:
+Goal: work EVERY verified un-DONE finding from this cycle's audit in
+severity order (P0, then P1, then P2), then older stragglers, exactly by
+the PART B contract:
+
+**Remediate mandate.** Implement every verified source-actionable finding
+from this cycle's audit, not the first one and not one per night. Group fixes
+by root cause into separate commits on one dated branch `testing/<YYYY-MM-DD>` (one
+branch per loop per day; the deliver phase turns it into one PR). Red/green
+per fix; the full project gates before every commit. Independent fixes may
+run in parallel as subagents in separate worktrees of this clone
+(`git worktree add ../wt-<id> -b testing/<date>-<id> testing/<date>`), each
+committing to its own branch; this phase merges them back onto the dated
+branch, reruns the gates on the merged result, and removes the worktrees
+(`git worktree remove`, `git branch -d`). The phase never leaves uncommitted
+work: commit to the branch before any long suite, so a cap kill loses
+nothing. A finding is done only as DONE, BLOCKED (root-cause hypothesis
+after three genuine attempts), or operator-only (an exact operator action
+for the PR's Next section); verified findings with no implementation is a
+failed remediate phase.
 
 1. Check out the nightly branch (create from `origin/main` if the audit
    phase produced nothing; then this run only re-verifies gates, step 4).
@@ -107,8 +130,12 @@ then any older non-P2 stragglers), exactly by the PART B contract:
    correct); for a net-negative test, show what real defect it passes
    over; (b) implement surgically; (c) show green; (d) run the full gates
    from the repo root (`python3.13 -m pytest`, `npx vitest run`, and
-   `pytest cloud/tests` when units/cloud files changed); (e) append the
-   TEST_LOG.md row with red/green counts; (f) commit with the T-### id.
+   `pytest cloud/tests` when units/cloud files changed); when the task
+   changed UI, also run the relevant `web/e2e` spec in the worktree and
+   attach the screenshot: the clone-copied `node_modules` is what makes
+   that possible, and CLAUDE.md does not accept unit-only evidence for
+   UI; (e) append the TEST_LOG.md row with red/green counts; (f) commit
+   with the T-### id.
    Source-code fixes are in scope ONLY when a test correctly fails
    against a real defect the audit identified — fix the defect, keep the
    test; never the reverse.
@@ -116,10 +143,160 @@ then any older non-P2 stragglers), exactly by the PART B contract:
    hypothesis and move on.
 4. Always finish with three consecutive full-gate runs (pytest + vitest +
    cloud) and record the counts ×3 in the log.
-5. Push the branch; update the PR body with: tasks DONE/BLOCKED/DEFERRED
-   by severity, gate counts ×3, and anything needing the operator (e.g. a
-   ratchet-threshold decision per the T-050 rule, or CI workflow changes
-   that need a human eye before merge).
+5. Push the branch; rewrite the PR via §Pull request output. DONE/BLOCKED
+   tables and gate counts ×3 go on the rolling issue. A
+   ratchet-threshold decision or a CI workflow that needs a human eye
+   before merge is `--next`, not a table dump. CI on that PR is the deliver
+   phase's job (§Mode: deliver).
+
+## Mode: deliver (third phase of the daily cycle)
+
+Goal: every commit the remediate phase landed on `testing/<YYYY-MM-DD>` reaches the
+operator as ONE pull request with CI green, in this same cycle, and the
+operator is told exactly what is ready to merge. The loop never merges.
+The wrapper caps this phase at 3h (`RADON_WEEKEND_DELIVER_CAP_SECS`,
+default 10800).
+
+1. Resume first. Read this loop's deliver record
+   (`python3.13 scripts/nightly_deliver.py show --loop testing`; kept outside the clone under `~/radon-weekend/.testing-deliver/`).
+   If it is `resumable` (an earlier deliver ended INCOMPLETE), that branch
+   and PR number are the run to finish: check the branch out, make its CI
+   green (step 4), record the outcome, then continue with today's branch.
+   Never open a second PR for a branch that already has one.
+2. Push the dated branch. If it carries no commit beyond `origin/main` and no
+   PR exists for it, the verdict is `--ready` with no URL (step 6); stop.
+3. Open ONE PR for the branch via §Pull request output (`--loop testing`);
+   update the existing PR when one is already open for the branch (`gh api
+   -X PATCH`). Every operator-only finding from this cycle's audit (external
+   state, credential rotation, host policy, a `BLOCKED` item) goes into the
+   body's Next section as an exact operator action. Nothing is dropped
+   silently. Record the PR:
+   `python3.13 scripts/nightly_deliver.py record --loop testing --branch <branch> --pr <n> --url <url> --status pending`.
+4. Wait for CI, bounded:
+   `python3.13 scripts/nightly_deliver.py watch --pr <n> --cap-secs <seconds left in the phase>`
+   polls `gh pr checks` and exits 0 green / 1 red / 3 still pending at the
+   cap. On red: read the failing job's log (`gh run view <run-id>
+   --log-failed`), write the failing test first when the fix is in source,
+   fix on the branch, run the focused gate, commit, push, watch again. Repeat
+   until green or the cap. Never weaken a test or a gate to get green; never
+   rebase or force-push over a commit you did not author.
+5. Record the outcome (`record ... --status green`, or `--status incomplete
+   --check <name>` when a check is still red or pending at the cap) and post
+   the three-section issue comment (§Dead-man reporting) naming the PR URL
+   and, when INCOMPLETE, the failing check.
+6. Print, as the LAST stdout line of the phase, the verdict line from
+   `python3.13 scripts/nightly_deliver.py verdict --loop testing --ready <url>...`
+   (or `--incomplete <check> --pr-url <url>`). The wrapper greps it:
+   `NIGHTLY DELIVER READY: loop=testing prs=<n> <urls>` becomes the operator
+   notification "N PR(s) green, ready to merge: <urls>" (Pushover and the
+   dead-man comment); `NIGHTLY DELIVER INCOMPLETE: loop=testing check=<name>
+   pr=<url>` becomes "INCOMPLETE: <name>", the phase exits 75, and the next
+   fire resumes the same branch and PR from the record. An exit-0 deliver
+   phase without the line is INCOMPLETE. Never emit the line anywhere else.
+
+## Declaring a no-op phase
+
+The wrapper scores `audit` and `remediate` on a commit landing on the nightly
+branch during the phase: exit 0 with an unmoved HEAD is `INCOMPLETE (agent
+exited 0 without committing to the nightly branch)`, exit 75. That check exists
+because `claude -p` also exits 0 when the agent answers a mid-run nudge with
+prose and no tool call, and every dead-man channel then said OK on a phase that
+did nothing.
+
+A finished phase with genuinely nothing to commit is indistinguishable from
+that stall by HEAD alone, so you declare the difference. When you have done the
+full phase — the whole delta range read, every sweep run, the report written —
+and the honest result is that there is nothing to commit, print exactly this as
+the last thing you emit, unindented, at column 0:
+
+```
+NIGHTLY PHASE NO-OP: loop=testing phase=<audit|remediate> <one-line reason>
+```
+
+For example (indented here on purpose — see the third rule below):
+
+```
+    NIGHTLY PHASE NO-OP: loop=testing phase=audit no new findings in the delta range
+    NIGHTLY PHASE NO-OP: loop=testing phase=remediate 0 source-actionable P0/P1 items
+```
+
+Rules, all of them enforced by `scripts/tests/test_phase_noop_declaration.py`:
+
+- The line must name THIS loop and THIS phase. A line copied from a sibling
+  loop or a different phase does not count.
+- It must start at column 0. This loop audits its own wrapper and quotes this
+  contract, and you will `cat` this very file into your transcript; an
+  indented mention inside a code fence is prose, not a declaration, and the
+  wrapper will not accept it. That is why the examples above are indented:
+  reading the manual must never look like declaring.
+- It is a declaration of completion, not an excuse. Emit it only when the phase
+  ran end to end. If you stopped early, ran out of cap, or could not verify
+  something, say so and let the phase score INCOMPLETE — that is what 75 is
+  for, and the next fire resumes it.
+- Never emit it when you did commit. A commit is its own evidence.
+- Silence is still INCOMPLETE. Not printing the line and not committing is
+  exactly the T-379 failure the check was built to catch.
+
+## Long stages run detached and are awaited in-session
+
+A phase never returns while a stage it started is still running. "Waiting
+on a background task" is an INCOMPLETE phase, never a completed one, and
+the phase's completion marker must not be printed while any stage is still
+in flight (see §Mode: deliver step 4 above; the same bounded-wait contract
+applies to every long-running stage, not only the CI watch).
+
+Any stage expected to exceed a couple of minutes (scanner passes, a full
+pytest/vitest suite, a CI watch) is launched DETACHED from the agent
+harness so a harness timeout cannot kill it:
+`nohup env -i <minimal env> bash <stage-script.sh> </dev/null >stage.out
+2>&1 & disown` (macOS has no `setsid`). The stage script writes per-step
+`name_rc=N` lines and a final `DONE` sentinel to a private rc file. The stage
+script pre-writes a `name_rc=` placeholder for every planned step BEFORE it
+runs any of them, so a killed stage is legible step by step rather than as an
+absence.
+
+**An rc file with no `DONE` is a FAILED stage, never a passing one.** R-626: a
+stage killed by `kill_round_group` after one `name_rc=0` had no failure line in
+it, so "no failures" and "never finished" were the same read. Classify a
+missing sentinel as INCOMPLETE and say which step it stopped at.
+
+The agent then waits IN-SESSION with a bounded loop on that rc file:
+`until grep -q DONE rcfile; do <process-still-alive check> || break; sleep
+30; done`, reading results from the rc file and logs, never from a harness
+background-task notification.
+
+Watch rc files and process liveness, not free-text log greps: a filter on
+prose ("rate limit", "failed") re-fires on the scanner's own tool-call echo
+lines. Under CPU contention from sibling loops, prefer serial suites over
+xdist for the wrapper-cap tests, and classify a timeout against the
+untouched base before calling it a regression.
+
+## Pull request output
+
+PR titles and bodies are generated by `python3.13 scripts/github_pr_output.py`,
+never freehanded. Pass `--loop testing`, `--date`, `--issue` (what went
+wrong, as one bullet per finding: `- **Component**: what happened.`), `--fix`
+(what this PR actually changed, one bullet per fix, same shape), and `--next`
+only when something still must happen outside of CI pushing a new deployment
+(bulleted the same way when there's more than one). Omit `--next` and the
+formatter emits `Fixed with green deployment`. A single plain sentence still
+works when there is exactly one finding.
+
+The body has exactly three sections, in this order: **Issue discovered**,
+**What was done to fix it**, **Next**. Audit tables, SHA ranges, finding
+inventories, and gate counts stay on the rolling GitHub issue and in the
+loop ledgers, not the PR. Title shape: `Testing <date>: <plain-language
+issue>`. Create a new dated branch, or a new remediation PR after the
+audit PR merged, with `gh pr create --title <title> --body <body>
+--head <branch> --base main` (or `POST /repos/{owner}/{repo}/pulls` with
+`head`, `base`, `title`, and `body`). Formatter `--json` is `{title, body}`
+only; do not POST it as the create payload. Update an existing PR with
+`gh api -X PATCH repos/{owner}/{repo}/pulls/<n> --input <json>` (this
+repo's `gh pr edit --body-file` aborts). Verify with a grep for a phrase
+you just wrote.
+
+Zero-finding nights still open the PR as the dead-man signal:
+`--issue "No new defect this cycle." --fix "Recorded the audit. No code change." --next "No deploy needed."`
 
 ## Dead-man reporting
 
@@ -127,12 +304,60 @@ Every phase outcome is reported three ways, so a silent-dead runner shows up
 the next morning at the latest: a comment on the rolling GitHub issue
 labeled `testing-nightly`, a Pushover notification per phase carrying the
 status and the nightly PR link when one exists, and the PR itself.
-A quiet day means one of two things: the runner did not fire, or the
+
+The wrapper posts one runner-health comment per phase, not the three-section
+write-up:
+
+**PHASE** STAMP **status**
+optional detail
+
+For the deliver phase the status IS the operator's merge cue: `N PR(s)
+green, ready to merge: <urls>`, `0 PR(s), nothing to merge`, or
+`INCOMPLETE: <check>` (CI not green at the cap; the next fire resumes the
+same branch and PR). The issue is created once with a timeless
+rolling-dead-man description. Run
+history stays in comments. The wrapper does not edit the issue body after
+the first run. A missing daily comment means the runner did not fire.
+
+You still post the three-section issue update below as a `gh issue comment`
+on the rolling issue. Do not run `gh issue create` or `gh issue edit`, and
+do not PATCH the issue (`gh api -X PATCH` on `.../issues/`). That would
+overwrite the dead-man description. Comment-only. The wrapper also comments;
+you are not the only commenter. GitHub issue write-ups
+you author use this shape, never a status dump or a pointer to a log on a
+machine:
+
+**Issue discovered**
+What went wrong, in plain language. If nothing went wrong, say that.
+
+**What was done to fix it**
+What THIS run actually changed. If nothing: "Nothing this run."
+
+**Next**
+Only work that must happen OUTSIDE of CI pushing a new deployment. If
+nothing remains: "Fixed with green deployment"
+
+`INCOMPLETE (agent exited 0 without committing to the nightly branch)` is
+the status the wrapper posts when `claude -p` returned 0 but no commit landed
+on the nightly branch during the phase (T-379): treat it exactly like
+TRUNCATED — the phase's draft work, if any, is under `/tmp/tw-<date>/` and
+the next phase must land it. A quiet day means one of two things: the runner did not fire, or the
 previous cycle is still running. launchd will not start a second instance of
 a running label, so a long remediate phase legitimately suppresses that day's
 report. Check `launchctl list | grep radon` before treating quiet as dead.
-This loop's worst case is one 2h audit plus one 6h remediate, so it always
-clears the next 00:00 fire.
+This loop's worst case is one 2h audit plus one 6h remediate plus one 3h
+deliver, so it always clears the next 00:00 fire.
+
+## Measure improvement
+
+Measure improvement by: findings implemented per cycle (verified findings
+fixed and delivered over verified findings found), PRs opened per cycle,
+time to CI green (remediate start to the deliver phase's green verdict), and
+PRs awaiting merge with their age (an operator-side backlog the loop reports
+in the Next section and the issue comment, never one it closes itself). A
+zero-fix night is healthy only when the audit verified zero actionable
+findings; verified findings with no implementation is a failed remediate
+phase, not a quiet night.
 
 ## Self-improvement
 
@@ -195,12 +420,20 @@ how this loop improves as the codebase grows.
   reproduced and had to be logged as an observation rather than a finding.
   Write the full reporter output to a file per gate run and read the tail
   from that file, so a flake round is nameable the first time it happens.
-- **2026-08-17 (remediate): `pytest cloud/tests` is 10-red on macOS on
-  `origin/main` too.** Ten `sha256sum`-dependent control-plane tests cannot
-  pass on a darwin runner. Diff the failure LIST against a clean
-  `origin/main` worktree before treating any cloud red as yours; the count
-  alone is not a signal. Baseline as of this run: `10 failed, 848 passed,
-  4 skipped`.
+- **2026-08-17 (remediate): `pytest cloud/tests` is red on macOS on
+  `origin/main` too.** Diff the failure LIST against a clean `origin/main`
+  worktree before treating any cloud red as yours; the count alone is not a
+  signal. Baseline as of this run: `10 failed, 848 passed, 4 skipped`, then
+  attributed to `sha256sum`. **That attribution is STALE as of 2026-08-29**
+  — `/opt/homebrew/bin/sha256sum` exists on this host and no `sha256sum`
+  red remains. The current darwin baseline is `37 failed`: 13 in
+  `test_bootstrap_control_plane.py` (`exec {fd}<>` is bash 4+ and
+  `/bin/bash` here is 3.2, so it exits 127), 21 in
+  `test_ib_gateway_control.py` (`operator-radon.sh` uses `mapfile`, bash
+  4+), 3 in `test_caddy_edge_timeouts.py` (no `caddy` on PATH).
+  `setup_testing_weekend.sh` now checks both and names the consequence;
+  installing either MOVES this baseline, so re-record the FAILED list in
+  the same run.
 - **2026-08-17 (remediate): pre-flight a spec under `next start` before
   curating it into CI.** The e2e job builds and serves a production
   server, and this repo has a documented dev-vs-prod divergence. Every
@@ -217,7 +450,9 @@ how this loop improves as the codebase grows.
 - **2026-08-22 (audit): the darwin cloud baseline is a LIST, not a count, and
   it moves.** Round 1 read `12 failed` against a recorded baseline of 10; the
   diff of `FAILED` lines against the 2026-08-17 list is what separated two
-  new `sha256sum`-shim reds (T-088) from the known ten. Always `sort` the
+  new environment-shim reds (T-088) from the known ten. (The environment
+  cause has since changed from `sha256sum` to bash 3.2 + missing `caddy`;
+  the list is 37 today.) Always `sort` the
   `FAILED` lines to a file and `diff` them; update the recorded baseline in
   the audit whenever it changes.
 - **2026-08-22 (audit, second pass): CHECK `origin` FOR AN EXISTING WEEKEND
@@ -244,7 +479,8 @@ how this loop improves as the codebase grows.
 - **2026-08-22 (audit): verify the RUNNER TOOLCHAIN before trusting a red
   gate, the same way you verify the tree is clean.** One round reported
   `107 failed` and every failure was "async def functions are not natively
-  supported" — the shared venv (`~/radon-weekend/venv`) had pytest but no
+  supported" — the venv (then the shared `~/radon-weekend/venv`; now this
+  loop's `~/radon-weekend/venv-testing`) had pytest but no
   `pytest-asyncio`, which only CI installs. The same tree was `7216 passed`
   once the plugin was in. `node` was also absent from the agent's PATH until
   `~/.nvm/versions/node/<v>/bin` was prepended (the wrapper exports it, but a
@@ -276,13 +512,20 @@ how this loop improves as the codebase grows.
   `TEST_LOG.md`.
 - **2026-08-23 (remediate): fan the backlog out to one worktree per task
   group; cherry-pick back serially.** `git worktree add --detach /tmp/...`
-  plus symlinked `node_modules` (root AND `web/`) gives each subagent a clean
-  tree; the shared venv needs nothing. Group findings that touch the SAME
-  test file into one agent (T-082+T-097, T-084+T-099, T-086+T-098 here) or
-  the cherry-picks conflict. The main clone stays untouched, so a baseline
-  gate can run there while the agents work, and each `cherry-pick -n` +
-  docs row + push is one durable commit. Sixteen P1s landed in ~15 minutes
-  of wall clock this way versus one-at-a-time.
+  plus an APFS clone copy of `node_modules` (`cp -Rc <clone>/node_modules
+  <wt>/node_modules` and the same for `web/`; fall back to `cp -R` off APFS)
+  gives each subagent a clean tree; the loop venv needs nothing. NEVER
+  symlink `node_modules`: a symlink out of the worktree root breaks BOTH
+  gates. vitest cannot resolve `@rollup/rollup-darwin-arm64` through the
+  link's real path, and Turbopack hard-fails the Playwright webServer with
+  `Symlink [project]/web/node_modules is invalid, it points out of the
+  filesystem root`, so the worktree cannot run e2e at all. `cp -Rc` is
+  copy-on-write, so it costs seconds and near-zero disk. Group findings that
+  touch the SAME test file into one agent (T-082+T-097, T-084+T-099,
+  T-086+T-098 here) or the cherry-picks conflict. The main clone stays
+  untouched, so a baseline gate can run there while the agents work, and
+  each `cherry-pick -n` + docs row + push is one durable commit. Sixteen
+  P1s landed in ~15 minutes of wall clock this way versus one-at-a-time.
 - **2026-08-23 (remediate): a subagent's "green" is scoped; re-read the
   source diff before landing.** Two things the per-task reports could not
   show: (a) the relay is ESM with socket side effects on import, so T-087's
@@ -293,10 +536,11 @@ how this loop improves as the codebase grows.
   scoped run. Grep every caller of a changed signature in the LANDED tree,
   not the worktree.
 - **2026-08-23 (remediate): the darwin cloud baseline grew by three
-  `sha256sum`-class reds without any test being wrong.** At `4985a7f8`
+  environment-class reds without any test being wrong.** At `4985a7f8`
   this host reads 12; at `2e904678` it reads 15 because
-  `test_refresh_control_plane.py` (new in the delta) also asserts
-  `shutil.which("sha256sum")`. Same rule as the audit lesson: sort the
+  `test_refresh_control_plane.py` was new in the delta. (The `sha256sum`
+  cause named at the time is stale; as of 2026-08-29 the baseline is 37 and
+  the cause is bash 3.2 + missing `caddy`.) Same rule as the audit lesson: sort the
   `FAILED` lines, run the base SHA in a worktree, `diff` — and record the
   new list in the log so the next run does not misattribute it.
 - **2026-08-23 (remediate): two hosts remediated the same branch at once —
@@ -379,7 +623,9 @@ how this loop improves as the codebase grows.
   `pytest-xdist`.** Bare `git` is the only git here and its output was
   trustworthy (the 2026-08-16 rtk lesson applies only where rtk is installed —
   check `which rtk` first). `pytest-xdist` is CI-only like `pytest-asyncio`
-  was: install it in the shared venv before verifying anything under
+  was: install it in this loop's venv (`~/radon-weekend/venv-testing` — the
+  legacy shared `~/radon-weekend/venv` is unused since the per-loop split)
+  before verifying anything under
   `-n auto --dist loadfile` (a new shard is only proven with CI's flags).
   `setsid` does not exist on darwin: detach a long job with
   `subprocess.Popen(..., start_new_session=True)`, never `nohup setsid`.
@@ -453,16 +699,18 @@ how this loop improves as the codebase grows.
   the main clone after each cherry-pick. Doing that caught nothing wrong this
   run, but it is what makes the closing gate a confirmation rather than a
   discovery. Never run the closing 3x gate until the fan-out is fully drained.
-- **2026-08-26 (remediate): a worktree with symlinked `node_modules` cannot
-  start vitest on this host** — `@rollup/rollup-darwin-arm64` resolves relative
-  to the symlink's real path and is absent, so vitest dies at startup. Three
-  agents hit it independently and each worked around it by installing that one
-  binding to a scratch dir and setting `NODE_PATH`, which is the right move:
-  the main clone is UNAFFECTED (verified with a scoped `npx vitest run` before
-  trusting the closing gate) and nothing in the repo was modified. Put the
-  workaround in the agent prompt next time instead of making each one discover
-  it, and always smoke-test vitest in the MAIN clone before concluding the
-  suite is broken.
+- **2026-08-26 (remediate): SUPERSEDED by the `cp -Rc` rule at the fan-out
+  bullet above. Kept for the symptom.** A worktree with symlinked
+  `node_modules` cannot start vitest on this host: `@rollup/rollup-darwin-arm64`
+  resolves relative to the symlink's real path and is absent, so vitest dies at
+  startup. Three agents hit it independently and each worked around it by
+  installing that one binding to a scratch dir and setting `NODE_PATH`; do NOT
+  do that any more, clone-copy `node_modules` instead, because the `NODE_PATH`
+  patch rescues vitest but leaves e2e dead, which is worse because it looks
+  green. The main clone is UNAFFECTED (verified with a scoped `npx vitest run`
+  before trusting the closing gate) and nothing in the repo was modified.
+  Always smoke-test vitest in the MAIN clone before concluding the suite is
+  broken.
 - **2026-08-26 (remediate): two agents branched from the same base can land
   CONTRADICTORY pins — diff the landed tree, not the two reports.** T-162
   wrapped `run()` in the credit-spread and IEI/HYG producers; T-163, working
@@ -587,3 +835,277 @@ how this loop improves as the codebase grows.
   deprecation, so the body goes through
   `gh api -X PATCH repos/{owner}/{repo}/pulls/<n> --input <json>` and is
   verified with a grep for a phrase you just wrote.
+
+- **2026-08-29 (audit): check `git status` AFTER the gates, not only before.**
+  The clean-tree rail is a pre-flight check in this skill, but a gate run can
+  DIRTY the tree: `scripts/api/tests/test_flow_report_capacity_shed.py` (new in
+  the delta) POSTs `/flow-analysis/JOBY` without redirecting
+  `server._FLOW_REPORTS_DIR`, so every run writes `data/flow_reports/JOBY.json`
+  into the checkout — reproduced isolated in 0.56 s, `3 passed`, file recreated
+  every time (T-275). It surfaced only because a mid-run `git status` (run to
+  confirm the read-only agents were behaving) showed an untracked path that was
+  not there at pre-flight. Two rails: run `git status --porcelain` after each
+  gate and attribute anything new to the file that wrote it; and treat a test
+  that writes into the repo as a P1, not housekeeping — the loop's own
+  clean-tree precondition is what it breaks.
+- **2026-08-29 (audit): "green in the full suite, red in isolation" is a real
+  shape — do not assume isolation is the clean signal.** The standing
+  `orders-place-cache-race.test.ts` item had been recorded as cross-file
+  pollution on the strength of "6-passed ×3 in isolation". At HEAD it is
+  `1 failed | 5 passed` on one isolated run and `6 passed` on the next, always
+  the same case, while the FULL vitest gate passed it — the full run's
+  scheduling happens to be kinder to a `vi.waitFor` polling for an in-flight
+  route handler (T-311). When a finding's diagnosis rests on an isolation run,
+  run it at least twice; one green in isolation proves nothing about a race.
+- **2026-08-29 (audit): probe the installed dependency, do not read the driver
+  docs.** The headline P0 (T-250) is `getattr(result, "rows_affected", 0)`
+  against a libsql Cursor that exposes only `rowcount`. Two agents found it
+  independently, but what made it filable in one tool call was ten lines of
+  python against the PINNED build — `connect(':memory:')`, insert twice, print
+  `dir(cursor)` and both `rowcount`s. Any finding of the form "this code reads
+  an attribute that is not there" should be settled that way before it is
+  written down, never from the source alone.
+- **2026-08-29 (audit): run the gates BEFORE the fan-out, or after it drains —
+  not alongside it.** Launching six audit agents concurrently with round 1 drove
+  load average from 74 to 224 (`corespotlightd` was already at 589% CPU), which
+  made pytest take 870 s instead of ~275 s and produced three timing-shaped reds
+  that all needed isolation re-runs to attribute. The reds were correctly called
+  as load — scattered across three files, timing-shaped, CI green at the same
+  SHA — but the attribution cost several rounds. The agents are read-only and
+  cheap to start late; the gate is the thing whose numbers have to be quotable.
+- **2026-08-29 (audit): running on a Saturday makes the weekend-false-red class
+  LIVE, and that is worth keeping.** `f7b5eeb9` — the newest commit in the
+  delta, authored by the grok responder hours before this run — pins
+  `web/tests/account-metric-modal.test.ts:165-170` to a Friday session because
+  the unpinned test redded vitest shard 7 on Saturday 2026-08-29 and blocked the
+  deploy. That is T-117 / T-248 recurring for a third time, and this audit saw
+  it as a fact in the git log rather than as a hypothesis. Note the day of the
+  week in the audit preamble; it changes what the gate run is evidence of.
+
+- **2026-08-30 (audit): when a gate flips red with NO source or test change in
+  the range, diff the ENVIRONMENT, and start with the files the setup script
+  copies.** Twenty-two pytest reds appeared in files untouched since May;
+  `git log` on every module in the import chain was empty. The cause was
+  `web/.env` — provisioned into this clone by the delta's own `14065b74`
+  (`cp -p`, so its mtime still read Aug 24 and looked old) — and a `load_dotenv`
+  spy on `import cash_flow_sync` named the loader in one run. Two rails:
+  (a) `stat -f '%SB'` (birth time) on any `.env`-class file, not `ls -l`; (b)
+  prove an env-dependence claim in BOTH directions before filing it
+  (`TURSO_DB_URL= TURSO_AUTH_TOKEN= pytest <files>` → green; unmasked → red),
+  and yesterday's gate output under `/tmp/tw-<date-1>/gates/` is the cheapest
+  proof that the tree, not the host, is what changed.
+- **2026-08-30 (audit): one detached script per collection ROOT for the added-
+  file determinism runs.** `pytest cloud/tests/x.py scripts/tests/y.py` in one
+  invocation dies at collection with `ImportPathMismatchError: tests.conftest`
+  (both roots own a `tests/conftest.py`), so the 3× run reported nothing and
+  looked like a hung job. Split by root — it is also why CI runs them as
+  separate jobs.
+- **2026-08-30 (audit): the reliability loop's gates WILL overlap yours, and
+  its vitest alone takes this host to load 250.** Round 2 of the full gate was
+  launched at load 4.5 with only two light agents left; nine minutes later the
+  other loop's `npx vitest run` started in `~/radon-weekend/radon/` and the
+  round's vitest came back `3 failed`, all bare timeouts, 22/22 green in
+  isolation. Before calling any round's number, `ps -eo pcpu,args | grep
+  radon-weekend/radon/` — if the other clone is mid-gate, the round is a load
+  sample, not a verdict, and the isolation re-run is the number to quote.
+- **2026-08-30 (audit): a delta TEST can create the artifact that reds an
+  UNTOUCHED test.** `test_next_clerk_guard.py`'s `"pk_live_" + "fixture" * 4`
+  dodges gitleaks and the source-level scan, but CPython constant-folds it into
+  the `.pyc` written at collection, and `test_integration.py`'s "tracked files"
+  walker reads `__pycache__`. CI never sees it because the two files are in
+  different shards. Add to the after-gate sweep: when a cloud red names a path
+  under `__pycache__`, `node_modules` or `.next`, the finding is the walker,
+  not the environment — and check whether the shard split is what keeps CI
+  green.
+
+- **2026-08-31 (remediate): a text-only reply ENDS the run — every response
+  in this loop must carry a tool call until the phase is finished.** The
+  audit phase drafted 33 findings to `/tmp/tw-2026-08-31/findings.md`,
+  launched its gates from a detached script, and then answered a mid-run
+  "say what you're doing" nudge with a sentence and no tool call. Print mode
+  read that as the end of the turn: `claude -p` exited 0 after 18 minutes with
+  zero commits, no PR, and `phase_status` said OK on all three dead-man
+  channels while the cloud gate was still running (T-379, now INCOMPLETE).
+  Two rails: (a) when you are only waiting, wait INSIDE a tool call — a
+  foreground `until`/poll loop under the 600 s cap, or a `run_in_background`
+  waiter — never by replying with text; (b) the remediate phase must check
+  `/tmp/tw-<date>/findings.md` and `logs/testing-weekend/audit-<stamp>.log`
+  at pre-flight when `origin/testing/<date>` sits at `origin/main` with no
+  commits, and land the draft under `## Delta audit <date> (landed by the
+  remediation phase)` before touching the backlog. The draft is the audit's
+  work product; re-auditing the range would have cost two hours and thrown
+  away six agents' convergences.
+- **2026-08-31 (remediate): a "coverage gap" P1 on an auth gate was a live
+  bypass — read the fall-through, not only the guard.** T-346 was filed as
+  "the `:873` predicate is stubbed open in every test"; the agent's first
+  un-stubbed wire test returned 200 with no bearer at HEAD, because the
+  middleware withheld the loopback bypass and then called `verify_clerk_jwt`,
+  which re-grants the same loopback trust. The guard was correct; the code
+  path AFTER the guard undid it. When a finding says "this line is untested",
+  write the wire test against HEAD before assuming green, and read what the
+  request reaches once the guard says no.
+- **2026-08-31 (remediate): an agent probing a Gateway route in DOCKER mode
+  will try to start the stack — pin `GATEWAY_MODE=cloud` in the PROMPT, not
+  only in the committed tests.** A T-346 recon probe of `/ib/restart` ran with
+  the clone's default mode and attempted `docker compose up` on this laptop
+  (daemon not running, nothing started; the 2FA push-lock file it created
+  was released by the probe's own `/ib/reset-backoff`). Rail 1 was brushed,
+  not broken, and only because Docker was down. Any prompt that hands an
+  agent an `/ib/*` or `radon-ib-gateway.service` route must say: stub
+  `remote_gateway_action` / `control_unit`, set `GATEWAY_MODE=cloud`, never
+  call the route un-stubbed.
+- **2026-09-02 (remediate): the T-379 exit recurred VERBATIM with the rail in
+  the prompt — detection is not prevention, and the fix that sticks is
+  structural.** Tonight's audit again answered a mid-run nudge with text at
+  "gates 53%" and exited 0 at four minutes; the wrapper correctly posted
+  INCOMPLETE (T-379's check works) but the night's audit was still forfeit
+  (T-380 filed: the wrapper should retry an INCOMPLETE phase once; not yet implemented). Two things that
+  worked and should repeat: the remediate phase ADOPTED the dead audit's
+  still-running detached gates script as its round 1 (zero wasted wall
+  clock), and `/tmp/tw-<date>/` scratch survived the phase boundary exactly
+  as designed.
+- **2026-09-02 (remediate): two subagents stalled by ENDING THEIR TURN to
+  "wait" for a build/suite — put the anti-wait rail in every agent PROMPT,
+  not just this skill.** The 2026-08-26 resume-don't-redo lesson worked both
+  times (SendMessage got each back on track with context intact), but the
+  stall is now a pattern: any prompt that can involve a long build or
+  detached run must say "wait inside a bounded foreground poll; never end
+  your turn to wait; the lead owns the full gates."
+- **2026-09-02 (remediate): grep the gate logs for the runner's own exported
+  secrets before calling a round harvested.** T-381: a test that subprocesses
+  a wrapper snippet WITHOUT `env=` printed the runner's live PUSHOVER_* into
+  the pytest gate log, because the wrapper exports them to page and the
+  snippet prefers env over file by design. The red was also invisible in
+  isolation (93 passed) — it only fires under the wrapper. After each gate
+  run: `grep -c "$PUSHOVER_TOKEN"`-style checks on the gate output for every
+  secret the wrapper exports, and treat any hit as a P1 test-isolation
+  finding.
+
+- **2026-09-04 (audit): `github_pr_output.py --issue` does NOT accumulate across
+  repeated flags — it keeps the LAST one.** Passing `--issue` five times
+  produced a PR body with a single bullet and a title taken from the fifth,
+  which reads exactly like a correctly-formatted one-finding night. The same
+  applies to `--next`. Pass ONE multi-line string per flag, with the bullets
+  separated by real newlines, and always print the generated body before
+  `gh pr create` — the PR is a dead-man channel, so a silently truncated body
+  is the failure this loop exists to prevent (same class as the 2026-08-26
+  `gh pr edit --body-file` silent abort).
+- **2026-09-04 (audit): a bounded wait loop that RUNS OUT is not a completed
+  wait — check the sentinel before you read the artifact.** The base-SHA cloud
+  attribution used `for i in $(seq 1 16); do ... sleep 20; done`, which expired
+  while pytest was still at 54%. `grep '^FAILED' cloud-base.log` therefore
+  returned zero lines, and `comm -13` against a 37-line HEAD list reported all
+  37 reds as NEW IN THIS DELTA — a five-alarm result that was pure artifact.
+  The tell was that neither "BASE DONE" nor "GONE" printed. Always branch on the
+  sentinel explicitly after the loop and refuse to diff when it is absent; an
+  empty FAILED list from a red run is impossible and should be treated as such.
+- **2026-09-04 (audit): the sibling loop's gates cost this phase its second
+  round.** With the reliability loop mid-gate in `~/radon-weekend/radon`
+  throughout, pytest took 2617 s (43 min) against a usual ~275 s — nearly 10x —
+  which alone consumed most of the cap and forced round 2 to be abandoned. The
+  2026-08-30 lesson says to check `ps` before trusting a round's numbers; extend
+  it to PLANNING: check for the sibling at pre-flight, and when it is already
+  running, budget for one round only and say so in the ledger rather than
+  starting two and killing one. One honest round plus a base-SHA diff is worth
+  more than two contended rounds.
+
+- **2026-09-04 (remediate): `nohup env -i` for the detached gate script is a
+  TRAP — a minimal `PATH` reds 75 tests that have nothing to do with your
+  changes.** The closing 3x gate came back `75 failed`, concentrated in the
+  weekend-wrapper, loop-launcher and mTLS gateway-remote suites: with
+  `PATH=/usr/bin:/bin` there is no `node`, no `openssl`, no `launchctl`, and
+  those suites shell out to all three. The same 8 files were `257 passed` in a
+  normal shell. The detach rail is right; the minimal env is not. Export the
+  full `PATH` inside the stage script (venv bin, nvm node bin, `/opt/homebrew/bin`,
+  then the system dirs) and put the venv on `PATH` directly rather than
+  `source`ing `activate` and then overwriting `PATH` after it — the second
+  ordering silently gives you the system python and `No module named pytest`.
+  Both mistakes cost a full round each.
+- **2026-09-04 (remediate): a new guard can fire on the very branch that adds
+  it, and that is the guard working.** T-438's "a changed held-out e2e spec
+  needs a dated ledger annotation" redded on landing, because a sibling agent
+  had modified both named specs the same day against a previous-day stamp. The
+  correct response was to re-stamp the annotations with the `next start`
+  evidence that agent had actually captured, not to loosen the date comparison.
+  Land guards that read the branch diff LAST, after the changes they will judge.
+
+- **2026-09-04 (deliver): a CI red the remediate phase never saw can be the
+  remediate phase's own work — attribute by AUTHORSHIP, not by `git diff
+  --name-only | grep`.** Three shards redded. Two were a pre-existing
+  whole-second `date` granularity bug in the shed ladders that only samples red
+  under load, correctly fixed here. The third (`test_rel178_...`) was read as
+  "untouched by this branch" because a `git diff --name-only origin/main..HEAD |
+  grep rel178` printed nothing — but `git log origin/main..HEAD -- <file>` named
+  the branch's own commit as its author. The file existed on main; the branch
+  ADDED a class to it, and diff-name matching had already been satisfied
+  upstream. Use `git log <base>..HEAD -- <path>` to attribute, never a name
+  grep, before writing "pre-existing" anywhere.
+- **2026-09-04 (deliver): a test that passes locally and fails on CI with an
+  errno is a PLATFORM-default test, not a flake.** The watchdog cert cycle
+  acquired the real 2FA lease, which resolves to per-user Application Support on
+  macOS and `/var/lib/radon/ib-lease` on Linux. Every new test that drives a
+  REAL cycle (rather than patching around it) inherits every host path that
+  cycle touches; grep the branch's new tests for the entry point and confirm
+  each one redirects the paths it will reach. That sweep is what proved this was
+  the only unguarded `run_cycle` on the branch.
+- **2026-09-05 (audit): when the delta touches `package.json`/`bun.lock`, run the
+  dependency install BEFORE the vitest gate.** A new `thinking-orbs` dep merged
+  in-range was absent from this clone's `node_modules`, so the first vitest round
+  read 13 failed + 34 files failed at import — one cause, zero repo defects, a
+  full round of attribution lost. Pre-flight: `git diff <base>..HEAD --name-only
+  | grep -E 'package.json|bun.lock'` → if it hits, `bun install --frozen-lockfile`
+  in each affected project first. Also: `bun install` in `site/` repeatedly died
+  extracting the `next` tarball on this host; `npm install --prefix site` worked —
+  and it rewrites `package-lock.json` via bun's earlier migration, so
+  `git checkout -- site/package-lock.json` after.
+
+- **2026-09-05 (audit, second pass): the `.radon-testing-runner` marker was
+  ABSENT and the skill's rail says refuse — but the WRAPPER self-heals on the
+  canonical path.** `scripts/testing_weekend.sh:517-526` admits
+  `~/radon-weekend/radon-testing` once and `touch`es the marker; only a
+  non-canonical path refuses. A directly-invoked `/testing-weekend` never runs
+  that code, so the rail as written would abort every manual run in the correct
+  clone. Resolve it the way the wrapper does: compare `pwd -P` against
+  `$HOME/radon-weekend/radon-testing`, stamp the marker on a match, refuse
+  otherwise — and say in the report that you stamped it.
+- **2026-09-05 (audit, second pass): 39 vitest FILES failed with only 14 failed
+  TESTS — that ratio IS the signal, and it is an environment read every time.**
+  The first pass had already hit this same morning (`thinking-orbs` missing),
+  yet it recurred because the clone's tree reset wiped `node_modules` again
+  while `package.json` was UNCHANGED in the range — so the 2026-09-05 pre-flight
+  rule ("check whether the delta touched package.json") did not fire. Better
+  rule: whenever failed-FILES greatly exceeds failed-TESTS, grep the vitest log
+  for `Failed to resolve import` / `Cannot find package` BEFORE attributing
+  anything, and re-run only the failed set after installing. Here that turned a
+  39-file red into `323 passed / 0 failed` with the repo untouched. Also: `bun`
+  is at `~/.bun/bin/bun`, not on the default PATH; `npm install --no-audit
+  <pkgs>` in `web/` worked and leaves an untracked `web/package-lock.json` that
+  must be deleted to keep the tree clean.
+- **2026-09-05 (audit, second pass): the darwin cloud "baseline" is a PATH
+  artifact, not a host property — filed as T-484.** Ledger entries have carried
+  10/12/34/35/37/33 for weeks, attributed to bash 3.2. This run's gate script
+  put `/opt/homebrew/bin` ahead of `/bin`, resolving `bash` to 5.3.9, and the
+  cloud gate read **5 failed** — all of them `test_caddy_edge_timeouts.py` with
+  `caddy` absent. The 2026-08-22 rail ("the baseline is a LIST, not a count")
+  is necessary but insufficient: record the RESOLVED `bash --version` and
+  `command -v caddy` next to the FAILED list, or the list itself is not
+  comparable run to run.
+- **2026-09-05 (audit, second pass): read-only agents can safely run CONCURRENTLY
+  with the gates if the prompt forbids running suites.** The 2026-08-29 rail
+  (gates before the fan-out, never alongside) exists because agents that ran
+  test suites drove load to 224. Four agents given an explicit "NEVER run a test
+  suite, npm, bun, a build, pytest or vitest — grep and read only" rail ran for
+  the whole pytest gate at load 3-6, and the gate's 1730s was uncontended. The
+  mechanism to remove is the agents' SUITE RUNS, not their existence; that
+  recovered roughly 30 minutes of otherwise-idle cap.
+
+- **2026-09-06 (remediate): a prior remediation's own preamble is not the
+  backlog — recount un-DONE findings across ALL audit sections at pre-flight.**
+  The morning run's table said "all 24 DONE" while 14 verified findings from
+  the FIRST-pass 2026-09-05 audit had no DONE/BLOCKED record anywhere; a
+  10-line grep of every backlog T-### against the log's status rows found them
+  in one tool call. A dangling "closing counts appended below" promise at the
+  log tail is also work the next run owns — supersede it explicitly, never
+  leave it implied. And when your branch fixes source under the source-fix
+  rule, expect repo guards (docs-ownership) to fire on the fix itself: that is
+  the guard working; update the owner doc, don't docs-skip past it wholesale.

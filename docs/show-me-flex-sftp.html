@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Flex cutover: SendRequest to sFTP pull</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --canvas: #0a0f14;
+      --panel: #0f1519;
+      --raised: #151c22;
+      --grid: #1e293b;
+      --ink: #e2e8f0;
+      --muted: #94a3b8;
+      --dim: #64748b;
+      --signal: #05AD98;
+      --fault: #ef4444;
+      --warn: #d4a017;
+      --r: 4px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--canvas);
+      color: var(--ink);
+      font-family: Inter, system-ui, sans-serif;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 24px 16px 48px; }
+    h1 { font-size: 15px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; margin: 0 0 6px; }
+    .sub { color: var(--muted); margin: 0 0 24px; }
+    h2 {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--signal);
+      margin: 28px 0 10px;
+      border-bottom: 1px solid var(--grid);
+      padding-bottom: 6px;
+    }
+    .grid { display: grid; gap: 10px; }
+    .cols-2 { grid-template-columns: 1fr 1fr; }
+    .cols-3 { grid-template-columns: repeat(3, 1fr); }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--grid);
+      border-radius: var(--r);
+      padding: 12px 14px;
+    }
+    .raised { background: var(--raised); }
+    .label {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--dim);
+      margin-bottom: 8px;
+    }
+    .fault { color: var(--fault); }
+    .ok { color: var(--signal); }
+    .warn { color: var(--warn); }
+    .mono { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
+    .flow {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+    }
+    .chip {
+      border: 1px solid var(--grid);
+      background: var(--raised);
+      border-radius: 999px;
+      padding: 3px 8px;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 11px;
+    }
+    .chip.kill { border-color: var(--fault); color: var(--fault); }
+    .chip.go { border-color: var(--signal); color: var(--signal); }
+    .arrow { color: var(--dim); font-family: "IBM Plex Mono", monospace; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td {
+      text-align: left; padding: 6px 8px;
+      border-bottom: 1px solid var(--grid);
+      vertical-align: top;
+    }
+    th {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--dim);
+      font-weight: 500;
+    }
+    .phases { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
+    .phase .n {
+      font-family: "IBM Plex Mono", monospace;
+      color: var(--signal);
+      font-size: 11px;
+    }
+    .stop {
+      border-color: var(--fault);
+      color: var(--fault);
+    }
+    ul { margin: 0; padding-left: 16px; color: var(--muted); }
+    li { margin: 3px 0; }
+    code { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--ink); }
+    @media (max-width: 800px) {
+      .cols-2, .cols-3, .phases { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Flex cutover</h1>
+    <p class="sub">Kill weekday SendRequest. Pull files outbound from IBKR if they grant Flex sFTP. Email ingest if they do not. No inbound port.</p>
+
+    <h2>01 Today vs target</h2>
+    <div class="grid cols-2">
+      <div class="panel">
+        <div class="label fault">Today (token lockout)</div>
+        <div class="flow">
+          <span class="chip kill">/orders 5m POST</span>
+          <span class="arrow">+</span>
+          <span class="chip kill">08:00 cash-flow</span>
+          <span class="arrow">+</span>
+          <span class="chip kill">07:30 TWR</span>
+        </div>
+        <p class="mono" style="margin:10px 0 0;color:var(--muted)">SendRequest → gdcdyn → 1025 extends</p>
+        <p class="mono" style="margin:4px 0 0;color:var(--fault)">last success 2026-08-16 · embargo to 2026-08-28T13:58:28Z</p>
+      </div>
+      <div class="panel">
+        <div class="label ok">Target (routine)</div>
+        <div class="flow">
+          <span class="chip go">IBKR sFTP :22</span>
+          <span class="arrow">or</span>
+          <span class="chip go">email → R2</span>
+          <span class="arrow">→</span>
+          <span class="chip go">VPS pull 07:30 ET</span>
+          <span class="arrow">→</span>
+          <span class="chip go">--from-file</span>
+        </div>
+        <p class="mono" style="margin:10px 0 0;color:var(--muted)">weekday SendRequest = 0 · VPS is SSH client · no listener</p>
+      </div>
+    </div>
+
+    <h2>02 Two IBKR products. Do not mix.</h2>
+    <div class="grid cols-2">
+      <div class="panel raised">
+        <div class="label ok">Ask for this</div>
+        <p><strong>Client Portal Flex delivery</strong></p>
+        <ul>
+          <li>Queries 1442520 + 1422766 only</li>
+          <li>IB-hosted sFTP, we pull</li>
+          <li>Else Email is the only method</li>
+        </ul>
+      </div>
+      <div class="panel raised">
+        <div class="label fault">Refuse if they grant this</div>
+        <p><strong>Reporting integration / master-sub</strong></p>
+        <ul>
+          <li>~19:00 ET clock, PGP required table</li>
+          <li>EmployeeTrack / acct_status</li>
+          <li>Wrong product. Keep email ingest.</li>
+        </ul>
+      </div>
+    </div>
+
+    <h2>03 Clock</h2>
+    <div class="panel mono">
+      <table>
+        <thead><tr><th></th><th>When</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr><td class="fault">Not 21:15 ET</td><td>evening Flex still last session</td><td>already measured 20:57 ET Monday → Friday NAV</td></tr>
+          <tr><td class="ok">Pull Tue..Sat 07:30 ET</td><td>same as radon-perf-twr.timer</td><td>next-morning finalize</td></tr>
+          <tr><td>Live blotter</td><td>RTH journal_sync 300s</td><td>Gateway fills, not Flex</td></tr>
+          <tr><td>First SendRequest recon</td><td>Sun 2026-08-30</td><td>only if now ≥ 2026-08-28T13:58:28Z and not blocked</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>04 Classify fail closed</h2>
+    <div class="panel mono">
+<pre style="margin:0;white-space:pre-wrap">on(file):
+  if NAV AND CashTransaction AND Transfers AND no Trade  → 1442520
+       cash_flow_sync + TWR  (Last Business Day)
+  elif Trade AND no NAV                                 → 1422766
+       journal_rehydrate recon only
+  else
+       reject, keep .gpg, heartbeat error</pre>
+    </div>
+
+    <h2>05 Kill list (P2, does not wait on sFTP)</h2>
+    <div class="panel">
+      <div class="flow" style="margin-bottom:8px">
+        <span class="chip kill">POST /api/blotter</span>
+        <span class="chip kill">POST /journal/rehydrate</span>
+        <span class="chip kill">POST /blotter</span>
+        <span class="chip kill">POST /performance*</span>
+        <span class="chip kill">08:00 cash-flow SendRequest</span>
+        <span class="chip kill">07:30 TWR SendRequest</span>
+        <span class="chip kill">ib_client.FlexReport</span>
+      </div>
+      <p class="mono" style="margin:0;color:var(--muted)">GET /orders reads Turso. Same-day fills = journal_sync. Flex 1422766 = daily recon.</p>
+    </div>
+
+    <h2>06 Phases</h2>
+    <div class="phases">
+      <div class="panel phase"><div class="n">P0 ops</div>Portal Run. Inventory. Stop if human email reports. Keys in flex-secrets. filedelivery@ Flex only.</div>
+      <div class="panel phase"><div class="n">P1 code</div>Ingest floor. --from-file TWR + journal. Section tests. Timer disabled.</div>
+      <div class="panel phase"><div class="n">P2 code</div>Kill weekday SendRequest. Blotter GET-only. Grep allowlist.</div>
+      <div class="panel phase"><div class="n">P3 code</div>sFTP puller IPv4. Do not enable timer.</div>
+      <div class="panel phase"><div class="n">P4 ops</div>Tick only those two queries. Method sFTP only after grant + inventory.</div>
+      <div class="panel phase"><div class="n">P5–6</div>Diff vs Portal XML. Sunday recon after embargo. Weekday SendRequest = 0.</div>
+    </div>
+
+    <h2>07 Stops</h2>
+    <div class="grid cols-3">
+      <div class="panel stop">Grant names master/sub or reportingintegration@</div>
+      <div class="panel stop">Any statement still wanted in a human mailbox</div>
+      <div class="panel stop">SendRequest before 2026-08-28T13:58:28Z</div>
+    </div>
+  </div>
+</body>
+</html>

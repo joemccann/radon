@@ -1,33 +1,29 @@
 import { RevealOnScroll } from "@/components/atoms/RevealOnScroll";
 import { SectionHeading } from "@/components/atoms/SectionHeading";
+import { CopyAgentPromptBar } from "@/components/molecules/CopyAgentPromptBar";
 import { PlateFrame } from "@/components/molecules/PlateFrame";
 import { ScannerTable } from "@/components/organisms/ScannerTable";
 import { flowArgumentSteps } from "@/lib/editorial-content";
 
 export function FlowThesisSection() {
   return (
-    <section id="flow" className="px-8 py-[clamp(64px,9vw,128px)]">
+    <section id="view" className="px-5 py-[clamp(64px,9vw,128px)] sm:px-8">
       <div className="mx-auto max-w-[1140px]">
-        <SectionHeading no="Thesis 01" label="Flow · Dark-Pool Reconstruction" />
+        <SectionHeading no="View" label="How the view is built" />
 
         <div className="grid items-start gap-[clamp(36px,5vw,72px)] md:grid-cols-2">
           <RevealOnScroll>
             <h2 className="editorial-thesis mb-[22px] text-primary">
-              The edge is structural, not predictive.
+              Size on the exchange is already spoken for.
             </h2>
             <p className="mb-[1.05em] text-secondary">
-              Off-exchange venues clear large institutional orders away from the lit tape.
-              By the time size prints on the exchange, the position is built. Radon
-              reconstructs that activity from the print stream and scores it as
-              accumulation or distribution before the move appears on a chart.
-              Radon calls this market-structure reconstruction: rebuilding what
-              institutions did off-exchange from the prints they could not
-              hide.
+              Big orders clear off-exchange. By the time that size hits the lit tape,
+              the position is already on. Radon reads the print stream and scores it
+              as accumulation or distribution before the chart moves.
             </p>
             <p className="mb-[1.05em] text-secondary">
-              The lead is measured, not assumed. Accumulation shows up in the print
-              stream sessions before it shows up in price, and a score that misses its
-              threshold is discarded, whatever the chart looks like.
+              A score that misses its threshold is thrown out, even if the chart
+              looks clean. The lead is a measured window per ticker, not a hunch.
             </p>
 
             <div className="mt-7 border-t border-hairline-soft">
@@ -46,9 +42,11 @@ export function FlowThesisSection() {
               ))}
             </div>
 
+            <CopyAgentPromptBar capabilityId="flow" className="mt-5" />
+
             <p className="mt-5 text-[1.02rem] leading-[1.55] text-secondary">
-              The wiring from Unusual Whales prints to Interactive Brokers
-              orders is documented end to end in{" "}
+              Unusual Whales prints to Interactive Brokers orders, start to
+              finish, is in{" "}
               <a
                 href="/unusual-whales-interactive-brokers"
                 className="underline decoration-grid underline-offset-4 transition-colors hover:text-signal-deep hover:decoration-signal-deep"
@@ -61,11 +59,11 @@ export function FlowThesisSection() {
 
           <RevealOnScroll>
             <PlateFrame
-              figNo="Exhibit 3"
+              figNo="Figure 3"
               figTitle="Dark-pool flow scanner · institutional accumulation score"
               source="UW"
               confidence="High"
-              caption="Scores above the accumulation threshold with a positive lead are candidates. The scanner ranks by lead-adjusted conviction, not raw volume."
+              caption="Above the accumulation line with a lead: that is a candidate. Rank is by lead and score, not raw volume."
             >
               <ScannerTable />
             </PlateFrame>

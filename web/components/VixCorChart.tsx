@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEven
 import * as d3 from "d3";
 import ChartPanel from "./charts/ChartPanel";
 import { chartSeriesColor } from "@/lib/chartSystem";
+import { buildChartXAxisTickIndices, chartXAxisTickAnchor } from "@/lib/chartXAxis";
 import { formatCor } from "@/lib/cor";
 import {
   BREAKDOWN_TRIGGER,
@@ -72,17 +73,6 @@ type HoverState = { index: number; x: number; y: number } | null;
 
 function toTime(date: string): number {
   return new Date(`${date}T00:00:00Z`).getTime();
-}
-
-/** Evenly spaced label positions, endpoints always included. */
-function pickTickIndices(count: number, innerWidth: number): number[] {
-  if (count <= 1) return count === 1 ? [0] : [];
-  const maxLabels = Math.max(2, Math.min(7, Math.floor(innerWidth / 110)));
-  if (count <= maxLabels) return d3.range(count);
-  const step = (count - 1) / (maxLabels - 1);
-  const picked = new Set<number>([0, count - 1]);
-  for (let i = 0; i < maxLabels; i += 1) picked.add(Math.round(i * step));
-  return [...picked].sort((a, b) => a - b);
 }
 
 export default function VixCorChart({ history, episodes, title, xTickFormat }: VixCorChartProps) {
@@ -192,7 +182,7 @@ export default function VixCorChart({ history, episodes, title, xTickFormat }: V
     })
     .filter((band): band is { episode: VixcorEpisode; left: number; width: number } => band !== null);
 
-  const tickIndices = pickTickIndices(rows.length, innerWidth);
+  const tickIndices = buildChartXAxisTickIndices(rows.length, innerWidth);
   const vixTicks = yVix.ticks(4);
   const hovered = hover ? rows[hover.index] : null;
 
@@ -274,7 +264,7 @@ export default function VixCorChart({ history, episodes, title, xTickFormat }: V
                     textAnchor="end"
                     dominantBaseline="middle"
                     fontFamily={MONO}
-                    fontSize={10}
+                    fontSize="var(--text-meta)"
                     fill={CHART_AXIS_MUTED}
                   >
                     {formatVix(tick)}
@@ -288,7 +278,7 @@ export default function VixCorChart({ history, episodes, title, xTickFormat }: V
                 x={0}
                 y={-4}
                 fontFamily={MONO}
-                fontSize={9}
+                fontSize="var(--text-meta)"
                 letterSpacing="0.08em"
                 fill={CHART_AXIS_MUTED}
               >
@@ -306,7 +296,7 @@ export default function VixCorChart({ history, episodes, title, xTickFormat }: V
                   textAnchor="end"
                   dominantBaseline="middle"
                   fontFamily={MONO}
-                  fontSize={10}
+                  fontSize="var(--text-meta)"
                   fill={CHART_AXIS_MUTED}
                 >
                   {tick.toFixed(2)}
@@ -338,7 +328,7 @@ export default function VixCorChart({ history, episodes, title, xTickFormat }: V
                 x={0}
                 y={-6}
                 fontFamily={MONO}
-                fontSize={9}
+                fontSize="var(--text-meta)"
                 letterSpacing="0.08em"
                 fill={CHART_AXIS_MUTED}
               >
@@ -354,15 +344,15 @@ export default function VixCorChart({ history, episodes, title, xTickFormat }: V
                 stroke={CHART_AXIS}
                 strokeWidth={1}
               />
-              {tickIndices.map((index) => (
+              {tickIndices.map((index, tickIndex) => (
                 <text
                   key={`x-tick-${rows[index].date}`}
                   x={x(new Date(times[index]))}
                   y={CORR_INNER_HEIGHT + 14}
-                  textAnchor="middle"
+                  textAnchor={chartXAxisTickAnchor(tickIndex, tickIndices.length)}
                   dominantBaseline="hanging"
                   fontFamily={MONO}
-                  fontSize={9}
+                  fontSize="var(--text-meta)"
                   fill={CHART_AXIS_MUTED}
                 >
                   {xTickFormat(new Date(times[index]))}

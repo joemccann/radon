@@ -18,13 +18,13 @@ export const PAGE_TITLE =
   "Fractional Kelly Sizing for Options | Radon Terminal";
 export const PAGE_DESCRIPTION =
   "Fractional Kelly sizing for options: signal odds from max gain over max loss, quarter-Kelly, then a hard 2.5% bankroll cap. Free demo.";
-export const PAGE_HEADLINE = "Position size is a policy, not a feeling.";
+export const PAGE_HEADLINE = "Size comes from the structure's odds, then a 2.5% cap.";
 
 // Frozen per-page dates for TechArticle JSON-LD. Update dateModified when the
 // copy meaningfully changes; a request-time stamp gets ignored by Google
 // (same rationale as SITE_CONTENT_LAST_MODIFIED in lib/seo.ts).
 export const PAGE_DATE_PUBLISHED = "2026-07-03";
-export const PAGE_DATE_MODIFIED = "2026-08-23";
+export const PAGE_DATE_MODIFIED = "2026-09-07";
 
 export const pageUrl = `${siteUrl}/${PAGE_SLUG}`;
 

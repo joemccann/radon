@@ -1,10 +1,17 @@
+import type { ReactNode } from "react";
 import { LegalDocument } from "@/components/sections/LegalDocument";
 import {
   agentPageStructuredData,
   type AgentPage,
 } from "@/lib/developer-pages";
 
-export function AgentDocument({ page }: { page: AgentPage }) {
+export function AgentDocument({
+  page,
+  afterIntro,
+}: {
+  page: AgentPage;
+  afterIntro?: ReactNode;
+}) {
   return (
     <>
       <LegalDocument
@@ -15,6 +22,7 @@ export function AgentDocument({ page }: { page: AgentPage }) {
         dateLabel="Updated"
         intro={page.intro}
         sections={page.sections}
+        afterIntro={afterIntro}
       />
       <script
         type="application/ld+json"

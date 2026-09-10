@@ -1,5 +1,249 @@
 # Lessons
 
+## 2026-09-10 — A 130k-row Turso history cannot be the GET path
+
+- `/regime/llm` was empty with 130,083 durable observations already in Turso.
+  Collection and backfill were not the failure. GET `/ai-cycle` rebuilt the
+  snapshot from every latest vintage, 261 x 500-row pages, and died on the
+  30s/100k-row budget. Service-health `ok` does not mean the page can read.
+- Materialize a compact `ai_cycle_api_snapshot` at collect time. GET reads
+  that singleton only. Registry source status is the fallback; never scan
+  observation history on a user request.
+- Page-success proofs: stored payload bytes, GET latency, and per-source
+  coverage. Row counts in `ai_cycle_observations` are not page evidence.
+
+## 2026-09-08: Joe's research and social copy
+
+- Never emit em dashes in generated Dropbox PDF summaries, rendered research copy, or social-share captions, images, and videos. Enforce this at output boundaries as well as in model instructions.
+- Use Joe McCann's documented @joemccann voice: direct, conversational, concise, numbers first when useful. Preserve evidence, attribution, uncertainty, and numeric meaning. Do not invent personal trades or experience.
+- Preserve original source PDFs and chart evidence. Voice changes apply to authored summaries and captions, not source artifacts.
+
+## 2026-09-07 — A weekly error row is one cycle, not a daily re-fail
+
+- `equibles-ats-venue-share` `no ticker produced a series / requested=33 /
+  failed=33` with no `codes` was the 2026-09-01 11:36Z rerun after the
+  Equibles tarpit, not six days of fresh failures. Duration matched
+  `TICKER_FETCH_BUDGET_S`; remaining names were marked `budget` and skipped.
+- Read `service_health_events` and sibling Equibles rows before treating a
+  frozen weekly writer as a live outage. Siblings `ok` plus a live
+  `/off-exchange-volume` probe means the row is waiting on Tuesday 09:15 UTC.
+- One hung Session must not zero the watchlist. Replace it and keep walking.
+  Put `codes` in `message`; the dashboard only renders that field.
+
+## 2026-09-05 — API health is not authenticated browser relay health
+
+- A healthy FastAPI/IB pool, listening tunnel, and rejected anonymous handshake
+  do not prove the signed-in browser can obtain and use a WebSocket ticket.
+- Before claiming a connected localhost handoff, verify the actual authenticated
+  ticket-to-upgrade path and receipt of relay status frames. Otherwise state
+  that browser relay connectivity is unverified, even when API health is green.
+- Authless browser fixtures bypass enforced CSP. Exercise the normal compiled
+  response policy too: `connect-src 'self' wss: https:` rejects the cross-port
+  local default `ws://localhost:8765`, even with a healthy SSH relay tunnel.
+
+## 2026-09-05 — UI verification must exercise the compiled trading surface
+
+- A demo build replaces quote/depth state independently of WebSocket fixtures.
+  Use a non-demo production build for signed prices, IV, depth and order payload
+  checks; assert the expected feed/value before claiming those paths passed.
+- Use real pointer actions for mobile review controls. Synthetic clicks and
+  forced clicks can pass through overlapping navigation and hide regressions.
+- Fixed mobile actions inside instrument decks must reserve both application
+  tabs and instrument navigation. Test short/narrow viewports after compilation.
+- Pin historical fixture clocks and active date ranges. Never weaken financial
+  assertions to accommodate an expired option or a correctly filtered old fill.
+
+## 2026-09-04 — Defined-risk combinations need whole-structure coverage
+
+- Classify multi-leg risk from the complete same-expiry payoff, including
+  protective long legs outside a vertical spread; do not reduce recognition to
+  named two-leg structures.
+- When every leg has resolved entry and market values, the parent row must sum
+  per-leg P&L even if a separate return-capital input is unavailable.
+
+## 2026-09-04 — IB error 202 is cancel confirmation, not a replace abort
+
+- IB error 202 (`Order Canceled - reason:`) is the broker's cancel
+  acknowledgement. On `/orders/replace` it must count as cancelled and the
+  replacement must still place. Treating it as a failed cancel leaves the
+  original gone and the position unhedged.
+- Do not wait for the open-order snapshot to drop a BAG before accepting 202.
+  Combo cancels can sit in `PendingCancel` longer than the 5s poll, then IBKR
+  Mobile pushes the cancel after Radon has already aborted the replacement.
+- Already-Filled is not 202. Do not place a replacement on top of a fill.
+
+## 2026-09-04 — Close-order P&L must include dollars and percent
+
+- Every close or modify confirmation that renders estimated realized P&L must
+  show both the signed dollar amount and return on absolute signed entry basis.
+- Pin this at the shared `OrderConfirmSummary` boundary and in the modify-order
+  browser path, including option, combo, stock-cover, loss, and missing-basis cases.
+
+## 2026-09-03 — Assistant identity is Radon, not a provider model
+
+- User-facing assistant speaker labels and generated self-identification must
+  say Radon, never Grok. Model selectors may keep factual provider/model names.
+
+## 2026-09-02 — localhost needs local.sh; local.sh stops the VPS gateway
+
+- Do not curl localhost:3000 / :8321 unless `scripts/local.sh` is already
+  running. Starting local.sh during live cloud trading stops the Hetzner
+  IB gateway and requires 2FA. Diagnose against Turso / production instead.
+
+## 2026-09-02 — EXT fills need orders-sync + fill-monitor past 16:00 ET
+
+- outsideRth DAY stock orders fill 04:00-20:00 ET. Gating orders-sync and
+  fill-monitor on RTH (09:30-16:00) left AVGO SELL 1000 @ 355 WORKING on
+  /orders after the 16:24 ET fill. Overnight 20:00-03:50 is not EXT.
+- fill_monitor journals fills but /orders reads open_orders +
+  executed_orders. Mirror the IB snapshot on fill.
+
+## 2026-09-02 — Quota drop matches CLI strings; USE_* flags are truthy-only
+
+- `is_quota_exhausted` must not grep bare `rate.limit` / `rate_limit` /
+  `overloaded`. Claude Code prints tool-skip categories `(rate-limited)`
+  and `(overloaded)` that retry the same model; ordinary agent text and a
+  500/timeout log that merely mentions rate limits also match. Drop only
+  on the CLI strings: credits, You've hit your Opus/Sonnet limit, Request
+  rejected (429), 529 Overloaded, experiencing high load. Quota is checked
+  before transient-network retry and on any RC != 0 including timeout 124.
+- `CLAUDE_CODE_USE_BEDROCK=0`/`false` is subscription-only (locks Bedrock
+  off). Refuse USE_* only for 1/true/yes; keep -n refuse for keys/tokens.
+  Match those with bash `case` character classes, never PATH `tr`. A
+  planted venv `tr` is the same class of skip as a planted `timeout`.
+  File FLAG_ASSIGN must allow optional dotenv quotes (`"true"` / `'1'`);
+  KEY_ASSIGN already treats a leading quote as a value, and deepsec
+  loads the quoted flag as truthy after unset.
+
+## 2026-09-02 — Overnight TIF is not EXT outsideRth
+
+- IB Overnight is 20:00-03:50 ET, limit (or Adaptive) only, TIF Overnight or
+  Overnight+Day. No GTC. A separate venue from pre-market / after-hours.
+- Radon EXT is `outsideRth` on pre-market + AH (04:00-09:30 and 16:00-20:00
+  ET). DAY+EXT sits Queued through overnight and never routes to Overnight.
+- Do not treat "overnight" as a synonym for EXT. Mapping PreSubmitted to
+  Working is only valid in a live pre-market/AH window.
+- The Orders header WORKING count must use the same mapped status as the
+  row chips. Counting every non-partial open order as Working while every
+  row reads QUEUED is a lie.
+
+## 2026-09-02 — Snapshot Pushover creds before the agent; comment-only issue writes
+
+- `_notify_curl` read WEEKEND_ROOT/.env at page time. Launchd does not set
+  PUSHOVER_*. A skip-permissions agent can rewrite the shared .env and
+  redirect or blank later loops the same night. Snapshot next to GH_BIN
+  and use only those copies in `_notify_curl`.
+- Non-security skills said "post the three-section issue update" without
+  requiring `gh issue comment` or banning `gh issue edit`/create/PATCH.
+  Agents already PATCH PR bodies; the same on the rolling issue overwrites
+  the dead-man description. Comment-only; wrapper is not the only commenter.
+
+## 2026-09-02 — TIMEOUT_BIN must be snapshotted before --lock-lib-only
+
+- `net_bounded` expands `"$TIMEOUT_BIN"` under `set -u`. A snapshot inside
+  `main()` is after the `--lock-lib-only` return, so sourced fetch-retry
+  aborts unbound. Snapshot `command -v timeout` next to `net_bounded`,
+  before that return and before the venv PATH prepend. Do not fall back
+  to PATH `timeout` after venv prepend.
+
+## 2026-09-02 — Agent wall-clock must use TIMEOUT_BIN; escape curl --config
+
+- Snapshotting `timeout` before `$VENV/bin` is not enough if the agent
+  wall-clock still runs PATH `timeout`. A skip-permissions agent can
+  plant `$VENV/bin/timeout` on the first ladder rung; later invokes skip
+  the cap. Use `"$TIMEOUT_BIN" -k` in all five wrappers.
+- Piped curl `--config` interpolates token/user/title/message. A quote
+  or newline in WEEKEND_ROOT/.env closes the value and injects
+  url/output/proxy. Escape backslash, double-quote, and newlines.
+
+## 2026-09-02 — Piped curl config; snapshot gh/timeout before venv PATH
+
+- A 0600 mktemp curl config still leaves PUSHOVER_* in $TMPDIR if the
+  wrapper dies during the POST. Pipe `--config -`. Keep `-q` as argv[1].
+- Snapshot `gh` and `timeout` before prepending `$VENV/bin`. report()
+  must invoke those snapshots; a planted venv gh can replace the
+  wrapper-only security comment.
+
+## 2026-09-02 — curl -q must be argv[1] or curlrc intercepts the 0600 POST
+
+- `_notify_curl` `--config` still loads `$HOME/.curlrc` unless `-q` is
+  argv[1]. A skip-permissions agent can plant curlrc outside the clone.
+- REL-180 `_run` must copy the wrapper, rewrite `/usr/bin/curl` to a stub,
+  and drop host `PUSHOVER_*`. Inheriting `os.environ` plus pinned curl
+  fires a real page from CI.
+
+## 2026-09-02 — Wrapper dead-man comments are not the three-section write-up
+
+- Captain: wrapper OK/runner-health comments stay a distinct PHASE status
+  dead-man line. The three-section template (Issue discovered / What was
+  done / Next: Fixed with green deployment) is the agent issue update, not
+  the wrapper comment. Security stays wrapper-only sanitized comments.
+- The `gh issue create` body is a timeless rolling-dead-man description.
+  Run history stays in comments. Do not `gh issue edit` the body after the
+  first run, and do not leave "No run yet." as the lasting body.
+
+## 2026-09-01 — A capacity-shed retry on one sibling wrapper is not the other
+
+- Page `776ea756`: `radon-garch` instant FastAPI 502 at 14:00:12Z,
+  `curl=0 http=502`, `NRestarts=0`. `/health/lite` authenticated. LEAP in
+  the same window POSTed at 14:01:16Z and completed OK at 14:02:33Z.
+- `leap-capacity-502` (2026-08-27, `4350c666`) taught
+  `run_leap_refresh.sh` to wait on the R-221 body marker. `run_garch_refresh.sh`
+  kept the R-144 single-shot exit. The 14:00 UTC pile-up hits both.
+- When two wrappers share a FastAPI lane, a shed-retry on one is a defect
+  on the other until it is copied. Pin both in the same regression file.
+
+## 2026-08-30 — Pin parity that only checks OPERATIONS ⊆ pins misses new routes
+
+- STREAKS shipped `radonCapability` and FastAPI `assistant_catalog.py`, CI green.
+- Chat `list_apis("streaks")` still missed GET `/streaks/{ticker}` because
+  `web/lib/assistant/catalog.ts` kept a third handwritten OPERATIONS seed.
+- REL-161 parity asserted capability match for listed ops, never reverse
+  inclusion. A new pin cannot be invisible: derive the runtime catalog from
+  the pins, and fail CI when advertised pins are absent from list_apis.
+
+---
+
+## 2026-08-30 — Broker weekend downtime is not a sidecar death
+
+- Page `a45d6410`: R-382 dwell on ALL `DEPENDENCY_UNITS` re-paged the
+  2026-08-09 weekend IB clean-exit as edge `aggregate_down` after 15m.
+- Broker downtime is hours by doctrine (IBC auto-restart frozen
+  off-hours). Dwell-escalate only Restart=always sidecars
+  (newsfeed/monitor). On-box still pages `ib-gateway-grouped`.
+
+## 2026-08-29 — Botocore Config retries are not application-level retry
+
+- Page `29c8a560`: `radon-db-backup` dumped 100 tables then paged P1 on
+  `ConnectionClosedError` of a 576 MB B2 PUT. `_s3_client` already had
+  `retries max_attempts=3 mode=standard`.
+- Media-backup (page `02ccb70e`) treated those botocore bounds as enough.
+  An injected client and a spent-retry multipart PUT still fail the
+  oneshot. Wrap LIST/PUT/HEAD/DELETE in `call_s3_with_retry`.
+
+## 2026-08-29 — Container newsfeed needs the host Playwright revision
+
+- Page `3e952746`: `radon-newsfeed` crash-looped after the container
+  cutover (`NRestarts=21`, `Result=exit-code`). Turso
+  `newsfeed-scraper` said `Executable doesn't exist at
+  /ms-playwright/chromium_headless_shell-1217`.
+- `bun x playwright install` from WORKDIR `web/` is not the repo-root
+  playwright the scraper imports. Host deploy already had 1217 in
+  `~/.cache/ms-playwright`. Bind that cache onto `/ms-playwright`;
+  install in the image via `./node_modules/.bin/playwright` from
+  `/home/radon/radon`.
+- A new GHCR tag is not required to recover (R-234): the wrapper is
+  control-plane and takes effect on the next unit restart.
+
+## 2026-08-29 — Sidecar Restart=always is activating, not just down
+
+- Page `0b7726f8` moved newsfeed/monitor `down` onto DEPENDENCY_UNITS.
+- Page `344f0592` sampled the same storm in `activating`. The starting
+  check still scanned every unit, so overall_state stayed `starting` and
+  the off-box probe wrote `aggregate_down` while ping and `/sign-in` were 200.
+- Classify sidecar `starting` like sidecar `down`: degraded, not an edge
+  outage. Serving-path starting stays `starting`.
+
 ## 2026-08-27 — Ticket max gain is the limit fill, not mid minus spread
 
 - CBRS 40× short $182.5 put, limit $4: TOTAL $16,000 CR, MAX GAIN $12,248.
@@ -661,3 +905,86 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 - `chrome-cdp` drives the operator's LIVE Chrome, not a disposable harness. An `Emulation.setDeviceMetricsOverride` left active after a measurement made the terminal lay out at 1800px inside a ~1367px window; the right ~430px rendered off-screen and the user reported a broken UI that was entirely my leftover state. Pair every Emulation override (device metrics, emulateMedia, throttling, geolocation) with its clear call in the SAME step, not "at the end" of a sequence. When a specific viewport is needed, use a local Playwright run against a built app instead. Also leave no modals open and no order tickets populated - it is a live trading account.
 - Corollary for diagnosis: before chasing a "regression" in a UI the user screenshotted, first check whether the session itself mutated their browser. Measure `document.documentElement.scrollWidth vs clientWidth` and `window.innerWidth` against the real window; zero internal overflow plus a mismatched innerWidth means the harness, not the code.
 - ResizeObserver notifications are throttled in background/occluded tabs. A responsive chart that "stops tracking resizes" under CDP is usually the tab not rendering, not a bug - foreground the tab (`Page.bringToFront`) and re-test before touching the code. Prove it by attaching an independent observer: if that one also never fires, it is throttling.
+
+## 2026-08-29 - Terse closing messages are a hard format, not a preference
+
+- The `Response Format` rule already existed at `CLAUDE.md:187` and was ignored on every turn of a long session: closing messages ran 200-350 words against a stated ~150 cap, with prose paragraphs, diagnosis tables, and "Worth knowing…" / "Correction to my earlier report…" openers the rule banned by name. Restating a guideline in prose does not change behaviour.
+- The fix is structural: a literal `**Done**` / `**Next**` bullet template, a 100-word cap enforced by DELETING lines rather than compressing prose, and a banned-phrase table quoting the exact openers that shipped. Paired with a `UserPromptSubmit` hook in `.claude/settings.json` that re-injects the contract at generation time, because a rule 200 lines up in a long file loses to momentum.
+- Causes belong in the commit message and PR body; chat carries state and next action only. Length creep started every time with narrating WHY something broke after the user had already been told WHAT broke.
+
+## 2026-08-29 - Deploys must reconcile the root control plane themselves
+
+- Every control-plane edit (helper, sudoers, polkit, control-plane unit, drop-in) and every root hot-patch of an installed drop-in blocked ALL deploys at preflight until a human ran `bootstrap-control-plane.sh` over root SSH. The durable fix is a privileged verb the deploy calls BEFORE `deploy.sh` holds the lock (`radon-deploy-root sync-control-plane`: extract `cloud/` at the GitHub main tip, run that tip's own bootstrap). Anything root must do "after a deploy" is a design gap, not an ops chore.
+- A unit that looks fixed in a text assertion is not fixed: REL-138 restored `Type=notify` on containerised units and its test asserted env-var NAMES in the source, while systemd silently dropped every `READY=1` from the container cgroup. Verify supervision contracts live (`STATUS=` probe through the real socket path) before shipping them as control-plane.
+- Test a background helper at the wire while its parent is still alive: the notify proxy passed 34 argv-level tests and died in 250ms in production because it was spawned inside `$(...)`.
+- Before trusting a deploy on a busy day, check `df -h /` and that the pruner timer is `enabled`: a 4.8GB image pull per SHA on a 75G disk took production down with every gate failing at once, and `bootstrap` installs control-plane timers but never enables them.
+- Other sessions were merging PRs and running root bootstraps on the same VPS at the same time (PR #151 reverted the same drop-ins I was fixing). Re-read `origin/main` and the installed manifest before every privileged step; never assume the tip is yours.
+
+## 2026-08-29 - Done/Next format applies to background-job progress lines too
+
+- Second correction in one day: a background-job session narrated every step in prose ("Waiting on the ingestion implementer…", "Full vitest green: …") because the harness asks for narration. The harness "narrate" instruction sets WHEN to speak, not the SHAPE: every emitted message is still `**Done**` / `**Next**` bullets under 100 words. Fold the pre-tool line into a `**Done**` bullet or omit it.
+## 2026-08-29 - Every user-visible message is Done/Next, including mid-task and pre-tool-call lines
+
+- The format rule was followed on closing messages and dropped on every other turn: one-line narration before a tool call ("Pre-existing duplicate keys... bypassing"), progress lines after arming a monitor ("Checks running on #180; I'll merge when green"), and status replies to `Status` prompts all shipped as prose. The user reads ALL of them as output.
+- The rule at `CLAUDE.md` §Response Format says "Mid-task progress messages follow the same shape". A message that ends a turn while work continues in the background is a closing message. Use `**Done** / **Next**` there too; when nothing changed, one bullet.
+- The harness "say in a line what you're about to do" instruction does not override the repo format: fold that line into a single bullet or emit nothing and let the tool call's description carry it.
+
+## 2026-08-29 - Never round-trip a diff through `git diff > file` under the rtk hook
+
+- `git diff HEAD -- f > patch` was rewritten to `rtk git diff`, which emits a token-compacted summary, not a patch. The follow-up `git checkout HEAD -- f` then discarded the only copy of the edit. Use `rtk proxy git diff` (or `git stash`) when the bytes matter, and never checkout-revert a file before confirming the saved patch applies (`git apply --check`).
+
+## 2026-08-29 - CI acceleration requires a successful production measurement
+
+- Do not stop at local green checks or a faster failed workflow. Commit and push the implementation, follow the real run through every required gate and production deploy, compare end-to-end wall time with the named baseline, and iterate on any release-only failure until the measured deploy is both green and materially faster.
+
+## Dropbox research calibration (2026-09-07)
+
+- Preserve the operator-approved selection method in `scripts/research/policy.md`: incremental measured positioning/flow/volatility/market-structure evidence, specific macro transmission, counterevidence, source dates and explicit conditionality; no quota or repetitive summaries.
+- Research media must reuse the live feed presentation: original chart region, complete titles/axes/legends/source, lead preview and secondary thumbnails, article-context enlargement. Full pages are supplementary evidence; state when evidence is text-only.
+- A model reviewing a full page beside a crop can falsely attribute the original page’s missing labels to the crop. Inspect crops independently, require visible label transcription, retain failed attempts, and verify real rendered examples before enabling unattended publication.
+
+## 2026-09-07: Publication dates need local source evidence
+- A model boolean is insufficient for document-date verification. Require a literal source excerpt that contains the exact report publication date and validate it locally. Folder dates, coverage windows, event dates and copyright years cannot establish publication dates. Audit the first automatic result before reporting full unattended verification complete.
+
+## 2026-09-07: Original-provider attribution only
+- Research feed copy must name the original bank/provider only. Do not name the subscription aggregator in publisher labels, titles, bodies or captions. Preserve original source files privately without rewriting evidence.
+
+## 2026-09-07 - Sequence final frontend verification
+
+- Run the full suite only after implementation agents finish and focused/browser fixes are complete. Starting it while source files are changing can produce mixed-revision results and force an expensive restart.
+- Bound test workers on the shared workstation. Run Next route type generation after the dev server has stopped, then typecheck the completed generated files; do not race typechecking against regeneration.
+
+## Deployment completion (2026-09-07)
+- A merged feature with a reproducible deployment failure still needs a concrete repair when requested; trace supervisor, unit and outer deadlines together, add a failing regression, and verify the corrected release reaches production.
+
+
+## 2026-09-07 - Social share publisher exclusions
+- Never include The Market Ear or ZeroHedge names, attribution, or links in generated social-share captions, posts, Story cards, or Reels/TikTok text. Apply the same exclusion to embedded text and edited outbound captions, not only the source footer.
+- Social exports should rewrite the supplied facts in Joe's documented voice, not simply reproduce the feed's narrator. Keep the evidence-backed persona provisional until a representative recent authored-tweet sample is available; exclude quoted/reposted text from calibration.
+
+## 2026-09-08 - One research filename cannot stop ingestion
+- Treat Dropbox metadata paths as remote identifiers, not local paths or URI selectors; retain absolute-root confinement while accepting valid filename punctuation.
+- Isolate discovery failures by scope and continue already validated queue work. Preserve failed cursors for replay and report the actual failing stage with credential-safe diagnostics.
+
+## 2026-09-08 - New data sources require Profile credential coverage
+- When a pipeline introduces a credential or operator-supplied configuration value, add it to the canonical credential registry and Profile credentials UI in the same change. Verify every collector-loaded field is represented; do not leave production-only environment setup as an undocumented side channel.
+
+## 2026-09-08 - Prefer CI for expensive full-suite verification
+- When the operator says local full suites consume too much workstation time, stop rerunning them. Run focused local checks, publish the PR promptly, and use the faster GitHub runners as the authoritative full-suite loop until the exact head is green.
+
+## 2026-09-08 - Dropbox arrival latency
+- A sleep after a batch of long model reviews is not a polling SLA. Keep current-day discovery and document parsing independent from slow review; explicitly report actual host identity and deployment placement.
+- Replay rejection examples against source evidence before describing zero publication as legitimate filtering. Preserve range context and account for extraction markup without relaxing value/sign/unit provenance.
+
+## 2026-09-08 - Run test suites in GitHub CI
+- User instruction: do not run test suites on this machine going forward. Create the PR, resolve conflicts, and ensure CI is green; GitHub runners own suite execution. This supersedes earlier local-full-suite requirements. Local code edits, static inspection and generated-map maintenance remain appropriate.
+
+## 2026-09-08 — Credential verification must use provider-compatible transport
+
+- Verify new credentials against the provider from the server runtime, and classify only provider auth responses as invalid; TLS, proxy, DNS, and request-library behavior need a regression before claiming a key cannot be checked.
+
+## 2026-09-08 — Full test suites run in CI, not on the laptop
+- Never launch full `pytest`/`vitest` locally. Push, read `gh run view --log-failed`, fix, push, repeat until green. Targeted single-file red/green runs are fine.
+
+## 2026-09-09 - Compose on X must not await generated media
+- Keep the text-only X intent link usable immediately with the current sanitized caption while voice rewriting or preview rendering is pending. Media readiness may disable media downloads only; pin the loading-state composer navigation in unit and browser regressions.

@@ -255,13 +255,20 @@ describe("evaluateScanCheck — vcg-scan (scheduled RTH cadence)", () => {
   });
 });
 
-describe("evaluateScanCheck — gex-scan (on-demand writer)", () => {
-  it("is never applicable while its category is on-demand — quiet is expected", () => {
-    // feedback_service_health_staleness: past-window silence on an on-demand
-    // writer means "nobody has looked", never an outage. Asserting freshness
-    // would burn the scan SLO on user inactivity.
-    expect(evaluateScanCheck("gex-scan", iso(OPEN_NOW - 60_000), "open", OPEN_NOW)).toEqual(NOT_APPLICABLE);
-    expect(evaluateScanCheck("gex-scan", iso(OPEN_NOW - 7 * 86_400_000), "open", OPEN_NOW)).toEqual(NOT_APPLICABLE);
+describe("evaluateScanCheck — gex-scan (scheduled writer)", () => {
+  it("is applicable during RTH now that a timer drives it", () => {
+    // R-422: `gex-scan` is run by data_refresh's 15-minute RTH driver
+    // (`_SCRIPT_SERVICES` maps `gex_scan.py -> "gex-scan"`), so it is a
+    // SCHEDULED writer, not an on-demand one. Cataloguing it as on-demand meant
+    // check.py never evaluated it and a failing gex_scan was invisible.
+    expect(evaluateScanCheck("gex-scan", iso(OPEN_NOW - 60_000), "open", OPEN_NOW).fresh).toBe(true);
+    expect(
+      evaluateScanCheck("gex-scan", iso(OPEN_NOW - 7 * 86_400_000), "open", OPEN_NOW).fresh,
+    ).toBe(false);
+  });
+
+  it("is still not applicable while the market is closed", () => {
+    // The half that still holds: a closed-market silence is expected.
     expect(evaluateScanCheck("gex-scan", null, "closed", CLOSED_NOW)).toEqual(NOT_APPLICABLE);
   });
 });
@@ -331,9 +338,12 @@ describe("buildFreshnessPayload", () => {
     expect(payload.database_failures).toEqual(["relay_tick", "journal"]);
   });
 
-  it("all_fresh is true when every APPLICABLE check is fresh (gex null-skipped)", () => {
+  it("all_fresh is true when every APPLICABLE check is fresh", () => {
+    // gex_scan used to be null-skipped here; it is a scheduled writer now and
+    // the fixture supplies a fresh scan time, so it participates. R-422.
     const payload = buildFreshnessPayload(FRESH_INPUTS, new Date(OPEN_NOW));
-    expect(payload.checks.gex_scan.applicable).toBe(false);
+    expect(payload.checks.gex_scan.applicable).toBe(true);
+    expect(payload.checks.gex_scan.fresh).toBe(true);
     expect(payload.all_fresh).toBe(true);
   });
 

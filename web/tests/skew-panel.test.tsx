@@ -9,7 +9,7 @@
  * Spec: docs/indicators/skew.md.
  */
 import React from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
@@ -155,6 +155,7 @@ import SkewPanel from "../components/SkewPanel";
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   mockUseSkew.mockReset();
 });
 
@@ -245,7 +246,7 @@ describe("SkewPanel — header strip", () => {
     expect(screen.getByText("-3.0")).toBeTruthy(); // z-score
     expect(screen.getByText("16.0%")).toBeTruthy(); // 25d put IV
     expect(screen.getByText("12.3%")).toBeTruthy(); // 25d call IV
-    expect(screen.getByText("2026-08-05")).toBeTruthy(); // latest date
+    expect(screen.getByTestId("skew-strip-date").textContent).toContain("2026-08-05"); // latest date
   });
 
   it("tones a beyond-2-sigma change as a warning", () => {
@@ -293,5 +294,63 @@ describe("SkewPanel — chart + views", () => {
     for (const path of Array.from(paths)) {
       expect(path.getAttribute("d") ?? "").not.toContain("NaN");
     }
+  });
+});
+
+/* ─── Freshness rail ─────────────────────────────────────
+ *
+ * radon-skew.timer is the union of an intraday Mon..Fri 13..21 UTC five-minute
+ * sweep and a daily 21:45 UTC finalize. Neither rule alone reproduces both
+ * instants below: the five-minute sweep (breadth) has nothing on a Saturday,
+ * and the daily finalize (credit-spread) does not fire at 21:55 on a Wednesday.
+ */
+describe("SkewPanel — freshness rail", () => {
+  function renderAt(instant: string, sessionDate: string) {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(instant));
+    const data = buildData({
+      scan_time: instant,
+      current: { ...buildData().current!, date: sessionDate },
+    });
+    renderPanel(hookState({ data, lastSync: instant }));
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+  }
+
+  it("keys off the session date, not the intraday as_of, and counts to the next five-minute slot", () => {
+    // 21:52 UTC on a Wednesday: the next intraday slot is 21:55, three minutes out.
+    renderAt("2026-08-26T21:52:00Z", "2026-08-26");
+    const rail = screen.getByTestId("skew-freshness-rail");
+    expect(rail).toBeTruthy();
+    expect(rail.textContent).toContain("2026-08-26");
+    expect(screen.getByTestId("skew-freshness-rail-countdown").textContent).toBe("3m 00s");
+    expect(rail.textContent).toContain("Next sample");
+  });
+
+  it("counts to the daily 21:45 UTC finalize when the intraday sweep is dark", () => {
+    // 20:00 UTC on a Saturday: no weekday sweep until Monday, so the daily
+    // finalize at 21:45 is the next fire, 1h45m out.
+    renderAt("2026-08-29T20:00:00Z", "2026-08-28");
+    expect(screen.getByTestId("skew-freshness-rail-countdown").textContent).toBe("1h 45m");
+    expect(screen.getByTestId("skew-freshness-rail").textContent).toContain("Next sample");
+  });
+
+  it("does not render the intraday as_of timestamp as the rail anchor", () => {
+    const instant = "2026-08-26T21:52:00Z";
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(instant));
+    const data = buildData({
+      scan_time: instant,
+      market_status: "open",
+      current: { ...buildData().current!, date: "2026-08-26", is_intraday: true, as_of: instant },
+    });
+    renderPanel(hookState({ data, lastSync: instant }));
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+    const rail = screen.getByTestId("skew-freshness-rail");
+    expect(rail.textContent).toContain("2026-08-26");
+    expect(rail.textContent).not.toContain("T21:52");
   });
 });

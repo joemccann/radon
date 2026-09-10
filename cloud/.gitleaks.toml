@@ -6,7 +6,9 @@ useDefault = true
 [[rules]]
 id = "literal-tws-credential-assignment"
 description = "Literal TWS credentials must never be committed"
-regex = '''\bTWS_(?:USERID|PASSWORD)[ \t]*=[ \t]*["']?[A-Za-z0-9][A-Za-z0-9_.$!@#%^&*+:/=-]{3,}["']?'''
+# A value may start with a symbol. `$` counts only inside single quotes: a
+# bare or double-quoted `$name` / `${name}` is shell or dotenv interpolation.
+regex = '''\bTWS_(?:USERID|PASSWORD)[ \t]*=[ \t]*(?:["']?[A-Za-z0-9_.!@#%^&*+:/=-][A-Za-z0-9_.$!@#%^&*+:/=-]{3,}["']?|'\$[A-Za-z0-9_.$!@#%^&*+:/=-]{3,}')'''
 keywords = ["TWS_"]
 
 [[rules.allowlists]]
@@ -35,6 +37,11 @@ commits = [
   # test_gitleaks_policy.py for the mirrored baseline.
   "6ec11003bb4521e7f7b677ffbd78b7fd4d09458a",
   "da857b8b19a6e5778bb86bf37465346dca8da89b",
+  # 2026-08-30: PR #184's test fixture spelled a fake gateway password
+  # (TWS_PASSWORD="p@ss word") to prove the env-file unquoting; merged before
+  # the scan ran. Not a credential; the fixture was rewritten to runtime
+  # construction in the next commit so no later SHA re-trips the rule.
+  "020865adeff48b7182b7eb81d74a01fc70d00c82",
 ]
 
 [[rules]]
@@ -56,7 +63,9 @@ commits = [
   "da857b8b19a6e5778bb86bf37465346dca8da89b",
 ]
 
-[allowlist]
+# Global allowlists. The singular legacy `[allowlist]` table cannot coexist
+# with this array, so both entries live here.
+[[allowlists]]
 description = "Generated local artifacts are not source"
 paths = ['''(^|/)__pycache__/|\.pyc$|(^|/)\.venv/''']
 # RADON_DB_NO_REPLICA=1 is the documented replica kill-switch flag (root
@@ -64,3 +73,33 @@ paths = ['''(^|/)__pycache__/|\.pyc$|(^|/)\.venv/''']
 # `RADON_DB_NO_REPLICA=1`" trips generic-api-key (2026-08-16, .pi/AGENTS.md
 # in b2ef3209). The literal is config, never a credential.
 regexes = ['''RADON_DB_NO_REPLICA=1''']
+
+# generic-api-key is a gitleaks DEFAULT rule, so its exception cannot live
+# under a [[rules]] block here. `targetRules` keeps this scoped to that one
+# rule instead of blanket-allowing the commit (gitleaks >= 8.19).
+[[allowlists]]
+description = "Vetted test fixture in an immutable merged commit"
+targetRules = ["generic-api-key"]
+commits = [
+  # 2026-08-31 (#212): the weekend-redactor test spelled a FAKE UW token to
+  # prove the redactor scrubs env values; merged before the scan ran. Never a
+  # valid credential, nothing to rotate. The fixture was rewritten to runtime
+  # construction in the next commit so no later SHA re-trips the rule.
+  "38eeecb91eedb3b90966821bff12d5b240d89708",
+  # 2026-09-02 (PR #125): the secret-store tests spelled FAKE sample values
+  # ("uw-abc123secret" and friends) next to *_TOKEN/*_KEY identifiers to
+  # prove roundtrip/masking/audit behavior. Never valid credentials, nothing
+  # to rotate. The fixtures were rewritten to runtime construction in the
+  # follow-up commit so no later SHA re-trips the rule.
+  "fd1eb140d324cf8b61373723ee34a744a0ddaab2",
+  # 2026-09-02 (PR #234): hosted-MCP docstring listed env names next to
+  # the word "credentials". Never a secret, nothing to rotate. Rewritten
+  # in the follow-up commit so no later SHA re-trips the rule.
+  "9db5f7aff4a947c1ee4965b467a79eefe1800ae9",
+  # 2026-09-08 sweep of history (gitleaks default-rule drift): PR #125's
+  # tasks/todo.md planning prose described the secret-store design
+  # ("AES-…" next to "values") and trips generic-api-key. Prose in an
+  # immutable merged commit; never a secret, nothing to rotate. The line no
+  # longer exists at HEAD.
+  "b0322b6f2ac3ef3b7310e628a23b67b859168ac5",
+]

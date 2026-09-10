@@ -13,7 +13,11 @@ import {
   type OrderIntent,
   type OrderStatusTone,
 } from "@/lib/orders/orderDisplay";
-import { classifyDisplayRowSession } from "@/lib/orders/sessionWindow";
+import {
+  classifyDisplayRowSession,
+  isExtendedFillLive,
+  type OrderSession,
+} from "@/lib/orders/sessionWindow";
 import SessionWindowChip from "../orders/SessionWindowChip";
 import Card from "./Card";
 import BottomSheet from "./BottomSheet";
@@ -92,6 +96,7 @@ function statusInfo(
     remaining?: number;
     isPendingCancel: boolean;
     isPendingModify: boolean;
+    session?: OrderSession;
   },
 ): { label: string; tone: OrderStatusTone } {
   if (opts.isPendingCancel) return { label: "Cancelling...", tone: "pending" };
@@ -99,6 +104,7 @@ function statusInfo(
   const mapped = mapOrderStatus(raw, {
     filled: opts.filled,
     remaining: opts.remaining,
+    extendedFillLive: opts.session ? isExtendedFillLive(opts.session) : false,
   });
   return { label: mapped.label, tone: mapped.tone };
 }
@@ -110,6 +116,7 @@ function statusLabel(
     remaining?: number;
     isPendingCancel: boolean;
     isPendingModify: boolean;
+    session?: OrderSession;
   },
 ): string {
   return statusInfo(raw, opts).label;
@@ -140,6 +147,7 @@ function StatusChip({ label, tone }: { label: string; tone: OrderStatusTone }) {
 function rowSummary(
   row: OpenOrderDisplayRow,
   pending: { cancel: boolean; modify: boolean },
+  session?: OrderSession,
 ): {
   title: string;
   subtitle: string;
@@ -155,6 +163,7 @@ function rowSummary(
       remaining: first?.remaining,
       isPendingCancel: pending.cancel,
       isPendingModify: pending.modify,
+      session,
     });
     return {
       title: `${row.symbol} · ${row.structure}`,
@@ -171,6 +180,7 @@ function rowSummary(
     remaining: o.remaining,
     isPendingCancel: pending.cancel,
     isPendingModify: pending.modify,
+    session,
   });
   return {
     title: `${o.contract.symbol} · ${o.action}`,
@@ -257,6 +267,7 @@ function OrderSheetSummary({
       remaining: first?.remaining,
       isPendingCancel: pending.cancel,
       isPendingModify: pending.modify,
+      session,
     });
     return (
       <div className="mobile-order-sheet-summary" data-testid="mobile-order-sheet-summary">
@@ -301,6 +312,7 @@ function OrderSheetSummary({
     remaining: o.remaining,
     isPendingCancel: pending.cancel,
     isPendingModify: pending.modify,
+    session,
   });
   return (
     <div className="mobile-order-sheet-summary" data-testid="mobile-order-sheet-summary">
@@ -434,11 +446,11 @@ export default function MobileOrderList({
       <div className="mobile-card-list" data-testid="mobile-order-list">
         {sortRows(rows, sortKey).map((row) => {
           const pending = pendingFor(row, cancels, modifies);
-          const summary = rowSummary(row, pending);
+          const session = classifyDisplayRowSession(row);
+          const summary = rowSummary(row, pending, session);
           const action = rowAction(row);
           const intent = rowIntent(row, portfolioPositions);
           const tone = rowCardTone(intent, action, row.kind === "combo");
-          const session = classifyDisplayRowSession(row);
           const id = row.kind === "combo" ? row.id : `single-${row.order.permId}`;
 
           return (

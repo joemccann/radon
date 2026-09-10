@@ -87,7 +87,10 @@ describe("requireRouteAccess", () => {
       env: { ALLOWED_USER_IDS: "user-operator" },
       rateLimitFn: () => ({ ok: false, retryAfterSec: 9 }),
     };
-    const result = await requireRouteAccess(request, { rate: { key: "scan", limit: 1, windowMs: 60_000 } }, deps);
+    const result = await requireRouteAccess(request, {
+      rate: { key: "scan", limit: 1, windowMs: 60_000 },
+      durableRateTier: "B",
+    }, deps);
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.response.status).toBe(429);
@@ -105,6 +108,7 @@ describe("requireRouteAccess", () => {
 
     const result = await requireRouteAccess(request, {
       rate: { key: "portfolio:route", limit: 20, windowMs: 60_000 },
+      durableRateTier: "I",
     }, {
       authFn: async () => ({ userId: "operator" }),
       env: { ALLOWED_USER_IDS: "operator" },
@@ -116,7 +120,30 @@ describe("requireRouteAccess", () => {
     expect(durableRateLimitFn).not.toHaveBeenCalled();
   });
 
-  it("keeps active demo traffic inside the default durable tier", async () => {
+  it("fails closed when a dynamically assembled rate policy omits its durable tier", async () => {
+    const now = Date.parse("2026-08-13T12:00:00Z");
+    const result = await requireRouteAccess(request, {
+      rate: { key: "portfolio:route", limit: 20, windowMs: 60_000 },
+    } as unknown as import("@/lib/routeAccess").RouteAccessOptions, {
+      authFn: async () => ({
+        userId: "demo-user",
+        sessionClaims: {
+          metadata: {
+            demoRole: "trial",
+            demoTrialExpiresAt: "2026-08-14T12:00:00Z",
+          },
+        },
+      }),
+      env: { NEXT_PUBLIC_RADON_DEMO: "1" },
+      now,
+      rateLimitFn: () => ({ ok: true, retryAfterSec: 0 }),
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.response.status).toBe(503);
+  });
+
+  it("keeps active demo reads inside their explicitly declared durable tier", async () => {
     const now = Date.parse("2026-08-13T12:00:00Z");
     const durableRateLimitFn = vi.fn(async () => ({
       success: false,
@@ -127,6 +154,7 @@ describe("requireRouteAccess", () => {
 
     const result = await requireRouteAccess(request, {
       rate: { key: "portfolio:route", limit: 20, windowMs: 60_000 },
+      durableRateTier: "I",
     }, {
       authFn: async () => ({
         userId: "demo-user",
@@ -145,7 +173,7 @@ describe("requireRouteAccess", () => {
 
     expect(result.ok).toBe(false);
     expect(durableRateLimitFn).toHaveBeenCalledWith(
-      "B",
+      "I",
       "route:portfolio:route:demo-user",
     );
     if (!result.ok) {

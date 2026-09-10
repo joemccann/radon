@@ -1,0 +1,1364 @@
+#!/usr/bin/env bash
+# Nightly documentation loop runner — invoked by launchd on the always-on
+# runner (Mac mini). One job fires daily and runs `cycle`: the audit phase
+# then the remediate phase, then the deliver phase (push, PR, CI green,
+# operator told what to merge), sequentially, in this loop's own clone.
+# Sequencing them inside one clone is what keeps two phases from checking
+# out over each other. Each phase still runs standalone (`audit` /
+# `remediate` / `deliver`). See .claude/skills/documentation-nightly/.
+#
+# Runs in its OWN dedicated clone (~/radon-weekend/radon-documentation), never
+# the reliability loop's (~/radon-weekend/radon). Both wrappers hard-reset
+# and clean their clone on every round, so two loops in one working tree
+# destroy each other's checkouts and in-flight work — observed 2026-08-16
+# when the testing loop's audit checked out its branch under a running
+# reliability remediation. Schedule slotting is NOT sufficient isolation:
+# the reliability loop relaunches continuation rounds until its backlog
+# is done, so its wall clock is unbounded. (First observed on the testing
+# loop, 2026-08-16.)
+#
+# Safety model:
+#   - runs ONLY in the dedicated runner clone (marker file required);
+#     the clone is hard-reset to origin/main every run, so it must never
+#     be a working checkout anyone edits by hand.
+#   - the agent never pushes main (skill rail); this wrapper's only git
+#     writes are fetch/reset on the runner clone.
+#   - deploy this file with git only (fetch + checkout -f + reset --hard):
+#     git writes a NEW inode, so a running copy keeps reading the old one.
+#     cp / cat / tee rewrite it IN PLACE and strand a live run at a stale
+#     byte offset. Never write it in a clone while a run is in flight.
+#   - wall-clock capped; every outcome (incl. crash) is reported to the
+#     rolling GitHub issue, and each phase also pages Pushover, so a
+#     silent-dead runner is visible without waiting for the next run.
+# -E: the ERR trap must be inherited by ground_truth/run_phase, otherwise a
+# git failure at midnight exits silently with no dead-man comment and no page.
+set -Eeuo pipefail
+
+# One writer per runner clone. The daily fire, a hand-run smoke test and the
+# setup script all drive the SAME tree, and every entry point runs
+# `git clean -fdxq`, so a second run would delete the live agent's uncommitted
+# work mid-write with both runs reporting success. The plist pre-reset and
+# setup_documentation_nightly.sh both stand down on this lock, so it has to exist.
+# mkdir is the atomic primitive here: flock(1) does not exist on macOS.
+acquire_runner_lock() {
+  local dir="$1" held
+  if ! mkdir "$dir" 2>/dev/null; then
+    held="$(cat "$dir/pid" 2>/dev/null || true)"
+    if [[ -z "$held" ]]; then
+      # No pid yet means the winner is between its mkdir and its pid write.
+      # That window used to skip the `kill -0` test entirely — the loser read
+      # an empty pid, called the lock stale, `rm -rf`d it and took it, and two
+      # cycles then ran `git clean -fdxq` in the same clone. Absent evidence is
+      # not evidence of staleness. R-411.
+      echo "weekend runner lock held (pid not yet published): $dir" >&2
+      return 1
+    fi
+    if kill -0 "$held" 2>/dev/null; then
+      echo "weekend runner lock held by pid $held ($dir)" >&2
+      return 1
+    fi
+    echo "[weekend] reclaiming stale runner lock (pid $held)" >&2
+    rm -rf -- "$dir"
+    mkdir "$dir" 2>/dev/null || { echo "cannot take runner lock $dir" >&2; return 1; }
+  fi
+  # Rename the pid in so it is never half-written to a reader. R-411.
+  printf '%s\n' "$$" > "$dir/pid.tmp" && mv -f "$dir/pid.tmp" "$dir/pid"
+  return 0
+}
+
+release_runner_lock() {
+  # ONLY the owner unlocks. Unconditional `rm -rf` meant the first run's EXIT
+  # trap unlocked the SECOND run's tree on its way out. R-411.
+  local dir="${1:-}" held
+  [[ -n "$dir" && -d "$dir" ]] || return 0
+  held="$(cat "$dir/pid" 2>/dev/null || true)"
+  [[ "$held" == "$$" ]] || return 0
+  rm -rf -- "$dir"
+}
+
+# Every network call in this wrapper is bounded, INCLUDING the dead-man channel
+# itself: a hung issue-comment call inside the crash handler wedged the wrapper
+# while it was trying to report its own death, holding the runner lock and
+# dropping every subsequent daily fire. R-409.
+NET_TIMEOUT_SECS="${RADON_WEEKEND_NET_TIMEOUT_SECS:-120}"
+# Before --lock-lib-only and before the venv PATH prepend. lock-lib-only
+# fetch always calls net_bounded under set -u.
+TIMEOUT_BIN="$(command -v timeout || true)"
+net_bounded() { "$TIMEOUT_BIN" "$NET_TIMEOUT_SECS" "$@"; }
+
+# A VPN flap that establishes TCP and then stalls hangs an ssh transport with
+# no keepalive, and the attempt-count retry below bounds attempts, not time.
+GIT_SSH_BOUNDED="ssh -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3"
+
+# `source documentation_nightly.sh --lock-lib-only` exposes the helpers above to the
+# contract tests without running a weekend.
+[[ "${1:-}" == "--lock-lib-only" ]] && return 0 2>/dev/null
+
+# Bash reads a script LAZILY by byte offset and re-reads it from disk after
+# every fork. The agent this wrapper spawns edits files in this clone, this
+# one included, so the whole run body is ONE function: bash parses a function
+# body in full before its first statement runs, and never reads it from disk
+# again. Two invariants keep that true — nothing above this line may fork, and
+# the call at the bottom must exit on its own line. Residual window: the
+# initial parse itself, before main is defined.
+main() {
+
+MODE="${1:?usage: documentation_nightly.sh audit|remediate|deliver|cycle}"
+[[ "$MODE" == "audit" || "$MODE" == "remediate" || "$MODE" == "deliver" || "$MODE" == "cycle" ]] || {
+  echo "unknown mode: $MODE" >&2; exit 2;
+}
+
+REPO="${RADON_WEEKEND_REPO:-$HOME/radon-weekend/radon-documentation}"
+WEEKEND_ROOT="$(dirname "$REPO")"
+# Per-loop venv. The legacy $WEEKEND_ROOT/venv is not deleted here
+# (operator follow-up after this ships).
+VENV="$WEEKEND_ROOT/venv-documentation"
+# Snapshot gh and Pushover BEFORE the venv prepend / agent. PATH is
+# $VENV/bin first after this. WEEKEND_ROOT/.env is shared across loops
+# and writable by a skip-permissions agent.
+_notify_cred() {
+  local key="$1" envf="$WEEKEND_ROOT/.env" line val=""
+  val="${!key:-}"
+  if [[ -n "$val" ]]; then
+    printf '%s' "$val"
+    return 0
+  fi
+  [[ -f "$envf" ]] || return 0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    case "$line" in
+      "${key}="*)
+        val="${line#*=}"
+        val="${val#\"}"
+        val="${val%\"}"
+        val="${val#\'}"
+        val="${val%\'}"
+        printf '%s' "$val"
+        return 0
+        ;;
+    esac
+  done < "$envf"
+}
+GH_BIN="$(command -v gh || true)"
+NOTIFY_PUSHOVER_USER="$(_notify_cred PUSHOVER_USER || true)"
+NOTIFY_PUSHOVER_TOKEN="$(_notify_cred PUSHOVER_TOKEN || true)"
+# Activate the venv so any python3.13 calls inside the agent use it.
+[[ -f "$VENV/bin/activate" ]] && export PATH="$VENV/bin:$PATH"
+DEADMAN_TITLE="Nightly documentation runner"
+DEADMAN_LABEL="documentation-nightly"
+ISSUE_SANITIZE=0
+LOOP_SLUG="documentation"
+DEADMAN_CREATE_BODY="Rolling dead-man for the nightly ${LOOP_SLUG} loop. A missing daily comment means the runner did not fire."
+# Branch prefix the skill opens/updates its PR from. Matched on the head
+# ref, not the title: the title is now `Documentation <date>`, which a
+# hand-written PR could also start with.
+PR_BRANCH_PREFIX="documentation/"
+
+resolve_pr_url() {
+  # Newest-updated open PR the skill opened for this loop. A gh failure or
+  # no match must yield an empty string, never a non-zero exit under set -e.
+  local url
+  # The repo is public: a fork PR can carry a prefix-named head branch, so
+  # only a same-repo head (write access required) counts as this loop's PR.
+  url="$(net_bounded "$GH_BIN" pr list --state open --limit 20 --json url,headRefName,updatedAt,isCrossRepository \
+    -q "[.[] | select(.isCrossRepository == false) | select(.headRefName | startswith(\"$PR_BRANCH_PREFIX\"))] | sort_by(.updatedAt) | reverse | .[0].url" \
+    2>/dev/null || true)"
+  [[ "$url" == "null" ]] && url=""
+  printf '%s' "$url"
+}
+
+_notify_curl() {
+  local loop="$1" phase="$2" status="$3" pr_url="$4" detail="$5"
+  local user token title message
+  user="$NOTIFY_PUSHOVER_USER"
+  token="$NOTIFY_PUSHOVER_TOKEN"
+  [[ -n "$user" && -n "$token" ]] || return 0
+  [[ -x /usr/bin/curl ]] || return 0
+  title="radon ${loop} ${phase}"
+  # PATH is $VENV/bin first. A planted or failing PATH tr under set -e
+  # aborts before curl; notify_phase's || true would swallow the page.
+  message="$(printf '%s' "$status" | /usr/bin/tr -s '[:space:]' ' ')"
+  detail="$(printf '%s' "$detail" | /usr/bin/tr -s '[:space:]' ' ')"
+  [[ -n "$detail" ]] && message="${message} ${detail}"
+  [[ -n "$pr_url" ]] && message="${message} ${pr_url}"
+  message="$(printf '%s' "$message" | /usr/bin/tr -s '[:space:]' ' ')"
+  local k v
+  for k in token user title message; do
+    v="${!k}"
+    v="${v//\\/\\\\}"
+    v="${v//\"/\\\"}"
+    v="${v//$'\n'/ }"
+    v="${v//$'\r'/}"
+    printf -v "$k" '%s' "$v"
+  done
+  # Creds stay off curl argv and off disk. -q must be argv[1].
+  {
+    printf 'url = "https://api.pushover.net/1/messages.json"\n'
+    printf 'request = POST\n'
+    printf 'silent = true\n'
+    printf 'show-error = true\n'
+    printf 'max-time = 10\n'
+    printf 'output = "/dev/null"\n'
+    printf 'data-urlencode = "token=%s"\n' "$token"
+    printf 'data-urlencode = "user=%s"\n' "$user"
+    printf 'data-urlencode = "title=%s"\n' "$title"
+    printf 'data-urlencode = "message=%s"\n' "$message"
+    printf 'data-urlencode = "priority=0"\n'
+  } | /usr/bin/curl -q --config - >/dev/null 2>&1 || true
+}
+
+notify_phase() {
+  # One Pushover per phase so a hung phase is visible immediately.
+  # Best-effort: it must never change the run's exit code.
+  # Never exec python after the agent: clone/venv python3 and
+  # /usr/bin/python3 without -I both import agent-writable modules
+  # from WEEKEND_ROOT (sys.path[0]). System python also lacks dotenv,
+  # so a 0 exit would skip _notify_curl. Always page with /usr/bin/curl.
+  local status="$1" pr_url
+  pr_url="$(resolve_pr_url)"
+  _notify_curl "$LOOP_SLUG" "$PHASE" "$status" "$pr_url" "log: ${RUN_LOG##*/}" || true
+}
+
+_sanitize_issue_text() {
+  # Parsed with main(). Never exec disk python3 or a formatter file: both
+  # are writable by the agent (venv python3, clone file, PID-guessable snapshot).
+  local text="$1"
+  [[ -n "$text" ]] || { printf '%s' "$text"; return 0; }
+  text="${text//https:\/\/claude.ai\/settings\/usage/$'\x01USAGE\x01'}"
+  text="${text//http:\/\/claude.ai\/settings\/usage/$'\x01USAGE\x01'}"
+  text="${text//claude.ai\/settings\/usage/$'\x01USAGE\x01'}"
+  text="$(printf '%s' "$text" | /usr/bin/sed -E \
+    -e 's,https?://[^[:space:]]+,[REDACTED],g' \
+    -e 's,(^|[^[:alnum:].])/(api|admin)/[A-Za-z0-9._/-]+,\1[REDACTED],g' \
+    -e 's,[A-Za-z0-9./_-]+\.(py|ts|tsx|js|mjs|cjs|sh|go|rb|java|json|yml|yaml|toml|md):[0-9]+,[REDACTED],g' \
+    -e 's,[Bb]earer [^[:space:]]+,Bearer [REDACTED],g' \
+    -e 's,[A-Za-z0-9_]*(TOKEN|SECRET|PASSWORD|PASSWD|PASS|AUTH|CREDENTIAL|API_KEY|APIKEY|_KEY)[A-Za-z0-9_]*[[:space:]]*[=:][[:space:]]*[^[:space:]]+,[REDACTED],g' \
+    -e 's,[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z][A-Za-z]+,[REDACTED],g' \
+    -e 's,(^|[^A-Za-z0-9])(radon)?(trader|operator)[0-9]+,\1[REDACTED],g' \
+    -e 's,[Cc]heck the runner,,g' \
+    -e 's,[Oo]n the runner,,g' \
+    || true)"
+  text="${text//$'\x01USAGE\x01'/claude.ai/settings/usage}"
+  printf '%s' "$text"
+}
+
+_format_issue_body() {
+  # In-main bash only. Wrapper dead-man is PHASE STAMP status, not the
+  # three-section agent write-up. Never exec disk python3 after the agent.
+  local phase="$1" status="$2" detail="$3"
+  local clean body
+  if [[ "${ISSUE_SANITIZE:-0}" == "1" ]]; then
+    phase="$(_sanitize_issue_text "$phase")"
+    status="$(_sanitize_issue_text "$status")"
+    detail="$(_sanitize_issue_text "$detail")"
+  fi
+  clean="${detail%%\`\`\`*}"
+  body="$(printf '**%s** %s **%s**' "$phase" "${STAMP:-}" "$status")"
+  if [[ -n "$clean" ]]; then
+    body="${body}"$'\n'"${clean}"
+  fi
+  if [[ "${ISSUE_SANITIZE:-0}" == "1" ]]; then
+    body="$(_sanitize_issue_text "$body")"
+  fi
+  printf '%s\n' "$body"
+}
+
+report() {
+  # Dead-man: one rolling issue, a comment per run. Failure to report
+  # must not mask the run's own exit code. Third arg 0 suppresses the
+  # Pushover.
+  local status="$1" detail="$2" push="${3:-1}"
+  local body
+  body="$(_format_issue_body "$PHASE" "$status" "$detail")"
+  local issue
+  # REL-188 (R-537): every gh call here was `|| true`, so an expired gh auth
+  # produced exactly the observable of a runner that never fired — a missing
+  # daily comment. Say so in the log; Pushover still fires either way.
+  issue="$(net_bounded "$GH_BIN" issue list --label "$DEADMAN_LABEL" --state open \
+    --json number -q '.[0].number' 2>/dev/null || true)"
+  if [[ -z "$issue" ]]; then
+    echo "[weekend] gh issue call failed or found no dead-man issue (auth expired?)" \
+      | tee -a "${RUN_LOG:-/dev/null}" >/dev/null 2>&1 || true
+  fi
+  if [[ -z "$issue" ]]; then
+    net_bounded "$GH_BIN" issue create --title "$DEADMAN_TITLE" --label "$DEADMAN_LABEL" \
+      --body "$DEADMAN_CREATE_BODY" \
+      >/dev/null 2>&1 || true
+    issue="$(net_bounded "$GH_BIN" issue list --label "$DEADMAN_LABEL" --state open \
+      --json number -q '.[0].number' 2>/dev/null || true)"
+  fi
+  if [[ -n "$issue" ]]; then
+    # R-612 (P0): post FIRST, and prune only once the post is confirmed. The
+    # prune used to run ahead of a post whose failure `|| true` swallowed, so a
+    # gh outage deleted the whole dead-man history and wrote nothing in its
+    # place. The new comment's id is handed to --keep so it survives the wipe.
+    local posted
+    posted="$(net_bounded "$GH_BIN" issue comment "$issue" --body "$body" 2>/dev/null || true)"
+    if [[ -n "$posted" ]]; then
+      prune_deadman_comments "$issue" "$posted"
+    else
+      echo "[weekend] gh issue call failed: the phase comment did not post" \
+        | tee -a "${RUN_LOG:-/dev/null}" >/dev/null 2>&1 || true
+    fi
+  fi
+  if [[ "$push" == "1" ]]; then
+    notify_phase "$status"
+  fi
+  return 0
+}
+
+# Wipes every existing dead-man comment right before report() posts the new
+# one, but only once no PR is open for this loop (merged, closed, or never
+# needed) — an open PR means an operator still needs the full run history
+# until they merge it. Never exec a python FILE from the agent-writable
+# clone: origin/main's copy is piped into an isolated system interpreter,
+# same defence as prune_weekend_root. Non-fatal and bounded by design; a
+# failure here must never change what report() posts or the run's exit code.
+prune_deadman_comments() {
+  local issue="$1"
+  local posted="${2:-}"
+  local keep="${posted##*issuecomment-}"
+  # R-657: no issuecomment- marker (or a non-numeric suffix) means the
+  # keep-id is unparseable; --keep "<whole url>" would match no comment id
+  # and the prune would delete EVERYTHING, including the comment just
+  # posted. No parseable id, no prune.
+  if [[ ! "$keep" =~ ^[0-9]+$ ]]; then return 0; fi
+  if [[ "${RADON_WEEKEND_SKIP_ISSUE_PRUNE:-0}" == "1" ]]; then return 0; fi
+  if [[ -z "${TIMEOUT_BIN:-}" || -z "$GH_BIN" ]]; then return 0; fi
+  git -C "$REPO" show origin/main:scripts/nightly_issue_prune.py 2>/dev/null \
+    | "$TIMEOUT_BIN" "${RADON_WEEKEND_ISSUE_PRUNE_TIMEOUT_SECS:-30}" \
+      /usr/bin/python3 -I - --gh-bin "$GH_BIN" --issue "$issue" \
+      --branch-prefix "$PR_BRANCH_PREFIX" ${keep:+--keep "$keep"} >/dev/null 2>&1 || true
+  return 0
+}
+
+# T-239: `claude -p` terminates unfinished background tasks at its print-mode
+# background-wait ceiling and then exits **0**, so a phase cut off with its
+# last agent still working is indistinguishable from one that finished. The
+# testing loop's 2026-08-28 audit was cut at 600s, filed nothing on a 24-commit delta,
+# left an empty branch and no PR — and paged OK. The ceiling is lifted at the
+# invocation below (the `timeout` is the cap); this is the second guarantee,
+# so that if it is ever cut off anyway the operator is not told it succeeded.
+BG_CEILING_MARKER="Background tasks still running after"
+
+phase_status() {
+  # rc + run log -> the one status string every dead-man channel carries.
+  # `mark` is the size of $run_log before THIS round's invocation. RUN_LOG is
+  # per PHASE and appended by every retry and continuation round, so grepping
+  # the whole file made a round-1 ceiling message report a finished round 8 as
+  # TRUNCATED forever — a permanent false alarm on exactly the long
+  # remediations the detector was added to protect. R-426.
+  local rc="$1" run_log="$2" mark="${3:-0}"
+  if [[ $rc -eq 124 ]]; then
+    printf 'TIMEOUT after %ss' "$CAP_SECS"
+  elif [[ $rc -ne 0 ]]; then
+    printf 'FAILED (exit %s)' "$rc"
+  elif tail -c "+$((mark + 1))" "$run_log" 2>/dev/null | grep -qF "$BG_CEILING_MARKER"; then
+    printf 'TRUNCATED (background work killed before the phase finished)'
+  else
+    printf 'OK'
+  fi
+}
+
+# Deliver phase (2026-09-02): the skill's last line is a verdict the wrapper
+# turns into the cycle's final notification — "N PR(s) green, ready to merge:
+# <urls>" or "INCOMPLETE: <check>". Printed by scripts/nightly_deliver.py
+# verdict; parsed here in bash (never exec disk python after the agent). An
+# exit-0 deliver phase without it is INCOMPLETE, exits 75, and the next fire
+# resumes the same branch and PR from the deliver record.
+DELIVER_READY_MARKER="NIGHTLY DELIVER READY:"
+DELIVER_INCOMPLETE_MARKER="NIGHTLY DELIVER INCOMPLETE:"
+
+# R-611 (P1): a deliver phase killed at its cap left NOTHING behind when the
+# agent had not yet written a record, so "resume the same branch and PR"
+# resumed nothing. The wrapper arms a branch-only record before the agent
+# starts; the agent overwrites it with the PR number and status as it goes.
+# Same isolation as prune_deadman_comments: origin/main's copy piped into a
+# system interpreter, never a python FILE from the agent-writable clone.
+arm_deliver_record() {
+  [[ "$PHASE" == "deliver" ]] || return 0
+  [[ -n "${TIMEOUT_BIN:-}" ]] || return 0
+  git -C "$REPO" show origin/main:scripts/nightly_deliver.py 2>/dev/null \
+    | "$TIMEOUT_BIN" 30 /usr/bin/python3 -I - record --loop "$LOOP_SLUG" \
+      --branch "${PR_BRANCH_PREFIX}$(date +%F)" --status launched >/dev/null 2>&1 || true
+  return 0
+}
+
+# An agent-asserted URL is not a merge cue. Before any "ready to merge"
+# render, every URL must be independently confirmed as a same-repo open PR
+# on this loop's branch prefix, via the pre-snapshotted gh binary; anything
+# unconfirmed makes the phase INCOMPLETE instead of a render.
+_deliver_urls_verified() {
+  local tok verified
+  for tok in $1; do
+    case "$tok" in
+      http://*|https://*)
+        verified="$(net_bounded "$GH_BIN" pr view "$tok" \
+          --json state,headRefName,isCrossRepository \
+          -q "select(.state == \"OPEN\" and .isCrossRepository == false and (.headRefName | startswith(\"$PR_BRANCH_PREFIX\"))) | \"ok\"" \
+          2>/dev/null || true)"
+        [[ "$verified" == "ok" ]] || return 1 ;;
+    esac
+  done
+  return 0
+}
+
+deliver_status() {
+  # R-613: the verdict is read from the DURABLE record the phase writes, not
+  # by grepping the agent's own transcript — a marker line recited inside
+  # agent prose is not a verdict, and a cap kill leaves no transcript line at
+  # all. The log grep survives only as the fallback for a record-less run.
+  local from_record=""
+  if [[ -n "${TIMEOUT_BIN:-}" ]]; then
+    from_record="$(git -C "$REPO" show origin/main:scripts/nightly_deliver.py 2>/dev/null \
+      | "$TIMEOUT_BIN" 30 /usr/bin/python3 -I - deliver-status --loop "$LOOP_SLUG" 2>/dev/null || true)"
+  fi
+  case "$from_record" in
+    ""|*"no deliver record"*) ;;
+    # A branch-only record is the one arm_deliver_record() wrote BEFORE the
+    # agent started (R-611). It proves the phase launched, not what the agent
+    # concluded, so it is not a verdict: fall through to this round's verdict
+    # line. A finished deliver with nothing to ship prints `prs=0` and never
+    # touches the record, and read as a verdict the launch stub scored every
+    # such night INCOMPLETE (2026-09-08 15:06, all five loops in the phase
+    # tests). A cap kill leaves no verdict line, so it still lands INCOMPLETE
+    # below — and the record itself, untouched, still makes it resumable.
+    *"deliver record has a branch but no PR"*) ;;
+    *"ready to merge:"*)
+      if _deliver_urls_verified "${from_record#*ready to merge:}"; then
+        printf '%s' "$from_record"
+      else
+        printf 'INCOMPLETE: unverified-pr-url'
+      fi
+      return 0 ;;
+    *) printf '%s' "$from_record"; return 0 ;;
+  esac
+  # Last verdict line of THIS round's slice of the log (R-426 scoping).
+  local line rest tok n="" urls="" check=""
+  line="$(tail -c "+$((ROUND_LOG_MARK + 1))" "$RUN_LOG" 2>/dev/null \
+    | grep -E "^(${DELIVER_READY_MARKER}|${DELIVER_INCOMPLETE_MARKER})" | tail -n 1 || true)"
+  case "$line" in
+    "$DELIVER_READY_MARKER"*)
+      rest="${line#"$DELIVER_READY_MARKER"}"
+      for tok in $rest; do
+        case "$tok" in
+          prs=*) n="${tok#prs=}" ;;
+          http://*|https://*) urls="${urls:+$urls }$tok" ;;
+        esac
+      done
+      if [[ "${n:-0}" == "0" ]]; then
+        printf '0 PR(s), nothing to merge'
+      elif _deliver_urls_verified "$urls"; then
+        printf '%s PR(s) green, ready to merge: %s' "$n" "$urls"
+      else
+        printf 'INCOMPLETE: unverified-pr-url'
+      fi ;;
+    "$DELIVER_INCOMPLETE_MARKER"*)
+      rest="${line#"$DELIVER_INCOMPLETE_MARKER"}"
+      for tok in $rest; do
+        case "$tok" in check=*) check="${tok#check=}" ;; esac
+      done
+      printf 'INCOMPLETE: %s' "${check:-unnamed check}" ;;
+    *)
+      printf 'INCOMPLETE (exit 0 without the deliver verdict line)' ;;
+  esac
+}
+
+# REL-188 (R-520): a `claude -p` round can exit 0 having done nothing — no
+# commit, no ledger advance, no PR — and every dead-man channel then said OK.
+# Each phase commits at least once on the nightly branch by contract, so "exit
+# 0 and nothing was committed during this phase" is INCOMPLETE. Both the SHA
+# and the committer date are checked: a phase legitimately moves HEAD onto the
+# previous phase's branch tip without committing, so a moved HEAD alone is not
+# evidence.
+INCOMPLETE_STATUS="INCOMPLETE (agent exited 0 without committing to the nightly branch)"
+PHASE_HEAD_BEFORE=""
+PHASE_START_EPOCH=0
+phase_committed() {
+  local head epoch
+  head="$(git rev-parse HEAD 2>/dev/null || true)"
+  [[ -n "$head" && "$head" != "$PHASE_HEAD_BEFORE" ]] || return 1
+  epoch="$(git log -1 --format=%ct HEAD 2>/dev/null || true)"
+  [[ -n "$epoch" && "$epoch" -ge "$PHASE_START_EPOCH" ]]
+}
+
+# T-379's check reads "HEAD did not move" as proof the agent stalled, and that
+# is one of two causes. The other is a phase that ran to completion and had
+# nothing to commit: on 2026-09-08 testing/audit found no findings in its delta
+# range and documentation/remediate found 0 source-actionable P0/P1 items. Both
+# printed their full report on the codex rung and both were scored INCOMPLETE
+# with exit 75, on the rolling issue, for doing exactly what the contract asked.
+# HEAD alone cannot tell a stall from a finished no-op, so the agent declares
+# it. Scoped like the TRUNCATED (R-426) and cap (R-530, R-667) detectors: THIS
+# round's slice, wrapper markers dropped, and anchored at column 0 naming this
+# loop and phase — these loops audit their own wrappers and quote this contract,
+# so an indented mention inside a fence must not satisfy it. Silence is still
+# INCOMPLETE: only the printed line is a declaration.
+PHASE_NOOP_MARKER="NIGHTLY PHASE NO-OP:"
+phase_declared_noop() {
+  # NOT `grep -q`. Under `set -o pipefail` a consumer that exits on the first
+  # match leaves `tail` writing into a closed pipe: SIGPIPE, 141, and the
+  # pipeline reports failure on the very line it just found. The stub-sized
+  # logs in the unit tests fit in the pipe buffer, so they never saw it; the
+  # 2026-09-08 15:06 documentation audit printed the line above 6,000 more
+  # lines of transcript and was scored INCOMPLETE. Reading to EOF costs a
+  # few milliseconds once per phase.
+  tail -c "+$((ROUND_LOG_MARK + 1))" "$RUN_LOG" 2>/dev/null \
+    | grep -v '^\[' \
+    | grep -E "^${PHASE_NOOP_MARKER} loop=${LOOP_SLUG} phase=${PHASE}([[:space:]]|$)" \
+    > /dev/null
+}
+
+on_crash() {
+  report "CRASHED (exit $?)" "wrapper died before the agent finished"
+}
+
+# Bash runs the EXIT trap on an untrapped SIGTERM, so the lock released and the
+# process exited 143 — but `on_crash` never ran, so launchd's ExitTimeOut kill,
+# a `launchctl bootout`, an operator kill and a reboot mid-cycle all produced
+# exactly the same observable as "the runner did not fire". SKILL.md tells the
+# operator to read quiet as "still running", so they waited. R-384.
+ROUND_PID=""
+kill_round_group() {
+  [[ -n "$ROUND_PID" ]] || return 0
+  # `timeout` (deliberately WITHOUT --foreground) makes itself the round's
+  # process-group leader, so the negative pid reaches claude and anything it
+  # left behind. --foreground would signal only timeout's direct child, which
+  # is the opposite of what reaping orphaned subagents needs — they would keep
+  # writing into the clone while the next round runs `git clean -fdxq`. R-386.
+  kill -TERM -- "-$ROUND_PID" 2>/dev/null || kill -TERM "$ROUND_PID" 2>/dev/null || true
+  ROUND_PID=""
+}
+
+on_signal() {
+  local sig="$1"
+  trap - INT TERM HUP ERR EXIT
+  kill_round_group
+  # REL-199 (R-531): launchd's default ExitTimeOut is ~20s and report()'s gh
+  # ladder is up to five 120s-bounded calls — a bootout produced NO page.
+  # Release the lock and fire the 10s-bounded Pushover FIRST, log locally,
+  # then give GitHub one short-bounded attempt.
+  release_runner_lock "${RUNNER_LOCK:-}"
+  notify_phase "KILLED (SIG${sig})" || true
+  echo "[weekend] KILLED (SIG${sig}) $(date -u +%FT%TZ)" >> "${RUN_LOG:-/dev/null}" 2>/dev/null || true
+  NET_TIMEOUT_SECS=10 report "KILLED (SIG${sig})" "the wrapper was signalled before the phase finished — launchd ExitTimeOut, a bootout, an operator kill or a reboot; partial work may exist on the weekend branch" 0
+  exit 143
+}
+
+# These four are defined HERE, above the trap, and not further down beside
+# begin_phase: the prologue's REFUSED branches and the ERR trap below call
+# report(), and a function defined later in main() is not yet defined when
+# they run — every prologue death died on "report: command not found", then on
+# unset PHASE/STAMP/RUN_LOG under `set -u`, so no issue comment and no page
+# were ever sent for the very failures the trap exists to catch. T-209.
+PHASE="prologue"
+STAMP="$(date +%Y%m%dT%H%M%S)"
+RUN_LOG="prologue (no phase log yet)"
+
+# R-239: the ERR trap used to be armed only inside run_phase, so everything
+# from here down — the cd, the marker check, the lock, the mkdir and the
+# rotation pipeline under `set -o pipefail` — exited on a full disk, a moved
+# clone or a held lock with nothing but a line on stderr. The file header
+# claims every outcome is reported; for the prologue that was false.
+trap on_crash ERR
+trap 'on_signal INT' INT
+trap 'on_signal TERM' TERM
+trap 'on_signal HUP' HUP
+
+cd "$REPO"
+[[ -f .radon-weekend-runner ]] || {
+  echo "REFUSING: $REPO is not the dedicated weekend runner clone" >&2
+  report "REFUSED" "$REPO is not the dedicated weekend runner clone" || true
+  exit 2
+}
+
+# REL-180 (R-504): .radon-weekend-runner is every loop's clone; this loop's
+# OWN marker is what stops a stray RADON_WEEKEND_REPO from running inside a
+# sibling loop's clone (taking ITS lock, hard-resetting ITS tree). Installed
+# clones predate the marker: the canonical path is admitted once and stamps
+# itself, so a merge cannot silence a loop until setup is re-run.
+LOOP_MARKER=".radon-documentation-runner"
+if [[ ! -f "$LOOP_MARKER" ]]; then
+  if [[ "$(pwd -P)" == "$(cd "$HOME/radon-weekend/radon-documentation" 2>/dev/null && pwd -P)" ]]; then
+    touch "$LOOP_MARKER"
+  else
+    echo "REFUSING: $REPO is not the dedicated documentation runner clone ($LOOP_MARKER absent)" >&2
+    report "REFUSED" "$REPO lacks the $LOOP_MARKER marker; the documentation loop runs only in ~/radon-weekend/radon-documentation" || true
+    exit 2
+  fi
+fi
+
+# Subscription only. Claude Code prefers an API key / Bedrock / Vertex /
+# Foundry / gateway reroute over the claude.ai login whenever one is visible.
+# Operator rule 2026-09-01: a reroute variable the launch shell carries is
+# IGNORED, not fatal. Name it on stderr (never the value), unset it, run on
+# the subscription. Refuse only what `unset` cannot reach: a key file a
+# scanner reloads itself, or a Claude Code settings file carrying an
+# apiKeyHelper / env reroute. The lists are what `strings` on the installed
+# CLI actually honors; a hand copy of six of them was the old hole.
+# Re-derived against the INSTALLED CLI on 2026-09-07 (2.1.263, drifted from
+# the 2.1.258 this list was pinned to): `strings` on the binary names two
+# routing variables the list did not cover, CLAUDE_CODE_API_BASE_URL and
+# CLAUDE_CODE_HFI_BEARER_TOKEN, both now unset and refused. Deliberately NOT
+# added: CLAUDE_CODE_OAUTH_TOKEN and its _FILE_DESCRIPTOR — that is the
+# subscription credential itself, and unsetting it would break the very
+# billing path this rail exists to protect. CLAUDE_CODE_API_KEY is no longer
+# referenced by the binary; it stays listed because unsetting a dead name
+# costs nothing and an older CLI may still read it.
+BILLING_REROUTE_KEYS="ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL CLAUDE_CODE_API_KEY CLAUDE_CODE_API_BASE_URL CLAUDE_CODE_HFI_BEARER_TOKEN CLAUDE_API_KEY CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR AWS_BEARER_TOKEN_BEDROCK ANTHROPIC_AWS_API_KEY ANTHROPIC_AWS_BASE_URL ANTHROPIC_BEDROCK_BASE_URL ANTHROPIC_BEDROCK_MANTLE_BASE_URL ANTHROPIC_VERTEX_BASE_URL ANTHROPIC_GOOGLE_CLOUD_BASE_URL ANTHROPIC_FOUNDRY_API_KEY ANTHROPIC_FOUNDRY_AUTH_TOKEN ANTHROPIC_FOUNDRY_BASE_URL ANTHROPIC_FOUNDRY_RESOURCE ANTHROPIC_IDENTITY_TOKEN ANTHROPIC_IDENTITY_TOKEN_FILE"
+BILLING_REROUTE_FLAGS="CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY CLAUDE_CODE_USE_GATEWAY CLAUDE_CODE_USE_MANTLE CLAUDE_CODE_USE_ANTHROPIC_AWS CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD"
+BILLING_IGNORED=""
+for _billing_var in $BILLING_REROUTE_KEYS; do
+  [[ -n "${!_billing_var:-}" ]] || continue
+  echo "IGNORING: $_billing_var is set in the launch environment; unset for the agent, this loop bills the claude.ai subscription only" >&2
+  BILLING_IGNORED="$BILLING_IGNORED $_billing_var"
+done
+# 0/false/no lock the reroute OFF: that is subscription-only and not worth an
+# operator line. Only a truthy value (1/true/yes) actually reroutes billing.
+for _billing_var in $BILLING_REROUTE_FLAGS; do
+  case "${!_billing_var:-}" in
+    1|[Tt][Rr][Uu][Ee]|[Yy][Ee][Ss])
+      echo "IGNORING: $_billing_var is set in the launch environment; unset for the agent, this loop bills the claude.ai subscription only" >&2
+      BILLING_IGNORED="$BILLING_IGNORED $_billing_var"
+      ;;
+  esac
+done
+# shellcheck disable=SC2086
+unset $BILLING_REROUTE_KEYS $BILLING_REROUTE_FLAGS _billing_var
+BILLING_IGNORED="${BILLING_IGNORED# }"
+
+# `unset` cannot reach a key the scanner loads for itself: deepsec reads
+# .deepsec/.env*.local out of its own workspace, which is gitignored and
+# survives every nightly `git clean`. Refuse rather than edit operator state.
+BILLING_REROUTE_KEY_ASSIGN="^[[:space:]]*(export[[:space:]]+)?(${BILLING_REROUTE_KEYS// /|})[[:space:]]*=[[:space:]]*[^[:space:]#]"
+BILLING_REROUTE_FLAG_ASSIGN="^[[:space:]]*(export[[:space:]]+)?(${BILLING_REROUTE_FLAGS// /|})[[:space:]]*=[[:space:]]*[\"']?(1|true|yes)[\"']?([#[:space:]]|\$)"
+# A settings-level apiKeyHelper or env reroute reaches the agent past any
+# unset. Refuse and name the file; the operator edits it, not the loop.
+BILLING_REROUTE_SETTINGS_KEY="\"(${BILLING_REROUTE_KEYS// /|})\"[[:space:]]*:[[:space:]]*\"[^\"]"
+BILLING_REROUTE_SETTINGS_FLAG="\"(${BILLING_REROUTE_FLAGS// /|})\"[[:space:]]*:[[:space:]]*\"?(1|true|yes)\"?"
+# Checked in the prologue and AGAIN at the start of every phase and
+# continuation round, after the reset and before `claude` launches: the
+# in-phase agent can write any of these files, and .deepsec/, web/.env and
+# the settings files all survive `git clean`, so a one-time prologue check
+# let the next phase inherit what the previous phase planted.
+refuse_billing_reroute_files() {
+  local key_file settings_file
+  for key_file in .deepsec/.env .deepsec/.env.local .deepsec/.env.*.local .env.local; do
+    [[ -f "$key_file" ]] || continue
+    if grep -qE "$BILLING_REROUTE_KEY_ASSIGN" "$key_file" || grep -qiE "$BILLING_REROUTE_FLAG_ASSIGN" "$key_file"; then
+      echo "REFUSING: $key_file holds billing-reroute credentials; this loop bills the claude.ai subscription only, remove the key line" >&2
+      report "REFUSED" "$key_file holds billing-reroute credentials; the agent would bill metered API usage instead of the claude.ai subscription, remove the key line" || true
+      exit 2
+    fi
+  done
+
+  # web/.env is provisioned into the Radon-credential clones for the Next dev
+  # server and pytest's load_dotenv, and the product copy carries
+  # ANTHROPIC_API_KEY. Neither the agent nor any child may use it: scrub the
+  # reroute lines in place (same inode, mode kept) so the subscription is the
+  # only model route in this clone. The security clone refuses the file above.
+  if [[ -f web/.env ]] && { grep -qE "$BILLING_REROUTE_KEY_ASSIGN" web/.env || grep -qiE "$BILLING_REROUTE_FLAG_ASSIGN" web/.env; }; then
+    echo "IGNORING: web/.env holds billing-reroute credentials; removed from the clone copy, this loop bills the claude.ai subscription only" >&2
+    { grep -vE "$BILLING_REROUTE_KEY_ASSIGN" web/.env | grep -viE "$BILLING_REROUTE_FLAG_ASSIGN" || true; } > web/.env.scrub
+    cat web/.env.scrub > web/.env
+    rm -f web/.env.scrub
+    [[ " $BILLING_IGNORED " == *" web/.env "* ]] || BILLING_IGNORED="${BILLING_IGNORED:+$BILLING_IGNORED }web/.env"
+  fi
+
+  for settings_file in "$HOME/.claude/settings.json" .claude/settings.json .claude/settings.local.json "/Library/Application Support/ClaudeCode/managed-settings.json" /etc/claude-code/managed-settings.json; do
+    [[ -f "$settings_file" ]] || continue
+    if grep -qE '"apiKeyHelper"[[:space:]]*:[[:space:]]*"[^"]' "$settings_file" \
+       || grep -qE "$BILLING_REROUTE_SETTINGS_KEY" "$settings_file" \
+       || grep -qiE "$BILLING_REROUTE_SETTINGS_FLAG" "$settings_file"; then
+      echo "REFUSING: $settings_file holds an apiKeyHelper or billing-reroute env entry; this loop bills the claude.ai subscription only, remove it" >&2
+      report "REFUSED" "$settings_file holds an apiKeyHelper or billing-reroute env entry; the agent would bill metered API usage instead of the claude.ai subscription, remove it" || true
+      exit 2
+    fi
+  done
+}
+refuse_billing_reroute_files
+
+RUNNER_LOCK="$REPO/.weekend-runner.lock"
+acquire_runner_lock "$RUNNER_LOCK" || {
+  echo "REFUSING: another weekend run owns $REPO" >&2
+  # The expensive instance: acquire_runner_lock only reclaims when
+  # `kill -0 $held` fails, so a recorded pid reused by ANY live unrelated
+  # process makes every subsequent daily fire exit 3 in under a second. That
+  # must page, not vanish. R-239.
+  report "REFUSED (lock held)" "another weekend run owns $REPO (pid $(cat "$RUNNER_LOCK/pid" 2>/dev/null || echo unknown)); if no cycle is running, the recorded pid was reused — remove $RUNNER_LOCK" || true
+  exit 3
+}
+trap 'release_runner_lock "$RUNNER_LOCK"' EXIT
+
+LOG_DIR="$REPO/logs/documentation-nightly"
+mkdir -p "$LOG_DIR"
+# Run logs carry agent transcripts; keep them owner-only regardless of
+# the inherited umask. Dir-level clamp so no per-file mode can regress it.
+chmod 700 "$LOG_DIR"
+# Keep the newest 30 run logs. NEVER the launchd sinks: the plist points
+# StandardOutPath/StandardErrorPath at launchd-cycle.log/.err inside this same
+# directory, and launchd-cycle.err only gets an mtime bump when something
+# writes to stderr — so it sorts old and was unlinked once ~30 per-phase logs
+# accumulated, taking the only forensics for a prologue death with it. Worse,
+# the rotation runs BEFORE run_phase, so the rest of that same invocation
+# wrote to a deleted inode launchd still held open. R-267.
+# `|| true` on the grep: it exits 1 when it filters everything out (an empty
+# or sinks-only log dir), and `set -o pipefail` would turn that into a
+# prologue death — now a REPORTED one, thanks to the trap above.
+ls -1t "$LOG_DIR" 2>/dev/null \
+  | { grep -v -e '^launchd-cycle\.log$' -e '^launchd-cycle\.err$' || true; } \
+  | tail -n +31 | while IFS= read -r old; do
+  rm -f -- "$LOG_DIR/$old"
+done
+
+CAP_SECS=0
+RUN_LOG="$LOG_DIR/$MODE-$STAMP.log"
+RC=0
+
+begin_phase() {
+  PHASE="$1"
+  # Audit fans out read agents (cap 2h); remediation is the long half (cap 6h).
+  # Deliver pushes, opens the PR and waits on CI (cap 3h).
+  case "$PHASE" in
+    audit) CAP_SECS="${RADON_WEEKEND_AUDIT_CAP_SECS:-7200}" ;;
+    deliver) CAP_SECS="${RADON_WEEKEND_DELIVER_CAP_SECS:-10800}" ;;
+    *) CAP_SECS="${RADON_WEEKEND_REMEDIATE_CAP_SECS:-21600}" ;;
+  esac
+  # One log per phase: the transient-network detector reads $RUN_LOG.
+  # Issue comments do not include a run-log tail.
+  RUN_LOG="$LOG_DIR/$PHASE-$STAMP.log"
+  RC=0
+  # REL-198 (R-533): rung carry across phases is intended; flag carry is
+  # not — an audit-phase exhaustion mislabelled a successful remediate.
+  ALL_PROVIDERS_EXHAUSTED=0
+  EXHAUSTED_PROVIDERS=""
+}
+
+# Fresh ground truth. Any leftover state from a killed prior run is
+# discarded — the branch/PR on GitHub is the durable state.
+# R-237: this loop's fetch was a bare single attempt while the reliability
+# loop already had a bounded retry (3f96dc31, added for the 2026-08-23 port-22
+# blackhole). Same shape, same reason.
+FETCH_ATTEMPTS="${RADON_WEEKEND_FETCH_ATTEMPTS:-3}"
+FETCH_PAUSE_SECS="${RADON_WEEKEND_FETCH_PAUSE_SECS:-60}"
+
+fetch_origin_with_retry() {
+  local attempt
+  for (( attempt = 1; attempt <= FETCH_ATTEMPTS; attempt++ )); do
+    net_bounded git -c "core.sshCommand=$GIT_SSH_BOUNDED" fetch origin --quiet && return 0
+    echo "[weekend] git fetch origin failed — attempt $attempt/$FETCH_ATTEMPTS" >&2
+    if (( attempt < FETCH_ATTEMPTS )); then sleep "$FETCH_PAUSE_SECS"; fi
+  done
+  return 1
+}
+
+# REL-187 (R-519): every loop reset its clone to the RAW TIP of origin/main, so
+# a loop firing minutes after a red push spent its whole cycle auditing,
+# remediating and testing a tree CI had already rejected — and the resulting PR
+# mixed the loop's work with someone else's broken commit. Stale-but-green
+# beats fresh-but-red. GitHub being unreachable keeps the tip already checked
+# out, with a logged warning: an unreachable API must never stop a nightly run.
+# Isolated origin/main pipe, same defence as prune_deadman_comments.
+resolve_green_main_sha() {
+  [[ -n "${TIMEOUT_BIN:-}" && -n "$GH_BIN" ]] || return 0
+  git -C "$REPO" show origin/main:scripts/nightly_green_base.py 2>/dev/null \
+    | "$TIMEOUT_BIN" "${RADON_WEEKEND_GREEN_BASE_TIMEOUT_SECS:-60}" \
+      /usr/bin/python3 -I - --repo "${RADON_WEEKEND_GH_REPO:-joemccann/radon}" \
+      --repo-dir "$REPO" --head origin/main --gh-bin "$GH_BIN" 2>/dev/null || true
+  return 0
+}
+
+ground_truth() {
+  fetch_origin_with_retry
+  git checkout -f --quiet main
+  git reset --hard --quiet origin/main
+  local green_sha
+  green_sha="$(resolve_green_main_sha)"
+  if [[ -n "$green_sha" ]] && git -C "$REPO" rev-parse --verify --quiet "${green_sha}^{commit}" >/dev/null; then
+    if [[ "$green_sha" != "$(git -C "$REPO" rev-parse origin/main)" ]]; then
+      echo "[weekend] origin/main tip is not CI-green; pinning to $green_sha" | tee -a "${RUN_LOG:-/dev/null}" >/dev/null 2>&1 || true
+    fi
+    git reset --hard --quiet "$green_sha"
+  fi
+  git clean -fdxq --exclude=.radon-weekend-runner --exclude=.radon-documentation-runner --exclude=.weekend-runner.lock --exclude=logs/ --exclude=.env --exclude=.env.ib-mode --exclude=web/.env --exclude=node_modules/ --exclude=.next/ --exclude=.deepsec/
+}
+
+# The agent commits per completed task and the skill resumes from the
+# weekend branch, so a fresh attempt after a dropped API connection loses
+# nothing. Retry ONLY on a transient-network signature (2026-08-16: five
+# runs died to ENOTFOUND / connection-lost on the runner's flaky uplink);
+# real failures and timeouts surface immediately.
+KILL_AFTER_SECS="${RADON_WEEKEND_KILL_AFTER_SECS:-60}"
+# Production always gives `timeout` the real phase remainder after the 60s
+# launch floor below. The survivability regression needs to exercise the real
+# process group and SIGKILL path without sleeping for that production-sized
+# deadline. Refuse this narrow override unless pytest explicitly owns the
+# process, and accept only the bounded values the regression needs.
+TEST_ROUND_TIMEOUT_SECS=""
+if [[ -n "${RADON_WEEKEND_TEST_ROUND_TIMEOUT_SECS:-}" ]]; then
+  if [[ -z "${PYTEST_CURRENT_TEST:-}" ]]; then
+    echo "REFUSING: RADON_WEEKEND_TEST_ROUND_TIMEOUT_SECS is test-only" >&2
+    report "REFUSED" "RADON_WEEKEND_TEST_ROUND_TIMEOUT_SECS is test-only and cannot alter a production deadline" || true
+    exit 2
+  fi
+  case "$RADON_WEEKEND_TEST_ROUND_TIMEOUT_SECS" in 1|2|5) ;;
+    *)
+      echo "REFUSING: RADON_WEEKEND_TEST_ROUND_TIMEOUT_SECS must be 1, 2, or 5" >&2
+      report "REFUSED" "RADON_WEEKEND_TEST_ROUND_TIMEOUT_SECS must be the bounded test value 1, 2, or 5" || true
+      exit 2
+      ;;
+  esac
+  TEST_ROUND_TIMEOUT_SECS="$RADON_WEEKEND_TEST_ROUND_TIMEOUT_SECS"
+fi
+ROUND_LOG_MARK=0
+MAX_ATTEMPTS=3
+RETRY_PAUSE_SECS=60
+# Credits, per-model rate limit, and provider capacity are per MODEL, so an
+# exhausted one is a reason to drop a rung, not to lose the night. 2026-09-01:
+# `~/.claude/settings.json` carried `model: claude-fable-5[1m]`, these wrappers
+# passed no --model and inherited it, that model's quota was gone, and
+# `claude -p` printed one line and exited 1. Pinning the model also takes the
+# operator's global default off the unattended path. Session/weekly caps are
+# shared across models and must not match here.
+LOOP_SKILL="documentation-nightly"
+LOOP_LOG_TAG="documentation-nightly"
+PORTABLE_PROMPT_DIR="${RADON_PORTABLE_PROMPT_DIR:-$REPO/.claude/portable-prompts}"
+# `RADON_WEEKEND_MODEL_LADDER` still names claude rungs, for the loops that
+# have them; `RADON_WEEKEND_PROVIDER_LADDER` overrides the whole ladder.
+# 2026-09-07: a pinned codex model id (gpt-5.4) started answering HTTP 400
+# "not supported when using Codex with a ChatGPT account" once OpenAI migrated
+# the account default forward to gpt-5.6-terra, and three loops died with no
+# issue comment. Operator's decision: do not pin. A rung may name a provider
+# with NO model, which launches that CLI with no --model flag so the account
+# default in force that night is what runs. nvidia and cerebras still name one
+# because the grok CLI resolves them through a `[model."<key>"]` block: the
+# rung names that STABLE KEY and scripts/agent_cli_bootstrap.sh resolves the
+# live id behind it from the provider's own /v1/models.
+PROVIDER_LADDER="${RADON_WEEKEND_PROVIDER_LADDER:-codex grok nvidia:nvidia-latest cerebras:cerebras-latest}"
+
+# --- provider ladder (byte-identical across all five loops) ------------------
+# A rung is `provider:model`. 2026-09-06: a Claude session cap is shared across
+# every Claude model, so a Claude-only ladder had nothing to route around it and
+# the night ended at INCOMPLETE 75. The ladder now crosses PROVIDERS. The four
+# non-security loops left the claude.ai subscription entirely — it is reserved
+# for the security loop, which stays claude-exclusive because it is the one loop
+# whose output is sanitized before reaching a public issue.
+#
+# A capped provider skips every remaining rung it owns: an account cap is a wall
+# no model on that account routes around. A per-model quota advances one rung.
+AGENT_CLI_ROOT="${RADON_AGENT_CLI_ROOT:-$HOME/.radon/agent-cli}"
+RUNG_INDEX=0
+ALL_PROVIDERS_EXHAUSTED=0
+EXHAUSTED_PROVIDERS=""
+read -r -a PROVIDER_RUNGS <<< "$PROVIDER_LADDER"
+
+rung_provider() { printf '%s' "${1%%:*}"; }
+# The model half of a rung is OPTIONAL. A bare `codex` or `grok` rung resolves
+# to the empty string, and launch_round then omits --model entirely rather than
+# passing an empty one.
+rung_model() { case "$1" in *:*) printf '%s' "${1#*:}" ;; *) : ;; esac; }
+
+# Resolved by absolute path, never bare `command -v`, for codex and grok: the
+# npm @openai/codex install on this host ships an empty vendor directory and
+# its shim is first on PATH, so a PATH lookup finds a binary that cannot run.
+provider_bin() {
+  case "$1" in
+    claude) command -v claude 2>/dev/null || true ;;
+    codex) printf '%s' "${RADON_WEEKEND_CODEX_BIN:-/opt/homebrew/bin/codex}" ;;
+    grok | nvidia | cerebras) printf '%s' "${RADON_WEEKEND_GROK_BIN:-$HOME/.grok/bin/grok}" ;;
+    *) return 1 ;;
+  esac
+}
+
+# Readiness is checked BEFORE a rung is selected, so it cannot depend on the
+# key already being exported — only the chosen rung's key ever is.
+provider_key_present() {
+  [[ -n "${!1:-}" ]] && return 0
+  grep -qE "^$1=." "$AGENT_CLI_ROOT/env" 2>/dev/null
+}
+
+# Cheap local checks only — no network, no token refresh. A provider that is
+# not installed or not signed in is SKIPPED, never a reason to end the night.
+provider_ready() {
+  local bin
+  bin="$(provider_bin "$1")" || return 1
+  [[ -n "$bin" && -x "$bin" ]] || return 1
+  case "$1" in
+    # claude: the binary is the whole check. Its CLI resolves a subscription
+    # from a credentials file, the keychain or an OAuth token, and guessing
+    # which from out here would skip the primary rung on a host that simply
+    # stores it somewhere else. An auth failure surfaces as a normal round
+    # failure, exactly as it did before the ladder crossed providers.
+    claude) : ;;
+    codex) [[ -r "${CODEX_HOME:-$HOME/.codex}/auth.json" ]] || return 1 ;;
+    grok) [[ -r "$HOME/.grok/auth.json" || -n "${XAI_API_KEY:-}" ]] || return 1 ;;
+    nvidia) provider_key_present NVIDIA_API_KEY && [[ -r "$AGENT_CLI_ROOT/grok-home-nvidia/config.toml" ]] || return 1 ;;
+    cerebras) provider_key_present CEREBRAS_API_KEY && [[ -r "$AGENT_CLI_ROOT/grok-home-cerebras/config.toml" ]] || return 1 ;;
+    *) return 1 ;;
+  esac
+  # A fallback rung is driven by a rendered prompt file, not a slash command.
+  # A missing one used to reach the shell as a redirect error mid-launch; it
+  # is a rung that cannot run, so treat it as one and skip cleanly.
+  if [[ "$1" != "claude" && -n "${PHASE:-}" ]]; then
+    [[ -r "$PORTABLE_PROMPT_DIR/$LOOP_SKILL.$PHASE.md" ]] || return 1
+  fi
+  return 0
+}
+
+# Provider keys live outside every clone (the credential rails refuse a key
+# file inside one, and `git clean` between phases would delete it anyway).
+# Only the key the CURRENT rung needs is exported; the others stay unset so a
+# rung cannot silently bill a provider it was not chosen for.
+load_provider_key() {
+  local want="$1" envf="$AGENT_CLI_ROOT/env" line key val
+  unset NVIDIA_API_KEY CEREBRAS_API_KEY XAI_API_KEY
+  case "$want" in nvidia | cerebras | grok) ;; *) return 0 ;; esac
+  [[ -r "$envf" ]] || return 0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in \#* | "") continue ;; esac
+    key="${line%%=*}"
+    val="${line#*=}"
+    [[ -n "$val" ]] || continue
+    case "$want:$key" in
+      nvidia:NVIDIA_API_KEY | cerebras:CEREBRAS_API_KEY | grok:XAI_API_KEY)
+        export "$key=$val" ;;
+    esac
+  done < "$envf"
+}
+
+use_rung() {
+  local rung="${PROVIDER_RUNGS[$RUNG_INDEX]}"
+  RUNG_PROVIDER="$(rung_provider "$rung")"
+  RUNG_MODEL="$(rung_model "$rung")"
+  RUNG_BIN="$(provider_bin "$RUNG_PROVIDER")"
+  # The security skill spawns a SECOND claude for its Stage 4 scan and a
+  # --model flag on the outer process does not reach it, so the rung travels
+  # as environment too. DOC-042; unchanged name and meaning.
+  export RADON_WEEKEND_PROVIDER="$RUNG_PROVIDER"
+  export RADON_WEEKEND_MODEL="$RUNG_MODEL"
+  # Anything but claude runs the portable prompt with no subagents; the phase
+  # narrows remediation to P0/P1 and says so in its own report.
+  if [[ "$RUNG_PROVIDER" == "claude" ]]; then
+    export RADON_WEEKEND_REDUCED=0
+  else
+    export RADON_WEEKEND_REDUCED=1
+  fi
+  load_provider_key "$RUNG_PROVIDER"
+}
+
+# `wide` retires every remaining rung of the current provider. Returns 1 when
+# no usable rung is left, which is the ONLY path to "all providers exhausted".
+# One entry per provider, first reason wins: the dead-man has to say WHY each
+# provider is out, or the operator re-fires into the same wall.
+note_exhausted() {
+  # "; " separated, not space separated: a reason contains spaces of its own.
+  case "; $EXHAUSTED_PROVIDERS" in
+    *"; $1="*) return 0 ;;
+  esac
+  EXHAUSTED_PROVIDERS="${EXHAUSTED_PROVIDERS:+$EXHAUSTED_PROVIDERS; }$1=$2"
+}
+
+advance_rung() {
+  local wide="${1:-}" reason="${2:-cap}" dead="$RUNG_PROVIDER" next
+  note_exhausted "$dead" "$reason"
+  while :; do
+    RUNG_INDEX=$((RUNG_INDEX + 1))
+    (( RUNG_INDEX < ${#PROVIDER_RUNGS[@]} )) || return 1
+    next="$(rung_provider "${PROVIDER_RUNGS[$RUNG_INDEX]}")"
+    [[ "$wide" == "wide" && "$next" == "$dead" ]] && continue
+    if ! provider_ready "$next"; then
+      echo "[$LOOP_LOG_TAG] rung ${PROVIDER_RUNGS[$RUNG_INDEX]} skipped: provider not installed or not signed in" | tee -a "$RUN_LOG"
+      note_exhausted "$next" "not installed or not signed in"
+      continue
+    fi
+    use_rung
+    return 0
+  done
+}
+
+# Per-provider cap signatures, captured from the real CLIs rather than guessed.
+# Scoping is unchanged and deliberately narrow (R-426, R-530, R-667): this
+# round's slice only, never the wrapper's own `[loop]` marker lines.
+quota_regex() {
+  case "$1" in
+    claude) printf '%s' 'out of usage credits|You.ve hit your (Opus|Sonnet) limit|Request rejected \(429\)|529 Overloaded|experiencing high load' ;;
+    codex) printf '%s' 'You.ve hit your usage limit|usage limited|rate limit reached|429' ;;
+    grok | nvidia | cerebras) printf '%s' 'usage limit reached|out of credits|spending limit|usage balance exhausted|429' ;;
+    *) printf '%s' 'a\{0\}b' ;;
+  esac
+}
+
+# A SHARED account cap: not per-model, so no rung of that provider can route
+# around it. codex prints its own, verified 2026-09-06:
+#   "You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage
+#    to purchase more credits or try again at 7:52 PM."
+session_regex() {
+  case "$1" in
+    claude) printf '%s' "^You.ve hit your (session|weekly) limit.*resets" ;;
+    codex) printf '%s' "You.ve hit your usage limit.*(try again|purchase more credits)" ;;
+    grok | nvidia | cerebras) printf '%s' "(usage limit reached|usage balance exhausted).*(resets|try again)" ;;
+    *) printf '%s' 'a\{0\}b' ;;
+  esac
+}
+
+# A PERMANENT rejection of THIS rung: the provider answered, understood the
+# request and refused it. 2026-09-07: `codex exec --model gpt-5.4` returned
+# HTTP 400 invalid_request_error ("The 'gpt-5.4' model is not supported when
+# using Codex with a ChatGPT account") for every round of three loops. A 400 is
+# neither a cap nor a transient network error, so nothing classified it and the
+# ladder never advanced. Scoped exactly like session_regex when it is applied:
+# this round's slice, no wrapper marker lines, a bounded tail — so prose that
+# merely QUOTES the text (these loops audit their own wrappers) is not one.
+rejection_regex() {
+  case "$1" in
+    *) printf '%s' 'invalid_request_error|model is not supported|model metadata for .* not found|unknown model|"status":[[:space:]]*400' ;;
+  esac
+}
+
+# One launch per rung. Backgrounded and `wait`ed, never foreground: bash defers
+# trap handling until a foreground child exits, and `-k` escalates to SIGKILL so
+# a CLI blocked on a hung child cannot make the cap advisory. R-384, R-386.
+launch_round() {
+  local remain="$1" prompt_file="$PORTABLE_PROMPT_DIR/$LOOP_SKILL.$PHASE.md"
+  # A bare rung names no model on purpose: the CLI/account default is what runs
+  # and the vendor migrates it forward. An empty --model is NOT the same thing,
+  # so the flag is omitted entirely. `${a[@]+"${a[@]}"}` because bash 3.2 (the
+  # /bin/bash on this runner) errors on an empty "${a[@]}" under set -u.
+  # Reasoning effort is always medium, on every provider that takes one.
+  local -a model_flag=()
+  if [[ -n "$RUNG_MODEL" ]]; then model_flag=(--model "$RUNG_MODEL"); fi
+  case "$RUNG_PROVIDER" in
+    claude)
+      # --disallowedTools: three security rounds in a row (2026-09-08) ran
+      # 17-27 minutes, wrote ZERO bytes here and exited 0. Every transcript
+      # ended on ScheduleWakeup — the /loop heartbeat — "while <stage> runs
+      # detached; notifications are the primary wake signal". Under -p there
+      # is no later: the turn ends, the process exits 0, the final text and
+      # the completion marker are never printed. The skill already says to
+      # wait in-session on the rc file; the model reached for the harness
+      # tool anyway, so it is taken off the table, with Monitor (whose
+      # notifications are what it was waiting on) and CronCreate.
+      CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 "$TIMEOUT_BIN" -k "$KILL_AFTER_SECS" "$remain" \
+        "$RUNG_BIN" -p "/$LOOP_SKILL $PHASE" \
+        ${model_flag[@]+"${model_flag[@]}"} \
+        --dangerously-skip-permissions \
+        --disallowedTools ScheduleWakeup Monitor CronCreate \
+        --output-format text >> "$RUN_LOG" 2>&1 &
+      ;;
+    codex)
+      # --sandbox workspace-write, never the bypass flag: parity with the
+      # claude rung's bounded grant, not a wider one.
+      #
+      # codex's workspace-write sandbox is narrower than the phase contract in
+      # three ways, each of which silently produced an INCOMPLETE on 2026-09-07:
+      #
+      #   .git                 protected by default, so `git checkout -b
+      #                        <loop>/<date>` failed with "Unable to create
+      #                        '.../refs/heads/....lock': Operation not
+      #                        permitted" and a phase scored on a COMMIT could
+      #                        never make one.
+      #   deliver record       lives one level ABOVE the clone at
+      #                        $WEEKEND_ROOT/.<loop>-deliver, so arming it raised
+      #                        "PermissionError: [Errno 1] Operation not
+      #                        permitted" and deliver reported
+      #                        check=runner-lock-held-and-gh-auth-unavailable.
+      #   network              off by default: `curl https://api.github.com`
+      #                        returns "Could not resolve host" (000), so `gh`
+      #                        cannot comment on the rolling issue, open a PR or
+      #                        read CI, and `git push` cannot reach origin.
+      #                        Verified: network_access=true -> 200.
+      #
+      # Each grant is the narrowest that lets the phase meet its own contract.
+      # The bypass flag stays off, so this remains a bounded grant matching the
+      # claude rung's scope rather than exceeding it.
+      "$TIMEOUT_BIN" -k "$KILL_AFTER_SECS" "$remain" \
+        "$RUNG_BIN" exec ${model_flag[@]+"${model_flag[@]}"} \
+        -c model_reasoning_effort="medium" \
+        -c "sandbox_workspace_write={network_access=true,writable_roots=[\"$REPO/.git\",\"$WEEKEND_ROOT/.$LOOP_SLUG-deliver\"]}" \
+        -C "$REPO" --color never \
+        --sandbox workspace-write --skip-git-repo-check \
+        - < "$prompt_file" >> "$RUN_LOG" 2>&1 &
+      ;;
+    grok)
+      "$TIMEOUT_BIN" -k "$KILL_AFTER_SECS" "$remain" \
+        "$RUNG_BIN" --prompt-file "$prompt_file" ${model_flag[@]+"${model_flag[@]}"} \
+        --reasoning-effort medium \
+        --cwd "$REPO" --always-approve --output-format plain >> "$RUN_LOG" 2>&1 &
+      ;;
+    nvidia | cerebras)
+      # grok's CLI hosts every OpenAI-compatible provider: it is the only agent
+      # CLI here that speaks /chat/completions. codex speaks only /responses,
+      # which neither NVIDIA NIM nor Cerebras serves (both 404, 2026-09-06).
+      GROK_HOME="$AGENT_CLI_ROOT/grok-home-$RUNG_PROVIDER" \
+        "$TIMEOUT_BIN" -k "$KILL_AFTER_SECS" "$remain" \
+        "$RUNG_BIN" --prompt-file "$prompt_file" ${model_flag[@]+"${model_flag[@]}"} \
+        --reasoning-effort medium \
+        --cwd "$REPO" --always-approve --output-format plain >> "$RUN_LOG" 2>&1 &
+      ;;
+    *)
+      echo "[$LOOP_LOG_TAG] unknown provider $RUNG_PROVIDER" | tee -a "$RUN_LOG"
+      return 1
+      ;;
+  esac
+  ROUND_PID=$!
+}
+# --- end provider ladder -----------------------------------------------------
+use_rung
+
+# Scoped to THIS round's slice of the log, like the ceiling detector: RUN_LOG
+# is per phase and every round appends to it, so a whole-file grep would let
+# round 1's exhausted rung drop a model on every later round forever. R-426.
+is_quota_exhausted() {
+  # REL-198 (R-530): the detector reads the agent's own transcript, so a
+  # crashing round that QUOTES a pattern mid-run must not read as quota
+  # exhaustion. The CLI prints its refusal in its FINAL lines: scan only the
+  # last 40 lines of the round slice, and never the wrapper's own markers.
+  tail -c "+$((ROUND_LOG_MARK + 1))" "$RUN_LOG" 2>/dev/null \
+    | grep -v '^\[' | tail -n 40 | grep -qiE "$(quota_regex "$RUNG_PROVIDER")"
+}
+
+# 2026-09-05: the subscription's SHARED session (or weekly) cap is not a
+# per-model quota, so is_quota_exhausted deliberately excludes it and the
+# ladder cannot route around it. Nothing else claimed it either: every loop
+# that fired at midnight exited 1 into the generic `*)` arm and paged a bare
+# FAILED with no cause on a public rolling issue. Recognised here so the cap
+# is reported as INCOMPLETE-and-resumable, on the same round-scoped tail as
+# the quota detector.
+is_session_limited() {
+  # R-667 (REL-248): match the CLI's own verdict line, never prose that merely
+  # QUOTES a cap phrase — these loops audit their own wrappers and routinely
+  # echo the trigger strings. The CLI prints its refusal as the final line, so
+  # scan only the last 3 non-empty non-wrapper lines for the real cap shape.
+  tail -c "+$((ROUND_LOG_MARK + 1))" "$RUN_LOG" 2>/dev/null \
+    | grep -v '^\[' | grep -v '^[[:space:]]*$' | tail -n 3 | grep -qiE "$(session_regex "$RUNG_PROVIDER")"
+}
+
+# The same narrow scoping as is_session_limited: the CLI prints its refusal as
+# its final line, so only the last 3 non-empty non-wrapper lines of THIS round
+# count. A Traceback quoting the 400 mid-run is not a rejection.
+is_rung_rejected() {
+  tail -c "+$((ROUND_LOG_MARK + 1))" "$RUN_LOG" 2>/dev/null \
+    | grep -v '^\[' | grep -v '^[[:space:]]*$' | tail -n 3 | grep -qiE "$(rejection_regex "$RUNG_PROVIDER")"
+}
+
+is_transient_network_failure() {
+  tail -c 500 "$RUN_LOG" | grep -qE 'API Error|ENOTFOUND|Connection lost|Execution error'
+}
+
+run_phase() {
+  begin_phase "$1"
+  trap on_crash ERR
+  echo "[documentation-nightly] $PHASE start $STAMP repo=$REPO cap=${CAP_SECS}s${BILLING_IGNORED:+ ignored=${BILLING_IGNORED// /,}}" | tee -a "$RUN_LOG"
+  arm_deliver_record
+  # NOT bare. Under `set -Eeuo pipefail` with the ERR trap armed, a failed
+  # fetch made on_crash report and then the shell exit anyway — so
+  # `run_phase audit` never returned and `run_phase remediate` was never run
+  # and never reported, contradicting the comment on the cycle branch. The
+  # testing loop was the exposed one: its fetch was a bare single attempt while
+  # reliability already had fetch_origin_with_retry. R-237.
+  if ! ground_truth; then
+    RC=70
+    report "GROUND TRUTH FAILED" "could not refresh the clone (network or git); the phase did not run" || true
+    echo "[documentation-nightly] $PHASE done rc=$RC" | tee -a "$RUN_LOG"
+    return 0
+  fi
+  # Rail 5b again: the previous phase's agent may have planted a key file
+  # or a settings reroute the reset does not remove; refuse before this
+  # phase's `claude` launches.
+  refuse_billing_reroute_files
+
+  # Attempt clock is per phase: under cycle the remediate phase must not
+  # inherit the audit phase's elapsed seconds and insta-timeout.
+  # R-185: `timeout claude` returning 124 (cap) or any non-zero agent exit is
+  # an EXPECTED outcome this loop handles — but the ERR trap was still armed
+  # over it, so every failed or timed-out run posted a false
+  # "CRASHED — wrapper died" dead-man comment AND then its real status.
+  trap - ERR
+  PHASE_HEAD_BEFORE="$(git rev-parse HEAD 2>/dev/null || true)"
+  PHASE_START_EPOCH="$(date +%s)"
+  local attempt=1 start_ts=$SECONDS remain round_start
+  set +e
+  # The rung carried in from startup (or from the previous phase) has never
+  # been checked against THIS phase: its binary may be gone, its key unset, or
+  # its rendered prompt missing. Walk to the first rung that can actually run.
+  if ! provider_ready "$RUNG_PROVIDER"; then
+    echo "[$LOOP_LOG_TAG] rung $RUNG_PROVIDER:$RUNG_MODEL is not usable for $PHASE" | tee -a "$RUN_LOG"
+    advance_rung "" "not installed or not signed in" || ALL_PROVIDERS_EXHAUSTED=1
+  fi
+  while :; do
+    (( ALL_PROVIDERS_EXHAUSTED )) && break
+    remain=$((CAP_SECS - (SECONDS - start_ts)))
+    if [[ $remain -le 60 ]]; then RC=124; break; fi
+    [[ -z "$TEST_ROUND_TIMEOUT_SECS" ]] || remain="$TEST_ROUND_TIMEOUT_SECS"
+    ROUND_LOG_MARK=$(( $(wc -c < "$RUN_LOG" 2>/dev/null || echo 0) ))
+    # Backgrounded and `wait`ed rather than run in the foreground: bash defers
+    # trap handling until a foreground child completes, so a SIGTERM to the
+    # wrapper was not acted on until `claude` finished on its own — which is
+    # never, in the case that matters. `-k` escalates to SIGKILL so a claude
+    # blocked on a hung child cannot make the cap advisory. R-384, R-386.
+    launch_round "$remain"
+    round_start=$SECONDS
+    wait "$ROUND_PID"
+    RC=$?
+    # REL-198 (R-532): reap the round's process group BEFORE clearing the
+    # pid — the guard early-returns on an empty ROUND_PID, so the old order
+    # made orphan reaping after a normal exit dead code.
+    kill_round_group
+    # The exit code for a `-k` escalation is not portable: GNU coreutils 9.4
+    # reports 137 when the SIGKILL is what actually ended the child, not 124.
+    # The cap is OUR clock, so classify from it rather than from the code, or a
+    # round the cap genuinely killed is reported as a crash. R-386.
+    if (( RC != 0 && SECONDS - round_start >= remain )); then RC=124; fi
+    # A quota drop is not one of the three transient-network attempts: it
+    # costs no wall clock, and the next rung is a different quota, so it
+    # retries immediately and `attempt` is untouched. Bounded by the ladder.
+    # A shared cap is not a dead rung: every model on the ladder is behind the
+    # same wall, so stop here rather than burning the ladder for nothing.
+    # A shared ACCOUNT cap retires the whole provider; a per-model quota
+    # advances one rung. Either way the night continues if a rung remains.
+    if is_session_limited; then
+      echo "[$LOOP_LOG_TAG] $RUNG_PROVIDER:$RUNG_MODEL hit a shared account cap" | tee -a "$RUN_LOG"
+      advance_rung wide "session limit" || { ALL_PROVIDERS_EXHAUSTED=1; break; }
+      echo "[$LOOP_LOG_TAG] continuing on $RUNG_PROVIDER:$RUNG_MODEL" | tee -a "$RUN_LOG"
+      continue
+    fi
+    # A permanent rejection is neither: it advances ONE rung (another model or
+    # provider may be fine, so `wide` would throw away good rungs) and spends
+    # none of the three transient-network attempts.
+    if (( RC != 0 )) && is_rung_rejected; then
+      echo "[$LOOP_LOG_TAG] $RUNG_PROVIDER:$RUNG_MODEL was rejected by the provider" | tee -a "$RUN_LOG"
+      advance_rung "" "rung rejected by provider" || { ALL_PROVIDERS_EXHAUSTED=1; break; }
+      echo "[$LOOP_LOG_TAG] continuing on $RUNG_PROVIDER:$RUNG_MODEL" | tee -a "$RUN_LOG"
+      continue
+    fi
+    if (( RC != 0 )) && is_quota_exhausted; then
+      echo "[$LOOP_LOG_TAG] $RUNG_PROVIDER:$RUNG_MODEL is exhausted" | tee -a "$RUN_LOG"
+      advance_rung "" "quota exhausted" || { ALL_PROVIDERS_EXHAUSTED=1; break; }
+      echo "[$LOOP_LOG_TAG] continuing on $RUNG_PROVIDER:$RUNG_MODEL" | tee -a "$RUN_LOG"
+      continue
+    fi
+    [[ $RC -eq 0 || $RC -eq 124 || $attempt -ge $MAX_ATTEMPTS ]] && break
+    is_transient_network_failure || break
+    echo "[documentation-nightly] transient network failure (rc=$RC) — attempt $attempt/$MAX_ATTEMPTS, retrying in ${RETRY_PAUSE_SECS}s" | tee -a "$RUN_LOG"
+    attempt=$((attempt + 1))
+    sleep "$RETRY_PAUSE_SECS"
+  done
+  set -e
+  # A genuine wrapper death AFTER the agent finished must still page.
+  trap on_crash ERR
+
+  local status
+  status="$(phase_status "$RC" "$RUN_LOG" "$ROUND_LOG_MARK")"
+  # REL-188: exit 0 with nothing committed is not a finished phase, and an
+  # unfinished phase must exit non-zero so neither the dead-man nor launchd is
+  # told it succeeded. The deliver phase is keyed on its verdict line below,
+  # not on a commit: a PR that went green first time needs no new commit.
+  if [[ "$status" == OK && "$PHASE" != "deliver" ]] \
+     && ! phase_committed && ! phase_declared_noop; then
+    status="$INCOMPLETE_STATUS"
+    RC=75
+  fi
+  # An exhausted ladder is not a generic non-zero exit: the operator needs the
+  # cause and the one place it is fixed, or they re-fire into the same wall.
+  # Every rung tried and every one walled off. Named, with the reason per
+  # provider, so the operator does not re-fire into the same wall. 75 is
+  # this loop's incomplete-and-resumable code.
+  if (( ALL_PROVIDERS_EXHAUSTED )); then
+    status="INCOMPLETE (all agent providers exhausted: $EXHAUSTED_PROVIDERS)"
+    # The one place a claude cap is fixed, carried in the comment itself.
+    case "$EXHAUSTED_PROVIDERS" in
+      *claude=*) status="${status%)}; top up at claude.ai/settings/usage)" ;;
+    esac
+    RC=75
+  fi
+  # Deliver: the operator's merge cue is the verdict line, not exit 0. A cap
+  # hit is the likeliest incomplete deliver, so it is named as one.
+  if [[ "$PHASE" == "deliver" ]]; then
+    if [[ "$status" == "OK" ]]; then
+      status="$(deliver_status)"
+      [[ "$status" == INCOMPLETE* ]] && RC=75
+    elif [[ "$status" == TIMEOUT* ]]; then
+      status="INCOMPLETE: deliver cap hit before CI went green ($status)"
+    fi
+  fi
+  case "$status" in
+    "INCOMPLETE (all agent providers exhausted"*)
+      report "$status" "every provider on the ladder reported an account cap, or was not installed or signed in — this phase is INCOMPLETE; nothing was advanced and the next fire retries from the top of the ladder" ;;
+    *"ready to merge: "*|"0 PR(s), nothing to merge")
+      report "$status" "CI is green on every PR this cycle delivered; merging is the operator's call" ;;
+    "INCOMPLETE: "*)
+      report "$status" "CI could not be made green inside the deliver cap — this phase is INCOMPLETE; the branch and PR number are in the deliver record and the next fire resumes them" ;;
+    "INCOMPLETE (exit 0 without the deliver verdict line)")
+      report "$status" "the agent exited 0 without declaring the deliver verdict — this phase is INCOMPLETE; the next fire resumes the same branch and PR" ;;
+    OK)
+      report "$status" "The audit or remediate phase completed." ;;
+    TRUNCATED*)
+      report "$status" "the harness killed unfinished background work and the agent still exited 0 — this phase's output is INCOMPLETE and must not be read as a finished run" ;;
+    TIMEOUT*)
+      report "$status" "partial work may exist on the weekend branch/PR" ;;
+    *)
+      report "$status" "" ;;
+  esac
+  echo "[documentation-nightly] $PHASE done rc=$RC" | tee -a "$RUN_LOG"
+}
+
+# Durable per-runner prune of the weekend root, at the END of a cycle so it
+# cannot creep back up between fires. The allowlist lives in
+# scripts/weekend_prune.py: it enumerates the categories it may delete and
+# refuses every clone, venv, node_modules, scratch dir, held lock and unpushed
+# worktree by construction. NON-FATAL and bounded — a prune failure must never
+# change this cycle's status or exit code. Skip with RADON_WEEKEND_SKIP_PRUNE=1.
+# Never exec a python FILE from the clone or the venv after the agent: both are
+# agent-writable. The origin/main copy is piped straight into an isolated system
+# interpreter (-I: no cwd, no clone dir, no user site on sys.path). That stops a
+# planted working-tree scripts/weekend_prune.py and a planted json.py on
+# sys.path. It is NOT a network trust anchor: refs/remotes/origin/main lives in
+# the same agent-writable $REPO/.git, so an agent that rewrites that ref is
+# still ahead of it. Defence in depth, not a boundary.
+# --self "$REPO" makes this clone ignore its OWN runner lock, which it holds for
+# the whole cycle: otherwise the loop that generates the garbage is the one
+# clone that can never clean it. Every other refusal still applies to it.
+prune_weekend_root() {
+  if [[ "${RADON_WEEKEND_SKIP_PRUNE:-0}" == "1" ]]; then return 0; fi
+  if [[ -z "${TIMEOUT_BIN:-}" ]]; then
+    echo "[prune] skipped (no timeout(1) to bound it)" >&2
+    return 0
+  fi
+  local rc=0
+  git -C "$REPO" show origin/main:scripts/weekend_prune.py 2>/dev/null \
+    | "$TIMEOUT_BIN" "${RADON_WEEKEND_PRUNE_TIMEOUT_SECS:-600}" \
+      /usr/bin/python3 -I - --root "$WEEKEND_ROOT" --self "$REPO" >> "$RUN_LOG" 2>&1 || rc=$?
+  if [[ $rc -ne 0 ]]; then
+    echo "[prune] skipped (non-fatal rc=$rc)" >&2
+  fi
+  return 0
+}
+
+if [[ "$MODE" == "cycle" ]]; then
+  # Remediate runs regardless of the audit rc — backlog may exist even when
+  # the audit phase failed. Deliver runs regardless of the remediate rc —
+  # committed fixes on the dated branch are durable and CI, not the remediate
+  # exit code, decides whether they are mergeable. Exit non-zero if any
+  # phase failed; the deliver report is the cycle's final notification.
+  set +e
+  run_phase audit
+  RC_AUDIT=$RC
+  run_phase remediate
+  RC_REMEDIATE=$RC
+  run_phase deliver
+  RC_DELIVER=$RC
+  set -e
+  echo "[documentation-nightly] cycle done audit_rc=$RC_AUDIT remediate_rc=$RC_REMEDIATE deliver_rc=$RC_DELIVER"
+  prune_weekend_root
+  [[ $RC_AUDIT -ne 0 ]] && exit "$RC_AUDIT"
+  [[ $RC_REMEDIATE -ne 0 ]] && exit "$RC_REMEDIATE"
+  exit "$RC_DELIVER"
+fi
+
+run_phase "$MODE"
+prune_weekend_root
+exit "$RC"
+}
+# Call and exit on ONE line: parsed together, so even a returning main can
+# never make bash read this file again.
+main "$@"; exit

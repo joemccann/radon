@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+import { assistantDonePayload, drainAssistantStream } from "./assistantStream";
+
 /**
  * Extended API route tests — heavy mocking of external services.
  *
@@ -1526,9 +1528,9 @@ describe("POST /api/assistant — extended", () => {
     );
     expect(res.status).toBe(200);
 
-    const body = await res.json();
+    const body = await assistantDonePayload<{ model: string; content: string }>(res);
     expect(body.model).toBe("mock");
-    expect(body.content).toContain("Mock Grok response");
+    expect(body.content).toContain("Mock Radon response");
   });
 
   it("returns 400 when no messages supplied", async () => {
@@ -1574,6 +1576,7 @@ describe("POST /api/assistant — extended", () => {
   it("calls Anthropic API and returns response", async () => {
     process.env.ASSISTANT_MOCK = "0";
     process.env.ANTHROPIC_API_KEY = "test-key";
+    process.env.LLM_PROVIDER = "anthropic";
 
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -1597,7 +1600,9 @@ describe("POST /api/assistant — extended", () => {
     );
     expect(res.status).toBe(200);
 
-    const body = await res.json();
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+
+    const body = await assistantDonePayload<{ content: string; model: string }>(res);
     expect(body.content).toBe("AAPL shows strong accumulation");
     expect(body.model).toBe("claude-sonnet-4-5-20250929");
   });
@@ -1622,10 +1627,19 @@ describe("POST /api/assistant — extended", () => {
         }),
       }) as any,
     );
-    expect(res.status).toBe(502);
+    // The header is flushed before the loop runs, so a provider failure can
+    // no longer carry a status. It arrives as an `error` frame on the 200 the
+    // stream already committed to. R-262.
+    expect(res.status).toBe(200);
 
-    const body = await res.json();
-    expect(body.error).toContain("500");
+    const frames = await drainAssistantStream(res);
+    const failure = frames.find((frame) => frame.event === "error");
+    expect((failure?.data as { error: string }).error).toBe(
+      "The assistant couldn't complete this turn. No order was placed. Try again or choose another model.",
+    );
+    expect(JSON.stringify(failure?.data)).not.toContain("500");
+    expect(JSON.stringify(failure?.data)).not.toContain("Anthropic");
+    expect(frames.some((frame) => frame.event === "done")).toBe(false);
   });
 
   it("returns 400 for invalid JSON payload (non-mock)", async () => {

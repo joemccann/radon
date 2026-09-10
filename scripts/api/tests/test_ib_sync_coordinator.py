@@ -108,7 +108,7 @@ async def test_orders_tick_and_route_share_run_and_snapshot(monkeypatch):
         return snapshot
 
     monkeypatch.setattr(server, "test_mode", False)
-    monkeypatch.setattr(server, "_is_market_open_now_et", lambda: True)
+    monkeypatch.setattr(server, "_is_orders_session_live_now_et", lambda: True)
     monkeypatch.setattr(server, "_pool_has_any_connection", lambda: True)
     monkeypatch.setattr(server, "_run_ib_script_with_recovery", run)
     monkeypatch.setattr(server, "_read_orders_snapshot_from_db", read_snapshot)

@@ -30,3 +30,7 @@ def test_garch_refresh_defaults_to_largecaps_and_3610s_curl():
     assert "RADON_GARCH_REFRESH_PRESET:-largecaps}" in text
     assert "RADON_SCAN_FASTAPI_TIMEOUT_SECS:-3610}" in text
     assert '-m "$FASTAPI_TIMEOUT_SECS"' in text
+    # 2026-09-01 capacity shed: wait budget fits under TimeoutStartSec=3900
+    # with the 3610s scan curl still intact (same contract as leap).
+    assert "RADON_GARCH_SHED_WAIT_SECS:-240}" in text
+    assert "subprocess capacity exhausted" in text

@@ -72,6 +72,8 @@ type PlaceBody = {
   /** Futures: caller passes IB conId (preferred — from /futures/chain) or expiry+exchange. */
   conId?: number;
   exchange?: string;
+  /** Futures: contract multiplier (from /futures/chain) — order_limits fails closed without it. */
+  multiplier?: number;
   /** Optional client idempotency key (see placeOrderBodySchema). */
   idempotencyKey?: string;
 };
@@ -98,6 +100,8 @@ function indeterminatePlacementDetail(error: IndeterminatePlacementError): strin
     cause instanceof Error ? `${cause.name}: ${cause.message}` : "upstream request aborted";
   return `Placement was not confirmed (${reason}). The idempotency key is held so an identical resubmit cannot double-place.`;
 }
+
+export const radonCapability = "mutate.trading";
 
 export async function POST(request: Request): Promise<Response> {
   const access = await requireRouteAccess(request, {
@@ -344,6 +348,7 @@ export async function POST(request: Request): Promise<Response> {
             ...(body.conId != null ? { conId: body.conId } : {}),
             ...(body.expiry ? { expiry: body.expiry } : {}),
             ...(body.exchange ? { exchange: body.exchange } : {}),
+            ...(body.multiplier != null ? { multiplier: body.multiplier } : {}),
           }
         : {}),
       ...(body.type === "combo" && body.legs

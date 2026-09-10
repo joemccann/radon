@@ -93,6 +93,22 @@ export default function FillsModal({ open, fills, totalRealizedPnl, netLiquidati
                     <td className="mono text-right">{fill.commission != null ? fmtPnl(fill.commission) : "---"}</td>
                     <td className={`mono text-right ${fill.realizedPNL != null ? (fill.realizedPNL >= 0 ? "positive" : "negative") : ""}`}>
                       {fmtPnl(fill.realizedPNL)}
+                      {/* R-408: journal_realized.py withholds its average-cost
+                          figure whenever the contract's fill history is
+                          incomplete and stamps `realizedPNLSource: "ib"`. That
+                          field was read by nothing, so a conservative fallback
+                          rendered as if it were the journal-derived truth — for
+                          the SLV shape the module documents, an $11,558
+                          discrepancy with no marker at all. */}
+                      {fill.realizedPNLSource === "ib" && fill.ibRealizedPNL != null && (
+                        <span
+                          className="fills-source-marker"
+                          data-testid={`realized-source-${fill.execId}`}
+                          title="IB broker figure: the journal history for this contract is incomplete, so the average-cost value was withheld"
+                        >
+                          IB
+                        </span>
+                      )}
                     </td>
                   </tr>
                 ))}

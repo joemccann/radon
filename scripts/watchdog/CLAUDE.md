@@ -10,7 +10,7 @@ Monitors every `scheduled` service in `web/lib/serviceHealthWindows.ts`, notifie
 
 - **`intraday`**: `vcg-scan`, `cri-scan`, `orders-sync`, `portfolio-sync` — 5 min cadence, Mon–Fri 13:00–21:00 UTC.
 - **`continuous`**: `newsfeed-scraper`, `fill-monitor`, `exit-orders`, `journal-sync`, `ib-watchdog`, `journal-gap-sli`, plus `replica-watchdog` only while `data/replica.db` exists — 5 min, 24/7.
-- **`daily`**: `cash-flow-sync`, `flex-token-check`, `cta-sync`, `llm-token-index`, `leap-scan`, `garch-scan`, `oi-changes`, `catalysts`, `config-drift`, `db-backup`, `preset-rebalance`, `journal-reconcile`, `portfolio-archive`, `db-retention`, `media-backup` — hourly, 24/7.
+- **`daily`**: every once-a-day writer (`cash-flow-sync`, `flex-token-check`, `cta-sync`, the indicator timers such as `ivrank` and `iv-spread`, backups, retention, and the rest; the membership is `BUCKETS["daily"]` in `services.py`, not this line) — hourly, 24/7.
 - **`error`**: every scheduled service except `watchdog-alerts` itself (recursive-alert prevention) — 5 min, 24/7.
 
 ---
@@ -62,3 +62,9 @@ Verified against each writer's source code in `test_services.py`. UW-only / Flex
 ## Auto-Heal on Recovery
 
 When IB transitions from `awaiting_2fa` → `authenticated`, the handler clears stale `service_health` rows for `requires_ib=true` services. Watchdog-alerts is intentionally NOT in scope (separate writer-semantics fix). Commit 5aea4ec.
+
+---
+
+## Digest Error Text
+
+`error_text()` (`check.py`) renders a writer's error blob by taking the first non-empty of `message` > `summary` > `detail` > `reason` — writers disagree on the key (`drift_audit` writes `summary`, FastAPI paths write `detail`, reconcile writes `reason`). A writer supplying none of the four renders `in error state: unknown`.

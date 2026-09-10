@@ -89,4 +89,82 @@ describe("handleDemoGate", () => {
     expect(res).toBeNull();
     expect(limiter.mock.calls.map(([tier]) => tier)).toEqual(["E", "F"]);
   });
+
+  it("headline polling consumes isolated minute and daily ceilings", async () => {
+    const limiter = vi.fn(async () => allow);
+    const res = await handleDemoGate(
+      { userId: "u", metadata: activeMeta, request: apiReq("/api/headlines") },
+      { now: NOW, rateLimiter: limiter },
+    );
+    expect(res).toBeNull();
+    expect(limiter.mock.calls.map(([tier]) => tier)).toEqual(["G", "H"]);
+  });
+
+  it("keeps a first scanner visit out of an exhausted regime budget", async () => {
+    const usage = new Map<string, number>();
+    const limiter = vi.fn(async (tier: string, key: string): Promise<DemoRateLimitResult> => {
+      // Intent: per-resource tier-A isolation. The K daily backstop (REL-244)
+      // is exercised elsewhere; keep it open so it does not mask the A keys.
+      if (tier !== "A") return { success: true, limit: 1000, remaining: 999, reset: 0 };
+      const counterKey = `${tier}:${key}`;
+      const next = (usage.get(counterKey) ?? 0) + 1;
+      usage.set(counterKey, next);
+      return {
+        success: next <= 10,
+        limit: 10,
+        remaining: Math.max(0, 10 - next),
+        reset: NOW + 60_000,
+      };
+    });
+
+    for (let requestNumber = 0; requestNumber < 10; requestNumber += 1) {
+      const res = await handleDemoGate(
+        { userId: "fresh-demo-user", metadata: activeMeta, request: apiReq("/api/regime") },
+        { now: NOW, rateLimiter: limiter },
+      );
+      expect(res).toBeNull();
+    }
+
+    const scanner = await handleDemoGate(
+      { userId: "fresh-demo-user", metadata: activeMeta, request: apiReq("/api/scanner") },
+      { now: NOW, rateLimiter: limiter },
+    );
+
+    expect(scanner).toBeNull();
+    expect(limiter.mock.calls.filter(([tier]) => tier === "A").at(-1)).toEqual([
+      "A",
+      "fresh-demo-user:resource:scanner",
+    ]);
+  });
+
+  it("shares one abuse budget across nested routes for the same resource", async () => {
+    const limiter = vi.fn(async () => allow);
+
+    await handleDemoGate(
+      { userId: "user", metadata: activeMeta, request: apiReq("/api/scanner") },
+      { now: NOW, rateLimiter: limiter },
+    );
+    await handleDemoGate(
+      { userId: "user", metadata: activeMeta, request: apiReq("/api/scanner/theta") },
+      { now: NOW, rateLimiter: limiter },
+    );
+
+    // Each read also charges the user-global K daily backstop (REL-244).
+    expect(limiter.mock.calls).toEqual([
+      ["A", "user:resource:scanner"],
+      ["K", "user"],
+      ["A", "user:resource:scanner"],
+      ["K", "user"],
+    ]);
+  });
+
+  it("shell polling consumes isolated minute and daily ceilings", async () => {
+    const limiter = vi.fn(async () => allow);
+    const res = await handleDemoGate(
+      { userId: "u", metadata: activeMeta, request: apiReq("/api/futures-quote") },
+      { now: NOW, rateLimiter: limiter },
+    );
+    expect(res).toBeNull();
+    expect(limiter.mock.calls.map(([tier]) => tier)).toEqual(["I", "J"]);
+  });
 });

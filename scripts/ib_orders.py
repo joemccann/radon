@@ -112,6 +112,11 @@ def serialize_contract(contract, resolved_legs: dict = None) -> dict:
                 leg_expiry = getattr(resolved, "lastTradeDateOrContractMonth", "")
                 if len(leg_expiry) == 8:
                     leg_expiry = f"{leg_expiry[:4]}-{leg_expiry[4:6]}-{leg_expiry[6:8]}"
+                # T-385: `order_limits._legs_are_priceable` exempts STK legs
+                # (strike 0) from the strike requirement by reading the leg's
+                # secType — without it a real covered combo demotes to the
+                # contract cap and skips the max-loss branch.
+                leg_data["secType"] = resolved.secType
                 leg_data["symbol"] = resolved.symbol
                 leg_data["strike"] = getattr(resolved, "strike", None)
                 leg_data["right"] = getattr(resolved, "right", None)

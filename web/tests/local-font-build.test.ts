@@ -4,6 +4,17 @@ import { describe, expect, it } from "vitest";
 
 
 describe("production font build", () => {
+  it("preloads the primary UI font without eagerly downloading all mono faces", () => {
+    const layout = readFileSync(resolve(__dirname, "../app/layout.tsx"), "utf8");
+    const inter = layout.match(/const inter = localFont\(\{([\s\S]*?)\n\}\);/)?.[1];
+    const mono = layout.match(/const plexMono = localFont\(\{([\s\S]*?)\n\}\);/)?.[1];
+
+    expect(inter).toBeDefined();
+    expect(inter).not.toContain("preload: false");
+    expect(mono).toContain("preload: false");
+    expect(mono).toContain('display: "swap"');
+  });
+
   it("bundles fonts locally without a Google Fonts build-time fetch", () => {
     const layout = readFileSync(resolve(__dirname, "../app/layout.tsx"), "utf8");
 

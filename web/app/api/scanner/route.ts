@@ -8,7 +8,7 @@ import { radonFetch } from "@/lib/radonApi";
 import { getDb } from "@/lib/db";
 import { cachedRead, invalidateCache } from "@/lib/dbCache";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
-import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
+import { getRequestId, scrubSecrets, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 // Disable Next.js static caching: this handler reads live disk state
 // (data/*.json, cache files). Without this, the framework freezes the
 // first response and serves stale data until the dev server restarts.
@@ -70,8 +70,10 @@ async function readScannerFromDisk(): Promise<TimestampedRead<Record<string, unk
   return { data, timestampMs: contentTimestampMs(data.scan_time) };
 }
 
+export const radonCapability = { GET: "read", POST: "read.spawn" };
+
 export async function GET(): Promise<Response> {
-  const access = await requireRouteAccess(undefined, { rate: { key: "scanner:route", limit: 20, windowMs: 60_000 } });
+  const access = await requireRouteAccess(undefined, { rate: { key: "scanner:route", limit: 20, windowMs: 60_000 }, durableRateTier: "A" });
   if (!access.ok) return access.response;
   const requestId = getRequestId();
   // Fresher of DB row and disk JSON. The cache_meta still reflects file
@@ -104,7 +106,7 @@ export async function GET(): Promise<Response> {
 }
 
 export async function POST(): Promise<Response> {
-  const access = await requireRouteAccess(undefined, { rate: { key: "scanner:route", limit: 20, windowMs: 60_000 } });
+  const access = await requireRouteAccess(undefined, { rate: { key: "scanner:route", limit: 20, windowMs: 60_000 }, durableRateTier: "B" });
   if (!access.ok) return access.response;
   const requestId = getRequestId();
   try {
@@ -125,7 +127,8 @@ export async function POST(): Promise<Response> {
       res.headers.set("X-Sync-Warning", "Radon API unavailable - serving cached data");
       return setNoStoreResponseHeaders(res, requestId);
     } catch {
-      const message = error instanceof Error ? error.message : "Scanner failed";
+      // RC-B9: upstream error text can carry a LibsqlError's URL + token.
+      const message = scrubSecrets(error instanceof Error ? error.message : "Scanner failed");
       return setNoStoreResponseHeaders(
         NextResponse.json({ error: message }, { status: 502 }),
         requestId,

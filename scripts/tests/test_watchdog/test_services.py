@@ -132,6 +132,11 @@ class TestServiceCatalogContract:
             # TRIN 5m RTH sampler: the hourly series has no non-IB source
             # (scripts/fetch_trin.py sample_live connects via IBClient).
             "trin",
+            # IV SPREAD daily NDX/SPX 30d IV pull: IB OPTION_IMPLIED_VOLATILITY
+            # bars are the only source (scripts/fetch_iv_spread.py
+            # _real_ib_fetch connects via IBClient; no UW/Yahoo rung serves
+            # index-level 30d IV).
+            "iv-spread",
         }
         assert ib_dependent == expected, (
             f"requires_ib=true mismatch.\n"
@@ -281,6 +286,17 @@ class TestBuckets:
         assert "journal-sync" in cont
         assert "journal-gap-sli" in cont
 
+    def test_dropbox_research_is_continuously_staleness_checked(self):
+        """REL-251: an alive worker can stall in-process without systemd noticing."""
+        from watchdog import services as svc_mod
+
+        assert svc_mod.SCHEDULED_SERVICES["dropbox-research"] == {
+            "open": 15 * 60,
+            "closed": 15 * 60,
+            "requires_ib": False,
+        }
+        assert "dropbox-research" in svc_mod.BUCKETS["continuous"]
+
     def test_daily_bucket_lists_daily_services(self):
         from watchdog import services as svc_mod
 
@@ -305,3 +321,53 @@ class TestBuckets:
         from watchdog import services as svc_mod
 
         assert set(svc_mod.BUCKETS.keys()) == {"intraday", "continuous", "daily", "error"}
+
+
+# REL-181 (R-512): the TS route budget and the Python pager hand-carry the
+# same open/closed numbers; comparing names alone let the values drift.
+_TS_UNIT_MS = {"MIN": 60_000, "HOUR": 3_600_000, "DAY": 86_400_000}
+_TS_WINDOW_RE = re.compile(
+    r'"([a-z][a-z0-9\-]*)"\s*:\s*\{\s*open:\s*([0-9_]+)(?:\s*\*\s*(MIN|HOUR|DAY))?\s*,'
+    r'[^}]*?closed:\s*([0-9_]+)(?:\s*\*\s*(MIN|HOUR|DAY))?\s*,',
+    re.MULTILINE | re.DOTALL,
+)
+
+
+def _ts_windows_secs() -> dict[str, tuple[int, int]]:
+    """service -> (open_secs, closed_secs) parsed from serviceHealthWindows.ts."""
+    text = _TS_FILE.read_text(encoding="utf-8")
+
+    def _secs(num: str, unit: str | None) -> int:
+        ms = int(num.replace("_", "")) * (_TS_UNIT_MS[unit] if unit else 1)
+        return ms // 1000
+
+    return {
+        name: (_secs(o_num, o_unit), _secs(c_num, c_unit))
+        for name, o_num, o_unit, c_num, c_unit in _TS_WINDOW_RE.findall(text)
+    }
+
+
+class TestWindowValuesMatchAcrossTsAndPython:
+    def test_open_and_closed_values_are_identical(self):
+        from watchdog import services as svc_mod
+
+        ts = _ts_windows_secs()
+        mismatches = []
+        for name, window in svc_mod.SCHEDULED_SERVICES.items():
+            if name not in ts:
+                continue
+            if (window["open"], window["closed"]) != ts[name]:
+                mismatches.append(
+                    f"{name}: py(open={window['open']},closed={window['closed']}) "
+                    f"ts(open={ts[name][0]},closed={ts[name][1]})"
+                )
+        assert not mismatches, (
+            "TS/Python freshness windows drifted (REL-181/R-512): "
+            + "; ".join(mismatches)
+        )
+
+    def test_the_parser_sees_a_meaningful_population(self):
+        """A regex refactor on the TS side must not silently empty this test."""
+        ts = _ts_windows_secs()
+        assert len(ts) >= 20, f"TS window parser found only {len(ts)} entries"
+        assert ts.get("vol-cone") == (26 * 3600, 4 * 86400)

@@ -71,14 +71,27 @@ async function buildFromJournal(): Promise<BlotterPayload | null> {
   return null;
 }
 
+export const radonCapability = { GET: "read", POST: "mutate.workspace" };
+
 export async function GET(): Promise<Response> {
-  const access = await requireRouteAccess(undefined, { rate: { key: "blotter:route", limit: 20, windowMs: 60_000 } });
+  const access = await requireRouteAccess(undefined, { rate: { key: "blotter:route", limit: 20, windowMs: 60_000 }, durableRateTier: "A" });
   if (!access.ok) return access.response;
   const requestId = getRequestId();
   try {
     const blotter = await buildFromJournal();
     if (blotter) return setNoStoreResponseHeaders(NextResponse.json(blotter), requestId);
-    return setNoStoreResponseHeaders(NextResponse.json(emptyBlotter()), requestId);
+    // A journal read that returned ZERO rows is not a flat book. A replica
+    // pointed at the wrong database, or a journal not yet rehydrated, was
+    // indistinguishable from a genuinely empty one: `realized_pnl: 0` served
+    // as authoritative with `as_of: ""`, which `useBlotter` maps to null so
+    // no timestamp contradicted it, and POST returns 404 so the operator
+    // could not force a rebuild. R-375.
+    const response = setNoStoreResponseHeaders(
+      NextResponse.json({ ...emptyBlotter(), missing: true as const }),
+      requestId,
+    );
+    response.headers.set("X-Radon-Stale", "1");
+    return response;
   } catch {
     return setNoStoreResponseHeaders(
       NextResponse.json({ error: "Blotter data unavailable" }, { status: 503 }),

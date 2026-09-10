@@ -7,7 +7,6 @@ FROM python:3.13-slim
 RUN groupadd --gid 1000 radon \
     && useradd --system --uid 1000 --gid 1000 --create-home --home-dir /home/radon --shell /usr/sbin/nologin radon \
     && mkdir -p /home/radon/radon/scripts \
-    && chown -R radon:radon /home/radon \
     && chmod 755 /home/radon
 
 WORKDIR /home/radon/radon
@@ -18,8 +17,53 @@ RUN python -m pip install --no-cache-dir \
     -r requirements.txt \
     -r scripts/requirements-api.txt
 
-COPY --chown=radon:radon scripts ./scripts
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+# R-665: record what the unverified `playwright install` actually fetched.
+# The digest lives next to the browsers and is computed in the same layer,
+# so two images can be compared and an audit can pin the browser build.
+# T-467: an empty/missing browser tree must FAIL the build, never record the
+# empty-stream sha256 (e3b0c442...); the grep below is the digest's in-image
+# consumer — the build aborts unless a real 64-hex non-empty digest landed.
+RUN python -m playwright install --with-deps --only-shell chromium \
+    && find /ms-playwright -type f -print0 | sort -z | xargs -0 -r sha256sum > /tmp/.browser-hashes \
+    && [ -s /tmp/.browser-hashes ] \
+    && sha256sum /tmp/.browser-hashes | cut -d' ' -f1 > /ms-playwright/.browsers.sha256 \
+    && rm /tmp/.browser-hashes \
+    && grep -qE '^[0-9a-f]{64}$' /ms-playwright/.browsers.sha256 \
+    && ! grep -q e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 /ms-playwright/.browsers.sha256 \
+    && echo "playwright browsers digest: $(cat /ms-playwright/.browsers.sha256)" \
+    && chmod -R a+rX /ms-playwright \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY scripts ./scripts
+
+# Monitor logging needs a writable directory; the app and import tree stay root-owned.
+RUN install -d -o radon -g radon -m 0755 /home/radon/radon/logs
 
 USER radon
+
+# Monitor log permissions smoke: fail the build before an unwritable image ships.
+RUN python - <<'PY'
+import logging
+import os
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
+
+assert os.geteuid() == 1000
+assert not os.access(".", os.W_OK)
+assert not os.access("scripts", os.W_OK)
+assert not os.access("scripts/monitor_daemon/run.py", os.W_OK)
+log_dir = Path("logs")
+log_dir.mkdir(exist_ok=True)
+log_file = log_dir / ".monitor-permission-smoke.log"
+handler = RotatingFileHandler(log_file, maxBytes=1024, backupCount=1)
+handler.emit(logging.LogRecord("smoke", logging.INFO, "", 0, "monitor log smoke", (), None))
+handler.doRollover()
+handler.close()
+log_file.unlink()
+log_file.with_suffix(".log.1").unlink()
+PY
+
+RUN python -c "from playwright.sync_api import sync_playwright; p = sync_playwright().start(); browser = p.chromium.launch(headless=True); page = browser.new_page(); page.set_content('<title>radon-browser-smoke</title>'); assert page.title() == 'radon-browser-smoke'; browser.close(); p.stop()"
 
 CMD ["uvicorn", "scripts.api.server:app", "--host", "0.0.0.0", "--port", "8321", "--proxy-headers", "--forwarded-allow-ips", "127.0.0.1"]

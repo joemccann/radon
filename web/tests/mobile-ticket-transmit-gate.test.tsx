@@ -51,7 +51,10 @@ const PORTFOLIO = {
   avg_kelly_optimal: null, positions: [],
 } as unknown as PortfolioData;
 
-/** A naked short call: unbounded max loss, so the gate must engage. */
+/**
+ * A naked short call: unbounded max loss, so the gate must engage. Ten lots,
+ * not one, so a hardcoded `quantity: 1` on the wire cannot pass as correct.
+ */
 const SHORT_CALL = [
   {
     id: "leg-1",
@@ -59,7 +62,7 @@ const SHORT_CALL = [
     right: "C" as const,
     strike: 970,
     expiry: COMPACT,
-    quantity: 1,
+    quantity: 10,
     limitPrice: 2.98,
   },
 ];
@@ -73,16 +76,29 @@ function renderTicket() {
       prices={PRICES}
       portfolio={PORTFOLIO}
       onClose={vi.fn()}
-      onPlaced={vi.fn()}
+      onRemoveLeg={vi.fn()}
+      onUpdateLeg={vi.fn()}
+      onClearLegs={vi.fn()}
     />,
   );
 }
 
-const fetchMock = vi.fn(() =>
-  Promise.resolve(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } })),
-);
+/**
+ * Every request the ticket makes, recorded whole. A count over a url
+ * substring proves only that something was sent somewhere.
+ */
+type SentRequest = { url: string; method: string; body: string };
+const sent: SentRequest[] = [];
+
+const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+  sent.push({ url: String(input), method: init?.method ?? "GET", body: String(init?.body ?? "") });
+  return Promise.resolve(
+    new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }),
+  );
+});
 
 beforeEach(() => {
+  sent.length = 0;
   fetchMock.mockClear();
   vi.stubGlobal("fetch", fetchMock);
 });
@@ -105,8 +121,8 @@ function reactOnClick(node: HTMLElement): () => void {
   return props.onClick;
 }
 
-function placeCalls() {
-  return fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/orders/place"));
+function placeCalls(): SentRequest[] {
+  return sent.filter((c) => c.url === "/api/orders/place");
 }
 
 describe("mobile ticket transmit gate", () => {
@@ -152,7 +168,56 @@ describe("mobile ticket transmit gate", () => {
     expect(placeCalls()).toEqual([]);
   });
 
-  it("still transmits once the acknowledgement is given", async () => {
+  it("transmits the exact order once the acknowledgement is given", async () => {
+    renderTicket();
+    fireEvent.click(await screen.findByTestId("mobile-order-ticket-review"));
+    fireEvent.click(await screen.findByTestId("ticket-unbounded-ack"));
+    await waitFor(() => {
+      expect((screen.getByTestId("mobile-order-ticket-submit") as HTMLButtonElement).disabled).toBe(false);
+    });
+
+    // Twice in one tick: `submitting` is state and invisible to the second
+    // call, so only the in-flight ref stops the double-send.
+    await act(async () => {
+      const submit = reactOnClick(screen.getByTestId("mobile-order-ticket-submit"));
+      submit();
+      submit();
+    });
+
+    await waitFor(() => expect(placeCalls()).toHaveLength(1));
+    // The whole request, not a substring of the url: a flipped action turns a
+    // short call into a buy, a hardcoded quantity mis-sizes it, and a dropped
+    // `ibPlaceFields` sends a bare market order.
+    expect(sent).toHaveLength(1);
+    expect(sent[0].url).toBe("/api/orders/place");
+    expect(sent[0].method).toBe("POST");
+    expect(JSON.parse(sent[0].body)).toEqual({
+      type: "option",
+      symbol: "MU",
+      action: "SELL",
+      quantity: 10,
+      tif: "DAY",
+      expiry: COMPACT,
+      strike: 970,
+      right: "CALL",
+      limitPrice: 2.98,
+    });
+  });
+
+  // The in-flight ref has to be RELEASED as well as taken: a rejected order
+  // leaves the ticket on the confirm step, and the operator must be able to
+  // correct and resend. A ref set but never reset in `finally` bricks that.
+  it("releases the in-flight lock so a rejected order can be resent", async () => {
+    fetchMock.mockImplementationOnce((input: RequestInfo | URL, init?: RequestInit) => {
+      sent.push({ url: String(input), method: init?.method ?? "GET", body: String(init?.body ?? "") });
+      return Promise.resolve(
+        new Response(JSON.stringify({ error: "rejected" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    });
+
     renderTicket();
     fireEvent.click(await screen.findByTestId("mobile-order-ticket-review"));
     fireEvent.click(await screen.findByTestId("ticket-unbounded-ack"));
@@ -163,8 +228,12 @@ describe("mobile ticket transmit gate", () => {
     await act(async () => {
       reactOnClick(screen.getByTestId("mobile-order-ticket-submit"))();
     });
-
     await waitFor(() => expect(placeCalls()).toHaveLength(1));
+
+    await act(async () => {
+      reactOnClick(screen.getByTestId("mobile-order-ticket-submit"))();
+    });
+    await waitFor(() => expect(placeCalls()).toHaveLength(2));
   });
 
   it("keeps the acknowledgement checkbox at a real tap target size", async () => {

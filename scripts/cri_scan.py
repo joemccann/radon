@@ -16,7 +16,9 @@ Data sources (priority order):
   3. Cboe official feeds — COR1M dashboard historical feed plus official
      VIX_History.csv / VVIX_History.csv daily close verification after market
      close + 20 minutes ET.
-  4. Yahoo Finance — ABSOLUTE LAST RESORT. Only for remaining gaps after
+  4. Robinhood (official trading MCP, read-only) — SPY equity historicals /
+     quotes when configured. Never above IB, UW or Cboe.
+  5. Yahoo Finance — ABSOLUTE LAST RESORT. Only for remaining gaps after
      higher-priority sources fail; COR1M reaches Yahoo only if IB + Cboe fail.
 
 Usage:
@@ -30,6 +32,7 @@ import argparse
 import csv
 import json
 import math
+import os
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -133,7 +136,7 @@ def _fetch_ib(tickers: List[str]) -> Dict[str, List[Tuple[str, float]]]:
     auth_state = _ib_auth_state()
     if auth_state and auth_state != "authenticated":
         print(
-            f"  IB skipped — gateway auth_state={auth_state} (falling back to UW/Cboe/Yahoo)",
+            f"  IB skipped — gateway auth_state={auth_state} (falling back to UW/Cboe/RH/Yahoo)",
             file=sys.stderr,
         )
         return {}
@@ -384,6 +387,30 @@ def fetch_cboe_vvix_close(session_date: str) -> Optional[float]:
     return fetch_cboe_daily_close_from_csv(CBOE_VVIX_HISTORY_CSV_URL, session_date, value_column="VVIX")
 
 
+def _fetch_rh(ticker: str) -> List[Tuple[str, float]]:
+    """Robinhood (read-only MCP) daily bars — after IB/UW/Cboe, before Yahoo.
+
+    Equities/ETFs only (SPY); the index tickers are not on Robinhood equity
+    historicals. Unconfigured hosts return [] without any network I/O.
+    """
+    try:
+        from clients.robinhood_client import fetch_robinhood_closes
+    except ImportError:
+        return []
+    closes = fetch_robinhood_closes([ticker]).get(ticker, {})
+    return [(date, closes[date]) for date in sorted(closes)]
+
+
+def _fetch_rh_current_quote(ticker: str) -> Optional[float]:
+    """Robinhood current quote — equities via get_equity_quotes, indices via
+    get_index_quotes. None when unconfigured (clean fall-through to Yahoo)."""
+    try:
+        from clients.robinhood_client import fetch_robinhood_quote
+    except ImportError:
+        return None
+    return fetch_robinhood_quote(ticker, index=ticker in YAHOO_TICKERS)
+
+
 def _fetch_yahoo(ticker: str, days: int = 400) -> List[Tuple[str, float]]:
     """Fetch daily bars from Yahoo Finance.  Returns [(date_str, close), ...]."""
     result = _fetch_yahoo_chart_result(ticker, days=days)
@@ -471,20 +498,43 @@ def _fetch_ib_current_quote(ticker: str) -> Optional[float]:
         ib.disconnect()
 
 
-def fetch_preferred_current_quote(ticker: str) -> Optional[float]:
-    """Fetch a current quote using IB first, then Yahoo as fallback."""
+# REL-175 (R-486): the appended post-close bar records which rung served each
+# quote, so a fallback-sourced close is attributable from cri.json.
+_POST_CLOSE_SNAPSHOT_SOURCES: Dict[str, str] = {}
+
+
+def last_post_close_snapshot_sources() -> Dict[str, str]:
+    return dict(_POST_CLOSE_SNAPSHOT_SOURCES)
+
+
+def fetch_preferred_current_quote_with_source(
+    ticker: str,
+) -> Tuple[Optional[float], Optional[str]]:
+    """Fetch a current quote using IB first, then Robinhood, then Yahoo."""
     ib_quote = _fetch_ib_current_quote(ticker)
     if ib_quote is not None:
         print(f"  IB: {ticker} current quote {ib_quote:.2f}", file=sys.stderr)
-        return ib_quote
+        return ib_quote, "ib"
+
+    rh_quote = _fetch_rh_current_quote(ticker)
+    if rh_quote is not None:
+        print(f"  Robinhood: {ticker} current quote {rh_quote:.2f}", file=sys.stderr)
+        return rh_quote, "robinhood"
 
     yahoo_quote = _fetch_yahoo_current_quote(ticker)
     if yahoo_quote is not None:
         print(f"  Yahoo: {ticker} current quote {yahoo_quote:.2f}", file=sys.stderr)
-        return yahoo_quote
+        return yahoo_quote, "yahoo"
 
     print(f"  ERROR: No current {ticker} quote available", file=sys.stderr)
-    return None
+    return None, None
+
+
+def fetch_preferred_current_quote(ticker: str) -> Optional[float]:
+    value, source = fetch_preferred_current_quote_with_source(ticker)
+    if source is not None:
+        _POST_CLOSE_SNAPSHOT_SOURCES[ticker] = source
+    return value
 
 
 def select_cor1m_current_quote(
@@ -568,12 +618,19 @@ def current_session_date_et(now: Optional[datetime] = None) -> str:
 
 def build_post_close_snapshot(session_date: str, use_official_cboe_close: bool) -> Dict[str, Optional[float]]:
     """Build the end-of-day snapshot used when daily bars lag the current ET session."""
-    return {
+    _POST_CLOSE_SNAPSHOT_SOURCES.clear()
+    snapshot = {
         "VIX": fetch_cboe_vix_close(session_date) if use_official_cboe_close else fetch_preferred_current_quote("VIX"),
         "VVIX": fetch_cboe_vvix_close(session_date) if use_official_cboe_close else fetch_preferred_current_quote("VVIX"),
         "SPY": fetch_preferred_current_quote("SPY"),
         "COR1M": fetch_cor1m_current_quote(),
     }
+    if use_official_cboe_close:
+        if snapshot["VIX"] is not None:
+            _POST_CLOSE_SNAPSHOT_SOURCES["VIX"] = "cboe"
+        if snapshot["VVIX"] is not None:
+            _POST_CLOSE_SNAPSHOT_SOURCES["VVIX"] = "cboe"
+    return snapshot
 
 
 def append_post_close_snapshot(
@@ -648,7 +705,30 @@ def fetch_all(tickers: List[str]) -> Tuple[Dict[str, np.ndarray], List[str]]:
             print(f"  CBOE: COR1M only {len(cboe_cor1m)} bars (need {MIN_BARS}), trying Yahoo", file=sys.stderr)
         fallback_needed = [ticker for ticker in fallback_needed if ticker != "COR1M" or "COR1M" not in raw]
 
-    # Priority 4 (LAST RESORT): Yahoo Finance
+    # Priority 4: Robinhood (read-only MCP) for equities/ETFs (SPY). Indices
+    # (VIX/VVIX/COR1M) are not on Robinhood equity historicals. Unconfigured
+    # hosts skip cleanly and fall through to Yahoo.
+    if fallback_needed:
+        rh_eligible = [t for t in fallback_needed if t not in YAHOO_TICKERS]
+        if rh_eligible:
+            print("  Trying Robinhood for remaining equity gaps...", file=sys.stderr)
+            still_needed = []
+            for t in fallback_needed:
+                if t in rh_eligible:
+                    rh_bars = _fetch_rh(t)
+                    if len(rh_bars) >= MIN_BARS:
+                        raw[t] = rh_bars
+                        print(f"  Robinhood: {t} — {len(rh_bars)} bars", file=sys.stderr)
+                        continue
+                    if rh_bars:
+                        print(
+                            f"  Robinhood: {t} only {len(rh_bars)} bars (need {MIN_BARS}), trying Yahoo",
+                            file=sys.stderr,
+                        )
+                still_needed.append(t)
+            fallback_needed = still_needed
+
+    # Priority 5 (LAST RESORT): Yahoo Finance
     for t in fallback_needed:
         print(f"  LAST RESORT: Yahoo for {t}", file=sys.stderr)
         time.sleep(0.5)  # Rate limit Yahoo
@@ -1560,6 +1640,93 @@ def is_post_close_cboe_official_window(now: Optional[datetime] = None) -> bool:
 # CLI
 # ══════════════════════════════════════════════════════════════════
 
+# One in-flight cri_scan per host. The timer runs this script on the HOST
+# (radon-refresh.service) while /regime/scan runs it INSIDE the app container,
+# and `data/` is the one directory radon-app-runtime.sh binds into that
+# container: a lock anywhere else (`/tmp`) is a different inode on each side
+# and serialises nothing. The handle is kept in a module global for the life of
+# the process: closing it releases the flock. R-423, T-314.
+CRI_SCAN_LOCK_PATH = _PROJECT_DIR / "data" / "radon-cri-scan.lock"
+_scan_lock_handle = None
+
+
+def scan_lock_path() -> Path:
+    override = os.environ.get("RADON_CRI_SCAN_LOCK")
+    return Path(override) if override else CRI_SCAN_LOCK_PATH
+
+
+class ScanLockError(RuntimeError):
+    """The lock PATH is broken (EACCES/EROFS/missing dir) — not contention.
+
+    REL-176 (R-487): after the lock moved into the bind-mounted `data/`, a
+    blanket `except OSError` made an ownership drift on `data/` read as
+    "another scan in flight" forever, serving the cache indefinitely with no
+    error signal.
+    """
+
+
+def _acquire_scan_lock():
+    """The open file handle when this process won, `None` when one is
+    running. Raises ScanLockError when the lock path itself is unusable."""
+    global _scan_lock_handle
+
+    import fcntl  # noqa: PLC0415 — POSIX-only, and only this path needs it
+
+    try:
+        handle = open(scan_lock_path(), "a+")  # noqa: SIM115 — held for the process lifetime
+    except OSError as exc:
+        raise ScanLockError(f"cannot open scan lock {scan_lock_path()}: {exc}") from exc
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        handle.close()
+        return None
+    except OSError as exc:
+        handle.close()
+        raise ScanLockError(f"cannot flock scan lock {scan_lock_path()}: {exc}") from exc
+    _scan_lock_handle = handle
+    return handle
+
+
+# The loser's cache budget mirrors the watchdog's `closed` window for
+# cri-scan (3 days): beyond that the cache is a different market regime,
+# not an answer.
+LOSER_CACHE_MAX_AGE_S = 3 * 24 * 3600.0
+
+
+def loser_cache_payload(cached: Optional[dict]) -> Optional[dict]:
+    """The cached payload marked as served-from-cache, or None to refuse.
+
+    REL-176 (R-487): the flock loser used to echo `data/cri.json` verbatim
+    with no age bound and no marker, so a days-old scan was returned as the
+    live /regime/scan answer.
+    """
+    if not isinstance(cached, dict):
+        return None
+    scan_time = cached.get("scan_time")
+    if not isinstance(scan_time, str) or not scan_time:
+        return None
+    try:
+        stamp = datetime.fromisoformat(scan_time.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    age = (datetime.now(timezone.utc) - stamp).total_seconds()
+    if age > LOSER_CACHE_MAX_AGE_S:
+        return None
+    return {**cached, "served_from_cache": True}
+
+
+def _read_cached_scan(path: Path) -> Optional[dict]:
+    """The last written payload regardless of session date, else None."""
+    try:
+        data = json.loads(Path(path).read_text())
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Crash Risk Index (CRI) Scanner",
@@ -1611,12 +1778,53 @@ Examples:
                 print(json.dumps(cached, indent=2))
                 return
 
+    # Advisory, NON-BLOCKING. cri_scan held no lock at all, so a browser POST
+    # landing during a 15-minute timer fire ran a SECOND scan concurrently for
+    # up to 180s — both racing the same `data/cri.json` write and the same IB
+    # client-id range (50-61). A loser serves the cache rather than queueing
+    # behind a run that may take three minutes. R-423.
+    try:
+        lock_handle = _acquire_scan_lock()
+    except ScanLockError as exc:
+        # A broken lock path is an outage, not contention: heartbeat and fail.
+        print(f"  ERROR: {exc}", file=sys.stderr)
+        try:
+            from db import writer as _writer  # noqa: PLC0415
+
+            _writer.record_service_health(
+                "cri-scan", "error",
+                finished_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                error={"message": str(exc)},
+            )
+        except Exception as record_exc:  # noqa: BLE001
+            print(f"  lock-error heartbeat non-fatal: {record_exc}", file=sys.stderr)
+        sys.exit(1)
+    if lock_handle is None:
+        if args.json:
+            # Not the off-hours gate: `cached_scan_if_fresh(force=True)` is
+            # "never serve", and the winner is about to rewrite this file
+            # anyway — but the loser's answer carries its age and refuses a
+            # cache past the closed window (REL-176 / R-487).
+            cached = loser_cache_payload(
+                _read_cached_scan(_PROJECT_DIR / "data" / "cri.json")
+            )
+            if cached is not None:
+                print("  Another CRI scan is in flight; serving cache.", file=sys.stderr)
+                print(json.dumps(cached, indent=2))
+                return
+        print(
+            "  Another CRI scan is in flight and no fresh cache is available.",
+            file=sys.stderr,
+        )
+        sys.exit(75)
+
     t_start = time.time()
 
     # Fetch data for all required instruments
     aligned, common_dates = fetch_all(ALL_TICKERS)
     prior_cor1m_close = float(aligned["COR1M"][-1]) if len(aligned["COR1M"]) > 0 else float("nan")
     post_close_snapshot_appended = False
+    post_close_snapshot_sources = {}
 
     print(f"  Data range: {common_dates[0]} to {common_dates[-1]} ({len(common_dates)} bars)", file=sys.stderr)
 
@@ -1649,6 +1857,8 @@ Examples:
             )
             post_close_snapshot_appended = appended
             if appended:
+                post_close_snapshot_sources = last_post_close_snapshot_sources()
+            if appended:
                 print(
                     f"  Appended today's closing snapshot for {session_date} to replace the lagged prior-session view",
                     file=sys.stderr,
@@ -1658,6 +1868,8 @@ Examples:
     result = run_analysis(aligned, common_dates, current_quotes=current_quotes)
     if post_close_snapshot_appended and not math.isnan(prior_cor1m_close):
         result["cor1m_previous_close"] = round(prior_cor1m_close, 2)
+    if post_close_snapshot_appended:
+        result["post_close_snapshot_sources"] = post_close_snapshot_sources
 
     # Official Cboe close wins over any IB-derived anchor when available;
     # the positional daily-bar logic above stays as the offline fallback.

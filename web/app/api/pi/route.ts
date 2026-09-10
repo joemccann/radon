@@ -592,6 +592,8 @@ const resolvePiInput = (body: PiRoutePayload): string => {
 export const __resolvePiInput = resolvePiInput;
 export const __normalizeScanArgs = normalizeScanArgs;
 
+export const radonCapability = "internal";
+
 export async function POST(request: NextRequest): Promise<Response> {
   const access = await requireRouteAccess(request, {
     operatorOnly: true,

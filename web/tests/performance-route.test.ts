@@ -297,3 +297,80 @@ describe("/api/performance route", () => {
     expect(body.summary.ending_equity).toBe(100_000);
   });
 });
+
+/* ── R-346 / REL-126(b): the route serves staleness, not just computes it ───
+ *
+ * `stale` and `shouldRebuild` were computed and DISCARDED: the
+ * `!shouldRebuild` branch and the `cachedPerformance` branch returned the
+ * byte-identical response, and `triggerBackgroundRebuild` was an empty
+ * function. A payload three days past its 60-minute CLOSED TTL was served
+ * with no stale flag, no header and nothing to trigger a refresh. The
+ * payload's own honesty markers do not cover this: `nav_sessions_behind` and
+ * every NAV_STALE warning are frozen at BUILD time, so a payload built Friday
+ * still reads ok / 0 on Monday.
+ */
+describe("/api/performance staleness is served", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-16T22:00:00Z")); // Monday, market closed
+    vi.clearAllMocks();
+    mockReadFile.mockReset();
+    mockStat.mockReset();
+    mockRadonFetch.mockReset();
+    mockGetDb.mockReset();
+  });
+
+  afterEach(() => vi.useRealTimers());
+
+  const PAYLOAD = {
+    as_of: "2026-03-13",
+    last_sync: "2026-03-13T20:00:00Z",
+    generated_at: "2026-03-13T20:00:00Z",
+    status: "ok",
+    nav_sessions_behind: 0,
+    warnings: [],
+  };
+
+  it("flags a payload three days past its TTL as stale", async () => {
+    mockDbSnapshots({ performance: PAYLOAD });
+    const { GET } = await import("../app/api/performance/route");
+    const res = await GET();
+    const body = (await res.json()) as Record<string, unknown>;
+
+    expect(body.stale).toBe(true);
+    expect(res.headers.get("X-Radon-Stale")).toBe("1");
+    // The payload's own frozen markers are unchanged; the route adds the
+    // marker that is derived at READ time.
+    expect(body.nav_sessions_behind).toBe(0);
+    expect(body.as_of).toBe("2026-03-13");
+  });
+
+  it("serves a fresh payload verbatim with no stale marker", async () => {
+    vi.setSystemTime(new Date("2026-03-13T20:10:00Z"));
+    mockDbSnapshots({ performance: PAYLOAD });
+    const { GET } = await import("../app/api/performance/route");
+    const res = await GET();
+    const body = (await res.json()) as Record<string, unknown>;
+
+    expect(body.stale).toBeUndefined();
+    expect(res.headers.get("X-Radon-Stale")).toBeNull();
+  });
+
+  it("does not leave a dead background-rebuild trigger behind", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+    const here = resolve(fileURLToPath(import.meta.url), "..");
+    const src = readFileSync(
+      resolve(here, "..", "app", "api", "performance", "route.ts"),
+      "utf8",
+    );
+    const code = src
+      .split("\n")
+      .filter((l) => !l.trimStart().startsWith("//") && !l.trimStart().startsWith("*"))
+      .join("\n");
+    expect(code).not.toContain("triggerBackgroundRebuild");
+    expect(code).not.toContain("shouldRebuild");
+  });
+});

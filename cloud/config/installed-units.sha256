@@ -25,7 +25,7 @@ f009e2526b96fb3a47babb2b57be8f0a66d77e2598739534774dfb3be74514ef  radon-ivrank.s
 054e75a01a18e4aa8bd5d5f65e0e64c461335f951491a60211fa126a99b977b4  radon-host-metrics.timer
 2415d76ea45e4fca2896cfa4da03797e7803d858b250953f599095dbbb9f7953  radon-flow-refresh.service
 09943ac2d9e55b45905db71577d9223b8e13959f05816748fe3288bf3e669279  radon-skew.timer
-0c04e9bccde03c648baf269368561a72fcf739b4f33ab9a866161335d762f98e  radon-portfolio-sync.timer
+000d4cf0dfdbc5b547f74cbfeac88d91c5a1591aea8a2c230fd296723f2842e6  radon-portfolio-sync.timer
 02415d0114f2a549fddcc2cdc6551d2c702281bf7f73c28bd686f1a533c8ba54  radon-vixcor.service
 0e92d00acf46caeddc749b6af29fcbab0a69516065dd50f25dad3a2c98ec7538  radon-ib-gateway-preheld-restart.service
 260ea41c5d5e9cf4d12cd0549b556e06ae520ecc83effbfcdfa8e3531a766e1a  radon-cta-sync.service
@@ -38,7 +38,7 @@ f009e2526b96fb3a47babb2b57be8f0a66d77e2598739534774dfb3be74514ef  radon-ivrank.s
 bd0227f4a7549f6c0d4245844e535117e6acf3c7d443e6325e4113a873a92017  radon-garch.service
 0abc0de8e183d3f5c1dd3e664b06f7c321fd198d375d92b277f0aec4f183fc37  radon-cor.service
 31e0c964e1d2a951273f3f54d1bebeb871b55d60019bb13efa529fd602266b25  radon-drift-audit.service
-0f6a57552ef11ce49397a36ef1a0d6e7427d9d5c7cd99f0e6e7d21471c2eae55  radon-monitor.service
+39ca331d4e0fa1c669768cefb87e4ae39889add8806b13fdb0e726ef061590a2  radon-monitor.service
 816c006126dc1b9fe8eec387c9efa6ffcaa3ebdc14a0df7310cf687325872dcc  radon-iei-hyg.service
 381e4b7c37369d2bfc2d55e5e53cea1747d915d3bc4d654ae5f77e0c5b00b55d  radon-incident-watchdog.timer
 3a79ebd9a1a27c73912936ce0ea4124abb3b3eccb0c3c3aad5dcbb392b6daf6b  radon-cta-sync.timer
@@ -67,34 +67,38 @@ f5e2372e44d3b704c2642d5fc4129932f880b480b5e7badbe805985023401b1c  radon-leap.ser
 004c02662a026f81ee2ac4a74faaae2935768669b8f6ef608137d6fa1faf49bb  radon-media-backup.service
 4593601ec9454398460fb5f8d63bdbf9cb951bad79976dd94eaa727cb458eb41  radon-nextjs.service
 51cdc24a75a4568ee286e73f55cb0e964401fba7d13b1821cea4687e41e8e40e  radon-portfolio-sync.service
-bf3b5ee2a2b3014c01379ebaadf44cc09d7a98d392880cf063e80dcc91b53f76  radon-api.service
+5660b13352bc1cc216ffd55406184e3f5ac49eea9af516a7030a9ab9eb4729da  radon-api.service
 840a42df4c8171535656b4d04df8a6972e78c97ca303b91c31bafb6ff7822272  radon-media-backup.timer
 88b61ef25c08c84e5faa605e665af220c9a9c2b27b86c2d13f7d746ba53532d0  radon-equibles-filings.timer
 90138a8953a768b2dee85ca3614909a035fcdfe38950b300b249ede12fb135dd  radon-knowledge.timer
 9c7efec470029175ecfae639ab6289e5452a694f0ba97a694bf237d83dbb1813  radon-trin.service
 96214af0de32c6952cd31f8f97db84eb13a44247d09b0fa0dcb40835f7d00fb9  radon-perf-twr.service
-7b35d9aa20c2b671838b4a29c4eb2d7de9a086c055be3fef3553eb0c3a472a02  radon-health.service
+29da2f4ddb4ad94b3a66b796cb6db245c66fb973eafaf2062371ea7d558cd56f  radon-health.service
+00e6875e5be790a4d3100475f6750267ebe83b92cade0584df97de9ec83f20e3  radon-mcp.service
 983e19233b56c8cf8a02cba5d7e9e7a45db671d02a734644561735f717f3e218  radon-equibles-short-crowding.timer
 9a0cf1dd58d8ee2d83e98376b72325d5e7623cc0efd5e8e64334a1b980e2b6d8  radon-demo-mirror.timer
 0386224d1ddb9a13b757469f4228c65ace8035b4f41a369027eaf88fe4773470  radon-oi-changes.service
 2b8533e647d539aaa1e155a3dca28b0f0b9d4fdedcbc17e2c5ff46f0d41070b1  radon-vol-cone-intraday.timer
 49eea47e3490f74921d8f882d582a79a14aa831486d54d3c7a6e4945424816d8  radon-catalysts.service
 a27f4a5d595a60b3992848c33cbb1c29ad8837b337a8d5e27722ae715384069a  radon-equibles-ats.timer
-0069f8418dd6c4693825086733d1800bbdade029f4086809b1c02b50cef396c7  radon-relay.service
+6d0d7ff49ff0609c5e9106509a5da031b5c78198a1d76b47af82170b8eb1e663  radon-relay.service
 a51aa0cc7474dbb5deb091407b2ad26911087a33a1f9a21d85fea2788bc46eff  radon-equibles-cot.timer
 ac5bd445e1a564d00f01be12c4eb84659349b499d81025380f94ffd4e35b5870  radon-grok-page-responder.timer
 acf178ade703f6a4f1174cf9439ae58616c13386c02dd550781e533da2e62289  radon-ib-watchdog.timer
 5b45a83248482325f43e9b056d9674de012b2d2fa15d18a3a5891338a810ec3f  radon-breadth.service
 c187efa89823f04b2be1dfe81fcb84ba5cc238bb4f6d2f0e75c4e4e94ad02a80  radon-db-retention.service
-ec37a64a935d7200b86ccfe1257c7390023b14640b55ab65aec36430f30aa9c7  radon-db-backup.service
-17665c3c3cdcbb4cdd59cce5ed4f490cbad23d3066b5b7dfa7f376518ed8bdaa  radon-refresh.service
+548da18d7d315f79ad46e58ddcfd9f622afdb9628ece6a3107e8def3c9b0a601  radon-db-backup.service
+4484bf94f864d56757b24dfde37eec2f550bcd56cc37fb1e738cdcabcc3f4c7e  radon-refresh.service
 f6cdfd33b15e813c6b91ea947b3040567fed4d1f54535e1e4790111a31af7b32  radon-watchdog-error.service
 b756b2eb4faf692f8292149843c61cc46c5bf31f9d515f9f31400e6d3a431916  radon-credit-spread.timer
 b91673c4a0d35ea5e09f400dbb46984d0db0a4aece6994f951050e17bbb32b8e  radon-ivrank.timer
+f4f9cef39d69d520ea60351f2c35b3e3b7fc18e6d539ffc1ee8e67505f964427  radon-iv-spread.service
+f321bd763457a9c3cbc5604f113ddc5cbbb07975c8250db5f1243994ea13bae3  radon-iv-spread.timer
 ba922a7566120af411315bb75a78b019da57f99fe924c3f9cbb2e25d23a88cb9  radon-forecast-nightly.timer
 9c7b417ef0de981b7ddc81dd82e32be4f8444cae86039c599b54c58c3522fc59  radon-knowledge.service
 bbcae5cebee5ca45af4da5a2db86fe69f86713917cea1f1980275d70b116b307  radon-db-backup.timer
-bca4199948bf435f528043dc25a82f20bfff5bea5e17e6d1d4dc4c2fde2fb4ff  radon-ib-gateway.service
+7819746221f71d07de4d2f0a660a7d77c7dd68c2f0f5f2a1f89179f291717063  radon-ib-gateway.service
+22c6f07ec8b8fde0cbd8aba6a32e4e518609f1e6c2955ba8b7f49fe6801cf9b5  radon-ib-gateway-remote.service
 fbd67454cb1a1ac6e5d9613d0f6aaeb1e4585340c93acb318b1d489ee886f731  radon-watchdog-intraday.service
 c39daf2868edbe671c8245d861142ce519c09ea251f6c7bca30653c4adb702d5  radon-portfolio-archive.timer
 db83ce2e02f5ca36d8a42b4f58132ba98b3c1bf891d608b0c75aebc5e3a80a6d  radon-vol-cone.service
@@ -104,7 +108,7 @@ ab8b768a69862a9eb348cf34403f278853052e4e26dacfab9aac15eb1f7957c1  radon-trin.tim
 c8472292237a54a4da240b2f7b54e8a6d3ef2a658d00e9b079f8b6e612d7428b  radon-signals-refresh.service
 d125a8d231f7d801b64ec3328fde2994d0ed979ab17541646c99336328bcb1a0  radon-vol-cone.timer
 d3bb821a7943f1a97f2a3ba4e408d9ac6e12cfabccade2c96dd65e490b589a79  radon-flow-refresh.timer
-27912c05b971233ee10d801267254ea0b5660084e9003c7529aa18f00cf81385  radon-newsfeed.service
+ecc66b04d92fc0cf7bd6a84d14f08eb767df64e2dcf846098334c213965bf306  radon-newsfeed.service
 a8ac39c72e5624445a7f73ca83247da792ebaea72de184ecfc1d570ea2ab0122  radon-signals-refresh.timer
 dc889c664bcdc0481298c8f51730ccedbe4a1b918b3f2c4c380ac55367780fc5  radon-vcg-refresh.timer
 11af9f369841e624051af7376e8d5e17c038bdc21788fc904ffa24ac9e585934  radon-portfolio-archive.service
@@ -126,17 +130,56 @@ f9f0b6716a1c6df7532abba2acf03c55f0d6e54aff76b92e1da13dc21d9dd12f  radon-watchdog
 ca9075f6b3facd7feea1b58f8ad287ca511d5ab7c04bbe091dd4d2b536b53331  radon-equibles-13f.service
 b9d9438d3cb245b5ed84a5a67383b83083fd018baa67d53f8d3df94250d4eccf  radon-divyield.service
 818538420e5307a47cbac818ba23091c6e06a6b7b135efae61279e865da29d1e  radon-divyield.timer
+264fa52749f67a4e6c90d29bea21f9e61cd791596bb10177b2bfbd410daa622d  radon-ma-ratio.service
+b247b2b6fba11eb0af47daeaba3cabf3a8dd68a01ff1d4ded8b463887c1f8498  radon-ma-ratio.timer
 8b62dfbb039177c1d81e0b1e889c8674adb8314435f6fc986e152b7e2b035472  radon-hyad.service
 1c9b9a557dc5594f6f584af375ced7eb556849db1be01c43c3775266acb39977  radon-hyad.timer
 d0c1ec2309131f1f1f311a864c6bfcb5088264ea456501b92091ccc6d937f4ee  radon-hhlev.service
 193ddc6b460b38ced6750ed0e6995fabdc5ce63bb37b4a898316ac5f5e3e1196  radon-hhlev.timer
 d25e52ea594eba7cd7421793dec6b0e6e554ea3055628b812e2d5b7508fd29f6  radon-vixts.service
 1735ba1cf04d7c7e42f734425eec6eb29eecc7923865742fa08d3c4be62abaf8  radon-vixts.timer
+ea53f16f0a91b478398d599f3db52c16dc4efcd097100ee5a32cffaaf298ef6a  radon-dispersion.service
+2a3bd5d9433d70162ec2c28247e6e5fe0ca826ad955c09ad4cf5a321b72b7366  radon-dispersion.timer
 
 # Weekend disk cleanup (2026-08-27 root-disk-usage P1). CONTROL-PLANE units:
 # `install-units` skips them by design, so the copy that clears these two
 # entries is the root `bootstrap-control-plane.sh` run, which the same commit's
 # CONTROL_PLANE_SOURCES growth already requires before the next deploy's
 # verify-control-plane preflight can pass.
-0213ae19e9bd1d51ae6c1c53eb871e10eac71546b013c2685228d8f174599b40  radon-disk-cleanup.service
-6d725a92326516355eda4486b5a8e77069681ed0acf7596f3170d3666c9fec06  radon-disk-cleanup.timer
+e8a7dca2f2f2c7d1176010a2c4df4e4a60842a6bb1cb34682d2ce9c815c11938  radon-disk-cleanup.service
+71f51588972f5eaf42e4047f35435df870d7249fd4f18d8f47ed923aac19ec16  radon-disk-cleanup.timer
+
+# T-236: the FLEET-WIDE systemd prefix drop-in. Not a unit -- systemd applies
+# "radon-.service.d/" to every unit named radon-*, so this one file's blast
+# radius is the whole fleet, and it was the only installed artifact under
+# services/ with no sha256 pin. Installed by setup-vps.sh:install_fleet_dropin
+# (NOT by the per-release install-units verb, whose manifest regex matches bare
+# radon-*.{service,timer} names only and ignores this line by design); the
+# daily drift audit compares it live as `fleet-dropin`.
+16b56fc5c731cefb4d8184e01c9da042aa1a623b3bd23b6face060e9d0b4df08  radon-.service.d/common.conf
+c9e4ef36521cb7a923853f5478d6c52d7076fdb24876e38f2bab8feb86c05947  radon-api.service.d/runtime-container.conf
+5563ba98cbd9df202cd67647191eafe64676afff1fab97fd0795d4409a5c8c01  radon-monitor.service.d/runtime-container.conf
+c9e4ef36521cb7a923853f5478d6c52d7076fdb24876e38f2bab8feb86c05947  radon-newsfeed.service.d/runtime-container.conf
+c9e4ef36521cb7a923853f5478d6c52d7076fdb24876e38f2bab8feb86c05947  radon-nextjs.service.d/runtime-container.conf
+a6c1c2e92b8438b0e670970549990a10d0113738b748ce8f824bd6b4f4febbc9  radon-relay.service.d/runtime-container.conf
+c0fbaff90cb1e57758374ac63e7793c7a80108470589d3a0fae071f3976ccfc3  radon-flex-pull.service
+b5532b732c2a1b7347b3ddddcafe5d5b8123ad8671cdfcad9ba3a8176ee88d50  radon-flex-pull.timer
+51edb86e5991cccda21d12dfdff71e9da727652bbd2e34cb0067320a232e65bb  radon-model-catalog.service
+246c4751fd4619f339b6e983be50d4d16b7e09d55e47062d79258e9ebb0100c5  radon-model-catalog.timer
+
+# radon-mktnews (2026-08-30 headlines incident). The hub has been serving
+# production /ws-headlines while its unit sat behind a `not-installed:` ack —
+# the R-092 trapdoor: excluded from every automated install path, so unit
+# edits (and the REL-155/163 ExecStart contract) could drift from the host
+# copy with nothing at review time saying so. Manifest-pinned from this
+# commit: install-units converges the body on the next deploy; being a
+# .service (not a timer) it is never `enable --now`ed by the installer.
+6d095d97ff9872e8919aa1aec930ed34a152c8047fd58a5f377f39fef3ef3487  radon-mktnews.service
+95ce54775595eb59246481ec9d53d33e493b832cade7e263b1c120ba108a4e7e  radon-research.service
+b307c773926b5f87fce8cc5187815749e06a8f8781c2681abc142e55f962aad8  radon-research.service.d/runtime-container.conf
+4016805f8bd20c5ecf430da4fa6b9ae64268eccecaddec7a73bd2efecaa0abf3  radon-aa-frontier-refresh.service
+a1a1a80a13c500ba96fe56fcf1b25ef2a9a91d4981c9e792c6bd5e5cf44b0719  radon-aa-frontier-refresh.timer
+30226abe14b4b364745b048fd8dd575aaddd59fbda9574111b2ec443e442ef41  radon-ai-cycle.service
+dbadc2e451385aae0bdad301de95d49eceef1d9e78d3ddcb104168c8305d3ff0  radon-ai-cycle.timer
+a294d5ea92d3ce6ff3dcb3e01ff0a4c5e119a2ea61e988626f995603394613a4  radon-ai-cycle-backfill.service
+f698339100c7ecba33b98e38da4b6e025f569ebcb4073ad0259b209a1eefa79b  radon-ai-cycle-backfill.timer

@@ -23,17 +23,16 @@ services:
       - AUTO_RESTART_TIME=
       - TWS_COLD_RESTART=
 
-    # 4001 is bound to loopback (for the VPS-local FastAPI, which connects with
-    # IB_GATEWAY_HOST=127.0.0.1) and to the Tailscale interface IP (so the
-    # laptop can reach the Gateway over the tailnet). It is NOT published on the
-    # public NIC. NOTE: the Tailscale bind requires tailscaled up and
-    # 100.112.32.16 assigned before the container starts; on a cold boot the
-    # bind can fail until then; the systemd/watchdog owner retries with bounded
-    # backoff after tailscaled and the interface address are available.
-    # If this node is rebuilt and gets a new Tailscale IP, update the line below.
+    # 4001 is bound to loopback (combined/broker FastAPI or the helper) and to
+    # the Tailscale interface IP (laptop). It is NOT published on the public
+    # NIC. IB_GATEWAY_TAILSCALE_BIND defaults to the current Ashburn tailnet
+    # address; a rebuilt node or a dedicated broker VM must set the new 100.x
+    # in /etc/radon/env. Production app-to-broker orders after the host split
+    # use a Hetzner private-net bind documented in docs/spof-host-split.md,
+    # not this Tailscale port.
     ports:
       - "127.0.0.1:4001:4003"
-      - "100.112.32.16:4001:4003"
+      - "${IB_GATEWAY_TAILSCALE_BIND:-100.112.32.16}:4001:4003"
       - "127.0.0.1:4002:4004"
       - "127.0.0.1:5900:5900"
 

@@ -21,31 +21,33 @@ test.describe("MobileShell — phase 1 foundation", () => {
     await page.goto("/dashboard");
     await expect(page.getByTestId("mobile-tab-bar")).toBeVisible();
 
-    await expect(page.getByTestId("mobile-tab-dashboard")).toHaveAttribute("href", "/dashboard");
+    await expect(page.getByTestId("mobile-tab-portfolio")).toHaveAttribute("href", "/dashboard");
     await expect(page.getByTestId("mobile-tab-positions")).toHaveAttribute("href", "/portfolio");
-    await expect(page.getByTestId("mobile-tab-orders")).toHaveAttribute("href", "/orders");
-    await expect(page.getByTestId("mobile-tab-scanner")).toHaveAttribute("href", "/scanner");
+    await expect(page.getByTestId("mobile-tab-risk")).toHaveAttribute("href", "/regime/cri");
+    await expect(page.getByTestId("mobile-tab-research")).toHaveAttribute("href", "/scanner");
     await expect(page.getByTestId("mobile-tab-more")).toBeVisible();
   });
 
   test("clicking Positions tab navigates to /portfolio", async ({ page }) => {
     await page.goto("/dashboard");
-    await page.getByTestId("mobile-tab-positions").click({ force: true });
+    await page.getByTestId("mobile-tab-positions").click();
     await page.waitForURL("**/portfolio");
   });
 
   test("More tab opens drawer with overflow nav links", async ({ page }) => {
     await page.goto("/dashboard");
 
-    await page.getByTestId("mobile-tab-more").click({ force: true });
+    await page.getByTestId("mobile-tab-more").click();
     await expect(page.getByTestId("mobile-more-drawer")).toBeVisible();
 
     await expect(page.getByTestId("mobile-drawer-journal")).toHaveAttribute("href", "/journal");
     await expect(page.getByTestId("mobile-drawer-performance")).toHaveAttribute("href", "/performance");
-    await expect(page.getByTestId("mobile-drawer-discover")).toHaveCount(0);
+    await expect(page.getByTestId("mobile-drawer-discover")).toHaveAttribute("href", "/discover");
+    await expect(page.getByTestId("mobile-drawer-orders")).toHaveAttribute("href", "/orders");
+    await expect(page.getByTestId("mobile-drawer-profile")).toHaveAttribute("href", "/profile");
     await expect(page.getByTestId("mobile-drawer-operator")).toHaveAttribute("href", "/admin");
 
-    await page.getByTestId("mobile-drawer-close").click({ force: true });
+    await page.getByTestId("mobile-drawer-close").click();
     await expect(page.getByTestId("mobile-more-drawer")).toBeHidden();
   });
 
@@ -74,8 +76,8 @@ test.describe("MobileShell — phase 1 foundation", () => {
     const swRes = await request.get("/sw.js");
     expect(swRes.status()).toBe(200);
     const swBody = await swRes.text();
-    expect(swBody).toContain("CACHE_NAME");
-    expect(swBody).toContain("/api/");
+    expect(swBody).toContain("D.STATIC_CACHE");
+    expect(swBody).toContain('importScripts("/sw-decisions.js")');
 
     const icon192 = await request.get("/icons/icon-192.png");
     expect(icon192.status()).toBe(200);
@@ -254,6 +256,9 @@ test.describe("MobileShell — phase 1 foundation", () => {
     //      extremes of a 44px target — resolves back to the control.
     // Neutralise the pseudo-element and both go red, which is what makes this
     // a real assertion rather than a weakened one.
+    // Clear's account overview precedes the feed. Hit-test the control only
+    // after scrolling it into the viewport, as a pointer user would.
+    await refresh.scrollIntoViewIfNeeded();
     const refreshHit = await page.evaluate(() => {
       const el = document.querySelector(
         '[data-testid="dashboard-section-feed"] .dashboard-news .news-feed-refresh',

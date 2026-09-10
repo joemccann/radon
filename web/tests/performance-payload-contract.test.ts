@@ -446,7 +446,20 @@ describe("/api/performance v2 route contract", () => {
       expect(body.warnings).toEqual(payload.warnings);
       expect(body.nav_source).toBe(payload.nav_source);
       expect(body.flows_status).toBe(payload.flows_status);
-      expect(body).toEqual(JSON.parse(JSON.stringify(payload)));
+      // R-346: the route now adds READ-TIME staleness markers (`stale`,
+      // `stale_reason`) when the served snapshot is past its TTL or behind the
+      // portfolio sync — the builder's own `nav_sessions_behind` and NAV_STALE
+      // warnings are frozen at BUILD time and cannot express it. This
+      // assertion's intent — the route REWRITES nothing the builder produced —
+      // is unchanged, and is now asserted as such rather than as byte
+      // equality, with the added keys enumerated so a future silent addition
+      // still fails.
+      const { stale, stale_reason, ...builderFields } = body;
+      expect(builderFields).toEqual(JSON.parse(JSON.stringify(payload)));
+      if (stale !== undefined) {
+        expect(stale).toBe(true);
+        expect(["ttl", "behind_portfolio"]).toContain(stale_reason);
+      }
     });
   }
 

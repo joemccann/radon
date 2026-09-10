@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from datetime import datetime, timedelta, timezone
@@ -12,6 +13,7 @@ from health_service import turso_http
 
 from .check import CheckOutcome
 
+log = logging.getLogger(__name__)
 
 SERVICE = "external-health-probe"
 FETCH_TIMEOUT_SECONDS = 2.5
@@ -41,19 +43,17 @@ DEPLOY_MARKER_GRACE_SECONDS = 60
 # 900s deploy budget, covering stacked deploys.
 TRANSITION_JOURNAL_STRANDED_AFTER_SECONDS = 3600
 
-_EDGE_5XX_REASON = re.compile(r"(?:ping|status)_http_5\d\d$")
+# Deploy restart collateral as seen from off-box: raw 5xx through Caddy, or
+# the never-502 health floor that rewrites those into HTTP 200
+# {reachable:false, observer:caddy} (page 1b0b049c). Generic *_unreachable
+# (runner timeout, DNS) is NOT collateral — a deploy never stops Caddy.
+_DEPLOY_COLLATERAL_REASON = re.compile(
+    r"(?:(?:ping|status)_http_5\d\d|status_unreachable:caddy)$"
+)
 
 
-def _local_aggregate_is_healthy(timeout: float = FETCH_TIMEOUT_SECONDS) -> bool:
-    """Confirm recovery from a validated off-box ``aggregate_down`` sample.
-
-    The off-box row is authoritative for perimeter failures, but its irregular
-    GitHub schedule can leave a recovered aggregate red for tens of minutes.
-    The aggregate itself is produced on-box, so a fresh schema-v2 healthy
-    response is sufficient recovery evidence for this one failure class. Never
-    use this fallback for ping/status reachability failures: only an off-box
-    observer can prove that the public perimeter recovered.
-    """
+def _read_local_aggregate(timeout: float = FETCH_TIMEOUT_SECONDS) -> dict | None:
+    """Bounded on-box ``/status`` read. None on transport or parse failure."""
     request = urllib.request.Request(
         LOCAL_STATUS_URL,
         headers={"Accept": "application/json", "User-Agent": "radon-watchdog"},
@@ -61,16 +61,127 @@ def _local_aggregate_is_healthy(timeout: float = FETCH_TIMEOUT_SECONDS) -> bool:
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             if not 200 <= int(response.status) < 300:
-                return False
+                return None
             payload = json.loads(response.read(262_144).decode("utf-8"))
     except Exception:  # noqa: BLE001 - recovery must fail closed
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+# Current on-box producer version plus the one validated predecessor, so a
+# watchdog running against a not-yet-redeployed health daemon (or vice versa)
+# does not read every recovery as an opaque body. Mirrors
+# `health_probe.probe.SUPPORTED_STATUS_SCHEMAS`.
+SUPPORTED_STATUS_SCHEMAS = (3, 2)
+
+
+def _local_aggregate_is_healthy(timeout: float = FETCH_TIMEOUT_SECONDS) -> bool:
+    """True only for a supported-schema ``up`` (strict). Prefer serving-path-ok for 5xx."""
+    payload = _read_local_aggregate(timeout)
+    if payload is None:
         return False
     return (
-        isinstance(payload, dict)
-        and payload.get("schema_version") == 2
+        payload.get("schema_version") in SUPPORTED_STATUS_SCHEMAS
         and payload.get("ok") is True
         and str(payload.get("overall_state") or "").lower() == "up"
     )
+
+
+def _local_aggregate_serving_path_ok(timeout: float = FETCH_TIMEOUT_SECONDS) -> bool:
+    """Serving path up, including dependency-only ``degraded``.
+
+    Deploy-window 5xx suppression used to require ``overall_state=up``. On
+    weekends the broker is clean-exited so the aggregate is ``degraded``; every
+    deploy then re-paged ``status_http_502`` as P1 (2026-08-29 16:49Z, page
+    d98c3364) even though api/relay/nextjs and ``/sign-in`` stayed up.
+    """
+    payload = _read_local_aggregate(timeout)
+    if payload is None or payload.get("schema_version") not in SUPPORTED_STATUS_SCHEMAS:
+        return False
+    state = str(payload.get("overall_state") or "").lower()
+    ok = payload.get("ok")
+    if state == "up":
+        return ok is True
+    if state == "degraded":
+        return ok is False and _degradation_is_dependency_only(payload)
+    return False
+
+
+def _aggregate_is_newer_than(payload: dict, sampled_at: datetime | None) -> bool:
+    """Whether this aggregate was produced AFTER the off-box sample it clears.
+
+    Nothing inspected `generated_at`, so an aggregate produced before the
+    off-box observer took its sample could clear that sample — it cannot
+    describe a recovery that had not happened yet. R-399.
+    """
+    if sampled_at is None:
+        return False
+    raw = payload.get("generated_at")
+    if not raw:
+        return False
+    try:
+        produced = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if produced.tzinfo is None:
+        produced = produced.replace(tzinfo=timezone.utc)
+    return produced > sampled_at
+
+
+def _degradation_is_dependency_only(payload: dict) -> bool:
+    """Whether every SERVING-path probe and unit in this payload reads up.
+
+    The docstring below claimed `degraded` means "sidecar/broker only", but
+    nothing checked it — and since the 2026-08-29 partitioning `degraded` is
+    also what a dependency in `_DOWNISH` produces regardless of the serving
+    path's own state. R-399.
+    """
+    from health_service.probes import (  # noqa: PLC0415 — stdlib-only module
+        DEPENDENCY_PROBES,
+        DEPENDENCY_UNITS,
+    )
+
+    for section, dependencies in (
+        ("probes", DEPENDENCY_PROBES),
+        ("units", DEPENDENCY_UNITS),
+    ):
+        entries = payload.get(section)
+        if not isinstance(entries, dict):
+            return False
+        for name, value in entries.items():
+            if name in dependencies or not isinstance(value, dict):
+                continue
+            if str(value.get("state", "unknown")).lower() != "up":
+                return False
+    return True
+
+
+def _local_aggregate_clears_offbox_down(
+    sampled_at: datetime | None = None, timeout: float = FETCH_TIMEOUT_SECONDS
+) -> bool:
+    """Confirm recovery from a validated off-box ``aggregate_down`` sample.
+
+    The off-box row is authoritative for perimeter failures, but its irregular
+    GitHub schedule can leave a recovered aggregate red for tens of minutes.
+    The aggregate itself is produced on-box, so it can clear that row — but only
+    when it is EVIDENCE of the recovery: produced after the off-box sample, and
+    for ``degraded``, degraded only in the dependency partition. Never use this
+    fallback for ping/status reachability failures: only an off-box observer can
+    prove that the public perimeter recovered. ``starting``/``down``/``unknown``
+    stay fail-closed — those can be a serving-path restart.
+    """
+    payload = _read_local_aggregate(timeout)
+    if payload is None or payload.get("schema_version") not in SUPPORTED_STATUS_SCHEMAS:
+        return False
+    if not _aggregate_is_newer_than(payload, sampled_at):
+        return False
+    state = str(payload.get("overall_state") or "").lower()
+    ok = payload.get("ok")
+    if state == "up":
+        return ok is True
+    if state == "degraded":
+        return ok is False and _degradation_is_dependency_only(payload)
+    return False
 
 
 def _transition_journal_age_seconds(now: datetime) -> float | None:
@@ -113,11 +224,23 @@ def _sampled_during_deploy_window(sample_time: datetime, now: datetime) -> bool:
 
 def _latest_github_run(timeout: float = FETCH_TIMEOUT_SECONDS) -> dict | None:
     """Independent witness when Turso persistence is stale or unavailable."""
-    request = urllib.request.Request(
-        GITHUB_RUNS_URL,
-        headers={"Accept": "application/vnd.github+json", "User-Agent": "radon-watchdog"},
-    )
     try:
+        # R-617: the import and `prefer_ipv4()` sat OUTSIDE the guard below,
+        # whose whole job is to preserve the primary Turso verdict. An
+        # ImportError from `utils.ipv4_first` (module moved, `scripts` off
+        # sys.path, a partially deployed tree) therefore raised out of the
+        # entire continuous bucket, on exactly the cycle where the external
+        # probe was already failing.
+        from utils.ipv4_first import prefer_ipv4
+
+        prefer_ipv4()
+        request = urllib.request.Request(
+            GITHUB_RUNS_URL,
+            headers={
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "radon-watchdog",
+            },
+        )
         with urllib.request.urlopen(request, timeout=timeout) as response:
             payload = json.loads(response.read(262_144).decode("utf-8"))
         runs = payload.get("workflow_runs") or []
@@ -137,6 +260,44 @@ def _github_run_is_current_and_green(run: dict | None, now: datetime) -> bool:
     return 0 <= (now - timestamp).total_seconds() <= reader.STALE_AFTER_SECONDS
 
 
+
+# R-603: how many CONSECUTIVE cycles a green workflow run may disarm a STALE
+# Turso verdict before the dead-man fires anyway. The witness cannot see a
+# misrouted or renamed row, so an unbounded upgrade is a permanent mute.
+WITNESS_SUPPRESS_MAX_CONSECUTIVE = 3
+_WITNESS_COUNTER_SERVICE = "external-probe-witness-suppress"
+_WITNESS_COUNTER_KIND = "witness-suppression"
+
+
+def _register_witness_suppression(*, now: datetime) -> bool:
+    """Count one witness-suppressed cycle; True while under the ceiling.
+
+    Counter storage failure fails toward paging — a broken counter must never
+    extend a suppression.
+    """
+    from . import cooldown as cooldown_mod
+
+    try:
+        decision = cooldown_mod.record_failure_and_decide(
+            service=_WITNESS_COUNTER_SERVICE, kind=_WITNESS_COUNTER_KIND, now=now
+        )
+    except Exception as exc:  # noqa: BLE001 — storage must not extend suppression
+        log.warning("witness suppression counter unavailable; not suppressing: %s", exc)
+        return False
+    return decision.consecutive_failures <= WITNESS_SUPPRESS_MAX_CONSECUTIVE
+
+
+def _reset_witness_suppression() -> None:
+    from . import cooldown as cooldown_mod
+
+    try:
+        cooldown_mod.record_success(
+            service=_WITNESS_COUNTER_SERVICE, kind=_WITNESS_COUNTER_KIND
+        )
+    except Exception as exc:  # noqa: BLE001 — best-effort reset
+        log.warning("witness suppression counter reset failed: %s", exc)
+
+
 def check_external_probe(*, now: datetime | None = None) -> CheckOutcome:
     checked_at = now or datetime.now(timezone.utc)
     try:
@@ -149,15 +310,35 @@ def check_external_probe(*, now: datetime | None = None) -> CheckOutcome:
         verdict = {"verdict": reader.VERDICT_STALE, "reason": f"probe_read_failed: {exc}"}
 
     if verdict["verdict"] == reader.VERDICT_STALE:
-        github_run = _latest_github_run()
+        try:
+            github_run = _latest_github_run()
+        except Exception as exc:  # noqa: BLE001 — the witness must never kill the bucket
+            log.warning("github witness lookup failed: %s", exc)
+            github_run = None
         if _github_run_is_current_and_green(github_run, checked_at):
-            verdict = {"verdict": reader.VERDICT_HEALTHY, "reason": "github_workflow_current"}
+            # R-603: the witness proves only that the workflow exited 0 — never
+            # that a row readable at EXPECTED_SOURCE exists. Rename the source,
+            # rotate the secret to another DB or drop the row and this upgrade
+            # disarms the edge dead-man on EVERY cycle, forever, with no
+            # operator signal. Bound the suppression the same way the warmup
+            # ceiling is bounded (R-056).
+            if _register_witness_suppression(now=checked_at):
+                verdict = {
+                    "verdict": reader.VERDICT_HEALTHY,
+                    "reason": "github_workflow_current",
+                }
+    else:
+        _reset_witness_suppression()
 
     state = verdict["verdict"]
+    offbox_age = verdict.get("age_seconds")
+    offbox_sampled_at = (
+        checked_at - timedelta(seconds=float(offbox_age)) if offbox_age is not None else None
+    )
     if (
         state == reader.VERDICT_DOWN
         and verdict.get("reason") == "aggregate_down"
-        and _local_aggregate_is_healthy()
+        and _local_aggregate_clears_offbox_down(offbox_sampled_at)
     ):
         return CheckOutcome(
             service=SERVICE,
@@ -170,22 +351,25 @@ def check_external_probe(*, now: datetime | None = None) -> CheckOutcome:
             now=checked_at,
         )
 
-    # A validated edge 5xx whose sample was taken while a deploy was cycling
-    # the app tier is restart collateral, not an outage (2026-08-09: the
-    # 17:43Z probe ran entirely inside the Deploy-to-VPS window and paged P1).
-    # Scope is deliberately narrow: 5xx-through-Caddy reasons only — transport
-    # failures (*_unreachable) can't be produced by a deploy, which never
-    # stops Caddy — and the local aggregate must be healthy (fail closed).
-    # The next off-box cycle still independently proves perimeter recovery.
+    # A validated edge 5xx (or the Caddy never-502 rewrite of that 5xx)
+    # whose sample was taken while a deploy was cycling the app tier is
+    # restart collateral, not an outage (2026-08-09: the 17:43Z probe ran
+    # entirely inside the Deploy-to-VPS window and paged P1; 2026-08-29
+    # 23:05Z page 1b0b049c: the floor turned the same restart into
+    # aggregate_invalid). Scope is narrow: 5xx-through-Caddy plus the
+    # matching caddy-observer body. Runner-side *_unreachable still pages.
+    # Dependency-only degraded (weekend IB clean-exit, sidecar flap) still
+    # counts: requiring overall_state=up re-paged d98c3364 on every weekend
+    # deploy. The next off-box cycle still independently proves perimeter recovery.
     if state == reader.VERDICT_DOWN:
         down_reason = str(verdict.get("reason") or "")
         age = verdict.get("age_seconds")
         sample_time = checked_at - timedelta(seconds=float(age)) if age is not None else None
         if (
-            _EDGE_5XX_REASON.fullmatch(down_reason)
+            _DEPLOY_COLLATERAL_REASON.fullmatch(down_reason)
             and sample_time is not None
             and _sampled_during_deploy_window(sample_time, checked_at)
-            and _local_aggregate_is_healthy()
+            and _local_aggregate_serving_path_ok()
         ):
             return CheckOutcome(
                 service=SERVICE,

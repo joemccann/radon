@@ -3,6 +3,7 @@
 import { useRef, useEffect, useMemo, useState } from "react";
 import * as d3 from "d3";
 import ChartPanel from "./charts/ChartPanel";
+import { buildTimeXAxisTickValues, chartXAxisTickAnchor } from "@/lib/chartXAxis";
 
 export interface CriHistoryEntry {
   date: string;
@@ -43,6 +44,15 @@ export interface ReferenceLevel {
   color?: string;
 }
 
+export interface ReferenceBand {
+  from: number;
+  to: number;
+  label: string;
+  color?: string;
+  /** Which y-scale the band belongs to; its bounds fold into that scale's domain. */
+  axis: "left" | "right";
+}
+
 interface CriHistoryChartProps<T extends { date: string }> {
   history: T[];
   series: [ChartSeries<T>, ChartSeries<T>];
@@ -53,10 +63,15 @@ interface CriHistoryChartProps<T extends { date: string }> {
   /** Dashed horizontal guide lines on the left scale (e.g. signal zones);
    *  their values are folded into the scale domain so they are always visible. */
   referenceLevels?: ReferenceLevel[];
+  /** Shaded horizontal zones (e.g. the MA RATIO 0.25-0.5 signal zone), each
+   *  drawn on the scale of its declared axis and folded into that domain. */
+  referenceBands?: ReferenceBand[];
   /** Override for today's live values — keys match the entry type fields */
   liveValues?: Partial<Record<keyof T, number>>;
   /** X-axis tick label override; defaults to "%b %-d" (e.g. "Mar 5"). */
   xTickFormat?: (d: Date) => string;
+  /** Minimum rendered distance between x-axis labels. Increase for long labels. */
+  xTickMinSpacing?: number;
 }
 
 const MARGIN = { top: 20, right: 56, bottom: 44, left: 48 };
@@ -70,37 +85,16 @@ function defaultFormat(v: number): string {
   return v.toFixed(2);
 }
 
-export function buildCriHistoryXAxisTickValues(dates: Date[], innerWidth: number): Date[] {
-  if (dates.length <= 1) return dates;
-
-  const maxLabels = Math.max(4, Math.min(7, Math.floor(innerWidth / 110)));
-  if (dates.length <= maxLabels) return dates;
-
-  const step = (dates.length - 1) / (maxLabels - 1);
-  const indices = new Set<number>();
-  for (let i = 0; i < maxLabels; i += 1) {
-    indices.add(Math.round(i * step));
-  }
-  indices.add(0);
-  indices.add(dates.length - 1);
-
-  return [...indices]
-    .sort((a, b) => a - b)
-    .map((index) => dates[index]);
-}
-
-export function shouldRotateCriHistoryXAxisLabels(innerWidth: number, tickCount: number): boolean {
-  return tickCount > 5 || innerWidth < 560;
-}
-
 export default function CriHistoryChart<T extends { date: string }>({
   history,
   series,
   title,
   liveValues,
   xTickFormat,
+  xTickMinSpacing,
   sharedAxis = false,
   referenceLevels,
+  referenceBands,
 }: CriHistoryChartProps<T>) {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -179,8 +173,18 @@ export default function CriHistoryChart<T extends { date: string }>({
       const vals = sources
         .flatMap((src) => chartData.map((d) => d[src.key] as number | null | undefined))
         .filter((v): v is number => isPlottable(s, v));
+      // Reference levels draw on the LEFT scale, so they fold into the left
+      // domain only (or the shared one). Folding them into an independent
+      // right scale dragged a percent axis to a vol-point guide (IV SPREAD:
+      // SPX 1M IV read 0..600% against the 5.32 AVG line).
       for (const level of referenceLevels ?? []) {
+        if (s.axis !== "left" && !sharedAxis) break;
         if (isPlottable(s, level.value)) vals.push(level.value);
+      }
+      for (const band of referenceBands ?? []) {
+        if (band.axis !== s.axis && !sharedAxis) continue;
+        if (isPlottable(s, band.from)) vals.push(band.from);
+        if (isPlottable(s, band.to)) vals.push(band.to);
       }
       if (vals.length === 0) return d3.scaleLinear().domain([0, 100]).range([innerH, 0]);
       const ext = d3.extent(vals) as [number, number];
@@ -273,6 +277,44 @@ export default function CriHistoryChart<T extends { date: string }>({
       }
     }
 
+    // Reference bands: shaded zones under the data lines, on the scale of
+    // their declared axis, with dashed edge guides and a right-edge label.
+    for (const band of referenceBands ?? []) {
+      const scale = band.axis === "left" || sharedAxis ? yLeft : yRight;
+      const bandSeries = band.axis === "left" ? leftSeries : rightSeries;
+      if (!isPlottable(bandSeries, band.from) || !isPlottable(bandSeries, band.to)) continue;
+      const color = band.color ?? CHART_AXIS_MUTED;
+      const yTop = scale(Math.max(band.from, band.to));
+      const yBottom = scale(Math.min(band.from, band.to));
+      g.append("rect")
+        .attr("class", "reference-band")
+        .attr("data-testid", "chart-reference-band")
+        .attr("x", 0)
+        .attr("width", innerW)
+        .attr("y", yTop)
+        .attr("height", Math.max(0, yBottom - yTop))
+        .attr("fill", `color-mix(in srgb, ${color} 12%, transparent)`);
+      for (const edge of [band.from, band.to]) {
+        g.append("line")
+          .attr("class", "reference-band-edge")
+          .attr("x1", 0)
+          .attr("x2", innerW)
+          .attr("y1", scale(edge))
+          .attr("y2", scale(edge))
+          .attr("stroke", color)
+          .attr("stroke-width", 1)
+          .attr("stroke-dasharray", "4 4");
+      }
+      g.append("text")
+        .attr("x", innerW - 4)
+        .attr("y", yTop - 4)
+        .attr("text-anchor", "end")
+        .attr("fill", color)
+        .attr("font-size", "var(--text-meta)")
+        .attr("font-family", "var(--font-mono)")
+        .text(band.label);
+    }
+
     // Reference levels: dashed guides under the data lines, labelled at the
     // right edge so they read as zones rather than as a third series.
     for (const level of referenceLevels ?? []) {
@@ -293,7 +335,7 @@ export default function CriHistoryChart<T extends { date: string }>({
         .attr("y", y - 4)
         .attr("text-anchor", "end")
         .attr("fill", color)
-        .attr("font-size", 9)
+        .attr("font-size", "var(--text-meta)")
         .attr("font-family", "var(--font-mono)")
         .text(level.label);
     }
@@ -316,7 +358,7 @@ export default function CriHistoryChart<T extends { date: string }>({
         axis
           .selectAll(".tick text")
           .attr("fill", leftSeries.color)
-          .attr("font-size", "10px")
+          .attr("font-size", "var(--text-meta)")
           .attr("font-family", "IBM Plex Mono, monospace");
       });
 
@@ -336,19 +378,19 @@ export default function CriHistoryChart<T extends { date: string }>({
         axis
           .selectAll(".tick text")
           .attr("fill", rightSeries.color)
-          .attr("font-size", "10px")
+          .attr("font-size", "var(--text-meta)")
           .attr("font-family", "IBM Plex Mono, monospace");
       });
 
     // X-axis — use explicit sparse ticks so labels stay legible on 20-session charts
-    const xTickValues = buildCriHistoryXAxisTickValues(dates, innerW);
-    const rotateXAxisLabels = shouldRotateCriHistoryXAxisLabels(innerW, xTickValues.length);
+    const xTickValues = buildTimeXAxisTickValues(dates, innerW, xTickMinSpacing);
     const xAxis = d3
       .axisBottom(xScale)
       .tickValues(xTickValues)
       .tickFormat((d) => (xTickFormat ?? d3.timeFormat("%b %-d"))(d as Date));
 
     g.append("g")
+      .attr("data-testid", "chart-x-axis")
       .attr("transform", `translate(0,${innerH})`)
       .call(xAxis)
       .call((axis) => {
@@ -357,12 +399,11 @@ export default function CriHistoryChart<T extends { date: string }>({
         axis
           .selectAll(".tick text")
           .attr("fill", CHART_AXIS_MUTED)
-          .attr("font-size", "10px")
+          .attr("font-size", "var(--text-meta)")
           .attr("font-family", "IBM Plex Mono, monospace")
-          .attr("text-anchor", rotateXAxisLabels ? "end" : "middle")
-          .attr("dx", rotateXAxisLabels ? "-0.4em" : "0")
-          .attr("dy", rotateXAxisLabels ? "0.6em" : "0.9em")
-          .attr("transform", rotateXAxisLabels ? "rotate(-24)" : null);
+          .attr("text-anchor", (_d, index, nodes) => chartXAxisTickAnchor(index, nodes.length))
+          .attr("dx", "0")
+          .attr("dy", "0.9em");
       });
 
     // Invisible overlay for tooltip — supports both mouse hover and touch drag.
@@ -407,7 +448,7 @@ export default function CriHistoryChart<T extends { date: string }>({
       .on("touchend touchcancel", function () {
         setTooltip({ visible: false, x: 0, y: 0, d: null });
       });
-  }, [chartData, width, series, leftSeries, rightSeries, xTickFormat]);
+  }, [chartData, width, series, leftSeries, rightSeries, liveValues, xTickFormat, xTickMinSpacing, sharedAxis, referenceLevels, referenceBands]);
 
   const showEmpty = !chartData || chartData.length < 2;
   const tooltipSideStyle =

@@ -50,6 +50,8 @@ function deps(): AdminActionDeps {
   };
 }
 
+export const radonCapability = { GET: "admin", POST: "admin" };
+
 export async function GET(): Promise<Response> {
   const requestId = getRequestId();
   const admin = await requireDemoAdmin();

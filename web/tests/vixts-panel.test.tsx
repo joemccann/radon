@@ -15,7 +15,7 @@
  * Spec: docs/indicators/vixts.md.
  */
 import React from "react";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
@@ -116,6 +116,7 @@ import VixTsPanel from "../components/VixTsPanel";
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   mockUseVixTs.mockReset();
 });
 
@@ -292,5 +293,74 @@ describe("VixTsPanel — copy discipline", () => {
     const text = container.textContent ?? "";
     expect(text).not.toContain("—");
     expect(text).not.toMatch(/refresh(es)? (daily|hourly|every)|updated (daily|hourly|every)/i);
+  });
+});
+
+/* ─── R-365 / REL-118: the header clock must carry an AGE ──────────────────
+ *
+ * `formatClockTime` rendered `scan_time` as a bare hour:minute with no date
+ * and no age comparison, and it was the only writer-freshness signal in the
+ * panel. Combined with R-332, a snapshot written eight days ago rendered as
+ * "2:47 AM" — visually identical to a run that finished this morning.
+ *
+ * The staleness threshold is derived from the shared `serviceHealthWindows`
+ * entry for `vixts`, not from a literal, so the panel cannot drift from the
+ * catalog the watchdog uses.
+ */
+
+describe("VixTsPanel — writer freshness", () => {
+  function withScanTime(iso: string) {
+    return renderPanel(
+      hookState({ data: { ...buildData(), scan_time: iso } as unknown as VixTsData }),
+    );
+  }
+
+  it("renders an age indication rather than a bare clock", () => {
+    withScanTime(new Date(Date.now() - 3 * 60 * 60_000).toISOString());
+    const stamp = screen.getByTestId("vixts-writer-age");
+    expect(stamp.textContent).toMatch(/\bago\b/i);
+    expect(stamp.textContent).toMatch(/3h/);
+  });
+
+  it("marks a snapshot older than the catalog window as behind", () => {
+    withScanTime(new Date(Date.now() - 8 * 24 * 60 * 60_000).toISOString());
+    const stamp = screen.getByTestId("vixts-writer-age");
+    expect(stamp.getAttribute("data-state")).toBe("behind");
+    expect(stamp.textContent).toMatch(/8d/);
+  });
+
+  it("leaves a snapshot inside the catalog window unmarked", () => {
+    withScanTime(new Date(Date.now() - 2 * 60 * 60_000).toISOString());
+    expect(screen.getByTestId("vixts-writer-age").getAttribute("data-state")).toBe("current");
+  });
+
+  it("says so rather than guessing when scan_time is absent", () => {
+    renderPanel(
+      hookState({ data: { ...buildData(), scan_time: null } as unknown as VixTsData }),
+    );
+    const stamp = screen.getByTestId("vixts-writer-age");
+    expect(stamp.getAttribute("data-state")).toBe("unknown");
+    expect(stamp.textContent).toContain("---");
+  });
+});
+
+describe("VixTsPanel — freshness rail", () => {
+  it("shows the Cboe session date and counts down to the 02:45 UTC slot", () => {
+    // 00:30 UTC on a Thursday: 2h15m short of radon-vixts.timer's 02:45 UTC
+    // slot. The neighbouring overnight Cboe pulls (straddle 02:15, cor 02:20,
+    // vixcor 02:35) all land on a different number from here.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-27T00:30:00Z"));
+    const data = buildData({ data_date: "2026-08-26" });
+    data.current = { ...data.current!, date: "2026-08-26" };
+    renderPanel(hookState({ data }));
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+    const rail = screen.getByTestId("vixts-freshness-rail");
+    expect(rail).toBeTruthy();
+    expect(rail.textContent).toContain("2026-08-26");
+    expect(screen.getByTestId("vixts-freshness-rail-countdown").textContent).toBe("2h 15m");
+    expect(rail.textContent).toContain("Next sample");
   });
 });

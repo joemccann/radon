@@ -145,4 +145,66 @@ test.describe("/orders session window", () => {
     await expect(strip.getByTestId("open-orders-rth-count")).toHaveCount(0);
     await expect(strip.getByTestId("open-orders-ext-count")).toHaveCount(0);
   });
+
+  // 2026-09-01 TQQQ flatten: IB reports PreSubmitted for extended-eligible
+  // equity orders that ARE live in the extended session; the table called
+  // them QUEUED for the whole after-hours window. While the extended window
+  // is live the status must read Working (chip EXT LIVE); once the session
+  // closes, Queued is the honest label and the EXT chip names the eligibility.
+  const EXTENDED_NOW = new Date("2026-08-27T21:30:00.000Z"); // 17:30 ET Thursday
+  const CLOSED_NOW = new Date("2026-08-28T01:00:00.000Z"); // 21:00 ET Thursday
+
+  function tqqqPreSubmittedClose() {
+    return {
+      last_sync: EXTENDED_NOW.toISOString(),
+      open_count: 1,
+      executed_count: 0,
+      executed_orders: [],
+      open_orders: [
+        makeOpenOrder({
+          orderId: 3,
+          permId: 1003,
+          action: "SELL",
+          tif: "DAY",
+          outsideRth: true,
+          status: "PreSubmitted",
+          symbol: "TQQQ",
+          limitPrice: 68.8,
+          contract: {
+            conId: 30,
+            symbol: "TQQQ",
+            secType: "STK",
+            strike: null,
+            right: null,
+            expiry: null,
+          },
+        }),
+      ],
+    };
+  }
+
+  test("a PreSubmitted EXT stock close reads Working while after hours is live", async ({ page }) => {
+    await page.clock.install({ time: EXTENDED_NOW });
+    await stubOrdersPage(page, tqqqPreSubmittedClose());
+
+    await page.goto("/orders");
+
+    const row = page.getByTestId("open-order-row-3-1003");
+    await expect(row).toBeVisible();
+    await expect(row).toContainText("Working");
+    await expect(row).not.toContainText("Queued");
+    await expect(row.getByTestId("order-session-chip")).toHaveText("EXT LIVE");
+  });
+
+  test("the same order reads Queued once the extended session has closed", async ({ page }) => {
+    await page.clock.install({ time: CLOSED_NOW });
+    await stubOrdersPage(page, tqqqPreSubmittedClose());
+
+    await page.goto("/orders");
+
+    const row = page.getByTestId("open-order-row-3-1003");
+    await expect(row).toBeVisible();
+    await expect(row).toContainText("Queued");
+    await expect(row.getByTestId("order-session-chip")).toHaveText("EXT");
+  });
 });

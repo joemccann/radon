@@ -185,6 +185,68 @@ describe("orders command strip", () => {
     expect(document.getElementById("orders-historical")).toBeTruthy();
   });
 
+  it("shows Working 0 when every open row is Queued after the extended close", () => {
+    vi.setSystemTime(new Date("2026-08-28T01:00:00.000Z")); // 21:00 ET
+    const orders: OrdersData = {
+      last_sync: new Date("2026-08-28T01:00:00.000Z").toISOString(),
+      open_count: 3,
+      executed_count: 0,
+      executed_orders: [],
+      open_orders: [
+        makeOpenOrder({
+          orderId: 1,
+          permId: 1001,
+          status: "PreSubmitted",
+          tif: "GTC",
+          symbol: "ARM",
+          contract: {
+            conId: 10, symbol: "ARM", secType: "OPT",
+            strike: 260, right: "C", expiry: "2026-09-18",
+          },
+        }),
+        makeOpenOrder({
+          orderId: 2,
+          permId: 1002,
+          status: "PreSubmitted",
+          tif: "GTC",
+          symbol: "SPCX",
+          contract: {
+            conId: 20, symbol: "SPCX", secType: "BAG",
+            strike: null, right: null, expiry: null,
+          },
+        }),
+        makeOpenOrder({
+          orderId: 3,
+          permId: 1003,
+          status: "PreSubmitted",
+          tif: "DAY",
+          outsideRth: true,
+          symbol: "TQQQ",
+          action: "SELL",
+          contract: {
+            conId: 30, symbol: "TQQQ", secType: "STK",
+            strike: null, right: null, expiry: null,
+          },
+        }),
+      ],
+    };
+
+    render(
+      React.createElement(WorkspaceSections, {
+        section: "orders",
+        orders,
+        prices: {},
+        portfolio: null,
+      }),
+    );
+
+    const strip = screen.getByTestId("orders-command-strip");
+    expect(strip.textContent).toMatch(/Working\s*0/);
+    expect(screen.getByTestId("open-order-row-1-1001").textContent).toContain("Queued");
+    expect(screen.getByTestId("open-order-row-2-1002").textContent).toContain("Queued");
+    expect(screen.getByTestId("open-order-row-3-1003").textContent).toContain("Queued");
+  });
+
   it("shows mapped Working status, fill qty, Δ Fill header, and intent OPEN", () => {
     const orders: OrdersData = {
       last_sync: NOW.toISOString(),

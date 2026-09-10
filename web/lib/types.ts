@@ -12,11 +12,31 @@ export type NavIcon = ComponentType<{
   strokeWidth?: number;
 }>;
 
+/** Media types the assistant endpoint accepts for a pasted image. */
+export type ChatImageMediaType = "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+
+/**
+ * An image pasted into the chat composer. The preview src is built as
+ * `data:${mediaType};base64,${data}` at render time — there is deliberately no
+ * second dataUrl field to drift out of sync.
+ */
+export type ChatImageAttachment = {
+  /** Stable id for React keys and removal. Derived from index + name. */
+  id: string;
+  mediaType: ChatImageMediaType;
+  /** Raw base64 payload, NO "data:" prefix. */
+  data: string;
+  /** Original file name when the clipboard supplied one. */
+  name?: string;
+};
+
 export type Message = {
   id: string;
   role: MessageRole;
   content: string;
   timestamp: string;
+  /** Images the operator pasted with this turn; rendered in their own bubble. */
+  attachments?: ChatImageAttachment[];
 };
 
 export type FlowRow = {
@@ -28,9 +48,18 @@ export type FlowRow = {
   note: string;
 };
 
+/** Anthropic Messages API content blocks, verbatim. */
+export type ApiTextBlock = { type: "text"; text: string };
+export type ApiImageBlock = {
+  type: "image";
+  source: { type: "base64"; media_type: ChatImageMediaType; data: string };
+};
+export type ApiContentBlock = ApiTextBlock | ApiImageBlock;
+
 export type ApiMessage = {
   role: MessageRole;
-  content: string;
+  /** A plain string for a text-only turn; blocks once an image rides along. */
+  content: string | ApiContentBlock[];
 };
 
 export type AssistantToolEvent = {
@@ -91,6 +120,10 @@ export type AssistantOrderInput =
 export type AssistantResponse = {
   content?: string;
   model?: string;
+  /** The picker's id when one was sent; compare with `model` (R-457). */
+  requestedModel?: string;
+  /** Some round ran on LLM_FALLBACK_PROVIDER, not the requested model. */
+  usedFallback?: boolean;
   error?: string;
   toolEvents?: AssistantToolEvent[];
   proposal?: AssistantOrderProposal | null;
@@ -120,6 +153,13 @@ export type WorkspaceNavItem = {
   group: NavGroupId;
 };
 
+/**
+ * Where a leg's cost basis came from. `mixed` is position-level only: some
+ * legs carry this session's fill VWAP while others still carry IB's lagged
+ * avgCost, so no aggregate over the legs describes a real trade.
+ */
+export type BasisSource = "ib" | "journal" | "session_fills" | "mixed";
+
 export type PortfolioLeg = {
   con_id?: number | null;
   /** Per-leg expiry for calendars/diagonals. Falls back to position expiry. */
@@ -133,6 +173,7 @@ export type PortfolioLeg = {
   market_price: number | null;
   market_value: number | null;
   market_price_is_calculated?: boolean;
+  basis_source?: BasisSource | null;
 };
 
 export type LegacyPositionReturnCapitalPayload = {
@@ -202,8 +243,10 @@ export type PortfolioPosition = {
   expiry: string;
   contracts: number;
   direction: string;
-  entry_cost: number;
+  /** `null` when the legs disagree about their basis source (`mixed`). */
+  entry_cost: number | null;
   max_risk: number | null;
+  basis_source?: BasisSource | null;
   /**
    * Legacy projected margin field. It is not a valid return denominator unless
    * `init_margin_at_entry_metadata` proves the value is fill-linked.
@@ -694,6 +737,21 @@ export type ScannerData = {
 // long-dated IV diverges from realized vol; `best_gap` is the headline
 // signal (HV − IV in vol points). `is_mispriced` is the script's own
 // boolean classification.
+/** The single contract behind `best_gap`, emitted by leap_scanner_uw.py so the
+ *  scanner can deep-link it into the chain order builder. Absent on scans
+ *  written before the field existed. */
+export type LeapBestContract = {
+  symbol: string;
+  expiry: string;
+  strike: number;
+  right: "C" | "P";
+  iv: number;
+  delta: number;
+  gap: number;
+  oi: number;
+  volume: number;
+};
+
 export type LeapResult = {
   ticker: string;
   price: number | null;
@@ -705,6 +763,7 @@ export type LeapResult = {
   leap_count: number;
   best_gap: number;
   is_mispriced: boolean;
+  best_leap?: LeapBestContract | null;
 };
 
 export type LeapData = {

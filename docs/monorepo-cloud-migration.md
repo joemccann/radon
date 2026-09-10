@@ -39,7 +39,7 @@ radon/                          # sole product repo
 | `/home/radon/radon` | Monorepo checkout (app + `cloud/`) |
 | `/home/radon/radon/cloud` | Infra + deploy scripts (same SHA as app) |
 | `/home/radon/.radon-deploy-runners/<sha>.<run>/cloud` | Immutable support bundle; current plus four newest inactive bundles retained |
-| `/home/radon/radon-cloud/.env` | Temporary stable secrets location only (`0600`, `radon:radon`) |
+| `/etc/radon/env` | Canonical host secrets (`0640`, `root:radon`); `/home/radon/radon-cloud/.env` is the compatibility symlink |
 | `/var/lib/radon/deploy` | Reboot-durable root topology transition state |
 | `/var/lib/radon/control-plane-ready` | Root-published compatibility marker for monorepo deploys |
 
@@ -162,19 +162,23 @@ evidence; the next successful deploy performs bounded cleanup.
 
 ## Live cutover notes (2026-07-11)
 
+> **Completed; retained for rollback.** The cutover finished 2026-07-11.
+> The checklist below is historical record plus the reference sequence for a
+> rollback or host rebuild — it is not an active procedure to run.
+
 ### Order of operations that worked
 
 1. Deploy a readiness-gated release so `cloud/` and schema-v2 `radon-health` land (broker health advisory).
 2. As root, from `/home/radon/radon`: `bash cloud/scripts/bootstrap-control-plane.sh` (no Gateway restart).
 3. Recover IBKR 2FA via `/usr/local/bin/radon-ib-gateway-control` only.
-4. Confirm `/status` `schema_version=2 ok=true overall_state=up` and pool 3/3 connected.
+4. Confirm `/status` `schema_version=3 ok=true overall_state=up` and pool 3/3 connected.
 5. Subsequent deploys use immutable runners under `~/.radon-deploy-runners/` and start automatically after the required CI jobs pass; the non-blocking Production environment retains its main-only deployment policy.
 
 ### Production env contract after cutover
 
 | Key | Value |
 |---|---|
-| Secrets file | `/home/radon/radon-cloud/.env` mode `0600` |
+| Secrets file | `/etc/radon/env` mode `0640` `root:radon` |
 | `IB_GATEWAY_MODE` | `cloud` |
 | `RADON_MODE` | `hetzner` |
 | `IB_GATEWAY_COMPOSE_DIR` | `/home/radon/radon/cloud` |
@@ -235,10 +239,10 @@ Production is three planes. Do not collapse them into one Compose project.
 | Plane | Runtime | Owns |
 |---|---|---|
 | Host | never container | systemd, journald, polkit, sudoers, Caddy, Tailscale, Docker engine, `radon-health` `:8330`, `radon-deploy-root`, `radon-ib-gateway-control` |
-| Broker | already Docker | digest-pinned IB Gateway in `cloud/docker-compose.yml` — the only production container |
-| App | host default, images optional | Next.js, FastAPI, relay, monitor, newsfeed, timer-owned oneshots. Default `RADON_RUNTIME=host`. Per-unit drop-ins switch ExecStart to `radon-app-runtime run %n` after hours |
+| Broker | Docker | digest-pinned IB Gateway in `cloud/docker-compose.yml` |
+| App | per-unit containers active | Next.js, FastAPI, relay, monitor, and newsfeed run through installed `runtime-container.conf` drop-ins; timer-owned oneshots remain host systemd |
 
-App-plane images exist under `docker/app` and are not production runtime until per-unit drop-ins are installed. They must not own Gateway, Caddy, health, or the Docker engine socket. `radon-app-runtime` pulls/runs those images as root and does not take the deploy lock.
+App-plane images live under `docker/app`. Main CI builds the Python and Node images in parallel, gates deploy on both exact-SHA tags, and pre-pulls the pair concurrently with release prestaging. The deploy retries a missing pull before teardown and refuses a moving `latest` fallback. The images must not own Gateway, Caddy, health, timer-owned oneshots, or the Docker engine socket. `radon-app-runtime` pulls/runs them as root and does not take the deploy lock.
 
 After `radon-deploy-root refresh-control-plane` is installed (helper + sudoers), a unit-only push does not need root SSH. The SHA that *adds* that sudoers verb still needs one root `bootstrap-control-plane.sh`. Control-plane `.service` files stay bootstrap/refresh-owned; allowlisted timer-owned oneshots publish via `sync-scheduled-units` (`daemon-reload` only, no start/stop).
 

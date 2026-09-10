@@ -44,6 +44,14 @@ export type AtsVenueShareThresholds = {
 
 export type AtsVenueShareError = { ticker: string; error: string };
 
+export type AtsUniverseMeta = {
+  order?: string[];
+  counts?: Record<string, number>;
+  core?: number;
+  this_cycle?: number;
+  index_offset?: number;
+};
+
 export type AtsVenueShareData = {
   missing?: boolean;
   scan_time: string | null;
@@ -55,6 +63,8 @@ export type AtsVenueShareData = {
   current: AtsVenueShareRow[];
   series: Record<string, AtsVenueShareRow[]>;
   errors: AtsVenueShareError[];
+  universe?: AtsUniverseMeta;
+  carried_forward?: string[];
 };
 
 export const PLACEHOLDER = "---";
@@ -107,6 +117,13 @@ export function venueDivergence(row: AtsVenueShareRow): number | null {
  *  assumed refresh interval (the FINRA file itself only moves weekly). */
 export function weekLabel(week: string | null | undefined): string {
   return week ? `WEEK OF ${week}` : PLACEHOLDER;
+}
+
+export function coverageScopeLabel(universe: AtsUniverseMeta | undefined): string {
+  if (!universe?.order?.length) {
+    return "PORTFOLIO, WATCHLIST, NDX, R2K, SPX";
+  }
+  return universe.order.map((tier) => tier.replace("ndx100", "ndx").toUpperCase()).join(", ");
 }
 
 export function countByClassification(

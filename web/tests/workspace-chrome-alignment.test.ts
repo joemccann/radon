@@ -1,82 +1,28 @@
-/**
- * @vitest-environment jsdom
- */
-
-import { act, createElement } from "react";
+/** @vitest-environment jsdom */
+import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import Sidebar from "../components/Sidebar";
 
-// Flush concurrent work inside act() so Sidebar's post-mount rAF
-// (setSettled) cannot run after this file's jsdom is torn down.
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+vi.mock("@/lib/useProfile", () => ({ useProfile: () => ({ profile: { username: "Operator", avatar_url: null } }) }));
+afterEach(cleanup);
+const css = readFileSync(join(__dirname, "../components/ClearShell.module.css"), "utf8");
 
-vi.mock("@/lib/IBStatusContext", () => ({
-  useIBStatusContext: () => ({ displayStatus: "unreachable" }),
-}));
-
-vi.mock("@/lib/useProfile", () => ({
-  useProfile: () => ({ profile: { username: "Operator", avatar_url: null } }),
-}));
-
-const globalsCss = readFileSync(join(__dirname, "..", "app", "globals.css"), "utf8");
-
-function ruleBlock(selector: string): string {
-  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const pattern = new RegExp(`(?:^|\\n)${escaped}\\s*\\{([^}]*)\\}`, "m");
-  const match = globalsCss.match(pattern);
-  if (!match) throw new Error(`rule not found for selector ${selector}`);
-  return match[1];
-}
-
-function declaredHeight(selector: string): string | null {
-  const body = ruleBlock(selector);
-  const direct = body.match(/(?:^|;|\n)\s*height\s*:\s*([^;]+?)\s*(?:;|$)/);
-  if (direct) return direct[1].trim();
-  const min = body.match(/(?:^|;|\n)\s*min-height\s*:\s*([^;]+?)\s*(?:;|$)/);
-  return min ? min[1].trim() : null;
-}
-
-afterEach(() => {
-  cleanup();
-});
-
-describe("workspace chrome alignment", () => {
-  it("sidebar-header and header use the same height token so bottom borders align", () => {
-    const sidebarHeaderHeight = declaredHeight(".sidebar-header");
-    const topHeaderHeight = declaredHeight(".header");
-
-    expect(sidebarHeaderHeight).toBe("var(--header-height)");
-    expect(topHeaderHeight).toBe("var(--header-height)");
-    expect(sidebarHeaderHeight).toBe(topHeaderHeight);
+describe("Clear workspace chrome", () => {
+  it("uses one horizontal header rather than a competing fixed-height sidebar", () => {
+    expect(css).toContain("grid-template-rows: 84px auto");
+    expect(css).toContain("grid-template-columns: minmax(0, 1fr) auto");
+    expect(css).toContain("@media (max-width: 640px)");
   });
 
-  it("sidebar-header does not reintroduce a min-height that would overflow the rail", () => {
-    const body = ruleBlock(".sidebar-header");
-    expect(body).not.toMatch(/min-height\s*:/);
-  });
-
-  it("renders the monogram at the compact 22px brand size", async () => {
-    const { container } = render(
-      createElement(Sidebar, {
-        activeSection: "portfolio",
-        actionTone: "#05AD98",
-        ibConnected: false,
-        lastSync: null,
-      }),
-    );
-
-    await act(async () => {
-      await new Promise<void>((resolve) => {
-        window.requestAnimationFrame(() => resolve());
-      });
-    });
-
-    const monogram = container.querySelector(".sidebar-header img.logo-mark");
-    expect(monogram).not.toBeNull();
-    expect(monogram?.getAttribute("width")).toBe("22");
-    expect(monogram?.getAttribute("height")).toBe("22");
+  it("keeps the brand compact and links home and profile without a full-height rail", () => {
+    const { container } = render(createElement(Sidebar, { activeSection: "portfolio", actionTone: "currentColor" }));
+    const monogram = screen.getByRole("link", { name: "Radon home" }).querySelector("svg");
+    expect(monogram?.getAttribute("width")).toBe("28");
+    expect(monogram?.getAttribute("height")).toBe("28");
+    expect(screen.getByRole("link", { name: "Profile" }).getAttribute("href")).toBe("/profile");
+    expect(container.querySelector("aside.sidebar")).toBeNull();
   });
 });

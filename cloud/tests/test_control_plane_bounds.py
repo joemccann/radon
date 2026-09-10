@@ -9,6 +9,8 @@ can grow without anyone deciding to grow it.
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -106,15 +108,62 @@ class TestDeadManDoesNotCryWolf:
     def test_the_trap_is_re_armed_after_the_loop(self, wrapper):
         src = wrapper.read_text()
         loop = src.index(LOOP_MARKERS[wrapper.name])
-        loop_end = src.index("tail_text=")
+        # report() used to build `tail_text=` (redacted log tail) immediately
+        # after re-arming. Issue comments are now a three-section body, so the
+        # next local after the loop is the status string handed to report().
+        loop_end = src.index("local status", loop)
         assert "trap on_crash ERR" in src[loop:loop_end], (
             "a genuine wrapper death after the agent finishes must still page"
         )
 
-    def test_the_real_outcome_is_still_reported(self, wrapper):
+    def test_the_real_outcome_is_still_reported(self, wrapper, tmp_path):
+        """T-239: RUN the classifier instead of grepping for `report "OK"`.
+
+        The grep this replaces matched a literal call spelling, so it said
+        nothing about which outcomes the dead-man channels can actually carry.
+        It also could not see the defect T-239 fixed: the status used to be
+        keyed on the agent's exit code alone, and `claude -p` exits 0 after
+        killing unfinished background work, so a phase cut in half reported OK.
+        """
         src = wrapper.read_text()
-        assert 'report "OK"' in src
-        assert "TIMEOUT" in src
+        assert "phase_status" in src and 'report "$status"' in src, (
+            "the phase outcome must flow through one classifier the tests can "
+            "run; a bare literal call cannot be checked for what it omits"
+        )
+        start = src.index("BG_CEILING_MARKER=")
+        block = src[start:src.index("\n}\n", src.index("phase_status() {", start)) + 3]
+
+        clean = tmp_path / "clean.log"
+        clean.write_text("[weekend] audit start\nall done\n", encoding="utf-8")
+        truncated = tmp_path / "truncated.log"
+        truncated.write_text(
+            "Background tasks still running after 600s; terminating.\n",
+            encoding="utf-8",
+        )
+
+        def status(rc: int, log: Path) -> str:
+            proc = subprocess.run(
+                [
+                    shutil.which("bash") or "/bin/bash",
+                    "-c",
+                    "set -Eeuo pipefail\nCAP_SECS=7200\n"
+                    + block
+                    + f'\nphase_status {rc} "{log}"\n',
+                ],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            assert proc.returncode == 0, (proc.returncode, proc.stderr)
+            return proc.stdout.strip()
+
+        assert status(0, clean) == "OK"
+        assert status(124, clean) == "TIMEOUT after 7200s"
+        assert status(9, clean) == "FAILED (exit 9)"
+        assert status(0, truncated) != "OK", (
+            "a phase the harness truncated still pages OK, so the operator "
+            "cannot tell it from a finished run"
+        )
 
 
 # --------------------------------------------------------------------------
@@ -123,6 +172,13 @@ class TestDeadManDoesNotCryWolf:
 # Pinned to the full scheduled-unit set main adopted in PR #73 (2026-08-22):
 # every timer-owned unit CI may publish. Growing it is a review decision.
 EXPECTED_AUTO_SYNC_UNITS = (
+    # AI evidence daily collector: deliberately authorize these two scheduled units.
+    "radon-aa-frontier-refresh.service",
+    "radon-aa-frontier-refresh.timer",
+    "radon-ai-cycle-backfill.service",
+    "radon-ai-cycle-backfill.timer",
+    "radon-ai-cycle.service",
+    "radon-ai-cycle.timer",
     "radon-bpi.service",
     "radon-bpi.timer",
     "radon-breadth.service",
@@ -151,6 +207,8 @@ EXPECTED_AUTO_SYNC_UNITS = (
     "radon-equibles-filings.timer",
     "radon-equibles-short-crowding.service",
     "radon-equibles-short-crowding.timer",
+    "radon-flex-pull.service",
+    "radon-flex-pull.timer",
     "radon-flow-refresh.service",
     "radon-flow-refresh.timer",
     "radon-forecast-nightly.service",
@@ -161,6 +219,10 @@ EXPECTED_AUTO_SYNC_UNITS = (
     "radon-grok-page-responder.timer",
     "radon-host-metrics.service",
     "radon-host-metrics.timer",
+    "radon-hhlev.service",
+    "radon-hhlev.timer",
+    "radon-hyad.service",
+    "radon-hyad.timer",
     "radon-iei-hyg.service",
     "radon-iei-hyg.timer",
     "radon-incident-watchdog.service",
@@ -175,6 +237,8 @@ EXPECTED_AUTO_SYNC_UNITS = (
     "radon-margin-debt.timer",
     "radon-media-backup.service",
     "radon-media-backup.timer",
+    "radon-model-catalog.service",
+    "radon-model-catalog.timer",
     "radon-oi-changes.service",
     "radon-oi-changes.timer",
     "radon-perf-twr.service",
@@ -195,6 +259,8 @@ EXPECTED_AUTO_SYNC_UNITS = (
     "radon-vcg-refresh.timer",
     "radon-vixcor.service",
     "radon-vixcor.timer",
+    "radon-vixts.service",
+    "radon-vixts.timer",
     "radon-vol-cone-intraday.service",
     "radon-vol-cone-intraday.timer",
     "radon-vol-cone.service",

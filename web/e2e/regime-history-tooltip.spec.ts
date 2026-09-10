@@ -113,7 +113,7 @@ async function setupMocks(page: import("@playwright/test").Page) {
 test.describe("/regime page — 20-session history tooltip", () => {
   test("keeps the info icon beside the title and explains the charts in plain English", async ({ page }) => {
     await setupMocks(page);
-    await page.goto("/regime");
+    await page.goto("/regime/cri");
 
     const header = page.locator('[data-testid="regime-history-header"]');
     const titleText = header.locator('[data-testid="regime-history-title-text"]');
@@ -136,8 +136,8 @@ test.describe("/regime page — 20-session history tooltip", () => {
 
     const tooltip = page.locator('[data-testid="regime-history-tooltip-bubble"]');
     await expect(tooltip).toBeVisible();
-    await expect(tooltip).toContainText("Left chart tracks VIX and VVIX across the last 20 trading sessions");
-    await expect(tooltip).toContainText("Right chart compares realized volatility with COR1M over the same window");
+    await expect(tooltip).toContainText("The VIX / VVIX chart tracks VIX and VVIX across the last 20 trading sessions");
+    await expect(tooltip).toContainText("The realized vol / COR1M chart compares realized volatility with COR1M over the same window");
     await expect(tooltip).toContainText("VIX");
     await expect(tooltip).toContainText("VVIX");
     await expect(tooltip).toContainText("realized volatility");

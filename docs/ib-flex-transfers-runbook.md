@@ -1,5 +1,9 @@
 # IB Flex Transfers — closing the last TWR data gap
 
+**Current transport (2026-08-28):** routine 1442520/1422766 ingest is IBKR
+sFTP. Setup: [`flex-sftp-setup.md`](flex-sftp-setup.md). Do not weekday
+SendRequest. This runbook remains the query-shape / Transfers-section spec.
+
 ## STATUS: the Portal edit is DONE (2026-08-16)
 
 The operator amended Activity Flex Query `1442520` and the export now carries all three sections:
@@ -127,7 +131,7 @@ If either shows up in the real XML, that is a follow-up code change with its own
 
 Recorded here only in case §1 is overridden and a second query id is created:
 
-- **File:** `/home/radon/radon-cloud/.env` on Hetzner, mode `0600`, owner `radon`. Add `IB_FLEX_FLOWS_QUERY_ID=<id>`.
+- **File:** `/etc/radon/env` on Hetzner, mode `0640`, owner `root:radon` (`/home/radon/radon-cloud/.env` is the compatibility symlink). Add `IB_FLEX_FLOWS_QUERY_ID=<id>`.
 - **Values containing `$` must be single-quoted** (repo rule; bash `set -a` expands `$VAR` under `set -u` and aborts silently from systemd). A numeric query id has no `$`, so this is a non-issue for this variable specifically.
 - **Who reads it:**
   - `radon-perf-twr.service` — `EnvironmentFile=/home/radon/radon-cloud/.env` (`cloud/services/radon-perf-twr.service:12`). It is `Type=oneshot` fired by `radon-perf-twr.timer` (Mon–Fri 20:45 America/New_York), and systemd re-reads `EnvironmentFile` at every `ExecStart` — **no restart needed**, the next timer firing picks it up.
@@ -143,7 +147,7 @@ Recorded here only in case §1 is overridden and a second query id is created:
 
 ### a. Pull the amended query once and confirm the Transfers section appears
 
-Run **after 17:15 ET** (so `cash_flow_sync`'s daily 17:00 ET call has already completed) or **before 16:00 ET**, never in the 17:00–17:10 ET window.
+Run outside the scheduled consumers' windows in §7 (no daemon `cash_flow_sync` SendRequest exists any more; routine ingest is sFTP).
 
 ```bash
 cd /Users/joemccann/dev/apps/finance/radon/.claude/worktrees/perf-pnl-refactor
@@ -290,8 +294,8 @@ SELECT report_date, amount, flow_type FROM external_flows ORDER BY report_date;
 
 | Consumer | When | Requests |
 |---|---|---|
-| `cash_flow_sync` (monitor_daemon handler) | 17:00 ET, trading days only | 1 SendRequest + polling |
-| `radon-perf-twr.timer` → builder | 20:45 ET ±5min randomized delay, Mon–Fri | 1 SendRequest (document reused for flows) |
+| `cash_flow_sync` | not scheduled since 2026-09-02; runs `--from-file` inside `flex_delivery_ingest` after `radon-flex-pull.timer` (Tue..Sat 07:30 ET) | 0 (sFTP delivery) |
+| `radon-perf-twr.timer` → builder | Tue..Sat 07:30 ET | 0 by default (`sendrequest` off; statement in hand) |
 
 **Sequencing rules for the manual work:**
 

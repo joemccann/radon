@@ -18,7 +18,9 @@ describe("ChatLauncher", () => {
 
     // Autofocus now comes from AskComposer's `focusKey` (fed the launcher's
     // open flag), not ChatPanel's removed composerRef effect.
-    const composer = await screen.findByLabelText("Ask Radon");
+    // The first open now downloads the assistant module; wait for its actual
+    // composer instead of assuming that module was part of the initial page.
+    const composer = await screen.findByLabelText("Ask Radon", {}, { timeout: 5000 });
     await waitFor(() => expect(document.activeElement).toBe(composer));
 
     fireEvent.keyDown(document, { key: "Escape" });

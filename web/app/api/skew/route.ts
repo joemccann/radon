@@ -49,6 +49,8 @@ async function readSkewFromDisk(): Promise<TimestampedRead<Record<string, unknow
   return { data, timestampMs: contentTimestampMs(data.scan_time) };
 }
 
+export const radonCapability = "read";
+
 export async function GET(): Promise<Response> {
   const requestId = getRequestId();
   const result = await dbFirstRead({

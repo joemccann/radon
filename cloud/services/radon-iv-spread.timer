@@ -1,0 +1,16 @@
+[Unit]
+Description=Radon IV SPREAD Indicator - daily NDX minus SPX 1M implied volatility spread
+
+[Timer]
+# 22:15 UTC is after the 16:00 ET close year-round (20:00 UTC summer,
+# 21:00 UTC winter), so both daily OPTION_IMPLIED_VOLATILITY bars are final
+# when the job reads them, and it sits between radon-ivrank (22:10) and
+# radon-dispersion (22:20) so the three IB daily pulls never share a minute.
+# Runs every calendar day: weekend and holiday runs are unchanged-data
+# heartbeats that keep service_health fresh inside the 26h staleness window.
+OnCalendar=*-*-* 22:15:00 UTC
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

@@ -8,6 +8,7 @@ import { useTickerDetailOptional, type OrderPrefill } from "@/lib/TickerDetailCo
 import { MetricCell } from "@/components/mobile/MetricCell";
 import { resolveMarketValue, resolveEntryCost, getAvgEntry, fmtPrice } from "@/lib/positionUtils";
 import { fmtMoneySigned } from "@/lib/format/money";
+import { isIndexSymbol } from "@/lib/indexSymbols";
 import BookTab from "./BookTab";
 import OrderTab from "./OrderTab";
 import ActHeldSummary from "./ActHeldSummary";
@@ -56,7 +57,7 @@ export type AssetCockpitProps = {
 function MobilePositionSummary({ position }: { position: PortfolioPosition }) {
   const mv = resolveMarketValue(position);
   const ec = resolveEntryCost(position);
-  const pnl = mv != null ? mv - ec : null;
+  const pnl = mv != null && ec != null ? mv - ec : null;
   const pnlTone = pnl == null ? "mut" : pnl > 0 ? "pos" : pnl < 0 ? "neg" : "mut";
   // Signed per the credit/debit convention: a credit combo's avg entry reads
   // NEGATIVE (the operator was paid to open). `getAvgEntry` owns the leg-count
@@ -104,6 +105,7 @@ export default function AssetCockpit({
   viewUnderlying,
 }: AssetCockpitProps) {
   const live = (quotePriceData?.bid != null && quotePriceData?.ask != null) || quotePriceData?.last != null;
+  const ticketPriceData = isIndexSymbol(ticker) ? prices[ticker] ?? null : priceData;
 
   // When the underlying is in focus, the order ticket acts on the STOCK (a
   // fresh order), not the held option — OrderTab renders its linear stock form
@@ -132,7 +134,7 @@ export default function AssetCockpit({
   };
 
   return (
-    <div className={`cockpit cockpit-host ${mobile ? "cockpit--mobile" : ""}`}>
+    <div className={`cockpit cockpit-host ${mobile ? "cockpit--mobile" : ""}`} data-testid="cockpit-host">
       <CockpitHeader
         ticker={ticker}
         kind={bookKind}
@@ -176,14 +178,14 @@ export default function AssetCockpit({
           (legs / P&L cards / close-out) always lives in the p-deck. */}
       {!mobile && (
         <div className="act-region">
-          <div className="act-ticket">
+          <div className="act-ticket" data-testid="act-ticket">
             <OrderTab
               ticker={ticker}
               position={ticketPosition}
               portfolio={portfolio}
               prices={prices}
               openOrders={tickerOrders}
-              tickerPriceData={priceData}
+              tickerPriceData={ticketPriceData}
             />
           </div>
           <div className="act-position">
@@ -215,7 +217,7 @@ export default function AssetCockpit({
         position={position}
         quotePriceData={quotePriceData}
         openOrders={tickerOrders}
-        tickerPriceData={priceData}
+        tickerPriceData={ticketPriceData}
       />
 
       <GlyphRail activeDeck={activeDeck} onDeckChange={onDeckChange} includeOrder={mobile} />

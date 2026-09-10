@@ -11,7 +11,7 @@
  * stat strip, the chart title, the toggle chips, and the splice footnote.
  */
 import React from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
@@ -201,6 +201,7 @@ import MarginDebtPanel from "../components/MarginDebtPanel";
 afterEach(() => {
   cleanup();
   mockUseMarginDebt.mockReset();
+  vi.useRealTimers();
 });
 
 function buildSeries(count: number): MarginDebtEntry[] {
@@ -356,5 +357,50 @@ describe("MarginDebtPanel — chart + controls", () => {
     for (const path of Array.from(paths)) {
       expect(path.getAttribute("d") ?? "").not.toContain("NaN");
     }
+  });
+});
+
+describe("MarginDebtPanel — freshness rail", () => {
+  it("normalises the FINRA month key to its month-end and counts down to the 13:10 UTC check", () => {
+    // 10:00 UTC on a Wednesday: 3h10m short of radon-margin-debt.timer's
+    // 13:10 UTC slot. The 13:00 sweeps read 3h 00m, hh-lev 3h 20m, trin 3h 02m.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-26T10:00:00Z"));
+    renderPanel(hookState({ data: buildData() }));
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+    const rail = screen.getByTestId("margin-debt-freshness-rail");
+    expect(rail).toBeTruthy();
+    expect(rail.textContent).toContain("As of");
+    expect(rail.textContent).toContain("2026-05-31");
+    expect(screen.getByTestId("margin-debt-freshness-rail-countdown").textContent).toBe("3h 10m");
+    expect(rail.textContent).toContain("Next check");
+    expect(rail.textContent).not.toContain("Next sample");
+  });
+
+  it("keeps the LATEST MONTH and SOURCE UPDATED cells alongside the rail", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-26T10:00:00Z"));
+    renderPanel(hookState({ data: buildData() }));
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+    expect(screen.getByTestId("margin-debt-strip-month").textContent).toContain("2026-05");
+    expect(screen.getByTestId("margin-debt-strip-source").textContent).toContain("16 Jun 2026");
+  });
+
+  it("passes a full YYYY-MM-DD current date through unchanged", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-26T10:00:00Z"));
+    renderPanel(
+      hookState({
+        data: buildData({ current: { date: "2026-06-30", level: 1415557, level_yoy_pct: 53.7 } }),
+      }),
+    );
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+    expect(screen.getByTestId("margin-debt-freshness-rail").textContent).toContain("2026-06-30");
   });
 });

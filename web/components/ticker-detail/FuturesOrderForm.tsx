@@ -176,6 +176,7 @@ export function FuturesOrderForm({ ticker, portfolio, priceData }: FuturesOrderF
         tif,
         conId: selectedContract.conId,
         exchange: selectedContract.exchange,
+        multiplier,
       },
       successText: `${action} ${qty} ${selectedContract.localSymbol} @ ${price} submitted`,
     };

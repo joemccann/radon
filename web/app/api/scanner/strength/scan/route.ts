@@ -15,8 +15,10 @@ function cacheMatchesRequest(cached: Record<string, unknown>, ticker: string, pr
   return universe === `preset:${preset}` || universe === `fallback:${preset}`;
 }
 
+export const radonCapability = "read.spawn";
+
 export async function POST(request: Request): Promise<Response> {
-  const access = await requireRouteAccess(undefined, { rate: { key: "scanner/strength/scan:route", limit: 20, windowMs: 60_000 } });
+  const access = await requireRouteAccess(undefined, { rate: { key: "scanner/strength/scan:route", limit: 20, windowMs: 60_000 }, durableRateTier: "B" });
   if (!access.ok) return access.response;
   const requestId = getRequestId();
   let body: Record<string, unknown> = {};

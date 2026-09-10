@@ -4,11 +4,12 @@ import { NextResponse } from "next/server";
 import { readFile } from "fs/promises";
 import { join } from "path";
 import { isGexDataStale } from "@/lib/gexStaleness";
-import { radonFetch } from "@/lib/radonApi";
+import { radonFetch, RadonApiError } from "@/lib/radonApi";
 import { createBackgroundScanTrigger } from "@/lib/backgroundScan";
-import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
+import { getRequestId, setCacheResponseHeaders, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 import { dbExecute } from "@/lib/dbExecute";
 import { cachedRead } from "@/lib/dbCache";
+import { buildDemoGexFixture } from "@/lib/demo/fixtures/regime";
 // Disable Next.js static caching: this handler reads live disk state
 // (data/*.json, cache files). Without this, the framework freezes the
 // first response and serves stale data until the dev server restarts.
@@ -143,10 +144,15 @@ const triggerBackgroundScan = createBackgroundScanTrigger({
 // path stays uncached so a user-triggered rescan always reads the freshest.
 const GEX_CACHE_TTL_MS = 5_000;
 
+export const radonCapability = { GET: "read", POST: "read.spawn" };
+
 export async function GET(): Promise<Response> {
-  const access = await requireRouteAccess(undefined, { rate: { key: "gex:route", limit: 20, windowMs: 60_000 } });
+  const access = await requireRouteAccess(undefined, { rate: { key: "gex:route", limit: 20, windowMs: 60_000 }, durableRateTier: "A" });
   if (!access.ok) return access.response;
   const requestId = getRequestId();
+  if (access.principal.kind === "demo") {
+    return setNoStoreResponseHeaders(NextResponse.json(buildDemoGexFixture()), requestId);
+  }
   const cached = await cachedRead("gex:SPX", GEX_CACHE_TTL_MS, readCachedGex, {
     staleWhileError: true,
   });
@@ -163,34 +169,50 @@ export async function GET(): Promise<Response> {
     triggerBackgroundScan();
   }
 
+  // R-660: never label a stale snapshot HIT-fresh. The header carries the
+  // cache verdict for infrastructure; the body marker is what clients read.
+  (data as Record<string, unknown>).is_stale = stale;
+
   const response = NextResponse.json(data);
   return setCacheResponseHeaders(response, {
     maxAgeSeconds: 15,
     staleWhileRevalidateSeconds: 120,
     requestId,
-    cacheState: "HIT",
+    cacheState: stale ? "STALE" : "HIT",
     tags: ["gex"],
   });
 }
 
 export async function POST(): Promise<Response> {
-  const access = await requireRouteAccess(undefined, { rate: { key: "gex:route", limit: 20, windowMs: 60_000 } });
+  const access = await requireRouteAccess(undefined, { rate: { key: "gex:route", limit: 20, windowMs: 60_000 }, durableRateTier: "B" });
   if (!access.ok) return access.response;
+  if (access.principal.kind === "demo") {
+    const requestId = getRequestId();
+    return setNoStoreResponseHeaders(NextResponse.json(buildDemoGexFixture()), requestId);
+  }
   try {
     const rawData = await radonFetch<Record<string, unknown>>("/gex/scan", { method: "POST", timeout: 130_000 });
     const data = normalizeGexPayload(rawData);
-    return NextResponse.json(data);
-  } catch {
-    try {
+    return NextResponse.json({ ...data, scan_succeeded: true });
+  } catch (err) {
+    // R-643: mirror the theta scan shape — preserve the upstream status and
+    // stamp the failure in the body so useSyncHook consumers see it. A 200 +
+    // X-Sync-Warning header silently masked dead scans.
+    const status = err instanceof RadonApiError ? err.status : 502;
+    if (status >= 500) try {
       const cached = await readCachedGex();
       if (cached) {
-        const res = NextResponse.json(normalizeGexPayload(cached));
+        const res = NextResponse.json(
+          { ...normalizeGexPayload(cached), is_stale: true, scan_succeeded: false },
+          { status },
+        );
         res.headers.set("X-Sync-Warning", "GEX sync failed - serving cached data");
         return res;
       }
     } catch {
-      // fall through to 502
+      // Preserve the upstream failure below.
     }
-    return NextResponse.json({ error: "GEX scan failed" }, { status: 502 });
+    const message = err instanceof Error ? err.message : "GEX scan failed";
+    return NextResponse.json({ error: message, scan_succeeded: false }, { status });
   }
 }

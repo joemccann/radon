@@ -5,10 +5,12 @@ import { ScrollProgress } from "@/components/atoms/ScrollProgress";
 import { SectionHeading } from "@/components/atoms/SectionHeading";
 import { SectionRule } from "@/components/atoms/SectionRule";
 import { MilestoneRow } from "@/components/molecules/MilestoneRow";
+import { CopyAgentPromptBar } from "@/components/molecules/CopyAgentPromptBar";
 import { PlateFrame } from "@/components/molecules/PlateFrame";
+import { ClusterCta } from "@/components/sections/ClusterCta";
 import { EditorialFooter } from "@/components/sections/EditorialFooter";
 import { EditorialHeader } from "@/components/sections/EditorialHeader";
-import { DEMO_URL, IB_URL, UW_URL } from "@/lib/editorial-content";
+import { IB_URL, UW_URL } from "@/lib/editorial-content";
 import {
   faqEntries,
   ingestSurfaces,
@@ -41,43 +43,9 @@ function Breadcrumb() {
   );
 }
 
-// Inline equivalent of the shared ClusterCta organism (contract markup).
-// Integrator: swap to components/sections/ClusterCta.tsx once it lands.
-function BottomCta() {
-  return (
-    <section className="px-8 py-[clamp(64px,9vw,128px)]">
-      <div className="mx-auto max-w-[1140px]">
-        <RevealOnScroll>
-          <h2 className="editorial-thesis mb-[18px] text-primary">
-            Run it against the live tape.
-          </h2>
-          <p className="mb-9 max-w-[66ch] text-secondary">
-            The demo carries the full instrument on seeded data: scanner, gates,
-            sizing, journal. No subscription to either service required.
-          </p>
-          <div className="flex flex-wrap items-center gap-7">
-            <a
-              href={DEMO_URL}
-              className="inline-block rounded-[4px] border border-grid px-[13px] py-[7px] font-mono text-[11px] uppercase tracking-[0.06em] text-primary transition-colors hover:border-signal-deep hover:text-signal-deep"
-            >
-              Try the free demo
-            </a>
-            <Link
-              href="/#flow"
-              className="font-mono text-[11px] uppercase tracking-[0.06em] text-secondary underline decoration-grid underline-offset-4 transition-colors hover:text-signal-deep hover:decoration-signal-deep"
-            >
-              Read the flow thesis
-            </Link>
-          </div>
-        </RevealOnScroll>
-      </div>
-    </section>
-  );
-}
-
 export default function UnusualWhalesInteractiveBrokersPage() {
   return (
-    <div className="min-h-screen bg-canvas font-serif text-[19px] leading-[1.62] text-primary">
+    <div className="min-h-screen bg-canvas font-sans text-[16px] leading-[1.55] text-primary">
       <ScrollProgress />
       <a
         href="#main-content"
@@ -113,7 +81,7 @@ export default function UnusualWhalesInteractiveBrokersPage() {
               Brokers account produces fills. This page documents the
               disciplined pipeline between the two: the surfaces Radon ingests,
               the stages a print passes through on its way to an order, and
-              what each side requires. The instrument itself is covered
+              what each side requires. View construction and expression are covered
               separately, in{" "}
               <a
                 href="/interactive-brokers-dark-pool-terminal"
@@ -123,6 +91,7 @@ export default function UnusualWhalesInteractiveBrokersPage() {
               </a>
               .
             </RevealOnScroll>
+            <CopyAgentPromptBar capabilityId="uw-ib" />
           </div>
         </section>
 
@@ -265,16 +234,16 @@ export default function UnusualWhalesInteractiveBrokersPage() {
                   beyond being a customer of both.
                 </p>
                 <p className="mb-[1.05em] text-secondary">
-                  The demo requires neither. It runs the full instrument
-                  against seeded data, with no brokerage connection and no flow
-                  subscription, so the pipeline can be inspected before either
-                  relationship exists.
+                  The demo requires neither. It constructs the view and sizes
+                  the expression against seeded data, with no brokerage
+                  connection and no flow subscription, so both systems can be
+                  inspected before either relationship exists.
                 </p>
               </RevealOnScroll>
 
               <RevealOnScroll>
                 <PlateFrame
-                  figNo="Exhibit 1"
+                  figNo="Figure 1"
                   figTitle="Requirements · what each component supplies"
                   source="Radon"
                   confidence="High"
@@ -385,7 +354,11 @@ export default function UnusualWhalesInteractiveBrokersPage() {
 
         <SectionRule />
 
-        <BottomCta />
+        <ClusterCta
+          body="The demo constructs the view and sizes the expression on seeded data: scanner, news, regime, structures, journal. No subscription to either service required."
+          secondaryHref="/#view"
+          secondaryLabel="Read how the view is built"
+        />
         <EditorialFooter />
       </main>
       <script

@@ -10,7 +10,8 @@ risk UI remains a display, never the enforcement.
 Operator-tunable (read at call time so operators can adjust without restart)
 through ``app_preferences``, which resolves DB row > env var > code default
 and discards any stored value outside the declared hard band:
-  RADON_MAX_ORDER_QTY        max contracts/shares per order   (default 500)
+  RADON_MAX_ORDER_QTY        max contracts per option order   (default 500)
+  RADON_MAX_STOCK_ORDER_QTY  max shares per stock order       (default 10_000)
   RADON_MAX_ORDER_NOTIONAL   max $ per order (qty×price×mult) (default 250_000)
   RADON_MAX_COMBO_LOSS_DOLLARS combo worst-case loss cap     (default 10_000_000)
   RADON_MAX_ORDERS_PER_MIN   max accepted placements per min  (default 10)
@@ -24,6 +25,7 @@ Kelly policy (that stays in the evaluation pipeline).
 
 from __future__ import annotations
 
+import math
 from typing import Any, Optional
 
 try:  # scripts/ on sys.path (subprocess scripts, pytest)
@@ -68,6 +70,23 @@ def workflow_max_orders() -> int:
     return app_preferences.get_int("RADON_WORKFLOW_MAX_ORDERS")
 
 
+def _finite(value: Any) -> Optional[float]:
+    """float(value) when it is a finite number; None otherwise (RC-D4).
+
+    NaN passes every ``>`` cap comparison and an unparseable string used to
+    coerce to 0/None and silently skip the dollar bounds.
+    """
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _is_stk_leg(leg: dict) -> bool:
+    return str(leg.get("sec_type") or leg.get("secType") or "").upper() == "STK"
+
+
 def _combo_risk_per_unit(legs: Any) -> Optional[float]:
     """Worst-case loss of ONE combo unit, in dollars; None when unpriceable.
 
@@ -89,12 +108,17 @@ def _combo_risk_per_unit(legs: Any) -> Optional[float]:
     for leg in legs:
         if not isinstance(leg, dict):
             return None
+        if _is_stk_leg(leg):
+            # RC-D2: a stock leg has no strike to pair, but it must not null
+            # the whole computation — the option legs' worst case still gets
+            # priced (the buy-write's short call used to skip the loss cap).
+            continue
+        strike = _finite(leg.get("strike") or 0)
         try:
-            strike = float(leg.get("strike") or 0)
             ratio = int(leg.get("ratio", 1) or 1)
         except (TypeError, ValueError):
             return None
-        if strike <= 0 or ratio <= 0:
+        if strike is None or strike <= 0 or ratio <= 0:
             return None
         right = str(leg.get("right") or "").upper()[:1]
         side = "short" if str(leg.get("action") or "").upper().startswith("SELL") else "long"
@@ -163,9 +187,28 @@ def order_notional(params: dict) -> Optional[float]:
     quantity, price = _quantity_and_price(params)
     if quantity is None or price is None:
         return None
-    multiplier = 1 if str(params.get("type", "")).lower() == "stock" else _OPTION_MULTIPLIER
+    order_type = str(params.get("type", "")).lower()
+    if order_type == "stock":
+        multiplier: Optional[float] = 1
+    elif order_type == "future":
+        # RC-D1: pricing a 1000-multiplier future with the option's 100
+        # under-counted its notional 10x. No valid multiplier → None here;
+        # check_order_limits refuses the order outright before this point.
+        multiplier = _future_multiplier(params)
+        if multiplier is None:
+            return None
+    else:
+        multiplier = _OPTION_MULTIPLIER
     premium = quantity * price * multiplier
     return premium or None
+
+
+def _future_multiplier(params: dict) -> Optional[float]:
+    """The caller-supplied contract multiplier; None when absent/invalid."""
+    multiplier = _finite(params.get("multiplier"))
+    if multiplier is None or multiplier <= 0:
+        return None
+    return multiplier
 
 
 def combo_max_loss(params: dict) -> Optional[float]:
@@ -189,10 +232,35 @@ def combo_max_loss(params: dict) -> Optional[float]:
 
 def check_order_limits(params: dict) -> Optional[dict[str, Any]]:
     """Return {"code", "message"} on violation, None when within limits."""
-    try:
-        quantity = abs(float(params.get("quantity") or 0))
-    except (TypeError, ValueError):
-        quantity = 0
+    # RC-D4: a supplied-but-unusable number must refuse, never coerce to
+    # 0/None and skip the dollar bounds. Absent/empty optional fields keep
+    # their existing meaning.
+    for field in ("quantity", "limitPrice", "stopPrice"):
+        raw = params.get(field)
+        if raw is None or raw == "":
+            continue
+        if _finite(raw) is None:
+            return {
+                "code": "ORDER_INPUT_UNPARSEABLE",
+                "message": (
+                    f"{field} {raw!r} is not a finite number, so the order "
+                    "cannot be bounded — refused"
+                ),
+            }
+
+    quantity = abs(_finite(params.get("quantity") or 0) or 0)
+
+    if str(params.get("type", "")).lower() == "future" and _future_multiplier(params) is None:
+        # RC-D1: with no contract multiplier the notional cannot be computed.
+        # Fail closed rather than guess (the option's 100 under-counted a
+        # 1000-multiplier future 10x).
+        return {
+            "code": "ORDER_FUTURE_MULTIPLIER",
+            "message": (
+                "future order carries no valid contract multiplier, so its "
+                "notional cannot be bounded — refused"
+            ),
+        }
 
     is_stock = str(params.get("type", "")).lower() == "stock"
     qty_cap = max_stock_order_qty() if is_stock else max_order_qty()
@@ -244,12 +312,9 @@ def check_order_limits(params: dict) -> Optional[dict[str, Any]]:
                     "code": "ORDER_COMBO_STRIKE",
                     "message": "combo leg is not an object — refused",
                 }
-            if str(leg.get("sec_type") or leg.get("secType") or "").upper() == "STK":
+            if _is_stk_leg(leg):
                 continue
-            try:
-                strike = float(leg.get("strike") or 0)
-            except (TypeError, ValueError):
-                strike = 0.0
+            strike = _finite(leg.get("strike") or 0) or 0.0
             if strike <= 0:
                 return {
                     "code": "ORDER_COMBO_STRIKE",
@@ -284,6 +349,59 @@ def check_order_limits(params: dict) -> Optional[dict[str, Any]]:
     return None
 
 
+def _legs_are_priceable(legs: Any) -> bool:
+    """True when `_combo_risk_per_unit` can price every leg.
+
+    `ib_orders.py:fetch_open_orders` skips combo legs it cannot qualify, so a
+    snapshot BAG may carry legs with no strike. `check_order_limits` fails
+    CLOSED on those (ORDER_COMBO_STRIKE), which is right for a placement the
+    caller composed and wrong for a resize of an order IB already holds.
+    """
+    if not isinstance(legs, list) or not 2 <= len(legs) <= _MAX_COMBO_LEGS:
+        return False
+    for leg in legs:
+        if not isinstance(leg, dict):
+            return False
+        if _is_stk_leg(leg):
+            continue
+        if (_finite(leg.get("strike") or 0) or 0.0) <= 0:
+            return False
+    return True
+
+
+def _working_order_shape(working_order: dict) -> tuple[str, Optional[list]]:
+    """(order type, combo legs) of a working order, from either shape.
+
+    R-431: the Turso `open_orders` payload nests the contract —
+    `contract.secType` and `contract.comboLegs` (``ib_orders.py``) — while a
+    caller-composed replacement carries `secType`/`legs` flat. Reading only
+    the flat keys resolved EVERY snapshot row to "option", so a working stock
+    order was bounded by the contracts cap (RADON_MAX_ORDER_QTY, hard max
+    2500): selling 10,000 shares was refused, and raising the contracts cap to
+    its ceiling could not unblock it. A BAG likewise never reached the
+    max-loss branch R-145 added.
+
+    A BAG whose legs cannot be priced stays "option" — the quantity and
+    notional bounds it already had, never a new fail-closed refusal of a
+    legitimate resize (the same trade-off ``ib_order_manage.py`` documents).
+    """
+    contract = working_order.get("contract")
+    contract = contract if isinstance(contract, dict) else {}
+
+    sec_type = str(contract.get("secType") or working_order.get("secType") or "").upper()
+
+    legs = working_order.get("legs")
+    if not isinstance(legs, list):
+        combo_legs = contract.get("comboLegs")
+        legs = combo_legs if isinstance(combo_legs, list) else None
+
+    if sec_type == "BAG" or (legs is not None and len(legs) >= 2):
+        return ("combo" if _legs_are_priceable(legs) else "option"), legs
+    if sec_type == "STK":
+        return "stock", None
+    return "option", None
+
+
 def check_modify_limits(
     working_order: Optional[dict],
     *,
@@ -301,27 +419,80 @@ def check_modify_limits(
     lots was accepted with its assignment exposure never computed. REL-005's
     contract named modify as a chokepoint for max qty AND max notional.
 
-    An unreadable working order is NOT a bypass: the contract-quantity cap
-    still applies, exactly as before.
+    An unreadable working order is NOT a bypass: a quantity modify keeps the
+    contract-quantity cap (plus the notional cap when a price is supplied),
+    and a price-only modify is refused outright — with no snapshot there is
+    nothing to bound the new price against.
+
+    R-431: the shape is read through `_working_order_shape`, because the Turso
+    `open_orders` payload nests it one level down and reading the top level
+    typed every real working order as an option.
     """
     if not isinstance(working_order, dict):
-        return check_quantity_limit(new_quantity) if new_quantity is not None else None
+        if new_quantity is not None:
+            if new_price is not None:
+                # Bound notional with the only shape available: the stricter
+                # option convention, same as check_quantity_limit.
+                return check_order_limits(
+                    {"type": "option", "quantity": new_quantity, "limitPrice": new_price}
+                )
+            return check_quantity_limit(new_quantity)
+        if new_price is not None:
+            # A price-only modify with no readable snapshot used to skip
+            # every limit and forward the price unchecked. Fail closed.
+            return {
+                "code": "ORDER_MODIFY_UNREADABLE",
+                "message": (
+                    "working order is unreadable, so a price-only modify "
+                    "cannot be bounded — refused"
+                ),
+            }
+        return None
 
-    sec_type = str(working_order.get("secType") or "").upper()
-    legs = working_order.get("legs")
-    if sec_type == "BAG" or isinstance(legs, list) and len(legs) >= 2:
-        order_type = "combo"
-    elif sec_type == "STK":
-        order_type = "stock"
-    else:
-        order_type = "option"
+    order_type, legs = _working_order_shape(working_order)
 
     quantity = new_quantity
     if quantity is None:
         quantity = working_order.get("quantity") or working_order.get("totalQuantity")
     price = new_price
     if price is None:
-        price = working_order.get("limitPrice") or working_order.get("lmtPrice") or 0
+        # REL-211 (R-580): a working STP/MKT-style order carries no limit
+        # price; auxPrice/stopPrice still bounds its notional.
+        price = (
+            working_order.get("limitPrice")
+            or working_order.get("lmtPrice")
+            or working_order.get("auxPrice")
+            or working_order.get("stopPrice")
+            or 0
+        )
+
+    if order_type != "stock" and not price and not (order_type == "combo" and legs is not None):
+        # R-632: the refusal below was keyed on `stock`, so an unpriceable
+        # OPT fell through with `limitPrice: 0`, never had its notional
+        # computed, and was bounded solely by the 500-contract band. A combo
+        # is exempt because `combo_max_loss()` derives its exposure from the
+        # legs, not from a premium.
+        return {
+            "code": "ORDER_PRICE_UNRESOLVED",
+            "message": (
+                f"{order_type} modify has no resolvable price (limit/aux/stop), "
+                "so its notional cannot be bounded — refused"
+            ),
+        }
+
+    if order_type == "stock" and not price:
+        # REL-211 (R-580): with no resolvable price the notional cap cannot
+        # be computed, and a quantity-only modify was bounded solely by the
+        # 50,000-share band (50,000 x a $500 stock = $25M past the $250k
+        # cap). Fail closed, same convention as the unpriceable-combo-strike
+        # refusal above.
+        return {
+            "code": "ORDER_STOCK_PRICE_UNRESOLVED",
+            "message": (
+                "stock modify has no resolvable price (limit/aux/stop), so "
+                "its notional cannot be bounded — refused"
+            ),
+        }
 
     params: dict[str, Any] = {
         "type": order_type,
@@ -329,7 +500,7 @@ def check_modify_limits(
         "limitPrice": price,
         "action": action or working_order.get("action"),
     }
-    if order_type == "combo" and isinstance(legs, list):
+    if order_type == "combo" and legs is not None:
         params["legs"] = legs
     return check_order_limits(params)
 

@@ -8,6 +8,9 @@ import type { MarketEarPost } from "@/components/DashboardNewsFeed";
 import { formatAbsolute, formatRelative, formatTime } from "@/lib/newsfeedTime";
 import { useDialogChrome } from "@/lib/useDialogChrome";
 import { useBookmarks } from "@/lib/useBookmarks";
+import styles from "./NewsfeedResearchMedia.module.css";
+import NewsfeedShare from "./NewsfeedShare";
+import NewsfeedPostContent from "./NewsfeedPostContent";
 import StarToggle from "@/components/StarToggle";
 
 export type NewsfeedLightboxFocus = {
@@ -51,6 +54,7 @@ export default function NewsfeedLightbox({
   canNavigatePrev = false,
   canNavigateNext = false,
 }: NewsfeedLightboxProps) {
+  const [selectedImage, setSelectedImage] = useState<{ focus: NewsfeedLightboxFocus; url: string } | null>(null);
   const touchStartX = useRef<number | null>(null);
   const touchStartY = useRef<number | null>(null);
   const { isBookmarked, toggleBookmark } = useBookmarks();
@@ -101,6 +105,7 @@ export default function NewsfeedLightbox({
           source: post.href,
           timestamp: post.isoTimestamp,
           image: post.images?.[0] ?? focus.imageUrl,
+          thumbnail: post.images?.[0] ?? focus.imageUrl,
         },
       });
     } catch {
@@ -112,7 +117,9 @@ export default function NewsfeedLightbox({
 
   if (!focus || !portalTarget) return null;
 
-  const { post, imageUrl } = focus;
+  const { post } = focus;
+  const imageUrl = selectedImage?.focus === focus ? selectedImage.url : focus.imageUrl;
+  const figure = post.source?.figures.find(item => item.url === imageUrl);
   const tags = Array.isArray(post.tags) ? post.tags : [];
   const relative = formatRelative(post.isoTimestamp);
   const time = formatTime(post.isoTimestamp);
@@ -186,7 +193,7 @@ export default function NewsfeedLightbox({
           onTouchStart={handleTouchStart}
           onTouchEnd={handleTouchEnd}
         >
-          <div className="newsfeed-lightbox__media">
+          <div className={`newsfeed-lightbox__media ${post.source ? styles.media : ""}`}>
             <Image
               src={imageUrl}
               alt={post.title}
@@ -194,8 +201,18 @@ export default function NewsfeedLightbox({
               height={900}
               sizes="(max-width: 900px) 100vw, 60vw"
               className="newsfeed-lightbox__image"
+              unoptimized={post.source?.kind === "dropbox"}
               priority
             />
+            {figure ? <p className={styles.caption}>{post.source?.publisher} · p. {figure.page} · {figure.caption}</p> : null}
+            {post.source && post.source.figures.length > 1 ? <div className={styles.thumbnails} aria-label="Article charts">
+              {post.source.figures.map((item, index) => <button type="button" key={item.url}
+                aria-label={`View chart ${index + 1}: ${item.caption}`} aria-pressed={imageUrl === item.url}
+                onClick={() => setSelectedImage({ focus, url: item.url })}>
+                <Image src={item.url} alt={item.caption} width={160} height={100} unoptimized />
+                <span>{index + 1} · p. {item.page}</span>
+              </button>)}
+            </div> : null}
           </div>
 
           <article className="newsfeed-lightbox__copy">
@@ -207,9 +224,7 @@ export default function NewsfeedLightbox({
               <h2 className="newsfeed-lightbox__title">{post.title}</h2>
             </header>
 
-            {post.content ? (
-              <p className="newsfeed-lightbox__body">{post.content}</p>
-            ) : null}
+            <NewsfeedPostContent post={post} className="newsfeed-lightbox__body" />
 
             {tags.length > 0 ? (
               <div className="newsfeed-lightbox__tags">
@@ -229,7 +244,7 @@ export default function NewsfeedLightbox({
                 rel="noopener noreferrer"
               >
                 <LinkIcon size={12} />
-                <span>Open original</span>
+                <span>{post.source ? "Source PDF" : "Open original"}</span>
               </a>
               <StarToggle
                 active={isBookmarked(post.id)}
@@ -241,6 +256,7 @@ export default function NewsfeedLightbox({
                 {absolute}
               </span>
             </footer>
+            <NewsfeedShare key={post.id} post={post} imageUrl={imageUrl} />
             {onNavigate && (canNavigatePrev || canNavigateNext) ? (
               <p className="newsfeed-lightbox__hint" aria-hidden>
                 ← / → to cycle posts · Esc to close

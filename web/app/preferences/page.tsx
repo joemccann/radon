@@ -1,7 +1,7 @@
-import WorkspaceShell from "@/components/WorkspaceShell";
+import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
 export default function PreferencesPage() {
-  return <WorkspaceShell section="preferences" />;
+  redirect("/profile?tab=preferences");
 }

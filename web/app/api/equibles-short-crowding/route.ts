@@ -58,6 +58,8 @@ function isDegraded(data: Record<string, unknown>): boolean {
   return data.missing === true || !Array.isArray(data.entries) || data.entries.length === 0;
 }
 
+export const radonCapability = "read";
+
 export async function GET(): Promise<Response> {
   const requestId = getRequestId();
   const result = await dbFirstRead({

@@ -155,7 +155,10 @@ class TestExpiryEdgeCases(unittest.TestCase):
     expiries, 0-qty broker rows, and the missing_in_ib branch."""
 
     ET = ZoneInfo("America/New_York")
-    TODAY = date.today()
+    # Pinned weekday (Friday). date.today() at class-definition time made the
+    # 14:00 ET "during session" case land on a weekend whenever the suite ran
+    # Sat/Sun, which flips the moment the cutoff becomes market-aware.
+    TODAY = date(2026, 9, 4)
     TODAY_IB = TODAY.strftime("%Y%m%d")
     TODAY_SNAPSHOT = TODAY.strftime("%Y-%m-%d")
 
@@ -340,6 +343,50 @@ class TestMainExitAndHealth(unittest.TestCase):
         self.assertIn("quantity_mismatch_count", recorded[0][1])
         self.assertEqual(recorded[0][1]["quantity_mismatch_count"], 1)
 
+    def test_ib_unreachable_health_detail_has_message(self):
+        recorded = []
+        with patch.object(ib_reconcile, "connect_ib", return_value=None), patch.object(
+            ib_reconcile, "_record_health", side_effect=lambda s, d: recorded.append((s, d))
+        ):
+            with self.assertRaises(SystemExit):
+                ib_reconcile.main()
+        self.assertIn("unreachable", recorded[0][1]["message"])
+
+    def test_attention_health_detail_has_message(self):
+        client = MagicMock()
+        recorded = []
+        ib_positions = [_ib_opt("AAOI", 5, 10.0, "C", LIVE_EXPIRY_IB)]
+        portfolio = {
+            "positions": [
+                _local_position("AAOI", 3, "LONG", 10.0, "Call", LIVE_EXPIRY_SNAPSHOT)
+            ]
+        }
+        with patch.object(ib_reconcile, "connect_ib", return_value=client), patch.object(
+            ib_reconcile, "load_trade_log", return_value={"trades": []}
+        ), patch.object(
+            ib_reconcile, "load_portfolio_snapshot", return_value=portfolio
+        ), patch.object(
+            ib_reconcile, "fetch_ib_executions", return_value=[]
+        ), patch.object(
+            ib_reconcile, "fetch_ib_positions", return_value=ib_positions
+        ), patch.object(
+            ib_reconcile, "save_reconciliation_report"
+        ), patch.object(
+            ib_reconcile, "_record_health", side_effect=lambda s, d: recorded.append((s, d))
+        ):
+            ib_reconcile.main()
+        self.assertIn("quantity mismatch", recorded[0][1]["message"])
+
+    def test_drift_message_counts_new_trades(self):
+        """needs_attention flips on new_trades alone; the digest line must say so."""
+        detail = {
+            "new_trades_count": 4,
+            "quantity_mismatch_count": 0,
+            "positions_missing_locally_count": 0,
+            "positions_closed_count": 0,
+        }
+        self.assertIn("4 new trade(s)", ib_reconcile._drift_message(detail))
+
 
 class TestPositionReconcileHandler(unittest.TestCase):
     def _make_handler(self, ib_positions, portfolio, connect_ok=True):
@@ -374,6 +421,23 @@ class TestPositionReconcileHandler(unittest.TestCase):
         self.assertEqual(kwargs["error"]["quantity_mismatch_count"], 1)
         client.disconnect.assert_called_once()
 
+    def test_error_health_blob_carries_operator_message(self):
+        handler, _ = self._make_handler(
+            [_ib_opt("AAOI", 5, 10.0, "C", LIVE_EXPIRY_IB)],
+            {"positions": [_local_position("AAOI", 3, "LONG", 10.0, "Call", LIVE_EXPIRY_SNAPSHOT)]},
+        )
+        handler.execute()
+        message = handler.record_cycle_health.call_args[1]["error"]["message"]
+        self.assertIn("quantity mismatch", message)
+
+    def test_clean_run_writes_no_error_blob(self):
+        handler, _ = self._make_handler(
+            [_ib_opt("CRCL", 40, 110.0, "C", LIVE_EXPIRY_IB)],
+            {"positions": [_local_position("CRCL", 40, "LONG", 110.0, "Call", LIVE_EXPIRY_SNAPSHOT)]},
+        )
+        handler.execute()
+        self.assertIsNone(handler.record_cycle_health.call_args[1]["error"])
+
     def test_ok_heartbeat_when_clean(self):
         handler, client = self._make_handler(
             [_ib_opt("CRCL", 40, 110.0, "C", LIVE_EXPIRY_IB)],
@@ -399,3 +463,47 @@ class TestPositionReconcileHandler(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTheDaemonDoesNotClaimItCheckedForNewTrades:
+    """R-626 (P3): the handler calls `generate_reconciliation_report([], ...)`,
+    so `new_trades_count` is structurally always 0 — yet the shared message
+    printed '0 new trade(s)' into the digest line and into `result['error']`.
+    An operator reads that as "the daemon looked and found none"."""
+
+    def test_the_handler_message_omits_the_new_trades_clause(self):
+        import ib_reconcile
+
+        detail = {
+            "new_trades_count": 0,
+            "quantity_mismatch_count": 2,
+            "positions_missing_locally_count": 1,
+            "positions_closed_count": 0,
+        }
+        assert "new trade" not in ib_reconcile._drift_message(
+            detail, include_new_trades=False
+        )
+        assert "2 quantity mismatch(es)" in ib_reconcile._drift_message(
+            detail, include_new_trades=False
+        )
+
+    def test_the_full_reconcile_path_still_reports_new_trades(self):
+        import ib_reconcile
+
+        detail = {
+            "new_trades_count": 3,
+            "quantity_mismatch_count": 0,
+            "positions_missing_locally_count": 0,
+            "positions_closed_count": 0,
+        }
+        assert "3 new trade(s)" in ib_reconcile._drift_message(detail)
+
+    def test_the_handler_call_site_passes_the_flag(self):
+        src = (
+            Path(__file__).resolve().parents[1]
+            / "monitor_daemon" / "handlers" / "position_reconcile.py"
+        ).read_text()
+        body = "\n".join(
+            l for l in src.splitlines() if not l.lstrip().startswith("#")
+        )
+        assert "include_new_trades=False" in body

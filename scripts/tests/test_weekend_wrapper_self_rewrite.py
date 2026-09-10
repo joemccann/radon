@@ -50,10 +50,44 @@ LOOPS = {
         "testing-weekend",
         "com.radon.testing-daily.plist",
     ),
+    "ci-performance": (
+        "ci_performance_nightly.sh",
+        "ci-performance",
+        "com.radon.ci-performance-daily.plist",
+    ),
+    "documentation": (
+        "documentation_nightly.sh",
+        "documentation-nightly",
+        "com.radon.documentation-daily.plist",
+    ),
+    "security": (
+        "security_nightly.sh",
+        "security-nightly",
+        "com.radon.security-daily.plist",
+    ),
 }
 LOOP_IDS = sorted(LOOPS)
 
 COMMENT_MARK = "<<<COMMENT>>>"
+
+
+def _curl_log_stub(log: Path) -> str:
+    return (
+        "#!/bin/bash\n"
+        f'printf "%s\\n" "$*" >> "{log}"\n'
+        "i=1\n"
+        'while [ "$i" -le "$#" ]; do\n'
+        '  eval "arg=\\${$i}"\n'
+        '  if [ "$arg" = "--config" ] || [ "$arg" = "-K" ]; then\n'
+        "    i=$((i + 1))\n"
+        '    eval "cfg=\\${$i}"\n'
+        f'    if [ "$cfg" = "-" ]; then cat >> "{log}"\n'
+        f'    elif [ -f "$cfg" ]; then cat "$cfg" >> "{log}"; fi\n'
+        "  fi\n"
+        "  i=$((i + 1))\n"
+        "done\n"
+        "exit 0\n"
+    )
 
 
 def _executable(path: Path, content: str) -> None:
@@ -84,9 +118,10 @@ def _build(
     wrapper.chmod(wrapper.stat().st_mode | stat.S_IXUSR)
     if marker:
         (clone / ".radon-weekend-runner").touch()
-    # notify_phase shells `python3 $REPO/scripts/weekend_notify.py`; python3
-    # is stubbed, but the file must exist for the call to look real.
-    (clone / "scripts" / "weekend_notify.py").write_text("# stub\n", encoding="utf-8")
+        # REL-180 (R-504): every wrapper requires its OWN loop marker as well.
+        for loop_marker in (".radon-security-runner", ".radon-reliability-runner", ".radon-testing-runner",
+                            ".radon-ci-performance-runner", ".radon-documentation-runner"):
+            (clone / loop_marker).touch()
 
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -95,6 +130,16 @@ def _build(
     git_log = tmp_path / "git.log"
     agent_log = tmp_path / "agent.log"
     attack_sh = tmp_path / "attack.sh"
+
+    (clone / "scripts" / "weekend_notify.py").write_text("# unused\n", encoding="utf-8")
+    curl_stub = bin_dir / "curl"
+    (tmp_path / ".env").write_text(
+        "PUSHOVER_USER=test-user\nPUSHOVER_TOKEN=test-token\n", encoding="utf-8"
+    )
+    wrapper.write_text(
+        wrapper.read_text(encoding="utf-8").replace("/usr/bin/curl", str(curl_stub)),
+        encoding="utf-8",
+    )
 
     # The rewriter. `> "$f"` truncates in place: same inode, which is the only
     # writer shape that can strand a running interpreter at a stale offset.
@@ -127,25 +172,56 @@ def _build(
         'case " $* " in\n'
         '  *" reset --hard "*)\n'
         '    if [ "${STUB_ATTACK_ON:-off}" = "git" ]; then "%s"; fi ;;\n'
+        # REL-188: the wrapper calls a phase OK only on commit evidence, so the
+        # stub reports a fresh HEAD and a current committer date.
+        '  *" rev-parse HEAD "*) date +%%s%%N; exit 0 ;;\n'
+        '  *"--format=%%ct"*) date +%%s; exit 0 ;;\n'
         "esac\n"
         "exit 0\n" % attack_sh,
     )
 
+    # The security wrapper (operator policy 2026-08-31) keys OK on the skill's
+    # phase-completion marker, not on exit 0 alone, so its stub agent prints
+    # the marker the way a phase that actually finished would. The other
+    # loops' wrappers do not grep for it and the extra line is inert there.
+    complete_line = ""
+    if loop == "security":
+        src = (REPO / "scripts" / script).read_text(encoding="utf-8")
+        marker = re.search(r'PHASE_COMPLETE_MARKER="([^"]+)"', src).group(1)
+        complete_line = f"echo '{marker} stub run_id=stub'\n"
+    # The deliver phase (2026-09-02) keys OK on the skill's verdict line the
+    # same way; every loop's wrapper greps it, so the stub prints it whenever
+    # it is invoked for deliver.
+    deliver_line = f"case \" $* \" in *\" deliver\"*) echo 'NIGHTLY DELIVER READY: loop={loop} prs=0' ;; esac\n"
     _executable(
         bin_dir / "claude",
         "#!/bin/bash\n"
         f'echo "claude $*" >> "{agent_log}"\n'
-        'if [ "${STUB_ATTACK_ON:-off}" = "agent" ]; then "%s"; fi\n'
+        f'if [ "${{STUB_ATTACK_ON:-off}}" = "agent" ]; then "{attack_sh}"; fi\n'
         'if [ "${STUB_CLAUDE_SLEEP:-0}" != "0" ]; then sleep "$STUB_CLAUDE_SLEEP"; fi\n'
         "echo 'stub agent output'\n"
-        'exit "${STUB_CLAUDE_RC:-0}"\n' % attack_sh,
+        + deliver_line
+        + complete_line
+        + 'exit "${STUB_CLAUDE_RC:-0}"\n',
     )
 
+    # REL-137 gave the real invocation `-k <secs>` so a claude blocked on a
+    # hung child cannot make the cap advisory. The stub has to consume the
+    # option pair as well as the duration, or it execs the duration.
     _executable(
         bin_dir / "timeout",
         "#!/bin/bash\n"
-        "shift\n"
-        'if [ "${STUB_TIMEOUT_124:-0}" = "1" ]; then exit 124; fi\n'
+        'while [ $# -gt 0 ]; do\n'
+        '  case "$1" in\n'
+        '    -k|--kill-after) shift 2 ;;\n'
+        '    --foreground|--preserve-status) shift ;;\n'
+        '    *) shift; break ;;\n'
+        '  esac\n'
+        'done\n'
+        # Only the AGENT invocation simulates the cap. Since REL-137 the
+        # dead-man `gh` calls also run under `timeout` (R-409), and failing
+        # those left the run with no comment to assert on at all.
+        'if [ "${STUB_TIMEOUT_124:-0}" = "1" ] && [ "${1##*/}" = "claude" ]; then exit 124; fi\n'
         'exec "$@"\n',
     )
 
@@ -171,6 +247,10 @@ def _build(
         bin_dir / "python3",
         "#!/bin/bash\n" f'echo "notify $*" >> "{push_log}"\n' "exit 0\n",
     )
+    _executable(
+        curl_stub,
+        _curl_log_stub(push_log),
+    )
 
     env = {
         # launchd hands the job a minimal environment; mirror it.
@@ -184,6 +264,11 @@ def _build(
         "STUB_CLAUDE_RC": str(agent_rc),
         "STUB_CLAUDE_SLEEP": str(agent_sleep),
         "STUB_TIMEOUT_124": "1" if timeout_124 else "0",
+        # 2026-09-06: this suite is about the wrapper being rewritten under a
+        # live run, and it stubs `claude` to exercise that. Pin a claude rung
+        # so the provider ladder is not what decides the outcome; the ladder
+        # itself is covered by test_provider_failover.py.
+        "RADON_WEEKEND_PROVIDER_LADDER": "claude:claude-fable-5[1m]",
     }
     env.update(extra_env or {})
 
@@ -223,9 +308,14 @@ def _comments(cfg: dict) -> list[str]:
 
 
 def _pages(cfg: dict) -> int:
+    """Pushover attempts via the wrapper's /usr/bin/curl (rewired in the
+    test copy to a logging stub)."""
     if not cfg["push_log"].exists():
         return 0
-    return len([ln for ln in cfg["push_log"].read_text(encoding="utf-8").splitlines() if ln.strip()])
+    return len([
+        ln for ln in cfg["push_log"].read_text(encoding="utf-8").splitlines()
+        if ln.strip() and "pushover.net" in ln
+    ])
 
 
 def _why(result: subprocess.CompletedProcess, cfg: dict) -> str:
@@ -254,7 +344,8 @@ def test_a_mid_run_rewrite_cannot_change_the_runs_outcome(
     comments = _comments(cfg)
     assert len(comments) == 1, _why(result, cfg)
     assert "**audit**" in comments[0], comments
-    assert "FAILED (exit 7)" in comments[0], comments
+    assert "**FAILED (exit 7)**" in comments[0], comments
+    assert "**Issue discovered**" not in comments[0], comments
     assert "CRASHED" not in comments[0], "a finished agent is not a wrapper crash"
     assert _pages(cfg) == 1, "exactly one Pushover per phase"
 
@@ -268,7 +359,7 @@ def test_the_agent_exit_code_survives_the_rewrite(
     result = _run(cfg, "remediate")
 
     assert result.returncode == agent_rc, _why(result, cfg)
-    assert "**remediate**" in _comments(cfg)[-1]
+    assert "remediate" in _comments(cfg)[-1], _comments(cfg)
 
 
 @pytest.mark.parametrize("loop", LOOP_IDS)
@@ -288,7 +379,9 @@ def test_a_cycle_still_reports_both_phases(tmp_path: Path, loop: str) -> None:
 
     assert result.returncode == 0, _why(result, cfg)
     bodies = "\n".join(_comments(cfg))
-    assert "**audit**" in bodies and "**remediate**" in bodies, bodies
+    assert bodies.count("**audit**") >= 1 and bodies.count("**remediate**") >= 1, bodies
+    assert bodies.count("**deliver**") >= 1, bodies
+    assert "audit" in bodies and "remediate" in bodies, bodies
     assert "CRASHED" not in bodies, bodies
 
 
@@ -331,8 +424,12 @@ def test_a_clone_without_the_marker_is_refused_and_reported(tmp_path: Path, loop
     comments = _comments(cfg)
     assert len(comments) == 1, _why(result, cfg)
     assert "REFUSED" in comments[0], comments
-    # Third arg 0: the rolling issue carries it, no 00:00 Pushover.
-    assert _pages(cfg) == 0
+    # This case REQUIRED the page to be suppressed. A clone that lost its
+    # marker makes every daily fire exit 2 in under a second, forever, and the
+    # only signal was a comment on a rolling issue nobody watches — the file
+    # header and SKILL.md both promise the opposite. The half that still
+    # matters (exactly one comment, naming REFUSED) is kept. R-410.
+    assert _pages(cfg) == 1
 
 
 @pytest.mark.parametrize("loop", LOOP_IDS)
@@ -382,6 +479,7 @@ def test_two_instances_in_one_clone_do_not_both_run(tmp_path: Path, loop: str) -
 # --------------------------------------------------------------------------
 ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=\S*$")
 GUARD = '[[ "${1:-}" == "--lock-lib-only" ]] && return 0 2>/dev/null'
+TIMEOUT_SNAP = 'TIMEOUT_BIN="$(command -v timeout || true)"'
 
 
 def _prologue_top_level(src: str) -> list[str]:
@@ -452,7 +550,7 @@ class TestTheRunBodyIsParsedBeforeItRuns:
         # command above `main() {` re-opens the window the wrap closes.
         src = (REPO / "scripts" / LOOPS[loop][0]).read_text(encoding="utf-8")
         for line in _prologue_top_level(src):
-            if line in ("set -Eeuo pipefail", GUARD):
+            if line in ("set -Eeuo pipefail", GUARD, TIMEOUT_SNAP):
                 continue
             assert ASSIGNMENT.match(line) or re.match(r'^[A-Za-z_][A-Za-z0-9_]*="[^`]*"$', line), (
                 f"unexpected top-level statement before main(): {line!r}"
@@ -491,6 +589,29 @@ class TestTheRunnerLockIsTakenOnce:
             if "git clean" in line and not line.strip().startswith("#"):
                 assert "--exclude=.weekend-runner.lock" in line, line
 
+    @pytest.mark.parametrize("loop", LOOP_IDS)
+    def test_hard_reset_cleans_ignored_agent_files_and_keeps_env_cache(self, loop: str) -> None:
+        """-x drops leftover ignored skills/settings; --exclude keeps env/build-cache."""
+        src = (REPO / "scripts" / LOOPS[loop][0]).read_text(encoding="utf-8")
+        cleans = [
+            line for line in src.splitlines()
+            if "git clean" in line and not line.strip().startswith("#")
+        ]
+        assert cleans, f"{loop} wrapper lost git clean"
+        for line in cleans:
+            assert "git clean -fdxq" in line, line
+            for kept in (
+                "--exclude=.env",
+                "--exclude=.env.ib-mode",
+                "--exclude=web/.env",
+                "--exclude=node_modules/",
+                "--exclude=.next/",
+                "--exclude=.deepsec/",
+                "--exclude=logs/",
+            ):
+                assert kept in line, (loop, kept, line)
+            assert "--exclude=.claude" not in line, line
+
 
 class TestTheJobRestoresTheEntryPointBeforeReadingIt:
     """A wrapper left corrupt on disk dies at the top, before the ground_truth
@@ -514,7 +635,7 @@ class TestTheJobRestoresTheEntryPointBeforeReadingIt:
 
     @pytest.mark.parametrize(
         "setup",
-        ["setup_reliability_weekend.sh", "setup_testing_weekend.sh"],
+        ["setup_reliability_weekend.sh", "setup_testing_weekend.sh", "setup_documentation_nightly.sh", "setup_security_nightly.sh"],
     )
     def test_the_setup_script_states_the_deploy_rule(self, setup: str) -> None:
         src = (REPO / "scripts" / setup).read_text(encoding="utf-8")
@@ -525,7 +646,7 @@ class TestTheJobRestoresTheEntryPointBeforeReadingIt:
 
     @pytest.mark.parametrize(
         "setup",
-        ["setup_reliability_weekend.sh", "setup_testing_weekend.sh"],
+        ["setup_reliability_weekend.sh", "setup_testing_weekend.sh", "setup_documentation_nightly.sh", "setup_security_nightly.sh"],
     )
     def test_the_setup_script_refuses_while_a_run_is_in_flight(self, setup: str) -> None:
         src = (REPO / "scripts" / setup).read_text(encoding="utf-8")

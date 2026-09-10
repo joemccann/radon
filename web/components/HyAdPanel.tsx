@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Activity } from "lucide-react";
 import BrushMinimap from "./BrushMinimap";
 import CriHistoryChart, { type ChartSeries } from "./CriHistoryChart";
+import FreshnessRail from "./FreshnessRail";
 import HistoryRangeChips from "./HistoryRangeChips";
 import InfoTooltip from "./InfoTooltip";
 import MetricCell from "./mobile/MetricCell";
@@ -12,6 +13,7 @@ import SpectralLoader from "./SpectralLoader";
 import { RegimeStrip, RegimeStripCell } from "./RegimeStrip";
 import { chartSeriesColor } from "@/lib/chartSystem";
 import { presetRange, type RangePresetSlug } from "@/lib/historyRange";
+import { HY_AD_REFRESH } from "@/lib/refreshSchedule";
 import {
   formatSignedThousands,
   formatThousands,
@@ -141,7 +143,7 @@ export default function HyAdPanel() {
             <InfoTooltip text={INFO_TOOLTIP} />
           </div>
           {clock && (
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: "9px", color: "var(--text-muted)" }}>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--text-muted)" }}>
               {clock}
             </span>
           )}
@@ -200,6 +202,12 @@ export default function HyAdPanel() {
             />
           </RegimeStrip>
         )}
+
+        <FreshnessRail
+          schedule={HY_AD_REFRESH}
+          asOf={data.data_date}
+          testId="hyad-freshness-rail"
+        />
       </div>
 
       <div className="breadth-history-block" data-testid="hyad-chart-section">
@@ -232,7 +240,7 @@ export default function HyAdPanel() {
         <div
           style={{
             fontFamily: "var(--font-mono)",
-            fontSize: "9px",
+            fontSize: "var(--text-meta)",
             color: "var(--text-muted)",
             marginTop: "8px",
           }}

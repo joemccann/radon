@@ -16,14 +16,6 @@ afterEach(() => {
   cleanup();
 });
 
-// d3 charts touch SVG measurement APIs jsdom doesn't ship. Stub the chart
-// child component so we can assert the card's own logic in isolation.
-vi.mock("@/components/CriHistoryChart", () => ({
-  default: ({ history }: { history: unknown[] }) => (
-    <div data-testid="stub-chart">chart with {history.length} rows</div>
-  ),
-}));
-
 describe("LlmTokenIndexCard", () => {
   let originalFetch: typeof fetch;
 
@@ -83,7 +75,9 @@ describe("LlmTokenIndexCard", () => {
     // 5d window: (1.20 - 1.00) / 1.00 = +20.0%
     expect(screen.getByTestId("llm-token-index-window-change").textContent).toContain("+20.0%");
     expect(screen.getByTestId("llm-token-index-chart")).toBeTruthy();
-    expect(screen.getByTestId("stub-chart").textContent).toContain("5 rows");
+    expect(screen.getByRole("img", { name: "Legacy inference price basket, normalized index" })).toBeTruthy();
+    expect(screen.getByTestId("llm-token-index-window-change").style.color).toBe("var(--text-secondary)");
+    expect(screen.getByTestId("llm-token-index-chart").querySelectorAll("polyline")).toHaveLength(1);
   });
 
   it("surfaces an error message when the route fails", async () => {

@@ -10,12 +10,18 @@ import { requireRouteAccess } from "@/lib/routeAccess";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+export const radonCapability = "admin";
+
 export async function POST(): Promise<Response> {
   const access = await requireRouteAccess(undefined, { operatorOnly: true });
   if (!access.ok) return access.response;
   const requestId = getRequestId();
   try {
-    const data = await radonFetch("/ib/reset-backoff", { method: "POST", timeout: 15_000 });
+    const data = await radonFetch("/ib/reset-backoff", {
+      method: "POST",
+      timeout: 15_000,
+      token: access.principal.token,
+    });
     const response = NextResponse.json(data);
     return setNoStoreResponseHeaders(response, requestId);
   } catch (error) {

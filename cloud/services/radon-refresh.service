@@ -18,6 +18,6 @@ User=radon
 WorkingDirectory=/home/radon/radon
 EnvironmentFile=/etc/radon/env
 ExecStart=/home/radon/radon/.venv/bin/python -m scripts.data_refresh
-# data_refresh runs three sequential children with 120s budgets. Preserve
-# that normal path while bounding hung children before the next 15-minute run.
+# data_refresh: cri 180s + vcg/gex 120s each (sum 420s). Preserve that path
+# while bounding hung children before the next 15-minute run (period 900s).
 TimeoutStartSec=480

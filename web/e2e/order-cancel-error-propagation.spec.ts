@@ -1,7 +1,4 @@
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { expect, test } from "@playwright/test";
-
-const MOCK_BACKEND_PORT = 8325;
 
 const PORTFOLIO_MOCK = {
   bankroll: 100_000,
@@ -62,46 +59,6 @@ const ORDERS_MOCK = {
   executed_count: 0,
 };
 
-function respondJson(res: ServerResponse, status: number, body: unknown) {
-  res.statusCode = status;
-  res.setHeader("Content-Type", "application/json");
-  res.end(JSON.stringify(body));
-}
-
-let backendServer: Server | null = null;
-
-test.beforeAll(async () => {
-  backendServer = createServer((req: IncomingMessage, res: ServerResponse) => {
-    if (req.method === "POST" && req.url === "/orders/cancel") {
-      respondJson(res, 502, { detail: "Cancel not confirmed by refreshed IB open orders" });
-      return;
-    }
-
-    if (req.method === "POST" && req.url === "/orders/refresh") {
-      respondJson(res, 200, { status: "ok" });
-      return;
-    }
-
-    respondJson(res, 404, { detail: "Not found" });
-  });
-
-  await new Promise<void>((resolve, reject) => {
-    backendServer?.once("error", reject);
-    backendServer?.listen(MOCK_BACKEND_PORT, "127.0.0.1", () => resolve());
-  });
-});
-
-test.afterAll(async () => {
-  if (!backendServer) return;
-  await new Promise<void>((resolve, reject) => {
-    backendServer?.close((error) => {
-      if (error) reject(error);
-      else resolve();
-    });
-  });
-  backendServer = null;
-});
-
 async function stubOrdersPageApis(page: import("@playwright/test").Page) {
   await page.unrouteAll({ behavior: "ignoreErrors" });
 
@@ -151,8 +108,15 @@ async function stubOrdersPageApis(page: import("@playwright/test").Page) {
 }
 
 test.describe("Orders cancel error propagation", () => {
-  test("preserves FastAPI 502 detail through /api/orders/cancel and surfaces it in the UI", async ({ page }) => {
+  test("surfaces a cancel API 502 detail and retains the unconfirmed working order", async ({ page }) => {
     await stubOrdersPageApis(page);
+    // Real route -> FastAPI status/detail propagation is separately asserted
+    // in tests/api-routes-extended.test.ts. This browser boundary must not
+    // depend on an unauthenticated test token becoming an operator principal.
+    await page.route("**/api/orders/cancel", (route) => route.fulfill({
+      status: 502, contentType: "application/json",
+      body: JSON.stringify({ error: "Cancel not confirmed by refreshed IB open orders" }),
+    }));
     await page.goto("/orders");
 
     const openOrderRow = page.locator("tbody tr").filter({ hasText: "TSLL" });

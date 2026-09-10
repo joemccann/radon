@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
 
 import FreshnessRail from "../components/FreshnessRail";
-import { IV_RANK_REFRESH } from "../lib/refreshSchedule";
+import { IV_RANK_REFRESH, MARGIN_DEBT_REFRESH } from "../lib/refreshSchedule";
 
 afterEach(() => {
   cleanup();
@@ -91,5 +91,27 @@ describe("FreshnessRail", () => {
     // `asOf` that is an ET session date.
     const text = screen.getByTestId("rail").textContent ?? "";
     expect(text).toMatch(/\b(GMT|UTC|[A-Z]{2,5}T)\b/);
+  });
+});
+
+describe("FreshnessRail — release model", () => {
+  it("labels the countdown as a check and the anchor as the latest release", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-26T22:30:00Z"));
+    render(
+      <FreshnessRail
+        schedule={MARGIN_DEBT_REFRESH}
+        asOf="2026-07-31"
+        testId="rail"
+        asOfTestId="rail-asof"
+        model="release"
+      />,
+    );
+    act(() => { vi.advanceTimersByTime(0); });
+    expect(screen.getByTestId("rail").getAttribute("data-state")).toBe("current");
+    expect(screen.getByTestId("rail").textContent).toContain("Latest release");
+    expect(screen.getByTestId("rail").textContent).toContain("Next check");
+    expect(screen.getByTestId("rail").textContent).not.toContain("Awaiting");
+    expect(screen.getByTestId("rail-countdown").textContent).toBe("14h 40m");
   });
 });

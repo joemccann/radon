@@ -58,10 +58,10 @@ export function radonErrorDetailText(detail: RadonErrorDetail): string {
   return typeof detail === "string" ? detail : JSON.stringify(detail);
 }
 
-export async function radonFetch<T = Record<string, unknown>>(
+export async function radonFetchResponse(
   path: string,
   opts?: RequestInit & { timeout?: number; token?: string },
-): Promise<T> {
+): Promise<Response> {
   const { timeout = 30_000, token, ...fetchOpts } = opts ?? {};
   const headers = new Headers(fetchOpts.headers);
   if (token) {
@@ -95,7 +95,14 @@ export async function radonFetch<T = Record<string, unknown>>(
     }
     throw new RadonApiError(res.status, detail);
   }
-  return res.json();
+  return res;
+}
+
+export async function radonFetch<T = Record<string, unknown>>(
+  path: string,
+  opts?: RequestInit & { timeout?: number; token?: string },
+): Promise<T> {
+  return (await radonFetchResponse(path, opts)).json();
 }
 
 export async function radonFetchText(

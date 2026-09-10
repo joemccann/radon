@@ -1,0 +1,16 @@
+[Unit]
+Description=Radon MA RATIO Indicator - daily 22:45 UTC SPX moving-average breadth ratio
+
+[Timer]
+# 22:45 UTC is after the 16:00 ET close year-round, when the session's member
+# candles have published, and five minutes behind radon-divyield's 22:40 pass
+# so the two SPX constituent sweeps never share a minute. Runs every calendar
+# day: weekend and holiday runs recompute identical rows (idempotent upsert)
+# and act as unchanged-data heartbeats that keep service_health fresh inside
+# the 26h staleness window (the ivrank convention).
+OnCalendar=*-*-* 22:45:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

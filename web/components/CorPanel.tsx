@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Network } from "lucide-react";
 import BrushMinimap from "./BrushMinimap";
 import CriHistoryChart, { type ChartSeries } from "./CriHistoryChart";
+import FreshnessRail from "./FreshnessRail";
 import HistoryRangeChips from "./HistoryRangeChips";
 import InfoTooltip from "./InfoTooltip";
 import MetricCell from "./mobile/MetricCell";
@@ -12,6 +13,7 @@ import SpectralLoader from "./SpectralLoader";
 import { RegimeStrip, RegimeStripCell } from "./RegimeStrip";
 import { chartSeriesColor } from "@/lib/chartSystem";
 import { presetRange, type RangePresetSlug } from "@/lib/historyRange";
+import { COR_REFRESH } from "@/lib/refreshSchedule";
 import {
   buildCorChartRows,
   corRegime,
@@ -130,7 +132,7 @@ export default function CorPanel() {
             <InfoTooltip text={COR_TOOLTIP} />
           </div>
           {lastSync && (
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: "9px", color: "var(--text-muted)" }}>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--text-muted)" }}>
               {new Date(lastSync).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
             </span>
           )}
@@ -203,6 +205,13 @@ export default function CorPanel() {
             />
           </RegimeStrip>
         )}
+
+        <FreshnessRail
+          schedule={COR_REFRESH}
+          asOf={current.date}
+          testId="cor-freshness-rail"
+          model="session"
+        />
       </div>
 
       {/* ── Implied correlation chart ─────────────────────── */}
@@ -251,7 +260,7 @@ export default function CorPanel() {
         <div
           style={{
             fontFamily: "var(--font-mono)",
-            fontSize: "9px",
+            fontSize: "var(--text-meta)",
             color: "var(--text-muted)",
             marginTop: "8px",
           }}

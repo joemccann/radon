@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Building2 } from "lucide-react";
 import type { PriceData, FundamentalsData } from "@/lib/pricesProtocol";
+import AiInfrastructureHandoff from "@/components/AiInfrastructureHandoff";
 import SectionEmptyState from "@/components/SectionEmptyState";
 import { useShortAvailability } from "@/lib/order/hooks/useShortAvailability";
 import { useOfflineStatus } from "@/lib/offline/OfflineStatusContext";
@@ -124,14 +125,15 @@ export default function CompanyTab({ ticker, active, priceData, fundamentals }: 
   const { data: shortData } = useShortAvailability(ticker, active && data != null && !isIndex);
 
   if (loading) {
-    return <div className="tab-loading"><div className="tab-loading-text">Loading company info...</div></div>;
+    return <div><AiInfrastructureHandoff ticker={ticker} /><div className="tab-loading"><div className="tab-loading-text">Loading company info...</div></div></div>;
   }
   if (error) {
-    return <div className="tab-error">{error}</div>;
+    return <div><AiInfrastructureHandoff ticker={ticker} /><div className="tab-error">{error}</div></div>;
   }
   if (!data) {
     return (
       <div className="tab-empty">
+        <AiInfrastructureHandoff ticker={ticker} />
         <SectionEmptyState
           icon={Building2}
           headline={`No data for ${ticker}`}
@@ -220,6 +222,7 @@ export default function CompanyTab({ ticker, active, priceData, fundamentals }: 
 
   return (
     <div className="company-tab">
+      <AiInfrastructureHandoff ticker={ticker} />
       {/* About section */}
       <div className="company-about">
         <div className="company-about-header">

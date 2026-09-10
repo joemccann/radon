@@ -1,0 +1,446 @@
+/* ============================================================
+   Radon artifact stylesheet
+   https://app.radon.run/radon.css
+
+   Bounded class vocabulary for agent-generated Radon artifacts
+   (reports, briefs, proposals, one-off pages). Documented in
+   https://app.radon.run/design.md — use only classes documented
+   there. Pinned by web/tests/design-artifact-contract.test.ts.
+
+   Dark is the default theme. Set data-theme="light" on <html>
+   for light artifacts.
+   ============================================================ */
+
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap");
+
+/* ---- tokens ------------------------------------------------ */
+
+:root {
+  --bg-canvas: #0a0f14;
+  --bg-panel: #0f1519;
+  --bg-panel-raised: #1e252b;
+  --line-grid: #2e3947;
+  --text-primary: #e2e8f0;
+  --text-secondary: #94a3b8;
+  --text-muted: #758192;
+  --signal-core: #05ad98;
+  --signal-strong: #0fcfb5;
+  --signal-deep: #33a090;
+  --warn: #f5a623;
+  --fault: #e85d6c;
+  --dislocation: #e55fb5;
+  --extreme: #9e80f6;
+  --neutral: #94a3b8;
+  --positive: #05ad98;
+  --negative: #e85d6c;
+
+  --font-ui: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+[data-theme="light"] {
+  --bg-canvas: #ffffff;
+  --bg-panel: #ffffff;
+  --bg-panel-raised: #f1f5f9;
+  --line-grid: #bbbfbf;
+  --text-primary: #000000;
+  --text-secondary: #636363;
+  --text-muted: #878787;
+  --signal-core: #05ad98;
+  --signal-strong: #048a7a;
+  --signal-deep: #037066;
+  --warn: #b45309;
+  --fault: #d4183d;
+  --dislocation: #c026a0;
+  --extreme: #7c3aed;
+  --neutral: #475569;
+  --positive: #048a7a;
+  --negative: #d4183d;
+}
+
+/* ---- page -------------------------------------------------- */
+
+* {
+  box-sizing: border-box;
+}
+
+.rd-page {
+  margin: 0 auto;
+  max-width: 1120px;
+  padding: 48px 32px 64px;
+  background: var(--bg-canvas);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+body:has(> .rd-page) {
+  margin: 0;
+  background: var(--bg-canvas);
+}
+
+.rd-section {
+  margin-top: 32px;
+}
+
+/* ---- masthead ---------------------------------------------- */
+
+.rd-masthead {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line-grid);
+}
+
+.rd-masthead .rd-meta {
+  margin-left: auto;
+}
+
+.rd-wordmark {
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: 0.01em;
+  color: var(--text-primary);
+}
+
+.rd-wordmark::before {
+  content: "";
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 8px;
+  background: var(--signal-core);
+  border-radius: 2px;
+}
+
+.rd-title {
+  margin: 24px 0 4px;
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+}
+
+.rd-subtitle {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+/* ---- telemetry / labels ------------------------------------ */
+
+.rd-meta {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.rd-label {
+  margin: 0 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+/* ---- grid -------------------------------------------------- */
+
+.rd-grid {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 16px;
+}
+
+.rd-span-4 {
+  grid-column: span 4;
+}
+
+.rd-span-6 {
+  grid-column: span 6;
+}
+
+.rd-span-8 {
+  grid-column: span 8;
+}
+
+.rd-span-12 {
+  grid-column: span 12;
+}
+
+@media (max-width: 720px) {
+  .rd-span-4,
+  .rd-span-6,
+  .rd-span-8 {
+    grid-column: span 12;
+  }
+}
+
+/* ---- panels ------------------------------------------------ */
+
+.rd-panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--line-grid);
+  border-radius: 4px;
+  padding: 16px;
+}
+
+.rd-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  margin: -4px 0 12px;
+}
+
+.rd-panel-title {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.rd-panel-header .rd-meta {
+  margin-left: auto;
+}
+
+.rd-panel-rail {
+  display: flex;
+  gap: 16px;
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line-grid);
+}
+
+/* ---- stat strip -------------------------------------------- */
+
+.rd-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 16px;
+}
+
+.rd-stat {
+  background: var(--bg-panel);
+  border: 1px solid var(--line-grid);
+  border-radius: 4px;
+  padding: 12px 16px;
+}
+
+.rd-stat-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.rd-stat-value {
+  margin-top: 4px;
+  font-size: 26px;
+  font-weight: 500;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+}
+
+.rd-stat-note {
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  color: var(--text-secondary);
+}
+
+/* ---- tables ------------------------------------------------ */
+
+.rd-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.rd-table th {
+  padding: 0 12px;
+  height: 32px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--line-grid);
+}
+
+.rd-table td {
+  padding: 0 12px;
+  height: 32px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line-grid) 50%, transparent);
+}
+
+.rd-table .rd-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- badges ------------------------------------------------ */
+
+.rd-badge {
+  display: inline-block;
+  height: 20px;
+  line-height: 18px;
+  padding: 0 10px;
+  border: 1px solid var(--line-grid);
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.rd-badge.rd-baseline {
+  color: var(--neutral);
+  border-color: color-mix(in srgb, var(--neutral) 40%, transparent);
+}
+
+.rd-badge.rd-emerging {
+  color: var(--signal-deep);
+  border-color: color-mix(in srgb, var(--signal-deep) 40%, transparent);
+}
+
+.rd-badge.rd-clear {
+  color: var(--signal-core);
+  border-color: color-mix(in srgb, var(--signal-core) 40%, transparent);
+}
+
+.rd-badge.rd-strong {
+  color: var(--signal-strong);
+  border-color: color-mix(in srgb, var(--signal-strong) 40%, transparent);
+}
+
+.rd-badge.rd-dislocated {
+  color: var(--dislocation);
+  border-color: color-mix(in srgb, var(--dislocation) 40%, transparent);
+}
+
+.rd-badge.rd-extreme {
+  color: var(--extreme);
+  border-color: color-mix(in srgb, var(--extreme) 40%, transparent);
+}
+
+.rd-badge.rd-warn {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 40%, transparent);
+}
+
+.rd-badge.rd-fault {
+  color: var(--fault);
+  border-color: color-mix(in srgb, var(--fault) 40%, transparent);
+}
+
+/* ---- deltas ------------------------------------------------ */
+
+.rd-delta-up {
+  color: var(--positive);
+  font-variant-numeric: tabular-nums;
+}
+
+.rd-delta-down {
+  color: var(--negative);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- comparison bars --------------------------------------- */
+
+.rd-bar {
+  display: grid;
+  grid-template-columns: 160px 1fr 88px;
+  align-items: center;
+  gap: 12px;
+  min-height: 28px;
+}
+
+.rd-bar-label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.01em;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rd-bar-track {
+  height: 8px;
+  background: color-mix(in srgb, var(--line-grid) 45%, transparent);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.rd-bar-fill {
+  height: 100%;
+  background: var(--signal-core);
+}
+
+.rd-bar-fill.rd-dislocated {
+  background: var(--dislocation);
+}
+
+.rd-bar-fill.rd-warn {
+  background: var(--warn);
+}
+
+.rd-bar-fill.rd-neutral {
+  background: var(--neutral);
+}
+
+.rd-bar-value {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- callout (decision panel) ------------------------------ */
+
+.rd-callout {
+  background: var(--bg-panel);
+  border: 1px solid var(--line-grid);
+  border-left: 2px solid var(--signal-core);
+  border-radius: 4px;
+  padding: 16px;
+}
+
+.rd-callout.rd-warn {
+  border-left-color: var(--warn);
+}
+
+.rd-callout.rd-fault {
+  border-left-color: var(--fault);
+}
+
+/* ---- notes and footer -------------------------------------- */
+
+.rd-note {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.rd-footer {
+  margin-top: 48px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line-grid);
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}

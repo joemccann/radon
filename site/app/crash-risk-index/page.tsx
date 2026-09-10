@@ -6,7 +6,9 @@ import { RevealOnScroll } from "@/components/atoms/RevealOnScroll";
 import { ScrollProgress } from "@/components/atoms/ScrollProgress";
 import { SectionHeading } from "@/components/atoms/SectionHeading";
 import { SectionRule } from "@/components/atoms/SectionRule";
+import { CopyAgentPromptBar } from "@/components/molecules/CopyAgentPromptBar";
 import { PlateFrame } from "@/components/molecules/PlateFrame";
+import { ClusterCta } from "@/components/sections/ClusterCta";
 import { EditorialFooter } from "@/components/sections/EditorialFooter";
 import { EditorialHeader } from "@/components/sections/EditorialHeader";
 import { DEMO_URL } from "@/lib/editorial-content";
@@ -14,6 +16,7 @@ import {
   crashRiskIndexFaqEntries,
   crashRiskIndexMetadata,
   crashRiskIndexStructuredData,
+  CRASH_RISK_INDEX_H1,
   CRASH_RISK_INDEX_NAV_LABEL,
   criComponents,
   criSignalBands,
@@ -76,7 +79,7 @@ function InputRow({ label, children }: { label: string; children: ReactNode }) {
 
 export default function CrashRiskIndexPage() {
   return (
-    <div className="min-h-screen bg-canvas font-serif text-[19px] leading-[1.62] text-primary">
+    <div className="min-h-screen bg-canvas font-sans text-[16px] leading-[1.55] text-primary">
       <ScrollProgress />
       <a
         href="#main-content"
@@ -103,8 +106,7 @@ export default function CrashRiskIndexPage() {
               as="h1"
               className="editorial-display mb-7 max-w-[22ch] text-primary"
             >
-              Forced selling is <em>mechanical</em>. The Crash Risk Index reads
-              the regime that triggers it.
+              {CRASH_RISK_INDEX_H1}
             </RevealOnScroll>
 
             <RevealOnScroll
@@ -118,6 +120,7 @@ export default function CrashRiskIndexPage() {
               average. The inputs, the weights, and the thresholds are
               published here in full.
             </RevealOnScroll>
+            <CopyAgentPromptBar capabilityId="cri" />
           </div>
         </section>
 
@@ -362,9 +365,9 @@ export default function CrashRiskIndexPage() {
               </Link>
               , alongside GEX for dealer positioning, VCG-R for panic in the
               volatility-credit spread, and GRG for gamma rotation. The four
-              are deliberately orthogonal. A tail-risk read that agrees with a
-              widening volatility-credit gap is a different situation from a
-              tail-risk read that stands alone, and the terminal treats them
+              watch different pressures. A tail-risk read that lines up with a
+              widening volatility-credit gap is not the same as a tail-risk
+              read that stands alone, and the terminal treats them
               differently.
             </RevealOnScroll>
           </div>
@@ -450,35 +453,11 @@ export default function CrashRiskIndexPage() {
 
         <SectionRule />
 
-        {/* S7 · Cluster CTA */}
-        <section id="cta" className="px-8 py-[clamp(64px,9vw,128px)]">
-          <div className="mx-auto max-w-[1140px]">
-            <RevealOnScroll className="max-w-[66ch]">
-              <h2 className="editorial-thesis mb-[22px] text-primary">
-                Run it against the live tape.
-              </h2>
-              <p className="mb-[34px] text-secondary">
-                The demo instance runs the same regime models on seeded data.
-                Read the CRI band yourself before you take anyone&apos;s word
-                for it, including ours.
-              </p>
-              <div className="flex flex-wrap items-center gap-x-6 gap-y-4">
-                <a
-                  href={DEMO_URL}
-                  className={`inline-block rounded-[4px] border border-grid px-[22px] py-[13px] font-mono text-[12px] uppercase tracking-[0.06em] text-primary transition-colors hover:border-signal-deep hover:text-signal-deep ${focusRing}`}
-                >
-                  Try the free demo
-                </a>
-                <Link
-                  href="/#regime"
-                  className={`font-mono text-[12px] uppercase tracking-[0.06em] text-secondary underline decoration-grid underline-offset-4 transition-colors hover:text-signal-deep hover:decoration-signal-deep ${focusRing}`}
-                >
-                  See all four regime models
-                </Link>
-              </div>
-            </RevealOnScroll>
-          </div>
-        </section>
+        <ClusterCta
+          body="The demo runs the same regime models on seeded data, then shows how a crash-regime view is expressed. Read the CRI band yourself before you take anyone's word for it, including ours."
+          secondaryHref="/#regime"
+          secondaryLabel="See all four regime models"
+        />
 
         <EditorialFooter />
       </main>

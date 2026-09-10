@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Activity } from "lucide-react";
 import BrushMinimap from "./BrushMinimap";
 import CriHistoryChart, { type ChartSeries } from "./CriHistoryChart";
+import FreshnessRail from "./FreshnessRail";
 import HistoryRangeChips from "./HistoryRangeChips";
 import InfoTooltip from "./InfoTooltip";
 import MetricCell from "./mobile/MetricCell";
@@ -11,6 +12,7 @@ import SectionEmptyState from "./SectionEmptyState";
 import SpectralLoader from "./SpectralLoader";
 import { RegimeStrip, RegimeStripCell } from "./RegimeStrip";
 import { chartSeriesColor } from "@/lib/chartSystem";
+import { STRADDLE_REFRESH } from "@/lib/refreshSchedule";
 import {
   defaultPresetForLength,
   presetRange,
@@ -151,7 +153,7 @@ export default function StraddlePanel({
             <InfoTooltip text={STRADDLE_TOOLTIP} />
           </div>
           {lastSync && (
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: "9px", color: "var(--text-muted)" }}>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--text-muted)" }}>
               {new Date(lastSync).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
             </span>
           )}
@@ -242,6 +244,13 @@ export default function StraddlePanel({
             />
           </RegimeStrip>
         )}
+
+        <FreshnessRail
+          schedule={STRADDLE_REFRESH}
+          asOf={current.date}
+          testId="straddle-freshness-rail"
+          model="session"
+        />
       </div>
 
       {/* ── SPX vs straddle ratio chart ───────────────────── */}
@@ -276,7 +285,7 @@ export default function StraddlePanel({
         <div
           style={{
             fontFamily: "var(--font-mono)",
-            fontSize: "9px",
+            fontSize: "var(--text-meta)",
             color: "var(--text-muted)",
             marginTop: "8px",
           }}

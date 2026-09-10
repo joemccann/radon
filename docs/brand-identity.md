@@ -21,6 +21,7 @@ This document is the enforced reference for all UI and asset work. The full bran
 | `brand/radon-wordmark.svg` | Wordmark with tagline |
 | `brand/radon-lockup-horizontal.svg` | Horizontal lockup (icon + name + sub-label) |
 | `.github/hero.png` | README hero banner |
+| `web/public/design.md` | Public agent-design guidance served at `app.radon.run/design.md`, with `radon.css` and `design-example.html` beside it. External agents build Radon-styled UI from that surface, not from this file. Eval scenarios and rubric: [`design-evals.md`](design-evals.md). |
 
 ---
 

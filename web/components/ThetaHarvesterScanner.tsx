@@ -310,6 +310,11 @@ export function thetaOrderHref(row: ThetaHarvesterResult): string {
   params.set("expiry", formatExpiry(expiry));
   params.set("strikes", "100");
   params.set("legs", `SELL:1x${legStrikeParam(put.strike)}P,SELL:1x${legStrikeParam(call.strike)}C`);
+  // Declare the seeder. The chain's `prefillLabelForSource` used to ATTRIBUTE
+  // an absent `src` to Theta Harvester, which meant a hand-edited or shared
+  // `?legs=` URL was stamped with a scanner verdict no scanner produced. Now
+  // that the fallback is neutral, this link has to name itself. R-414.
+  params.set("src", "theta");
   return `/${encodeURIComponent(ticker)}?${params.toString()}`;
 }
 

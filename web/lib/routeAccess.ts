@@ -21,7 +21,7 @@ export type RoutePrincipal = {
   token?: string;
 };
 
-export type RouteAccessOptions = {
+type RouteAccessCommonOptions = {
   operatorOnly?: boolean;
   /**
    * The route carries its own demo order blockade downstream (paper path or an
@@ -31,9 +31,18 @@ export type RouteAccessOptions = {
    * everywhere else operatorOnly stays fail-closed.
    */
   demoBlockadeRoute?: boolean;
-  rate?: { key: string; limit: number; windowMs: number };
-  durableRateTier?: DemoRateTier;
 };
+
+export type RouteAccessOptions = RouteAccessCommonOptions & (
+  | {
+      rate: { key: string; limit: number; windowMs: number };
+      durableRateTier: DemoRateTier;
+    }
+  | {
+      rate?: never;
+      durableRateTier?: never;
+    }
+);
 
 export type RouteAccessDeps = {
   authFn?: () => Promise<AuthResult>;
@@ -51,8 +60,19 @@ function parseAllowed(raw: string | undefined): Set<string> {
   return new Set((raw ?? "").split(",").map((value) => value.trim()).filter(Boolean));
 }
 
+// One dynamic import per module instance. Two handlers racing separate
+// `import()` calls of a vi.mock'd module hand the loser the real Clerk
+// module, which throws outside a request scope and lands the caller in the
+// NODE_ENV=test seam below as a different user. A rejected import is not
+// cached so the next call retries.
+let clerkServer: Promise<typeof import("@clerk/nextjs/server")> | undefined;
+
 async function defaultAuth(): Promise<AuthResult> {
-  const { auth } = await import("@clerk/nextjs/server");
+  clerkServer ??= import("@clerk/nextjs/server").catch((error) => {
+    clerkServer = undefined;
+    throw error;
+  });
+  const { auth } = await clerkServer;
   return (await auth()) as unknown as AuthResult;
 }
 
@@ -153,10 +173,15 @@ export async function requireRouteAccess(
   // budget above, and backend admission/single-flight controls. Demo traffic
   // additionally consumes its fail-closed cross-instance spend/DOS budget.
   if (options.rate && kind === "demo") {
+    if (!options.durableRateTier) {
+      // TypeScript makes this unreachable for in-repo callers. Keep the
+      // runtime guard for JavaScript or dynamically assembled options so a
+      // new route cannot silently inherit an unrelated quota class.
+      return reject(503, "Rate limit policy unavailable");
+    }
     try {
-      const tier = options.durableRateTier ?? "B";
       const durable = await (deps.durableRateLimitFn ?? demoRateLimit)(
-        tier,
+        options.durableRateTier,
         `route:${options.rate.key}:${userId}`,
       );
       if (!durable.success) {

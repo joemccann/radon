@@ -25,6 +25,9 @@ _IBKR_RELOAD_SECS = 6 * 3600
 
 _OPEN_MIN = 9 * 60 + 30  # 09:30 ET
 _CLOSE_MIN = 16 * 60     # 16:00 ET
+# US equity extended hours (pre-market + AH). Not IB Overnight 20:00-03:50.
+_EXT_OPEN_MIN = 4 * 60    # 04:00 ET
+_EXT_CLOSE_MIN = 20 * 60  # 20:00 ET exclusive
 
 
 def _load_holidays_file() -> dict:
@@ -264,6 +267,37 @@ def is_market_open_et(now: datetime = None) -> bool:
     # IBKR cache (ad-hoc closures / half-days) without a logic fork. With no
     # cache present this is identical to the legacy weekday+holiday+time check.
     return market_state(now)["is_open"]
+
+
+def is_equity_ext_session_et(now: datetime = None) -> bool:
+    """True during US equity regular + extended hours (04:00-20:00 ET).
+
+    outsideRth DAY/GTC stock orders fill in pre-market and after-hours.
+    ``is_market_open_et`` is RTH-only (09:30-16:00), so gating orders-sync
+    and fill-monitor on it leaves EXT fills stuck as WORKING on /orders
+    until the next RTH tick or a manual SYNC NOW (AVGO 2026-09-02 16:24 ET).
+
+    Overnight (20:00-03:50 ET) is a different IB venue — not EXT. IBKR
+    cache ``closed`` days and weekends/holidays stay closed. Early-close
+    weekdays still include AH through 20:00.
+    """
+    try:
+        import zoneinfo
+        et = zoneinfo.ZoneInfo("America/New_York")
+        now_et = (now.astimezone(et) if (now and now.tzinfo) else now) if now else datetime.now(et)
+    except Exception:
+        now_et = now or datetime.now()
+    date_str = now_et.strftime("%Y-%m-%d")
+    minutes = now_et.hour * 60 + now_et.minute
+    weekday = now_et.weekday()
+    ibkr_day = _load_ibkr_calendar().get(date_str)
+    if ibkr_day and ibkr_day.get("status") == "closed":
+        return False
+    if weekday >= 5:
+        return False
+    if date_str in load_holidays(now_et.year) and not ibkr_day:
+        return False
+    return _EXT_OPEN_MIN <= minutes < _EXT_CLOSE_MIN
 
 
 def most_recent_session_date(now: datetime = None) -> str:

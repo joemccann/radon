@@ -130,6 +130,17 @@ def _repo(tmp_path: Path, spec: dict, marker: Path) -> tuple[Path, Path]:
 
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
+    # T-283: record the leap wrapper's retry waits instead of sleeping them —
+    # `assert 1 >= 2` here was one of the 2026-08-29 gate's load reds.
+    _executable(
+        bin_dir / "sleep-recorder",
+        textwrap.dedent(
+            """\
+            #!/bin/bash
+            exit 0
+            """
+        ),
+    )
     py = bin_dir / "python3.13"
     _executable(
         py,
@@ -139,6 +150,23 @@ def _repo(tmp_path: Path, spec: dict, marker: Path) -> tuple[Path, Path]:
             if [ "$1" = "-" ]; then cat >/dev/null; echo yes; exit 0; fi
             if [ "$1" = "-c" ]; then exit 0; fi
             exec /usr/bin/env python3 "$@"
+            """
+        ),
+    )
+    # The ladder reads the clock twice per attempt. A scripted 1s-per-attempt
+    # epoch is the tightest reading an instant 502 can produce, so the exact
+    # POST count below stops being a sample of where the second boundary fell
+    # (CI 2026-09-04, shards scripts-jm/scripts-gh).
+    counter = tmp_path / "clock.n"
+    _executable(
+        bin_dir / "clock",
+        textwrap.dedent(
+            f"""\
+            #!/bin/bash
+            n=$(cat {str(counter)!r} 2>/dev/null || echo 0)
+            n=$((n + 1))
+            echo "$n" > {str(counter)!r}
+            echo $((1700000000 + n))
             """
         ),
     )
@@ -157,6 +185,10 @@ def _run(
         **os.environ,
         "RADON_PYTHON_BIN": str(py),
         spec["port_env"]: str(port),
+        "RADON_LEAP_SLEEP_CMD": str(repo.parent / "bin" / "sleep-recorder"),
+        "RADON_GARCH_SLEEP_CMD": str(repo.parent / "bin" / "sleep-recorder"),
+        "RADON_LEAP_NOW_CMD": str(repo.parent / "bin" / "clock"),
+        "RADON_GARCH_NOW_CMD": str(repo.parent / "bin" / "clock"),
     }
     if timeout_secs is not None:
         env["RADON_SCAN_FASTAPI_TIMEOUT_SECS"] = timeout_secs
@@ -179,16 +211,14 @@ def test_capacity_502_does_not_launch_a_direct_duplicate(tmp_path, name):
     marker = tmp_path / "direct-ran"
     repo, py = _repo(tmp_path, spec, marker)
     port = _free_port()
-    # Leap waits out capacity shed (2026-08-27); keep the wait tiny here so
-    # the no-duplicate assertion stays fast. Garch still fails on first 502.
-    extra = (
-        {
-            "RADON_LEAP_SHED_WAIT_SECS": "2",
-            "RADON_LEAP_REFRESH_RETRY_DELAY_SECS": "1",
-        }
-        if name == "leap"
-        else None
-    )
+    # Leap (2026-08-27) and garch (2026-09-01) wait out capacity shed;
+    # keep the wait tiny here so the no-duplicate assertion stays fast.
+    extra = {
+        "RADON_LEAP_SHED_WAIT_SECS": "2",
+        "RADON_LEAP_REFRESH_RETRY_DELAY_SECS": "1",
+        "RADON_GARCH_SHED_WAIT_SECS": "2",
+        "RADON_GARCH_REFRESH_RETRY_DELAY_SECS": "1",
+    }
 
     with _Stub(port, 502) as stub:
         result = _run(repo, py, spec, port, extra_env=extra)
@@ -199,12 +229,14 @@ def test_capacity_502_does_not_launch_a_direct_duplicate(tmp_path, name):
     )
     assert result.returncode != 0, result.stdout + result.stderr
     combined = (result.stdout + result.stderr).lower()
-    if name == "leap":
-        assert len(stub.calls) >= 2, stub.calls
-        assert "capacity" in combined or "shed" in combined
-    else:
-        assert stub.calls == [spec["path"]], stub.calls
-        assert "indeterminate" in combined
+    # 2s budget at a 1s delay is three POSTs when the POSTs themselves are
+    # free, but the budget is wall clock: under CI load a slow POST eats a
+    # retry slot and only two fit. Pin what the wrapper guarantees — it
+    # re-POSTs the SAME endpoint and never anything else, and it gives up
+    # inside the budget rather than looping — not a count the clock owns.
+    assert set(stub.calls) == {spec["path"]}, stub.calls
+    assert 2 <= len(stub.calls) <= 3, stub.calls
+    assert "capacity" in combined or "shed" in combined
 
 
 @pytest.mark.parametrize("name", sorted(WRAPPERS))

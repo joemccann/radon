@@ -124,6 +124,7 @@ describe("useOrderRisk — branded output contract", () => {
     const { result } = renderHook(() => useOrderRisk(closeInput, emptyPortfolio));
     expect(result.current!.summary.totalLabel).toMatch(/Close Credit/);
     expect(result.current!.summary.estimatedPnl).toBe(1_400); // $1,900 − $500
+    expect(result.current!.summary.estimatedPnlPct).toBe(280);
     expect(result.current!.summary.maxLoss).toBeUndefined();
     expect(result.current!.summary.maxGain).toBeUndefined();
     expect(result.current!.okToSubmit).toBe(true);

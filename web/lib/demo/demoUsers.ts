@@ -54,8 +54,9 @@ function nowIso(now?: Date): string {
 }
 
 /**
- * Insert a trial row. A webhook retry may refresh identity fields, but it must
- * never reset the trial clock or reactivate an expired/revoked user.
+ * Insert a trial row. A webhook retry may refresh identity fields (email),
+ * but it must never reset the trial clock, change demo_role, or reactivate
+ * an expired/revoked user (RC-B11).
  */
 export async function upsertDemoUser(params: {
   db: DemoDbClient;
@@ -74,8 +75,7 @@ export async function upsertDemoUser(params: {
         (user_id, email, demo_role, started_at, expires_at, status, revoked_at, created_at)
       VALUES (?, ?, ?, ?, ?, 'active', NULL, ?)
       ON CONFLICT(user_id) DO UPDATE SET
-        email      = excluded.email,
-        demo_role  = excluded.demo_role
+        email      = excluded.email
     `,
     args: [userId, email, demoRole, startedAt, expiresAt, created],
   });

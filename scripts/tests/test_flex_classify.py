@@ -63,3 +63,14 @@ def test_empty_transfers_section_is_activity():
 def test_garbage_is_reject():
     with pytest.raises(FlexClassifyError, match="unreadable"):
         classify_flex_xml("not xml")
+
+
+def test_empty_trades_section_is_trades():
+    """A session with no fills is still 1422766."""
+    xml = (
+        "<FlexQueryResponse><FlexStatements>"
+        "<FlexStatement>"
+        "<Trades></Trades>"
+        "</FlexStatement></FlexStatements></FlexQueryResponse>"
+    )
+    assert classify_flex_xml(xml) == TRADES

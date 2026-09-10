@@ -854,6 +854,11 @@ recover_pending_transition
             "/usr/local/sbin/radon-deploy-root commit-transition",
             "-n -l -- /usr/local/sbin/radon-deploy-root sync-scheduled-units",
             "/usr/local/sbin/radon-deploy-root sync-scheduled-units",
+            # The edge config publishes on the same verified-release path as
+            # the unit sync; before this, cloud/caddy/Caddyfile was the one
+            # release artifact no deploy shipped.
+            "-n -l -- /usr/local/sbin/radon-deploy-root publish-caddy",
+            "/usr/local/sbin/radon-deploy-root publish-caddy",
         ]
 
     def test_verified_journal_finalizes_when_unit_sync_refuses_stale_head(
@@ -1245,7 +1250,13 @@ if command == "show":
     unit = args[1]
     if data["list_mode"] == "show-fail" and unit == "radon-demo-mirror.service":
         raise SystemExit(9)
-    if "--property=Type" in args:
+    if data["units"].get(unit, {{}}).get("show_fail"):
+        raise SystemExit(9)
+    if "--property=LoadState" in args:
+        print(data["units"].get(unit, {{}}).get("load", "loaded"))
+    elif "--property=FragmentPath" in args:
+        print(data["units"].get(unit, {{}}).get("fragment", ""))
+    elif "--property=Type" in args:
         print(data["units"].get(unit, {{"type": "simple"}})["type"])
     else:
         print(data["units"].get(unit, {{"state": "inactive"}})["state"])
@@ -1264,6 +1275,8 @@ if command == "reset-failed":
 if command in {{"stop", "start", "restart"}}:
     with log_path.open("a", encoding="utf-8") as handle:
         handle.write(command + " " + " ".join(args[1:]) + "\\n")
+    if command == "stop" and any(data["units"].get(unit, {{}}).get("load", "loaded") != "loaded" or data["units"].get(unit, {{}}).get("stop_fail") for unit in args[1:]):
+        raise SystemExit(5)
     for unit in args[1:]:
         if unit not in data["units"]:
             continue
@@ -1308,6 +1321,53 @@ for path in paths:
             "RADON_TEST_REPLICA_PREFIX": str(tmp_path / "replica.db"),
         }
         return env, state_file, systemctl_log, rm_log, active_state
+
+    @pytest.mark.parametrize("suffix", ["timer", "service"])
+    @pytest.mark.parametrize("load,state,fragment,show_fail,expected", [
+        ("not-found", "inactive", "", False, 0),
+        ("not-found", "active", "", False, 69),
+        ("not-found", "failed", "", False, 69),
+        ("not-found", "inactive", "/unexpected/unit", False, 69),
+        ("not-found", "inactive", "", True, 69),
+        ("error", "inactive", "", False, 69),
+        ("", "inactive", "", False, 69),
+    ])
+    def test_stop_recovery_only_tolerates_provably_absent_inventory_units(
+        self, tmp_path, suffix, load, state, fragment, show_fail, expected
+    ):
+        import json
+        env, state_file, systemctl_log, rm_log, active_state = self._root_helper_fixture(tmp_path)
+        # Preserve the durable pre-failure snapshot before a legacy unit vanishes.
+        first = subprocess.run(["bash", str(ROOT_HELPER), "stop-clean"], env=env, capture_output=True, text=True)
+        assert first.returncode == 0, first.stderr
+        inventory = active_state.with_name(active_state.name + ".inventory")
+        missing = "radon-ib-watchdog." + suffix
+        inventory.write_text(inventory.read_text() + missing + "\n")
+        original_inventory = inventory.read_bytes()
+        original_snapshot = active_state.read_bytes()
+        data = json.loads(state_file.read_text())
+        data["units"][missing] = dict(state=state, type="timer" if suffix == "timer" else "simple", load=load, fragment=fragment, show_fail=show_fail)
+        state_file.write_text(json.dumps(data))
+        rm_log.unlink()
+        result = subprocess.run(["bash", str(ROOT_HELPER), "stop-clean"], env=env, capture_output=True, text=True)
+        assert result.returncode == expected, result.stdout + result.stderr
+        assert inventory.read_bytes() == original_inventory
+        assert active_state.read_bytes() == original_snapshot
+        assert rm_log.exists() is (expected == 0)
+        if expected == 0:
+            recovered = subprocess.run(["bash", str(ROOT_HELPER), "recover"], env=env, capture_output=True, text=True)
+            assert recovered.returncode == 0, recovered.stderr
+            assert missing not in [unit for line in systemctl_log.read_text().splitlines() if line.startswith("start ") for unit in line.split()[1:]]
+
+    def test_loaded_stop_failure_remains_fatal(self, tmp_path):
+        import json
+        env, state_file, _, rm_log, _ = self._root_helper_fixture(tmp_path)
+        data = json.loads(state_file.read_text())
+        data["units"]["radon-margin-debt-refresh.timer"]["stop_fail"] = True
+        state_file.write_text(json.dumps(data))
+        result = subprocess.run(["bash", str(ROOT_HELPER), "stop-clean"], env=env, capture_output=True, text=True)
+        assert result.returncode == 5, result.stderr
+        assert not rm_log.exists()
 
     def test_quiesces_dynamic_main_tree_units_and_restores_exact_scheduled_state(
         self, tmp_path: Path
@@ -1711,7 +1771,8 @@ restart_services
         assert "mktemp" in configure
         assert configure.find("visudo -cf") < configure.find("mv -f")
         installer = function_body(setup, "install_deploy_root_helper")
-        assert "install -m 0755 -o root -g root" in installer
+        # Root-staged copy out of the radon-owned checkout, final mode/owner here.
+        assert 'stage_from_checkout "$source" "$staged" 0755 -o root -g root' in installer
         assert "mv -f" in installer
         main = function_body(setup, "main")
         assert main.find("install_deploy_root_helper") < main.find("configure_sudoers")
@@ -1763,6 +1824,7 @@ configure_caddy
                 **os.environ,
                 "RADON_SETUP_SOURCE_ONLY": "1",
                 "RADON_CLOUD_DIR": str(cloud),
+                "RADON_SETUP_STAGE_DIR": str(tmp_path / "stage"),
                 "RADON_CADDY_CONFIG_PATH": str(live),
                 "RADON_CADDY_LOG_DIR": str(tmp_path / "log"),
                 "RADON_CADDY_BIN": str(fake_caddy),
@@ -1816,6 +1878,7 @@ configure_caddy
                 **os.environ,
                 "RADON_SETUP_SOURCE_ONLY": "1",
                 "RADON_CLOUD_DIR": str(cloud),
+                "RADON_SETUP_STAGE_DIR": str(tmp_path / "stage"),
                 "RADON_CADDY_CONFIG_PATH": str(live),
                 "RADON_CADDY_LOG_DIR": str(tmp_path / "log"),
                 "RADON_CADDY_BIN": str(fake_caddy),
@@ -2160,6 +2223,7 @@ deploy_gate() {{
 }}
 build_staged_release() {{ printf 'build\\n' >> {calls!s}; }}
 activate_staged_release() {{ printf 'activate\\n' >> {calls!s}; }}
+prepull_app_images() {{ return 0; }}
 restart_services() {{ printf 'restart\\n' >> {calls!s}; }}
 write_transition_phase() {{ return 0; }}
 record_deploy_marker() {{ return 0; }}
@@ -2219,6 +2283,60 @@ rollback {'a' * 40}
         else:
             assert "rollback complete" in output
 
+    def _run_rollback(self, tmp_path, prev_sha: str, marker_sha: str | None):
+        marker = tmp_path / "green-marker"
+        if marker_sha is not None:
+            marker.write_text(f"{marker_sha}\n", encoding="utf-8")
+        shell = f"""
+set -euo pipefail
+source {DEPLOY!s}
+git() {{ return 0; }}
+recover_pending_transition() {{ return 0; }}
+sleep() {{ return 0; }}
+deploy_gate() {{ return 0; }}
+rollback {prev_sha}
+"""
+        return subprocess.run(
+            ["bash", "-c", shell],
+            env={**os.environ, "RADON_DEPLOY_GREEN_MARKER": str(marker)},
+            capture_output=True,
+            text=True,
+        )
+
+    def test_rollback_without_green_evidence_never_claims_the_gate_passed(
+        self, tmp_path: Path
+    ) -> None:
+        """T-254: CI run 33239774951 rolled f7b5eeb9 back to e4bc7171, whose own
+        ci.yml run (33197706791) concluded `failure` at `pytest (cloud mz)` with
+        the deploy job skipped. The log still asserted the release "passed the
+        deploy gate". A rollback target with no green-gate record must be
+        reported as unverified — and must still complete."""
+        prev = "e" * 40
+        result = self._run_rollback(tmp_path, prev, marker_sha="b" * 40)
+        output = (result.stdout + result.stderr).lower()
+        assert result.returncode == 1, output
+        assert "rollback complete" in output
+        assert "passed the deploy gate" not in output
+        assert "no green deploy-gate record" in output
+
+    def test_rollback_with_no_marker_at_all_is_reported_unverified(
+        self, tmp_path: Path
+    ) -> None:
+        result = self._run_rollback(tmp_path, "e" * 40, marker_sha=None)
+        output = (result.stdout + result.stderr).lower()
+        assert result.returncode == 1, output
+        assert "no green deploy-gate record" in output
+
+    def test_rollback_to_a_recorded_green_release_still_reports_it_passed(
+        self, tmp_path: Path
+    ) -> None:
+        prev = "c" * 40
+        result = self._run_rollback(tmp_path, prev, marker_sha=prev)
+        output = (result.stdout + result.stderr).lower()
+        assert result.returncode == 1, output
+        assert "passed the deploy gate" in output
+        assert "no green deploy-gate record" not in output
+
 
 class TestFrozenArtifacts:
     def test_deploy_and_setup_use_only_immutable_node_installs(self, deploy_text: str) -> None:
@@ -2259,6 +2377,110 @@ class TestFrozenArtifacts:
         assert stop_at < restart.find(
             "activate_staged_release", stop_at
         ) < restart.find("start_services_after_transition")
+
+    def _container_node_image_contract(
+        self, tmp_path: Path, *, matching_dropin: bool = True
+    ) -> tuple[subprocess.CompletedProcess[str], Path]:
+        sha = "d" * 40
+        fake_bin = tmp_path / "bin"
+        fake_bin.mkdir()
+        _write_executable(
+            fake_bin / "git",
+            f"""#!{sys.executable}
+print("{sha}")
+""",
+        )
+        systemctl = tmp_path / "systemctl"
+        _write_executable(
+            systemctl,
+            """#!/bin/bash
+case "$*" in
+  *--property=DropInPaths*) printf '%s\n' "$RADON_NEXT_RUNTIME_DROPIN" ;;
+  *--property=NeedDaemonReload*) printf 'no\n' ;;
+  *--property=Environment*) printf 'RADON_RUNTIME=container PATH=/usr/bin\n' ;;
+  *--property=ExecStart*) printf '{ path=/usr/local/sbin/radon-app-runtime ; argv[]=/usr/local/sbin/radon-app-runtime run %%n ; }\n' ;;
+  *) exit 2 ;;
+esac
+""",
+        )
+        staged = tmp_path / "staged"
+        target_dropin = (
+            staged
+            / "cloud"
+            / "services"
+            / "radon-nextjs.service.d"
+            / "runtime-container.conf"
+        )
+        target_dropin.parent.mkdir(parents=True)
+        source_dropin = (
+            ROOT
+            / "services"
+            / "radon-nextjs.service.d"
+            / "runtime-container.conf"
+        ).read_text(encoding="utf-8")
+        target_dropin.write_text(source_dropin, encoding="utf-8")
+        installed_dropin = tmp_path / "installed-runtime-container.conf"
+        installed_dropin.write_text(
+            source_dropin if matching_dropin else source_dropin + "# drift\n",
+            encoding="utf-8",
+        )
+        (staged / "web" / ".next").mkdir(parents=True)
+        (staged / "web" / ".next" / "BUILD_ID").write_text(
+            "rollback-build\n", encoding="utf-8"
+        )
+        pull_log = tmp_path / "pull.log"
+        shell = f"""
+set -euo pipefail
+source {DEPLOY}
+prepull_app_images() {{ printf '%s\n' "$1" > {pull_log}; }}
+container_node_image_replaces_next_compile {staged}
+"""
+        result = subprocess.run(
+            ["bash", "-c", shell],
+            env={
+                **os.environ,
+                "PATH": f"{fake_bin}:{os.environ['PATH']}",
+                "RADON_DEPLOY_USE_NODE_IMAGE_BUILD": "1",
+                "RADON_NEXT_RUNTIME_DROPIN": str(installed_dropin),
+                "RADON_SYSTEMCTL": str(systemctl),
+            },
+            capture_output=True,
+            text=True,
+        )
+        return result, pull_log
+
+    def test_exact_node_image_can_replace_duplicate_host_compile(
+        self, tmp_path: Path
+    ) -> None:
+        result, pull_log = self._container_node_image_contract(tmp_path)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert pull_log.read_text(encoding="utf-8").strip() == "d" * 40
+
+    def test_node_image_reuse_fails_closed_when_target_dropin_differs(
+        self, tmp_path: Path
+    ) -> None:
+        result, pull_log = self._container_node_image_contract(
+            tmp_path, matching_dropin=False
+        )
+        assert result.returncode != 0
+        assert not pull_log.exists()
+
+    def test_node_image_reuse_is_only_enabled_by_gated_prestage(
+        self, deploy_text: str
+    ) -> None:
+        contract = function_body(
+            deploy_text, "container_node_image_replaces_next_compile"
+        )
+        assert "RADON_DEPLOY_USE_NODE_IMAGE_BUILD" in contract
+        assert "prepull_app_images" in contract
+        assert "NeedDaemonReload" in contract
+        assert "DropInPaths" in contract
+        ci = ROOT_CI.read_text(encoding="utf-8")
+        stage = ci.split("\n  stage-release:\n", 1)[1].split(
+            "\n  prepull-images:\n", 1
+        )[0]
+        assert "app-images" in stage.split("needs:", 1)[1].split("\n", 1)[0]
+        assert "RADON_DEPLOY_USE_NODE_IMAGE_BUILD=1" in stage
 
     def test_seed_staged_node_modules_reuses_live_tree_when_lockfiles_match(
         self, tmp_path: Path
@@ -2858,6 +3080,7 @@ git() {{
 }}
 verify_tracked_drift_matches_target() {{ return 0; }}
 build_staged_release() {{ printf 'build\\n' >> {calls!s}; }}
+prepull_app_images() {{ return 0; }}
 restart_services() {{ printf 'restart\\n' >> {calls!s}; }}
 deploy_gate() {{ return 0; }}
 write_transition_phase() {{ return 0; }}
@@ -2969,6 +3192,7 @@ class TestRequiredEnvironment:
                 "IB_GATEWAY_HOST": "127.0.0.1",
                 "RADON_MODE": "hetzner",
                 "NODE_ENV": "production",
+                "RADON_REQUIRE_OPERATOR_ALLOWLIST": "1",
             }
         )
         assignments["TRADING_MODE"] = trading_mode
@@ -3006,6 +3230,7 @@ class TestRequiredEnvironment:
                 "IB_GATEWAY_HOST": "127.0.0.1",
                 "RADON_MODE": "hetzner",
                 "NODE_ENV": "production",
+                "RADON_REQUIRE_OPERATOR_ALLOWLIST": "1",
             }
         )
         assignments["TRADING_MODE"] = trading_mode
@@ -3051,6 +3276,7 @@ class TestRequiredEnvironment:
                 "IB_GATEWAY_HOST": "127.0.0.1",
                 "RADON_MODE": "hetzner",
                 "NODE_ENV": "production",
+                "RADON_REQUIRE_OPERATOR_ALLOWLIST": "1",
                 "TRADING_MODE": "live",
                 "IB_GATEWAY_PORT": "4001",
                 key: unsafe_value,
@@ -3118,6 +3344,14 @@ class TestCloudSecretScan:
         assert "gitleaks detect --source ." in commands
         assert "--redact" in commands
         assert "--config cloud/.gitleaks.toml" in commands
+        scan = next(step for step in steps if "gitleaks detect" in str(step.get("run", "")))
+        script = scan["run"]
+        assert "git merge-base" in script
+        assert "${merge_base}..${PR_HEAD}" in script
+        assert 'log_opts="${PUSH_BEFORE}..${PUSH_HEAD}"' in script
+        assert 'ensure_commit "$PUSH_BEFORE"' in script
+        assert '[ "$PUSH_BEFORE" = "$zero" ] || ! git cat-file -e "${PUSH_BEFORE}^{commit}"' not in script
+        assert "--log-opts=" in script
 
     def test_root_ci_runs_full_python313_cloud_suite(self) -> None:
         workflow = yaml.safe_load(ROOT_CI.read_text(encoding="utf-8"))
@@ -3127,7 +3361,7 @@ class TestCloudSecretScan:
             for job in jobs.values()
             if re.search(
                 r"python\s+-m\s+pytest",
-                "\n".join(str(step.get("run", "")) for step in job["steps"]),
+                "\n".join(str(step.get("run", "")) for step in job.get("steps", [])),
             )
         ]
         assert len(pytest_jobs) >= 2
@@ -3139,7 +3373,7 @@ class TestCloudSecretScan:
         assert "cloud/tests/test_" in str(cloud["strategy"]["matrix"]["include"])
         assert "matrix.paths" in "\n".join(str(step.get("run", "")) for step in cloud["steps"])
         all_commands = [
-            "\n".join(str(step.get("run", "")) for step in job["steps"])
+            "\n".join(str(step.get("run", "")) for step in job.get("steps", []))
             for job in jobs.values()
         ]
         assert any("fail-under=56" in commands for commands in all_commands)

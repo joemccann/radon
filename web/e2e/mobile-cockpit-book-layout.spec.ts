@@ -10,8 +10,8 @@ import { expect, test, type Page } from "@playwright/test";
  *    than the viewport (right-edge clipping).
  * 3. `.book-window-head` (nowrap + overflow hidden) clipped SPRD and the tape
  *    toggle clean off a 393px screen.
- * 4. The header position chip repeated the FULL structure string that the
- *    position summary right below it already shows.
+ * 4. The header HELD chip sat on its own wrap row above the structure card.
+ *    Summary owns the held cue; the header chip is gone when a position is held.
  */
 
 const now = new Date().toISOString();
@@ -72,9 +72,16 @@ const IWM_DEPTH = {
   ],
 };
 
-async function installMockWebSocket(page: Page) {
+async function installMockWebSocket(page: Page, withLegQuotes = false) {
+  const callKey = `IWM_${EXPIRY.replaceAll("-", "")}_247_C`;
+  const putKey = `IWM_${EXPIRY.replaceAll("-", "")}_243_P`;
+  const quotes = withLegQuotes ? {
+    IWM: IWM_PRICE,
+    [callKey]: { ...IWM_PRICE, symbol: callKey, bid: 3.6, ask: 3.7, last: 3.65, close: 3.2 },
+    [putKey]: { ...IWM_PRICE, symbol: putKey, bid: 3.8, ask: 3.9, last: 3.85, close: 3.5 },
+  } : { IWM: IWM_PRICE };
   await page.addInitScript(
-    ({ price, depth }) => {
+    ({ quotes, depth }) => {
       class MockWebSocket {
         static CONNECTING = 0; static OPEN = 1; static CLOSING = 2; static CLOSED = 3;
         url: string; readyState = 0;
@@ -91,11 +98,13 @@ async function installMockWebSocket(page: Page) {
           }, 0);
         }
         send(raw: string) {
-          const message = JSON.parse(raw) as { action?: string; symbols?: string[]; symbol?: string };
+          const message = JSON.parse(raw) as { action?: string; symbols?: string[]; symbol?: string; expiry?: string; right?: string; strike?: number };
           if (message.action === "subscribe" && message.symbols?.includes("IWM")) {
-            this.emit({ type: "batch", updates: { IWM: price } });
+            this.emit({ type: "batch", updates: quotes });
           }
-          if (message.action === "subscribe-depth" && message.symbol === "IWM") {
+          // Option requests also carry symbol=IWM. Never answer them with
+          // underlying stock depth under the wrong instrument subject.
+          if (message.action === "subscribe-depth" && message.symbol === "IWM" && !message.expiry && !message.right && message.strike == null) {
             this.emit({ type: "depth-batch", updates: { IWM: depth } });
           }
         }
@@ -112,12 +121,13 @@ async function installMockWebSocket(page: Page) {
       Object.assign(RelayAwareWebSocket, { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 });
       window.WebSocket = RelayAwareWebSocket;
     },
-    { price: IWM_PRICE, depth: IWM_DEPTH },
+    { quotes, depth: IWM_DEPTH },
   );
 }
 
 async function stubApis(page: Page) {
   await page.unrouteAll({ behavior: "ignoreErrors" });
+  await page.route("**/api/**", (r) => r.fulfill({ status: 503, json: { error: "No fixture for this read" } }));
   await page.route("**/api/portfolio", (r) =>
     r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(PORTFOLIO_MOCK) }),
   );
@@ -144,13 +154,43 @@ async function stubApis(page: Page) {
   );
 }
 
-async function openCockpit(page: Page) {
-  await installMockWebSocket(page);
+async function openPositionBook(page: Page, withLegQuotes = false) {
+  await installMockWebSocket(page, withLegQuotes);
   await stubApis(page);
-  await page.goto("/IWM?posId=12");
+  await page.goto("/IWM?posId=12", { waitUntil: "domcontentloaded" });
   await expect(page.locator(".cockpit--mobile")).toBeVisible();
+  await expect(page.getByRole("button", { name: "OPTION", exact: true })).toHaveAttribute("aria-pressed", "true");
+}
+
+async function openCockpit(page: Page) {
+  await openPositionBook(page);
+  // Held options default to their option/implied book. These geometry
+  // regressions exercise the stock montage and its Time & Sales toggle.
+  const stock = page.getByRole("button", { name: "STOCK", exact: true });
+  await stock.click();
+  await expect(stock).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator(".book-feed-pill")).toHaveText("SMART DEPTH");
   await expect(page.locator(".microstructure-strip")).toBeVisible();
 }
+
+test("missing combo leg quotes never display the underlying price as a spread premium", async ({ page }, testInfo) => {
+  await openPositionBook(page);
+  const book = page.locator(".book-window");
+  await expect(book.locator(".book-kind")).toHaveText("IMPLIED SPREAD");
+  await expect(book.locator(".book-head-stat.bid b")).toHaveText("---");
+  await expect(book.locator(".book-head-stat.ask b")).toHaveText("---");
+  await expect(book).not.toContainText("244.65");
+  await page.screenshot({ path: testInfo.outputPath("missing-combo-quotes.png"), fullPage: false });
+});
+
+test("available combo leg quotes preserve the signed executable spread", async ({ page }) => {
+  await openPositionBook(page, true);
+  const book = page.locator(".book-window");
+  await expect(book.locator(".book-kind")).toHaveText("IMPLIED SPREAD");
+  await expect(book.locator(".book-head-stat.bid b")).toHaveText("-0.30");
+  await expect(book.locator(".book-head-stat.ask b")).toHaveText("-0.10");
+  await expect(book).not.toContainText("244.65");
+});
 
 test("book pane never overflows the viewport horizontally", async ({ page }) => {
   await openCockpit(page);
@@ -186,7 +226,7 @@ test("the two-sided depth montage fits its card — no inner horizontal scrollba
   expect(scroll, `montage needs ${scroll}px in a ${client}px card`).toBeLessThanOrEqual(client);
 });
 
-test("the book head keeps its intrinsic height on short viewports — never crushed by the montage", async ({ page }) => {
+test("the book head keeps its intrinsic height on short viewports — never crushed by the montage", async ({ page }, testInfo) => {
   // Real-device regression (2026-08-04, second report): the flex column
   // shrank the head under height pressure once its 45px floor was removed —
   // the montage colheads rode over the half-clipped MID/BID/ASK row. A 660px
@@ -206,6 +246,7 @@ test("the book head keeps its intrinsic height on short viewports — never crus
     const montage = document.querySelector(".book-montage")!.getBoundingClientRect();
     return { montageHeight: montage.height, escape: montage.bottom - win.bottom };
   });
+  await page.screenshot({ path: testInfo.outputPath("short-mobile-book.png"), fullPage: false });
   expect(montageHeight).toBeGreaterThanOrEqual(110);
   expect(escape, `montage extends ${escape}px past the card's clip`).toBeLessThanOrEqual(1);
 });
@@ -222,10 +263,9 @@ test("a credit combo's AVG ENTRY reads negative, not positive (2026-08-07)", asy
   expect(avgEntry ?? "").not.toMatch(/(?<![-])\$0\.12/);
 });
 
-test("the structure string renders once — summary owns it, the header chip stays compact", async ({ page }) => {
+test("the structure string renders once — summary owns it, the header has no HELD chip", async ({ page }) => {
   await openCockpit(page);
   await expect(page.locator(".ckp-pos-summary")).toContainText(STRUCTURE);
-  const chip = page.locator(".ckh-poschip");
-  await expect(chip).toBeVisible();
-  await expect(chip).not.toContainText("Risk Reversal");
+  await expect(page.locator(".ckh-poschip")).toHaveCount(0);
+  await expect(page.locator(".cockpit-head")).not.toContainText("HELD");
 });

@@ -14,12 +14,12 @@ function declarationBlock(selector: string): string {
 describe("typography foundation", () => {
   it("defines semantic type roles and disables synthetic font faces", () => {
     const root = declarationBlock(":root");
-    expect(root).toContain("--text-meta: 11px");
-    expect(root).toContain("--text-label: 12px");
+    expect(root).toContain("--text-meta: 12px");
+    expect(root).toContain("--text-label: 13px");
     expect(root).toContain("--text-table: 13px");
     expect(root).toContain("--text-prose: 14px");
-    expect(root).toContain("--text-panel-title: 14px");
-    expect(root).toContain("--text-view-title: 18px");
+    expect(root).toContain("--text-panel-title: 18px");
+    expect(root).toContain("--text-view-title: 28px");
     expect(root).toContain("--text-metric: 28px");
 
     const html = declarationBlock("html");
@@ -29,7 +29,7 @@ describe("typography foundation", () => {
   });
 
   it("uses an AA-compliant light-theme muted text token", () => {
-    expect(declarationBlock('[data-theme="light"]')).toContain("--text-muted: #737373");
+    expect(declarationBlock('[data-theme="light"]')).toContain("--text-muted: #62716d");
   });
 
   it("uses Inter for structural titles and stable primary metrics", () => {

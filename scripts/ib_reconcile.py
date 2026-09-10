@@ -461,6 +461,22 @@ def _health_detail(report: dict) -> dict:
         "expired_locally": report.get("expired_locally", [])[:10],
     }
 
+
+def _drift_message(detail: dict, *, include_new_trades: bool = True) -> str:
+    """R-626: the daemon's position-reconcile handler passes no trades, so its
+    `new_trades_count` is structurally 0 — printing '0 new trade(s)' told the
+    operator the daemon had looked. Only `main()`, which passes real trades,
+    may claim that clause."""
+    head = "position drift vs IB: "
+    if include_new_trades:
+        head += f"{detail['new_trades_count']} new trade(s), "
+    return (
+        head
+        + f"{detail['quantity_mismatch_count']} quantity mismatch(es), "
+        f"{detail['positions_missing_locally_count']} missing locally, "
+        f"{detail['positions_closed_count']} closed locally"
+    )
+
 def main():
     """Main reconciliation routine."""
     log("Starting IB trade reconciliation...")
@@ -470,7 +486,13 @@ def main():
     client = connect_ib()
     if not client:
         log("Cannot connect to IB Gateway - reconciliation NOT run", "error")
-        _record_health("error", {"reason": "ib_connect_failed"})
+        _record_health(
+            "error",
+            {
+                "reason": "ib_connect_failed",
+                "message": "IB Gateway unreachable - reconciliation not run",
+            },
+        )
         sys.exit(2)
 
     try:
@@ -503,9 +525,12 @@ def main():
 
         # Heartbeat for the watchdog: error when attention is needed so the
         # error bucket pages; ok otherwise.
+        detail = _health_detail(report)
+        if report["needs_attention"]:
+            detail["message"] = _drift_message(detail)
         _record_health(
             "error" if report["needs_attention"] else "ok",
-            _health_detail(report),
+            detail,
         )
 
         # Log summary

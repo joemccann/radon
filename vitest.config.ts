@@ -1,9 +1,35 @@
 import { defineConfig } from "vitest/config";
 import { resolve } from "path";
+import { resolveMaxWorkers } from "./vitest.workers";
 
 export default defineConfig({
   // Repo root so `web/tests/**` includes match when `npm run test` runs from `web/`.
   root: resolve(__dirname),
+  plugins: [
+    // T-456: `@/*` is app-relative — web/tsconfig maps it to web/*, site/tsconfig
+    // to site/*. The static aliases below only encode the web mapping, so any
+    // site file importing "@/lib/theme" either failed to resolve or silently
+    // picked up web's module. Route `@/` imports whose IMPORTER lives under
+    // site/ to site/* before the web aliases apply.
+    {
+      name: "site-app-alias",
+      enforce: "pre" as const,
+      resolveId(source: string, importer: string | undefined) {
+        if (!importer || !/[\\/]site[\\/]/.test(importer)) return null;
+        // Vite applies `resolve.alias` before any plugin, so by the time this
+        // hook runs "@/lib/theme" has usually already been rewritten to the
+        // absolute web/ path — undo either spelling.
+        const webRoot = `${resolve(__dirname, "web")}/`;
+        let appRelative: string | null = null;
+        if (source.startsWith("@/")) appRelative = source.slice(2);
+        else if (source.startsWith(webRoot)) appRelative = source.slice(webRoot.length);
+        if (appRelative == null) return null;
+        return this.resolve(resolve(__dirname, "site", appRelative), importer, {
+          skipSelf: true,
+        });
+      },
+    },
+  ],
   resolve: {
     alias: {
       "@tools": resolve(__dirname, "lib/tools"),
@@ -16,6 +42,7 @@ export default defineConfig({
       "lib/tools/__tests__/**/*.test.ts",
       "site/lib/**/*.test.ts",
       "scripts/lib/**/*.test.js",
+      "scripts/mktnews/**/*.test.js",
       "web/tests/**/*.test.ts",
       "web/tests/**/*.test.tsx",
       // T-058: the PI extension security tests (browser command boundary,
@@ -25,7 +52,8 @@ export default defineConfig({
     ],
     environment: "node",
     fileParallelism: true,
-    maxWorkers: "100%",
+    // Half the cores locally, all of them on CI (vitest.workers.ts).
+    maxWorkers: resolveMaxWorkers(process.env),
     // Never retry (TEST_AUDIT T-161). A suite-wide retry turns any intermittent
     // failure in an order-safety or money-math file into a green deploy gate,
     // and it suppresses exactly the first-failure signal the repo's "re-run the
@@ -41,7 +69,24 @@ export default defineConfig({
     // shell makes ib-status-context/ws-keepalive throw "useAuth must be within
     // ClerkProvider"). Forcing it makes the suite deterministic regardless of the
     // developer's environment.
-    env: { NODE_ENV: "test" },
+    //
+    // TZ and LC_ALL/LANG are pinned for the same reason (T-233). Both were
+    // ambient inputs the suite read without ever naming them, so its
+    // TZ-independence and locale-independence were PROPERTIES to re-audit each
+    // delta rather than guarantees.
+    //   TZ=America/New_York — every market-hours / session / ET-day-cut helper
+    //   in web/lib defines "the calendar day" as the ET day, and fixtures are
+    //   written as ET wall clock. Under TZ=Pacific/Kiritimati, e.g.
+    //   format-trade-date.test.ts:28 reds because 2026-05-08T17:30:00Z is the
+    //   9th there. ET is the market timezone, so it is also the right default.
+    //   LC_ALL/LANG=en_US.UTF-8 — product code formats money with an EXPLICIT
+    //   toLocaleString("en-US"), while tests compare against a BARE
+    //   toLocaleString() whose locale comes from the environment. Under
+    //   LC_ALL=de_DE.UTF-8 the expectation is "1.030" and the component still
+    //   renders "1,030". en-US is not a preference here: it is the locale the
+    //   product hardcodes, so the test-side default must match it. ICU resolves
+    //   LC_ALL before LANG, so both are set.
+    env: { NODE_ENV: "test", TZ: "America/New_York", LC_ALL: "en_US.UTF-8", LANG: "en_US.UTF-8" },
     // Global @testing-library cleanup so jsdom components (and their leaked
     // effects/timers/WebSocket handlers) can't bleed into the next test — the
     // cross-test leak that made `vitest --coverage` throw window-undefined.

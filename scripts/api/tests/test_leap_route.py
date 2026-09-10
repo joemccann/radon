@@ -78,33 +78,51 @@ def test_leap_ticker_scan_bypasses_preset_cooldown(monkeypatch):
     assert server._leap_last_scan == seeded
 
 
-def test_leap_preset_scan_ignores_explicit_ticker_cache(monkeypatch):
+def test_leap_preset_scan_inside_cooldown_never_serves_explicit_cache(monkeypatch):
+    """An explicit-ticker cache never satisfies a preset request, and inside
+    the window the route refuses (429) rather than re-spawning."""
     monkeypatch.setattr(server, "_leap_last_scan", time.monotonic())
     monkeypatch.setattr(server, "_leap_scan_lock", None)
 
-    cache_reads = {"n": 0}
-    calls: list[tuple[str, list[str], int | None]] = []
+    async def fake_run_script(*_args, **_kwargs):
+        raise AssertionError("cooldown must not re-scan on a cache miss")
 
-    def fake_read_cache(_path):
-        cache_reads["n"] += 1
-        return _explicit_payload() if cache_reads["n"] < 3 else _preset_payload()
+    monkeypatch.setattr(server, "run_script", fake_run_script)
+    monkeypatch.setattr(server, "_read_cache", lambda _path: _explicit_payload())
+
+    client = TestClient(server.app)
+    response = client.post("/leap/scan?preset=mag7")
+
+    assert response.status_code == 429
+    assert int(response.headers["Retry-After"]) >= 1
+
+
+def test_leap_cooldown_is_keyed_on_route_not_preset(monkeypatch):
+    monkeypatch.setattr(server, "_leap_last_scan", time.monotonic())
+    monkeypatch.setattr(server, "_leap_scan_lock", None)
+
+    calls: list[tuple[str, list[str], int | None]] = []
 
     async def fake_run_script(script, args, timeout=None):
         calls.append((script, args, timeout))
         return ScriptResult(ok=True, data={})
 
     monkeypatch.setattr(server, "run_script", fake_run_script)
-    monkeypatch.setattr(server, "_read_cache", fake_read_cache)
+    monkeypatch.setattr(server, "_read_cache", lambda _path: _preset_payload())
 
     client = TestClient(server.app)
-    response = client.post("/leap/scan?preset=mag7")
+    assert client.post("/leap/scan?preset=mag7").status_code == 200
+    blocked = client.post("/leap/scan?preset=semis")
+    assert blocked.status_code == 429
+    assert 1 <= int(blocked.headers["Retry-After"]) <= server.LEAP_COOLDOWN_S
+    assert calls == []
 
-    assert response.status_code == 200
-    assert response.json()["universe"] == "preset:mag7"
+    monkeypatch.setattr(server, "_leap_last_scan", -1e9)
+    assert client.post("/leap/scan?preset=semis").status_code == 200
     assert calls == [
         (
             "leap_scanner_uw.py",
-            ["--preset", "mag7", "--min-gap", "10.0", "--json", "--workers", "16"],
+            ["--preset", "semis", "--min-gap", "10.0", "--json", "--workers", "16"],
             3600,
         )
     ]

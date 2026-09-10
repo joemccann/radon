@@ -103,6 +103,55 @@ describe("provisionDemoTrial", () => {
     expect(setClerkMetadata.mock.calls[0]).toEqual(["user_demo", { demoRole: "pending" }]);
   });
 
+  // RC-B11: a replayed user.created delivery must be idempotent — it must
+  // never restart the trial clock and never resurrect a revoked/expired user.
+  it("an existing REVOKED row is never re-stamped to trial", async () => {
+    const d = deps();
+    d.db.users.set("user_demo", {
+      user_id: "user_demo",
+      email: "trial@demo.test",
+      demo_role: "trial",
+      started_at: "2026-06-01T09:30:00-04:00",
+      expires_at: "2026-06-04T16:00:00-04:00",
+      status: "revoked",
+      revoked_at: "2026-06-02T10:00:00-04:00",
+      created_at: "2026-06-01T09:30:00-04:00",
+    });
+    const result = await provisionDemoTrial(demoUser(), d);
+    expect(result.provisioned).toBe(false);
+    expect(d.setClerkMetadata).not.toHaveBeenCalled();
+    const row = await getDemoUser(d.db, "user_demo");
+    expect(row?.status).toBe("revoked");
+    expect(row?.started_at).toBe("2026-06-01T09:30:00-04:00");
+  });
+
+  it("a replayed delivery for an ACTIVE row reuses the original trial window", async () => {
+    const d = deps();
+    d.db.users.set("user_demo", {
+      user_id: "user_demo",
+      email: "trial@demo.test",
+      demo_role: "trial",
+      started_at: "2026-06-20T09:30:00-04:00",
+      expires_at: "2026-06-24T16:00:00-04:00",
+      status: "active",
+      revoked_at: null,
+      created_at: "2026-06-20T09:30:00-04:00",
+    });
+    const result = await provisionDemoTrial(demoUser(), d);
+    expect(result.provisioned).toBe(true);
+    expect(result.expiresAt).toBe("2026-06-24T16:00:00-04:00");
+    expect(d.setClerkMetadata).toHaveBeenCalledWith("user_demo", {
+      demoRole: "trial",
+      demoTrialStartedAt: "2026-06-20T09:30:00-04:00",
+      demoTrialExpiresAt: "2026-06-24T16:00:00-04:00",
+    });
+    // Never restart the clock from the replayed delivery.
+    expect(d.computeExpiry).not.toHaveBeenCalled();
+    const row = await getDemoUser(d.db, "user_demo");
+    expect(row?.started_at).toBe("2026-06-20T09:30:00-04:00");
+    expect(row?.expires_at).toBe("2026-06-24T16:00:00-04:00");
+  });
+
   it("leaves a failed provisioning attempt explicitly pending in Clerk", async () => {
     const setClerkMetadata = vi.fn().mockResolvedValue(undefined);
     await expect(provisionDemoTrial(demoUser(), deps({

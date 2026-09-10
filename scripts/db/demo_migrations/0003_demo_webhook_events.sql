@@ -5,5 +5,3 @@ CREATE TABLE IF NOT EXISTS demo_webhook_events (
   event_type   TEXT NOT NULL,
   processed_at TEXT NOT NULL
 );
-
-INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (3, datetime('now'));

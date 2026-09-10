@@ -465,12 +465,15 @@ export function resolveMenthorqRenderer(
   };
 }
 
+export const radonCapability = "read";
+
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ command: string }> }
 ) {
   const access = await requireRouteAccess(request, {
     rate: { key: "menthorq/image", limit: 20, windowMs: 60_000 },
+    durableRateTier: "B",
   });
   if (!access.ok) return access.response;
   const { command } = await params;

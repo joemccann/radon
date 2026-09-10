@@ -67,6 +67,11 @@ class ExitOrdersHandler(BaseHandler):
         # (journal_trade_id, order_type) -> live order_id; healed (journal
         # marked PLACED) on a later cycle once the DB write succeeds.
         self._unrecorded_placements: Dict[tuple, int] = {}
+        # REL-185 (R-518): legs refused by the order limits, keyed by
+        # (journal_trade_id, order_type) -> (contracts, target_price). A
+        # refused leg is not re-refused every cycle until its parameters
+        # change — the storm was bounded only by watchdog anti-flood.
+        self._limit_refusals: Dict[tuple, tuple] = {}
 
     def _open_db(self) -> Any:
         if self.db is not None:
@@ -425,6 +430,16 @@ class ExitOrdersHandler(BaseHandler):
         return total
 
     @staticmethod
+    def _note_error(result: dict, message: str) -> None:
+        """Accumulate per-leg errors (REL-185 / R-518): a limit refusal must
+        not be overwritten by a later leg's ack error."""
+        errors = result.setdefault("errors", [])
+        errors.append(message)
+        result["error"] = errors[0] if len(errors) == 1 else (
+            f"{len(errors)} leg errors; first: {errors[0]}"
+        )
+
+    @staticmethod
     def _oca_group(journal_trade_id: Any, trade_id: Any) -> str:
         """One group per journal row: filling the target cancels that
         row's stop, and never another position's exit."""
@@ -480,6 +495,11 @@ class ExitOrdersHandler(BaseHandler):
                 return result
         except ImportError:
             pass
+
+        # Both guards, at the placement funnel — the halt refuses first (it is a
+        # deliberate operator state), the limits bound what a non-halted cycle
+        # may send. R-427.
+        from order_limits import check_order_limits
 
         try:
             pending = self._load_pending_orders()
@@ -556,12 +576,12 @@ class ExitOrdersHandler(BaseHandler):
                             "order_type": order_info["order_type"],
                             "reason": "working_sell_price_unknown",
                         })
-                        result["error"] = (
+                        self._note_error(result, (
                             f"working SELL on {contract.localSymbol} has no "
                             f"readable limit price; {order_info['order_type']} "
                             f"placement deferred (cannot rule out a duplicate)"
-                        )
-                        logger.warning(result["error"])
+                        ))
+                        logger.warning(result["errors"][-1])
                         continue
                     if live is not None:
                         live_order_id = live.order.orderId
@@ -584,12 +604,12 @@ class ExitOrdersHandler(BaseHandler):
                                 order_info["order_type"],
                             )
                             self._unrecorded_placements[guard_key] = live_order_id
-                            result["error"] = (
+                            self._note_error(result, (
                                 f"live exit order #{live_order_id} found for "
                                 f"{ticker} {order_info['order_type']} but journal "
                                 f"adoption write failed; re-place suppressed"
-                            )
-                            logger.error(result["error"])
+                            ))
+                            logger.error(result["errors"][-1])
                         continue
 
                     # Get current price
@@ -673,6 +693,74 @@ class ExitOrdersHandler(BaseHandler):
                             ocaType=1,
                         )
 
+                        # R-427: this was the only order-placing path left in
+                        # the repo with the halt and NOT the limits, and unlike
+                        # exit_order_service.py it is definitely running — a
+                        # handler inside radon-monitor.service. The exit leg is
+                        # sized from the existing position, so the fat-finger
+                        # class is bounded in practice, but the notional branch
+                        # was skipped entirely and a corrupt position size
+                        # reached IB unbounded.
+                        # T-412: journal_trade_id is NULL on legacy rows, so
+                        # keying on it alone collapses every id-less leg onto
+                        # (None, "target") and one refusal suppressed an
+                        # unrelated position's exit. localSymbol is the
+                        # qualified broker identity (symbol+expiry+strike+
+                        # right) and is always present here.
+                        refusal_key = (
+                            order_info.get("journal_trade_id"),
+                            contract.localSymbol,
+                            order_info["order_type"],
+                        )
+                        refusal_params = (contracts, target_price)
+                        if self._limit_refusals.get(refusal_key) == refusal_params:
+                            # Already refused with these exact parameters; a
+                            # re-place would be re-refused identically.
+                            result["orders_skipped"] += 1
+                            result["skipped"].append({
+                                "ticker": ticker,
+                                "contract": contract.localSymbol,
+                                "reason": "limit_refused_previously",
+                            })
+                            # T-410: the latch only suppresses the redundant
+                            # re-place, not the fact that the position is
+                            # still unprotected. Every cycle must heartbeat
+                            # error until the refusal clears.
+                            self._note_error(result, (
+                                f"exit order still refused by the order limit "
+                                f"({ticker} {order_info['order_type']}); "
+                                f"position remains unprotected"
+                            ))
+                            continue
+                        violation = check_order_limits({
+                            "type": "option",
+                            "quantity": contracts,
+                            "symbol": ticker,
+                            "limitPrice": target_price,
+                        })
+                        if violation is None:
+                            self._limit_refusals.pop(refusal_key, None)
+                        if violation:
+                            logger.warning(
+                                "Order limit refused the exit order for %s: %s",
+                                ticker, violation["message"],
+                            )
+                            result["orders_failed"] = result.get("orders_failed", 0) + 1
+                            result.setdefault("failed", []).append({
+                                "ticker": ticker,
+                                "contract": contract.localSymbol,
+                                "error": violation["message"],
+                            })
+                            # T-313: the position stays unprotected, so
+                            # this cycle must heartbeat error, not ok.
+                            self._note_error(result, (
+                                f"exit order refused by the order limit "
+                                f"({ticker} {order_info['order_type']}): "
+                                f"{violation['message']}"
+                            ))
+                            self._limit_refusals[refusal_key] = refusal_params
+                            continue
+
                         trade = client.place_order(contract, limit_order)
 
                         confirmed, ack_status = self._confirm_placement(client, trade)
@@ -686,12 +774,12 @@ class ExitOrdersHandler(BaseHandler):
                                 "order_type": order_info["order_type"],
                                 "status": ack_status,
                             })
-                            result["error"] = (
+                            self._note_error(result, (
                                 f"exit order not acknowledged by IB "
                                 f"({ticker} {order_info['order_type']}: "
                                 f"{ack_status or 'no status'}); journal left PENDING"
-                            )
-                            logger.warning(result["error"])
+                            ))
+                            logger.warning(result["errors"][-1])
                             continue
 
                         order_id = trade.order.orderId

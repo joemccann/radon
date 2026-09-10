@@ -4,11 +4,14 @@ import type {
   AssistantOrderProposal,
   AssistantResponse,
   AssistantToolEvent,
+  ChatImageAttachment,
   Message,
   PiResponse,
   WorkspaceSection,
 } from "./types";
 import { PI_COMMAND_ALIASES, PI_COMMAND_SET } from "./data";
+import { assistantErrorMessage } from "./assistant/errorCopy";
+import { isTickerRouteSegment } from "./tickerRoute";
 import { placeOrderFeedback } from "./orders/placeOrderFeedback";
 import {
   createTimestamp,
@@ -155,37 +158,45 @@ async function readJsonBody<T>(response: Response): Promise<T | null> {
   }
 }
 
+/**
+ * Text-only assistant turn. Delegates to {@link requestAssistantTurn} so there
+ * is ONE reader of the endpoint: the route answers `text/event-stream` now, and
+ * a second call site parsing the body as JSON would silently fall back to
+ * canned copy on every real turn.
+ */
 export async function requestAssistantReply(history: ApiMessage[], latestMessage: string): Promise<string> {
-  const response = await fetch("/api/assistant", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      messages: [
-        ...history,
-        { role: "user", content: latestMessage },
-      ],
-    }),
-  });
+  const turn = await requestAssistantTurn(history, latestMessage);
+  return turn.content;
+}
 
-  const payload = await readJsonBody<AssistantResponse>(response);
-
-  if (!response.ok) {
-    if (payload?.error) {
-      return `Error: ${payload.error}`;
-    }
-    return "Assistant service returned an error.";
+/**
+ * The turn's user message. Text-only turns keep the plain-string content shape
+ * the endpoint has always accepted; pasted images promote it to the Anthropic
+ * block array, images first so the model reads them before the question.
+ */
+export function buildUserMessage(text: string, attachments: ChatImageAttachment[]): ApiMessage {
+  if (!attachments.length) {
+    return { role: "user", content: text };
   }
-
-  if (typeof payload?.content === "string" && payload.content.trim()) {
-    return formatAssistantPayload(payload.content);
-  }
-
-  return fallbackReply(latestMessage);
+  return {
+    role: "user",
+    content: [
+      ...attachments.map((attachment) => ({
+        type: "image" as const,
+        source: {
+          type: "base64" as const,
+          media_type: attachment.mediaType,
+          data: attachment.data,
+        },
+      })),
+      // An image-only turn carries no text block: an empty one is not content.
+      ...(text ? [{ type: "text" as const, text }] : []),
+    ],
+  };
 }
 
 export type AssistantTurn = {
+  failed?: boolean;
   content: string;
   proposal: AssistantOrderProposal | null;
   /** Per-tool-call telemetry from the agentic loop; drives <EngineTrace>. */
@@ -193,6 +204,117 @@ export type AssistantTurn = {
   /** Concrete model id the loop ran on; drives the trace's engine chip. */
   model: string | null;
 };
+
+/** Live progress from the open turn, before its final payload exists. */
+export type AssistantStreamEvent =
+  | { type: "start" }
+  | { type: "tool"; event: AssistantToolEvent };
+
+/**
+ * A stream that ends without a `done` frame — killed upstream, severed
+ * connection, a proxy that gave up mid-body. It MUST read as a failure: an
+ * empty assistant bubble is worse than the 504 this replaced, because nothing
+ * on screen says the turn did not finish.
+ */
+const TRUNCATED_STREAM_MESSAGE =
+  "The connection dropped and the turn did not finish. No order was placed. Ask again.";
+
+function parseFrameData(raw: string): unknown {
+  try {
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Reads the `/api/assistant` event stream. Frames are `event:`/`data:` lines
+ * terminated by a blank line, and arrive on arbitrary chunk boundaries, so the
+ * buffer is split on the terminator rather than per read.
+ */
+async function readAssistantStream(
+  body: ReadableStream<Uint8Array>,
+  latestMessage: string,
+  onEvent?: (event: AssistantStreamEvent) => void,
+): Promise<AssistantTurn> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  const streamedTools: AssistantToolEvent[] = [];
+  let buffer = "";
+  let settled: AssistantTurn | null = null;
+  let failure: string | null = null;
+
+  const handle = (event: string, raw: string) => {
+    if (event === "start") {
+      onEvent?.({ type: "start" });
+      return;
+    }
+    if (event === "tool") {
+      const parsed = parseFrameData(raw) as AssistantToolEvent | null;
+      if (parsed) {
+        streamedTools.push(parsed);
+        onEvent?.({ type: "tool", event: parsed });
+      }
+      return;
+    }
+    if (event === "error") {
+      // Ignore the frame text at this second trust boundary so an older route
+      // cannot leak provider diagnostics into a newer client.
+      failure = assistantErrorMessage();
+      return;
+    }
+    if (event === "done") {
+      const payload = parseFrameData(raw) as AssistantResponse | null;
+      settled = {
+        content:
+          typeof payload?.content === "string" && payload.content.trim()
+            ? formatAssistantPayload(payload.content)
+            : fallbackReply(latestMessage),
+        proposal: payload?.proposal ?? null,
+        toolEvents: Array.isArray(payload?.toolEvents) ? payload.toolEvents : streamedTools,
+        model: typeof payload?.model === "string" ? payload.model : null,
+      };
+    }
+  };
+
+  const drainFrames = () => {
+    let boundary = buffer.indexOf("\n\n");
+    while (boundary !== -1) {
+      const chunk = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      let event = "";
+      const dataLines: string[] = [];
+      for (const line of chunk.split("\n")) {
+        if (line.startsWith("event: ")) event = line.slice(7).trim();
+        else if (line.startsWith("data: ")) dataLines.push(line.slice(6));
+      }
+      if (event) handle(event, dataLines.join("\n"));
+      boundary = buffer.indexOf("\n\n");
+    }
+  };
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (value) {
+        buffer += decoder.decode(value, { stream: true });
+        drainFrames();
+      }
+      if (done) break;
+    }
+  } catch {
+    // A read that throws is the same failure as a stream that stops early.
+  }
+
+  if (settled) return settled;
+  return {
+    failed: true,
+    content: failure ?? TRUNCATED_STREAM_MESSAGE,
+    proposal: null,
+    toolEvents: streamedTools,
+    model: null,
+  };
+}
 
 /**
  * Like {@link requestAssistantReply} but preserves the structured order
@@ -203,21 +325,37 @@ export type AssistantTurn = {
 export async function requestAssistantTurn(
   history: ApiMessage[],
   latestMessage: string,
+  attachments: ChatImageAttachment[] = [],
+  /** Catalog model id from the composer's picker. "" leaves the choice to the server. */
+  model = "",
+  /** Live progress while the turn is still open — flips the panel to alive. */
+  onEvent?: (event: AssistantStreamEvent) => void,
+  signal?: AbortSignal,
 ): Promise<AssistantTurn> {
   const response = await fetch("/api/assistant", {
+    ...(signal ? { signal } : {}),
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
     body: JSON.stringify({
-      messages: [...history, { role: "user", content: latestMessage }],
+      messages: [...history, buildUserMessage(latestMessage, attachments)],
+      // Omitted rather than sent empty: the route treats an absent model as
+      // "unchanged behavior", and validates any id it does receive.
+      ...(model ? { model } : {}),
     }),
   });
 
-  const payload = await readJsonBody<AssistantResponse>(response);
-
+  // Every rejection that carries a status is written before the stream opens,
+  // so a non-2xx is still a JSON body.
   if (!response.ok) {
-    const message = payload?.error ? `Error: ${payload.error}` : "Assistant service returned an error.";
-    return { content: message, proposal: null, toolEvents: [], model: null };
+    const message = assistantErrorMessage(response.status);
+    return { failed: true, content: message, proposal: null, toolEvents: [], model: null };
   }
+
+  if (response.headers?.get?.("content-type")?.includes("text/event-stream") && response.body) {
+    return readAssistantStream(response.body, latestMessage, onEvent);
+  }
+
+  const payload = await readJsonBody<AssistantResponse>(response);
 
   const content =
     typeof payload?.content === "string" && payload.content.trim()
@@ -285,8 +423,9 @@ export async function placeProposedOrder(
   return { ok: true, message: feedback.message };
 }
 
-export async function requestPiReply(command: string): Promise<string> {
+export async function requestPiReply(command: string, signal?: AbortSignal): Promise<string> {
   const response = await fetch("/api/pi", {
+    ...(signal ? { signal } : {}),
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -437,8 +576,9 @@ export function resolveSectionFromPath(pathname: string | null, fallback: Worksp
     return "profile";
   }
 
-  // Dynamic ticker route: /AAPL, /GOOG, etc. (1-5 alpha chars)
-  if (/^\/[A-Za-z]{1,5}$/.test(pathname)) {
+  // Dynamic ticker route: /AAPL, /GOOG, /VIX3M, etc.
+  const segments = pathname.split("/");
+  if (segments.length === 2 && isTickerRouteSegment(segments[1])) {
     return "ticker-detail";
   }
 

@@ -18,7 +18,7 @@
  */
 
 import React from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
 
 import PositionTable from "../components/PositionTable";
@@ -32,11 +32,13 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
 afterEach(cleanup);
 
-function todayET(): string {
+/** The ET calendar date of a GIVEN instant — never of "now", so the caller
+ *  has to say which moment it means. */
+function etDate(instant: Date): string {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/New_York",
     year: "numeric", month: "2-digit", day: "2-digit",
-  }).formatToParts(new Date());
+  }).formatToParts(instant);
   const get = (type: string) => parts.find((p) => p.type === type)!.value;
   return `${get("year")}-${get("month")}-${get("day")}`;
 }
@@ -53,7 +55,28 @@ function makePriceData(overrides: Partial<PriceData> = {}): PriceData {
   };
 }
 
-const EXPIRY = todayET();
+/** The suite's clock, frozen.
+ *
+ *  `TODAY` is read once at MODULE LOAD, while `positionUtils.isSameDay` calls
+ *  `todayInET()` again at ASSERTION time. A run that crosses 00:00 ET reads
+ *  two different dates from those two points: the same-day branch stops
+ *  firing mid-suite, the fixture becomes an overnight position, and the
+ *  identity goes red for a reason that has nothing to do with the code under
+ *  test. Freezing the clock makes both reads the same instant.
+ *
+ *  Only `Date` is faked — the timer queue stays real so React's scheduling is
+ *  untouched. */
+const FROZEN_NOW = new Date("2026-08-26T20:00:00Z"); // 2026-08-26 16:00 ET
+
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(FROZEN_NOW);
+});
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+const EXPIRY = etDate(FROZEN_NOW);
 
 const META_SHORT_PUT: PortfolioPosition = {
   id: 42,
@@ -71,7 +94,7 @@ const META_SHORT_PUT: PortfolioPosition = {
   kelly_optimal: null,
   target: null,
   stop: null,
-  entry_date: todayET(),
+  entry_date: etDate(FROZEN_NOW),
   legs: [{
     direction: "SHORT" as const,
     contracts: 40,

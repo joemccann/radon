@@ -1,4 +1,4 @@
-import { computeCtaImageHeight, MAX_IMAGE_ROWS } from "@/lib/ctaImageLayout";
+import { computeCtaImageHeight, truncateCtaTables } from "@/lib/ctaImageLayout";
 import { requireRouteAccess } from "@/lib/routeAccess";
 
 import { ImageResponse } from "next/og";
@@ -291,8 +291,10 @@ function DataRow({ row }: { row: CtaRow }) {
   );
 }
 
+export const radonCapability = "read";
+
 export async function GET(request: Request) {
-  const access = await requireRouteAccess(undefined, { rate: { key: "menthorq/cta/image:route", limit: 20, windowMs: 60_000 } });
+  const access = await requireRouteAccess(undefined, { rate: { key: "menthorq/cta/image:route", limit: 20, windowMs: 60_000 }, durableRateTier: "B" });
   if (!access.ok) return access.response;
   const { searchParams } = new URL(request.url);
   const section = searchParams.get("section") ?? undefined;
@@ -307,12 +309,7 @@ export async function GET(request: Request) {
   // Truncate before laying out, not after: the row count comes from a cache
   // FILE, so a malformed extraction could otherwise ask for a canvas tens of
   // thousands of pixels tall on a Node-runtime satori render. R-310.
-  let budget = MAX_IMAGE_ROWS;
-  for (const key of Object.keys(data.tables)) {
-    const rows = data.tables[key] ?? [];
-    if (rows.length > budget) data.tables[key] = rows.slice(0, Math.max(0, budget));
-    budget -= data.tables[key].length;
-  }
+  truncateCtaTables(data.tables);
 
   const totalRows = Object.values(data.tables).reduce(
     (sum, rows) => sum + rows.length,

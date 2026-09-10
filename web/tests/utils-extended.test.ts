@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   createTimestamp,
   sleep,
@@ -400,6 +400,58 @@ describe("formatPortfolioPayload extended", () => {
     const result = formatPortfolioPayload({});
     expect(result).toContain("Portfolio Snapshot");
     expect(result).toContain("No positions found.");
+  });
+});
+
+// =============================================================================
+// formatPortfolioPayload — human-readable snapshot header
+// =============================================================================
+
+describe("formatPortfolioPayload snapshot header", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-29T20:10:30Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const snapshot = {
+    bankroll: 1315883,
+    position_count: 10,
+    defined_risk_count: 9,
+    undefined_risk_count: 1,
+    last_sync: "2026-08-29T20:06:24.768526+00:00",
+    positions: [],
+  };
+
+  it("renders sync age plus an ET wall clock, never the raw ISO timestamp", () => {
+    const result = formatPortfolioPayload(snapshot);
+    expect(result).toContain("Synced 4m ago (16:06 ET)");
+    expect(result).not.toContain("2026-08-29T20:06:24.768526+00:00");
+    expect(result).not.toContain("Last Sync:");
+  });
+
+  it("collapses the risk split onto the positions line", () => {
+    const result = formatPortfolioPayload(snapshot);
+    expect(result).toContain("Positions: 10 (9 defined risk, 1 undefined risk)");
+    expect(result).not.toContain("Defined Risk: 9");
+    expect(result).not.toContain("Undefined Risk: 1");
+  });
+
+  it("says the sync time is unavailable when the payload has none", () => {
+    const result = formatPortfolioPayload({ bankroll: 1000, positions: [] });
+    expect(result).toContain("Sync time unavailable");
+    expect(result).not.toContain("N/A");
+    expect(result).not.toContain("Invalid Date");
+  });
+
+  it("says the sync time is unavailable when it cannot be parsed", () => {
+    const result = formatPortfolioPayload({ ...snapshot, last_sync: "not-a-timestamp" });
+    expect(result).toContain("Sync time unavailable");
+    expect(result).not.toContain("unknown");
+    expect(result).not.toContain("Invalid Date");
   });
 });
 

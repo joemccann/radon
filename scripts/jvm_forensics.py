@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -46,6 +47,18 @@ STEP_TIMEOUT_SECS = 6.0
 THREAD_DUMP_SETTLE_SECS = 3.0
 # Match the gateway JVM specifically; plain `pgrep java` is the fallback.
 JVM_PGREP_PATTERN = "ibcalpha.ibc.IbcGateway"
+
+# The watchdog runs as radon, which is not in group `docker` -- that group is
+# root-equivalent. Every capture goes through the root shim, which pins the
+# container and the verb set. RADON_DOCKER_GW lets a test point at a stub.
+DOCKER_GW = os.environ.get("RADON_DOCKER_GW", "/usr/local/sbin/radon-docker-gw")
+SUDO = os.environ.get("RADON_SUDO_BIN", "/usr/bin/sudo")
+
+
+def _gw(*verb: str) -> list[str]:
+    if os.environ.get("RADON_DOCKER_GW_NO_SUDO") == "1":
+        return [DOCKER_GW, *verb]
+    return [SUDO, "-n", DOCKER_GW, *verb]
 
 _CAPTURE_DIR_RE = re.compile(r"^\d{8}T\d{6}Z$")
 
@@ -113,11 +126,17 @@ class _Capture:
         self.result.steps[step] = "ok"
         return proc.stdout or ""
 
+    @staticmethod
+    def _write_private(path: Path, content: str) -> None:
+        """Write one capture artifact readable by the owner only."""
+        path.write_text(content)
+        os.chmod(path, 0o600)
+
     def _persist(self, step: str, filename: str, content: Optional[str]) -> None:
         if content is None:
             return
         try:
-            (self.result.capture_dir / filename).write_text(content)
+            self._write_private(self.result.capture_dir / filename, content)
         except OSError as exc:
             self.result.steps[step] = f"error:write:{exc}"
 
@@ -128,6 +147,7 @@ class _Capture:
         try:
             capture_dir = self.output_dir / stamp
             capture_dir.mkdir(parents=True, exist_ok=True)
+            os.chmod(capture_dir, 0o700)
         except OSError as exc:
             self.result.steps["mkdir"] = f"error:{exc}"
             return False
@@ -137,12 +157,12 @@ class _Capture:
     def _find_jvm_pid(self) -> Optional[str]:
         out = self._run(
             "find_pid",
-            ["docker", "exec", self.container, "pgrep", "-f", JVM_PGREP_PATTERN],
+            _gw("pgrep-jvm"),
         )
         if not out or not out.strip():
             out = self._run(
                 "find_pid_fallback",
-                ["docker", "exec", self.container, "pgrep", "java"],
+                _gw("pgrep-java"),
             )
         if not out or not out.strip():
             self.result.steps["find_pid"] = self.result.steps.get("find_pid", "") + ";no_pid"
@@ -153,7 +173,7 @@ class _Capture:
         # `bash -c` so the shell-builtin kill works even if /bin/kill is absent.
         out = self._run(
             "kill_minus_3",
-            ["docker", "exec", self.container, "bash", "-c", f"kill -3 {pid}"],
+            _gw("thread-dump", str(pid)),
         )
         if out is None:
             return False
@@ -161,16 +181,16 @@ class _Capture:
         return True
 
     def _snapshot_logs(self) -> bool:
-        out = self._run("docker_logs", ["docker", "logs", "--since", "5m", self.container])
+        out = self._run("docker_logs", _gw("logs"))
         self._persist("docker_logs", "docker_logs.txt", out)
         return out is not None
 
     def _snapshot_stats(self) -> None:
-        out = self._run("docker_stats", ["docker", "stats", "--no-stream", self.container])
+        out = self._run("docker_stats", _gw("stats"))
         self._persist("docker_stats", "docker_stats.txt", out)
 
     def _snapshot_process_table(self) -> None:
-        out = self._run("ps_aux", ["docker", "exec", self.container, "ps", "aux"])
+        out = self._run("ps_aux", _gw("ps"))
         self._persist("ps_aux", "ps_aux.txt", out)
 
     def _write_manifest(self) -> None:
@@ -181,8 +201,9 @@ class _Capture:
             "steps": self.result.steps,
         }
         try:
-            (self.result.capture_dir / "manifest.json").write_text(
-                json.dumps(manifest, indent=2)
+            self._write_private(
+                self.result.capture_dir / "manifest.json",
+                json.dumps(manifest, indent=2),
             )
         except OSError as exc:
             LOG.warning("manifest write failed: %s", exc)

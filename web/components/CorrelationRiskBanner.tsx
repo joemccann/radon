@@ -3,6 +3,7 @@
 import { ShieldAlert } from "lucide-react";
 import {
   correlationRiskBanner,
+  type CorrelationOrderContext,
   type RiskBudgetReport,
 } from "@/lib/correlationRiskBanner";
 
@@ -18,11 +19,18 @@ import {
 export default function CorrelationRiskBanner({
   report,
   showUnavailable = false,
+  order = null,
 }: {
   report: RiskBudgetReport | null | undefined;
   showUnavailable?: boolean;
+  /** Working-order context: a close/reduce of a breached-cluster ticker
+   *  suppresses that cluster's breach banner (the order IS the trim). */
+  order?: CorrelationOrderContext | null;
 }) {
-  const banner = correlationRiskBanner(report);
+  const banner = correlationRiskBanner(report, order);
+  // A reduce of the breached stack renders no Gate-3 module at all: the
+  // banner exists to stop adds, and this order is the trim it asks for.
+  if (banner?.level === "reduce") return null;
   const measurementUnavailable =
     showUnavailable && (!banner || (banner.level === "none" && banner.insufficientData.length > 0));
   if ((!banner || banner.level === "none") && !measurementUnavailable) return null;

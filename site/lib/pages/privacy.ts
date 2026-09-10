@@ -32,7 +32,7 @@ export const PRIVACY_DATE_MODIFIED = LEGAL_EFFECTIVE_DATE;
 export const privacyUrl = `${siteUrl}/${PRIVACY_SLUG}`;
 
 export const PRIVACY_INTRO =
-  "radon.run is a static research journal. It sets no cookies, shows no consent banner because none is warranted, and collects nothing you type, because there is nowhere to type it. This page is the complete inventory.";
+  "radon.run is a static marketing site. It sets no cookies, shows no consent banner because none is warranted, and collects nothing you type, because there is nowhere to type it. This page is the complete inventory.";
 
 export const privacySections: LegalSection[] = [
   {

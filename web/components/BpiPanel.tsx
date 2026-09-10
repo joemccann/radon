@@ -5,6 +5,7 @@ import { Gauge } from "lucide-react";
 
 import BpiChart from "./BpiChart";
 import BrushMinimap from "./BrushMinimap";
+import FreshnessRail from "./FreshnessRail";
 import HistoryRangeChips from "./HistoryRangeChips";
 import InfoTooltip from "./InfoTooltip";
 import MetricCell from "./mobile/MetricCell";
@@ -22,6 +23,7 @@ import {
   type BpiPayload,
   type BpiTone,
 } from "@/lib/bpi";
+import { BPI_REFRESH } from "@/lib/refreshSchedule";
 import { useBpi } from "@/lib/useBpi";
 import {
   defaultPresetForLength,
@@ -100,7 +102,7 @@ function BpiSessionStaleMark() {
       style={{
         marginLeft: "8px",
         fontFamily: "var(--font-mono)",
-        fontSize: "9px",
+        fontSize: "var(--text-meta)",
         fontWeight: 700,
         letterSpacing: "0.08em",
         color: "var(--warning)",
@@ -254,7 +256,14 @@ export default function BpiPanel() {
         <IndexSwitcher active={index} compact={compact} onChange={switchIndex} />
 
         {payload ? (
-          <BpiReadout payload={payload} compact={compact} />
+          <>
+            <BpiReadout payload={payload} compact={compact} />
+            <FreshnessRail
+              schedule={BPI_REFRESH}
+              asOf={payload.as_of_session}
+              testId="bpi-freshness-rail"
+            />
+          </>
         ) : (
           <SectionEmptyState
             icon={Gauge}
@@ -290,7 +299,7 @@ export default function BpiPanel() {
           <div
             style={{
               fontFamily: "var(--font-mono)",
-              fontSize: "9px",
+              fontSize: "var(--text-meta)",
               color: "var(--text-muted)",
               marginTop: "8px",
             }}

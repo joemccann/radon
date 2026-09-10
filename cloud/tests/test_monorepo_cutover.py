@@ -97,10 +97,11 @@ def test_compose_renders_with_external_env_and_no_project_dotenv(tmp_path: Path)
 
 
 def test_deploy_exports_external_compose_env_for_preflight_and_gateway() -> None:
+    """The env-file pin moved into the root shim; the helper only names a verb."""
     deploy = DEPLOY.read_text(encoding="utf-8")
-    gateway = GATEWAY_HELPER.read_text(encoding="utf-8")
+    shim = (CLOUD_ROOT / "scripts" / "radon-docker-gw.sh").read_text(encoding="utf-8")
     preflight = _function_body(deploy, "preflight_env")
-    compose = _function_body(gateway, "compose")
+    compose = _function_body(shim, "compose")
 
     assert "RADON_COMPOSE_ENV_FILE" in preflight
     assert "RADON_COMPOSE_ENV_FILE" in compose
@@ -526,6 +527,15 @@ def test_runtime_code_paths_are_canonical_while_secret_path_remains_stable() -> 
                     assert line == (
                         "EnvironmentFile=/home/radon/radon-page-responder.env"
                     ), name
+                elif name == "radon-flex-pull.service":
+                    assert line.lstrip("EnvironmentFile=").lstrip("-") == (
+                        "/var/lib/radon/flex-secrets/env"
+                    ), name
+                elif name == "radon-mcp.service":
+                    # The anonymous-facing MCP unit gets a derived, non-secret
+                    # subset (written next to the canonical file), never the
+                    # full secret set.
+                    assert line == "EnvironmentFile=/etc/radon/mcp.env", name
                 else:
                     assert line == f"EnvironmentFile={CANONICAL_ENV_FILE}", name
             if line.startswith(("WorkingDirectory=", "ExecStart=", "ExecStop=")):

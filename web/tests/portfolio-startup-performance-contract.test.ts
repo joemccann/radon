@@ -42,10 +42,14 @@ vi.mock("next/link", () => ({
 // --- next/dynamic: record each lazy boundary the shell declares -----------
 type ChunkLoader = () => Promise<{ default: React.ComponentType<unknown> }>;
 const chunkLoaders: ChunkLoader[] = [];
+const chunkProps = new Map<number, Record<string, unknown>>();
 vi.mock("next/dynamic", () => ({
   default: (loader: ChunkLoader) => {
     const index = chunkLoaders.push(loader) - 1;
-    const LazyChunk = () => React.createElement("div", { "data-testid": `lazy-chunk-${index}` });
+    const LazyChunk = (props: Record<string, unknown>) => {
+      chunkProps.set(index, props);
+      return React.createElement("div", { "data-testid": `lazy-chunk-${index}` });
+    };
     LazyChunk.displayName = `LazyChunk(${index})`;
     return LazyChunk;
   },
@@ -53,7 +57,7 @@ vi.mock("next/dynamic", () => ({
 
 // --- shell/nav dependencies ----------------------------------------------
 const usePortfolioSpy = vi.fn(() => ({
-  data: null, loading: false, syncing: false, error: null, lastSync: null, syncNow: () => {},
+  data: null, loading: false, syncing: false, error: null, lastSync: null as string | null, syncNow: () => {},
 }));
 vi.mock("@/lib/usePortfolio", () => ({ usePortfolio: usePortfolioSpy }));
 
@@ -89,8 +93,30 @@ vi.mock("@/lib/TickerDetailContext", () => ({ useTickerDetail: () => tickerDetai
 vi.mock("@/lib/offline/OfflineStatusContext", () => ({ useOfflineStatus: () => ({ offline: false }) }));
 vi.mock("@/lib/ThemeContext", () => ({ useTheme: () => ({ theme: "dark", toggleTheme: () => {} }) }));
 vi.mock("@/lib/RealtimeAuthContext", () => ({ useRealtimeAuth: () => async () => null }));
-vi.mock("@/lib/usePrices", () => ({
-  usePrices: () => ({ prices: {}, depths: {}, tape: {}, connected: true }),
+// The shell reads the root realtime context (useRealtimePrices), not
+// @/lib/usePrices directly. Record every `connected` value the shell observes
+// so the perf cases below provably measure the CONNECTED branch — a dead mock
+// here once left them timing the disconnected fallback (T-388).
+const observedConnected: boolean[] = [];
+const realtimeValue = {
+  prices: {},
+  fundamentals: {},
+  depths: {},
+  tape: {},
+  connected: true,
+  ibConnected: true,
+  ibIssue: null,
+  ibStatusMessage: null,
+  error: null,
+  reconnect: () => {},
+  getSnapshot: async () => ({}),
+  publishSubscriptions: () => {},
+};
+vi.mock("@/lib/RealtimePricesContext", () => ({
+  useRealtimePrices: () => {
+    observedConnected.push(realtimeValue.connected);
+    return realtimeValue;
+  },
 }));
 vi.mock("@/lib/useOrders", () => ({
   useOrders: () => ({ data: null, loading: false, syncing: false, error: null, lastSync: null, syncNow: () => {} }),
@@ -113,6 +139,8 @@ vi.mock("@clerk/nextjs", () => ({
 
 afterEach(() => {
   cleanup();
+  chunkProps.clear();
+  usePortfolioSpy.mockReturnValue({ data: null, loading: false, syncing: false, error: null, lastSync: null, syncNow: () => {} });
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
@@ -209,29 +237,85 @@ describe("portfolio startup performance contracts", () => {
 
     expect(container.querySelector(`[data-testid="lazy-chunk-${portfolioChunk}"]`)).not.toBeNull();
     expect(container.querySelector(`[data-testid="lazy-chunk-${workspaceChunk}"]`)).toBeNull();
+
+    // T-388: this render must exercise the CONNECTED branch. Without a
+    // provider (or a stubbed context value) the shell reads the context
+    // default `connected: false` and these timings measure the wrong path.
+    expect(observedConnected.length, "shell must read useRealtimePrices()").toBeGreaterThan(0);
+    expect(observedConnected.every((c) => c === true), "shell must observe connected === true").toBe(true);
   });
+
+  it("loads performance independently of the omnibus workspace and preserves its freshness props", async () => {
+    const { default: WorkspaceShell } = await import("../components/WorkspaceShell");
+    const [performanceModule, workspaceModule] = await Promise.all([
+      import("../components/PerformancePanel"),
+      import("../components/WorkspaceSections"),
+    ]);
+    const resolved = await Promise.all(chunkLoaders.map((load) => load()));
+    const performanceChunk = resolved.findIndex((mod) => mod.default === performanceModule.default);
+    const workspaceChunk = resolved.findIndex((mod) => mod.default === workspaceModule.default);
+    expect(performanceChunk, "Performance must not wait for every workspace panel").toBeGreaterThanOrEqual(0);
+    expect(eagerImportSpecifiers(source("components/WorkspaceSections.tsx"))).not.toContain("PerformancePanel");
+
+    usePortfolioSpy.mockReturnValue({
+      data: null, loading: false, syncing: false, error: null,
+      lastSync: "2026-09-04T18:00:00Z", syncNow: () => {},
+    });
+    const { container, unmount } = render(React.createElement(WorkspaceShell, { section: "performance" } as never));
+    expect(container.querySelector(`[data-testid="lazy-chunk-${performanceChunk}"]`)).not.toBeNull();
+    expect(container.querySelector(`[data-testid="lazy-chunk-${workspaceChunk}"]`)).toBeNull();
+    expect(chunkProps.get(performanceChunk)).toMatchObject({ portfolioLastSync: "2026-09-04T18:00:00Z" });
+    expect(chunkProps.get(performanceChunk)).toHaveProperty("marketState");
+    unmount();
+    const branch = render(React.createElement(workspaceModule.default, { section: "performance" } as never));
+    expect(branch.container.innerHTML).toBe("");
+  });
+
+  /**
+   * T-186: the stub answers with a real Response instead of `undefined`. A spy
+   * returning undefined makes a genuine `await fetch(...)` in the RSC die on
+   * `res.json()` BEFORE the no-round-trip assertion runs, so the file reds with
+   * "Cannot read properties of undefined" and never names the contract it
+   * guards. Answering the call lets the RSC finish and lets the assertion that
+   * owns this contract be the one that fails.
+   */
+  const answeringFetchSpy = () => {
+    const spy = vi.fn(async () => new Response("{}", {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", spy);
+    return spy;
+  };
 
   it("seeds the portfolio page from the server instead of a client fetch waterfall", async () => {
     const seed = { data: { bankroll: 42_000 }, warning: null };
     readSeedSpy.mockResolvedValue(seed);
-    const fetchSpy = vi.fn();
-    vi.stubGlobal("fetch", fetchSpy);
+    const fetchSpy = answeringFetchSpy();
 
     const page = await import("../app/portfolio/page");
     const element = await page.default();
 
+    // Asserted FIRST: a round trip is the defect this test exists for, so it
+    // must be the failure the reader sees, not a downstream seed mismatch.
+    expect(fetchSpy, "the RSC must not issue its own HTTP round trip").not.toHaveBeenCalled();
     expect(page.dynamic).toBe("force-dynamic");
     expect(readSeedSpy).toHaveBeenCalledTimes(1);
     expect((element.props as { initialPortfolio?: unknown }).initialPortfolio).toBe(seed);
-    expect(fetchSpy, "the RSC must not issue its own HTTP round trip").not.toHaveBeenCalled();
   });
 
   it("skips the RSC DB read under the authless Playwright harness", async () => {
     vi.stubEnv("RADON_AUTHLESS_TEST", "1");
+    // T-186: this path was the one unstubbed `fetch` in the file. A real
+    // `await fetch(...)` in the RSC escaped as live egress to localhost:3000
+    // (ECONNREFUSED, or a hit on whatever is actually listening) rather than a
+    // named failure. The authless path owes the same no-round-trip contract.
+    const fetchSpy = answeringFetchSpy();
 
     const page = await import("../app/portfolio/page");
     const element = await page.default();
 
+    expect(fetchSpy, "the authless RSC must not issue an HTTP round trip either").not.toHaveBeenCalled();
     expect(readSeedSpy).not.toHaveBeenCalled();
     expect((element.props as { initialPortfolio?: unknown }).initialPortfolio).toBeUndefined();
   });

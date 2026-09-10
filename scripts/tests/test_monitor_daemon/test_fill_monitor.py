@@ -14,7 +14,24 @@ from unittest.mock import Mock, patch, MagicMock
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+import monitor_daemon.handlers.fill_monitor as fill_monitor_module
 from monitor_daemon.handlers.fill_monitor import FillMonitorHandler
+
+# Captured before the autouse fixture patches the method out, so the
+# mirror-body tests below can execute the real implementation.
+_ORIG_MIRROR = FillMonitorHandler._mirror_ib_orders_snapshot
+
+
+@pytest.fixture(autouse=True)
+def _disable_orders_mirror(monkeypatch):
+    """Persist-to-open_orders is covered in TestFillMonitorOrdersSnapshotMirror.
+    Default it off so execute() never hits ib_orders.save_orders in unit tests.
+    """
+    monkeypatch.setattr(
+        FillMonitorHandler,
+        "_mirror_ib_orders_snapshot",
+        lambda self, client: None,
+    )
 
 
 def make_mock_client(trades=None):
@@ -153,6 +170,182 @@ class TestFillMonitorExecute:
             assert result["complete_fills"] == 1
             assert result["completed"][0]["order_id"] == 5
 
+
+class TestFillMonitorMirrorBody:
+    """The mirror body itself (T-382).
+
+    IBClient.get_open_orders waits on openOrderEnd capped at 0.5s and
+    returns openTrades() regardless — a slow gateway yields [], which the
+    mirror must NOT write over a non-empty existing snapshot (it would
+    wipe every working order off /orders).
+    """
+
+    def _stub_mirror_env(self, monkeypatch, *, open_orders, executed, existing_count):
+        save = MagicMock()
+        monkeypatch.setattr(
+            fill_monitor_module, "fetch_open_orders_for_mirror",
+            lambda client: open_orders, raising=False)
+        monkeypatch.setattr(
+            fill_monitor_module, "fetch_executed_orders_for_mirror",
+            lambda client: executed, raising=False)
+        monkeypatch.setattr(
+            fill_monitor_module, "build_orders_data_for_mirror",
+            lambda o, e: {"open_orders": o, "executed_orders": e}, raising=False)
+        monkeypatch.setattr(
+            fill_monitor_module, "save_orders_snapshot", save, raising=False)
+        monkeypatch.setattr(
+            fill_monitor_module, "count_open_orders_for_mirror",
+            lambda: existing_count, raising=False)
+        return save
+
+    def test_empty_book_never_replaces_nonempty_snapshot(self, monkeypatch):
+        """RED for T-382: [] from a slow gateway must not clobber working orders."""
+        save = self._stub_mirror_env(
+            monkeypatch, open_orders=[],
+            executed=[{"exec_id": "e1"}], existing_count=3)
+        handler = FillMonitorHandler(send_notifications=False)
+        _ORIG_MIRROR(handler, MagicMock())
+        save.assert_not_called()
+
+    def test_empty_book_with_empty_existing_snapshot_saves(self, monkeypatch):
+        """A genuinely flat book over a flat snapshot still mirrors."""
+        save = self._stub_mirror_env(
+            monkeypatch, open_orders=[],
+            executed=[{"exec_id": "e1"}], existing_count=0)
+        handler = FillMonitorHandler(send_notifications=False)
+        _ORIG_MIRROR(handler, MagicMock())
+        save.assert_called_once_with(
+            {"open_orders": [], "executed_orders": [{"exec_id": "e1"}]})
+
+    def test_nonempty_book_fetches_builds_and_saves(self, monkeypatch):
+        """Happy path: mirror body runs fetch → build → save."""
+        save = self._stub_mirror_env(
+            monkeypatch, open_orders=[{"perm_id": 7}],
+            executed=[{"exec_id": "e1"}], existing_count=3)
+        handler = FillMonitorHandler(send_notifications=False)
+        _ORIG_MIRROR(handler, MagicMock())
+        save.assert_called_once_with(
+            {"open_orders": [{"perm_id": 7}], "executed_orders": [{"exec_id": "e1"}]})
+
+    def test_partial_book_never_drops_tracked_working_orders(self, monkeypatch):
+        """RED for R-610 (P1): the same 0.5s openOrderEnd cap that produces an
+        EMPTY read produces a TRUNCATED one. The guard keyed on `not
+        open_orders`, so a partial arrival passed straight to the
+        whole-replacing save and the tracked orders it omitted vanished from
+        the book that drives modify and cancel — strictly more likely than the
+        fully-empty read already guarded."""
+        save = self._stub_mirror_env(
+            monkeypatch,
+            open_orders=[{"orderId": 1}],
+            executed=[{"exec_id": "e1"}],
+            existing_count=5,
+        )
+        handler = FillMonitorHandler(send_notifications=False)
+        handler.known_orders = {i: {"status": "Submitted"} for i in range(1, 6)}
+        _ORIG_MIRROR(handler, MagicMock())
+        save.assert_not_called()
+
+    def test_full_book_covering_every_tracked_order_still_saves(self, monkeypatch):
+        """The guard must not freeze the mirror: a read that covers every
+        tracked order mirrors normally, extra untracked ids included."""
+        save = self._stub_mirror_env(
+            monkeypatch,
+            open_orders=[{"orderId": 1}, {"orderId": 2}, {"orderId": 9}],
+            executed=[],
+            existing_count=2,
+        )
+        handler = FillMonitorHandler(send_notifications=False)
+        handler.known_orders = {1: {}, 2: {}}
+        _ORIG_MIRROR(handler, MagicMock())
+        save.assert_called_once()
+
+    def test_snapshot_count_failure_is_swallowed_and_skips_save(self, monkeypatch):
+        """Counter blowing up must neither crash the handler nor clobber."""
+        save = self._stub_mirror_env(
+            monkeypatch, open_orders=[], executed=[], existing_count=0)
+        def boom():
+            raise RuntimeError("turso down")
+        monkeypatch.setattr(
+            fill_monitor_module, "count_open_orders_for_mirror", boom, raising=False)
+        handler = FillMonitorHandler(send_notifications=False)
+        _ORIG_MIRROR(handler, MagicMock())  # must not raise
+        save.assert_not_called()
+
+
+class TestFillMonitorOrdersSnapshotMirror:
+    """Fills must also replace Turso open_orders/executed_orders.
+
+    fill_monitor already journals the fill, but /orders reads those two
+    tables. After RTH the autonomous ib_orders --sync loop is dark, so an
+    EXT fill (AVGO SELL 1000 @ 355 at 16:24 ET 2026-09-02) stayed WORKING
+    in the UI until a manual SYNC NOW.
+    """
+
+    def test_complete_fill_mirrors_orders_snapshot(self):
+        with patch("monitor_daemon.handlers.fill_monitor.IBClient") as mock_cls:
+            mock_client = make_mock_client(trades=[])
+            mock_cls.return_value = mock_client
+            mock_client.get_managed_accounts.return_value = ["DU123"]
+            fill = MagicMock()
+            fill.execution.orderId = 5
+            mock_client.get_fills.return_value = [fill]
+
+            handler = FillMonitorHandler(send_notifications=False)
+            handler.known_orders = {
+                5: {
+                    "symbol": "AVGO",
+                    "contract": "AVGO",
+                    "action": "SELL",
+                    "quantity": 1000,
+                    "filled": 0,
+                    "limit": 355.0,
+                }
+            }
+            with patch.object(
+                FillMonitorHandler, "_mirror_ib_orders_snapshot"
+            ) as mock_mirror:
+                result = handler.execute()
+
+            assert result["complete_fills"] == 1
+            mock_mirror.assert_called_once_with(mock_client)
+
+    def test_partial_fill_mirrors_orders_snapshot(self):
+        with patch("monitor_daemon.handlers.fill_monitor.IBClient") as mock_cls:
+            mock_trade = MagicMock()
+            mock_trade.order.orderId = 5
+            mock_trade.order.action = "SELL"
+            mock_trade.order.totalQuantity = 1000
+            mock_trade.order.lmtPrice = 355.0
+            mock_trade.orderStatus.status = "Submitted"
+            mock_trade.orderStatus.filled = 400
+            mock_trade.orderStatus.remaining = 600
+            mock_trade.orderStatus.avgFillPrice = 355.0
+            mock_trade.contract.symbol = "AVGO"
+            mock_trade.contract.localSymbol = "AVGO"
+            mock_client = make_mock_client(trades=[mock_trade])
+            mock_cls.return_value = mock_client
+
+            handler = FillMonitorHandler(send_notifications=False)
+            handler.known_orders = {5: {"filled": 0}}
+            with patch.object(
+                FillMonitorHandler, "_mirror_ib_orders_snapshot"
+            ) as mock_mirror:
+                result = handler.execute()
+
+            assert result["partial_fills"] == 1
+            mock_mirror.assert_called_once_with(mock_client)
+
+    def test_no_fill_does_not_mirror(self):
+        with patch("monitor_daemon.handlers.fill_monitor.IBClient") as mock_cls:
+            mock_client = make_mock_client(trades=[])
+            mock_cls.return_value = mock_client
+            handler = FillMonitorHandler(send_notifications=False)
+            with patch.object(
+                FillMonitorHandler, "_mirror_ib_orders_snapshot"
+            ) as mock_mirror:
+                handler.execute()
+            mock_mirror.assert_not_called()
+
     def test_disconnects_after_execution(self):
         """Handler disconnects from IB after execution."""
         with patch('monitor_daemon.handlers.fill_monitor.IBClient') as mock_cls:
@@ -167,6 +360,25 @@ class TestFillMonitorExecute:
 
 class TestFillMonitorNotifications:
     """Test notification logic."""
+
+    def test_notification_text_is_passed_as_argv_not_script_source(self):
+        """Title and message ride argv; the -e script source is a fixed
+        constant no fill field can reach, so quotes and backslashes in a
+        contract description cannot alter the executed AppleScript."""
+        title = 'Order Fill: A"B\\C'
+        message = 'BUY 1x A"B\\C  260306P00090000 @ $1.00'
+        handler = FillMonitorHandler()
+        with patch.object(fill_monitor_module.subprocess, 'run') as mock_run:
+            handler._send_notification(title, message)
+        assert mock_run.call_count == 1
+        argv = mock_run.call_args[0][0]
+        assert argv[0] == "osascript"
+        assert argv[1] == "-e"
+        script = argv[2]
+        assert title not in script and message not in script
+        assert '"' not in script  # static source: nothing to break out of
+        assert "on run argv" in script
+        assert argv[3:] == [message, title]
 
     def test_sends_notification_on_fill(self):
         """Handler sends macOS notification on fill."""
@@ -371,3 +583,66 @@ class TestFillMonitorTradeIdUniqueness:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+_REAL_MIRROR = FillMonitorHandler._mirror_ib_orders_snapshot
+
+
+class TestMirrorGuardsAgainstDegradedSnapshot:
+    """REL-212 (R-579): an empty mirror read while working orders are tracked
+    must NOT whole-replace Turso open_orders."""
+
+    @pytest.fixture(autouse=True)
+    def _restore_real_mirror(self, monkeypatch):
+        # The file-level autouse fixture stubs the mirror to a no-op; this
+        # class tests the mirror itself.
+        monkeypatch.setattr(
+            FillMonitorHandler, "_mirror_ib_orders_snapshot", _REAL_MIRROR
+        )
+
+    def _handler_with_tracked_order(self):
+        handler = FillMonitorHandler(send_notifications=False)
+        handler.known_orders = {
+            7: {"symbol": "NVDA", "action": "BUY", "quantity": 10, "filled": 0},
+        }
+        return handler
+
+    def test_empty_open_orders_with_tracked_orders_skips_the_replace(self):
+        import monitor_daemon.handlers.fill_monitor as fm
+
+        saved = []
+        with patch.object(fm, "fetch_open_orders_for_mirror", lambda c: []), \
+             patch.object(fm, "count_open_orders_for_mirror", lambda: 1), \
+             patch.object(fm, "fetch_executed_orders_for_mirror", lambda c: []), \
+             patch.object(fm, "build_orders_data_for_mirror", lambda o, e: {"open_orders": o}), \
+             patch.object(fm, "save_orders_snapshot", lambda data: saved.append(data)):
+            self._handler_with_tracked_order()._mirror_ib_orders_snapshot(MagicMock())
+        assert saved == [], (
+            "an empty open-orders read whole-replaced Turso while a working "
+            "order was still tracked (degraded-snapshot race, R-579)"
+        )
+
+    def test_empty_open_orders_with_nothing_tracked_still_mirrors(self):
+        import monitor_daemon.handlers.fill_monitor as fm
+
+        saved = []
+        handler = FillMonitorHandler(send_notifications=False)
+        handler.known_orders = {}
+        with patch.object(fm, "fetch_open_orders_for_mirror", lambda c: []), \
+             patch.object(fm, "count_open_orders_for_mirror", lambda: 0), \
+             patch.object(fm, "fetch_executed_orders_for_mirror", lambda c: []), \
+             patch.object(fm, "build_orders_data_for_mirror", lambda o, e: {"open_orders": o}), \
+             patch.object(fm, "save_orders_snapshot", lambda data: saved.append(data)):
+            handler._mirror_ib_orders_snapshot(MagicMock())
+        assert len(saved) == 1
+
+    def test_populated_open_orders_still_mirror(self):
+        import monitor_daemon.handlers.fill_monitor as fm
+
+        saved = []
+        with patch.object(fm, "fetch_open_orders_for_mirror", lambda c: [{"orderId": 7}]), \
+             patch.object(fm, "fetch_executed_orders_for_mirror", lambda c: []), \
+             patch.object(fm, "build_orders_data_for_mirror", lambda o, e: {"open_orders": o}), \
+             patch.object(fm, "save_orders_snapshot", lambda data: saved.append(data)):
+            self._handler_with_tracked_order()._mirror_ib_orders_snapshot(MagicMock())
+        assert len(saved) == 1

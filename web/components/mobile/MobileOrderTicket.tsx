@@ -643,23 +643,6 @@ export default function MobileOrderTicket({
   ) : (
     <>
       {statusBlock}
-      {legs.length > 0 && (
-        <div className="mobile-ticket__risk-block">
-          <TicketRiskBlock
-            legs={payoffLegs}
-            netPremium={netPremiumForPayoff(payoffLegs, legs.length > 1, signedLimitPrice)}
-            spot={spot ?? 0}
-            maxGain={gateRiskState?.summary.maxGain ?? null}
-            maxLoss={gateRiskState?.summary.maxLoss ?? null}
-            maxLossUnbounded={gateRiskState?.summary.maxLossUnbounded === true}
-            marginRequirement={gateRiskState?.summary.marginImpact?.requirement ?? null}
-            fundsAfter={gateRiskState?.summary.marginImpact?.availableAfter ?? null}
-            total={gateRiskState?.summary.totalCost ?? null}
-            totalLabel={gateRiskState?.summary.totalLabel ?? "TOTAL"}
-            isCredit={netPremiumForPayoff(payoffLegs, legs.length > 1, signedLimitPrice) < 0}
-          />
-        </div>
-      )}
       {riskTeaser ? (
         <div className="mobile-ticket__teaser" data-testid="mobile-order-ticket-teaser">
           {notionalDollars != null ? (
@@ -1004,6 +987,29 @@ export default function MobileOrderTicket({
               </button>
             ))}
           </div>
+
+          {/* 4. Risk grid + payoff — scrolls WITH the sheet, below the size
+              controls. Pinning this instrument in the sticky footer ate ~48%
+              of a 393x852 viewport and crushed the legs/qty/preset region
+              into a ~196px nested scroller (2026-09-01). The footer keeps
+              only the teaser + Clear / Review thumb-zone. */}
+          {legs.length > 0 && (
+            <div className="mobile-ticket__risk-block">
+              <TicketRiskBlock
+                legs={payoffLegs}
+                netPremium={netPremiumForPayoff(payoffLegs, legs.length > 1, signedLimitPrice)}
+                spot={spot ?? 0}
+                maxGain={gateRiskState?.summary.maxGain ?? null}
+                maxLoss={gateRiskState?.summary.maxLoss ?? null}
+                maxLossUnbounded={gateRiskState?.summary.maxLossUnbounded === true}
+                marginRequirement={gateRiskState?.summary.marginImpact?.requirement ?? null}
+                fundsAfter={gateRiskState?.summary.marginImpact?.availableAfter ?? null}
+                total={gateRiskState?.summary.totalCost ?? null}
+                totalLabel={gateRiskState?.summary.totalLabel ?? "TOTAL"}
+                isCredit={netPremiumForPayoff(payoffLegs, legs.length > 1, signedLimitPrice) < 0}
+              />
+            </div>
+          )}
 
           {/* Footer carries the teaser + Review CTA; this spacer keeps the
               body-scroll content from running under the footer. */}

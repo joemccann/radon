@@ -95,6 +95,16 @@ def out_dir(tmp_path: Path) -> Path:
 
 
 class TestCaptureHappyPath:
+    def test_capture_artifacts_are_owner_only(self, out_dir):
+        runner = FakeRunner()
+        result = capture_jvm_forensics(output_dir=out_dir, runner=runner, sleeper=lambda s: None)
+        assert result.capture_dir is not None
+        assert (result.capture_dir.stat().st_mode & 0o777) == 0o700
+        files = list(result.capture_dir.iterdir())
+        assert files
+        for artifact in files:
+            assert (artifact.stat().st_mode & 0o777) == 0o600, artifact
+
     def test_writes_all_snapshot_files(self, out_dir):
         runner = FakeRunner()
         result = capture_jvm_forensics(output_dir=out_dir, runner=runner, sleeper=lambda s: None)
@@ -107,7 +117,7 @@ class TestCaptureHappyPath:
     def test_kill_minus_3_targets_discovered_pid(self, out_dir):
         runner = FakeRunner()
         capture_jvm_forensics(output_dir=out_dir, runner=runner, sleeper=lambda s: None)
-        kill_cmds = [c for c in runner.commands() if "kill -3" in c]
+        kill_cmds = [c for c in runner.commands() if "thread-dump" in c]
         assert len(kill_cmds) == 1
         assert "1770100" in kill_cmds[0]
 

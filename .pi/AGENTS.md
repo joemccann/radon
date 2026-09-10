@@ -17,23 +17,44 @@ This root file is intentionally small. Scoped `AGENTS.md` files live beside subs
 
 When a scoped `AGENTS.md` and this root file conflict, prefer the more specific scoped file. When `AGENTS.md` and `CLAUDE.md` conflict, prefer the newer, more specific rule and update the Codex file during the work.
 
+## Code path map
+
+Read `tools/codemap/architecture.json` before searching for a module or reconstructing imports. Full graph: `tools/codemap/codemap.json` (`meta`, `groups`, `nodes`, `edges`; `edges` are `[src, dst]` indexes into `nodes`). Do not walk the tree to reconstruct imports. Code commits regenerate those files via `python3.13 tools/codemap/pre_commit.py`; CI fails if they are stale (`python3.13 tools/codemap/generate_codemap.py`).
+
 ## Response Format
 
-**Answer only what was asked. Bulleted lists by default.**
+⛔ **This is a HARD FORMAT, not a style preference.** Copied from `CLAUDE.md`. Every closing message uses this shape and nothing else:
 
-- No preamble, no recap of the request, no narration of what you are about to do.
-- **Bullets over prose.** Prose only when a bullet genuinely cannot carry it.
-- **Ship the outcome, not the journey.** No "what surfaced", "worth noting", "interesting", "one thing you should know", "also found", "for the record", "lessons". If it is not the answer to the prompt, cut it.
-- No tangents about adjacent bugs, other sessions' work, test flake, or process observations unless they BLOCK the requested task — then one bullet, no story.
-- No self-narration of reasoning, corrections, or how hard something was.
-- Verification = one line of evidence (counts, status codes, SHAs). Not a transcript.
-- Don't restate what a diff already says.
-- Follow-ups: at most one line, only if genuinely actionable. Otherwise omit.
-- Length target: under ~150 words unless the user asked for depth.
+```
+**Done**
+- <one line per outcome, with its evidence inline: count, SHA, status code, path>
+
+**Next**
+- <one line per action the user must take, command first>
+```
+
+- **100 words max.** Over that, delete lines. Do not compress prose. Only a direct request for depth ("explain", "why", "walk me through") lifts the cap.
+- **Bullets only.** No prose paragraph anywhere. One line per bullet. No sub-bullets.
+- **Omit `Next` entirely when there is nothing for the user to do.** Never pad it.
+- **Causes go in the commit message and the PR body, never in chat.** The user reads chat for state and next action; they read the PR for the story. If it explains WHY something broke, it does not belong here.
+
+**Banned outright** (these have all shipped in this repo):
+
+| Banned | Instead |
+|---|---|
+| "Worth knowing…", "Worth noting…", "The sharpest find is…" | cut |
+| "Two things that changed…", "Correction to my earlier report…" | fix it in one bullet under Done, no narration |
+| A table or code block re-explaining a diagnosis | link the PR |
+| A paragraph offering follow-up work | one bullet under Next, or cut |
+| Restating what a commit message, PR body, or diff already says | cut |
+| Preamble, recap of the request, "I'll now…" | cut |
+
+- Verification is evidence, not a transcript: `8482 passed, 0 failed`, `e40107b4`, `30/30 gating green`. One fragment, inline.
+- Mid-task progress messages follow the same shape. Length creep starts with "while that runs, here is what I found".
 
 ## Workflow
 
-- Be extremely terse. See §Response Format — a hard rule, not a preference.
+- Be extremely terse. See §Response Format. Hard format, not a preference.
 - Think before coding. State assumptions, surface tradeoffs, and ask only when ambiguity blocks safe progress.
 - Keep changes surgical. Touch only what the task requires; do not refactor adjacent code opportunistically.
 - Simplicity first. Do not add speculative features or abstractions without a concrete need.
@@ -41,7 +62,15 @@ When a scoped `AGENTS.md` and this root file conflict, prefer the more specific 
 - Track checklist progress as work completes and add a review section before final response.
 - After any user correction, update `tasks/lessons.md` with a rule that prevents repeating the mistake.
 - Never revert user changes. Check `git status --short --branch` before edits and ignore unrelated dirty files.
+- For architecture, module location, or imports, read `tools/codemap/architecture.json` then `tools/codemap/codemap.json`. Do not walk the tree to reconstruct imports.
 - Use `rg` / `rg --files` first for search.
+
+## Pull Request Completion
+
+- Whenever you create or open a pull request, capture its GitHub URL and latest head SHA, verify that GitHub has registered the expected CI suite for that SHA, then remain active and run `gh pr checks <PR-URL> --watch --interval 10` (or an equivalent continuous check) until every applicable CI/build check on that exact head is complete and green. "No checks reported" is pending, not success; keep polling until the expected checks appear.
+- A failed, cancelled, timed-out, action-required, or stale check is not a stopping point. Inspect the failed run with `gh run view <RUN-ID> --log-failed`, fix the root cause, run the relevant local verification, commit and push the repair, confirm the PR head SHA changed, and resume watching. Repeat until green; do not yield the task back while safe, in-scope changes can repair CI.
+- Do not call the PR complete while any applicable check on the latest head is queued, in progress, or failing. Superseded runs do not count.
+- After the latest head is fully green, send exactly one normal-priority Pushover notification titled `radon PR green`. Its message must briefly describe the PR and include the clickable GitHub PR URL (`url` plus `url_title`). Load only `PUSHOVER_USER` and `PUSHOVER_TOKEN`; never expose credentials. Confirm Pushover accepted the request. Missing credentials or delivery failure must be reported and retried, never silently skipped or described as complete.
 
 ## Verification
 
@@ -49,6 +78,7 @@ When a scoped `AGENTS.md` and this root file conflict, prefer the more specific 
 - UI bugs require Playwright E2E coverage and visual browser verification. Use `chrome-cdp` when available; otherwise use Playwright.
 - Target 95% coverage on touched surfaces.
 - Always run the relevant focused tests. Run full project suites before commits when changes are code-bearing; if baselines are already red, report focused green results and unrelated baseline failures separately.
+- Local suites are worker-budgeted: `pytest -n auto` resolves to half the cores and an explicit `-n N` above that is clamped to it (root `conftest.py`); vitest runs `maxWorkers: 50%`. CI keeps every core. Never run pytest and vitest concurrently on the laptop. Overrides: `PYTEST_XDIST_AUTO_NUM_WORKERS` (lifts the pytest budget), `VITEST_MAX_WORKERS`.
 - For scoped Python changes, prefer `python3.13 scripts/run_pytest_affected.py --files ... -- -q` first, then broaden when needed.
 - For JS/UI changes, run focused Vitest, relevant Playwright E2E, and browser screenshot checks.
 
@@ -81,10 +111,12 @@ Any UI or asset work must comply with Radon brand identity:
 
 1. Interactive Brokers.
 2. Unusual Whales.
-3. Yahoo Finance — **ABSOLUTE LAST RESORT**. Never make Yahoo the scheduled, primary, or only source for a series IB or UW can serve.
-4. Web scrape / browser after Yahoo; use Exa for research/docs and interactive browser only for JS-rendered pages.
+3. Cboe official index feeds — COR1M dashboard history, official VIX/VVIX daily closes. Other specialized official feeds (Treasury, FINRA) rank here when a script documents them as the source for that metric.
+4. Robinhood — official trading MCP only (`https://agent.robinhood.com/mcp/trading`), READ-ONLY. Quote/chain failover + retail-crowding overlay; never above IB, UW, or Cboe; execution stays on IB. No dark pool, OTC, sweeps, GEX, or vol surface; options are NBBO/last + prior-close only.
+5. Yahoo Finance — **ABSOLUTE LAST RESORT**. Never make Yahoo the scheduled, primary, or only source for a series IB or UW can serve.
+6. Web scrape / browser after Yahoo; use Exa for research/docs and interactive browser only for JS-rendered pages.
 
-Try IB every cycle. Skip the IB socket only when `/health` `auth_state` is set and not `authenticated`; then UW; then Yahoo. 2FA, unattended timers, and "historical needs a gateway" do not skip IB or UW. Specialized official feeds (Cboe, Treasury, FINRA) may sit ahead of Yahoo when a script documents them as the source for that metric.
+Try IB every cycle. Skip the IB socket only when `/health` `auth_state` is set and not `authenticated`; then UW; then Robinhood (skipped cleanly when no credentials (access or refresh token) are configured; access tokens expire ~3 days, refreshed automatically via the 0600 token file `ROBINHOOD_MCP_TOKEN_FILE`); then Yahoo. 2FA, unattended timers, and "historical needs a gateway" do not skip IB or UW. Specialized official feeds (Cboe, Treasury, FINRA) may sit ahead of Robinhood and Yahoo when a script documents them as the source for that metric — the full order is IB > UW > Cboe > Robinhood > Yahoo.
 
 ## Commands
 

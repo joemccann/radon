@@ -75,7 +75,9 @@ export const SECTION_TOOLTIPS: Record<string, string> = {
     "RTH vs EXT chips show whether a working order can fill after 16:00 ET. " +
     "Options and option combos stay RTH-only even with FILL OUTSIDE RTH. " +
     "Stocks and ETFs fill after RTH only when that flag is on. Futures can fill outside equity RTH. " +
-    "Last Price shows the current market mid for the contract. Orders can be modified " +
+    "Last Price uses a reliable last trade, or a calculated mark prefixed C. A calculated mark is the bid/ask midpoint when a live quote exists, " +
+    "and the previous-session close when it does not, which is marked separately. " +
+    "Combo marks are the signed sum of those resolved leg prices. Orders can be modified " +
     "(price/quantity) or cancelled directly. Status reflects IB order state " +
     "(PreSubmitted, Submitted, Filled, Cancelled).",
 
@@ -103,8 +105,8 @@ export const SECTION_TOOLTIPS: Record<string, string> = {
     "and COR1M > 60 (panic herding). All three must fire to trigger.",
 
   "20-SESSION HISTORY":
-    "Left chart tracks VIX and VVIX across the last 20 trading sessions so you can see whether volatility and vol-of-vol are expanding together or cooling off. " +
-    "Right chart compares realized volatility with COR1M over the same window to show whether actual market turbulence is being joined by tighter stock-to-stock correlation. " +
+    "The VIX / VVIX chart tracks VIX and VVIX across the last 20 trading sessions so you can see whether volatility and vol-of-vol are expanding together or cooling off. " +
+    "The realized vol / COR1M chart compares realized volatility with COR1M over the same window to show whether actual market turbulence is being joined by tighter stock-to-stock correlation. " +
     "The latest point is the most recent session in view, and each point shows that session's reading.",
 
   "RELATIONSHIP VIEW":

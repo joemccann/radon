@@ -32,8 +32,10 @@ describe("Regime history tooltip copy", () => {
     const copy = SECTION_TOOLTIPS["20-SESSION HISTORY"];
 
     expect(copy).toMatch(/20 trading sessions/i);
-    expect(copy).toMatch(/Left chart/i);
-    expect(copy).toMatch(/Right chart/i);
+    expect(copy).toMatch(/VIX \/ VVIX chart/i);
+    expect(copy).toMatch(/realized vol \/ COR1M chart/i);
+    expect(copy).not.toMatch(/Left chart/i);
+    expect(copy).not.toMatch(/Right chart/i);
     expect(copy).toMatch(/VIX/i);
     expect(copy).toMatch(/VVIX/i);
     expect(copy).toMatch(/realized vol/i);

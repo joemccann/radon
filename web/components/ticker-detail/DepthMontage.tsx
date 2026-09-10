@@ -19,7 +19,7 @@ function venueCell(venues: string, side: "bid" | "ask", isCombo: boolean) {
   const pairs = isCombo ? venues.split(" | ") : [venues];
   const overflow = pairs.length - 1;
   return (
-    <span className="book-mkt" key="m" title={overflow > 0 ? venues : undefined}>
+    <span className="book-mkt" key="m" title={venues}>
       {side === "ask" && overflow > 0 && <span className="book-venue-more">+{overflow}</span>}
       <span className="book-venue-lead">{pairs[0]}</span>
       {side === "bid" && overflow > 0 && <span className="book-venue-more">+{overflow}</span>}
@@ -82,6 +82,7 @@ export function DepthMontage({ book, onPriceClick }: { book: DepthBook; onPriceC
     return (
       <div
         className={`book-row book-reveal${best ? " best" : ""}${isOption && level.nbbo ? " nbbo" : ""}${clickable ? " book-row-fill" : ""}`}
+        data-testid="book-depth-row"
         data-lvlfirst={lvlfirst}
         style={{ ["--fill" as string]: fill, ["--i" as string]: index }}
         key={`${side}-${index}`}
@@ -126,7 +127,7 @@ export function DepthMontage({ book, onPriceClick }: { book: DepthBook; onPriceC
         <div className="book-side ask">
           <div className="book-colhead">
             <span>Ask</span>
-            <span className="r">{isOption ? "Size" : "Shares"}</span>
+            <span>{isOption ? "Size" : "Shares"}</span>
             <span className="r">{isOption ? "Exchange" : isCombo ? "Leg venues" : "Market"}</span>
           </div>
           {asks.map((level, i) => row(level, "ask", i))}

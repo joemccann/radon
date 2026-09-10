@@ -3,7 +3,7 @@ import { readFile } from "fs/promises";
 import { join } from "path";
 import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
 import { getDb } from "@/lib/db";
-import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
+import { contentTimestampMs, dbFirstRead, isMissingPayload, staleCollapse, type TimestampedRead } from "@/lib/dbFirstRead";
 import { MISSING_VIXTS } from "@/lib/vixts";
 // Disable Next.js static caching: this handler reads live disk state
 // (data/*.json, cache files). Without this, the framework freezes the
@@ -41,6 +41,8 @@ async function readVixTsFromDisk(): Promise<TimestampedRead<Record<string, unkno
   return { data, timestampMs: contentTimestampMs(data.scan_time) };
 }
 
+export const radonCapability = "read";
+
 export async function GET(): Promise<Response> {
   const requestId = getRequestId();
   const result = await dbFirstRead({
@@ -48,8 +50,18 @@ export async function GET(): Promise<Response> {
     fromDisk: readVixTsFromDisk,
     maxAgeMs: VIXTS_MAX_AGE_MS,
     label: "vixts",
+    // A fresher row that only carries the missing:true heartbeat must not
+    // outrank an older row with a real series — source selection was on
+    // timestamp alone and regressed the tab to the empty state. R-366.
+    isDegraded: isMissingPayload,
   });
-  const response = NextResponse.json(result.ok ? result.data : MISSING_VIXTS);
+  // `result.fresh` was computed from VIXTS_MAX_AGE_MS and then DISCARDED, so
+  // a dead radon-vixts.service kept serving a week-old snapshot with no stale
+  // or missing marker and the panel rendered a confident regime badge for a
+  // dead feed. Same shape as vixcor/route.ts. R-332.
+  const response = NextResponse.json(
+    result.ok && result.fresh ? result.data : staleCollapse(MISSING_VIXTS, result),
+  );
   return setCacheResponseHeaders(response, {
     maxAgeSeconds: 300,
     staleWhileRevalidateSeconds: 3600,

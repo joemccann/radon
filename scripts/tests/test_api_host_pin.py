@@ -43,6 +43,8 @@ class TestLegitimateHostFormsAreServed:
             "[::1]:8321",  # how an IPv6 literal actually arrives
             "localhost:8321",
             "127.0.0.1:8321",
+            "10.0.0.2:8321",  # Hetzner private-net broker -> app /health
+            "10.0.0.4",
             "app.radon.run",
             "ib-gateway:8321",
         ],
@@ -61,6 +63,8 @@ class TestRebindingIsStillRefused:
             "100.128.0.1",  # one address past the CGNAT range
             "100.63.255.255",  # one address before it
             "203.0.113.9:8321",  # a public literal is not a tailnet peer
+            "10.1.0.1:8321",  # adjacent RFC1918, not radon-private
+            "172.17.0.1:8321",  # docker0
             "[2001:db8::1]:8321",  # a routable IPv6 literal is not loopback
         ],
     )

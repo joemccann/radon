@@ -39,6 +39,8 @@ function emptySurface(ticker: string): Record<string, unknown> {
 
 type Params = { params: Promise<{ ticker: string }> };
 
+export const radonCapability = "read";
+
 export async function GET(_req: Request, ctx: Params): Promise<Response> {
   const requestId = getRequestId();
   const { ticker: raw } = await ctx.params;

@@ -10,6 +10,10 @@ import time
 
 import pytest
 
+from _bash_toolchain import MODERN_BASH, requires_modern_bash
+
+# T-484: operator-radon.sh uses mapfile (bash >= 4); pin which bash runs it.
+pytestmark = requires_modern_bash
 
 CLOUD_ROOT = Path(__file__).resolve().parents[1]
 # Monorepo: cloud/ lives inside radon/. Legacy: cloud repo is a sibling of radon/.
@@ -42,7 +46,7 @@ def control_env(tmp_path: Path) -> tuple[dict[str, str], Path, Path, Path]:
         """#!/bin/sh
 set -eu
 printf '%s\n' "$*" >> "$FAKE_DOCKER_LOG"
-if [ "${1:-}" = inspect ]; then
+if [ "${1:-}" = inspect-running ]; then
   if [ -n "${FAKE_DOCKER_INSPECT_MARKER:-}" ] && [ ! -e "$FAKE_DOCKER_INSPECT_MARKER" ]; then
     : > "$FAKE_DOCKER_INSPECT_MARKER"
     sleep "${FAKE_DOCKER_INSPECT_DELAY:-0}"
@@ -60,13 +64,10 @@ if [ "${1:-}" = inspect ]; then
   fi
   exit 0
 fi
-if [ "${1:-}" = compose ]; then
-  case " $* " in
-    *" up -d "*) printf 'running\\n' > "$FAKE_DOCKER_STATE" ;;
-    *" down "*) printf 'stopped\\n' > "$FAKE_DOCKER_STATE" ;;
-  esac
-  exit 0
-fi
+case "${1:-}" in
+  compose-up) printf 'running\\n' > "$FAKE_DOCKER_STATE"; exit 0 ;;
+  compose-down) printf 'stopped\\n' > "$FAKE_DOCKER_STATE"; exit 0 ;;
+esac
 exit 2
 """,
     )
@@ -91,7 +92,7 @@ exit 2
 
 def _run_control(env: dict[str, str], *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [str(CONTROL), *args],
+        [str(MODERN_BASH), str(CONTROL), *args],
         env=env,
         text=True,
         capture_output=True,
@@ -118,7 +119,33 @@ def test_healthy_start_does_not_take_lease(control_env):
 
     assert result.returncode == 0, result.stderr
     assert not lock.exists()
-    assert "compose up" not in log.read_text()
+    assert "compose-up" not in log.read_text()
+
+
+def test_reset_lease_does_not_touch_compose(control_env):
+    env, state, log, lock = control_env
+    state.write_text("running\n")
+    _acquire(env, "radon-cloud.ib-gateway-control")
+    assert lock.exists()
+
+    result = _run_control(env, "reset-lease")
+
+    assert result.returncode == 0, result.stderr
+    assert "released" in result.stdout.lower() or "released" in result.stderr.lower()
+    assert not log.exists() or "compose-" not in log.read_text()
+
+
+def test_app_role_refuses_start_even_if_container_is_stopped(control_env):
+    env, state, log, _lock = control_env
+    env["RADON_HOST_ROLE"] = "app"
+    state.write_text("stopped\n")
+
+    result = _run_control(env, "start")
+
+    assert result.returncode != 0
+    assert "RADON_HOST_ROLE=app" in result.stderr
+    assert state.read_text().strip() == "stopped"
+    assert not log.exists() or "compose-up" not in log.read_text()
 
 
 def test_dead_container_start_acquires_lease_before_compose(control_env):
@@ -129,7 +156,7 @@ def test_dead_container_start_acquires_lease_before_compose(control_env):
 
     assert result.returncode == 0, result.stderr
     assert state.read_text().strip() == "running"
-    assert re.search(r"compose .* up -d", log.read_text())
+    assert "compose-up" in log.read_text()
     assert lock.exists()
     assert "radon-cloud.ib-gateway-control" in lock.read_text()
 
@@ -158,7 +185,7 @@ def test_held_lease_refuses_dead_container_start(control_env):
     result = _run_control(env, "start")
 
     assert result.returncode != 0
-    assert "compose up" not in log.read_text()
+    assert "compose-up" not in log.read_text()
 
 
 def test_same_holder_restart_reentry_is_refused_before_second_cycle(control_env):
@@ -170,7 +197,7 @@ def test_same_holder_restart_reentry_is_refused_before_second_cycle(control_env)
 
     assert first.returncode == 0, first.stderr
     assert second.returncode == 75
-    assert sum(line.endswith(" down") for line in log.read_text().splitlines()) == 1
+    assert sum(line.strip() == "compose-down" for line in log.read_text().splitlines()) == 1
 
 
 def test_watchdog_preheld_lease_is_consumed_exactly_once(control_env):
@@ -184,7 +211,7 @@ def test_watchdog_preheld_lease_is_consumed_exactly_once(control_env):
 
     assert first.returncode == 0, first.stderr
     assert second.returncode != 0
-    assert sum(line.endswith(" down") for line in log.read_text().splitlines()) == 1
+    assert sum(line.strip() == "compose-down" for line in log.read_text().splitlines()) == 1
 
 
 def _wait_for_path(path: Path, timeout: float = 2.0) -> None:
@@ -281,11 +308,11 @@ def test_restart_and_concurrent_stop_are_serialized(control_env, tmp_path):
     assert stop.returncode == 0, stop.stderr
     assert state.read_text().strip() == "stopped"
     compose_actions = [
-        line.rsplit(" ", 1)[-1]
+        line.strip()
         for line in log.read_text().splitlines()
-        if line.startswith("compose ") and line.rsplit(" ", 1)[-1] in {"down", "-d"}
+        if line.strip() in {"compose-up", "compose-down"}
     ]
-    assert compose_actions == ["down", "-d", "down"]
+    assert compose_actions == ["compose-down", "compose-up", "compose-down"]
 
 
 def test_boot_and_watchdog_units_use_authoritative_control_path():
@@ -515,9 +542,14 @@ def test_operator_quiesces_active_oneshot_without_restarting_it(tmp_path: Path):
         fake_bin / "systemctl",
         """#!/bin/sh
 if [ "${1:-}" = list-units ]; then
-  for unit in radon-ib-gateway radon-api radon-nextjs radon-relay radon-monitor radon-newsfeed radon-health; do
-    printf '%s.service loaded active running persistent\n' "$unit"
-  done
+  printf '%s\n' 'radon-ib-gateway.service loaded active running persistent'
+  printf '%s\n' 'radon-ib-gateway-remote.service loaded active running persistent'
+  printf '%s\n' 'radon-api.service loaded active running persistent'
+  printf '%s\n' 'radon-nextjs.service loaded active running persistent'
+  printf '%s\n' 'radon-relay.service loaded active running persistent'
+  printf '%s\n' 'radon-monitor.service loaded active running persistent'
+  printf '%s\n' 'radon-newsfeed.service loaded active running persistent'
+  printf '%s\n' 'radon-health.service loaded active running persistent'
   printf '%s\n' 'radon-portfolio-sync.timer loaded active waiting timer'
   printf '%s\n' 'radon-portfolio-sync.service loaded activating start scheduled-job'
   exit 0
@@ -541,6 +573,7 @@ printf 'gateway %s\n' "$*" >> "$RADON_OPERATOR_EVENTS"
         "RADON_OPERATOR_ALLOW_ROOT": "1",
         "RADON_OPERATOR_PYTHON": sys.executable,
         "RADON_DEPLOY_LOCK_FILE": str(tmp_path / "deploy.lock"),
+        "RADON_HOST_ROLE": "combined",
     }
 
     result = subprocess.run(
@@ -567,7 +600,7 @@ def test_gateway_helper_refuses_while_deploy_lock_is_held(control_env):
 
     assert result.returncode == 74
     assert "deploy/control lock held" in result.stderr
-    assert "compose" not in log.read_text()
+    assert "compose-" not in log.read_text()
     assert not lock.exists()
 
 
@@ -582,7 +615,7 @@ def test_healthy_start_is_noop_even_when_operator_holds_deploy_lock(control_env)
     assert result.returncode == 0, result.stderr
     assert "already running" in result.stdout
     assert not lock.exists()
-    assert all("compose" not in line for line in log.read_text().splitlines())
+    assert all("compose-" not in line for line in log.read_text().splitlines())
 
 
 def test_deploy_lock_refusal_releases_unused_watchdog_preheld_lease(control_env):
@@ -992,6 +1025,7 @@ set -eu
         "RADON_APP_DIR": str(APP_ROOT),
         "RADON_SUDOERS_DIR": str(sudoers_dir),
         "RADON_POLKIT_RULES_DIR": str(polkit_dir),
+        "RADON_SETUP_STAGE_DIR": str(tmp_path / "stage"),
         "RADON_VISUDO_BIN": str(visudo),
         "RADON_POLICY_SKIP_CHOWN": "1",
         "RADON_SKIP_POLKIT_RELOAD": "1",
@@ -1002,7 +1036,7 @@ set -eu
     )
 
     result = subprocess.run(
-        ["bash", "-c", command],
+        [str(MODERN_BASH), "-c", command],
         env=env,
         text=True,
         capture_output=True,
@@ -1066,7 +1100,7 @@ def test_setup_never_replaces_live_helper_with_invalid_candidate(
     )
 
     result = subprocess.run(
-        ["bash", "-c", command], env=env, text=True,
+        [str(MODERN_BASH), "-c", command], env=env, text=True,
         capture_output=True, check=False,
     )
 
@@ -1173,7 +1207,7 @@ def test_stop_then_start_is_not_blocked_by_the_prior_lease(control_env):
 
     assert result.returncode == 0, result.stderr
     assert state.read_text().strip() == "running"
-    assert re.search(r"compose .* up -d", log.read_text())
+    assert "compose-up" in log.read_text()
 
 
 def test_start_ignores_a_lease_orphaned_while_the_gateway_stayed_down(control_env):
@@ -1221,4 +1255,42 @@ def test_start_still_defers_to_a_lease_with_a_live_gateway_port(control_env):
         listener.close()
 
     assert result.returncode == 75, result.stdout + result.stderr
+    assert state.read_text().strip() == "stopped"
+
+
+def test_app_role_in_canonical_env_file_refuses_start(control_env, tmp_path):
+    """REL-169 (R-472a): the role lives in /etc/radon/env for every other
+    reader; the helper must refuse on it even when the legacy env file and
+    the process environment carry no role at all."""
+    env, state, log, _lock = control_env
+    env.pop("RADON_HOST_ROLE", None)
+    canonical = tmp_path / "etc-radon-env"
+    canonical.write_text("IB_GATEWAY_MODE=cloud\nRADON_HOST_ROLE=app\n")
+    legacy = tmp_path / "legacy.env"
+    legacy.write_text("IB_GATEWAY_MODE=cloud\n")
+    env["RADON_ENV_FILE"] = str(canonical)
+    env["RADON_DEPLOY_ENV_FILE"] = str(legacy)
+    state.write_text("stopped\n")
+
+    result = _run_control(env, "start")
+
+    assert result.returncode != 0
+    assert "RADON_HOST_ROLE=app" in result.stderr
+    assert state.read_text().strip() == "stopped"
+    assert not log.exists() or "compose-up" not in log.read_text()
+
+
+def test_role_in_legacy_env_file_still_read_when_canonical_is_absent(control_env, tmp_path):
+    env, state, log, _lock = control_env
+    env.pop("RADON_HOST_ROLE", None)
+    env["RADON_ENV_FILE"] = str(tmp_path / "does-not-exist")
+    legacy = tmp_path / "legacy.env"
+    legacy.write_text("RADON_HOST_ROLE='app'\n")
+    env["RADON_DEPLOY_ENV_FILE"] = str(legacy)
+    state.write_text("stopped\n")
+
+    result = _run_control(env, "start")
+
+    assert result.returncode != 0
+    assert "RADON_HOST_ROLE=app" in result.stderr
     assert state.read_text().strip() == "stopped"

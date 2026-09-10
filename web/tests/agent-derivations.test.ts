@@ -75,6 +75,11 @@ describe("buildTurnSteps", () => {
     expect(describeTool("get_brand_new_thing")).toBe("Get brand new thing");
     expect(describeTool("get_flow")).toBe("Read dark-pool flow");
   });
+
+  it("labels catalog dispatcher tools for EngineTrace", () => {
+    expect(describeTool("list_apis")).toBe("Search API catalog");
+    expect(describeTool("call_api")).toBe("Call Radon API");
+  });
 });
 
 describe("describeEngines / formatElapsed", () => {

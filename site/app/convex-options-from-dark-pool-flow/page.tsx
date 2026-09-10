@@ -4,14 +4,16 @@ import { RevealOnScroll } from "@/components/atoms/RevealOnScroll";
 import { ScrollProgress } from "@/components/atoms/ScrollProgress";
 import { SectionHeading } from "@/components/atoms/SectionHeading";
 import { SectionRule } from "@/components/atoms/SectionRule";
+import { CopyAgentPromptBar } from "@/components/molecules/CopyAgentPromptBar";
 import { PlateFrame } from "@/components/molecules/PlateFrame";
+import { ClusterCta } from "@/components/sections/ClusterCta";
 import { EditorialFooter } from "@/components/sections/EditorialFooter";
 import { EditorialHeader } from "@/components/sections/EditorialHeader";
-import { DEMO_URL } from "@/lib/editorial-content";
 import {
   CLUSTER_SLUG,
   NAV_LABEL,
   PAGE_DESCRIPTION,
+  PAGE_H1,
   PAGE_TITLE,
   clusterPageMetadata,
   confidenceBands,
@@ -57,42 +59,9 @@ function ClusterBreadcrumb() {
   );
 }
 
-// Local stand-in for the shared ClusterCta organism specified by the contract.
-function ClusterCta() {
-  return (
-    <section id="cta" className="px-8 py-[clamp(64px,9vw,128px)]">
-      <div className="mx-auto max-w-[1140px]">
-        <RevealOnScroll>
-          <h2 className="editorial-thesis mb-5 text-primary">
-            Run it against the live tape.
-          </h2>
-          <p className="mb-[34px] max-w-[66ch] text-secondary">
-            The demo instance runs the same scanner, the same gates, and the
-            same journal on seeded data.
-          </p>
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-4">
-            <a
-              href={DEMO_URL}
-              className={`inline-block rounded-[4px] border border-grid px-[22px] py-[13px] font-mono text-[12px] uppercase tracking-[0.06em] text-primary transition-colors hover:border-signal-deep hover:text-signal-deep ${focusRing}`}
-            >
-              Try the free demo
-            </a>
-            <Link
-              href="/#registry"
-              className={`font-mono text-[12px] uppercase tracking-[0.06em] text-secondary underline decoration-grid underline-offset-4 transition-colors hover:text-signal-deep hover:decoration-signal-deep ${focusRing}`}
-            >
-              See the plays in the registry
-            </Link>
-          </div>
-        </RevealOnScroll>
-      </div>
-    </section>
-  );
-}
-
 export default function ConvexOptionsFromDarkPoolFlowPage() {
   return (
-    <div className="min-h-screen bg-canvas font-serif text-[19px] leading-[1.62] text-primary">
+    <div className="min-h-screen bg-canvas font-sans text-[16px] leading-[1.55] text-primary">
       <ScrollProgress />
       <a
         href="#main-content"
@@ -115,7 +84,7 @@ export default function ConvexOptionsFromDarkPoolFlowPage() {
               as="h1"
               className="editorial-display mb-7 max-w-[16ch] text-primary"
             >
-              The flow finds the edge. The structure makes it <em>convex</em>.
+              {PAGE_H1}
             </RevealOnScroll>
             <RevealOnScroll
               initiallyShown
@@ -128,6 +97,7 @@ export default function ConvexOptionsFromDarkPoolFlowPage() {
               publishes the working procedure: seven milestones run in order,
               with a stop on failure at any gate.
             </RevealOnScroll>
+            <CopyAgentPromptBar capabilityId="flow" />
           </div>
         </section>
 
@@ -158,10 +128,17 @@ export default function ConvexOptionsFromDarkPoolFlowPage() {
                 remains visible is a different thing from a gate that quietly
                 disappears.
               </p>
+              <CopyAgentPromptBar capabilityId="gates" />
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <CopyAgentPromptBar capabilityId="gate-01" className="" />
+                <CopyAgentPromptBar capabilityId="gate-02" className="" />
+                <CopyAgentPromptBar capabilityId="gate-03" className="" />
+                <CopyAgentPromptBar capabilityId="gate-04" className="" />
+              </div>
             </RevealOnScroll>
             <RevealOnScroll>
               <PlateFrame
-                figNo="Exhibit A"
+                figNo="Figure 1"
                 figTitle="The four gates · any failure stops the trade and names the gate"
                 source="Method spec"
                 confidence="Verbatim"
@@ -284,7 +261,7 @@ export default function ConvexOptionsFromDarkPoolFlowPage() {
             </RevealOnScroll>
             <RevealOnScroll className="mb-[42px]">
               <PlateFrame
-                figNo="Exhibit B"
+                figNo="Figure 2"
                 figTitle="Intraday dark-pool interpolation · the published math"
                 source="Method spec"
                 confidence="Verbatim"
@@ -369,7 +346,7 @@ export default function ConvexOptionsFromDarkPoolFlowPage() {
             </RevealOnScroll>
             <RevealOnScroll className="mb-[42px]">
               <PlateFrame
-                figNo="Exhibit C"
+                figNo="Figure 3"
                 figTitle="Signal interpretation bands · P/C ratio, flow side, ratings, seasonality"
                 source="Method spec"
                 confidence="Verbatim"
@@ -445,7 +422,7 @@ export default function ConvexOptionsFromDarkPoolFlowPage() {
             </RevealOnScroll>
             <RevealOnScroll className="mb-[42px]">
               <PlateFrame
-                figNo="Exhibit D"
+                figNo="Figure 4"
                 figTitle="The registry plays · edge, structure, convexity floor"
                 source="Registry"
                 confidence="Defined risk"
@@ -543,7 +520,11 @@ export default function ConvexOptionsFromDarkPoolFlowPage() {
         <SectionRule />
 
         {/* S8 · CTA */}
-        <ClusterCta />
+        <ClusterCta
+          body="The demo runs the same view construction and the same expression path on seeded data."
+          secondaryHref="/#registry"
+          secondaryLabel="See the plays in the registry"
+        />
 
         <EditorialFooter />
       </main>

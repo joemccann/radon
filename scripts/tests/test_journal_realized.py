@@ -449,6 +449,72 @@ class TestContractIdentityCorruption:
         closed = _row("cl1", "CLOSED", 10, 3.00, 0.0, _C60, "2026-08-11", "w2")
         assert _unusable_fill_key(closed) is None
 
+    # --- R-320 / REL-109: corruption that NORMALISES must poison too -------
+    #
+    # REL-094 keyed usability on `_bucket_key` returning None, so a contract
+    # field that is malformed but still normalises forms its own phantom
+    # bucket and never reaches the shape test. The healthy triple's true
+    # realized is $3,000; each case below fabricated $4,000 with no warning.
+
+    def test_zero_numeric_strike_refuses_instead_of_fabricating(self, caplog):
+        with caplog.at_level("WARNING"):
+            realized = realized_pnl_by_exec_id(self._corrupted("strike", 0))
+        assert realized == {}, (
+            "strike 0 normalises to '0.0' and forms a phantom bucket, so the "
+            f"healthy bucket prices its close against half a basis; got {realized}"
+        )
+        assert any("incomplete" in r.getMessage().lower() for r in caplog.records)
+
+    def test_zero_string_strike_refuses_instead_of_fabricating(self):
+        assert realized_pnl_by_exec_id(self._corrupted("strike", "0")) == {}
+
+    def test_negative_strike_refuses_instead_of_fabricating(self):
+        assert realized_pnl_by_exec_id(self._corrupted("strike", -60.0)) == {}
+
+    def test_impossible_calendar_expiry_refuses_instead_of_fabricating(self):
+        """Eight digits pass `_normalize_expiry` without being a real date."""
+        assert realized_pnl_by_exec_id(self._corrupted("expiry", "20261340")) == {}
+
+    def test_all_three_contract_fields_falsy_is_not_read_as_a_stock_leg(self):
+        """`_is_option_shaped` tested truthiness, so 0/'' read as field-absent.
+
+        A row that NAMES right, strike and expiry is asserting it is an
+        option fill even when all three are falsy — it must poison, not be
+        waved through as the by-design stock exclusion.
+        """
+        broken = _row("o2", "BUY_OPTION", 10, 3.00, 0.0, _C60, "2026-08-11", "w2")
+        payload = json.loads(broken[0])
+        payload["right"] = ""
+        payload["strike"] = 0
+        payload["expiry"] = ""
+        row = (json.dumps(payload), broken[1], broken[2])
+        assert _unusable_fill_key(row) == "SLV|*", (
+            "all three option fields present-but-falsy must be read as a "
+            "corrupt OPTION row, not as a stock leg naming none of them"
+        )
+
+    def test_zero_strike_is_field_presence_not_truthiness(self):
+        """A numeric 0 strike is PRESENT; only a missing key is absent."""
+        payload = {"ticker": "SLV", "action": "BUY_OPTION", "contracts": 10,
+                   "fill_price": 3.0, "commission": 0.0, "ib_exec_id": "z1",
+                   "date": "2026-08-11", "strike": 0}
+        assert _unusable_fill_key((json.dumps(payload), "2026-08-11", "w1")) == "SLV|*"
+
+    def test_plausible_contract_corruption_still_poisons_the_whole_ticker(self):
+        """Poison scope must be TICKER|*, not the phantom bucket's own key."""
+        assert _unusable_fill_key(
+            self._corrupted("strike", 0)[1]
+        ) == "SLV|*"
+
+    def test_healthy_triple_is_untouched_by_the_plausibility_domain(self):
+        """The plausibility check must not poison a legitimate replay."""
+        rows = [
+            _row("o1", "BUY_OPTION", 10, 1.00, 0.0, _C60, "2026-08-07", "w1"),
+            _row("o2", "BUY_OPTION", 10, 3.00, 0.0, _C60, "2026-08-11", "w2"),
+            _row("c1", "SELL_OPTION", 10, 5.00, 0.0, _C60, "2026-08-20", "w3"),
+        ]
+        assert realized_pnl_by_exec_id(rows) == {"c1": 3000.0}
+
     def test_bag_and_stock_rows_do_not_block_a_healthy_replay(self):
         """The pre-existing by-design exclusions keep their exact behaviour."""
         rows = [
@@ -534,3 +600,165 @@ class TestBoundedJournalRead:
         assert fills[0]["realizedPNL"] == 1234.5
         assert calls, "the overlay must have gone through the bounded transport"
         assert "journal" in calls[0][0].lower()
+
+
+class TestCrossWriterSameDayPartials:
+    """T-184: two genuinely distinct same-day partials, one per writer.
+
+    ``contract_fill_fingerprint`` is (contract, ET session date, signed qty) —
+    by construction the ONLY identity the two writers agree on, because
+    ``ib_exec_id`` is a numeric Flex ``tradeID`` on one side and a dotted IB
+    API execId on the other. So a cross-writer collision is genuinely
+    ambiguous: it is either the same fill written twice (the common case the
+    dedupe exists for, T-124) or two real equal-size partials.
+
+    Nothing in the journal can separate them. ``execution_time`` cannot:
+    ``monitor_daemon/handlers/journal_sync.py`` writes it and
+    ``journal_rehydrate._bucket_to_entry`` does not, so a cross-writer pair
+    NEVER carries two comparable times in production — keying on it would
+    treat every dual-written fill as distinct and re-introduce exactly the
+    double-count T-124 fixed. Neither can price: the ambiguous case is equal
+    size at equal price, and narrowing the fingerprint only ever counts MORE
+    rows.
+
+    So the drop is deliberate, and it stays: ``journal_basis
+    ._claim_exec_parts`` states the module's standing preference — "under-
+    counting is recoverable ... while double-counting silently inflates the
+    basis". What must not stay silent is what the suppression costs LATER on
+    the same contract.
+    """
+
+    # The daemon's dotted IB API execId and the Flex numeric tradeID for two
+    # real 10-lot partials of the same 20-lot SLV position on 2026-08-24.
+    API_ID = "0000e0d5.68abc123.01.01"
+    FLEX_ID = "9998092102"
+
+    def _twenty_lot_open_then_two_partials(self, *, flex_has_time: bool):
+        """BUY 20 @ $1.00, then SELL 10 @ $3.00 twice on 2026-08-24.
+
+        Basis is $100/contract, so each real partial realizes
+        10 x ($300 - $100) = $2,000, i.e. $4,000 for the session.
+        """
+        return [
+            _row("o1", "BUY_OPTION", 20, 1.00, 0.0, _C60, "2026-08-07", "w1"),
+            _row(self.API_ID, "SELL_OPTION", 10, 3.00, 0.0, _C60, "2026-08-24", "w2",
+                 "2026-08-24T15:30:00-04:00"),
+            _row(self.FLEX_ID, "SELL_OPTION", 10, 3.00, 0.0, _C60, "2026-08-24", "w3",
+                 "2026-08-24T15:45:00-04:00" if flex_has_time else None),
+        ]
+
+    def test_second_partial_is_dropped_and_only_one_figure_is_attributed(self):
+        """The AC case, pinned as the deliberate under-count.
+
+        Distinct ``execution_time``s do NOT make the pair separable — the
+        fingerprint does not carry time, and a real Flex row has none at all.
+        Money: $4,000 of realized P&L, $2,000 of it journal-attributed.
+        """
+        realized = realized_pnl_by_exec_id(
+            self._twenty_lot_open_then_two_partials(flex_has_time=True)
+        )
+        assert realized == {self.API_ID: 2000.0}, (
+            "the cross-writer collision must under-count, never double-count: "
+            f"{realized}"
+        )
+
+    def test_the_dropped_partial_falls_back_to_ib_and_is_not_halved(self):
+        """The suppressed fill keeps IB's own figure, it is not zeroed.
+
+        Both real partials reach ``/orders`` under dotted API execIds. Only
+        one of them is in the journal under an api id, so the other is served
+        from IB and labelled ``ib``. The blotter therefore shows
+        $2,000 (journal) + $1,300 (IB, avgCost-drifted) = $3,300 against a
+        true $4,000 — understated by $700, and mixed-source.
+        """
+        fills = [
+            _fill(self.API_ID, "SLV", 60.0, "C", "SLD", 10, 1300.0),
+            _fill("0000e0d5.68abc123.02.01", "SLV", 60.0, "C", "SLD", 10, 1300.0),
+        ]
+        overlay_journal_realized_pnl(
+            fills,
+            reader=_FakeDb(rows=self._twenty_lot_open_then_two_partials(flex_has_time=True)),
+        )
+        assert fills[0]["realizedPNL"] == 2000.0
+        assert fills[0]["realizedPNLSource"] == "journal"
+        assert fills[1]["realizedPNL"] == 1300.0, "the dropped partial must keep IB's figure"
+        assert fills[1]["realizedPNLSource"] == "ib"
+
+    def test_a_real_flex_row_has_no_execution_time_so_it_wins_the_attribution(self):
+        """Production shape, and the reason the correction never lands.
+
+        ``_ordered`` sorts a day by ``execution_time``; the Flex row has none,
+        so "" sorts it FIRST and the daemon's row is the one suppressed. The
+        surviving key is then a Flex ``tradeID``, which no IB fill carries, so
+        ``apply_journal_realized_pnl`` matches nothing and BOTH partials ship
+        IB's figure. Pinned as-is, not endorsed.
+        """
+        realized = realized_pnl_by_exec_id(
+            self._twenty_lot_open_then_two_partials(flex_has_time=False)
+        )
+        assert realized == {self.FLEX_ID: 2000.0}
+
+        fills = [_fill(self.API_ID, "SLV", 60.0, "C", "SLD", 10, 1300.0)]
+        apply_journal_realized_pnl(fills, realized)
+        assert fills[0]["realizedPNL"] == 1300.0
+        assert fills[0]["realizedPNLSource"] == "ib"
+
+    def test_a_close_after_the_phantom_inventory_is_reopened_is_withheld(self, caplog):
+        """The suppression's real damage: it under-closes the position.
+
+        BUY 20 @ $1.00, both 10-lot partials sold at $3.00 (one suppressed),
+        then a re-entry BUY 10 @ $5.00 and a SELL 10 @ $6.00.
+
+        Truth: the position was flat before the re-entry, so the re-entry
+        basis is $500/contract and the last close realizes
+        10 x ($600 - $500) = $1,000.
+        Untreated replay: 10 phantom contracts at $100 blend with the
+        re-entry into $300/contract, and the last close reports
+        10 x ($600 - $300) = $3,000 — $2,000 fabricated, with neither
+        quantity-only guard firing.
+        """
+        rows = self._twenty_lot_open_then_two_partials(flex_has_time=True) + [
+            _row("o2", "BUY_OPTION", 10, 5.00, 0.0, _C60, "2026-08-25", "w4"),
+            _row("c3", "SELL_OPTION", 10, 6.00, 0.0, _C60, "2026-08-26", "w5"),
+        ]
+        with caplog.at_level("WARNING"):
+            realized = realized_pnl_by_exec_id(rows)
+        assert "c3" not in realized, (
+            "a close priced against phantom inventory must keep IB's figure, "
+            f"not publish $3,000 against a true $1,000: {realized}"
+        )
+        assert realized == {self.API_ID: 2000.0}
+        assert any("incomplete" in record.getMessage().lower() for record in caplog.records)
+
+    def test_a_suppressed_opening_partial_withholds_every_later_figure(self):
+        """A suppressed OPEN removes its cost, not just its quantity.
+
+        BUY 10 @ $1.00 (api) and BUY 10 @ $2.00 (Flex) on the same day are one
+        fingerprint, so the second is suppressed. True basis is $150/contract,
+        so SELL 10 @ $3.00 realizes 10 x ($300 - $150) = $1,500; the replay
+        prices it against $100 and reports $2,000 — $500 fabricated.
+        """
+        rows = [
+            _row("o1", "BUY_OPTION", 10, 1.00, 0.0, _C60, "2026-08-07", "w1",
+                 "2026-08-07T14:00:00-04:00"),
+            _row(self.FLEX_ID, "BUY_OPTION", 10, 2.00, 0.0, _C60, "2026-08-07", "w2",
+                 "2026-08-07T15:00:00-04:00"),
+            _row("c1", "SELL_OPTION", 10, 3.00, 0.0, _C60, "2026-08-24", "w3"),
+        ]
+        assert realized_pnl_by_exec_id(rows) == {}
+
+    def test_a_dual_written_close_still_yields_the_later_scale_out(self):
+        """The T-124 correction must survive: no re-entry, no taint.
+
+        The whole point of the module is the SLV shape — a multi-day scale-out
+        whose IB figure has drifted. A cross-writer duplicate on the first
+        partial leaves the per-unit basis exactly right, so the later partial
+        keeps its journal figure and only a re-open would forfeit it.
+        """
+        rows = [
+            _row("o1", "BUY_OPTION", 30, 1.00, 0.0, _C60, "2026-08-07", "w1"),
+            _row(self.API_ID, "SELL_OPTION", 10, 3.00, 0.0, _C60, "2026-08-24", "w2"),
+            _row(self.FLEX_ID, "SELL_OPTION", 10, 3.00, 0.0, _C60, "2026-08-24", "w3"),
+            _row("c2", "SELL_OPTION", 10, 4.00, 0.0, _C60, "2026-08-26", "w4"),
+        ]
+        assert realized_pnl_by_exec_id(rows) == {self.API_ID: 2000.0, "c2": 3000.0}

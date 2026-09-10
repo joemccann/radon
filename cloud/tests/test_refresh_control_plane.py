@@ -6,6 +6,7 @@ Gateway lifecycle, no sudoers wildcards, privileged diffs fail closed.
 
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import os
 import re
@@ -51,6 +52,13 @@ def _bash_string_array(script: str, name: str) -> list[str]:
     return match.group(1).split()
 
 
+def _strip_comments(text: str) -> str:
+    """Never assert structure over a comment that quotes the code it explains."""
+    return "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith("#")
+    )
+
+
 def _sha256_bytes(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
@@ -62,6 +70,15 @@ def _sha256_path(path: Path) -> str:
 def _write_executable(path: Path, body: str) -> None:
     path.write_text(body, encoding="utf-8")
     path.chmod(0o755)
+
+
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-C", str(repo), *args],
+        check=True,
+        capture_output=True,
+        env={**os.environ, "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null"},
+    )
 
 
 def sudoers_helper_verbs(text: str) -> list[str]:
@@ -108,6 +125,7 @@ class Sandbox:
         self.ready = self.rootfs / "var" / "lib" / "radon" / "control-plane-ready"
         self.systemctl_log = tmp_path / "systemctl.log"
         self.visudo_log = tmp_path / "visudo.log"
+        self.node_log = tmp_path / "node.log"
         fake_systemctl = tmp_path / "systemctl"
         _write_executable(
             fake_systemctl,
@@ -119,6 +137,18 @@ class Sandbox:
             f"""#!/bin/bash
 printf '%s\\n' "$*" >> {shlex.quote(str(self.visudo_log))}
 if [[ "${{RADON_TEST_VISUDO_FAIL:-0}}" == "1" ]]; then
+  exit 1
+fi
+exit 0
+""",
+        )
+        fake_node = tmp_path / "node"
+        _write_executable(
+            fake_node,
+            f"""#!/bin/bash
+printf '%s\\n' "$*" >> {shlex.quote(str(self.node_log))}
+[[ "$#" -eq 1 && "$1" == "--check" ]] || exit 93
+if [[ "${{RADON_TEST_NODE_FAIL:-0}}" == "1" ]]; then
   exit 1
 fi
 exit 0
@@ -146,9 +176,18 @@ exit 0
             shutil.copy2(source, installed)
             installed.chmod(int(mode, 8))
         self.write_manifest_and_ready()
+        # refresh-control-plane installs the git blobs of the deployed commit,
+        # never the working tree, so the fixture has to commit before the
+        # helper can see anything -- exactly the property under test.
+        _git(self.tmp, "init", "-b", "main", ".")
+        _git(self.tmp, "config", "user.email", "refresh-control-plane@test")
+        _git(self.tmp, "config", "user.name", "refresh-control-plane")
+        self.commit_sources()
         self.env = {
             **os.environ,
             "RADON_DEPLOY_HELPER_TEST_MODE": "1",
+            "RADON_TEST_GIT_DIR": str(self.tmp / ".git"),
+            "RADON_TEST_UNIT_REMOTE": str(self.tmp),
             "RADON_TEST_SYSTEMCTL": str(fake_systemctl),
             "RADON_TEST_RM": str(fake_rm),
             "RADON_TEST_SYNC": str(fake_sync),
@@ -160,6 +199,7 @@ exit 0
             "RADON_TEST_SYSTEMD_UNIT_DIR": str(self.unit_dir),
             "RADON_TEST_SHA256SUM": str(sha256sum),
             "RADON_TEST_VISUDO": str(fake_visudo),
+            "RADON_TEST_NODE": str(fake_node),
         }
 
     def write_manifest_and_ready(self) -> None:
@@ -181,7 +221,17 @@ exit 0
         index = CONTROL_PLANE_SOURCES.index(source_rel)
         return self.rootfs / CONTROL_PLANE_TARGETS[index].lstrip("/")
 
+    def commit_sources(self) -> None:
+        _git(self.tmp, "add", "--force", "cloud")
+        _git(self.tmp, "commit", "--allow-empty", "-m", "control-plane sources")
+
     def mutate_source(self, source_rel: str) -> None:
+        """A reviewed change: edit the tree, then land it on main."""
+        self.mutate_source_uncommitted(source_rel)
+        self.commit_sources()
+
+    def mutate_source_uncommitted(self, source_rel: str) -> None:
+        """What an attacker with the radon account can do: edit, never commit."""
         path = self.cloud / source_rel
         path.write_text(path.read_text(encoding="utf-8") + _diff_marker(source_rel), encoding="utf-8")
 
@@ -221,13 +271,13 @@ exit 0
 # --- A. sudoers --------------------------------------------------------------
 
 
-def test_sudoers_grants_exact_refresh_verb_and_not_privileged() -> None:
+def test_sudoers_grants_exact_refresh_verb_and_privileged() -> None:
     sudoers = SUDOERS.read_text(encoding="utf-8")
     verbs = sudoers_helper_verbs(sudoers)
     assert "/usr/local/sbin/radon-deploy-root refresh-control-plane" in sudoers
+    assert "/usr/local/sbin/radon-deploy-root refresh-control-plane-privileged" in sudoers
     assert "refresh-control-plane" in verbs
-    assert "refresh-control-plane-privileged" not in verbs
-    assert "refresh-control-plane-privileged" not in sudoers
+    assert "refresh-control-plane-privileged" in verbs
     assert "radon-*" not in sudoers
     assert "/usr/bin/systemctl" not in sudoers
     for verb in verbs:
@@ -235,14 +285,11 @@ def test_sudoers_grants_exact_refresh_verb_and_not_privileged() -> None:
         assert "?" not in verb
 
 
-def test_privileged_refresh_action_is_not_in_sudoers() -> None:
+def test_privileged_refresh_action_is_exact_sudoers_verb() -> None:
     sudoers = SUDOERS.read_text(encoding="utf-8")
-    helper = ROOT_HELPER.read_text(encoding="utf-8")
     verbs = sudoers_helper_verbs(sudoers)
-    assert "refresh-control-plane-privileged" not in verbs
-    assert "refresh-control-plane-privileged" not in sudoers
-    if re.search(r"refresh-control-plane-privileged\)", helper):
-        assert "refresh-control-plane-privileged" not in verbs
+    assert "refresh-control-plane-privileged" in verbs
+    assert verbs.count("refresh-control-plane-privileged") == 1
 
 
 # --- B. helper usage / timeout / job-cancel ----------------------------------
@@ -266,6 +313,30 @@ def test_refresh_timeout_is_mutation_class_and_does_not_queue_radon_jobs() -> No
 
 
 # --- C. sandbox --------------------------------------------------------------
+
+
+def test_app_role_verify_allows_missing_gateway_helper(tmp_path: Path) -> None:
+    sandbox = Sandbox(tmp_path)
+    helper = sandbox.installed_path("scripts/ib-gateway-control.sh")
+    helper.unlink()
+    sandbox.env["RADON_HOST_ROLE"] = "app"
+    result = sandbox.run("verify-control-plane")
+    assert result.returncode == 0, result.stderr
+
+
+def test_app_role_refresh_removes_gateway_helper(tmp_path: Path) -> None:
+    sandbox = Sandbox(tmp_path)
+    helper = sandbox.installed_path("scripts/ib-gateway-control.sh")
+    unit = sandbox.installed_path("services/radon-ib-gateway.service")
+    assert helper.exists()
+    assert unit.exists()
+    sandbox.env["RADON_HOST_ROLE"] = "app"
+    sandbox.mutate_source("scripts/ib-gateway-control.sh")
+    result = sandbox.run("refresh-control-plane-privileged")
+    assert result.returncode == 0, result.stderr
+    assert not helper.exists()
+    assert not unit.exists()
+    sandbox.assert_no_gateway_lifecycle()
 
 
 def test_unit_only_refresh_copies_diff_reloads_once_and_skips_gateway(tmp_path: Path) -> None:
@@ -439,7 +510,7 @@ def test_restart_services_refreshes_before_restart_and_installs_units_after() ->
     assert activate_at < refresh_at < start_at < install_at
     refresh = function_body(deploy, "refresh_control_plane")
     assert "refresh-control-plane" in refresh
-    assert "refresh-control-plane-privileged" not in refresh
+    assert "refresh-control-plane-privileged" in refresh
     assert "sudo -n -l --" in refresh
     assert "bootstrap-control-plane.sh" in refresh
     assert "return 0" in refresh
@@ -464,7 +535,9 @@ def _preflight_runner(tmp_path: Path, mutate_rel: str | None) -> Path:
     return runner
 
 
-def _run_preflight(tmp_path: Path, mutate_rel: str | None) -> subprocess.CompletedProcess[str]:
+def _run_preflight(
+    tmp_path: Path, mutate_rel: str | None, *, extra_env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
     runner = _preflight_runner(tmp_path, mutate_rel)
     originals = {
         HELPER_SOURCE: (CLOUD_ROOT / HELPER_SOURCE).read_bytes(),
@@ -518,6 +591,7 @@ preflight_control_plane
             "RADON_CONTROL_PLANE_MANIFEST": str(manifest),
             "RADON_CONTROL_PLANE_READY": str(ready),
             "RADON_SHA256SUM": sha256sum,
+            **(extra_env or {}),
         },
         capture_output=True,
         text=True,
@@ -580,3 +654,221 @@ restart_services aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa bbbbbbbbbbbbbbbbbbbbbb
     lines = calls.read_text(encoding="utf-8").splitlines()
     assert "/fixed/root-helper restart-managed" in lines
     assert not any("rollback" in line.lower() for line in lines)
+
+
+# --- E. the every-deploy install path validates like bootstrap (R-437) -------
+#
+# refresh_install_file runs with the app tier STOPPED and is the path deploy.sh
+# takes for a bundle that differs from the manifest. It validated sudoers, the
+# three shell helpers and drop-ins only: no arm for radon-app-runtime (the
+# ExecStart of all five app units), polkit rules, the python helpers, nor
+# systemd-analyze for control-plane units. A bad runtime restarted the tier
+# through itself with no path back short of root SSH.
+
+RUNTIME_SOURCE = "scripts/radon-app-runtime.sh"
+DRIFT_AUDIT_SOURCE = "scripts/drift_audit.py"
+HEALTH_UNIT = "services/radon-health.service"
+
+
+def _refused_without_install(box: Sandbox, action: str, message: str) -> str:
+    snapshot = box.snapshot_installed()
+    manifest_before = box.manifest.read_bytes()
+    ready_before = box.ready.read_bytes()
+
+    result = box.run(action)
+
+    combined = result.stdout + result.stderr
+    assert result.returncode != 0, combined
+    assert message in combined
+    assert {path: path.read_bytes() for path in snapshot} == snapshot
+    assert box.manifest.read_bytes() == manifest_before
+    assert box.ready.read_bytes() == ready_before
+    assert box.systemctl_calls() == []
+    return combined
+
+
+def test_privileged_refresh_refuses_a_runtime_script_with_a_syntax_error(tmp_path: Path) -> None:
+    box = Sandbox(tmp_path)
+    source = box.cloud / RUNTIME_SOURCE
+    source.write_text(source.read_text(encoding="utf-8") + "\nif [[ broken\n", encoding="utf-8")
+    box.commit_sources()
+
+    _refused_without_install(box, "refresh-control-plane-privileged", "shell syntax validation failed")
+    assert not list((box.rootfs / "usr" / "local" / "sbin").glob(".radon-refresh.*"))
+
+
+def test_privileged_refresh_refuses_polkit_rules_node_rejects(tmp_path: Path) -> None:
+    box = Sandbox(tmp_path)
+    box.mutate_source(POLKIT_SOURCE)
+    box.env["RADON_TEST_NODE_FAIL"] = "1"
+
+    _refused_without_install(box, "refresh-control-plane-privileged", "polkit syntax validation failed")
+    assert "--check" in box.node_log.read_text(encoding="utf-8")
+
+
+def test_privileged_refresh_runs_node_check_then_installs_polkit_rules(tmp_path: Path) -> None:
+    box = Sandbox(tmp_path)
+    box.mutate_source(POLKIT_SOURCE)
+    expected = (box.cloud / POLKIT_SOURCE).read_bytes()
+
+    result = box.run("refresh-control-plane-privileged")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert box.installed_path(POLKIT_SOURCE).read_bytes() == expected
+    assert box.node_log.read_text(encoding="utf-8").splitlines() == ["--check"]
+
+
+def test_privileged_refresh_refuses_a_python_helper_with_a_syntax_error(tmp_path: Path) -> None:
+    box = Sandbox(tmp_path)
+    source = box.cloud / DRIFT_AUDIT_SOURCE
+    source.write_text(source.read_text(encoding="utf-8") + "\ndef broken(:\n", encoding="utf-8")
+    box.commit_sources()
+
+    _refused_without_install(box, "refresh-control-plane-privileged", "python syntax validation failed")
+
+
+def test_unit_refresh_refuses_a_unit_systemd_analyze_rejects(tmp_path: Path) -> None:
+    box = Sandbox(tmp_path)
+    box.mutate_source(HEALTH_UNIT)
+    analyze_log = tmp_path / "systemd-analyze.log"
+    fake_analyze = tmp_path / "systemd-analyze"
+    _write_executable(
+        fake_analyze,
+        f"#!/bin/bash\nprintf '%s\\n' \"$*\" >> {shlex.quote(str(analyze_log))}\nexit 1\n",
+    )
+    box.env["RADON_TEST_SYSTEMD_ANALYZE"] = str(fake_analyze)
+
+    _refused_without_install(box, "refresh-control-plane", "systemd unit validation failed")
+    calls = analyze_log.read_text(encoding="utf-8").splitlines()
+    assert len(calls) == 1
+    assert calls[0].startswith("verify ")
+    assert calls[0].endswith("/radon-health.service")
+
+
+def test_refresh_install_file_has_a_validator_arm_for_every_control_plane_target() -> None:
+    """Bootstrap's KINDS table and this case statement must cover the same
+    targets, or a future manifest entry ships through the weaker path."""
+    body = _strip_comments(function_body(HELPER_TEXT, "refresh_install_file"))
+    case = body.split('case "$dest" in', 1)[1].split("esac", 1)[0]
+    patterns = [
+        pattern
+        for arm in re.findall(r"^\s*(\*/\S+?)\)\s*$", case, re.MULTILINE)
+        for pattern in arm.split("|")
+    ]
+    assert patterns
+    uncovered = [
+        target
+        for target in CONTROL_PLANE_TARGETS
+        if not any(fnmatch.fnmatchcase(target, pattern) for pattern in patterns)
+    ]
+    assert uncovered == [], uncovered
+
+
+def test_refresh_ignores_an_uncommitted_working_tree_edit(tmp_path: Path) -> None:
+    """R-084 for the control plane: the checkout is radon-writable.
+
+    A sudoers body that never landed on main must not reach /etc/sudoers.d,
+    otherwise the one sudo verb radon already holds mints it root.
+    """
+    box = Sandbox(tmp_path)
+    installed = box.installed_path(SUDOERS_SOURCE)
+    before = installed.read_bytes()
+
+    box.mutate_source_uncommitted(SUDOERS_SOURCE)
+    result = box.run("refresh-control-plane-privileged")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "current/unchanged" in result.stdout
+    assert installed.read_bytes() == before
+
+
+def test_refresh_refuses_a_head_that_is_not_on_main(tmp_path: Path) -> None:
+    """A commit GitHub main never contained is not evidence of review."""
+    box = Sandbox(tmp_path)
+    box.mutate_source_uncommitted(SUDOERS_SOURCE)
+    _git(box.tmp, "checkout", "-q", "-b", "attacker")
+    box.commit_sources()
+    installed = box.installed_path(SUDOERS_SOURCE)
+    before = installed.read_bytes()
+
+    result = box.run("refresh-control-plane-privileged")
+
+    combined = result.stdout + result.stderr
+    assert result.returncode == 76, combined
+    assert "not reachable from the GitHub main tip" in combined
+    assert installed.read_bytes() == before
+
+
+# --- F. T-441: the compose body root executes is gated ON THE REFRESH PATH ---
+#
+# test_rel234_compose_gate.py exercises compose_body_is_valid() as an extracted
+# function; nothing passed a bad body through refresh_install_file itself, so
+# the /etc/radon/ib-gateway-compose.yml case arm could be dropped or reordered
+# without a red. These stage a poisoned body the way a deploy would (committed
+# to main) and require the privileged refresh to refuse it before install.
+
+COMPOSE_SOURCE = "docker-compose.yml"
+
+COMPOSE_BASE = (
+    "services:\n"
+    "  ib-gateway:\n"
+    "    image: ghcr.io/example/ib-gateway@sha256:0000\n"
+    "    container_name: ib-gateway\n"
+)
+
+COMPOSE_REJECTIONS = {
+    "no-services": (
+        "x-fragments:\n  ib-gateway:\n    container_name: ib-gateway\n",
+        "declares no services",
+    ),
+    "unpinned-container-name": (
+        "services:\n  ib-gateway:\n    image: ghcr.io/example/x@sha256:0000\n",
+        "does not pin container_name ib-gateway",
+    ),
+    "privileged": (
+        COMPOSE_BASE + "    privileged: true\n",
+        "requests privileged",
+    ),
+    "privileged-quoted": (
+        COMPOSE_BASE + '    privileged: "true"\n',
+        "requests privileged",
+    ),
+    "privileged-single-quoted": (
+        COMPOSE_BASE + "    privileged: 'true'\n",
+        "requests privileged",
+    ),
+    "host-root-bind": (
+        COMPOSE_BASE + "    volumes:\n      - /:/host\n",
+        "binds an absolute host path",
+    ),
+}
+
+
+def _stage_compose_body(box: Sandbox, body: str) -> None:
+    (box.cloud / COMPOSE_SOURCE).write_text(body, encoding="utf-8")
+    box.commit_sources()
+
+
+@pytest.mark.parametrize("poison", sorted(COMPOSE_REJECTIONS))
+def test_privileged_refresh_refuses_a_poisoned_compose_body(
+    tmp_path: Path, poison: str
+) -> None:
+    box = Sandbox(tmp_path)
+    body, message = COMPOSE_REJECTIONS[poison]
+    _stage_compose_body(box, body)
+
+    combined = _refused_without_install(
+        box, "refresh-control-plane-privileged", "compose validation failed"
+    )
+    assert message in combined
+
+
+def test_privileged_refresh_installs_a_valid_compose_body(tmp_path: Path) -> None:
+    box = Sandbox(tmp_path)
+    box.mutate_source(COMPOSE_SOURCE)
+    expected = (box.cloud / COMPOSE_SOURCE).read_bytes()
+
+    result = box.run("refresh-control-plane-privileged")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert box.installed_path(COMPOSE_SOURCE).read_bytes() == expected

@@ -301,7 +301,12 @@ def test_deploy_installs_units_after_promote_and_after_restart(tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
     lines = calls.read_text(encoding="utf-8").splitlines()
     refresh_idx = next(
-        (i for i, line in enumerate(lines) if line.endswith("refresh-control-plane")),
+        (
+            i
+            for i, line in enumerate(lines)
+            if line.endswith("refresh-control-plane")
+            or line.endswith("refresh-control-plane-privileged")
+        ),
         None,
     )
     assert refresh_idx is not None, lines

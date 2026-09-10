@@ -6,11 +6,12 @@ import { join } from "path";
 import { isCriDataStale } from "@/lib/criStaleness";
 import { selectPreferredCriCandidate, type CriCacheCandidate } from "@/lib/criCache";
 import { backfillRealizedVolHistory, type RegimeHistoryEntry } from "@/lib/regimeHistory";
-import { radonFetch } from "@/lib/radonApi";
+import { radonFetch, RadonApiError } from "@/lib/radonApi";
 import { createBackgroundScanTrigger } from "@/lib/backgroundScan";
-import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
+import { getRequestId, setCacheResponseHeaders, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 import { dbExecute } from "@/lib/dbExecute";
 import { cachedRead, invalidateCache } from "@/lib/dbCache";
+import { buildDemoCriFixture } from "@/lib/demo/fixtures/regime";
 // Disable Next.js static caching: this handler reads live disk state
 // (data/*.json, cache files). Without this, the framework freezes the
 // first response and serves stale data until the dev server restarts.
@@ -286,10 +287,15 @@ async function runCriScanAndArchive(): Promise<void> {
 
 const triggerBackgroundScan = createBackgroundScanTrigger({ label: "CRI", run: runCriScanAndArchive });
 
+export const radonCapability = { GET: "read", POST: "read.spawn" };
+
 export async function GET(): Promise<Response> {
-  const access = await requireRouteAccess(undefined, { rate: { key: "regime:route", limit: 20, windowMs: 60_000 } });
+  const access = await requireRouteAccess(undefined, { rate: { key: "regime:route", limit: 20, windowMs: 60_000 }, durableRateTier: "A" });
   if (!access.ok) return access.response;
   const requestId = getRequestId();
+  if (access.principal.kind === "demo") {
+    return setNoStoreResponseHeaders(NextResponse.json(buildDemoCriFixture()), requestId);
+  }
   const result = await readLatestCri();
   const data = normalizeCriPayload((result?.data ?? EMPTY_CRI) as Record<string, unknown>);
   const currentMarketOpen = isMarketOpenNow();
@@ -338,8 +344,12 @@ export async function GET(): Promise<Response> {
 }
 
 export async function POST(): Promise<Response> {
-  const access = await requireRouteAccess(undefined, { rate: { key: "regime:route", limit: 20, windowMs: 60_000 } });
+  const access = await requireRouteAccess(undefined, { rate: { key: "regime:route", limit: 20, windowMs: 60_000 }, durableRateTier: "B" });
   if (!access.ok) return access.response;
+  if (access.principal.kind === "demo") {
+    const requestId = getRequestId();
+    return setNoStoreResponseHeaders(NextResponse.json(buildDemoCriFixture()), requestId);
+  }
   try {
     const rawData = await radonFetch<Record<string, unknown>>("/regime/scan", {
       method: "POST",
@@ -347,14 +357,24 @@ export async function POST(): Promise<Response> {
     });
     invalidateCache("regime:cri");
     const data = normalizeCriPayload(rawData);
-    return NextResponse.json(data);
-  } catch {
-    const cached = await readLatestCri();
-    if (cached?.data) {
-      const response = NextResponse.json(normalizeCriPayload(cached.data as Record<string, unknown>));
-      response.headers.set("X-Sync-Warning", "CRI sync failed - serving cached data");
-      return response;
+    return NextResponse.json({ ...data, scan_succeeded: true });
+  } catch (err) {
+    // R-643: mirror the theta scan shape — preserve the upstream status and
+    // stamp the failure in the body so useSyncHook consumers see it. A 200 +
+    // X-Sync-Warning header silently masked dead scans.
+    const status = err instanceof RadonApiError ? err.status : 502;
+    if (status >= 500) {
+      const cached = await readLatestCri();
+      if (cached?.data) {
+        const response = NextResponse.json(
+          { ...normalizeCriPayload(cached.data as Record<string, unknown>), is_stale: true, scan_succeeded: false },
+          { status },
+        );
+        response.headers.set("X-Sync-Warning", "CRI sync failed - serving cached data");
+        return response;
+      }
     }
-    return NextResponse.json({ error: "CRI scan failed" }, { status: 502 });
+    const message = err instanceof Error ? err.message : "CRI scan failed";
+    return NextResponse.json({ error: message, scan_succeeded: false }, { status });
   }
 }

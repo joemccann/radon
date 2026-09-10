@@ -5,9 +5,10 @@ import { readFile } from "fs/promises";
 import { join } from "path";
 import { dbExecute } from "@/lib/dbExecute";
 import { cachedRead, invalidateCache } from "@/lib/dbCache";
-import { radonFetch } from "@/lib/radonApi";
-import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
+import { radonFetch, RadonApiError } from "@/lib/radonApi";
+import { getRequestId, setCacheResponseHeaders, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 import { isGammaRotationStale } from "@/lib/gammaRotationStaleness";
+import { buildDemoGammaRotationFixture } from "@/lib/demo/fixtures/regime";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -161,10 +162,15 @@ function triggerBackgroundScan(): void {
     .finally(() => { bgScanInFlight = false; });
 }
 
+export const radonCapability = { GET: "read", POST: "read.spawn" };
+
 export async function GET(): Promise<Response> {
-  const access = await requireRouteAccess(undefined, { rate: { key: "gamma-rotation:route", limit: 20, windowMs: 60_000 } });
+  const access = await requireRouteAccess(undefined, { rate: { key: "gamma-rotation:route", limit: 20, windowMs: 60_000 }, durableRateTier: "A" });
   if (!access.ok) return access.response;
   const requestId = getRequestId();
+  if (access.principal.kind === "demo") {
+    return setNoStoreResponseHeaders(NextResponse.json(buildDemoGammaRotationFixture()), requestId);
+  }
   const cached = await readCachedGammaRotation();
   const data = normalizeGammaRotationPayload(cached ?? {});
   const currentMarketOpen = isMarketOpenNow();
@@ -186,20 +192,33 @@ export async function GET(): Promise<Response> {
 }
 
 export async function POST(): Promise<Response> {
-  const access = await requireRouteAccess(undefined, { rate: { key: "gamma-rotation:route", limit: 20, windowMs: 60_000 } });
+  const access = await requireRouteAccess(undefined, { rate: { key: "gamma-rotation:route", limit: 20, windowMs: 60_000 }, durableRateTier: "B" });
   if (!access.ok) return access.response;
+  if (access.principal.kind === "demo") {
+    const requestId = getRequestId();
+    return setNoStoreResponseHeaders(NextResponse.json(buildDemoGammaRotationFixture()), requestId);
+  }
   try {
     const rawData = await radonFetch<Record<string, unknown>>("/gamma-rotation/scan", { method: "POST", timeout: 130_000 });
     invalidateCache("gamma-rotation:snapshot");
-    return NextResponse.json(normalizeGammaRotationPayload(rawData));
+    return NextResponse.json({ ...normalizeGammaRotationPayload(rawData), scan_succeeded: true });
   } catch (error) {
+    // R-643: mirror the theta scan shape — preserve the upstream status and
+    // stamp the failure in the body so useSyncHook consumers see it. A 200 +
+    // X-Sync-Warning header silently masked dead scans.
     const message = error instanceof Error ? error.message : "Gamma Rotation Gap scan failed";
-    const cached = await readCachedGammaRotation();
-    if (cached) {
-      const res = NextResponse.json(normalizeGammaRotationPayload(cached));
-      res.headers.set("X-Sync-Warning", `Gamma Rotation Gap scan failed - serving cached data (${message})`);
-      return res;
+    const status = error instanceof RadonApiError ? error.status : 502;
+    if (status >= 500) {
+      const cached = await readCachedGammaRotation();
+      if (cached) {
+        const res = NextResponse.json(
+          { ...normalizeGammaRotationPayload(cached), is_stale: true, scan_succeeded: false },
+          { status },
+        );
+        res.headers.set("X-Sync-Warning", `Gamma Rotation Gap scan failed - serving cached data (${message})`);
+        return res;
+      }
     }
-    return NextResponse.json({ error: message }, { status: 502 });
+    return NextResponse.json({ error: message, scan_succeeded: false }, { status });
   }
 }

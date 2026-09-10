@@ -72,6 +72,20 @@ describe("CatalystsQuadrant", () => {
     expect(labels).toEqual(["ECONOMIC DATA", "EARNINGS", "FDA"]);
   });
 
+  it("orders same-day rows chronologically by event_time, not insertion order", () => {
+    freeze("2026-08-04T14:00:00Z");
+    payload = snapshot([
+      row({ title: "ISM Services PMI", date: "2026-08-04", event_time: "2026-08-04T14:00:00Z" }),
+      row({ title: "Services PMI", date: "2026-08-04", event_time: "2026-08-04T13:45:00Z" }),
+      row({ title: "Jobless Claims", date: "2026-08-04", event_time: "2026-08-04T12:30:00Z" }),
+    ]);
+    render(<CatalystsQuadrant positionTickers={new Set()} />);
+    const names = Array.from(document.querySelectorAll(".catalyst-group__name")).map(
+      (el) => el.textContent,
+    );
+    expect(names).toEqual(["Jobless Claims", "Services PMI", "ISM Services PMI"]);
+  });
+
   it("opens only the first category and toggles the others on click", () => {
     freeze("2026-08-04T14:00:00Z");
     payload = snapshot([

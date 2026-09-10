@@ -72,6 +72,8 @@ async function readLeapFromDisk(): Promise<TimestampedRead<Record<string, unknow
   return { data, timestampMs: contentTimestampMs(data.scan_time) };
 }
 
+export const radonCapability = "read";
+
 export async function GET(): Promise<Response> {
   const access = await requireRouteAccess();
   if (!access.ok) return access.response;

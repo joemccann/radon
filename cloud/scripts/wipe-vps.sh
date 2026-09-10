@@ -34,6 +34,9 @@ echo "  - Docker containers and volumes"
 echo "  - Caddy and its config"
 echo "  - Python 3.13, Node.js 22, Docker CE"
 echo "  - /home/radon/ (repos, venv, data)"
+echo "  - /etc/radon/ secrets and the stored secret-store key"
+echo "  - /var/lib/radon/ host state"
+echo "  - radon sudoers and polkit grants"
 echo "  - The radon user account"
 echo ""
 echo "This will KEEP:"
@@ -109,10 +112,36 @@ if id radon &>/dev/null; then
 fi
 rm -rf /home/radon
 
-# -- Remove sudoers -----------------------------------------------------------
+# R-618: /home/radon holds the secret-store CIPHERTEXT
+# (data/secret_store/secrets.db); its master key lives outside that tree. Left
+# behind, a re-provision finds a key that decrypts nothing (the store is
+# key-bound by fingerprint and refuses to open, so every /credentials route
+# answers 503) — and a decommissioned host is handed back with a live key.
+log_info "Removing secret-store master credential..."
+rm -f /etc/credstore.encrypted/radon-secret-store-key
+rmdir /etc/credstore.encrypted 2>/dev/null || true
 
-log_info "Removing radon sudoers config..."
+# -- Remove sudoers and polkit ------------------------------------------------
+
+log_info "Removing radon sudoers and polkit config..."
 rm -f /etc/sudoers.d/radon-deploy
+rm -f /etc/sudoers.d/radon-monitor
+rm -f /etc/sudoers.d/radon-ops
+rm -f /etc/sudoers.d/radon-caddy
+rm -f /etc/polkit-1/rules.d/50-radon-services.rules
+
+# -- Remove secrets and host state --------------------------------------------
+
+# setup-vps.sh writes the whole production credential set here (/etc/radon/env
+# and /etc/radon/mcp.env), and the API unit loads its secret-store key from the
+# systemd credential store. A reset that leaves these behind hands the next
+# owner of the machine live credentials.
+log_info "Shredding radon secrets and host state..."
+find /etc/radon -type f -exec shred -u {} + 2>/dev/null || true
+rm -rf /etc/radon
+shred -u /etc/credstore.encrypted/radon-secret-store-key 2>/dev/null || true
+rm -f /etc/credstore.encrypted/radon-secret-store-key
+rm -rf /var/lib/radon
 
 # -- Remove packages ----------------------------------------------------------
 
@@ -128,6 +157,7 @@ log_info "Removing Node.js..."
 apt-get remove -y nodejs 2>/dev/null || true
 rm -f /etc/apt/sources.list.d/nodesource.list
 rm -f /usr/share/keyrings/nodesource.gpg
+rm -f /etc/apt/keyrings/nodesource.gpg
 
 log_info "Cleaning up apt..."
 apt-get autoremove -y 2>/dev/null || true

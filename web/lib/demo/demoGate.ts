@@ -15,7 +15,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { resolveDemoContext, type DemoPublicMetadata } from "./demoRole";
-import { classifyRateTier } from "./rateTier";
+import { classifyRateTier, demoRateLimitKey } from "./rateTier";
 import { demoRateLimit, type DemoRateLimitResult, type DemoRateTier } from "./rateLimit";
 
 function isApiPath(pathname: string): boolean {
@@ -56,7 +56,9 @@ export async function handleDemoGate(
         requestId,
       }, { status: 403 }));
     }
-    return noStore(new NextResponse("Demo access is not active.", { status: 403 }));
+    return noStore(
+      NextResponse.redirect(new URL("/demo-pending", request.url), 307),
+    );
   }
   if (!ctx) return null;
 
@@ -86,7 +88,7 @@ export async function handleDemoGate(
   if (api) {
     const tier = classifyRateTier(request.method, pathname);
     const limiter = deps.rateLimiter ?? demoRateLimit;
-    const rl = await limiter(tier, userId);
+    const rl = await limiter(tier, demoRateLimitKey(tier, userId, pathname));
     if (!rl.success) {
       const res = NextResponse.json(
         {
@@ -104,13 +106,26 @@ export async function handleDemoGate(
       }
       return noStore(res);
     }
-    if (tier === "E") {
-      const daily = await limiter("F", userId);
+    // Every windowed tier carries a user-global daily ceiling. A/B were the
+    // gap: their per-resource keys renewed hourly with no daily cap (R-652).
+    const dailyTier = tier === "E"
+      ? "F"
+      : tier === "G"
+        ? "H"
+        : tier === "I"
+          ? "J"
+          : tier === "A"
+            ? "K"
+            : tier === "B"
+              ? "L"
+              : null;
+    if (dailyTier) {
+      const daily = await limiter(dailyTier, userId);
       if (!daily.success) {
         return noStore(NextResponse.json({
           error: "Demo rate limit exceeded. Slow down.",
           code: "DEMO_RATE_LIMITED",
-          tier: "F",
+          tier: dailyTier,
           limit: daily.limit,
           resetAt: daily.reset,
         }, { status: 429 }));

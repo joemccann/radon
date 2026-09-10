@@ -30,9 +30,66 @@
       "owners": ["docs/incident-runbook.md", "docs/grok-page-responder.md"]
     },
     {
+      "id": "host-split",
+      "globs": [
+        "scripts/ib_gateway_remote/**",
+        "scripts/api/services.py",
+        "cloud/services/radon-ib-gateway-remote.service",
+        "cloud/scripts/ib-gateway-remote-certs.sh",
+        "cloud/scripts/check-env.py"
+      ],
+      "owners": ["docs/spof-host-split.md"],
+      "note": "App/broker split contract: mTLS Gateway control, cert lifecycle, role env checks. Recurring runbook drift class (DOC-002/006/009/010/017/018/019)."
+    },
+    {
+      "id": "api-trust-boundary",
+      "globs": ["scripts/api/auth.py"],
+      "owners": ["scripts/api/CLAUDE.md", "docs/spof-host-split.md"],
+      "note": "Who FastAPI trusts without a JWT (loopback, tailnet, the private-net /health probe). Both owners restated the 10.0.0.0/16 scope wrongly after REL-170 (DOC-020/022)."
+    },
+    {
       "id": "ops-timers",
       "globs": ["cloud/services/*.timer"],
       "owners": ["docs/operations.md", "docs/cloud-services.md"]
+    },
+    {
+      "id": "nightly-loops",
+      "globs": [
+        "scripts/*_weekend.sh",
+        "scripts/*_nightly.sh",
+        "scripts/weekend_notify.py",
+        "scripts/weekend_redact.py",
+        "scripts/weekend_prune.py",
+        "scripts/nightly_*.py",
+        "scripts/github_pr_output.py",
+        "config/com.radon.*-daily.plist"
+      ],
+      "owners": ["docs/operations.md"],
+      "note": "operations.md is the one place indexing all five nightly loops: fire times, clone + marker rails, the model pin and the status vocabulary an operator reads off a page. #219 changed operator-facing behaviour in all five wrappers with no owner update (DOC-032/033/034/040). Loop SEMANTICS stay in .claude/skills/<loop>/SKILL.md; only the operator contract belongs here."
+    },
+    {
+      "id": "streaks-source-ladder",
+      "globs": ["scripts/api/routes/streaks.py"],
+      "owners": ["docs/indicators/streaks.md"],
+      "note": "Cache semantics and the vendor ladder are the reader-facing contract: a cached hit keeps its original source, and errors[] is not missing (DOC-065)."
+    },
+    {
+      "id": "credential-validators",
+      "globs": ["scripts/credential_validators.py"],
+      "owners": ["docs/operations.md"],
+      "note": "The Credentials tab refuses values on egress pins an operator cannot see from the UI (DOC-067)."
+    },
+    {
+      "id": "health-probes",
+      "globs": ["scripts/health_service/probes.py"],
+      "owners": ["scripts/health_service/CLAUDE.md"],
+      "note": "Probe sources, degraded_reasons and the dwell suppressions decide what an operator is paged for (DOC-074)."
+    },
+    {
+      "id": "flex-pull",
+      "globs": ["scripts/flex_sftp_pull.py"],
+      "owners": ["docs/cloud-services.md"],
+      "note": "When a duplicate-only or empty pull is an error vs expected is the on-call discriminator (DOC-078)."
     },
     {
       "id": "factory",
@@ -56,6 +113,55 @@
       ],
       "owners": ["docs/README.md"],
       "note": "GitHub front door. Root README.md is pinned by TestThinIndex, not this glob: a bare README.md glob matches every nested README via basename."
+    },
+    {
+      "id": "credential-store",
+      "globs": [
+        "scripts/secret_store.py",
+        "scripts/credentials_registry.py",
+        "scripts/api/routes/credentials.py",
+        "web/lib/setup/**",
+        "web/components/setup/**"
+      ],
+      "owners": ["docs/operations.md"],
+      "note": "Store-wins-over-.env precedence, master-key loss recovery, and setup-mode entry/exit are operator contracts (DOC-051)."
+    },
+    {
+      "id": "deploy-provisioning",
+      "globs": [
+        "cloud/scripts/deploy.sh",
+        "cloud/scripts/deploy-root-helper.sh",
+        "cloud/scripts/setup-vps.sh",
+        "cloud/scripts/bootstrap-control-plane.sh",
+        "cloud/scripts/radon-docker-gw.sh",
+        "cloud/scripts/drift_audit.py"
+      ],
+      "owners": ["cloud/CLAUDE.md"],
+      "note": "Deploy/provisioning contracts (preflight fallback, shim trust gates, control-plane sync) drifted twice in one cycle (DOC-104/105); cloud/CLAUDE.md is their owner."
+    },
+    {
+      "id": "mcp-hosted-auth",
+      "globs": ["scripts/mcp_hosted/auth.py"],
+      "owners": ["docs/cloud-services.md"],
+      "note": "JWKS verdict-vs-outage caching, per-kid refresh cooldown, and allowlist semantics are operator contracts (DOC-090)."
+    },
+    {
+      "id": "secret-store-staging",
+      "globs": [
+        "cloud/scripts/setup-vps.sh",
+        "cloud/scripts/radon-app-runtime.sh"
+      ],
+      "owners": ["docs/operations.md"],
+      "note": "Provisioning-time secret staging, group boundaries, and docker-group stripping are operator contracts (DOC-090)."
+    },
+    {
+      "id": "drift-audit",
+      "globs": [
+        "cloud/scripts/drift_audit.py",
+        "cloud/config/drift-allowlist.conf"
+      ],
+      "owners": ["docs/cloud-services.md"],
+      "note": "Drift-audit scope and allowlist semantics live in the cloud runbook (DOC-090)."
     }
   ]
 }

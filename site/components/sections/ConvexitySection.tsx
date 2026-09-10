@@ -1,23 +1,23 @@
 import { RevealOnScroll } from "@/components/atoms/RevealOnScroll";
 import { SectionHeading } from "@/components/atoms/SectionHeading";
+import { CopyAgentPromptBar } from "@/components/molecules/CopyAgentPromptBar";
 import { GateCard } from "@/components/molecules/GateCard";
 import { gates } from "@/lib/editorial-content";
 
 export function ConvexitySection() {
   return (
-    <section id="convexity" className="px-8 py-[clamp(64px,9vw,128px)]">
+    <section id="discipline" className="px-5 py-[clamp(64px,9vw,128px)] sm:px-8">
       <div className="mx-auto max-w-[1140px]">
-        <SectionHeading no="Thesis 02" label="Convexity · The Four Gates" />
+        <SectionHeading no="Discipline" label="The order still has to clear" />
 
         <RevealOnScroll className="mb-[42px] max-w-[66ch]">
           <h2 className="editorial-pull">
-            A signal is permission to look. Convexity is permission to trade.
+            A good view still dies at a bad structure.
           </h2>
           <p className="mt-6 text-secondary">
-            Every candidate is forced through four sequential gates before a contract is
-            built. The gates are ordered. A failure at any gate stops the trade and names
-            itself. There is no override that lets conviction outrank structure. Every
-            structure the gates admit is catalogued, with a per-structure risk verdict, in{" "}
+            Gates sit after the view and the vehicle. Fail one and the order
+            stops. Conviction does not get a veto. Every structure that gets
+            through is in{" "}
             <a
               href="/defined-risk-options-structures"
               className="underline decoration-grid underline-offset-4 transition-colors hover:text-signal-deep hover:decoration-signal-deep"
@@ -26,11 +26,16 @@ export function ConvexitySection() {
             </a>
             .
           </p>
+          <CopyAgentPromptBar capabilityId="gates" />
         </RevealOnScroll>
 
         <RevealOnScroll className="gates">
-          {gates.map((gate) => (
-            <GateCard key={gate.no} gate={gate} />
+          {gates.map((gate, index) => (
+            <GateCard
+              key={gate.no}
+              gate={gate}
+              capabilityId={`gate-0${index + 1}`}
+            />
           ))}
         </RevealOnScroll>
       </div>

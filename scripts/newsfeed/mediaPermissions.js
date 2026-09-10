@@ -20,6 +20,22 @@ export function localMediaDest(remote) {
   return remote.endsWith("/") ? remote.slice(0, -1) : remote;
 }
 
+// Under the P3 container runtime the served media volume is bind-mounted into
+// the scraper, so the download tree and the Caddy tree are the same directory
+// and there is no hop left to make. Compare resolved paths, not strings: the
+// host reaches the same inode through /home/radon/radon-cloud/media (a
+// symlink) and /var/lib/radon/media.
+export function isSameMediaTree(local, remote) {
+  const source = localMediaDest(local);
+  const dest = localMediaDest(remote);
+  if (!source || !dest) return false;
+  try {
+    return fs.realpathSync(source) === fs.realpathSync(dest);
+  } catch {
+    return false;
+  }
+}
+
 // R-137: the sweep chmods files in an OPERATOR-SUPPLIED directory. Without
 // an allowlist a stray storageState / cookie jar under a Caddy web root
 // becomes world-readable. Only the shapes the newsfeed actually publishes.

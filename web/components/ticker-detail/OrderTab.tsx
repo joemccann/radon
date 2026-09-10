@@ -7,7 +7,7 @@ import type { OpenOrder, PortfolioData, PortfolioPosition } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
 import { optionKey } from "@/lib/pricesProtocol";
 import { useOrderActions, useOrderActionsOptional } from "@/lib/OrderActionsContext";
-import { fmtPrice, legPriceKey, resolveEntryCost, resolveNaturalSpreadQuote } from "@/lib/positionUtils";
+import { fmtPrice, legPriceKey, resolveClosingBasis, resolveNaturalSpreadQuote } from "@/lib/positionUtils";
 import { computeLegImpliedValue } from "@/lib/impliedValue";
 import { useRiskFreeRate } from "@/lib/useRiskFreeRate";
 import ModifyOrderModal from "@/components/ModifyOrderModal";
@@ -31,6 +31,7 @@ import { fmtSignedPrice, toneClass } from "@/lib/format";
 import { isIndexSymbol, hasFuturesSupport, hasIndexOptionsSupport } from "@/lib/indexSymbols";
 import { FuturesOrderForm } from "@/components/ticker-detail/FuturesOrderForm";
 import { IndexOptionOrderForm } from "@/components/ticker-detail/IndexOptionOrderForm";
+import { useRealtimePrices } from "@/lib/RealtimePricesContext";
 
 type OrderTabProps = {
   ticker: string;
@@ -866,7 +867,7 @@ function ComboOrderForm({
         description,
         totalCost: closeCashFlow,
         closeOut: {
-          entryCostDollars: resolveEntryCost(position) * (parsedQty / comboUnits),
+          entryCostDollars: resolveClosingBasis(position, parsedQty, comboUnits),
         },
       };
     }
@@ -1111,6 +1112,9 @@ export default function OrderTab({ ticker, position, portfolio, prices, openOrde
   const isIndex = isIndexSymbol(ticker);
 
   const { requestModify } = useOrderActions();
+  // T-462: the feed-disconnect arm of quoteSubmitGate is dead unless the
+  // owner surface supplies real connectivity.
+  const { connected: feedConnected } = useRealtimePrices();
   const [modifyTarget, setModifyTarget] = useState<OpenOrder | null>(null);
   const [modifyLoading, setModifyLoading] = useState(false);
 
@@ -1131,6 +1135,7 @@ export default function OrderTab({ ticker, position, portfolio, prices, openOrde
         portfolio={portfolio}
         // R-112: a close-out must count the SELL combos already working.
         openOrders={{ open_orders: openOrders }}
+        feedConnected={feedConnected}
         onConfirm={handleModifyConfirm}
         onClose={() => setModifyTarget(null)}
       />

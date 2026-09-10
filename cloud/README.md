@@ -300,7 +300,7 @@ container healthcheck probes internal port `4001` for live and `4002` for paper.
 The deploy script writes only literal `NEXT_PUBLIC_*` lines to `web/.env` and
 sets mode `0600`. Server-side build values are parsed without interpolation and
 exist only in the build process environment. The production cloud `.env` must
-also be mode `0600`. The script does **not** create a root `.env` in the radon
+be mode `0640` root:radon. The script does **not** create a root `.env` in the radon
 directory.
 
 ---
@@ -423,7 +423,8 @@ scripts/post-setup.sh
 - WebSocket uses short-lived tickets (no JWT in URLs)
 - Caddy enforces HTTPS with auto-redirect
 - IB Gateway port 4001 is bound to loopback and the Tailscale interface IP (`100.112.32.16`) only, never to the public NIC. The VPS FastAPI uses loopback; the laptop connects over Tailscale.
-- SSH via Tailscale only (ufw blocks public SSH)
+- `setup-vps.sh` `open_firewall()` sets `ufw default deny incoming` and enables ufw; the allow rules live in that function
+- Public 22/tcp is open but keys-only (password and keyboard-interactive auth disabled by the sshd drop-in `setup-vps.sh` installs); Tailscale SSH is the primary route
 - `.env` and `.env.production` are gitignored and must never be committed. A credential-shaped example previously entered repository history; credential rotation and a coordinated destructive history rewrite remain required separately.
 - GitHub Actions pinned by commit SHA
 - Deploy sudoers grants only exact invocations of the root-owned `/usr/local/sbin/radon-deploy-root` helper (`stop-clean`, `restart-managed`, `recover`, `verify-restored`, `verify-control-plane`, `commit-transition`, `install-units`, `revert-units`, `sync-scheduled-units`, plus `publish-caddy` in its own fragment); the helper discovers non-beta Radon units with a required core-service floor, owns the fixed stale-replica cleanup paths, and installs the manifest-pinned timer-owned units (`install-units`) during each deploy; a rollback reverts exactly those changes (`revert-units`). `sync-scheduled-units` re-reads allowlisted units from git objects at the GitHub main tip and never starts, stops, or enables units.

@@ -30,6 +30,13 @@ Live file -> repo source of truth (install command, for when live is stale):
       sudo install -m 0644 services/journald-radon.conf /etc/systemd/journald.conf.d/radon.conf
   /etc/systemd/system/radon-.service.d/common.conf <- services/radon-.service.d/common.conf
       installed by setup-vps.sh:install_fleet_dropin
+  /usr/local/sbin/radon-deploy-root <- scripts/deploy-root-helper.sh
+  /usr/local/sbin/radon-app-runtime <- scripts/radon-app-runtime.sh
+  /usr/local/sbin/radon-docker-gw <- scripts/radon-docker-gw.sh
+      all three installed by bootstrap-control-plane.sh / refresh-control-plane
+  /etc/radon/ib-gateway-compose.yml <- git blob HEAD:cloud/docker-compose.yml
+      (R-636 provenance: the working tree is radon-writable and is NOT the
+      comparison basis; installed by install_docker_gw / refresh-control-plane)
   /etc/sudoers.d/radon* <- config/sudoers.d/*
       sudo visudo -cf config/sudoers.d/NAME && sudo install -m 0440 config/sudoers.d/NAME /etc/sudoers.d/NAME
   docker-compose actually running the ib-gateway container <- docker-compose.yml
@@ -119,7 +126,33 @@ FILE_PAIRS = [
         "services/radon-.service.d/common.conf",
         "fleet-dropin",
     ),
+    # R-649: root-run helper surfaces installed by the control plane.
+    (
+        "/usr/local/sbin/radon-deploy-root",
+        "scripts/deploy-root-helper.sh",
+        "radon-deploy-root",
+    ),
+    (
+        "/usr/local/sbin/radon-app-runtime",
+        "scripts/radon-app-runtime.sh",
+        "radon-app-runtime",
+    ),
+    (
+        "/usr/local/sbin/radon-docker-gw",
+        "scripts/radon-docker-gw.sh",
+        "radon-docker-gw",
+    ),
+    # R-636: the installed compose body's canonical source is the git blob at
+    # HEAD, never the radon-writable working tree (see the git: dispatch in
+    # _compare_file_pair).
+    (
+        "/etc/radon/ib-gateway-compose.yml",
+        "git:docker-compose.yml",
+        "ib-gateway-compose",
+    ),
 ]
+
+GIT_BLOB_PREFIX = "git:"
 
 UNIT_GLOBS = ("radon-*.service", "radon-*.timer")
 
@@ -164,11 +197,13 @@ def set_cloud_root(root: Path) -> None:
 def load_env_keys(path: Path, keys: tuple[str, ...]) -> dict[str, str]:
     """Read an allowlisted set of keys out of an env file, as DATA.
 
-    This process runs as root while the file is 0600 radon:radon, so the file's
-    contents are attacker-influenced from root's point of view. Only the named
-    keys are returned, and nothing here touches os.environ -- an appended
-    LD_PRELOAD or PATH line is read past, not applied. Literal parsing (no
-    shell) also keeps a `$VAR` in a secret from being expanded.
+    This process runs as root. The canonical file is 0640 root:radon, but the
+    compatibility path lives under /home/radon, which the unprivileged account
+    can replace, so the file's contents are attacker-influenced from root's
+    point of view. Only the named keys are returned, and nothing here touches
+    os.environ -- an appended LD_PRELOAD or PATH line is read past, not
+    applied. Literal parsing (no shell) also keeps a `$VAR` in a secret from
+    being expanded.
     """
     values: dict[str, str] = {}
     try:
@@ -441,9 +476,33 @@ def _line_delta(repo_text: str, live_text: str) -> str:
     return f"live vs repo: +{added}/-{removed} lines"
 
 
+def _read_repo_blob(relative: str) -> str | None:
+    """Read the canonical artifact from the git blob at HEAD (R-636).
+
+    The installed ib-gateway-compose.yml is provisioned from the committed
+    blob, so the working tree -- which the radon account can rewrite -- must
+    never be the comparison basis for it.
+    """
+    try:
+        proc = _run(
+            [
+                "git", "-c", f"safe.directory={GIT_REPO}", "-C", str(GIT_REPO),
+                "show", f"HEAD:{(REPO.relative_to(GIT_REPO) / relative).as_posix()}",
+            ]
+        )
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return None
+    if proc.returncode != 0:
+        return None
+    return proc.stdout
+
+
 def _compare_file_pair(live_path: str, repo_rel: str, label: str) -> dict | None:
     live = _read(Path(live_path))
-    repo = _read_repo(repo_rel)
+    if repo_rel.startswith(GIT_BLOB_PREFIX):
+        repo = _read_repo_blob(repo_rel[len(GIT_BLOB_PREFIX):])
+    else:
+        repo = _read_repo(repo_rel)
     if live is None and repo is None:
         return {"id": f"both-missing:{label}", "detail": f"{live_path} and {repo_rel}"}
     if live is None:
@@ -512,7 +571,90 @@ def _live_unit_counter(unit_path: Path) -> Counter:
     return merge_unit_counters(texts)
 
 
+def _repo_unit_counter(repo_path: Path) -> Counter:
+    """Repo base unit merged with its OWN drop-ins, mirroring the live side.
+
+    Comparing a merged live counter against the repo BASE alone made every
+    setting a shipped drop-in adds — `User=root`, the `ExecStartPre=` reset,
+    both `ExecStart=` lines — read as live-only, so all five app units went
+    permanently `unit-mismatch` the moment the container drop-ins were
+    installed, and a permanently-red `config-drift` buries every real drift.
+    Not resolvable with an allowlist entry: the R-058 ratchet is a bounded
+    acknowledgment, not a suppression for a permanent, intended state. R-392.
+    """
+    texts = [_read_repo(repo_path.relative_to(REPO)) or ""]
+    dropin_dir = repo_path.with_name(repo_path.name + ".d")
+    if dropin_dir.is_dir():
+        for conf in sorted(dropin_dir.glob("*.conf")):
+            texts.append(_read_repo(conf.relative_to(REPO)) or "")
+    return merge_unit_counters(texts)
+
+
+CANONICAL_ENV_FILE = Path("/etc/radon/env")
+HOST_ROLES = frozenset({"app", "broker", "combined"})
+# Units the control-plane refresh strips by role. Mirrors
+# role_skips_control_plane_source() in scripts/deploy-root-helper.sh; their
+# absence on that role is the intended state, not drift (REL-169, R-498).
+ROLE_SKIPPED_UNITS: dict[str, frozenset[str]] = {
+    "app": frozenset(
+        {
+            "radon-ib-gateway.service",
+            "radon-ib-gateway-preheld-restart.service",
+            "radon-ib-watchdog.service",
+            "radon-ib-watchdog.timer",
+            "radon-ib-gateway-remote.service",
+        }
+    ),
+}
+# Gateway runtime surfaces are absent by design on app-role hosts. Keep them
+# visible as role-skipped notes without weakening broker/combined audits.
+ROLE_SKIPPED_GATEWAY_SURFACES: dict[str, frozenset[str]] = {
+    "app": frozenset(
+        {"ib-gateway-control", "compose", "radon-docker-gw", "ib-gateway-compose"}
+    ),
+}
+
+
+#: Roles that make this root-run auditor SKIP a check. R-604: the compat
+#: `RADON_ENV_FILE` the unit points at lives under /home/radon, which the
+#: unprivileged account can replace — `load_env_keys`' own docstring calls it
+#: attacker-influenced from root's point of view. It may still NAME a role,
+#: but it may not be the source of one that suppresses an audit surface.
+SUPPRESSING_ROLES: frozenset[str] = frozenset(ROLE_SKIPPED_UNITS) | frozenset(
+    ROLE_SKIPPED_GATEWAY_SURFACES
+)
+
+
+def resolve_host_role(environ=None) -> str:
+    """RADON_HOST_ROLE: process env, then /etc/radon/env, then RADON_ENV_FILE.
+
+    The last of those three is radon-writable, so a role it names is honoured
+    only when that role does not suppress anything (R-604).
+    """
+    environ = os.environ if environ is None else environ
+    raw = (environ.get("RADON_HOST_ROLE") or "").strip().strip("\"'")
+    if not raw:
+        raw = load_env_keys(
+            CANONICAL_ENV_FILE, ("RADON_HOST_ROLE",)
+        ).get("RADON_HOST_ROLE", "").strip()
+    if not raw and environ.get("RADON_ENV_FILE"):
+        compat = load_env_keys(
+            Path(environ["RADON_ENV_FILE"]), ("RADON_HOST_ROLE",)
+        ).get("RADON_HOST_ROLE", "").strip()
+        if compat in SUPPRESSING_ROLES:
+            print(
+                f"[drift-audit] ignoring RADON_HOST_ROLE={compat!r} from the "
+                "radon-writable compat env file; a suppressing role must come "
+                "from the process environment or /etc/radon/env",
+                file=sys.stderr,
+            )
+        else:
+            raw = compat
+    return raw if raw in HOST_ROLES else "combined"
+
+
 def _check_units(drifts: list[dict], known_untracked: list[str]) -> None:
+    role_skipped = ROLE_SKIPPED_UNITS.get(resolve_host_role(), frozenset())
     repo_units = {
         p.name: p
         for pattern in UNIT_GLOBS
@@ -529,6 +671,9 @@ def _check_units(drifts: list[dict], known_untracked: list[str]) -> None:
     for name, repo_path in sorted(repo_units.items()):
         live_path = live_units.get(name)
         if live_path is None:
+            if name in role_skipped:
+                known_untracked.append(f"role-skipped:{name}")
+                continue
             drifts.append({"id": f"not-installed:{name}", "detail": f"services/{name}"})
             continue
         if live_path.is_symlink():
@@ -541,7 +686,7 @@ def _check_units(drifts: list[dict], known_untracked: list[str]) -> None:
             continue
         detail = unit_counter_diff(
             _live_unit_counter(live_path),
-            merge_unit_counters([_read_repo(repo_path.relative_to(REPO)) or ""]),
+            _repo_unit_counter(repo_path),
         )
         if detail:
             drifts.append({"id": f"unit-mismatch:{name}", "detail": detail})
@@ -636,12 +781,21 @@ def _check_repo_dirty(drifts: list[dict]) -> None:
 def gather() -> tuple[list[dict], dict[str, str], list[str]]:
     raw_drifts: list[dict] = []
     known_untracked: list[str] = []
+    role_skipped = ROLE_SKIPPED_GATEWAY_SURFACES.get(
+        resolve_host_role(), frozenset()
+    )
 
     for live, repo_rel, label in FILE_PAIRS:
+        if label in role_skipped:
+            known_untracked.append(f"role-skipped:{label}")
+            continue
         drift = _compare_file_pair(live, repo_rel, label)
         if drift:
             raw_drifts.append(drift)
-    _check_compose(raw_drifts)
+    if "compose" in role_skipped:
+        known_untracked.append("role-skipped:compose")
+    else:
+        _check_compose(raw_drifts)
     _check_units(raw_drifts, known_untracked)
     _check_sudoers(raw_drifts, known_untracked)
     _check_env_invariants(raw_drifts)

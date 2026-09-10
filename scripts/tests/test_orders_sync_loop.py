@@ -37,24 +37,50 @@ async def test_orders_sync_tick_skips_when_test_mode():
 
 @pytest.mark.asyncio
 async def test_orders_sync_tick_skips_when_market_closed():
-    """tick() is a no-op outside 09:30-16:00 ET weekdays."""
+    """tick() is a no-op outside equity EXT (04:00-20:00 ET weekdays)."""
     with patch.object(srv, "test_mode", False):
-        with patch.object(srv, "_is_market_open_now_et", return_value=False):
+        with patch.object(srv, "_is_orders_session_live_now_et", return_value=False):
             with patch.object(srv, "_run_ib_script_with_recovery", new=AsyncMock()) as mock_run:
                 await srv._orders_sync_tick()
                 mock_run.assert_not_called()
 
 
 @pytest.mark.asyncio
+async def test_orders_sync_tick_runs_during_extended_hours():
+    """RTH closed, equity EXT live → still sync. AVGO 16:24 ET 2026-09-02."""
+    ok_result = ScriptResult(ok=True, data={})
+    with patch.object(srv, "test_mode", False):
+        with patch.object(srv, "_is_market_open_now_et", return_value=False):
+            with patch.object(srv, "_is_orders_session_live_now_et", return_value=True):
+                with patch.object(srv, "_pool_has_any_connection", return_value=True):
+                    with patch.object(
+                        srv,
+                        "_run_ib_script_with_recovery",
+                        new=AsyncMock(return_value=ok_result),
+                    ) as mock_run:
+                        await srv._orders_sync_tick()
+                        mock_run.assert_called_once()
+                        assert mock_run.call_args[0][0] == "ib_orders.py"
+                        assert "--sync" in mock_run.call_args[0][1]
+
+
+@pytest.mark.asyncio
 async def test_orders_sync_tick_skips_when_pool_disconnected():
     """tick() is a no-op when no pool connection is live (gateway unreachable /
-    awaiting 2FA)."""
+    awaiting 2FA). Silent skip so IB-outage grouping can still page stale."""
     with patch.object(srv, "test_mode", False):
-        with patch.object(srv, "_is_market_open_now_et", return_value=True):
+        with patch.object(srv, "_is_orders_session_live_now_et", return_value=True):
             with patch.object(srv, "_pool_has_any_connection", return_value=False):
-                with patch.object(srv, "_run_ib_script_with_recovery", new=AsyncMock()) as mock_run:
-                    await srv._orders_sync_tick()
-                    mock_run.assert_not_called()
+                with patch.object(
+                    srv,
+                    "check_ib_gateway",
+                    new=AsyncMock(return_value={"port_listening": False, "upstream_dead": True}),
+                ):
+                    with patch.object(srv, "_run_ib_script_with_recovery", new=AsyncMock()) as mock_run:
+                        with patch.object(srv.db_http, "hrana_execute", new=MagicMock()) as hrana:
+                            await srv._orders_sync_tick()
+                            mock_run.assert_not_called()
+                            hrana.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -64,7 +90,7 @@ async def test_orders_sync_tick_runs_sync_during_market_hours():
     ok_result = ScriptResult(ok=True, data={})
 
     with patch.object(srv, "test_mode", False):
-        with patch.object(srv, "_is_market_open_now_et", return_value=True):
+        with patch.object(srv, "_is_orders_session_live_now_et", return_value=True):
             with patch.object(srv, "_pool_has_any_connection", return_value=True):
                 with patch.object(
                     srv,
@@ -88,7 +114,7 @@ async def test_orders_sync_tick_logs_warning_on_failure():
     fail_result = ScriptResult(ok=False, error="ECONNREFUSED")
 
     with patch.object(srv, "test_mode", False):
-        with patch.object(srv, "_is_market_open_now_et", return_value=True):
+        with patch.object(srv, "_is_orders_session_live_now_et", return_value=True):
             with patch.object(srv, "_pool_has_any_connection", return_value=True):
                 with patch.object(
                     srv,
@@ -124,7 +150,7 @@ async def test_orders_sync_tick_retries_capacity_shed_then_succeeds():
         return _ok_outcome()
 
     with patch.object(srv, "test_mode", False):
-        with patch.object(srv, "_is_market_open_now_et", return_value=True):
+        with patch.object(srv, "_is_orders_session_live_now_et", return_value=True):
             with patch.object(srv, "_pool_has_any_connection", return_value=True):
                 with patch.object(srv, "_coordinated_orders_sync", new=flaky):
                     with patch.object(srv.asyncio, "sleep", new=AsyncMock()):
@@ -155,7 +181,7 @@ async def test_orders_sync_tick_capacity_shed_heartbeats_without_claiming_ok():
         return []
 
     with patch.object(srv, "test_mode", False):
-        with patch.object(srv, "_is_market_open_now_et", return_value=True):
+        with patch.object(srv, "_is_orders_session_live_now_et", return_value=True):
             with patch.object(srv, "_pool_has_any_connection", return_value=True):
                 with patch.object(
                     srv,
@@ -174,25 +200,118 @@ async def test_orders_sync_tick_capacity_shed_heartbeats_without_claiming_ok():
     assert args[1] != "ok", "a tick that never ran must not report healthy"
 
 
-@pytest.mark.asyncio
-async def test_orders_sync_tick_real_failure_does_not_skip_heartbeat():
-    """A real IB/script miss is not capacity shed. Do not stamp ok and hide it."""
-    fail = srv._IBSyncOutcome(
-        result=ScriptResult(ok=False, error="ECONNREFUSED"),
-        error="ECONNREFUSED",
+def _timeout_outcome() -> srv._IBSyncOutcome:
+    return srv._IBSyncOutcome(
+        result=ScriptResult(ok=False, error="Script timed out after 30s"),
+        error="Script timed out after 30s",
     )
-    hrana = MagicMock()
+
+
+def _fail_outcome(error: str) -> srv._IBSyncOutcome:
+    return srv._IBSyncOutcome(
+        result=ScriptResult(ok=False, error=error),
+        error=error,
+    )
+
+
+def _capture_hrana() -> tuple[list[tuple], object]:
+    captured: list[tuple] = []
+
+    def fake_hrana(sql, args=(), *rest, **kwargs):
+        captured.append((sql, tuple(args)))
+        return []
+
+    return captured, fake_hrana
+
+
+@pytest.mark.asyncio
+async def test_orders_sync_tick_script_timeout_heartbeats_error():
+    """2026-09-04 16:35Z page 99dad5ec: ib_orders.py missed for 15m while
+    /health/lite stayed authenticated, fill-monitor/portfolio-sync/relay
+    stayed fresh, and grouping did not fire. service_cycle lives inside the
+    script, so a timeout/fail never wrote service_health and the 10-min
+    stale window paged silence. Heartbeat error (not ok) so _check_stale
+    cannot page and the error bucket names the miss."""
+    srv._reset_orders_sync_shed_state()
+    captured, fake_hrana = _capture_hrana()
 
     with patch.object(srv, "test_mode", False):
-        with patch.object(srv, "_is_market_open_now_et", return_value=True):
+        with patch.object(srv, "_is_orders_session_live_now_et", return_value=True):
+            with patch.object(srv, "_pool_has_any_connection", return_value=True):
+                with patch.object(
+                    srv,
+                    "_coordinated_orders_sync",
+                    new=AsyncMock(return_value=_timeout_outcome()),
+                ):
+                    with patch.object(srv.db_http, "hrana_execute", new=fake_hrana):
+                        await srv._orders_sync_tick()
+
+    assert captured, "expected an orders-sync heartbeat on a timed-out tick"
+    sql, args = captured[0]
+    assert "INSERT INTO service_health" in sql
+    assert args[0] == "orders-sync"
+    assert args[1] == "error"
+    assert args[1] != "ok", "a tick that never finished must not report healthy"
+    err = args[4] or ""
+    assert "timed out" in err.lower()
+    assert "sync-failed" in err
+
+
+@pytest.mark.asyncio
+async def test_orders_sync_tick_pool_disconnected_gateway_up_heartbeats():
+    """Stuck FastAPI pool while the gateway TCP probe is still up. Isolated
+    orders-sync silence (fill-monitor uses its own client) is this class,
+    not ib-gateway-grouped. Heartbeat; do not spawn ib_orders.py."""
+    srv._reset_orders_sync_shed_state()
+    captured, fake_hrana = _capture_hrana()
+
+    with patch.object(srv, "test_mode", False):
+        with patch.object(srv, "_is_orders_session_live_now_et", return_value=True):
+            with patch.object(srv, "_pool_has_any_connection", return_value=False):
+                with patch.object(
+                    srv,
+                    "check_ib_gateway",
+                    new=AsyncMock(
+                        return_value={"port_listening": True, "upstream_dead": False}
+                    ),
+                ):
+                    with patch.object(
+                        srv, "_run_ib_script_with_recovery", new=AsyncMock()
+                    ) as mock_run:
+                        with patch.object(srv.db_http, "hrana_execute", new=fake_hrana):
+                            await srv._orders_sync_tick()
+
+    mock_run.assert_not_called()
+    assert captured, "expected an orders-sync heartbeat when the gateway is reachable"
+    sql, args = captured[0]
+    assert args[0] == "orders-sync"
+    assert args[1] == "error"
+    assert args[1] != "ok"
+    assert "pool-disconnected" in (args[4] or "")
+
+
+@pytest.mark.asyncio
+async def test_orders_sync_tick_real_failure_does_not_stamp_ok():
+    """A real IB/script miss is not capacity shed. Do not stamp ok and hide it.
+    Heartbeat error so the 10-min stale window cannot page silence while
+    /health stays authenticated (page 99dad5ec, 2026-09-04 16:35Z)."""
+    captured, fake_hrana = _capture_hrana()
+    fail = _fail_outcome("ECONNREFUSED")
+
+    with patch.object(srv, "test_mode", False):
+        with patch.object(srv, "_is_orders_session_live_now_et", return_value=True):
             with patch.object(srv, "_pool_has_any_connection", return_value=True):
                 with patch.object(
                     srv, "_coordinated_orders_sync", new=AsyncMock(return_value=fail)
                 ):
-                    with patch.object(srv.db_http, "hrana_execute", new=hrana):
+                    with patch.object(srv.db_http, "hrana_execute", new=fake_hrana):
                         await srv._orders_sync_tick()
 
-    hrana.assert_not_called()
+    assert captured, "expected an orders-sync heartbeat on a real miss"
+    sql, args = captured[0]
+    assert args[0] == "orders-sync"
+    assert args[1] != "ok"
+    assert args[1] == "error"
 
 
 # ---------------------------------------------------------------------------
@@ -276,3 +395,63 @@ async def test_orders_sync_loop_task_created_in_lifespan():
     assert "_orders_sync_loop" in created_tasks, (
         f"Expected '_orders_sync_loop' task; tasks created: {created_tasks}"
     )
+
+
+@pytest.mark.asyncio
+async def test_orders_sync_tick_gateway_probe_raise_heartbeats_error():
+    """R-658: a raising check_ib_gateway() used to return with NO heartbeat,
+    leaving the orders-sync row stale during the exact silence class the
+    pool-disconnected branch exists to name. Probe raise must still write
+    an error heartbeat row."""
+    srv._reset_orders_sync_shed_state()
+    captured, fake_hrana = _capture_hrana()
+
+    with patch.object(srv, "test_mode", False):
+        with patch.object(srv, "_is_orders_session_live_now_et", return_value=True):
+            with patch.object(srv, "_pool_has_any_connection", return_value=False):
+                with patch.object(
+                    srv,
+                    "check_ib_gateway",
+                    new=AsyncMock(side_effect=RuntimeError("probe exploded")),
+                ):
+                    with patch.object(
+                        srv, "_run_ib_script_with_recovery", new=AsyncMock()
+                    ) as mock_run:
+                        with patch.object(srv.db_http, "hrana_execute", new=fake_hrana):
+                            await srv._orders_sync_tick()
+
+    mock_run.assert_not_called()
+    assert captured, "expected an orders-sync heartbeat when the gateway probe raises"
+    sql, args = captured[0]
+    assert "INSERT INTO service_health" in sql
+    assert args[0] == "orders-sync"
+    assert args[1] == "error"
+    assert "probe-failed" in (args[4] or "")
+
+
+@pytest.mark.asyncio
+async def test_orders_sync_unrelated_failure_resets_shed_streak():
+    """R-658: the shed streak was reset only on success, so sheds separated
+    by an unrelated failure (pool-disconnected, sync-failed) kept the old
+    streak and escalated the NEXT shed straight to error. An unrelated
+    failure must reset the streak; the following shed starts at 1 (warn)."""
+    srv._reset_orders_sync_shed_state()
+    captured, fake_hrana = _capture_hrana()
+
+    with patch.object(srv.db_http, "hrana_execute", new=fake_hrana):
+        # Build a streak at the escalation threshold.
+        for _ in range(srv.ORDERS_SYNC_MAX_CONSECUTIVE_SHEDS):
+            await srv._heartbeat_orders_sync_skip("capacity", error_class="capacity-shed")
+        # Unrelated failure between sheds.
+        await srv._heartbeat_orders_sync_skip(
+            "ECONNREFUSED", error_class="sync-failed", state="error"
+        )
+        captured.clear()
+        # Next shed must NOT inherit the stale streak.
+        await srv._heartbeat_orders_sync_skip("capacity", error_class="capacity-shed")
+
+    assert captured
+    _, args = captured[0]
+    assert args[1] == "warn", "a post-reset shed must start a fresh streak, not escalate"
+    assert '"consecutive_sheds": 1' in (args[4] or "")
+    srv._reset_orders_sync_shed_state()

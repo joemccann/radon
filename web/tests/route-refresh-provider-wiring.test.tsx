@@ -14,6 +14,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import type { PortfolioData } from "../lib/types";
 
+// The real <Providers> tree collapses to ThemeProvider-only in first-run
+// setup mode (no Clerk publishable key). This test drives the FULL tree, so
+// pin a key before the module-scope read in components/Providers.tsx runs.
+vi.hoisted(() => {
+  process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY =
+    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || "pk_test_wiring_stub";
+});
+
 const nav = vi.hoisted(() => ({ pathname: "/dashboard" }));
 
 vi.mock("next/navigation", () => ({

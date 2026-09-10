@@ -88,5 +88,6 @@ An evaluation is complete when:
 2. **Unusual Whales** — Dark pool flow, options activity, alerts, analyst ratings
 3. **Exa (web search)** — Company research, code/docs lookup
 4. **Cboe official index feeds** — Official VIX/VVIX daily close verification after market close + 20 minutes ET; COR1M historical fallback
-5. **agent-browser** — Interactive pages, JS-rendered content
-6. **Yahoo Finance** — **ABSOLUTE LAST RESORT** — only if ALL above sources fail (rate limited, unreliable)
+5. **Robinhood (official trading MCP, read-only)** — Equity quote/historicals failover + retail-crowding overlay; never above IB/UW/Cboe; execution stays on IB
+6. **agent-browser** — Interactive pages, JS-rendered content
+7. **Yahoo Finance** — **ABSOLUTE LAST RESORT** — only if ALL above sources fail (rate limited, unreliable)

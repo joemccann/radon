@@ -101,3 +101,83 @@ describe("correlationRiskBanner", () => {
     expect(banner!.breachedClusters[0].budgetPctLabel).toBe("2.5%");
   });
 });
+
+// 2026-09-01 TQQQ flatten: a working order that CLOSES part of the breached
+// SMH+SPY+TQQQ stack rendered the same critical breach with "before adding
+// correlated risk" copy as an add. Gate 3 is a guard against ADDING to a
+// concentrated bet; an order that reduces the cluster must not read as
+// blocked, and the copy must never call a close an add.
+describe("correlationRiskBanner with a working-order context", () => {
+  const STACK_CLUSTER = {
+    tickers: ["SMH", "SPY", "TQQQ"],
+    aggregate_exposure: 0.73,
+    budget: 0.025,
+    breached: true,
+    max_pair_corr: 0.92,
+    per_ticker_exposure: { SMH: 0.3, SPY: 0.23, TQQQ: 0.2 },
+  };
+
+  it("suppresses the breach when the order reduces a ticker in the cluster", () => {
+    const banner = correlationRiskBanner(
+      report({ clusters: [STACK_CLUSTER], breaches: [STACK_CLUSTER] }),
+      { ticker: "TQQQ", reducesExposure: true },
+    );
+    expect(banner!.level).toBe("reduce");
+    expect(banner!.breachedClusters).toHaveLength(0);
+    expect(banner!.headline).toContain("reduces");
+    expect(banner!.detail).not.toMatch(/adding/i);
+    expect(banner!.headline).not.toContain("\u2014");
+    expect(banner!.detail).not.toContain("\u2014");
+  });
+
+  it("matches the reduce ticker case-insensitively", () => {
+    const banner = correlationRiskBanner(
+      report({ clusters: [STACK_CLUSTER], breaches: [STACK_CLUSTER] }),
+      { ticker: "tqqq", reducesExposure: true },
+    );
+    expect(banner!.level).toBe("reduce");
+  });
+
+  it("keeps the critical breach when the same order is an add", () => {
+    const banner = correlationRiskBanner(
+      report({ clusters: [STACK_CLUSTER], breaches: [STACK_CLUSTER] }),
+      { ticker: "TQQQ", reducesExposure: false },
+    );
+    expect(banner!.level).toBe("critical");
+    expect(banner!.detail).toMatch(/adding/);
+  });
+
+  it("keeps unrelated breaches critical but never calls a close an add", () => {
+    const banner = correlationRiskBanner(
+      report({
+        clusters: [STACK_CLUSTER, BREACH_CLUSTER],
+        breaches: [STACK_CLUSTER, BREACH_CLUSTER],
+      }),
+      { ticker: "TQQQ", reducesExposure: true },
+    );
+    // AAA+BBB is untouched by the TQQQ close: still a real breach.
+    expect(banner!.level).toBe("critical");
+    expect(banner!.breachedClusters).toHaveLength(1);
+    expect(banner!.breachedClusters[0].tickers).toEqual(["AAA", "BBB"]);
+    expect(banner!.detail).not.toMatch(/adding/i);
+    expect(banner!.detail).not.toContain("\u2014");
+  });
+
+  it("a reduce on a ticker outside every cluster keeps the breach without add copy", () => {
+    const banner = correlationRiskBanner(
+      report({ clusters: [STACK_CLUSTER], breaches: [STACK_CLUSTER] }),
+      { ticker: "GLD", reducesExposure: true },
+    );
+    expect(banner!.level).toBe("critical");
+    expect(banner!.breachedClusters).toHaveLength(1);
+    expect(banner!.detail).not.toMatch(/adding/i);
+  });
+
+  it("no order context leaves every existing verdict unchanged", () => {
+    const banner = correlationRiskBanner(
+      report({ clusters: [STACK_CLUSTER], breaches: [STACK_CLUSTER] }),
+    );
+    expect(banner!.level).toBe("critical");
+    expect(banner!.detail).toMatch(/adding/);
+  });
+});

@@ -17,6 +17,7 @@ import {
   isWorkingOrderMissingDetail,
   workingOrderMissingMessage,
 } from "@/lib/orders/workingOrders";
+import { filledQuantity } from "@/lib/orders/modifyQuantity";
 
 export const runtime = "nodejs";
 
@@ -143,6 +144,8 @@ function normalizeCancelTargets(
   return targets;
 }
 
+export const radonCapability = "mutate.trading";
+
 export async function POST(request: Request): Promise<Response> {
   const access = await requireRouteAccess(request, {
     operatorOnly: true,
@@ -264,7 +267,21 @@ export async function POST(request: Request): Promise<Response> {
     }
 
     const prior = await readOrdersSnapshotBestEffort();
-    existingTif = findOpenOrder(prior, orderId, permId)?.tif;
+    const priorOrder = findOpenOrder(prior, orderId, permId);
+    existingTif = priorOrder?.tif;
+
+    // R-639: a new TOTAL below what has already filled means IB
+    // fill-and-cancel — the working remainder silently shrinks to zero.
+    // Floor it against the snapshot's filled count before touching IB.
+    const priorFilled = priorOrder ? filledQuantity(priorOrder) : 0;
+    if (newQuantity != null && priorFilled > 0 && newQuantity < priorFilled) {
+      return NextResponse.json(
+        {
+          error: `newQuantity ${newQuantity} is below the ${priorFilled} already filled; IB would cancel the working remainder`,
+        },
+        { status: 422 },
+      );
+    }
 
     const result = await radonFetch<Record<string, unknown>>("/orders/modify", {
       method: "POST",

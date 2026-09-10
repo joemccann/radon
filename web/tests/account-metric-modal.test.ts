@@ -1,16 +1,39 @@
 /**
- * TDD: AccountMetricModal — account and risk card click-to-explain behavior
+ * @vitest-environment jsdom
  *
- * Tests cover:
- * 1. Modal config data (title + formula) for each of the 7 cards
- * 2. MetricCard onClick wiring: every ACCOUNT and RISK card has a handler
+ * AccountMetricModal — the ACCOUNT / RISK card drill-downs.
  *
- * Note: environment is node (no jsdom), so we test the config data and
- * click-handler assignment logic as pure functions rather than rendering.
+ * T-225: this suite used to declare itself a "mirror" of MetricCards.tsx and
+ * assert against its OWN local copy of the modal copy, never rendering the
+ * component. An em-dash sweep rewrote the Day P&L source line to
+ * "reqPnL(), account-level" and added a second, estimated-source branch; the
+ * mirror kept the old spelling and the suite stayed green, because nothing
+ * ever compared the two. Every assertion below now reads the text off the
+ * rendered modal, so a copy edit in the component reds the test.
  */
 
-import { describe, test, expect, vi } from "vitest";
+import React from "react";
+import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
+import { cleanup, fireEvent, render } from "@testing-library/react";
+
+import MetricCards from "../components/MetricCards";
 import type { AccountSummary } from "../lib/types";
+
+beforeAll(() => {
+  if (typeof globalThis.ResizeObserver === "undefined") {
+    class Stub {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    (globalThis as unknown as { ResizeObserver: typeof Stub }).ResizeObserver = Stub;
+  }
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  cleanup();
+});
 
 // ── Shared mock account summary ──────────────────────────────────────────────
 
@@ -26,317 +49,200 @@ const MOCK_ACCT: AccountSummary = {
   dividends: 910.0,
 };
 
-// ── Modal config definitions (mirrors MetricCards.tsx modal content) ─────────
+type Portfolio = Parameters<typeof MetricCards>[0]["portfolio"];
 
-type AccountModalConfig = {
-  title: string;
-  formula: string;
-  getValue: (acct: AccountSummary) => string | null;
-};
+function buildPortfolio(acct: AccountSummary = MOCK_ACCT): Portfolio {
+  return {
+    bankroll: acct.net_liquidation,
+    net_leverage: 0.5,
+    total_deployed_dollars: 100_000,
+    total_pnl_pct: 1.0,
+    positions: [
+      {
+        id: "AAPL-stock",
+        ticker: "AAPL",
+        structure: "Stock",
+        structure_type: "Stock",
+        direction: "LONG",
+        qty: 100,
+        contracts: 100,
+        avg_entry: 180,
+        cost: 18_000,
+        legs: [],
+        market_value: 19_000,
+        pnl: 1_000,
+        pnl_pct: 5.5,
+        entry_date: "2026-04-01",
+        ib_daily_pnl: null,
+      },
+    ],
+    account_summary: acct,
+  } as unknown as Portfolio;
+}
 
-const NET_LIQ_CONFIG: AccountModalConfig = {
-  title: "Net Liquidation Value",
-  formula:
-    "Net Liquidation = Cash + Stocks at Market Value + Options at Market Value + Bond Value\n" +
-    "Source: Interactive Brokers account_summary (reqAccountSummary)\n" +
-    "Updated: real-time during market hours",
-  getValue: (acct) =>
-    `$${Math.abs(acct.net_liquidation).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-};
+/** Open a card's drill-down and read the modal title + formula off the DOM.
+ *  One card per render, so exactly one modal is mounted when we read it. */
+function openCard(label: string, acct: AccountSummary = MOCK_ACCT): { title: string; formula: string } {
+  const { container } = render(
+    React.createElement(MetricCards, {
+      portfolio: buildPortfolio(acct),
+      prices: { AAPL: { last: 190, close: 188 } },
+      realizedPnl: acct.realized_pnl,
+      section: "portfolio",
+    } as unknown as Parameters<typeof MetricCards>[0]),
+  );
 
-const DAY_PNL_CONFIG: AccountModalConfig = {
-  title: "Day P&L",
-  formula:
-    "Day P&L = SUM( current_price − yesterday_close ) × position_size\n" +
-    "Source: Interactive Brokers reqPnL() — account-level, updated in real-time\n" +
-    "Note: Includes all open positions across stocks, options, and other instruments",
-  getValue: (acct) => (acct.daily_pnl != null ? String(acct.daily_pnl) : null),
-};
+  // RISK / MARGIN / CAPITAL rows start collapsed; open every section header so
+  // any card is reachable without the test knowing which row owns it.
+  for (const header of Array.from(container.querySelectorAll(".section-label-toggle"))) {
+    const name = (header.textContent ?? "").trim();
+    if (name === "RISK" || name === "MARGIN" || name === "CAPITAL") fireEvent.click(header);
+  }
 
-const DIVIDENDS_CONFIG: AccountModalConfig = {
-  title: "Accrued Dividends",
-  formula:
-    "Dividends = Accrued dividends from dividend-paying positions\n" +
-    "Source: Interactive Brokers account_summary (DividendReceivedYear)\n" +
-    "Note: Represents dividends accrued in the current calendar year",
-  getValue: (acct) => String(acct.dividends),
-};
+  const card = Array.from(container.querySelectorAll(".metric-label"))
+    .find((el) => (el.textContent ?? "").trim() === label)
+    ?.closest(".metric-card");
+  expect(card, `no metric card labelled "${label}"`).toBeTruthy();
+  expect(card!.className).toContain("metric-card-clickable");
+  fireEvent.click(card!);
 
-const BUYING_POWER_CONFIG: AccountModalConfig = {
-  title: "Buying Power",
-  formula:
-    "Buying Power = Available margin capacity for new positions\n" +
-    "Source: Interactive Brokers account_summary (BuyingPower)\n" +
-    "= Excess Liquidity × Margin Multiplier\n" +
-    "Note: For a Reg T margin account, typically 4× excess liquidity for day trades",
-  getValue: (acct) => String(acct.buying_power),
-};
+  const modal = document.querySelector(".modal-backdrop");
+  expect(modal, `clicking "${label}" opened no modal`).toBeTruthy();
+  return {
+    title: (modal!.querySelector(".modal-title")?.textContent ?? "").trim(),
+    formula: modal!.querySelector(".eb-formula code")?.textContent ?? "",
+  };
+}
 
-const MAINTENANCE_MARGIN_CONFIG: AccountModalConfig = {
-  title: "Maintenance Margin",
-  formula:
-    "Maintenance Margin = Minimum equity required to maintain current positions\n" +
-    "Source: Interactive Brokers account_summary (MaintMarginReq)\n" +
-    "If Net Liquidation falls below this, IB may issue a margin call",
-  getValue: (acct) => String(acct.maintenance_margin),
-};
+// ── Tests: the rendered modal copy ───────────────────────────────────────────
+//
+// Each expectation is the WHOLE formula block, so a reworded line, a dropped
+// source attribution or a punctuation sweep all fail loudly instead of
+// slipping past a substring match.
 
-const EXCESS_LIQ_CONFIG: AccountModalConfig = {
-  title: "Excess Liquidity",
-  formula:
-    "Excess Liquidity = Net Liquidation − Maintenance Margin\n" +
-    "Source: Interactive Brokers account_summary (ExcessLiquidity)\n" +
-    "= Safety cushion above margin requirements\n" +
-    "Green = healthy buffer | Red = dangerously close to margin call",
-  getValue: (acct) => String(acct.excess_liquidity),
-};
-
-const SETTLED_CASH_CONFIG: AccountModalConfig = {
-  title: "Settled Cash",
-  formula:
-    "Settled Cash = Cash settled and available (T+1 for options, T+2 for stocks)\n" +
-    "Source: Interactive Brokers account_summary (SettledCash)\n" +
-    "Negative = you've spent unsettled funds (cash from recent sells not yet settled)",
-  getValue: (acct) => String(acct.settled_cash),
-};
-
-// ── Tests: Modal config data ─────────────────────────────────────────────────
-
-describe("AccountMetricModal — config data", () => {
-  describe("NET LIQUIDATION card", () => {
-    test("has correct title", () => {
-      expect(NET_LIQ_CONFIG.title).toBe("Net Liquidation Value");
-    });
-
-    test("formula mentions reqAccountSummary source", () => {
-      expect(NET_LIQ_CONFIG.formula).toContain("reqAccountSummary");
-    });
-
-    test("formula mentions cash and market value components", () => {
-      expect(NET_LIQ_CONFIG.formula).toContain("Cash");
-      expect(NET_LIQ_CONFIG.formula).toContain("Market Value");
-    });
-
-    test("getValue returns formatted dollar value from account summary", () => {
-      const value = NET_LIQ_CONFIG.getValue(MOCK_ACCT);
-      expect(value).toBeTruthy();
-      expect(value).toContain("1,131,051.65");
-    });
+describe("AccountMetricModal — rendered copy", () => {
+  test("NET LIQUIDATION card", () => {
+    const { title, formula } = openCard("Net Liquidation");
+    expect(title).toBe("Net Liquidation Value");
+    expect(formula).toBe(
+      "Net Liquidation = Cash + Stocks at Market Value + Options at Market Value + Bond Value\n" +
+      "Source: Interactive Brokers account_summary (reqAccountSummary)\n" +
+      "Updated: real-time during market hours",
+    );
   });
 
-  describe("DAY P&L card", () => {
-    test("has correct title", () => {
-      expect(DAY_PNL_CONFIG.title).toBe("Day P&L");
-    });
-
-    test("formula mentions reqPnL source", () => {
-      expect(DAY_PNL_CONFIG.formula).toContain("reqPnL()");
-    });
-
-    test("formula mentions real-time update", () => {
-      expect(DAY_PNL_CONFIG.formula).toContain("real-time");
-    });
-
-    test("getValue returns null when daily_pnl is null", () => {
-      const acctNoDaily = { ...MOCK_ACCT, daily_pnl: null };
-      expect(DAY_PNL_CONFIG.getValue(acctNoDaily)).toBeNull();
-    });
-
-    test("getValue returns value string when daily_pnl is set", () => {
-      const value = DAY_PNL_CONFIG.getValue(MOCK_ACCT);
-      expect(value).toBeTruthy();
-      expect(value).toContain("-17071.27");
-    });
+  test("DAY P&L card cites the IB aggregate when IB reported one", () => {
+    const { title, formula } = openCard("Day P&L");
+    expect(title).toBe("Day P&L");
+    expect(formula).toBe(
+      "Day P&L = SUM( current_price − yesterday_close ) × position_size\n" +
+      "Source: Interactive Brokers reqPnL(), account-level, updated in real-time\n" +
+      "Note: Includes all open positions across stocks, options, and other instruments",
+    );
   });
 
-  describe("DIVIDENDS card", () => {
-    test("has correct title", () => {
-      expect(DIVIDENDS_CONFIG.title).toBe("Accrued Dividends");
-    });
-
-    test("formula mentions DividendReceivedYear", () => {
-      expect(DIVIDENDS_CONFIG.formula).toContain("DividendReceivedYear");
-    });
-
-    test("formula mentions calendar year", () => {
-      expect(DIVIDENDS_CONFIG.formula).toContain("calendar year");
-    });
+  test("DAY P&L card owns up to the estimate when IB reported no aggregate", () => {
+    const { formula } = openCard("Day P&L", { ...MOCK_ACCT, daily_pnl: null as unknown as number });
+    expect(formula).toBe(
+      "Day P&L = SUM( current_price − yesterday_close ) × position_size\n" +
+      "Source: Current prices versus prior-session closes, estimated\n" +
+      "Note: Includes all open positions across stocks, options, and other instruments",
+    );
   });
 
-  describe("BUYING POWER card", () => {
-    test("has correct title", () => {
-      expect(BUYING_POWER_CONFIG.title).toBe("Buying Power");
-    });
-
-    test("formula mentions BuyingPower IB field", () => {
-      expect(BUYING_POWER_CONFIG.formula).toContain("BuyingPower");
-    });
-
-    test("formula mentions Excess Liquidity relationship", () => {
-      expect(BUYING_POWER_CONFIG.formula).toContain("Excess Liquidity");
-    });
-
-    test("formula mentions Reg T", () => {
-      expect(BUYING_POWER_CONFIG.formula).toContain("Reg T");
-    });
+  test("UNREALIZED P&L card", () => {
+    const { title, formula } = openCard("Unrealized P&L");
+    expect(title).toBe("Unrealized P&L: Open Positions");
+    expect(formula).toBe(
+      "Unrealized P&L = SUM( market_value − entry_cost ) per position\n" +
+      "Entry cost and market value are signed (credits and short marks negative)\n" +
+      "so each row satisfies P&L = MKT VALUE − ENTRY COST.\n" +
+      "Return uses verified max loss, net debit paid, or isolated broker-observed opening margin; opening credits stay N/A.\n" +
+      "Source: IB market data synced via IB Gateway",
+    );
   });
 
-  describe("MAINTENANCE MARGIN card", () => {
-    test("has correct title", () => {
-      expect(MAINTENANCE_MARGIN_CONFIG.title).toBe("Maintenance Margin");
-    });
-
-    test("formula mentions MaintMarginReq IB field", () => {
-      expect(MAINTENANCE_MARGIN_CONFIG.formula).toContain("MaintMarginReq");
-    });
-
-    test("formula mentions margin call risk", () => {
-      expect(MAINTENANCE_MARGIN_CONFIG.formula).toContain("margin call");
-    });
+  test("DAY MOVE card", () => {
+    // Pin to a US session: on weekends the card is MARKET CLOSED and not
+    // clickable, which failed shard 7 on 35071d85 (Saturday 2026-08-29).
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-21T18:30:00Z")); // Fri 14:30 ET
+    const { title, formula } = openCard("Day Move");
+    expect(title).toBe("Day Move: Intraday P&L");
+    expect(formula).toBe(
+      "Day Move = stocks: (last − close) × shares; options: IB reqPnLSingle daily P&L when available, else sign × (last − close) × contracts × multiplier\n" +
+      "sign = +1 LONG, −1 SHORT  |  multiplier = 100 for options, 1 for stocks\n" +
+      "Source: IB reqPnLSingle + live IB realtime prices",
+    );
   });
 
-  describe("EXCESS LIQUIDITY card", () => {
-    test("has correct title", () => {
-      expect(EXCESS_LIQ_CONFIG.title).toBe("Excess Liquidity");
-    });
-
-    test("formula shows calculation as Net Liquidation minus Maintenance Margin", () => {
-      expect(EXCESS_LIQ_CONFIG.formula).toContain("Net Liquidation − Maintenance Margin");
-    });
-
-    test("formula mentions ExcessLiquidity IB field", () => {
-      expect(EXCESS_LIQ_CONFIG.formula).toContain("ExcessLiquidity");
-    });
-
-    test("formula describes green/red interpretation", () => {
-      expect(EXCESS_LIQ_CONFIG.formula).toContain("Green");
-      expect(EXCESS_LIQ_CONFIG.formula).toContain("Red");
-    });
+  test("DIVIDENDS card", () => {
+    const { title, formula } = openCard("Dividends");
+    expect(title).toBe("Accrued Dividends");
+    expect(formula).toBe(
+      "Dividends = Accrued dividends from dividend-paying positions\n" +
+      "Source: Interactive Brokers account_summary (DividendReceivedYear)\n" +
+      "Note: Represents dividends accrued in the current calendar year",
+    );
   });
 
-  describe("SETTLED CASH card", () => {
-    test("has correct title", () => {
-      expect(SETTLED_CASH_CONFIG.title).toBe("Settled Cash");
-    });
+  test("BUYING POWER card", () => {
+    const { title, formula } = openCard("Buying Power");
+    expect(title).toBe("Buying Power");
+    expect(formula).toBe(
+      "Buying Power = Available margin capacity for new positions\n" +
+      "Source: Interactive Brokers account_summary (BuyingPower)\n" +
+      "= Excess Liquidity × Margin Multiplier\n" +
+      "Note: For a Reg T margin account, typically 4× excess liquidity for day trades",
+    );
+  });
 
-    test("formula mentions SettledCash IB field", () => {
-      expect(SETTLED_CASH_CONFIG.formula).toContain("SettledCash");
-    });
+  test("MAINTENANCE MARGIN card", () => {
+    const { title, formula } = openCard("Maintenance Margin");
+    expect(title).toBe("Maintenance Margin");
+    expect(formula).toBe(
+      "Maintenance Margin = Minimum equity required to maintain current positions\n" +
+      "Source: Interactive Brokers account_summary (MaintMarginReq)\n" +
+      "If Net Liquidation falls below this, IB may issue a margin call",
+    );
+  });
 
-    test("formula explains T+1/T+2 settlement", () => {
-      expect(SETTLED_CASH_CONFIG.formula).toContain("T+1");
-      expect(SETTLED_CASH_CONFIG.formula).toContain("T+2");
-    });
+  test("EXCESS LIQUIDITY card", () => {
+    const { title, formula } = openCard("Excess Liquidity");
+    expect(title).toBe("Excess Liquidity");
+    expect(formula).toBe(
+      "Excess Liquidity = Net Liquidation − Maintenance Margin\n" +
+      "Source: Interactive Brokers account_summary (ExcessLiquidity)\n" +
+      "= Safety cushion above margin requirements\n" +
+      "Green = healthy buffer | Red = dangerously close to margin call",
+    );
+  });
 
-    test("formula explains negative value meaning", () => {
-      expect(SETTLED_CASH_CONFIG.formula).toContain("Negative");
-    });
+  test("SETTLED CASH card", () => {
+    const { title, formula } = openCard("Settled Cash");
+    expect(title).toBe("Settled Cash");
+    expect(formula).toBe(
+      "Settled Cash = Cash settled and available (T+1 for options, T+2 for stocks)\n" +
+      "Source: Interactive Brokers account_summary (SettledCash)\n" +
+      "Negative = you've spent unsettled funds (cash from recent sells not yet settled)",
+    );
   });
 });
 
-// ── Tests: onClick handler wiring ────────────────────────────────────────────
-// These test that a MetricCard onClick is called when the card is clicked.
-// We simulate the pattern used in MetricCards.tsx: a card with onClick set
-// calls that handler when invoked, not when onClick is undefined.
+// ── Tests: the value each modal reports ──────────────────────────────────────
 
-describe("MetricCard onClick wiring", () => {
-  test("card with onClick defined calls handler when invoked", () => {
-    const handler = vi.fn();
-    // Simulate what MetricCard does: onClick ? onClick() : noop
-    const simulateClick = (onClick?: () => void) => onClick?.();
+describe("AccountMetricModal — rendered value", () => {
+  const modalValue = () =>
+    (document.querySelector(".modal-backdrop .eb-total-value")?.textContent ?? "").trim();
 
-    simulateClick(handler);
-    expect(handler).toHaveBeenCalledOnce();
+  test("NET LIQUIDATION reports the account summary figure", () => {
+    openCard("Net Liquidation");
+    expect(modalValue()).toContain("1,131,051.65");
   });
 
-  test("card without onClick does NOT throw when clicked", () => {
-    const simulateClick = (onClick?: () => void) => onClick?.();
-    expect(() => simulateClick(undefined)).not.toThrow();
-  });
-
-  test("NET LIQUIDATION card: setting open state to true enables modal", () => {
-    // Simulate the state toggle pattern
-    let netLiqModalOpen = false;
-    const setNetLiqModalOpen = (val: boolean) => { netLiqModalOpen = val; };
-
-    const onNetLiqClick = () => setNetLiqModalOpen(true);
-    onNetLiqClick();
-
-    expect(netLiqModalOpen).toBe(true);
-  });
-
-  test("BUYING POWER card: setting open state to true enables modal", () => {
-    let buyingPowerModalOpen = false;
-    const setBuyingPowerModalOpen = (val: boolean) => { buyingPowerModalOpen = val; };
-
-    const onBuyingPowerClick = () => setBuyingPowerModalOpen(true);
-    onBuyingPowerClick();
-
-    expect(buyingPowerModalOpen).toBe(true);
-  });
-
-  test("MAINTENANCE MARGIN card: setting open state to true enables modal", () => {
-    let marginModalOpen = false;
-    const setMarginModalOpen = (val: boolean) => { marginModalOpen = val; };
-
-    const onMarginClick = () => setMarginModalOpen(true);
-    onMarginClick();
-
-    expect(marginModalOpen).toBe(true);
-  });
-
-  test("EXCESS LIQUIDITY card: setting open state to true enables modal", () => {
-    let excessLiqModalOpen = false;
-    const setExcessLiqModalOpen = (val: boolean) => { excessLiqModalOpen = val; };
-
-    const onExcessLiqClick = () => setExcessLiqModalOpen(true);
-    onExcessLiqClick();
-
-    expect(excessLiqModalOpen).toBe(true);
-  });
-
-  test("SETTLED CASH card: setting open state to true enables modal", () => {
-    let settledCashModalOpen = false;
-    const setSettledCashModalOpen = (val: boolean) => { settledCashModalOpen = val; };
-
-    const onSettledCashClick = () => setSettledCashModalOpen(true);
-    onSettledCashClick();
-
-    expect(settledCashModalOpen).toBe(true);
-  });
-
-  test("closing a modal sets its state back to false", () => {
-    let netLiqModalOpen = true;
-    const setNetLiqModalOpen = (val: boolean) => { netLiqModalOpen = val; };
-
-    const onClose = () => setNetLiqModalOpen(false);
-    onClose();
-
-    expect(netLiqModalOpen).toBe(false);
-  });
-});
-
-// ── Tests: AccountSummary field presence ─────────────────────────────────────
-
-describe("AccountSummary field access", () => {
-  test("all required ACCOUNT row fields are present on mock", () => {
-    expect(MOCK_ACCT.net_liquidation).toBeDefined();
-    expect(MOCK_ACCT.daily_pnl).toBeDefined();
-    expect(MOCK_ACCT.unrealized_pnl).toBeDefined();
-    expect(MOCK_ACCT.dividends).toBeDefined();
-  });
-
-  test("all required RISK row fields are present on mock", () => {
-    expect(MOCK_ACCT.buying_power).toBeDefined();
-    expect(MOCK_ACCT.maintenance_margin).toBeDefined();
-    expect(MOCK_ACCT.excess_liquidity).toBeDefined();
-    expect(MOCK_ACCT.settled_cash).toBeDefined();
-  });
-
-  test("excess_liquidity approximates net_liquidation minus maintenance_margin", () => {
-    // IB computes this server-side; we just verify the relationship holds
-    const computed = MOCK_ACCT.net_liquidation - MOCK_ACCT.maintenance_margin;
-    // Within $50k (IB may include other adjustments)
-    expect(Math.abs(computed - MOCK_ACCT.excess_liquidity)).toBeLessThan(500_000);
+  test("SETTLED CASH keeps the negative sign", () => {
+    openCard("Settled Cash");
+    expect(modalValue()).toContain("14,654.04");
+    expect(modalValue().startsWith("-")).toBe(true);
   });
 });

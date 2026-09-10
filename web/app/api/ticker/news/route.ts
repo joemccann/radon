@@ -16,8 +16,10 @@ const NEWS_CACHE_SECONDS = 45;
 const PROVIDER_TIMEOUT_MS = 3_000;
 
 /** Try UW headlines first, fall back to Yahoo Finance on any error. */
+export const radonCapability = "read";
+
 export async function GET(request: Request): Promise<Response> {
-  const access = await requireRouteAccess(undefined, { rate: { key: "ticker/news:route", limit: 20, windowMs: 60_000 } });
+  const access = await requireRouteAccess(undefined, { rate: { key: "ticker/news:route", limit: 20, windowMs: 60_000 }, durableRateTier: "A" });
   if (!access.ok) return access.response;
   const requestId = getRequestId();
   const { searchParams } = new URL(request.url);

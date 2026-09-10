@@ -205,6 +205,26 @@ def test_missing_level_is_explicitly_partial_not_fabricated():
     assert result["complete"] is False
 
 
+def test_live_provider_null_spot_preserves_exposure_without_inventing_price():
+    # 2026-09-09: live SNDK (5413 cells) and SPX (12424 cells) returned
+    # HTTP 200 cubes with spot_price=null while Radon rejected both as 503.
+    exposure = _exposure_payload(ticker="SNDK")
+    exposure["spot_price"] = None
+    levels = {**_levels_payload(), "ticker": "SNDK"}
+    result = MenthorQDashboardClient._normalize("SNDK", "eod", exposure, levels)
+    assert result["spot"] is None
+    assert result["complete"] is False
+    assert result["cells"]["net_gex"] == exposure["cells"]["net_gex"]
+    assert result["source_time"] == exposure["timestamp"]
+
+
+@pytest.mark.parametrize("spot", [0, -1, True, "853.2", float("nan"), float("inf")])
+def test_missing_spot_tolerance_does_not_accept_malformed_prices(spot):
+    exposure = {**_exposure_payload(), "spot_price": spot}
+    with pytest.raises(MenthorQDashboardPayloadError):
+        MenthorQDashboardClient._normalize("MU", "eod", exposure, _levels_payload())
+
+
 def test_expired_explicit_token_fails_before_network_call():
     session = _Session([])
     client = MenthorQDashboardClient(
@@ -550,3 +570,128 @@ class TestAuthFailureEmbargo:
         monkeypatch.setattr(client, "_bootstrap_dashboard_session", _bootstrap)
         assert client._resolve_access_token() == token
         assert calls["bootstrap"] == 1
+
+
+class _FakeBrowserType:
+    def __init__(self, error: Exception):
+        self._error = error
+
+    def launch(self, **_kwargs):
+        raise self._error
+
+
+class _FakePlaywright:
+    def __init__(self, error: Exception):
+        self.chromium = _FakeBrowserType(error)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        return False
+
+
+def _install_failing_playwright(monkeypatch, error: Exception) -> None:
+    import sys
+    import types
+
+    module = types.ModuleType("playwright.sync_api")
+    module.sync_playwright = lambda: _FakePlaywright(error)
+    package = types.ModuleType("playwright")
+    package.sync_api = module
+    monkeypatch.setitem(sys.modules, "playwright", package)
+    monkeypatch.setitem(sys.modules, "playwright.sync_api", module)
+
+
+class TestMissingBrowserRuntimeIsNotACredentialFault:
+    """A chromium that was never downloaded is an ENVIRONMENT fault.
+
+    Flattening it into "dashboard authentication is unavailable" is what made
+    the daily login probe latch a broken-credential alarm for days.
+    """
+
+    def _client(self, tmp_path: Path) -> MenthorQDashboardClient:
+        return MenthorQDashboardClient(
+            storage_state_path=tmp_path / "dashboard.json",
+            username="operator@example.test",
+            password="test-password",
+        )
+
+    def test_missing_chromium_raises_a_distinct_browser_error(
+        self, tmp_path: Path, monkeypatch
+    ):
+        from clients.menthorq_dashboard_client import (
+            MenthorQDashboardBrowserUnavailable,
+        )
+
+        _install_failing_playwright(
+            monkeypatch,
+            RuntimeError(
+                "Executable doesn't exist at /ms-playwright/chromium/chrome\n"
+                "Looks like Playwright was just installed or updated. Please run "
+                "the following command to download new browsers: playwright install"
+            ),
+        )
+
+        with pytest.raises(MenthorQDashboardBrowserUnavailable) as exc_info:
+            self._client(tmp_path)._bootstrap_dashboard_session()
+
+        assert not isinstance(exc_info.value, MenthorQDashboardAuthError)
+        assert "playwright" not in str(exc_info.value).lower()
+
+    def test_missing_chromium_does_not_trip_the_auth_embargo(
+        self, tmp_path: Path, monkeypatch
+    ):
+        from clients import menthorq_dashboard_client as mod
+
+        _install_failing_playwright(
+            monkeypatch, RuntimeError("Executable doesn't exist at /ms-playwright")
+        )
+
+        with pytest.raises(mod.MenthorQDashboardBrowserUnavailable):
+            self._client(tmp_path)._resolve_access_token()
+
+        assert mod._auth_embargo_active() is False
+
+    def test_other_bootstrap_failures_stay_credential_failures(
+        self, tmp_path: Path, monkeypatch
+    ):
+        _install_failing_playwright(monkeypatch, RuntimeError("connection reset"))
+
+        with pytest.raises(
+            MenthorQDashboardAuthError, match="authentication is unavailable"
+        ):
+            self._client(tmp_path)._bootstrap_dashboard_session()
+
+
+class TestBrowserRuntimeMissingNarrowing:
+    """R-659: _is_browser_runtime_missing was true for ANY ImportError, so an
+    unrelated dependency break (requests, pydantic) masqueraded as a missing
+    chromium and suppressed the credential-chain alarm."""
+
+    def test_unrelated_import_error_is_not_browser_missing(self):
+        from clients.menthorq_dashboard_client import _is_browser_runtime_missing
+
+        exc = ModuleNotFoundError("No module named 'requests'", name="requests")
+        assert _is_browser_runtime_missing(exc) is False
+        assert _is_browser_runtime_missing(ImportError("bad magic number")) is False
+
+    def test_playwright_import_error_is_browser_missing(self):
+        from clients.menthorq_dashboard_client import _is_browser_runtime_missing
+
+        exc = ModuleNotFoundError(
+            "No module named 'playwright'", name="playwright"
+        )
+        assert _is_browser_runtime_missing(exc) is True
+        sub = ModuleNotFoundError(
+            "No module named 'playwright.sync_api'", name="playwright.sync_api"
+        )
+        assert _is_browser_runtime_missing(sub) is True
+
+    def test_marker_matching_is_unchanged(self):
+        from clients.menthorq_dashboard_client import _is_browser_runtime_missing
+
+        assert _is_browser_runtime_missing(
+            RuntimeError("Executable doesn't exist at /ms-playwright")
+        ) is True
+        assert _is_browser_runtime_missing(RuntimeError("connection reset")) is False

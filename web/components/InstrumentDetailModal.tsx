@@ -15,6 +15,7 @@ import {
   riskPriceForOrderType,
 } from "@/lib/order/stopOrder";
 import { useOrderActionsOptional } from "@/lib/OrderActionsContext";
+import { useRealtimePrices } from "@/lib/RealtimePricesContext";
 import type { PortfolioData } from "@/lib/types";
 
 export type InstrumentDetailProps = {
@@ -135,6 +136,9 @@ function LegOrderForm({
   portfolio: PortfolioData | null | undefined;
 }) {
   const orderActions = useOrderActionsOptional();
+  // T-462: the feed-disconnect arm of quoteSubmitGate is dead unless the
+  // owner surface supplies real connectivity.
+  const { connected: feedConnected } = useRealtimePrices();
   const bid = priceData?.bid ?? null;
   const ask = priceData?.ask ?? null;
   const mid = bid != null && ask != null ? (bid + ask) / 2 : null;
@@ -226,7 +230,11 @@ function LegOrderForm({
       chainLegs: [
         { action, right, strike: leg.strike, expiry, quantity: parsedQty },
       ],
-      netPremium: action === "SELL" ? -parsedPrice : parsedPrice,
+      // `riskPrice`, not `parsedPrice`: for a STP order `isValid` is `stopOk`
+      // alone, so a blank Limit passes with `parsedPrice === NaN` and every
+      // risk figure downstream renders NaN. `totalCost`, `description` and
+      // the close-out branch above already resolve through `riskPrice`. R-322.
+      netPremium: action === "SELL" ? -riskPrice : riskPrice,
       description,
       totalCost: action === "SELL" ? -totalCost : totalCost,
       // Live quote travels with the opening input; do not fold spread into max gain.
@@ -247,6 +255,7 @@ function LegOrderForm({
       bid={bid}
       mid={mid}
       ask={ask}
+      feedConnected={feedConnected}
       showQuickButtonPrices={true}
       isValid={isValid}
       limitPrice={limitPrice}

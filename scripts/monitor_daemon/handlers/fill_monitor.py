@@ -8,6 +8,9 @@ Features:
 - Detects complete fills (order disappears from open orders)
 - Sends macOS notifications on fills
 - Upserts detected fills to the Turso journal
+- Mirrors the IB open+executed snapshot into Turso so /orders drops
+  WORKING rows on fill without waiting for the 5-min orders-sync loop
+- session_window=equity_ext (04:00-20:00 ET); outsideRth stocks fill after RTH
 """
 
 import subprocess
@@ -25,6 +28,24 @@ try:
     from db.writer import upsert_journal_entry  # type: ignore
 except ImportError:  # pragma: no cover — DB layer optional in unit tests
     upsert_journal_entry = None  # type: ignore[assignment]
+
+try:
+    # /orders reads open_orders + executed_orders, not the journal. Mirror
+    # the IB snapshot on fill so EXT fills drop from WORKING without
+    # waiting for the RTH-gated 5-min orders-sync loop.
+    from ib_orders import (  # type: ignore
+        build_orders_data as build_orders_data_for_mirror,
+        fetch_executed_orders as fetch_executed_orders_for_mirror,
+        fetch_open_orders as fetch_open_orders_for_mirror,
+        save_orders as save_orders_snapshot,
+    )
+    from db.writer import count_open_orders as count_open_orders_for_mirror  # type: ignore
+except ImportError:  # pragma: no cover
+    build_orders_data_for_mirror = None  # type: ignore[assignment]
+    fetch_executed_orders_for_mirror = None  # type: ignore[assignment]
+    fetch_open_orders_for_mirror = None  # type: ignore[assignment]
+    save_orders_snapshot = None  # type: ignore[assignment]
+    count_open_orders_for_mirror = None  # type: ignore[assignment]
 
 def _identity_int(value: Any) -> int:
     """Coerce an IB identity field (conId/permId) to int, else 0.
@@ -73,6 +94,7 @@ class FillMonitorHandler(BaseHandler):
     name = "fill_monitor"
     interval_seconds = 60  # Check every minute
     service_name = "fill-monitor"  # structural heartbeat via BaseHandler.run()
+    session_window = "equity_ext"
 
     def __init__(
         self,
@@ -249,6 +271,9 @@ class FillMonitorHandler(BaseHandler):
 
                 # Remove from tracking (gone either way)
                 del self.known_orders[order_id]
+
+            if result["fills"] or result.get("complete_fills"):
+                self._mirror_ib_orders_snapshot(client)
             
         except Exception as e:
             logger.error(f"Fill monitor error: {e}")
@@ -258,6 +283,61 @@ class FillMonitorHandler(BaseHandler):
             logger.debug("Disconnected from IB")
         
         return result
+
+    def _mirror_ib_orders_snapshot(self, client: Any) -> None:
+        """Replace Turso open_orders + executed_orders from this IB session.
+
+        Failures are logged and swallowed — the next orders-sync tick or
+        evening execution sweep is the recovery path. Never crash the
+        handler on a mirror miss.
+        """
+        if (
+            save_orders_snapshot is None
+            or fetch_open_orders_for_mirror is None
+            or fetch_executed_orders_for_mirror is None
+            or build_orders_data_for_mirror is None
+        ):
+            return
+        try:
+            open_orders = fetch_open_orders_for_mirror(client)
+            # get_open_orders caps its openOrderEnd wait at 0.5s and returns
+            # whatever arrived. The same cap that yields an EMPTY book yields a
+            # TRUNCATED one, and `save_orders_snapshot` whole-replaces, so a
+            # partial arrival silently dropped the tracked working orders it
+            # omitted from the book that drives modify and cancel (R-610).
+            # Any tracked order missing from the read means the read is not a
+            # picture of the book — skip, the next tick is the recovery path.
+            returned_ids = {
+                row.get("orderId")
+                for row in open_orders or []
+                if isinstance(row, dict)
+            }
+            missing = [oid for oid in self.known_orders if oid not in returned_ids]
+            if missing:
+                logger.warning(
+                    "fill_monitor: IB open-orders read omits %d tracked working "
+                    "order(s) %s — skipping mirror",
+                    len(missing),
+                    sorted(missing)[:10],
+                )
+                return
+            if not open_orders:
+                # An empty book over a non-empty stored snapshot is the same
+                # truncation with nothing tracked in memory to detect it
+                # (T-382, R-579).
+                if (
+                    count_open_orders_for_mirror is None
+                    or count_open_orders_for_mirror() > 0
+                ):
+                    logger.warning(
+                        "fill_monitor: IB returned empty open-orders book but "
+                        "existing snapshot is non-empty — skipping mirror"
+                    )
+                    return
+            executed = fetch_executed_orders_for_mirror(client)
+            save_orders_snapshot(build_orders_data_for_mirror(open_orders, executed))
+        except Exception as exc:  # noqa: BLE001 — never crash on mirror failure
+            logger.warning("fill_monitor: orders snapshot mirror failed: %s", exc)
     
     @staticmethod
     def _side_to_action(side_label: str, sec_type: str, prior_qty: float = 0.0) -> str:
@@ -452,12 +532,19 @@ class FillMonitorHandler(BaseHandler):
         message = f"{completed['action']} {completed['filled']}x {completed['contract']}"
         self._send_notification(title, message)
     
+    # Fixed AppleScript source: the text rides argv, so fill fields are data
+    # to the script, never part of it.
+    _NOTIFY_SCRIPT = (
+        "on run argv\n"
+        "  display notification (item 1 of argv) with title (item 2 of argv)\n"
+        "end run"
+    )
+
     def _send_notification(self, title: str, message: str) -> None:
         """Send macOS notification via osascript."""
         try:
-            script = f'display notification "{message}" with title "{title}"'
             subprocess.run(
-                ["osascript", "-e", script],
+                ["osascript", "-e", self._NOTIFY_SCRIPT, message, title],
                 capture_output=True,
                 timeout=5
             )

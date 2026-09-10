@@ -3,6 +3,7 @@
 import { Fragment, useMemo, useState } from "react";
 import { Unlink } from "lucide-react";
 import BrushMinimap from "./BrushMinimap";
+import FreshnessRail from "./FreshnessRail";
 import HistoryRangeChips from "./HistoryRangeChips";
 import InfoTooltip from "./InfoTooltip";
 import MetricCell from "./mobile/MetricCell";
@@ -12,6 +13,7 @@ import VixCorChart from "./VixCorChart";
 import { RegimeStrip, RegimeStripCell } from "./RegimeStrip";
 import { formatCor } from "@/lib/cor";
 import { presetRange, type RangePresetSlug } from "@/lib/historyRange";
+import { VIXCOR_REFRESH } from "@/lib/refreshSchedule";
 import {
   buildVixcorChartRows,
   formatCorr,
@@ -169,7 +171,7 @@ export default function VixCorPanel() {
             <InfoTooltip text={VIXCOR_TOOLTIP} />
           </div>
           {lastSync && (
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: "9px", color: "var(--text-muted)" }}>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--text-muted)" }}>
               {new Date(lastSync).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
             </span>
           )}
@@ -234,6 +236,13 @@ export default function VixCorPanel() {
             </RegimeStrip>
           </div>
         )}
+
+        <FreshnessRail
+          schedule={VIXCOR_REFRESH}
+          asOf={data.as_of ?? current.date}
+          testId="vixcor-freshness-rail"
+          model="session"
+        />
       </div>
 
       {/* ── VIX over the 20-session correlation ───────────── */}
@@ -270,7 +279,7 @@ export default function VixCorPanel() {
         <div
           style={{
             fontFamily: "var(--font-mono)",
-            fontSize: "9px",
+            fontSize: "var(--text-meta)",
             color: "var(--text-muted)",
             marginTop: "8px",
           }}

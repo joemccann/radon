@@ -22,7 +22,7 @@ This document covers Radon's two-mode architecture introduced in Phase 0–6 of 
 
 - **Database**: Turso (libSQL) — every Radon process talks **directly** to the cloud DB for both reads and writes. Direct-to-cloud is the code default (DUR-07; replica is opt-in only via `RADON_DB_USE_REPLICA=1`), and the prefix drop-in `/etc/systemd/system/radon-.service.d/common.conf` sets the `RADON_DB_NO_REPLICA=1` kill switch on every `radon-*` unit as belt-and-suspenders. The embedded-replica architecture (`data/replica.db`) was retired 2026-05-20 after two same-day incidents: multi-writer WAL checkpoint contention (radon-cloud `741cfc6`) followed by single-writer frame conflicts between the replica owner and direct-cloud writers (radon-cloud `2c46232`). The libsql embedded-replica model only works when ONE host has exactly ONE writer; Radon's split between Node and Python writers can't satisfy that constraint. Reads cost +30–60 ms cloud round-trip, absorbed by SWR caching. See `feedback_libsql_replica_one_writer.md` for the full failure-mode catalog.
 - **Media**: Hetzner-hosted Caddy serves `https://media.radon.run`; the laptop's newsfeed scraper rsyncs new images over Tailscale.
-- **Schedulers**: laptop launchd plists (local mode) OR Hetzner host systemd (cloud mode). Production is host systemd; IB Gateway is the only production container until per-unit app drop-ins are installed. App-plane images default `RADON_RUNTIME=host`. Unit sources live in `/home/radon/radon/cloud/services/` and are installed through the reviewed control-plane path. The former `docker/services/` tree was deleted as decoy units in `40cfff2a` and is not a scheduler alternative.
+- **Schedulers**: laptop launchd plists (local mode) OR Hetzner host systemd (cloud mode). Production scheduling remains host systemd. Installed per-unit drop-ins run Next.js, FastAPI, relay, monitor, and newsfeed in exact-SHA app containers; timer-owned oneshots remain on the host. Unit sources live in `/home/radon/radon/cloud/services/` and are installed through the reviewed control-plane path. The former `docker/services/` tree was deleted as decoy units in `40cfff2a` and is not a scheduler alternative.
 - **Self-contained**: themarketear.com newsfeed scraper is now a headless Playwright flow that runs on either the laptop or Hetzner. No magic-link or Chrome Debug.app dependency.
 
 ## Newsfeed (`themarketear.com`) — Self-contained headless flow
@@ -106,7 +106,7 @@ The same SSH public key is authorized on both routes — `~/.ssh/authorized_keys
 
 `data/replica.db` is intentionally absent — the embedded-replica architecture was retired 2026-05-20. If the file appears on disk (stray from a pre-migration host), it is safe to `rm` — nothing reads from it.
 
-Every `radon-*.service` (except `radon-grok-page-responder`) uses `EnvironmentFile=/etc/radon/env`. `/home/radon/radon-cloud/.env` is a compatibility symlink to that file. Media is `/var/lib/radon/media` (Caddy `media.radon.run`); `/home/radon/radon-cloud/media` is a compatibility symlink. The legacy directory is not a deploy source.
+Every `radon-*.service` (except `radon-grok-page-responder`, `radon-flex-pull` and `radon-mcp`, which load stripped files) uses `EnvironmentFile=/etc/radon/env`. `/home/radon/radon-cloud/.env` is a compatibility symlink to that file. Media is `/var/lib/radon/media` (Caddy `media.radon.run`); `/home/radon/radon-cloud/media` is a compatibility symlink. The legacy directory is not a deploy source.
 
 **Whole-stack kill switch:** `/usr/local/bin/radon` wraps all units (IB Gateway included). Run on the VPS or remotely:
 
@@ -155,8 +155,10 @@ The full `/health` (IB auth state) is used only by the pre-teardown `wait_for_ga
 
 #### Manual server-only deploy (when CI is unusable)
 
-When Actions is down or a deploy requires privileged recovery, preserve the
-manifest boundary: compare `/home/radon/radon` to the exact tested SHA,
+A control-plane edit no longer needs this: the deploy job runs
+`radon-deploy-root sync-control-plane` before `deploy.sh` and installs the
+GitHub-main-tip bundle itself (R-430). When Actions is down or a deploy
+requires privileged recovery, preserve the manifest boundary: compare `/home/radon/radon` to the exact tested SHA,
 fast-forward as `radon` if it is behind, run the root bootstrap from that
 checkout, then rerun CI. The command sequence and live verification contract
 are maintained in [`cloud/CLAUDE.md`](../cloud/CLAUDE.md) and
@@ -172,7 +174,7 @@ Related: `scripts/db/migrate.py` (radon-api `ExecStartPre`) retries transport-cl
 
 ### Runtime planes
 
-Production is three planes: host (never container), broker (already Docker), app (host default). IB Gateway in `cloud/docker-compose.yml` is the only production container until per-unit `runtime-container.conf` drop-ins are installed after hours. App-plane images (`docker/app`) plus `/usr/local/sbin/radon-app-runtime` are the optional container path; the default is `RADON_RUNTIME=host`. Do not install the fleet `radon-.service.d` example (it would override Gateway and health). The former `docker/services/` tree was deleted as decoy units in `40cfff2a` and is not a containerized scheduler alternative.
+Production is three planes: host, broker, and app. IB Gateway runs from the control-plane artifact `/etc/radon/ib-gateway-compose.yml` via the root-owned `radon-docker-gw` shim (installed from `cloud/docker-compose.yml` by `bootstrap-control-plane.sh`/`setup-vps.sh` at the deployed commit — the checkout copy is the source, not what runs); the five long-lived app services run from exact-SHA `docker/app` images through installed per-unit `runtime-container.conf` drop-ins; timer-owned oneshots remain host systemd. Main CI gates deploy on both app images, pre-pulls them in parallel with prestage, and the runtime refuses `latest`. Do not install the fleet `radon-.service.d` example because it would override Gateway and health. The former `docker/services/` tree was deleted as decoy units in `40cfff2a` and is not a scheduler alternative.
 
 ## Trades — single source of truth
 
@@ -219,7 +221,7 @@ marked deprecated. Don't extend them.
 | Scenario | Recovery |
 |----------|----------|
 | Cold-start a new laptop | Clone repo, `bun install`, set `TURSO_DB_URL` + `TURSO_AUTH_TOKEN`, run `bun run db:migrate`, then `scripts/cloud.sh`. No replica file to seed — every process talks directly to the cloud DB. |
-| Cold-start a new VPS | Run `radon-cloud/scripts/setup-vps.sh`, configure the production `.env`, then use `/usr/local/bin/radon start`. Setup installs the lease-aware Gateway helper and every `radon-*.service`; no raw Compose start is permitted. Laptop's `scripts/cloud.sh` flips IB host to the new VPS through the same helper. |
+| Cold-start a new VPS | Run `cloud/scripts/setup-vps.sh`, configure the production `.env`, then use `/usr/local/bin/radon start`. Setup installs the lease-aware Gateway helper and every `radon-*.service`; no raw Compose start is permitted. Laptop's `scripts/cloud.sh` flips IB host to the new VPS through the same helper. |
 | Stale `data/replica.db` from a pre-2026-05-20 host | `rm data/replica.db*` — nothing reads from it anymore. The libsql client opens cloud connections regardless of whether the file exists. |
 | Turso outage | Read paths fall through to JSON files (dual-write retains them). Writes queue in the libsql client and replay when cloud returns. |
 | Hetzner outage | Switch to `scripts/local.sh`. Laptop becomes self-sufficient against local Docker IB Gateway. |
@@ -246,7 +248,7 @@ Service health for every dual-writing scheduler lands in the `service_health` ta
 The health daemon's `radon-nextjs` probe is TCP-liveness only, so a process
 that is alive but cannot read Turso (the 2026-07-02 destroy-storm class)
 looked healthy to every monitoring layer. `radon-nextjs-db-watchdog.timer`
-(radon-cloud `services/`, 60s, 24/7) closes the gap: it GETs
+(`cloud/services/`, 60s, 24/7) closes the gap: it GETs
 `localhost:3000/api/service-health` with
 `Authorization: Bearer $RADON_PROBE_FRESHNESS_TOKEN` (the route is not
 public) and judges the **body**. HTTP 200 with a synthetic `turso-db`
@@ -256,8 +258,8 @@ wedge cycles plus a Python-side canary read (proving Turso itself is fine,
 so a restart will actually help) → solo `systemctl restart radon-nextjs`
 (no PartOf/BindsTo — no cascade), 10 min restart cooldown. Heartbeats the
 `nextjs-db-read` service_health row every clean cycle; state in
-`radon-cloud/state/nextjs-db-watchdog.json`. Script:
-`radon-cloud/scripts/nextjs_db_watchdog.py`.
+`/home/radon/radon-cloud/state/nextjs-db-watchdog.json` (legacy state dir,
+still the script's default). Script: `cloud/scripts/nextjs_db_watchdog.py`.
 
 ### CRI read-stall incident (2026-07-12)
 
@@ -313,7 +315,7 @@ does not mean Turso necessarily failed.
 
 ### Host metrics (DUR-12)
 
-`scripts/host_metrics_sampler.py` (main repo, stdlib-only) runs every minute on the VPS via `radon-host-metrics.timer` (radon-cloud) and writes one row per run to the Turso `host_metrics` table (migration 0012): CPU % from a 1s `/proc/stat` delta, memory + swap from `/proc/meminfo`, `load1`, per-`radon-*`-unit ActiveState/NRestarts, and the FastAPI event-loop lag exposed as `loop_lag_ms` on `/health/lite`. Writes ride the bounded hrana path (`scripts/db/hrana_http.py`) with a capped JSONL fallback at `data/host_metrics_fallback.jsonl`; every run heartbeats `service_health[host-metrics]` (10-min freshness window). Retention is 14 days, pruned hourly by the sampler. The `/admin` page renders the latest values + 1h sparkline via `GET /api/admin/host-metrics`.
+`scripts/host_metrics_sampler.py` (main repo, stdlib-only) runs every minute on the VPS via `radon-host-metrics.timer` (`cloud/services/`) and writes one row per run to the Turso `host_metrics` table (migration 0012): CPU % from a 1s `/proc/stat` delta, memory + swap from `/proc/meminfo`, `load1`, per-`radon-*`-unit ActiveState/NRestarts, and the FastAPI event-loop lag exposed as `loop_lag_ms` on `/health/lite`. Writes ride the bounded hrana path (`scripts/db/hrana_http.py`) with a capped JSONL fallback at `data/host_metrics_fallback.jsonl`; every run heartbeats `service_health[host-metrics]` (10-min freshness window). Retention is 14 days, pruned hourly by the sampler. The `/admin` page renders the latest values + 1h sparkline via `GET /api/admin/host-metrics`.
 
 ### Bounded vs process-bound Turso writes (R5 partial)
 
@@ -339,7 +341,7 @@ journald on the VPS is on-box only (capped at 1G). A laptop launchd job (`~/Libr
 (`/home/radon/radon-page-responder.env`). It must not use
 `/home/radon/radon` or `/home/radon/radon-cloud/.env`. Laptop launchd is
 off. Spec: [`grok-page-responder.md`](grok-page-responder.md).
-Do not install this on `~/radon-weekend/radon` (that clone hard-resets).
+Do not install this on any clone under `~/radon-weekend/` (the five nightly loops hard-reset them every phase; table in [`operations.md`](operations.md#background-services)).
 
 ### Error tracking — Sentry (not wired; recommended next step)
 
@@ -362,6 +364,58 @@ The migration was implemented as dual-write at every step — every prior JSON r
 3. Restart Next.js + FastAPI.
 
 The `data/*.json` files keep advancing on every cycle, so reverting is a no-data-loss change.
+
+## Hosted MCP (`radon-mcp.service`, issue #232 chunk 1)
+
+Public read-only MCP at **`https://app.radon.run/mcp`** (Streamable HTTP
+JSON-RPC), documented for consumers at radon.run `/developers/mcp`.
+
+- **Process**: `radon-mcp.service` runs `python -m scripts.mcp_hosted.serve`
+  (module invocation — a path invocation fails on import; FastMCP, stateless,
+  loopback `127.0.0.1:8334`). Deliberately a DEDICATED
+  process — never a mount on `scripts/api/server.py` — so an anonymous MCP
+  caller can never reach the FastAPI `/docs` / operator `/openapi.json`
+  surface. Caddy intercepts `handle /mcp*` before the Next.js catch-all
+  (same pattern as `/api/ib/*`).
+- **Auth rungs** (`scripts/mcp_hosted/auth.py`, default deny): anonymous →
+  `radon_identity` / `radon_docs` / `radon_health` only; Clerk demo-trial
+  token (`metadata.demoRole`) → `demo_*` reads proxied to demo.radon.run
+  with the caller's own token; allowlisted operator token (the same
+  `ALLOWED_USER_IDS` FastAPI enforces, failing CLOSED when empty) →
+  `operator_*` reads proxied to the local Next.js routes with the caller's
+  own token. No write tools; no `kb_*` corpus tools (operator journal/P&L
+  stays on the checkout-only radon-kb stdio server); no service tokens.
+  JWKS lookups are capped at `MAX_JWKS_INFLIGHT` (4) concurrent verifications;
+  a caller past the cap gets a retryable `503 authentication unavailable`
+  rather than queueing, and a kid that fails verification is negatively cached
+  for `JWKS_NEGATIVE_TTL_SECONDS` so a bad token cannot drive repeated
+  upstream fetches. Only a PyJWT-class signature failure is a VERDICT that
+  gets negatively cached; a JWKS upstream outage (timeout/5xx) returns a
+  retryable `503 authentication temporarily unavailable` and leaves the kid
+  re-probeable, with refetches rate-limited per kid by
+  `JWKS_REFRESH_COOLDOWN_SECONDS` (`scripts/mcp_hosted/auth.py`, R-606,
+  398c8636). A kid already present in the cached key set is served without
+  taking the refresh gate, so a slow or contended JWKS refresh cannot stall
+  verification of tokens signed by an already-known key.
+- **Env**: `CLERK_JWKS_URL` / `CLERK_ISSUER` / `ALLOWED_USER_IDS` from
+  `/etc/radon/mcp.env`, a stripped file `deploy.sh:write_mcp_env` (and
+  `setup-vps.sh`) derives from `/etc/radon/env` on every deploy; the unit
+  never loads the full secret set and runs with `/etc/radon/env`
+  inaccessible. Optional overrides `RADON_MCP_{HOST,PORT,SITE_BASE,EDGE_BASE,APP_BASE,DEMO_BASE}`
+  `RADON_MCP_ALLOWED_HOSTS` (comma list; default
+  `app.radon.run,app.radon.run:*,mcp.radon.run,mcp.radon.run:*,127.0.0.1:*,localhost:*`
+  — the SDK's DNS-rebinding protection 421s any Host not on it), and
+  `RADON_MCP_ALLOWED_ORIGINS` (default
+  `https://app.radon.run,https://mcp.radon.run`) are copied through when
+  present in `/etc/radon/env`.
+- **First enable** (install-units only auto-enables new timers):
+  `sudo systemctl enable --now radon-mcp.service`, then
+  `curl -s -X POST https://app.radon.run/mcp -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'`.
+- **Dedicated host `mcp.radon.run`**: Vercel A record to the same VPS as
+  `app.radon.run`. Caddy site block proxies only `/mcp*` (and `/` rewritten
+  to `/mcp`) to `127.0.0.1:8334` — no Next.js, no FastAPI. The published
+  consumer URL remains `https://app.radon.run/mcp` until TLS on the dedicated
+  host is verified.
 
 ## MenthorQ Playwright session refresh
 
@@ -391,7 +445,7 @@ bounded.
 |---|---|---|
 | `radon-db-backup.timer` | VPS | Nightly **09:00 UTC** (after archive 05:40 + retention 08:10), `Persistent=true` |
 | `radon-db-backup.service` | VPS | Oneshot, `User=radon`, `TimeoutStartSec=3600` (libsql has no client timeouts — the unit bound is the real one) |
-| `radon-cloud/scripts/db_backup.py` / monorepo `cloud/scripts/db_backup.py` | VPS | Iterates `sqlite_master` — the ENTIRE DB, no hand-picked table list, so new migration tables are captured automatically. Paged `SELECT`s (500 rows/page). Emits portable SQL (schema + INSERTs), gzip'd to `/home/radon/radon-cloud/backups/db/radon-<UTC>.sql.gz`. Prunes dumps older than 30 days in-script. |
+| `radon-cloud/scripts/db_backup.py` / monorepo `cloud/scripts/db_backup.py` | VPS | Iterates `sqlite_master` — the ENTIRE DB, no hand-picked table list, so new migration tables are captured automatically. Paged `SELECT`s (500 rows/page). Emits portable SQL (schema + INSERTs), gzip'd to `/home/radon/radon-cloud/backups/db/radon-<UTC>.sql.gz`. Prunes dumps older than `RETENTION_DAYS` (7) in-script, and only those present in B2 once the off-box leg has run (R-445). |
 | `service_health` heartbeat | row `db-backup` | Written on EVERY run — `ok` with `{size_bytes, duration_secs, tables, rows, pruned}` detail, `error` with the failure summary. 48h freshness window. |
 | `com.radon.db-backup-pull` | laptop launchd | Daily rsync of dump dir over Tailscale into `data/db_backups/` (no `--delete`). |
 
@@ -532,7 +586,7 @@ Never touched: the running `ghcr.io/gnzsnz/ib-gateway` and
 `willfarrell/autoheal` images, `/home/radon/radon` (the live tree),
 `~/.cache/{ms-playwright,huggingface,fastembed,radon-wheels}`, and
 `/home/radon/radon-cloud/backups` — DB backup retention is `db_backup.py`'s
-`RETENTION_DAYS = 30` and shrinking it is an operator policy call.
+`RETENTION_DAYS = 7` (operator call 2026-08-29; was 30) and changing it is an operator policy call.
 
 A category that finds nothing is a normal run. A category that RAISES flips
 the heartbeat to `error` but does not fail the unit: a wedged docker daemon
@@ -546,17 +600,18 @@ their `config/installed-units.sha256` entries.
 
 Daily `21:45 UTC` (`RandomizedDelaySec=300`), oneshot
 `scripts/fetch_credit_spread.py`. IB daily closes for HYG + SPX, then UW, then
-Yahoo. Both units share IB client IDs 56/69 and therefore serialize on `flock -w <peer budget> -E 75 /run/lock/radon-ib-history-5669.lock`: the 21:45/21:55 gap is not a mutex once `RandomizedDelaySec=300` applies to both. The lock loser exits 75 (`SuccessExitStatus=75`) and defers to its next slot instead of entering `failed` (R-127).
-Heartbeat `credit-spread`. Units are listed in `setup-vps.sh`
-`SERVICE_FILES`; root install-copy is still owed (`not-installed` allowlist
-expires 2026-12-31). Spec: [`indicators/credit.md`](indicators/credit.md).
+Robinhood (HYG only, when configured), then Yahoo. Both units share IB client IDs 56/69 and therefore serialize on `flock -w <peer budget> -E 75 /run/lock/radon-ib-history-5669.lock`: the 21:45/21:55 gap is not a mutex once `RandomizedDelaySec=300` applies to both. The lock loser exits 75 (`SuccessExitStatus=75`) and defers to its next slot instead of entering `failed` (R-127).
+Heartbeat `credit-spread`. Installed by the deploy's `install-units` verb
+from `installed-units.sha256` (units on `auto-sync-units.txt`). Spec:
+[`indicators/credit.md`](indicators/credit.md).
 
 ### IEI/HYG ratio (`radon-iei-hyg.timer`)
 
 Daily `21:55 UTC` (`RandomizedDelaySec=300`), oneshot
 `scripts/fetch_iei_hyg.py`. IB daily closes for IEI + HYG (SMART) and the ICE
 dollar index (`DX`, NYBOT), then UW (IEI/HYG, regular-session rows only), then
-Yahoo (`DX-Y.NYB` for DXY). Serialized against `radon-credit-spread` on the
+Robinhood (IEI/HYG only, when configured), then Yahoo (`DX-Y.NYB` for DXY).
+Serialized against `radon-credit-spread` on the
 shared IB client IDs (see above). Heartbeat `iei-hyg`. Installed by the deploy's
 `install-units` verb from `installed-units.sha256`. Spec:
 [`indicators/iei-hyg.md`](indicators/iei-hyg.md).
@@ -588,6 +643,20 @@ Rows in `divyield_history` (monthly pre-cutover rows are a survivorship-biased
 approximation, `approximate=1`). Weekend runs are unchanged-day heartbeats.
 Heartbeat `div-yield`. Installed by the deploy's `install-units` verb from
 `installed-units.sha256`. Spec: [`indicators/divyield.md`](indicators/divyield.md).
+
+### MA RATIO (`radon-ma-ratio.timer`)
+
+Daily `22:45 UTC` (`RandomizedDelaySec=300`, five minutes behind
+`radon-divyield`'s 22:40 pass so the two SPX constituent sweeps never share
+a minute), oneshot `scripts/ma_ratio_scan.py`, `TimeoutStartSec=2100`.
+Percent of S&P 500 members whose close is strictly above their own 50-day
+SMA, over the percent strictly above their own 200-day SMA (the StockCharts
+`$SPXA50R:$SPXA200R` construction, computed from constituent closes, never
+a vendor series). Member closes ride the shared Turso `price_history_daily`
+store via `bpi_scan.ensure_member_history`. Weekend and holiday runs are
+unchanged-data heartbeats. Heartbeat `ma-ratio`. Installed by the deploy's
+`install-units` verb from `installed-units.sha256`. Spec:
+[`indicators/ma-ratio.md`](indicators/ma-ratio.md).
 
 ### HY AD (`radon-hyad.timer`)
 
@@ -630,15 +699,106 @@ plausibility guard raises rather than latching `ok` over a truncated or
 implausible series. Installed by the deploy's `install-units` verb from
 `installed-units.sha256`. Spec: [`indicators/vixts.md`](indicators/vixts.md).
 
+### DISPERSION (`radon-dispersion.timer`)
+
+Daily `22:20 UTC` (`RandomizedDelaySec=120`), oneshot `scripts/fetch_dispersion.py`,
+`TimeoutStartSec=900`. VIX close, the 95th-minus-5th percentile spread of daily
+single-stock returns across the S&P 500 seed, and the same spread across the 11
+Select Sector SPDRs, each rolled to a 60-session mean and z-scored over the full
+sample since 2017. IB daily `TRADES` bars for every symbol (`IBClient` auto client
+id, `asyncio.gather` under 8 slots, `1 M` incremental / `10 Y` `--backfill`), then
+Yahoo for whatever IB left empty (spark batches of 20 incrementally, per-symbol
+chart on backfill); UW is skipped so the 515-symbol sweep never spends the shared
+daily cap. Only raw per-session rows land in `dispersion_history`; the means and
+z-scores are rebuilt from every stored row each run. 22:20 clears the EST close
+and sits between iv-spread 22:15 and yield-curve 22:30. Runs every calendar day;
+weekend and holiday runs find no new completed session, make no IB or Yahoo
+requests, and refresh only the snapshot + heartbeat that keep `dispersion` inside
+its 26h window. An empty VIX or a thin cross-section re-serves the stored series
+as `stale_source` with an `error` heartbeat and exits non-zero; a gap wider than
+the incremental window raises and asks for `--backfill`. Installed by the deploy's
+`install-units` verb from `installed-units.sha256`. Spec:
+[`indicators/dispersion.md`](indicators/dispersion.md).
+
+### Model catalog (`radon-model-catalog.timer`)
+
+Daily `03:10 UTC` (`RandomizedDelaySec=300`), oneshot
+`scripts/refresh_model_catalog.py`, `TimeoutStartSec=300`. Picks ONE frontier
+chat model per LLM provider whose API key is present in the unit env
+(`ANTHROPIC_API_KEY` today; `XAI_API_KEY` / `GROK_API_KEY` and `OPENAI_API_KEY`
+light up automatically when added to `/etc/radon/env`) by listing that
+provider's own models endpoint and applying a deterministic filter, sort, head:
+dated snapshots lose to the undated alias they pin, cheap and preview tiers and
+non-chat modalities are dropped, and versions are compared as floats so
+`grok-4.20` reads as 4.2 rather than beating `grok-4.6`. A provider with no key
+is skipped silently, so the chat model picker lists exactly what this
+deployment can call. A provider that errors, times out or rate-limits keeps its
+existing row (seeded from Turso, JSON cache second); a run that resolves no
+provider at all writes only the heartbeat, so a bad poll never blanks a good
+catalog. Any carried-forward keyed provider makes that heartbeat `error`
+(`class: provider_carry_forward`, naming the providers), a crash before the
+write leaves an `error` row (`class: cycle_failed`) and exit 1, each provider
+poll has its own 60s wall-clock budget and the Anthropic cursor walk is capped
+at 10 pages, so the 26h alarm reports content staleness rather than an `ok`
+with today's `finished_at` (R-455/R-456/R-458). Per-provider operator overrides
+(`ANTHROPIC_MODEL`, `OPENAI_MODEL`, `XAI_MODEL` / `GROK_MODEL` — the same
+variables `web/lib/llm/provider.ts` reads) win over discovery, so a bad
+heuristic is recoverable without a deploy. Rows in `llm_model_catalog`, payload
+in `scan_snapshots`, heartbeat `model-catalog`, JSON fallback
+`data/llm_models.json`. A key added to `/etc/radon/env` only becomes visible to
+the picker after `systemctl restart radon-nextjs` — `write_web_env()` rewrites
+`web/.env` on every deploy with `NEXT_PUBLIC_*` only, so provider keys must
+live in the unit env, never in `web/.env` on the host. Installed by the
+deploy's `install-units` verb from `installed-units.sha256`.
+
 ### IV RANK (`radon-ivrank.timer`)
 
 Daily `22:10 UTC` (`RandomizedDelaySec=120`), oneshot
 `scripts/fetch_ivrank.py`. SPY 30-day implied vol from IB
 (`OPTION_IMPLIED_VOLATILITY` daily bars, health-gated), UW iv-rank fallback,
-ranked over the trailing 252 sessions. Heartbeat `ivrank`. Units are listed in
-`setup-vps.sh` `SERVICE_FILES`; root install-copy is still owed
-(`not-installed` allowlist expires 2026-12-31). Spec:
+ranked over the trailing 252 sessions. Heartbeat `ivrank`. Installed by the
+deploy's `install-units` verb from `installed-units.sha256`. Spec:
 [`indicators/ivrank.md`](indicators/ivrank.md).
+
+### IV SPREAD (`radon-iv-spread.timer`)
+
+Daily `22:15 UTC` (`RandomizedDelaySec=120`), oneshot
+`scripts/fetch_iv_spread.py`. NDX and SPX 30-day implied vol from IB
+(`OPTION_IMPLIED_VOLATILITY` daily bars on both index legs, health-gated),
+spread in volatility points against its full stored history. IB is the only
+feed: an IB outage re-serves the cached payload as `stale_source` with an
+`error` heartbeat. Heartbeat `iv-spread`. Installed by the deploy's
+`install-units` verb from `installed-units.sha256`. Spec:
+[`indicators/iv-spread.md`](indicators/iv-spread.md).
+
+### Flex sFTP pull (`radon-flex-pull.timer`)
+
+Install dependency: IBKR-hosted sFTP, not Flex Web Service. Full recipe:
+[`flex-sftp-setup.md`](flex-sftp-setup.md).
+
+`Tue..Sat 07:30 ET` plus `08:30 ET` empty-dir retry. Oneshot
+`scripts/flex_sftp_pull.py`. The effective `ssh_config` is validated before
+connecting: global directives above the first `Host` block count toward the
+alias (first-match-wins), and `Include` / `Match` — which pull in
+configuration the validator cannot see — fail closed
+(`validate_ssh_config`). Heartbeats `flex-pull` (the delivery signal)
+and, from the Activity branch of `flex_delivery_ingest`, `cash-flow-sync`
+(`ok` when `cash_flow_sync --from-file` succeeds or an already-applied
+statement is re-pulled, `error` with the exit code when it fails; a
+duplicate-only run is a stale-remote `error` on `flex-pull` only when the
+newest statement period is more than `MAX_DELIVERY_LAG_DAYS` (1) behind the
+last session AND an empty remote is not expected for the date, R-389 + R-448;
+never on `cash-flow-sync`; once any file heartbeats `error`, later `ok`
+heartbeats in the same run are suppressed, so the row reports the batch's
+worst outcome, REL-210). Stripped env
+`/var/lib/radon/flex-secrets/env` (no `TWS_PASSWORD`). Units on
+`auto-sync-units.txt`.
+
+Queries: `1442520` SOD (NAV + cash + transfers), `1422766` EOD (trades).
+Period Last Business Day, XML, PGP. Empty `outgoing` through 2026-08-31 is
+ok skip; from 2026-09-01 empty is error. Miss does not SendRequest.
+
+Same-day blotter is Gateway `journal_sync`. This timer is T+1 recon.
 
 ### TWR performance builder (`radon-perf-twr.timer`)
 
@@ -664,8 +824,12 @@ never installed on the VPS (`systemctl is-enabled` → `not-found`) and nothing
 rebuilt the payload on a schedule at all; the only refreshes came from the
 page's own SWR trigger.
 
-**A Flex outage must not blank the page.** NAV degrades `flex → disk_cache →
-turso`; flows now degrade `flex → turso external_flows` via
+**A Flex outage must not blank the page.** NAV resolves `flex` (only with
+`--sendrequest`) → the fresher of the disk cache and Turso (a tie stays on
+disk; "disk then Turso" served an 18-day-old cache after the sFTP ingest had
+mirrored newer NAV into Turso, 2026-09-02). Flows come from a statement
+already in hand (the file ingest, or the NAV fetch this run) with no
+`IB_FLEX_TOKEN` required, then degrade `flex → turso external_flows` via
 `load_flows_from_turso()`. Before that fallback existed, one `fetch_flex_xml`
 exception produced `FlowSet.failed`, which suppresses TWR, Max DD, Sharpe and
 the equity curve — so the page flipped between +90.81% and `--` depending on
@@ -797,7 +961,7 @@ Windows are registered in `scripts/watchdog/services.py` and
 | Allowance | Pro plan 100,000 requests/day, shared REST + MCP, resets 00:00 UTC. Every paginated page bills separately, so `max_pages` is bounded in the client. |
 | Env contract | root `.env.example`, `cloud/.env.example`, `cloud/config/required-env.txt` |
 | VPS secrets | `/etc/radon/env` (`EnvironmentFile=` on every unit) |
-| Ticker scope | `fetch_equibles_smart_money_13f.py` and `fetch_equibles_filing_forensics.py` read the Turso `watchlist` table. A ticker off the watchlist has no row, and both API routes serve `missing: true` for it. |
+| Ticker scope | `fetch_equibles_smart_money_13f.py` and `fetch_equibles_filing_forensics.py` read the Turso `watchlist` table. A ticker off the watchlist has no row, and both API routes serve `missing: true` for it. `fetch_equibles_ats_venue_share.py` walks portfolio, then watchlist, then Nasdaq-100, Russell 2000, S&P 500. |
 | Tables | `equibles_13f_snapshots` (the route's only read), `equibles_13f_holders` (write-only depth), `equibles_filing_forensics`, `equibles_short_interest` + `equibles_squeeze_scores`, `equibles_ats_venue_share`, `cot_positioning` |
 | Demo mirror | `equibles_13f_snapshots` + `equibles_filing_forensics` are mirrored per ticker by `scripts/db/mirror_market_snapshots_to_demo.js`. `equibles_13f_holders` is not — nothing reads it. |
 
@@ -878,8 +1042,8 @@ automated off-box push, and is not a backup strategy.
 | Unit | Unchanged `radon-db-backup.service` + `.timer` (09:00 UTC). `TimeoutStartSec=19500` already covers dump + upload. |
 | Target | S3-compatible API to the existing B2 bucket `radon-archive`, prefix **`db_backups/`** (never collides with `portfolio_snapshots/` or `media/`). |
 | Credentials | `RADON_ARCHIVE_S3_*` from `/etc/radon/env` (already required-env). Optional per-field overrides `RADON_DB_BACKUP_S3_{ENDPOINT,BUCKET,ACCESS_KEY_ID,SECRET_ACCESS_KEY,REGION}` and `RADON_DB_BACKUP_PREFIX`, same shape as `RADON_MEDIA_BACKUP_S3_*`. |
-| Local retention | `RETENTION_DAYS = 30` — **unchanged**, operator policy. |
-| Remote retention | `REMOTE_RETENTION_DAYS = 365`. Off-boxing a 30-day window would buy nothing; a year of nightly dumps is ~190 GB in B2 at current sizes. |
+| Local retention | `RETENTION_DAYS = 7` since 2026-08-29 (was 30 at cutover), operator policy; B2 is the archive. The off-box leg runs BEFORE the local prune and a dump past the window is unlinked only when it is present in B2 (already listed, or uploaded and size-confirmed tonight); a failed or budget-deferred upload keeps the local copy, so a red `db-backup` row is also a disk-growth signal. Without any B2 config the prune is age-only. |
+| Remote retention | `REMOTE_RETENTION_DAYS = 365`. Off-boxing only the local window would buy nothing; a year of nightly dumps is ~190 GB in B2 at current sizes. |
 | Transport bound | Multipart at 64 MB chunks, 4 threads, botocore `connect_timeout=30` / `read_timeout=300` / 3 attempts, plus a `UPLOAD_BUDGET_SECS = 3600` wall-clock ceiling. |
 | Heartbeat | Existing `db-backup` row, extended detail: `offbox_bucket`, `offbox_prefix`, `offbox_uploaded`, `offbox_bytes_uploaded`, `offbox_deferred`, `offbox_remote_pruned`, and `offbox_error`. Summary gains `; b2 <uploaded>/<planned> (<bytes> B), deferred N, remote pruned N`. |
 

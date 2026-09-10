@@ -4,16 +4,40 @@ import { radonFetch } from "@/lib/radonApi";
 import { readOrdersSnapshotFromDb } from "@/lib/orders/readOrdersFromDb";
 import { invalidateOrdersSnapshotCache } from "@/lib/orders/ordersReadCache";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
+import { buildDemoOrders } from "@/lib/demo/fixtures/orders";
+import { demoDbIsolationViolation } from "@/lib/demo/demoDbIsolation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 let syncInFlight: Promise<void> | null = null;
 
+export const radonCapability = { GET: "read", POST: "mutate.workspace" };
+
 export async function GET(): Promise<Response> {
   const access = await requireRouteAccess();
   if (!access.ok) return access.response;
   const requestId = getRequestId();
+  if (access.principal.kind === "demo") {
+    // REL-245: demo principal implies demo DB. On a prod-marked TURSO_DB_URL
+    // skip the DB read entirely — fixtures only, never the operator's orders.
+    const violation = demoDbIsolationViolation();
+    if (violation) console.error(`[Orders] ${violation}`);
+    const emptyBase = {
+      last_sync: "",
+      open_orders: [],
+      executed_orders: [],
+      open_count: 0,
+      executed_count: 0,
+    };
+    const base = violation
+      ? emptyBase
+      : await readOrdersSnapshotFromDb().catch(() => emptyBase);
+    return setNoStoreResponseHeaders(
+      NextResponse.json(buildDemoOrders(base, new Date())),
+      requestId,
+    );
+  }
   try {
     const data = await readOrdersSnapshotFromDb();
     return setNoStoreResponseHeaders(NextResponse.json(data), requestId);

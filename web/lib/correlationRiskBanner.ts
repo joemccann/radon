@@ -28,7 +28,24 @@ export type RiskBudgetReport = {
   book_budget: number;
 };
 
-export type CorrelationBannerLevel = "none" | "info" | "unmeasured" | "critical";
+export type CorrelationBannerLevel =
+  | "none"
+  | "info"
+  | "unmeasured"
+  | "critical"
+  | "reduce";
+
+/**
+ * What the WORKING ORDER under review does to the book. Gate 3 guards against
+ * ADDING to a concentrated bet; a close that reduces a breached cluster is the
+ * trim the gate asks for, so the breach must not present as a block on it.
+ */
+export type CorrelationOrderContext = {
+  ticker: string;
+  /** True when the order closes or reduces held exposure in `ticker`
+   *  (the chokepoint's close-out branch). */
+  reducesExposure: boolean;
+};
 
 export type CorrelationClusterRow = {
   tickers: string[];
@@ -67,25 +84,61 @@ function toClusterRow(cluster: RiskBudgetCluster): CorrelationClusterRow {
 
 export function correlationRiskBanner(
   report: RiskBudgetReport | null | undefined,
+  order?: CorrelationOrderContext | null,
 ): CorrelationRiskBanner | null {
   if (!report) return null;
 
-  const breachedClusters = report.breaches.map(toClusterRow);
   const insufficientData = report.insufficient_data ?? [];
+
+  // A working order that reduces a ticker inside a breached cluster IS the
+  // trim Gate 3 asks for. Its cluster must not present as a block on the
+  // reduce; clusters the order does not touch stay critical.
+  const orderTicker = order?.ticker?.toUpperCase() ?? null;
+  const isReduce = order?.reducesExposure === true && orderTicker != null;
+  const reducedBreaches = isReduce
+    ? report.breaches.filter((cluster) =>
+        cluster.tickers.some((t) => t.toUpperCase() === orderTicker),
+      )
+    : [];
+  const activeBreaches = report.breaches.filter(
+    (cluster) => !reducedBreaches.includes(cluster),
+  );
+  const breachedClusters = activeBreaches.map(toClusterRow);
 
   if (breachedClusters.length > 0) {
     const names = breachedClusters
       .map((c) => c.tickers.join("+"))
       .join(", ");
+    // Never tell the operator they are "adding" risk when the working order
+    // is a close/reduce (2026-09-01 TQQQ flatten misread).
+    const guidance = isReduce
+      ? "This working order is a close and does not add to it. The cluster stays over budget until trimmed or hedged."
+      : "Trim or hedge before adding correlated risk.";
     return {
       gate: 3,
       level: "critical",
       headline: `Gate 3: correlated exposure over budget (${names})`,
       detail:
-        "Highly-correlated positions stack into a single concentrated bet. " +
-        "Trim or hedge before adding correlated risk.",
+        `Highly-correlated positions stack into a single concentrated bet. ${guidance}`,
       clusterCount: report.clusters.length,
       breachedClusters,
+      insufficientData,
+    };
+  }
+
+  if (reducedBreaches.length > 0) {
+    const names = reducedBreaches
+      .map((cluster) => cluster.tickers.join("+"))
+      .join(", ");
+    return {
+      gate: 3,
+      level: "reduce",
+      headline: `Gate 3: this order reduces the ${names} stack`,
+      detail:
+        "The working order closes exposure inside the breached cluster. " +
+        "Reducing is the action Gate 3 asks for; it is not blocked.",
+      clusterCount: report.clusters.length,
+      breachedClusters: [],
       insufficientData,
     };
   }

@@ -62,3 +62,21 @@ describe("CockpitHeader mobile — STOCK|OPTION switcher", () => {
     expect(onInstrumentViewChange).toHaveBeenCalledWith("underlying");
   });
 });
+
+describe("CockpitHeader mobile — no HELD chip on a held option", () => {
+  it("omits the HELD badge when a position is held", () => {
+    const { container } = renderHeader({
+      position: { structure: "Bull Put Spread $545.0/$550.0" },
+      live: true,
+    });
+    expect(container.querySelector(".ckh-poschip")).toBeNull();
+    expect(container.textContent ?? "").not.toMatch(/\bHELD\b/);
+    expect(container.querySelector(".ckh-instr")).not.toBeNull();
+    expect(container.querySelector(".ckh-live")).not.toBeNull();
+  });
+
+  it("keeps the FLAT chip when there is no position", () => {
+    const { container } = renderHeader({ position: null });
+    expect(container.querySelector(".ckh-poschip")?.textContent?.trim()).toBe("FLAT");
+  });
+});

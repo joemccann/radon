@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+import re
 import shlex
 import subprocess
 import sys
@@ -50,24 +51,58 @@ PENDING_ROOT_OWNED_PAYLOAD: dict[str, str] = {}
 INTERPRETER_ISOLATION_FLAGS = ("-I", "-P")
 
 
-def _unit_texts() -> dict[str, str]:
-    return {
-        path.name: path.read_text(encoding="utf-8")
-        for path in sorted(SERVICES_DIR.iterdir())
-        if path.is_file() and path.suffix == ".service"
-    }
+def _unit_texts(services_dir: pathlib.Path = SERVICES_DIR) -> dict[str, str]:
+    """Base units with their `*.service.d/*.conf` drop-ins merged in.
+
+    The drop-ins are precisely what flips five `User=radon` units to
+    `User=root`, and they reset `ExecStartPre=`/`ExecStart=` and reinstate
+    `ExecStart=` from scratch. Reading only `*.service` meant the guard below
+    could not see the artifacts it exists to police. R-393.
+    """
+    texts: dict[str, str] = {}
+    for path in sorted(services_dir.iterdir()):
+        if path.is_file() and path.suffix == ".service":
+            texts[path.name] = path.read_text(encoding="utf-8")
+    for path in sorted(services_dir.glob("*.service.d/*.conf")):
+        name = path.parent.name[: -len(".d")]
+        # `radon-.service.d` is a systemd PREFIX drop-in with no base unit of its
+        # own; merging it would invent a phantom `radon-.service`. Only drop-ins
+        # that name a real unit are merged.
+        if name not in texts:
+            continue
+        texts[name] = texts[name] + "\n" + path.read_text(encoding="utf-8")
+    return texts
 
 
 def _directive_values(text: str, prefix: str) -> list[str]:
-    values = []
+    """Values for every directive starting with `prefix`, with reset semantics.
+
+    An empty assignment (`ExecStart=`) clears the values accumulated for THAT
+    exact key, which is how a drop-in replaces a base unit's command rather than
+    appending to it. Without this the merged text above would still report the
+    base unit's `/home/radon` ExecStart that the drop-in overrode. R-393.
+    """
+    per_key: dict[str, list[str]] = {}
+    order: list[str] = []
     for line in text.splitlines():
         stripped = line.strip()
         if not stripped.startswith(prefix):
             continue
-        key, _, value = stripped.partition("=")
-        if key.strip().startswith(prefix):
-            values.append(value.strip().lstrip("-+!:@").strip())
-    return values
+        key, sep, value = stripped.partition("=")
+        if not sep:
+            continue
+        key = key.strip()
+        if not key.startswith(prefix):
+            continue
+        if key not in per_key:
+            per_key[key] = []
+            order.append(key)
+        cleaned = value.strip().lstrip("-+!:@").strip()
+        if not cleaned:
+            per_key[key].clear()
+            continue
+        per_key[key].append(cleaned)
+    return [value for key in order for value in per_key[key]]
 
 
 def _runs_as_root(text: str) -> bool:
@@ -150,12 +185,13 @@ def test_no_root_unit_inherits_a_radon_writable_environment_file():
     """Relocating the payload is not enough if the environment still comes from radon.
 
     systemd merges every KEY=VALUE line of an EnvironmentFile into the process
-    environment with no filtering, and /home/radon/radon-cloud/.env is 0600
-    radon:radon by design (setup-vps.sh). One appended LD_PRELOAD line makes the
-    next timer tick load radon-authored code into root, and PATH= makes root's
-    bare `docker` / `systemctl` calls resolve to radon-owned binaries. `-I` does
-    not affect either. A root unit may READ specific keys out of that file as
-    data; it must not inherit the file wholesale.
+    environment with no filtering, and /home/radon/radon-cloud/.env is a
+    compatibility path the unprivileged account can replace. One appended
+    LD_PRELOAD line makes the next timer tick load radon-authored code into
+    root, and PATH= makes root's bare `docker` / `systemctl` calls resolve to
+    radon-owned binaries. `-I` does not affect either. A root unit may READ
+    specific keys out of that file as data; it must not inherit the file
+    wholesale.
     """
     offenders = {
         name: paths
@@ -376,6 +412,12 @@ def test_caddy_sudoers_publishes_through_the_fixed_root_helper():
         )
 
 
+def _git(repo: pathlib.Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-C", str(repo), *args], check=True, capture_output=True, text=True
+    )
+
+
 def _write_executable(path: pathlib.Path, body: str) -> None:
     path.write_text(body, encoding="utf-8")
     path.chmod(0o755)
@@ -413,9 +455,18 @@ exit {0 if caddy_valid else 1}
     fake_rm = tmp_path / "rm"
     _write_executable(fake_rm, '#!/bin/bash\nexec /bin/rm "$@"\n')
 
+    body = "app.radon.run {\n  respond \"ok\"\n}\n"
     source = tmp_path / "checkout" / "caddy" / "Caddyfile"
     source.parent.mkdir(parents=True, exist_ok=True)
-    source.write_text("app.radon.run {\n  respond \"ok\"\n}\n", encoding="utf-8")
+    source.write_text(body, encoding="utf-8")
+    # The trusted content source: a real git repo standing in for the release
+    # branch tip. `radon` owns `source` but cannot forge a blob at that commit.
+    repo = tmp_path / "release"
+    (repo / "cloud" / "caddy").mkdir(parents=True)
+    (repo / "cloud" / "caddy" / "Caddyfile").write_text(body, encoding="utf-8")
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "add", "-A")
+    _git(repo, "-c", "user.email=cp@test", "-c", "user.name=cp", "commit", "-q", "-m", "edge")
     config = tmp_path / "etc" / "caddy" / "Caddyfile"
     config.parent.mkdir(parents=True, exist_ok=True)
     config.write_text("# live known-good\n", encoding="utf-8")
@@ -431,6 +482,8 @@ exit {0 if caddy_valid else 1}
         "RADON_TEST_CADDY_SOURCE": str(source),
         "RADON_TEST_CADDY_CONFIG": str(config),
         "RADON_TEST_CADDY_BIN": str(fake_caddy),
+        "RADON_TEST_GIT_DIR": str(repo / ".git"),
+        "RADON_TEST_UNIT_REMOTE": str(repo),
     }
     return env, source, config, systemctl_log, caddy_log
 
@@ -471,6 +524,29 @@ def test_publish_caddy_refuses_a_symlinked_source(tmp_path):
     assert not systemctl_log.exists() or "reload caddy" not in systemctl_log.read_text(
         encoding="utf-8"
     )
+
+
+def test_publish_caddy_never_publishes_a_checkout_only_edge_config(tmp_path):
+    """The edge config decides which proxy and fetch-metadata headers reach the
+    API's local-trust check, so whoever chooses its bytes chooses that check's
+    answer. `radon` owns the checkout and holds a passwordless grant for this
+    verb, so the content must come from the commit the remote reports for the
+    release branch -- which it cannot forge -- and a checkout-only edit must be
+    inert.
+    """
+    env, source, config, systemctl_log, _caddy_log = _publish_fixture(tmp_path)
+    source.write_text(
+        "app.radon.run {\n  reverse_proxy 127.0.0.1:8321 {\n"
+        "    header_up -X-Forwarded-For\n  }\n}\n",
+        encoding="utf-8",
+    )
+
+    result = _run_publish(env)
+
+    assert "header_up -X-Forwarded-For" not in config.read_text(encoding="utf-8"), (
+        "a checkout-only edge config edit reached the live configuration"
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_publish_caddy_leaves_live_config_untouched_when_validation_fails(tmp_path):
@@ -533,6 +609,66 @@ def test_caddy_validation_output_is_not_relayed_to_the_unprivileged_caller(tmp_p
     assert leaked not in result.stderr + result.stdout, (
         "caddy validate output reached the unprivileged caller, leaking the "
         "content of whatever file the candidate imported"
+    )
+
+
+def test_publish_caddy_restarts_when_reload_fails(tmp_path):
+    """TERMing a hung reload leaves Type=notify in `reloading`. Later
+    `systemctl reload caddy` waits out the helper timeout and rolls back
+    (db69ccb4 through 3866d693, HTTP-only included). Restart unwedes and
+    loads the already-installed candidate."""
+    env, source, config, systemctl_log, _caddy_log = _publish_fixture(tmp_path)
+    fake_systemctl = tmp_path / "systemctl"
+    _write_executable(
+        fake_systemctl,
+        f"""#!/bin/bash
+printf '%s\\n' "$*" >> {shlex.quote(str(systemctl_log))}
+if [[ "${{1:-}}" == "reload" ]]; then
+  exit 1
+fi
+exit 0
+""",
+    )
+
+    result = _run_publish(env)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    commands = systemctl_log.read_text(encoding="utf-8")
+    assert "reload caddy" in commands
+    assert "restart caddy" in commands
+    assert config.read_text(encoding="utf-8") == source.read_text(encoding="utf-8")
+
+
+def test_publish_caddy_action_timeout_outlasts_reload_and_restart():
+    """publish-caddy is supervised at ROOT_MUTATION_ACTION_TIMEOUT (180s).
+
+    reload_caddy used that full 180s, so the supervisor killed the helper
+    before restart_caddy ran (11a0575d and 868ee0f2 both failed at 180s
+    with no restart). The action budget must cover reload + restart.
+    """
+    text = ROOT_HELPER.read_text(encoding="utf-8")
+    reload_s = int(
+        re.search(
+            r'kill-after=2s\s+(\d+)s\s+"\$SYSTEMCTL"\s+reload caddy', text
+        ).group(1)
+    )
+    restart_s = int(
+        re.search(
+            r'kill-after=2s\s+(\d+)s\s+"\$SYSTEMCTL"\s+restart caddy', text
+        ).group(1)
+    )
+    start = text.index("root_action_timeout() {")
+    body = text[start : text.index("\n}", start) + 2]
+    assert "publish-caddy" in body
+    # Dedicated publish budget, or the shared mutation timeout if not split.
+    dedicated = re.search(
+        r'ROOT_PUBLISH_CADDY_ACTION_TIMEOUT=(\d+)', text
+    )
+    mutation = int(re.search(r'(?m)^  readonly ROOT_MUTATION_ACTION_TIMEOUT=(\d+)', text).group(1))
+    action_s = int(dedicated.group(1)) if dedicated else mutation
+    assert action_s >= reload_s + restart_s + 20, (
+        f"publish-caddy action {action_s}s cannot fit reload {reload_s}s "
+        f"+ restart {restart_s}s"
     )
 
 

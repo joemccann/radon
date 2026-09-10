@@ -6,19 +6,19 @@ import { describe, expect, it } from "vitest";
 const ROUTES = [
   "assistant", "attribution", "backtest/[strategy]", "blotter", "breadth",
   "cash-flows", "discover", "flow-analysis", "flow-analysis/[ticker]",
-  "futures/chain", "gamma-rotation", "gex", "index-options/chain", "internals",
+  "futures/chain", "gamma-rotation", "gex", "headlines", "index-options/chain", "internals",
   "journal", "journal/sync", "knowledge/prior-evals", "knowledge/search", "leap",
   "leap/scan", "menthorq/[command]/image", "menthorq/cta", "menthorq/cta/image", "newsfeed/posts",
   "options/chain", "options/expirations", "options/exposure", "options/rv-ratio",
   "orders/cancel", "orders/modify", "orders/place", "orders", "orders/whatif",
   "paper/place", "performance", "pi", "portfolio", "preferences", "previous-close",
   "regime", "scanner", "scanner/strength", "scanner/strength/scan",
-  "scanner/theta", "scanner/theta/scan", "short-availability/[ticker]",
+  "scanner/theta", "scanner/theta/scan", "short-availability/[ticker]", "streaks",
   "ticker/info", "ticker/news", "ticker/ratings", "ticker/seasonality", "vcg",
   "workflow/run", "service-health",
 ] as const;
 
-const SHARE_ROUTES = ["gex", "internals", "menthorq/cta", "regime", "vcg"] as const;
+const SHARE_ROUTES = ["gex", "internals", "menthorq/cta", "newsfeed", "regime", "vcg"] as const;
 const ADMIN_ROUTES = ["edge-health", "health", "host-metrics", "reliability", "slo"] as const;
 
 // Guarded routes outside the security-report ROUTES list — admin actions and
@@ -27,13 +27,22 @@ const GUARDED_ADMIN_ACTION_ROUTES = [
   "admin/ib/reset-backoff", "admin/ib/restart", "admin/services",
   "admin/services/[unit]/[action]", "admin/stack/restart",
   "admin/trading/[action]", "alerts", "alerts/[id]",
+  // Operator credentials CRUD (PR #125): requireRouteAccess operatorOnly on
+  // every verb, reads included — masked hints are nobody's business on demo.
+  "credentials", "credentials/[service]",
   // R-179: minting a relay ticket is not read-only — with an OPTIONAL bearer
   // this route was a loopback-trusted deputy (the Next.js server IS loopback
   // to FastAPI's /ws-ticket).
   "ib/ws-ticket",
+  // Subscription research bytes require the operator allowlist on every read.
+  "newsfeed/research/files/[asset]",
   // R-180: this POST SPAWNS garch_convergence.py. Its leap/scan sibling has
   // carried the same guard since R-079; the read-only GET stays below.
   "garch-convergence/scan",
+  // profile PUT is a mutate.workspace pin, so chat call_api can reach it; the
+  // handler-local gate keeps it off the perimeter-only list like every other
+  // mutation. Its GET stays authenticated-only.
+  "profile",
 ] as const;
 
 // R-181: routes whose guard is a DIFFERENT allowlist. `admin/demo-users`
@@ -43,22 +52,36 @@ const GUARDED_ADMIN_ACTION_ROUTES = [
 // have unexercised by either matrix.
 const DEMO_ADMIN_GUARDED_ROUTES = ["admin/demo-users"] as const;
 
+// First-run setup wizard (PR #125): guarded by a DIFFERENT mechanism again —
+// hard 404 unless setup mode is active (no Clerk keys configured anywhere),
+// then a timing-safe console-token check on every POST. Never reachable on a
+// deployment with auth configured; tests: setup-first-run.test.tsx.
+const SETUP_TOKEN_GUARDED_ROUTES = [
+  "setup/complete", "setup/status", "setup/validate",
+] as const;
+
 // Routes with NO route-local guard: the middleware default-deny perimeter is
 // their only auth layer — a deliberate classification for read-only market
 // data and user-scoped stores. A new route file is UNCLASSIFIED until it
 // lands either here or in a guarded list above; the filesystem pin below
 // fails until that decision is made (the publicShareRoutes.ts discipline).
 const MIDDLEWARE_PERIMETER_ONLY_ROUTES = [
+  // AI infrastructure is a cache-only research read, like llm-token-index.
+  "ai-cycle",
   "bookmarks", "bookmarks/[post_id]", "bpi", "catalysts",
   // cor/skew2d/vol-cone/equibles-*: read-only market-data indicators (R-079
   // classification) — same posture as bpi/margin-debt/straddle.
-  "cor", "credit-spread", "divyield", "iei-hyg", "trin", "equibles-ats-venue-share", "equibles-cot-positioning",
+  "cor", "credit-spread", "dispersion", "divyield", "ma-ratio", "iei-hyg", "trin", "equibles-ats-venue-share", "equibles-cot-positioning",
   "equibles-filing-forensics", "equibles-short-crowding",
   "equibles-smart-money-13f",
   "flex-token", "flow-surprise", "futures-quote", "garch-convergence",
   "hhlev", "hyad", "index-quote",
-  "informed-flow/[ticker]", "ivrank", "llm-token-index", "margin-debt", "prices",
-  "profile", "risk-free-rate", "skew", "skew2d", "straddle", "vixcor", "vixts",
+  "informed-flow/[ticker]", "ivrank", "iv-spread", "llm-token-index", "margin-debt",
+  // models: read-only chat model picker catalog. Reports WHICH provider keys
+  // are present in this deployment, never any key material — same posture as
+  // its llm-token-index sibling, so the middleware perimeter is the only layer.
+  "models", "prices",
+  "risk-free-rate", "skew", "skew2d", "straddle", "vixcor", "vixts",
   "vol-cone", "watchlist", "watchlist/[symbol]", "workflow", "yield-curve",
   "yield-curve/live",
 ] as const;
@@ -105,6 +128,7 @@ describe("security report route-local authorization matrix", () => {
       ...ADMIN_ROUTES.map((route) => `admin/${route}`),
       ...GUARDED_ADMIN_ACTION_ROUTES,
       ...DEMO_ADMIN_GUARDED_ROUTES,
+      ...SETUP_TOKEN_GUARDED_ROUTES,
       ...MIDDLEWARE_PERIMETER_ONLY_ROUTES,
       ...PINNED_ELSEWHERE_ROUTES,
     ]);
@@ -156,6 +180,15 @@ describe("security report route-local authorization matrix", () => {
       expect(text, route).toContain("requireRouteAccess");
       expect(text, route).toContain("operatorOnly: true");
     }
+  });
+
+  it("mints relay tickets for operators only", () => {
+    // The route declares radonCapability "admin"; without operatorOnly a
+    // deployment with no allowlist (the demo posture) would let any active
+    // principal mint a relay ticket from its own token.
+    const text = source("app/api/ib/ws-ticket/route.ts");
+    expect(text).toContain("requireRouteAccess");
+    expect(text).toContain("operatorOnly: true");
   });
 
   it("requires operator capability and durable mutation budgets on live order routes", () => {

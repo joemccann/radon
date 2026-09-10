@@ -71,6 +71,13 @@ class TestTotalDeadline:
         with pytest.raises(mq.MenthorQDashboardAuthError):
             client._remaining_ms(time.monotonic() - 1, cap_seconds=10)
 
+    def test_the_production_request_budget_is_forty_seconds(self):
+        """test_menthorq_dashboard_bootstrap overrides the budget per-test so
+        the expired-session poll runs out in 0.5s instead of 40s (CIP-001).
+        Pin the module default so that test-only override can never become
+        the production value."""
+        assert mq.REQUEST_PATH_AUTH_BUDGET_SECONDS == 40.0
+
 
 class TestEmbargoIsDistinguishable:
     def test_the_embargo_raises_its_own_subclass(self):
@@ -88,7 +95,7 @@ class TestEmbargoIsDistinguishable:
         client = mq.MenthorQDashboardClient(username="u", password="p")
 
         class _Context:
-            def storage_state(self, path):
+            def storage_state(self, path=None):
                 raise OSError("No space left on device")
 
         with pytest.raises(mq.MenthorQDashboardStorageError):
@@ -140,10 +147,10 @@ class TestBootstrapWallTime:
             def count(self):
                 return 1
 
-            def fill(self, _value):
+            def fill(self, _value, **_kwargs):
                 return None
 
-            def click(self):
+            def click(self, **_kwargs):
                 return None
 
         class _Response:

@@ -3,7 +3,7 @@
  */
 
 import React from "react";
-import { cleanup, render, screen, fireEvent, within } from "@testing-library/react";
+import { act, cleanup, render, screen, fireEvent, within } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
 import GexPanel, { getDisplayProfile } from "../components/GexPanel";
@@ -341,4 +341,27 @@ describe("GexPanel", () => {
     expect(content).toContain("/api/gex/share");
   });
 
+});
+
+describe("GexPanel — freshness rail", () => {
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it("shows data_date and counts down to the next radon-refresh slot", () => {
+    // 20:20 UTC on a Wednesday: ten minutes short of radon-refresh.timer's
+    // 20:30 slot. The VCG constant (16:25 ET) would read 5m 00s here.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-02T20:20:00Z"));
+    renderWithData({ ...MOCK_GEX_DATA, scan_time: "2026-09-02T20:15:00Z", data_date: "2026-09-02" });
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+    const rail = screen.getByTestId("gex-freshness-rail");
+    expect(rail).toBeTruthy();
+    expect(rail.textContent).toContain("2026-09-02");
+    expect(screen.getByTestId("gex-freshness-rail-countdown").textContent).toBe("10m 00s");
+    expect(rail.textContent).toContain("Next sample");
+  });
 });

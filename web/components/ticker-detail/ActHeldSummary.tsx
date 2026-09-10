@@ -17,7 +17,8 @@ type ActHeldSummaryProps = {
  */
 export default function ActHeldSummary({ position, onOpenDeck }: ActHeldSummaryProps) {
   const marketValue = resolveMarketValue(position);
-  const pnl = marketValue != null ? marketValue - resolveEntryCost(position) : null;
+  const entryCost = resolveEntryCost(position);
+  const pnl = marketValue != null && entryCost != null ? marketValue - entryCost : null;
 
   return (
     <button type="button" className="act-flat" onClick={onOpenDeck}>

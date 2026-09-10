@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { mostRecentSessionDate } from "../lib/marketSession";
 
 /**
  * API route tests.
@@ -94,6 +95,12 @@ const mockMkdir = vi.fn().mockResolvedValue(undefined);
 const mockWriteFile = vi.fn().mockResolvedValue(undefined);
 // Default stat: mtime 5 s ago (fresh) so portfolio GET doesn't trigger background spawn
 const mockStat = vi.fn().mockResolvedValue({ mtimeMs: Date.now() - 5_000 });
+// T-478: the module-load-time default freezes and leaks per-test stubs —
+// re-stamp a fresh window-relative mtime before every test.
+beforeEach(() => {
+  mockStat.mockReset();
+  mockStat.mockResolvedValue({ mtimeMs: Date.now() - 5_000 });
+});
 vi.mock("fs/promises", () => ({
   readFile: mockReadFile,
   readdir: mockReaddir,
@@ -817,11 +824,16 @@ describe("POST /api/gex", () => {
       history: [],
     }));
 
+    // REL-238 / R-643: the fallback keeps the cached body but must preserve
+    // the upstream failure status and stamp it in the body — a 200 +
+    // header-only warning hid dead scans from useSyncHook consumers.
     const res = await POST();
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(502);
     expect(res.headers.get("X-Sync-Warning")).toContain("GEX sync failed");
     const body = await res.json();
     expect(body.net_gex).toBe(321);
+    expect(body.is_stale).toBe(true);
+    expect(body.scan_succeeded).toBe(false);
   });
 });
 
@@ -837,14 +849,18 @@ describe("GET /api/regime", () => {
     mockReadFile.mockReset();
     mockStat.mockReset();
     mockStat.mockResolvedValue({ mtimeMs: Date.now() - 5_000 });
+    mockRadonFetch.mockReset();
     const mod = await import("../app/api/regime/route");
     GET = mod.GET;
   });
 
   it("returns cached regime payload when file exists", async () => {
+    // Window-relative date: a hardcoded past date goes stale and re-arms
+    // triggerBackgroundScan() (T-477).
+    const sessionDate = mostRecentSessionDate();
     mockReadFile.mockResolvedValue(JSON.stringify({
-      scan_time: "2026-04-22T14:00:00Z",
-      date: "2026-04-22",
+      scan_time: `${sessionDate}T14:00:00Z`,
+      date: sessionDate,
       market_open: true,
       cri: { score: 24, level: "ELEVATED", components: { vix: 6, vvix: 6, correlation: 6, momentum: 6 } },
       history: [],
@@ -854,8 +870,10 @@ describe("GET /api/regime", () => {
     const res = await GET();
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.date).toBe("2026-04-22");
+    expect(body.date).toBe(sessionDate);
     expect(body.cri.score).toBe(24);
+    // T-477: a fresh cached payload must not fire a background /regime/scan.
+    expect(mockRadonFetch).not.toHaveBeenCalled();
   });
 });
 
@@ -897,11 +915,15 @@ describe("POST /api/regime", () => {
       spy_closes: [],
     }));
 
+    // REL-238 / R-643: status preserved + body-level failure markers (see the
+    // GEX fallback test above for the rationale).
     const res = await POST();
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(502);
     expect(res.headers.get("X-Sync-Warning")).toContain("CRI sync failed");
     const body = await res.json();
     expect(body.cri.score).toBe(18);
+    expect(body.is_stale).toBe(true);
+    expect(body.scan_succeeded).toBe(false);
   });
 });
 

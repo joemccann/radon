@@ -16,9 +16,15 @@ import { requireRouteAccess } from "@/lib/routeAccess";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+export const radonCapability = "admin";
+
 export async function POST(request?: Request) {
   const access = await requireRouteAccess(request, {
+    // Capability is "admin": a deployment with no allowlist must not let a
+    // non-operator principal mint a relay ticket.
+    operatorOnly: true,
     rate: { key: "ib/ws-ticket:route", limit: 30, windowMs: 60_000 },
+    durableRateTier: "E",
   });
   if (!access.ok) return access.response;
   const requestId = getRequestId();

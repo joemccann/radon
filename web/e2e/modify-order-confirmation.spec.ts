@@ -164,7 +164,7 @@ test.describe("Order modify confirmation", () => {
     await expect(modal).toBeVisible();
     await modal.locator("#modify-price-input").fill("5.55");
     await expect(modal).toContainText("Est. Realized P&L:");
-    await expect(modal).toContainText("$2,750");
+    await expect(modal.getByTestId("order-confirm-estimated-pnl")).toHaveText("$2,750 (+11.0%)");
     await modal.getByRole("button", { name: /modify order/i }).click();
 
     await expect(row).toContainText("$5.70");

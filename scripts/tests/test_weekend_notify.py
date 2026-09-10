@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import os
 from unittest.mock import patch
+
+import pytest
 
 from weekend_notify import (
     build_weekend_payload,
@@ -162,6 +165,73 @@ class TestEnvFile:
         assert payload["user"] == "from-env"
         assert payload["token"] == "from-file"
 
+    # T-351 (rail 5): every wrapper hands the notifier `$WEEKEND_ROOT/.env`,
+    # and on the runner that file carries more than Pushover. The notifier
+    # needs exactly two keys; importing the whole file put IB_FLEX_TOKEN,
+    # TURSO_AUTH_TOKEN and CLERK_* into the security loop's child process.
+    SECRETS = ("IB_FLEX_TOKEN", "TURSO_AUTH_TOKEN", "CLERK_SECRET_KEY")
+
+    def test_env_file_imports_only_the_pushover_keys(self, monkeypatch, tmp_path):
+        env_file = tmp_path / ".env"
+        env_file.write_text(
+            "PUSHOVER_USER=from-file\nPUSHOVER_TOKEN=from-file\n"
+            + "".join(f"{key}=x\n" for key in self.SECRETS)
+        )
+        for key in ("PUSHOVER_USER", "PUSHOVER_TOKEN", *self.SECRETS):
+            monkeypatch.delenv(key, raising=False)
+        argv = ["--loop", "security", "--phase", "audit", "--status", "OK",
+                "--env-file", str(env_file)]
+        try:
+            with patch("weekend_notify._http_post", return_value=(200, b"")) as post:
+                assert main(argv) == 0
+            leaked = [key for key in self.SECRETS if key in os.environ]
+            assert leaked == [], (
+                f"{leaked} were imported from --env-file into os.environ; the "
+                "notifier may load PUSHOVER_USER / PUSHOVER_TOKEN and nothing else"
+            )
+            payload = post.call_args[0][1]
+            assert payload["user"] == "from-file" and payload["token"] == "from-file"
+        finally:
+            for key in ("PUSHOVER_USER", "PUSHOVER_TOKEN", *self.SECRETS):
+                os.environ.pop(key, None)
+
     @staticmethod
     def argv(env_file):
         return TestMainAlwaysExitsZero.ARGV + ["--env-file", str(env_file)]
+
+
+class TestProloguePhaseStillPages:
+    """A prologue death must page, not just post an issue comment.
+
+    Every wrapper's `report()` is reachable with `PHASE="prologue"`: the
+    marker refusal, the held-lock refusal and the ERR trap armed over the
+    whole prologue all fire before `begin_phase` ever runs. `--phase`
+    accepted only audit/remediate, so argparse exited 2 BEFORE the Pushover
+    call, and the wrapper sends the page with `|| true` — the loudest
+    failures (a moved clone, a full disk, a reused pid that makes every
+    subsequent daily fire exit 3 in under a second) posted a comment and
+    never paged. Observed on the 2026-08-30 CI-performance install smoke
+    test, which reproduced the held-lock refusal end to end.
+    """
+
+    LOOPS = ("reliability", "testing", "ci-performance", "documentation", "security")
+
+    @pytest.mark.parametrize("loop", LOOPS)
+    def test_the_prologue_page_is_sent(self, loop, monkeypatch):
+        monkeypatch.setenv("PUSHOVER_USER", "u")
+        monkeypatch.setenv("PUSHOVER_TOKEN", "t")
+        argv = [
+            "--loop",
+            loop,
+            "--phase",
+            "prologue",
+            "--status",
+            "REFUSED (lock held)",
+        ]
+        with patch("weekend_notify._http_post", return_value=(200, b"")) as post:
+            assert main(argv) == 0
+        post.assert_called_once()
+        payload = post.call_args[0][1]
+        assert payload["title"] == f"radon {loop} prologue"
+        assert "REFUSED (lock held)" in payload["message"]
+        assert payload["priority"] == 0

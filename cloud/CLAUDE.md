@@ -45,16 +45,113 @@ After `radon-deploy-root refresh-control-plane` is installed (helper +
 sudoers), a unit-only push does not need root SSH. The SHA that *adds*
 that sudoers verb still needs one root `bootstrap-control-plane.sh`.
 Refresh copies changed control-plane units and `daemon-reload`s; it does
-not start, stop, or restart Gateway.
+not start, stop, or restart Gateway. Since R-430 the deploy job also runs
+`radon-deploy-root sync-control-plane` first, so privileged diffs (helper,
+sudoers, polkit) converge on GitHub main without root SSH too.
+
+**`radon` is not in group `docker`.** That group is root-equivalent: a member
+mounts the host into a container and walks out as root. The account held it
+only to drive the `ib-gateway` container, and that now goes through
+`/usr/local/sbin/radon-docker-gw` — root-owned, a fixed verb set
+(`compose-up`, `compose-down`, `inspect-running`, `pgrep-jvm`, `pgrep-java`,
+`thread-dump <pid>`, `logs`, `stats`, `ps`) against a pinned container, each
+verb listed in full in `sudoers.d/radon-ops` with no wildcard. Callers:
+`ib-gateway-control.sh` (still `User=radon`, so the 2FA lease and guard files
+under `/var/lib/radon` keep their ownership) and `scripts/jvm_forensics.py`.
+
+The compose body it runs lives at `/etc/radon/ib-gateway-compose.yml`, a
+control-plane artifact, NOT `cloud/docker-compose.yml` in the checkout: root
+acting on a file its caller can rewrite is the same escalation with extra
+steps. The shim refuses a symlinked or non-root-owned body, and likewise refuses
+`/etc/radon/env` when it is a symlink, not root-owned, or group/other-writable
+(`require_trusted_env_file`, REL-234 — both refusals exit 78; an exit 78 from
+`ib-gateway-control.sh` during recovery means fix the file's ownership/perms,
+not the Gateway), and
+`--project-name cloud` is pinned so the `cloud_ib-config` volume — the
+Gateway's Jts settings and 2FA state — survives the move.
+
+`config-check` is `deploy.sh`'s preflight compose render. It takes no
+env-file argument on purpose — a caller-supplied path is the one thing the
+shim refuses — and pins the same `/etc/radon/env` the deploy's
+`ENV_FILE_DEFAULT` resolves to in production. When the shim refuses (or for a
+dev/test invocation against some other env file), `preflight_env` falls back to
+a direct `docker compose config` — including in production, where a shim
+refusal that the direct render covers emits the countable journal line
+`[preflight] compose-render: shim refused (exit N), direct render covered`
+(R-647/REL-242: the fallback deliberately does not abort the deploy, because
+the shim's sudoers verb arrives with the release being promoted). A compose
+body that fails both paths still fails preflight: preferring one path
+would deadlock the deploy across the sudoers-verb / docker-group transition,
+since whichever mechanism the current host lacks would abort the promote that
+installs it (`deploy.sh:204-231`, bd7d7e4c). Note the
+narrowing: preflight now renders the INSTALLED compose body, not the incoming
+release's. The incoming body is gated at install time instead, by provenance
+(git blob at the deployed commit) plus `compose_body_is_valid`.
+
+**`publish-caddy` stages from the trusted tip too.** The edge config decides
+which proxy and fetch-metadata headers survive on the way to the API's
+local-trust check, and `radon` both owns the checkout copy and holds a NOPASSWD
+grant for the verb. `caddy validate` proves the candidate parses and nothing
+about what it does, so `stage_caddy_candidate` reads the blob at the commit the
+remote reports for the release branch (`resolve_fetched_main_tip`) rather than
+the working tree - the same anchor the control-plane refresh uses. A
+checkout-only edit never reaches the live configuration.
+
+That validator's deny-list refuses EVERY host-namespace join, not only
+`pid:` — `ipc:`, `userns_mode:`, `uts:` and `cgroup:` widen the container's
+runtime the same way (R-668/REL-249), and the deny greps match quoted values
+too (`privileged: "true"` / `'true'` — the bare-`true` grep alone waved the
+quoted form through until T-441 caught it). The three copies
+(deploy-root-helper, bootstrap-control-plane, setup-vps) stay byte-identical;
+a parity test in `cloud/tests/test_rel234_compose_gate.py` pins them. Their
+body predicates consume here-strings, never `printf | grep -q` or another
+early-exit producer pipeline: under `pipefail`, SIGPIPE can reject a safe body
+or bypass a forbidden match. Large-body regressions exercise both outcomes
+in all three copies.
+
+**The broker host gets none of this from CI.** `.github/workflows/ci.yml`
+deploys to a single `secrets.VPS_HOST`, and `sync-control-plane` reads
+`/home/radon/radon/.git`, which the broker does not have. Every control-plane
+change reaches it by hand: rsync the `cloud/` tree at the tested SHA to a
+root-owned path there, then run `bootstrap-control-plane.sh` with
+`RADON_BOOTSTRAP_CLOUD_ROOT` pointed at it.
+
+`inspect-running` passes docker's stdout, stderr and exit code through
+untouched: `gateway_state()` tells `missing` from `unknown` by matching
+"No such object" on stderr, and swallowing it wedges the watchdog's restart
+ladder at `unknown`.
+
+**Refresh installs git blobs, never the working tree.** The sources it copies
+into `/etc/sudoers.d`, `/usr/local/sbin`, `/etc/polkit-1` and the unit
+directory come from `git cat-file blob` at the deployed commit, staged
+root-owned under `/var/lib/radon/deploy/control-plane-src.*`. That commit is
+the local HEAD, and it must be reachable from the GitHub main tip -- an
+ancestor, so a rollback still installs its own release's control plane, but
+never a commit main has not contained. `/home/radon/radon` is writable by
+`radon`, which holds a NOPASSWD verb for `refresh-control-plane-privileged`;
+reading the checkout there made those bytes a root install with only syntax
+validation in front of them. Same rule `install-units` has always followed
+(R-084).
+
+The five app-plane drop-ins run the container with the systemd notify
+socket proxied: `radon-app-runtime run` spawns `notify-proxy` inside the
+unit cgroup and mounts ITS socket as the container's `NOTIFY_SOCKET`. A
+datagram sent from the container's own PIDs (in `system.slice/docker-*.scope`)
+is dropped by systemd regardless of `NotifyAccess=`, so `Type=notify` +
+`WatchdogSec=` work only through the proxy (R-429).
 
 ## Canonical Host Paths
 
 - Monorepo checkout: `/home/radon/radon`
 - Cloud source: `/home/radon/radon/cloud`
 - Immutable deploy support: `/home/radon/.radon-deploy-runners/<sha>.<run>/cloud`
-- Canonical secrets: `/etc/radon/env` (regular file, mode `0600`, owner `radon:radon`)
+- Canonical secrets: `/etc/radon/env` (regular file, mode `0640`, owner `root:radon`)
 - Compatibility secret symlink: `/home/radon/radon-cloud/.env` -> `/etc/radon/env`
 - Canonical media: `/var/lib/radon/media`
+- Private research: `/var/lib/radon-private` is a root-owned `0700` anchor;
+  its `research` child is radon-owned `0700`. The worker mounts that child
+  read-write and API read-only at `/var/lib/radon/research`. Seed through the
+  container mount; host user radon cannot traverse the anchor.
 - Compatibility media symlink: `/home/radon/radon-cloud/media` -> `/var/lib/radon/media`
 - Durable privileged deploy state: `/var/lib/radon/deploy`
 - Control-plane manifest/readiness:
@@ -64,7 +161,9 @@ not start, stop, or restart Gateway.
 The legacy directory is not a code source. Do not symlink the whole
 `/home/radon/radon-cloud` directory. Code paths, working directories, Compose,
 drift audit, helpers, and units use the monorepo cloud path. Units load
-`EnvironmentFile=/etc/radon/env`.
+`EnvironmentFile=/etc/radon/env`; the exception is `radon-mcp.service`, which
+loads the stripped `/etc/radon/mcp.env` that `deploy.sh:write_mcp_env` derives
+from it.
 
 ## Deployment Contract
 
@@ -86,7 +185,10 @@ Pushes to `main` run the root CI workflow. The deploy job:
 6. Verifies the installed root control plane against the root-written manifest
    before any dependency build, service stop, or transition journal write.
 7. Builds frozen Bun workspaces and Python wheels in a detached worktree before
-   teardown.
+   teardown, then pre-pulls the release's app image pair
+   (`radon-app-runtime pull <sha>`, sudoers-granted) while the current
+   release still serves; the same verb drops SHA-tagged pairs that are
+   neither the target nor in use by a running container (R-431).
 8. Fsyncs a durable transition journal, snapshots active services and timers,
    promotes artifacts, restores the prior topology, and runs code-controlled
    gates.
@@ -95,6 +197,24 @@ Pushes to `main` run the root CI workflow. The deploy job:
 The journal helper is loaded from the immutable runner so rollback to a commit
 that predates `cloud/` cannot delete its own recovery implementation. Root
 topology state is durable across reboot under `/var/lib/radon/deploy`.
+
+**Auto-deploy mechanics (moved from root `CLAUDE.md`).** `.github/workflows/ci.yml` runs the Vitest + pytest gate (including `cloud/tests`) then deploys on green: it SSHes to Hetzner, materializes an immutable `cloud/` runner from the release SHA under `~/.radon-deploy-runners/`, and runs that runner's `deploy.sh '$SHA'`. The deploy job remains bound to the GitHub Environment `Production` for deployment history, URL metadata, environment-scoped configuration, and a main-only deployment branch policy; it has no required-reviewer rule, so no manual approval is needed after the automated gates pass. Host secrets stay at `~/radon-cloud/.env` (`RADON_DEPLOY_ENV_FILE`). After root bootstrap publishes `/var/lib/radon/control-plane-ready`, legacy dual-checkout deploy is retired for new releases; pre-ready SHAs still use the compatibility path. Before `deploy.sh`, the deploy job runs `cloud/scripts/sync-control-plane.sh` → `radon-deploy-root sync-control-plane`, which installs the GitHub-main-tip control-plane bundle (helper, sudoers, polkit, control-plane units, drop-ins) via that tip's own bootstrap, so control-plane edits and root hot-patches need no manual bootstrap (R-430, 2026-08-29). Confirm: `gh run list --workflow=ci.yml --limit 1`. Migration/rollback: `docs/monorepo-cloud-migration.md`. `deploy.sh` then `publish-caddy`: stage, `caddy validate`, atomic install, `systemctl reload caddy` (30s), then `systemctl restart caddy` (60s) if reload is TERMed. The helper supervisor budget for publish-caddy is 300s so reload+restart both fit; 180s was consumed by a wedged reload and restart never ran (`11a0575d`, `868ee0f2`). `mcp.radon.run` is `http://mcp.radon.run` until HTTPS ACME can run against a process that already answers that Host on :80. Do not add a new `/var/log/caddy/*.log` path: root `caddy validate` creates that file as root:root and the caddy user cannot start (`mcp.log` took the edge down on 8628705d). Cutover lessons: `tasks/lessons.md` (2026-07-11). The deploy health-gates the relay restart: before tearing services down (while the current radon-api still serves `/health`), `wait_for_gateway_ready` confirms the IB gateway is authenticated + port_listening (bounded 60s, warn-and-proceed). The relay self-heals on reconnect and raises a `service_health` row (`ib-realtime-relay`) instead of looping silently on no-ticks.
+
+The root helper normally polls service state for 60 seconds. Production stops
+of `radon-research.service` instead allow 150 seconds: its canonical unit has
+`TimeoutStopSec=120`, followed by container cleanup in `ExecStopPost`. Research
+startup and all other state waits keep their original bounds. The root mutation
+supervisor still caps the complete action at 180 seconds and fails closed into
+recovery if shutdown does not complete. `cloud/tests/test_research_deploy.py`
+pins these nested budgets and exercises delayed shutdown with a simulated clock.
+
+A failed batched stop retries loaded units, tolerating a retired inventory entry
+only when successful probes report `LoadState=not-found`, `ActiveState=inactive`
+and an empty `FragmentPath`. Unknown states, probe errors and loaded-unit stop
+failures remain fatal. Recovery preserves the inventory and active snapshot.
+The Python image keeps application source root-owned and provisions only
+`/home/radon/radon/logs` for the runtime user; its non-root build smoke verifies
+log creation, writing and rotation while source directories remain unwritable.
 
 ## Privileged Bootstrap
 
@@ -110,6 +230,34 @@ before `systemd-analyze verify` (units reference absolute ExecStart paths that
 do not exist yet). Remove only those seeds if verification fails. After any
 live hot-patch of an installed control-plane file, re-run bootstrap so the
 readiness manifest hashes match the next release.
+
+### Automated control-plane sync (2026-08-29, R-430)
+
+The deploy job runs `cloud/scripts/sync-control-plane.sh` (as `radon`, from
+the immutable runner) before `deploy.sh`. It calls the sudoers verb
+`radon-deploy-root sync-control-plane`: root resolves the GitHub main tip,
+extracts `cloud/` at that commit from git objects into a root-only staging
+tree under `/var/lib/radon/deploy/`, and runs that tip's own
+`bootstrap-control-plane.sh` (deploy lock, transition refusal, validation,
+atomic install, manifest rewrite). A bundle that is already current is a
+no-op. Helper, sudoers, polkit, control-plane unit and drop-in edits, and
+root hot-patches of installed drop-ins, therefore reconcile on the next green
+push without root SSH. The verb takes no argument: radon cannot hand root a
+tree, only ask it to converge on GitHub main. Prestage skips (does not fail)
+when the bundle is not ready. The manual sequence below remains the recovery
+path when the verb itself is not yet granted or GitHub is unreachable.
+
+Exit semantics (R-437, R-440): 75 (deploy lock held, pending transition) is
+retried and then handed to `deploy.sh`. Any other failure, a bootstrap
+rejection or the helper's 300s deadline (124), fails the deploy job and is
+recorded in `/home/radon/.radon-control-plane-rejected`; while that file
+exists `deploy.sh`'s preflight refuses to apply a differing bundle "after
+promote" (the every-deploy `refresh_install_file` path now carries
+bootstrap's full validator table anyway). A bootstrap TERMed after its
+`daemon-reload` restores the previous readiness marker with the previous
+bundle; only a reload systemd refused leaves readiness withdrawn. A missing
+marker on a host whose units carry `runtime-container.conf` drop-ins makes
+the deploy job refuse (exit 78) instead of using the legacy runner.
 
 ### Safe control-plane refresh (2026-07-18)
 
@@ -181,8 +329,10 @@ Immutable runners under `~/.radon-deploy-runners/` are extracted `a-w`.
 - `scripts/check-env.py` validates names, permissions, literal values, and mode
   consistency without sourcing secrets.
 - Production invariants on Hetzner monorepo hosts:
-  `IB_GATEWAY_MODE=cloud`, `RADON_MODE=hetzner`, `IB_GATEWAY_HOST=127.0.0.1`,
-  `NODE_ENV=production`.
+  `IB_GATEWAY_MODE=cloud`, `RADON_MODE=hetzner`, `NODE_ENV=production`.
+  `IB_GATEWAY_HOST=127.0.0.1` on `RADON_HOST_ROLE=combined` (default) and
+  `broker`. App-role hosts must use an RFC1918 address, never Tailscale
+  CGNAT and never a public NIC. See `docs/spof-host-split.md`.
 - Canonical future secrets path: `/etc/radon/env`. Compatibility path
   `/home/radon/radon-cloud/.env` remains until one green host cutover.
   `deploy.sh` prefers `/etc/radon/env` when that path is a regular file.
@@ -199,7 +349,25 @@ Immutable runners under `~/.radon-deploy-runners/` are extracted `a-w`.
 - Setup validates the stable env before dependency installation or builds.
 - Host needs the exact Bun pin on radon PATH for staged Next builds.
 
+**IB Flex / Gateway env (Hetzner `/etc/radon/env` mode `0640`, owner `root:radon`; moved from root `CLAUDE.md`):** `IB_FLEX_TOKEN`, `IB_FLEX_QUERY_ID=1422766` (blotter), `IB_FLEX_NAV_QUERY_ID=1442520` (Activity query "Equity Summary in Base"; carries THREE sections — NAV in Base, Cash Transactions and Transfers — don't repurpose for trade pulls), `IB_GATEWAY_MODE=cloud` (production; FastAPI must not own Compose), `IB_GATEWAY_COMPOSE_DIR=/home/radon/radon/cloud` (monorepo path; not `~/radon-cloud`), `RADON_MODE=hetzner`.
+
+**Verify Flex query ids against the real env before trusting one written down anywhere** — a stale id documented here once pointed the runbook at a query that does not exist for this account. `IB_FLEX_FLOWS_QUERY_ID` is deliberately unset: `_flows_query_id()` falls back to the NAV id and `resolve_flows` reuses the one fetched document, so a run makes ONE Flex request. Setting it to a second id doubles the request rate against a token that has already taken a 24h-to-168h throttle embargo.
+
+**Backblaze B2 (portfolio cold-archive, production required):** `RADON_ARCHIVE_S3_ENDPOINT`, `RADON_ARCHIVE_S3_BUCKET`, `RADON_ARCHIVE_S3_ACCESS_KEY_ID`, `RADON_ARCHIVE_S3_SECRET_ACCESS_KEY`, `RADON_ARCHIVE_S3_REGION` (+ optional `RADON_ARCHIVE_S3_PREFIX`). S3-compatible API to bucket `radon-archive`. Used by `radon-portfolio-archive.service` / `scripts/archive_portfolio_snapshots.py`. Not Cloudflare R2. Full contract: root `.env.example`, `docs/cloud-services.md` "Portfolio archive".
+
 ## Systemd And Drift
+
+`setup-vps.sh` includes the `radon-aa-frontier-refresh`, `radon-ai-cycle-backfill`
+and `radon-ai-cycle` service/timer pairs in the full-host installation inventory.
+Setup installs all three pairs and enables only their timers; existing hosts receive
+them through the hash-pinned `install-units` path. Historical collection resumes
+at 05:30 UTC, the frontier timer updates the fixed Artificial Analysis cohort at
+07:00 UTC, and current collection runs at 07:15 UTC, each with up to five minutes
+of jitter. Provider credentials are optional source
+entitlements; missing keys leave those measurements unavailable. Collection,
+reviewed disclosures and source limits are documented in
+[`docs/ai-infrastructure-operations.md`](../docs/ai-infrastructure-operations.md).
+
 
 Canonical unit files are copied root-owned to `/etc/systemd/system`; they are
 not symlinked from the checkout.
@@ -232,14 +400,16 @@ starts, stops, or enables units.
 After promote, `deploy.sh` runs `radon-deploy-root refresh-control-plane`
 (unit-class diffs only: `services/*` at `0644 root:root`, one
 `daemon-reload`). It does not start, stop, or restart Gateway. Privileged
-diffs (`scripts/*`, `config/*`) fail closed unless root runs
-`refresh-control-plane-privileged`, which is not in sudoers. The SHA
-that adds the `refresh-control-plane` sudoers verb still needs one
-`bootstrap-control-plane.sh`. After that verb is installed, a unit-only
-push does not need root SSH.
+diffs (`scripts/*`, `config/*`) fail closed unless the installed sudoers
+grants `refresh-control-plane-privileged`; then preflight warns and the
+deploy applies the hashed privileged refresh. The SHA that *adds* that
+sudoers verb still needs one `bootstrap-control-plane.sh`. After that
+verb is installed, helper/sudoers/polkit edits deploy without root SSH.
 
 The drift audit runs from `/home/radon/radon/cloud` and compares live Caddy,
-Compose, systemd, polkit, sudoers, and installed helpers with this source. It
+Compose, systemd, polkit, sudoers, and installed helpers with this source; on
+`RADON_HOST_ROLE=app` the Compose and `ib-gateway-control` surfaces are
+role-skipped because Gateway runtime surfaces are absent by design there. It
 must never read or report `.env*` contents.
 
 `radon-health.service` remains runtime-isolated from the trading cascade: no

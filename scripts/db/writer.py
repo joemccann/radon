@@ -130,7 +130,8 @@ _PRICE_HISTORY_INSERT_CHUNK_ROWS = 400
 def upsert_price_history_rows(symbol: str, rows: list[dict[str, Any]]) -> None:
     """Batched upsert of daily closes into price_history_daily.
 
-    Each row: {"date": "YYYY-MM-DD", "close": float, "source": "ib"|"uw"|"yahoo"}.
+    Each row: {"date": "YYYY-MM-DD", "close": float,
+    "source": "ib"|"uw"|"rh"|"yahoo"}.
     fetched_at is stamped at write time. Writes go as chunked multi-row
     INSERT statements, never per-row.
     """
@@ -649,6 +650,128 @@ def _journal_payload_with_compact_expiry(payload: dict[str, Any]) -> dict[str, A
     return {**payload, "expiry": compact}
 
 
+# A lease older than this is dead. `radon-flex-pull.service` bounds a run at
+# TimeoutStartSec=120 and the timer's closest two runs are 07:30 and 08:30, so
+# the window must sit between the two: long enough that no live run is ever
+# stolen from, short enough that the 08:30 re-pull repairs a 07:30 failure
+# instead of waiting a day. R-436.
+FLEX_CLAIM_STALE_AFTER_S = 15 * 60
+
+
+def claim_flex_delivery(
+    content_sha256: str,
+    *,
+    classified_as: str,
+    period_from: Optional[str] = None,
+    period_to: Optional[str] = None,
+    source_path: Optional[str] = None,
+    now: Optional[datetime] = None,
+) -> bool:
+    """Claim one Flex file for ingest. True when THIS call won the claim.
+
+    `flex_deliveries` was inert: the digest was computed and echoed into a
+    result dict, the table appeared nowhere outside its own migration, and the
+    migration comment "content_sha256 is the PK so the same file is never
+    applied twice" was simply false. Ingest idempotency rested entirely on the
+    row-level upsert keys, which R-329 showed were ordinal-derived and unstable
+    across a reissued statement. R-326.
+
+    The upsert makes the claim atomic: a second ingest of the same bytes
+    affects zero rows and the caller skips every writer. The row is written
+    `status='in_progress'`; `mark_flex_delivery_applied` flips it once every
+    writer has committed. The ON CONFLICT branch re-takes ONLY a stale
+    in_progress lease (claimed_at older than FLEX_CLAIM_STALE_AFTER_S), which
+    is how the bytes stay retryable when the outage that failed the writer
+    also failed the release. R-436.
+    """
+    moment = now or datetime.now(timezone.utc)
+    now_iso = moment.isoformat().replace("+00:00", "Z")
+    cutoff = moment - timedelta(seconds=FLEX_CLAIM_STALE_AFTER_S)
+    cutoff_iso = cutoff.isoformat().replace("+00:00", "Z")
+    db = get_db()
+    cursor = db.execute(
+        "INSERT INTO flex_deliveries "
+        "(content_sha256, classified_as, period_from, period_to, ingested_at, "
+        "source_path, status, claimed_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(content_sha256) DO UPDATE SET "
+        "classified_as = excluded.classified_as, "
+        "period_from = excluded.period_from, "
+        "period_to = excluded.period_to, "
+        "ingested_at = excluded.ingested_at, "
+        "source_path = excluded.source_path, "
+        "status = excluded.status, "
+        "claimed_at = excluded.claimed_at "
+        "WHERE flex_deliveries.status = 'in_progress' "
+        "AND flex_deliveries.claimed_at < ?",
+        (
+            content_sha256,
+            classified_as,
+            period_from,
+            period_to,
+            now_iso,
+            source_path,
+            "in_progress",
+            now_iso,
+            cutoff_iso,
+        ),
+    )
+    db.commit()
+    # `rows_affected` is the JS driver's name (writer.js). libsql_experimental's
+    # Cursor has `rowcount` only — 1 on the insert, 0 on the conflict — so the
+    # old getattr default made the claim False on FIRST sight and every
+    # delivery took the "duplicate" branch. T-250.
+    claimed = getattr(cursor, "rowcount", None)
+    return isinstance(claimed, int) and claimed > 0
+
+
+def release_flex_delivery(content_sha256: str) -> bool:
+    """Release a claim whose ingest did not complete. True when a row was dropped.
+
+    The claim is taken BEFORE the writers run, so it is a lease on work in
+    progress — not a record that the work succeeded. Nothing released it, so a
+    `cash_flow_sync` that failed mid-chunk left `cash_flows` half-applied AND
+    permanently unretryable: the same bytes re-dropped (or re-pulled by the
+    08:30 sFTP run) lost the claim, skipped every writer and heartbeated `ok`.
+    R-379.
+    """
+    db = get_db()
+    result = db.execute(
+        "DELETE FROM flex_deliveries WHERE content_sha256 = ?",
+        (content_sha256,),
+    )
+    db.commit()
+    released = getattr(result, "rowcount", None)
+    if not isinstance(released, int):
+        released = getattr(result, "rows_affected", None)
+    return isinstance(released, int) and released > 0
+
+
+def flex_delivery_status(content_sha256: str) -> Optional[str]:
+    """`in_progress` | `applied` | None (never claimed). R-436."""
+    db = get_db()
+    row = db.execute(
+        "SELECT status FROM flex_deliveries WHERE content_sha256 = ?",
+        (content_sha256,),
+    ).fetchone()
+    return None if row is None else row[0]
+
+
+def mark_flex_delivery_applied(content_sha256: str) -> bool:
+    """Flip the lease to `applied` after EVERY writer committed. R-436."""
+    db = get_db()
+    result = db.execute(
+        "UPDATE flex_deliveries SET status = 'applied' "
+        "WHERE content_sha256 = ? AND status = 'in_progress'",
+        (content_sha256,),
+    )
+    db.commit()
+    applied = getattr(result, "rowcount", None)
+    if not isinstance(applied, int):
+        applied = getattr(result, "rows_affected", None)
+    return isinstance(applied, int) and applied > 0
+
+
 def upsert_journal_entry(trade_id: str, payload: dict[str, Any], filled_at: Optional[str] = None) -> None:
     """Upsert one journal row over bounded Hrana HTTP (real socket timeout).
 
@@ -834,6 +957,53 @@ def upsert_twr_history(date_str: str, twr: float) -> None:
     db.commit()
 
 
+_RH_CROWDING_INSERT_CHUNK_ROWS = 400
+
+
+def upsert_rh_crowding_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
+    """Robinhood retail-crowding overlay — one row per (date, symbol).
+
+    Descriptive crowding features only (popular-watchlist rank + scan hits
+    from the read-only trading MCP). This series must never feed the Four
+    Gates; see migration 0066 and test_rh_crowding.py.
+
+    Chunked multi-row INSERTs (Hrana I/O bounding): one statement per ~400
+    rows, never one per row — per-row executemany is one round-trip PER ROW
+    over Hrana (the rv-ratio 2026-07-21 502 incident class).
+    """
+    if not rows:
+        return
+    stamp = recorded_at or _now_iso()
+    db = get_db()
+    for start in range(0, len(rows), _RH_CROWDING_INSERT_CHUNK_ROWS):
+        chunk = rows[start:start + _RH_CROWDING_INSERT_CHUNK_ROWS]
+        placeholders = ", ".join("(?, ?, ?, ?, ?, ?)" for _ in chunk)
+        params: list[Any] = []
+        for row in chunk:
+            params.extend(
+                (
+                    row["date"],
+                    row["symbol"],
+                    row.get("popular_rank"),
+                    json.dumps(row.get("watchlists") or []),
+                    int(row.get("scan_hits") or 0),
+                    stamp,
+                )
+            )
+        db.execute(
+            "INSERT INTO rh_crowding "
+            "(date, symbol, popular_rank, watchlists, scan_hits, recorded_at) "
+            f"VALUES {placeholders} "
+            "ON CONFLICT(date, symbol) DO UPDATE SET "
+            "popular_rank = excluded.popular_rank, "
+            "watchlists   = excluded.watchlists, "
+            "scan_hits    = excluded.scan_hits, "
+            "recorded_at  = excluded.recorded_at",
+            tuple(params),
+        )
+    db.commit()
+
+
 MARGIN_DEBT_UPSERT_SQL = """
 INSERT INTO margin_debt_history
   (date, level, level_yoy_pct, free_credit_cash, free_credit_margin, source, recorded_at)
@@ -1001,6 +1171,50 @@ def upsert_divyield_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] 
 
 
 
+def upsert_ma_ratio_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
+    """MA RATIO indicator — one row per session date, idempotent on date.
+
+    Chunked multi-row INSERTs (Hrana I/O bounding): the daily run upserts the
+    full computed window (~350 rows), which per-row would be hundreds of
+    statements on one stream (the rv-ratio 2026-07-21 502 incident). ``ratio``
+    and ``spx_close`` are nullable by contract (zero-denominator guard /
+    optional overlay).
+    """
+    if not rows:
+        return
+    stamp = recorded_at or _now_iso()
+    db = get_db()
+    for start in range(0, len(rows), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
+        chunk = rows[start:start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
+        placeholders = ", ".join("(?, ?, ?, ?, ?, ?)" for _ in chunk)
+        params: list[Any] = []
+        for row in chunk:
+            ratio = row.get("ratio")
+            spx_close = row.get("spx_close")
+            params.extend(
+                (
+                    row["date"],
+                    float(row["pct_above_50"]),
+                    float(row["pct_above_200"]),
+                    float(ratio) if ratio is not None else None,
+                    float(spx_close) if spx_close is not None else None,
+                    stamp,
+                )
+            )
+        db.execute(
+            "INSERT INTO ma_ratio_history "
+            "(date, pct_above_50, pct_above_200, ratio, spx_close, recorded_at) "
+            f"VALUES {placeholders} "
+            "ON CONFLICT(date) DO UPDATE SET "
+            "pct_above_50 = excluded.pct_above_50, "
+            "pct_above_200 = excluded.pct_above_200, "
+            "ratio = excluded.ratio, spx_close = excluded.spx_close, "
+            "recorded_at = excluded.recorded_at",
+            tuple(params),
+        )
+    db.commit()
+
+
 def upsert_hyad_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
     """HYAD indicator — one row per date, idempotent on date.
 
@@ -1086,6 +1300,69 @@ def upsert_hhlev_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = N
     db.commit()
 
 
+def upsert_llm_model_catalog_rows(
+    rows: list[dict[str, Any]], refreshed_at: Optional[str] = None
+) -> None:
+    """LLM model catalog — one row per provider, idempotent on provider.
+
+    The stamp parameter is ``refreshed_at`` rather than the module's usual
+    ``recorded_at`` because it is what the picker renders as the catalog's
+    freshness (``LlmModelOption.refreshedAt``), not a bookkeeping column.
+    At most one row per provider, so a single multi-row INSERT.
+
+    A row carries its OWN ``refreshed_at`` when the refresh job carried it
+    forward from a provider whose poll failed or rate-limited. That per-row
+    stamp wins over the batch stamp: restamping a carried-forward row with
+    this run's time would report a model last seen live weeks ago as
+    refreshed today. The batch stamp applies only to rows without one.
+    """
+    if not rows:
+        return
+    stamp = refreshed_at or _now_iso()
+    db = get_db()
+    placeholders = ", ".join("(?, ?, ?, ?)" for _ in rows)
+    params: list[Any] = []
+    for row in rows:
+        params.extend(
+            (
+                row["provider"],
+                row["model_id"],
+                row["display_name"],
+                row.get("refreshed_at") or stamp,
+            )
+        )
+    db.execute(
+        "INSERT INTO llm_model_catalog (provider, model_id, display_name, refreshed_at) "
+        f"VALUES {placeholders} "
+        "ON CONFLICT(provider) DO UPDATE SET "
+        "model_id = excluded.model_id, "
+        "display_name = excluded.display_name, "
+        "refreshed_at = excluded.refreshed_at",
+        tuple(params),
+    )
+    db.commit()
+
+
+def get_llm_model_catalog_rows() -> list[dict[str, Any]]:
+    """Every ``llm_model_catalog`` row in the dict shape
+    ``upsert_llm_model_catalog_rows`` accepts.
+
+    Seeds ``refresh_model_catalog.load_previous`` so a provider whose poll
+    fails is carried forward from Turso, not from a host-local JSON that is
+    ephemeral on the VPS (R-456). Raises on DB errors; the caller falls back
+    to the JSON cache.
+    """
+    db = get_db()
+    rows = db.execute(
+        "SELECT provider, model_id, display_name, refreshed_at "
+        "FROM llm_model_catalog ORDER BY provider ASC"
+    ).fetchall()
+    return [
+        {"provider": r[0], "model_id": r[1], "display_name": r[2], "refreshed_at": r[3]}
+        for r in rows
+    ]
+
+
 _VIXTS_INSERT_HEAD = (
     "INSERT INTO vixts_history (date, vix_close, vix3m_close, ratio, spx_close, recorded_at) "
 )
@@ -1127,16 +1404,82 @@ def upsert_vixts_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = N
     """
     if not rows:
         return
+    # SQLite refuses to UPSERT one conflict target twice inside a single
+    # INSERT, so a duplicate date — a doubled row from the SPX left join, or a
+    # Cboe double-publish — raised "ON CONFLICT DO UPDATE command does not
+    # affect row a second time" and killed the run mid-history with earlier
+    # chunks already committed. Last wins, exactly as `upsert_cash_flow_rows`
+    # dedups for the same reason. R-362.
+    deduped: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        deduped[str(row.get("date"))] = row
+    ordered = list(deduped.values())
     stamp = recorded_at or _now_iso()
     db = get_db()
-    for start in range(0, len(rows), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
-        chunk = rows[start:start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
+    for start in range(0, len(ordered), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
+        chunk = ordered[start:start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
         placeholders = ", ".join(_VIXTS_ROW_PLACEHOLDER for _ in chunk)
         params: list[Any] = []
         for row in chunk:
             params.extend(_vixts_params(row, stamp))
         db.execute(
             f"{_VIXTS_INSERT_HEAD}VALUES {placeholders}{_VIXTS_ON_CONFLICT}",
+            tuple(params),
+        )
+    db.commit()
+
+
+_DISPERSION_INSERT_HEAD = (
+    "INSERT INTO dispersion_history "
+    "(date, vix_close, stock_spread, sector_spread, n_stocks, n_sectors, recorded_at, source) "
+)
+_DISPERSION_ROW_PLACEHOLDER = "(?, ?, ?, ?, ?, ?, ?, ?)"
+_DISPERSION_ON_CONFLICT = (
+    " ON CONFLICT(date) DO UPDATE SET "
+    "vix_close = excluded.vix_close, stock_spread = excluded.stock_spread, "
+    "sector_spread = excluded.sector_spread, n_stocks = excluded.n_stocks, "
+    "n_sectors = excluded.n_sectors, recorded_at = excluded.recorded_at, "
+    "source = excluded.source"
+)
+
+
+def _dispersion_params(row: dict[str, Any], stamp: str) -> tuple:
+    return (
+        row["date"],
+        float(row["vix_close"]),
+        float(row["stock_spread"]),
+        float(row["sector_spread"]),
+        int(row["n_stocks"]),
+        int(row["n_sectors"]),
+        stamp,
+        row.get("source"),
+    )
+
+
+def upsert_dispersion_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
+    """DISPERSION indicator — one raw row per session, idempotent on date.
+
+    Chunked multi-row INSERTs (Hrana I/O bounding): a --backfill passes
+    ~2,500 rows in one run. Duplicate dates collapse to the last row before
+    the statement is built, since SQLite refuses to UPSERT one conflict
+    target twice inside a single INSERT (R-362).
+    """
+    if not rows:
+        return
+    deduped: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        deduped[str(row.get("date"))] = row
+    ordered = list(deduped.values())
+    stamp = recorded_at or _now_iso()
+    db = get_db()
+    for start in range(0, len(ordered), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
+        chunk = ordered[start:start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
+        placeholders = ", ".join(_DISPERSION_ROW_PLACEHOLDER for _ in chunk)
+        params: list[Any] = []
+        for row in chunk:
+            params.extend(_dispersion_params(row, stamp))
+        db.execute(
+            f"{_DISPERSION_INSERT_HEAD}VALUES {placeholders}{_DISPERSION_ON_CONFLICT}",
             tuple(params),
         )
     db.commit()
@@ -1419,6 +1762,39 @@ def upsert_ivrank_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = 
             "iv = excluded.iv, iv_rank = excluded.iv_rank, "
             "iv_pct = excluded.iv_pct, source = excluded.source, "
             "recorded_at = excluded.recorded_at",
+            tuple(params),
+        )
+    db.commit()
+
+
+def upsert_iv_spread_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
+    """IV SPREAD indicator - one row per paired SPX/NDX session, idempotent on
+    date. spread is NULL only for a session the leg-level bad-print gate
+    excluded (the raw leg closes stay).
+
+    Chunked multi-row INSERTs (Hrana I/O bounding): every run rewrites the
+    full stored series (~1,250 sessions under the 5Y seed), which per-row
+    would be thousands of statements on one stream (the rv-ratio 2026-07-21
+    502 incident). ~4 chunked round-trips instead.
+    """
+    if not rows:
+        return
+    stamp = recorded_at or _now_iso()
+    db = get_db()
+    for start in range(0, len(rows), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
+        chunk = rows[start:start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
+        placeholders = ", ".join("(?, ?, ?, ?, ?)" for _ in chunk)
+        params: list[Any] = []
+        for row in chunk:
+            params.extend(
+                (row["date"], row["spx_iv"], row["ndx_iv"], row.get("spread"), stamp)
+            )
+        db.execute(
+            "INSERT INTO iv_spread_history (date, spx_iv, ndx_iv, spread, recorded_at) "
+            f"VALUES {placeholders} "
+            "ON CONFLICT(date) DO UPDATE SET "
+            "spx_iv = excluded.spx_iv, ndx_iv = excluded.ndx_iv, "
+            "spread = excluded.spread, recorded_at = excluded.recorded_at",
             tuple(params),
         )
     db.commit()
@@ -1972,6 +2348,13 @@ def replace_open_orders_for_session(
         tuple(row[0] for row in rows),
     )
     db.commit()
+
+
+def count_open_orders() -> int:
+    """Row count of the open_orders snapshot (T-382 empty-book guard)."""
+    db = get_db()
+    row = db.execute("SELECT COUNT(*) FROM open_orders").fetchone()
+    return int(row[0]) if row else 0
 
 
 def upsert_daemon_state(

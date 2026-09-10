@@ -42,6 +42,8 @@ function upstreamError(error: unknown, requestId: string): Response {
   );
 }
 
+export const radonCapability = { GET: "admin", POST: "admin" };
+
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ action: string }> },

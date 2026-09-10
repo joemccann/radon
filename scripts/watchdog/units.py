@@ -59,8 +59,17 @@ log = logging.getLogger("watchdog.units")
 
 
 UNIT_GLOB = "radon-*"
-SHOW_PROPERTIES = "Id,ActiveState,SubState,Result,NRestarts,InactiveEnterTimestamp,Type"
+# ExecMainStatus distinguishes a graceful SIGTERM unwind (143 = 128+15)
+# recorded as Result=exit-code from a real application exit-code failure.
+# bpi_scan (and siblings) catch SIGTERM, raise SystemExit(143), and systemd
+# then reports exit-code rather than signal — same stop-clean collateral.
+SHOW_PROPERTIES = (
+    "Id,ActiveState,SubState,Result,NRestarts,InactiveEnterTimestamp,"
+    "Type,ExecMainStatus"
+)
 SYSTEMCTL_TIMEOUT_S = 10
+# Process handled SIGTERM and exited 128+SIGTERM. systemd Result=exit-code.
+GRACEFUL_SIGTERM_EXIT_STATUS = 143
 
 _PROJECT_DIR = Path(__file__).resolve().parent.parent.parent
 DEFAULT_STATE_PATH = _PROJECT_DIR / "data" / "watchdog_units_state.json"
@@ -82,6 +91,12 @@ DEPLOY_COLLATERAL_WINDOW_SECS = 60 * 60
 # a 60-min cap here false-paged that exact shape). Past 24h the unit is
 # frozen — the deploy left it dead (e.g. timer disabled) — and it re-pages P1.
 KILL_BEFORE_GREEN_FROZEN_CAP_SECS = 24 * 60 * 60
+# REL-202 (R-559, NF-10): the exit-code/143 aperture matches a shape ANY
+# SIGTERM source produces (earlyoom, pkill, a co-scheduled TimeoutStopSec),
+# and daily deploys keep the 24h pre-green horizon permanently warm. A REAL
+# deploy stop-clean greens within minutes of the kill, so 143 gets its own
+# short kill-to-marker dwell; Result=signal keeps the wide horizon.
+GRACEFUL_EXIT_MARKER_DWELL_SECS = 15 * 60
 
 # R-157: the `in_flight` branch keyed on nothing but the journal EXISTING.
 # R-057 established that an interrupted deploy leaves it on disk indefinitely
@@ -132,8 +147,25 @@ def parse_show_output(text: str) -> list[dict]:
             continue
         nrestarts = props.get("NRestarts")
         props["NRestarts"] = int(nrestarts) if nrestarts is not None and nrestarts.isdigit() else None
+        exec_status = props.get("ExecMainStatus")
+        props["ExecMainStatus"] = (
+            int(exec_status) if exec_status is not None and exec_status.isdigit() else None
+        )
         parsed.append(props)
     return parsed
+
+
+def _is_graceful_sigterm_exit(unit: dict) -> bool:
+    """True when a oneshot caught SIGTERM and exited 143.
+
+    Default SIGTERM disposition yields Result=signal. Handlers that unwind
+    via SystemExit(143) (bpi_scan.install_sigterm_unwind) make systemd
+    record Result=exit-code instead — still stop-clean collateral when
+    the kill sits inside a deploy window (2026-09-01 page e741ed1a).
+    """
+    if (unit.get("Result") or "") != "exit-code":
+        return False
+    return unit.get("ExecMainStatus") == GRACEFUL_SIGTERM_EXIT_STATUS
 
 
 # ── deploy-collateral evidence ───────────────────────────────────────
@@ -191,8 +223,12 @@ def _journal_is_stranded(deploy: dict) -> bool:
 
 
 def _is_deploy_collateral(unit: dict, deploy: Optional[dict], now: datetime) -> bool:
-    """True when a Result=signal failure sits inside a deploy window —
-    stop-clean killing an in-flight oneshot, not an outage.
+    """True when a stop-clean SIGTERM failure sits inside a deploy window —
+    killing an in-flight oneshot, not an outage.
+
+    Matches ``Result=signal`` (default SIGTERM disposition) and
+    ``Result=exit-code`` with ``ExecMainStatus=143`` (process caught
+    SIGTERM and exited 128+15; 2026-09-01 radon-bpi page e741ed1a).
 
     Covers three stacked-deploy shapes:
       * kill before the latest green (completed stop-clean; checked first)
@@ -212,7 +248,10 @@ def _is_deploy_collateral(unit: dict, deploy: Optional[dict], now: datetime) -> 
     stop-clean (2026-08-20 02:45Z radon-bpi: kill 00:04, a231 green
     00:05, 0f7d green 02:42 → kill-to-latest-marker 158 min).
     """
-    if not deploy or unit.get("Result") != "signal":
+    if not deploy:
+        return False
+    result = unit.get("Result") or ""
+    if result != "signal" and not _is_graceful_sigterm_exit(unit):
         return False
     failed_at = _parse_systemd_timestamp(unit.get("InactiveEnterTimestamp") or "")
     if failed_at is None:
@@ -224,7 +263,13 @@ def _is_deploy_collateral(unit: dict, deploy: Optional[dict], now: datetime) -> 
     if marker is not None and failed_at < marker:
         if age > KILL_BEFORE_GREEN_FROZEN_CAP_SECS:
             return False
-        return 0 <= (marker - failed_at).total_seconds() <= KILL_BEFORE_GREEN_FROZEN_CAP_SECS
+        kill_to_marker = (marker - failed_at).total_seconds()
+        if _is_graceful_sigterm_exit(unit):
+            # REL-202: the ambiguous 143 shape is collateral only when the
+            # green marker landed within minutes of the kill (a journalled
+            # in-flight window is handled below).
+            return 0 <= kill_to_marker <= GRACEFUL_EXIT_MARKER_DWELL_SECS
+        return 0 <= kill_to_marker <= KILL_BEFORE_GREEN_FROZEN_CAP_SECS
     if deploy.get("in_flight") and not _journal_is_stranded(deploy):
         return age <= DEPLOY_COLLATERAL_WINDOW_SECS
     if marker is None:

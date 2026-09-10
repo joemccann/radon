@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { normalisePostContent } from "./newsfeedText";
+import { withoutEmDashes } from "./copyPunctuation";
 import { readOfflineMeta } from "./offline/offlineStatus";
 import {
   reportFetchFailure,
@@ -10,11 +11,14 @@ import {
   reportOfflineServed,
 } from "./offline/offlineSignals";
 
+import { parseResearchSource, type ResearchSource } from "./newsfeedSource";
+
 const POSTS_ENDPOINT = "/api/newsfeed/posts";
 const POSTS_FALLBACK_ENDPOINT = "/data/posts.json";
 const REFRESH_INTERVAL_MS = 2 * 60 * 1000;
 
 export type MarketEarPost = {
+  source?: ResearchSource;
   id: string;
   title: string;
   content?: string;
@@ -109,21 +113,26 @@ export function useNewsfeedPosts(): NewsfeedPosts {
       const normalised = data
         .map((item) => {
           const post = item as MarketEarPost;
+          const source = parseResearchSource(post.source);
           const stamp = post.timestamp ?? post.updatedAt ?? post.createdAt ?? "";
           const ts = new Date(stamp);
           const ms = ts.getTime();
           return {
             ...post,
+            title: source ? withoutEmDashes(post.title || "") : post.title,
+            tags: source && Array.isArray(post.tags)
+              ? post.tags.map(tag => typeof tag === "string" ? withoutEmDashes(tag) : tag) : post.tags,
             isoTimestamp: Number.isFinite(ms) ? ts.toISOString() : stamp,
             timestampMs: Number.isFinite(ms) ? ms : 0,
-            href: buildPostHref(post.id),
-            // The one place raw scrape text becomes display text — every
-            // consumer downstream reads the same normalised body.
-            content: normalisePostContent(post.content || "", post.title || ""),
-            images: Array.isArray(post.images) ? post.images : [],
+            source,
+            href: source?.url ?? buildPostHref(post.id),
+            // Research bodies are authored Markdown: indentation, line breaks,
+            // and trailing spaces carry formatting that scrape rewrapping loses.
+            content: source ? withoutEmDashes(post.content || "") : normalisePostContent(post.content || "", post.title || ""),
+            images: source ? source.figures.map(f => f.url) : Array.isArray(post.images) ? post.images : [],
           } satisfies NormalisedPost;
         })
-        .filter((post) => post.id && post.title && post.isoTimestamp)
+        .filter((post) => post.id && post.title && post.isoTimestamp && (!post.id.startsWith("research-") || post.source))
         .sort((a, b) => b.timestampMs - a.timestampMs);
 
       setPosts(normalised);
@@ -137,7 +146,7 @@ export function useNewsfeedPosts(): NewsfeedPosts {
       if (!networkResolved) reportFetchFailure();
       if (postsRef.current.length > 0) return;
       const message = err instanceof Error ? err.message : String(err);
-      setError(`Unable to load Market Ear feed: ${message}`);
+      setError(`Unable to load news feed: ${message}`);
     } finally {
       if (mode === "initial") {
         setLoading(false);

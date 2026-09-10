@@ -4,13 +4,13 @@ import {
   isIbDailyPnlFromCurrentSession,
   sessionPositions,
 } from "@/lib/ibDailyPnlSession";
-import { useState, useCallback, useMemo, type ReactNode } from "react";
+import { useState, useCallback, useId, useMemo, type KeyboardEvent, type ReactNode } from "react";
 import type { PortfolioData, AccountSummary, ExecutedOrder } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
 import { computeExposureDetailed, type ExposureDataWithBreakdown } from "@/lib/exposureBreakdown";
 import { computeDayMoveBreakdown } from "@/lib/dayMoveBreakdown";
-import { computeUnrealizedBreakdown } from "@/lib/unrealizedBreakdown";
-import { resolveEntryCost, resolveMarketValue } from "@/lib/positionUtils";
+import { computeUnrealizedBreakdown, countUnmeasuredBasis, sumUnrealizedBreakdown } from "@/lib/unrealizedBreakdown";
+import { resolveMarketValue } from "@/lib/positionUtils";
 import { getMarketPhaseFromDate } from "@/lib/serviceHealthWindows";
 import {
   computeLeverageRatio,
@@ -67,13 +67,30 @@ type CardDef = {
   subtitle?: ReactNode;
 };
 
+function activateMetricControl(event: KeyboardEvent<HTMLDivElement>) {
+  if (event.target !== event.currentTarget) return;
+  if (event.key !== "Enter" && event.key !== " ") return;
+  event.preventDefault();
+  if (!event.repeat) event.currentTarget.click();
+}
+
 function MetricCard({ card, onClick }: { card: CardDef; onClick?: () => void }) {
+  const descriptionId = useId();
   return (
-    <div className={`metric-card${onClick ? " metric-card-clickable" : ""}`} onClick={onClick}>
+    <div
+      className={`metric-card${onClick ? " metric-card-clickable" : ""}`}
+      onClick={onClick}
+      onKeyDown={onClick ? activateMetricControl : undefined}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      aria-label={onClick ? `View ${card.label} breakdown` : undefined}
+      aria-haspopup={onClick ? "dialog" : undefined}
+      aria-describedby={onClick ? `${descriptionId}-value ${descriptionId}-change${card.subtitle ? ` ${descriptionId}-subtitle` : ""}` : undefined}
+    >
       <div className="metric-label">{card.label}</div>
-      <div className={`metric-value ${card.tone !== "neutral" ? card.tone : ""}`}>{card.value}</div>
-      {card.subtitle ? <div className="metric-subtitle">{card.subtitle}</div> : null}
-      <div className={`metric-change ${card.tone}`}>{card.change}</div>
+      <div id={`${descriptionId}-value`} className={`metric-value ${card.tone !== "neutral" ? card.tone : ""}`}>{card.value}</div>
+      {card.subtitle ? <div id={`${descriptionId}-subtitle`} className="metric-subtitle">{card.subtitle}</div> : null}
+      <div id={`${descriptionId}-change`} className={`metric-change ${card.tone}`}>{card.change}</div>
     </div>
   );
 }
@@ -82,7 +99,15 @@ function MetricCard({ card, onClick }: { card: CardDef; onClick?: () => void }) 
 
 function SectionHeader({ label, collapsed, onToggle }: { label: string; collapsed: boolean; onToggle: () => void }) {
   return (
-    <div className="section-label-mono section-label-toggle" onClick={onToggle}>
+    <div
+      className="section-label-mono section-label-toggle"
+      role="button"
+      tabIndex={0}
+      aria-label={`${label} metrics`}
+      aria-expanded={!collapsed}
+      onClick={onToggle}
+      onKeyDown={activateMetricControl}
+    >
       <svg
         className={`section-chevron${collapsed ? "" : " section-chevron-open"}`}
         width="10"
@@ -486,6 +511,7 @@ function TodayPnlRow({
   onRealizedClick: () => void;
   onTotalClick: () => void;
 }) {
+  const realizedDescriptionId = useId();
   return (
     <>
       <SectionHeader label="TODAY'S P&L" collapsed={collapsed} onToggle={onToggle} />
@@ -517,12 +543,21 @@ function TodayPnlRow({
             <div className="metric-value">---</div>
             <div className="metric-change neutral">MARKET CLOSED</div>
           </div>
-          <div className="metric-card metric-card-clickable" onClick={onRealizedClick}>
+          <div
+            className="metric-card metric-card-clickable"
+            role="button"
+            tabIndex={0}
+            aria-label="View Realized breakdown"
+            aria-haspopup="dialog"
+            aria-describedby={`${realizedDescriptionId}-value ${realizedDescriptionId}-change`}
+            onClick={onRealizedClick}
+            onKeyDown={activateMetricControl}
+          >
             <div className="metric-label">Realized</div>
-            <div className={`metric-value ${tone(realizedPnl ?? 0) !== "neutral" ? tone(realizedPnl ?? 0) : ""}`}>
+            <div id={`${realizedDescriptionId}-value`} className={`metric-value ${tone(realizedPnl ?? 0) !== "neutral" ? tone(realizedPnl ?? 0) : ""}`}>
               {fmtSigned(realizedPnl ?? 0)}
             </div>
-            <div className="metric-change neutral">TODAY&apos;S FILLS</div>
+            <div id={`${realizedDescriptionId}-change`} className="metric-change neutral">TODAY&apos;S FILLS</div>
           </div>
           <div className="metric-card">
             <div className="metric-label">Total</div>
@@ -537,12 +572,20 @@ function TodayPnlRow({
 
 /* ─── Legacy NET LEVERAGE row (no account_summary) ───────── */
 
-function LegacyLeverageRow({ portfolio, pnl, pnlPct }: { portfolio: PortfolioData; pnl: number; pnlPct: number }) {
+function LegacyLeverageRow({ portfolio, pnl, pnlPct, unmeasuredBasisCount }: {
+  portfolio: PortfolioData; pnl: number; pnlPct: number; unmeasuredBasisCount: number;
+}) {
+  const pnlChange = `${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(1)}%`;
   const cards: CardDef[] = [
     { label: "Net Liquidation", value: fmt(portfolio.bankroll), change: "BANKROLL", tone: "neutral" },
     { label: "Positions", value: String(portfolio.position_count), change: `${portfolio.defined_risk_count} DEFINED / ${portfolio.undefined_risk_count} UNDEFINED`, tone: "neutral" },
     { label: "Deployed", value: fmt(portfolio.total_deployed_dollars), change: `${portfolio.total_deployed_pct.toFixed(1)}% OF BANKROLL`, tone: portfolio.total_deployed_pct > 100 ? "negative" : "neutral" },
-    { label: "Open P&L", value: fmtSigned(pnl), change: `${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(1)}%`, tone: tone(pnl) },
+    {
+      label: "Open P&L",
+      value: fmtSigned(pnl),
+      change: unmeasuredBasisCount > 0 ? `${pnlChange} · ${unmeasuredBasisCount} UNMEASURED BASIS` : pnlChange,
+      tone: tone(pnl),
+    },
   ];
 
   return (
@@ -621,14 +664,8 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
     );
   }
 
-  const pnl = (() => {
-    let total = 0;
-    for (const pos of portfolio.positions) {
-      const mv = resolveMarketValue(pos);
-      if (mv != null) total += mv - resolveEntryCost(pos);
-    }
-    return total;
-  })();
+  const pnl = sumUnrealizedBreakdown(portfolio);
+  const unmeasuredBasisCount = countUnmeasuredBasis(portfolio);
   const pnlPct = portfolio.total_deployed_dollars > 0
     ? (pnl / portfolio.total_deployed_dollars) * 100
     : 0;
@@ -687,7 +724,7 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
           onDividendsClick={() => setDividendsModalOpen(true)}
         />
       ) : (
-        <LegacyLeverageRow portfolio={portfolio} pnl={pnl} pnlPct={pnlPct} />
+        <LegacyLeverageRow portfolio={portfolio} pnl={pnl} pnlPct={pnlPct} unmeasuredBasisCount={unmeasuredBasisCount} />
       )}
 
       {/* Row 2: RISK */}

@@ -1,5 +1,26 @@
 import { expect, test } from "@playwright/test";
 
+import { lastCompletedSessionDate } from "../lib/marketSession";
+
+/**
+ * The strip's day-change baseline is read off the payload's OWN daily history
+ * and anchored to `lastCompletedSessionDate()`; `resolvePreviousSessionClose`
+ * withholds it when the newest history row is more than
+ * MAX_PREVIOUS_CLOSE_GAP_DAYS (7) off that anchor (web/lib/regimeLiveStrip.ts).
+ * Hard-coded 2026-02 fixture dates therefore aged out permanently, `<DayChange>`
+ * stopped rendering, and this layout spec — which measures cell heights and the
+ * `regime-day-chg` node itself — failed on every run. The fixture is now
+ * window-relative so it stays valid whenever the suite runs.
+ */
+const HISTORY_ANCHOR = lastCompletedSessionDate();
+const HISTORY_LENGTH = 20;
+
+function daysBefore(anchor: string, daysBack: number): string {
+  const d = new Date(`${anchor}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - daysBack);
+  return d.toISOString().slice(0, 10);
+}
+
 const CRI_MOCK = {
   scan_time: "2026-03-12T08:18:32",
   market_open: true,
@@ -40,8 +61,8 @@ const CRI_MOCK = {
     est_selling_bn: 0,
   },
   menthorq_cta: null,
-  history: Array.from({ length: 20 }, (_, index) => ({
-    date: `2026-02-${String(index + 1).padStart(2, "0")}`,
+  history: Array.from({ length: HISTORY_LENGTH }, (_, index) => ({
+    date: daysBefore(HISTORY_ANCHOR, HISTORY_LENGTH - 1 - index),
     vix: 20 + index * 0.3,
     vvix: 105 + index * 1.1,
     spy: 650 + index,
@@ -283,19 +304,24 @@ test.describe("/regime page — responsive strip collapse", () => {
     await expect(rvolLabelShort).toBeVisible();
     await expect(rvolLabelFull).toBeHidden();
 
-    const [vixBox, rvolBox, cor1mBox] = await Promise.all([
+    // Cell order is VIX, VVIX, COR1M, RVOL, SPY (d3acdd57), so the 3-column
+    // grid puts COR1M on row 1 beside VIX and leaves RVOL + SPY on row 2.
+    const [vixBox, cor1mBox, rvolBox, spyBox] = await Promise.all([
       page.locator('[data-testid="strip-vix"]').boundingBox(),
-      page.locator('[data-testid="strip-rvol"]').boundingBox(),
       page.locator('[data-testid="strip-cor1m"]').boundingBox(),
+      page.locator('[data-testid="strip-rvol"]').boundingBox(),
+      page.locator('[data-testid="strip-spy"]').boundingBox(),
     ]);
 
     expect(vixBox).not.toBeNull();
-    expect(rvolBox).not.toBeNull();
     expect(cor1mBox).not.toBeNull();
+    expect(rvolBox).not.toBeNull();
+    expect(spyBox).not.toBeNull();
+    expect(Math.abs((cor1mBox?.y ?? 0) - (vixBox?.y ?? 0))).toBeLessThan(4);
     expect((rvolBox?.y ?? 0)).toBeGreaterThan((vixBox?.y ?? 0) + 20);
-    expect((cor1mBox?.y ?? 0)).toBeGreaterThan((vixBox?.y ?? 0) + 20);
-    expect(Math.abs((cor1mBox?.y ?? 0) - (rvolBox?.y ?? 0))).toBeLessThan(4);
-    expect(Math.abs((cor1mBox?.width ?? 0) - (rvolBox?.width ?? 0))).toBeLessThan(4);
+    expect((spyBox?.y ?? 0)).toBeGreaterThan((vixBox?.y ?? 0) + 20);
+    expect(Math.abs((spyBox?.y ?? 0) - (rvolBox?.y ?? 0))).toBeLessThan(4);
+    expect(Math.abs((spyBox?.width ?? 0) - (rvolBox?.width ?? 0))).toBeLessThan(4);
     expect((rvolBox?.width ?? 0)).toBeGreaterThan((vixBox?.width ?? 0) * 1.4);
 
     const stripMetrics = await strip.evaluate((node) => ({
@@ -310,27 +336,29 @@ test.describe("/regime page — responsive strip collapse", () => {
     await setupMocks(page);
     await page.goto("/regime");
 
-    const [vixBox, vvixBox, spyBox, rvolBox, cor1mBox] = await Promise.all([
+    // Single column: every cell stacks in the shipped order VIX, VVIX, COR1M,
+    // RVOL, SPY (d3acdd57) and shares the same left edge.
+    const [vixBox, vvixBox, cor1mBox, rvolBox, spyBox] = await Promise.all([
       page.locator('[data-testid="strip-vix"]').boundingBox(),
       page.locator('[data-testid="strip-vvix"]').boundingBox(),
-      page.locator('[data-testid="strip-spy"]').boundingBox(),
-      page.locator('[data-testid="strip-rvol"]').boundingBox(),
       page.locator('[data-testid="strip-cor1m"]').boundingBox(),
+      page.locator('[data-testid="strip-rvol"]').boundingBox(),
+      page.locator('[data-testid="strip-spy"]').boundingBox(),
     ]);
 
     expect(vixBox).not.toBeNull();
     expect(vvixBox).not.toBeNull();
-    expect(spyBox).not.toBeNull();
-    expect(rvolBox).not.toBeNull();
     expect(cor1mBox).not.toBeNull();
+    expect(rvolBox).not.toBeNull();
+    expect(spyBox).not.toBeNull();
     expect((vvixBox?.y ?? 0)).toBeGreaterThan((vixBox?.y ?? 0) + 20);
-    expect((spyBox?.y ?? 0)).toBeGreaterThan((vixBox?.y ?? 0) + 20);
-    expect((rvolBox?.y ?? 0)).toBeGreaterThan((spyBox?.y ?? 0) + 20);
-    expect((cor1mBox?.y ?? 0)).toBeGreaterThan((spyBox?.y ?? 0) + 20);
+    expect((cor1mBox?.y ?? 0)).toBeGreaterThan((vvixBox?.y ?? 0) + 20);
+    expect((rvolBox?.y ?? 0)).toBeGreaterThan((cor1mBox?.y ?? 0) + 20);
+    expect((spyBox?.y ?? 0)).toBeGreaterThan((rvolBox?.y ?? 0) + 20);
     expect(Math.abs((vvixBox?.x ?? 0) - (vixBox?.x ?? 0))).toBeLessThan(4);
-    expect(Math.abs((spyBox?.x ?? 0) - (vixBox?.x ?? 0))).toBeLessThan(4);
-    expect(Math.abs((rvolBox?.x ?? 0) - (vixBox?.x ?? 0))).toBeLessThan(4);
     expect(Math.abs((cor1mBox?.x ?? 0) - (vixBox?.x ?? 0))).toBeLessThan(4);
+    expect(Math.abs((rvolBox?.x ?? 0) - (vixBox?.x ?? 0))).toBeLessThan(4);
+    expect(Math.abs((spyBox?.x ?? 0) - (vixBox?.x ?? 0))).toBeLessThan(4);
 
     const [vixCellBox, vixChangeTextBox, vixChangeArrowBox] = await Promise.all([
       page.locator('[data-testid="strip-vix"]').boundingBox(),

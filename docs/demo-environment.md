@@ -10,7 +10,7 @@ A public, Clerk-gated demo of Radon that real users can self-serve try for **max
 | 2 | Host | **New Hetzner VM** (hard physical isolation from prod) |
 | 3 | Demo data | **Separate Turso DB** (`radon-demo-*`) |
 | 4 | Rate limiting | **Upstash** Redis + `@upstash/ratelimit` |
-| 5 | Quote feed | **Realtime** (real entitled relay feed) |
+| 5 | Quote feed | **Request-time sample snapshots** (no IB ticket or WebSocket) |
 | 6 | AI keys | **Reuse the existing prod Anthropic/Cerebras/Exa keys** (revised 2026-06-27 — per-user `demo_ai_usage` quota + Upstash tier-D are the only spend guard; no separate provider cap) |
 | 7 | Signup gating | **Email-verify** required before a trial starts |
 
@@ -20,11 +20,11 @@ FastAPI short-circuits auth on `is_trusted_local_request` (`scripts/api/auth.py:
 
 ## Architecture
 
-- **New Hetzner VM** (own public IP) running its own docker-compose: `radon-nextjs-demo:3000`, `radon-api-demo:8321`, `ib-realtime-relay-demo:8765`, Caddy terminating TLS for `demo.radon.run`.
+- **New Hetzner VM** (own public IP) running FastAPI for bounded demo-only operations. The Vercel frontend does not require an IB relay for workstation reads.
 - **Cloudflare** (orange-cloud) in front: WAF + volumetric DDoS + IP rate-limiting before origin.
 - FastAPI runs **`RADON_API_TEST_MODE=1`** → every IB path stubbed at source (`server.py:1760` returns synthetic permIds without calling `ib_place_order.py`). **No IB Gateway container, no Tailscale route to `ib-gateway:4001`** — IB is physically unreachable.
-- **Realtime quote feed (decision 5):** the demo relay connects to the entitled market-data feed for realism. It is READ-ONLY market data; it can never trade. (Risk: shares IB data-farm entitlement capacity — monitor; fall back to a delayed feed if it pressures prod.)
-- Same git repo deploys both; a **CI isolation guard** (`scripts/ci/check_demo_isolation.py`, run by the `py-coverage` job in `.github/workflows/ci.yml` — skipped with a workflow warning annotation until the `TURSO_DEMO_DB_URL` / `TURSO_DEMO_APP_DB_URL` secrets are provisioned, TEST_AUDIT T-130) rejects any demo deploy whose env carries a prod `TURSO_DB_URL` or a reachable IB host. It checks BOTH `TURSO_DEMO_DB_URL` and `TURSO_DB_URL` against the prod marker: every account route reads through `dbExecute` → `getDb()` → `TURSO_DB_URL`, so that variable is the isolation boundary (`getDemoDb()` serves only `/api/admin/demo-users`). The two being equal on the demo VM is the desired state. Until 2026-08-23 nothing invoked the guard and it never inspected `TURSO_DB_URL` at all (RELIABILITY_AUDIT R-156).
+- **Sample quote feed (decision 5):** the client builds deterministic minute-bucketed quotes, depth, tape, fundamentals, and option marks for requested instruments. Demo pages never request an IB ticket or open a market-data WebSocket.
+- Same git repo deploys both; a **CI isolation guard** (`scripts/ci/check_demo_isolation.py`, run by the `py-coverage` job in `.github/workflows/ci.yml` — skipped with a workflow warning annotation until the `TURSO_DEMO_DB_URL` / `TURSO_DEMO_APP_DB_URL` secrets are provisioned, TEST_AUDIT T-130) rejects any demo deploy whose env carries a prod `TURSO_DB_URL` or a reachable IB host. It checks BOTH `TURSO_DEMO_DB_URL` and `TURSO_DB_URL` against the prod marker: every account route reads through `dbExecute` → `getDb()` → `TURSO_DB_URL`, so that variable is the isolation boundary (`getDemoDb()` serves only `/api/admin/demo-users`). The two being equal on the demo VM is the desired state. Until 2026-08-23 nothing invoked the guard and it never inspected `TURSO_DB_URL` at all (RELIABILITY_AUDIT R-156). The CI guard is deploy-time only; the serving path also fails closed at runtime: `web/lib/demo/demoDbIsolation.ts` checks `TURSO_DB_URL` against the same prod marker per request, demo-principal DB reads return 403 `DEMO_DB_ISOLATION` (`web/lib/apiContracts.ts`) and routes fall back to fixtures (test: `web/tests/demo-db-isolation.test.ts`) — a mis-provisioned prod `TURSO_DB_URL` never serves live rows even while the CI guard is skipped.
 
 ## Isolation model (three independent guarantees)
 
@@ -34,11 +34,15 @@ FastAPI short-circuits auth on `is_trusted_local_request` (`scripts/api/auth.py:
 
 **Synthetic demo dataset:** `scripts/db/demo_seed.py` seeds the demo Turso once with a fabricated-but-consistent `portfolio_snapshots` row (~500K net liq, 3-4 synthetic SPY/QQQ/TSLA positions), matching journal + open-orders rows, modeled on `marketing-mockups/portfolio-recreation.html`. Demo users' simulated orders land in `paper_fills` (`account='PAPER'`), never mutating the seed.
 
+**Newsfeed schema rollout:** the Vercel frontend and demo Turso have an independent migration lifecycle from production. `/api/newsfeed/posts` joins `research_post_sources` when migration `0071` exists. If that specific table is absent, it reads the newest 500 legacy posts and excludes every `research-*` ID before the limit. Network/auth failures and other SQL errors retain the existing error or last-good-cache behavior. No request performs schema writes or copies private research into the demo database.
+
+**Workstation sample contract:** live-service-dependent read surfaces are completed at request time after the Clerk principal resolves to `demo`. Performance, current executions, cash flows, theta, ticker flow, option calendars/chains/exposure, CRI, VCG, GRG, GEX, dispersion, TRIN, and BPI therefore remain current without disk writers, Turso snapshots, FastAPI producers, or vendor credentials. Fixtures accept an injected clock, carry explicit sample provenance, and are covered at the route boundary. Seeded open orders remain intact when current-session executions are added.
+
 ## Guardrails (enforcement points)
 
 - **No real orders** — (backend) VM `RADON_API_TEST_MODE=1`; (UX) `web/app/api/orders/place/route.ts` detects `demoRole` via `auth()` and routes to `/paper/place` → `paper_fills`. Both present; neither load-bearing alone.
 - **AI quotas** — new `demo_ai_usage` table (PK user_id+endpoint+day_et); guard at the top of the 3 Next.js LLM routes (`assistant` 5/day, `ticker/seasonality` 10/day, `ticker/info` 20/day) where Clerk identity exists; 429 on exceed; reset 00:00 ET. Backstop (revised 2026-06-27): demo **reuses the prod AI keys**, so the per-user quota + the Upstash tier-D limiter (5/day) are the only AI-spend guard — no separate provider cap.
-- **Rate-limit / DOS** — Cloudflare edge (IP limits, Bot Fight, OWASP WAF) + a **greenfield** app-layer tiered sliding-window limiter via `@upstash/ratelimit` keyed by Clerk userId (Tier A reads ~100/hr, B expensive ~10/hr, C mutations 5/day, D AI 5/day). No rate-limiting exists today.
+- **Rate-limit / DOS** — Vercel edge controls plus an app-layer Upstash sliding-window limiter keyed by Clerk userId. Cached GETs use Tier A; only producer mutations use Tier B; writes, AI, WebSocket tickets, headlines, and shell polling retain their dedicated tiers. Every handler with a local limiter declares its durable tier explicitly. Demo sync hooks load one GET, suppress automatic producer POSTs/polling/retries, and make manual refresh another GET.
 - **Write spam** — per-trial caps in demo DB (journal ≤1000 + 10KB/note + 1/5s; alerts/watchlist bounded).
 
 ## Trial: 3 trading days
@@ -116,6 +120,105 @@ Tests: 55 new Vitest (10 files) + 2 extended perimeter pins + 4 new pytest, all 
 - **Edge-runtime middleware trap** → keep the trial-expiry gate free of `node:*` imports (Edge runtime; a prior prod bug — `feedback_middleware_edge_runtime`).
 - **FastAPI per-user blindness** → never rely on FastAPI to gate per-user; VM `TEST_MODE` + Next.js `auth()` are the two guarantees.
 - **Clerk webhook failure** → a user could exist without `demoRole`/expiry → unlimited access. Add a reconciliation sweep + default-deny (no `demoRole` = no demo access).
-- **Realtime feed entitlement pressure** (decision 5) → monitor IB data-farm capacity; fall back to delayed feed if it pressures prod.
+- **Sample-feed realism** (decision 5) → keep sample provenance visible and validate quote/depth/option relationships in fixture tests; never imply broker entitlement or execution availability.
 - **Prod AI-budget burn** (revised 2026-06-27) → demo reuses the prod Anthropic/Cerebras/Exa keys, so a demo quota bug spends the *prod* AI budget. The only guard is the `demo_ai_usage` per-user quota + Upstash tier-D (5/day); add a provider spend cap if abuse appears.
 - **Cost/ops** → second VM + Turso + Upstash + Cloudflare zone. No separate IB paper account needed (TEST_MODE).
+
+---
+
+## Outage 2026-08-13 → 2026-09-03: no new user could get a trial
+
+**Symptom.** Signups completed at Clerk and then every page and `/api/*` call
+returned `403 "Demo access is not active."` with no explanation. The last
+provisioned trial was `2026-08-13T17:30:04Z`; ~60 accounts created after that
+carry empty `publicMetadata`.
+
+**Cause.** Commit `4eaaf5e9` shipped two changes together:
+
+1. A webhook replay ledger — `claimDemoWebhookEvent` INSERTs into
+   `demo_webhook_events` *before* `provisionDemoTrial` runs
+   (`web/app/api/webhooks/clerk/route.ts`). The table was never created in the
+   demo Turso, so every `user.created` delivery threw and provisioned nothing.
+2. A default-deny in `web/lib/demo/demoGate.ts` — any signed-in user with no
+   `demoRole` is refused on the demo deployment. Correct on its own; combined
+   with (1) it turned a silent provisioning failure into a total wall.
+
+**Why the migration never ran.** The demo Turso is a full prod-shaped clone and
+shared ONE `schema_migrations` table with the main series (versions 1..69).
+`demo_migrations/0003` declared version 3, which the main series claimed on
+2026-06-29, so `apply_demo_migrations` read it as already applied and skipped it
+on every run. Every future demo migration numbered ≤ 69 was pre-swallowed the
+same way. This is a different failure from 2026-07-03 ("nobody ran the tool");
+here the tool ran and reported success.
+
+**Fixes.**
+
+| Change | Where |
+|---|---|
+| Demo series gets its own NAME-keyed ledger `demo_schema_migrations`; the shared table is never read or written | `scripts/db/demo_seed.py`, `scripts/db/demo_migrations/*.sql` |
+| `assert_not_prod` also requires the positive `radon-demo` marker | `scripts/db/demo_seed.py` |
+| A missing idempotency STORE degrades to at-least-once provisioning; every other claim failure still throws | `web/lib/demo/webhookLedger.ts` |
+| Provisioning failures page the operator (counts and reason only, never a user id or email) | `web/lib/notify/pushover.ts` |
+| Unprovisioned page requests redirect to a public `/demo-pending` leaf that bounds its own token-refresh retry; `/api/*` keeps the hard 403 | `web/app/demo-pending/`, `web/lib/demo/demoGate.ts`, `web/middleware.ts` |
+| A dead Upstash denies instead of throwing out of middleware as an opaque 500 | `web/lib/demo/rateLimit.ts` |
+| Seed dates anchor to the run date (`RADON_DEMO_SEED_TODAY` overrides) so the demo book never shows expired options | `scripts/db/demo_seed.py` |
+| Marketing CTA deep-links to `/sign-up`; the bare demo origin is a gated route that 404s a signed-out visitor | `site/lib/editorial-content.ts` |
+
+**Stranded users are NOT backfilled.** `clerk.radon.run` is the shared prod
+instance and "created after 2026-08-13 without `demoRole`" is not the set of
+demo signups — OAuth signups never carry the `unsafe_metadata.demo` marker, and
+`updateUserMetadata` replaces rather than merges. Stamping `demoRole` on a real
+prod account puts it behind demo expiry and paper-order routing; stamping the
+operator locks them out of `app.radon.run`. Affected users re-sign-up.
+
+**Set `PUSHOVER_TOKEN` / `PUSHOVER_USER` on the `radon-demo` Vercel project** to
+arm the provisioning alert; it no-ops silently while unset.
+
+### VM backend redeploy, 2026-09-04
+
+The demo VM was frozen at 2026-07-03 (~50 commits behind on `scripts/api`).
+Redeployed by shipping `scripts/ requirements.txt pyproject.toml` over ssh+tar
+to `/opt/radon-demo/app` and rebuilding (`docker compose build api && up -d`).
+`data/` on the VM is NOT shipped — it holds the copied `flow_reports/*.json`
+that the TEST_MODE per-ticker flow guard serves.
+
+Rollback: `radon-demo-api:rollback` (the pre-redeploy image) and
+`/opt/radon-demo/app.bak` are both kept on the VM.
+
+The redeploy surfaced one break: `TrustedHostMiddleware` gained a host pin
+after the VM's last deploy, and `demo-api.radon.run` was never on the list, so
+every proxied request returned `400 Invalid host header` while `127.0.0.1`
+health stayed 200. The host is now pinned in `scripts/api/server.py`
+`_ALLOWED_HOSTS` rather than left to `RADON_ALLOWED_HOSTS` on the VM, so a
+fresh VM cannot reproduce it. Pinned by
+`scripts/api/tests/test_loopback_browser_bypass.py`.
+
+Post-redeploy verification: `/health` 200 externally, `/health/lite` 401 without
+the service token and 200 with it, `POST /vcg/scan` and `/breadth/scan` 200 from
+the seeded snapshots, `RADON_API_TEST_MODE=1` confirmed in the running
+container, container `TURSO_DB_URL` on `radon-demo-joemccann`, no tailscale and
+no reachable IB port on any prod host.
+
+### Second root cause: Svix auto-disabled the endpoint (found 2026-09-04)
+
+Restoring `demo_webhook_events` was necessary but not sufficient. The Svix
+endpoint `https://demo.radon.run/api/webhooks/clerk` was **Disabled** with a
+69.9% error rate, last updated 2026-08-19 — Svix auto-disabled it six days into
+the 500 storm. After that no delivery was even attempted, so the endpoint could
+not recover on its own once the underlying bug was fixed.
+
+Re-enabled via the Svix app portal (Clerk Backend API `POST /v1/webhooks/svix_url`
+returns a one-time login link), then `Replay → Replay missing messages` scoped to
+the narrowest window so only the new signup was replayed, never the ~60 stranded
+accounts.
+
+Verified end to end 2026-09-04: a real Google-OAuth signup produced
+`publicMetadata {demoRole: trial, demoTrialExpiresAt: 2026-09-08T16:00:00-04:00}`,
+a `demo_users` row, and a `demo_webhook_events` claim row.
+
+**Detection gap this leaves.** The Pushover alert added alongside the table fix
+fires from inside the webhook handler, so it is silent in exactly this failure
+mode — a disabled endpoint means the handler never runs. The durable signal is
+the provisioning RATE: alert when `user.created` signups occur with no
+corresponding `demo_users` row, or poll the Svix endpoint's enabled/error-rate
+state. Neither exists yet.

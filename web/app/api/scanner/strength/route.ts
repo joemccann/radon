@@ -69,6 +69,8 @@ export function emptyStrengthConfirmationPayload() {
   };
 }
 
+export const radonCapability = "read";
+
 export async function readStrengthConfirmationCache(): Promise<Record<string, unknown> | null> {
   const raw = await readFile(CACHE_PATH, "utf-8");
   return JSON.parse(raw) as Record<string, unknown>;

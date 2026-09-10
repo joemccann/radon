@@ -216,12 +216,41 @@ def test_lapsed_service_health_row_neither_blocks_nor_rehydrates(
     assert sidecar_path.exists() is False
 
 
-def test_service_health_outage_fails_open_without_raising(
+def test_service_health_outage_with_a_configured_store_fails_closed(
     sidecar_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """Read side: a Turso outage must never turn raise_if_blocked() into a
-    crash. Documented fail-open (the sidecar is still consulted first)."""
+    """Production shape (Hetzner EnvironmentFile): Turso IS configured, so a
+    durable lockout record could exist and the read outage means we cannot
+    tell. R-212 requires blocking, not waving the caller into a live IBKR
+    1025 whose every SendRequest extends it.
+
+    The store configuration is stated here, not inherited: this verdict used
+    to be decided by whatever `TURSO_DB_URL` happened to be in the ambient
+    environment (T-277)."""
     from db.hrana_http import HranaHttpError
+
+    monkeypatch.setenv("TURSO_DB_URL", "libsql://radon-test.turso.io")
+    monkeypatch.setenv("TURSO_AUTH_TOKEN", "test-token")
+
+    def _outage(*_a: Any, **_k: Any) -> None:
+        raise HranaHttpError("TimeoutError: timed out")
+
+    monkeypatch.setattr("db.hrana_http.hrana_query", _outage, raising=False)
+    assert is_blocked(now=FRIDAY) is True
+    with pytest.raises(FlexTokenLocked):
+        raise_if_blocked(now=FRIDAY)
+
+
+def test_service_health_outage_without_a_store_fails_open_without_raising(
+    sidecar_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Laptop shape: no Turso credentials, so the sidecar is the ONLY record
+    and its absence is genuine information. Fail-open here, and a Turso
+    outage must never turn raise_if_blocked() into a crash."""
+    from db.hrana_http import HranaHttpError
+
+    monkeypatch.delenv("TURSO_DB_URL", raising=False)
+    monkeypatch.delenv("TURSO_AUTH_TOKEN", raising=False)
 
     def _outage(*_a: Any, **_k: Any) -> None:
         raise HranaHttpError("TimeoutError: timed out")

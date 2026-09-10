@@ -17,7 +17,16 @@ _SCRIPTS_DIR = Path(__file__).resolve().parent.parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
-if "libsql_experimental" not in sys.modules:
+# Import-time, process-wide and never undone, so this stub is visible to every
+# test module collected alongside this one. `not in sys.modules` is true
+# whenever the real driver merely has not been imported YET, which is the
+# normal case, so the stub displaced a driver that was installed all along:
+# test_flex_delivery_claim_writer.py exists to exercise the claim against a
+# REAL libsql connection and got MagicMocks instead, taking `rowcount` and
+# `fetchall()` with it. Stub only when the driver is genuinely absent.
+try:  # noqa: SIM105 - the ImportError is the condition, not an accident
+    import libsql_experimental  # noqa: F401
+except ImportError:
     _libsql_stub = types.ModuleType("libsql_experimental")
     _libsql_stub.connect = MagicMock(return_value=MagicMock())  # type: ignore[attr-defined]
     sys.modules["libsql_experimental"] = _libsql_stub

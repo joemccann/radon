@@ -5,11 +5,13 @@ import { RevealOnScroll } from "@/components/atoms/RevealOnScroll";
 import { ScrollProgress } from "@/components/atoms/ScrollProgress";
 import { SectionHeading } from "@/components/atoms/SectionHeading";
 import { SectionRule } from "@/components/atoms/SectionRule";
+import { CopyAgentPromptBar } from "@/components/molecules/CopyAgentPromptBar";
 import { PlateFrame } from "@/components/molecules/PlateFrame";
+import { ClusterCta } from "@/components/sections/ClusterCta";
 import { EditorialFooter } from "@/components/sections/EditorialFooter";
 import { EditorialHeader } from "@/components/sections/EditorialHeader";
-import { DEMO_URL } from "@/lib/editorial-content";
 import {
+  PAGE_HEADLINE,
   PAGE_NAV_LABEL,
   kellyPageMetadata,
   kellySizingFaqEntries,
@@ -27,7 +29,7 @@ const inlineLink =
 
 export default function FractionalKellyPositionSizingPage() {
   return (
-    <div className="min-h-screen bg-canvas font-serif text-[19px] leading-[1.62] text-primary">
+    <div className="min-h-screen bg-canvas font-sans text-[16px] leading-[1.55] text-primary">
       <ScrollProgress />
       <a
         href="#main-content"
@@ -63,7 +65,7 @@ export default function FractionalKellyPositionSizingPage() {
               as="h1"
               className="editorial-display mb-7 max-w-[16ch] text-primary"
             >
-              Position size is a policy, not a feeling.
+              {PAGE_HEADLINE}
             </RevealOnScroll>
             <RevealOnScroll
               initiallyShown
@@ -76,6 +78,7 @@ export default function FractionalKellyPositionSizingPage() {
               maximum loss and the signal&apos;s odds, then hard-capped at 2.5%
               of bankroll per position. The cap is a ceiling, not a target.
             </RevealOnScroll>
+            <CopyAgentPromptBar capabilityId="kelly" />
           </div>
         </section>
 
@@ -165,7 +168,7 @@ export default function FractionalKellyPositionSizingPage() {
 
               <RevealOnScroll>
                 <PlateFrame
-                  figNo="Exhibit 1"
+                  figNo="Figure 1"
                   figTitle="Fractional Kelly sizing · call debit spread · worked arithmetic"
                   source="Catalog + Gate 3"
                   confidence="Arithmetic"
@@ -316,34 +319,11 @@ export default function FractionalKellyPositionSizingPage() {
 
         <SectionRule />
 
-        <section className="px-8 py-[clamp(64px,9vw,128px)]">
-          <div className="mx-auto max-w-[1140px]">
-            <RevealOnScroll className="border-y border-hairline-soft py-[clamp(40px,6vw,72px)]">
-              <h2 className="editorial-thesis mb-[18px] text-primary">
-                Run it against the live tape.
-              </h2>
-              <p className="mb-[30px] max-w-[60ch] text-secondary">
-                The sizing policy is visible end to end in the demo: signal,
-                structure, Kelly arithmetic, cap, and the pre-trade check that
-                enforces it.
-              </p>
-              <div className="flex flex-wrap items-center gap-[26px]">
-                <a
-                  href={DEMO_URL}
-                  className={`inline-block rounded-[4px] border border-grid px-[16px] py-[10px] font-mono text-[11px] uppercase tracking-[0.06em] text-primary transition-colors hover:border-signal-deep hover:text-signal-deep ${focusRing}`}
-                >
-                  Try the free demo
-                </a>
-                <Link
-                  href="/#pipeline"
-                  className={`font-mono text-[12px] uppercase tracking-[0.04em] text-secondary underline decoration-grid underline-offset-4 transition-colors hover:text-signal-deep hover:decoration-signal-deep ${focusRing}`}
-                >
-                  See where sizing sits in the method →
-                </Link>
-              </div>
-            </RevealOnScroll>
-          </div>
-        </section>
+        <ClusterCta
+          body="The sizing policy is visible end to end in the demo: the view, the structure, Kelly arithmetic, the cap, and the pre-trade check that enforces it."
+          secondaryHref="/#expression"
+          secondaryLabel="See where sizing sits in the method"
+        />
 
         <EditorialFooter />
       </main>

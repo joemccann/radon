@@ -1,9 +1,11 @@
 import type { Metadata, Viewport } from "next";
+import { headers } from "next/headers";
 import localFont from "next/font/local";
 import Providers from "@/components/Providers";
 import PwaRegister from "@/components/PwaRegister";
 import ThemeBootstrap from "@/components/ThemeBootstrap";
 import "./globals.css";
+import "./clear.css";
 
 // Local files keep both page loads and production builds independent of the
 // Google Fonts network. Variables preserve the existing typography contract.
@@ -24,6 +26,9 @@ const plexMono = localFont({
   ],
   variable: "--font-mono",
   display: "swap",
+  // Clear's critical account/navigation UI uses Inter. Let CSS request only
+  // the mono faces actually rendered instead of competing with it upfront.
+  preload: false,
 });
 
 // Inline custom properties outrank the :root fallbacks in globals.css. Using
@@ -41,7 +46,7 @@ export const viewport: Viewport = {
   viewportFit: "cover",
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#ffffff" },
-    { media: "(prefers-color-scheme: dark)", color: "#0a0f14" },
+    { media: "(prefers-color-scheme: dark)", color: "#101714" },
   ],
 };
 
@@ -82,7 +87,18 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // The Playwright bypass is server-only and token-bound in middleware. Carry
+  // the same verified request into the client provider tree so realtime specs
+  // do not request WS credentials from the deliberately fake Clerk instance
+  // in the test config. A deployment flag alone cannot enter this branch.
+  const requestHeaders = await headers();
+  const authlessTestToken = process.env.RADON_AUTHLESS_TEST_TOKEN;
+  const authlessTestBypass =
+    process.env.RADON_AUTHLESS_TEST === "1" &&
+    Boolean(authlessTestToken) &&
+    requestHeaders.get("x-radon-authless-test") === authlessTestToken;
+
   return (
     <html
       lang="en"
@@ -93,8 +109,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <ThemeBootstrap />
       </head>
-      <body className="app-root">
-        <Providers>{children}</Providers>
+      <body className="app-root radon-clear">
+        <Providers authlessTestBypass={authlessTestBypass}>{children}</Providers>
         <PwaRegister />
       </body>
     </html>

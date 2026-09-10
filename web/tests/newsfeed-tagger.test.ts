@@ -277,3 +277,64 @@ describe("hydrateTags", () => {
     expect(posts[1].tags).toEqual(["BTC"]);
   });
 });
+
+// R-466 / REL-165: same unbounded-fetch shape as the vision tagger. A
+// half-open connection to api.cerebras.ai held the cycle; the bound is a
+// per-model tagging failure (the fallback model is still tried), never a hang.
+describe("R-466 / REL-165: the text fetch is bounded", () => {
+  function hangUntilAborted(init?: RequestInit): Promise<Response> {
+    return new Promise((_resolve, reject) => {
+      const signal = init?.signal;
+      if (signal) signal.addEventListener("abort", () => reject(signal.reason));
+    });
+  }
+
+  it("a fetch that never answers settles tagPost as untagged within the bound", async () => {
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => hangUntilAborted(init));
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const { createTagger } = await import("../../scripts/newsfeed/tagger.js");
+    const tagger = createTagger({ getTaxonomySnapshot: async () => TAXONOMY, timeoutMs: 50 });
+
+    const outcome = await Promise.race([
+      tagger.tagPost({ id: "p1", title: "Hangs", content: "x" }).then((tags) => ({ tags })),
+      new Promise<string>((resolve) => setTimeout(() => resolve("hung"), 1500)),
+    ]);
+
+    expect(outcome).toEqual({ tags: null });
+    // Both models were tried and both carried the bound on the wire.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(init?.signal).toBeInstanceOf(AbortSignal);
+    }
+  });
+});
+
+// T-374: the tests above all inject timeoutMs, so the 30 s DEFAULT (the
+// REL-165 incident constant) was a free variable. AbortSignal.timeout runs on
+// Node's internal timer, which vitest fake timers cannot advance (verified:
+// advanceTimersByTimeAsync(30_001) leaves the signal un-aborted), so the
+// default's wiring is asserted directly: the AbortSignal.timeout spy sees
+// exactly 30 000 ms and the fetch carries the very signal it returned. The
+// abort path itself is proven end-to-end by the timeoutMs: 50 test above.
+describe("T-374: the default fetch bound is exactly 30 000 ms", () => {
+  it("with no timeoutMs override, the model call carries AbortSignal.timeout(30000) on the wire", async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(chatCompletion(JSON.stringify({ tags: ["puts", "options", "positioning"] }))),
+    );
+    global.fetch = fetchMock as typeof fetch;
+
+    const { createTagger } = await import("../../scripts/newsfeed/tagger.js");
+    const tagger = createTagger({ getTaxonomySnapshot: async () => TAXONOMY });
+
+    const tags = await tagger.tagPost({ id: "p-t374", title: "X", content: "Y" });
+    expect(tags).toEqual(["PUTS", "OPTIONS", "POSITIONING"]);
+
+    expect(timeoutSpy).toHaveBeenCalledTimes(1);
+    expect(timeoutSpy).toHaveBeenCalledWith(30_000);
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+    expect(init.signal).toBe(timeoutSpy.mock.results[0].value);
+  });
+});

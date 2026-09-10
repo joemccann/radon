@@ -18,7 +18,12 @@
 import { createClient } from "@libsql/client";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { recordServiceHealth } from "./writer.js";
 
+// R-325: this unit fired every weekday at 21:45 UTC and wrote NO
+// service_health row, so it sat in neither watchdog catalog and a demo mirror
+// that had stopped mirroring was invisible on both sides.
+const SERVICE_NAME = "demo-mirror";
 const PROD_MARKER = "radon-joemccann";
 const DEMO_MARKER = "radon-demo";
 const DEFAULT_MAX_ATTEMPTS = 3;
@@ -283,11 +288,29 @@ async function main() {
 
   const src = createClient({ url: toHttp(srcUrl), authToken: srcToken });
   const dst = createClient({ url: toHttp(dstUrl), authToken: dstToken });
+  const startedAt = new Date().toISOString();
   try {
     await runMarketMirror({ src, dst, maxAttempts });
+    await heartbeat("ok", { startedAt, finishedAt: new Date().toISOString() });
+  } catch (err) {
+    await heartbeat("error", {
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      error: { message: err?.message ?? String(err) },
+    });
+    throw err;
   } finally {
     src.close?.();
     dst.close?.();
+  }
+}
+
+/** Telemetry must never mask the mirror's own outcome. */
+async function heartbeat(state, extra) {
+  try {
+    await recordServiceHealth(SERVICE_NAME, state, extra);
+  } catch (err) {
+    console.error(`[mirror] service_health heartbeat failed: ${err?.message ?? err}`);
   }
 }
 

@@ -1,4 +1,4 @@
-import { agentPages } from "./developer-pages";
+import { agentPages, HOSTED_MCP_URL } from "./developer-pages";
 import { LEGAL_CONTACT_EMAIL } from "./legal";
 import { SITE_DESCRIPTION, SITE_NAME, siteUrl } from "./seo";
 
@@ -31,7 +31,13 @@ const documentedPaths = [
     path: "/developers",
     summary: "Radon Terminal developer resources",
     description:
-      "Index of OpenAPI, auth docs, MCP server, and webhook status. Accept: text/markdown supported.",
+      "Index of OpenAPI, auth docs, MCP server, webhook status, and agent-prompt payload shape. Accept: text/markdown supported.",
+  },
+  {
+    path: "/developers/recipes",
+    summary: "Radon Terminal developer recipes",
+    description:
+      "Seven one-paste agent prompts for Flow, Gates, CRI, GEX, structures, Kelly, and llms.txt bootstrap.",
   },
   {
     path: "/developers/openapi",
@@ -46,7 +52,7 @@ const documentedPaths = [
   {
     path: "/developers/mcp",
     summary: "Radon Terminal MCP server",
-    description: "Local stdio radon-kb server. No hosted HTTP MCP URL.",
+    description: `Hosted Streamable HTTP MCP at ${HOSTED_MCP_URL} plus the local stdio radon-kb server.`,
   },
   {
     path: "/developers/webhooks",

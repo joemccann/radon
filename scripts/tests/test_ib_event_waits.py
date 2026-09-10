@@ -118,7 +118,19 @@ def test_wait_until_caps_at_timeout_using_sleep_steps(MockIB):
 def test_wait_until_is_bounded_by_wall_clock_when_sleep_overruns(MockIB):
     """ib.sleep runs the event loop for AT LEAST ``secs``; a blocked handler
     can stretch each 0.05s step to 0.2s. The cap must be wall-clock, not
-    ``ceil(timeout/poll)`` nominal steps (which would be 4 x 0.2s = 0.8s)."""
+    ``ceil(timeout/poll)`` nominal steps (which would be 4 x 0.2s = 0.8s).
+
+    TEST_AUDIT T-182: ``sleep.call_count`` is the assertion that CARRIES that
+    contract, not the wall-clock bound. A deadline-capped loop takes ONE step
+    here (the first over-running step consumes the whole 0.2s timeout); the
+    nominal-step bug takes four. Measured 2026-08-28 against a nominal-step
+    build on a runner whose stubbed sleep is exact: elapsed 0.831s, call_count
+    4 — ``call_count <= 2`` reds, and any wall-clock ceiling loose enough not to
+    flake on the real floor does not. The old ``elapsed < 0.5`` was that squeeze
+    from the other side: ``time.sleep(0.2)`` returns in ~0.34s on this macOS
+    gate (72% overshoot), so the floor already sat at 67% of the ceiling with
+    the box idle. ``elapsed`` is kept only as a coarse hang guard.
+    """
     mock_ib = MockIB.return_value
     client = _connected_client(mock_ib)
     mock_ib.sleep.side_effect = lambda seconds: time.sleep(0.2)
@@ -127,8 +139,12 @@ def test_wait_until_is_bounded_by_wall_clock_when_sleep_overruns(MockIB):
     assert client.wait_until(lambda: False, timeout=0.2, poll=0.05) is False
     elapsed = time.monotonic() - started
 
-    assert elapsed < 0.5, f"wait_until overran wall-clock timeout: {elapsed:.2f}s"
-    assert mock_ib.sleep.call_count <= 2
+    assert mock_ib.sleep.call_count <= 2, (
+        f"wait_until took {mock_ib.sleep.call_count} sleep steps for a 0.2s "
+        "timeout whose first step already burned 0.2s: the loop is counting "
+        "ceil(timeout/poll) nominal steps instead of honouring the deadline"
+    )
+    assert elapsed < 1.0, f"wait_until hung: {elapsed:.2f}s"
 
 
 @patch("clients.ib_client.IB")

@@ -7,22 +7,21 @@ export function EvidenceSection() {
   return (
     <section id="evidence" className="px-8 py-[clamp(64px,9vw,128px)]">
       <div className="mx-auto max-w-[1140px]">
-        <SectionHeading no="Evidence" label="Audit Trail · Journal & Portfolio" />
+        <SectionHeading no="Evidence" label="Journal and portfolio" />
 
         <div className="grid items-start gap-[clamp(28px,4vw,56px)] md:grid-cols-2">
           <RevealOnScroll>
             <h2 className="editorial-thesis mb-[22px] text-primary">
-              The record is the proof.
+              The journal is the book.
             </h2>
             <p className="mb-[1.05em] text-secondary">
-              Every routed contract is journaled with its full decision chain: the flow
-              score that detected it, the regime read that corroborated it, the structure
-              that expressed it, and the realized outcome. The journal is the canonical
-              store. The portfolio and order views both derive from it.
+              Every routed contract keeps the chain: flow score, regime read,
+              structure, and result. Portfolio and orders both read from that
+              journal.
             </p>
             <p className="mb-[1.05em] text-secondary">
-              Nothing is reconstructed after the fact. P&amp;L is lot-matched to basis, and
-              the same row that placed the trade carries its result.
+              P&amp;L stays on the same row that placed the trade, lot-matched to
+              basis.
             </p>
 
             <div className="mt-[30px] border-t border-grid font-mono text-[12px]">
@@ -62,12 +61,12 @@ export function EvidenceSection() {
 
           <RevealOnScroll>
             <ProductPlate
-              figNo="Plate 6"
+              figNo="Figure 6"
               figTitle="Structure-aware portfolio · live session"
               shot="portfolio"
               lightAlt="Radon portfolio view: net liquidation, day P&L, unrealized P&L, and a table of defined-risk positions with ticker, structure, direction, entry, and P&L."
               darkAlt="Radon portfolio view, dark theme: net liquidation, day P&L, unrealized P&L, and a table of defined-risk positions."
-              caption="The portfolio derives from the same journal that placed each trade. Every open position carries its structure, direction, entry, and lot-matched P&L. Nothing is reconstructed after the fact."
+              caption="Same journal that placed the trade. Each row keeps structure, entry, and lot-matched P&L."
             />
           </RevealOnScroll>
         </div>

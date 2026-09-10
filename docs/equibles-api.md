@@ -15,7 +15,7 @@ Companion to `docs/unusual_whales_api.md`.
 |---|---|
 | Base | `https://api.equibles.com/v1` |
 | Auth | `Authorization: Bearer $EQUIBLES_API_KEY` |
-| Key | repo-root `.env` (laptop) and `/etc/radon/env` mode `0600` (Hetzner; `~/radon-cloud/.env` is a compatibility symlink) |
+| Key | repo-root `.env` (laptop) and `/etc/radon/env` mode `0640` root:radon (Hetzner; `~/radon-cloud/.env` is a compatibility symlink) |
 | Plan | Pro. `X-RateLimit-Limit: 100000` / day, shared REST + MCP, resets 00:00 UTC |
 | Methods | GET only |
 
@@ -125,6 +125,17 @@ Only parameters listed here are accepted. `meta` column indicates pagination sup
 `off-exchange-volume` is weekly (FINRA ATS transparency). `short-interest` settles bi-monthly.
 `short-volume` is daily.
 
+The ATS venue-share sweep (`scripts/fetch_equibles_ats_venue_share.py`) bounds
+each ticker fetch with an abandoned **daemon thread** (never a
+ThreadPoolExecutor — CPython's atexit join on executor workers blocks
+interpreter exit behind a tarpitted socket, REL-196/R-528). A
+timeout on one ticker replaces the shared Session and continues the walk;
+only a spent `SWEEP_BUDGET_S` defers the unreached tail. The scheduled
+universe is portfolio, then watchlist, then Nasdaq-100, Russell 2000, S&P
+500 (first seat wins). Coverage is scored against portfolio ∪ watchlist;
+the index tail rotates and prior series carry forward so a Tuesday that
+cannot finish ~2500 names still keeps last week's rows (R-558).
+
 ### 13F institutional
 
 | Endpoint | Params | meta | Response |
@@ -227,6 +238,20 @@ silently with the previous quarter's surviving rows while
 `holder_count`) asserted completeness. The write now rolls back as a unit, and
 the snapshot carries `holders_persisted` so a consumer can tell when the depth
 rows are behind the summary (R-227).
+
+## A failed weekly cycle carries its own next attempt
+
+`radon-equibles-ats.timer` fires once a week (Tuesday 09:15 UTC). Without a
+retry hint, one failed cycle re-paged the watchdog on every watchdog cycle for
+the seven days until the next attempt — 22 duplicate pages in a single daily
+digest. Every `state='error'` payload from `run()` now carries
+`next_attempt_at`, computed by `_next_scheduled_run()` from the timer
+constants, so the watchdog's embargo suppression covers the dead week. The
+no-series payload carries `codes`, and `message` includes them
+(`no ticker produced a series (timeout)`), because the dashboard only
+renders `message`. A tarpit that used to budget-skip the rest of the
+watchlist after the first hung ticker now replaces the Session and
+keeps walking; the weekly timer is otherwise the only retry.
 
 ---
 

@@ -24,16 +24,16 @@
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
   /* Semantic typography roles. Component primitives should consume these
      instead of introducing new one-off sizes and tracking values. */
-  --text-meta: 11px;
-  --text-label: 12px;
-  --text-body: 13px;
+  --text-meta: 12px;
+  --text-label: 13px;
+  --text-body: 14px;
   --text-table: 13px;
   --text-prose: 14px;
-  --text-panel-title: 14px;
-  --text-view-title: 18px;
+  --text-panel-title: 18px;
+  --text-view-title: 28px;
   --text-metric: 28px;
-  --tracking-meta: 0.03em;
-  --tracking-label: 0.02em;
+  --tracking-meta: 0.01em;
+  --tracking-label: 0;
 
   /* ---- Canonical scales. New rules MUST consume these tokens rather than
      introducing fresh literals. Existing rules are migrated in a later pass;
@@ -48,10 +48,11 @@
   --space-5: 24px;
   --space-6: 32px;
 
-  /* Radius: capped at the brand's 4px panel ceiling. --radius-sm is the
-     micro corner (grips, ticks); --radius-capsule is badges only. */
-  --radius: 4px;
-  --radius-sm: 2px;
+  /* Clear: restrained soft corners on controls and supporting surfaces.
+     Financial tables retain square internal cells. */
+  --radius: 8px;
+  --radius-sm: 6px;
+  --radius-lg: 10px;
   --radius-capsule: 999px;
 
   /* Motion: three durations and one easing curve. --duration-quick is for
@@ -90,26 +91,25 @@
 
 [data-theme="dark"] {
   color-scheme: dark;
-  /* Canonical Radon tokens — per brand/radon-design-tokens.json and brand-identity.md § 2.
-     Dark-theme contrast tuning 2026-07-14: signal states re-leveled so escalation tracks
-     lightness (dislocation/extreme were the dimmest states; now the most legible), muted
-     text raised above the WCAG AA floor, hairline + hover surfaces made perceptible.
-     Comments give the prior value + resulting WCAG ratio against --bg-panel (#0f1519). */
-  --bg-canvas: #0a0f14;
-  --bg-panel: #0f1519;
-  --bg-panel-raised: #1e252b; /* was #151c22 — hover shift 1.07 → 1.19 (perceptible) */
-  --line-grid: #2e3947; /* was #1e293b — hairline 1.26 → 1.57 (holds without shadows) */
-  --signal-core: #05AD98;
-  --signal-strong: #0FCFB5;
-  --signal-deep: #33a090; /* emerging; was #048A7A — 4.31 → 5.76 (legible at 12px mono) */
+  /* Clear's dark counterpart preserves each semantic signal role. Reading
+     contrast on canvas/subtle surfaces is pinned by clear-theme.test.ts. */
+  --bg-canvas: #101714;
+  --bg-panel: #101714;
+  --bg-panel-raised: #202c25;
+  --bg-subtle: #162019;
+  --line-grid: #2c3c32;
+  --signal-core: #76d5a1;
+  --signal-strong: #91e2b5;
+  --signal-deep: #68bf8f;
   --warn: #F5A623;
   --fault: #E85D6C;
   --dislocation: #e55fb5; /* was #D946A8 — 4.72 → 5.81 (alarm state now pops) */
   --extreme: #9e80f6; /* rare/high-convexity; was #8B5CF6 — 4.34 → 6.02 (was weakest) */
   --neutral: #94a3b8;
-  --text-primary: #e2e8f0;
-  --text-secondary: #94a3b8;
-  --text-muted: #758192; /* was #475569 — 2.43 → 4.65 (metadata rails now pass AA) */
+  --text-primary: #edf4ef;
+  --text-secondary: #b0c1b7;
+  --text-muted: #96aa9e;
+  --clear-attention-bg: #30281a;
   /* Accessible foreground variants of the accent hues. Identical to the base token
      in dark (zero visual change); darkened in the light block so accent TEXT clears
      WCAG AA on white. Base --signal-core / --warn stay bright for FILLS. */
@@ -138,46 +138,46 @@
   --accent-text: var(--bg-canvas);
   --scrollbar-track: var(--bg-canvas);
   --scrollbar-thumb: var(--line-grid);
-  --chart-grid: rgba(148, 163, 184, 0.16);
-  --chart-axis: #2e3947; /* sync with --line-grid */
-  --chart-axis-muted: #94a3b8;
-  --chart-surface: linear-gradient(180deg, rgba(15, 21, 25, 0.84) 0%, rgba(10, 15, 20, 0.95) 100%);
-  --chart-tooltip-bg: #0f1519;
-  --chart-tooltip-border: #2e3947; /* sync with --line-grid */
-  --chart-series-comparison: rgba(148, 163, 184, 0.72);
-  --chart-fill-primary-start: rgba(5, 173, 152, 0.22);
-  --chart-fill-primary-end: rgba(5, 173, 152, 0.02);
-  --chart-live-badge-bg: rgba(5, 173, 152, 0.15);
-  --chart-live-badge-text: #05AD98;
+  --chart-grid: color-mix(in srgb, var(--text-muted) 16%, transparent);
+  --chart-axis: var(--line-grid);
+  --chart-axis-muted: var(--text-muted);
+  --chart-surface: var(--bg-panel);
+  --chart-tooltip-bg: var(--bg-panel-raised);
+  --chart-tooltip-border: var(--line-grid);
+  --chart-series-comparison: var(--text-muted);
+  --chart-fill-primary-start: color-mix(in srgb, var(--signal-core) 14%, transparent);
+  --chart-fill-primary-end: transparent;
+  --chart-live-badge-bg: var(--wash-signal);
+  --chart-live-badge-text: var(--signal-core-text);
   --performance-chart-bg: var(--chart-surface);
   --performance-chart-grid: var(--chart-grid);
   --performance-chart-benchmark: var(--chart-series-comparison);
-  --performance-chart-meta-bg: rgba(30, 37, 43, 0.45); /* sync with --bg-panel-raised #1e252b */
+  --performance-chart-meta-bg: var(--bg-subtle);
 }
 
 [data-theme="light"] {
   color-scheme: light;
-  /* Canonical Radon tokens — per brand/radon-design-tokens.json § color.light. */
-  --bg-canvas: #FFFFFF;
-  --bg-panel: #FFFFFF;
-  --bg-panel-raised: #F1F5F9;
-  --line-grid: #BBBFBF;
+  /* A / Clear, selected 2026-09-05. See DESIGN_MEMORY.md. */
+  --bg-canvas: #ffffff;
+  --bg-panel: #ffffff;
+  --bg-panel-raised: #e9f4ed;
+  --bg-subtle: #f6f8f8;
+  --line-grid: #e4eae7;
   --img-outline: oklch(0 0 0 / 0.1);
-  --signal-core: #05AD98;
-  --signal-strong: #048A7A;
-  --signal-deep: #037066;
-  --warn: #D4910A;
-  --fault: #D4183D;
+  --signal-core: #087f53;
+  --signal-strong: #087f53;
+  --signal-deep: #086541;
+  --warn: #96651c;
+  --fault: #b5453e;
   --dislocation: #C026A0;
   --extreme: #7C3AED;
-  --neutral: #878787;
-  --text-primary: #000000;
-  --text-secondary: #636363;
-  --text-muted: #737373; /* 4.74:1 against white; passes WCAG AA for UI text. */
-  /* Accent TEXT on white: base core #05AD98 = 2.82 and warn #D4910A = 2.67 fail AA.
-     These darkened variants pass (#037066 = 5.98, #9f5d00 = 5.20). Fills keep the base. */
-  --signal-core-text: #037066;
-  --warn-text: #9f5d00;
+  --neutral: #62716d;
+  --text-primary: #172624;
+  --text-secondary: #52645d;
+  --text-muted: #62716d;
+  --clear-attention-bg: #faf2e1;
+  --signal-core-text: var(--signal-core);
+  --warn-text: var(--warn);
   --border-focus: var(--signal-core-text);
   --gex-mq-accent: #2563EB;
   --signal-fault-deep: #9F1239;
@@ -197,21 +197,21 @@
   --accent-text: var(--bg-canvas);
   --scrollbar-track: var(--bg-canvas);
   --scrollbar-thumb: var(--line-grid);
-  --chart-grid: rgba(100, 116, 139, 0.22);
-  --chart-axis: #BBBFBF;
-  --chart-axis-muted: #636363;
-  --chart-surface: linear-gradient(180deg, rgba(255, 255, 255, 0.92) 0%, rgba(241, 245, 249, 0.98) 100%);
-  --chart-tooltip-bg: #FFFFFF;
-  --chart-tooltip-border: #BBBFBF;
-  --chart-series-comparison: rgba(100, 116, 139, 0.72);
-  --chart-fill-primary-start: rgba(5, 173, 152, 0.18);
-  --chart-fill-primary-end: rgba(5, 173, 152, 0.03);
-  --chart-live-badge-bg: rgba(5, 173, 152, 0.1);
-  --chart-live-badge-text: #048A7A;
+  --chart-grid: color-mix(in srgb, var(--text-muted) 14%, transparent);
+  --chart-axis: var(--line-grid);
+  --chart-axis-muted: var(--text-muted);
+  --chart-surface: var(--bg-panel);
+  --chart-tooltip-bg: var(--bg-panel);
+  --chart-tooltip-border: var(--line-grid);
+  --chart-series-comparison: var(--text-muted);
+  --chart-fill-primary-start: color-mix(in srgb, var(--signal-core) 10%, transparent);
+  --chart-fill-primary-end: transparent;
+  --chart-live-badge-bg: var(--wash-signal);
+  --chart-live-badge-text: var(--signal-core-text);
   --performance-chart-bg: var(--chart-surface);
   --performance-chart-grid: var(--chart-grid);
   --performance-chart-benchmark: var(--chart-series-comparison);
-  --performance-chart-meta-bg: rgba(241, 245, 249, 0.92);
+  --performance-chart-meta-bg: var(--bg-subtle);
 }
 
 *,
@@ -2052,6 +2052,99 @@ body[data-mobile="true"] .dashboard-surface__feed {
   overflow-y: visible;
 }
 
+.feed-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--line-grid);
+  margin: 0 0 12px;
+}
+.feed-tabs__tab {
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  letter-spacing: var(--tracking-meta);
+  text-transform: uppercase;
+  color: var(--text-muted);
+  background: transparent;
+  border: 0;
+  border-right: 1px solid var(--line-grid);
+  padding: 8px 14px;
+  cursor: pointer;
+  min-height: var(--hit-min);
+}
+.feed-tabs__tab--on {
+  color: var(--text-primary);
+  background: var(--bg-panel-raised);
+  border-bottom: 1px solid var(--signal-core);
+  margin-bottom: -1px;
+}
+.headlines-tape {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.headlines-tape__row {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--line-grid);
+}
+.headlines-tape__row:last-child {
+  border-bottom: none;
+}
+.headlines-tape__meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+.headlines-tape__time {
+  font-variant-numeric: tabular-nums;
+}
+.headlines-tape__headline {
+  margin: 6px 0 0;
+  max-inline-size: 680px;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.005em;
+  line-height: 1.35;
+  color: var(--text-primary);
+  text-wrap: balance;
+}
+.headlines-tape__body {
+  margin: 8px 0 0;
+  max-inline-size: 680px;
+  font-size: var(--text-body);
+  line-height: 1.6;
+  color: color-mix(in srgb, var(--text-primary) 82%, transparent);
+  text-wrap: pretty;
+}
+.headlines-tape__body--solo {
+  margin-top: 6px;
+  color: var(--text-primary);
+}
+.headlines-tape__lede {
+  font-weight: 600;
+}
+.headlines-tape__imp {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--warn);
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+  border-radius: var(--radius-capsule);
+  padding: 1px 5px;
+}
+.headlines-tape__hit {
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  color: var(--fault);
+  white-space: nowrap;
+}
+.headlines-tape__hit--up {
+  color: var(--signal-strong);
+}
+
 .dashboard-surface__right {
   display: flex;
   flex-direction: column;
@@ -2980,6 +3073,7 @@ a.signals-hero__row:hover { background: var(--bg-panel-raised); }
 .chat-launcher__panel {
   position: relative;
   z-index: 1;
+  align-self: flex-start;
   width: min(820px, 100%);
   max-height: 100%;
   background: var(--bg-panel);
@@ -2990,20 +3084,16 @@ a.signals-hero__row:hover { background: var(--bg-panel-raised); }
   overflow: hidden;
 }
 
-.chat-launcher__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--line-grid);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+/* Composer-only empty state (design-lab Variant A): the panel shrinks to the
+   composer and floats in the upper third instead of filling the viewport. */
+.chat-launcher:has(.chat-panel[data-empty]) {
+  align-items: flex-start;
+  padding-top: 18vh;
 }
 
-.chat-launcher__kicker { color: var(--signal-core-text); }
-.chat-launcher__hint   { color: var(--text-muted); }
+.chat-launcher__panel:has(.chat-panel[data-empty]) {
+  width: min(640px, 100%);
+}
 
 /* ───────────────────────────────────────────────────────────
    Footer telemetry strip — collapses the three legacy banners
@@ -4465,7 +4555,7 @@ td.last-price-cell {
 }
 
 .chat-shell {
-  padding: 0 20px 16px;
+  padding: 16px 20px;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -4733,10 +4823,6 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh--rail {
   color: var(--text-muted);
 }
 
-.news-feed-meta__source {
-  color: var(--text-secondary);
-}
-
 .news-feed-item .news-feed-tags {
   margin-top: 16px;
 }
@@ -4782,10 +4868,6 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh--rail {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.news-feed-figcaption span:last-child {
-  flex: none;
 }
 
 .news-feed-image-wrapper {
@@ -5235,29 +5317,6 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh--rail {
   padding: 14px 0 6px;
 }
 
-.news-feed-link-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 12px;
-  border: 1px solid var(--line-grid);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--text-secondary);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  text-decoration: none;
-  transition: color 150ms ease, border-color 150ms ease, background 150ms ease;
-}
-
-.news-feed-link-pill:hover {
-  color: var(--signal-core-text);
-  border-color: var(--line-grid);
-  background: var(--bg-panel-raised);
-}
-
 .news-feed-timestamp {
   margin-left: auto;
   font-family: var(--font-mono);
@@ -5464,64 +5523,6 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh--rail {
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 16px 4px;
-}
-
-/* Empty / first-run state — clickable domain prompts instead of a blank box. */
-.chat-empty-state {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 12px;
-  padding: 24px 8px;
-}
-
-.chat-empty-state__title {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--signal-core-text);
-}
-
-.chat-empty-state__copy {
-  margin: 0;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--text-muted);
-  max-width: 46ch;
-}
-
-.chat-empty-state__cards {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.chat-empty-card {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  text-align: left;
-  padding: 10px 12px;
-  border: 1px solid var(--border-dim);
-  border-radius: 4px;
-  background: var(--bg-panel);
-  color: var(--text-primary);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  cursor: pointer;
-  transition: border-color 160ms ease, background 160ms ease;
-}
-
-.chat-empty-card:hover {
-  border-color: var(--signal-core-text);
-  background: var(--bg-hover);
-}
-
-.chat-empty-card__slash {
-  color: var(--text-muted);
 }
 
 /* Floating jump-to-latest, shown only when the user has scrolled up. Always
@@ -6041,28 +6042,6 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh--rail {
   cursor: not-allowed;
 }
 
-.chat-pills {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.pill-chip {
-  border: 0;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--bg-hover) 70%, transparent);
-  color: var(--text-secondary);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: 6px 10px;
-  font-family: var(--font-mono);
-  cursor: pointer;
-}
-
-.pill-chip:hover {
-  background: var(--bg-hover);
-}
 
 @media (max-width: 1200px) {
   .two-col {
@@ -6856,6 +6835,19 @@ tr.leg-row td {
   padding: 28px;
 }
 
+/* Mount point for DemoPendingLogo's WebGL sketch. Sized to match the mark;
+   collapses to zero footprint via :empty when WebGL is unavailable or the
+   visitor prefers reduced motion, so the panel renders identically to the
+   plain static card that shipped before the mark existed. */
+.demo-pending-logo {
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 16px;
+}
+.demo-pending-logo:empty {
+  display: none;
+}
+
 .trial-expired-kicker {
   display: flex;
   align-items: center;
@@ -7414,6 +7406,18 @@ body[data-mobile="true"] .orders-command-strip__jump:active {
   row-gap: 6px;
   font-family: var(--font-mono);
   font-size: 12px;
+}
+
+/* Partial fill: the header quantity is the REMAINDER, so name what already
+   filled rather than leaving the smaller number unexplained. */
+.modify-order-filled {
+  padding: 1px 6px;
+  border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent);
+  border-radius: 2px;
+  color: var(--warning);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .modify-layout {
@@ -8488,7 +8492,7 @@ body[data-mobile="true"] .orders-command-strip__jump:active {
   height: auto;
   flex: 1 0 auto;
 }
-.cockpit--mobile .book-montage {
+.cockpit--mobile .book-region .book-window .book-montage {
   border-right: none;
   border-bottom: 1px solid var(--line-grid);
   flex: 1 1 56%;
@@ -8523,19 +8527,17 @@ body[data-mobile="true"] .orders-command-strip__jump:active {
 .cockpit--mobile .book-row .book-mkt {
   font-size: 12px;
 }
-/* Tighter side columns on a phone: the desktop 52px-mkt / 70px-px pairs plus
-   12px pads need 382px of montage — 17px more than a 393px viewport leaves,
-   which grew an inner horizontal scrollbar and amputated the ask side. */
+/* Phone montage: market flexes, size hugs the price, gap keeps SHARES off MARKET. */
 .cockpit--mobile .book-side.bid .book-colhead,
 .cockpit--mobile .book-side.bid .book-row {
-  grid-template-columns: 44px minmax(0, 1fr) 58px;
+  grid-template-columns: minmax(0, 1fr) minmax(36px, auto) 58px;
   column-gap: 6px;
   padding-left: 8px;
   padding-right: 8px;
 }
 .cockpit--mobile .book-side.ask .book-colhead,
 .cockpit--mobile .book-side.ask .book-row {
-  grid-template-columns: 58px minmax(0, 1fr) 44px;
+  grid-template-columns: 58px minmax(36px, auto) minmax(0, 1fr);
   column-gap: 6px;
   padding-left: 8px;
   padding-right: 8px;
@@ -9299,6 +9301,12 @@ body[data-mobile="true"] .table-wrap td { white-space: nowrap; }
   position: relative;
   display: inline-block;
 }
+/* Mobile card lists don't consume column visibility, so the toggle is dead
+   UI on the phone shell — hide it rather than ship a control that does
+   nothing (mobile parity rubric, 2026-09-02). */
+body[data-mobile="true"] .columns-toggle {
+  display: none;
+}
 .columns-toggle-btn {
   display: inline-flex;
   align-items: center;
@@ -9840,14 +9848,29 @@ tr {
   border-bottom: 1px solid var(--line-grid);
   background: var(--bg-panel-raised);
 }
+.book-colhead > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .book-colhead .r { text-align: right; }
 .book-colhead .c { text-align: center; }
 
-/* two-sided montage (stock / option) */
+/* two-sided montage (stock / option)
+   Market is the flexible column (minmax 0 so long MPIDs ellipsis). Size hugs
+   the price: bid size right-aligned, ask size left-aligned. column-gap keeps
+   SHARES and MARKET from colliding on names like DRCTEDARK. */
 .book-sides { display: grid; grid-template-columns: 1fr 1fr; }
 .book-side.bid { border-right: 1px solid var(--line-grid); }
-.book-side.bid .book-colhead, .book-side.bid .book-row { grid-template-columns: 52px 1fr 70px; }
-.book-side.ask .book-colhead, .book-side.ask .book-row { grid-template-columns: 70px 1fr 52px; }
+.book-side.bid .book-colhead, .book-side.bid .book-row {
+  grid-template-columns: minmax(0, 1.15fr) minmax(44px, auto) 70px;
+  column-gap: 8px;
+}
+.book-side.ask .book-colhead, .book-side.ask .book-row {
+  grid-template-columns: 70px minmax(44px, auto) minmax(0, 1.15fr);
+  column-gap: 8px;
+}
 .book-row {
   display: grid;
   align-items: center;
@@ -9859,8 +9882,18 @@ tr {
   position: relative;
 }
 .book-row .book-mkt { color: var(--text-secondary); font-size: 11px; }
-.book-row .book-shares { color: var(--text-secondary); font-variant-numeric: tabular-nums; text-align: right; }
-.book-row .book-px { font-weight: 600; font-variant-numeric: tabular-nums; }
+.book-row .book-shares {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  min-width: 0;
+}
+.book-side.ask .book-row .book-shares { text-align: left; }
+.book-row .book-px {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  min-width: 0;
+}
 .book-side.bid .book-row .book-px { text-align: right; color: var(--signal-core-text); }
 .book-side.ask .book-row .book-px { text-align: left; color: var(--fault); }
 .book-side.ask .book-row .book-mkt { text-align: right; }
@@ -9946,10 +9979,16 @@ tr {
   align-items: center;
   gap: 5px;
   min-width: 0;
+  overflow: hidden;
   white-space: nowrap;
 }
 .book-side.ask .book-row .book-mkt { justify-content: flex-end; }
-.book-venue-lead { overflow: hidden; text-overflow: ellipsis; }
+.book-venue-lead {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1 1 auto;
+}
 .book-venue-more {
   flex: 0 0 auto;
   padding: 1px 4px;
@@ -11411,7 +11450,7 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
 
 .regime-history-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 16px;
   align-items: start;
 }
@@ -11545,7 +11584,7 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
 
 .regime-relationship-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 16px;
   align-items: start;
   padding: 16px;
@@ -12763,12 +12802,40 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
 
 /* Docked ticket rail — chain keeps its column, the ticket sits beside it so
    legs, price, risk and CTA are readable without scrolling. Below the
-   breakpoint the rail unstacks and the ticket returns to full width. */
+   breakpoint the rail unstacks and the ticket returns to full width.
+
+   The deck is height-locked, so the chain is the deck body's only child and
+   fills it exactly: chain table and ticket are then the ONLY scroll
+   containers. Without this the deck body scrolls too, and a ticket sized off
+   the viewport (`100dvh`) overflows its much shorter scrollport — the risk
+   block and transmit CTA are reachable only by scrolling the panel AROUND the
+   form, never the form. */
+.asset-deck-body:has(.chain-tab) {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.chain-tab {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 8px 0 0;
+  /* Last resort. Above 1180px the only inner scrollports are
+     .chain-grid-wrapper and .order-builder--rail, so any OTHER child — the
+     expiry bar, the hint line, and notably an error or empty-chain block — was
+     clipped with no scrollbar anywhere on the page. R-425. */
+  overflow-y: auto;
+}
+
 .chain-rail {
+  flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 12px;
-  align-items: start;
+  align-items: stretch;
 }
 
 .chain-rail[data-docked="true"] {
@@ -12777,32 +12844,55 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
 
 .chain-rail-main {
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
 
+/* The chain takes whatever height the toolbar and hint leave it — a fixed box
+   would either strand empty deck below it or clip rows on a short window.
+   `0 1 auto` hugs a short chain and shrinks-to-scroll a long one. */
 .chain-rail .chain-grid-wrapper {
+  flex: 0 1 auto;
   min-width: 0;
+  min-height: 0;
+  max-height: none;
 }
 
+/* Hugs its content, caps at the deck and scrolls itself past that — so the
+   risk block and TRANSMIT are always reachable from inside the ticket. */
 .order-builder--rail {
-  position: sticky;
-  top: 8px;
-  /* Never taller than the viewport: the ticket scrolls internally so the
-     transmit CTA stays reachable on a short window. */
-  max-height: calc(100dvh - 96px);
+  align-self: start;
+  max-height: 100%;
+  margin-top: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
 
+/* Narrow: the rail unstacks, so the deck body goes back to being the single
+   scroll container and both panes size to content. */
 @media (max-width: 1180px) {
-  .chain-rail[data-docked="true"] {
-    grid-template-columns: minmax(0, 1fr);
+  .asset-deck-body:has(.chain-tab) {
+    overflow-y: auto;
+    display: block;
+  }
+
+  .chain-tab {
+    display: block;
+  }
+
+  .chain-rail,
+  .chain-rail-main {
+    display: block;
+  }
+
+  .chain-rail .chain-grid-wrapper {
+    max-height: 520px;
   }
 
   .order-builder--rail {
-    position: static;
-    max-height: none;
+    height: auto;
+    margin-top: 12px;
     overflow-y: visible;
   }
 }
@@ -12825,6 +12915,34 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
   font-size: 9px;
   letter-spacing: 0.08em;
   color: var(--text-muted);
+}
+
+/* Provenance marker on a realized-P&L cell that fell back to IB's own figure.
+   Deliberately quiet: it flags a degraded number, it does not shout. R-408. */
+.fills-source-marker {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 4px;
+  border: 1px solid var(--warn);
+  border-radius: 2px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--warn);
+  vertical-align: middle;
+}
+
+/* A deep link named a contract the chain cannot serve. Says so rather than
+   letting the ticket sit empty with no explanation (R-378, R-413). */
+.chain-prefill-unavailable {
+  border: 1px solid var(--warn);
+  border-radius: 4px;
+  padding: 6px 8px;
+  margin-bottom: 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--warn);
 }
 
 /* Unbounded-risk acknowledgement. Deliberately loud: it is the last thing
@@ -16444,29 +16562,78 @@ body[data-mobile="true"] .toast-container {
   color: var(--text-muted);
 }
 
-/* Underlying spot on an option position card: where the stock trades relative
-   to the strikes, without leaving the card (2026-08-07 request). */
-.mobile-card__underlying {
+/* Quote strip on a position card: live last (+trend arrow), day change and —
+   for option structures — the underlying spot relative to the strikes
+   (2026-08-07 request), in one hairline-topped mono line. */
+.mobile-card__quote {
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 8px;
+  gap: 14px;
+  flex-wrap: wrap;
   padding-top: 8px;
   border-top: 1px solid var(--line-grid);
 }
-.mobile-card__underlying-k {
+.mobile-card__quote-seg {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+}
+.mobile-card__quote-seg--spot { margin-left: auto; }
+.mobile-card__quote-k {
   font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.12em;
+  font-size: 9px;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--text-muted);
+  white-space: nowrap;
 }
-.mobile-card__underlying-v {
+.mobile-card__quote-v {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   color: var(--text-primary);
+  white-space: nowrap;
+}
+
+/* Return % annotated under the header P&L — the desktop P&L / Return % pair. */
+.mobile-card__return {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+.mobile-card__return-v {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+}
+.mobile-card__return-k {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* Collapsed scan grid (MV / Today / EC / Day Chg). */
+.mobile-card__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 12px;
+}
+
+/* Expanded basis ledger (Avg Entry / Implied) — desktop default-ON columns
+   that don't earn collapsed space. */
+.mobile-card__ledger {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line-grid);
 }
 
 .mobile-card__leg-row {
@@ -16503,6 +16670,75 @@ body[data-mobile="true"] .toast-container {
 
 .mobile-card__leg-meta {
   color: var(--text-muted);
+}
+
+/* Expanded position leg block: description + leg P&L header over a mini-grid
+   of the desktop default-ON leg cells (Avg / Last / Impl / MV / Init). The
+   whole block is the instrument-detail tap target (44px floor). */
+.mobile-card__leg {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 44px;
+  padding: 8px;
+  border: 1px solid var(--line-grid);
+  border-radius: 4px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: opacity 100ms ease;
+}
+.mobile-card__leg:active { opacity: 0.7; }
+.mobile-card__leg:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 1px;
+}
+
+.mobile-card__leg-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.mobile-card__leg-pnl {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.mobile-card__leg-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px 10px;
+}
+
+.mobile-card__leg-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.mobile-card__leg-cell-k {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.mobile-card__leg-cell-v {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .mobile-empty-state {
@@ -18149,6 +18385,23 @@ body[data-mobile="true"] td.right {
   color: var(--fault);
 }
 
+/* A cached verdict's age must not read as part of the direction. R-358 added
+   this span with no styling, so "BULLISH" and "LAST GOOD SCAN 2026-06-16" ran
+   together at 22px as one headline. */
+.ticker-flow-badge-stale {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 6px;
+  border: 1px solid color-mix(in srgb, var(--warn-text) 34%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--warn-text) 12%, transparent);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--warn-text);
+  vertical-align: middle;
+}
+
 .ticker-flow-badge-rationale {
   font-family: var(--font-sans);
   font-size: 12px;
@@ -19334,6 +19587,12 @@ body[data-mobile="true"] td.right {
 .m-metric__value--mut  { color: var(--text-muted); }
 
 /* ── .m-signal-card ── */
+.m-signal-card-link {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+
 .m-signal-card {
   display: flex;
   flex-direction: column;
@@ -20640,6 +20899,72 @@ body[data-mobile="true"] .alerts-rule__channel {
   margin: 0;
 }
 
+/* ── Service rows (profile Credentials tab, setup wizard) ──
+   One row per vendor service with N fields stacked below the header.
+   Fields never share a grid cell, so multi-field services (MenthorQ,
+   IB Flex) cannot paint on top of each other. */
+.preferences-row--service {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    "head"
+    "description"
+    "fields"
+    "actions"
+    "error";
+}
+
+.credentials-fields {
+  grid-area: fields;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 4px;
+  min-width: 0;
+}
+
+.credentials-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 300px);
+  gap: 2px 16px;
+  align-items: start;
+  min-width: 0;
+}
+
+.credentials-field__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.credentials-field__title {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  min-width: 0;
+}
+
+.credentials-field__inputrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.credentials-field__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+  text-align: left;
+}
+
+.preferences-row__key {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .preferences-badge {
   font-size: 11px;
   font-family: var(--font-mono);
@@ -20692,9 +21017,37 @@ body[data-mobile="true"] .alerts-rule__channel {
     justify-content: flex-start;
   }
 
+  .preferences-row--service {
+    grid-template-areas:
+      "head"
+      "description"
+      "fields"
+      "actions"
+      "error";
+  }
+
   .preferences-row__input {
     width: 100%;
     text-align: left;
+  }
+
+  .credentials-field {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+
+  .credentials-field__input {
+    width: 100%;
+  }
+
+  .credentials-field__inputrow .order-input,
+  .credentials-field__inputrow .admin-btn {
+    min-height: 44px;
+  }
+
+  .preferences-row--service .admin-actions-row .admin-btn {
+    min-height: 44px;
+    width: 100%;
   }
 }
 
@@ -20802,6 +21155,20 @@ body[data-mobile="true"] .alerts-rule__channel {
   border: 1px solid var(--signal-core); border-radius: 3px; padding: 0 5px;
   cursor: pointer;
 }
+.ask-composer__attachments { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 12px 0; }
+.ask-composer__thumb {
+  position: relative; width: 44px; height: 44px; overflow: hidden;
+  border: 1px solid var(--line-grid); border-radius: 4px; background: var(--bg-panel-raised);
+}
+.ask-composer__thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.ask-composer__thumb-remove {
+  position: absolute; top: 0; right: 0; width: 14px; height: 14px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono); font-size: 10px; line-height: 1;
+  color: var(--text-primary); background: var(--bg-panel);
+  border: 1px solid var(--line-grid); border-radius: 0 4px 0 4px;
+  cursor: pointer;
+}
 .ask-composer__input {
   width: 100%; box-sizing: border-box; resize: none;
   padding: 10px 12px; border: none; background: transparent;
@@ -20811,20 +21178,31 @@ body[data-mobile="true"] .alerts-rule__channel {
 .ask-composer__input:focus { outline: none; }
 .ask-composer__rail { display: flex; align-items: center; gap: 8px; border-top: 1px solid var(--line-grid); padding: 8px 12px; }
 .ask-composer__spacer { flex: 1; }
-.ask-composer__engine { display: flex; align-items: center; gap: 6px; border: 1px solid var(--line-grid); border-radius: 4px; padding: 3px 8px; }
-.ask-composer__engine-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; color: var(--text-muted); }
-.ask-composer__engine select {
+.ask-composer__model { display: flex; align-items: center; gap: 6px; }
+.ask-composer__model-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; color: var(--text-muted); }
+.ask-composer__model select {
   background: transparent; border: none; color: var(--text-secondary);
   font-family: var(--font-mono); font-size: var(--text-meta); letter-spacing: 0.06em;
 }
-.ask-composer__send {
-  display: flex; align-items: center; gap: 6px;
-  font-family: var(--font-mono); font-size: var(--text-meta); font-weight: 600; letter-spacing: 0.06em;
-  padding: 6px 14px; border-radius: 4px; border: 1px solid var(--accent-bg);
-  background: var(--accent-bg); color: var(--accent-text); cursor: pointer;
+.ask-composer__field { display: flex; align-items: flex-end; }
+.ask-composer__field .ask-composer__input { flex: 1; }
+/* Quiet Enter affordance replaces the ASK button (design-lab Variant A):
+   Enter sends; this is the same submit, drawn as a kbd hint. */
+.ask-composer__enter {
+  margin: 0 10px 8px 0;
+  padding: 2px 8px; border-radius: 2px;
+  border: 1px solid var(--line-grid); background: var(--bg-panel-raised);
+  font-family: var(--font-mono); font-size: 11px; line-height: 1.4;
+  color: var(--text-muted); cursor: pointer;
   transition: var(--transition-controls);
 }
-.ask-composer__send:disabled { opacity: 0.45; cursor: default; }
+.ask-composer__enter:not(:disabled):hover { border-color: var(--signal-core-text); color: var(--signal-core-text); }
+.ask-composer__enter:disabled { opacity: 0.45; cursor: default; }
+.ask-composer__esc { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; color: var(--text-muted); white-space: nowrap; }
+/* Rail chrome reads as one muted footer line, not a row of boxed controls. */
+.ask-composer__rail .agent-chip { border: 0; padding: 0; border-radius: 0; color: var(--text-muted); }
+/* Hero focus: with no messages the composer is the whole surface. */
+.chat-panel[data-empty] .ask-composer:focus-within { box-shadow: 0 0 0 3px var(--wash-signal); }
 
 /* — AnalysisSources — */
 .analysis-sources { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
@@ -20942,3 +21320,62 @@ body[data-mobile="true"] .alerts-rule__channel {
 }
 
 /* ══ end VIX-COR regime tab ════════════════════════════════════════════ */
+
+.thinking-wait {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+}
+
+.thinking-wait-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.four-gate-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.gate-chip {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 88px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-grid);
+  border-radius: 4px;
+  background: var(--bg-panel-raised);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.gate-chip__name {
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.gate-chip--evaluating {
+  border-color: color-mix(in srgb, var(--signal-core) 45%, var(--line-grid));
+  color: var(--signal-core-text);
+}
+
+.gate-chip--cleared {
+  color: var(--signal-core-text);
+}
+
+.gate-chip--failed {
+  color: var(--fault);
+}
+
+.gate-chip--idle {
+  opacity: 0.72;
+}

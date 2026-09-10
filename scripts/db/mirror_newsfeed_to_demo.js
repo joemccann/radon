@@ -142,7 +142,7 @@ export async function runNewsfeedMirror({
   try {
     const { rows } = await attempt("source_read", () => src.execute({
       sql: `SELECT id, title, content, timestamp, images, raw_images, tags, tags_text, tags_vision, created_at, updated_at
-            FROM posts ORDER BY timestamp DESC LIMIT ?`,
+            FROM posts WHERE id NOT GLOB 'research-*' ORDER BY timestamp DESC LIMIT ?`,
       args: [limit],
     }));
     log({

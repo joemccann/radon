@@ -44,7 +44,7 @@
  * budget and a property is a thousand cases, which is fine locally and not
  * always fine on a loaded CI runner.
  */
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fc from "fast-check";
 
 import {
@@ -64,16 +64,39 @@ const FC_OPTS = process.env.RADON_FUZZ_RANDOM === "1"
   : { numRuns: 1000, seed: 42 };
 const PROPERTY_TIMEOUT_MS = 60_000;
 
-function todayET(): string {
+/** The ET calendar date of a GIVEN instant — never of "now", so the caller
+ *  has to say which moment it means. */
+function etDate(instant: Date): string {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/New_York",
     year: "numeric", month: "2-digit", day: "2-digit",
-  }).formatToParts(new Date());
+  }).formatToParts(instant);
   const get = (type: string) => parts.find((p) => p.type === type)!.value;
   return `${get("year")}-${get("month")}-${get("day")}`;
 }
 
-const TODAY = todayET();
+/** The suite's clock, frozen.
+ *
+ *  `TODAY` is read once at MODULE LOAD, while `positionUtils.isSameDay` calls
+ *  `todayInET()` again at ASSERTION time. A run that crosses 00:00 ET reads
+ *  two different dates from those two points: the same-day branch stops
+ *  firing mid-suite, the fixture becomes an overnight position, and the
+ *  identity goes red for a reason that has nothing to do with the code under
+ *  test. Freezing the clock makes both reads the same instant.
+ *
+ *  Only `Date` is faked — the timer queue stays real so React's scheduling is
+ *  untouched. */
+const FROZEN_NOW = new Date("2026-08-26T20:00:00Z"); // 2026-08-26 16:00 ET
+
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(FROZEN_NOW);
+});
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+const TODAY = etDate(FROZEN_NOW);
 const TICKER = "META";
 const EXPIRIES = ["2026-08-26", "2026-09-18", "2027-01-15"];
 

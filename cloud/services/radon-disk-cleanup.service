@@ -33,6 +33,15 @@ Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # -I (isolated): CPython otherwise prepends the script's own directory to
 # sys.path, so a module dropped beside it would be imported by root.
 ExecStart=/usr/bin/python3 -I /usr/local/lib/radon/disk_cleanup.py
+# The deploy lock is taken IN-PROCESS (disk_cleanup.acquire_deploy_lock), not
+# by an ExecStart flock as radon-db-backup.service uses. Two reasons: the lock
+# deploy.sh holds lives at /home/radon/.radon-deploy.lock, and naming any
+# /home/radon path in a User=root ExecStart is exactly what
+# cloud/tests/test_root_execution_paths.py forbids; and opening it in-process
+# lets us pass O_NOFOLLOW, so the radon account cannot swap the lock file for
+# a symlink and have root open the target. 75 is EX_TEMPFAIL: a run skipped
+# because a deploy holds the lock is not a failure. R-341.
+SuccessExitStatus=75
 StandardOutput=journal
 StandardError=journal
 # A oneshot with no runtime ceiling can hang forever and freeze its timer

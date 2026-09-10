@@ -735,3 +735,46 @@ describe("portfolio fuzzy-match word-overlap threshold — requires >= 2 words, 
     expect(data.entryTime).not.toBe("2026-05-15");
   });
 });
+
+
+describe("REL-219 (R-582): partial stock close return % is lot-matched", () => {
+  const stockFill = (over: Record<string, unknown>) => ({
+    execId: String(over.execId ?? "s1"),
+    symbol: "NVDA",
+    contract: { conId: 3001, symbol: "NVDA", secType: "STK", strike: 0, right: "?", expiry: null },
+    side: "BOT",
+    quantity: 100,
+    avgPrice: 100,
+    commission: 0,
+    realizedPNL: null,
+    time: "2026-09-02T14:30:00+00:00",
+    exchange: "SMART",
+    ...over,
+  });
+
+  it("BUY 1000 @100 + SELL 400 @110 renders 10%, not mixed-cash", () => {
+    const group = {
+      id: "nvda-mixed",
+      symbol: "NVDA",
+      description: "NVDA stock",
+      isClosing: true,
+      totalQuantity: 1000,
+      netPrice: null,
+      totalCommission: 0,
+      totalPnL: 4000, // IB: 400 x (110 - 100)
+      time: "2026-09-02T15:00:00+00:00",
+      fills: [
+        stockFill({ execId: "open-1", side: "BOT", quantity: 1000, avgPrice: 100 }),
+        stockFill({
+          execId: "close-1",
+          side: "SLD",
+          quantity: 400,
+          avgPrice: 110,
+          realizedPNL: 4000,
+          time: "2026-09-02T15:00:00+00:00",
+        }),
+      ],
+    } as unknown as PositionFillGroup;
+    expect(closedGroupReturnPct(group)).toBeCloseTo(10, 5);
+  });
+});

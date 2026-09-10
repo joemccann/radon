@@ -9,9 +9,12 @@ import InfoTooltip from "./InfoTooltip";
 import ShareReportModal from "./ShareReportModal";
 import GexLaplaceContour from "./instruments/GexLaplaceContour";
 import SpectralLoader from "./SpectralLoader";
+import ThinkingWait from "./fx/ThinkingWait";
 import RegimeSyncStatusBadge from "./RegimeSyncStatusBadge";
 import SortTh from "./SortTh";
 import { useSort } from "@/lib/useSort";
+import { GEX_REFRESH } from "@/lib/refreshSchedule";
+import FreshnessRail from "./FreshnessRail";
 
 type GexPanelProps = {
   marketState?: MarketState;
@@ -73,7 +76,7 @@ function SourceBadge({ source }: { source: "uw" | "mq" | "both" }) {
   return (
     <span style={{
       ...styles[source],
-      fontSize: 9, fontWeight: 500, padding: "1px 5px",
+      fontSize: "var(--text-meta)", fontWeight: 500, padding: "1px 5px",
       borderRadius: 2, letterSpacing: "0.06em",
     }}>
       {labels[source]}
@@ -253,9 +256,9 @@ function MqLevelsPanel({ mq, sourceDelta }: { mq: MqLevels; sourceDelta: SourceD
     return (
       <span style={deltaStyle(e.delta)}>
         {sign}{e.delta.toFixed(1)} &nbsp;
-        <span style={{ color: "var(--signal-core-text)", fontSize: 9 }}>{e.uw.toFixed(0)}</span>
-        <span style={{ color: "var(--text-muted)", fontSize: 9 }}> vs </span>
-        <span style={{ color: "var(--gex-mq-accent)", fontSize: 9 }}>{e.mq.toFixed(0)}</span>
+        <span style={{ color: "var(--signal-core-text)", fontSize: "var(--text-meta)" }}>{e.uw.toFixed(0)}</span>
+        <span style={{ color: "var(--text-muted)", fontSize: "var(--text-meta)" }}> vs </span>
+        <span style={{ color: "var(--gex-mq-accent)", fontSize: "var(--text-meta)" }}>{e.mq.toFixed(0)}</span>
       </span>
     );
   }
@@ -265,7 +268,7 @@ function MqLevelsPanel({ mq, sourceDelta }: { mq: MqLevels; sourceDelta: SourceD
       <button className="gex-mq-toggle" onClick={() => setExpanded(!expanded)}>
         MenthorQ Key Levels
         {mq.source_date && (
-          <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-muted)", marginLeft: 8 }}>
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--text-muted)", marginLeft: 8 }}>
             {mq.source_date}
           </span>
         )}
@@ -276,7 +279,7 @@ function MqLevelsPanel({ mq, sourceDelta }: { mq: MqLevels; sourceDelta: SourceD
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 10 }}>
           {/* MQ Level Values */}
           <div>
-            <div style={{ fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 8 }}>
+            <div style={{ fontSize: "var(--text-meta)", letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 8 }}>
               Levels
             </div>
             {[
@@ -288,20 +291,20 @@ function MqLevelsPanel({ mq, sourceDelta }: { mq: MqLevels; sourceDelta: SourceD
               { label: "Expected High",          val: mq.expected_high },
               { label: "Expected Low",           val: mq.expected_low },
             ].map(({ label, val }) => (
-              <div key={label} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 5, fontFamily: "var(--font-mono)" }}>
-                <span style={{ color: "var(--text-secondary)", fontSize: 10 }}>{label}</span>
+              <div key={label} style={{ display: "flex", justifyContent: "space-between", fontSize: "var(--text-meta)", marginBottom: 5, fontFamily: "var(--font-mono)" }}>
+                <span style={{ color: "var(--text-secondary)", fontSize: "var(--text-meta)" }}>{label}</span>
                 <span style={{ color: "var(--gex-mq-accent)", fontWeight: 500 }}>{val != null ? fmtPrice(val) : "—"}</span>
               </div>
             ))}
             {mq.top_gex_strikes.length > 0 && (
               <div style={{ marginTop: 8 }}>
-                <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 4 }}>Top GEX Strikes</div>
+                <div style={{ fontSize: "var(--text-meta)", color: "var(--text-muted)", marginBottom: 4 }}>Top GEX Strikes</div>
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                   {mq.top_gex_strikes.map((s) => (
                     <span key={s} style={{
                       background: "color-mix(in srgb, var(--gex-mq-accent) 12%, transparent)", color: "var(--gex-mq-accent)",
                       border: "1px solid color-mix(in srgb, var(--gex-mq-accent) 30%, transparent)",
-                      fontSize: 10, padding: "1px 6px", borderRadius: 2, fontFamily: "var(--font-mono)",
+                      fontSize: "var(--text-meta)", padding: "1px 6px", borderRadius: 2, fontFamily: "var(--font-mono)",
                     }}>
                       {fmtPrice(s)}
                     </span>
@@ -313,7 +316,7 @@ function MqLevelsPanel({ mq, sourceDelta }: { mq: MqLevels; sourceDelta: SourceD
 
           {/* Source Delta */}
           <div>
-            <div style={{ fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 8 }}>
+            <div style={{ fontSize: "var(--text-meta)", letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 8 }}>
               UW vs MQ Delta &nbsp;
               <span style={{ color: "var(--text-muted)", fontStyle: "italic", textTransform: "none" }}>(+= UW higher)</span>
             </div>
@@ -325,27 +328,27 @@ function MqLevelsPanel({ mq, sourceDelta }: { mq: MqLevels; sourceDelta: SourceD
                 { label: "Call wall vs resist (all)", entry: sourceDelta.call_wall_vs_resistance_all },
                 { label: "Call wall vs resist (0DTE)",entry: sourceDelta.call_wall_vs_resistance_0dte },
               ].map(({ label, entry }) => (
-                <div key={label} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 5, fontFamily: "var(--font-mono)" }}>
-                  <span style={{ color: "var(--text-secondary)", fontSize: 10 }}>{label}</span>
+                <div key={label} style={{ display: "flex", justifyContent: "space-between", fontSize: "var(--text-meta)", marginBottom: 5, fontFamily: "var(--font-mono)" }}>
+                  <span style={{ color: "var(--text-secondary)", fontSize: "var(--text-meta)" }}>{label}</span>
                   {fmtDelta(entry)}
                 </div>
               ))
             ) : (
-              <div style={{ color: "var(--text-muted)", fontSize: 11 }}>No delta data</div>
+              <div style={{ color: "var(--text-muted)", fontSize: "var(--text-meta)" }}>No delta data</div>
             )}
             {/* IV comparison */}
             {(mq.iv30d != null || mq.hv30 != null) && (
               <div style={{ marginTop: 12 }}>
-                <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 4 }}>Volatility (MQ)</div>
+                <div style={{ fontSize: "var(--text-meta)", color: "var(--text-muted)", marginBottom: 4 }}>Volatility (MQ)</div>
                 {mq.iv30d != null && (
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 4, fontFamily: "var(--font-mono)" }}>
-                    <span style={{ color: "var(--text-secondary)", fontSize: 10 }}>IV 30D</span>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "var(--text-meta)", marginBottom: 4, fontFamily: "var(--font-mono)" }}>
+                    <span style={{ color: "var(--text-secondary)", fontSize: "var(--text-meta)" }}>IV 30D</span>
                     <span style={{ color: "var(--gex-mq-accent)", fontWeight: 500 }}>{(mq.iv30d * 100).toFixed(2)}%</span>
                   </div>
                 )}
                 {mq.hv30 != null && (
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, fontFamily: "var(--font-mono)" }}>
-                    <span style={{ color: "var(--text-secondary)", fontSize: 10 }}>HV 30D</span>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "var(--text-meta)", fontFamily: "var(--font-mono)" }}>
+                    <span style={{ color: "var(--text-secondary)", fontSize: "var(--text-meta)" }}>HV 30D</span>
                     <span style={{ color: "var(--text-secondary)", fontWeight: 500 }}>{(mq.hv30 * 100).toFixed(2)}%</span>
                   </div>
                 )}
@@ -414,7 +417,7 @@ function GexHistoryTable({ history }: { history: GexHistoryEntry[] }) {
                   <td className="text-right">{row.atm_iv != null ? `${row.atm_iv.toFixed(1)}%` : "---"}</td>
                   <td className="text-right">{row.vol_pc != null ? row.vol_pc.toFixed(2) : "---"}</td>
                   <td className="text-center">
-                    <span style={{ color: biasColor(row.bias || "NEUTRAL"), fontWeight: 600, fontSize: 10 }}>
+                    <span style={{ color: biasColor(row.bias || "NEUTRAL"), fontWeight: 600, fontSize: "var(--text-meta)" }}>
                       {biasLabel(row.bias || "NEUTRAL")}
                     </span>
                   </td>
@@ -443,7 +446,10 @@ export default function GexPanel({ marketState }: GexPanelProps) {
           </div>
         </div>
         <div className="section-body">
-          <SpectralLoader label="Sampling gamma exposure by strike" />
+          <div className="thinking-wait-stack">
+            <ThinkingWait kind="gex" label="Sampling gamma exposure by strike" size={64} />
+            <SpectralLoader label="Sampling gamma exposure by strike" />
+          </div>
         </div>
       </div>
     );
@@ -475,7 +481,7 @@ export default function GexPanel({ marketState }: GexPanelProps) {
           </div>
         </div>
         <div className="section-body" style={{ padding: "24px", textAlign: "center" }}>
-          <span style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--text-muted)" }}>
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--text-muted)" }}>
             No GEX data available. Run a scan to populate.
           </span>
         </div>
@@ -508,6 +514,9 @@ export default function GexPanel({ marketState }: GexPanelProps) {
           />
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          {syncing ? (
+            <ThinkingWait kind="gex" label="Rebuilding gamma exposure" />
+          ) : null}
           <RegimeSyncStatusBadge
             state={freshnessState}
             className={freshnessBadgeClass}
@@ -532,12 +541,14 @@ export default function GexPanel({ marketState }: GexPanelProps) {
             shareContentTitle="GEX Share Preview"
           />
           {lastSync && (
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-muted)" }}>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--text-muted)" }}>
               {new Date(lastSync).toLocaleTimeString()}
             </span>
           )}
         </div>
       </div>
+
+      <FreshnessRail schedule={GEX_REFRESH} asOf={data.data_date ?? null} testId="gex-freshness-rail" />
 
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         {/* ── Metrics Row ── */}

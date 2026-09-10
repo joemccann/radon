@@ -85,8 +85,15 @@ describe("PI_COMMAND_ALIASES", () => {
   });
 
   it("contains known aliases", () => {
-    expect(PI_COMMAND_ALIASES["watchlist"]).toBeDefined();
-    expect(PI_COMMAND_ALIASES["action items"]).toBeDefined();
+    expect(PI_COMMAND_ALIASES["compare support vs against"]).toBe("/scan --top 20");
+    expect(PI_COMMAND_ALIASES["action items"]).toBe("/journal --limit 25");
+    expect(PI_COMMAND_ALIASES["what are action items"]).toBe("/journal --limit 25");
+  });
+
+  it("does not map watchlist phrases to scan", () => {
+    expect(PI_COMMAND_ALIASES["review watch list"]).toBeUndefined();
+    expect(PI_COMMAND_ALIASES["watch list"]).toBeUndefined();
+    expect(PI_COMMAND_ALIASES["watchlist"]).toBeUndefined();
   });
 
   it("aliases map to known command roots", () => {

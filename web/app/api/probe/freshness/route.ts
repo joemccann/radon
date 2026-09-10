@@ -74,6 +74,8 @@ async function gatherInputs(): Promise<ProbeFreshnessInputs> {
   };
 }
 
+export const radonCapability = "internal";
+
 export async function GET(request: Request): Promise<Response> {
   const requestId = getRequestId();
   if (!await isAuthorizedProbeRequest(

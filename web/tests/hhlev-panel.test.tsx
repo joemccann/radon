@@ -15,7 +15,7 @@
  * dashes, no cadence claims).
  */
 import React from "react";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
@@ -116,6 +116,7 @@ import HhLevPanel from "../components/HhLevPanel";
 afterEach(() => {
   cleanup();
   mockUseHhLev.mockReset();
+  vi.useRealTimers();
 });
 
 // Window-relative dates: the series always ends on the last completed
@@ -260,6 +261,33 @@ describe("HhLevPanel — chart + controls", () => {
     for (const path of paths) {
       expect(path.getAttribute("d") ?? "").not.toContain("NaN");
     }
+  });
+});
+
+describe("HhLevPanel — freshness rail", () => {
+  it("shows the quarter-start date and counts down to the 13:20 UTC check in release model", () => {
+    // 12:00 UTC on a Wednesday: 1h20m short of radon-hhlev.timer's 13:20 UTC
+    // check (radon-margin-debt's 13:10 pass would read 1h 10m). Release model:
+    // the rail never judges the quarter date, only counts to the next check.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-26T12:00:00Z"));
+    renderPanel(
+      hookState({
+        data: buildData({
+          scan_time: "2026-08-26T12:00:00Z",
+          data_date: "2026-04-01",
+          current: { ...buildData().current!, date: "2026-04-01" },
+        }),
+      }),
+    );
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+    expect(screen.getByTestId("hhlev-freshness-rail")).toBeTruthy();
+    expect(screen.getByTestId("hhlev-freshness-rail").textContent).toContain("2026-04-01");
+    expect(screen.getByTestId("hhlev-freshness-rail-countdown").textContent).toBe("1h 20m");
+    expect(screen.getByTestId("hhlev-freshness-rail").textContent).toContain("Next check");
+    expect(screen.getByTestId("hhlev-freshness-rail").textContent).toContain("Latest release");
   });
 });
 

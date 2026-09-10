@@ -5,6 +5,7 @@
  */
 
 import type { OpenOrder, PortfolioPosition } from "@/lib/types";
+import { classifyOrderSession, isExtendedFillLive } from "@/lib/orders/sessionWindow";
 
 export type OperatorOrderStatus =
   | "Working"
@@ -72,6 +73,17 @@ export function mapOrderStatus(
     remaining?: number;
     isPendingCancel?: boolean;
     isPendingModify?: boolean;
+    /**
+     * True when the order's extended fill window is live right now
+     * (`isExtendedFillLive` from sessionWindow). IB reports `PreSubmitted`
+     * for extended-eligible equity orders that ARE live and fillable in the
+     * current pre-market / after-hours session; labelling those Queued told
+     * the operator a marketable TQQQ close was not working during AH
+     * (2026-09-01). Only IB-acknowledged `PreSubmitted` promotes to Working;
+     * `PendingSubmit` / `ApiPending` have no IB acknowledgement and stay
+     * Queued regardless.
+     */
+    extendedFillLive?: boolean;
   },
 ): MappedOrderStatus {
   const status = (raw ?? "").trim();
@@ -91,6 +103,9 @@ export function mapOrderStatus(
   const lower = status.toLowerCase();
 
   if (lower === "presubmitted" || lower === "pendingsubmit" || lower === "apipending") {
+    if (lower === "presubmitted" && opts?.extendedFillLive === true) {
+      return { label: "Working", raw: status, tone: "working" };
+    }
     return { label: "Queued", raw: status, tone: "working" };
   }
   if (
@@ -124,6 +139,24 @@ export function mapOrderStatus(
  * SELL fills when last rises to/through limit → delta = limit − last.
  * Negative delta means the market is through the limit.
  */
+/**
+ * R-607: the non-OPT single-leg branch read `priceData?.last ?? null`, and
+ * `??` does not reject `0`. IB broadcasts `last: 0` for a halted ticker, a
+ * pre-open contract, or a relay reconnect that has not ticked yet, so the
+ * Last Price cell showed a confident `$0.00` and `distanceToFill` computed
+ * `0 - limitPrice <= 0` and badged a resting BUY limit as THROUGH the market.
+ * A non-positive last is no price at all.
+ */
+export function resolveSingleLegLastPrice(
+  priceData?: { last?: number | null; lastIsCalculated?: boolean | null } | null,
+): { price: number | null; isCalculated: boolean } {
+  const last = priceData?.last;
+  if (last == null || !Number.isFinite(last) || last <= 0) {
+    return { price: null, isCalculated: false };
+  }
+  return { price: last, isCalculated: Boolean(priceData?.lastIsCalculated) };
+}
+
 export function distanceToFill(params: {
   action: string;
   limitPrice: number | null;
@@ -247,13 +280,19 @@ export function cardToneForIntent(
 
 export function summarizeOpenOrders(
   orders: readonly OpenOrder[],
+  now: Date = new Date(),
 ): OpenOrdersSummary {
   let partialCount = 0;
   let workingCount = 0;
   for (const order of orders) {
-    if (isPartialFill(order)) {
+    const mapped = mapOrderStatus(order.status, {
+      filled: order.filled,
+      remaining: order.remaining,
+      extendedFillLive: isExtendedFillLive(classifyOrderSession(order, now)),
+    });
+    if (mapped.label === "Partial") {
       partialCount += 1;
-    } else {
+    } else if (mapped.label === "Working") {
       workingCount += 1;
     }
   }
@@ -263,6 +302,44 @@ export function summarizeOpenOrders(
     workingCount,
   };
 }
+
+/** REL-203 (R-564): the header count derives from the same combo-grouped
+ * rows the table renders — `summarizeOpenOrders` iterated raw legs, so a
+ * split-leg structure showed "WORKING 2" over one WORKING chip. Combo rows
+ * classify from the aggregate status exactly like the table's chip. */
+export function summarizeOpenOrderRows(
+  rows: readonly (
+    | { kind: "single"; order: OpenOrder }
+    | { kind: "combo"; status: string; orders: readonly OpenOrder[] }
+  )[],
+  now: Date = new Date(),
+): OpenOrdersSummary {
+  let partialCount = 0;
+  let workingCount = 0;
+  for (const row of rows) {
+    let mapped;
+    if (row.kind === "combo") {
+      const partialLeg = row.orders.find((leg) => isPartialFill(leg));
+      mapped = mapOrderStatus(row.status, {
+        filled: partialLeg?.filled,
+        remaining: partialLeg?.remaining,
+        extendedFillLive: row.orders.some((leg) =>
+          isExtendedFillLive(classifyOrderSession(leg, now)),
+        ),
+      });
+    } else {
+      mapped = mapOrderStatus(row.order.status, {
+        filled: row.order.filled,
+        remaining: row.order.remaining,
+        extendedFillLive: isExtendedFillLive(classifyOrderSession(row.order, now)),
+      });
+    }
+    if (mapped.label === "Partial") partialCount += 1;
+    else if (mapped.label === "Working") workingCount += 1;
+  }
+  return { openCount: rows.length, partialCount, workingCount };
+}
+
 
 /** Format signed distance for table cells, e.g. +0.30 / -0.05 */
 export function formatDistanceDelta(delta: number): string {

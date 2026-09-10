@@ -10,18 +10,18 @@ export type EditorialNavLink = {
 // subpages as well as the homepage; the header and footer render them on
 // every route.
 export const editorialNavLinks: EditorialNavLink[] = [
-  { label: "Flow", href: "/#flow" },
-  { label: "Convexity", href: "/#convexity" },
-  { label: "Regime", href: "/#regime" },
-  { label: "Method", href: "/#pipeline" },
-  { label: "Registry", href: "/#registry" },
-  { label: "Evidence", href: "/#evidence" },
+  { label: "View", href: "/#view" },
+  { label: "Expression", href: "/#expression" },
+  { label: "Discipline", href: "/#discipline" },
+  { label: "Surfaces", href: "/#surfaces" },
   { label: "FAQ", href: "/#faq" },
 ];
 
 // The one product destination on the page: the free demo instance
 // (public signups live there; app.radon.run is operator-allowlisted).
-export const DEMO_URL = "https://demo.radon.run";
+// Deep-links to /sign-up deliberately — the demo's root is an authenticated
+// route and 404s a signed-out visitor, so the bare origin is a dead CTA.
+export const DEMO_URL = "https://demo.radon.run/sign-up";
 
 // Data-source reference links (from README.md; UW carries the referral).
 export const IB_URL = "https://www.interactivebrokers.com/";
@@ -58,12 +58,12 @@ export const flowArgumentSteps: ArgumentStep[] = [
   {
     stage: "Mechanism",
     body:
-      "Volume is venue-weighted and normalized to a rolling z-score, then directional pressure is inferred from print-side and size clustering.",
+      "Volume is venue-weighted and turned into a rolling z-score. Direction comes from print side and size clustering.",
   },
   {
     stage: "Evidence",
     body:
-      "A threshold-crossing flow score that precedes the lit move, with the lead window measured per ticker and surfaced in the scanner.",
+      "A flow score that prints before the lit move, with the lead window measured per ticker and shown in the scanner.",
   },
 ];
 
@@ -94,14 +94,14 @@ export const gates: Gate[] = [
     no: "Gate 03",
     name: "Risk",
     body:
-      "Position size is fractional Kelly with a hard ceiling. No single position exceeds the cap.",
+      "Fractional Kelly, hard cap. No position above 2.5% of bankroll.",
     rule: "≤ 2.5% bankroll",
   },
   {
     no: "Gate 04",
     name: "Naked Shorts",
     body:
-      "Historically blocked undefined-risk shorts. Disabled by operator policy; logic preserved for re-enable.",
+      "Used to block undefined-risk shorts. Off by policy. The code is still there.",
     rule: "no naked shorts",
     disabled: true,
   },
@@ -120,28 +120,28 @@ export const regimeModels: RegimeModel[] = [
     reads: "reads · tail risk",
     name: "Crash Risk Index",
     method:
-      "Four components, each scored 0 to 25: VIX level and rate of change, VVIX and its ratio to VIX, COR1M implied correlation, and SPX distance from its 100-day average. Published weights and thresholds. Reads the regime that forces systematic selling.",
+      "Four components, each scored 0 to 25: VIX level and rate of change, VVIX and its ratio to VIX, COR1M implied correlation, and SPX distance from its 100-day average. Weights and thresholds are published. That is the regime that forces systematic selling.",
   },
   {
     code: "GEX",
     reads: "reads · dealer positioning",
     name: "Gamma Exposure",
     method:
-      "Aggregate dealer gamma by strike. Positive gamma pins and dampens; negative gamma amplifies. Surfaces walls (resistance) and magnets (gravity) as price levels.",
+      "Sum dealer gamma by strike. Positive gamma pins. Negative gamma amplifies. Walls are resistance. Magnets pull price.",
   },
   {
     code: "VCG-R",
     reads: "reads · panic / capitulation",
     name: "Volatility-Credit Gap",
     method:
-      "Tracks the spread between equity-implied vol and credit-implied stress. A widening gap with credit leading flags panic that the options market has not yet priced.",
+      "The spread between equity-implied vol and credit stress. Credit leading and the gap widening is panic the options market has not priced.",
   },
   {
     code: "GRG",
     reads: "reads · rotation",
     name: "Gamma Rotation Gap",
     method:
-      "Measures the migration of dealer gamma across sectors and tenors. A rotating gap signals where positioning is moving next, ahead of the flow following it.",
+      "Where dealer gamma is moving across sectors and tenors. Rotation shows where positioning is headed before the flow follows.",
   },
 ];
 
@@ -155,13 +155,13 @@ export const milestones: Milestone[] = [
   {
     name: "Detect",
     body:
-      "Flow score crosses the accumulation or distribution threshold with a positive lead window. The signal is logged with its source and confidence.",
+      "Flow score crosses the accumulation or distribution line with a lead. Source and confidence go in the log.",
     tag: "gate · edge",
   },
   {
     name: "Corroborate",
     body:
-      "Cross-check the read against the four regime models. A signal fighting the regime is downgraded, not ignored. Agreement raises conviction.",
+      "Check the four regime models. A signal against the regime gets downgraded. Agreement adds conviction.",
     tag: "regime · CRI / GEX / VCG-R / GRG",
   },
   {
@@ -173,25 +173,25 @@ export const milestones: Milestone[] = [
   {
     name: "Structure",
     body:
-      "Select a defined-risk options structure that expresses the thesis with convexity. Multi-leg combos are preferred over single-leg directional bets.",
+      "Pick a defined-risk structure that pays more than it can lose. Combos over single-leg bets.",
     tag: "convexity · gain ≥ 2× loss",
   },
   {
     name: "Size",
     body:
-      "Fractional Kelly sets the position against bankroll, capped hard at the per-position ceiling. Conviction adjusts within the cap, never past it.",
+      "Fractional Kelly vs bankroll, hard-capped. Conviction moves size inside the cap, never past it.",
     tag: "risk · ≤ 2.5% bankroll",
   },
   {
     name: "Verify",
     body:
-      "The mandatory pre-trade chokepoint computes max-loss, margin impact, and naked-short exposure on the assembled combo. It is not optional and cannot be bypassed.",
+      "Pre-trade check: max loss, margin, naked-short exposure. It cannot be skipped.",
     tag: "chokepoint · pre-trade risk",
   },
   {
     name: "Route",
     body:
-      "Only a structure that cleared every prior milestone is assembled into an Interactive Brokers BAG combo and submitted. The audit trail records the full chain.",
+      "Only a structure that cleared every step becomes an Interactive Brokers BAG combo. The journal keeps the chain.",
     tag: "execute · IB BAG combo",
   },
 ];

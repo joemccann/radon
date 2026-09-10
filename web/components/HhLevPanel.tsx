@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Home } from "lucide-react";
 import BrushMinimap from "./BrushMinimap";
 import CriHistoryChart, { type ChartSeries } from "./CriHistoryChart";
+import FreshnessRail from "./FreshnessRail";
 import HistoryRangeChips from "./HistoryRangeChips";
 import InfoTooltip from "./InfoTooltip";
 import MetricCell from "./mobile/MetricCell";
@@ -12,6 +13,7 @@ import SpectralLoader from "./SpectralLoader";
 import { RegimeStrip, RegimeStripCell } from "./RegimeStrip";
 import { chartSeriesColor } from "@/lib/chartSystem";
 import { presetRange, type RangePresetSlug } from "@/lib/historyRange";
+import { HH_LEV_REFRESH } from "@/lib/refreshSchedule";
 import {
   formatLeveragePct,
   formatQuarter,
@@ -138,7 +140,7 @@ export default function HhLevPanel() {
             <InfoTooltip text={INFO_TOOLTIP} />
           </div>
           {clock && (
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: "9px", color: "var(--text-muted)" }}>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--text-muted)" }}>
               {clock}
             </span>
           )}
@@ -190,6 +192,13 @@ export default function HhLevPanel() {
             />
           </RegimeStrip>
         )}
+
+        <FreshnessRail
+          schedule={HH_LEV_REFRESH}
+          asOf={data.data_date}
+          testId="hhlev-freshness-rail"
+          model="release"
+        />
       </div>
 
       <div className="breadth-history-block" data-testid="hhlev-chart-section">
@@ -222,7 +231,7 @@ export default function HhLevPanel() {
         <div
           style={{
             fontFamily: "var(--font-mono)",
-            fontSize: "9px",
+            fontSize: "var(--text-meta)",
             color: "var(--text-muted)",
             marginTop: "8px",
           }}

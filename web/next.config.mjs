@@ -40,6 +40,11 @@ function securityHeaders() {
 // function trace — production data alone is >128 MiB and fails deploy audit.
 const HOST_DATA_TRACE_EXCLUDES = ["../data/**/*"];
 const HOST_DATA_TRACE_ROUTES = [
+  // These entrypoints transitively import snapshot readers. Their live data
+  // is host-mounted too; bundling it can pull private backup archives into
+  // the order function and thousands of caches into the assistant.
+  "/api/assistant",
+  "/api/orders/place",
   "/api/breadth",
   "/api/catalysts",
   "/api/discover",

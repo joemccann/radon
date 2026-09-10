@@ -12,8 +12,10 @@ export const dynamic = "force-dynamic";
 
 export const runtime = "nodejs";
 
+export const radonCapability = { GET: "read", POST: "mutate.workspace" };
+
 export async function GET(): Promise<Response> {
-  const access = await requireRouteAccess(undefined, { rate: { key: "journal:route", limit: 20, windowMs: 60_000 } });
+  const access = await requireRouteAccess(undefined, { rate: { key: "journal:route", limit: 20, windowMs: 60_000 }, durableRateTier: "A" });
   if (!access.ok) return access.response;
   const requestId = getRequestId();
   try {

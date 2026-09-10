@@ -736,6 +736,10 @@ def run_full_analysis():
     
     for scenario in ['bear', 'base', 'bull']:
         for pos in positions:
+            # A `mixed` leg basis publishes no entry_cost (ib_sync), so there is
+            # no basis to price a scenario P&L against.
+            if pos.get('entry_cost') is None:
+                continue
             r = analyze_position(pos, scenario)
             results[scenario].append(r)
     

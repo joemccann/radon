@@ -5,12 +5,14 @@ import { RevealOnScroll } from "@/components/atoms/RevealOnScroll";
 import { ScrollProgress } from "@/components/atoms/ScrollProgress";
 import { SectionHeading } from "@/components/atoms/SectionHeading";
 import { SectionRule } from "@/components/atoms/SectionRule";
+import { CopyAgentPromptBar } from "@/components/molecules/CopyAgentPromptBar";
 import { PlateFrame } from "@/components/molecules/PlateFrame";
+import { ClusterCta } from "@/components/sections/ClusterCta";
 import { EditorialFooter } from "@/components/sections/EditorialFooter";
 import { EditorialHeader } from "@/components/sections/EditorialHeader";
-import { DEMO_URL } from "@/lib/editorial-content";
 import {
   NAV_LABEL,
+  PAGE_HEADLINE,
   faqEntries,
   ibRoles,
   pageMetadata,
@@ -25,7 +27,7 @@ const crossLink =
 
 export default function InteractiveBrokersDarkPoolTerminalPage() {
   return (
-    <div className="min-h-screen bg-canvas font-serif text-[19px] leading-[1.62] text-primary">
+    <div className="min-h-screen bg-canvas font-sans text-[16px] leading-[1.55] text-primary">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{
@@ -63,7 +65,7 @@ export default function InteractiveBrokersDarkPoolTerminalPage() {
               as="h1"
               className="editorial-display mb-7 max-w-[18ch] text-primary"
             >
-              A dark pool terminal is only finished when it routes the order.
+              {PAGE_HEADLINE}
             </RevealOnScroll>
             <RevealOnScroll
               initiallyShown
@@ -79,6 +81,7 @@ export default function InteractiveBrokersDarkPoolTerminalPage() {
               Unusual Whales supplies the off-exchange prints, because IB does
               not publish a public dark pool print feed.
             </RevealOnScroll>
+            <CopyAgentPromptBar capabilityId="ib-terminal" />
           </div>
         </section>
 
@@ -125,7 +128,7 @@ export default function InteractiveBrokersDarkPoolTerminalPage() {
 
             <RevealOnScroll>
               <PlateFrame
-                figNo="Figure 01"
+                figNo="Figure 1"
                 figTitle="Interactive Brokers roles inside the terminal"
                 source="IB TWS / Gateway"
                 confidence="Documented"
@@ -289,11 +292,11 @@ export default function InteractiveBrokersDarkPoolTerminalPage() {
 
             <RevealOnScroll>
               <PlateFrame
-                figNo="Figure 02"
+                figNo="Figure 2"
                 figTitle="Requirements · live use versus free demo"
                 source="Radon"
                 confidence="Documented"
-                caption="Radon is a research instrument on Interactive Brokers rails, not a broker. The demo carries none of the live requirements."
+                caption="Radon constructs the view and sizes the expression on Interactive Brokers rails. It is not a broker. The demo carries none of the live requirements."
               >
                 <div className="overflow-x-auto">
                   <table className="scan-table">
@@ -360,35 +363,11 @@ export default function InteractiveBrokersDarkPoolTerminalPage() {
 
         <SectionRule />
 
-        {/* S7 · Cluster CTA */}
-        <section className="px-8 py-[clamp(64px,9vw,128px)]">
-          <div className="mx-auto max-w-[1140px]">
-            <RevealOnScroll>
-              <h2 className="editorial-thesis mb-[22px] text-primary">
-                Run it against the live tape.
-              </h2>
-              <p className="mb-[30px] max-w-[66ch] text-secondary">
-                The demo runs the same scanner, gates, and journal on seeded
-                data. No Interactive Brokers account, no Unusual Whales
-                subscription.
-              </p>
-              <div className="flex flex-wrap items-center gap-[26px]">
-                <a
-                  href={DEMO_URL}
-                  className="inline-block rounded-[4px] border border-grid px-[13px] py-[7px] font-mono text-[11px] uppercase tracking-[0.06em] text-primary transition-colors hover:border-signal-deep hover:text-signal-deep"
-                >
-                  Try the free demo
-                </a>
-                <Link
-                  href="/#pipeline"
-                  className="font-mono text-[12px] uppercase tracking-[0.04em] text-secondary underline decoration-grid underline-offset-4 transition-colors hover:text-signal-deep hover:decoration-signal-deep"
-                >
-                  See the execution discipline &rarr;
-                </Link>
-              </div>
-            </RevealOnScroll>
-          </div>
-        </section>
+        <ClusterCta
+          body="The demo constructs the view and sizes the expression on seeded data. No Interactive Brokers account, no Unusual Whales subscription."
+          secondaryHref="/#expression"
+          secondaryLabel="See the expression path"
+        />
 
         <EditorialFooter />
       </main>

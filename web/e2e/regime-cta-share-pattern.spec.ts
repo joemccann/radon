@@ -3,7 +3,7 @@
  *
  * Verifies:
  *  1. Share button opens the same modal pattern on both routes.
- *  2. The modal renders using the shared cta-share classes and labels.
+ *  2. The modal renders the shared share-modal nodes and labels.
  *  3. Clicking Escape closes the modal.
  */
 
@@ -131,11 +131,15 @@ async function expectShareModal(
   page: import("@playwright/test").Page,
   expectedTitle: string,
 ) {
-  const modal = page.locator(".cta-share-backdrop");
+  const modal = page.getByTestId("share-modal-backdrop");
   await expect(modal).toBeVisible({ timeout: 10_000 });
-  await expect(page.locator(".cta-share-modal")).toBeVisible();
-  await expect(page.locator(".cta-share-title")).toHaveText(expectedTitle);
-  await expect(page.locator(".cta-share-iframe")).toHaveAttribute("src", /^blob:/);
+  await expect(page.getByTestId("share-modal-panel")).toBeVisible();
+  await expect(page.getByTestId("share-modal-title")).toHaveText(expectedTitle);
+  await expect(page.getByTestId("share-modal-iframe")).toHaveAttribute("src", /^blob:/);
+  // The download link and the close control shared one class, so a bare class
+  // locator resolved to two nodes and tripped strict mode. They are distinct
+  // controls and now carry distinct ids.
+  await expect(page.getByTestId("share-modal-download")).toHaveAttribute("href", /^blob:/);
 }
 
 test.describe("/regime and /cta share UX", () => {
@@ -147,7 +151,7 @@ test.describe("/regime and /cta share UX", () => {
     await expectShareModal(page, "REGIME REPORT: SHARE TO X");
 
     await page.keyboard.press("Escape");
-    await expect(page.locator(".cta-share-backdrop")).toBeHidden();
+    await expect(page.getByTestId("share-modal-backdrop")).toBeHidden();
   });
 
   test("opens shared modal pattern on /cta", async ({ page }) => {
@@ -157,7 +161,7 @@ test.describe("/regime and /cta share UX", () => {
     await page.getByRole("button", { name: "Share to X" }).click();
     await expectShareModal(page, "CTA REPORT: SHARE TO X");
 
-    await page.locator(".cta-share-close").click();
-    await expect(page.locator(".cta-share-backdrop")).toBeHidden();
+    await page.getByTestId("share-modal-close").click();
+    await expect(page.getByTestId("share-modal-backdrop")).toBeHidden();
   });
 });

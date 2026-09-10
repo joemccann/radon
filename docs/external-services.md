@@ -2,10 +2,14 @@
 
 Radon is glued together from third-party services. The env-var matrix lives
 in [`.env.example`](../.env.example) and [`web/.env.example`](../web/.env.example).
-This page is why each service exists and where to sign up.
+This page is why each service exists and where to sign up. Keys entered in
+the profile Credentials tab live in the host-local encrypted secret store and
+WIN over these `.env` values at FastAPI startup — rotation and key-loss
+recovery: [`docs/operations.md`](operations.md) "Encrypted credential store".
 
-Production `.env` lives on the VPS at `/home/radon/radon-cloud/.env` (`0600`).
-That path is the sole legacy-directory exception during the monorepo
+Production `.env` lives on the VPS at `/etc/radon/env` (`0640` root:radon,
+canonical; `/home/radon/radon-cloud/.env` is the compatibility symlink).
+That symlink is the sole legacy-directory exception during the monorepo
 migration, not a source of deploy code. Laptop dev uses the root `.env`
 for FastAPI and scripts, plus `web/.env` for Next.js.
 
@@ -28,14 +32,14 @@ for FastAPI and scripts, plus `web/.env` for Next.js.
 | **MarketDataWorks (MDW)** | Inbound shared-secret used by MDW → FastAPI pushes that feed CTA enrichment. Validates `X-API-Key` header. | `MDW_API_KEY` | Vendor-issued |
 | **The Market Ear** | Real-time intraday news scraped by `scripts/newsfeed/`. Headless Playwright login; session cached at `data/newsfeed-storage.json` (~30d), full re-auth ~6h. | `THEMARKETEAR_EMAIL`, `THEMARKETEAR_PASSWORD` | [themarketear.com](https://themarketear.com/) (paid subscription) |
 | **Cerebras** | Newsfeed text tagger (gpt-oss-120b → qwen-3 fallback). Falls back to Anthropic when unset. | `CEREBRAS_API_KEY` | [cerebras.ai](https://www.cerebras.ai/inference) |
-| **Artificial Analysis** | LLM Token Expenditure Index (`/regime/llm`, daily timer). Free tier 1000 req/day. | `ARTIFICIAL_ANALYSIS_API_KEY` | [artificialanalysis.ai](https://artificialanalysis.ai/login) → Insights dashboard |
+| **Artificial Analysis** | Legacy LLM list-price proxy and fixed inference basket (`/regime/llm`). New collector reserves a 450-request UTC daily budget; entitlement and redistribution rights require verification. | `ARTIFICIAL_ANALYSIS_API_KEY` | [artificialanalysis.ai](https://artificialanalysis.ai/login) → Insights dashboard |
 | **Exa** | Company and market research surfaces. | `EXA_API_KEY` | [dashboard.exa.ai](https://dashboard.exa.ai/api-keys) |
 
 ## Infrastructure (production)
 
 | Service | Purpose | Notes |
 |---|---|---|
-| **Hetzner Cloud** | VPS that hosts FastAPI, IB Gateway (docker), the WS relay, the monitor daemon, the newsfeed, Caddy, and `media.radon.run`. Host secrets in `/home/radon/radon-cloud/.env` include Turso + Backblaze B2 archive keys. | Resolved as `ib-gateway` via Tailscale on the laptop |
+| **Hetzner Cloud** | VPS that hosts FastAPI, IB Gateway (docker), the WS relay, the monitor daemon, the newsfeed, Caddy, and `media.radon.run`. Host secrets live in `/etc/radon/env` (0640 root:radon, canonical; `/home/radon/radon-cloud/.env` is the compatibility symlink) — IB Flex, Turso, Backblaze B2 archive, and the Robinhood MCP bootstrap keys. The Robinhood token file is the one secret NOT in that env file: it sits at `/etc/radon/rh-mcp.json` (0600) because the refresh loop must rewrite it. | Resolved as `ib-gateway` via Tailscale on the laptop |
 | **Backblaze B2** | Cold storage for archived portfolio snapshot months (`portfolio_snapshots/YYYY-MM.jsonl.gz`). | Bucket `radon-archive` |
 | **Tailscale** | Mesh VPN between laptop and VPS. Laptop reaches `ib-gateway:4001` over Tailscale; FastAPI on the VPS binds to localhost-only. | [tailscale.com](https://tailscale.com/) |
 | **Caddy** | TLS termination + reverse proxy on the VPS. Serves `app.radon.run` and `media.radon.run`. | Canonical config: [`cloud/caddy/`](../cloud/caddy/) |
@@ -48,4 +52,11 @@ for FastAPI and scripts, plus `web/.env` for Next.js.
 | **Pushover** | Watchdog P1 (emergency) starts laptop Grok auto-fix. Grok follow-up and live deploys are normal-priority (`radon grok:`, `radon deploy live`) and must never be P1. P2/P3 stay in `service_health`. Absent vars degrade gracefully. Spec: [`docs/grok-page-responder.md`](grok-page-responder.md). | `PUSHOVER_USER`, `PUSHOVER_TOKEN` | [pushover.net](https://pushover.net/) |
 | **FRED (St. Louis Fed)** | Risk-free rate (DFF) for Black-Scholes implied value. No key required; 24h cache + 0.0 fallback. | none | Public API |
 | **Cboe** | COR1M historical fallback when IB / UW are missing the series. | none | Public CSV feed |
-| **Yahoo Finance** | Last-resort price fallback when IB and UW both fail. Never the first or second source. | none | Public API |
+| **Robinhood** | READ-ONLY quote/historicals failover before Yahoo, plus the popular-watchlist / scan retail-crowding overlay (`rh_crowding`). Official trading MCP only: `https://agent.robinhood.com/mcp/trading` (OAuth 2.1 + PKCE, Streamable HTTP; discovery `https://agent.robinhood.com/.well-known/oauth-authorization-server/mcp/trading`). Execution stays on IB — Radon never calls a place_*/cancel_* tool. **Access tokens expire ~3 days, so refresh is mandatory in production:** tokens live in a 0600 JSON file (`ROBINHOOD_MCP_TOKEN_FILE`; fields `access_token`, `refresh_token`, `client_id`, `token_type`, `expires_at`; default `data/rh_mcp_token.json`, gitignored; production `/etc/radon/rh-mcp.json` — never commit it) that the client rewrites atomically on every refresh against `https://api.robinhood.com/oauth2/token/` (`grant_type=refresh_token` + `client_id`, form-encoded, public client, `token_endpoint_auth_method=none` — no secret). Refresh fires when the access token is missing, within 1h of `expires_at`, or on an MCP 401/403, except when the rejected token was itself minted within the last 60s (`minted_recently`): then the client disables Robinhood for the rest of the process (the same clean skip to Yahoo) instead of re-minting per symbol across a scan; a rotated `refresh_token` replaces the old one. Env vars bootstrap the file on first run. No credentials at all = clean skip to Yahoo; `invalid_grant` degrades the process to the same skip. Options probed live (2026-08-30, 67 tools): `get_option_quotes` takes `instrument_ids` (UUIDs), returns real-time quotes + official prior-session close, no greeks/IV/OI — never a vol-surface source. **Failure classes and the 300s breaker (REL-174):** the client sorts failures into `auth`, `rate_limited` (HTTP 429), `network` and `token_endpoint`. `auth` is structural and disables the rung for the rest of the process; the other three open a circuit breaker for `BREAKER_COOLDOWN_S` (300s) so a dead or throttled MCP is hit once per scan instead of once per symbol. The class rides on the ladder heartbeat, so an `ok` row can name a Robinhood demotion in `last_error`. **Rotated-token recovery:** if the endpoint has already spent the old refresh token and the 0600 store cannot be rewritten, the new pair is written to a `rh-mcp-rotated-*.json` file in the system temp dir and the error names the path to restore it to. That file is the only copy of a working refresh token — restore it to `ROBINHOOD_MCP_TOKEN_FILE` (mode 0600) before the temp dir is cleaned, or the whole rung needs a fresh OAuth grant. Full order: IB > UW > Cboe > Robinhood > Yahoo. Operator setup: [agentic trading overview](https://robinhood.com/us/en/support/articles/agentic-trading-overview/) · [trading with your agent](https://robinhood.com/us/en/support/articles/trading-with-your-agent/). | `ROBINHOOD_MCP_URL` (default the trading MCP), `ROBINHOOD_MCP_TOKEN` (access, ~3d expiry), `ROBINHOOD_MCP_REFRESH_TOKEN` (required for production), `ROBINHOOD_MCP_CLIENT_ID` (public OAuth client), `ROBINHOOD_MCP_TOKEN_FILE` (0600 JSON) | [agentic trading support](https://robinhood.com/us/en/support/articles/agentic-trading-overview/) (the `agent.robinhood.com` root is an MCP endpoint, not a console — it 404s in a browser) |
+| **Yahoo Finance** | Last-resort price fallback when IB, UW and Robinhood all fail. Never the first or second source. | none | Public API |
+
+**Robinhood non-dependencies (deliberate):** no pip package — `requests` speaks the MCP JSON-RPC directly; unofficial wrappers (robin-stocks, meow-meow-hood, private `api.robinhood.com` scrapers) are forbidden; the Banking MCP (`banking-agent.robinhood.com`) is out of scope; the crypto REST surface (`trading.robinhood.com`) is out of scope; execution stays on IB; the `rh_crowding` series is descriptive retail-crowding context only and cannot trip the three gates (convexity, edge, fractional Kelly).
+
+## AI infrastructure evidence
+
+`/regime/llm` now groups Demand, Compute, Delivery and Finance. The collector uses OpenRouter, Vercel AI Gateway, GPU Rental Prices, Artificial Analysis, SEC, EIA and Vast for their specific published measurements. Missing credentials and unsupported feeds remain visible source states. Issuer disclosures require reviewed imports; no automatic filing-text extraction is claimed. See [source configuration and limits](ai-infrastructure-operations.md) and [primary-statement reconciliation](ai-infrastructure-verification.md).

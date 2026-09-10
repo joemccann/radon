@@ -1,3 +1,4 @@
+import { CtaBeam } from "@/components/atoms/CtaBeam";
 import { EditorialEyebrow } from "@/components/atoms/EditorialEyebrow";
 import { RevealOnScroll } from "@/components/atoms/RevealOnScroll";
 import { DEMO_URL } from "@/lib/editorial-content";
@@ -33,30 +34,32 @@ export function ColophonSection() {
           as="h2"
           className="editorial-pull mb-[34px] max-w-[22ch] border-0 p-0"
         >
-          For operators who want the method, not the noise.
+          Open the demo. Run a name.
         </RevealOnScroll>
 
         <RevealOnScroll as="p" className="mb-[34px] max-w-[66ch] text-secondary">
-          Radon is built for a single operator who treats trading as research. If you read
-          this far and nodded, you already understand the discipline. Convexity or no trade.
+          If you already form a view, this keeps the scanners and the order
+          path on one desk. Gates stay. They are not the whole product.
         </RevealOnScroll>
 
         <RevealOnScroll className="flex flex-wrap items-center gap-x-6 gap-y-4">
+          <CtaBeam>
+            <a
+              href={DEMO_URL}
+              className={`inline-flex min-h-11 items-center rounded-[8px] border border-signal-deep bg-signal-deep px-[22px] font-sans text-[13px] font-medium text-canvas transition-colors hover:bg-transparent hover:text-signal-deep ${focusRing}`}
+            >
+              Try the free demo
+            </a>
+          </CtaBeam>
           <a
-            href={DEMO_URL}
-            className={`inline-block rounded-[4px] border border-signal-deep bg-signal-deep px-[22px] py-[13px] font-mono text-[12px] uppercase tracking-[0.06em] text-canvas transition-colors hover:bg-transparent hover:text-signal-deep ${focusRing}`}
+            href="#expression"
+            className={`inline-flex min-h-11 items-center rounded-[8px] border border-grid bg-transparent px-[22px] font-sans text-[13px] font-medium text-primary transition-colors hover:border-signal-deep hover:text-signal-deep ${focusRing}`}
           >
-            Try the free demo
-          </a>
-          <a
-            href="#pipeline"
-            className={`inline-block rounded-[4px] border border-grid bg-transparent px-[22px] py-[13px] font-mono text-[12px] uppercase tracking-[0.06em] text-primary transition-colors hover:border-signal-deep hover:text-signal-deep ${focusRing}`}
-          >
-            Read the method
+            See the expression path
           </a>
           <a
             href="#registry"
-            className={`font-mono text-[12px] uppercase tracking-[0.06em] text-secondary underline decoration-grid underline-offset-4 transition-colors hover:text-signal-deep hover:decoration-signal-deep ${focusRing}`}
+            className={`inline-flex min-h-11 items-center font-mono text-[12px] uppercase tracking-[0.06em] text-secondary underline decoration-grid underline-offset-4 transition-colors hover:text-signal-deep hover:decoration-signal-deep ${focusRing}`}
           >
             Review the registry
           </a>

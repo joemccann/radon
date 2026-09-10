@@ -15,7 +15,7 @@ Archived session artifacts live in [`docs/archive/`](archive/).
 | Operator contributing rules | [`CONTRIBUTING.md`](../CONTRIBUTING.md) |
 | Security reports | [`SECURITY.md`](../SECURITY.md) |
 | Support (proprietary, unsupported clones) | [`SUPPORT.md`](../SUPPORT.md) |
-| External services and signup | [`docs/external-services.md`](external-services.md) |
+| External services and signup (incl. Robinhood read-only MCP; host secret locations) | [`docs/external-services.md`](external-services.md) |
 | CLI commands | [`docs/scripts-reference.md`](scripts-reference.md) |
 | Python script map | [`scripts/README.md`](../scripts/README.md) |
 | Repo layout plan | [`docs/monorepo-legibility-plan.md`](monorepo-legibility-plan.md) |
@@ -26,6 +26,7 @@ Archived session artifacts live in [`docs/archive/`](archive/).
 |-------|-----|
 | Background services, watchdogs, env | [`docs/operations.md`](operations.md) |
 | Cloud architecture, Turso, two-mode deploy | [`docs/cloud-services.md`](cloud-services.md) |
+| Production network topology (app / broker split) | [`docs/spof-host-split.md`](spof-host-split.md) · [`docs/radon-network-topology.png`](radon-network-topology.png) |
 | Retired beta.radon.run (do not recreate) | [`docs/cloud-services.md`](cloud-services.md#retired-betaradonrun-2026-08-20) |
 | Monorepo cutover and rollback | [`docs/monorepo-cloud-migration.md`](monorepo-cloud-migration.md) |
 | Cloud operating contract | [`cloud/CLAUDE.md`](../cloud/CLAUDE.md) |
@@ -39,6 +40,8 @@ Archived session artifacts live in [`docs/archive/`](archive/).
 |-------|-----|
 | Regime and scanner indicator specs | [`docs/indicators/README.md`](indicators/README.md) |
 | AI boom leading indicators | [`docs/ai-boom-leading-indicators.md`](ai-boom-leading-indicators.md) |
+| AI infrastructure evidence, source verification and rollout | [Design](ai-infrastructure-plan.md) · [Collection](ai-infrastructure-operations.md) · [Verification](ai-infrastructure-verification.md) |
+| Social-share voice provenance and export constraints | [`docs/joe-mccann-social-voice.md`](joe-mccann-social-voice.md) |
 | Equibles market-structure API | [`docs/equibles-api.md`](equibles-api.md) |
 | Strategy specs | [`docs/strategies.md`](strategies.md) |
 | VCG-R research notes | [`docs/cross_asset_volatility_credit_gap_spec_(VCG).md`](cross_asset_volatility_credit_gap_spec_(VCG).md) |
@@ -54,10 +57,13 @@ Archived session artifacts live in [`docs/archive/`](archive/).
 | IB Gateway Docker (laptop) | [`docs/ib-gateway-docker.md`](ib-gateway-docker.md) |
 | IB connection troubleshooting | [`docs/ib-connection-troubleshooting.md`](ib-connection-troubleshooting.md) |
 | IB Gateway recovery / 2FA | [`docs/ib-gateway-recovery.md`](ib-gateway-recovery.md) |
+| IB Flex sFTP setup (install) | [`docs/flex-sftp-setup.md`](flex-sftp-setup.md) |
 | IB Flex transfers / TWR | [`docs/ib-flex-transfers-runbook.md`](ib-flex-transfers-runbook.md) |
 | Performance reconstruction | [`docs/performance-reconstruction.md`](performance-reconstruction.md) |
 | Chart system | [`docs/chart-system.md`](chart-system.md) |
 | Brand identity | [`docs/brand-identity.md`](brand-identity.md) |
+| Public agent-design surface + eval scenarios | [`docs/design-evals.md`](design-evals.md) |
+| Short locate / borrow playbook | [`docs/short-locate-borrow.md`](short-locate-borrow.md) |
 | OAuth subscription auth | [`docs/oauth-subscription-auth.md`](oauth-subscription-auth.md) |
 
 ## Glossary

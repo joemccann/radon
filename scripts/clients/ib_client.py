@@ -702,6 +702,33 @@ class IBClient:
             IBOrderError: If the order placement fails.
         """
         self._require_connection()
+        # LAST funnel. Every caller is expected to check the limits itself and
+        # report the refusal in its own vocabulary, but this is the one place a
+        # new call site cannot go around — a guard that lives only in the caller
+        # is the inversion ib_place_order.py was restructured to avoid. Pure
+        # function over a process-local snapshot (app_preferences contract: no
+        # inline I/O, never raises), so double-checking costs nothing. R-427/R-428.
+        from order_limits import check_order_limits, check_quantity_limit  # noqa: PLC0415
+
+        # A BAG's leg detail (strikes, ratios) is not derivable here — a
+        # `comboLeg` carries a conId, not a strike — and `check_order_limits`
+        # fails CLOSED on a combo whose legs it cannot read. Refusing every
+        # combo at the transport would break legitimate placement, so the funnel
+        # applies the bound it CAN compute (the stricter contract-quantity cap,
+        # which is the fat-finger class) and leaves the leg-ratio and max-loss
+        # branches to the caller, which has the legs. R-427/R-428.
+        sec_type = str(getattr(contract, "secType", "") or "")
+        if sec_type == "BAG":
+            violation = check_quantity_limit(getattr(order, "totalQuantity", 0))
+        else:
+            violation = check_order_limits({
+                "type": "stock" if sec_type == "STK" else "option",
+                "quantity": getattr(order, "totalQuantity", 0),
+                "symbol": getattr(contract, "symbol", ""),
+                "limitPrice": getattr(order, "lmtPrice", None),
+            })
+        if violation:
+            raise IBOrderError(violation["message"])
         try:
             trade = self._ib.placeOrder(contract, order)
             self.logger.info(
@@ -759,13 +786,24 @@ class IBClient:
             List of ``Trade`` objects ``[parent, take_profit, stop_loss]``.
         """
         self._require_connection()
+        # REL-186 (R-479): the bracket funnel carries the same guards as
+        # place_order. Halt first — three resting legs placed during a halt
+        # are exactly what the kill switch exists to refuse.
+        from trading_halt import get_halt_state, is_trading_halted  # noqa: PLC0415
+
+        if is_trading_halted():
+            reason = get_halt_state().get("reason", "manual halt")
+            raise IBOrderError(f"TRADING HALTED — bracket not placed ({reason})")
         try:
             bracket = self._ib.bracketOrder(
                 action, quantity, limit_price, take_profit_price, stop_loss_price,
             )
             trades = []
             for order in bracket:
-                trade = self._ib.placeOrder(contract, order)
+                # Each leg routes through place_order, so the server-side
+                # limits (quantity, notional, price sanity) apply per leg and
+                # a new guard added there covers brackets automatically.
+                trade = self.place_order(contract, order)
                 trades.append(trade)
             self.logger.info(
                 "Placed bracket order: %s %s %s limit=%.2f TP=%.2f SL=%.2f",
@@ -812,6 +850,24 @@ class IBClient:
             order.auxPrice = kwargs["aux_price"]
         if "tif" in kwargs:
             order.tif = kwargs["tif"]
+
+        # REL-186: the modify re-submit is a placement at the wire, so it takes
+        # the same last-funnel bound as place_order — secType-aware, with the
+        # BAG carve-out (leg detail is not derivable from comboLegs). R-427/R-428.
+        from order_limits import check_order_limits, check_quantity_limit  # noqa: PLC0415
+
+        sec_type = str(getattr(contract, "secType", "") or "")
+        if sec_type == "BAG":
+            violation = check_quantity_limit(getattr(order, "totalQuantity", 0))
+        else:
+            violation = check_order_limits({
+                "type": "stock" if sec_type == "STK" else "option",
+                "quantity": getattr(order, "totalQuantity", 0),
+                "symbol": getattr(contract, "symbol", ""),
+                "limitPrice": getattr(order, "lmtPrice", None),
+            })
+        if violation:
+            raise IBOrderError(violation["message"])
 
         try:
             trade = self._ib.placeOrder(contract, order)
@@ -1162,10 +1218,15 @@ class IBClient:
         Raises:
             IBError: If the Flex query fails.
         """
-        try:
-            from utils.flex_send import assert_sendrequest_permitted
+        # ABOVE the try, deliberately. The guard and the 1025 embargo check it
+        # invokes are POLICY, not transport: wrapping them made a by-design
+        # block and a real token lockout indistinguishable from a Flex outage,
+        # and `portfolio_performance` then degraded to the stale blotter cache
+        # warning "Live IB Flex Query unavailable" for both. R-353.
+        from utils.flex_send import assert_sendrequest_permitted
 
-            assert_sendrequest_permitted(allowed=False)
+        assert_sendrequest_permitted(allowed=False)
+        try:
             report = FlexReport(token=token, queryId=query_id)
             self.logger.info("Flex query %d executed successfully", query_id)
             return report

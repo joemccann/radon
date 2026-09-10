@@ -16,16 +16,18 @@
 
 import { useEffect, useState } from "react";
 
-import { computeFreshnessRail, formatCountdown } from "@/lib/freshnessRail";
-import type { UtcSchedule } from "@/lib/refreshSchedule";
+import { computeFreshnessRail, formatCountdown, type FreshnessModel } from "@/lib/freshnessRail";
+import type { RefreshSchedule } from "@/lib/refreshSchedule";
 
 type FreshnessRailProps = {
-  schedule: UtcSchedule;
+  schedule: RefreshSchedule;
   /** Latest session the panel holds, `YYYY-MM-DD`. */
   asOf: string | null;
   testId: string;
   /** Test id for the as-of value, so existing assertions keep their anchor. */
   asOfTestId?: string;
+  /** See `FreshnessModel`. Defaults to a market-session series. */
+  model?: FreshnessModel;
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -57,7 +59,13 @@ function targetLabel(target: Date, now: Date): string {
   return `${target.toLocaleDateString([], { weekday: "short" })} ${time}`;
 }
 
-export default function FreshnessRail({ schedule, asOf, testId, asOfTestId }: FreshnessRailProps) {
+export default function FreshnessRail({
+  schedule,
+  asOf,
+  testId,
+  asOfTestId,
+  model = "session",
+}: FreshnessRailProps) {
   // The clock starts on the client. Reading it during render would put a
   // different countdown in the server HTML than in the first client paint —
   // the hydration-mismatch class this app has already been bitten by.
@@ -68,7 +76,7 @@ export default function FreshnessRail({ schedule, asOf, testId, asOfTestId }: Fr
     return () => clearInterval(id);
   }, []);
 
-  const rail = now ? computeFreshnessRail(schedule, asOf, now) : null;
+  const rail = now ? computeFreshnessRail(schedule, asOf, now, model) : null;
   // An unknown date is its own state: the rail used to render the calm
   // "Current" note with a ticking countdown over a panel holding no date at
   // all. R-306.
@@ -83,6 +91,7 @@ export default function FreshnessRail({ schedule, asOf, testId, asOfTestId }: Fr
           : "current";
 
   const countdown = rail ? (rail.overdue ? "Due" : formatCountdown(rail.msRemaining)) : "--";
+  const fillPct = rail ? (rail.elapsedFraction * 100).toFixed(2) : "0.00";
   const note = !rail
     ? null
     : rail.overdue
@@ -94,7 +103,9 @@ export default function FreshnessRail({ schedule, asOf, testId, asOfTestId }: Fr
       ? "Unknown"
       : rail.awaitingSession
         ? `Awaiting ${rail.awaitingSession}`
-        : "Current";
+        : model === "release"
+          ? "Latest release"
+          : "Current";
 
   return (
     <div
@@ -105,7 +116,7 @@ export default function FreshnessRail({ schedule, asOf, testId, asOfTestId }: Fr
         rail
           ? rail.overdue
             ? `Data as of ${asOf ?? "unknown"}. The ${targetLabel(rail.lastSampleAt, now!)} sample has not landed.`
-            : `Data as of ${asOf ?? "unknown"}. Next sample ${countdown} from now.`
+            : `Data as of ${asOf ?? "unknown"}. ${model === "release" ? "Next check" : "Next sample"} ${countdown} from now.`
           : undefined
       }
     >
@@ -118,16 +129,23 @@ export default function FreshnessRail({ schedule, asOf, testId, asOfTestId }: Fr
       </div>
 
       {/* The wait as a length. No transition: the fill moves once a second and
-          an eased width would smear rather than tick. */}
+          an eased width would smear rather than tick.
+
+          `data-fill-pct` is the number the fill MEANS; the inline width is how
+          this stylesheet happens to draw it today. Tests read the attribute, so
+          moving the drawing to a custom property or a transform stays a styling
+          change instead of a broken assertion. */}
       <div className="freshness-rail-track" aria-hidden="true">
         <div
           className="freshness-rail-track-fill"
-          style={{ width: rail ? `${(rail.elapsedFraction * 100).toFixed(2)}%` : "0%" }}
+          data-testid={`${testId}-fill`}
+          data-fill-pct={fillPct}
+          style={{ width: `${fillPct}%` }}
         />
       </div>
 
       <div className="freshness-rail-side freshness-rail-side--end">
-        <div className="freshness-rail-label">Next sample</div>
+        <div className="freshness-rail-label">{model === "release" ? "Next check" : "Next sample"}</div>
         <div className="freshness-rail-countdown" data-testid={`${testId}-countdown`}>
           {countdown}
         </div>

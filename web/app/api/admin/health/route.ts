@@ -14,6 +14,8 @@ import {
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+export const radonCapability = "admin";
+
 export async function GET(): Promise<Response> {
   const access = await requireRouteAccess(undefined, { operatorOnly: true });
   if (!access.ok) return access.response;

@@ -28,13 +28,13 @@ export const CRASH_RISK_INDEX_DESCRIPTION =
 
 // The single h1 on the page; the TechArticle headline must mirror it exactly.
 export const CRASH_RISK_INDEX_H1 =
-  "Forced selling is mechanical. The Crash Risk Index reads the regime that triggers it.";
+  "CRI scores the regime that forces selling.";
 
 // Frozen per-page dates (never request-time; same rationale as
 // SITE_CONTENT_LAST_MODIFIED in lib/seo.ts). Bump dateModified when the copy
 // meaningfully changes.
 export const CRASH_RISK_INDEX_DATE_PUBLISHED = "2026-07-03";
-export const CRASH_RISK_INDEX_DATE_MODIFIED = "2026-08-23";
+export const CRASH_RISK_INDEX_DATE_MODIFIED = "2026-09-07";
 
 export const crashRiskIndexUrl = `${siteUrl}/${CRASH_RISK_INDEX_SLUG}`;
 

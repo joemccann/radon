@@ -30,16 +30,42 @@ readonly CADDY_BIN="${RADON_CADDY_BIN:-/usr/bin/caddy}"
 readonly CADDY_SYSTEMCTL="${RADON_CADDY_SYSTEMCTL:-/usr/bin/systemctl}"
 readonly CADDY_TIMEOUT="${RADON_CADDY_TIMEOUT:-/usr/bin/timeout}"
 readonly CADDY_SYNC="${RADON_CADDY_SYNC:-/usr/bin/sync}"
+readonly SSHD_KEYS_ONLY_DROPIN="${RADON_SSHD_KEYS_ONLY_DROPIN:-/etc/ssh/sshd_config.d/10-radon-keys-only.conf}"
+# Root-only staging area for artifacts copied out of the radon-owned checkout.
+readonly STAGE_DIR="${RADON_SETUP_STAGE_DIR:-/root/.radon-stage}"
+# Docker documents this fingerprint for its apt signing key.
+readonly DOCKER_GPG_FINGERPRINT="9DC858229FC7DD38854AE2D88D81803C0EBFCD88"
+# NodeSource nodesource-repo.gpg.key (NSolid <nsolid-gpg@nodesource.com>).
+readonly NODESOURCE_GPG_FINGERPRINT="6F71F525282841EEDAF851B42F59B5F99B1BE0B4"
+# Caddy Cloudsmith stable key (Caddy Web Server <contact@caddyserver.com>).
+readonly CADDY_GPG_FINGERPRINT="65760C51EDEA2017CEA2CA15155B6D79CA56EA34"
+# T-417: CI installs a frozen caddy tarball (.github/workflows/ci.yml,
+# `ver=`) to run the edge-mechanism tests. Production must be the SAME
+# version or those tests prove nothing about the proxy that actually serves
+# POST /api/orders/place — a path with no idempotency key, whose non-replay
+# rests on caddy's lb_retry_match semantics (cloud/caddy/Caddyfile R-220).
+# Bump both literals together; the equality is asserted by
+# cloud/tests/test_actions_node24.py.
+readonly CADDY_VERSION="2.11.4"
 
 readonly SERVICE_FILES=(
+  radon-aa-frontier-refresh.service
+  radon-aa-frontier-refresh.timer
+  radon-ai-cycle-backfill.service
+  radon-ai-cycle-backfill.timer
+  radon-ai-cycle.service
+  radon-ai-cycle.timer
   radon-ib-gateway.service
   radon-ib-gateway-preheld-restart.service
+  radon-ib-gateway-remote.service
   radon-nextjs.service
   radon-api.service
   radon-relay.service
   radon-monitor.service
   radon-health.service
+  radon-mcp.service
   radon-newsfeed.service
+  radon-research.service
   radon-refresh.service
   radon-refresh.timer
   radon-vcg-refresh.service
@@ -62,6 +88,8 @@ readonly SERVICE_FILES=(
   radon-incident-watchdog.timer
   radon-grok-page-responder.service
   radon-grok-page-responder.timer
+  radon-flex-pull.service
+  radon-flex-pull.timer
   radon-llm-index.service
   radon-llm-index.timer
   radon-leap.service
@@ -94,6 +122,9 @@ readonly SERVICE_FILES=(
   radon-demo-mirror.timer
   radon-margin-debt.service
   radon-margin-debt.timer
+  radon-mktnews.service
+  radon-model-catalog.service
+  radon-model-catalog.timer
   radon-oi-changes.service
   radon-oi-changes.timer
   radon-knowledge.service
@@ -136,18 +167,24 @@ readonly SERVICE_FILES=(
   radon-credit-spread.timer
   radon-ivrank.service
   radon-ivrank.timer
+  radon-iv-spread.service
+  radon-iv-spread.timer
   radon-iei-hyg.service
   radon-iei-hyg.timer
   radon-trin.service
   radon-trin.timer
   radon-divyield.service
   radon-divyield.timer
+  radon-ma-ratio.service
+  radon-ma-ratio.timer
   radon-hyad.service
   radon-hyad.timer
   radon-hhlev.service
   radon-hhlev.timer
   radon-vixts.service
   radon-vixts.timer
+  radon-dispersion.service
+  radon-dispersion.timer
 )
 
 
@@ -167,6 +204,160 @@ log_info()    { echo -e "${BLUE}[INFO]${NC}  $*"; }
 log_success() { echo -e "${GREEN}[OK]${NC}    $*"; }
 log_warn()    { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 log_error()   { echo -e "${RED}[ERROR]${NC} $*"; }
+
+# -- Privileged path guards --------------------------------------------------
+#
+# Root provisioning never dereferences a path an unprivileged account can
+# replace. radon owns ${CLOUD_DIR}, its home and the env file, and chmod,
+# chown, cp and install all follow symlinks, so a link planted at any of those
+# paths turned a root copy or chown into an arbitrary-file primitive. Every
+# privileged touch of such a path goes through one of these two helpers.
+
+require_regular_file() {
+  local path="$1"
+  if [[ -L "$path" || ! -f "$path" ]]; then
+    log_error "Refusing ${path}: not a regular file (missing or a symlink)"
+    return 1
+  fi
+}
+
+# stage_from_checkout <source> <target> <mode> [install owner args...]
+# Copies a checkout artifact into a root-only 0600 staging file, re-checks the
+# source around the copy (a swap between the test and the copy fails the byte
+# comparison instead of being published), then installs the staged copy at
+# the final mode and owner. Creates the target's parent so the guard runs
+# before any privileged directory is touched.
+# Shared with deploy-root-helper.sh and setup-vps.sh, byte-for-byte;
+# cloud/tests/test_rel234_compose_gate.py pins the copies identical. R-635.
+compose_body_is_valid() {
+  local candidate="$1" dest="$2"
+  local body render_env
+
+  # Comments must never satisfy or trip a structural gate.
+  body="$(grep -Ev '^[[:space:]]*#' "$candidate")" || body=""
+
+  # Early-exiting consumers must not SIGPIPE a producer under pipefail:
+  # a failed producer inverts both required matches and forbidden-match guards.
+  grep -Eq '^services:' <<< "$body" || {
+    echo "compose validation failed: ${dest} declares no services" >&2
+    return 1
+  }
+  grep -Eq '^[[:space:]]+container_name:[[:space:]]*ib-gateway[[:space:]]*$' <<< "$body" || {
+    echo "compose validation failed: ${dest} does not pin container_name ib-gateway" >&2
+    return 1
+  }
+  if grep -Eq "^[[:space:]]*privileged:[[:space:]]*[\"']?true" <<< "$body"; then
+    echo "compose validation failed: ${dest} requests privileged" >&2
+    return 1
+  fi
+  # The Gateway body's only volume is the named ib-config volume, so any
+  # short-form entry whose source is an absolute host path (quoted or not)
+  # is a host mount root must not perform. There is no allowlist.
+  if grep -Eq "^[[:space:]]*-[[:space:]]*[\"']?/" <<< "$body"; then
+    echo "compose validation failed: ${dest} binds an absolute host path" >&2
+    return 1
+  fi
+  if grep -Eq "type:[[:space:]]*[\"']?bind" <<< "$body"; then
+    echo "compose validation failed: ${dest} declares a long-form bind mount" >&2
+    return 1
+  fi
+  if grep -Eq "source:[[:space:]]*[\"']?/" <<< "$body"; then
+    echo "compose validation failed: ${dest} declares an absolute long-form source" >&2
+    return 1
+  fi
+  if grep -q 'docker\.sock' <<< "$body"; then
+    echo "compose validation failed: ${dest} mounts the docker socket" >&2
+    return 1
+  fi
+  # R-668 (REL-249): every host-namespace join is denied, not only pid — ipc,
+  # userns_mode, uts and cgroup widen the container's runtime the same way.
+  if grep -Eq '^[[:space:]]*(pid|ipc|userns_mode|uts|cgroup):' <<< "$body"; then
+    echo "compose validation failed: ${dest} joins a host namespace (pid/ipc/userns_mode/uts/cgroup)" >&2
+    return 1
+  fi
+  if grep -Eq "^[[:space:]]*network_mode:[[:space:]]*[\"']?host" <<< "$body"; then
+    echo "compose validation failed: ${dest} requests host networking" >&2
+    return 1
+  fi
+  if grep -Eq '^[[:space:]]*(cap_add|devices):' <<< "$body"; then
+    echo "compose validation failed: ${dest} adds capabilities or devices" >&2
+    return 1
+  fi
+  if grep -Eq "^[[:space:]]*user:[[:space:]]*[\"']?(root|0)[\"']?[[:space:]]*$" <<< "$body"; then
+    echo "compose validation failed: ${dest} runs as root in the container" >&2
+    return 1
+  fi
+  # security_opt may only tighten: block form, no-new-privileges:true entries
+  # and nothing else. The inline form is refused outright.
+  if grep -Eq '^[[:space:]]*security_opt:[[:space:]]*[^[:space:]]' <<< "$body"; then
+    echo "compose validation failed: ${dest} uses inline security_opt" >&2
+    return 1
+  fi
+  if ! awk '
+    /^[[:space:]]*security_opt:[[:space:]]*$/ { inso = 1; next }
+    inso == 1 && /^[[:space:]]*-[[:space:]]*/ {
+      entry = $0
+      sub(/^[[:space:]]*-[[:space:]]*/, "", entry)
+      gsub(/[" \t]/, "", entry)
+      if (entry != "no-new-privileges:true") { bad = 1; exit }
+      next
+    }
+    inso == 1 { inso = 0 }
+    END { exit bad }
+  ' <<< "$body"; then
+    echo "compose validation failed: ${dest} sets a security_opt beyond no-new-privileges" >&2
+    return 1
+  fi
+  # Render check where the tooling exists (the deploy host has it; a test
+  # host may not). RADON_COMPOSE_ENV_FILE is pointed at an empty file so the
+  # env_file directive resolves without reading production secrets.
+  if command -v docker >/dev/null 2>&1 && \
+     docker compose version >/dev/null 2>&1; then
+    render_env="$(mktemp)" || {
+      echo "compose validation failed: ${dest} render env could not be created" >&2
+      return 1
+    }
+    if ! RADON_COMPOSE_ENV_FILE="$render_env" docker compose \
+        -f "$candidate" --project-name radon-compose-validate \
+        config --quiet >/dev/null 2>&1; then
+      rm -f -- "$render_env"
+      echo "compose validation failed: ${dest} does not render with docker compose config" >&2
+      return 1
+    fi
+    rm -f -- "$render_env"
+  fi
+  return 0
+}
+
+stage_from_checkout() {
+  local source="$1" target="$2" mode="$3"
+  shift 3
+  local staged
+  require_regular_file "$source" || return 1
+  if [[ -L "$STAGE_DIR" ]]; then
+    log_error "Refusing symlinked staging dir ${STAGE_DIR}"
+    return 1
+  fi
+  # Fail closed: an empty staging path would make cp/install resolve "" to
+  # the working directory, so both steps must produce a real path.
+  if ! install -d -m 0700 "$STAGE_DIR" \
+    || ! staged="$(mktemp "${STAGE_DIR}/$(basename "$target").XXXXXX")" \
+    || [[ -z "$staged" ]]; then
+    log_error "Could not create a root-only staging file under ${STAGE_DIR}"
+    return 1
+  fi
+  chmod 0600 "$staged"
+  if ! cp -- "$source" "$staged" \
+    || ! require_regular_file "$source" \
+    || ! cmp -s -- "$source" "$staged"; then
+    rm -f "$staged"
+    log_error "Source changed while staging: ${source}"
+    return 1
+  fi
+  mkdir -p "$(dirname "$target")"
+  install -m "$mode" "$@" "$staged" "$target"
+  rm -f "$staged"
+}
 
 # -- Base packages ----------------------------------------------------------
 
@@ -192,6 +383,24 @@ install_base_packages() {
 
 # -- Prerequisites ----------------------------------------------------------
 
+pin_apt_keyring() {
+  local url="$1"
+  local dest="$2"
+  local fingerprint="$3"
+  local label="$4"
+  install -m 0755 -d "$(dirname "$dest")"
+  curl -fsSL "$url" | gpg --batch --yes --dearmor -o "$dest"
+  # apt trusts whatever this keyring holds: refuse a key that is not the
+  # pinned publisher rather than adding its repository under it.
+  if ! gpg --batch --show-keys --with-colons "$dest" 2>/dev/null \
+    | grep -q "^fpr:.*:${fingerprint}:"; then
+    rm -f "$dest"
+    log_error "${label} apt signing key does not match the pinned fingerprint"
+    return 1
+  fi
+  chmod a+r "$dest"
+}
+
 install_docker() {
   if docker compose version &>/dev/null; then
     log_warn "Docker with compose already installed -- skipping"
@@ -199,10 +408,11 @@ install_docker() {
   fi
 
   log_info "Installing Docker from official repo..."
-  install -m 0755 -d /etc/apt/keyrings
-  curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
-    | gpg --batch --yes --dearmor -o /etc/apt/keyrings/docker.gpg
-  chmod a+r /etc/apt/keyrings/docker.gpg
+  pin_apt_keyring \
+    "https://download.docker.com/linux/ubuntu/gpg" \
+    /etc/apt/keyrings/docker.gpg \
+    "$DOCKER_GPG_FINGERPRINT" \
+    "Docker"
 
   echo \
     "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
@@ -212,8 +422,13 @@ install_docker() {
   apt update
   apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
-  if id radon &>/dev/null; then
-    usermod -aG docker radon
+  # radon is deliberately NOT in group docker: that group is root-equivalent
+  # (mount the host into a container, walk out as root), and the only reason it
+  # ever held it was driving the ib-gateway container. That goes through the
+  # root-owned radon-docker-gw shim now. Strip a membership left by an older
+  # provision so a re-run of setup converges instead of preserving the hole.
+  if id radon &>/dev/null && id -nG radon 2>/dev/null | grep -qw docker; then
+    gpasswd -d radon docker || true
   fi
 
   log_success "Docker installed"
@@ -246,7 +461,15 @@ install_node22() {
 
   if $need_install; then
     log_info "Installing Node.js 22 from nodesource..."
-    curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+    pin_apt_keyring \
+      "https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key" \
+      /etc/apt/keyrings/nodesource.gpg \
+      "$NODESOURCE_GPG_FINGERPRINT" \
+      "NodeSource"
+    echo \
+      "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
+      | tee /etc/apt/sources.list.d/nodesource.list > /dev/null
+    apt update
     apt install -y nodejs
     log_success "Node.js 22 installed"
   fi
@@ -329,10 +552,36 @@ preflight_checks() {
     log_warn "radon user already exists -- skipping"
   fi
 
-  # Ensure radon is in the docker group (needed even if Docker was installed before user)
-  if command -v docker &>/dev/null && ! id -nG radon 2>/dev/null | grep -qw docker; then
-    usermod -aG docker radon
+  # Never add radon to group docker -- see install_docker. Converge an older
+  # provision that did.
+  if id -nG radon 2>/dev/null | grep -qw docker; then
+    gpasswd -d radon docker || true
   fi
+
+  # R-619: the app-plane API container runs --user radon, so the plaintext
+  # secret-store master key must not be handed over as a file uid radon can
+  # open. radon-app-runtime stages it root:radon-secrets 0040 and grants the
+  # gid to that one container with --group-add. radon is never a member --
+  # the runtime refuses to start the API if it ever becomes one.
+  if ! getent group radon-secrets &>/dev/null; then
+    log_info "Creating radon-secrets group..."
+    groupadd --system radon-secrets
+  fi
+  if id -nG radon 2>/dev/null | grep -qw radon-secrets; then
+    log_error "radon must not be a member of radon-secrets (R-619)"
+    exit 1
+  fi
+
+  # radon owns its home, so root never writes through a link under it.
+  local ssh_path
+  for ssh_path in /home/radon/.ssh /home/radon/.ssh/authorized_keys \
+    /home/radon/.ssh/id_ed25519 /home/radon/.ssh/id_ed25519.pub \
+    /home/radon/.ssh/known_hosts; do
+    if [[ -L "$ssh_path" ]]; then
+      log_error "Refusing ${ssh_path}: not a regular file (symlink under /home/radon/.ssh)"
+      exit 1
+    fi
+  done
 
   # Copy root's authorized_keys so radon user is accessible via SSH
   if [[ -f /root/.ssh/authorized_keys ]] && [[ ! -f /home/radon/.ssh/authorized_keys ]]; then
@@ -387,17 +636,77 @@ preflight_checks() {
   log_success "Preflight checks passed"
 }
 
+provision_secret_store_credential() {
+  # R-605: radon-api.service carries
+  #   LoadCredentialEncrypted=radon-secret-store-key:/etc/credstore.encrypted/radon-secret-store-key
+  # and nothing created that file — it existed only as prose in
+  # docs/operations.md. systemd fails a unit outright when a
+  # LoadCredentialEncrypted= source is missing, BEFORE any ExecStart, so a
+  # rebuilt or restored host parked radon-api start-limit-hit inside ~25s with
+  # a credential error and no ExecStart ever running.
+  #
+  # A fresh host gets a fresh 32-byte key. An existing one is left alone: the
+  # store is key-bound by fingerprint (docs/operations.md), so replacing the
+  # key would orphan every stored credential.
+  local dir="/etc/credstore.encrypted"
+  local key="${dir}/radon-secret-store-key"
+
+  if [[ -e "$key" && ! -f "$key" ]]; then
+    log_error "Refusing ${key}: not a regular file"
+    exit 1
+  fi
+  install -d -m 0700 -o root -g root "$dir"
+  if [[ -f "$key" ]]; then
+    log_success "Secret-store credential already provisioned (${key})"
+    return 0
+  fi
+  if ! command -v systemd-creds >/dev/null 2>&1; then
+    log_error "systemd-creds is missing; radon-api.service cannot start without ${key}"
+    exit 1
+  fi
+  local tmp
+  tmp="$(mktemp)"
+  head -c 32 /dev/urandom | base64 \
+    | systemd-creds encrypt --name=radon-secret-store-key - "$tmp" || {
+      rm -f "$tmp"
+      log_error "systemd-creds encrypt failed; radon-api.service would fail on a missing ${key}"
+      exit 1
+    }
+  install -m 0600 -o root -g root "$tmp" "$key"
+  rm -f "$tmp"
+  if [[ ! -f "$key" ]]; then
+    log_error "Secret-store credential ${key} was not created; refusing to enable radon-api.service"
+    exit 1
+  fi
+  log_success "Secret-store credential provisioned (${key}, root 0600)"
+}
+
 create_etc_radon_dir() {
   # Canonical secrets and media dirs. Live units load /etc/radon/env.
   # Compatibility: ~/radon-cloud/.env and ~/radon-cloud/media are host
   # symlinks after P2, not a checkout.
+  #
+  # /etc/radon is root-owned with the sticky bit (root:radon 1770): radon can
+  # still create entries (the Robinhood token store rotates rh-mcp.json beside
+  # the env through a same-directory temp + rename), but cannot re-mode the
+  # directory or rename, unlink, or replace any root-owned entry in it. The
+  # env file is 0640 root:radon: systemd and group radon can read; the
+  # unprivileged account cannot rewrite secrets. post-setup.sh and
+  # validate_env deliver it as root. A link planted in its place is refused
+  # by require_regular_file before root touches it.
   local dir="/etc/radon"
   local media="/var/lib/radon/media"
+  # /var/lib/radon is radon-owned (2FA leases), so media/ is radon-replaceable
+  # and install -d would follow a planted link and chown its target.
+  if [[ -L "$media" ]]; then
+    log_error "Refusing ${media}: not a regular file or directory (symlink)"
+    return 1
+  fi
   if [[ "${RADON_HELPER_SKIP_CHOWN:-0}" == "1" ]]; then
-    install -d -m 0750 "$dir"
+    install -d -m 1770 "$dir"
     install -d -m 0750 "$media"
   else
-    install -d -m 0750 -o radon -g radon "$dir"
+    install -d -m 1770 -o root -g radon "$dir"
     install -d -m 0750 -o radon -g radon "$media"
   fi
 }
@@ -474,9 +783,10 @@ setup_node() {
 
   # Persist only browser-safe build variables. Server-side values are injected
   # into the build process by run_with_env.py and never copied into web/.env.
-  if [[ -f "$ENV_FILE" ]]; then
-    chmod 0600 "$ENV_FILE"
-    chown radon:radon "$ENV_FILE"
+  if [[ -e "$ENV_FILE" || -L "$ENV_FILE" ]]; then
+    require_regular_file "$ENV_FILE" || return 1
+    chmod 0640 "$ENV_FILE"
+    chown root:radon "$ENV_FILE"
     local public_env_tmp
     public_env_tmp="$(mktemp)"
     grep -E '^NEXT_PUBLIC_[A-Z0-9_]+=' "$ENV_FILE" > "$public_env_tmp" || true
@@ -509,12 +819,16 @@ install_caddy() {
   else
     log_info "Installing Caddy from official repos..."
     apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
-      | gpg --batch --yes --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
-      | tee /etc/apt/sources.list.d/caddy-stable.list
+    pin_apt_keyring \
+      "https://dl.cloudsmith.io/public/caddy/stable/gpg.key" \
+      /usr/share/keyrings/caddy-stable-archive-keyring.gpg \
+      "$CADDY_GPG_FINGERPRINT" \
+      "Caddy"
+    echo \
+      "deb [signed-by=/usr/share/keyrings/caddy-stable-archive-keyring.gpg] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main" \
+      | tee /etc/apt/sources.list.d/caddy-stable.list > /dev/null
     apt-get update
-    apt-get install -y caddy
+    apt-get install -y caddy="${CADDY_VERSION}"
     log_success "Caddy installed"
   fi
 
@@ -542,7 +856,13 @@ configure_caddy() {
   chown caddy:caddy "$CADDY_LOG_DIR"
 
   candidate="$(mktemp "${CADDY_CONFIG_PATH}.candidate.XXXXXX")"
-  install -m 0644 "${CLOUD_DIR}/caddy/Caddyfile" "$candidate"
+  # Staged 0600 and widened only after validation: caddy runs unprivileged and
+  # must read the live file, but content that fails validate never gets there.
+  if ! stage_from_checkout "${CLOUD_DIR}/caddy/Caddyfile" "$candidate" 0600; then
+    rm -f "$candidate"
+    log_error "Caddy candidate could not be staged; live configuration is unchanged"
+    return 1
+  fi
   if ! "$CADDY_BIN" validate --config "$candidate" --adapter caddyfile >/dev/null; then
     rm -f "$candidate"
     log_error "Caddy candidate validation failed; live configuration is unchanged"
@@ -554,6 +874,7 @@ configure_caddy() {
     cp -a "$CADDY_CONFIG_PATH" "$rollback"
     "$CADDY_SYNC" -f "$rollback"
   fi
+  chmod 0644 "$candidate"
   mv -f "$candidate" "$CADDY_CONFIG_PATH"
   "$CADDY_SYNC" -f "$CADDY_CONFIG_PATH"
   "$CADDY_SYNC" -f "$config_dir"
@@ -587,8 +908,8 @@ copy_systemd_services() {
     # Never follow a legacy /home/radon/radon-cloud symlink and mutate the
     # retired source tree. Every managed unit is a regular canonical artifact.
     rm -f "/etc/systemd/system/${svc}"
-    install -m 0644 -o root -g root \
-      "${CLOUD_DIR}/services/${svc}" "/etc/systemd/system/${svc}"
+    stage_from_checkout "${CLOUD_DIR}/services/${svc}" \
+      "/etc/systemd/system/${svc}" 0644 -o root -g root
   done
   systemctl daemon-reload
   log_success "Systemd units copied and daemon reloaded"
@@ -598,8 +919,8 @@ copy_systemd_services() {
 # for rationale (beta crash loop grew the journal to 3.9G).
 install_journald_limits() {
   log_info "Installing journald disk cap (SystemMaxUse=1G)..."
-  mkdir -p /etc/systemd/journald.conf.d
-  cp "${CLOUD_DIR}/services/journald-radon.conf" /etc/systemd/journald.conf.d/radon.conf
+  stage_from_checkout "${CLOUD_DIR}/services/journald-radon.conf" \
+    /etc/systemd/journald.conf.d/radon.conf 0644
   # journald.conf(5): changes apply on a restart of systemd-journald. Not a
   # radon unit; restart keeps the sockets up and does not drop log streams.
   systemctl restart systemd-journald
@@ -613,8 +934,7 @@ install_journald_limits() {
 # via RADON_DB_USE_REPLICA=1). Applies at daemon-reload; no unit restart.
 install_fleet_dropin() {
   log_info "Installing radon-.service.d fleet drop-in (RADON_DB_NO_REPLICA=1)..."
-  mkdir -p /etc/systemd/system/radon-.service.d
-  cp "${CLOUD_DIR}/services/radon-.service.d/common.conf" /etc/systemd/system/radon-.service.d/common.conf
+  stage_from_checkout "${CLOUD_DIR}/services/radon-.service.d/common.conf" /etc/systemd/system/radon-.service.d/common.conf 0644
   systemctl daemon-reload
   log_success "Fleet drop-in installed (verify: systemctl show radon-api.service -p Environment)"
 }
@@ -625,7 +945,12 @@ enable_services() {
   local timer_owned_services=()
   local base svc
   for svc in "${SERVICE_FILES[@]}"; do
+    # Research requires private runtime credentials and explicit activation.
+    [[ "$svc" == "radon-research.service" ]] && continue
     [[ "$svc" == "radon-ib-gateway-preheld-restart.service" ]] && continue
+    # Broker-only. Combined/app copy the unit but do not enable it. Certs plus
+    # `systemctl enable --now` happen on the broker after the split.
+    [[ "$svc" == "radon-ib-gateway-remote.service" ]] && continue
     if [[ "$svc" == *.timer ]]; then
       timer_units+=("$svc")
     elif [[ -f "${CLOUD_DIR}/services/${svc%.service}.timer" ]]; then
@@ -650,6 +975,18 @@ start_services() {
 # -- Firewall ----------------------------------------------------------------
 
 open_firewall() {
+  ufw default deny incoming
+  ufw default allow outgoing
+
+  # SSH is allowed before enable: switching on a default-deny firewall
+  # without it locks the operator out of the box.
+  if ufw status | grep -q "22/tcp.*ALLOW"; then
+    log_warn "Port 22 already open -- skipping"
+  else
+    ufw allow 22/tcp
+    log_success "Port 22 opened"
+  fi
+
   if ufw status | grep -q "80/tcp.*ALLOW"; then
     log_warn "Port 80 already open -- skipping"
   else
@@ -663,6 +1000,54 @@ open_firewall() {
     ufw allow 443/tcp
     log_success "Port 443 opened"
   fi
+
+  if ufw status | grep -q "on tailscale0.*ALLOW"; then
+    log_warn "Tailnet ingress already open -- skipping"
+  else
+    ufw allow in on tailscale0
+    log_success "Tailnet ingress opened"
+  fi
+
+  if ufw status | grep -q "8321/tcp.*ALLOW.*10\.0\.0\.0/16"; then
+    log_warn "Port 8321 from 10.0.0.0/16 already open -- skipping"
+  else
+    ufw allow from 10.0.0.0/16 to any port 8321 proto tcp comment "radon-broker health"
+    log_success "Port 8321 opened from 10.0.0.0/16"
+  fi
+
+  if ufw status | grep -q "^Status: active"; then
+    log_warn "ufw already active -- skipping enable"
+  else
+    ufw --force enable
+    log_success "ufw enabled (default deny incoming)"
+  fi
+}
+
+# -- SSH: keys only ----------------------------------------------------------
+
+install_sshd_keys_only() {
+  local target="$SSHD_KEYS_ONLY_DROPIN"
+  local desired staged
+  desired=$'PasswordAuthentication no\nKbdInteractiveAuthentication no'
+
+  if [[ -f "$target" ]] && [[ "$(cat "$target")" == "$desired" ]]; then
+    log_warn "sshd keys-only drop-in already installed -- skipping"
+    return 0
+  fi
+
+  staged="$(mktemp)"
+  printf '%s\n' "$desired" > "$staged"
+  mkdir -p "$(dirname "$target")"
+  install -m 0644 "$staged" "$target"
+  rm -f "$staged"
+
+  if ! sshd -t; then
+    log_error "sshd -t rejected the keys-only drop-in; removing it"
+    rm -f "$target"
+    exit 1
+  fi
+  systemctl reload ssh
+  log_success "sshd keys-only drop-in installed (password auth disabled)"
 }
 
 # -- Fixed deploy privilege boundary -----------------------------------------
@@ -677,7 +1062,10 @@ install_deploy_root_helper() {
     return 1
   fi
   staged="$(mktemp "${target}.tmp.XXXXXX")"
-  install -m 0755 -o root -g root "$source" "$staged"
+  if ! stage_from_checkout "$source" "$staged" 0755 -o root -g root; then
+    rm -f "$staged"
+    return 1
+  fi
   if ! bash -n "$staged"; then
     rm -f "$staged"
     log_error "Deploy root helper failed syntax validation"
@@ -714,7 +1102,10 @@ configure_sudoers() {
     target="${targets[$index]}"
     candidate="$(mktemp)"
     staged="${target}.tmp.$$"
-    install -m 0440 "${owner_args[@]}" "$source" "$candidate"
+    if ! stage_from_checkout "$source" "$candidate" 0440 ${owner_args[@]+"${owner_args[@]}"}; then
+      rm -f "$candidate"
+      return 1
+    fi
     if ! "$visudo_bin" -cf "$candidate" >/dev/null; then
       rm -f "$candidate"
       log_error "Malformed sudoers candidate for $target"
@@ -755,7 +1146,10 @@ install_gateway_control() {
 
   log_info "Installing authoritative IB Gateway control helper..."
   staged="$(mktemp "${target}.tmp.XXXXXX")"
-  install -m 0755 "${owner_args[@]}" "$source" "$staged"
+  if ! stage_from_checkout "$source" "$staged" 0755 ${owner_args[@]+"${owner_args[@]}"}; then
+    rm -f "$staged"
+    return 1
+  fi
   if ! bash -n "$staged" || [[ ! -x "$staged" ]]; then
     rm -f "$staged"
     log_error "Gateway control candidate failed syntax/permission validation"
@@ -767,6 +1161,10 @@ install_gateway_control() {
     install -d -m 0750 "$state_dir"
   else
     install -d -m 0750 -o radon -g radon "$state_dir"
+    if [[ -L /home/radon/.radon-deploy.lock ]]; then
+      log_error "Deploy lock is not a regular file (symlink); refusing"
+      return 1
+    fi
     if [[ -e /home/radon/.radon-deploy.lock ]]; then
       if [[ "$(stat -c '%U:%G:%a' /home/radon/.radon-deploy.lock)" != "radon:radon:600" ]]; then
         log_error "Deploy lock must already be radon:radon mode 0600; refusing unsafe replacement"
@@ -794,7 +1192,10 @@ install_operator_cli() {
 
   log_info "Installing /usr/local/bin/radon operator CLI..."
   staged="$(mktemp "${target}.tmp.XXXXXX")"
-  install -m 0755 "${owner_args[@]}" "$source" "$staged"
+  if ! stage_from_checkout "$source" "$staged" 0755 ${owner_args[@]+"${owner_args[@]}"}; then
+    rm -f "$staged"
+    return 1
+  fi
   if ! bash -n "$staged" || [[ ! -x "$staged" ]]; then
     rm -f "$staged"
     log_error "Operator CLI candidate failed syntax/permission validation"
@@ -819,7 +1220,10 @@ install_app_runtime() {
 
   log_info "Installing /usr/local/sbin/radon-app-runtime..."
   staged="$(mktemp "${target}.tmp.XXXXXX")"
-  install -m 0755 "${owner_args[@]}" "$source" "$staged"
+  if ! stage_from_checkout "$source" "$staged" 0755 ${owner_args[@]+"${owner_args[@]}"}; then
+    rm -f "$staged"
+    return 1
+  fi
   if ! bash -n "$staged" || [[ ! -x "$staged" ]]; then
     rm -f "$staged"
     log_error "App runtime candidate failed syntax/permission validation"
@@ -828,6 +1232,89 @@ install_app_runtime() {
   mv -f "$staged" "$target"
 
   log_success "App runtime wrapper installed"
+}
+
+# The root-owned Gateway docker operator that replaces radon's group `docker`
+# membership, plus the compose body it runs. Both must land root-owned: a
+# radon-writable compose file hands root straight back through the shim.
+install_docker_gw() {
+  local source="${CLOUD_DIR}/scripts/radon-docker-gw.sh"
+  local target="${RADON_DOCKER_GW_TARGET:-/usr/local/sbin/radon-docker-gw}"
+  local compose_source="${CLOUD_DIR}/docker-compose.yml"
+  local compose_target="${RADON_COMPOSE_TARGET:-/etc/radon/ib-gateway-compose.yml}"
+  local -a owner_args=(-o root -g root)
+  [[ "${RADON_HELPER_SKIP_CHOWN:-0}" == "1" ]] && owner_args=()
+  local staged
+
+  if [[ ! -f "$source" ]]; then
+    log_error "radon-docker-gw.sh missing from ${CLOUD_DIR}/scripts/"
+    return 1
+  fi
+  if [[ ! -f "$compose_source" ]]; then
+    log_error "docker-compose.yml missing from ${CLOUD_DIR}/"
+    return 1
+  fi
+
+  log_info "Installing /usr/local/sbin/radon-docker-gw..."
+  staged="$(mktemp "${target}.tmp.XXXXXX")"
+  if ! stage_from_checkout "$source" "$staged" 0755 ${owner_args[@]+"${owner_args[@]}"}; then
+    rm -f "$staged"
+    return 1
+  fi
+  if ! bash -n "$staged" || [[ ! -x "$staged" ]]; then
+    rm -f "$staged"
+    log_error "Gateway docker shim failed syntax/permission validation"
+    return 1
+  fi
+  mv -f "$staged" "$target"
+
+  # R-636: the compose body root will execute must not come from the
+  # radon-writable working tree. Install the git blob at HEAD, refuse a
+  # working-tree body that differs from that blob (a tamper is a stop, not a
+  # silent bypass), and run the shared validator before anything is staged.
+  # Same provenance shape as the deploy helper's refresh_control_plane.
+  log_info "Installing ${compose_target}..."
+  local repo_root blob_sha work_sha
+  if ! repo_root="$(git -C "$CLOUD_DIR" rev-parse --show-toplevel 2>/dev/null)"; then
+    log_error "Compose provenance failed: ${CLOUD_DIR} is not a git checkout"
+    return 1
+  fi
+  local compose_rel="${compose_source#"${repo_root}"/}"
+  if ! blob_sha="$(git -C "$repo_root" rev-parse "HEAD:${compose_rel}" 2>/dev/null)"; then
+    log_error "Compose provenance failed: ${compose_rel} is not committed at HEAD"
+    return 1
+  fi
+  if ! work_sha="$(git -C "$repo_root" hash-object -- "$compose_source")" \
+    || [[ "$work_sha" != "$blob_sha" ]]; then
+    log_error "Compose provenance failed: ${compose_source} differs from the committed blob"
+    return 1
+  fi
+  if [[ -L "$STAGE_DIR" ]]; then
+    log_error "Refusing symlinked staging dir ${STAGE_DIR}"
+    return 1
+  fi
+  if ! install -d -m 0700 "$STAGE_DIR" \
+    || ! staged="$(mktemp "${STAGE_DIR}/ib-gateway-compose.yml.XXXXXX")" \
+    || [[ -z "$staged" ]]; then
+    log_error "Could not create a root-only staging file under ${STAGE_DIR}"
+    return 1
+  fi
+  chmod 0600 "$staged"
+  if ! git -C "$repo_root" cat-file blob "$blob_sha" > "$staged"; then
+    rm -f "$staged"
+    log_error "Compose provenance failed: could not read blob ${blob_sha}"
+    return 1
+  fi
+  if ! compose_body_is_valid "$staged" "$compose_target"; then
+    rm -f "$staged"
+    log_error "Gateway compose body failed validation"
+    return 1
+  fi
+  mkdir -p "$(dirname "$compose_target")"
+  install -m 0644 ${owner_args[@]+"${owner_args[@]}"} "$staged" "$compose_target"
+  rm -f "$staged"
+
+  log_success "Gateway docker shim installed"
 }
 
 # The only direct systemd privilege left to the radon user is the watchdog's
@@ -843,7 +1330,10 @@ install_admin_polkit_rule() {
   local staged="${target}.tmp.$$"
 
   log_info "Installing exact watchdog preheld-unit polkit rule..."
-  install -m 0644 "${owner_args[@]}" "$source" "$staged"
+  if ! stage_from_checkout "$source" "$staged" 0644 ${owner_args[@]+"${owner_args[@]}"}; then
+    rm -f "$staged"
+    return 1
+  fi
   mv -f "$staged" "$target"
 
   if [[ "${RADON_SKIP_POLKIT_RELOAD:-0}" != "1" ]] && systemctl is-active --quiet polkit; then
@@ -861,12 +1351,13 @@ validate_env() {
   if [[ ! -f "$env_file" ]]; then
     log_error ".env file not found at ${env_file}"
     echo "  Copy the example and fill in your values:"
-    echo "    install -m 0600 -o radon -g radon ${CLOUD_DIR}/.env.example ${env_file}"
+    echo "    install -m 0640 -o root -g radon ${CLOUD_DIR}/.env.example ${env_file}"
     return 1
   fi
 
-  chmod 0600 "$env_file"
-  chown radon:radon "$env_file"
+  require_regular_file "$env_file" || return 1
+  chmod 0640 "$env_file"
+  chown root:radon "$env_file"
 
   if ! run_as_radon "$PYTHON_BIN" "${CLOUD_DIR}/scripts/check-env.py" \
     "$env_file" "${CLOUD_DIR}/config/required-env.txt"; then
@@ -875,6 +1366,20 @@ validate_env() {
   fi
 
   log_success "Environment validated"
+}
+
+write_mcp_env() {
+  # radon-mcp.service terminates anonymous internet traffic, so it loads
+  # /etc/radon/mcp.env (Clerk verification inputs, operator allowlist,
+  # RADON_MCP_* knobs), never the full secret set. Same key set as
+  # deploy.sh:write_mcp_env, which rewrites it on every deploy.
+  local mcp_env_tmp
+  require_regular_file "$ENV_FILE" || return 1
+  mcp_env_tmp="$(mktemp)"
+  grep -E '^(CLERK_JWKS_URL|CLERK_ISSUER|ALLOWED_USER_IDS|RADON_MCP_[A-Z0-9_]+)=' "$ENV_FILE" > "$mcp_env_tmp" || true
+  install -m 0600 -o radon -g radon "$mcp_env_tmp" /etc/radon/mcp.env
+  rm -f "$mcp_env_tmp"
+  log_success "Hosted MCP env written to /etc/radon/mcp.env"
 }
 
 # -- Main --------------------------------------------------------------------
@@ -888,8 +1393,10 @@ main() {
   validate_versions
   preflight_checks
   create_etc_radon_dir
+  provision_secret_store_credential
   clone_repos
   validate_env
+  write_mcp_env
   setup_python
   setup_node
   install_caddy
@@ -900,9 +1407,11 @@ main() {
   install_fleet_dropin
   enable_services
   open_firewall
+  install_sshd_keys_only
   install_deploy_root_helper
   install_operator_cli
   install_app_runtime
+  install_docker_gw
   configure_sudoers
   install_admin_polkit_rule
   start_services

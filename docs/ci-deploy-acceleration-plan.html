@@ -1,0 +1,511 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Radon CI and Deploy Acceleration Plan</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --canvas: #0a0f14;
+      --panel: #0f1519;
+      --raised: #1e252b;
+      --grid: #2e3947;
+      --text: #e2e8f0;
+      --secondary: #94a3b8;
+      --muted: #758192;
+      --signal: #05ad98;
+      --strong: #0fcfb5;
+      --deep: #33a090;
+      --warn: #f5a623;
+      --fault: #e85d6c;
+      --violet: #9e80f6;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+    }
+
+    * { box-sizing: border-box; }
+
+    html { background: var(--canvas); }
+
+    body {
+      margin: 0;
+      background: var(--canvas);
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    a { color: var(--strong); }
+    a:hover { color: var(--signal); }
+
+    .shell {
+      width: min(1440px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 32px 0 64px;
+    }
+
+    .masthead {
+      border-top: 2px solid var(--signal);
+      border-bottom: 1px solid var(--grid);
+      padding: 20px 0 24px;
+      margin-bottom: 16px;
+    }
+
+    .eyebrow,
+    .panel-id,
+    .meta,
+    th,
+    .task-id,
+    .priority,
+    .metric-label {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow { color: var(--signal); margin-bottom: 8px; }
+
+    h1 {
+      font-size: clamp(26px, 4vw, 42px);
+      line-height: 1.08;
+      letter-spacing: -.02em;
+      margin: 0;
+      max-width: 920px;
+    }
+
+    .lede {
+      max-width: 900px;
+      color: var(--secondary);
+      font-size: 16px;
+      margin: 16px 0 0;
+    }
+
+    .meta { color: var(--muted); margin-top: 16px; }
+
+    .metric-grid,
+    .two-col,
+    .priority-grid {
+      display: grid;
+      gap: 16px;
+    }
+
+    .metric-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .two-col { grid-template-columns: 1.15fr .85fr; }
+    .priority-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--grid);
+      border-radius: 4px;
+      box-shadow: none;
+      margin-bottom: 16px;
+    }
+
+    .panel-head {
+      min-height: 40px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 8px 16px;
+      border-bottom: 1px solid var(--grid);
+    }
+
+    .panel-id { color: var(--muted); }
+    .panel-title { font-size: 14px; font-weight: 600; letter-spacing: .02em; }
+    .panel-body { padding: 16px; }
+
+    .metric {
+      background: var(--panel);
+      border: 1px solid var(--grid);
+      border-radius: 4px;
+      padding: 16px;
+      min-height: 116px;
+    }
+
+    .metric-value {
+      font-family: var(--mono);
+      font-size: 30px;
+      line-height: 1;
+      margin: 12px 0 8px;
+      color: var(--text);
+    }
+
+    .metric-label { color: var(--muted); }
+    .metric-note { color: var(--secondary); font-size: 12px; }
+    .signal { color: var(--strong); }
+    .warn { color: var(--warn); }
+    .fault { color: var(--fault); }
+
+    .timeline {
+      display: grid;
+      grid-template-columns: 11fr 204fr 22fr 60fr 170fr;
+      min-height: 68px;
+      border: 1px solid var(--grid);
+      overflow: hidden;
+    }
+
+    .segment {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 8px 4px;
+      border-right: 1px solid var(--canvas);
+      font-family: var(--mono);
+      font-size: 11px;
+      text-align: center;
+      color: var(--canvas);
+    }
+
+    .segment:last-child { border-right: 0; }
+    .seg-launch { background: var(--secondary); color: var(--canvas); }
+    .seg-test { background: var(--fault); }
+    .seg-coverage { background: var(--warn); }
+    .seg-stage { background: var(--violet); }
+    .seg-deploy { background: var(--signal); }
+
+    .legend {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 12px;
+      color: var(--secondary);
+      font-family: var(--mono);
+      font-size: 11px;
+    }
+
+    .legend strong { display: block; color: var(--text); font-weight: 500; }
+
+    .callout {
+      border-left: 2px solid var(--signal);
+      background: var(--raised);
+      padding: 12px 16px;
+      margin-top: 16px;
+      color: var(--secondary);
+    }
+
+    .callout strong { color: var(--text); }
+
+    .priority-card {
+      border: 1px solid var(--grid);
+      border-radius: 4px;
+      padding: 16px;
+      background: var(--panel);
+    }
+
+    .priority { color: var(--signal); }
+    .priority-card h3 { font-size: 16px; margin: 8px 0; }
+    .priority-card p { color: var(--secondary); margin: 0 0 12px; }
+
+    .impact {
+      display: inline-flex;
+      padding: 3px 8px;
+      border: 1px solid var(--deep);
+      border-radius: 999px;
+      color: var(--strong);
+      font-family: var(--mono);
+      font-size: 11px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+
+    th,
+    td {
+      border-bottom: 1px solid var(--grid);
+      padding: 12px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th { color: var(--muted); font-weight: 500; }
+    td { color: var(--secondary); }
+    td strong { color: var(--text); }
+    tr:last-child td { border-bottom: 0; }
+
+    .task-id { color: var(--signal); white-space: nowrap; }
+    code { font-family: var(--mono); color: var(--text); font-size: 12px; }
+    td code { overflow-wrap: anywhere; word-break: break-word; }
+
+    ul { margin: 8px 0 0; padding-left: 18px; }
+    li { margin: 6px 0; color: var(--secondary); }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .flow-node {
+      border: 1px solid var(--grid);
+      background: var(--raised);
+      padding: 12px;
+      min-height: 104px;
+    }
+
+    .flow-node b { display: block; margin: 5px 0; }
+    .flow-node span { color: var(--muted); font-size: 12px; }
+
+    .decision {
+      display: grid;
+      grid-template-columns: 72px 1fr;
+      gap: 12px;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--grid);
+    }
+
+    .decision:last-child { border-bottom: 0; }
+    .decision-tag { font-family: var(--mono); color: var(--warn); font-size: 11px; }
+    .decision p { margin: 0; color: var(--secondary); }
+    .decision strong { color: var(--text); }
+
+    .sources { font-size: 12px; color: var(--muted); }
+    .sources li { margin: 8px 0; }
+
+    @media (max-width: 980px) {
+      .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .two-col, .priority-grid { grid-template-columns: 1fr; }
+      .flow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+    @media (max-width: 640px) {
+      .shell { width: min(100% - 16px, 1440px); padding-top: 16px; }
+      .metric-grid, .flow { grid-template-columns: 1fr; }
+      .timeline { display: block; }
+      .segment { min-height: 44px; justify-content: flex-start; padding-left: 12px; border-right: 0; border-bottom: 1px solid var(--canvas); }
+      .legend { grid-template-columns: 1fr 1fr; }
+      .panel-body { padding: 12px; overflow-x: auto; }
+      table { min-width: 760px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="masthead">
+      <div class="eyebrow">Radon Terminal / Delivery Systems</div>
+      <h1>CI and production deploy acceleration plan</h1>
+      <p class="lede">The pipeline already has broad concurrency. The delay is caused by one skewed pytest shard and serialized release work after the test gate. Fix the critical path before adding more runners.</p>
+      <div class="meta">Baseline: run 33290751126 · measured 2026-08-29 PT · confidence: high</div>
+    </header>
+
+    <section class="metric-grid" aria-label="Baseline metrics">
+      <article class="metric">
+        <div class="metric-label">Current wall time</div>
+        <div class="metric-value fault">7:48</div>
+        <div class="metric-note">Push to successful Production environment</div>
+      </article>
+      <article class="metric">
+        <div class="metric-label">Phase 1 target</div>
+        <div class="metric-value signal">≤4:45</div>
+        <div class="metric-note">Web-only p50 across five main runs</div>
+      </article>
+      <article class="metric">
+        <div class="metric-label">Test straggler</div>
+        <div class="metric-value warn">3:08</div>
+        <div class="metric-note"><code>pytest scripts-rs</code> test step</div>
+      </article>
+      <article class="metric">
+        <div class="metric-label">Runner queue</div>
+        <div class="metric-value">1–4s</div>
+        <div class="metric-note">Capacity is not the current constraint</div>
+      </article>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <span class="panel-title">Measured critical path</span>
+        <span class="panel-id">CP-01 / 467 seconds</span>
+      </div>
+      <div class="panel-body">
+        <div class="timeline" aria-label="Critical path timeline">
+          <div class="segment seg-launch">11s</div>
+          <div class="segment seg-test">204s</div>
+          <div class="segment seg-coverage">22s</div>
+          <div class="segment seg-stage">60s</div>
+          <div class="segment seg-deploy">170s</div>
+        </div>
+        <div class="legend">
+          <div><strong>Launch</strong>Path filter and fan-out</div>
+          <div><strong>pytest gate</strong><code>scripts-rs</code> straggler</div>
+          <div><strong>Coverage</strong>Runner and merge barrier</div>
+          <div><strong>Prestage</strong>Remote build and audit</div>
+          <div><strong>Deploy</strong>Pull, promote, gate, publish</div>
+        </div>
+        <div class="callout"><strong>Do not add the 3:21 app-image workflow to this total.</strong> It ran in parallel and finished before the test gate. Its node build still needs optimization, but it was not on this deploy's critical path.</div>
+      </div>
+    </section>
+
+    <section class="priority-grid" aria-label="Highest impact changes">
+      <article class="priority-card">
+        <div class="priority">P0 / CI gate</div>
+        <h3>Isolate cross-tree contracts</h3>
+        <p>A two-line web change triggered the entire Python and cloud suite because broad static guards read parts of <code>web/</code>. Move those guards into a small explicit contract job, keep fail-closed path ownership, and run the full suite nightly.</p>
+        <span class="impact">Save 120–135s on web-only pushes</span>
+      </article>
+      <article class="priority-card">
+        <div class="priority">P0 / Test balance</div>
+        <h3>Remove test-only wall-clock waits</h3>
+        <p>Two weekend-wrapper regression cases each wait about 76s. Add a test-only minimum-remaining-time override, keep the real subprocess and process-group assertion, and run the same boundary with a 1–2s cap. Then isolate Caddy's intentional 30s waits from the remaining cloud tests.</p>
+        <span class="impact">Save 145–150s, then 60–70s</span>
+      </article>
+      <article class="priority-card">
+        <div class="priority">P0 / Deploy</div>
+        <h3>Gate exact images, pull in parallel</h3>
+        <p>Container drop-ins are active, but deploy blocks for about 79s after prestage and can fall back to <code>latest</code>. Build exact-SHA images during tests, pull them in a gated job parallel to prestage, then require a fast local exact-SHA check before teardown.</p>
+        <span class="impact">Save 65–80s on every deploy</span>
+      </article>
+    </section>
+
+    <section class="two-col">
+      <article class="panel">
+        <div class="panel-head">
+          <span class="panel-title">Implementation dependency graph</span>
+          <span class="panel-id">PLAN-01</span>
+        </div>
+        <div class="panel-body">
+          <div class="flow">
+            <div class="flow-node"><span>T1 · depends_on: []</span><b>Timing telemetry</b><span>Per-file test durations and critical-path summary</span></div>
+            <div class="flow-node"><span>T2 · depends_on: [T1]</span><b>Contract isolation</b><span>Narrow path triggers without dropping static guards</span></div>
+            <div class="flow-node"><span>T3 · depends_on: [T1]</span><b>Bounded wait tests</b><span>Inject short deadlines and isolate Caddy waits</span></div>
+            <div class="flow-node"><span>T4 · depends_on: [T1]</span><b>Exact image fan-in</b><span>Gate exact SHA images and overlap pull with prestage</span></div>
+            <div class="flow-node"><span>T5 · depends_on: [T4]</span><b>Image cache and size</b><span>Buildx cache, layer order, then service image split</span></div>
+            <div class="flow-node"><span>T6 · depends_on: [T2, T3]</span><b>Build artifact reuse</b><span>Build one production Next artifact and validate provenance</span></div>
+            <div class="flow-node"><span>T7 · depends_on: [T2, T3, T4, T5, T6]</span><b>SLA rollout</b><span>Five-run p50/p95 validation and rollback proof</span></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-head">
+          <span class="panel-title">Keep these safety boundaries</span>
+          <span class="panel-id">GUARD-01</span>
+        </div>
+        <div class="panel-body">
+          <div class="decision"><div class="decision-tag">KEEP</div><p><strong>40s unit stability window.</strong> It detects the configured restart cycle and is not waste.</p></div>
+          <div class="decision"><div class="decision-tag">KEEP</div><p><strong>No workflow-level cancellation.</strong> A running production deploy must finish.</p></div>
+          <div class="decision"><div class="decision-tag">KEEP</div><p><strong>Exact SHA at teardown.</strong> Active container drop-ins must never resolve a moving <code>latest</code> image.</p></div>
+          <div class="decision"><div class="decision-tag">AVOID</div><p><strong>More random shards.</strong> Queue time is negligible; duration skew is the constraint.</p></div>
+          <div class="decision"><div class="decision-tag">AVOID</div><p><strong>Fire-and-forget prepull.</strong> Pull concurrently, wait for both images, and verify the local exact tags before service stop.</p></div>
+          <div class="decision"><div class="decision-tag">AVOID</div><p><strong>Direct <code>node_modules</code> cache trust.</strong> Cache package downloads and build intermediates with trusted keys instead.</p></div>
+        </div>
+      </article>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <span class="panel-title">Actionable PR sequence</span>
+        <span class="panel-id">EXEC-01</span>
+      </div>
+      <div class="panel-body">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:8%">Task</th>
+              <th style="width:22%">Change</th>
+              <th style="width:27%">Exact surfaces</th>
+              <th style="width:28%">Acceptance check</th>
+              <th style="width:15%">Expected result</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="task-id">T1</td>
+              <td><strong>Emit duration telemetry</strong></td>
+              <td><code>.github/workflows/ci.yml</code><br><code>scripts/ci/</code></td>
+              <td>Job summary reports queue, setup, test, artifact, and critical-path seconds. Upload per-file pytest timing data for 10 runs.</td>
+              <td>Measured inputs for every later change</td>
+            </tr>
+            <tr>
+              <td class="task-id">T2</td>
+              <td><strong>Add a cross-tree contract job</strong></td>
+              <td><code>scripts/ci/path_filter.py</code><br><code>scripts/tests/test_path_filter.py</code><br><code>scripts/tests/test_ci_gate_integrity.py</code></td>
+              <td>The exact commit shape from run 33290751126 skips full Python/cloud but runs all Python tests that inspect web files. Unknown paths still arm both full gates. Nightly full suite is green.</td>
+              <td>Web-only gate near 1:45</td>
+            </tr>
+            <tr>
+              <td class="task-id">T3</td>
+              <td><strong>Shorten test deadlines and rebalance</strong></td>
+              <td><code>scripts/tests/test_rel137_weekend_wrapper_survivability.py</code><br><code>scripts/reliability_weekend.sh</code><br><code>scripts/testing_weekend.sh</code><br><code>.github/workflows/ci.yml</code></td>
+              <td>The weekend tests keep real subprocess and process-group coverage with a 1–2s test-only deadline. Caddy edge timeout tests move to their own matrix shard. Recursive inventory still equals the matrix union. No Python or cloud shard exceeds 90s p50 across five runs.</td>
+              <td>Python gate near 2:00</td>
+            </tr>
+            <tr>
+              <td class="task-id">T4</td>
+              <td><strong>Gate images and overlap prepull</strong></td>
+              <td><code>.github/workflows/ci.yml</code><br><code>.github/workflows/app-images.yml</code><br><code>cloud/scripts/deploy.sh</code><br><code>cloud/scripts/radon-app-runtime.sh</code></td>
+              <td>Python and node images build during tests. A cancelable prepull job waits for both exact SHA images, pulls them concurrently, and runs parallel to prestage. Deploy verifies both local tags before teardown, never falls back to <code>latest</code>, and remains noncanceling after service stop.</td>
+              <td>65–80s off deploy</td>
+            </tr>
+            <tr>
+              <td class="task-id">T5</td>
+              <td><strong>Adopt Buildx cache and correct layer order</strong></td>
+              <td><code>.github/workflows/app-images.yml</code><br><code>docker/app/Dockerfile.node</code><br><code>docker/app/Dockerfile.python</code></td>
+              <td>Use separate cache scopes per image. Copy lockfiles before source. Build and push SHA plus latest in one action. Warm node image workflow is under 2:00 p50.</td>
+              <td>Faster builds and less registry transfer</td>
+            </tr>
+            <tr>
+              <td class="task-id">T6</td>
+              <td><strong>Build once, deploy the tested artifact</strong></td>
+              <td><code>.github/workflows/ci.yml</code><br><code>cloud/scripts/deploy.sh</code><br><code>web/next.config.ts</code></td>
+              <td>One production-configured Next artifact carries SHA and checksum provenance, passes the output-trace audit, serves perimeter smoke, and is the exact artifact promoted on the VPS.</td>
+              <td>Another 25–40s off prestage</td>
+            </tr>
+            <tr>
+              <td class="task-id">T7</td>
+              <td><strong>Canary and enforce the SLA</strong></td>
+              <td><code>scripts/tests/test_ci_deploy_concurrency.py</code><br>GitHub Actions summaries</td>
+              <td>Five consecutive main runs: web-only p50 ≤4:45, Python-bearing p50 ≤5:15, p95 ≤6:00. Failure drill proves rollback and non-canceling deploy behavior.</td>
+              <td>Measured completion criteria</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <span class="panel-title">Measured evidence</span>
+        <span class="panel-id">RUN-33290751126</span>
+      </div>
+      <div class="panel-body">
+        <table>
+          <thead><tr><th>Surface</th><th>Duration</th><th>Evidence</th><th>Interpretation</th></tr></thead>
+          <tbody>
+            <tr><td><strong>CI workflow</strong></td><td><code>468s</code></td><td>03:39:15Z to 03:47:03Z</td><td>Observed push-to-production baseline</td></tr>
+            <tr><td><strong>pytest scripts-rs</strong></td><td><code>202s</code></td><td>Two weekend-wrapper cases consumed about 76s each</td><td>Inject a short test deadline, preserve the real process assertion</td></tr>
+            <tr><td><strong>pytest cloud al</strong></td><td><code>167s</code></td><td>Caddy edge tests carry intentional 30s waits; <code>cloud mz</code> completed in 25s</td><td>Isolate Caddy waits so they overlap the remainder</td></tr>
+            <tr><td><strong>Prestage</strong></td><td><code>56s</code></td><td>About 31s Next compile/audit and 11s artifact seeding</td><td>Build reuse opportunity</td></tr>
+            <tr><td><strong>Deploy</strong></td><td><code>166s</code></td><td>About 79s image prepull and 40s stability window</td><td>Overlap the pull; keep the stability proof</td></tr>
+            <tr><td><strong>Node image</strong></td><td><code>198s</code></td><td>117s build plus 75s push</td><td>Separate workflow, cache and image-size target</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <span class="panel-title">Primary references</span>
+        <span class="panel-id">SOURCE-01</span>
+      </div>
+      <div class="panel-body sources">
+        <ul>
+          <li><a href="https://github.com/joemccann/radon/actions/runs/33290751126">Radon run 33290751126</a>, job and step timestamps used for the critical path.</li>
+          <li><a href="https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/run-job-variations">GitHub Actions matrix jobs</a>, parallel job and matrix controls.</li>
+          <li><a href="https://docs.github.com/en/actions/concepts/workflows-and-actions/dependency-caching">GitHub Actions dependency caching</a>, cache dependencies and reusable intermediate output.</li>
+          <li><a href="https://docs.github.com/en/actions/tutorials/store-and-share-data">GitHub Actions artifacts</a>, pass one built output between jobs instead of rebuilding it.</li>
+          <li><a href="https://docs.docker.com/build/cache/optimize/">Docker cache optimization</a>, order layers from stable dependencies to frequently changing source.</li>
+          <li><a href="https://docs.docker.com/build/cache/backends/gha/">Docker GitHub Actions cache backend</a>, separate BuildKit cache scopes for each image.</li>
+          <li><a href="https://docs.docker.com/build/building/multi-stage/">Docker multi-stage builds</a>, leave build-only tools and intermediates out of runtime images.</li>
+        </ul>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

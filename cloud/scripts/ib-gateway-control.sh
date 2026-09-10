@@ -31,7 +31,16 @@ fi
 # provisioned by setup-vps rather than the app venv swapped during deploys.
 LOCK_PYTHON="${RADON_LOCK_PYTHON:-/usr/bin/python3.13}"
 LOCK_CLI="${APP_DIR}/scripts/utils/ib_2fa_lock.py"
-DOCKER_BIN="${RADON_DOCKER_BIN:-/usr/bin/docker}"
+# The helper stays radon (the lease and guard files under /var/lib/radon must
+# keep their ownership), but radon is no longer in group `docker` -- that group
+# is root-equivalent. The two docker calls below go through the root shim,
+# which pins the container, the compose body and every flag. Tests keep
+# overriding RADON_DOCKER_BIN with a stub and get no sudo hop.
+if [[ -n "${RADON_DOCKER_BIN:-}" ]]; then
+  DOCKER_CMD=("$RADON_DOCKER_BIN")
+else
+  DOCKER_CMD=("${RADON_SUDO_BIN:-/usr/bin/sudo}" -n /usr/local/sbin/radon-docker-gw)
+fi
 CONSUMED_PATH="${RADON_IB_LEASE_CONSUMED_PATH:-/var/lib/radon/ib-2fa-consumed-lease.json}"
 CONTROL_GUARD_PATH="${RADON_IB_CONTROL_GUARD_PATH:-/var/lib/radon/ib-gateway-control.guard}"
 TRANSITION_PATH="${RADON_IB_TRANSITION_PATH:-/var/lib/radon/ib-gateway-transition.json}"
@@ -211,20 +220,16 @@ except subprocess.TimeoutExpired:
 PY
 }
 
+# The shim owns --env-file, --project-name and -f; this passes only the verb.
 compose() {
-  RADON_COMPOSE_ENV_FILE="$ENV_FILE" run_bounded \
-    "$DOCKER_MUTATION_TIMEOUT_SECS" "$DOCKER_BIN" compose \
-    --env-file "$ENV_FILE" \
-    --project-directory "$CLOUD_DIR" \
-    -f "$CLOUD_DIR/docker-compose.yml" \
-    "$@"
+  run_bounded "$DOCKER_MUTATION_TIMEOUT_SECS" "${DOCKER_CMD[@]}" "$@"
 }
 
 gateway_state() {
   local output rc=0
   output="$(
     run_bounded "$DOCKER_INSPECT_TIMEOUT_SECS" \
-      "$DOCKER_BIN" inspect --format '{{.State.Running}}' "$CONTAINER_NAME" 2>&1
+      "${DOCKER_CMD[@]}" inspect-running 2>&1
   )" || rc=$?
   if (( rc == 0 )); then
     case "$output" in
@@ -410,14 +415,45 @@ consume_watchdog_lease_once() {
   fi
 }
 
+read_host_role() {
+  local role="${RADON_HOST_ROLE:-}"
+  local envf
+  # REL-169 (R-472): every other role reader (root helper, operator CLI, app
+  # runtime, setup-vps) canonicalizes /etc/radon/env. Read that first; the
+  # legacy deploy env file is a fallback, never the source of the role.
+  for envf in "${RADON_ENV_FILE:-/etc/radon/env}" "${ENV_FILE:-}"; do
+    [[ -z "$role" ]] || break
+    [[ -n "$envf" && -f "$envf" ]] || continue
+    role="$(awk -F= '/^RADON_HOST_ROLE=/{v=$2} END{print v}' "$envf" 2>/dev/null || true)"
+    role="${role%\"}"
+    role="${role#\"}"
+    role="${role%\'}"
+    role="${role#\'}"
+    role="${role//$'\r'/}"
+  done
+  case "$role" in
+    app|broker|combined) printf '%s\n' "$role" ;;
+    *) printf 'combined\n' ;;
+  esac
+}
+
+refuse_app_role_mutation() {
+  if [[ "$(read_host_role)" == "app" ]]; then
+    echo "REFUSING Gateway mutation: RADON_HOST_ROLE=app (broker owns the session)" >&2
+    return 1
+  fi
+  return 0
+}
+
 start_gateway() {
+  refuse_app_role_mutation || return 1
   reconcile_pending_transition
   if container_running; then
     echo "IB Gateway container already running; no lease acquired"
     return 0
   fi
   require_new_lease
-  compose_to_state running start up -d
+  compose_to_state running start compose-up
   if ! container_running; then
     echo "Gateway start command completed but container is not running" >&2
     return 1
@@ -425,10 +461,11 @@ start_gateway() {
 }
 
 restart_gateway() {
+  refuse_app_role_mutation || return 1
   reconcile_pending_transition
   require_new_lease
-  compose_to_state stopped restart-down down
-  compose_to_state running restart-up up -d
+  compose_to_state stopped restart-down compose-down
+  compose_to_state running restart-up compose-up
   if ! container_running; then
     echo "Gateway restart command completed but container is not running" >&2
     return 1
@@ -437,10 +474,11 @@ restart_gateway() {
 
 restart_gateway_preheld() {
   local expected_holder="${1:-}"
+  refuse_app_role_mutation || return 1
   reconcile_pending_transition
   consume_watchdog_lease_once "$expected_holder"
-  compose_to_state stopped preheld-down down
-  compose_to_state running preheld-up up -d
+  compose_to_state stopped preheld-down compose-down
+  compose_to_state running preheld-up compose-up
   if ! container_running; then
     echo "Preheld Gateway restart completed but container is not running" >&2
     return 1
@@ -462,7 +500,7 @@ release_any_lease() {
 
 stop_gateway() {
   reconcile_pending_transition
-  compose_to_state stopped stop down
+  compose_to_state stopped stop compose-down
   # A stopped container has no login session, so no IBKR push can still be
   # pending against it. Leaving the lease held locks operator start, the
   # watchdog, and deploy out for the rest of its 10m TTL — 2026-08-25, an admin
@@ -505,6 +543,11 @@ case "${1:-}" in
     acquire_lifecycle_mutex "$@"
     stop_gateway
     ;;
+  reset-lease)
+    refuse_app_role_mutation || exit 1
+    acquire_lifecycle_mutex "$@"
+    release_any_lease
+    ;;
   status)
     if [[ -e "$TRANSITION_PATH" ]]; then
       echo "transition-pending"
@@ -523,7 +566,7 @@ case "${1:-}" in
     fi
     ;;
   *)
-    echo "usage: $0 {start|restart|restart-preheld HOLDER|stop|status}" >&2
+    echo "usage: $0 {start|restart|restart-preheld HOLDER|stop|status|reset-lease}" >&2
     exit 2
     ;;
 esac

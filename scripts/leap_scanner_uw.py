@@ -3,7 +3,8 @@
 LEAP IV Mispricing Scanner (Unusual Whales primary)
 
 Uses IB historical bars for daily closes when the gateway is up,
-Unusual Whales OHLC as fallback, and Yahoo as last resort.
+Unusual Whales OHLC as fallback, then Robinhood (read-only MCP) when
+configured, and Yahoo as ABSOLUTE LAST RESORT.
 UW remains the source for LEAP option IV.
 
 API Reference: docs/unusual_whales_api.md
@@ -233,6 +234,9 @@ class ScanResult:
     leaps: List[LeapOption]
     best_gap: float
     is_mispriced: bool
+    # The single contract behind `best_gap` — the dashboard deep-links it into
+    # the chain order builder, which needs an expiry and a strike, not a gap.
+    best_leap: Optional[LeapOption] = None
 
 
 def get_uw_history(
@@ -278,13 +282,29 @@ def get_yahoo_history(ticker: str, days: int = 400) -> List[float]:
         return []
 
 
+def get_rh_history(ticker: str) -> List[float]:
+    """Robinhood (read-only MCP) daily closes — after IB/UW, before Yahoo.
+
+    Unconfigured hosts return [] without any network I/O.
+    """
+    try:
+        from clients.robinhood_client import fetch_robinhood_closes
+    except ImportError:
+        return []
+    closes = fetch_robinhood_closes([ticker]).get(ticker, {})
+    return [closes[date] for date in sorted(closes)]
+
+
 def get_price_history(
     ticker: str,
     uw_client: Optional[UWClient] = None,
     ib: Any = None,
 ) -> List[float]:
-    """Fetch daily closes: IB first, UW fallback, Yahoo last resort."""
+    """Fetch daily closes: IB first, UW fallback, Robinhood, then Yahoo last resort."""
     prices = get_uw_history(ticker, uw_client, ib=ib)
+    if len(prices) >= 60:
+        return prices
+    prices = get_rh_history(ticker)
     if len(prices) >= 60:
         return prices
     return get_yahoo_history(ticker)
@@ -437,6 +457,30 @@ def get_leap_options(ticker: str, min_year: int = 2027, _client: UWClient = None
     return leaps
 
 
+def pick_best_mispriced_leap(
+    leaps: List[LeapOption], hv_20: float
+) -> Optional[LeapOption]:
+    """The widest realized-vs-implied gap among the group's TRADEABLE contracts.
+
+    `hv_20` is constant across the group, so `(hv_20 - iv, oi)` was purely
+    argmin(IV): `oi` broke only an exact tie on an IV rounded to 2dp, which
+    essentially never happens, and the "ties go to the deeper open interest"
+    promise was inoperative. `get_leap_options` rejects only `iv == 0`, so
+    `oi=0`/`volume=0` contracts survive into the pool — and the lowest quoted IV
+    in a delta bucket is systematically the STALEST or least-traded quote. That
+    contract was then serialised as `best_leap` and deep-linked as the headline
+    TRADE BEST order.
+
+    A contract qualifies on resting open interest OR on today's volume; with
+    neither there is nothing to fill against, and `None` suppresses the link
+    rather than pointing it at a dead quote. R-387.
+    """
+    tradeable = [leap for leap in leaps if leap.oi > 0 or leap.volume > 0]
+    if not tradeable:
+        return None
+    return max(tradeable, key=lambda leap: (hv_20 - leap.iv, leap.oi))
+
+
 def approximate_delta(strike: float, price: float, iv: float, dte: int) -> float:
     """Rough delta approximation based on moneyness."""
     if price == 0 or dte == 0:
@@ -507,6 +551,7 @@ def scan_ticker(
     }
 
     best_gap = 0
+    best_leap: Optional[LeapOption] = None
     is_mispriced = False
 
     emit("\n  LEAP IV Analysis:")
@@ -523,8 +568,14 @@ def scan_ticker(
         if gap_20 >= min_gap or gap_60 >= min_gap:
             status = "🔥 MISPRICED"
             is_mispriced = True
+            # `best_leap` comes ONLY from the group that set `best_gap`. Under
+            # `or best_leap is None` a ticker mispriced solely via `gap_60` got
+            # a contract while `best_gap` stayed at its 0 initialiser, so the
+            # row rendered a MISPRICED anchor reading `+0.0` that still armed a
+            # live order. R-388.
             if gap_20 > best_gap:
                 best_gap = gap_20
+                best_leap = pick_best_mispriced_leap(group_leaps, vol_data.hv_20)
 
         emit(f"    {group_name}: IV={avg_iv:.1f}% | Gap vs HV20: {gap_20:+.1f}% | vs HV60: {gap_60:+.1f}% {status}")
 
@@ -538,7 +589,8 @@ def scan_ticker(
         iv_rank=iv_rank,
         leaps=leaps,
         best_gap=best_gap,
-        is_mispriced=is_mispriced
+        is_mispriced=is_mispriced,
+        best_leap=best_leap,
     )
 
 
@@ -775,6 +827,23 @@ def resolve_scan_inputs(explicit_tickers=None, preset=None):
     return list(load_preset(preset).tickers), universe
 
 
+def best_leap_payload(leap: Optional[LeapOption], hv_20: float) -> Optional[dict]:
+    """Serialize the headline contract for the dashboard's order deep-link."""
+    if leap is None:
+        return None
+    return {
+        "symbol": leap.symbol,
+        "expiry": leap.expiry,
+        "strike": leap.strike,
+        "right": leap.right,
+        "iv": leap.iv,
+        "delta": round(leap.delta_approx, 2),
+        "gap": round(hv_20 - leap.iv, 1),
+        "oi": leap.oi,
+        "volume": leap.volume,
+    }
+
+
 def build_json_payload(results, min_gap, universe, requested_tickers):
     """Build the data/leap.json envelope, stamped with the scanned universe."""
     return {
@@ -794,6 +863,7 @@ def build_json_payload(results, min_gap, universe, requested_tickers):
                 "leap_count": len(r.leaps),
                 "best_gap": r.best_gap,
                 "is_mispriced": r.is_mispriced,
+                "best_leap": best_leap_payload(r.best_leap, r.vol_data.hv_20),
             }
             for r in results
         ],

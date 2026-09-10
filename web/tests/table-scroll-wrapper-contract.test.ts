@@ -23,7 +23,8 @@
  * reasoned: `data-overflow-exempt="<reason>"` on the table.
  */
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -98,8 +99,77 @@ const HTML_TAGS = new Set([
   "footer", "figure", "li", "span", "p", "label", "td", "th", "details",
 ]);
 
-const TAG =
-  /<(\/?)([A-Za-z][\w.]*)\b((?:[^>"'`{}]|"[^"]*"|'[^']*'|`[^`]*`|\{(?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*\})*?)(\/?)>/g;
+const TAG_HEAD = /<(\/?)([A-Za-z][\w.]*)\b/y;
+
+type Tag = { close: boolean; name: string; attrs: string; selfClose: boolean; index: number };
+
+/** Every JSX tag in `src`, `<` through its matching `>`, in document order.
+ *
+ * T-175 — this was one regex that modelled attribute brace nesting with three
+ * hand-written levels of alternation, so a tag carrying a fourth
+ * (`style={{ a: { b: { c: 1 } } }}`) did not match AT ALL. An unmatched opening
+ * tag never reached the ancestor stack, so a correctly wrapped <table> beneath
+ * it was reported unwrapped — a phantom violation; the same brace on a <table>
+ * dropped that table out of the sweep entirely, hiding a real one. Since the
+ * assertion below is an EQUALITY, a parser blind spot reds this file in both
+ * directions. Depth is now COUNTED, so it holds at any nesting.
+ *
+ * A tag whose attributes carry JSX (`components={{ table: () => <div…> }}` in
+ * MarkdownRenderer) is still descended into: the old regex only reached those
+ * nested tags by ACCIDENT — it failed to match the outer tag, so its scan fell
+ * through to them. Counting braces correctly consumes the outer tag in one
+ * bite, so the embedded subtree is re-scanned explicitly, after the tag that
+ * owns it, or that <table> would have silently left the sweep.
+ *
+ * Quotes are skipped as spans only when they close on the same line (or are
+ * backticks), which pairs real attribute strings without an apostrophe in JSX
+ * prose swallowing the rest of the file.
+ *
+ * Cost: one forward pass per region, no backtracking. Measured over the
+ * ~271-file / 2.15 MB sweep across three runs — 91-564 ms for the whole file,
+ * slowest single test 310 ms — against vitest's 5000 ms default. A 16x margin,
+ * so no `vi.setConfig` bump is warranted the way T-161 needed one.
+ */
+function* tags(src: string, offset = 0): Generator<Tag> {
+  for (let lt = src.indexOf("<"); lt >= 0; lt = src.indexOf("<", lt + 1)) {
+    TAG_HEAD.lastIndex = lt;
+    const head = TAG_HEAD.exec(src);
+    if (!head) continue;
+    const attrStart = lt + head[0].length;
+    const nested: Array<[number, number]> = [];
+    let depth = 0;
+    let braceStart = -1;
+    let end = -1;
+    for (let i = attrStart; i < src.length; i++) {
+      const c = src[i];
+      if (c === '"' || c === "'" || c === "`") {
+        const shut = src.indexOf(c, i + 1);
+        if (shut < 0) break;
+        if (c === "`" || !src.slice(i + 1, shut).includes("\n")) i = shut;
+      } else if (c === "{") {
+        if (depth === 0) braceStart = i + 1;
+        depth++;
+      } else if (c === "}") {
+        depth--;
+        if (depth === 0 && braceStart >= 0) nested.push([braceStart, i]);
+      } else if (c === ">" && depth <= 0) {
+        end = i;
+        break;
+      }
+    }
+    if (end < 0) continue;
+    const raw = src.slice(attrStart, end);
+    yield {
+      close: Boolean(head[1]),
+      name: head[2],
+      attrs: raw.replace(/\/\s*$/, ""),
+      selfClose: /\/\s*$/.test(raw),
+      index: offset + lt,
+    };
+    for (const [from, to] of nested) yield* tags(src.slice(from, to), offset + from);
+    lt = end;
+  }
+}
 
 type Element = { name: string; attrs: string; tokens: string[] };
 type TableSite = { line: number; wrapped: boolean; owner: string | null; exempt: string | null };
@@ -123,7 +193,6 @@ function ownerAt(src: string, index: number): string | null {
 }
 
 function analyze(src: string, moduleAlias: string | null) {
-  TAG.lastIndex = 0;
   const stack: Element[] = [];
   const tables: TableSite[] = [];
   const usages = new Map<string, boolean[]>();
@@ -132,12 +201,10 @@ function analyze(src: string, moduleAlias: string | null) {
     || /overflowX\s*:/.test(el.attrs);
 
   return (moduleClasses: Set<string>) => {
-    TAG.lastIndex = 0;
     stack.length = 0;
     tables.length = 0;
     usages.clear();
-    for (let m = TAG.exec(src); m; m = TAG.exec(src)) {
-      const [, close, name, attrs, selfClose] = m;
+    for (const { close, name, attrs, selfClose, index } of tags(src)) {
       const isComponent = /^[A-Z]/.test(name);
       if (!HTML_TAGS.has(name) && name !== "table" && !isComponent) continue;
       if (close) {
@@ -153,9 +220,9 @@ function analyze(src: string, moduleAlias: string | null) {
       if (name === "table") {
         const exempt = attrs.match(/data-overflow-exempt=["']([^"']+)["']/);
         tables.push({
-          line: src.slice(0, m.index).split("\n").length,
+          line: src.slice(0, index).split("\n").length,
           wrapped: stack.some((a) => scrolls(a, moduleClasses)),
-          owner: ownerAt(src, m.index),
+          owner: ownerAt(src, index),
           exempt: exempt?.[1] ?? null,
         });
       }
@@ -206,5 +273,35 @@ describe("table scroll wrapper contract", () => {
   it("every <table> has an ancestor that establishes horizontal overflow", () => {
     const violations = files.flatMap(unwrappedTables).sort();
     expect(violations).toEqual([...KNOWN_UNWRAPPED_T121].sort());
+  });
+
+  /* T-175. The sweep above is only as trustworthy as the tag parser under it,
+   * and a parser blind spot is invisible from the repo scan alone: it moves
+   * tables OUT of the sweep as readily as it invents violations. These pin the
+   * three shapes that broke the fixed-depth brace alternation. All four fail
+   * against it — the first two as phantom violations, the last two as tables
+   * that vanish. */
+  const DEEP = "style={{ a: { b: { c: 1 } } }}";
+  const dir = mkdtempSync(join(tmpdir(), "table-scroll-t175-"));
+  const sweep = (body: string) => {
+    const p = join(dir, "Fixture.tsx");
+    writeFileSync(p, `export function Fixture() {\n  return ${body};\n}\n`);
+    return unwrappedTables(p).map((v) => v.slice(v.lastIndexOf(":") + 1));
+  };
+
+  it("resolves a wrapper whose attributes nest braces past three levels", () => {
+    expect(sweep(`<div className="table-wrap" ${DEEP}><table /></div>`)).toEqual([]);
+    expect(sweep(`<div className="table-wrap"><table ${DEEP} /></div>`)).toEqual([]);
+  });
+
+  it("still sees an unwrapped table that carries a deep brace itself", () => {
+    expect(sweep(`<div><table ${DEEP} /></div>`)).toEqual(["Fixture"]);
+  });
+
+  it("descends into JSX embedded in a prop", () => {
+    expect(sweep("<Md components={{ table: () => <table /> }} />")).toEqual(["Fixture"]);
+    expect(
+      sweep('<Md components={{ table: () => <div className="table-wrap"><table /></div> }} />'),
+    ).toEqual([]);
   });
 });

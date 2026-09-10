@@ -116,10 +116,10 @@ async function setupMocks(page: import("@playwright/test").Page) {
 }
 
 test.describe("/regime page — responsive history chart stack", () => {
-  test("keeps the charts side by side on wide screens", async ({ page }) => {
+  test("stacks the charts full width on wide screens", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 1400 });
     await setupMocks(page);
-    await page.goto("/regime");
+    await page.goto("/regime/cri");
 
     const charts = page.locator('[data-testid="cri-history-chart"]');
     await expect(charts.nth(1)).toBeVisible();
@@ -131,14 +131,15 @@ test.describe("/regime page — responsive history chart stack", () => {
 
     expect(firstBox).not.toBeNull();
     expect(secondBox).not.toBeNull();
-    expect(Math.abs((firstBox?.y ?? 0) - (secondBox?.y ?? 0))).toBeLessThan(20);
-    expect((secondBox?.x ?? 0)).toBeGreaterThan((firstBox?.x ?? 0) + 40);
+    expect((secondBox?.y ?? 0)).toBeGreaterThan((firstBox?.y ?? 0) + (firstBox?.height ?? 0) - 20);
+    expect(Math.abs((firstBox?.x ?? 0) - (secondBox?.x ?? 0))).toBeLessThan(20);
+    expect(Math.abs((firstBox?.width ?? 0) - (secondBox?.width ?? 0))).toBeLessThan(24);
   });
 
   test("stacks the charts vertically on narrow screens", async ({ page }) => {
     await page.setViewportSize({ width: 820, height: 1600 });
     await setupMocks(page);
-    await page.goto("/regime");
+    await page.goto("/regime/cri");
 
     const charts = page.locator('[data-testid="cri-history-chart"]');
     await expect(charts.nth(1)).toBeVisible();

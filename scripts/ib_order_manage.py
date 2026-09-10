@@ -121,7 +121,7 @@ def cancel_order(client: IBClient, order_id: int, perm_id: int,
     error_msgs = []
     def on_error(reqId, errorCode, errorString, advancedOrderRejectJson=""):
         if reqId == trade.order.orderId or reqId == -1:
-            error_msgs.append((errorCode, errorString))
+            error_msgs.append((reqId, errorCode, errorString))
 
     client.ib.errorEvent += on_error
 
@@ -153,10 +153,31 @@ def cancel_order(client: IBClient, order_id: int, perm_id: int,
                 finalStatus=refreshed_trade.orderStatus.status,
             )
 
-        # Check for fatal errors (10147=order not found, 201=rejected)
-        fatal = [e for e in error_msgs if e[0] in (10147, 201)]
+        # 10147/201 are real rejects. 202 ("Order Canceled - reason:") is IB's
+        # cancel confirmation — treating it as fatal left combo replacements
+        # unplaced after the original was already gone at the broker.
+        fatal = [e for e in error_msgs if e[1] in (10147, 201)]
         if fatal:
-            finish("error", f"IB rejected cancel: {fatal[0][1]}")
+            finish("error", f"IB rejected cancel: {fatal[0][2]}")
+        # REL-233 (R-634): a broadcast 202 (reqId=-1) can belong to a
+        # DIFFERENT order on the same clientId. Only a 202 addressed to this
+        # orderId confirms; broadcasts confirm solely via the refreshed
+        # trade snapshot (gone / Cancelled) checked above.
+        if any(rid == trade.order.orderId and code == 202 for rid, code, _ in error_msgs):
+            finish(
+                "ok",
+                f"Order cancelled (orderId={trade.order.orderId})",
+                orderId=trade.order.orderId,
+                finalStatus="Cancelled",
+            )
+
+    if any(rid == trade.order.orderId and code == 202 for rid, code, _ in error_msgs):
+        finish(
+            "ok",
+            f"Order cancelled (orderId={trade.order.orderId})",
+            orderId=trade.order.orderId,
+            finalStatus="Cancelled",
+        )
 
     final_status = latest_trade.orderStatus.status if latest_trade is not None else trade.orderStatus.status
     finish("error", f"Cancel failed — order still {final_status}",
@@ -256,6 +277,33 @@ def modify_order(client: IBClient, order_id: int, perm_id: int, new_price: Optio
     if trade.contract.secType == "BAG":
         from ib_insync import TagValue
         trade.order.smartComboRoutingParams = [TagValue("NonGuaranteed", "1")]
+
+    # R-428: a modify RE-TRANSMITS the order, so the server-side caps apply
+    # here and not only in the FastAPI caller (`check_modify_limits`). The
+    # script is directly invocable on the host, and a guard that lives in the
+    # caller rather than at the placement funnel is the exact inversion
+    # ib_place_order.py was restructured to avoid.
+    from order_limits import check_order_limits, check_quantity_limit
+
+    # A BAG's leg detail (strikes, ratios) is not derivable here — a
+    # `comboLeg` carries a conId, not a strike — and `check_order_limits`
+    # fails CLOSED on a combo whose legs it cannot read. Refusing every
+    # combo at the transport would break legitimate placement, so the funnel
+    # applies the bound it CAN compute (the stricter contract-quantity cap,
+    # which is the fat-finger class) and leaves the leg-ratio and max-loss
+    # branches to the caller, which has the legs. R-427/R-428.
+    if trade.contract.secType == "BAG":
+        violation = check_quantity_limit(trade.order.totalQuantity)
+    else:
+        violation = check_order_limits({
+            "type": "stock" if trade.contract.secType == "STK" else "option",
+            "quantity": trade.order.totalQuantity,
+            "symbol": getattr(trade.contract, "symbol", ""),
+            "limitPrice": getattr(trade.order, "lmtPrice", None),
+        })
+    if violation:
+        output("error", f"{violation['message']} (order not modified).")
+        return
 
     client.place_order(trade.contract, trade.order)
 

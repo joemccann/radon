@@ -181,6 +181,25 @@ class TestClassifyProbes:
         result = probe.classify_probes(_ok_probe(), _ok_probe(status=503))
         assert result == {"ok": 0, "detail": "status_http_503"}
 
+    def test_caddy_never_502_floor_is_status_unreachable_not_aggregate_invalid(self):
+        # 2026-08-29 23:05Z page 1b0b049c: Caddy maps healthd-down (deploy
+        # restart, dial refused) to HTTP 200 {"reachable":false,"observer":"caddy"}
+        # so the never-502 floor stays up. Ping is Caddy-static 200. The
+        # classifier used to call that opaque 200 aggregate_invalid, which
+        # the deploy-window 5xx suppressor cannot match.
+        from pathlib import Path
+
+        caddy = (
+            Path(__file__).resolve().parents[2] / "cloud" / "caddy" / "Caddyfile"
+        ).read_text(encoding="utf-8")
+        literal = '{"reachable":false,"observer":"caddy"}'
+        assert literal in caddy
+        result = probe.classify_probes(
+            _ok_probe(),
+            _ok_probe(payload=json.loads(literal)),
+        )
+        assert result == {"ok": 0, "detail": "status_unreachable:caddy"}
+
     def test_aggregate_ok_false_fails(self):
         result = probe.classify_probes(_ok_probe(), _ok_probe(payload={"ok": False}))
         assert result == {"ok": 0, "detail": "aggregate_invalid"}
@@ -217,7 +236,9 @@ class TestClassifyProbes:
                 }
             ),
         )
-        assert result == {"ok": 1, "detail": "edge_ok:aggregate_degraded"}
+        assert result["ok"] == 1
+        # REL-181 (R-510): the verdict now names the degraded dependency.
+        assert result["detail"].startswith("edge_ok:aggregate_degraded")
 
     def test_schema_v2_degraded_with_ok_true_is_contradictory(self):
         result = probe.classify_probes(
@@ -244,7 +265,77 @@ class TestClassifyProbes:
             units_age_secs=0,
         )
         result = probe.classify_probes(_ok_probe(), _ok_probe(payload=degraded))
-        assert result == {"ok": 1, "detail": "edge_ok:aggregate_degraded"}
+        assert result["ok"] == 1
+        # REL-181 (R-510): the verdict now names the degraded dependency.
+        assert result["detail"].startswith("edge_ok:aggregate_degraded")
+
+    def test_newsfeed_unit_down_payload_keeps_edge_ok(self):
+        # 2026-08-29 page 0b7726f8: newsfeed flap must not write aggregate_down.
+        degraded = health_service_probes.build_status(
+            {
+                "radon-api": {
+                    "state": "up",
+                    "payload": {
+                        "service_state": "reachable",
+                        "auth_state": "authenticated",
+                        "upstream_dead": False,
+                        "port_listening": True,
+                    },
+                },
+                "radon-relay": {"state": "up"},
+                "radon-nextjs": {"state": "up"},
+                "ib-gateway": {"state": "up"},
+            },
+            {
+                "radon-api.service": {"state": "up"},
+                "radon-relay.service": {"state": "up"},
+                "radon-monitor.service": {"state": "up"},
+                "radon-nextjs.service": {"state": "up"},
+                "radon-ib-gateway.service": {"state": "up"},
+                "radon-newsfeed.service": {"state": "down"},
+            },
+            "t",
+            units_age_secs=0,
+        )
+        assert degraded["overall_state"] == "degraded"
+        result = probe.classify_probes(_ok_probe(), _ok_probe(payload=degraded))
+        assert result["ok"] == 1
+        # REL-181 (R-510): the verdict now names the degraded dependency.
+        assert result["detail"].startswith("edge_ok:aggregate_degraded")
+
+    def test_newsfeed_unit_starting_payload_keeps_edge_ok(self):
+        # 2026-08-29 page 344f0592: activating sidecar must not write aggregate_down.
+        degraded = health_service_probes.build_status(
+            {
+                "radon-api": {
+                    "state": "up",
+                    "payload": {
+                        "service_state": "reachable",
+                        "auth_state": "authenticated",
+                        "upstream_dead": False,
+                        "port_listening": True,
+                    },
+                },
+                "radon-relay": {"state": "up"},
+                "radon-nextjs": {"state": "up"},
+                "ib-gateway": {"state": "up"},
+            },
+            {
+                "radon-api.service": {"state": "up"},
+                "radon-relay.service": {"state": "up"},
+                "radon-monitor.service": {"state": "up"},
+                "radon-nextjs.service": {"state": "up"},
+                "radon-ib-gateway.service": {"state": "up"},
+                "radon-newsfeed.service": {"state": "starting"},
+            },
+            "t",
+            units_age_secs=0,
+        )
+        assert degraded["overall_state"] == "degraded"
+        result = probe.classify_probes(_ok_probe(), _ok_probe(payload=degraded))
+        assert result["ok"] == 1
+        # REL-181 (R-510): the verdict now names the degraded dependency.
+        assert result["detail"].startswith("edge_ok:aggregate_degraded")
 
     def test_valid_schema_v2_down_is_distinct_from_invalid_payload(self):
         result = probe.classify_probes(
@@ -491,9 +582,24 @@ class TestClassifyUserPath:
         assert result["ok"] == 1
         assert result["detail"] == "clerk_protect_404"
 
-    def test_200_sign_in_served_inline_with_clerk_header_is_ok(self):
+    def test_200_with_signed_out_header_is_not_a_wall(self):
+        # A signed-out visitor that still receives the page content means the
+        # perimeter let the request through; the header alone is not a wall.
         raw = _user_path_raw(status=200, location=None)
-        assert probe.classify_user_path(raw)["ok"] == 1
+        assert probe.classify_user_path(raw)["ok"] == 0
+
+    def test_relative_sign_in_redirect_is_ok(self):
+        raw = _user_path_raw(status=307, location="/sign-in?redirect_url=x", clerk_auth_status=None)
+        result = probe.classify_user_path(raw)
+        assert result == {"ok": 1, "detail": "clerk_redirect"}
+
+    def test_redirect_to_off_domain_sign_in_path_fails(self):
+        raw = _user_path_raw(status=307, location="https://evil.example/sign-in", clerk_auth_status=None)
+        assert probe.classify_user_path(raw)["ok"] == 0
+
+    def test_redirect_to_lookalike_clerk_host_fails(self):
+        raw = _user_path_raw(status=307, location="https://clerk.evil.example/x", clerk_auth_status=None)
+        assert probe.classify_user_path(raw)["ok"] == 0
 
     def test_arbitrary_clerk_header_value_does_not_turn_500_green(self):
         raw = _user_path_raw(
@@ -961,16 +1067,26 @@ class TestRunProbe:
         assert probe.main() == probe.EXIT_UNHEALTHY
         assert history["freshness_ok"] == 0
 
-    def test_main_preserves_healthy_verdict_when_latest_write_fails(self, monkeypatch):
+    def test_ledger_write_failure_exits_nonzero(self, monkeypatch):
         _patch_happy_network(monkeypatch)
 
         def _boom(_row):
             raise turso_http.TursoHttpError("down")
         monkeypatch.setattr(probe, "upsert_external_probe", _boom)
         monkeypatch.setattr(probe, "insert_external_probe_run", lambda row: None)
-        assert probe.main() == 0
+        assert probe.main() == 1
 
-    def test_main_preserves_healthy_verdict_when_history_write_fails(self, monkeypatch):
+    def test_ledger_write_failure_still_emits_stdout_json(self, monkeypatch, capsys):
+        _patch_happy_network(monkeypatch)
+
+        def _boom(_row):
+            raise turso_http.TursoHttpError("down")
+        monkeypatch.setattr(probe, "upsert_external_probe", _boom)
+        monkeypatch.setattr(probe, "insert_external_probe_run", lambda row: None)
+        assert probe.main() == 1
+        assert json.loads(capsys.readouterr().out)["edge"]["ok"] == 1
+
+    def test_history_write_failure_stays_soft(self, monkeypatch):
         _patch_happy_network(monkeypatch)
         monkeypatch.setattr(probe, "upsert_external_probe", lambda row: None)
 
@@ -979,14 +1095,20 @@ class TestRunProbe:
         monkeypatch.setattr(probe, "insert_external_probe_run", _boom)
         assert probe.main() == 0
 
-    def test_main_preserves_healthy_verdict_on_raw_urllib_timeout(self, monkeypatch):
+    def test_green_run_with_both_writes_landing_exits_zero(self, monkeypatch):
+        _patch_happy_network(monkeypatch)
+        monkeypatch.setattr(probe, "upsert_external_probe", lambda row: None)
+        monkeypatch.setattr(probe, "insert_external_probe_run", lambda row: None)
+        assert probe.main() == 0
+
+    def test_latest_write_raw_urllib_timeout_exits_nonzero(self, monkeypatch):
         _patch_happy_network(monkeypatch)
         monkeypatch.setattr(
             probe, "upsert_external_probe",
             lambda _row: (_ for _ in ()).throw(TimeoutError("SSL read timed out")),
         )
         monkeypatch.setattr(probe, "insert_external_probe_run", lambda row: None)
-        assert probe.main() == 0
+        assert probe.main() == 1
 
 
 # ── dead-man's-switch reader ─────────────────────────────────────────────────
@@ -1061,3 +1183,37 @@ class TestDeadMansSwitch:
 
         assert result["verdict"] == reader.VERDICT_STALE
         assert result["reason"] == "invalid_checked_at"
+
+
+class TestCombinedOutageAndLedgerFailure:
+    """R-627 (P3): the `latest:` write-failure early return sits AHEAD of the
+    unhealthy branch, so a shared network fault that takes out both the edge
+    and the ledger reported exit 1 ('ledger degraded') and never named the
+    endpoint that was down. A consumer keying on EXIT_UNHEALTHY misclassified
+    the exact case both mechanisms exist for."""
+
+    def test_edge_down_plus_ledger_failure_is_unhealthy(self, monkeypatch, capsys):
+        _patch_happy_network(monkeypatch)
+        monkeypatch.setattr(probe, "probe_endpoint",
+                            lambda url, **k: {"reachable": False, "detail": "timeout"})
+
+        def _boom(_row):
+            raise turso_http.TursoHttpError("down")
+
+        monkeypatch.setattr(probe, "upsert_external_probe", _boom)
+        monkeypatch.setattr(probe, "insert_external_probe_run", lambda row: None)
+        assert probe.main() == probe.EXIT_UNHEALTHY
+        err = capsys.readouterr().err
+        assert "probe ledger degraded" in err
+        assert "UNHEALTHY" in err
+
+    def test_a_healthy_probe_with_a_ledger_failure_still_exits_one(self, monkeypatch):
+        """The R-627 fix must not swallow the ledger-only case."""
+        _patch_happy_network(monkeypatch)
+
+        def _boom(_row):
+            raise turso_http.TursoHttpError("down")
+
+        monkeypatch.setattr(probe, "upsert_external_probe", _boom)
+        monkeypatch.setattr(probe, "insert_external_probe_run", lambda row: None)
+        assert probe.main() == 1

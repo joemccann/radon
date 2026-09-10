@@ -14,6 +14,9 @@ import cash_flow_sync
 from cash_flow_sync import _classify, _normalize_date, parse_cash_transactions
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "cash_transactions_flex_sample.xml"
+YTD_FIXTURE = (
+    Path(__file__).resolve().parent / "fixtures" / "cash_transactions_flex_ytd_detail_sample.xml"
+)
 
 
 class TestClassify:
@@ -130,14 +133,14 @@ EXPECTED_ROWS = [
      "raw_type": "Deposits/Withdrawals"},
     # Same IBKR transactionID on all three. Suffix #n so upsert cannot
     # last-write-wins the $38.18 on the first two rows.
-    {"id": "41191444701", "date": "2026-07-06", "type": "Interest", "amount": -23.71,
+    {"id": "41191444701#9fd9517999ea", "date": "2026-07-06", "type": "Interest", "amount": -23.71,
      "currency": "USD", "description": "USD BORROW FEES FOR JUN-2026",
      "raw_type": "Broker Interest Paid"},
-    {"id": "41191444701#1", "date": "2026-07-06", "type": "Interest", "amount": 61.89,
+    {"id": "41191444701#3b1d74cac14d", "date": "2026-07-06", "type": "Interest", "amount": 61.89,
      "currency": "USD",
      "description": "USD IBKR MANAGED SECURITIES (SYEP) FOR JUN-2026",
      "raw_type": "Broker Interest Received"},
-    {"id": "41191444701#2", "date": "2026-07-06", "type": "Interest", "amount": 182.03,
+    {"id": "41191444701#eeab215e203a", "date": "2026-07-06", "type": "Interest", "amount": 182.03,
      "currency": "USD", "description": "USD SHORT CREDIT INTEREST FOR JUN-2026",
      "raw_type": "Broker Interest Received"},
     # No reportDate — date falls back to dateTime "20260708;120000".
@@ -207,16 +210,27 @@ class TestParseCashTransactions:
 
         Ids must be unique so upsert_cash_flow_rows cannot last-write-wins
         the $38.18 that sits on the first two rows.
+
+        R-329: the suffix is now a hash of each row's own content rather than
+        its ordinal, and EVERY member of a duplicated id carries one — "the
+        first keeps the raw id" was still a positional rule, so a row inserted
+        ahead of the trio took the unsuffixed id and pushed the original onto
+        a suffix. The original assertions (three rows, three distinct ids,
+        $220.21) are unchanged; only the id SHAPE moved.
         """
         shared = [
             r
             for r in self._parse_fixture()
-            if r["id"] == "41191444701" or str(r["id"]).startswith("41191444701#")
+            if str(r["id"]).split("#", 1)[0] == "41191444701"
         ]
         assert len(shared) == 3
         assert len({r["id"] for r in shared}) == 3
         # -23.71 + 61.89 + 182.03 = 220.21
         assert round(sum(r["amount"] for r in shared), 2) == 220.21
+        assert all("#" in r["id"] for r in shared), (
+            "every member of a duplicated id must be content-suffixed, or the "
+            "unsuffixed one moves when a sibling is added or dropped"
+        )
 
     def test_bucket_breakdown(self):
         by_type: dict[str, int] = {}
@@ -238,6 +252,48 @@ class TestParseCashTransactions:
             "</FlexStatement></FlexStatements></FlexQueryResponse>"
         )
         assert parse_cash_transactions(empty) == []
+
+    def test_cash_acats_is_a_withdrawal(self):
+        """1442520 carries cash ACATS on <Transfer>, not <CashTransaction>."""
+        rows = parse_cash_transactions(YTD_FIXTURE.read_text(encoding="utf-8"))
+        cash = [r for r in rows if r["id"] == "37884824874"]
+        assert cash == [
+            {
+                "id": "37884824874",
+                "date": "2026-02-06",
+                "type": "Withdrawal",
+                "amount": -305947.84,
+                "currency": "USD",
+                "description": "ACATS",
+                "raw_type": "Transfer:ACATS:IN",
+            }
+        ]
+
+    def test_stk_acats_with_zero_cash_is_not_a_cash_flow(self):
+        rows = parse_cash_transactions(YTD_FIXTURE.read_text(encoding="utf-8"))
+        assert "37884824872" not in {r["id"] for r in rows}
+
+    def test_cash_acats_deposit_uses_signed_cash_transfer(self):
+        xml = (
+            "<FlexQueryResponse><FlexStatements count='1'><FlexStatement>"
+            "<Transfers><Transfer accountId='U0000000' currency='USD' "
+            "assetCategory='CASH' reportDate='20260213' type='ACATS' "
+            "direction='IN' cashTransfer='289.69' transactionID='38036618138' "
+            "description='ACATS CASH' /></Transfers>"
+            "</FlexStatement></FlexStatements></FlexQueryResponse>"
+        )
+        rows = parse_cash_transactions(xml)
+        assert rows == [
+            {
+                "id": "38036618138",
+                "date": "2026-02-13",
+                "type": "Deposit",
+                "amount": 289.69,
+                "currency": "USD",
+                "description": "ACATS CASH",
+                "raw_type": "Transfer:ACATS:IN",
+            }
+        ]
 
 
 class TestFetchDelegatesToParser:

@@ -68,6 +68,7 @@ function MobileMoreDrawerView({
   const [phase, setPhase] = useState<"open" | "exiting">(open ? "open" : "exiting");
   const exitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const openFrameRef = useRef<number | null>(null);
+  const drawerRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     if (open) {
@@ -110,14 +111,33 @@ function MobileMoreDrawerView({
 
   useEffect(() => {
     if (!mounted) return;
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    drawerRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
     const handleKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+      }
+      if (event.key !== "Tab") return;
+      const focusable = drawerRef.current?.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), [tabindex="0"]');
+      if (!focusable?.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     };
     window.addEventListener("keydown", handleKey);
     document.body.style.overflow = "hidden";
     return () => {
       window.removeEventListener("keydown", handleKey);
-      document.body.style.overflow = "";
+      document.body.style.overflow = previousOverflow;
+      previouslyFocused?.focus();
     };
   }, [mounted, onClose]);
 
@@ -129,16 +149,17 @@ function MobileMoreDrawerView({
       : "mobile-drawer-root mobile-drawer-root--exiting";
 
   return (
-    <div className={rootClass} role="dialog" aria-modal="true" data-testid="mobile-more-drawer">
+    <div className={rootClass} role="dialog" aria-modal="true" aria-labelledby="mobile-navigation-title" data-testid="mobile-more-drawer">
       <button
         type="button"
         className="mobile-drawer-backdrop"
         aria-label="Close menu"
+        tabIndex={-1}
         onClick={onClose}
       />
-      <aside className="mobile-drawer">
+      <aside ref={drawerRef} className="mobile-drawer">
         <div className="mobile-drawer__header">
-          <span className="mobile-drawer__title">Menu</span>
+          <h2 id="mobile-navigation-title" className="mobile-drawer__title">Your workspace</h2>
           <button
             type="button"
             className="mobile-drawer__close"
@@ -152,7 +173,7 @@ function MobileMoreDrawerView({
 
         <nav className="mobile-drawer__nav" aria-label="Overflow navigation">
           {NAV_GROUP_ORDER.map((groupId) => {
-            const items = navItems.filter((item) => !item.hidden && item.group === groupId);
+            const items = navItems.filter((item) => item.group === groupId);
             if (items.length === 0) return null;
             return (
               <div key={groupId} className="mobile-drawer__group">

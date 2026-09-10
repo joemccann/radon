@@ -428,7 +428,9 @@ def test_docs_mtime_propagates_and_deterministic(db, docs_tree):
 # ---------------------------------------------------------------- newsfeed
 
 
-def _seed_posts(db):
+def _seed_posts(db) -> str:
+    """Seed two posts; return the MoMo post's timestamp so assertions share one clock read."""
+    momo_at = _days_ago(2)
     db.execute(
         "INSERT INTO posts (id, title, content, timestamp, images, raw_images, tags) "
         "VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -436,7 +438,7 @@ def _seed_posts(db):
             "cRThqRM_Kk",
             "MoMo touching the trendline",
             "Momentum names are back at the trendline that has held all year.",
-            _days_ago(2),
+            momo_at,
             json.dumps(["https://media.radon.run/img/momo.png"]),
             json.dumps(["https://themarketear.com/img/momo.png"]),
             json.dumps(["TRENDLINE", "MOMENTUM", "SPX"]),
@@ -448,10 +450,11 @@ def _seed_posts(db):
         ("aAAAAAA_Aa", "Vol reset", "VIX crushed into the print.", _days_ago(1), None, None, json.dumps(["VIX"])),
     )
     db.commit()
+    return momo_at
 
 
 def test_newsfeed_doc_per_post_with_tags_and_timestamp(db):
-    _seed_posts(db)
+    momo_at = _seed_posts(db)
     docs = {d.doc_key: d for d in newsfeed_source.fetch(db)}
     assert set(docs) == {"cRThqRM_Kk", "aAAAAAA_Aa"}
     momo = docs["cRThqRM_Kk"]
@@ -459,7 +462,7 @@ def test_newsfeed_doc_per_post_with_tags_and_timestamp(db):
     assert momo.metadata["tags"] == ["TRENDLINE", "MOMENTUM", "SPX"]
     assert momo.metadata["tickers"] == ["SPX"]
     assert momo.metadata["url"] == "https://media.radon.run/img/momo.png"
-    assert momo.last_activity_at == _days_ago(2)
+    assert momo.last_activity_at == momo_at
     assert docs["aAAAAAA_Aa"].metadata["url"] is None
 
 
@@ -545,12 +548,51 @@ def test_incidents_one_doc_per_service_with_state_digest(db):
     ok_doc = docs["journal-gap-sli"]
     assert ok_doc.scope == "ops"
     assert "ok" in ok_doc.content
-    assert "missing_exec_id_count=0" in ok_doc.content
+    # Per-run counters of a healthy service are run exhaust, not incident
+    # knowledge — keeping them out of content is what stops hourly churn.
+    assert "missing_exec_id_count" not in ok_doc.content
     assert ok_doc.metadata == {"service": "journal-gap-sli", "state": "ok"}
     err_doc = docs["ib-realtime-relay"]
     assert "no ticks for 60s" in err_doc.content
     assert "error" in err_doc.content
     assert err_doc.last_activity_at == _days_ago(0)
+
+
+def test_incidents_content_stable_across_writer_cycles(db):
+    """Every writer cycle rewrites the service_health timestamps (and, for ok
+    rows, the run-detail payload). None of that may reach content: an
+    unchanged state must hash identical so ingest skips it instead of
+    re-distilling every service every hour (2026-08-29: 12-20 Cerebras calls
+    per hourly run for 81 unchanged services)."""
+    _seed_service_health(db)
+    before = {d.doc_key: d for d in incidents_source.fetch(db)}
+    db.execute(
+        "UPDATE service_health SET last_attempt_started_at = ?, "
+        "last_attempt_finished_at = ?, updated_at = ?, last_error = ? "
+        "WHERE service = 'journal-gap-sli'",
+        (
+            _days_ago(0), _days_ago(0), _days_ago(0),
+            json.dumps({"missing_exec_id_count": 0, "window_days": 7, "scanned": 999}),
+        ),
+    )
+    db.execute(
+        "UPDATE service_health SET last_attempt_started_at = ?, "
+        "last_attempt_finished_at = ?, updated_at = ? WHERE service = 'ib-realtime-relay'",
+        (_days_ago(0), _days_ago(0), _days_ago(0)),
+    )
+    db.commit()
+    after = {d.doc_key: d for d in incidents_source.fetch(db)}
+    for key in before:
+        assert after[key].content_hash() == before[key].content_hash(), key
+    # A real state/error transition still re-syncs the row.
+    db.execute(
+        "UPDATE service_health SET state = 'error', last_error = 'gap detected' "
+        "WHERE service = 'journal-gap-sli'"
+    )
+    db.commit()
+    flipped = {d.doc_key: d for d in incidents_source.fetch(db)}
+    assert flipped["journal-gap-sli"].content_hash() != before["journal-gap-sli"].content_hash()
+    assert "gap detected" in flipped["journal-gap-sli"].content
 
 
 def test_incidents_deterministic_order(db):

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { classifyRateTier } from "@/lib/demo/rateTier";
+import { classifyRateTier, demoRateLimitKey } from "@/lib/demo/rateTier";
 
 describe("classifyRateTier", () => {
   it("AI routes are tier D regardless of method", () => {
@@ -13,7 +13,14 @@ describe("classifyRateTier", () => {
     expect(classifyRateTier("POST", "/api/gex/scan")).toBe("B");
     expect(classifyRateTier("POST", "/api/leap/scan")).toBe("B");
     expect(classifyRateTier("POST", "/api/pi/exec")).toBe("B");
-    expect(classifyRateTier("GET", "/api/performance/foo")).toBe("B");
+    expect(classifyRateTier("POST", "/api/performance/build")).toBe("B");
+  });
+
+  it("keeps cached measurement reads out of producer quotas", () => {
+    expect(classifyRateTier("GET", "/api/performance")).toBe("A");
+    expect(classifyRateTier("GET", "/api/scanner/theta")).toBe("A");
+    expect(classifyRateTier("GET", "/api/regime")).toBe("A");
+    expect(classifyRateTier("GET", "/api/regime/gex")).toBe("A");
   });
 
   it("writes are tier C", () => {
@@ -27,9 +34,28 @@ describe("classifyRateTier", () => {
     expect(classifyRateTier("POST", "/api/ib/ws-ticket")).toBe("E");
   });
 
+  it("headline snapshots use an isolated realtime-polling budget", () => {
+    expect(classifyRateTier("GET", "/api/headlines")).toBe("G");
+  });
+
+  it("passive shell polling uses a budget sized for the shipped cadence", () => {
+    expect(classifyRateTier("GET", "/api/futures-quote")).toBe("I");
+    expect(classifyRateTier("GET", "/api/service-health")).toBe("I");
+    expect(classifyRateTier("GET", "/api/flex-token")).toBe("I");
+    expect(classifyRateTier("GET", "/api/risk-free-rate")).toBe("I");
+    expect(classifyRateTier("GET", "/api/portfolio")).toBe("I");
+    expect(classifyRateTier("GET", "/api/orders")).toBe("I");
+    expect(classifyRateTier("POST", "/api/orders")).toBe("C");
+  });
+
   it("plain reads are tier A", () => {
-    expect(classifyRateTier("GET", "/api/portfolio")).toBe("A");
-    expect(classifyRateTier("GET", "/api/orders")).toBe("A");
     expect(classifyRateTier("get", "/api/blotter")).toBe("A"); // case-insensitive
+    expect(classifyRateTier("GET", "/api/preferences")).toBe("A");
+  });
+
+  it("keeps spend and mutation controls user-global", () => {
+    expect(demoRateLimitKey("C", "user", "/api/watchlist")).toBe("user");
+    expect(demoRateLimitKey("D", "user", "/api/assistant")).toBe("user");
+    expect(demoRateLimitKey("E", "user", "/api/ib/ws-ticket")).toBe("user");
   });
 });

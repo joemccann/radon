@@ -25,6 +25,15 @@ Environment=RADON_DB_NO_REPLICA=1
 ExecStart=/usr/bin/node /home/radon/radon/scripts/newsfeed/index.js
 Restart=on-failure
 RestartSec=30
+# scripts/newsfeed/scheduler.js exits 75 (EX_TEMPFAIL) when the shutdown grace
+# expires with a scrape cycle still in flight (R-262). The loop runs every
+# 120 s, so an ordinary deploy `systemctl stop` lands mid-cycle most of the
+# time; without this mapping that deliberate signal ends the unit `failed`,
+# which the unit watchdog pages on, and Restart=on-failure then burns
+# 5 x 30 s = 150 s < StartLimitIntervalSec=300 into Result=start-limit-hit —
+# a silently parked newsfeed. Same EX_TEMPFAIL convention as
+# radon-db-retention.service and radon-db-backup.service.
+SuccessExitStatus=75
 StandardOutput=journal
 StandardError=journal
 

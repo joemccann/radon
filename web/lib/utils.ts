@@ -1,4 +1,5 @@
 import type { JsonValue } from "./types";
+import { formatRelativeTime } from "./adminFormat";
 
 export function createTimestamp() {
   return new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
@@ -182,17 +183,37 @@ export function formatJsonObject(value: Record<string, JsonValue>, indent = 0): 
   return lines.join("\n");
 }
 
+const ET_CLOCK = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+  hourCycle: "h23",
+});
+
+/** "Synced 4m ago (16:06 ET)" — how a person reads a clock, not an ISO-8601
+ *  string with microseconds. The age is derived from the snapshot's own
+ *  timestamp, never a hardcoded cadence. An unusable timestamp says so. */
+function formatSyncLine(lastSync: unknown): string {
+  const raw = typeof lastSync === "string" ? lastSync.trim() : "";
+  const parsed = Date.parse(raw);
+  if (!raw || !Number.isFinite(parsed)) {
+    return "Sync time unavailable";
+  }
+  return `Synced ${formatRelativeTime(raw)} (${ET_CLOCK.format(parsed)} ET)`;
+}
+
 export function formatPortfolioPayload(raw: unknown): string {
   const payload = raw as { bankroll?: unknown; position_count?: unknown; defined_risk_count?: unknown; undefined_risk_count?: unknown; last_sync?: unknown; positions?: unknown[] };
   const positions = Array.isArray(payload?.positions) ? payload.positions : [];
+  const definedRisk = Number(payload?.defined_risk_count ?? 0);
+  const undefinedRisk = Number(payload?.undefined_risk_count ?? 0);
 
   const lines = [
     "Portfolio Snapshot",
     `Bankroll: ${formatCurrency(payload?.bankroll)}`,
-    `Positions: ${Number(payload?.position_count ?? positions.length)}`,
-    `Defined Risk: ${Number(payload?.defined_risk_count ?? 0)}`,
-    `Undefined Risk: ${Number(payload?.undefined_risk_count ?? 0)}`,
-    `Last Sync: ${String(payload?.last_sync ?? "N/A")}`,
+    `Positions: ${Number(payload?.position_count ?? positions.length)} (${definedRisk} defined risk, ${undefinedRisk} undefined risk)`,
+    formatSyncLine(payload?.last_sync),
     "",
     "Positions:",
   ];

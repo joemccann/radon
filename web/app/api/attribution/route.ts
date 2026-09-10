@@ -6,8 +6,11 @@ import { radonFetch } from "@/lib/radonApi";
 
 export const runtime = "nodejs";
 
+// read.spawn: the FastAPI twin spawns a subprocess per call.
+export const radonCapability = "read.spawn";
+
 export async function GET() {
-  const access = await requireRouteAccess(undefined, { rate: { key: "attribution:route", limit: 20, windowMs: 60_000 } });
+  const access = await requireRouteAccess(undefined, { rate: { key: "attribution:route", limit: 20, windowMs: 60_000 }, durableRateTier: "A" });
   if (!access.ok) return access.response;
   try {
     const data = await radonFetch("/attribution", { timeout: 20_000 });

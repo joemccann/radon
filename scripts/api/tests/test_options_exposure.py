@@ -13,8 +13,10 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 from clients.menthorq_dashboard_client import (  # noqa: E402
+    MenthorQDashboardAuthEmbargoed,
     MenthorQDashboardAuthError,
     MenthorQDashboardPayloadError,
+    MenthorQDashboardStorageError,
     MenthorQDashboardTimeoutError,
     MenthorQDashboardUpstreamError,
 )
@@ -93,6 +95,11 @@ def test_route_rejects_invalid_symbol_or_frequency_with_400(client, path):
     ("provider_error", "expected_status", "expected_detail"),
     [
         (
+            MenthorQDashboardStorageError("private storage path"),
+            503,
+            "Options exposure session storage is unavailable",
+        ),
+        (
             MenthorQDashboardAuthError("secret token here"),
             503,
             "Options exposure authentication is unavailable",
@@ -129,3 +136,70 @@ def test_route_maps_provider_failures_to_sanitized_statuses(
     assert response.json() == {"detail": expected_detail}
     assert "secret" not in response.text.lower()
     assert "private" not in response.text.lower()
+
+
+def test_route_maps_auth_embargo_to_transient_detail(client):
+    def _raise(*_args):
+        raise MenthorQDashboardAuthEmbargoed(
+            "dashboard authentication embargoed after a recent failure"
+        )
+
+    provider = type("Provider", (), {"fetch_exposure": _raise})()
+
+    with patch("scripts.api.server.MenthorQDashboardClient", return_value=provider):
+        response = client.get("/options/exposure/SPX?frequency=eod")
+
+    assert response.status_code == 503
+    detail = response.json()["detail"]
+    assert "embargo" in detail.lower()
+
+    from monitor_daemon.handlers import menthorq_login_probe
+
+    assert menthorq_login_probe._is_auth_failure(503, detail) is False
+
+
+def test_route_maps_missing_browser_runtime_to_an_environment_detail(client):
+    from clients.menthorq_dashboard_client import MenthorQDashboardBrowserUnavailable
+
+    def _raise(*_args):
+        raise MenthorQDashboardBrowserUnavailable(
+            "dashboard browser runtime is unavailable"
+        )
+
+    provider = type("Provider", (), {"fetch_exposure": _raise})()
+
+    with patch("scripts.api.server.MenthorQDashboardClient", return_value=provider):
+        response = client.get("/options/exposure/SPX?frequency=eod")
+
+    assert response.status_code == 503
+    detail = response.json()["detail"]
+    assert "browser runtime" in detail.lower()
+
+    from monitor_daemon.handlers import menthorq_login_probe
+
+    assert menthorq_login_probe._is_auth_failure(503, detail) is False
+
+
+def test_missing_browser_detail_carries_the_environment_repair(client):
+    """R-659: the escalated login-probe alarm relays this route detail
+    verbatim; it must name the environment fault and the repair so the
+    page is actionable without a shell session."""
+    from clients.menthorq_dashboard_client import MenthorQDashboardBrowserUnavailable
+
+    def _raise(*_args):
+        raise MenthorQDashboardBrowserUnavailable(
+            "dashboard browser runtime is unavailable"
+        )
+
+    provider = type("Provider", (), {"fetch_exposure": _raise})()
+
+    with patch("scripts.api.server.MenthorQDashboardClient", return_value=provider):
+        response = client.get("/options/exposure/SPX?frequency=eod")
+
+    detail = response.json()["detail"]
+    assert "environment fault" in detail.lower()
+    assert "playwright install" in detail.lower()
+
+    from monitor_daemon.handlers import menthorq_login_probe
+
+    assert menthorq_login_probe._is_auth_failure(503, detail) is False

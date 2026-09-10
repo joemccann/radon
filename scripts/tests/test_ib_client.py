@@ -154,6 +154,7 @@ from clients.ib_client import (
     DEFAULT_HOST,
     DEFAULT_TWS_PORT,
 )
+from utils.flex_send import FlexSendDisabled
 
 
 # ===========================================================================
@@ -985,7 +986,14 @@ class TestFlexQuery:
 
         client = IBClient()
         client.connect(client_id=1)
-        with pytest.raises(IBError, match="Flex query"):
+        # R-353: the file-ingest-only policy block used to be rewritten into a
+        # generic `IBError("Flex query ... failed")`, which made it
+        # indistinguishable from a transient Flex outage — `portfolio_
+        # performance` degraded to the stale blotter cache for both. The
+        # ORIGINAL intent of this case (the guard blocks the send; FlexReport
+        # is never constructed) is unchanged and still asserted below; only
+        # the exception type moved to the one that names the actual state.
+        with pytest.raises(FlexSendDisabled):
             client.run_flex_query(query_id=123456, token="test_token")
         MockFlexReport.assert_not_called()
 
@@ -1000,8 +1008,14 @@ class TestFlexQuery:
         client = IBClient()
         client.connect(client_id=1)
 
-        with pytest.raises(IBError, match="Flex"):
-            client.run_flex_query(query_id=123456, token="bad_token")
+        # A REAL transport failure must still surface as IBError. The guard
+        # now runs above the try (R-353), so it has to be satisfied for this
+        # case to reach the transport at all.
+        with patch(
+            "utils.flex_send.assert_sendrequest_permitted", return_value=None
+        ):
+            with pytest.raises(IBError, match="Flex"):
+                client.run_flex_query(query_id=123456, token="bad_token")
 
 
 # ===========================================================================

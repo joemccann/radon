@@ -14,6 +14,9 @@ import { useWatchlist } from "@/lib/useWatchlist";
 import { useRealtimeAuth } from "@/lib/RealtimeAuthContext";
 import { buildAuthenticatedWebSocketUrl, resolveRealtimeWebSocketUrl } from "@/lib/realtimeSocketAuth";
 import StarToggle from "@/components/StarToggle";
+import { demoSymbolHash } from "@/lib/demo/fixtures/market";
+import { isFuturesRoot } from "@/lib/futuresSymbols";
+import { isIndexSymbol } from "@/lib/indexSymbols";
 
 type SearchResult = {
   conId: number;
@@ -37,12 +40,37 @@ type TickerSearchProps = {
 const MAX_RESULTS = 10;
 const DEBOUNCE_MS = 200;
 const ALLOWED_SEC_TYPES = new Set(["STK", "IND", "FUT"]);
+const DEMO_SEARCH_SYMBOLS = [
+  "AAPL", "AMAT", "AMD", "COIN", "GOOG", "META", "MSFT", "NEM",
+  "NVDA", "QQQ", "SNDK", "SPY", "TSLA", "VIX",
+];
+
+function demoSearchResults(pattern: string): SearchResult[] {
+  const normalized = pattern.trim().toUpperCase();
+  if (!/^[A-Z][A-Z.]{0,9}$/.test(normalized)) return [];
+  const symbols = [
+    normalized,
+    ...DEMO_SEARCH_SYMBOLS.filter((symbol) => symbol !== normalized && symbol.startsWith(normalized)),
+  ].slice(0, MAX_RESULTS);
+  return symbols.map((symbol) => {
+    const secType = isFuturesRoot(symbol) ? "FUT" : isIndexSymbol(symbol) ? "IND" : "STK";
+    return {
+      conId: demoSymbolHash(symbol),
+      symbol,
+      secType,
+      primaryExchange: secType === "FUT" ? "CME" : secType === "IND" ? "CBOE" : "SMART",
+      currency: "USD",
+      ...(secType === "STK" ? { derivativeSecTypes: ["OPT"] } : {}),
+    };
+  });
+}
 
 const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
   function TickerSearch(
     { onSelect, placeholder = "Search ticker...", className, ariaLabel = "Search ticker", onSearchUnavailable },
     ref,
   ) {
+    const demoMode = process.env.NEXT_PUBLIC_RADON_DEMO === "1";
     const inputRef = useRef<HTMLInputElement>(null);
     const wsRef = useRef<WebSocket | null>(null);
     const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -96,6 +124,7 @@ const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
     /*  WebSocket lifecycle                                                */
     /* ------------------------------------------------------------------ */
     const connectWs = useCallback(() => {
+      if (demoMode) return;
       if (!mountedRef.current) return;
       if (connectingRef.current) return;
       if (
@@ -162,6 +191,14 @@ const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
               connectingRef.current = false;
               if (!mountedRef.current) return;
               wsRef.current = null;
+              // A search queued behind this (now failed) connection attempt
+              // will not resolve promptly — tell the operator instead of
+              // spinning silently. The pattern stays queued for the retry.
+              if (pendingPatternRef.current) {
+                setResults([]);
+                setLoading(false);
+                onSearchUnavailable?.();
+              }
               // Reconnect with exponential backoff
               const strategy = reconnectStrategyRef.current;
               if (strategy.canRetry()) {
@@ -196,11 +233,17 @@ const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
           reconnectTimerRef.current = setTimeout(connectWs, delay);
         }
       }
-    }, [onSearchUnavailable]);
+    }, [demoMode, onSearchUnavailable]);
 
+    // Deliberately no eager connect on mount: this component remounts on every
+    // App Router navigation (Header lives in the per-page WorkspaceShell, and
+    // stays mounted-but-hidden on the mobile shell), so a mount-time connect
+    // fetched a fresh ws-ticket and opened a fresh relay socket on every page
+    // change. The socket now opens on first focus; a search dispatched before
+    // it opens is queued in pendingPatternRef and fires on open.
+    // Pin: web/tests/ticker-search-lazy-connect.test.tsx.
     useEffect(() => {
       mountedRef.current = true;
-      connectWs();
       return () => {
         mountedRef.current = false;
         if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
@@ -237,10 +280,21 @@ const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
         activePatternRef.current = pattern.trim().toUpperCase();
 
         debounceRef.current = setTimeout(() => {
+          if (demoMode) {
+            setResults(demoSearchResults(pattern));
+            setLoading(false);
+            pendingPatternRef.current = null;
+            return;
+          }
           const ws = wsRef.current;
           if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ action: "search", pattern: pattern.trim() }));
             pendingPatternRef.current = null;
+          } else if (connectingRef.current) {
+            // First-focus connect still in flight (lazy connect) — keep the
+            // spinner; the queued pattern fires on open, and onclose surfaces
+            // the failure if the attempt dies.
+            pendingPatternRef.current = pattern.trim();
           } else {
             // WS not ready — relay (or upstream IB) is unreachable. Surface that.
             pendingPatternRef.current = pattern.trim();
@@ -251,7 +305,7 @@ const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
           }
         }, DEBOUNCE_MS);
       },
-      [connectWs, onSearchUnavailable],
+      [connectWs, demoMode, onSearchUnavailable],
     );
 
     /* ------------------------------------------------------------------ */
@@ -348,18 +402,22 @@ const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
             dispatchSearch(val);
           }}
           onFocus={() => {
+            // Lazy connect: the relay socket opens on first focus, not on
+            // mount (mount happens on every route change).
+            connectWs();
             if (query.trim() && results.length > 0) setIsOpen(true);
           }}
           onKeyDown={handleKeyDown}
           style={{
             width: "100%",
             padding: "8px 12px",
-            fontFamily: "'IBM Plex Mono', monospace",
-            fontSize: "13px",
+            minHeight: "44px",
+            fontFamily: "var(--font-sans)",
+            fontSize: "14px",
             color: "var(--text-primary)",
             backgroundColor: "var(--bg-panel)",
             border: "1px solid var(--border-dim)",
-            borderRadius: "4px",
+            borderRadius: "var(--radius-sm)",
             outline: "none",
             transition: "border-color 150ms",
           }}

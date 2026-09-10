@@ -1,11 +1,33 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
-test("Radon Chat focuses its composer on open and still dismisses with Escape", async ({ page }) => {
+const SAFE_ASSISTANT_ERROR =
+  "The assistant couldn't complete this turn. No order was placed. Try again or choose another model.";
+
+const PROVIDER_ERROR =
+  'OpenAI request failed (400): {"error":{"message":"Unsupported parameter: max_tokens","type":"invalid_request_error","code":"unsupported_parameter"}}';
+
+async function stubShellApis(page: Page, assistantError = false) {
   // A bare {} for every API crashes WorkspaceShell (portfolio.positions is
-  // iterated during render) and the launcher never mounts — stub the shapes
-  // the shell actually reads.
+  // iterated during render) and the launcher never mounts. Stub the shapes the
+  // shell reads, plus an optional hostile assistant error frame.
   await page.route("**/api/**", (route) => {
     const path = new URL(route.request().url()).pathname;
+    if (assistantError && path === "/api/assistant") {
+      return route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: [
+          "event: start",
+          "data: {}",
+          "",
+          "event: error",
+          `data: ${JSON.stringify({ error: PROVIDER_ERROR })}`,
+          "",
+          "",
+        ].join("\n"),
+      });
+    }
+
     const payloads: Record<string, unknown> = {
       "/api/portfolio": { positions: [], exposure: {}, violations: [], account_summary: null },
       "/api/orders": { open_orders: [], executed_orders: [], open_count: 0, executed_count: 0 },
@@ -16,38 +38,110 @@ test("Radon Chat focuses its composer on open and still dismisses with Escape", 
       "/api/flex-token": { remaining: 240 },
       "/api/previous-close": { closes: {} },
     };
-    route.fulfill({
+    return route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify(payloads[path] ?? {}),
     });
   });
+}
+
+async function stubPendingAssistant(page: Page) {
+  await page.route("**/api/assistant", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    return route.fulfill({
+      status: 200,
+      contentType: "text/event-stream",
+      body: [
+        "event: start",
+        "data: {}",
+        "",
+        "event: result",
+        `data: ${JSON.stringify({ content: "Flow read.", model: "test-model", toolEvents: [] })}`,
+        "",
+        "",
+      ].join("\n"),
+    });
+  });
+}
+
+async function openChat(page: Page) {
+  const dialog = page.getByRole("dialog", { name: "Radon chat" });
+  // Wait for the launcher to report its ⌘J keydown listener attached, then send
+  // ONE real key press. A retry loop around a synthetic document-level event
+  // passed even with the launcher's handler deleted, so it verified nothing.
+  await expect(page.getByTestId("chat-launcher-ready")).toBeAttached({ timeout: 30_000 });
+  await page.keyboard.press("ControlOrMeta+j");
+  await expect(dialog).toBeVisible();
+  return dialog;
+}
+
+test("Radon Chat focuses its composer on open and still dismisses with Escape", async ({ page }) => {
+  await stubShellApis(page);
   // /alerts is the lightest WorkspaceShell page: the launcher mounts on every
-  // route, and /dashboard's cards each need bespoke payload shapes to render
-  // without tripping the route error boundary.
+  // route without dashboard cards needing bespoke payloads.
   await page.goto("/alerts");
 
-  const dialog = page.getByRole("dialog", { name: "Radon chat" });
-  const composer = page.getByLabel("Message Grok assistant");
-  // Headless Chromium delivers Meta/Ctrl+j keydowns to document listeners
-  // attached in-page but the launcher's React handler never receives the
-  // native press (verified: an in-page probe listener sees the event, the
-  // launcher does not; a synthetic dispatch opens it). The shortcut handler
-  // itself is covered by the jsdom unit test; this spec's subject is the
-  // focus-on-open behavior, so open via the synthetic path and keep the
-  // dialog/focus/Escape assertions real. Retry across hydration.
-  await expect(async () => {
-    if (!(await dialog.isVisible())) {
-      await page.evaluate(() => {
-        document.dispatchEvent(
-          new KeyboardEvent("keydown", { key: "j", metaKey: true, bubbles: true }),
-        );
-      });
-    }
-    await expect(dialog).toBeVisible({ timeout: 500 });
-  }).toPass({ timeout: 15_000 });
+  const dialog = await openChat(page);
+  const composer = page.getByLabel("Ask Radon");
   await expect(composer).toBeFocused();
 
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
+});
+
+test("Radon Chat renders safe recovery copy instead of provider JSON", async ({ page }, testInfo) => {
+  await stubShellApis(page, true);
+  await page.goto("/alerts");
+
+  const dialog = await openChat(page);
+  const composer = page.getByLabel("Ask Radon");
+  await composer.fill("Check DRAM IV rank");
+  await composer.press("Enter");
+
+  const assistantMessage = dialog.getByTestId("chat-message-assistant").last();
+  await expect(assistantMessage.getByTestId("chat-role")).toHaveText("Radon");
+  await expect(assistantMessage.getByTestId("chat-message-body")).toHaveText(SAFE_ASSISTANT_ERROR);
+  await expect(dialog.getByTestId("chat-messages")).toHaveAttribute("aria-busy", "false");
+  for (const internalDetail of [
+    "OpenAI request failed",
+    "max_tokens",
+    "max_completion_tokens",
+    "invalid_request_error",
+    "unsupported_parameter",
+  ]) {
+    await expect(assistantMessage).not.toContainText(internalDetail);
+  }
+
+  await dialog.getByTestId("chat-launcher-panel").screenshot({
+    path: testInfo.outputPath("assistant-provider-error.png"),
+  });
+});
+
+test("Radon Chat keeps an active short turn grouped with the composer", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.addInitScript(() => window.localStorage.setItem("theme", "dark"));
+  await stubShellApis(page);
+  await stubPendingAssistant(page);
+  await page.goto("/alerts");
+
+  const dialog = await openChat(page);
+  const composer = dialog.getByLabel("Ask Radon");
+  await composer.fill("Read MU flow");
+  await composer.press("Enter");
+
+  const trace = dialog.getByRole("region", { name: "Engine trace" });
+  await expect(trace).toContainText("Routing request");
+
+  const traceBox = await trace.boundingBox();
+  const composerBox = await composer.locator("xpath=ancestor::form").boundingBox();
+  expect(traceBox).not.toBeNull();
+  expect(composerBox).not.toBeNull();
+  expect(composerBox!.y - (traceBox!.y + traceBox!.height)).toBeLessThanOrEqual(40);
+  expect(traceBox!.y + traceBox!.height).toBeLessThan(composerBox!.y);
+  expect(composerBox!.y + composerBox!.height).toBeLessThanOrEqual(900);
+
+  await dialog.getByTestId("chat-launcher-panel").screenshot({
+    path: testInfo.outputPath("active-short-turn-dark.png"),
+  });
 });

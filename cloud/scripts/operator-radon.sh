@@ -272,15 +272,53 @@ if (( ${#LOADED_UNITS[@]} == 0 )); then
   exit 1
 fi
 
-REQUIRED_UNITS=(
-  radon-ib-gateway.service
-  radon-api.service
-  radon-nextjs.service
-  radon-relay.service
-  radon-monitor.service
-  radon-newsfeed.service
-  radon-health.service
-)
+read_host_role() {
+  local role="${RADON_HOST_ROLE:-}"
+  local envf="${RADON_ENV_FILE:-/etc/radon/env}"
+  if [[ -z "$role" && -f "$envf" ]]; then
+    role="$(awk -F= '/^RADON_HOST_ROLE=/{v=$2} END{print v}' "$envf" 2>/dev/null || true)"
+    role="${role%\"}"
+    role="${role#\"}"
+    role="${role%\'}"
+    role="${role#\'}"
+    role="${role//$'\r'/}"
+  fi
+  case "$role" in
+    app|broker|combined) printf '%s\n' "$role" ;;
+    *) printf 'combined\n' ;;
+  esac
+}
+
+HOST_ROLE="$(read_host_role)"
+case "$HOST_ROLE" in
+  app)
+    REQUIRED_UNITS=(
+      radon-api.service
+      radon-nextjs.service
+      radon-relay.service
+      radon-monitor.service
+      radon-newsfeed.service
+      radon-health.service
+    )
+    ;;
+  broker)
+    REQUIRED_UNITS=(
+      radon-ib-gateway.service
+      radon-ib-gateway-remote.service
+    )
+    ;;
+  *)
+    REQUIRED_UNITS=(
+      radon-ib-gateway.service
+      radon-api.service
+      radon-nextjs.service
+      radon-relay.service
+      radon-monitor.service
+      radon-newsfeed.service
+      radon-health.service
+    )
+    ;;
+esac
 MISSING_UNITS=()
 for required_unit in "${REQUIRED_UNITS[@]}"; do
   if ! printf '%s\n' "${LOADED_UNITS[@]}" | grep -qx "$required_unit"; then
@@ -302,13 +340,22 @@ fi
 GATEWAY_UNIT=radon-ib-gateway.service
 GATEWAY_CONTROL="${RADON_IB_GATEWAY_CONTROL:-/usr/local/bin/radon-ib-gateway-control}"
 TOPOLOGY_PATH="${RADON_OPERATOR_TOPOLOGY_PATH:-/var/lib/radon/operator-topology}"
-PERSISTENT_UNITS=(
-  radon-api.service
-  radon-nextjs.service
-  radon-relay.service
-  radon-monitor.service
-  radon-newsfeed.service
-)
+case "$HOST_ROLE" in
+  broker)
+    PERSISTENT_UNITS=(
+      radon-ib-gateway-remote.service
+    )
+    ;;
+  *)
+    PERSISTENT_UNITS=(
+      radon-api.service
+      radon-nextjs.service
+      radon-relay.service
+      radon-monitor.service
+      radon-newsfeed.service
+    )
+    ;;
+esac
 mapfile -t ACTIVE_TIMERS < <(
   printf '%s\n' "${ACTIVE_UNITS[@]}" \
     | grep -E '^radon-.+\.timer$' | grep -v '^radon-beta-' || true
@@ -331,7 +378,7 @@ fi
 ACTIVE_SCHEDULED_SERVICES=()
 for unit in "${ACTIVE_UNITS[@]}"; do
   case "$unit" in
-    radon-beta-*|radon-health.service|radon-ib-gateway.service|radon-ib-gateway-preheld-restart.service) ;;
+    radon-beta-*|radon-health.service|radon-ib-gateway.service|radon-ib-gateway-preheld-restart.service|radon-ib-gateway-remote.service) ;;
     radon-api.service|radon-nextjs.service|radon-relay.service|radon-monitor.service|radon-newsfeed.service) ;;
     radon-*.service) ACTIVE_SCHEDULED_SERVICES+=("$unit") ;;
   esac
@@ -387,6 +434,16 @@ systemctl_many() {
   return "$rc"
 }
 
+emit_stack_result() {
+  local verb="$1"
+  local count="$2"
+  if [[ "$HOST_ROLE" == "app" ]]; then
+    echo "${verb} ${count} app-plane radon units. Gateway stays on the broker."
+  else
+    echo "${verb} Gateway and ${count} radon units"
+  fi
+}
+
 case "$requested_action" in
   stop)
     STOP_UNITS=()
@@ -399,8 +456,10 @@ case "$requested_action" in
     STOP_UNITS+=("${ACTIVE_SCHEDULED_SERVICES[@]}")
     persist_topology "${STOP_UNITS[@]}"
     systemctl_many stop "${STOP_UNITS[@]}"
-    gateway_control stop
-    echo "stopped Gateway and ${#STOP_UNITS[@]} active radon units"
+    if [[ "$HOST_ROLE" != "app" ]]; then
+      gateway_control stop
+    fi
+    emit_stack_result "stopped" "${#STOP_UNITS[@]}"
     ;;
   start)
     if [[ -f "$TOPOLOGY_PATH" ]]; then
@@ -414,10 +473,12 @@ case "$requested_action" in
       printf '%s\n' "${PERSISTENT_UNITS[@]}" \
         "${PRIOR_TIMERS[@]}" | unique_units
     )
-    gateway_control start
+    if [[ "$HOST_ROLE" != "app" ]]; then
+      gateway_control start
+    fi
     systemctl_many start "${START_UNITS[@]}"
     rm -f "$TOPOLOGY_PATH"
-    echo "started Gateway and ${#START_UNITS[@]} radon units"
+    emit_stack_result "started" "${#START_UNITS[@]}"
     ;;
   restart)
     mapfile -t RESTART_UNITS < <(
@@ -427,16 +488,22 @@ case "$requested_action" in
     # Quiesce timer-owned jobs that are currently running, but never start
     # them directly after the Gateway cycle. Their timers retain ownership.
     systemctl_many stop "${ACTIVE_SCHEDULED_SERVICES[@]}"
-    gateway_control restart
+    if [[ "$HOST_ROLE" != "app" ]]; then
+      gateway_control restart
+    fi
     systemctl_many restart "${RESTART_UNITS[@]}"
-    echo "restarted Gateway and ${#RESTART_UNITS[@]} radon units"
+    emit_stack_result "restarted" "${#RESTART_UNITS[@]}"
     ;;
   status)
     run_bounded "$SYSTEMCTL_QUERY_TIMEOUT_SECS" \
       systemctl list-units 'radon-*' --all --no-pager --no-legend
-    printf 'ib-gateway-container: '
     gateway_status=0
-    gateway_control status || gateway_status=$?
+    if [[ "$HOST_ROLE" == "app" ]]; then
+      echo "ib-gateway-container: broker (not this host)"
+    else
+      printf 'ib-gateway-container: '
+      gateway_control status || gateway_status=$?
+    fi
     if (( ${#MISSING_UNITS[@]} > 0 || gateway_status != 0 )); then
       exit 1
     fi

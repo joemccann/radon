@@ -3,8 +3,8 @@
  */
 
 import React from "react";
-import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
 
 const mockAuth = vi.fn();
 const mockRedirect = vi.fn((url: string) => {
@@ -25,6 +25,7 @@ vi.mock("@clerk/nextjs", () => ({
 }));
 
 describe("auth pages", () => {
+  afterEach(cleanup);
   beforeEach(() => {
     mockAuth.mockReset();
     mockRedirect.mockClear();
@@ -46,6 +47,9 @@ describe("auth pages", () => {
     render(element as React.ReactElement);
 
     expect(screen.getByText("SIGN_IN_COMPONENT")).toBeTruthy();
+    expect(screen.getByRole("main").className).toBe("clear-auth");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toContain("A clear view.");
+    expect(screen.getByRole("link", { name: "Radon home" }).getAttribute("href")).toBe("/");
   });
 
   it("redirects authenticated users away from sign-up", async () => {
@@ -64,5 +68,7 @@ describe("auth pages", () => {
     render(element as React.ReactElement);
 
     expect(screen.getByText("SIGN_UP_COMPONENT")).toBeTruthy();
+    expect(screen.getByRole("main").className).toBe("clear-auth");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toContain("An informed decision.");
   });
 });

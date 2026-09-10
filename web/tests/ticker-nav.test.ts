@@ -3,6 +3,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { resolveSectionFromPath } from "@/lib/chat";
+import { isTickerRouteSegment } from "@/lib/tickerRoute";
 
 // ─── Route validation constants (mirrored from [ticker]/page.tsx) ────────────
 
@@ -12,7 +13,7 @@ const RESERVED = new Set([
   "_next", "favicon",
 ]);
 
-const TICKER_RE = /^[A-Za-z]{1,5}$/;
+const TICKER_RE = { test: isTickerRouteSegment };
 
 // ─── resolveSectionFromPath ──────────────────────────────────────────────────
 
@@ -48,6 +49,12 @@ describe("resolveSectionFromPath — ticker-detail detection", () => {
   it("falls back for numeric paths", () => {
     expect(resolveSectionFromPath("/12345", "dashboard")).toBe("dashboard");
   });
+
+  it("resolves Cboe term-structure indices with digits to ticker-detail", () => {
+    for (const path of ["/VIX3M", "/vix3m", "/VIX9D", "/VIX1D", "/VIX6M", "/VIX1Y", "/COR1M"]) {
+      expect(resolveSectionFromPath(path, "dashboard"), path).toBe("ticker-detail");
+    }
+  });
 });
 
 // ─── TICKER_RE validation ────────────────────────────────────────────────────
@@ -66,6 +73,17 @@ describe("TICKER_RE — format validation", () => {
   it("rejects numbers", () => {
     expect(TICKER_RE.test("123")).toBe(false);
     expect(TICKER_RE.test("A1")).toBe(false);
+  });
+
+  it("accepts registered index symbols that carry digits", () => {
+    for (const sym of ["VIX3M", "vix3m", "VIX9D", "VIX1D", "VIX6M", "VIX1Y", "COR1M", "COR3M"]) {
+      expect(TICKER_RE.test(sym), sym).toBe(true);
+    }
+  });
+
+  it("still rejects unregistered digit symbols of index-like shape", () => {
+    expect(TICKER_RE.test("VIX12M")).toBe(false);
+    expect(TICKER_RE.test("VIX1M")).toBe(false);
   });
 
   it("rejects more than 5 chars", () => {

@@ -4,11 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import * as d3 from "d3";
 
 import ChartPanel from "./charts/ChartPanel";
-import {
-  buildCriHistoryXAxisTickValues,
-  shouldRotateCriHistoryXAxisLabels,
-} from "./CriHistoryChart";
 import { chartSeriesColor } from "@/lib/chartSystem";
+import { buildTimeXAxisTickValues, chartXAxisTickAnchor } from "@/lib/chartXAxis";
 import type { BpiChartEntry, BpiThresholds } from "@/lib/bpi";
 
 /**
@@ -147,7 +144,7 @@ export default function BpiChart({ entries, thresholds, indexSymbol }: BpiChartP
         .attr("y", yScale(value) - 4)
         .attr("text-anchor", "end")
         .attr("fill", CHART_AXIS_MUTED)
-        .attr("font-size", "9px")
+        .attr("font-size", "var(--text-meta)")
         .attr("letter-spacing", "0.08em")
         .attr("font-family", "IBM Plex Mono, monospace")
         .text(label);
@@ -213,7 +210,7 @@ export default function BpiChart({ entries, thresholds, indexSymbol }: BpiChartP
         axis
           .selectAll(".tick text")
           .attr("fill", CHART_AXIS_MUTED)
-          .attr("font-size", "10px")
+          .attr("font-size", "var(--text-meta)")
           .attr("font-family", "IBM Plex Mono, monospace");
       });
 
@@ -224,15 +221,15 @@ export default function BpiChart({ entries, thresholds, indexSymbol }: BpiChartP
       .attr("y", -MARGIN.left + 12)
       .attr("text-anchor", "middle")
       .attr("fill", CHART_AXIS_MUTED)
-      .attr("font-size", "9px")
+      .attr("font-size", "var(--text-meta)")
       .attr("letter-spacing", "0.1em")
       .attr("font-family", "IBM Plex Mono, monospace")
       .text("PERCENT ON P&F BUY SIGNAL");
 
     // X-axis with the shared sparse-tick idiom.
-    const xTickValues = buildCriHistoryXAxisTickValues(dates, innerW);
-    const rotateXAxisLabels = shouldRotateCriHistoryXAxisLabels(innerW, xTickValues.length);
+    const xTickValues = buildTimeXAxisTickValues(dates, innerW);
     g.append("g")
+      .attr("data-testid", "chart-x-axis")
       .attr("transform", `translate(0,${innerH})`)
       .call(
         d3
@@ -246,12 +243,11 @@ export default function BpiChart({ entries, thresholds, indexSymbol }: BpiChartP
         axis
           .selectAll(".tick text")
           .attr("fill", CHART_AXIS_MUTED)
-          .attr("font-size", "10px")
+          .attr("font-size", "var(--text-meta)")
           .attr("font-family", "IBM Plex Mono, monospace")
-          .attr("text-anchor", rotateXAxisLabels ? "end" : "middle")
-          .attr("dx", rotateXAxisLabels ? "-0.4em" : "0")
-          .attr("dy", rotateXAxisLabels ? "0.6em" : "0.9em")
-          .attr("transform", rotateXAxisLabels ? "rotate(-24)" : null);
+          .attr("text-anchor", (_d, index, nodes) => chartXAxisTickAnchor(index, nodes.length))
+          .attr("dx", "0")
+          .attr("dy", "0.9em");
       });
 
     // Tooltip overlay — mouse hover + touch drag, bisection over the slice.

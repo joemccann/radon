@@ -35,6 +35,7 @@ import socket
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
@@ -56,8 +57,13 @@ FRESHNESS_PATH = "/api/probe/freshness"
 
 # Healthy user-path redirect targets, from live production evidence
 # (2026-06-12): Clerk 307s to the on-domain /sign-in; the hosted fallback
-# lives on clerk.radon.run. Anything else is not the Clerk wall.
-SIGN_IN_LOCATION_MARKERS = ("/sign-in", "clerk.")
+# lives on clerk.radon.run. Anything else is not the Clerk wall. Hosts are
+# matched exactly on the parsed Location, never by substring.
+SIGN_IN_ALLOWED_HOSTS = frozenset(
+    host
+    for host in (urllib.parse.urlsplit(EDGE_BASE).hostname, "clerk.radon.run")
+    if host
+)
 
 # Nonzero-but-distinct from the write-failure exit (1) so a red workflow run
 # can be triaged from the email subject line alone.
@@ -225,23 +231,36 @@ def probe_user_path(url: str, timeout: float = HTTP_TIMEOUT_SECONDS) -> dict:
         return {"reachable": False, "detail": _classify_transport_error(exc)}
 
 
+def _is_sign_in_location(location: str) -> bool:
+    """A redirect counts as the Clerk wall only when the parsed Location is a
+    relative /sign-in path or points at an exactly allowlisted host."""
+    try:
+        parts = urllib.parse.urlsplit(location)
+    except ValueError:
+        return False
+    if not parts.scheme and not parts.netloc:
+        return parts.path == "/sign-in" or parts.path.startswith("/sign-in/")
+    return parts.hostname in SIGN_IN_ALLOWED_HOSTS
+
+
 def classify_user_path(raw: dict) -> dict:
     """The Clerk wall answered = healthy. Live evidence (2026-06-12):
     Accept: text/html -> 307 Location: https://app.radon.run/sign-in?...;
     bare GET -> protect-rewrite 404, both with x-clerk-auth-status: signed-out.
-    A 200 WITHOUT any Clerk header means the perimeter did not run — that is a
-    failure (the middleware-is-the-perimeter class), not a pass."""
+    A 200 is never a wall — signed-out or not, the page content was served —
+    and redirect targets are matched on the parsed Location (relative
+    /sign-in, or an exactly allowlisted host), never by substring."""
     if not raw.get("reachable"):
         return {"ok": 0, "detail": "user_path_unreachable:" + str(raw.get("detail", "?"))}
     status = int(raw.get("http_status", 0))
     if 300 <= status < 400:
         location = raw.get("location") or ""
-        if any(marker in location for marker in SIGN_IN_LOCATION_MARKERS):
+        if _is_sign_in_location(location):
             return {"ok": 1, "detail": "clerk_redirect"}
         return {"ok": 0, "detail": "user_path_redirect_unexpected"}
     if (
         raw.get("clerk_auth_status") == "signed-out"
-        and status in {200, 401, 404}
+        and status in {401, 404}
     ):
         return {"ok": 1, "detail": "clerk_protect_%d" % status}
     if status == 200:
@@ -440,18 +459,26 @@ def _legacy_status_payload_healthy(payload: dict) -> bool:
     return bool(states) and all(state in {"up", "ok", "healthy"} for state in states)
 
 
+# Current producer version plus the one validated predecessor. Keep in step
+# with `health_service.probes.STATUS_SCHEMA_VERSION`.
+SUPPORTED_STATUS_SCHEMAS = (3, 2)
+
+
 def _classify_status_payload(payload: dict) -> str:
     """Classify the Tier-2 aggregate as ``healthy``, ``down``, or ``invalid``.
 
-    Schema v2 publishes ``ok`` plus ``overall_state``. Exactly one validated
-    predecessor is accepted during producer-first rolling deploys; unknown
-    versions, contradictory fields, and opaque bodies are invalid public
-    contracts rather than recoverable aggregate-down observations.
+    Schema v2/v3 publish ``ok`` plus ``overall_state`` (v3 adds
+    ``degraded_reasons``, an additive field this classifier does not read).
+    Both are accepted during producer-first rolling deploys, since a probe
+    that rejected the version it has not been redeployed for would fail closed
+    on every host mid-deploy; unknown versions, contradictory fields, and
+    opaque bodies remain invalid public contracts rather than recoverable
+    aggregate-down observations.
     """
     if not isinstance(payload, dict) or not payload:
         return "invalid"
     schema_version = payload.get("schema_version")
-    if schema_version == 2:
+    if schema_version in SUPPORTED_STATUS_SCHEMAS:
         state = payload.get("overall_state")
         if type(payload.get("ok")) is not bool or not isinstance(state, str):
             return "invalid"
@@ -509,10 +536,28 @@ def classify_probes(ping: dict, status: dict) -> dict:
     if not (200 <= status_code < 300):
         return {"ok": 0, "detail": "status_http_%d" % status_code}
 
-    aggregate = _classify_status_payload(status.get("payload", {}))
+    payload = status.get("payload") or {}
+    # Caddy's never-502 floor rewrites healthd 5xx and dial-refused into
+    # HTTP 200 {"reachable":false,"observer":"caddy"}. Ping stays Caddy-static
+    # 200, so this used to land as aggregate_invalid and page P1 during every
+    # healthd restart (2026-08-29 23:05Z, page 1b0b049c).
+    if (
+        isinstance(payload, dict)
+        and payload.get("observer") == "caddy"
+        and payload.get("reachable") is False
+    ):
+        return {"ok": 0, "detail": "status_unreachable:caddy"}
+
+    aggregate = _classify_status_payload(payload)
     if aggregate == "down":
         return {"ok": 0, "detail": "aggregate_down"}
     if aggregate == "degraded":
+        # R-510: name the dependency behind the degrade so a dead broker, a
+        # newsfeed flap and a 2FA lock stop producing the identical verdict.
+        reasons = payload.get("degraded_reasons")
+        if isinstance(reasons, list) and reasons:
+            joined = ",".join(str(r) for r in reasons[:4])
+            return {"ok": 1, "detail": f"edge_ok:aggregate_degraded({joined})"}
         return {"ok": 1, "detail": "edge_ok:aggregate_degraded"}
     if aggregate != "healthy":
         return {"ok": 0, "detail": "aggregate_invalid"}
@@ -638,9 +683,18 @@ def main() -> int:
     if outcome["write_errors"]:
         sys.stderr.write("[health_probe] probe ledger degraded: %s\n" % "; ".join(outcome["write_errors"]))
     sys.stdout.write(json.dumps({"edge": outcome["edge_row"], "run": outcome["runs_row"]}) + "\n")
+    # R-627: the observed verdict outranks the ledger. A shared network fault
+    # takes out both, and the early `return 1` below used to report that case
+    # as "ledger degraded" only — never naming the endpoint that was down, and
+    # handing exit 1 to consumers keying on EXIT_UNHEALTHY. Both lines are
+    # emitted; the ledger failure only decides the code when the probe itself
+    # is otherwise healthy.
     if outcome["exit_code"] != 0:
         sys.stderr.write("[health_probe] UNHEALTHY (arming the workflow-failure email): %s\n"
                          % outcome["runs_row"]["detail"])
+        return outcome["exit_code"]
+    if any(error.startswith("latest: ") for error in outcome["write_errors"]):
+        return 1
     return outcome["exit_code"]
 
 

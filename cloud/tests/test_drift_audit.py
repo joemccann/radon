@@ -277,11 +277,12 @@ class TestCloudRootInput:
 
 
 class TestEnvKeysAreReadAsData:
-    """Root reads two keys out of the radon-owned env file; it never inherits it.
+    """Root reads two keys out of the env file; it never inherits it.
 
     systemd would merge every line of an EnvironmentFile into root's
-    environment, so an appended LD_PRELOAD or PATH line in a 0600 radon:radon
-    file would be root code execution on the next timer tick.
+    environment, so an appended LD_PRELOAD or PATH line on a path the
+    unprivileged account can replace would be root code execution on the
+    next timer tick.
     """
 
     def _env_file(self, tmp_path, body):
@@ -396,6 +397,81 @@ def test_gateway_control_helper_is_drift_audited():
     ) in da.FILE_PAIRS
 
 
+class TestRoleSkippedGatewayPlane:
+    def _gather(self, monkeypatch, role):
+        checked_files = []
+        compose_checks = []
+
+        def compare_file_pair(_live, _repo, label):
+            checked_files.append(label)
+            if label == "ib-gateway-control":
+                return {
+                    "id": "live-missing:ib-gateway-control",
+                    "detail": "/usr/local/bin/radon-ib-gateway-control",
+                }
+            return None
+
+        def check_compose(drifts):
+            compose_checks.append(True)
+            drifts.append(
+                {"id": "compose:unresolvable", "detail": "no such container"}
+            )
+
+        monkeypatch.setattr(da, "resolve_host_role", lambda environ=None: role)
+        monkeypatch.setattr(da, "_compare_file_pair", compare_file_pair)
+        monkeypatch.setattr(da, "_check_compose", check_compose)
+        monkeypatch.setattr(da, "_check_units", lambda drifts, known: None)
+        monkeypatch.setattr(da, "_check_sudoers", lambda drifts, known: None)
+        monkeypatch.setattr(da, "_check_env_invariants", lambda drifts: None)
+        monkeypatch.setattr(da, "_read_repo", lambda relative: "")
+        result = da.gather()
+        return result, checked_files, compose_checks
+
+    def test_app_role_marks_gateway_file_and_compose_as_role_skipped(
+        self, monkeypatch
+    ):
+        (drifts, allowed, known), checked_files, compose_checks = self._gather(
+            monkeypatch, "app"
+        )
+
+        assert drifts == []
+        assert allowed == {}
+        assert checked_files.count("ib-gateway-control") == 0
+        assert compose_checks == []
+        assert known == [
+            "role-skipped:ib-gateway-control",
+            "role-skipped:radon-docker-gw",
+            "role-skipped:ib-gateway-compose",
+            "role-skipped:compose",
+        ]
+
+    def test_broker_role_still_checks_gateway_file_and_compose(self, monkeypatch):
+        (drifts, _allowed, known), checked_files, compose_checks = self._gather(
+            monkeypatch, "broker"
+        )
+
+        assert [drift["id"] for drift in drifts] == [
+            "live-missing:ib-gateway-control",
+            "compose:unresolvable",
+        ]
+        assert checked_files.count("ib-gateway-control") == 1
+        assert compose_checks == [True]
+        assert known == []
+
+    def test_combined_role_still_checks_gateway_file_and_compose(self, monkeypatch):
+        (drifts, _allowed, known), checked_files, compose_checks = self._gather(
+            monkeypatch, "combined"
+        )
+
+        assert [drift["id"] for drift in drifts] == [
+            "live-missing:ib-gateway-control",
+            "compose:unresolvable",
+        ]
+        assert checked_files.count("ib-gateway-control") == 1
+        assert compose_checks == [True]
+        assert known == []
+
+
 class TestSummary:
     def test_error_summary_is_compact_and_capped(self):
         drifts = [
@@ -446,3 +522,93 @@ def test_clean_audit_fails_when_health_result_cannot_publish(monkeypatch):
         da, "write_service_health_with_retry", lambda *_args: (_ for _ in ()).throw(TimeoutError("offline"))
     )
     assert da.main() == 1
+
+
+class TestRoleSkippedUnits:
+    """REL-169 (R-498): refresh strips the broker/app-only units by role, so
+    their absence on that role is the intended state, not drift."""
+
+    def _stage(self, tmp_path, monkeypatch, *, install_remote: bool):
+        services = tmp_path / "services"
+        live = tmp_path / "systemd"
+        services.mkdir()
+        live.mkdir()
+        api = "[Service]\nExecStart=/bin/true\n"
+        (services / "radon-api.service").write_text(api)
+        (live / "radon-api.service").write_text(api)
+        remote = "[Service]\nExecStart=/usr/bin/python3 -m scripts.ib_gateway_remote.serve\n"
+        (services / "radon-ib-gateway-remote.service").write_text(remote)
+        if install_remote:
+            (live / "radon-ib-gateway-remote.service").write_text(remote)
+        monkeypatch.setattr(da, "REPO", tmp_path)
+        monkeypatch.setattr(da, "SYSTEMD_DIR", live)
+
+    def test_app_role_does_not_report_remote_unit_missing(self, tmp_path, monkeypatch):
+        self._stage(tmp_path, monkeypatch, install_remote=False)
+        monkeypatch.setattr(da, "resolve_host_role", lambda environ=None: "app")
+        drifts, known = [], []
+        da._check_units(drifts, known)
+        assert [d["id"] for d in drifts] == []
+        assert "role-skipped:radon-ib-gateway-remote.service" in known
+
+    def test_combined_role_still_reports_remote_unit_missing(self, tmp_path, monkeypatch):
+        self._stage(tmp_path, monkeypatch, install_remote=False)
+        monkeypatch.setattr(da, "resolve_host_role", lambda environ=None: "combined")
+        drifts, known = [], []
+        da._check_units(drifts, known)
+        assert [d["id"] for d in drifts] == ["not-installed:radon-ib-gateway-remote.service"]
+
+    def test_app_role_still_audits_the_unit_when_it_is_installed(self, tmp_path, monkeypatch):
+        self._stage(tmp_path, monkeypatch, install_remote=True)
+        (tmp_path / "systemd" / "radon-ib-gateway-remote.service").write_text(
+            "[Service]\nExecStart=/bin/false\n"
+        )
+        monkeypatch.setattr(da, "resolve_host_role", lambda environ=None: "app")
+        drifts, known = [], []
+        da._check_units(drifts, known)
+        assert [d["id"] for d in drifts] == ["unit-mismatch:radon-ib-gateway-remote.service"]
+
+    def test_role_resolves_env_then_canonical_then_legacy(self, tmp_path, monkeypatch):
+        canonical = tmp_path / "etc-radon-env"
+        legacy = tmp_path / "legacy.env"
+        monkeypatch.setattr(da, "CANONICAL_ENV_FILE", canonical)
+        assert da.resolve_host_role({"RADON_HOST_ROLE": "app"}) == "app"
+        assert da.resolve_host_role({}) == "combined"
+        legacy.write_text("RADON_HOST_ROLE=broker\n")
+        assert da.resolve_host_role({"RADON_ENV_FILE": str(legacy)}) == "broker"
+        canonical.write_text("RADON_HOST_ROLE='app'\n")
+        assert da.resolve_host_role({"RADON_ENV_FILE": str(legacy)}) == "app"
+        assert da.resolve_host_role({"RADON_HOST_ROLE": "garbage"}) == "combined"
+
+
+class TestASuppressingRoleNeedsARootOwnedSource:
+    """R-604 (P1): `resolve_host_role` falls back to `RADON_ENV_FILE`, which
+    the drift-audit unit points at `/home/radon/radon-cloud/.env` — a file
+    `load_env_keys`' own docstring calls attacker-influenced from root's point
+    of view. That value selects `app`, which SKIPS `ib-gateway-control`, the
+    compose check and five units. A role that suppresses a check may come only
+    from the process environment or the root-owned canonical file."""
+
+    def test_the_compat_file_cannot_select_a_suppressing_role(self, tmp_path, monkeypatch):
+        canonical = tmp_path / "etc-radon-env"
+        legacy = tmp_path / "legacy.env"
+        monkeypatch.setattr(da, "CANONICAL_ENV_FILE", canonical)
+        legacy.write_text("RADON_HOST_ROLE=app\n")
+        assert da.resolve_host_role({"RADON_ENV_FILE": str(legacy)}) == "combined"
+
+    def test_the_compat_file_may_still_select_a_non_suppressing_role(self, tmp_path, monkeypatch):
+        canonical = tmp_path / "etc-radon-env"
+        legacy = tmp_path / "legacy.env"
+        monkeypatch.setattr(da, "CANONICAL_ENV_FILE", canonical)
+        legacy.write_text("RADON_HOST_ROLE=broker\n")
+        assert da.resolve_host_role({"RADON_ENV_FILE": str(legacy)}) == "broker"
+
+    def test_the_canonical_root_owned_file_may_select_app(self, tmp_path, monkeypatch):
+        canonical = tmp_path / "etc-radon-env"
+        monkeypatch.setattr(da, "CANONICAL_ENV_FILE", canonical)
+        canonical.write_text("RADON_HOST_ROLE='app'\n")
+        assert da.resolve_host_role({}) == "app"
+
+    def test_the_process_environment_may_select_app(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(da, "CANONICAL_ENV_FILE", tmp_path / "missing")
+        assert da.resolve_host_role({"RADON_HOST_ROLE": "app"}) == "app"

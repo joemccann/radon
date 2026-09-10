@@ -21,7 +21,7 @@ from utils import ib_2fa_lock
 @pytest.fixture(autouse=True)
 def _redirect_lock_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Every test gets its own lock file so the production
-    /var/lib/radon/ib-2fa-push-lock.json is never touched."""
+    /var/lib/radon/ib-lease/ib-2fa-push-lock.json is never touched."""
     path = tmp_path / "ib-2fa-push-lock.json"
     monkeypatch.setenv("IB_2FA_LOCK_PATH", str(path))
     # The orphan-confirmation globals and the R-210 inter-probe sleep are reset

@@ -1,0 +1,13 @@
+[Unit]
+Description=Radon model catalog - daily 03:10 UTC LLM provider frontier model list refresh
+
+[Timer]
+# Free overnight slot between radon-vixts (02:45) and radon-db-retention
+# (Sun 03:20). Provider model lists change on release cadence, not market
+# cadence, so any daily slot works; this one collides with nothing.
+OnCalendar=*-*-* 03:10:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

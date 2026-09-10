@@ -47,7 +47,7 @@ export interface OptionsExposurePayload {
   source_time: string;
   fetched_at: string;
   frequency: OptionsExposureFrequency;
-  spot: number;
+  spot: number | null;
   strikes: number[];
   expirations: OptionsExposureExpiration[];
   cells: OptionsExposureCells;
@@ -170,11 +170,11 @@ export function aggregateOptionsExposure(
 /** Return the nearest strike plus N strikes on either side, highest first. */
 export function selectStrikeWindow(
   rows: OptionsExposureRow[],
-  spot: number,
+  spot: number | null,
   strikeWindow: OptionsExposureStrikeWindow,
 ): OptionsExposureRow[] {
   const ascending = [...rows].sort((a, b) => a.strike - b.strike);
-  if (strikeWindow === "all") return ascending.reverse();
+  if (strikeWindow === "all" || spot === null) return ascending.reverse();
   if (ascending.length === 0) return [];
 
   let nearestIndex = 0;
@@ -189,8 +189,8 @@ export function selectStrikeWindow(
     .reverse();
 }
 
-export function nearestStrike(strikes: number[], spot: number): number | null {
-  if (strikes.length === 0) return null;
+export function nearestStrike(strikes: number[], spot: number | null): number | null {
+  if (strikes.length === 0 || spot === null) return null;
   return strikes.reduce((nearest, strike) => (
     Math.abs(strike - spot) < Math.abs(nearest - spot) ? strike : nearest
   ));
@@ -221,8 +221,9 @@ export function isOptionsExposurePayload(value: unknown): value is OptionsExposu
     && typeof payload.fetched_at === "string"
     && Number.isFinite(Date.parse(payload.fetched_at))
     && (payload.frequency === "eod" || payload.frequency === "intraday")
-    && finite(payload.spot)
-    && payload.spot > 0
+    && (payload.spot === null
+      ? payload.complete === false
+      : finite(payload.spot) && payload.spot > 0)
     && Array.isArray(payload.strikes)
     && payload.strikes.every(finite)
     && Array.isArray(payload.expirations)

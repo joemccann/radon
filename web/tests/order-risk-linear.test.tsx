@@ -202,6 +202,7 @@ describe("useOrderRisk — linear branch (stock)", () => {
     // Proceeds = 100 × 2.86 = 286; basis = 443; realised P&L = 286 - 443 = -157
     expect(result.current!.summary.totalCost).toBeCloseTo(286, 0);
     expect(result.current!.summary.estimatedPnl).toBeCloseTo(-157, 0);
+    expect(result.current!.summary.estimatedPnlPct).toBeCloseTo((-157 / 443) * 100, 6);
     expect(result.current!.okToSubmit).toBe(true);
   });
 
@@ -286,6 +287,7 @@ describe("useOrderRisk — linear branch (stock)", () => {
     expect(result.current!.summary.totalCost).toBe(5_000);
     expect(result.current!.summary.totalLabel).toMatch(/Cost to Cover/);
     expect(result.current!.summary.estimatedPnl).toBe(1_000);
+    expect(result.current!.summary.estimatedPnlPct).toBeCloseTo((1_000 / 6_000) * 100, 6);
   });
 });
 
@@ -391,5 +393,59 @@ describe("useOrderRisk — backwards compatibility (option without type field)",
     const { result } = renderHook(() => useOrderRisk(input, emptyPortfolio));
     // Naked short call → UNBOUNDED
     expect(result.current!.summary.maxLossUnbounded).toBe(true);
+  });
+});
+
+/**
+ * T-345: a close-out is a trade against a position the ticket cannot see when
+ * coverage is `no-portfolio`. The option close-out refused to arm under that
+ * state since 2026-08-13; the stock/futures close-out kept the original
+ * unconditional `okToSubmit: true` (gated only on finiteness since R-322) and
+ * armed Transmit behind a "Coverage indeterminate: portfolio not in scope"
+ * skeleton. Both close-out paths now fail closed on unresolved coverage
+ * (Gate 3 direction), and each contract is pinned separately so loosening
+ * one reds exactly one case.
+ */
+describe("useOrderRisk — close-out coverage gate (T-345)", () => {
+  const STOCK_CLOSE = {
+    type: "linear" as const,
+    ticker: "RR",
+    instrument: "stock" as const,
+    action: "SELL" as const,
+    quantity: 100,
+    limitPrice: 2.86,
+    multiplier: 1,
+    heldQuantity: 10_000,
+    description: "SELL 100 RR @ $2.86 (close)",
+    closeOut: { entryCostDollars: 443 },
+  };
+
+  const OPTION_CLOSE = {
+    ticker: "RR",
+    chainLegs: [
+      { action: "SELL" as const, right: "C" as const, strike: 100, expiry: "2026-12-18", quantity: 5 },
+    ],
+    netPremium: -5,
+    totalCost: 2_500,
+    description: "SELL 5x RR 100C @ $5.00 (close)",
+    closeOut: { entryCostDollars: 2_500 },
+  };
+
+  it("stock close-out under no-portfolio coverage refuses to arm submit", () => {
+    const { result } = renderHook(() => useOrderRisk(STOCK_CLOSE, null));
+    expect(result.current!.coverageStatus).toBe("no-portfolio");
+    expect(result.current!.okToSubmit).toBe(false);
+  });
+
+  it("stock close-out under resolved coverage still arms submit", () => {
+    const { result } = renderHook(() => useOrderRisk(STOCK_CLOSE, emptyPortfolio));
+    expect(result.current!.coverageStatus).toBe("resolved");
+    expect(result.current!.okToSubmit).toBe(true);
+  });
+
+  it("option close-out under no-portfolio coverage refuses to arm submit", () => {
+    const { result } = renderHook(() => useOrderRisk(OPTION_CLOSE, null));
+    expect(result.current!.coverageStatus).toBe("no-portfolio");
+    expect(result.current!.okToSubmit).toBe(false);
   });
 });

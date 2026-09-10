@@ -20,6 +20,14 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+# Same pattern as scripts/watchdog/__main__.py: systemd
+# `python -m scripts.incident_watchdog --once` from the repo root does not
+# put scripts/ on sys.path, so `from db.service_cycle` raises
+# ModuleNotFoundError (page 05511a4f, 2026-08-28 16:05Z).
+_SCRIPTS_DIR = Path(__file__).resolve().parent.parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
 from .classify import classify
 from .probes import gather_findings
 from .store import record_cycle
@@ -56,6 +64,9 @@ def has_open_p1(summary: dict) -> bool:
     return any(i["severity"] == "P1" for i in summary["incidents"])
 
 
+SERVICE_NAME = "incident-watchdog"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="incident_watchdog")
     parser.add_argument("--once", action="store_true")
@@ -69,7 +80,16 @@ def main(argv: list[str] | None = None) -> int:
 
     directory = Path(args.dir)
     if args.once or args.interval is None:
-        summary = run_cycle(directory)
+        # R-325: the timer fires every 5 min around the clock and the job wrote
+        # NO service_health row, so a wedged prober was in neither catalog and
+        # nothing noticed it had stopped probing.
+        from db.service_cycle import service_cycle  # noqa: PLC0415 — optional dep
+
+        with service_cycle(SERVICE_NAME, market_hours_class="continuous"):
+            summary = run_cycle(directory)
+        # An OPEN P1 is a finding, not a watchdog failure: exiting 2 inside the
+        # cycle would record the prober itself as errored every time it did its
+        # job. The heartbeat closes `ok` above, then the finding sets the code.
         return 2 if has_open_p1(summary) else 0
 
     cycles = 0

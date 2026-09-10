@@ -6,7 +6,7 @@
  * Spec: docs/indicators/skew2d.md.
  */
 import React from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
@@ -149,6 +149,7 @@ beforeAll(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   useSkew2dMock.mockReset();
 });
 
@@ -237,5 +238,44 @@ describe("Skew2dPanel", () => {
     for (const p of Array.from(container.querySelectorAll("path"))) {
       expect(p.getAttribute("d") ?? "").not.toMatch(/NaN/i);
     }
+  });
+});
+
+describe("Skew2dPanel — freshness rail", () => {
+  it("shows the final session date and counts down to the 21:50 UTC slot", async () => {
+    // Import before the clock is faked so module evaluation stays on real timers.
+    const { Skew2dPanel } = await import("@/components/Skew2dPanel");
+    // 20:00 UTC on a Wednesday: 1h50m short of radon-skew2d.timer's 21:50 UTC
+    // slot. Its neighbours (credit-spread 21:45, iei-hyg 21:55) and the
+    // five-minute skew sweep all land on a different number from here.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-26T20:00:00Z"));
+    const series = buildSeries(40);
+    const data: Skew2dData = {
+      scan_time: "2026-08-25T21:50:00Z",
+      source: "skew_history",
+      count: series.length,
+      current: {
+        date: "2026-08-25",
+        ratio: 1.24,
+        change: 0.08,
+        put_iv: 0.15,
+        call_iv: 0.12,
+        expiry: "2026-09-18",
+        dte: 24,
+      },
+      stats: { high: 0.27, low: -0.21, avg: 0, stddev: 0.03 },
+      series,
+    };
+    useSkew2dMock.mockReturnValue(hookState({ data, lastSync: data.scan_time }));
+    render(<Skew2dPanel />);
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+    const rail = screen.getByTestId("skew2d-freshness-rail");
+    expect(rail).toBeTruthy();
+    expect(rail.textContent).toContain("2026-08-25");
+    expect(screen.getByTestId("skew2d-freshness-rail-countdown").textContent).toBe("1h 50m");
+    expect(rail.textContent).toContain("Next sample");
   });
 });

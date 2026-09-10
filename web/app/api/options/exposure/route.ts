@@ -6,6 +6,8 @@ import {
   optionsErrorResponse,
   optionsJson,
 } from "../_shared";
+import { buildDemoOptionsExposure } from "@/lib/demo/fixtures/options";
+import type { OptionsExposureFrequency } from "@/lib/optionsExposure";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -13,8 +15,13 @@ export const runtime = "nodejs";
 const SYMBOL_RE = /^[A-Z][A-Z0-9.-]{0,9}$/;
 const FREQUENCIES = new Set(["eod", "intraday"]);
 
+export const radonCapability = "read";
+
 export async function GET(request: Request): Promise<Response> {
-  const access = await requireRouteAccess(undefined, { rate: { key: "options/exposure:route", limit: 20, windowMs: 60_000 } });
+  const access = await requireRouteAccess(undefined, {
+    rate: { key: "options/exposure:route", limit: 20, windowMs: 60_000 },
+    durableRateTier: "A",
+  });
   if (!access.ok) return access.response;
   const { searchParams } = new URL(request.url);
   const rawSymbol = searchParams.get("symbol");
@@ -29,6 +36,12 @@ export async function GET(request: Request): Promise<Response> {
   }
   if (!FREQUENCIES.has(frequency)) {
     return optionsJson({ error: "Invalid frequency", code: "BAD_REQUEST" }, 400);
+  }
+
+  if (access.principal.kind === "demo") {
+    return optionsJson({
+      ...buildDemoOptionsExposure(symbol, frequency as OptionsExposureFrequency),
+    });
   }
 
   try {

@@ -1,7 +1,9 @@
 import { clusterPages } from "./cluster-pages";
+import { developerRecipes, formatAgentPrompt } from "./agent-prompts";
 import {
   agentPages,
   pageToMarkdown,
+  recipesPage,
 } from "./developer-pages";
 import {
   DEMO_URL,
@@ -132,6 +134,20 @@ for (const page of clusterPages) {
 for (const page of agentPages) {
   pages.set(`/${page.slug}`, pageToMarkdown(page));
 }
+
+pages.set(
+  `/${recipesPage.slug}`,
+  joinBlocks([
+    pageToMarkdown(recipesPage).trim(),
+    "## Recipes",
+    developerRecipes
+      .map(
+        (recipe) =>
+          `### ${recipe.title}\n\n${formatAgentPrompt(recipe.prompt).trim()}`,
+      )
+      .join("\n\n"),
+  ]),
+);
 
 export const MARKDOWN_PATHS = [...pages.keys()].sort();
 

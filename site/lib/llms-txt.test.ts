@@ -28,6 +28,8 @@ describe("llms.txt agent index", () => {
     expect(llmsTxt).toContain("Radon Terminal auth docs");
     expect(llmsTxt).toContain("Radon Terminal MCP server");
     expect(llmsTxt).toContain("Radon Terminal webhooks");
+    expect(llmsTxt).toContain(`${siteUrl}/developers/recipes`);
+    expect(llmsTxt).toContain("Radon Terminal developer recipes");
   });
 
   it("keeps H2 sections as file lists", () => {

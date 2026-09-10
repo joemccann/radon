@@ -18,6 +18,16 @@ export type ErrorCode =
   // A stored row exists but will not parse. The database is fine; the
   // persisted payload is not, so retrying re-reads the same bad bytes.
   | "SNAPSHOT_CORRUPT"
+  // First-run setup: the whole API surface is parked until /setup finishes.
+  | "SETUP_MODE"
+  | "SETUP_TOKEN_INVALID"
+  | "SETUP_ALREADY_COMPLETE"
+  | "SETUP_REPO_ROOT_INVALID"
+  | "AUTH_MISCONFIGURED"
+  // REL-245: a demo principal resolved against a DB not marked demo; the
+  // serving path refuses rather than expose the operator's live rows.
+  | "DEMO_DB_ISOLATION"
+  | "BACKEND_UNAVAILABLE"
   | "INTERNAL_ERROR";
 
 export type CacheState = "HIT" | "MISS" | "STALE" | "BYPASS";

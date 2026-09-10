@@ -4,7 +4,7 @@
  * TRIN — NYSE Arms Index regime tab (60-minute bars, MA(10), low zone).
  */
 import React from "react";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
@@ -68,6 +68,7 @@ import TrinPanel from "../components/TrinPanel";
 afterEach(() => {
   cleanup();
   mockUseTrin.mockReset();
+  vi.useRealTimers();
 });
 
 function buildHourly(n: number): TrinHourlyBar[] {
@@ -164,5 +165,27 @@ describe("TrinPanel", () => {
     mockUseTrin.mockReturnValue(hookState({ data: buildData() }));
     const { container } = render(<TrinPanel />);
     expect(container.textContent ?? "").not.toMatch(/refresh(es)? (daily|hourly|every)|updated (daily|hourly|every)/i);
+  });
+});
+
+describe("TrinPanel — freshness rail", () => {
+  it("shows the session date and counts down to the next :02-offset sampler slot", () => {
+    // 18:30:45 UTC on a Wednesday: 1m15s short of radon-trin.timer's 18:32
+    // slot. The :00-aligned breadth sampler would read 4m 15s and the :15
+    // data_refresh sweep 14m 15s, so the number pins this constant.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-26T18:30:45Z"));
+    const data = buildData({ scan_time: "2026-08-26T18:27:00Z" });
+    data.current = { ...data.current!, session_date: "2026-08-26" };
+    mockUseTrin.mockReturnValue(hookState({ data }));
+    render(<TrinPanel />);
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+    const rail = screen.getByTestId("trin-freshness-rail");
+    expect(rail).toBeTruthy();
+    expect(rail.textContent).toContain("2026-08-26");
+    expect(screen.getByTestId("trin-freshness-rail-countdown").textContent).toBe("1m 15s");
+    expect(rail.textContent).toContain("Next sample");
   });
 });

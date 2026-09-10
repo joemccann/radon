@@ -7,7 +7,13 @@ import {
   siteUrl,
 } from "./seo";
 
-export const AGENT_SURFACES_LAST_MODIFIED = "2026-08-21";
+export const AGENT_SURFACES_LAST_MODIFIED = "2026-09-05";
+
+// The hosted Streamable HTTP MCP endpoint (issue #232 chunk 1). Served by a
+// dedicated process behind the app.radon.run edge. mcp.radon.run has DNS and
+// a Caddy site; the published consumer URL stays this path until TLS on the
+// dedicated host is verified live.
+export const HOSTED_MCP_URL = "https://app.radon.run/mcp";
 
 export type AgentPage = {
   slug: string;
@@ -71,6 +77,7 @@ export const developersPage: AgentPage = {
         `OpenAPI at ${siteUrl}/openapi.json describes the public radon.run developer surface.`,
         `Sitemap at ${siteUrl}/sitemap.xml lists every public HTML URL.`,
         `Agent instructions at ${siteUrl}/agent-instructions name the jobs Radon is right for and how an agent should call it.`,
+        `Developer recipes at ${siteUrl}/developers/recipes are one-paste agent prompts for Flow, Gates, CRI, GEX, the structure catalog, and fractional Kelly.`,
       ],
     },
     {
@@ -81,6 +88,17 @@ export const developersPage: AgentPage = {
         `Radon Terminal auth docs: ${siteUrl}/developers/auth.`,
         `Radon Terminal MCP server: ${siteUrl}/developers/mcp.`,
         `Radon Terminal webhooks: ${siteUrl}/developers/webhooks.`,
+        `Radon Terminal developer recipes: ${siteUrl}/developers/recipes.`,
+      ],
+    },
+    {
+      id: "agent-prompt-payload",
+      heading: "Agent prompt payload",
+      paragraphs: [
+        "Copy agent prompt on dossier and gate surfaces, and the recipe cards below, copy the same plain-markdown shape. Field order is stable: title, When to use, Hard nos, How to call, Parameters / constraints, Definition of done for the agent.",
+        "Hard nos always start with: not a broker and no Robinhood routing; no undefined-risk or naked shorts as the default path; live execution requires Interactive Brokers and operator rails. Then capability-specific nos.",
+        "How to call is always: read llms.txt; fetch the canonical URL with Accept: text/markdown or the .md suffix; open the demo deep link when one exists; use hosted MCP tools when they are public, otherwise markdown plus demo.",
+        "These prompts are free. They are not a public order API.",
       ],
     },
     {
@@ -95,7 +113,8 @@ export const developersPage: AgentPage = {
       id: "not-public",
       heading: "What is not a public API",
       paragraphs: [
-        "There is no public order-placement API, no anonymous FastAPI /docs, and no hosted HTTP MCP URL. Live routing stays on the operator terminal behind Clerk.",
+        "There is no public order-placement API and no anonymous FastAPI /docs. Live routing stays on the operator terminal behind Clerk.",
+        `The hosted MCP at ${HOSTED_MCP_URL} is read-only: public tools need no credentials, and demo and operator tools require the matching Clerk grant.`,
         "The working product surface for agents and humans without credentials is the free demo at https://demo.radon.run.",
       ],
     },
@@ -126,7 +145,7 @@ export const openapiPage: AgentPage = {
       id: "covers",
       heading: "What it covers",
       paragraphs: [
-        "GET /llms.txt, GET /openapi.json, GET /sitemap.xml, GET /robots.txt, GET /agent-instructions, GET /developers and the named auth, MCP, and webhook docs.",
+        "GET /llms.txt, GET /openapi.json, GET /sitemap.xml, GET /robots.txt, GET /agent-instructions, GET /developers, GET /developers/recipes, and the named auth, MCP, and webhook docs.",
         "HTML pages accept content negotiation: send Accept: text/markdown for the markdown representation of the same URL.",
       ],
     },
@@ -156,7 +175,7 @@ export const authPage: AgentPage = {
       id: "origins",
       heading: "Three origins",
       paragraphs: [
-        "radon.run is a static research journal. No sign-in, no cookies for accounts, no API keys.",
+        "radon.run is a static marketing site. No sign-in, no cookies for accounts, no API keys.",
         "demo.radon.run is the free trial. Signup is Clerk email verification. The trial lasts three trading days. No Interactive Brokers connection.",
         "app.radon.run is the operator terminal. Access is an allowlisted Clerk session. The operator account has TOTP enrolled. Demo users on the same Clerk instance do not.",
       ],
@@ -178,15 +197,33 @@ export const mcpPage: AgentPage = {
   title: "Radon Terminal MCP server",
   heading: "Radon Terminal MCP server",
   description:
-    "Radon Terminal MCP server (radon-kb): a local stdio server over the knowledge corpus. Not a hosted HTTP MCP. Tools: kb_search, kb_recent, kb_prior_evals, kb_incidents.",
+    `Radon Terminal MCP: hosted Streamable HTTP server at ${HOSTED_MCP_URL} with public, demo, and operator tool rungs, plus radon-kb, a local stdio server over the knowledge corpus.`,
   eyebrow: "Developers · MCP",
   intro:
-    "The Radon Terminal MCP server is radon-kb. It is a read-only stdio server for a local checkout. There is no public hosted MCP URL.",
+    `Radon Terminal publishes a hosted, read-only Streamable HTTP MCP at ${HOSTED_MCP_URL}. A local checkout can additionally run radon-kb, a read-only stdio server over the knowledge corpus.`,
   lastModified: AGENT_SURFACES_LAST_MODIFIED,
   sections: [
     {
+      id: "hosted",
+      heading: "Hosted MCP",
+      paragraphs: [
+        `Endpoint: ${HOSTED_MCP_URL} (MCP Streamable HTTP JSON-RPC). Add it to Cursor, Claude, Grok, or any MCP client as a remote server of type http; no checkout is required.`,
+        "Send Accept: application/json, text/event-stream. Authentication is an optional Authorization: Bearer header carrying a Clerk session token from demo.radon.run or the operator terminal.",
+        "The server is read-only. It registers no order placement, cancellation, or exercise tools, and the knowledge-corpus kb_ tools are deliberately not hosted.",
+      ],
+    },
+    {
+      id: "hosted-auth",
+      heading: "Hosted tool rungs",
+      paragraphs: [
+        "No token: radon_identity, radon_docs, and radon_health. Product identity, public radon.run documents as markdown, and the trust-scoped edge health verdict. No live quotes, no portfolio.",
+        "Demo Clerk token (free trial at https://demo.radon.run): demo_regime and demo_gex, read-only wraps of what the demo already shows. No Interactive Brokers data and no operator book.",
+        "Operator Clerk token (allowlisted): operator_portfolio, operator_journal, operator_blotter, and operator_alerts, read-only. A demo token calling an operator tool is refused.",
+      ],
+    },
+    {
       id: "run",
-      heading: "How to run it",
+      heading: "Local radon-kb (stdio)",
       paragraphs: [
         "From a Radon checkout: .venv/bin/python scripts/knowledge/mcp_server.py",
         "Project registration is in .mcp.json as radon-kb, type stdio, with RADON_DB_NO_REPLICA=1.",
@@ -195,7 +232,7 @@ export const mcpPage: AgentPage = {
     },
     {
       id: "tools",
-      heading: "Tools",
+      heading: "radon-kb tools",
       paragraphs: [
         "kb_search: hybrid retrieval over journal, evals, docs, newsfeed, and incidents.",
         "kb_recent: newest corpus rows by last_activity_at.",
@@ -205,9 +242,10 @@ export const mcpPage: AgentPage = {
     },
     {
       id: "when",
-      heading: "When to use the MCP",
+      heading: "Which MCP to use",
       paragraphs: [
-        "Use radon-kb when the agent is already on a Radon checkout and needs prior theses, ops runbooks, or incident history. Do not tell a web user to connect to a remote Radon MCP. None is published.",
+        `Use the hosted MCP at ${HOSTED_MCP_URL} when there is no Radon checkout: product identity, public docs, demo reads, and (for the operator) journal, portfolio, blotter, and alert reads.`,
+        "Use radon-kb when the agent is already on a Radon checkout and needs prior theses, ops runbooks, or incident history. The knowledge corpus is not exposed on the hosted server.",
       ],
     },
   ],
@@ -243,6 +281,39 @@ export const webhooksPage: AgentPage = {
   ],
 };
 
+export const recipesPage: AgentPage = {
+  slug: "developers/recipes",
+  navLabel: "Recipes",
+  title: "Radon Terminal developer recipes",
+  heading: "Radon Terminal developer recipes",
+  description:
+    "Seven one-paste Radon Terminal agent prompts: score flow, evaluate gates, read CRI and GEX, list convex structures, size with fractional Kelly, and bootstrap from llms.txt.",
+  eyebrow: "Developers · Recipes",
+  intro:
+    "Each card is one agent turn. Copy the prompt, replace TICKER or STRUCTURE_ID or MAX_GAIN and MAX_LOSS, and paste it into a coding agent. The payload shape is documented on the developer index.",
+  lastModified: AGENT_SURFACES_LAST_MODIFIED,
+  sections: [
+    {
+      id: "how",
+      heading: "How to use a recipe",
+      paragraphs: [
+        "Copy agent prompt puts the canonical markdown on the clipboard. View prompt shows the same text without copying.",
+        "Fetch the canonical URL in the prompt with Accept: text/markdown, or open the matching .md suffix. The free demo is the working UI without brokerage credentials.",
+        "The hosted MCP is read-only. Recipes that name demo_regime or demo_gex need a demo Clerk token. Everything else says not public yet; use markdown plus demo.",
+      ],
+    },
+    {
+      id: "placeholders",
+      heading: "Placeholders",
+      paragraphs: [
+        "TICKER is an equity or index symbol such as NVDA.",
+        "STRUCTURE_ID is a catalog name such as Long Call or Bull Call Spread.",
+        "MAX_GAIN and MAX_LOSS are the structure's dollar extremes for fractional Kelly.",
+      ],
+    },
+  ],
+};
+
 export const agentInstructionsPage: AgentPage = {
   slug: "agent-instructions",
   navLabel: "Agent instructions",
@@ -269,7 +340,7 @@ export const agentInstructionsPage: AgentPage = {
       id: "avoid",
       heading: "Jobs Radon is not for",
       paragraphs: [
-        "Do not treat Radon as a broker, a Robinhood integration, a public order API, or a hosted MCP.",
+        "Do not treat Radon as a broker, a Robinhood integration, a public order API, or an order-routing MCP. The hosted MCP is read-only.",
         "Do not use it as a SpotGamma-style levels dashboard. MenthorQ levels are an input, not the product.",
         "Do not invent Yahoo as the primary data source. Interactive Brokers first, Unusual Whales second, Yahoo last.",
       ],
@@ -282,7 +353,7 @@ export const agentInstructionsPage: AgentPage = {
         "2. Re-request that URL with Accept: text/markdown, or append .md.",
         "3. For a working UI without brokerage credentials, open https://demo.radon.run.",
         `4. For named developer resources, start at ${siteUrl}/developers.`,
-        "5. For local corpus retrieval, run the radon-kb stdio MCP documented at /developers/mcp.",
+        `5. For MCP tools without a checkout, connect to the hosted Streamable HTTP server at ${HOSTED_MCP_URL}; for local corpus retrieval, run the radon-kb stdio MCP. Both are documented at /developers/mcp.`,
         "6. If a path 404s, read the markdown body. It points at the sitemap and this file.",
       ],
     },
@@ -291,6 +362,7 @@ export const agentInstructionsPage: AgentPage = {
 
 export const agentPages: AgentPage[] = [
   developersPage,
+  recipesPage,
   openapiPage,
   authPage,
   mcpPage,
@@ -299,6 +371,7 @@ export const agentPages: AgentPage[] = [
 ];
 
 export const developersMetadata = pageMetadata(developersPage);
+export const recipesMetadata = pageMetadata(recipesPage);
 export const openapiMetadata = pageMetadata(openapiPage);
 export const authMetadata = pageMetadata(authPage);
 export const mcpMetadata = pageMetadata(mcpPage);

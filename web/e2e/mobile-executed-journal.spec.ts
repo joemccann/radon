@@ -8,8 +8,14 @@
  */
 
 import { test, expect, type Page } from "@playwright/test";
+import type { CashFlowResponse } from "../lib/useCashFlows";
 
 const TODAY = "2026-05-06";
+const CASH_FLOWS_EMPTY = {
+  rows: [], count: 0, from_date: "2026-02-05",
+  summary: { deposits: 0, withdrawals: 0, dividends: 0, net: 0 },
+  last_synced_at: null,
+} satisfies CashFlowResponse;
 
 const PORTFOLIO = {
   bankroll: 100_000,
@@ -35,7 +41,7 @@ const ORDERS_WITH_FILL = {
     {
       execId: "exec-1",
       symbol: "AAPL",
-      contract: { conId: 12345, symbol: "AAPL", secType: "OPT", strike: 200, right: "C", expiry: "20260418" },
+      contract: { conId: 12345, symbol: "AAPL", secType: "OPT", strike: 200, right: "C", expiry: "20260619" },
       side: "BOT",
       quantity: 5,
       avgPrice: 3.5,
@@ -81,7 +87,9 @@ const JOURNAL = {
 };
 
 async function setupBaseMocks(page: Page) {
+  await page.clock.setFixedTime(new Date(`${TODAY}T16:00:00Z`));
   await page.unrouteAll({ behavior: "ignoreErrors" });
+  await page.route("**/api/**", (route) => route.fulfill({ status: 503, json: { error: "Unmocked test endpoint" } }));
   await page.route("**/api/portfolio**", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(PORTFOLIO) }),
   );
@@ -92,7 +100,7 @@ async function setupBaseMocks(page: Page) {
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ as_of: `${TODAY}T14:34:25Z`, summary: { realized_pnl: 0 }, closed_trades: [], open_trades: [] }) }),
   );
   await page.route("**/api/cash-flows**", (route) =>
-    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ rows: [], summary: {} }) }),
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(CASH_FLOWS_EMPTY) }),
   );
   await page.route("**/api/regime", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ score: 15, cri: { score: 15 } }) }),
@@ -101,18 +109,27 @@ async function setupBaseMocks(page: Page) {
 }
 
 test.describe("Mobile executed orders", () => {
-  test("MobileExecutedList renders a card for each fill group", async ({ page }) => {
+  test("MobileExecutedList renders a card for each fill group", async ({ page }, testInfo) => {
     await setupBaseMocks(page);
     await page.route("**/api/orders", (route) =>
       route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(ORDERS_WITH_FILL) }),
     );
     await page.goto("/orders");
 
-    await expect(page.getByTestId("mobile-executed-list")).toBeVisible();
-    const card = page.locator('[data-testid^="mobile-executed-"]').first();
+    const list = page.getByTestId("mobile-executed-list");
+    await expect(list).toBeVisible();
+    const card = list.locator('[data-testid^="mobile-executed-"]');
+    await expect(card).toHaveCount(1);
     await expect(card).toBeVisible();
     await expect(card).toContainText("AAPL");
     await expect(card).toContainText("OPEN");
+    await expect(card.getByText("5", { exact: true })).toBeVisible();
+    await expect(card.getByText("$3.50", { exact: true })).toBeVisible();
+    await expect(card.getByText("$0.50", { exact: true })).toBeVisible();
+    await expect(card).toContainText("11:00:00 AM");
+    await expect(page.getByText(/NaN/)).toHaveCount(0);
+    await card.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath("mobile-executed.png") });
   });
 
   test("desktop executed-orders table is hidden on mobile", async ({ page }) => {
@@ -129,7 +146,7 @@ test.describe("Mobile executed orders", () => {
 });
 
 test.describe("Mobile journal page", () => {
-  test("MobileJournalList renders a card per trade", async ({ page }) => {
+  test("MobileJournalList renders a card per trade", async ({ page }, testInfo) => {
     await setupBaseMocks(page);
     await page.route("**/api/orders", (route) =>
       route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ open_count: 0, executed_count: 0, open_orders: [], executed_orders: [], last_sync: `${TODAY}T14:34:25Z` }) }),
@@ -139,6 +156,13 @@ test.describe("Mobile journal page", () => {
     );
     await page.goto("/journal");
 
+    // MTD includes the May open but excludes the April close. Widen the
+    // range through the actual control before asserting the full journal.
+    await expect(page.getByTestId("journal-range-mtd")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("mobile-journal-42")).toBeVisible();
+    await expect(page.getByTestId("mobile-journal-41")).toHaveCount(0);
+    await page.getByTestId("journal-range-all").click();
+    await expect(page.getByTestId("journal-range-all")).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByTestId("mobile-journal-list")).toBeVisible();
     await expect(page.getByTestId("mobile-journal-42")).toBeVisible();
     await expect(page.getByTestId("mobile-journal-41")).toBeVisible();
@@ -148,6 +172,10 @@ test.describe("Mobile journal page", () => {
     await expect(closedCard).toContainText("CLOSED");
     await expect(closedCard).toContainText("+$380");
     await expect(closedCard).toContainText("+31.7%");
+    await page.getByRole("toolbar", { name: "Sort trades" }).getByRole("button", { name: "P&L", exact: true }).click();
+    await expect(page.getByTestId("mobile-journal-list").locator('.mobile-card-list > [data-testid]').first()).toHaveAttribute("data-testid", "mobile-journal-41");
+    await closedCard.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath("mobile-journal.png") });
   });
 
   test("desktop journal table is hidden on mobile", async ({ page }) => {
@@ -160,8 +188,9 @@ test.describe("Mobile journal page", () => {
     );
     await page.goto("/journal");
 
+    await page.getByTestId("journal-range-all").click();
     await expect(page.getByTestId("mobile-journal-list")).toBeVisible();
-    const journalTables = page.locator("table").filter({ hasText: "Realized P&L" });
+    const journalTables = page.locator("table");
     await expect(journalTables).toHaveCount(0);
   });
 });

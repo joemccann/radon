@@ -7,6 +7,7 @@ Applies under `web/`. Mirrors `web/CLAUDE.md`; prefer the Claude file if it is n
 - Next.js 16 build uses `next build --experimental-build-mode=compile`.
 - `app/error.tsx`, `app/[ticker]/not-found.tsx`, and `app/global-error.tsx` must stay pure JSX with plain `<a>` links, no `next/link`, no `useEffect`, and no `globals.css`.
 - Every GET handler reading live disk state (`data/*.json`, `data/menthorq_cache/`) must export `dynamic = "force-dynamic"`.
+- New `app/api/**/route.ts(x)` files must `export const radonCapability` (usually GET `"read"`). Pin: `web/tests/assistant-catalog-pin.test.ts`. Chat catalog is derived from that pin plus `scripts/api/assistant_catalog.py`; freshness: `web/tests/assistant-catalog-freshness.test.ts`. Next-only routes also need `web/lib/assistant/nextLoaders.ts`.
 - Every client fetch hitting those routes must use `cache: "no-store"`. Contract test: `web/tests/api-routes-no-cache-contract.test.ts`.
 - Middleware runs in Edge runtime; no `node:*` imports in `web/middleware.ts`.
 - Use `RADON_AUTHLESS_TEST=1` for Playwright.
@@ -14,7 +15,8 @@ Applies under `web/`. Mirrors `web/CLAUDE.md`; prefer the Claude file if it is n
 
 ## Brand / Theme
 
-- Follow root Radon brand rules. Use tokens, not raw hex, except when defining tokens.
+- Clear (direction A, selected 2026-09-05) supersedes the previous web visual rules. Reference `DESIGN_MEMORY.md`, `app/globals.css` tokens and `app/clear.css`; use tokens, not raw hex except at token definitions. Shared marketing/export assets retain their own scoped identity.
+- Clear uses white/evergreen, a quiet dark counterpart, Inter hierarchy, tabular financial values, 12px minimum metadata and restrained 6/8/10px radii. Navigation is horizontal on desktop and four primary destinations plus a complete menu on mobile. Preserve all financial/auth/realtime rules below.
 - Single theme source: `web/lib/ThemeContext.tsx`.
 - `ThemeBootstrap.tsx` owns pre-paint `data-theme`; do not duplicate theme state.
 - SSR theme is pinned to `dark`; do not read localStorage/matchMedia during first render.
@@ -78,5 +80,16 @@ Applies under `web/`. Mirrors `web/CLAUDE.md`; prefer the Claude file if it is n
 - Every product `<table>` uses `SortTh` + `useSort`. Structural exceptions need `data-sortable-exempt` (`chain-layout` | `matrix` | `markdown` | `chrome` | `kit-demo`). Contract: `web/tests/sortable-table-contract.test.ts`.
 - Options chain sticky header requires separate borders, sticky header backgrounds, and z-index on `thead`.
 - Column visibility persists under `localStorage` key `radon:columns:<tableId>`.
-- Dashboard uses 50/50 grid with sticky internal newsfeed rail.
+- Dashboard uses the Clear account overview and quiet risk/research rail; the complete newsfeed, scanner, catalysts and engine sections remain below it with existing visibility controls.
 - Mobile shell activates at `<=640px`; PWA service worker must bypass `/api`, `/_next/data`, and `/ws`.
+- The realtime prices socket is owned by `RealtimePricesProvider` in root `Providers`, never by the per-page `WorkspaceShell` (App Router remounts pages on navigation; a shell-owned socket reconnects and re-tickets on every route change). Shells publish subscriptions via `publishSubscriptions`; do not call `usePrices` from page-level components. `TickerSearch` connects on first focus, not on mount. Pins: `web/tests/realtime-socket-ownership-contract.test.ts`, `web/tests/realtime-prices-navigation-persistence.test.tsx`.
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

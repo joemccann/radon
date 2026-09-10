@@ -15,6 +15,7 @@ async def test_subprocess_budget_rejects_without_spawning(monkeypatch):
         "_active_subprocesses",
         subprocess_mod.MAX_CONCURRENT_SUBPROCESSES,
     )
+    monkeypatch.setattr(subprocess_mod, "SUBPROCESS_ADMISSION_WAIT_S", 0.0)
     spawned = False
 
     async def fake_spawn(*args, **kwargs):
@@ -38,6 +39,7 @@ async def test_subprocess_budget_logs_exhaustion(monkeypatch, caplog):
         "_active_subprocesses",
         subprocess_mod.MAX_CONCURRENT_SUBPROCESSES,
     )
+    monkeypatch.setattr(subprocess_mod, "SUBPROCESS_ADMISSION_WAIT_S", 0.0)
     caplog.set_level("WARNING", logger="radon.subprocess")
     result = await subprocess_mod.run_script("scanner.py", [])
     assert result.ok is False
@@ -155,8 +157,12 @@ async def test_failed_jwks_key_id_is_negative_cached(monkeypatch):
     class Client:
         def get_signing_key_from_jwt(self, token):
             nonlocal calls
+            import jwt as pyjwt
+
             calls += 1
-            raise ValueError("unknown kid")
+            # REL-235: must be a PyJWT verdict — a bare ValueError is now
+            # classified as an upstream outage and is never negative-cached.
+            raise pyjwt.exceptions.PyJWKClientError("unknown kid")
 
     monkeypatch.setattr(auth, "_get_jwks_client", lambda: Client())
     for _ in range(2):

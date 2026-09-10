@@ -1,4 +1,6 @@
 import type { ReactNode } from "react";
+import { CopyAgentPrompt } from "@/components/molecules/CopyAgentPrompt";
+import { getCapabilityPrompt } from "@/lib/agent-prompts";
 import type { RegimeModel } from "@/lib/editorial-content";
 
 // Each model carries a hand-built mini-figure (not a screenshot). Colors come
@@ -87,7 +89,13 @@ type RegimeModelCardProps = {
   model: RegimeModel;
 };
 
+const regimeCapability: Record<string, string> = {
+  CRI: "cri",
+  GEX: "gex",
+};
+
 export function RegimeModelCard({ model }: RegimeModelCardProps) {
+  const capabilityId = regimeCapability[model.code];
   return (
     <div className="flex flex-col rounded-[4px] border border-grid bg-figure-bg p-[22px]">
       <div className="mb-1 flex items-baseline justify-between gap-3">
@@ -107,6 +115,11 @@ export function RegimeModelCard({ model }: RegimeModelCardProps) {
       <div className="mt-auto border-t border-hairline-soft pt-[14px] fig-svg">
         {miniFigures[model.code]}
       </div>
+      {capabilityId ? (
+        <div className="mt-4">
+          <CopyAgentPrompt prompt={getCapabilityPrompt(capabilityId)} />
+        </div>
+      ) : null}
     </div>
   );
 }

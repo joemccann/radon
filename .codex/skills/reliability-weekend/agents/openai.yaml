@@ -1,0 +1,4 @@
+interface:
+  display_name: "Radon Reliability Weekend"
+  short_description: "Nightly reliability delta-audit and remediation"
+  default_prompt: "Use $reliability-weekend to run the reliability nightly loop's audit, remediate or deliver phase."

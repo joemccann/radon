@@ -2,6 +2,11 @@
 # Keep versions here, not as unpinned `pip install pytest ...` in the workflow
 # (T-119). pytest-xdist is the unit-job wall-clock cut; --dist loadfile keeps
 # each test file on one worker so shared-module fixtures stay isolated.
+# Dependency vulnerability scanner for the Python trees. Pinned like the
+# rest of this file so a scan result is reproducible and a new release
+# cannot change a gate's verdict mid-cycle. Run:
+#   pip-audit -r requirements.txt -r requirements-dev.txt
+pip-audit==2.10.1
 pytest==9.0.2
 pytest-asyncio==1.3.0
 pytest-cov==7.1.0

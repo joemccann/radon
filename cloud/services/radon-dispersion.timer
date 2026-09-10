@@ -1,0 +1,17 @@
+[Unit]
+Description=Radon DISPERSION Indicator - daily 22:20 UTC IB daily-bar sweep (S&P 500 seed + sector SPDRs + VIX)
+
+[Timer]
+# IB's daily bar for a session is final after the 16:00 ET close, which is
+# 20:00 UTC in EDT and 21:00 UTC in EST. 22:20 clears EST with margin and sits
+# between ivrank 22:10 (one IB request) and yield-curve 22:30 (no IB), well
+# clear of the credit-spread / iei-hyg flock at 21:45-21:55. Runs every
+# calendar day: weekend and holiday runs find no new completed session,
+# make no IB or Yahoo requests, and refresh the snapshot + heartbeat so
+# service_health stays inside the 26h window.
+OnCalendar=*-*-* 22:20:00 UTC
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

@@ -40,7 +40,13 @@ function compareCategories(a: CatalystCategory, b: CatalystCategory): number {
 /** Held rows lead their category so exposure survives the collapsed preview. */
 function compareRows(a: CategorizedCatalystRow, b: CategorizedCatalystRow): number {
   if (a.isHeld !== b.isHeld) return a.isHeld ? -1 : 1;
-  return a.days_until - b.days_until;
+  if (a.days_until !== b.days_until) return a.days_until - b.days_until;
+  const aTime = a.event_time ? Date.parse(a.event_time) : NaN;
+  const bTime = b.event_time ? Date.parse(b.event_time) : NaN;
+  if (Number.isFinite(aTime) && Number.isFinite(bTime)) return aTime - bTime;
+  if (Number.isFinite(aTime)) return -1;
+  if (Number.isFinite(bTime)) return 1;
+  return 0;
 }
 
 /**
@@ -154,6 +160,14 @@ export function catalystWhenLabel(row: CatalystRow): string {
       });
       return dateLabel ? `${dateLabel} ${time} ET` : `${time} ET`;
     }
+  }
+  // R-631: an untimed row sorts to the end of its day bucket with nothing
+  // marking the time as unknown, so an economic print that actually lands at
+  // 08:30 ET renders BELOW the 14:00 ET events and an operator reading the
+  // list top-down as a clock misses it. Only same-day rows need this — a row
+  // three days out is read as a date either way.
+  if (row.days_until === 0) {
+    return dateLabel ? `${dateLabel} time TBD` : "time TBD";
   }
   return dateLabel;
 }

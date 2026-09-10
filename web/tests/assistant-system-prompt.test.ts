@@ -42,6 +42,8 @@ describe("assistant system prompt", () => {
     const { SYSTEM_PROMPT } = await import("@/app/api/assistant/route");
 
     expect(SYSTEM_PROMPT).toContain("JOURNAL CONVENTIONS");
+    expect(SYSTEM_PROMPT).toMatch(/^You are Radon,/);
+    expect(SYSTEM_PROMPT).not.toMatch(/\bGrok\b/i);
     expect(SYSTEM_PROMPT).toContain("flex_agg");
     expect(SYSTEM_PROMPT).toContain("get_realized_pnl");
     expect(SYSTEM_PROMPT).toContain("query_journal");
@@ -51,6 +53,9 @@ describe("assistant system prompt", () => {
     expect(SYSTEM_PROMPT).toContain("get_quote");
     expect(SYSTEM_PROMPT).toContain("rank_spreads");
     expect(SYSTEM_PROMPT).toContain("run_evaluate");
+    expect(SYSTEM_PROMPT).toContain("list_apis");
+    expect(SYSTEM_PROMPT).toContain("call_api");
+    expect(SYSTEM_PROMPT).toContain("/api/watchlist");
     expect(SYSTEM_PROMPT).toContain("Never invent a spot price");
     // No em dashes in user-facing-adjacent copy.
     expect(SYSTEM_PROMPT).not.toContain("—");

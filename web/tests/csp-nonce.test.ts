@@ -24,6 +24,13 @@ function reqFor(pathname: string): NextRequest {
   return new NextRequest(`https://app.radon.run${pathname}`);
 }
 
+function connectSrc(csp: string): string | undefined {
+  return csp
+    .split(";")
+    .map((directive) => directive.trim())
+    .find((directive) => directive.startsWith("connect-src"));
+}
+
 describe("buildCspWithNonce — enforced, nonce'd, Clerk-host-allowlisted", () => {
   it("script-src carries the nonce + Clerk hosts and no unsafe-inline", () => {
     const csp = buildCspWithNonce("ABC123");
@@ -109,6 +116,34 @@ describe("withNonceCsp — middleware emits enforced CSP + matching nonce", () =
     const overridden = res.headers.get("x-middleware-override-headers");
     expect(overridden).toContain("x-nonce");
     expect(res.headers.get("x-middleware-request-x-nonce")).toBe(nonceInCsp);
+  });
+
+  it("admits only the exact plaintext relay origin on loopback pages", () => {
+    for (const origin of [
+      "http://localhost:3000",
+      "http://127.0.0.1:3000",
+      "http://[::1]:3000",
+    ]) {
+      const csp = withNonceCsp(new NextRequest(`${origin}/portfolio`)).headers.get(
+        "Content-Security-Policy",
+      )!;
+      const directive = connectSrc(csp);
+
+      expect(directive).toContain("ws://localhost:8765");
+      expect(directive).not.toMatch(/(?:^|\s)ws:(?:\s|$)/);
+    }
+  });
+
+  it("does not expose the localhost plaintext relay origin on deployed pages", () => {
+    for (const origin of ["https://app.radon.run", "https://demo.radon.run"]) {
+      const csp = withNonceCsp(new NextRequest(`${origin}/portfolio`)).headers.get(
+        "Content-Security-Policy",
+      )!;
+      const directive = connectSrc(csp);
+
+      expect(directive).not.toContain("ws://localhost:8765");
+      expect(directive).not.toMatch(/(?:^|\s)ws:(?:\s|$)/);
+    }
   });
 });
 

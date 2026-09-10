@@ -1,10 +1,8 @@
 /**
- * Corner radius is capped at 4px.
+ * Clear corners are capped at 10px (approved direction A, 2026-09-05).
  *
- * Radon is a terminal, not a consumer app. Soft corners read as "dashboard
- * product" and dilute the dense, instrument-grade surface the brand is built
- * on, so `docs/brand-identity.md` fixes corner radius at **4px max** (§Corner
- * radius, and the panel checklist item "Uses 4px max border-radius").
+ * The selected Clear design supersedes the old 4px visual ceiling. Keep the
+ * restrained 6/8/10px scale bounded rather than removing the design contract.
  *
  * Three shapes are exempt because they are not panel corners:
  *   999px  - badge / pill capsules
@@ -26,7 +24,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 
-const MAX_PX = 4;
+const MAX_PX = 10;
 /** Reasons a non-panel shape may exceed the cap. Keep this list short. */
 const ALLOWED_EXEMPTIONS = new Set(["sheet-grab-edge"]);
 const EXEMPT_MARKER = /radius-exempt:\s*([a-z-]+)/i;
@@ -53,7 +51,7 @@ function walk(dir: string): string[] {
   for (const name of entries) {
     const p = join(dir, name);
     if (statSync(p).isDirectory()) out.push(...walk(p));
-    else if (p.endsWith(".tsx")) out.push(p);
+    else if (p.endsWith(".tsx") || p.endsWith(".css")) out.push(p);
   }
   return out;
 }
@@ -111,7 +109,7 @@ function collect(file: string, pattern: RegExp, stripped: boolean): string[] {
     if (exemptionFor(rawLines, i)) return;
     for (const match of line.matchAll(pattern)) {
       for (const token of offendingTokens(match[1])) {
-        violations.push(`${rel}:${i + 1}: radius ${token} exceeds the 4px brand cap (allowed: <= 4px, 999px, %, var(--radius*))`);
+        violations.push(`${rel}:${i + 1}: radius ${token} exceeds the Clear ${MAX_PX}px cap (allowed: <= ${MAX_PX}px, 999px, %, var(--radius*))`);
       }
     }
   });
@@ -119,10 +117,11 @@ function collect(file: string, pattern: RegExp, stripped: boolean): string[] {
 }
 
 describe("radius contract", () => {
-  it("no border-radius above the 4px brand cap in globals.css or component inline styles", () => {
+  it("bounds corners across global styles, component stylesheets and inline styles", () => {
     const violations = [
       ...collect(GLOBALS_CSS, CSS_RADIUS, true),
-      ...walk(COMPONENTS).flatMap((f) => collect(f, JSX_RADIUS, false)),
+      ...collect(join(WEB_ROOT, "app/clear.css"), CSS_RADIUS, true),
+      ...walk(COMPONENTS).flatMap((f) => collect(f, f.endsWith(".css") ? CSS_RADIUS : JSX_RADIUS, f.endsWith(".css"))),
     ];
 
     expect(violations).toEqual([]);

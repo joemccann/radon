@@ -1,6 +1,8 @@
 # Contributing
 
-Radon is a proprietary, single-operator trading system. This guide is for the operator.
+Radon is an open-source (Apache-2.0 OR MIT), single-operator trading system. This guide is for the operator.
+
+Contributions are dual licensed: unless you explicitly state otherwise, any contribution you intentionally submit for inclusion in this work, as defined in the Apache-2.0 license, is licensed as Apache-2.0 OR MIT, without any additional terms or conditions.
 
 The canonical developer runbook is `CLAUDE.md`. Read it before making changes. For a map of the tools that author this project (agents, session tooling, verification gates), see `DEVELOPMENT.md`. Documentation index: `docs/README.md`. Security reports: `SECURITY.md`. Clones are unsupported: `SUPPORT.md`.
 

@@ -247,7 +247,7 @@ export default function OptionsExposurePanel({ symbol }: OptionsExposurePanelPro
         </div>
         <div className={styles.telemetry}>
           <time dateTime={data.source_time}>{formatTimestamp(data.source_time)}</time>
-          <span>SPOT {formatStrike(data.spot)}</span>
+          <span>{data.spot === null ? "SPOT UNAVAILABLE" : `SPOT ${formatStrike(data.spot)}`}</span>
           <button
             type="button"
             className={styles.exportButton}
@@ -262,6 +262,11 @@ export default function OptionsExposurePanel({ symbol }: OptionsExposurePanelPro
       </header>
       {exportError ? (
         <div className={styles.exportError} role="alert">{exportError}</div>
+      ) : null}
+      {data.spot === null ? (
+        <p className={styles.measurementNotice} role="status">
+          Provider spot price is unavailable. Showing all strikes without a spot marker.
+        </p>
       ) : null}
 
       <div className={styles.controls} data-testid="options-exposure-controls">
@@ -282,7 +287,8 @@ export default function OptionsExposurePanel({ symbol }: OptionsExposurePanelPro
           <span>Strike range</span>
           <select
             aria-label="Strike range"
-            value={String(strikeWindow)}
+            value={data.spot === null ? "all" : String(strikeWindow)}
+            disabled={data.spot === null}
             onChange={(event) => {
               const next = event.target.value;
               setStrikeWindow(next === "all" ? "all" : Number(next) as OptionsExposureStrikeWindow);
@@ -353,8 +359,10 @@ export default function OptionsExposurePanel({ symbol }: OptionsExposurePanelPro
           No strikes match the current measurement controls.
         </div>
       ) : (
-        <div className={styles.tableWrap} data-testid="options-exposure-table-wrap">
-          <table className={styles.table} aria-label={`${data.symbol} options exposure by strike`} data-sortable-exempt="chain-layout" data-overflow-exempt="table-layout:fixed with per-column widths and ellipsis truncation; .tableWrap is overflow:visible by design">
+        <>
+        <p className={styles.scrollHint}>Scroll the table to compare exposure and open interest.</p>
+        <div className={styles.tableWrap} data-testid="options-exposure-table-wrap" role="region" aria-label={`${data.symbol} exposure table, horizontally scrollable`} tabIndex={0}>
+          <table className={styles.table} aria-label={`${data.symbol} options exposure by strike`} data-sortable-exempt="chain-layout" data-overflow-exempt="Readable financial columns scroll inside the focusable table region">
             <colgroup>
               <col className={styles.strikeColumn} />
               <col className={styles.levelColumn} />
@@ -433,6 +441,7 @@ export default function OptionsExposurePanel({ symbol }: OptionsExposurePanelPro
             </tbody>
           </table>
         </div>
+        </>
       )}
     </section>
   );

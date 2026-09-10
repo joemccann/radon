@@ -11,14 +11,18 @@ Owner specs for regime tabs and the cheap-wing scanner. Add a row here when a sp
 | cor | `/regime/cor` | `cor` | [cor.md](cor.md) |
 | vixcor | `/regime/vixcor` | `vixcor` | [vixcor.md](vixcor.md) |
 | ivrank | `/regime/ivrank` | `ivrank` | [ivrank.md](ivrank.md) |
+| iv-spread | `/regime/iv-spread` | `iv-spread` | [iv-spread.md](iv-spread.md) |
 | curve | `/regime/curve` | `yield-curve` | [curve.md](curve.md) |
 | credit | `/regime/credit` | `credit-spread` | [credit.md](credit.md) |
 | iei-hyg | `/regime/iei-hyg` | `iei-hyg` | [iei-hyg.md](iei-hyg.md) (tab renamed TSY/HY 2026-08-23) |
 | trin | `/regime/trin` | `trin` | [trin.md](trin.md) (spec; build in flight) |
 | divyield | `/regime/divyield` | `div-yield` | [divyield.md](divyield.md) |
+| ma-ratio | `/regime/ma-ratio` | `ma-ratio` | [ma-ratio.md](ma-ratio.md) |
 | hyad | `/regime/hyad` | `hy-ad` | [hyad.md](hyad.md) |
 | hhlev | `/regime/hhlev` | `hhlev` | [hhlev.md](hhlev.md) |
 | vixts | `/regime/vixts` | `vixts` | [vixts.md](vixts.md) |
+| dispersion | `/regime/dispersion` | `dispersion` | [dispersion.md](dispersion.md) |
+| streaks | `/regime/streaks` | on-demand, no timer | [streaks.md](streaks.md) |
 
 `divyield` oneshot `TimeoutStartSec=2100` covers a tarpitted Yahoo constituent sweep (`SWEEP_BUDGET_S=1800` plus one in-flight fetch). 900s SIGTERM'd the 2026-08-24 run.
 
@@ -33,7 +37,7 @@ builder `PREFILLED FROM VOL CONE` off that `src`. Any other `src` falls back to
 `PREFILLED FROM THETA HARVESTER`, so a new indicator that prefills the builder
 must add its own `src` value rather than reuse one.
 
-A price-series indicator whose every source (IB, UW, Yahoo) fails must re-serve
+A price-series indicator whose every source (IB, UW, Robinhood when configured, Yahoo) fails must re-serve
 its cache as `status: "stale_source"` with an `error` heartbeat, never a fresh `ok`
 over unconfirmed data: the watchdog gates purely on the 26h heartbeat window, so an
 `ok` here pins it open through a permanent outage. Pattern: `fetch_ivrank._serve_cached`,
