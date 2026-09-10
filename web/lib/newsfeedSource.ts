@@ -37,3 +37,25 @@ export function parseResearchSource(value: unknown): ResearchSource | undefined 
     figures: s.figures.map(figure => ({ ...figure, caption: withoutEmDashes(figure.caption) })),
   };
 }
+
+/** Credits are keyed by the displayed chart URL, never by array position. */
+export function parseImageSources(value: unknown, images: readonly string[]): Record<string, string> {
+  let candidate = value;
+  if (typeof candidate === "string") {
+    try { candidate = JSON.parse(candidate); } catch { return {}; }
+  }
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return {};
+  const allowed = new Set(images);
+  return Object.fromEntries(Object.entries(candidate).flatMap(([url, source]) =>
+    allowed.has(url) && typeof source === "string" && source.trim()
+      ? [[url, withoutEmDashes(source.trim())]] : []));
+}
+
+export function getImageSource(
+  post: { images?: string[]; imageSources?: Record<string, string> },
+  imageUrl: string | null | undefined,
+): string | undefined {
+  if (!imageUrl || !post.images?.includes(imageUrl)) return undefined;
+  const source = post.imageSources?.[imageUrl];
+  return typeof source === "string" && source.trim() ? source.trim() : undefined;
+}

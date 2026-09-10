@@ -20,6 +20,7 @@ def db(monkeypatch):
     root = Path(__file__).resolve().parents[1] / "db/migrations"
     connection.executescript((root / "0001_init.sql").read_text())
     connection.executescript((root / "0071_research_post_sources.sql").read_text())
+    connection.executescript((root / "0073_newsfeed_image_sources.sql").read_text())
     monkeypatch.setattr(db_http, "read_env", lambda: ("libsql://test.example", "test-token"))
     def transport(request, timeout):
         assert 0 < timeout <= 10
@@ -183,7 +184,7 @@ def test_demo_mirror_excludes_private_research_at_query_boundary(db, post):
     db.execute("INSERT INTO posts(id,title,timestamp,created_at,updated_at) VALUES ('public-post','Public','2026-09-07','now','now')")
     source = (Path(__file__).resolve().parents[1] / "db/mirror_newsfeed_to_demo.js").read_text()
     import re
-    query = re.search(r"sql: `(SELECT id, title, content, timestamp, images, raw_images, tags, tags_text, tags_vision, created_at, updated_at\s+FROM posts.*?)`", source, re.S).group(1)
+    query = re.search(r"sql: `(SELECT id, title, content, timestamp, images, raw_images, image_sources, tags, tags_text, tags_vision, created_at, updated_at\s+FROM posts.*?)`", source, re.S).group(1)
     assert [row[0] for row in db.execute(query, (400,)).fetchall()] == ["public-post"]
 
 
