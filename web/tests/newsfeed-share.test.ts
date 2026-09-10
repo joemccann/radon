@@ -5,6 +5,23 @@ const post: SharePost = { id: "post-123", title: "Yen hedge demand jumps", conte
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("social captions", () => {
+  it("keeps the original image provider in Market Ear share captions", () => {
+    const image = "https://media.radon.run/adoption.png";
+    const attributed = { ...post, images: [image], imageSources: { [image]: "Ramp" } };
+    expect(buildShareCaption(attributed)).toContain("Source: Ramp");
+    expect(buildShareCaption(attributed)).not.toMatch(/market[\s-]*ear/i);
+    const other = "https://media.radon.run/other.png";
+    const multi = { ...attributed, images: [image, other], imageSources: { [image]: "Ramp", [other]: "Goldman Sachs" } };
+    expect(buildShareCaption(multi, other)).toContain("Source: Goldman Sachs");
+    expect(buildShareCaption(multi, other)).not.toContain("Ramp");
+  });
+  it("does not reuse an unrelated image provider or excluded publisher", () => {
+    const image = "https://media.radon.run/adoption.png";
+    const unrelated = { ...post, images: [image], imageSources: { "https://media.radon.run/other.png": "Ramp" } };
+    expect(buildShareCaption(unrelated)).not.toContain("Source:");
+    const excluded = { ...post, images: [image], imageSources: { [image]: "The Market Ear" } };
+    expect(buildShareCaption(excluded)).not.toContain("Source:");
+  });
   it.each(["—", "&mdash;", "&#8212;", "&#x2014;"])("sanitizes %s in source captions and manually edited X copy", dash => {
     const content = `Positioning ${dash} still neutral. Returns: -2.5%.`;
     expect(sanitizeShareText(content)).toBe("Positioning, still neutral. Returns: -2.5%.");

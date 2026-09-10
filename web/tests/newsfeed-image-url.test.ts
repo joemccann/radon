@@ -294,7 +294,7 @@ describe("scripts/db/writer.js — absolutizeMedia idempotent guard", () => {
       CREATE TABLE IF NOT EXISTS posts (
         id TEXT PRIMARY KEY, title TEXT NOT NULL, content TEXT,
         timestamp TEXT NOT NULL, images TEXT, raw_images TEXT,
-        tags TEXT, tags_text TEXT, tags_vision TEXT,
+        tags TEXT, tags_text TEXT, tags_vision TEXT, image_sources TEXT,
         created_at TEXT NOT NULL, updated_at TEXT NOT NULL
       )
     `);

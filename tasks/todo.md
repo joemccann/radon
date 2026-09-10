@@ -6110,3 +6110,18 @@ Dependency graph: T1 -> T2; T1 -> T3; T2 + T3 -> T4 -> T5.
 
 ### Review
 Pending.
+
+# Market Ear image source captions (2026-09-10)
+
+Preserve explicit per-image provider attribution (for example Ramp) from Market Ear article HTML through storage/API and render it in the existing image caption/footer treatment. Do not invent attribution or replace the article publisher. Keep Dropbox provenance intact. Work in isolated `/tmp/radon-market-ear-sources`; no local test suites.
+
+Dependency graph: T1 -> T2; T1 -> T3; T2 + T3 -> T4 -> T5.
+
+- [x] T1 depends_on: [] - Inspect extraction, persistence, API and caption contracts.
+- [ ] T2 depends_on: [T1] - Add source extraction and persistence regression coverage and implementation.
+- [ ] T3 depends_on: [T1] - Add source rendering/API regression coverage and implementation.
+- [ ] T4 depends_on: [T2, T3] - Review integration, regenerate maps, publish PR and verify exact-head CI and browser artifacts.
+- [ ] T5 depends_on: [T4] - Record review and send confirmed green notification.
+
+## Review
+Pending.

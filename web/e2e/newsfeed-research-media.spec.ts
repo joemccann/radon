@@ -61,3 +61,68 @@ for (const width of [1440,393]) {
    await expect(page.getByRole("dialog")).toHaveCount(0);
  });
 }
+
+for (const width of [1440, 393]) {
+  test(`Market Ear chart captions preserve per-image providers at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 });
+    const rampImage = "https://media.radon.run/images/adoption-fixture.png";
+    const otherImage = "https://media.radon.run/images/uncredited-fixture.png";
+    const posts = [
+      {
+        id: "market-ear-adoption",
+        title: "Adoption slows",
+        content: "In general, new AI adoption continues to grow but is decelerating.",
+        timestamp: "2026-09-10T12:00:00Z",
+        images: [rampImage],
+        imageSources: { [rampImage]: "Ramp" },
+        tags: ["AI"],
+      },
+      {
+        id: "market-ear-uncredited",
+        title: "Another chart without attribution",
+        content: "The original post supplies no provider for this image.",
+        timestamp: "2026-09-10T11:00:00Z",
+        images: [otherImage],
+        tags: ["AI"],
+      },
+    ];
+    await page.route("**/api/newsfeed/posts**", route => route.fulfill({ json: posts }));
+    await page.route("https://media.radon.run/images/*-fixture.png", route =>
+      route.fulfill({ contentType: "image/svg+xml", body: svg(1000, 600) }));
+    await page.route("**/_next/image?**", async route => {
+      const imageUrl = new URL(route.request().url()).searchParams.get("url");
+      if (imageUrl === rampImage || imageUrl === otherImage) {
+        await route.fulfill({ contentType: "image/svg+xml", body: svg(1000, 600) });
+      } else {
+        await route.continue();
+      }
+    });
+    await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
+    const credited = page.getByTestId("news-feed-item").filter({ hasText: "Adoption slows" });
+    const uncredited = page.getByTestId("news-feed-item").filter({ hasText: "Another chart without attribution" });
+    await expect(credited.locator(".news-feed-figcaption")).toContainText("Source: Ramp");
+    await credited.scrollIntoViewIfNeeded();
+    await expect(credited.locator(".news-feed-image")).toHaveJSProperty("naturalWidth", 1000);
+    await expect(uncredited.locator(".news-feed-figcaption")).toHaveText("Chart · Another chart without attribution");
+    await credited.screenshot({ path: testInfo.outputPath(`research-market-ear-feed-${width}.png`) });
+    await testInfo.attach(`research-market-ear-feed-${width}`, {
+      path: testInfo.outputPath(`research-market-ear-feed-${width}.png`), contentType: "image/png",
+    });
+
+    await credited.getByRole("button", { name: "Open lightbox for: Adoption slows" }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.locator(".newsfeed-lightbox__media").getByText("Source: Ramp", { exact: true })).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath(`research-market-ear-lightbox-${width}.png`) });
+    await testInfo.attach(`research-market-ear-lightbox-${width}`, {
+      path: testInfo.outputPath(`research-market-ear-lightbox-${width}.png`), contentType: "image/png",
+    });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+
+    await dialog.getByRole("button", { name: "Next post" }).click();
+    await expect(dialog.getByRole("heading", { name: "Another chart without attribution" })).toBeVisible();
+    await expect(dialog.locator(".newsfeed-lightbox__media")).not.toContainText("Source:");
+    await expect(dialog).not.toContainText("Ramp");
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+  });
+}

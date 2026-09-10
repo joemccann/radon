@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS posts (
   timestamp   TEXT    NOT NULL,
   images      TEXT,
   raw_images  TEXT,
+  image_sources TEXT,
   tags        TEXT,
   tags_text   TEXT,
   tags_vision TEXT,
@@ -187,5 +188,22 @@ describe("recordServiceHealth", () => {
     const row = result.rows[0] as unknown as { state: string; last_error: string };
     expect(row.state).toBe("error");
     expect(JSON.parse(row.last_error)).toEqual({ message: "boom" });
+  });
+});
+
+
+describe("Market Ear source dual writes", () => {
+  it("preserves, normalizes, and clears image sources through both upsert paths", async () => {
+    const writer = await import("../../scripts/db/writer.js");
+    const post = { id: "source", title: "Adoption slows", timestamp: "2026-09-10T08:50:00Z", images: ["/media/chart.png"], imageSources: { "/media/chart.png": "Ramp", absent: "Wrong" } };
+    await writer.upsertPost(post);
+    let rows = (await db.execute("SELECT image_sources FROM posts WHERE id = 'source'")).rows;
+    expect(JSON.parse(String(rows[0].image_sources))).toEqual({ "https://media.radon.run/chart.png": "Ramp" });
+    await writer.upsertPosts([{ ...post, imageSources: { "/media/chart.png": "Goldman Sachs" } }]);
+    rows = (await db.execute("SELECT image_sources FROM posts WHERE id = 'source'")).rows;
+    expect(JSON.parse(String(rows[0].image_sources))).toEqual({ "https://media.radon.run/chart.png": "Goldman Sachs" });
+    await writer.upsertPost({ ...post, imageSources: {} });
+    rows = (await db.execute("SELECT image_sources FROM posts WHERE id = 'source'")).rows;
+    expect(JSON.parse(String(rows[0].image_sources))).toEqual({});
   });
 });
