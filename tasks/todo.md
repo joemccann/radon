@@ -6234,11 +6234,14 @@ No local suites. CI 34494032484 reproduces outdated download signature matching.
 Specification: one visible, aligned keyboard focus indicator per field, around the complete visual control (including currency prefixes). Audit shared/composite controls across Clear light/dark and desktop/mobile. Preserve native semantics and all order behavior; use mocked browser data. No local suites.
 
 Dependency graph: T1 -> T2; T1 -> T3; T2 + T3 -> T4 -> T5.
-- [ ] T1 depends_on: [] - Audit CSS cascade and composite control ownership; record scoped findings.
-- [ ] T2 depends_on: [T1] - Add browser regressions and screenshot artifacts on GitHub runners.
-- [ ] T3 depends_on: [T1] - Apply minimal shared CSS fix with focused contract coverage.
+- [x] T1 depends_on: [] - Audit CSS cascade and composite control ownership; record scoped findings.
+- [x] T2 depends_on: [T1] - Add browser regressions and screenshot artifacts on GitHub runners.
+- [x] T3 depends_on: [T1] - Apply minimal shared CSS fix with focused contract coverage.
 - [ ] T4 depends_on: [T2,T3] - Publish PR, capture red/green CI, resolve conflicts, await every exact-head check.
 - [ ] T5 depends_on: [T4] - Inspect browser screenshots, record results, send confirmed green notification.
 
 ## Review
-Pending. Isolated worktree /tmp/radon-focus-audit-20260910 protects existing user changes.
+Isolated worktree /tmp/radon-focus-audit-20260910 protects existing user changes.
+- RED: PR #397 head d1802ea6948a49979e4cb0a6d9c63a52464a00c2, GitHub CI 34504342646: all eight new browser cases reproduce inner outline solid instead of none; 88 existing browser cases passed. All eight Vitest shards and coverage checks passed.
+- Repair: shared Clear selectors assign rings to six active composite wrappers; command palette ring stays inset. Instrument search inherits the standard outline. No financial behavior or local suites changed.
+- Exact-head green CI and browser screenshot review pending.

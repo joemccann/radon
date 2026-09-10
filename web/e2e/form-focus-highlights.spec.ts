@@ -166,6 +166,11 @@ for (const viewport of [
       await input.focus();
       const wrapper = page.locator(wrapperClass);
       await expectCompositeFocus(input, wrapper, offset);
+      await page.screenshot({
+        path: testInfo.outputPath(`focus-matrix-${wrapperClass.slice(1)}-${viewport.label}.png`),
+        fullPage: true,
+        animations: "disabled",
+      });
       if (label === "Theta ticker" || label === "Assistant message") {
         await page.keyboard.press("Tab");
         await expect(wrapper.getByRole("button")).toBeFocused();

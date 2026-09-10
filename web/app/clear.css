@@ -132,6 +132,34 @@
   outline-offset: 2px;
 }
 
+/* Composite fields own their border and focus geometry, including prefixes
+   and icons. Only the text entry transfers focus to its wrapper; adjacent
+   buttons/selects keep their own keyboard indicator. */
+.radon-clear :is(.modify-price-input-row, .table-search, .theta-search, .flow-ticker-input-row) {
+  border-radius: var(--radius-sm);
+}
+
+.radon-clear :is(.modify-price-input-row, .table-search, .theta-search, .flow-ticker-input-row, .command-palette-input-wrap):has(> input:focus-visible),
+.radon-clear .ask-composer:has(.ask-composer__input:focus-visible) {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+.radon-clear :is(.modify-price-input-row, .table-search, .theta-search, .flow-ticker-input-row, .command-palette-input-wrap) > input,
+.radon-clear .ask-composer .ask-composer__input {
+  border-radius: 0;
+}
+
+.radon-clear :is(.modify-price-input-row, .table-search, .theta-search, .flow-ticker-input-row, .command-palette-input-wrap) > input:focus-visible,
+.radon-clear .ask-composer .ask-composer__input:focus-visible {
+  outline: none;
+}
+
+/* This field touches an overflow-clipped dialog edge; keep its ring inside. */
+.radon-clear .command-palette-input-wrap:has(> input:focus-visible) {
+  outline-offset: -2px;
+}
+
 .radon-clear :is(.pill, .order-status-pill) {
   padding: 4px 9px;
   font-size: 12px;
