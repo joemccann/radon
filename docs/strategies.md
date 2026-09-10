@@ -822,7 +822,9 @@ COR1M is the better crash-regime signal because it is:
 
 The vol-targeting model estimates CTA exposure from realized vol. MenthorQ provides **actual** institutional CTA positioning data: position sizes, percentiles, and z-scores across indices, commodities, currencies, and bonds.
 
-**Data flow**: Headless browser → screenshot CTA table images → Claude Haiku Vision → structured JSON → daily cache.
+**Data flow**: Headless browser → screenshot CTA table images → vision cascade → structured JSON → daily cache.
+
+**Vision cascade** (credit / billing / quota / hard-fail fallthrough; Joe 2026-09-10): subscription `anthropic -> grok -> cursor -> codex -> gemini`, then `nvidia` (free NIM), then `cerebras` (cheap paid, last). Cursor has no vision HTTP path in Radon and is skipped as unavailable. The service logs the winning provider/model. `radon-cta-sync.service` hard-fails only when the whole cascade misses — never "top up Anthropic" while another keyed provider remains.
 
 **Key fields per asset**: `position_today`, `position_yesterday`, `position_1m_ago`, `percentile_1m`, `percentile_3m`, `percentile_1y`, `z_score_3m`.
 
