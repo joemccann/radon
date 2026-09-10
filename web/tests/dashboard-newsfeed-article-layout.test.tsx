@@ -92,6 +92,22 @@ describe("DashboardNewsFeed article layout", () => {
     expect(caption.textContent).not.toContain("Market Ear");
   });
 
+  it("shows the supplied Market Ear chart provider in the image caption", async () => {
+    await renderFeed([{ ...POST, imageSources: { [POST.images[0]]: "Ramp" } }]);
+    expect(document.querySelector(".news-feed-figcaption")!.textContent).toContain("Source: Ramp");
+    expect(document.querySelector("[data-testid='news-feed-meta']")!.textContent).not.toContain("Ramp");
+  });
+
+  it("does not borrow another image's provider for an uncredited first chart", async () => {
+    const second = "/media/p1-02.png";
+    await renderFeed([{
+      ...POST,
+      images: [POST.images[0], second],
+      imageSources: { [second]: "Ramp" },
+    }]);
+    expect(document.querySelector(".news-feed-figcaption")!.textContent).toBe(`Chart · ${POST.title}`);
+  });
+
   it("renders no source-link pill in the footer", async () => {
     await renderFeed([POST]);
     expect(screen.queryByTestId("news-feed-link-pill")).toBeNull();

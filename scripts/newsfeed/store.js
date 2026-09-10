@@ -1,6 +1,6 @@
 import path from "path";
 import fs from "fs-extra";
-import { absolutizeMediaUrl, MEDIA_ORIGIN } from "./media.js";
+import { absolutizeMediaUrl, normaliseImageSources, MEDIA_ORIGIN } from "./media.js";
 import { atomicWriteText, withFileLock } from "./atomic.js";
 
 export const MAX_POSTS_FILE_BYTES = 500 * 1024;
@@ -12,10 +12,10 @@ export const MAX_POSTS_FILE_BYTES = 500 * 1024;
 // surfaces without breaking the cycle.
 function normalisePostImageUrls(post) {
   if (!post || typeof post !== "object") return post;
-  if (!Array.isArray(post.images) || post.images.length === 0) return post;
+  const images = Array.isArray(post.images) ? post.images : [];
 
   const cleaned = [];
-  for (const src of post.images) {
+  for (const src of images) {
     const next = absolutizeMediaUrl(src);
     if (typeof next === "string" && (next.startsWith("https://") || next.startsWith("http://"))) {
       cleaned.push(next);
@@ -27,10 +27,12 @@ function normalisePostImageUrls(post) {
     }
   }
 
-  if (cleaned.length === post.images.length && cleaned.every((v, i) => v === post.images[i])) {
+  const imageSources = normaliseImageSources(post.imageSources, cleaned);
+  if (cleaned.length === images.length && cleaned.every((v, i) => v === images[i]) &&
+      JSON.stringify(imageSources) === JSON.stringify(post.imageSources || {})) {
     return post;
   }
-  return { ...post, images: cleaned };
+  return { ...post, images: cleaned, ...(post.imageSources ? { imageSources } : {}) };
 }
 
 function normaliseTimestamp(ts) {
@@ -76,6 +78,7 @@ export function mergePosts(existingPosts, scrapedPosts, { now = () => new Date()
       timestamp: ts.iso,
       timestampMs: ts.ms,
       rawImages: Array.isArray(post.images) ? post.images : [],
+      rawImageSources: normaliseImageSources(post.imageSources, post.images || []),
     };
 
     const existing = byId.get(post.id);
@@ -95,7 +98,8 @@ export function mergePosts(existingPosts, scrapedPosts, { now = () => new Date()
       existing.title !== base.title ||
       existing.content !== base.content ||
       existing.timestamp !== base.timestamp ||
-      JSON.stringify(existing.rawImages || []) !== JSON.stringify(base.rawImages);
+      JSON.stringify(existing.rawImages || []) !== JSON.stringify(base.rawImages) ||
+      JSON.stringify(existing.rawImageSources || {}) !== JSON.stringify(base.rawImageSources);
 
     if (needsUpdate) {
       byId.set(post.id, {

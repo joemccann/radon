@@ -11,7 +11,7 @@ import {
   reportOfflineServed,
 } from "./offline/offlineSignals";
 
-import { parseResearchSource, type ResearchSource } from "./newsfeedSource";
+import { parseImageSources, parseResearchSource, type ResearchSource } from "./newsfeedSource";
 
 const POSTS_ENDPOINT = "/api/newsfeed/posts";
 const POSTS_FALLBACK_ENDPOINT = "/data/posts.json";
@@ -25,6 +25,7 @@ export type MarketEarPost = {
   timestamp: string;
   images?: string[];
   rawImages?: string[];
+  imageSources?: Record<string, string>;
   tags?: string[];
   tags_text?: string[];
   tags_vision?: string[];
@@ -125,6 +126,7 @@ export function useNewsfeedPosts(): NewsfeedPosts {
             isoTimestamp: Number.isFinite(ms) ? ts.toISOString() : stamp,
             timestampMs: Number.isFinite(ms) ? ms : 0,
             source,
+            imageSources: parseImageSources(post.imageSources, Array.isArray(post.images) ? post.images : []),
             href: source?.url ?? buildPostHref(post.id),
             // Research bodies are authored Markdown: indentation, line breaks,
             // and trailing spaces carry formatting that scrape rewrapping loses.

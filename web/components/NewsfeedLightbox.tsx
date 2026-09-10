@@ -10,6 +10,7 @@ import { useDialogChrome } from "@/lib/useDialogChrome";
 import { useBookmarks } from "@/lib/useBookmarks";
 import styles from "./NewsfeedResearchMedia.module.css";
 import NewsfeedShare from "./NewsfeedShare";
+import { getImageSource } from "@/lib/newsfeedSource";
 import NewsfeedPostContent from "./NewsfeedPostContent";
 import StarToggle from "@/components/StarToggle";
 
@@ -120,6 +121,7 @@ export default function NewsfeedLightbox({
   const { post } = focus;
   const imageUrl = selectedImage?.focus === focus ? selectedImage.url : focus.imageUrl;
   const figure = post.source?.figures.find(item => item.url === imageUrl);
+  const imageSource = getImageSource(post, imageUrl);
   const tags = Array.isArray(post.tags) ? post.tags : [];
   const relative = formatRelative(post.isoTimestamp);
   const time = formatTime(post.isoTimestamp);
@@ -193,7 +195,7 @@ export default function NewsfeedLightbox({
           onTouchStart={handleTouchStart}
           onTouchEnd={handleTouchEnd}
         >
-          <div className={`newsfeed-lightbox__media ${post.source ? styles.media : ""}`}>
+          <div className={`newsfeed-lightbox__media ${post.source || imageSource ? styles.media : ""}`}>
             <Image
               src={imageUrl}
               alt={post.title}
@@ -204,7 +206,7 @@ export default function NewsfeedLightbox({
               unoptimized={post.source?.kind === "dropbox"}
               priority
             />
-            {figure ? <p className={styles.caption}>{post.source?.publisher} · p. {figure.page} · {figure.caption}</p> : null}
+            {figure ? <p className={styles.caption}>{post.source?.publisher} · p. {figure.page} · {figure.caption}</p> : imageSource ? <p className={styles.caption}>Source: {imageSource}</p> : null}
             {post.source && post.source.figures.length > 1 ? <div className={styles.thumbnails} aria-label="Article charts">
               {post.source.figures.map((item, index) => <button type="button" key={item.url}
                 aria-label={`View chart ${index + 1}: ${item.caption}`} aria-pressed={imageUrl === item.url}
