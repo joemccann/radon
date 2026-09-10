@@ -1,3 +1,27 @@
+# Task: Historical trade fill prices 2026-09-10 [IMPLEMENTED; PR CI PENDING]
+
+## Dependency graph
+
+- T1 depends_on: [] - Trace journal fill prices and desktop/mobile historical rendering.
+- T2 depends_on: [T1] - Red/green price derivation, missing-price and aggregate provenance tests; add sortable Avg Fill and mobile metric.
+- T3 depends_on: [T2] - Focused tests, types/lint, browser verification and review.
+- T4 depends_on: [T3] - Publish scoped PR, supervise exact-head GitHub CI through green, send confirmed Pushover. Do not merge.
+
+## Checklist
+
+- [x] T1 Journal fill_price reaches executions.price but neither historical surface renders it; rehydrated rows can blend both sides.
+- [x] T2 Recorded quantity-weighted prices, signed/zero values, truthful unavailable and aggregate labels; desktop sorting and mobile parity.
+- [x] T3 158 focused Vitest tests, TypeScript and scoped ESLint passed; helper coverage 100%; 31 clean-snapshot codemap tests and 6 curation tests passed.
+- [ ] T4 Publish, repair and verify CI on GitHub, then notify.
+
+## Review
+
+- Preserve existing user changes in tasks/lessons.md, tasks/todo.md and docs/research/. No order execution, historical rewrites or production changes.
+- Browser: 3/3 Playwright cases passed against exact historical component source, real hook and CSS in an isolated harness; 1280px/393px screenshots inspected, no page errors or document overflow. Full Next page verification remains blocked by local sign-in and single-dev-server constraints.
+- Avg Fill displays recorded execution VWAP, not cost-basis-derived prices; collapsed or mixed-side records are visibly marked Aggregate and are not represented as separate entry/exit prices. Missing price remains null, signed/zero premiums and four-decimal precision are retained.
+- Pre-PR local full suites: Vitest 9,303 passed / 1 failed (fixed historical table remained in the known-unwrapped exception list; removed that entry); Python 12,749 passed / 36 failed / 19 skipped, including environment and local-artifact failures. No full-local-green claim.
+- Operator correction: all remaining test runs and CI repairs execute on GitHub, not locally. PR publication authorized; no merge, deployment, or trading action.
+
 # Task: LLM regime empty snapshot 2026-09-10 [IMPLEMENTED; PR CI PENDING]
 
 GET /regime/llm is empty because FastAPI rebuilds the snapshot from 130k

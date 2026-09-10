@@ -67,7 +67,8 @@ export interface BlotterExecutionShape {
   time: string;
   side: string;
   quantity: number;
-  price: number;
+  price: number | null;
+  price_is_aggregate?: boolean;
   commission: number;
   notional_value: number;
   net_cash_flow: number;
@@ -194,10 +195,10 @@ function rowToBlotterTrade(row: JournalRow): BlotterTradeShape {
   const secType = resolveSecType(p);
   const ticker = resolveTicker(p);
   const quantity = resolveQuantity(p);
-  const price = typeof p.fill_price === "number" ? p.fill_price : 0;
+  const price = typeof p.fill_price === "number" && Number.isFinite(p.fill_price) ? p.fill_price : null;
   const commission = typeof p.commission === "number" ? p.commission : 0;
   const multiplier = OPT_SEC_TYPES.has(secType) ? 100 : 1;
-  const notionalValue = quantity * price * multiplier;
+  const notionalValue = quantity * (price ?? 0) * multiplier;
   const side = resolveSide(action);
   // Net cash flow: BOT spends cash (negative), SLD receives cash (positive).
   // Commission always reduces cash on hand.
@@ -238,6 +239,11 @@ function rowToBlotterTrade(row: JournalRow): BlotterTradeShape {
     side,
     quantity,
     price,
+    // Rehydrate collapses multiple fills, potentially from BOTH sides.
+    price_is_aggregate: action === "CLOSED" || (
+      typeof p.notes === "string" && p.notes.startsWith("Rehydrated from IB Flex Query")
+      && typeof p.ib_exec_id === "string" && p.ib_exec_id.includes("+")
+    ),
     commission,
     notional_value: notionalValue,
     net_cash_flow: netCashFlow,
