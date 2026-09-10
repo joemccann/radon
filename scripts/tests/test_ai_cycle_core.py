@@ -144,6 +144,23 @@ def test_snapshot_reads_cloud_history_in_safe_large_pages(monkeypatch):
     assert calls[1][1][0] == 500
 
 
+def test_snapshot_persist_reads_past_one_hundred_thousand_rows(monkeypatch):
+    store = ObservationStore()
+    payload = json.dumps(observation())
+    calls = []
+
+    def query(sql, args):
+        calls.append(args[0])
+        if len(calls) <= 201:
+            start = (len(calls) - 1) * 500 + 1
+            return [(row_id, payload) for row_id in range(start, start + 500)]
+        return []
+
+    monkeypatch.setattr(store, "_query", query)
+    assert len(store.read_snapshot_observations("2026-09-08T00:00:00Z")) == 100_500
+    assert len(calls) == 202
+
+
 @pytest.mark.parametrize(
     "update",
     [
@@ -734,3 +751,100 @@ def test_rolling_financial_history_has_each_exact_ttm_window_and_its_own_provena
     )
     assert first["fetched_at"] == "2026-01-01T00:00:00.000000Z"
     assert f"{5:064x}" not in first["metadata"]["input_hashes"]
+
+
+def test_api_snapshot_is_compact_and_skips_history_scan_on_read():
+    from datetime import datetime, timedelta, timezone
+
+    from scripts.ai_cycle.snapshot import API_SNAPSHOT_MAX_BYTES, compact_snapshot, load_api_snapshot, persist_api_snapshot
+    from scripts.db.hrana_http import _MAX_RESPONSE_BYTES
+
+    store = ObservationStore(":memory:")
+    store.record_source_status(
+        dict(source_id="openrouter", status="available", reason="fixture", checked_at="2026-09-09T07:15:00Z")
+    )
+    store.append_observations(
+        [
+            {
+                **observation(),
+                "value": 10,
+                "period_start": "2026-09-01",
+                "period_end": "2026-09-02",
+                "fetched_at": "2026-09-03T00:00:00Z",
+            }
+        ]
+    )
+    persist_api_snapshot(store)
+    payload = store.read_api_snapshot()
+    encoded = json.dumps(payload)
+    assert payload["version"] == 1
+    assert payload["indicators"][0]["metrics"][0]["value"] == 10
+    assert len(encoded.encode()) < API_SNAPSHOT_MAX_BYTES < _MAX_RESPONSE_BYTES
+    store.read_snapshot_observations = lambda *args, **kwargs: (_ for _ in ()).throw(
+        AssertionError("GET must not scan observation history")
+    )
+    loaded = load_api_snapshot(store)
+    assert loaded["indicators"][0]["metrics"][0]["value"] == 10
+
+    empty = ObservationStore(":memory:")
+    empty.record_source_status(
+        dict(source_id="vercel", status="available", reason="status only", checked_at="2026-09-09T07:15:00Z")
+    )
+    empty.read_snapshot_observations = lambda *args, **kwargs: (_ for _ in ()).throw(
+        AssertionError("missing compact snapshot must not scan history")
+    )
+    fallback = load_api_snapshot(empty)
+    vercel = next(source for source in fallback["sources"] if source["id"] == "vercel")
+    assert vercel["status"] == "available"
+    assert all(not indicator["metrics"] for indicator in fallback["indicators"])
+
+    base = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    bloated = build_snapshot(ObservationStore(":memory:"))
+    bloated["indicators"][0]["history"] = [
+        {
+            "date": (base + timedelta(days=i % 2500)).date().isoformat(),
+            "value": float(i),
+            "unit": "tokens",
+            "series_id": f"series-{i % 120}",
+            "label": f"series-{i % 120}",
+            "source_id": "openrouter",
+        }
+        for i in range(80_000)
+    ]
+    bloated["indicators"][0]["metrics"] = [
+        {
+            "id": "total_tokens",
+            "label": "total",
+            "value": 1,
+            "unit": "tokens",
+            "period_start": "2026-09-01",
+            "period_end": "2026-09-02",
+            "published_at": None,
+            "fetched_at": "2026-09-03T00:00:00Z",
+            "source_id": "openrouter",
+            "source_url": "https://openrouter.ai/",
+            "measurement": "observed",
+            "methodology_version": "v1",
+            "cohort_version": "v1",
+            "lineage_group": "openrouter",
+            "raw_hash": "a" * 64,
+            "metadata": {},
+        }
+    ]
+    compact = compact_snapshot(bloated)
+    assert len(json.dumps(compact).encode()) < API_SNAPSHOT_MAX_BYTES
+    assert compact["indicators"][0]["metrics"][0]["value"] == 1
+    assert {source["id"] for source in compact["sources"]} == {source["id"] for source in bloated["sources"]}
+
+
+def test_raw_archive_import_is_durable_and_idempotent(tmp_path):
+    store = ObservationStore(":memory:")
+    raw = b'{"publisher":"openrouter","rows":[1]}'
+    digest = __import__("hashlib").sha256(raw).hexdigest()
+    (tmp_path / f"{digest}.json").write_bytes(raw)
+    (tmp_path / "not-a-digest.json").write_bytes(b"{}")
+    (tmp_path / ".raw-temp.tmp").write_bytes(raw)
+    assert store.import_raw_archive(tmp_path) == 1
+    assert store.import_raw_archive(tmp_path) == 1
+    assert store._query("SELECT COUNT(*) FROM ai_cycle_raw")[0][0] == 1
+    assert store._query("SELECT hash FROM ai_cycle_raw")[0][0] == digest

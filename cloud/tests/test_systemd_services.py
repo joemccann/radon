@@ -222,6 +222,9 @@ def unit(services_dir):
 class TestAiCycleCredentials:
     FILENAME = "radon-ai-cycle.service"
 
+    def test_snapshot_persist_fits_oneshot_budget(self, unit):
+        assert unit(self.FILENAME)["Service"]["timeoutstartsec"] == "1200"
+
     def test_loads_profile_credential_store(self, unit, services_dir):
         svc = unit(self.FILENAME)["Service"]
         assert svc["loadcredentialencrypted"] == (
@@ -278,7 +281,7 @@ class TestAiCycleBackfill:
     def test_is_resumable_bounded_and_loads_profile_store(self, unit, services_dir):
         svc = unit(self.SERVICE)["Service"]
         assert svc["type"] == "oneshot"
-        assert svc["timeoutstartsec"] == "600"
+        assert svc["timeoutstartsec"] == "1200"
         assert svc["loadcredentialencrypted"].startswith("radon-secret-store-key:")
         command = svc["execstart"]
         assert "--backfill --start 2009-01-01" in command

@@ -16,7 +16,7 @@ ExecStartPre=/home/radon/radon/.venv/bin/python3.13 /home/radon/radon/scripts/se
 ExecStart=/home/radon/radon/.venv/bin/python -m scripts.ai_cycle.collect --record --backfill --start 2009-01-01 --sources vercel,gpu-rental,sec,eia,noaa,openrouter --checkpoint /home/radon/.radon/ai-cycle/backfill-checkpoint.json --max-requests 400
 StandardOutput=journal
 StandardError=journal
-TimeoutStartSec=600
+TimeoutStartSec=1200
 
 [Install]
 WantedBy=multi-user.target

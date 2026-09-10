@@ -678,6 +678,10 @@ def test_cli_record_checkpoint_and_cache_only_store(tmp_path, monkeypatch, capsy
     monkeypatch.setattr(collect, "collect_source", collector)
     db = tmp_path / "local.db"
     checkpoint = tmp_path / "checkpoint.json"
+    archive = tmp_path / "raw"
+    archive.mkdir()
+    raw = b'{"data":[{"date":"2026-09-06","model_permaslug":"other","total_tokens":"42"}]}'
+    (archive / f"{hashlib.sha256(raw).hexdigest()}.json").write_bytes(raw)
     args = [
         "--record",
         "--database",
@@ -691,10 +695,15 @@ def test_cli_record_checkpoint_and_cache_only_store(tmp_path, monkeypatch, capsy
         "--checkpoint",
         str(checkpoint),
         "--archive",
-        str(tmp_path / "raw"),
+        str(archive),
     ]
     assert collect.main(args) == 0
-    assert len(ObservationStore(db).read_observations()) == 1
+    stored = ObservationStore(db)
+    assert len(stored.read_observations()) == 1
+    snapshot = stored.read_api_snapshot()
+    assert snapshot["version"] == 1
+    assert snapshot["indicators"][0]["metrics"] or any(source["status"] == "available" for source in snapshot["sources"])
+    assert stored._query("SELECT COUNT(*) FROM ai_cycle_raw")[0][0] >= 1
     assert json.loads(capsys.readouterr().out)["observations"] == 1
     assert collect.main(args) == 0
     assert len(calls) == 1

@@ -33,6 +33,14 @@ describe("AI infrastructure evidence", () => {
     expect(screen.getByTestId("ai-indicator-D5")).toBeTruthy();
     expect(screen.getByTestId("ai-indicator-D5").textContent).toContain("Ramp business AI spend");
   });
+  it("keeps a page-level coverage board for every snapshot source on every pane", () => {
+    render(<AiInfrastructureView data={aiFixture} error={null} loading={false} refresh={() => {}} />);
+    const board = screen.getByTestId("ai-source-coverage");
+    expect(board.querySelector('[data-testid="ai-coverage-fixture"]')?.textContent).toContain("Fixture publisher");
+    expect(board.querySelector('[data-testid="ai-coverage-ramp"]')?.textContent).toContain("Ramp AI Index");
+    fireEvent.click(screen.getByRole("tab", { name: "Finance" }));
+    expect(screen.getByTestId("ai-source-coverage").querySelector('[data-testid="ai-coverage-ramp"]')?.textContent).toContain("128");
+  });
   it("groups histories by unit and series, preserves chronological order, rejects invalid points", () => {
     const p = aiFixture.indicators[0].history[0]; const result = historyGroups([{ ...p, date: "2026-09-02" }, { ...p, date: "2026-09-01" }, { ...p, unit: "requests" }, { ...p, value: NaN }]);
     expect(result).toHaveLength(2); expect(result[0][0].date).toBe("2026-09-01"); expect(aiNumber(null)).toBe("Unavailable"); expect(aiNumber(0)).toBe("0");

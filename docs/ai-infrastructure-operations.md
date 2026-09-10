@@ -1,6 +1,6 @@
 # AI infrastructure collection operations
 
-The `/regime/llm` AI infrastructure view reads cached observations. Browser requests never scrape providers or place trades. All automatic source collection runs through `python3.13 -m scripts.ai_cycle` from the repository root. `radon-ai-cycle-backfill.timer` resumes historical coverage at 05:30 UTC, `radon-aa-frontier-refresh.timer` refreshes the model cohort at 07:00 UTC, then `radon-ai-cycle.timer` collects current observations at 07:15 UTC.
+The `/regime/llm` AI infrastructure view reads the compact `ai_cycle_api_snapshot` row written by collection. Browser requests never scrape providers, scan observation history, or place trades. Rebuild that snapshot with `python3.13 -m scripts.ai_cycle --persist-snapshot`. All automatic source collection runs through `python3.13 -m scripts.ai_cycle` from the repository root. `radon-ai-cycle-backfill.timer` resumes historical coverage at 05:30 UTC, `radon-aa-frontier-refresh.timer` refreshes the model cohort at 07:00 UTC, then `radon-ai-cycle.timer` collects current observations at 07:15 UTC.
 
 ## Collection and verification
 

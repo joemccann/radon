@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta
 
 from .model import response_group, utc
 from .registry import INDICATORS, SOURCES
 from .shadow import evaluate_shadow
 from .transforms import InsufficientEvidence, complete_daily_windows
+
+API_SNAPSHOT_MAX_BYTES = 900_000
+_MAX_CHART_SERIES = 3
+_MAX_CHART_POINTS = 120
+_MAX_STRIP_METRICS = 8
 
 
 def vintage_rank(row):
@@ -594,3 +600,77 @@ def weekly_evidence(rows, as_of):
             )
         )
     return result
+
+
+def _downsample(points, limit):
+    if len(points) <= limit:
+        return points
+    last = len(points) - 1
+    indexes = sorted({round(i * last / (limit - 1)) for i in range(limit)})
+    return [points[i] for i in indexes]
+
+
+def compact_snapshot(snapshot, max_bytes=API_SNAPSHOT_MAX_BYTES):
+    """Bound GET payload to the Hrana response ceiling; never invent zeros."""
+    compact = json.loads(json.dumps(snapshot, allow_nan=False))
+    for indicator in compact["indicators"]:
+        metrics = indicator.get("metrics") or []
+        indicator["metrics"] = metrics[:_MAX_STRIP_METRICS]
+        groups = {}
+        for point in indicator.get("history") or []:
+            groups.setdefault((point.get("source_id"), point.get("series_id"), point.get("unit")), []).append(point)
+        metric_ids = {metric["id"] for metric in indicator["metrics"]}
+        ranked = sorted(
+            groups.items(),
+            key=lambda item: (0 if item[0][1] in metric_ids else 1, -len(item[1]), item[0][1] or ""),
+        )
+        history = []
+        for _key, points in ranked[:_MAX_CHART_SERIES]:
+            history.extend(_downsample(sorted(points, key=lambda point: point["date"]), _MAX_CHART_POINTS))
+        indicator["history"] = history
+    def encoded():
+        return json.dumps(compact, sort_keys=True, separators=(",", ":"), allow_nan=False)
+
+    payload = encoded()
+    series_limit, point_limit = _MAX_CHART_SERIES, _MAX_CHART_POINTS
+    while len(payload.encode()) > max_bytes and (series_limit > 1 or point_limit > 24):
+        if point_limit > 24:
+            point_limit = max(24, point_limit // 2)
+        else:
+            series_limit = max(1, series_limit - 1)
+        for indicator in compact["indicators"]:
+            groups = {}
+            for point in indicator.get("history") or []:
+                groups.setdefault((point.get("source_id"), point.get("series_id"), point.get("unit")), []).append(point)
+            history = []
+            for _key, points in list(groups.items())[:series_limit]:
+                history.extend(_downsample(sorted(points, key=lambda point: point["date"]), point_limit))
+            indicator["history"] = history
+        payload = encoded()
+    if len(payload.encode()) > max_bytes:
+        raise ValueError("Compact snapshot exceeds API read budget")
+    return json.loads(payload)
+
+
+def persist_api_snapshot(store):
+    snapshot = compact_snapshot(build_snapshot(store))
+    store.write_api_snapshot(snapshot)
+    return snapshot
+
+
+def registry_snapshot(store):
+    class StatusOnly:
+        def read_snapshot_observations(self, as_of=None):
+            return []
+
+        def read_source_statuses(self, as_of=None):
+            return store.read_source_statuses(as_of=as_of)
+
+    return build_snapshot(StatusOnly())
+
+
+def load_api_snapshot(store):
+    payload = store.read_api_snapshot()
+    if payload is not None:
+        return payload
+    return registry_snapshot(store)

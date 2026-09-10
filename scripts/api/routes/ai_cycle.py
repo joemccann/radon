@@ -20,12 +20,12 @@ _inflight: asyncio.Task | None = None
 
 def _read_snapshot() -> dict:
     # Lazy import avoids database work and provider imports during API startup.
-    from ai_cycle.snapshot import build_snapshot
+    from ai_cycle.snapshot import load_api_snapshot
     from ai_cycle.store import ObservationStore
 
     store = ObservationStore(path=os.environ.get("RADON_AI_CYCLE_DB_PATH") or None)
     try:
-        return build_snapshot(store)
+        return load_api_snapshot(store)
     finally:
         store.close()
 
@@ -42,8 +42,9 @@ async def _load() -> dict:
 async def ai_cycle(response: Response):
     """Latest versioned AI measurements, source provenance and experimental state.
 
-    No upstream collection or schema changes occur on this read. Empty stores
-    are valid unavailable observations; transport/storage failures remain 503.
+    No upstream collection or history scan occurs on this read. The compact
+    API snapshot is written by the collector. Missing snapshots are registry
+    status only; transport/storage failures remain 503.
     """
     global _inflight
     response.headers["Cache-Control"] = "private, no-store"

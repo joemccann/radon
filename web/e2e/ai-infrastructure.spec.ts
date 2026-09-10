@@ -15,6 +15,8 @@ test.describe("AI infrastructure", () => {
     await expect(page.getByTestId("ai-indicator-D1").getByTestId("ai-source-fixture")).toContainText("Fixture publisher");
     await expect(page.getByTestId("ai-indicator-D5")).toContainText("Ramp business AI spend");
     await expect(page.getByTestId("ai-indicator-D5").getByTestId("ai-source-ramp")).toContainText("Ramp AI Index");
+    await expect(page.getByTestId("ai-source-coverage")).toContainText("Ramp AI Index");
+    await expect(page.getByTestId("ai-coverage-fixture")).toContainText("Fixture publisher");
     for (const name of ["Demand", "Compute", "Delivery", "Finance"]) {
       await page.getByRole("tab", { name, exact: true }).click();
       await expect(page.getByRole("tab", { name, exact: true })).toHaveAttribute("aria-selected", "true");

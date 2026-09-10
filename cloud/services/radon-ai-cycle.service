@@ -17,7 +17,7 @@ ExecStartPre=/home/radon/radon/.venv/bin/python3.13 /home/radon/radon/scripts/se
 ExecStart=/home/radon/radon/.venv/bin/python -m scripts.ai_cycle.collect --record
 StandardOutput=journal
 StandardError=journal
-TimeoutStartSec=600
+TimeoutStartSec=1200
 
 [Install]
 WantedBy=multi-user.target

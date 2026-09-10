@@ -1,3 +1,25 @@
+# Task: LLM regime empty snapshot 2026-09-10 [IMPLEMENTED; PR CI PENDING]
+
+GET /regime/llm is empty because FastAPI rebuilds the snapshot from 130k
+Turso observation rows and dies inside the 30s/35s budget. Collection already
+ran. Persist a compact API snapshot, dual-write raw archives, show every source.
+
+## Dependency graph
+
+- T1 depends_on: [] - Prove GET scans history; red tests for compact snapshot, raw import, coverage board.
+- T2 depends_on: [T1] - Collector writes compact snapshot and Turso raw; GET reads only that row.
+- T3 depends_on: [T2] - Page-level source coverage for every registry publisher.
+- T4 depends_on: [T2,T3] - Persist live snapshot, focused suites, PR/CI.
+
+## Checklist
+
+- [x] T1 130,083 Turso rows; first snapshot page 2s; 261 pages miss the 30s GET budget.
+- [x] T2 Compact `ai_cycle_api_snapshot`, raw import, GET `load_api_snapshot`.
+- [x] T3 Source coverage board on every pane.
+- [x] T4 Compact snapshot 490,476 bytes / 2.27s GET; 113 pytest + 8 Vitest; PR.
+
+---
+
 # Task: MenthorQ exposure availability 2026-09-09 [IMPLEMENTED; PR CI PENDING]
 
 ## Dependency graph
@@ -6072,3 +6094,19 @@ PR #379: first GitHub run completed all 10 new browser scenarios; eight desktop/
 - [ ] T3 depends_on: [T2] - Run focused checks, ship through exact-head CI/deployment, resume, and audit NOAA coverage.
 
 Dependency graph: T1 -> T2 -> T3.
+
+
+## Ornn data diligence (2026-09-09)
+
+Research only; preserve existing work. Deliver a comprehensive cited Markdown report for Radon's AI/LLM indicators and a purchase recommendation. No subscriptions, external messages, code changes, or local test suites.
+
+Dependency graph: T1 -> T2; T1 -> T3; T2 + T3 -> T4 -> T5.
+
+- [x] T1 — Read screenshot, repository instructions and code map; define scope. depends_on: []
+- [x] T2 — Verify Ornn pricing, methodology, APIs, licensing, coverage and history against primary sources. depends_on: [T1]
+- [x] T3 — Map current Radon LLM/AI indicators and compare alternative sources independently. depends_on: [T1]
+- [ ] T4 — Synthesize use cases, limitations, purchase decision and pilot design into a cited research artifact. depends_on: [T2, T3]
+- [ ] T5 — Review material claims, citations, recommendation and artifact completeness. depends_on: [T4]
+
+### Review
+Pending.

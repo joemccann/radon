@@ -13,9 +13,9 @@ from scripts.api.routes import ai_cycle as route
 
 
 def test_snapshot_deadlines_leave_headroom_between_layers():
-    from scripts.ai_cycle.store import _SNAPSHOT_READ_DEADLINE_SECONDS
+    from scripts.ai_cycle.store import _SNAPSHOT_PERSIST_DEADLINE_SECONDS
 
-    assert _SNAPSHOT_READ_DEADLINE_SECONDS == 30
+    assert _SNAPSHOT_PERSIST_DEADLINE_SECONDS >= 480
     assert route._READ_DEADLINE_SECONDS == 35
 
 

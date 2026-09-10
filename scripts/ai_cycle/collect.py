@@ -124,8 +124,23 @@ def _main(argv=None):
         "--import-ramp",
         help="Curated Ramp AI Index JSON; defaults to bundled published fixture for source ramp",
     )
+    parser.add_argument(
+        "--persist-snapshot",
+        action="store_true",
+        help="Rebuild the compact API snapshot from stored observations without provider calls",
+    )
     args = parser.parse_args(argv)
     selected = args.sources.split(",")
+    if args.persist_snapshot and not args.record:
+        from .snapshot import persist_api_snapshot
+        from .store import ObservationStore
+
+        store = ObservationStore(args.database)
+        store.initialize()
+        persist_api_snapshot(store)
+        imported = store.import_raw_archive(Path(args.archive))
+        print(json.dumps({"mode": "persist-snapshot", "imported_raw": imported}))
+        return 0
     if any(source not in SOURCES for source in selected):
         parser.error("Unknown source")
     if not 1 <= args.max_requests <= 400:
@@ -231,6 +246,11 @@ def _main(argv=None):
                 break
         if budget_exhausted:
             break
+    if store:
+        from .snapshot import persist_api_snapshot
+
+        store.import_raw_archive(Path(args.archive))
+        persist_api_snapshot(store)
     print(
         json.dumps(
             {
@@ -251,7 +271,7 @@ def main(argv=None):
     flags = list(sys.argv[1:] if argv is None else argv)
     backfill = "--backfill" in flags
     production = (
-        "--record" in flags
+        ("--record" in flags or "--persist-snapshot" in flags)
         and not any(flag == "--database" or flag.startswith("--database=") for flag in flags)
         and not os.environ.get("RADON_AI_CYCLE_DB_PATH")
     )

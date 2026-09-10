@@ -1,5 +1,17 @@
 # Lessons
 
+## 2026-09-10 — A 130k-row Turso history cannot be the GET path
+
+- `/regime/llm` was empty with 130,083 durable observations already in Turso.
+  Collection and backfill were not the failure. GET `/ai-cycle` rebuilt the
+  snapshot from every latest vintage, 261 x 500-row pages, and died on the
+  30s/100k-row budget. Service-health `ok` does not mean the page can read.
+- Materialize a compact `ai_cycle_api_snapshot` at collect time. GET reads
+  that singleton only. Registry source status is the fallback; never scan
+  observation history on a user request.
+- Page-success proofs: stored payload bytes, GET latency, and per-source
+  coverage. Row counts in `ai_cycle_observations` are not page evidence.
+
 ## 2026-09-08: Joe's research and social copy
 
 - Never emit em dashes in generated Dropbox PDF summaries, rendered research copy, or social-share captions, images, and videos. Enforce this at output boundaries as well as in model instructions.

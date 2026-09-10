@@ -15,6 +15,7 @@ SCHEMA = (
     "CREATE INDEX IF NOT EXISTS ai_cycle_observations_identity ON ai_cycle_observations(identity,available_at,period_end)",
     "CREATE TABLE IF NOT EXISTS ai_cycle_source_status (id INTEGER PRIMARY KEY AUTOINCREMENT, checked_at TEXT NOT NULL, payload TEXT NOT NULL)",
     "CREATE TABLE IF NOT EXISTS ai_cycle_raw (hash TEXT PRIMARY KEY, payload TEXT NOT NULL)",
+    "CREATE TABLE IF NOT EXISTS ai_cycle_api_snapshot (id INTEGER PRIMARY KEY CHECK (id = 1), generated_at TEXT NOT NULL, payload TEXT NOT NULL)",
 )
 
 _TRANSIENT_HRANA_MARKERS = (
@@ -28,7 +29,9 @@ _TRANSIENT_HRANA_MARKERS = (
 )
 _CLOUD_WRITE_RETRY_DELAYS = (0.25, 1.0)
 _SNAPSHOT_PAGE_SIZE = 500
-_SNAPSHOT_READ_DEADLINE_SECONDS = 30
+_SNAPSHOT_PERSIST_DEADLINE_SECONDS = 900
+_SNAPSHOT_MAX_ROWS = 500_000
+_SNAPSHOT_READ_DEADLINE_SECONDS = _SNAPSHOT_PERSIST_DEADLINE_SECONDS
 
 
 class ObservationStore:
@@ -121,6 +124,45 @@ class ObservationStore:
         )
         return key
 
+    def import_raw_archive(self, archive):
+        from pathlib import Path
+
+        root = Path(archive)
+        imported = 0
+        if not root.is_dir():
+            return 0
+        for path in root.iterdir():
+            if path.suffix != ".json" or path.name.startswith("."):
+                continue
+            raw = path.read_bytes()
+            if digest(raw) != path.stem:
+                continue
+            self.archive_raw(raw)
+            imported += 1
+        return imported
+
+    def write_api_snapshot(self, snapshot):
+        payload = json.dumps(snapshot, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        self.initialize()
+        self._execute(
+            "INSERT INTO ai_cycle_api_snapshot(id,generated_at,payload) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET generated_at=excluded.generated_at, payload=excluded.payload",
+            (snapshot.get("generated_at") or utc(), payload),
+        )
+
+    def read_api_snapshot(self):
+        try:
+            rows = self._query("SELECT payload FROM ai_cycle_api_snapshot WHERE id=1")
+        except Exception as exc:
+            if "no such table: ai_cycle_api_snapshot" in str(exc):
+                return None
+            raise
+        if not rows:
+            return None
+        payload = json.loads(rows[0][0])
+        if payload.get("version") != 1:
+            raise RuntimeError("AI API snapshot is incompatible")
+        return payload
+
     def record_source_status(self, status):
         from .registry import SOURCES
 
@@ -176,12 +218,12 @@ class ObservationStore:
         rows, cursor = [], 0
         deadline = time.monotonic() + _SNAPSHOT_READ_DEADLINE_SECONDS
         while True:
-            if time.monotonic() > deadline or len(rows) >= 100000:
+            if time.monotonic() > deadline or len(rows) >= _SNAPSHOT_MAX_ROWS:
                 raise RuntimeError("AI snapshot history exceeds bounded read budget")
             try:
                 page = self._query(
-                    f"SELECT id,payload FROM ai_cycle_observations AS o WHERE id > ? AND available_at <= ? AND period_end >= ? AND (period_end >= ? OR json_extract(payload,'$.indicator_id') IN ('F1','F2','H1','H2','P2')) AND NOT EXISTS (SELECT 1 FROM ai_cycle_observations AS newer WHERE newer.identity=o.identity AND newer.available_at <= ? AND (newer.available_at>o.available_at OR (newer.available_at=o.available_at AND (COALESCE(json_extract(newer.payload,'$.published_at'),'') || COALESCE(json_extract(newer.payload,'$.metadata.accession'),'') || printf('%020d',newer.id)) > (COALESCE(json_extract(o.payload,'$.published_at'),'') || COALESCE(json_extract(o.payload,'$.metadata.accession'),'') || printf('%020d',o.id))))) ORDER BY id LIMIT {_SNAPSHOT_PAGE_SIZE}",
-                    (cursor, at, cutoff, daily_cutoff, at),
+                    f"SELECT id,payload FROM ai_cycle_observations WHERE id > ? AND available_at <= ? AND period_end >= ? AND (period_end >= ? OR json_extract(payload,'$.indicator_id') IN ('F1','F2','H1','H2','P2')) ORDER BY id LIMIT {_SNAPSHOT_PAGE_SIZE}",
+                    (cursor, at, cutoff, daily_cutoff),
                 )
             except Exception as exc:
                 if "no such table: ai_cycle_observations" in str(exc):
