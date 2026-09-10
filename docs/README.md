@@ -39,7 +39,7 @@ Archived session artifacts live in [`docs/archive/`](archive/).
 | Topic | Doc |
 |-------|-----|
 | Regime and scanner indicator specs | [`docs/indicators/README.md`](indicators/README.md) |
-| AI infrastructure evidence, source verification and rollout | [Design](ai-infrastructure-plan.md) · [Collection](ai-infrastructure-operations.md) · [Verification](ai-infrastructure-verification.md) |
+| AI infrastructure evidence, source verification and rollout | [Design](ai-infrastructure-plan.md) · [Collection](ai-infrastructure-operations.md) · [Verification](ai-infrastructure-verification.md). Demand D6 OpenDesign Arena is LLM/model-quality only, never GPU scarcity |
 | Social-share voice provenance and export constraints | [`docs/joe-mccann-social-voice.md`](joe-mccann-social-voice.md) |
 | Equibles market-structure API | [`docs/equibles-api.md`](equibles-api.md) |
 | Strategy specs | [`docs/strategies.md`](strategies.md) |
