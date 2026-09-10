@@ -4,8 +4,6 @@
 **Author:** AI Boom Watch  
 **Type:** quant memo. Primary sources only. Confidence labeled. Not a forecast.
 
-**Historical scope:** This memo preserves the 27 Aug 2026 research snapshot and the explicitly dated 28 Aug supplements. Its prices, availability, source observations, and proposed build steps are historical. For the current implementation, see [AI infrastructure design](ai-infrastructure-plan.md), [collection operations](ai-infrastructure-operations.md), and [source verification](ai-infrastructure-verification.md).
-
 **How to use this:** pane-1 (OpenRouter levels, Vercel mix/spend, Portkey levels if the scrape holds, gpurentalprices GPU $, residual load) is the tradeable tape. Capex and interconnect queues confirm 2–4 quarters late. Cash conversion is already flashing *financed build*, not *demand peak*. Do not blend these into one 0–100 index.
 
 ---
@@ -48,6 +46,7 @@ There is **no public hourly data-center-only MW series** and **no public fleet G
 6. Dell AI **orders vs shipments vs backlog**.
 7. Vertiv / Eaton Electrical **orders** and book-to-bill.
 8. Artificial Analysis **$ per Intelligence-Index task** for a *fixed* tier (cache/reasoning split).
+8b. OpenDesign Arena (open-design.ai / @OpenDesignHQ) — design-task quality / $/artifact / minutes; open-vs-closed gap. **LLM-pane complement only — not AI-infra.**
 9. Weather-residual EIA-930 / PJM-DOM / ERCOT nighttime baseload (shoulder months).
 10. DC SASB CMBS concessions / neocloud new-issue spreads (Bloomberg; no FRED series).
 
@@ -79,6 +78,7 @@ Cadence key: **H** hourly/tick, **D** daily, **W** weekly, **M** monthly, **Q** 
 | State of AI 100T study | OpenRouter × a16z | https://openrouter.ai/state-of-ai · https://a16z.com/state-of-ai/ | One-shot (4 Dec 2025), weekly internals | Stale | N/A | Public | Yes | Mix study, not a 2026 series. |
 | HF downloads | Hugging Face | https://huggingface.co/models | Rolling 30d | ~1 day | Yes | Public; org daily CSV is Team/Enterprise | Yes | **Weights, not inference.** |
 | Arena Elo | Arena | https://arena.ai/leaderboard | Continuous votes | Hours–days | Yes | Public | Yes | **Preference, not volume.** |
+| Design-task quality / $/artifact / speed (task families) | OpenDesign Arena (@OpenDesignHQ) | https://open-design.ai/llm-arena-for-design/ · product https://open-design.ai/ · GH `nexu-io/open-design` | I / event (new model drops) | Hours–days | High — vendor bench; task set can change | Public charts; Apache-2.0 product is local BYOK design workspace, **not** a rental meter | Yes | **LLM / model-quality pane only.** Everyday design prototypes (web/mobile/desktop/dashboard/landing). Sep 2026 print (vendor): DeepSeek V4.1 Flash ≈ **98%** of GPT-6 Astra score at ~**1.4%** cost (~$0.023 vs ~$1.61/artifact; ~5.3 vs ~11.1 min). **Not** tokens, util, or GPU $. Skip as AI-infra source. Verify raw tables before encoding — marketing bias. |
 | Helicone / Groq / Together public tokens | — | — | — | — | — | — | — | **No verified public market series.** Helicone → Mintlify maintenance. |
 
 ### 2.2 Power and interconnects
@@ -220,6 +220,8 @@ Two feeds, one pane. Together they are the only other **public, charted, daily-o
 - **Turn:** 4 weeks of declining tokens **and** spend on this host, confirmed by OpenRouter paid levels. A one-day −13% token print is mix or a tenant, not a peak.
 - **Confidence:** **High** that the page is a real meter of Portkey traffic. **Low** as a global cycle index. **Medium** ingest risk (scrape of RSC flight data; they can break it).
 
+**LLM / quality pane (not a top-five infra tape):** OpenDesign Arena — https://open-design.ai/llm-arena-for-design/ (@OpenDesignHQ). Open-source vibe-design workspace (Apache-2.0, local BYOK agents) that publishes **design-task** benchmarks: quality score, **$/artifact**, minutes, and scenario splits (web / mobile / desktop / dashboard / landing). Useful for open-vs-closed mix and unit economics of *prototype generation*, next to Artificial Analysis. Recent vendor claim (≈9 Sep 2026): DeepSeek V4.1 Flash ≈ **98%** of GPT-6 Astra at ~**1.4%** of cost. **Headwinds:** vendor-run bench, marketing framing, undocumented sample sizes / intervals — verify raw tables before encoding. **Verdict:** **watch / adopt as LLM-pane complement.** **Skip as AI-infra source** (no tokens, MW, GPU $, or interconnects).
+
 **Not in the top five, but the best *non-daily* complements:** NVIDIA IR (quarterly hard $); EDGAR companyfacts (cash capex / CFO); SemiAnalysis Accelerator & HBM / ChipBook if you pay (no list price); TrendForce HBM $30k / AI Server $55k; Silicon Data residual values (monthly, paid). The monthly Vercel Production Index is commentary on source #2, not a separate series. Silicon Data **daily** indices sit under §3 #4 as a paid complement, not a sixth top source.
 
 ---
@@ -331,6 +333,7 @@ C4. SMCI or Dell: inventory days up + orders < shipments two quarters.
 - Google 3.2Q/month is **all surfaces** (Search + Gemini app + APIs + internal). Fireworks 40T/day is **one host**. Do not splice.
 - Private / ZDR excluded on OpenRouter. `:free` ranked separately.
 - tokensperday.com intra-day counter is grown/modeled. Floor vintage was 16 Jul 2026.
+- OpenDesign Arena is a **design-task** bench run by the product vendor (@OpenDesignHQ / open-design.ai). Not Chatbot Arena Elo, not volume, not GPU scarcity. Scores and $/artifact can move with prompt set and model labels. Do not treat “98% of Astra at 1.4% cost” as a global capability or cost index without the raw table. Do not put it on the GPU pane or splice it onto OpenRouter levels.
 
 ### Electricity
 - Weather dominates hourly and monthly BA load. 10–20 GW ERCOT/PJM heat swing swamps weekly AI increment.
@@ -393,12 +396,12 @@ SemiAnalysis / TrendForce / bank “supercycle” decks sell the boom. Require a
 7. One alarm, three colors, no adjectives.  
 8. Optional paid, in order: AA Pro ($417) if you want price history; **Silicon Data Plus/Pro** if you want neo vs hs H100/B200 indices + forward curve + residuals (ADOPT only with license; CME futures planned 5 Oct 2026); GridStatus Pro if you want nodal into NOVA / West Texas; SemiAnalysis ChipBook if you want CoWoS/HBM units; TrendForce HBM if you don’t buy SemiAnalysis.
 
-Do not subscribe to tokensperday, Arena, or HF downloads as cycle inputs.
+Do not subscribe to tokensperday, Chatbot Arena Elo, or HF downloads as cycle inputs. OpenDesign Arena is optional on the **LLM quality** pane only (verify raw tables); never as an infra cycle input.
 
 ---
 
 ## Sources (primary, fetched 27 Aug 2026)
 
-OpenRouter rankings + Data API; Socialpranker/token-history app snapshots (verified 28 Aug 2026, Hermes Agent 1.65T); jvrck/openrouterlist price ledger (as_of 2026-08-28, 984 models, from 2024-09-21); meni432/ModelGraveyard events (415/129); alex-hubbard/gpu_price_tracker (HF parquet); vxguo1/powertracker (no license); Artificial Analysis pricing/data-api; Vercel AI Gateway leaderboards + `leaderboard-export` (verified 27 Aug 2026, history from 2025-10-01) and Production Index (Jul 2026); Portkey Rankings daily (verified 27 Aug 2026; no public API); gpurentalprices `latest.json` + `adriannutiu/gpu-rental-prices` (54 daily snapshots from 2026-07-05, verified 27 Aug 2026); Silicon Data GPU indices / forward curve / residual value + CME compute-futures PR 11 Aug 2026 (planned H100+B200 futures 5 Oct 2026; Plus/Pro API — not ingested without license); Epoch data hub + usage-reports CSV + hyperscaler OCF/capex CSV; Google I/O 19 May 2026; OpenAI Signals 12 Aug 2026; Anthropic Economic Index 26 Jun 2026; Fireworks Series D 15 Jul 2026; EIA-930 / Open Data / EPM / STEO Aug 2026; GridStatus pricing + datasets; ERCOT Large Load hub + Apr/Jun 2026 decks; PJM 2026 LTLF; SPP HILL; IEA Key Questions 16 Apr 2026; LBNL Queued Up 2026 and US DC Energy 2025 Update; EPRI Powering Intelligence 2026; NVIDIA Q2 FY27 PR/CFO commentary 26 Aug 2026; TSMC 2Q26 transcript; SK hynix / Samsung Q2 2026; TrendForce DRAMeXchange cart; Lambda pricing; Vast.ai pricing; MSFT FY26 Q4 IR + 8-K 29 Jul 2026; Alphabet Q2 2026 IR/10-Q; Amazon Q2 2026 EX-99.1; Meta Q2 2026 IR; Oracle FY26 PR; CoreWeave Q2 2026 IR; Vertiv / Eaton Q2 2026 exhibits; Dell FY27 Q1; Equinix / Digital Realty Q2 2026.
+OpenRouter rankings + Data API; Socialpranker/token-history app snapshots (verified 28 Aug 2026, Hermes Agent 1.65T); jvrck/openrouterlist price ledger (as_of 2026-08-28, 984 models, from 2024-09-21); meni432/ModelGraveyard events (415/129); alex-hubbard/gpu_price_tracker (HF parquet); vxguo1/powertracker (no license); Artificial Analysis pricing/data-api; OpenDesign Arena / open-design.ai / @OpenDesignHQ (design-task quality+$/artifact; LLM-pane only, folded 10 Sep 2026); Vercel AI Gateway leaderboards + `leaderboard-export` (verified 27 Aug 2026, history from 2025-10-01) and Production Index (Jul 2026); Portkey Rankings daily (verified 27 Aug 2026; no public API); gpurentalprices `latest.json` + `adriannutiu/gpu-rental-prices` (54 daily snapshots from 2026-07-05, verified 27 Aug 2026); Silicon Data GPU indices / forward curve / residual value + CME compute-futures PR 11 Aug 2026 (planned H100+B200 futures 5 Oct 2026; Plus/Pro API — not ingested without license); Epoch data hub + usage-reports CSV + hyperscaler OCF/capex CSV; Google I/O 19 May 2026; OpenAI Signals 12 Aug 2026; Anthropic Economic Index 26 Jun 2026; Fireworks Series D 15 Jul 2026; EIA-930 / Open Data / EPM / STEO Aug 2026; GridStatus pricing + datasets; ERCOT Large Load hub + Apr/Jun 2026 decks; PJM 2026 LTLF; SPP HILL; IEA Key Questions 16 Apr 2026; LBNL Queued Up 2026 and US DC Energy 2025 Update; EPRI Powering Intelligence 2026; NVIDIA Q2 FY27 PR/CFO commentary 26 Aug 2026; TSMC 2Q26 transcript; SK hynix / Samsung Q2 2026; TrendForce DRAMeXchange cart; Lambda pricing; Vast.ai pricing; MSFT FY26 Q4 IR + 8-K 29 Jul 2026; Alphabet Q2 2026 IR/10-Q; Amazon Q2 2026 EX-99.1; Meta Q2 2026 IR; Oracle FY26 PR; CoreWeave Q2 2026 IR; Vertiv / Eaton Q2 2026 exhibits; Dell FY27 Q1; Equinix / Digital Realty Q2 2026.
 
 Series-level source notes were verified on publisher pages 27 Aug 2026 (PT). Re-open each URL before pasting a print into a model.
