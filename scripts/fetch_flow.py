@@ -20,7 +20,7 @@ Intraday Interpolation:
 """
 import argparse, json, logging, sys, time as time_module
 from datetime import datetime, time
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, NamedTuple, Optional, Tuple
 import pytz
 
 from clients.uw_client import (
@@ -309,14 +309,27 @@ def _darkpool_page_cursor(trades: List[Dict]) -> Optional[str]:
     return oldest
 
 
-def fetch_darkpool(
+class DarkpoolWalk(NamedTuple):
+    """One (ticker, date) dark-pool cursor walk.
+
+    ``cacheable`` is True when the walk finished on a short page (the day
+    is complete) or ran to ``DARKPOOL_MAX_PAGES`` (the system full walk).
+    A caller-imposed cap below that — discover's 2-page scoring sample —
+    is not a complete day and must not be served to flow reports.
+    """
+
+    trades: List[Dict]
+    cacheable: bool
+
+
+def walk_darkpool(
     ticker: str,
     date: Optional[str] = None,
     _client: Optional[UWClient] = None,
     *,
     retry_transient: bool = True,
     max_pages: Optional[int] = None,
-) -> List[Dict]:
+) -> DarkpoolWalk:
     """Fetch dark pool trade prints for a ticker (full day, multi-page).
 
     UW hard-caps each response at ``DARKPOOL_PAGE_LIMIT`` (500). Walks
@@ -324,9 +337,6 @@ def fetch_darkpool(
 
     ``max_pages`` caps the walk (discover scoring). Evaluate and
     ticker flow reports omit it and use ``DARKPOOL_MAX_PAGES``.
-
-    Returns list of individual dark pool transactions with price, size,
-    NBBO context, and premium.
 
     Raises `UWRateLimitError` / `UWServerError` if the upstream is genuinely
     failing (after one bounded retry). The caller is expected to abort the
@@ -347,7 +357,7 @@ def fetch_darkpool(
             retry_transient=retry_transient,
         )
 
-    def _fetch(client):
+    def _fetch(client) -> DarkpoolWalk:
         all_trades: List[Dict] = []
         older_than: Optional[str] = None
         seen_ids: set = set()
@@ -355,7 +365,8 @@ def fetch_darkpool(
             page_cap = DARKPOOL_MAX_PAGES
         else:
             page_cap = max(1, min(int(max_pages), DARKPOOL_MAX_PAGES))
-        for page_idx in range(page_cap):
+        hit_page_cap = False
+        for _page_idx in range(page_cap):
             resp = _fetch_page(client, older_than=older_than)
             if resp is None:
                 break
@@ -384,17 +395,37 @@ def fetch_darkpool(
                 break
             older_than = next_cursor
         else:
+            hit_page_cap = True
             logger.warning(
                 "darkpool(%s, date=%s): hit page cap=%d (%d prints)",
                 ticker, date, page_cap, len(all_trades),
             )
-        return all_trades
+        cacheable = (not hit_page_cap) or (page_cap >= DARKPOOL_MAX_PAGES)
+        return DarkpoolWalk(all_trades, cacheable)
 
     if _client is not None:
         return _fetch(_client)
     client_kwargs = {} if retry_transient else {"max_retries": 0, "backoff_factor": 0}
     with UWClient(**client_kwargs) as client:
         return _fetch(client)
+
+
+def fetch_darkpool(
+    ticker: str,
+    date: Optional[str] = None,
+    _client: Optional[UWClient] = None,
+    *,
+    retry_transient: bool = True,
+    max_pages: Optional[int] = None,
+) -> List[Dict]:
+    """Fetch dark pool prints; see ``walk_darkpool`` for completeness."""
+    return walk_darkpool(
+        ticker,
+        date=date,
+        _client=_client,
+        retry_transient=retry_transient,
+        max_pages=max_pages,
+    ).trades
 
 
 def _flow_alerts_page_cursor(alerts: List[Dict]) -> Optional[str]:
@@ -692,7 +723,7 @@ def fetch_flow(ticker: str, lookback_days: int = 5, _client: Optional[UWClient] 
                     skipped_history_dates.append(date)
                     continue
                 trades = fetch_darkpool(ticker, date, _client=client, retry_transient=retry_transient)
-                set_cached_darkpool(ticker, date, trades)
+                set_cached_darkpool(ticker, date, trades, complete=True)
             if isinstance(trades, list):
                 day_analysis = analyze_darkpool(trades)
                 day_analysis["date"] = date

@@ -70,6 +70,7 @@ class TestPriorDayRoundTrip:
         assert payload["count"] == 2
         assert payload["date"] == date
         assert payload["schema"] == dpc.CACHE_SCHEMA
+        assert payload["complete"] is True
 
 
 class TestCacheSchemaPagination:
@@ -107,6 +108,66 @@ class TestCacheSchemaPagination:
         date = _yesterday()
         dpc.set_cached_darkpool("GLD", date, SAMPLE_TRADES)
         assert dpc.get_cached_darkpool("GLD", date) == SAMPLE_TRADES
+
+
+class TestScoringWalkIsNotAFullDay:
+    """SNDK 2026-09-10: discover's 2-page scoring walk (~976 prints) was
+    written as schema v2 and then served to /flow-analysis as a complete
+    session. Days that actually filled the 40-page cap (~19k) sat next to
+    those truncated rows in the same report.
+    """
+
+    def _write_v2(self, ticker: str, date: str, n: int, **extra):
+        path = dpc._path(ticker, date)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        trades = [{"price": 1, "size": 1, "premium": 1}] * n
+        payload = {
+            "ticker": ticker,
+            "date": date,
+            "count": n,
+            "schema": 2,
+            "trades": trades,
+        }
+        payload.update(extra)
+        path.write_text(json.dumps(payload))
+        return trades
+
+    def test_legacy_two_page_row_is_a_miss_for_flow_consumers(self):
+        date = _yesterday()
+        self._write_v2("SNDK", date, 976)
+        assert dpc.get_cached_darkpool("SNDK", date) is None
+
+    def test_exactly_one_full_page_without_complete_is_a_miss(self):
+        date = _yesterday()
+        self._write_v2("SNDK", date, 500)
+        assert dpc.get_cached_darkpool("SNDK", date) is None
+
+    def test_short_first_page_without_complete_still_hits(self):
+        date = _yesterday()
+        trades = self._write_v2("SNDK", date, 499)
+        assert dpc.get_cached_darkpool("SNDK", date) == trades
+
+    def test_full_cap_legacy_v2_still_hits(self):
+        date = _yesterday()
+        trades = self._write_v2("SNDK", date, 1001)
+        assert dpc.get_cached_darkpool("SNDK", date) == trades
+
+    def test_incomplete_flag_is_a_miss_even_outside_the_band(self):
+        date = _yesterday()
+        self._write_v2("SNDK", date, 19050, complete=False)
+        assert dpc.get_cached_darkpool("SNDK", date) is None
+
+    def test_scoring_may_reuse_an_incomplete_row(self):
+        date = _yesterday()
+        trades = self._write_v2("SNDK", date, 976, complete=False)
+        assert dpc.get_cached_darkpool("SNDK", date, require_complete=False) == trades
+
+    def test_set_incomplete_is_a_miss_for_flow_consumers(self):
+        date = _yesterday()
+        sample = [{"price": 1, "size": 1}] * 1000
+        dpc.set_cached_darkpool("SNDK", date, sample, complete=False)
+        assert dpc.get_cached_darkpool("SNDK", date) is None
+        assert dpc.get_cached_darkpool("SNDK", date, require_complete=False) == sample
 
 
 # ── today is never cached ───────────────────────────────────────────
@@ -212,3 +273,49 @@ class TestFetchFlowUsesCache:
 
         assert calls == [session_today]
         assert result["history_backfill_skipped"] == [session_prior]
+
+    def test_legacy_two_page_cache_is_refetched(self, monkeypatch):
+        """A 976-print v2 row (SNDK 2026-09-04 shape) must not satisfy
+        fetch_flow — that is how truncated discover walks froze into the
+        20-session ticker report.
+        """
+        from unittest.mock import patch
+        import fetch_flow
+
+        session_today = "2026-09-10"
+        session_prior = "2026-09-04"
+        session_now = dpc._ET.localize(datetime(2026, 9, 10, 11, 23, 0))
+        monkeypatch.setattr(dpc, "_today_et", lambda: session_today)
+        monkeypatch.setattr(fetch_flow, "_session_now_et", lambda: session_now)
+
+        path = dpc._path("SNDK", session_prior)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({
+            "ticker": "SNDK",
+            "date": session_prior,
+            "count": 976,
+            "schema": 2,
+            "trades": [{"price": 1, "size": 1, "premium": 1}] * 976,
+        }))
+
+        calls = []
+
+        def fake_darkpool(ticker, date, _client=None, **_kwargs):
+            calls.append(date)
+            return [{"price": 1.0, "size": 100, "premium": 100}]
+
+        with patch.object(
+            fetch_flow,
+            "get_last_n_trading_days",
+            return_value=[session_today, session_prior],
+        ), patch.object(
+            fetch_flow, "fetch_darkpool", side_effect=fake_darkpool
+        ), patch.object(fetch_flow, "fetch_flow_alerts", return_value=[]):
+            fetch_flow.fetch_flow(
+                "SNDK",
+                lookback_days=2,
+                _client=object(),
+                skip_options_flow=True,
+            )
+
+        assert session_prior in calls
