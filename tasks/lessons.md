@@ -985,3 +985,6 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 
 ## 2026-09-08 — Full test suites run in CI, not on the laptop
 - Never launch full `pytest`/`vitest` locally. Push, read `gh run view --log-failed`, fix, push, repeat until green. Targeted single-file red/green runs are fine.
+
+## 2026-09-09 - Compose on X must not await generated media
+- Keep the text-only X intent link usable immediately with the current sanitized caption while voice rewriting or preview rendering is pending. Media readiness may disable media downloads only; pin the loading-state composer navigation in unit and browser regressions.

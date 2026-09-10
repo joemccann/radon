@@ -22,6 +22,27 @@ closure.
 
 ---
 
+# Task: Reliability remediate 2026-09-10 [IN PROGRESS]
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify dedicated runner, dated branch, reduced-rung eligibility, and prior remediation state.
+- T2 depends_on: [T1] - Re-run permanent fault-injection drills and attempt the serial gate contract with detached sentinels.
+- T3 depends_on: [T2] - Append the remediation outcome, commit, and push the dated branch.
+
+## Checklist
+
+- [x] T1 `RADON_WEEKEND_REDUCED=1`; today's audit has no P0/P1 finding and REL-251 through REL-253 source work is DONE.
+- [x] T2 Permanent drill stage attempted with the shared reliability venv; it exited before its first sentinel update, matching the prior verified runner blocker.
+- [x] T3 Append-only remediation record and commit.
+
+## Review
+
+- [x] Reduced rung admitted no new P0/P1 source work; REL-251 through REL-253 remain DONE.
+- [x] Detached drill PID 21837 produced blank step fields and no `DONE`; this is incomplete verification evidence, never a green gate.
+
+---
+
 # Task: LLM regime empty snapshot 2026-09-10 [IMPLEMENTED; PR CI PENDING]
 
 GET /regime/llm is empty because FastAPI rebuilds the snapshot from 130k
@@ -6120,6 +6141,29 @@ PR #379: first GitHub run completed all 10 new browser scenarios; eight desktop/
 Dependency graph: T1 -> T2 -> T3.
 
 
+## Testing-weekend audit 2026-09-10 [COMPLETE]
+
+Dependency graph: T1 -> T2 -> T3 -> T4.
+
+- [x] T1 — Verify dedicated runner, clean branch, ledger base and toolchain. depends_on: []
+- [x] T2 — Run serial full gates and delta determinism checks. depends_on: [T1]
+- [x] T3 — Audit delta, standing candidates, skips, ratchets and CI reachability. depends_on: [T1,T2]
+- [x] T4 — Append audit evidence, commit and push dated branch. depends_on: [T3]
+
+### Review
+- [x] No new finding; existing T-490 and T-488 reproduced in isolation.
+
+## Testing-weekend remediate 2026-09-10 [COMPLETE]
+
+Dependency graph: T1 -> T2 -> T3.
+
+- [x] T1 — Reconcile all append-only audit sections and reduced-scope P0/P1 eligibility. depends_on: []
+- [x] T2 — Reverified T-490 as blocked by `.codex` filesystem policy; T-488 remains operator-only. depends_on: [T1]
+- [x] T3 — Append evidence, commit, and push; closing gates are inapplicable while T-490 remains deterministically red. depends_on: [T2]
+
+### Review
+- [x] Renderer write returned `PermissionError`; portable-render contract remains 52 passed / 21 failed.
+
 ## Ornn data diligence (2026-09-09)
 
 Research only; preserve existing work. Deliver a comprehensive cited Markdown report for Radon's AI/LLM indicators and a purchase recommendation. No subscriptions, external messages, code changes, or local test suites.
@@ -6134,3 +6178,28 @@ Dependency graph: T1 -> T2; T1 -> T3; T2 + T3 -> T4 -> T5.
 
 ### Review
 Pending.
+
+# Social Compose on X availability (2026-09-09)
+
+## Specification
+Compose on X must immediately open X's composer using the current sanitized caption, independent of voice rewriting, chart rendering, PNG preparation, and video export. When the rewrite finishes, subsequent clicks use the updated caption. Media exports retain their readiness checks. Opening a composer must not publish anything automatically.
+
+## Dependency graph
+- T1 depends_on: [] - Inspect loading state and record regression contract.
+- T2 depends_on: [T1] - Add unit regressions for immediate Compose and asynchronous caption updates.
+- T3 depends_on: [T1] - Add browser regression with delayed rewrite/preview and captured composer navigation (parallel agent).
+- T4 depends_on: [T2,T3] - Publish failing regression head to GitHub CI, then apply minimal fix.
+- T5 depends_on: [T4] - Await exact-head green CI, inspect browser screenshots, document evidence and notify.
+
+## Checklist
+- [x] T1 Source and user screenshot inspected; isolated worktree protects unrelated working changes.
+- [x] T2 Unit regression.
+- [x] T3 Browser regression.
+- [x] T4 Red CI and minimal fix.
+- [ ] T5 Green CI and visual verification.
+
+## Review
+No local test suites. Change only Compose availability; retain caption and media generation behavior.
+
+- RED: GitHub CI run 34437337990, head da04fa6432459b320d36718b38b40c437d6be773, Vitest shard 4/8: 2 intended failures (missing Compose link), 1,332 passed. Both new loading-state assertions reproduce the missing href.
+- Fix: remove the voice-loading condition from the X intent href. Existing buildXShareUrl continues to sanitize captions; media readiness and caption editing behavior remain intact. Browser tests capture real mocked popup navigation during voice/PNG waits at 1440px and 393px.
