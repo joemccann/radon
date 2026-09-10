@@ -165,7 +165,6 @@ async function stubOrdersPage(page: import("@playwright/test").Page) {
   );
 
   await page.route("**/api/blotter", (route) => {
-    const method = route.request().method();
     return route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -231,6 +230,6 @@ for (const width of [1280, 393]) {
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
     expect(errors).toEqual([]);
-    await page.screenshot({ path: testInfo.outputPath(`historical-fill-${width}.png`), fullPage: true });
+    await page.screenshot({ path: testInfo.outputPath(`historical-fill-${width}.png`), fullPage: true, animations: "disabled" });
   });
 }

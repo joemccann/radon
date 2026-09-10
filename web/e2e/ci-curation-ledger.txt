@@ -71,7 +71,6 @@ fill-toast.spec.ts
 flow-analysis-ticker.spec.ts
 header-fullscreen.spec.ts
 hhlev-tab.spec.ts
-historical-trades-filter.spec.ts
 hyad-tab.spec.ts
 ib-mfa-reconnect-alert.spec.ts
 iei-hyg-tab.spec.ts
@@ -305,3 +304,6 @@ ws-connection-stability.spec.ts
 #   overflow at 1280px/393px; screenshots inspected. Full Next route coverage
 #   remains held out: the existing server requires sign-in and the checkout
 #   disallows a second dev server. No auth or production settings changed.
+
+# PROMOTED 2026-09-10 historical-trades-filter.spec.ts: full /orders route
+#   regression runs on GitHub with desktop/mobile screenshot artifacts.
