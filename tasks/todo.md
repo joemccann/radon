@@ -6228,3 +6228,17 @@ Dependency graph: T1 -> T2 -> T3.
 
 ## Review
 No local suites. CI 34494032484 reproduces outdated download signature matching. Main 1998fb77 merges cleanly.
+
+# Form focus highlight audit (2026-09-10)
+
+Specification: one visible, aligned keyboard focus indicator per field, around the complete visual control (including currency prefixes). Audit shared/composite controls across Clear light/dark and desktop/mobile. Preserve native semantics and all order behavior; use mocked browser data. No local suites.
+
+Dependency graph: T1 -> T2; T1 -> T3; T2 + T3 -> T4 -> T5.
+- [ ] T1 depends_on: [] - Audit CSS cascade and composite control ownership; record scoped findings.
+- [ ] T2 depends_on: [T1] - Add browser regressions and screenshot artifacts on GitHub runners.
+- [ ] T3 depends_on: [T1] - Apply minimal shared CSS fix with focused contract coverage.
+- [ ] T4 depends_on: [T2,T3] - Publish PR, capture red/green CI, resolve conflicts, await every exact-head check.
+- [ ] T5 depends_on: [T4] - Inspect browser screenshots, record results, send confirmed green notification.
+
+## Review
+Pending. Isolated worktree /tmp/radon-focus-audit-20260910 protects existing user changes.
