@@ -143,6 +143,7 @@ import VolConePanel from "./VolConePanel";
 import FlowAnalysisTickerInput from "./flow-analysis/FlowAnalysisTickerInput";
 import { InformedFlowPanel } from "./flow-analysis/InformedFlowPanel";
 import { AlertsPanel } from "./alerts/AlertsPanel";
+import ResearchWorkbench from "@/components/research/ResearchWorkbench";
 import WorkflowComposer from "@/app/workflow/WorkflowComposer";
 import { MarketState } from "@/lib/useMarketHours";
 
@@ -4268,6 +4269,8 @@ function WorkspaceSections({ section, portfolio, orders, prices, depths, tape, t
           <AlertsPanel />
         </div>
       );
+    case "research-workbench":
+      return <ResearchWorkbench portfolio={portfolio} />;
     case "workflow":
       return <WorkflowComposer />;
     case "admin":

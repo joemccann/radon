@@ -117,6 +117,8 @@ const PINNED: Record<string, PinnedCapability> = {
   "prices": { GET: "read", POST: "read" },
   "probe/freshness": "internal",
   "profile": { GET: "read", PUT: "mutate.workspace" },
+  "research/evidence/[asset]": "read",
+  "research/governance": "read",
   "regime": { GET: "read", POST: "read.spawn" },
   "regime/share": "internal",
   "regime/share/content": "internal",

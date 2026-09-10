@@ -47,6 +47,8 @@ def parse(pdf_path, output):
               'position_coordinates': 'PDF points, visible box lower-left origin, y up; text y is baseline; /Rotate not applied; rebased frames unknown in this wheel; positions are evidence metadata, not auto-crop coordinates',
               'ocr_enabled': False,
               'page_count': len(records), 'pages': records}
+    from research.manifest import build_manifest
+    save_json(output / 'manifest.json', build_manifest(result, output))
     save_json(output / 'evidence.json', result)
     return result
 

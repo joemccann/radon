@@ -5,6 +5,8 @@ export type ResearchSource = {
   kind: "dropbox";
   publisher: string;
   url: string;
+  /** Original-page extracted passages and tables; unavailable for legacy PDFs. */
+  evidenceUrl?: string;
   documentDate: string;
   folderDate: string;
   pages: number[];
@@ -31,6 +33,8 @@ export function parseResearchSource(value: unknown): ResearchSource | undefined 
     || !Array.isArray(s.figures) || !s.figures.every(f => f && typeof f.url === "string"
       && PRIVATE_RESEARCH_ASSET.test(f.url) && f.url.endsWith(".png")
       && Number.isInteger(f.page) && f.page > 0 && s.pages.includes(f.page) && typeof f.caption === "string")) return undefined;
+  if (s.evidenceUrl !== undefined && (typeof s.evidenceUrl !== "string"
+    || !/^\/api\/newsfeed\/research\/files\/[a-f0-9]{64}\.json$/.test(s.evidenceUrl))) return undefined;
   return {
     ...s,
     publisher: withoutEmDashes(s.publisher),
