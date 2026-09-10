@@ -3,6 +3,7 @@
 import type { BlotterTrade } from "@/lib/types";
 import { fmtPrice } from "@/lib/positionUtils";
 import { formatTradeDate } from "@/lib/blotter/formatTradeDate";
+import { blotterFillPrice, formatBlotterFillPrice, FILL_PRICE_HELP, AGGREGATE_FILL_PRICE_HELP } from "@/lib/blotter/fillPrice";
 import Card from "./Card";
 import MetricCell from "./MetricCell";
 
@@ -61,6 +62,7 @@ export default function MobileBlotterList({ trades }: MobileBlotterListProps) {
   return (
     <div className="mobile-card-list" data-testid="mobile-blotter-list">
       {trades.map((t, i) => {
+        const fill = blotterFillPrice(t);
         const realized = fmtRealized(t);
         const tradeDate = getTradeDate(t);
         const id = `${t.symbol}-${i}`;
@@ -86,9 +88,16 @@ export default function MobileBlotterList({ trades }: MobileBlotterListProps) {
 
             <div className="mobile-card__subtitle">{t.contract_desc}</div>
 
-            {/* Primary metrics: Qty + Net P&L */}
+            {/* Primary metrics: Qty + recorded fill price + Net P&L */}
             <div className="m-blotter-metrics">
               <MetricCell label="Qty" value={fmtQty(t)} size="secondary" />
+              <MetricCell
+                label={fill.aggregated ? "Avg Fill (aggregate)" : "Avg Fill"}
+                value={formatBlotterFillPrice(fill.price)}
+                size="secondary"
+                title={fill.aggregated ? AGGREGATE_FILL_PRICE_HELP : FILL_PRICE_HELP}
+                testId="historical-fill-price"
+              />
               {/* Two-line Net P&L: dollar on top, pct below */}
               <div className="m-blotter-pnl-cell">
                 <span className="m-metric__label">Net P&amp;L</span>

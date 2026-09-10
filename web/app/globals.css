@@ -20176,6 +20176,7 @@ body[data-mobile="true"] .strength-card__head {
 .m-blotter-metrics {
   display: flex;
   flex-direction: row;
+  flex-wrap: wrap;
   gap: 20px;
   padding: 6px 0 2px;
 }

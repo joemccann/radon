@@ -665,7 +665,8 @@ export type BlotterExecution = {
   time: string;
   side: string;
   quantity: number;
-  price: number;
+  price: number | null;
+  price_is_aggregate?: boolean;
   commission: number;
   notional_value: number;
   net_cash_flow: number;

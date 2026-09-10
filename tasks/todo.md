@@ -1,3 +1,29 @@
+# Task: Historical trade fill prices 2026-09-10 [IMPLEMENTED; PR CI PENDING]
+
+## Dependency graph
+
+- T1 depends_on: [] - Trace journal fill prices and desktop/mobile historical rendering.
+- T2 depends_on: [T1] - Red/green price derivation, missing-price and aggregate provenance tests; add sortable Avg Fill and mobile metric.
+- T3 depends_on: [T2] - Focused tests, types/lint, browser verification and review.
+- T4 depends_on: [T3] - Publish scoped PR, supervise exact-head GitHub CI through green, send confirmed Pushover. Do not merge.
+
+## Checklist
+
+- [x] T1 Journal fill_price reaches executions.price but neither historical surface renders it; rehydrated rows can blend both sides.
+- [x] T2 Recorded quantity-weighted prices, signed/zero values, truthful unavailable and aggregate labels; desktop sorting and mobile parity.
+- [x] T3 158 focused Vitest tests, TypeScript and scoped ESLint passed; helper coverage 100%; 31 clean-snapshot codemap tests and 6 curation tests passed.
+- [ ] T4 Publish, repair and verify CI on GitHub, then notify.
+
+## Review
+
+- Preserve existing user changes in tasks/lessons.md, tasks/todo.md and docs/research/. No order execution, historical rewrites or production changes.
+- Browser: 3/3 Playwright cases passed against exact historical component source, real hook and CSS in an isolated harness; 1280px/393px screenshots inspected, no page errors or document overflow. Full Next page verification remains blocked by local sign-in and single-dev-server constraints.
+- Avg Fill displays recorded execution VWAP, not cost-basis-derived prices; collapsed or mixed-side records are visibly marked Aggregate and are not represented as separate entry/exit prices. Missing price remains null, signed/zero premiums and four-decimal precision are retained.
+- Pre-PR local full suites: Vitest 9,303 passed / 1 failed (fixed historical table remained in the known-unwrapped exception list; removed that entry); Python 12,749 passed / 36 failed / 19 skipped, including environment and local-artifact failures. No full-local-green claim.
+- Operator correction: all remaining test runs and CI repairs execute on GitHub, not locally. PR publication authorized; no merge, deployment, or trading action.
+
+---
+
 # Task: Flow analysis truncated dark-pool cache [IN PROGRESS]
 
 SNDK `/flow-analysis` served 20-session history with ~900-print days
@@ -6270,3 +6296,15 @@ Isolated worktree /tmp/radon-focus-audit-20260910 protects existing user changes
 - Repair: shared Clear selectors assign rings to six active composite wrappers; command palette ring stays inset. Instrument search inherits the standard outline. No financial behavior or local suites changed.
 - CI 34505111914 at 43bbc58c passed the original ownership assertions and 88 existing browser cases; exposed palette inset precedence after production CSS grouped selectors into :is(), plus a modal animation changing offsetParent in the geometry test. Use a local offset custom property and compare settled parent-relative bounds.
 - Exact-head green CI and browser screenshot review pending.
+
+# PR 395 final integration (2026-09-10)
+
+Dependency graph: T1 -> T2 -> T3.
+- [x] T1 depends_on: [] - Merge current main, preserve task histories, review signed and missing historical prices.
+- [x] T2 depends_on: [T1] - Register route-level historical price regression and screenshot artifacts in CI.
+- [ ] T3 depends_on: [T2] - Verify final integrated-head checks and inspect desktop/mobile screenshots before parent merges.
+
+## Review
+No local suites. Review confirms quantity-weighted prices preserve zero and signed premiums, reject incomplete executions, and label collapsed journal fills aggregate. Generated codemap conflicts are regenerated from the merged source.
+
+- Integration verification: head 4d92842e passed every applicable check; GitHub CI 34507570000 ran 99 browser regressions plus one demo test. Desktop 1280px/mobile 393px full `/orders` screenshots reviewed (artifact 10164611383). Reintegrating main 722b1121 for the final merge gate; no local suites.
