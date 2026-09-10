@@ -1,3 +1,24 @@
+# Task: Reliability remediate 2026-09-10 [IN PROGRESS]
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify dedicated runner, dated branch, reduced-rung eligibility, and prior remediation state.
+- T2 depends_on: [T1] - Re-run permanent fault-injection drills and attempt the serial gate contract with detached sentinels.
+- T3 depends_on: [T2] - Append the remediation outcome, commit, and push the dated branch.
+
+## Checklist
+
+- [x] T1 `RADON_WEEKEND_REDUCED=1`; today's audit has no P0/P1 finding and REL-251 through REL-253 source work is DONE.
+- [x] T2 Permanent drill stage attempted with the shared reliability venv; it exited before its first sentinel update, matching the prior verified runner blocker.
+- [x] T3 Append-only remediation record and commit.
+
+## Review
+
+- [x] Reduced rung admitted no new P0/P1 source work; REL-251 through REL-253 remain DONE.
+- [x] Detached drill PID 21837 produced blank step fields and no `DONE`; this is incomplete verification evidence, never a green gate.
+
+---
+
 # Task: LLM regime empty snapshot 2026-09-10 [IMPLEMENTED; PR CI PENDING]
 
 GET /regime/llm is empty because FastAPI rebuilds the snapshot from 130k
