@@ -36,6 +36,8 @@ const GUARDED_ADMIN_ACTION_ROUTES = [
   "ib/ws-ticket",
   // Subscription research bytes require the operator allowlist on every read.
   "newsfeed/research/files/[asset]",
+  // Original-page evidence and account/assistant audit exports are operator-only.
+  "research/evidence/[asset]", "research/governance",
   // R-180: this POST SPAWNS garch_convergence.py. Its leap/scan sibling has
   // carried the same guard since R-079; the read-only GET stays below.
   "garch-convergence/scan",
@@ -179,6 +181,14 @@ describe("security report route-local authorization matrix", () => {
       const text = source(`app/api/admin/${route}/route.ts`);
       expect(text, route).toContain("requireRouteAccess");
       expect(text, route).toContain("operatorOnly: true");
+    }
+  });
+
+  it("keeps research evidence and audit exports operator-only", () => {
+    for (const route of ["research/evidence/[asset]", "research/governance"]) {
+      const text = source(`app/api/${route}/route.ts`);
+      expect(text, route).toMatch(/requireRouteAccess\(request, \{ operatorOnly: true \}\)/);
+      expect(text, route).not.toContain("demoBlockadeRoute: true");
     }
   });
 

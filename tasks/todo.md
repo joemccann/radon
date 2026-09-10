@@ -29,6 +29,7 @@ Implementation complete; exact-head CI pending on PR https://github.com/joemccan
 - Independent reviews repaired fiscal-period substitution, financing-role smuggling, future-source prompts/exports, missing plaintext provenance, and Labs state loss.
 - Marketing page exposed a pre-existing decorative WebGL crash; bounded fallback preserves content with regression coverage. New section fits mobile; existing plate-caption overflow remains outside the added section.
 - Verification artifacts and show-me draft: /tmp/radon-financial-evidence/.
+- CI repair cycle at 25a269c4: navigation and route registries, isolated decorative fallback regression, and source-tampering fixture corrected from runner logs. Both app images and Vercel previews passed. Full exact-head suites remain required after repair.
 
 ---
 

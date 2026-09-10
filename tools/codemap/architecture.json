@@ -1,10 +1,10 @@
 {
-  "generated_at": "2026-09-10T20:39:04Z",
-  "node_count": 3318,
-  "edge_count": 6727,
+  "generated_at": "2026-09-10T20:49:00Z",
+  "node_count": 3320,
+  "edge_count": 6731,
   "areas": {
-    "web": 1954,
-    "site": 154,
+    "web": 1955,
+    "site": 155,
     "scripts": 1096,
     "cloud": 66,
     "lib": 28,
@@ -50,7 +50,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 903
+      "count": 904
     },
     {
       "id": "site/app",
@@ -60,7 +60,7 @@
     {
       "id": "site/components",
       "area": "site",
-      "count": 64
+      "count": 65
     },
     {
       "id": "site/e2e",
@@ -406,7 +406,7 @@
     {
       "id": "web/lib/useViewport.ts",
       "area": "web",
-      "in": 38,
+      "in": 39,
       "out": 1,
       "test": false
     },

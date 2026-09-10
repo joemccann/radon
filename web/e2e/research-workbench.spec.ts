@@ -69,7 +69,8 @@ test("research rejects corrupt workspace imports without discarding evidence", a
   const report = { schema_version: 1, mode: "offline-contracts", generated_at: "2026-09-10T15:00:00Z", metrics: { total: 2, passed: 1, failed: 1, contract_accuracy: .5, p50_ms: 1, p95_ms: 5 }, queries: [{ query: "identity", passed: true, latency_ms: 1, error_class: null }, { query: "deny", passed: false, latency_ms: 5, error_class: "AssertionError" }] };
   await page.getByLabel("Import MCP evaluator report").setInputFiles({ name: "evaluation.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(report)) });
   await expect(page.getByText(/1\/2 contracts passed/)).toBeVisible();
-  await expect(page.getByText("Failed", { exact: true })).toBeVisible();
+  const failedQuery = page.getByRole("row").filter({ has: page.getByRole("cell", { name: "deny", exact: true }) });
+  await expect(failedQuery.getByRole("cell", { name: "Failed AssertionError", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Brief", exact: true }).click();
   await page.getByRole("button", { name: "Controls", exact: true }).click();
   await expect(page.getByText(/1\/2 contracts passed/)).toBeVisible();

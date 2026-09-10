@@ -45,12 +45,12 @@ export const clearPrimaryNavigation: { label: string; href: string; sections: Wo
 ];
 
 export const navItems: WorkspaceNavItem[] = [
-  { label: "Research workbench", route: "research-workbench", href: "/research-workbench", icon: JournalGlyph, group: "research" },
   { label: "Portfolio", route: "dashboard", href: "/dashboard", icon: DashboardGlyph, group: "overview" },
   { label: "Positions", route: "portfolio", href: "/portfolio", icon: PortfolioGlyph, group: "positions" },
   { label: "Performance", route: "performance", href: "/performance", icon: PerformanceGlyph, hidden: false, group: "positions" },
   { label: "Orders", route: "orders", href: "/orders", icon: OrdersGlyph, group: "positions" },
   { label: "Scanner", route: "scanner", href: "/scanner", icon: ScannerGlyph, group: "research" },
+  { label: "Research workbench", route: "research-workbench", href: "/research-workbench", icon: JournalGlyph, group: "research" },
   { label: "Watchlist", route: "watchlist", href: "/watchlist", icon: WatchlistGlyph, group: "positions" },
   { label: "Flow Analysis", route: "flow-analysis", href: "/flow-analysis", icon: FlowGlyph, group: "research" },
   { label: "Options", route: "options", href: "/options", icon: ExposureGlyph, group: "research" },

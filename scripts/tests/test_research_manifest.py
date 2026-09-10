@@ -50,6 +50,9 @@ def test_source_page_and_passage_changes_invalidate_ids(tmp_path):
     with pytest.raises(ValueError, match='digest'): validate_manifest(modified)
     modified = copy.deepcopy(result)
     modified['source_sha256'] = 'b' * 64
+    with pytest.raises(ValueError, match='source URL'): validate_manifest(modified)
+    # Keep the URL consistent so the next assertion reaches source-bound IDs.
+    modified['source_url'] = '/api/newsfeed/research/files/' + modified['source_sha256'] + '.pdf'
     with pytest.raises(ValueError, match='digest'): validate_manifest(modified)
 
 

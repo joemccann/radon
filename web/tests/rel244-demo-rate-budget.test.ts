@@ -13,7 +13,7 @@ import { join, resolve } from "node:path";
 import { describe, it, expect, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { handleDemoGate } from "@/lib/demo/demoGate";
-import { demoRateLimitKey, KNOWN_API_SEGMENTS } from "@/lib/demo/rateTier";
+import { classifyRateTier, demoRateLimitKey, KNOWN_API_SEGMENTS } from "@/lib/demo/rateTier";
 import type { DemoRateLimitResult } from "@/lib/demo/rateLimit";
 
 const WEB_ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -33,6 +33,18 @@ describe("R-652: unknown segments collapse to one shared bucket", () => {
     // Known resources keep their per-resource isolation.
     expect(demoRateLimitKey("A", "user", "/api/scanner")).toBe("user:resource:scanner");
     expect(demoRateLimitKey("A", "user", "/api/regime")).not.toBe(a);
+  });
+
+  it("research reads share one bounded resource budget across evidence assets and audit exports", () => {
+    const paths = [
+      "/api/research/governance",
+      `/api/research/evidence/${"a".repeat(64)}.json`,
+      `/api/research/evidence/${"b".repeat(64)}.json`,
+    ];
+    for (const path of paths) {
+      expect(classifyRateTier("GET", path)).toBe("A");
+      expect(demoRateLimitKey("A", "user", path)).toBe("user:resource:research");
+    }
   });
 
   it("the allowlist covers every real /api first segment (drift pin)", () => {

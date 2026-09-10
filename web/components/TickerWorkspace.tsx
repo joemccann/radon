@@ -71,7 +71,9 @@ export default function TickerWorkspace({
   //   - activeTab carries the deck key, or "book" when no deck is open.
   //   - onTabChange receives a deck key (or "book"/"company"/"order" for the
   //     always-docked hot-path surfaces) and maps the docked ones back to null.
-  const activeTabValue = activeDeck ?? "book";
+  // Preserve an explicit ticket request for phones, where the ticket is a
+  // local deck rather than the always-visible desktop Act column.
+  const activeTabValue = activeDeck ?? (searchParams.get("tab") === "order" ? "order" : "book");
   const onTabChange = useCallback((value: string) => {
     if (value === "book" || value === "company" || value === "order") {
       setDeck(null);
