@@ -35,7 +35,7 @@ Two P2 findings, no confirmed P0 or P1 findings. No WCAG violation is asserted f
 
 | Active family | Baseline style and markup | Required ownership |
 | --- | --- | --- |
-| `.modify-price-input-row` / `.modify-price-input` | `globals.css:7523–7563`; `ModifyOrderModal.tsx:729`; also SingleLegOrderTicket, OptionsChainTab, OrderTab, PositionTradeTicket | Wrapper owns ring and radius, including currency prefix and complete quantity field. |
+| `.modify-price-input-row` / `.modify-price-input` | `globals.css:7523–7563`; `ModifyOrderModal.tsx:729`; also SingleLegOrderTicket, OptionsChainTab, OrderTab, PositionTradeTicket | Wrapper owns ring and radius, including currency prefix, complete quantity field, and combo Action/Type selects that reuse the borderless input class. |
 | `.table-search` / `.table-search-input` | `globals.css:9395–9416`; `TableSearch.tsx:24–34` | Wrapper owns input-focus ring; clear button retains its own keyboard ring. |
 | `.theta-search` / `.theta-search__input` | `globals.css:14101–14131`; ScannerTickerSearch, ThetaHarvesterScanner, StrengthConfirmationScanner | Wrapper owns input-focus ring; Scan button retains its own ring. |
 | `.flow-ticker-input-row` / input | `globals.css:18149–18182`; `FlowAnalysisTickerInput.tsx:38–51` | Wrapper owns input-focus ring, including search icon; submit button retains its own ring. |
@@ -44,7 +44,7 @@ Two P2 findings, no confirmed P0 or P1 findings. No WCAG violation is asserted f
 
 AskComposer already suppresses its inner ring inside `.chat-panel`; the missing piece there is a consistent outer ring. Outside that context the generic rule can still outline the textarea. This is not evidence that the production chat panel currently shows the exact Modify Order defect.
 
-**Recommendation:** use explicit active-family selectors to move the token-based focus ring to the bordered wrapper only when its input/textarea matches `:focus-visible`. Suppress the inner ring only for these paired controls. Do not use a broad descendant rule that removes focus from child buttons, selects, or unrelated inputs. Use an inset ring on the palette row to avoid its known overflow boundary. Normalize the four ordinary composite wrapper radii to `--radius-sm`; preserve the composer radius and palette geometry. Suggested command: `/normalize`.
+**Recommendation:** use explicit active-family selectors to move the token-based focus ring to the bordered wrapper only when its input/textarea or paired combo select matches `:focus-visible`. Suppress the inner ring only for these paired controls. Do not use a broad descendant rule that removes focus from child buttons, selects, or unrelated inputs. Use an inset ring on the palette row to avoid its known overflow boundary. Normalize the four ordinary composite wrapper radii to `--radius-sm`; preserve the composer radius and palette geometry. Suggested command: `/normalize`.
 
 ### P2: instrument search overrides the shared keyboard ring inline
 
