@@ -502,6 +502,9 @@ class Pipeline:
                                'folderDate': work['folder_date'], 'pages': candidate['pages'],
                                'figures': asset_figures, 'fileId': work['metadata']['id'],
                                'revision': work['metadata']['rev'], 'contentHash': work['metadata']['content_hash']}}
+            manifest_path = out / 'manifest.json'
+            if manifest_path.is_file():
+                post['source']['evidenceUrl'] = self.publisher.store_asset(manifest_path)
             posts.append(post)
         atomic_save(str(out / 'review.json'), {'source_sha256': evidence['source_sha256'], 'model': self.reviewer.model,
                     'policy_sha256': hashlib.sha256(Path(__file__).with_name('policy.md').read_bytes()).hexdigest(),

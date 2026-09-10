@@ -39,6 +39,10 @@ def test_real_parse_original_pages_and_crop(tmp_path):
     pdf=make_pdf(tmp_path/"source.pdf")
     evidence=parse(pdf,tmp_path/"parsed")
     assert evidence["parser"]=="firecrawl/pdf-inspector" and evidence["page_count"]==2
+    manifest=json.loads((tmp_path/"parsed/manifest.json").read_text())
+    assert manifest["source_sha256"]==evidence["source_sha256"]
+    assert len(manifest["pages"])==2
+    assert "Research evidence page 2" in manifest["pages"][1]["passages"][0]["text"]
     assert evidence["source_sha256"]==hashlib.sha256(pdf.read_bytes()).hexdigest()
     assert [page["page_number"] for page in evidence["pages"]]==[1,2]
     assert "Research evidence page 2" in (tmp_path/"parsed/page-0002.md").read_text()

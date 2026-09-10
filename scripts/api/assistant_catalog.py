@@ -83,6 +83,7 @@ CATALOG: dict[CatalogKey, Capability] = {
     ("GET", "/llm-token-index"): "read",
     ("GET", "/market-calendar"): "read",
     ("POST", "/market-calendar/refresh"): "read.spawn",
+    ("GET", "/newsfeed/research/evidence/{asset}"): "read",
     ("GET", "/newsfeed/research/files/{asset}"): "internal",
     ("GET", "/openapi.json"): "internal",
     ("GET", "/options/chain"): "read",

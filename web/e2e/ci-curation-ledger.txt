@@ -1,3 +1,4 @@
+# research-workbench.spec.ts is curated in ci.yml: source citations, mobile/desktop, exports and safe handoff.
 # CI e2e curation ledger — every web/e2e/*.spec.ts must appear HERE or in the
 # curated `npx playwright test` arg list of the `e2e-financial-smoke` job in
 # .github/workflows/ci.yml. scripts/tests/test_e2e_ci_curation.py enforces it.

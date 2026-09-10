@@ -148,6 +148,7 @@ describe("navItems", () => {
     expect(routeMap.get("performance")).toBe("/performance");
     expect(routeMap.get("orders")).toBe("/orders");
     expect(routeMap.get("scanner")).toBe("/scanner");
+    expect(routeMap.get("research-workbench")).toBe("/research-workbench");
     expect(routeMap.get("discover")).toBe("/discover");
     expect(routeMap.get("watchlist")).toBe("/watchlist");
     expect(routeMap.get("journal")).toBe("/journal");
@@ -171,12 +172,14 @@ describe("navItems", () => {
     expect(new Set(hrefs).size).toBe(hrefs.length);
   });
 
-  it("orders Watchlist directly below Scanner in the visible nav", () => {
+  it("keeps the research workbench after Scanner and before Watchlist in the visible nav", () => {
     const routes = navItems.filter((n) => !n.hidden).map((n) => n.route);
     const scannerIdx = routes.indexOf("scanner");
+    const workbenchIdx = routes.indexOf("research-workbench");
     const watchlistIdx = routes.indexOf("watchlist");
     expect(scannerIdx).toBeGreaterThanOrEqual(0);
-    expect(watchlistIdx).toBe(scannerIdx + 1);
+    expect(workbenchIdx).toBe(scannerIdx + 1);
+    expect(watchlistIdx).toBe(workbenchIdx + 1);
   });
 
   it("uses a dedicated watchlist icon instead of the scanner glyph", () => {
@@ -194,6 +197,7 @@ describe("navItems", () => {
       "performance",
       "orders",
       "scanner",
+      "research-workbench",
       "watchlist",
       "flow-analysis",
       "options",
@@ -221,6 +225,7 @@ describe("quickPromptsBySection", () => {
     "performance",
     "orders",
     "scanner",
+    "research-workbench",
     "discover",
     "watchlist",
     "journal",
@@ -277,6 +282,7 @@ describe("sectionDescription", () => {
     "performance",
     "orders",
     "scanner",
+    "research-workbench",
     "discover",
     "watchlist",
     "journal",

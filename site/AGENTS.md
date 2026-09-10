@@ -8,3 +8,13 @@ Mirrors `site/CLAUDE.md` — read that for the full detail. Public marketing sit
 - **Product plates** (`components/molecules/ProductPlate.tsx`, `public/plates/`): real app screenshots captured via the chrome-cdp skill. Anonymize username to `radon-user`. Capture light+dark pairs. Cookie-gated newsfeed images need an image-load wait. The portfolio plate is a RECREATION. Source copies in `../marketing-mockups/shots/`.
 - **⛔ PII**: anonymizing the username does NOT anonymize the data. Swap account-figure plates to demo data before any public deploy.
 - **⛔ Deploy**: Vercel (root `site/`); `git push origin main` with a `site/` change AUTO-DEPLOYS radon.run publicly.
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

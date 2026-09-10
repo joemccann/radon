@@ -137,17 +137,19 @@ def test_selector_reviewer_success_keeps_original_crop_and_provenance(tmp_path):
     reviewer=SimpleNamespace(model='test',ask=lambda prompt,images:responses.pop(0))
     def extract(pdf,out):
         (out/'page.md').write_text('Report date: 4 September 2026. September4 source')
+        (out/'manifest.json').write_text('{"schema_version":1}')
         return {'page_count':1,'source_sha256':'a'*64,'pages':[{'page_number':1,'markdown_file':'page.md'}]}
     def render(pdf,out,pages,dpi,crop=None):
         calls.append((dpi,crop));out.mkdir(parents=True,exist_ok=True);(out/'image.png').write_bytes(b'image')
         return [{'page_number':p,'image_file':'image.png','width':800,'height':1100} for p in pages]
-    pub=SimpleNamespace(store_asset=lambda p:'/api/newsfeed/research/files/'+'a'*64+('.pdf' if Path(p).suffix=='.pdf' else '.png'))
+    pub=SimpleNamespace(store_asset=lambda p:'/api/newsfeed/research/files/'+'a'*64+Path(p).suffix)
     pipe=Pipeline(tmp_path,reviewer,pub,render,extract)
     work={'key':'key','folder_date':'2026-09-07','metadata':{'name':'report.pdf','id':'id:one','rev':'r1','content_hash':'b'*64}}
     posts=pipe.process(work,tmp_path/'report.pdf',[])
     assert len(posts)==1 and calls==[(96,None),(216,[.1,.2,.9,.8])]
     assert posts[0]['source']['documentDate']=='2026-09-04'
     assert posts[0]['source']['revision']=='r1'
+    assert posts[0]['source']['evidenceUrl']=='/api/newsfeed/research/files/'+'a'*64+'.json'
     assert posts[0]['images']==[posts[0]['source']['figures'][0]['url']]
 
 

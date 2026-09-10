@@ -2,15 +2,16 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from pathlib import Path
 import re
 import stat
 import tempfile
 
-ASSET_RE = re.compile(r"[a-f0-9]{64}\.(?:png|pdf)\Z")
+ASSET_RE = re.compile(r"[a-f0-9]{64}\.(?:png|pdf|json)\Z")
 URL_PREFIX = "/api/newsfeed/research/files/"
-MAX_BYTES = {"png": 20 * 1024 * 1024, "pdf": 100 * 1024 * 1024}
+MAX_BYTES = {"json": 20 * 1024 * 1024, "png": 20 * 1024 * 1024, "pdf": 100 * 1024 * 1024}
 
 
 def assets_dir() -> Path:
@@ -25,6 +26,10 @@ def _read_fd(fd: int, extension: str) -> bytes:
         data = stream.read(MAX_BYTES[extension] + 1)
     if len(data) > MAX_BYTES[extension]:
         raise ValueError("asset exceeds size limit")
+    if extension == "json":
+        from research.manifest import validate_manifest
+        validate_manifest(json.loads(data))
+        return data
     signature = b"\x89PNG\r\n\x1a\n" if extension == "png" else b"%PDF-"
     if not data.startswith(signature):
         raise ValueError("asset format does not match extension")
@@ -50,7 +55,7 @@ def store_asset(path: str | Path) -> str:
     path = Path(path)
     extension = path.suffix.lower().lstrip(".")
     if extension not in MAX_BYTES:
-        raise ValueError("only PNG and PDF research assets are supported")
+        raise ValueError("only PNG, PDF and JSON research assets are supported")
     data = _read_fd(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), extension)
     name = hashlib.sha256(data).hexdigest() + "." + extension
     root = assets_dir()

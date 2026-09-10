@@ -9,6 +9,7 @@ import { isFuturesRoot } from "@/lib/futuresSymbols";
 import { deriveBookHeader } from "@/lib/book/depthDerivations";
 import { isDeckKey } from "@/lib/legacyTabToDeck";
 import AssetCockpit, { type DeckKey } from "./ticker-detail/AssetCockpit";
+import { useViewport } from "@/lib/useViewport";
 import { useStockState } from "@/lib/useStockState";
 import { useTickerDetailOptional } from "@/lib/TickerDetailContext";
 import { MAX_FOCUSED_DEPTH_SUBJECTS } from "@/lib/usePrices";
@@ -301,6 +302,12 @@ export default function TickerDetailContent({
   // VALID_DECKS — they are not URL-addressable, so they live in local component
   // state. Every other key (c/p/n/r/s/i) flows through the URL via onTabChange.
   const [localDeck, setLocalDeck] = useState<DeckKey | null>(null);
+  const { isMobile, hasMounted } = useViewport();
+  useEffect(() => {
+    // Legacy order links must reveal the mobile ticket too. Wait for viewport
+    // hydration so desktop continues using its docked ticket without a deck.
+    if (activeTab === "order" && isMobile && hasMounted) setLocalDeck("o");
+  }, [activeTab, ticker, isMobile, hasMounted]);
   const urlDeck: DeckKey | null = isDeckKey(activeTab) ? activeTab : null;
   const activeDeck: DeckKey | null = urlDeck ?? localDeck;
 

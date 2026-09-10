@@ -8,3 +8,7 @@ describe("private research provenance", () => {
   it.each(["https://media.radon.run/chart.png", "javascript:alert(1)", "/api/newsfeed/research/files/../secret.png"])("rejects non-private image %s", url => expect(parseResearchSource({...source, figures: [{...source.figures[0], url}]})).toBeUndefined());
   it("rejects missing or malformed provenance", () => { expect(parseResearchSource("{")).toBeUndefined(); expect(parseResearchSource({...source, pages: [0]})).toBeUndefined(); });
 });
+it("retains a private agent-readable manifest URL and rejects external evidence", () => {
+  expect(parseResearchSource({ ...source, evidenceUrl: path+".json" })?.evidenceUrl).toBe(path+".json");
+  expect(parseResearchSource({ ...source, evidenceUrl: "https://attacker.example/evidence.json" })).toBeUndefined();
+});

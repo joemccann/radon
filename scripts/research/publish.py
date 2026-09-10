@@ -66,6 +66,15 @@ def publish(post: dict) -> str:
     if not isinstance(pages, list) or not pages or any(type(p) is not int or p < 1 for p in pages):
         raise ValueError("one-based source pages required")
     _asset_url(source.get("url"), "pdf")
+    if "evidenceUrl" in source:
+        _asset_url(source["evidenceUrl"], "json")
+        manifest_name = source["evidenceUrl"][len(URL_PREFIX):].split("#", 1)[0]
+        manifest = json.loads(read_asset(manifest_name))
+        pdf_name = source["url"][len(URL_PREFIX):].split("#", 1)[0]
+        if manifest["source_sha256"] != pdf_name.removesuffix(".pdf"):
+            raise ValueError("evidence manifest must cite the original source PDF")
+        if any(page > len(manifest["pages"]) for page in pages):
+            raise ValueError("source pages exceed evidence manifest")
     images = post.get("images", [])
     figures = source.get("figures", [])
     if not isinstance(images, list) or len(images) > 12 or not isinstance(figures, list):
