@@ -3,6 +3,12 @@ Description=Radon CTA sync (MenthorQ positioning via scripts/run_cta_sync.sh)
 After=network.target radon-api.service
 Wants=radon-api.service
 
+# CTA card OCR vision cascade. Credit / billing / quota / hard provider
+# fail falls through; ops_only only if the whole cascade misses.
+# Exact order: anthropic -> grok -> cursor -> codex -> gemini -> nvidia -> cerebras
+# Bands: subscription (first five) then NVIDIA free then Cerebras last.
+# Cursor has no vision HTTP path in Radon and is skipped as unavailable.
+
 # DUR-02 (2026-06-12): brake crash loops -- after StartLimitBurst starts inside
 # StartLimitIntervalSec, systemd parks the unit as failed (Result=start-limit-hit)
 # instead of restarting forever (radon-beta-nextjs hit 160k restarts in 10 days).
