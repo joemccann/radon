@@ -102,7 +102,13 @@ for (const width of [1440, 393]) {
     const uncredited = page.getByTestId("news-feed-item").filter({ hasText: "Another chart without attribution" });
     await expect(credited.locator(".news-feed-figcaption")).toContainText("Source: Ramp");
     await credited.scrollIntoViewIfNeeded();
-    await expect(credited.locator(".news-feed-image")).toHaveJSProperty("naturalWidth", 1000);
+    const image = credited.locator(".news-feed-image");
+    // Optimized srcsets adjust natural dimensions for the selected pixel density.
+    await expect.poll(() => image.evaluate(el => (el as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+    expect(await image.evaluate(el => {
+      const img = el as HTMLImageElement;
+      return img.naturalWidth / img.naturalHeight;
+    })).toBeCloseTo(1000 / 600, 2);
     await expect(uncredited.locator(".news-feed-figcaption")).toHaveText("Chart · Another chart without attribution");
     await credited.screenshot({ path: testInfo.outputPath(`research-market-ear-feed-${width}.png`) });
     await testInfo.attach(`research-market-ear-feed-${width}`, {

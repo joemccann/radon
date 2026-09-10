@@ -6176,7 +6176,7 @@ No local test suites. Change only Compose availability; retain caption and media
 
 Dependency graph: T1 -> T2 -> T3.
 - [x] T1 depends_on: [] - Inspect current-head CI and check mergeability against main.
-- [ ] T2 depends_on: [T1] - Update source contracts for downloader options and retained share attribution.
+- [x] T2 depends_on: [T1] - Update source contracts for downloader options and retained share attribution.
 - [ ] T3 depends_on: [T2] - Push and verify exact-head GitHub CI and browser artifacts; primary handles merge.
 
 ## Review
