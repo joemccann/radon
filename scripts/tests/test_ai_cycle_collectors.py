@@ -428,11 +428,12 @@ def test_opendesi_broken_html_is_unavailable_not_invented():
         parse_opendesi("<html><body>leaderboard unavailable</body></html>", HASH, FETCHED)
 
 
-def test_opendesi_bundled_fixture_loads_into_demand_snapshot(tmp_path):
+def test_opendesi_explicit_dated_import_loads_into_demand_snapshot(tmp_path, monkeypatch):
     from scripts.ai_cycle.collect import main
     from scripts.ai_cycle.snapshot import build_snapshot
     from scripts.ai_cycle.store import ObservationStore
 
+    monkeypatch.setattr("scripts.ai_cycle.collect.now_iso", lambda: "2026-09-10T15:30:00Z")
     db = tmp_path / "opendesi.sqlite"
     assert (
         main(
@@ -446,10 +447,21 @@ def test_opendesi_bundled_fixture_loads_into_demand_snapshot(tmp_path):
                 "2026-09-09",
                 "--archive",
                 str(tmp_path / "raw"),
+                "--import-opendesi",
+                str(FIXTURE_HTML),
+                "--opendesi-captured-at",
+                "2026-09-01T12:00:00Z",
             ]
         )
         == 0
     )
+    stored = ObservationStore(db).read_observations()
+    assert stored
+    assert all(row["period_end"].startswith("2026-09-01") for row in stored)
+    assert all(row["fetched_at"].startswith("2026-09-10T15:30:00") for row in stored)
+    assert all(row["published_at"] is None for row in stored)
+    assert all(row["metadata"]["asof"] == "2026-09-01T12:00:00+00:00" for row in stored)
+    assert all(row["metadata"]["capture_mode"] == "offline-import" for row in stored)
     snapshot = build_snapshot(ObservationStore(db), "2026-09-10T16:00:00Z")
     panel = next(item for item in snapshot["indicators"] if item["id"] == "D6")
     assert panel["pane"] == "demand"
@@ -1141,3 +1153,32 @@ def test_opendesi_import_requires_explicit_capture_timestamp(tmp_path):
 
     with pytest.raises(SystemExit):
         main(["--verify", "--sources", "open-design-arena", "--end", "2026-09-09", "--import-opendesi", str(FIXTURE_HTML), "--archive", str(tmp_path)])
+
+
+@pytest.mark.parametrize("timestamp", ["invalid", "2026-09-01", "2026-09-01T12:00:00", "2999-01-01T00:00:00Z"])
+def test_opendesi_import_rejects_invalid_capture_timestamp(tmp_path, timestamp):
+    from scripts.ai_cycle.collect import main
+
+    with pytest.raises(SystemExit):
+        main(["--verify", "--sources", "open-design-arena", "--end", "2026-09-09", "--import-opendesi", str(FIXTURE_HTML), "--opendesi-captured-at", timestamp, "--archive", str(tmp_path)])
+
+
+@pytest.mark.parametrize("extra", [[], ["--live-opendesi"]])
+def test_opendesi_cli_fetches_live_html_by_default(tmp_path, monkeypatch, capsys, extra):
+    from scripts.ai_cycle import collect
+
+    calls = []
+
+    def fetch_html(self, url, **kwargs):
+        calls.append(url)
+        return FIXTURE_HTML.read_text(), HASH, FETCHED, {}
+
+    monkeypatch.setattr(Transport, "fetch_html", fetch_html)
+    assert collect.main([
+        "--verify", "--sources", "open-design-arena", "--end", "2026-09-06",
+        "--archive", str(tmp_path), *extra,
+    ]) == 0
+    assert calls == ["https://open-design.ai/llm-arena-for-design/"]
+    report = json.loads(capsys.readouterr().out)
+    assert report["observations"] > 0
+    assert report["sources"][0]["status"] == "available"

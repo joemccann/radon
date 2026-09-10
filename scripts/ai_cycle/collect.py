@@ -40,7 +40,6 @@ SOURCES = (
     "lambda",
 )
 DEFAULT_RAMP_CURATED = Path(__file__).resolve().parent / "fixtures" / "ramp_ai_index_curated.json"
-DEFAULT_OPENDESI_HTML = Path(__file__).resolve().parent / "fixtures" / "opendesi_arena.html"
 KEYS = ("OPENROUTER_API_KEY", "ARTIFICIAL_ANALYSIS_API_KEY", "SEC_USER_AGENT", "EIA_API_KEY", "VAST_API_KEY")
 OPERATOR_FIELDS = (*KEYS, "RADON_AI_CYCLE_AA_BASKET")
 HEALTH_SERVICE = "ai-cycle"
@@ -135,21 +134,30 @@ def _main(argv=None):
         "--import-ramp",
         help="Curated Ramp AI Index JSON; defaults to bundled published fixture for source ramp",
     )
-    parser.add_argument(
-        "--import-opendesi",
-        help="Captured OpenDesign Arena HTML; defaults to bundled fixture for source open-design-arena",
+    opendesi_mode = parser.add_mutually_exclusive_group()
+    opendesi_mode.add_argument(
+        "--import-opendesi", help="Explicit offline OpenDesign Arena HTML import; requires --opendesi-captured-at"
     )
-    parser.add_argument(
-        "--live-opendesi",
-        action="store_true",
-        help="Fetch the live OpenDesign Arena page instead of the captured fixture",
+    opendesi_mode.add_argument(
+        "--live-opendesi", action="store_true", help="Fetch the live OpenDesign Arena page (the default)"
     )
+    parser.add_argument("--opendesi-captured-at", help="Verified capture timestamp with timezone for offline HTML")
     parser.add_argument(
         "--persist-snapshot",
         action="store_true",
         help="Rebuild the compact API snapshot from stored observations without provider calls",
     )
     args = parser.parse_args(argv)
+    if bool(args.import_opendesi) != bool(args.opendesi_captured_at):
+        parser.error("--import-opendesi and --opendesi-captured-at must be supplied together")
+    if args.opendesi_captured_at:
+        try:
+            captured = datetime.fromisoformat(args.opendesi_captured_at.replace("Z", "+00:00"))
+            if captured.tzinfo is None or captured > datetime.now(timezone.utc):
+                raise ValueError("Capture timestamp must have a timezone and cannot be in the future")
+            args.opendesi_captured_at = captured.astimezone(timezone.utc).isoformat()
+        except ValueError:
+            parser.error("--opendesi-captured-at must be a valid, nonfuture timestamp with timezone")
     selected = args.sources.split(",")
     if args.persist_snapshot and not args.record:
         from .snapshot import persist_api_snapshot
@@ -196,13 +204,6 @@ def _main(argv=None):
             continue
         if source == "ramp" and not args.import_ramp and not DEFAULT_RAMP_CURATED.exists():
             continue
-        if (
-            source == "open-design-arena"
-            and not args.live_opendesi
-            and not args.import_opendesi
-            and not DEFAULT_OPENDESI_HTML.exists()
-        ):
-            continue
         for first, last in source_windows(source, start, args.end, backfill=args.backfill):
             key = f"{source}:{first}:{last}"
             if key in completed:
@@ -218,11 +219,13 @@ def _main(argv=None):
                     raw = ramp_path.read_bytes()
                     digest = archive_raw(Path(args.archive), raw)
                     rows = parse_ramp_curated(json.loads(raw), digest, checked)
-                elif source == "open-design-arena" and not args.live_opendesi:
-                    page = Path(args.import_opendesi or DEFAULT_OPENDESI_HTML)
+                elif source == "open-design-arena" and args.import_opendesi:
+                    page = Path(args.import_opendesi)
                     raw = page.read_bytes()
                     digest = archive_raw(Path(args.archive), raw)
-                    rows = parse_opendesi(raw.decode("utf-8"), digest, checked)
+                    rows = parse_opendesi(
+                        raw.decode("utf-8"), digest, checked, captured_at=args.opendesi_captured_at
+                    )
                 else:
                     effective_start = (
                         (end - timedelta(days=800)).isoformat() if source == "sec" and not args.start else first

@@ -794,7 +794,7 @@ def _http_published(value):
     return parsed.astimezone(timezone.utc).isoformat()
 
 
-def parse_opendesi(html, digest, fetched, *, published=None, url=None):
+def parse_opendesi(html, digest, fetched, *, published=None, captured_at=None, url=None):
     """Parse the public OpenDesign Arena leaderboard. LLM/model-quality only."""
     if not isinstance(html, str) or not html.strip():
         raise SourceError("OpenDesign Arena HTML structure broke; page was empty")
@@ -847,8 +847,8 @@ def parse_opendesi(html, digest, fetched, *, published=None, url=None):
         if published_score is not None and published_score != fields["avg_score"]:
             raise SourceError("OpenDesign Arena HTML structure broke; overall score conflict")
 
-    asof = published or fetched
-    day = fetched[:10]
+    asof = published or captured_at or fetched
+    day = (captured_at or fetched)[:10]
     common = {
         "definition": (
             "OpenDesign Arena published design-task evaluation. LLM/model-quality only; "
@@ -856,6 +856,8 @@ def parse_opendesi(html, digest, fetched, *, published=None, url=None):
         ),
         "lane": "llm-model-quality",
         "asof": asof,
+        "capture_mode": "offline-import" if captured_at else "live",
+        "captured_at": captured_at or fetched,
         "license": "Public leaderboard page; retain OpenDesign attribution",
     }
     result, seen = [], set()

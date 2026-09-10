@@ -6268,7 +6268,12 @@ Isolated worktree /tmp/radon-focus-audit-20260910 protects existing user changes
 
 ## PR #394 final integration and freshness repair (2026-09-10)
 - [x] T1 (depends_on: []): Inspect collector ingestion, provenance, and upstream changes.
-- [ ] T2 (depends_on: [T1]): Resolve main integration and add CI regressions for default live collection and dated offline imports.
-- [ ] T3 (depends_on: [T2]): Repair freshness ownership and update source operations documentation.
+- [x] T2 (depends_on: [T1]): Resolve main integration and add CI regressions for default live collection and dated offline imports.
+- [x] T3 (depends_on: [T2]): Repair freshness ownership and update source operations documentation.
 - [ ] T4 (depends_on: [T3]): Verify every applicable exact-head GitHub check, then hand off merge to the sweep coordinator.
 Dependency graph: T1 -> T2 -> T3 -> T4.
+
+### PR #394 integration review
+- Regression-first GitHub run `34507551064`, scripts-ac job `102973431318`: 4 failed / 2215 passed. Default fixture replay and undated imports reproduced; the prior snapshot test also depended on wall-clock time.
+- Default collection now uses live HTML with no fixture fallback; explicit imports retain verified capture time and actual ingestion time separately. Snapshot tests use a fixed ingestion clock.
+- All suite execution is delegated to GitHub runners. Final exact-head CI remains pending before coordinator merge.
