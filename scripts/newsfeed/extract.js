@@ -58,13 +58,30 @@ export function buildExtractionExpression() {
         // (e.g. the EMB candlestick chart on four unrelated posts on 2026-05-21).
         // If the article DOM has no <img>, the post has no image. Period.
         const imageCandidates = [];
+        const imageSources = {};
+        const figureSelector = '.figure, figure';
         article.querySelectorAll('img').forEach((img) => {
           const src = img.getAttribute('src') || img.getAttribute('data-src');
           if (src) imageCandidates.push(src);
+          const absolute = toAbsolute(src);
+          const figure = img.closest(figureSelector);
+          if (!absolute || !figure || !article.contains(figure)) return;
+          // Credits belong to this figure only. Never borrow a nested or
+          // adjacent chart's caption, article text, alt text, or schema data.
+          const captions = Array.from(figure.querySelectorAll('.image-caption, figcaption'))
+            .filter((caption) => caption.closest(figureSelector) === figure);
+          for (const caption of captions) {
+            const text = (caption.textContent || '').replace(/\\s+/g, ' ').trim();
+            const match = text.match(/^Source\\s*:\\s*(.+)$/i);
+            if (match && match[1].trim()) {
+              imageSources[absolute] = match[1].trim();
+              break;
+            }
+          }
         });
         const images = Array.from(new Set(imageCandidates.map(toAbsolute).filter(Boolean)));
 
-        return { id, title, content: contentText || decodeEntities(schema?.description || ''), timestamp, images };
+        return { id, title, content: contentText || decodeEntities(schema?.description || ''), timestamp, images, imageSources };
       }).filter((entry) => entry.id && entry.title && entry.timestamp);
 
       return items;

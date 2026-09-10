@@ -9231,6 +9231,35 @@ Range `2b936ebc..391aaaea` — 118 commits / 395 files (154 test/spec files), au
 | T-483 | P2 | After the rejection, advance 60_000 and assert no third fetch, then a further 60_000 and assert exactly three. |
 | T-484 | P2 | Pin the interpreter `cloud/tests` shells out to (skip with a named reason when bash>=4 is absent), or record resolved `bash --version` + `command -v caddy` with every FAILED list. Red/green: the baseline artifact must be identical with `/bin` vs `/opt/homebrew/bin` first on PATH. |
 
+## Delta audit 2026-09-10
+
+Range: `964b6b77..9dce4b3a` (6 commits, 53 paths, 15 touched test files).
+
+### Findings
+
+No new test-health finding met the code-citation and reproducibility bar.
+Existing T-490 remains reproducibly red: all 21 portable Codex-render
+contracts fail because the tracked `.codex/skills/*` artifacts are absent in
+this checkout. Existing T-488 remains the four deterministic Darwin cloud
+reds in `cloud/tests/test_deploy_corrections.py`.
+
+### Standing sweeps
+
+- Serial gates: pytest **12,782 passed / 21 failed / 1 skipped / 90 deselected**;
+  all failures are T-490. Vitest **934 files / 9,263 passed / 0 failed / 18
+  skipped**. Cloud **1,842 passed / 4 failed / 76 skipped**; all failures are
+  T-488.
+- Delta determinism: changed Python tests **219 passed** x3, changed Vitest
+  tests passed x3, and `cloud/tests/test_systemd_services.py` **499 passed**
+  x3. T-490 isolated at **52 passed / 21 failed**.
+- Gate drift and ratchet: CI invocation, exclusions, deploy dependencies, and
+  coverage thresholds are unchanged; no new blanket exclude. Added
+  `ai-infrastructure.spec.ts` is in the curated Playwright invocation.
+  `options-exposure.spec.ts` remains explicitly held out in
+  `web/e2e/ci-curation-ledger.txt:113,241,294`.
+- Skip sweep: no added executable `test.skip`, `it.skip`,
+  `pytest.mark.skip`, `xfail`, or `.only`; tree clean after every gate.
+
 ## 11 · Audit ledger
 
 The weekend loop (`.claude/skills/testing-weekend/`) reads the last line
@@ -9259,6 +9288,7 @@ Delta findings continue the T-### numbering in dated `## Delta audit` sections.
 - Audited through: `7a7ca4ae` on 2026-09-06 — **1 new finding** (T-485, P2) over 6 commits / 5 files / +715−1, base `be64e1fc`. Sunday run, no sibling loop, load 2.5. The range is almost entirely the loops' own ledgers plus CIP-007 (one bounded apt step in `ci.yml` + an honest contract test, `9 passed` ×3). Gates: pytest **11763 passed / 0 failed** (1841s); vitest **8925 passed / 0 failed** but exit 1 on one unhandled `EnvironmentTeardownError` — the 2026-09-02 observation recurring UNCONTENDED, promoted to T-485; cloud **33 failed / 1757 passed** with `/bin/bash` 3.2 resolved and caddy PRESENT — sorted FAILED list byte-identical to the 2026-09-05 first-pass 33-list (zero new, zero gone), confirming T-484 from the other direction (caddy's 5 reds gone by installing caddy, the bash-class 33 back with bash 3.2). Post-gate tree clean (T-275); secret sweep vacuously clean (T-381); no new skips/`.only`/`xfail`; `deploy:` untouched; no threshold moved. CI green on `main` at this HEAD (`4dcbfdd2` run cancelled as superseded, not failed). `main` still has no `required_status_checks` (T-222, seventh audit running).
 - Audited through: `fcaa1c67` on 2026-09-08 — **4 new findings** (T-486…T-489: 4 P1) over 101 commits / 539 files. Full gates: pytest 12,392 passed / 2 failed; vitest 9,116 passed / 3 failed; cloud 1,808 passed / 4 failed. Every red reproduced in its owning file; 214 touched tests make scoped 3× reruns equivalent to full gates. No new code skip/only/xfail, exclusion growth, threshold decrease, or unclassified E2E spec.
 - Audited through: `964b6b77` on 2026-09-09 — **1 new finding** (T-490: P1) over 34 commits / 267 files. Full gates: pytest 12,709 passed / 21 failed; vitest 9,276 passed; cloud 1,841 passed / 4 failed. The 98 touched test files make scoped 3× reruns equivalent to full gates. No coverage threshold decrease, exclusion growth, or new `.only`/`xfail`; one new conditional `jq` skip is covered by CI's Ubuntu toolchain.
+- Audited through: `9dce4b3a` on 2026-09-10 — **0 new findings** over 6 commits / 53 paths, with existing deterministic T-490 (21 pytest reds) and T-488 (4 cloud reds) re-confirmed. Vitest green; changed Python, Vitest, and cloud test surfaces deterministic x3. No skip, exclusion, threshold, or CI-reachability drift.
 
 ## Remediation 2026-08-29 — PR #140
 
@@ -10148,3 +10178,18 @@ focused portable-render contract passed 73 / 73, and renderer check mode passed.
 All eight Codex artifacts are tracked and already match fresh renders exactly,
 so the write produced no artifact diff. The earlier absence was local to the
 restricted audit checkout rather than stale committed content.
+
+## Remediation 2026-09-10
+
+`RADON_WEEKEND_REDUCED=1`: no new P0/P1 was filed in this cycle. T-490 is
+DONE by the 2026-09-09 operator resolution. T-488 remains operator-only after
+three genuine fixture attempts; reproduce and repair the GNU-timeout
+process-tree behavior on Linux CI without widening its contract timeout.
+
+### Reverification correction
+
+The external T-490 resolution is not reproducible in this dedicated runner:
+the focused contract is 52 passed / 21 failed and a renderer write fails with
+`PermissionError` creating repository `.codex`. T-490 is therefore
+operator-only here until the generated artifacts can be written and committed;
+full closing gates are not claimed while that deterministic P1 red remains.

@@ -796,6 +796,16 @@ make scoped determinism reruns equivalent to full gates.
 Closing gates: not run. The focused P1 remains deterministically red and this
 runner cannot materialize its tracked artifacts; no green gate count is claimed.
 
+## Delta audit 2026-09-10 (audit mode)
+
+Range `964b6b77..9dce4b3a`: 6 commits, 53 paths, 15 touched test files.
+No new finding. Serial gates: pytest 12,782 passed / 21 failed (all existing
+T-490); Vitest 9,263 passed; cloud 1,842 passed / 4 failed (all existing
+T-488). Changed Python tests 219 passed x3, changed Vitest tests passed x3,
+and changed cloud test 499 passed x3; T-490 isolated 52 passed / 21 failed.
+No new skips, xfails, `.only`, coverage threshold/exclusion, or CI-reachability
+drift.
+
 ## Operator completion 2026-09-09
 
 T-490 is DONE. In writable checkout `/Users/joemccann/.radon/work/pr385-operator`,
@@ -804,3 +814,18 @@ skills and `python3.13 -m pytest scripts/tests/test_portable_prompt_sync.py -q`
 passed 73 / 73. `render_loop_prompt.py --check` also passed. The renderer left
 the tree clean because all eight tracked Codex artifacts already match the
 current templates byte-for-byte; there is no generated artifact delta to commit.
+
+## Remediation 2026-09-10
+
+`RADON_WEEKEND_REDUCED=1`: the 2026-09-10 audit filed no new finding, and
+there is no un-DONE source-actionable P0/P1. T-490 is DONE by the recorded
+operator completion. T-488 remains BLOCKED after its three recorded fixture
+attempts; operator action remains: reproduce and repair the GNU-timeout
+process-tree behavior on Linux CI without widening the fixed contract timeout.
+Focused re-verification and three serial full-gate rounds follow in this
+section before completion.
+
+| Task | Status | Evidence |
+|---|---|---|
+| T-490 | BLOCKED / operator-only | Red reverified in this runner: `test_portable_prompt_sync.py` is 52 passed / 21 failed. A fourth renderer attempt failed at `.codex` creation with `PermissionError`; full closing gates are not claimed while this deterministic P1 red remains. Operator: run `python3.13 scripts/render_loop_prompt.py --write` in a checkout where repository `.codex/` is writable, then run the focused contract and commit generated artifacts. |
+| T-488 | BLOCKED / operator-only | Unchanged after its three recorded fixture attempts. Operator: reproduce and repair the GNU-timeout process-tree behavior on Linux CI without widening the contract timeout. |

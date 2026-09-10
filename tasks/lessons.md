@@ -990,3 +990,11 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 
 ## 2026-09-08 — Full test suites run in CI, not on the laptop
 - Never launch full `pytest`/`vitest` locally. Push, read `gh run view --log-failed`, fix, push, repeat until green. Targeted single-file red/green runs are fine.
+
+## 2026-09-09 - Compose on X must not await generated media
+- Keep the text-only X intent link usable immediately with the current sanitized caption while voice rewriting or preview rendering is pending. Media readiness may disable media downloads only; pin the loading-state composer navigation in unit and browser regressions.
+
+
+## 2026-09-10 - Market Ear chart credits are per-image evidence
+- Preserve explicitly supplied image providers from Market Ear (for example Ramp) through scraping, media URL rewriting, durable storage, and image captions. An article publisher and its chart's original source are different fields.
+- Match attribution by image URL across failed downloads, never by the filtered output index. Uncredited charts must not inherit another chart's provider.

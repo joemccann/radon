@@ -21,8 +21,9 @@ export default function NewsfeedShare({ post, imageUrl }: { post: SharePost; ima
 
 function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: string; panelId: string }) {
   const id = useId();
-  const [caption, setCaption] = useState(() => buildShareCaption(post));
+  const [caption, setCaption] = useState(() => buildShareCaption(post, imageUrl));
   const original = useRef(post);
+  const originalImage = useRef(imageUrl);
   const [rewrite, setRewrite] = useState<{ title: string; content: string }>();
   const [rewriting, setRewriting] = useState(true);
   const [voiceError, setVoiceError] = useState("");
@@ -52,7 +53,7 @@ function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: s
     const start = setTimeout(() => { void fetch("/api/newsfeed/share", {
       method: "POST", cache: "no-store", signal: AbortSignal.any([abort.signal, AbortSignal.timeout(30_000)]),
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: sanitizeShareText(original.current.title), content: buildShareCaption({ ...original.current, title: "" }) }),
+      body: JSON.stringify({ title: sanitizeShareText(original.current.title), content: buildShareCaption({ ...original.current, title: "" }, originalImage.current) }),
     }).then(async response => {
       if (!response.ok) throw new Error("Voice rewrite unavailable. Showing the original copy.");
       const draft: unknown = await response.json();
@@ -64,7 +65,7 @@ function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: s
       if (cancelled) return;
       const next = { title: sanitizeShareText(draft.title), content: sanitizeShareText(draft.content) };
       setRewrite(next);
-      setCaption([next.title, next.content].join("\n\n"));
+      setCaption(buildShareCaption({ ...original.current, ...next }, originalImage.current));
     }).catch(() => {
       if (!cancelled) setVoiceError("Voice rewrite unavailable. Showing the original copy.");
     }).finally(() => { if (!cancelled) setRewriting(false); }); }, 0);
@@ -124,7 +125,7 @@ function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: s
         {preview ? <img src={preview} alt={`Portrait share preview: ${sanitizeShareText(post.title)}`} /> : <span>{error ? "Preview unavailable" : "Preparing preview…"}</span>}
       </div>
       <div className={styles.actions}>
-        <a className={styles.action} href={rewriting ? undefined : buildXShareUrl(caption)} aria-disabled={rewriting} target="_blank" rel="noopener noreferrer">Compose on X</a>
+        <a className={styles.action} href={buildXShareUrl(caption)} target="_blank" rel="noopener noreferrer">Compose on X</a>
         <button type="button" disabled={!preview || busy || rewriting} onClick={() => void download(false)}>Download Story image</button>
         <button type="button" disabled={!preview || busy || rewriting || !mp4} onClick={() => void download(true)}>{busy ? "Exporting…" : "Download Reels / TikTok video"}</button>
         <p>Save the image or video, then upload in your social app. Attach images separately on X.</p>
