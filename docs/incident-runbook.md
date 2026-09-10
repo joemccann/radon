@@ -1548,6 +1548,34 @@ gateway stays up, and the tick never heartbeats.** Peak: 2026-09-04
 
 ---
 
+## flow-analysis-truncated-scoring-cache
+
+**`/flow-analysis/{TICKER}` shows a fresh `fetched_at` / `cache_meta.is_stale:
+false` while Daily Dark Pool History mixes ~900-print days with ~19k-print
+days.** Peak: 2026-09-10, SNDK. Cache TTL is not the failure; the immutable
+dark-pool rows are truncated.
+
+- **Mechanism:** `discover.DISCOVER_DARKPOOL_MAX_PAGES = 2` walks UW and
+  wrote the sample as schema-v2 complete. `fetch_flow` treats closed days
+  as immutable and never re-fetches a hit, so the ticker report freezes
+  the scoring sample as the session.
+- **Discriminating check:** a closed day with `num_prints` in 500..1000
+  beside a 40-page-cap day (~19k) on the same ticker; on-disk
+  `data/darkpool_cache/{TICKER}_{date}.json` has `schema: 2` and no
+  `complete: true` (or `complete: false`).
+- **Remediation (code):** persist `complete`; flow consumers
+  `require_complete=True`; legacy 500..1000 v2 rows miss; discover may
+  reuse incomplete samples.
+- **Regression:**
+  `test_darkpool_cache.py::TestScoringWalkIsNotAFullDay`,
+  `TestFetchFlowUsesCache::test_legacy_two_page_cache_is_refetched`,
+  `test_fetch_flow.py::TestDarkpoolPagination::test_two_page_scoring_walk_is_not_cacheable`,
+  `test_discover.py::test_capped_scoring_walk_is_not_served_as_a_full_day`.
+- **Code:** `scripts/utils/darkpool_cache.py`; `scripts/fetch_flow.py`
+  (`walk_darkpool`); `scripts/discover.py` (`fetch_darkpool_multi`).
+
+---
+
 ## mktnews-upstream-ws-refused
 
 **Symptom:** the headline tape keeps printing while the `service_health` row
