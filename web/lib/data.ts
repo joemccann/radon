@@ -39,12 +39,13 @@ export const NAV_GROUP_ORDER: import("./types").NavGroupId[] = ["overview", "pos
 /** The four recurring decisions in the Clear workstation, shared across viewports. */
 export const clearPrimaryNavigation: { label: string; href: string; sections: WorkspaceSection[] }[] = [
   { label: "Portfolio", href: "/dashboard", sections: ["dashboard", "performance"] },
-  { label: "Research", href: "/scanner", sections: ["scanner", "discover", "flow-analysis", "options", "watchlist"] },
+  { label: "Research", href: "/scanner", sections: ["research-workbench", "scanner", "discover", "flow-analysis", "options", "watchlist"] },
   { label: "Risk", href: "/regime/cri", sections: ["regime", "cta"] },
   { label: "Positions", href: "/portfolio", sections: ["portfolio", "orders"] },
 ];
 
 export const navItems: WorkspaceNavItem[] = [
+  { label: "Research workbench", route: "research-workbench", href: "/research-workbench", icon: JournalGlyph, group: "research" },
   { label: "Portfolio", route: "dashboard", href: "/dashboard", icon: DashboardGlyph, group: "overview" },
   { label: "Positions", route: "portfolio", href: "/portfolio", icon: PortfolioGlyph, group: "positions" },
   { label: "Performance", route: "performance", href: "/performance", icon: PerformanceGlyph, hidden: false, group: "positions" },
@@ -68,6 +69,7 @@ export const navItems: WorkspaceNavItem[] = [
 ];
 
 export const quickPromptsBySection: Record<WorkspaceSection, string[]> = {
+  "research-workbench": ["portfolio", "evaluate nvda", "help"],
   dashboard: ["portfolio", "scan --top 12", "compare support vs against", "review watch list", "help"],
   "flow-analysis": ["analyze nvda", "compare support vs against", "what are action items", "review watch list", "scan --top 12", "evaluate nvda", "portfolio"],
   options: ["evaluate mu", "scan --top 12", "portfolio", "help"],
@@ -89,6 +91,7 @@ export const quickPromptsBySection: Record<WorkspaceSection, string[]> = {
 };
 
 export const sectionDescription: Record<WorkspaceSection, string> = {
+  "research-workbench": "Source-backed research, assumptions, and trade review.",
   dashboard: "Portfolio snapshot and command control panel.",
   "flow-analysis": "Flow and position analysis context.",
   options: "Options exposure, Greeks, open interest, and volatility measurements.",

@@ -1,0 +1,76 @@
+import { test, expect } from "@playwright/test";
+import { installClearFixtures } from "./clear-fixtures";
+test.use({ extraHTTPHeaders: { "x-radon-authless-test": process.env.RADON_AUTHLESS_TEST_TOKEN ?? "clear-local-verification-20260905" } });
+const evidence = "2026-Q2 Revenue: $120 million\n2026-Q2 Capex: $30 million\nBuyback blackout starts 2026-09-12 through 2026-10-15.\nEarnings release on 2026-10-20.";
+for (const viewport of [{ name: "desktop", width: 1440, height: 1000 }, { name: "mobile", width: 393, height: 852 }]) {
+  test(`research ${viewport.name}: cited workflow, exports and safe ticket handoff`, async ({ page }, testInfo) => {
+    await page.setViewportSize(viewport);
+    const requests = await installClearFixtures(page);
+    await page.goto("/research-workbench", { waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("chat-launcher-ready")).toBeAttached();
+    const workbench = page.getByTestId("research-workbench");
+    await expect(workbench.getByRole("heading", { name: "Evidence to decision", exact: true })).toBeVisible();
+    await workbench.getByLabel("Published", { exact: true }).fill("2026-09-01");
+    await workbench.getByLabel("Ticker (optional)").fill("AAPL");
+    await workbench.getByLabel("Original HTTPS URL (optional)").fill("https://example.com/filing");
+    await workbench.getByLabel("Source text", { exact: true }).fill(evidence);
+    await workbench.getByLabel("Document title").fill("Quarterly filing");
+    await workbench.getByRole("button", { name: "Add source", exact: true }).click();
+    await expect(workbench.getByText(/1 sources/)).toBeVisible();
+    await workbench.getByRole("button", { name: "Close inspector" }).click();
+    await workbench.getByRole("button", { name: "Fundamentals", exact: true }).click();
+    await expect(workbench.getByRole("cell", { name: "120", exact: true })).toBeVisible();
+    await workbench.getByRole("table").locator("summary").first().click();
+    await expect(workbench.getByRole("table").locator("blockquote").first()).toContainText("2026-Q2");
+    await workbench.getByRole("button", { name: "AI infrastructure", exact: true }).click();
+    await expect(workbench.getByText("Capex / revenue: 25.0%")).toBeVisible();
+    await workbench.getByRole("button", { name: "Calendar", exact: true }).click();
+    await expect(workbench.getByText("2026-09-12 to 2026-10-15")).toBeVisible();
+    const calendar = page.waitForEvent("download");
+    await workbench.getByRole("button", { name: "Export calendar holds" }).click();
+    expect((await calendar).suggestedFilename()).toMatch(/\.ics$/);
+    await workbench.getByRole("button", { name: "Labs & exports", exact: true }).click();
+    await workbench.getByLabel("Ticker or company").fill("AAPL");
+    for (const [label, value] of [["Unlevered free cash flow", "10"], ["Net debt (negative for net cash)", "20"], ["Diluted shares", "10"], ["EBITDA", "15"]]) await workbench.getByLabel(label, { exact: true }).fill(value);
+    await expect(workbench.getByText("DCF enterprise value")).toBeVisible();
+    await workbench.getByRole("button", { name: "Fundamentals", exact: true }).click();
+    await workbench.getByRole("button", { name: "Labs & exports", exact: true }).click();
+    await expect(workbench.getByLabel("Ticker or company")).toHaveValue("AAPL");
+    await expect(workbench.getByLabel("Unlevered free cash flow")).toHaveValue("10");
+    await expect(workbench.getByText("DCF enterprise value")).toBeVisible();
+    const spreadsheet = page.waitForEvent("download");
+    await workbench.getByRole("button", { name: "Download scenario XLSX" }).click();
+    expect((await spreadsheet).suggestedFilename()).toMatch(/\.xlsx$/);
+    if (viewport.name === "desktop") {
+      const deck = page.waitForEvent("download");
+      await workbench.getByRole("button", { name: "Download update PPTX" }).click();
+      expect((await deck).suggestedFilename()).toMatch(/\.pptx$/);
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await workbench.screenshot({ path: testInfo.outputPath(`research-${viewport.name}.png`) });
+    await workbench.getByRole("button", { name: "Brief", exact: true }).click();
+    const apply = workbench.getByRole("button", { name: "Apply checklist to ticket" });
+    await expect(apply).toBeDisabled();
+    for (const checkbox of await workbench.getByRole("checkbox").all()) await checkbox.check();
+    await apply.click();
+    await expect(page).toHaveURL(/\/AAPL\?tab=order&src=research/);
+    await expect(page.getByRole("complementary", { name: "Research checklist" })).toBeVisible();
+    expect(requests.some((request) => /POST \/api\/orders\/(place|cancel|modify)/.test(request))).toBe(false);
+  });
+}
+test("research rejects corrupt workspace imports without discarding evidence", async ({ page }) => {
+  await installClearFixtures(page);
+  await page.goto("/research-workbench");
+  await expect(page.getByTestId("chat-launcher-ready")).toBeAttached();
+  await page.getByLabel("Import workspace JSON").setInputFiles({ name: "corrupt.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify({ version: 1, documents: [], facts: [{ id: "fake", documentId: "missing", kind: "metric" }] })) });
+  await expect(page.getByRole("alert").filter({ hasText: "missing source" })).toBeVisible();
+  await expect(page.getByText(/0 sources/)).toBeVisible();
+  await page.getByRole("button", { name: "Controls", exact: true }).click();
+  const report = { schema_version: 1, mode: "offline-contracts", generated_at: "2026-09-10T15:00:00Z", metrics: { total: 2, passed: 1, failed: 1, contract_accuracy: .5, p50_ms: 1, p95_ms: 5 }, queries: [{ query: "identity", passed: true, latency_ms: 1, error_class: null }, { query: "deny", passed: false, latency_ms: 5, error_class: "AssertionError" }] };
+  await page.getByLabel("Import MCP evaluator report").setInputFiles({ name: "evaluation.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(report)) });
+  await expect(page.getByText(/1\/2 contracts passed/)).toBeVisible();
+  await expect(page.getByText("Failed", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Brief", exact: true }).click();
+  await page.getByRole("button", { name: "Controls", exact: true }).click();
+  await expect(page.getByText(/1\/2 contracts passed/)).toBeVisible();
+});

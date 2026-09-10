@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-09-10T17:42:14Z",
-  "node_count": 3288,
-  "edge_count": 6670,
+  "generated_at": "2026-09-10T20:39:04Z",
+  "node_count": 3318,
+  "edge_count": 6727,
   "areas": {
-    "web": 1930,
-    "site": 152,
-    "scripts": 1092,
+    "web": 1954,
+    "site": 154,
+    "scripts": 1096,
     "cloud": 66,
     "lib": 28,
     "tests": 17,
@@ -15,17 +15,17 @@
     {
       "id": "web/app",
       "area": "web",
-      "count": 208
+      "count": 211
     },
     {
       "id": "web/components",
       "area": "web",
-      "count": 243
+      "count": 248
     },
     {
       "id": "web/e2e",
       "area": "web",
-      "count": 190
+      "count": 191
     },
     {
       "id": "web",
@@ -35,7 +35,7 @@
     {
       "id": "web/lib",
       "area": "web",
-      "count": 381
+      "count": 387
     },
     {
       "id": "web/public",
@@ -50,7 +50,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 894
+      "count": 903
     },
     {
       "id": "site/app",
@@ -60,7 +60,7 @@
     {
       "id": "site/components",
       "area": "site",
-      "count": 63
+      "count": 64
     },
     {
       "id": "site/e2e",
@@ -75,7 +75,7 @@
     {
       "id": "site/lib",
       "area": "site",
-      "count": 52
+      "count": 53
     },
     {
       "id": "site/scripts",
@@ -160,7 +160,7 @@
     {
       "id": "scripts/mcp_hosted",
       "area": "scripts",
-      "count": 4
+      "count": 5
     },
     {
       "id": "scripts/mktnews",
@@ -185,7 +185,7 @@
     {
       "id": "scripts/research",
       "area": "scripts",
-      "count": 11
+      "count": 12
     },
     {
       "id": "scripts/security",
@@ -195,7 +195,7 @@
     {
       "id": "scripts/tests",
       "area": "scripts",
-      "count": 540
+      "count": 542
     },
     {
       "id": "scripts/trade_blotter",
@@ -252,7 +252,7 @@
     {
       "id": "web/lib/types.ts",
       "area": "web",
-      "in": 268,
+      "in": 272,
       "out": 1,
       "test": false
     },
@@ -271,6 +271,13 @@
       "test": false
     },
     {
+      "id": "web/components/WorkspaceShell.tsx",
+      "area": "web",
+      "in": 53,
+      "out": 42,
+      "test": false
+    },
+    {
       "id": "scripts/db/writer.py",
       "area": "scripts",
       "in": 89,
@@ -278,31 +285,24 @@
       "test": false
     },
     {
-      "id": "web/components/WorkspaceShell.tsx",
-      "area": "web",
-      "in": 52,
-      "out": 42,
-      "test": false
-    },
-    {
       "id": "web/components/WorkspaceSections.tsx",
       "area": "web",
       "in": 19,
-      "out": 74,
-      "test": false
-    },
-    {
-      "id": "web/lib/radonApi.ts",
-      "area": "web",
-      "in": 91,
-      "out": 0,
+      "out": 75,
       "test": false
     },
     {
       "id": "web/lib/routeAccess.ts",
       "area": "web",
-      "in": 87,
+      "in": 89,
       "out": 4,
+      "test": false
+    },
+    {
+      "id": "web/lib/radonApi.ts",
+      "area": "web",
+      "in": 92,
+      "out": 0,
       "test": false
     },
     {
@@ -320,17 +320,17 @@
       "test": false
     },
     {
+      "id": "web/lib/assistant/nextLoaders.ts",
+      "area": "web",
+      "in": 2,
+      "out": 73,
+      "test": false
+    },
+    {
       "id": "scripts/db/client.py",
       "area": "scripts",
       "in": 74,
       "out": 0,
-      "test": false
-    },
-    {
-      "id": "web/lib/assistant/nextLoaders.ts",
-      "area": "web",
-      "in": 2,
-      "out": 71,
       "test": false
     },
     {
@@ -383,17 +383,17 @@
       "test": false
     },
     {
+      "id": "web/lib/dbExecute.ts",
+      "area": "web",
+      "in": 40,
+      "out": 4,
+      "test": false
+    },
+    {
       "id": "web/components/SpectralLoader.tsx",
       "area": "web",
       "in": 43,
       "out": 0,
-      "test": false
-    },
-    {
-      "id": "web/lib/dbExecute.ts",
-      "area": "web",
-      "in": 39,
-      "out": 4,
       "test": false
     },
     {
@@ -449,7 +449,7 @@
       "id": "web/components/ticker-detail/OrderTab.tsx",
       "area": "web",
       "in": 12,
-      "out": 23,
+      "out": 24,
       "test": false
     },
     {

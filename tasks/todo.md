@@ -1,3 +1,37 @@
+# Task: Financial research workbench 2026-09-10 [IN PROGRESS]
+
+## Scope and acceptance
+Implement the 13 requested capabilities as integrated, source-grounded workflows, reusing existing research, indicators, order-risk and connector infrastructure. No fabricated provider access, no synthetic live financial data, no automatic orders. Imports must retain provenance; unavailable licensed data must be explicit. Valuation assumptions must be editable and auditable. Desktop and mobile must work. No local test suites; GitHub CI runs adversarial/unit/browser suites.
+
+## Dependency graph
+- T1 depends_on: [] - Verify announcement, inspect existing architecture and isolate clean branch.
+- T2 depends_on: [T1] - Cited evidence domain, earnings/blackout, fundamentals normalization, transcript deltas, deals and AI-capex joins.
+- T3 depends_on: [T1] - Research workbench UX, accessible desktop/mobile flows and focused browser regressions; integrate T2 contracts.
+- T4 depends_on: [T1] - MCP evaluation/reliability, agent-readable research and trading-governance audit of existing chokepoints.
+- T5 depends_on: [T2,T3] - Valuation/export artifacts, desk-note handoff, marketing wedge and production integration.
+- T6 depends_on: [T2,T3,T4,T5] - Adversarial review, generated files, desktop/mobile browser evidence, exact-head green PR CI.
+- T7 depends_on: [T6] - Show-me visual, review record and confirmed Pushover notification.
+
+## Checklist
+- [x] T1 Announcement and Astra model verified against official pages; clean worktree at /tmp/radon-financial-research from 9ef5fa8a.
+- [x] T2 Evidence and research domain; canonical periods, financing roles and as-of boundaries pinned by adversarial regressions.
+- [x] T3 Research workbench UI; preserved draft state and 44px disclosures after independent review.
+- [x] T4 Reliability evaluator, readable PDF manifests/retrieval and operator governance export.
+- [x] T5 Formula XLSX, PPTX, valuation/comps, dated portfolio exports, ticket checklist and marketing section.
+- [ ] T6 Browser and exact-head CI green.
+- [ ] T7 Visual walkthrough and delivery.
+
+## Review
+Implementation complete; exact-head CI and final reviewer verification pending. Preserve original workspace dirty files. No merge or deployment requested.
+
+- No local test suites executed. TypeScript static checks and changed-source ESLint passed before final integration.
+- Browser: illustrative source intake produced 1 source / 6 cited facts; valid XLSX downloaded; 1440px desktop and 393px mobile, zero page errors and app width 393/393.
+- Independent reviews repaired fiscal-period substitution, financing-role smuggling, future-source prompts/exports, missing plaintext provenance, and Labs state loss.
+- Marketing page exposed a pre-existing decorative WebGL crash; bounded fallback preserves content with regression coverage. New section fits mobile; existing plate-caption overflow remains outside the added section.
+- Verification artifacts and show-me draft: /tmp/radon-financial-evidence/.
+
+---
+
 # Task: OpenDesign Arena collector stub 2026-09-10 [IN PROGRESS]
 
 Thin LLM/model-quality collector for OpenDesign Arena on Demand `D6`.

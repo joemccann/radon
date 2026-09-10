@@ -38,6 +38,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Annotated, Any, Callable
 
@@ -107,11 +108,14 @@ def _http_get(url: str, headers: dict) -> HttpResult:
     """
     import requests
 
-    resp = requests.get(url, headers=headers, timeout=HTTP_TIMEOUT_S, stream=True)
+    started = time.monotonic()
+    resp = requests.get(url, headers=headers, timeout=HTTP_TIMEOUT_S, stream=True, allow_redirects=False)
     try:
         chunks: list[bytes] = []
         received = 0
         for chunk in resp.iter_content(chunk_size=65536):
+            if time.monotonic() - started > HTTP_TIMEOUT_S:
+                raise requests.Timeout("upstream read deadline exceeded")
             received += len(chunk)
             if received > MAX_RESPONSE_BYTES:
                 raise ValueError(
@@ -144,6 +148,20 @@ def _proxy_headers(principal: Principal) -> dict:
 
 def _denied(exc: AuthError) -> dict:
     return {"error": exc.message, "status": exc.status}
+
+
+def _safe_read(http_get: HttpGetter, url: str, headers: dict) -> HttpResult | dict:
+    """Provider exceptions must not expose URLs/tokens or look like empty data."""
+    import requests
+
+    try:
+        return http_get(url, headers)
+    except requests.Timeout:
+        return {"error": "upstream read timed out", "status": 504, "retryable": True}
+    except requests.RequestException:
+        return {"error": "upstream connection unavailable", "status": 503, "retryable": True}
+    except ValueError:
+        return {"error": "upstream response failed validation", "status": 502, "retryable": False}
 
 
 def _upstream_json(result: HttpResult) -> dict:
@@ -192,7 +210,9 @@ def _radon_docs_impl(slug: str, *, http_get: HttpGetter = _http_get) -> dict:
             "valid_slugs": sorted(PUBLIC_DOC_SLUGS),
         }
     url = f"{SITE_BASE}{path}"
-    result = http_get(url, {"Accept": "text/markdown, text/plain"})
+    result = _safe_read(http_get, url, {"Accept": "text/markdown, text/plain"})
+    if isinstance(result, dict):
+        return result
     if result.status != 200:
         return {"error": f"upstream HTTP {result.status}", "status": result.status, "url": url}
     return {"url": url, "markdown": result.text}
@@ -203,7 +223,9 @@ def _radon_health_impl(*, http_get: HttpGetter = _http_get) -> dict:
     # internet traffic (aggregate verdict only; no unit inventory, no IB
     # auth_state, no account identifiers). Never the FastAPI /health.
     url = f"{EDGE_BASE}/edge-health/status"
-    result = http_get(url, {"Accept": "application/json"})
+    result = _safe_read(http_get, url, {"Accept": "application/json"})
+    if isinstance(result, dict):
+        return result
     payload = _upstream_json(result)
     if "error" in payload:
         return payload
@@ -215,7 +237,9 @@ def _demo_read_impl(
 ) -> dict:
     if not principal.is_demo_or_operator:
         return _denied(AuthError(401, "a demo or operator Clerk token is required"))
-    result = http_get(f"{DEMO_BASE}{path}", _proxy_headers(principal))
+    result = _safe_read(http_get, f"{DEMO_BASE}{path}", _proxy_headers(principal))
+    if isinstance(result, dict):
+        return result
     return _upstream_json(result)
 
 
@@ -227,7 +251,9 @@ def _operator_read_impl(
             # A demo grant never reaches the operator book.
             return _denied(AuthError(403, "operator tools require the operator allowlist"))
         return _denied(AuthError(401, "an operator Clerk token is required"))
-    result = http_get(f"{APP_BASE}{path}", _proxy_headers(principal))
+    result = _safe_read(http_get, f"{APP_BASE}{path}", _proxy_headers(principal))
+    if isinstance(result, dict):
+        return result
     return _upstream_json(result)
 
 
