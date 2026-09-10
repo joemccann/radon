@@ -6244,4 +6244,5 @@ Dependency graph: T1 -> T2; T1 -> T3; T2 + T3 -> T4 -> T5.
 Isolated worktree /tmp/radon-focus-audit-20260910 protects existing user changes.
 - RED: PR #397 head d1802ea6948a49979e4cb0a6d9c63a52464a00c2, GitHub CI 34504342646: all eight new browser cases reproduce inner outline solid instead of none; 88 existing browser cases passed. All eight Vitest shards and coverage checks passed.
 - Repair: shared Clear selectors assign rings to six active composite wrappers; command palette ring stays inset. Instrument search inherits the standard outline. No financial behavior or local suites changed.
+- CI 34505111914 at 43bbc58c passed the original ownership assertions and 88 existing browser cases; exposed palette inset precedence after production CSS grouped selectors into :is(), plus a modal animation changing offsetParent in the geometry test. Use a local offset custom property and compare settled parent-relative bounds.
 - Exact-head green CI and browser screenshot review pending.

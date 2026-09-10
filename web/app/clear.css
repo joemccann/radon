@@ -143,7 +143,7 @@
 .radon-clear .modify-price-input-row:has(> select.modify-price-input:focus-visible),
 .radon-clear .ask-composer:has(.ask-composer__input:focus-visible) {
   outline: 2px solid var(--border-focus);
-  outline-offset: 2px;
+  outline-offset: var(--field-focus-offset, 2px);
 }
 
 .radon-clear :is(.modify-price-input-row, .table-search, .theta-search, .flow-ticker-input-row, .command-palette-input-wrap) > input,
@@ -158,9 +158,11 @@
   outline: none;
 }
 
-/* This field touches an overflow-clipped dialog edge; keep its ring inside. */
-.radon-clear .command-palette-input-wrap:has(> input:focus-visible) {
-  outline-offset: -2px;
+/* This field touches an overflow-clipped dialog edge; keep its ring inside.
+   A local value avoids competing with the grouped selector's specificity
+   after the production CSS optimizer combines it into :is(...). */
+.radon-clear .command-palette-input-wrap {
+  --field-focus-offset: -2px;
 }
 
 .radon-clear :is(.pill, .order-status-pill) {

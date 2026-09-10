@@ -72,10 +72,14 @@ for (const viewport of [
     const quantity = modal.locator("#modify-quantity-input");
     const price = modal.locator("#modify-price-input");
     const wrapper = price.locator("..");
+    // Finish the finite modal entrance before measuring. A transform creates
+    // a temporary offsetParent, so offsetLeft/Top can change without layout.
+    await page.screenshot({ animations: "disabled" });
     await quantity.focus();
     const measureLayout = () => wrapper.evaluate((element) => {
-      const row = element as HTMLElement;
-      return { left: row.offsetLeft, top: row.offsetTop, width: row.offsetWidth, height: row.offsetHeight };
+      const row = element.getBoundingClientRect();
+      const field = element.closest(".modify-field")!.getBoundingClientRect();
+      return { left: row.left - field.left, top: row.top - field.top, width: row.width, height: row.height };
     });
     const before = await measureLayout();
     await page.keyboard.press("Tab");
@@ -83,7 +87,10 @@ for (const viewport of [
     await price.fill("50.00");
     await page.screenshot({ path: testInfo.outputPath(`focus-modify-${viewport.label}.png`), animations: "disabled" });
     await expectCompositeFocus(price, wrapper);
-    expect(await measureLayout()).toEqual(before);
+    const after = await measureLayout();
+    for (const key of ["left", "top", "width", "height"] as const) {
+      expect(after[key], `Focused field ${key} must preserve its layout`).toBeCloseTo(before[key], 1);
+    }
     const geometry = await wrapper.evaluate((element) => {
       const row = element.getBoundingClientRect();
       const prefix = element.querySelector(".modify-price-prefix")!.getBoundingClientRect();
