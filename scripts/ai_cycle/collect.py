@@ -13,7 +13,7 @@ import os
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-from .collectors import SourceError, Transport, archive_raw, collect_source, now_iso, parse_disclosures
+from .collectors import SourceError, Transport, archive_raw, collect_source, now_iso, parse_disclosures, parse_ramp_curated
 
 SOURCES = (
     "openrouter",
@@ -25,9 +25,11 @@ SOURCES = (
     "vast",
     "noaa",
     "portkey",
+    "ramp",
     "issuer-disclosures",
     "lambda",
 )
+DEFAULT_RAMP_CURATED = Path(__file__).resolve().parent / "fixtures" / "ramp_ai_index_curated.json"
 KEYS = ("OPENROUTER_API_KEY", "ARTIFICIAL_ANALYSIS_API_KEY", "SEC_USER_AGENT", "EIA_API_KEY", "VAST_API_KEY")
 OPERATOR_FIELDS = (*KEYS, "RADON_AI_CYCLE_AA_BASKET")
 HEALTH_SERVICE = "ai-cycle"
@@ -118,6 +120,10 @@ def _main(argv=None):
         help="Comma-separated verified AA model slugs; immutable across a cohort",
     )
     parser.add_argument("--import-disclosures", help="Verified issuer observations JSON")
+    parser.add_argument(
+        "--import-ramp",
+        help="Curated Ramp AI Index JSON; defaults to bundled published fixture for source ramp",
+    )
     args = parser.parse_args(argv)
     selected = args.sources.split(",")
     if any(source not in SOURCES for source in selected):
@@ -153,6 +159,8 @@ def _main(argv=None):
         # Preserve their last reviewed status and publication vintage on daily runs.
         if source == "issuer-disclosures" and not args.import_disclosures:
             continue
+        if source == "ramp" and not args.import_ramp and not DEFAULT_RAMP_CURATED.exists():
+            continue
         for first, last in source_windows(source, start, args.end, backfill=args.backfill):
             key = f"{source}:{first}:{last}"
             if key in completed:
@@ -163,6 +171,11 @@ def _main(argv=None):
                     raw = Path(args.import_disclosures).read_bytes()
                     digest = archive_raw(Path(args.archive), raw)
                     rows = parse_disclosures(json.loads(raw), digest, checked)
+                elif source == "ramp":
+                    ramp_path = Path(args.import_ramp or DEFAULT_RAMP_CURATED)
+                    raw = ramp_path.read_bytes()
+                    digest = archive_raw(Path(args.archive), raw)
+                    rows = parse_ramp_curated(json.loads(raw), digest, checked)
                 else:
                     effective_start = (
                         (end - timedelta(days=800)).isoformat() if source == "sec" and not args.start else first

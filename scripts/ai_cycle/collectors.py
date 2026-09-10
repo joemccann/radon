@@ -591,6 +591,140 @@ def parse_noaa(payload, digest, fetched, start=None, end=None):
     return result
 
 
+RAMP_SPEND_SERIES = (
+    ("spend.median_pepm", "median_pepm", "Median firm AI spend per employee", "USD/employee-month"),
+    (
+        "spend.top_10_percent_median_pepm",
+        "top_10_percent_median_pepm",
+        "Top 10% firm median AI spend per employee",
+        "USD/employee-month",
+    ),
+    (
+        "spend.top_1_percent_median_pepm",
+        "top_1_percent_median_pepm",
+        "Top 1% firm median AI spend per employee",
+        "USD/employee-month",
+    ),
+)
+
+
+def _month_bounds(day):
+    start = date.fromisoformat(day[:10])
+    if start.month == 12:
+        end = date(start.year + 1, 1, 1) - timedelta(days=1)
+    else:
+        end = date(start.year, start.month + 1, 1) - timedelta(days=1)
+    return start.isoformat(), end.isoformat()
+
+
+def parse_ramp_curated(payload, digest, fetched):
+    """Curated published Ramp AI Index tables; no Ramp Data API key required."""
+    required = (
+        "source_url",
+        "methodology_version",
+        "cohort_version",
+        "spend_per_employee",
+        "adoption_overall",
+    )
+    if any(field not in payload for field in required):
+        raise SourceError("Ramp curated import missing required fields")
+    if payload.get("raw_hash") and payload["raw_hash"] != digest:
+        raise SourceError("Ramp curated import raw_hash does not match archived evidence")
+    source_url = public_url(payload["source_url"])
+    published = payload.get("published_at")
+    if published:
+        published_at = datetime.fromisoformat(published.replace("Z", "+00:00"))
+        if published_at.tzinfo is None or published_at > datetime.fromisoformat(fetched.replace("Z", "+00:00")):
+            raise SourceError("Ramp publication must be a known past UTC timestamp")
+    notes = payload.get("methodology_notes") or []
+    common = {
+        "definition": "Paid Ramp card and bill-pay AI transactions divided by employee count; free tools excluded",
+        "coverage_numerator": None,
+        "coverage_denominator": None,
+        "methodology_notes": notes,
+        "curated_from": payload.get("curated_from") or [source_url],
+        "license": "Public published research; attribution to Ramp Economics Lab",
+        "measurement_limits": [
+            "Undercounts free AI tools and personal employee accounts",
+            "Top 1% cohort is small and revised as late transactions arrive",
+        ],
+    }
+    result = []
+    seen = set()
+    for row in payload["spend_per_employee"]:
+        month = row.get("date_month")
+        if not isinstance(month, str):
+            raise SourceError("Ramp spend month must be an ISO date")
+        start, end = _month_bounds(month)
+        for series_id, field, label, unit in RAMP_SPEND_SERIES:
+            if field not in row or row[field] in (None, ""):
+                continue
+            value = number(row[field])
+            key = (series_id, month)
+            if key in seen:
+                raise SourceError("Duplicate Ramp spend observation")
+            seen.add(key)
+            result.append(
+                observation(
+                    "ramp",
+                    "D5",
+                    series_id,
+                    value,
+                    unit,
+                    start,
+                    end,
+                    digest,
+                    fetched,
+                    published=published,
+                    url=source_url,
+                    cohort=payload["cohort_version"],
+                    methodology_version=payload["methodology_version"],
+                    metadata={**common, "label": label, "entity": series_id.rsplit(".", 1)[-1], "month": month[:7]},
+                )
+            )
+    for row in payload["adoption_overall"]:
+        month = row.get("date_month")
+        rate = row.get("adoption_rate_pct")
+        if not isinstance(month, str) or rate in (None, ""):
+            raise SourceError("Ramp adoption month and rate are required")
+        start, end = _month_bounds(month)
+        key = ("adoption.overall_rate_pct", month)
+        if key in seen:
+            raise SourceError("Duplicate Ramp adoption observation")
+        seen.add(key)
+        share = number(rate)
+        if share > 100:
+            raise SourceError("Ramp adoption share exceeds 100 percent")
+        result.append(
+            observation(
+                "ramp",
+                "D5",
+                "adoption.overall_rate_pct",
+                share,
+                "%",
+                start,
+                end,
+                digest,
+                fetched,
+                published=published,
+                url=source_url,
+                cohort=payload["cohort_version"],
+                methodology_version=payload["methodology_version"],
+                metadata={
+                    **common,
+                    "label": "Businesses with paid AI transaction",
+                    "entity": "overall_adoption",
+                    "month": month[:7],
+                    "mom_change_pp": row.get("mom_change_pp"),
+                    "yoy_change_pp": row.get("yoy_change_pp"),
+                },
+            )
+        )
+    if not result:
+        raise SourceError("Ramp curated import produced no observations")
+    return result
+
+
 def parse_disclosures(payload, digest, fetched):
     """Explicit reviewed semantic ingestion; no memo values or guessed tags."""
     result = []
@@ -909,5 +1043,6 @@ def collect_source(source, transport, start, end, *, env=None, basket=()):
             "vast": "Authenticated offer schema and entitlement not verified",
             "lambda": "Direct HTML pricing semantics require a verified cohort import",
             "issuer-disclosures": "Requires reviewed issuer disclosure import; unattended release retrieval is not enabled",
+            "ramp": "Requires curated published Ramp AI Index import; Ramp Data API is out of scope for v1",
         }.get(source, "Collector is not configured")
     )

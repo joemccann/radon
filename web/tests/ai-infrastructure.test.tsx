@@ -30,6 +30,8 @@ describe("AI infrastructure evidence", () => {
     expect(source?.textContent).toContain("available");
     expect(source?.textContent).toContain("Sep 1, 2026");
     expect(source?.querySelector("a")?.getAttribute("href")).toBe("https://example.com/evidence");
+    expect(screen.getByTestId("ai-indicator-D5")).toBeTruthy();
+    expect(screen.getByTestId("ai-indicator-D5").textContent).toContain("Ramp business AI spend");
   });
   it("groups histories by unit and series, preserves chronological order, rejects invalid points", () => {
     const p = aiFixture.indicators[0].history[0]; const result = historyGroups([{ ...p, date: "2026-09-02" }, { ...p, date: "2026-09-01" }, { ...p, unit: "requests" }, { ...p, value: NaN }]);

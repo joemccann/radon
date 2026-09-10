@@ -73,6 +73,13 @@ _SOURCE_ROWS = [
         "Experimental; automation and estimation methodology unverified",
     ),
     (
+        "ramp",
+        "Ramp AI Index",
+        "https://ramp.com/data/ai-index",
+        "monthly",
+        "Public published research curated from credential-free HTML; Ramp Data API out of scope for v1",
+    ),
+    (
         "ib",
         "Interactive Brokers",
         "https://www.interactivebrokers.com/",
@@ -135,6 +142,15 @@ _ROWS = [
         ["portkey"],
         [],
         "Experimental publisher activity; estimated spend excluded from confirmation.",
+    ),
+    (
+        "D5",
+        "Ramp business AI spend",
+        "demand",
+        "P0",
+        ["ramp"],
+        ["MSFT", "AMZN", "GOOGL", "META", "ORCL"],
+        "Monthly median, top-10% and top-1% AI spend per employee from Ramp card and bill-pay transactions. Paid usage only; free tools excluded. Top-1% cohort is volatile.",
     ),
     (
         "C1",

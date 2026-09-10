@@ -112,7 +112,7 @@ def build_snapshot(store, as_of=None):
         newest = {}
         for row in observations:
             newest[(row["series_id"], row["source_id"], row["methodology_version"], row["cohort_version"])] = row
-        if id in ("D1", "D2", "D3", "C1", "C2", "C3", "C4") and observations:
+        if id in ("D1", "D2", "D3", "D5", "C1", "C2", "C3", "C4") and observations:
             latest_day = max(row["period_end"][:10] for row in observations)
             newest = {key: row for key, row in newest.items() if row["period_end"][:10] == latest_day}
         metrics = []

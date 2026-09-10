@@ -21,6 +21,7 @@ from scripts.ai_cycle.collectors import (
     parse_gpu,
     parse_noaa,
     parse_openrouter,
+    parse_ramp_curated,
     parse_sec,
     parse_vercel,
     public_url,
@@ -316,6 +317,78 @@ def test_disclosure_cannot_import_unverified_memo_values():
         parse_disclosures({"observations": [{"verified": False}]}, HASH, FETCHED)
 
 
+def test_ramp_curated_parses_spend_and_adoption_series():
+    payload = {
+        "source_url": "https://ramp.com/data/ai-index",
+        "methodology_version": "ramp-spend-intensity-v2-jun2026",
+        "cohort_version": "ramp-us-business-panel-70k-v2",
+        "published_at": "2026-09-07T00:00:00Z",
+        "methodology_notes": ["Paid transactions only; free tools excluded."],
+        "spend_per_employee": [
+            {
+                "date_month": "2026-08-01",
+                "median_pepm": 12.5,
+                "top_10_percent_median_pepm": 675.6,
+                "top_1_percent_median_pepm": 7205.13,
+            }
+        ],
+        "adoption_overall": [{"date_month": "2026-08-01", "adoption_rate_pct": 56.13, "mom_change_pp": 0.42}],
+    }
+    rows = parse_ramp_curated(payload, HASH, FETCHED)
+    assert len(rows) == 4
+    top1 = next(row for row in rows if row["series_id"] == "spend.top_1_percent_median_pepm")
+    assert top1["value"] == pytest.approx(7205.13)
+    assert top1["unit"] == "USD/employee-month"
+    assert top1["period_start"] == "2026-08-01"
+    assert top1["period_end"] == "2026-08-31"
+    assert "Undercounts free AI tools" in top1["metadata"]["measurement_limits"][0]
+    adoption = next(row for row in rows if row["series_id"] == "adoption.overall_rate_pct")
+    assert adoption["value"] == pytest.approx(56.13)
+
+
+def test_ramp_curated_rejects_digest_mismatch():
+    payload = {
+        "source_url": "https://ramp.com/data/ai-index",
+        "methodology_version": "ramp-spend-intensity-v2-jun2026",
+        "cohort_version": "ramp-us-business-panel-70k-v2",
+        "raw_hash": "b" * 64,
+        "spend_per_employee": [{"date_month": "2026-08-01", "median_pepm": 12.5}],
+        "adoption_overall": [{"date_month": "2026-08-01", "adoption_rate_pct": 56.13}],
+    }
+    with pytest.raises(SourceError, match="raw_hash"):
+        parse_ramp_curated(payload, HASH, FETCHED)
+
+
+def test_ramp_bundled_fixture_loads_into_snapshot(tmp_path):
+    from scripts.ai_cycle.collect import main
+    from scripts.ai_cycle.snapshot import build_snapshot
+    from scripts.ai_cycle.store import ObservationStore
+
+    db = tmp_path / "ramp.sqlite"
+    assert (
+        main(
+            [
+                "--record",
+                "--database",
+                str(db),
+                "--sources",
+                "ramp",
+                "--end",
+                "2026-08-31",
+                "--archive",
+                str(tmp_path / "raw"),
+            ]
+        )
+        == 0
+    )
+    snapshot = build_snapshot(ObservationStore(db), "2026-12-31T00:00:00Z")
+    panel = next(item for item in snapshot["indicators"] if item["id"] == "D5")
+    assert panel["pane"] == "demand"
+    assert panel["status"] == "available"
+    assert any(metric["id"] == "spend.top_1_percent_median_pepm" for metric in panel["metrics"])
+    assert len(panel["history"]) >= 32
+
+
 def test_public_url_removes_secrets_and_rejects_userinfo():
     assert public_url("https://api.eia.gov/path?api_key=secret#secret") == "https://api.eia.gov/path"
     with pytest.raises(SourceError):
@@ -579,7 +652,7 @@ def test_production_backfill_uses_separate_health_identity(monkeypatch):
 
 @pytest.mark.parametrize(
     "source",
-    ["openrouter", "artificial-analysis", "eia", "vast", "sec", "portkey", "lambda", "issuer-disclosures"],
+    ["openrouter", "artificial-analysis", "eia", "vast", "sec", "portkey", "ramp", "lambda", "issuer-disclosures"],
 )
 def test_missing_entitlements_never_calls_provider(source, tmp_path):
     from scripts.ai_cycle.collectors import collect_source

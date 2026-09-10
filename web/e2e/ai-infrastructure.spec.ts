@@ -13,8 +13,15 @@ test.describe("AI infrastructure", () => {
     await expect(page.getByRole("button", { name: "Refresh snapshot" })).toBeEnabled({ timeout: 45000 });
     await expect(page.getByRole("heading", { name: "AI infrastructure", exact: true })).toBeVisible();
     await expect(page.getByTestId("ai-indicator-D1").getByTestId("ai-source-fixture")).toContainText("Fixture publisher");
+    await expect(page.getByTestId("ai-indicator-D5")).toContainText("Ramp business AI spend");
+    await expect(page.getByTestId("ai-indicator-D5").getByTestId("ai-source-ramp")).toContainText("Ramp AI Index");
     for (const name of ["Demand", "Compute", "Delivery", "Finance"]) {
-      await page.getByRole("tab", { name, exact: true }).click(); await expect(page.getByRole("tab", { name, exact: true })).toHaveAttribute("aria-selected", "true"); await expect(page.getByRole("slider", { name: /Inspect .* history/ })).toBeVisible();
+      await page.getByRole("tab", { name, exact: true }).click();
+      await expect(page.getByRole("tab", { name, exact: true })).toHaveAttribute("aria-selected", "true");
+      const sliders = page.getByRole("slider", { name: /Inspect .* history/ });
+      // Demand hosts D1 plus D5 (Ramp), so two inspect sliders share the pane.
+      await expect(sliders).toHaveCount(name === "Demand" ? 2 : 1);
+      await expect(sliders.first()).toBeVisible();
     }
     const opener = page.getByRole("button", { name: "Sources and method: Cash funding coverage" }); await opener.click();
     await expect(page.getByRole("dialog")).toBeVisible(); await expect(page.getByText("Not disclosed; first-seen history only")).toBeVisible(); await expect(page.getByText("coverage_numerator", { exact: false })).toBeVisible();
@@ -62,7 +69,8 @@ test.describe("AI infrastructure", () => {
   });
   test("stale measurements and failed refresh stay explicit", async ({ page }) => {
     await page.route("**/api/ai-cycle", route => route.fulfill({ json: { ...aiFixture, indicators: aiFixture.indicators.map(i => ({ ...i, status: "stale" })) } }));
-    await page.goto("/regime/llm"); await expect(page.getByText("stale", { exact: true })).toBeVisible();
+    await page.goto("/regime/llm");
+    await expect(page.getByTestId("ai-indicator-D5").getByText("stale", { exact: true })).toBeVisible();
     await page.route("**/api/ai-cycle", route => route.fulfill({ status: 503, json: { detail: "Unavailable" } }));
     await page.getByRole("button", { name: "Refresh snapshot" }).click(); await expect(page.getByTestId("ai-infrastructure-panel").getByRole("alert")).toContainText("HTTP 503"); await expect(page.getByText("Insufficient evidence", { exact: true })).toBeVisible();
   });
