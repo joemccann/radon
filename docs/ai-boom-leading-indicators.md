@@ -41,7 +41,7 @@ There is **no public hourly data-center-only MW series** and **no public fleet G
 1. OpenRouter **paid** daily tokens **and** spend share (same host). **Levels.**
 2. Vercel Gateway daily **share** of tokens / requests / spend (export, not the blog). **Mix. Do not splice to #1.**
 3. Portkey Rankings hourly **levels** (requests / tokens / spend on *their* gateway). **Third host. Scrape-only. Do not splice to #1 or #2.**
-4. GPU rental: **gpurentalprices** daily min $/hr (H100/H200/B200 firm vs spot) + Vast book + Lambda list cuts.
+4. GPU rental: **gpurentalprices** daily min $/hr (H100/H200/B200 firm vs spot) + Vast book + Lambda list cuts. **Paid complement:** Silicon Data neo vs hs indices + forward curve + residual (license required).
 5. NVIDIA next-quarter DC guide + Hyperscale vs ACIE mix + inventory/AR (26 Aug 2026: DC $89.0B, inventories $31.6B).
 6. Dell AI **orders vs shipments vs backlog**.
 7. Vertiv / Eaton Electrical **orders** and book-to-bill.
@@ -111,6 +111,7 @@ Cadence key: **H** hourly/tick, **D** daily, **W** weekly, **M** monthly, **Q** 
 | On-demand GPU $ | Lambda | https://lambda.ai/pricing | Live list | Public | **H100 SXM $3.99/GPU-hr; B200 SXM6 $6.69.** No spot tier on page. |
 | Daily GPU $/hr ledger (34 providers) | GPU Rental Prices | https://gpurentalprices.com · `GET https://gpurentalprices.com/api/latest.json` · CSV on /data · GH `adriannutiu/gpu-rental-prices` | **D** (append-only). 54 snapshots 2026-07-05 → 2026-08-27 | Same day | Low on today's print; history cannot be backfilled | **Today's snapshot public, CC BY 4.0, no key.** Full ledger licensed (`data@gpurentalprices.com`). GH rolling window + HF/Kaggle mirrors. | Yes | **Best public daily GPU $ tape.** 293 offers, 34/34 providers ok 27 Aug. Firm H100 $1.99 Voltage Park. Spot vs on-demand in `kind`. Not hyperscaler util. |
 | Listing-level GPU $ (incl. Vast) | alex-hubbard/gpu_price_tracker | https://github.com/alex-hubbard/gpu_price_tracker · HF `afhubbard/gpu-prices` | **2×/day** (09:00 / 21:00 UTC) since Jan 2026 | Hours | Quality tag (`ok` vs stale) | **Living off-repo.** Code last git-push 8 Jul 2026; Actions still green 27 Aug. MIT / CC BY 4.0. DuckDB parquet on HF/S3. | Streamlit | Offer-level complement to gpurentalprices (which skips Vast marketplace). Filter `quality='ok'`. |
+| Daily GPU rental indices (neo vs hs) + residual + forward curve | Silicon Data | https://www.silicondata.com/products/silicon-index · API https://docs.silicondata.com/api-reference/gpu_index_api · forward https://www.silicondata.com/products/forward-curve | **D** (business day) indices; residual **M**; forward curve **D** | Same day / T+1 | **Paid only (Plus/Pro API).** Not public; do not scrape X. Bloomberg tickers SDH100RT / SDA100RT / SDB200RT / SDLLMTK. CME H100+B200 rental-index futures planned **5 Oct 2026** (pending review). | **Paid complement under §3 #4 — not a replace for gpurentalprices/Vast/AA.** Watch until licensed. Token Expenditure Index is **price**, not volume — do not splice with OpenRouter. |
 | Marketplace GPU $ | Vast.ai | https://vast.ai/pricing · docs.vast.ai | **Tick / live** | Public API | Hosts set prices. Scarcity proxy. Do not freeze one $. |
 | RunPod / AWS P5 | runpod.io/pricing · aws.amazon.com/ec2/pricing | Live | Public | RunPod $ on console, not a static table. **AWS P5 $55.04 not pulled from AWS HTML — unverified here.** |
 | Fleet utilization % | — | — | — | — | **Does not exist in public.** Infer from rental book + NVDA guide. |
@@ -158,10 +159,10 @@ Ranked for a desk that needs a **tape**, not a white paper. Token tape is **thre
 
 ### 2. Vercel AI Gateway leaderboards + export API
 - **What:** Daily **share** of production traffic on AI Gateway: models / labs / apps / providers × tokens, requests, spend, imageCount, videoCount. Text / image / video. Open-vs-closed is on the page. Same tape as the monthly Production Index, without waiting for the blog.
-- **URL:** https://vercel.com/ai-gateway/leaderboards
-  Export (no auth, 24h cache): `GET https://vercel.com/api/ai/leaderboard-export?dataset=models&modality=text&format=json&from=2025-10-01&to=2026-08-27`
-  Docs: https://vercel.com/docs/ai-gateway/leaderboards (updated 24 Aug 2026)
-  CLI: `vercel ai-gateway leaderboard models|labs|apps|providers`
+- **URL:** https://vercel.com/ai-gateway/leaderboards  
+  Export (no auth, 24h cache): `GET https://vercel.com/api/ai/leaderboard-export?dataset=models&modality=text&format=json&from=2025-10-01&to=2026-08-27`  
+  Docs: https://vercel.com/docs/ai-gateway/leaderboards (updated 24 Aug 2026)  
+  CLI: `vercel ai-gateway leaderboard models|labs|apps|providers`  
   Monthly write-up: https://vercel.com/blog/ai-gateway-production-index-july-2026
 - **Cadence:** Daily rollups, complete from **2025-10-01**. Page: last 3 months default. Production Index is monthly (July post covers June).
 - **Cost:** Free. CC BY 4.0. No API key. CLI needs a Vercel login only if you want the table command, not the HTTP export.
@@ -173,7 +174,7 @@ Ranked for a desk that needs a **tape**, not a white paper. Token tape is **thre
 
 ### 3. EIA-930 Hourly Electric Grid Monitor (optionally via GridStatus)
 - **What:** Hourly BA demand, forecast, net gen, fuel mix, interchange. Sub-BA demand for some BAs from 2018-07-01. **Not** prices (EIA FAQ).
-- **URL:** https://www.eia.gov/electricity/gridmonitor/ · Form: https://www.eia.gov/survey/#eia-930 · APIv2: https://www.eia.gov/opendata/browser/electricity/rto
+- **URL:** https://www.eia.gov/electricity/gridmonitor/ · Form: https://www.eia.gov/survey/#eia-930 · APIv2: https://www.eia.gov/opendata/browser/electricity/rto  
   Wrapper: https://www.gridstatus.io/datasets · OSS scraper: https://opensource.gridstatus.io/
 - **Cadence:** Hourly, same-day within 60 min; daily file 07:00 ET. GridStatus 5-min on native ISO markets.
 - **Cost:** EIA **free**. GridStatus Free 250 req / 500k rows/mo; Pro/Ent **no $ listed** on the live page (do not use old “$500/mo” third-party quotes).
@@ -184,30 +185,47 @@ Ranked for a desk that needs a **tape**, not a white paper. Token tape is **thre
 
 ### 4. GPU rental book + Artificial Analysis unit economics
 Two feeds, one pane. Together they are the only other **public, charted, daily-or-better** scarcity/price tape.
+
 - **gpurentalprices daily ledger (preferred ingest):** https://gpurentalprices.com/data · `GET https://gpurentalprices.com/api/latest.json` (27 Aug 2026: `date=2026-08-27`, 293 offers, 34 providers, 0 stale). GitHub `adriannutiu/gpu-rental-prices` (`data/latest.json` + 54 daily snapshots from 2026-07-05). Today's snapshot CC BY 4.0. Full history licensed. Live firm H100 **$1.99/hr** Voltage Park; Lambda list still **$3.99**.
 - **Vast.ai live book:** https://vast.ai/pricing · API `vastai search offers`. Hosts set prices; on-demand vs interruptible. Still the tick-level fringe.
 - **Lambda list:** https://lambda.ai/pricing — H100 SXM **$3.99**, B200 SXM6 **$6.69** / GPU-hr (fetched 27 Aug 2026).
 - **Artificial Analysis:** https://artificialanalysis.ai/pricing — list + cache hit/write + reasoning + answer; Intelligence Index; tok/s. Pro **$417/seat/mo** for history/export.
+- **Cadence:** gpurentalprices daily snapshot; Vast tick; Lambda when they edit the page; AA within ~24h of a new SKU.
+- **Cost:** gpurentalprices today-snapshot free (CC BY 4.0); history quote-only. Vast/Lambda public. AA freemium / $417 Pro.
+- **Can tell you:** Rentable-FLOPS glut (book deepens and cheapens; interruptible spread widens). Congestion (speed down at constant $). Realized $/quality up for a *fixed* tier.
+- **Cannot:** Hyperscaler internal util (most GPUs never hit this market). Shipments. Training vs inference. A price crash with quality stable is Jevons (more tokens), not a bust.
 - **Turn:** H100/B200 on-demand available + Vast −30% from 90d high + AA $ per Index-task **up** on the same tier (or speed down). List cuts are rare; availability flips first.
 - **Confidence:** **High** on Lambda list and Vast-as-market. **High** that this is not utilization %.
 
-### 5. Portkey LLM Rankings (third token host; scrape)
-- **What:** Hourly gateway totals: requests, tokens, spend, plus tokens-by-model and spend-by-model.
-- **URL:** https://portkey.ai/rankings/daily
-- **Cadence:** Page says updated hourly.
-- **Cost:** Charts free. **No public export.** `GET https://portkey.ai/api/rankings/daily` → 404 on 27 Aug 2026. Customer analytics API is tenant-only.
-- **Can tell you:** When a *third*, more-enterprise host (Vertex/Claude-heavy) rolls over in **levels**. 27 Aug print: 380.3M req (−1.1% d/d), 4.4T tok (−13.5%), $3.8M spend (−19.1%). Top token row: Vertex `claude-opus-5` 284.4B.
-- **Cannot:** Official vintage, first-party ChatGPT/Claude/Gemini, OpenRouter or Vercel traffic. Cross-host sums.
-- **Turn:** 4 weeks of declining tokens **and** spend on this host, confirmed by OpenRouter paid levels. A one-day −13% token print is mix or a tenant, not a peak.
-- **Confidence:** **High** that the page is a real meter of Portkey traffic. **Low** as a global cycle index. **Medium** ingest risk (scrape).
+**Paid complement (not a replace):** Silicon Data — https://www.silicondata.com · https://www.silicondata.com/products/silicon-index
+- **What:** Daily standardized GPU rental **indices** (H100 / A100 / B200 / H200 / MI300X) with separate **neo-cloud (`neo`)** and **hyperscaler (`hs`)** versions; **forward curve** (term + no-arbitrage forward rates out to 36m for H100/A100/B200); monthly **residual-value** benchmarks (DCF off the forward curve + utilization decay, H100/A100/B200). Also **LLM Token Expenditure Index** (SDH100RT / SDA100RT / SDB200RT / SDLLMTK on Bloomberg; also Kaiko / LSEG).
+- **Access:** Licensed API only (Plus/Pro). `POST https://api.silicondata.com/api/gpu-index/index` (Bearer). Forward: `POST /api/gpu-forward/list` + `/download`. Portal + Bloomberg. **Do not scrape X (@silicon_data) or the marketing homepage as a tape.** Homepage prints move; treat them as ads.
+- **CME linkage:** CME Group + Silicon Data announced cash-settled **H100 and B200 rental-index futures** on NYMEX, planned launch **5 Oct 2026**, pending regulatory review (CME PR 11 Aug 2026). Settlement index = Silicon Data rental indices. Makes the paid series more relevant to Radon once listed — still not a free meter.
+- **Method / revision risk:** Unit $/GPU-hr → multi-stage filter → basis adjustment (rental type, geo, CPU, GPU variant) → provider-weighted average. Opaque weights and private-transaction inputs. Indices can restate; treat as a **vendor composite**, not an offer book. Residual values are model output (forward × util × opex), not observed secondary-market clears.
+- **Can tell you:** Neo vs hs spread compression/widening; term structure / backwardation (blog print ~13% H100 36m as of mid-2026 — confirm on licensed curve); residual-value path for collateral/financing narratives.
+- **Cannot:** Replace gpurentalprices offer ledger or Vast book. Reveal hyperscaler internal util. Prove methodology without the license docs.
+- **Token Expenditure Index:** blended **inference $**, not token **volume**. Do **not** splice with OpenRouter / Vercel / Portkey. Optional join next to AA $/task and openrouterlist, not to rankings-daily.
+- **Verdict:** **Watch / paid complement.** **ADOPT only with a license.** Until then keep gpurentalprices + Vast + Lambda + AA as the public pane-1 scarcity tape.
+- **Confidence:** **High** that the product is real commercial data (CME partnership is a hard tell). **Medium** as a cycle signal until neo/hs and residuals are checked against public offer books. **Low** as a free meter.
 
-**Not in the top five, but the best *non-daily* complements:** NVIDIA IR; EDGAR companyfacts; SemiAnalysis ChipBook if you pay (no list price); TrendForce HBM $30k / AI Server $55k. The monthly Vercel Production Index is commentary on source #2, not a separate series.
+### 5. Portkey LLM Rankings (third token host; scrape)
+- **What:** Hourly gateway totals: requests, tokens, spend, plus tokens-by-model and spend-by-model. Daily / 30D / weekly / 90D / monthly / 1Y. Per-lab pages print request counts and share.
+- **URL:** https://portkey.ai/rankings/daily
+- **Cadence:** Page says updated hourly. Embedded RSC series covers Aug 2026 day-by-day (1–27 Aug on 27 Aug fetch).
+- **Cost:** Charts free. **No public export.** `GET https://portkey.ai/api/rankings/daily` → 404. Customer analytics API (`/analytics/graphs/tokens`) needs a workspace key — that is *their* tenants, not the public board. Pricing DB (`api.portkey.ai/model-configs`) is list prices, not volume.
+- **Can tell you:** When a *third*, more-enterprise host (Vertex/Claude-heavy) rolls over in **levels**. 27 Aug print: 380.3M req (−1.1% d/d), 4.4T tok (−13.5%), $3.8M spend (−19.1%). Top token row: Vertex `claude-opus-5` 284.4B.
+- **Cannot:** Official vintage, a stable schema, first-party ChatGPT/Claude/Gemini, OpenRouter or Vercel traffic. Cross-host sums.
+- **Turn:** 4 weeks of declining tokens **and** spend on this host, confirmed by OpenRouter paid levels. A one-day −13% token print is mix or a tenant, not a peak.
+- **Confidence:** **High** that the page is a real meter of Portkey traffic. **Low** as a global cycle index. **Medium** ingest risk (scrape of RSC flight data; they can break it).
+
+**Not in the top five, but the best *non-daily* complements:** NVIDIA IR (quarterly hard $); EDGAR companyfacts (cash capex / CFO); SemiAnalysis Accelerator & HBM / ChipBook if you pay (no list price); TrendForce HBM $30k / AI Server $55k; Silicon Data residual values (monthly, paid). The monthly Vercel Production Index is commentary on source #2, not a separate series. Silicon Data **daily** indices sit under §3 #4 as a paid complement, not a sixth top source.
 
 ---
 
 ## 4. How to build the indicator set
 
 ### 4.1 Ingest
+
 Store tidy rows: `date, source, series_id, value, unit, vintage`. Keep first-print vs current for anything you trade.
 
 | Freq | Pull | Path |
@@ -220,6 +238,7 @@ Store tidy rows: `date, source, series_id, value, unit, vintage`. Keep first-pri
 | Hourly / daily snapshot | Portkey `/rankings/daily` HTML (requests, tokens, spend, by-model). Store host-tagged levels. Do not splice | Scrape Next.js RSC; no public API as of 27 Aug 2026 |
 | Daily / intra-day | EIA APIv2 `electricity/rto` + bulk “U.S. Electric System Operating Data” | Free API key |
 | Daily | gpurentalprices `latest.json` (min firm + spot $/hr for H100/H200/B200). Archive each day yourself — site history is licensed | `GET https://gpurentalprices.com/api/latest.json` no key. Mirror: `adriannutiu/gpu-rental-prices` |
+| Business day (if licensed) | Silicon Data GPU indices (neo+hs) H100/A100/B200/H200/MI300X; forward curve; monthly residual. Token Expenditure Index = $ not volume | `POST https://api.silicondata.com/api/gpu-index/index` Bearer Plus/Pro. Do not scrape X. ADOPT only with license |
 | 2× daily | Hubbard listing-level GPU $ (incl. Vast) if you want marketplace, not just published lists | HF `afhubbard/gpu-prices` parquet, `quality='ok'` |
 | Daily | Vast search-offers (median H100 and B200, on-demand vs interruptible) | API |
 | Daily | Lambda / RunPod / AWS price-list pages (snapshot the HTML/API) | Scrape or official price list |
@@ -235,48 +254,56 @@ Store tidy rows: `date, source, series_id, value, unit, vintage`. Keep first-pri
 Epoch CSV is the free five-name capex/OCF composite. Refresh from EDGAR; do not wait for their 16 Jun vintage.
 
 ### 4.2 Transforms
+
+Apply to every series with enough history:
+
 - Level (raw units). Do not log unless span > 10×.
 - 4-week and **13-week % change** (4q / 1q if quarterly). 13-week is the default noise filter.
 - **YoY** required for electricity and web traffic. Optional for tokens (short, nonstationary).
-- **Z-score** of 13-week change vs trailing 2y (or full sample). Flag |z| > 1.5.
+- **Z-score** of 13-week change vs trailing 2y (or full sample). Flag \|z\| > 1.5.
 - **Breadth:** share of pane-1 series with 13-week change below their own 26-week median.
 - Electricity only: residual after HDD/CDD (+ industrial / crypto where you have it). Unresidualized load is not a series you trade.
 - Scarcity spread: Vast on-demand − interruptible; AA $ / Index-task for a fixed bucket.
-- No HP-filter or Kalman on the live dashboard.
+
+No HP-filter or Kalman on the live dashboard.
 
 ### 4.3 Dashboard: separate panes, one alarm
+
 Do **not** publish a blended “AI boom index” as the object of record. Units and lags differ. Capex will keep a blended index green for two quarters into an unwind.
 
-1. **Demand / util (HF):** OpenRouter paid model tokens + spend (levels) **and** app/agent tokens (`token-history`); Vercel Gateway daily shares (mix / volume-vs-spend); Portkey gateway levels (host-tagged, scrape); AA $ / quality / speed + `openrouterlist` routed $; gpurentalprices + Hubbard/Vast + Lambda GPU $.
+1. **Demand / util (HF):** OpenRouter paid model tokens + spend (levels) **and** app/agent tokens (`token-history`); Vercel Gateway daily shares (mix / volume-vs-spend); Portkey gateway levels (host-tagged, scrape); AA $ / quality / speed + `openrouterlist` routed $; gpurentalprices + Hubbard/Vast + Lambda GPU $; Silicon Data neo/hs indices + forward/residual **if licensed** (else watch only).
 2. **Power (HF + Q):** EIA-930 residuals; ISO congestion; energized/dated MW (Dominion 25 GW dated, Georgia 12.4 GW committed). Queue GW in a footnote.
 3. **Hardware (M/Q):** NVDA DC $ / mix / guide / inv; TSMC/HBM language flags; SMCI inventory; Dell orders−shipments.
 4. **Finance (Q + credit weekly):** TTM `CFO / cash capex` by name; FY guidance *with definition flags*; Vertiv/Eaton orders; DC-CMBS color.
+
+**Alarm (not a level):**
 
 | State | Rule |
 |---|---|
 | **GREEN** | ≥70% of pane-1 series have 13w change > 0 **and** scarcity spreads not collapsing **and** no genuine guidance cut |
 | **YELLOW** | Pane-1 deceleration breadth >70% **or** scarcity spread −1.5σ for 4 weeks, finance still expanding |
-| **RED** | YELLOW holds 8 weeks **and** (2 of 4 hyperscalers cut FY capex guide **or** TTM `CFO/capex` down 2q on the capex-weighted basket **or** GPU channel inventory + price weakness **or** NVDA guide implies sequential down *and** SMCI/Dell confirm) |
+| **RED** | YELLOW holds 8 weeks **and** (2 of 4 hyperscalers cut FY capex guide **or** TTM `CFO/capex` down 2q on the capex-weighted basket **or** GPU channel inventory + price weakness **or** NVDA guide implies sequential down *and* SMCI/Dell confirm) |
 
 YELLOW is the Radon-relevant turn. RED is confirmation.
 
 ### 4.4 Turn rules (peak vs noise)
-**A — utilization (earliest)**
-A1. Token/proxy 13w change from >+15% ann. to <0, holds 4 weeks.
-A2. Mix: Vercel open-weight token share up **and** frontier spend share down (or AA $ / 1M down on a fixed tier). Volume up + ASP down is a *revenue* bust, not a token bust. Track both. OpenRouter paid *levels* must confirm; Vercel shares alone cannot. Portkey levels are a third-host check, not a substitute (enterprise/Vertex-skewed).
-A3. GPU spot/book −30% from 90d high and “sold out” commentary flips to available.
+
+**A — utilization (earliest)**  
+A1. Token/proxy 13w change from >+15% ann. to <0, holds 4 weeks.  
+A2. Mix: Vercel open-weight token share up **and** frontier spend share down (or AA $ / 1M down on a fixed tier). Volume up + ASP down is a *revenue* bust, not a token bust. Track both. OpenRouter paid *levels* must confirm; Vercel shares alone cannot. Portkey levels are a third-host check, not a substitute (enterprise/Vertex-skewed).  
+A3. GPU spot/book −30% from 90d high and “sold out” commentary flips to available.  
 *False +:* launch week, tokenizer change, cache-accounting change, reasoning-token flood, OpenRouter losing one tenant.
 
-**B — scarcity (confirms A)**
-B1. Frontier API $ (fixed quality) down 2 months **and** output $ falling faster than input (decode overcapacity).
-B2. TSMC/SK “sold out through 202X” → “meeting demand.”
-B3. Vertiv/Eaton **orders** QoQ down 2q (revenue will still grow).
+**B — scarcity (confirms A)**  
+B1. Frontier API $ (fixed quality) down 2 months **and** output $ falling faster than input (decode overcapacity).  
+B2. TSMC/SK “sold out through 202X” → “meeting demand.”  
+B3. Vertiv/Eaton **orders** QoQ down 2q (revenue will still grow).  
 Need B1 **and** (B2 or B3), or A+B1.
 
-**C — finance (lagging, high confidence)**
-C1. 2 of 4 hyperscalers cut FY capex guide **or** print cash capex < prior-q run-rate without a one-time excuse. A “held” number after a useful-life/lease reclass is **not** a cut (MSFT 29 Jul 2026).
-C2. TTM `CFO / cash capex` down 2q for the capex-weighted basket. Level <1 is already true at AMZN/GOOG/ORCL — that is the *build*, not the peak. The signal is the **inflection vs their own 8q path** plus a guide cut.
-C3. NVDA DC YoY decelerates >20pp **and** guide sequential flat/down **and** supply-commitment language is not raised. Wait for SMCI/Dell.
+**C — finance (lagging, high confidence)**  
+C1. 2 of 4 hyperscalers cut FY capex guide **or** print cash capex < prior-q run-rate without a one-time excuse. A “held” number after a useful-life/lease reclass is **not** a cut (MSFT 29 Jul 2026).  
+C2. TTM `CFO / cash capex` down 2q for the capex-weighted basket. Level <1 is already true at AMZN/GOOG/ORCL — that is the *build*, not the peak. The signal is the **inflection vs their own 8q path** plus a guide cut.  
+C3. NVDA DC YoY decelerates >20pp **and** guide sequential flat/down **and** supply-commitment language is not raised. Wait for SMCI/Dell.  
 C4. SMCI or Dell: inventory days up + orders < shipments two quarters.
 
 **Falsify a YELLOW:** pane-1 13w re-accelerates above the prior 26w median within 6 weeks; GPU book re-bids; energized MW still stepping up 2q; next print *raises* capex guide. Then it was a mid-cycle pause.
@@ -291,41 +318,44 @@ C4. SMCI or Dell: inventory days up + orders < shipments two quarters.
 - OpenRouter: “A token in one row is not directly comparable to a token in another row from a different provider.” `other` is coarse magnitude only.
 - `token-history` is the **same host**, app cut. Hermes Agent 1.65T/day is not incremental to `rankings-daily`. Frontend `/api/frontend/v1/rankings/apps` can break; ranks on the 28 Aug file start at #2 (missing #1). **Gap 2026-06-19 → 08-26** (11 files only). Do not interpolate.
 - Cache hits flatten spend while tokens rise (AA now prices cache hit / write / input / output / reasoning / answer separately).
-- Reasoning / hidden tokens sit inside completions. Agent loops: Vercel, 22% of requests but **59% of tokens**.
+- Reasoning / hidden tokens sit inside completions (OpenRouter State of AI; Anthropic Index). Agent loops: Vercel, 22% of requests but **59% of tokens**.
 - Flash / OSS mix: Vercel 27 Aug board, open-weight **60.1%** of tokens while Claude Opus 5 is **21.2%** of spend. Tokens up, boom dying.
-- Vercel export is **share only**. Do not splice Gateway shares onto OpenRouter token levels.
-- Portkey is a **third host** with levels, scrape-only, enterprise-skewed. A −13% d/d token print (27 Aug) is not a 4-week rule. Do not add Portkey tokens to OpenRouter or invert Vercel shares into a Portkey total.
+- Vercel export is **share only** (docs: never absolute volumes). 24h cache. Do not splice Gateway shares onto OpenRouter token levels. Apps list is opt-in.
+- Portkey is a **third host** with levels, but scrape-only and enterprise-skewed (Vertex Claude). Hourly restates. A −13% d/d token print (27 Aug) is not a 4-week rule. Do not add Portkey tokens to OpenRouter or invert Vercel shares into a Portkey total.
 - Tidelines.ai / whatstrending.ai are OpenRouter (and Vercel) archives. Do not ingest as a fourth tape.
 - `jampongsathorn/openrouter-rankings` still commits daily but `rankings.json` has been empty since ~20 May 2026. Zombie. Do not ingest.
-- AnyRouter `GET https://anyrouter.dev/api/v1/analytics/network` is a real no-key JSON (28 Aug 03:00Z: 6.85B tok / 84.8k req / 30d; hourly+daily trend). **Too small and 87% cached tokens** (5.94B/6.85B). Watch, not a cycle tape.
-- Model Price Watch `https://modelpricewatch.com/api/v1/price-history.json` is a free list-price book (236 models, 116 dates from 2024-02-05, updated 27 Aug 2026). Optional join next to `openrouterlist`. Not volume.
-- Google 3.2Q/month is **all surfaces**. Fireworks 40T/day is **one host**. Do not splice.
+- AnyRouter `GET https://anyrouter.dev/api/v1/analytics/network` is a real no-key JSON (28 Aug 03:00Z: 6.85B tok / 84.8k req / 30d; hourly+daily trend). **Too small and 87% cached tokens** (5.94B/6.85B). Ox Alpha is 56% of the host. Watch, not a cycle tape. Do not splice to OR/Vercel/Portkey.
+- Model Price Watch `https://modelpricewatch.com/api/v1/price-history.json` is a free list-price book (236 models, 116 dates from 2024-02-05, updated 27 Aug 2026). Optional join next to `openrouterlist` (routed $). Not volume.
+- Google 3.2Q/month is **all surfaces** (Search + Gemini app + APIs + internal). Fireworks 40T/day is **one host**. Do not splice.
 - Private / ZDR excluded on OpenRouter. `:free` ranked separately.
 - tokensperday.com intra-day counter is grown/modeled. Floor vintage was 16 Jul 2026.
 
 ### Electricity
 - Weather dominates hourly and monthly BA load. 10–20 GW ERCOT/PJM heat swing swamps weekly AI increment.
-- Mix: colo, cloud GP, enterprise, CDN, **crypto**.
-- Queue ≠ energized ≠ utilized. ERCOT 438 GW requested vs 85.5 GW peak is not a demand forecast. Georgia 76.2 GW pipeline vs 12.4 GW committed.
+- Mix: colo, cloud GP, enterprise, CDN, **crypto**. EPRI scenarios include mining. ERCOT large-load materials lump DC + crypto + industrial.
+- Queue ≠ energized ≠ utilized. IEA: sites fill progressively and oversize connections. EPRI: nominal IT / nameplate (IT×PUE) / peak.
+- ERCOT 438 GW requested vs 85.5 GW peak is not a demand forecast. Georgia 76.2 GW pipeline vs 12.4 GW committed.
 - LBNL Queued Up is **not** a DC load queue.
 - Behind-the-meter gas hides load from EIA-930.
 - IEA/LBNL/EPRI/Ember TWh **do not match**. Do not splice.
 - Chips can roll over quarters before BA load does. Power is realization, not a lead.
 
 ### GPUs
-- NVDA Q3 FY27 $108B **assumes no China DC compute** — a license prints a beat with no RoW demand.
-- $ is price × mix. Units are not disclosed.
-- No public util %. gpurentalprices history starts **2026-07-05** (54 days as of 27 Aug) — too short for a 13-week z-score. Build your own archive of `latest.json`.
+- NVDA “sold out” / China-ex guide is a narrative tool. Q3 FY27 $108B **assumes no China DC compute** — a license prints a beat with no RoW demand.
+- $ is price × mix. Blackwell ASP can rise while units stall. Units are not disclosed.
+- Export controls reallocate geography.
+- No public util %. Rental book is the fringe. gpurentalprices history starts **2026-07-05** (54 days as of 27 Aug) — too short for a 13-week z-score. Build your own archive of `latest.json`; do not assume the licensed ledger is free.
+- Silicon Data indices are **vendor composites** (basis-adjusted, weighted, private prints). Restatement risk. Homepage/X prints are marketing — ingest only the licensed API. Residual values are DCF model output, not secondary clears. Token Expenditure Index is **price**, not volume; do not splice with OpenRouter/Vercel/Portkey. CME futures (planned 5 Oct 2026) settle to their index — that does not make the X feed a tape.
 
 ### Finance / guidance games (verified in current prints)
-1. **MSFT useful life 15→25 and finance→operating leases** (29 Jul 2026 call). Same build, lower printed capex.
-2. **Three capex definitions:** cash PP&E ≠ cash+finance leases ≠ net of incentives ≠ ORCL “net cash outlay”.
-3. **Calendar vs fiscal mixing** (MSFT June year, NVDA Jan year, ORCL May, Dell Feb).
-4. **ORCL RPO $638B** includes **$75B prepaid / customer-supplied GPUs**. ~12% converts in 12 months.
-5. **MSFT commercial RPO $678B +84%; +25% ex-OpenAI.**
+1. **MSFT useful life 15→25 and finance→operating leases** (29 Jul 2026 call). Same build, lower printed capex. Calendar-2026 “~$175B” while “investment expectations remain unchanged.”
+2. **Three capex definitions:** cash PP&E ≠ cash+finance leases ≠ net of incentives ≠ ORCL “net cash outlay” after customer prepay / ST manufacturer financing.
+3. **Calendar vs fiscal mixing** (MSFT June year, NVDA Jan year, ORCL May, Dell Feb). Fake sequential signals if stacked raw.
+4. **ORCL RPO $638B** includes **$75B prepaid / customer-supplied GPUs**. ~12% converts in 12 months (call).
+5. **MSFT commercial RPO $678B +84%; +25% ex-OpenAI.** One lab take-or-pay hides an ex-OpenAI slowdown.
 6. **Mark-to-market NI** (AMZN Anthropic, MSFT Anthropic/OpenAI, NVDA equity gains).
-7. **AVGO $100B FY27** reiterated, not raised (3 Jun 2026).
-8. **CRWV ~$104B backlog** plus a “>$25B early Q3” footnote.
+7. **AVGO $100B FY27** reiterated, not raised (3 Jun 2026). Slogan can outlive bookings.
+8. **CRWV ~$104B backlog** plus a “>$25B early Q3” footnote. Headline can rise after the balance-sheet date.
 9. Azure is a **rate**, not a dollar. NVDA DC includes networking/software. AMZN cash capex mixes AWS + Stores + devices.
 10. NVDA supply agreements are “cancellable, able to be rescheduled, or adjustable” (Q1 10-Q).
 
@@ -352,14 +382,14 @@ SemiAnalysis / TrendForce / bank “supercycle” decks sell the boom. Require a
 
 ## 7. First 30 days (if you actually stand this up)
 
-1. Key the OpenRouter `rankings-daily` history from 2025-01-01. Build paid vs free and a spend join against `jvrck/openrouterlist` `prices.json` (from 2024-09-21). Also key `Socialpranker/token-history` app snapshots — 11 files only (2026-06-10–18, 2026-08-27/28). Do not sum apps onto models. Do not fill the hole.
-2. Key Vercel `leaderboard-export` from 2025-10-01 (models + labs, text, tokens/requests/spend). Store shares. Do not invent a Gateway token total.
-3. Stand up a Portkey `/rankings/daily` scrape (hourly or EOD). Store host-tagged levels. If the RSC shape moves, drop the series rather than guess.
-4. Key EIA-930 for ERCOT and PJM (DOM/AEP). Start the weather residual. Do not trade it until you have one summer and one shoulder in-sample.
-5. Daily snapshot `gpurentalprices.com/api/latest.json` (keep your own history) + Vast median H100/B200 + Lambda list.
-6. EDGAR companyfacts panel + a **definition-flag** column (MSFT 29 Jul 2026 life/lease; ORCL net-cash-outlay). Compute TTM `CFO / cash capex`.
-7. One alarm, three colors, no adjectives.
-8. Optional paid, in order: AA Pro ($417) if you want price history; GridStatus Pro if you want nodal into NOVA / West Texas; SemiAnalysis ChipBook if you want CoWoS/HBM units; TrendForce HBM if you don’t buy SemiAnalysis.
+1. Key the OpenRouter `rankings-daily` history from 2025-01-01. Build paid vs free and a spend join against `jvrck/openrouterlist` `prices.json` (from 2024-09-21). Also key `Socialpranker/token-history` app snapshots — 11 files only (2026-06-10–18, 2026-08-27/28). Do not sum apps onto models. Do not fill the hole.  
+2. Key Vercel `leaderboard-export` from 2025-10-01 (models + labs, text, tokens/requests/spend). Store shares. Do not invent a Gateway token total.  
+3. Stand up a Portkey `/rankings/daily` scrape (hourly or EOD). Store host-tagged levels. If the RSC shape moves, drop the series rather than guess.  
+4. Key EIA-930 for ERCOT and PJM (DOM/AEP). Start the weather residual. Do not trade it until you have one summer and one shoulder in-sample.  
+5. Daily snapshot `gpurentalprices.com/api/latest.json` (keep your own history) + Vast median H100/B200 + Lambda list.  
+6. EDGAR companyfacts panel + a **definition-flag** column (MSFT 29 Jul 2026 life/lease; ORCL net-cash-outlay). Compute TTM `CFO / cash capex`.  
+7. One alarm, three colors, no adjectives.  
+8. Optional paid, in order: AA Pro ($417) if you want price history; **Silicon Data Plus/Pro** if you want neo vs hs H100/B200 indices + forward curve + residuals (ADOPT only with license; CME futures planned 5 Oct 2026); GridStatus Pro if you want nodal into NOVA / West Texas; SemiAnalysis ChipBook if you want CoWoS/HBM units; TrendForce HBM if you don’t buy SemiAnalysis.
 
 Do not subscribe to tokensperday, Arena, or HF downloads as cycle inputs.
 
@@ -367,6 +397,6 @@ Do not subscribe to tokensperday, Arena, or HF downloads as cycle inputs.
 
 ## Sources (primary, fetched 27 Aug 2026)
 
-OpenRouter rankings + Data API; Socialpranker/token-history app snapshots (verified 28 Aug 2026, Hermes Agent 1.65T); jvrck/openrouterlist price ledger (as_of 2026-08-28, 984 models, from 2024-09-21); meni432/ModelGraveyard events (415/129); alex-hubbard/gpu_price_tracker (HF parquet); vxguo1/powertracker (no license); Artificial Analysis pricing/data-api; Vercel AI Gateway leaderboards + `leaderboard-export` (verified 27 Aug 2026, history from 2025-10-01) and Production Index (Jul 2026); Portkey Rankings daily (verified 27 Aug 2026; no public API); gpurentalprices `latest.json` + `adriannutiu/gpu-rental-prices` (54 daily snapshots from 2026-07-05, verified 27 Aug 2026); Epoch data hub + usage-reports CSV + hyperscaler OCF/capex CSV; Google I/O 19 May 2026; OpenAI Signals 12 Aug 2026; Anthropic Economic Index 26 Jun 2026; Fireworks Series D 15 Jul 2026; EIA-930 / Open Data / EPM / STEO Aug 2026; GridStatus pricing + datasets; ERCOT Large Load hub + Apr/Jun 2026 decks; PJM 2026 LTLF; SPP HILL; IEA Key Questions 16 Apr 2026; LBNL Queued Up 2026 and US DC Energy 2025 Update; EPRI Powering Intelligence 2026; NVIDIA Q2 FY27 PR/CFO commentary 26 Aug 2026; TSMC 2Q26 transcript; SK hynix / Samsung Q2 2026; TrendForce DRAMeXchange cart; Lambda pricing; Vast.ai pricing; MSFT FY26 Q4 IR + 8-K 29 Jul 2026; Alphabet Q2 2026 IR/10-Q; Amazon Q2 2026 EX-99.1; Meta Q2 2026 IR; Oracle FY26 PR; CoreWeave Q2 2026 IR; Vertiv / Eaton Q2 2026 exhibits; Dell FY27 Q1; Equinix / Digital Realty Q2 2026.
+OpenRouter rankings + Data API; Socialpranker/token-history app snapshots (verified 28 Aug 2026, Hermes Agent 1.65T); jvrck/openrouterlist price ledger (as_of 2026-08-28, 984 models, from 2024-09-21); meni432/ModelGraveyard events (415/129); alex-hubbard/gpu_price_tracker (HF parquet); vxguo1/powertracker (no license); Artificial Analysis pricing/data-api; Vercel AI Gateway leaderboards + `leaderboard-export` (verified 27 Aug 2026, history from 2025-10-01) and Production Index (Jul 2026); Portkey Rankings daily (verified 27 Aug 2026; no public API); gpurentalprices `latest.json` + `adriannutiu/gpu-rental-prices` (54 daily snapshots from 2026-07-05, verified 27 Aug 2026); Silicon Data GPU indices / forward curve / residual value + CME compute-futures PR 11 Aug 2026 (planned H100+B200 futures 5 Oct 2026; Plus/Pro API — not ingested without license); Epoch data hub + usage-reports CSV + hyperscaler OCF/capex CSV; Google I/O 19 May 2026; OpenAI Signals 12 Aug 2026; Anthropic Economic Index 26 Jun 2026; Fireworks Series D 15 Jul 2026; EIA-930 / Open Data / EPM / STEO Aug 2026; GridStatus pricing + datasets; ERCOT Large Load hub + Apr/Jun 2026 decks; PJM 2026 LTLF; SPP HILL; IEA Key Questions 16 Apr 2026; LBNL Queued Up 2026 and US DC Energy 2025 Update; EPRI Powering Intelligence 2026; NVIDIA Q2 FY27 PR/CFO commentary 26 Aug 2026; TSMC 2Q26 transcript; SK hynix / Samsung Q2 2026; TrendForce DRAMeXchange cart; Lambda pricing; Vast.ai pricing; MSFT FY26 Q4 IR + 8-K 29 Jul 2026; Alphabet Q2 2026 IR/10-Q; Amazon Q2 2026 EX-99.1; Meta Q2 2026 IR; Oracle FY26 PR; CoreWeave Q2 2026 IR; Vertiv / Eaton Q2 2026 exhibits; Dell FY27 Q1; Equinix / Digital Realty Q2 2026.
 
 Series-level source notes were verified on publisher pages 27 Aug 2026 (PT). Re-open each URL before pasting a print into a model.
