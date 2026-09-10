@@ -773,6 +773,7 @@ jobs:
           e2e/portfolio-same-day-equity-pnl.spec.ts
           e2e/stop-order-desktop.spec.ts
           e2e/modify-order-correlation-risk.spec.ts
+          e2e/form-focus-highlights.spec.ts
           e2e/chain-expiry-preserves-builder.spec.ts
           e2e/act-ticket-scroll.spec.ts
           e2e/orders-realized-pnl-portfolio-fallback.spec.ts
@@ -787,6 +788,13 @@ jobs:
           e2e/newsfeed-sharing.spec.ts
           e2e/ai-infrastructure.spec.ts
           e2e/chat-experience.spec.ts
+      - name: Upload form focus screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: form-focus-screenshots
+          path: web/test-results/**/focus-*.png
+          retention-days: 7
       - name: Upload chat experience screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
