@@ -2,6 +2,8 @@
 
 Plan: ai-infrastructure-plan.md. Parallel ownership: core agent scripts/ai_cycle/{model,registry,store,transforms,snapshot,shadow}.py and core tests; collectors agent scripts/ai_cycle/{collectors,collect,__main__}.py and collector tests; UI agent web/components/AiInfrastructure*, web/lib/{aiInfrastructure,useAiInfrastructure}.ts, RegimePanel mount and LlmTokenIndexCard preservation, dashboard/ticker handoff and focused/E2E UI tests. Root owns API routes, assistant catalog, scheduler, integration, docs, final verification and PR. Communicate interface changes before editing shared files.
 
+LLM/model-quality observations (OpenDesign Arena `D6`) stay on the Demand pane. They never share lineage, series or transforms with GPU scarcity / Silicon Data / Compute asking-price indicators.
+
 ## Collector observation wire contract
 An observation is a plain JSON dict: indicator_id (D1..M1), series_id (stable metric plus entity/cohort), source_id, value (finite number), unit, period_start and period_end (ISO dates or UTC timestamps), published_at (ISO UTC or null if unknown), fetched_at (ISO UTC), source_url (canonical credential-free URL), raw_hash (SHA256 of source response), methodology_version (string), cohort_version (string), lineage_group (string), measurement (observed/derived/estimated), metadata (JSON object; entity, label, definition, access, coverage numerator/denominator, etc). No missing data rows with value=0. Status records separate: source_id, status (available/unavailable/error/restricted/experimental), reason (sanitized), checked_at. Fetch raw via bounded transport; snapshots archived by hash. No production DB writes during verification; use isolated local storage.
 

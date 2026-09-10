@@ -389,6 +389,109 @@ def test_ramp_bundled_fixture_loads_into_snapshot(tmp_path):
     assert len(panel["history"]) >= 32
 
 
+FIXTURE_HTML = Path(__file__).resolve().parents[1] / "ai_cycle" / "fixtures" / "opendesi_arena.html"
+
+
+def test_opendesi_fixture_parses_overall_and_task_families():
+    from scripts.ai_cycle.collectors import parse_opendesi
+
+    html = FIXTURE_HTML.read_text()
+    rows = parse_opendesi(html, HASH, FETCHED, published="2026-09-10T15:19:31Z")
+    by_id = {row["series_id"]: row for row in rows}
+    flash = by_id["overall.deepseek-v4-1-flash.avg_score"]
+    assert flash["indicator_id"] == "D6"
+    assert flash["source_id"] == "open-design-arena"
+    assert flash["value"] == pytest.approx(81.2)
+    assert flash["unit"] == "score"
+    assert flash["metadata"]["model"] == "DeepSeek V4.1 Flash"
+    assert flash["metadata"]["task_family"] == "overall"
+    assert flash["metadata"]["asof"] == "2026-09-10T15:19:31Z"
+    assert flash["metadata"]["lane"] == "llm-model-quality"
+    assert "not GPU scarcity" in flash["metadata"]["definition"]
+    assert by_id["overall.deepseek-v4-1-flash.usd_per_artifact"]["value"] == pytest.approx(0.023)
+    assert by_id["overall.deepseek-v4-1-flash.avg_minutes"]["value"] == pytest.approx(5.3)
+    assert by_id["overall.gpt-6-astra.avg_score"]["value"] == pytest.approx(82.7)
+    assert by_id["web.gpt-5-6-sol.avg_score"]["value"] == pytest.approx(83.1)
+    assert by_id["web.gpt-5-6-sol.usd_per_artifact"]["value"] == pytest.approx(0.53749)
+    assert by_id["desktop.deepseek-v4-flash.avg_score"]["value"] == pytest.approx(90.3)
+    families = {row["metadata"]["task_family"] for row in rows}
+    assert families == {"overall", "web", "mobile", "desktop", "dashboard", "landing"}
+    assert not any(row["series_id"].endswith(".avg_minutes") and row["metadata"]["task_family"] != "overall" for row in rows)
+    assert {row["indicator_id"] for row in rows} == {"D6"}
+    assert all(row["lineage_group"] == "open-design-arena" for row in rows)
+
+
+def test_opendesi_broken_html_is_unavailable_not_invented():
+    from scripts.ai_cycle.collectors import parse_opendesi
+
+    with pytest.raises(SourceError, match="HTML structure"):
+        parse_opendesi("<html><body>leaderboard unavailable</body></html>", HASH, FETCHED)
+
+
+def test_opendesi_bundled_fixture_loads_into_demand_snapshot(tmp_path):
+    from scripts.ai_cycle.collect import main
+    from scripts.ai_cycle.snapshot import build_snapshot
+    from scripts.ai_cycle.store import ObservationStore
+
+    db = tmp_path / "opendesi.sqlite"
+    assert (
+        main(
+            [
+                "--record",
+                "--database",
+                str(db),
+                "--sources",
+                "open-design-arena",
+                "--end",
+                "2026-09-09",
+                "--archive",
+                str(tmp_path / "raw"),
+            ]
+        )
+        == 0
+    )
+    snapshot = build_snapshot(ObservationStore(db), "2026-09-10T16:00:00Z")
+    panel = next(item for item in snapshot["indicators"] if item["id"] == "D6")
+    assert panel["pane"] == "demand"
+    assert panel["status"] == "experimental"
+    assert panel["title"] == "OpenDesign Arena model quality"
+    assert "never GPU scarcity" in panel["methodology"]
+    assert panel["source_ids"] == ["open-design-arena"]
+    assert any(metric["id"] == "overall.deepseek-v4-1-flash.avg_score" for metric in panel["metrics"])
+    source = next(item for item in snapshot["sources"] if item["id"] == "open-design-arena")
+    assert source["status"] == "available"
+    assert source["lineage_group"] == "open-design-arena"
+
+
+def test_opendesi_live_collect_uses_html_transport(tmp_path):
+    from scripts.ai_cycle.collectors import Transport, collect_source
+
+    html = FIXTURE_HTML.read_bytes()
+
+    class Response:
+        status_code = 200
+        headers = {"Last-Modified": "Thu, 10 Sep 2026 15:19:31 GMT", "Content-Type": "text/html"}
+
+        def iter_content(self, _size):
+            yield html
+
+        def close(self):
+            pass
+
+    class Session:
+        def request(self, method, url, **kwargs):
+            assert method == "GET"
+            assert url == "https://open-design.ai/llm-arena-for-design/"
+            assert "Mozilla" not in (kwargs.get("headers") or {}).get("User-Agent", "")
+            return Response()
+
+    rows = collect_source(
+        "open-design-arena", Transport(tmp_path, session=Session()), "2026-09-01", "2026-09-09", env={}
+    )
+    assert any(row["series_id"] == "overall.gpt-6-astra.avg_score" and row["value"] == pytest.approx(82.7) for row in rows)
+    assert (tmp_path / f"{hashlib.sha256(html).hexdigest()}.json").read_bytes() == html
+
+
 def test_public_url_removes_secrets_and_rejects_userinfo():
     assert public_url("https://api.eia.gov/path?api_key=secret#secret") == "https://api.eia.gov/path"
     with pytest.raises(SourceError):

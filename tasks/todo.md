@@ -1,3 +1,22 @@
+# Task: OpenDesign Arena collector stub 2026-09-10 [IN PROGRESS]
+
+Thin LLM/model-quality collector for OpenDesign Arena on Demand `D6`.
+No GPU scarcity mix, no preference/radar UI, no merge.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests for HTML parse, broken markup, Demand snapshot and live transport.
+- T2 depends_on: [T1] - Fixture, parser, registry, collect wiring, contract note.
+- T3 depends_on: [T2] - Focused pytest, PR, CI watch. Do not merge.
+
+## Checklist
+
+- [x] T1 Failing parse/status/snapshot tests.
+- [x] T2 Collector stub + captured fixture + D6 Demand registry.
+- [ ] T3 Focused green and draft PR.
+
+---
+
 # Task: CI performance remediate 2026-09-10 [COMPLETE]
 
 Apply every eligible P0/P1 finding from the latest completed CI-performance

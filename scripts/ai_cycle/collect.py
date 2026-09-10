@@ -13,7 +13,16 @@ import os
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-from .collectors import SourceError, Transport, archive_raw, collect_source, now_iso, parse_disclosures, parse_ramp_curated
+from .collectors import (
+    SourceError,
+    Transport,
+    archive_raw,
+    collect_source,
+    now_iso,
+    parse_disclosures,
+    parse_opendesi,
+    parse_ramp_curated,
+)
 
 SOURCES = (
     "openrouter",
@@ -26,10 +35,12 @@ SOURCES = (
     "noaa",
     "portkey",
     "ramp",
+    "open-design-arena",
     "issuer-disclosures",
     "lambda",
 )
 DEFAULT_RAMP_CURATED = Path(__file__).resolve().parent / "fixtures" / "ramp_ai_index_curated.json"
+DEFAULT_OPENDESI_HTML = Path(__file__).resolve().parent / "fixtures" / "opendesi_arena.html"
 KEYS = ("OPENROUTER_API_KEY", "ARTIFICIAL_ANALYSIS_API_KEY", "SEC_USER_AGENT", "EIA_API_KEY", "VAST_API_KEY")
 OPERATOR_FIELDS = (*KEYS, "RADON_AI_CYCLE_AA_BASKET")
 HEALTH_SERVICE = "ai-cycle"
@@ -125,6 +136,15 @@ def _main(argv=None):
         help="Curated Ramp AI Index JSON; defaults to bundled published fixture for source ramp",
     )
     parser.add_argument(
+        "--import-opendesi",
+        help="Captured OpenDesign Arena HTML; defaults to bundled fixture for source open-design-arena",
+    )
+    parser.add_argument(
+        "--live-opendesi",
+        action="store_true",
+        help="Fetch the live OpenDesign Arena page instead of the captured fixture",
+    )
+    parser.add_argument(
         "--persist-snapshot",
         action="store_true",
         help="Rebuild the compact API snapshot from stored observations without provider calls",
@@ -176,6 +196,13 @@ def _main(argv=None):
             continue
         if source == "ramp" and not args.import_ramp and not DEFAULT_RAMP_CURATED.exists():
             continue
+        if (
+            source == "open-design-arena"
+            and not args.live_opendesi
+            and not args.import_opendesi
+            and not DEFAULT_OPENDESI_HTML.exists()
+        ):
+            continue
         for first, last in source_windows(source, start, args.end, backfill=args.backfill):
             key = f"{source}:{first}:{last}"
             if key in completed:
@@ -191,6 +218,11 @@ def _main(argv=None):
                     raw = ramp_path.read_bytes()
                     digest = archive_raw(Path(args.archive), raw)
                     rows = parse_ramp_curated(json.loads(raw), digest, checked)
+                elif source == "open-design-arena" and not args.live_opendesi:
+                    page = Path(args.import_opendesi or DEFAULT_OPENDESI_HTML)
+                    raw = page.read_bytes()
+                    digest = archive_raw(Path(args.archive), raw)
+                    rows = parse_opendesi(raw.decode("utf-8"), digest, checked)
                 else:
                     effective_start = (
                         (end - timedelta(days=800)).isoformat() if source == "sec" and not args.start else first
