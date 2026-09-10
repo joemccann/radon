@@ -5,6 +5,16 @@
 - Push the scoped change, inspect exact-head GitHub failures, repair in-scope defects, and keep watching until all applicable checks are green.
 
 
+## 2026-09-10 — A scoring walk is not a trading day
+
+- Discover caps dark-pool pagination at 2 pages (~1000 prints) for
+  scoring. Writing that sample as schema-v2 complete made
+  `/flow-analysis/SNDK` serve 976-print days next to 19k-print days
+  with `cache_meta.is_stale: false`.
+- Persist `complete=false` on a capped walk. Flow consumers require
+  `complete`. Discover may reuse the sample. A 500..1000-print legacy
+  v2 row without the flag is a miss.
+
 ## 2026-09-10 — A 130k-row Turso history cannot be the GET path
 
 - `/regime/llm` was empty with 130,083 durable observations already in Turso.

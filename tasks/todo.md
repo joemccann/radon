@@ -22,6 +22,32 @@
 - Pre-PR local full suites: Vitest 9,303 passed / 1 failed (fixed historical table remained in the known-unwrapped exception list; removed that entry); Python 12,749 passed / 36 failed / 19 skipped, including environment and local-artifact failures. No full-local-green claim.
 - Operator correction: all remaining test runs and CI repairs execute on GitHub, not locally. PR publication authorized; no merge, deployment, or trading action.
 
+---
+
+# Task: Flow analysis truncated dark-pool cache [IN PROGRESS]
+
+SNDK `/flow-analysis` served 20-session history with ~900-print days
+next to ~19k-print days. Discover's 2-page scoring walk was written as
+schema-v2 complete and never re-fetched.
+
+## Dependency graph
+
+- T1 depends_on: [] - Failing regression: 976-print v2 row is a miss for flow consumers.
+- T2 depends_on: [T1] - Persist `complete`; reject scoring-walk rows; discover writes incomplete.
+- T3 depends_on: [T2] - Focused pytest green, commit, PR, CI.
+
+## Checklist
+
+- [x] T1 Red tests on SNDK-shaped 976-print cache + fetch_flow refetch + discover poison.
+- [x] T2 Cache contract + discover/fetch_flow writers.
+- [ ] T3 PR green.
+
+## Review
+
+- [x] Affected pytest 212 passed. Cache/flow/discover 98 passed.
+
+---
+
 # Task: CI performance remediate 2026-09-10 [COMPLETE]
 
 Apply every eligible P0/P1 finding from the latest completed CI-performance
@@ -6276,7 +6302,9 @@ Isolated worktree /tmp/radon-focus-audit-20260910 protects existing user changes
 Dependency graph: T1 -> T2 -> T3.
 - [x] T1 depends_on: [] - Merge current main, preserve task histories, review signed and missing historical prices.
 - [x] T2 depends_on: [T1] - Register route-level historical price regression and screenshot artifacts in CI.
-- [ ] T3 depends_on: [T2] - Verify exact-head checks and inspect desktop/mobile screenshots before parent merges.
+- [ ] T3 depends_on: [T2] - Verify final integrated-head checks and inspect desktop/mobile screenshots before parent merges.
 
 ## Review
 No local suites. Review confirms quantity-weighted prices preserve zero and signed premiums, reject incomplete executions, and label collapsed journal fills aggregate. Generated codemap conflicts are regenerated from the merged source.
+
+- Integration verification: head 4d92842e passed every applicable check; GitHub CI 34507570000 ran 99 browser regressions plus one demo test. Desktop 1280px/mobile 393px full `/orders` screenshots reviewed (artifact 10164611383). Reintegrating main 722b1121 for the final merge gate; no local suites.
