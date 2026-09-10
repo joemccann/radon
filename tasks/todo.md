@@ -17,6 +17,30 @@ No GPU scarcity mix, no preference/radar UI, no merge.
 
 ---
 
+# Task: Flow analysis truncated dark-pool cache [IN PROGRESS]
+
+SNDK `/flow-analysis` served 20-session history with ~900-print days
+next to ~19k-print days. Discover's 2-page scoring walk was written as
+schema-v2 complete and never re-fetched.
+
+## Dependency graph
+
+- T1 depends_on: [] - Failing regression: 976-print v2 row is a miss for flow consumers.
+- T2 depends_on: [T1] - Persist `complete`; reject scoring-walk rows; discover writes incomplete.
+- T3 depends_on: [T2] - Focused pytest green, commit, PR, CI.
+
+## Checklist
+
+- [x] T1 Red tests on SNDK-shaped 976-print cache + fetch_flow refetch + discover poison.
+- [x] T2 Cache contract + discover/fetch_flow writers.
+- [ ] T3 PR green.
+
+## Review
+
+- [x] Affected pytest 212 passed. Cache/flow/discover 98 passed.
+
+---
+
 # Task: CI performance remediate 2026-09-10 [COMPLETE]
 
 Apply every eligible P0/P1 finding from the latest completed CI-performance
