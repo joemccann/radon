@@ -444,6 +444,57 @@ class TestDarkpoolPagination:
         assert len(result) == DARKPOOL_PAGE_LIMIT
         assert mock_client.get_darkpool_flow.call_count == 1
 
+    def test_two_page_scoring_walk_is_not_cacheable(self):
+        from fetch_flow import DARKPOOL_PAGE_LIMIT, walk_darkpool
+
+        page1 = [
+            self._trade(i, f"2026-09-04T16:{59 - (i // 60):02d}:{59 - (i % 60):02d}Z")
+            for i in range(DARKPOOL_PAGE_LIMIT)
+        ]
+        page2 = [
+            self._trade(
+                DARKPOOL_PAGE_LIMIT + i,
+                f"2026-09-04T12:{59 - (i // 60):02d}:{59 - (i % 60):02d}Z",
+            )
+            for i in range(DARKPOOL_PAGE_LIMIT)
+        ]
+        mock_client = MagicMock()
+        mock_client.get_darkpool_flow.side_effect = [
+            {"data": page1},
+            {"data": page2},
+        ]
+
+        walk = walk_darkpool(
+            "SNDK", date="2026-09-04", _client=mock_client, max_pages=2
+        )
+
+        assert len(walk.trades) == 2 * DARKPOOL_PAGE_LIMIT
+        assert walk.cacheable is False
+
+    def test_short_second_page_scoring_walk_is_cacheable(self):
+        from fetch_flow import DARKPOOL_PAGE_LIMIT, walk_darkpool
+
+        page1 = [
+            self._trade(i, f"2026-09-04T16:{59 - (i // 60):02d}:{59 - (i % 60):02d}Z")
+            for i in range(DARKPOOL_PAGE_LIMIT)
+        ]
+        page2 = [
+            self._trade(DARKPOOL_PAGE_LIMIT + i, f"2026-09-04T12:00:{i:02d}Z")
+            for i in range(42)
+        ]
+        mock_client = MagicMock()
+        mock_client.get_darkpool_flow.side_effect = [
+            {"data": page1},
+            {"data": page2},
+        ]
+
+        walk = walk_darkpool(
+            "SNDK", date="2026-09-04", _client=mock_client, max_pages=2
+        )
+
+        assert len(walk.trades) == DARKPOOL_PAGE_LIMIT + 42
+        assert walk.cacheable is True
+
 
 class TestUWRetryPolicy:
     """Regression for the 2026-05-15 EWY incident: a transient UW
