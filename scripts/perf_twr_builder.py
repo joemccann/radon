@@ -24,6 +24,7 @@ import sys as _sys
 import time as _time
 import xml.etree.ElementTree as _ET
 from dataclasses import dataclass as _dataclass
+from dataclasses import replace as _replace
 from datetime import date as _date
 from datetime import datetime as _dt
 from datetime import timedelta as _timedelta
@@ -1362,7 +1363,11 @@ def build_payload(
         )
 
     try:
-        chain = build_subperiods(observations, flows.by_date)
+        chain = build_subperiods(
+            observations,
+            flows.by_date,
+            verified_through=flows.verified_through,
+        )
     except DuplicateNavDate as exc:
         return _suppressed_payload(
             status="degraded",
@@ -1404,7 +1409,11 @@ def build_payload(
     if inferred and allow_inferred_flows:
         for candidate in inferred:
             applied_flows[candidate["date"]] = applied_flows.get(candidate["date"], 0.0) + candidate["amount"]
-        chain = build_subperiods(observations, applied_flows)
+        chain = build_subperiods(
+            observations,
+            applied_flows,
+            verified_through=flows.verified_through,
+        )
         methodology = _methodology(risk_free_rate, risk_free_source, inferred)
         warnings.append(
             _warning(
@@ -1627,8 +1636,34 @@ def _xirr_for(
 # ---------------------------------------------------------------------------
 
 
+def _published_nav_as_of() -> Optional[str]:
+    """nav_as_of already on disk, or None when there is no readable tape."""
+    try:
+        existing = _json.loads(_PERF_PATH.read_text(encoding="utf-8"))
+    except (OSError, _json.JSONDecodeError, TypeError, AttributeError):
+        return None
+    if not isinstance(existing, Mapping):
+        return None
+    return _normalize_date(existing.get("nav_as_of"))
+
+
 def persist_payload(payload: Mapping[str, Any]) -> None:
-    """Write data/performance.json and mirror to Turso performance_snapshots."""
+    """Write data/performance.json and mirror to Turso performance_snapshots.
+
+    A weekday mirror build must not regress a fresher ingest/published tape
+    solely because covered_through lags NAV. Incoming nav_as_of older than
+    the published tape is refused for both the file and the Turso snapshot.
+    """
+    incoming = _normalize_date(payload.get("nav_as_of"))
+    published = _published_nav_as_of()
+    if published and incoming and incoming < published:
+        print(
+            f"[perf_twr] Refusing to overwrite published tape "
+            f"as_of={published} with older as_of={incoming}",
+            file=_sys.stderr,
+        )
+        return
+
     try:
         _DATA_DIR.mkdir(parents=True, exist_ok=True)
         tmp = _PERF_PATH.with_suffix(".tmp")
@@ -1720,11 +1755,12 @@ def _persist_perf_tables(payload: Mapping[str, Any]) -> None:
 def _apply_mirrored_flow_coverage(
     observations: Sequence[NavObservation], flows: FlowSet
 ) -> Tuple[Sequence[NavObservation], FlowSet, List[Dict[str, Any]]]:
-    """Hold a mirrored-flow build to the sessions the mirror actually verified.
+    """Hold a mirrored-flow TWR chain to sessions the mirror actually verified.
 
     Live Flex flows need no bound — the statement covers what it covers. A
-    mirror does: publishing a session it never saw asserts "no external flow
-    that day" on no evidence.
+    mirror does: chaining a session it never saw asserts "no external flow
+    that day" on no evidence. Newer NAV past covered_through is kept on the
+    published series; those sessions are skipped, not clipped off nav_as_of.
     """
     if flows.source != "turso" or not observations:
         return observations, flows, []
@@ -1745,28 +1781,44 @@ def _apply_mirrored_flow_coverage(
             )
         ] if not query_ok else []
 
-    dropped = len(observations) - len(bounded)
-    return (
-        bounded,
-        flows,
-        [
+    latest_nav = max(o.date for o in observations)
+    unverified = [o for o in observations if covered_through and o.date > covered_through]
+    # Keep the newer NAV series. Clipping to covered_through published an older
+    # nav_as_of and overwrote a fresher ingest tape (2026-09-10). Unverified
+    # sessions stay on the series and are skipped in the TWR chain.
+    flows = _replace(flows, verified_through=covered_through)
+    warnings = [
+        _warning(
+            "FLOWS_SOURCE_MIRROR",
+            # Provenance, not freshness — the same distinction NAV_SOURCE_*
+            # draws. `warn` floors the payload to "stale", and the render
+            # layer gates the TWR on "stale" exactly as on "degraded", so
+            # declaring the mirror at `info` keeps the page alive. Age is
+            # declared here; unverified tail sessions are skipped, not chained.
+            "info",
+            "External flows came from the last mirrored statement, not a live "
+            f"Flex fetch; verified through {covered_through or 'unknown'}.",
+            flows_source="turso",
+            covered_through=covered_through,
+            sessions_dropped=0,
+            sessions_unverified=len(unverified),
+        )
+    ]
+    if unverified:
+        warnings.append(
             _warning(
-                "FLOWS_SOURCE_MIRROR",
-                # Provenance, not freshness — the same distinction NAV_SOURCE_*
-                # draws. `warn` floors the payload to "stale", and the render
-                # layer gates the TWR on "stale" exactly as on "degraded", so
-                # declaring the mirror at `warn` would blank the very page this
-                # fallback exists to keep alive. The mirror's age is policed by
-                # the coverage bound below, not by the severity.
+                "FLOWS_COVERAGE_LAGS_NAV",
                 "info",
-                "External flows came from the last mirrored statement, not a live "
-                f"Flex fetch; verified through {covered_through or 'unknown'}.",
+                f"Mirrored flows are verified through {covered_through}; NAV "
+                f"extends to {latest_nav}. Newer NAV is kept; sessions after "
+                "coverage are not chained as implicit zero flows.",
                 flows_source="turso",
                 covered_through=covered_through,
-                sessions_dropped=dropped,
+                nav_as_of=latest_nav,
+                sessions_unverified=len(unverified),
             )
-        ],
-    )
+        )
+    return observations, flows, warnings
 
 
 def _resolution_from_file(path: str) -> NavResolution:

@@ -86,6 +86,9 @@ class FlowSet:
     # Flow sections the statement did not carry. Flows were still observed, but
     # only partially: the operator needs to be told which class is unreported.
     missing_sections: Tuple[str, ...] = ()
+    # Last session mirrored flows were verified through. Sessions after this
+    # date stay on the NAV series but are not chained as implicit zero flows.
+    verified_through: Optional[str] = None
 
     def __post_init__(self) -> None:
         if self.status is FlowsStatus.FAILED:
@@ -499,7 +502,10 @@ def _empty_chain() -> SubperiodChain:
 
 
 def build_subperiods(
-    nav: Sequence[NavObservation], flows: Mapping[str, float]
+    nav: Sequence[NavObservation],
+    flows: Mapping[str, float],
+    *,
+    verified_through: Optional[str] = None,
 ) -> SubperiodChain:
     observations = _sorted_observations(nav)
     if not observations:
@@ -526,7 +532,11 @@ def build_subperiods(
         ret = draft.ret
         skip_reason: Optional[str] = None
 
-        if ret is None:
+        if verified_through and draft.current.date > verified_through:
+            skip_reason = "unverified_flow_coverage"
+            flags.append(skip_reason)
+            ret = None
+        elif ret is None:
             skip_reason = "zero_base" if draft.previous.nav == 0 else "negative_base"
             flags.append(skip_reason)
         else:
