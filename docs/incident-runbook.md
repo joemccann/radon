@@ -1655,6 +1655,42 @@ cycle is its own fault, not a cascade.
 
 ---
 
+## flex-sftp-connection-storm
+
+**`radon-flex-pull.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) with `kex_exchange_identification: read: Connection reset
+by peer` on the tail of a multi-file pull.** Peak: 2026-09-11 12:30Z,
+page `c24fb393…`. Equity Summary at 07:30 ET had already ingested.
+
+- **Mechanism:** IBKR never removes files from `outgoing`, so every timer
+  fire re-lists a growing directory. `pull_gpg` opened one OpenSSH sFTP
+  session per file. Around ~20 files IBKR rate-limits the SSH handshake and
+  resets kex on the tail gets; the oneshot heartbeats
+  `one or more files rejected` and exits 1. TCP :22 stays up. A single
+  `sftp -b` batch with every `get` in one session pulls the same set
+  cleanly (~10s for 20 files). A `cd outgoing` + `get outgoing/<name>`
+  doubles the remote path (`/joemcc/outgoing/outgoing/... not found`) —
+  batch gets must keep the login-cwd relative path the old single get used.
+- **Detection:** journald `sftp_get_failed:…kex_exchange_identification`
+  / `Connection reset by 64.190.196.110 port 22` on the newest
+  Trade_History / Equity names; earlier files in the same run land in
+  `/var/lib/radon/flex-inbox`; `systemctl status radon-flex-pull` →
+  `Result=exit-code`; edge and `:8321/health/lite` stay up. Cash-flow
+  path may already be `ok` from the 07:30 fire.
+- **Discriminating check:** `flex_sftp_pull.py --list-only` succeeds;
+  a one-session batch of every listed `get` succeeds; the same set pulled
+  one-file-per-session reproduces the kex reset on the tail. If even a
+  single `ls` resets kex → upstream IBKR lockout, stand down and wait.
+- **Remediation (code):** `pull_gpg_batch` — one sFTP session for every
+  get, transient kex/reset retries with backoff, `SFTP_TIMEOUT_SECS=90`.
+  Do not SendRequest. After deploy: `radon unit restart radon-flex-pull.service`.
+- **Regression:**
+  `test_flex_sftp_pull.py::test_multi_file_delivery_uses_one_sftp_get_session`,
+  `test_flex_sftp_pull.py::test_transient_kex_reset_retries_batch_get`.
+- **Code:** `scripts/flex_sftp_pull.py` (`pull_gpg_batch`, `_is_transient_sftp`).
+
+---
+
 ## flex-1025-lockout
 
 **IBKR Flex code 1025 is a token lockout.** Routine ingest is sFTP
