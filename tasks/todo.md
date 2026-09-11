@@ -6374,6 +6374,16 @@ Dependency graph: T1 -> T2 -> T3.
 ## Review
 No local suites. CI 34494032484 reproduces outdated download signature matching. Main 1998fb77 merges cleanly.
 
+# CI performance audit (2026-09-11)
+
+Dependency graph: T1 -> T2 -> T3.
+- [x] T1 depends_on: [] - Verify dedicated runner state, exclusive lock, GitHub access, and the audited main delta.
+- [x] T2 depends_on: [T1] - Measured 20 organic main runs, reconstructed the gate/deploy critical path, and swept safety contracts.
+- [x] T3 depends_on: [T2] - Appended the append-only audit ledger; dated branch/PR reporting is pending publication.
+
+## Review
+Pending measured audit evidence.
+
 # Form focus highlight audit (2026-09-10)
 
 Specification: one visible, aligned keyboard focus indicator per field, around the complete visual control (including currency prefixes). Audit shared/composite controls across Clear light/dark and desktop/mobile. Preserve native semantics and all order behavior; use mocked browser data. No local suites.
