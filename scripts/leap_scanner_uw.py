@@ -870,6 +870,17 @@ def build_json_payload(results, min_gap, universe, requested_tickers):
     }
 
 
+def _write_best_effort(path: Path, text: str, label: str) -> None:
+    """Sidecar reports live under scripts/reports, which is read-only in the API image."""
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    except OSError as exc:
+        print(f"⚠ {label} not written ({path}: {exc})", file=sys.stderr)
+        return
+    print(f"✓ {label} saved to {path}")
+
+
 def refuse_budget_blocked_scan(universe: str) -> None:
     """Refuse a universe scan under the UW daily budget brake (theta precedent).
 
@@ -974,14 +985,7 @@ def main():
         for r in sorted(mispriced, key=lambda x: x.best_gap, reverse=True)[:5]:
             print(f"   {r.ticker}: HV20={r.vol_data.hv_20:.1f}% vs LEAP IV gap +{r.best_gap:.1f}%")
     
-    # Generate report (HTML only when there is something to show)
     output_path = Path(args.output)
-    if results:
-        report = generate_report(results, args.min_gap)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(report)
-        print(f"\n✓ Report saved to {output_path}")
-
     if not results:
         print(
             "✗ No ticker produced a valid provider result; preserving the last good cache",
@@ -994,28 +998,18 @@ def main():
         json_data["failed_tickers"] = failed_tickers
         json_data["provider_failures"] = provider_failures
         json_data["status"] = "degraded" if exhausted else "ok"
-        json_path = output_path.with_suffix(".json")
-        json_path.parent.mkdir(parents=True, exist_ok=True)
-        json_path.write_text(json.dumps(json_data, indent=2))
-        print(f"✓ JSON saved to {json_path}")
-
-        # Also mirror to data/leap.json so the dashboard
-        # Opportunities → LEAP tab can read the latest scan via the
-        # /api/leap route. Other scans (scanner, discover) follow the
-        # same data/<scan>.json convention.
         cache_path = DASHBOARD_CACHE_PATH
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         # atomic_save, not write_text: this file is CANONICAL (no table
         # behind it), so a SIGTERM or a full disk mid-write truncates the only
         # copy and the route serves a JSONDecodeError with nothing to fall
         # back to. bpi_scan.py already writes its mirror this way. R-260.
+        # Write the cache BEFORE the HTML sidecar. FastAPI's docker image
+        # keeps scripts/ read-only (Dockerfile.python); reports/leap-scan-uw.html
+        # is relative to cwd=scripts/ and a PermissionError there used to
+        # abort after a finished largecaps fetch (P1 2026-09-11).
         atomic_save(str(cache_path), json_data)
         print(f"✓ Dashboard cache saved to {cache_path}")
-        # No leap table in Turso — the file cache is canonical; the
-        # service_health row lets the banner spot a stale scheduled scan.
-        # R-095: an exhausted run must not heartbeat ok. `data/leap.json`
-        # still carries whatever did resolve, but the row says error so the
-        # banner and the watchdog see a 2-name LEAP tab for what it is.
         health_error = (
             {
                 "message": (
@@ -1029,6 +1023,13 @@ def main():
             else None
         )
         mirror_scan_snapshot("leap-scan", json_data, health_error=health_error)
+        _write_best_effort(
+            output_path.with_suffix(".json"),
+            json.dumps(json_data, indent=2),
+            "JSON",
+        )
+
+    _write_best_effort(output_path, generate_report(results, args.min_gap), "Report")
 
     if exhausted:
         print(

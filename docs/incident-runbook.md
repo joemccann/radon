@@ -714,6 +714,43 @@ on an instant FastAPI 502 capacity shed at the 10:00 ET timer.** Peak:
 
 ---
 
+## leap-readonly-html-aborts-cache
+
+**`radon-leap.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
+after a finished largecaps fetch, with `leap.json` still on the prior day.**
+Peak: 2026-09-11 14:01Z, page `77957c44…`. Recurred 2026-09-09 and
+2026-09-10 at the same 14:00 UTC timer after `a7e530101` made the API
+image's `scripts/` tree read-only.
+
+- **Mechanism:** FastAPI `run_script` cwd is `scripts/`. `leap_scanner_uw.py`
+  default `--output reports/leap-scan-uw.html` therefore writes
+  `scripts/reports/…`. The docker image (`Dockerfile.python`) asserts
+  `scripts/` is not writable; only `data/` is bind-mounted. After
+  `SCAN COMPLETE` the scanner mkdir'd the HTML sidecar, `PermissionError`
+  aborted before `atomic_save(data/leap.json)`, FastAPI mapped exit 1 to
+  HTTP 502, and the wrapper logged `LEAP FastAPI outcome indeterminate
+  (curl=0, http=502); not launching duplicate`. UW cache showed the
+  fetch itself succeeded (~518 OHLC, ~337 tickers with 2027 calls).
+- **Detection:** unit journal POST then ~80s later indeterminate 502;
+  `leap.json` mtime older than the run; `service_health.leap-scan` still
+  the prior ok row; UW budget `leap_scanner_uw` ticked up; edge and
+  `:8321/health/lite` stay up. Instant 502 with the capacity body is
+  `leap-capacity-502`. `SCAN COMPLETE` plus a new cache plus exit 1 is
+  `leap-partial-ticker-exit-pages-p1`.
+- **Discriminating check:** HTML/JSON sidecar under `scripts/reports`
+  plus a finished UW fetch and an untouched `data/leap.json`. Not IB,
+  not Turso (Python canary). `Result=signal` is deploy stop-clean.
+- **Remediation (code):** write `data/leap.json` and the health row
+  first; HTML and `reports/*.json` are best-effort `OSError`. Do not
+  restart-flap the hung run; after the fix deploys, `reset-failed` +
+  start (unit is on `RERUNNABLE_ONESHOT_UNITS`) or wait for the next
+  timer (weekend slot is Monday).
+- **Regression:**
+  `test_leap_scanner.py::test_readonly_html_report_path_still_writes_cache_and_exits_zero`.
+- **Code:** `scripts/leap_scanner_uw.py` (`_write_best_effort`, `main`).
+
+---
+
 ## garch-capacity-502
 
 **`radon-garch.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)

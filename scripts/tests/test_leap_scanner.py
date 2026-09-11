@@ -3,6 +3,7 @@ import math
 import json
 import sys
 from contextlib import contextmanager, nullcontext
+from pathlib import Path
 import pytest
 
 from leap_iv_scanner import (
@@ -489,6 +490,50 @@ def test_a_provider_wipeout_exits_nonzero_and_marks_the_row_error(tmp_path, monk
     assert len(payload["provider_failures"]) == 20
     assert health and health[-1] is not None
     assert health[-1]["class"] == "provider_exhausted"
+
+
+def test_readonly_html_report_path_still_writes_cache_and_exits_zero(tmp_path, monkeypatch):
+    """2026-09-11 radon-leap P1: FastAPI docker image asserts scripts/ is not
+    writable (Dockerfile.python). main() wrote reports/leap-scan-uw.html
+    before data/leap.json, so PermissionError aborted after a finished
+    largecaps fetch. FastAPI mapped that to 502; leap.json stayed 2026-09-08.
+    """
+    cache = tmp_path / "leap.json"
+    out_dir = tmp_path / "reports"
+    out_dir.mkdir()
+    html = out_dir / "leap-scan-uw.html"
+    monkeypatch.setattr(leap_scanner_uw, "DASHBOARD_CACHE_PATH", cache)
+    monkeypatch.setattr(leap_scanner_uw, "UWClient", lambda: nullcontext(object()))
+    monkeypatch.setattr(leap_scanner_uw, "mirror_scan_snapshot", lambda *a, **k: None)
+    monkeypatch.setattr(
+        leap_scanner_uw, "scan_ticker", lambda *_a, **_k: _one_scan_result("SPY")
+    )
+
+    real_mkdir = Path.mkdir
+    real_write = Path.write_text
+
+    def mkdir_ro(self, *args, **kwargs):
+        if self == out_dir or out_dir in self.parents:
+            raise PermissionError(13, "Permission denied")
+        return real_mkdir(self, *args, **kwargs)
+
+    def write_ro(self, *args, **kwargs):
+        if self.parent == out_dir:
+            raise PermissionError(13, "Permission denied")
+        return real_write(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "mkdir", mkdir_ro)
+    monkeypatch.setattr(Path, "write_text", write_ro)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["leap_scanner_uw.py", "SPY", "--json", "--output", str(html)],
+    )
+
+    assert leap_scanner_uw.main() == 0
+    payload = json.loads(cache.read_text())
+    assert payload["results"][0]["ticker"] == "SPY"
+    assert not html.exists()
 
 
 # ── find_strikes_by_delta ───────────────────────────────────────────
