@@ -10228,3 +10228,28 @@ reduced coverage threshold.
 - Coverage-ratchet and gate-drift review: `.github/workflows/ci.yml:426-444`
   only adds the MCP report artifact; its browser additions are curated at
   `:786-808`. `deploy.needs`, exclusions, and thresholds are unchanged.
+
+## Remediation 2026-09-11
+
+`RADON_WEEKEND_REDUCED=1`: the 2026-09-11 audit filed no P0/P1 finding, so
+the reduced rung admits no new source remediation. The complete P0/P1
+reconciliation leaves T-490 operator-only and T-488 blocked: neither has a
+safe in-repository action available in this runner.
+
+- **T-490 — operator-only:** the dedicated runner has no repository
+  `.codex/skills/` directory. The focused contract reproduced **52 passed / 21
+  failed**; every failure is one of the four required rendered-skill trees or
+  its interface file. This CLI may not create that protected repository path.
+  Operator: run `python3.13 scripts/render_loop_prompt.py --write` in a
+  checkout where `.codex/` is writable, run
+  `python3.13 -m pytest scripts/tests/test_portable_prompt_sync.py -q`, and
+  commit the generated artifacts.
+- **T-488 — blocked:** the prior three fixture attempts remain the only
+  meaningful source-level attempts. A new detached focused rerun was killed
+  before pytest wrote output or its `DONE` sentinel (`/tmp/tw-2026-09-11/t488.rc`
+  remained `PENDING`), so it is incomplete evidence, not a fourth attempt.
+  Operator: reproduce and repair the GNU-timeout process-tree behavior on
+  Linux CI without widening the fixed contract timeout.
+
+Closing full gates are not claimed: T-490 remains deterministically red and
+the required detached T-488 stage did not complete.
