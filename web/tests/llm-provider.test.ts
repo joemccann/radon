@@ -361,6 +361,73 @@ describe("llm provider", () => {
     await expect(chat(SAMPLE_REQUEST)).rejects.toThrow();
   });
 
+  it("forwards tool_choice, reasoning_effort, and max_tokens on xAI chat completions", async () => {
+    process.env.XAI_API_KEY = "xai-test-key";
+    const { calls } = captureFetch(() =>
+      jsonResponse({
+        choices: [{ message: { role: "assistant", content: "September P&L." }, finish_reason: "stop" }],
+      }),
+    );
+
+    await chat({
+      ...SAMPLE_REQUEST,
+      tools: [{ name: "get_realized_pnl", input_schema: { type: "object" } }],
+      toolChoice: "none",
+      reasoningEffort: "low",
+      maxTokens: 8192,
+    });
+
+    const payload = bodyOf(calls[0]);
+    expect(payload.tool_choice).toBe("none");
+    expect(payload.reasoning_effort).toBe("low");
+    expect(payload.max_tokens).toBe(8192);
+    expect(payload.tools).toEqual([
+      {
+        type: "function",
+        function: {
+          name: "get_realized_pnl",
+          parameters: { type: "object" },
+        },
+      },
+    ]);
+  });
+
+  it("omits reasoning_effort and tool_choice on xAI when the caller did not set them", async () => {
+    process.env.XAI_API_KEY = "xai-test-key";
+    const { calls } = captureFetch(() =>
+      jsonResponse({
+        choices: [{ message: { role: "assistant", content: "ok" }, finish_reason: "stop" }],
+      }),
+    );
+
+    await chat(SAMPLE_REQUEST);
+
+    const payload = bodyOf(calls[0]);
+    expect(payload).not.toHaveProperty("reasoning_effort");
+    expect(payload).not.toHaveProperty("tool_choice");
+    expect(payload).not.toHaveProperty("tools");
+  });
+
+  it("maps tool_choice none onto Anthropic's tool_choice object", async () => {
+    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+    const { calls } = captureFetch(() =>
+      jsonResponse({
+        content: [{ type: "text", text: "Done." }],
+        stop_reason: "end_turn",
+      }),
+    );
+
+    await chat({
+      ...SAMPLE_REQUEST,
+      tools: [{ name: "get_flow", input_schema: { type: "object" } }],
+      toolChoice: "none",
+    });
+
+    const payload = bodyOf(calls[0]);
+    expect(payload.tool_choice).toEqual({ type: "none" });
+    expect(payload.tools).toEqual([{ name: "get_flow", input_schema: { type: "object" } }]);
+  });
+
   it("passes tools to providers that support tool_use and normalizes tool calls", async () => {
     process.env.ANTHROPIC_API_KEY = "sk-ant-test";
     const tools = [
