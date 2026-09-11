@@ -272,7 +272,7 @@ class TestExhaustedMessaging:
                 post=router,
             )
         msg = str(exc.value).lower()
-        assert "vision cascade exhausted" in msg
+        assert "ladder exhausted" in msg
         assert "anthropic" in msg
         assert "grok" in msg
         assert "top up" not in msg
@@ -366,7 +366,7 @@ class TestMenthorQClientWiring:
                     with pytest.raises(MenthorQExtractionError) as exc:
                         client.get_cta("2026-03-06")
                 msg = str(exc.value).lower()
-                assert "vision cascade exhausted" in msg
+                assert "ladder exhausted" in msg
                 assert "top up" not in msg
             finally:
                 client.close()

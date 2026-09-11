@@ -10,6 +10,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from research.dropbox import DropboxClient, DropboxError
+from research.model import classify_error
 from research.state import State, date_scopes
 from utils.atomic_io import atomic_save
 
@@ -25,7 +26,7 @@ class DiscoveryError(DropboxError):
 def heartbeat(root, state, error=None, stage=None, local_only=False):
     stamp = datetime.now(timezone.utc).isoformat()
     payload = {'service': 'dropbox-research', 'state': state, 'updated_at': stamp,
-               'last_error': {'message': type(error).__name__} if error else None}
+               'last_error': {'message': classify_error(error)} if error else None}
     if isinstance(error, DiscoveryError):
         payload['last_error']['discovery_errors'] = error.failures
     if stage:
@@ -80,7 +81,7 @@ def discover(client, state, now=None, current_only=False, on_page=None):
                 raise RuntimeError('Dropbox pagination limit exceeded')
         except Exception as error:
             # Failed pages stay unacknowledged for retry; no revision is skipped.
-            failure = {'stage': 'discovery', 'type': type(error).__name__,
+            failure = {'stage': 'discovery', 'type': classify_error(error),
                        'scope_id': hashlib.sha256(scope.encode()).hexdigest()[:16]}
             status = getattr(error, 'status', None)
             if isinstance(status, int):
@@ -135,9 +136,9 @@ def cycle(root, client, state, pipeline, publisher, publish=False, limit=4):
             recent.extend(posts)
             processed += 1
         except Exception as error:
-            errors.append(type(error).__name__)
+            errors.append(classify_error(error))
             if work['attempts'] >= 5:
-                state.complete(work['key'], {'status': 'held', 'error': type(error).__name__})
+                state.complete(work['key'], {'status': 'held', 'error': classify_error(error)})
             else:
                 delay = max(getattr(error, 'retry_after', 0) or 0, min(3600, 60 * 2 ** work['attempts']))
                 state.retry(work['key'], error, delay=delay)
