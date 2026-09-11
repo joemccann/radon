@@ -96,6 +96,43 @@ describe("buildQuoteTelemetryModel — after-hours stock-state fallback", () => 
     expect(m.volume.value).toBe("7,896,563");
   });
 
+  it("keeps HIGH/LOW/VOLUME as --- on a live option when IB sent no session ticks and no fallback", () => {
+    // Positions → order sheet passes the leg PriceData with no stock fallback.
+    // Bid/ask/close populate Day% + Mark; null OHLV must stay honest ---.
+    const m = buildQuoteTelemetryModel(priceData({
+      symbol: "SNDK_20260925_1750_C",
+      last: 4.2,
+      lastIsCalculated: true,
+      bid: 4.0,
+      ask: 4.4,
+      close: 3.9,
+      volume: null,
+      high: null,
+      low: null,
+    }))!;
+    expect(m.bid.value).toContain("4.00");
+    expect(m.ask.value).toContain("4.40");
+    expect(m.last.label).toBe("MARK");
+    expect(m.day.value).not.toBe("---");
+    expect(m.high.value).toBe("---");
+    expect(m.low.value).toBe("---");
+    expect(m.volume.value).toBe("---");
+  });
+
+  it("renders VOLUME 0 when the relay reports an untraded session, not ---", () => {
+    const m = buildQuoteTelemetryModel(priceData({
+      symbol: "SNDK_20260925_1750_C",
+      last: 4.2,
+      lastIsCalculated: true,
+      bid: 4.0,
+      ask: 4.4,
+      volume: 0,
+    }))!;
+    expect(m.volume.value).toBe("0");
+    expect(m.high.value).toBe("---");
+    expect(m.low.value).toBe("---");
+  });
+
   it("prefers live values over the fallback when both exist", () => {
     const m = buildQuoteTelemetryModel(priceData({ last: 142.5, high: 144.0, volume: 100 }), FALLBACK)!;
     expect(m.high.value).toContain("144.00");
