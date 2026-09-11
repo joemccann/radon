@@ -9,6 +9,10 @@
  *        - READ tools execute via `executeTool` (radonFetch) and their results
  *          feed back as a tool_result turn.
  *   3. Repeat until the model stops requesting tools or the round cap is hit.
+ *   4. Period P&L prompts prefetch get_realized_pnl and force a text answer.
+ *   5. Cap-hit / empty completions keep tools in the request with
+ *      tool_choice=none (Grok 4.6 high-reasoning + a 1200 token cap was
+ *      returning empty finals and the canned error).
  *
  * The conversation carries structured content blocks (text / tool_use /
  * tool_result) so the model sees its own calls and their outputs. Anthropic
@@ -33,9 +37,16 @@ import {
   toolSchemas,
   type AssistantPrincipal,
 } from "@/lib/assistant/tools";
+import { detectRealizedPnlWindow, formatRealizedPnlAnswer } from "@/lib/assistant/pnlIntent";
+import { etCalendarDateString } from "@/lib/orders/executedToday";
 import type { AssistantOrderComboLeg, AssistantOrderInput } from "@/lib/types";
 
 export const MAX_ROUNDS = 8;
+export const MAX_TOOL_EVENTS = 16;
+export const MAX_CALLS_PER_ROUND = 8;
+const TOOL_ROUND_MAX_TOKENS = 4096;
+const FINAL_MAX_TOKENS = 8192;
+const ASSISTANT_CHAT_TIMEOUT_MS = 90_000;
 
 const CAP_FALLBACK_MESSAGE = "Reached the maximum tool-calling rounds without a final answer.";
 
@@ -234,6 +245,11 @@ function turnText(content: AssistantTurn["content"]): string {
     .join(" ");
 }
 
+function todayEtFromSystem(system: string): string {
+  const match = system.match(/Today is (\d{4}-\d{2}-\d{2})/);
+  return match?.[1] ?? etCalendarDateString();
+}
+
 function hasExplicitOrderIntent(turns: AssistantTurn[]): boolean {
   const last = [...turns].reverse().find((turn) => turn.role === "user");
   const current = last ? turnText(last.content) : "";
@@ -311,6 +327,8 @@ export async function runAssistantLoop(
   let provider = "unknown";
   let usedFallback = false;
   let knowledgeBoundaryReached = false;
+  let lastPnlData: unknown;
+  let forceText = false;
 
   const accumulateUsage = (roundUsage?: LlmUsage) => {
     if (!roundUsage) return;
@@ -327,14 +345,63 @@ export async function runAssistantLoop(
     usage,
     outcome: "cancelled",
   });
+  const answered = (round: number, content: string, outcome: AssistantLoopOutcome = "answered"): AssistantLoopResult => ({
+    content,
+    model,
+    ...provenance(),
+    toolEvents,
+    rounds: round,
+    usage,
+    outcome,
+  });
+  const resolveText = (raw: string | undefined): string => {
+    const text = raw?.trim();
+    if (text) return text;
+    return formatRealizedPnlAnswer(lastPnlData) ?? "";
+  };
+
+  const lastUser = [...turns].reverse().find((turn) => turn.role === "user");
+  const pnlWindow = lastUser
+    ? detectRealizedPnlWindow(turnText(lastUser.content), todayEtFromSystem(system))
+    : null;
+  if (pnlWindow && !signal?.aborted) {
+    const result = await executeTool("get_realized_pnl", pnlWindow, principal, spawnBudget);
+    const content = stringifyToolResult(result);
+    priorResults.set(callKey({ id: "prefetch", name: "get_realized_pnl", input: pnlWindow }), content);
+    emit({ name: "get_realized_pnl", input: pnlWindow, ok: result.ok, error: result.error });
+    if (result.ok) {
+      lastPnlData = result.data;
+      forceText = true;
+      messages.push({
+        role: "user",
+        content:
+          `Prefetched get_realized_pnl for ${pnlWindow.from} to ${pnlWindow.to}. ` +
+          "Answer from this payload. Do not list_apis or call_api for P&L. " +
+          "Call get_realized_pnl again only if this window is wrong.\n" +
+          content,
+      });
+    } else {
+      messages.push({
+        role: "user",
+        content:
+          `get_realized_pnl for ${pnlWindow.from} to ${pnlWindow.to} failed: ${result.error ?? "unknown error"}. ` +
+          "If the window is too wide, retry with a narrower range or a ticker.",
+      });
+    }
+  }
 
   for (let round = 1; round <= MAX_ROUNDS; round += 1) {
     if (signal?.aborted) return cancelled(round - 1);
+    const offerTools = !knowledgeBoundaryReached;
+    const toolChoice = forceText ? "none" : "auto";
     const response = await chat({
       messages: messages as unknown as LlmMessage[],
       system,
       ...selection,
-      ...(knowledgeBoundaryReached ? {} : { tools: toolSchemas() }),
+      maxTokens: forceText ? FINAL_MAX_TOKENS : TOOL_ROUND_MAX_TOKENS,
+      reasoningEffort: "low",
+      timeoutMs: ASSISTANT_CHAT_TIMEOUT_MS,
+      ...(offerTools ? { tools: toolSchemas(), toolChoice } : {}),
       ...(signal ? { signal } : {}),
     });
     model = response.model;
@@ -343,9 +410,13 @@ export async function runAssistantLoop(
     accumulateUsage(response.usage);
 
     const toolCalls = response.toolCalls ?? [];
-    logRound(round, response.model, toolCalls);
-    if (!toolCalls.length) {
-      return { content: response.text, model, ...provenance(), toolEvents, rounds: round, usage, outcome: "answered" };
+    logRound(round, response.model, forceText ? [] : toolCalls);
+
+    if (forceText || !toolCalls.length) {
+      const content = resolveText(response.text);
+      if (content) return answered(round, content);
+      if (forceText) break;
+      return answered(round, response.text ?? "");
     }
 
     const destructive = toolCalls.find((call) => isDestructiveTool(call.name));
@@ -394,8 +465,19 @@ export async function runAssistantLoop(
     messages.push(toAssistantToolUseBlocks(response.text, toolCalls));
 
     const results: ToolResultBlock[] = [];
-    for (const call of toolCalls) {
+    const dropMessage =
+      `Dropped: at most ${MAX_CALLS_PER_ROUND} tool calls per round and ${MAX_TOOL_EVENTS} per turn.`;
+    for (const [index, call] of toolCalls.entries()) {
       if (signal?.aborted) return cancelled(round);
+      if (index >= MAX_CALLS_PER_ROUND || toolEvents.length >= MAX_TOOL_EVENTS) {
+        emit({ name: call.name, input: call.input, ok: false, error: dropMessage });
+        results.push({
+          type: "tool_result",
+          tool_use_id: call.id,
+          content: JSON.stringify({ error: dropMessage }),
+        });
+        continue;
+      }
       if (isDestructiveTool(call.name)) {
         const content = JSON.stringify({
           deferred: true,
@@ -423,6 +505,10 @@ export async function runAssistantLoop(
       }
       const result = await executeTool(call.name, call.input, principal, spawnBudget);
       let content = stringifyToolResult(result);
+      if (result.ok && call.name === "get_realized_pnl") {
+        lastPnlData = result.data;
+        forceText = true;
+      }
       if (result.ok && isKnowledgeTool(call.name)) {
         try {
           const isolated = await isolateKnowledgeResult(content, signal);
@@ -442,11 +528,12 @@ export async function runAssistantLoop(
       });
     }
     messages.push(toToolResultMessage(results));
+    if (toolEvents.length >= MAX_TOOL_EVENTS) break;
   }
 
-  // Cap hit. Round-MAX_ROUNDS tool results are already in `messages`, so one
-  // forced tool-less final call lets the model answer with everything it has
-  // instead of discarding the turn behind a canned error.
+  // Cap hit. Keep the tool schemas in the request and set tool_choice=none so
+  // OpenAI-compatible providers (xAI Grok 4.6) write a final answer instead of
+  // emitting empty content / 400ing when tools disappear from a tool-call thread.
   messages.push({ role: "user", content: CAP_FORCED_FINAL_INSTRUCTION });
   if (signal?.aborted) return cancelled(MAX_ROUNDS);
   try {
@@ -454,26 +541,25 @@ export async function runAssistantLoop(
       messages: messages as unknown as LlmMessage[],
       system,
       ...selection,
+      tools: toolSchemas(),
+      toolChoice: "none",
+      maxTokens: FINAL_MAX_TOKENS,
+      reasoningEffort: "low",
+      timeoutMs: ASSISTANT_CHAT_TIMEOUT_MS,
       ...(signal ? { signal } : {}),
     });
     accumulateUsage(finalResponse.usage);
     logRound(MAX_ROUNDS + 1, finalResponse.model, []);
+    model = finalResponse.model;
     provider = finalResponse.provider;
     usedFallback = usedFallback || Boolean(finalResponse.usedFallback);
-    const text = finalResponse.text?.trim();
+    const text = resolveText(finalResponse.text);
     if (text) {
-      return {
-        content: text,
-        model: finalResponse.model,
-        ...provenance(),
-        toolEvents,
-        rounds: MAX_ROUNDS + 1,
-        usage,
-        outcome: "cap_forced_final",
-      };
+      return answered(MAX_ROUNDS + 1, text, "cap_forced_final");
     }
   } catch {
-    // Fall through to the canned fallback.
+    const synthesized = formatRealizedPnlAnswer(lastPnlData);
+    if (synthesized) return answered(MAX_ROUNDS, synthesized, "cap_forced_final");
   }
 
   return {
