@@ -60,14 +60,15 @@ export function buildTweetText(
   showPct: boolean,
   holdTime?: string | null,
 ): string {
-  const parts: string[] = [];
-  if (showDollar && pnl != null) parts.push(fmtDollar(pnl));
-  if (showPct && pnlPct != null && Number.isFinite(pnlPct)) parts.push(fmtPct(pnlPct));
-  const pnlStr = parts.join(" ");
-  const tagged = cashtagTicker(description);
-  // pnl and hold time join with " · "; either may be empty without a stray separator.
-  const metric = [pnlStr, holdTime ? `Held ${holdTime}` : ""].filter(Boolean).join(" · ");
-  return `💸 ${tagged} ${metric}\n\nExecuted with Radon\n\nhttps://radon.run`;
+  const metricParts: string[] = [];
+  if (showDollar && pnl != null) metricParts.push(fmtDollar(pnl));
+  if (showPct && pnlPct != null && Number.isFinite(pnlPct)) metricParts.push(fmtPct(pnlPct));
+  const blocks = [`💸 ${cashtagTicker(description)}`];
+  const metric = metricParts.join(" ");
+  if (metric) blocks.push(metric);
+  if (holdTime) blocks.push(`Held ${holdTime}`);
+  blocks.push("Executed with Radon", "https://radon.run");
+  return blocks.join("\n\n");
 }
 
 export default function SharePnlButton({ data, size = 13 }: SharePnlButtonProps) {

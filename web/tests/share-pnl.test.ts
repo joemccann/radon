@@ -1120,14 +1120,32 @@ describe("buildTweetText", () => {
     expect(text).toContain("Some custom description");
   });
 
-  it("appends hold time with a separator when provided", () => {
-    const text = buildTweetText("Closed AAPL Stock", 500, 2.86, false, true, "1 day");
-    expect(text).toContain("+2.86% · Held 1 day");
+  it("puts description, metric, hold, attribution, and URL on blank-line-separated blocks", () => {
+    const text = buildTweetText(
+      "Closed SNDK 9/25 (Long $1700 Put)",
+      null,
+      33.03,
+      false,
+      true,
+      "3 days",
+    );
+    expect(text).toBe(
+      "💸 Closed $SNDK 9/25 (Long $1700 Put)\n\n+33.03%\n\nHeld 3 days\n\nExecuted with Radon\n\nhttps://radon.run",
+    );
   });
 
-  it("shows hold time without a leading separator when pnl portion is empty", () => {
+  it("keeps dollar and percent on one metric line when both enabled", () => {
+    const text = buildTweetText("Closed AAOI Risk Reversal", 6871, 20.88, true, true, "1 day");
+    expect(text).toBe(
+      "💸 Closed $AAOI Risk Reversal\n\n+$6,871.00 +20.88%\n\nHeld 1 day\n\nExecuted with Radon\n\nhttps://radon.run",
+    );
+  });
+
+  it("omits the metric block when both $ and % are off, without a stray blank line", () => {
     const text = buildTweetText("Closed X", 100, 50, false, false, "37 minutes");
-    expect(text).toContain("$X Held 37 minutes");
+    expect(text).toBe(
+      "💸 Closed $X\n\nHeld 37 minutes\n\nExecuted with Radon\n\nhttps://radon.run",
+    );
     expect(text).not.toContain("· Held");
   });
 
