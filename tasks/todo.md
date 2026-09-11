@@ -6384,7 +6384,7 @@ Dependency graph: T1 -> T2 -> T3.
 ## Review
 Pending measured audit evidence.
 
-# CI performance remediate (2026-09-11) [IN PROGRESS]
+# CI performance remediate (2026-09-11) [COMPLETE]
 
 Apply every eligible P0/P1 finding from CIP-011 while preserving the full
 test, provenance, and deployment-safety closure.
