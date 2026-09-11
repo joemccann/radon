@@ -24,6 +24,30 @@ remain present; the newly touched `cta-sync`, `perf-twr`, `flex-pull`, and
 
 ---
 
+# Task: Reliability remediate 2026-09-11 [IN PROGRESS]
+
+Reduced rung permits P0/P1 only. The completed audit has no new P0/P1
+finding; REL-251 through REL-253 source work remains DONE. Re-run the
+mandatory drill and gate closure without touching IB or live orders.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify runner markers, dated branch, reduced-rung eligibility, and backlog state.
+- T2 depends_on: [T1] - Run permanent drills using the reliability venv with detached sentinel evidence.
+- T3 depends_on: [T2] - Append the remediation outcome, commit, and push the dated branch.
+
+## Checklist
+
+- [x] T1 `RADON_WEEKEND_REDUCED=1`; no open P0/P1 item found; REL-251 through REL-253 are DONE.
+- [x] T2 Drill stage started with prewritten fields and exited before either result or `DONE` sentinel.
+- [x] T3 Appended the blocked verification record; branch delivery follows.
+
+## Review
+
+- [x] The detached child reproduced the existing runner-stage blocker; no incomplete suite is represented as passing.
+
+---
+
 # Task: TWR coverage-lag overwrite 2026-09-11 [IN PROGRESS]
 
 Weekday radon-perf-twr must not clip Turso NAV to lagging mirrored-flow
