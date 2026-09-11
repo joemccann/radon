@@ -19,6 +19,9 @@ StandardError=journal
 # reads (R-103). resolve_flows reuses the one NAV document, so a run makes one
 # Flex request chain. 600s = the 420s budget plus SendRequest, parse and write.
 # Pinned by scripts/tests/test_nested_deadlines.py.
+#
+# Weekday ExecStart has no --sendrequest. Mirrored-flow covered_through that
+# lags Turso NAV must not clip nav_as_of or overwrite a newer published tape.
 TimeoutStartSec=600
 
 [Install]
