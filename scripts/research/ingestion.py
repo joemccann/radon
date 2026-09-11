@@ -12,6 +12,7 @@ import threading
 from research.dropbox import DropboxClient, DropboxError, content_hash
 from utils.atomic_io import atomic_save
 from datetime import datetime, timezone
+from research.model import classify_error
 from research.state import State
 
 
@@ -34,7 +35,7 @@ class Backoff:
 def stage_health(root, stage, state, error=None):
     atomic_save(str(Path(root) / f'health-{stage}.json'), {
         'stage': stage, 'state': state, 'updated_at': datetime.now(timezone.utc).isoformat(),
-        'error': type(error).__name__ if error else None})
+        'error': classify_error(error) if error else None})
 
 
 class GuardedClient:
@@ -140,7 +141,7 @@ def review_one(root, state, pipeline, publisher, publish):
         if not state.is_processing(work['key']):
             return True
         if work['attempts'] >= 5:
-            state.complete(work['key'], {'status': 'held', 'error': type(error).__name__})
+            state.complete(work['key'], {'status': 'held', 'error': classify_error(error)})
         else:
             state.retry(work['key'], error, delay=min(3600, 60 * 2 ** work['attempts']))
     if publish:
