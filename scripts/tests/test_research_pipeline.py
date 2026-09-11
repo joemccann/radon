@@ -96,7 +96,7 @@ def test_model_rejects_truncation_and_never_exposes_remote_errors():
     session=SimpleNamespace(post=lambda *a,**k:response)
     with pytest.raises(ModelError,match='complete'):Reviewer('secret',session=session).ask('test')
     response.status_code=401
-    with pytest.raises(ModelError,match='HTTP 401'):Reviewer('secret',session=session).ask('test')
+    with pytest.raises(ModelError,match='http_401'):Reviewer('secret',session=session).ask('test')
 
 
 def test_outbox_failure_does_not_acknowledge(tmp_path):
