@@ -95,6 +95,35 @@ def test_nav_past_mirror_coverage_is_not_chained(flex_outage_with_mirror, monkey
 
     payload = builder.build_and_persist(persist=False)
 
-    mirror = next(w for w in payload["warnings"] if w["code"] == "FLOWS_SOURCE_MIRROR")
-    assert mirror["context"]["sessions_dropped"] == 1
-    assert mirror["context"]["covered_through"] == "2026-08-13"
+    assert payload["nav_as_of"] == "2026-08-14"
+    lag = next(w for w in payload["warnings"] if w["code"] == "FLOWS_COVERAGE_LAGS_NAV")
+    assert lag["context"]["covered_through"] == "2026-08-13"
+    last = next(sp for sp in payload["subperiods"] if sp["date"] == "2026-08-14")
+    assert last["r"] is None
+    assert last["skip_reason"] == "unverified_flow_coverage"
+
+
+def test_weekday_mirror_does_not_publish_older_nav_as_of(flex_outage_with_mirror, monkeypatch):
+    """Incident 2026-09-10: Turso NAV through Sep 9, mirror covered_through Sep 8.
+
+    The weekday job must publish nav_as_of=2026-09-09, not clip to Sep 8.
+    """
+    monkeypatch.setattr(
+        builder,
+        "load_nav_from_disk",
+        lambda: {
+            "2026-09-05": 1_000_000.0,
+            "2026-09-08": 1_010_000.0,
+            "2026-09-09": 1_020_000.0,
+        },
+    )
+    monkeypatch.setattr(builder, "load_nav_from_turso", lambda: None)
+    monkeypatch.setattr(builder, "load_flows_from_turso", lambda: {"2026-09-08": 0.0})
+    monkeypatch.setattr(builder, "load_flows_coverage_state", lambda: ("2026-09-08", True))
+
+    payload = builder.build_and_persist(persist=False)
+
+    assert payload["nav_as_of"] == "2026-09-09"
+    assert payload["period_end"] == "2026-09-09"
+    codes = {w["code"] for w in payload["warnings"]}
+    assert "FLOWS_COVERAGE_LAGS_NAV" in codes

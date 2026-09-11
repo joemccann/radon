@@ -11,6 +11,7 @@ severity stays at `info` on the stated grounds that this bound does the
 policing, so the one mechanism it defers to was the one failing open.
 """
 
+import json as _json
 import sys
 from pathlib import Path
 
@@ -86,7 +87,7 @@ class TestCoverageBoundFailsClosed:
         )
 
     def test_uncovered_sessions_are_dropped_when_coverage_is_partial(self, monkeypatch):
-        """The covered path must keep working exactly as before."""
+        """Coverage still exists: NAV is kept, unverified sessions are not chained."""
         monkeypatch.setattr(
             ptb, "_query_turso_strict", lambda _sql: [{"report_date": "2026-08-10"}]
         )
@@ -96,10 +97,15 @@ class TestCoverageBoundFailsClosed:
         bounded, flows, warnings = ptb._apply_mirrored_flow_coverage(
             observations, _mirror_flows()
         )
-        assert [o.date for o in bounded] == ["2026-08-01", "2026-08-10"]
+        assert [o.date for o in bounded] == [
+            "2026-08-01",
+            "2026-08-10",
+            "2026-08-20",
+        ]
         assert flows.status is FlowsStatus.OK
-        assert warnings[0]["code"] == "FLOWS_SOURCE_MIRROR"
-        assert warnings[0]["context"]["sessions_dropped"] == 1
+        codes = {w["code"] for w in warnings}
+        assert "FLOWS_SOURCE_MIRROR" in codes
+        assert "FLOWS_COVERAGE_LAGS_NAV" in codes
 
     def test_live_flex_flows_are_still_unbounded(self, monkeypatch):
         """Only a MIRROR needs the bound; a live statement covers what it covers."""
@@ -134,3 +140,109 @@ def test_bound_observations_to_coverage_returns_nothing_for_unknown_coverage():
     observations = _obs(("2026-08-01", 100000.0), ("2026-08-20", 180000.0))
     assert list(ptb.bound_observations_to_coverage(observations, None)) == []
     assert list(ptb.bound_observations_to_coverage(observations, "")) == []
+
+
+class TestCoverageLagDoesNotRegressPublishedNav:
+    """2026-09-10: weekday radon-perf-twr clipped Turso NAV to mirrored-flow
+    covered_through=2026-09-08 and published AS OF 2026-09-08, overwriting a
+    fresher ingest tape. Newer NAV must stay published; unverified sessions
+    must not be chained as implicit zero flows.
+    """
+
+    def test_apply_keeps_newer_nav_when_mirror_coverage_lags(self, monkeypatch):
+        monkeypatch.setattr(
+            ptb, "_query_turso_strict", lambda _sql: [{"report_date": "2026-09-08"}]
+        )
+        observations = _obs(
+            ("2026-09-07", 100000.0),
+            ("2026-09-08", 101000.0),
+            ("2026-09-09", 102000.0),
+        )
+        kept, flows, warnings = ptb._apply_mirrored_flow_coverage(
+            observations, _mirror_flows()
+        )
+        assert [o.date for o in kept] == ["2026-09-07", "2026-09-08", "2026-09-09"]
+        assert flows.status is FlowsStatus.OK
+        codes = {w["code"] for w in warnings}
+        assert "FLOWS_SOURCE_MIRROR" in codes
+        assert "FLOWS_COVERAGE_LAGS_NAV" in codes
+        lag = next(w for w in warnings if w["code"] == "FLOWS_COVERAGE_LAGS_NAV")
+        assert lag["context"]["covered_through"] == "2026-09-08"
+        assert lag["context"]["nav_as_of"] == "2026-09-09"
+
+    def test_uncovered_session_is_skipped_not_chained_as_zero_flow(self, monkeypatch):
+        """An $80k deposit on the uncovered session must not become return."""
+        monkeypatch.setattr(
+            ptb, "_query_turso_strict", lambda _sql: [{"report_date": "2026-09-08"}]
+        )
+        observations = _obs(
+            ("2026-09-08", 100000.0),
+            ("2026-09-09", 180000.0),
+        )
+        kept, flows, warnings = ptb._apply_mirrored_flow_coverage(
+            observations, _mirror_flows()
+        )
+        assert [o.date for o in kept] == ["2026-09-08", "2026-09-09"]
+        payload = ptb.build_payload(
+            kept,
+            flows,
+            ingest_warnings=warnings,
+            nav_source="turso",
+        )
+        assert payload["nav_as_of"] == "2026-09-09"
+        last = next(sp for sp in payload["subperiods"] if sp["date"] == "2026-09-09")
+        assert last["r"] is None
+        assert last["skip_reason"] == "unverified_flow_coverage"
+        assert payload["twr"]["cum_return"] != pytest.approx(0.80, rel=1e-6)
+
+
+class TestPersistRefusesOlderTape:
+    """A weekday clip must not clobber a fresher ingest/published snapshot."""
+
+    def test_persist_does_not_overwrite_newer_nav_as_of(self, tmp_path, monkeypatch):
+        published = tmp_path / "performance.json"
+        published.write_text(
+            '{"schema_version": 2, "nav_as_of": "2026-09-09", "status": "ok"}\n',
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(ptb, "_PERF_PATH", published)
+        monkeypatch.setattr(ptb, "_DATA_DIR", tmp_path)
+        monkeypatch.delenv("TURSO_DB_URL", raising=False)
+        monkeypatch.delenv("TURSO_AUTH_TOKEN", raising=False)
+
+        ptb.persist_payload(
+            {
+                "schema_version": 2,
+                "nav_as_of": "2026-09-08",
+                "status": "ok",
+                "series": [],
+                "subperiods": [],
+            }
+        )
+
+        kept = _json.loads(published.read_text(encoding="utf-8"))
+        assert kept["nav_as_of"] == "2026-09-09"
+
+    def test_persist_writes_when_incoming_nav_as_of_is_newer(self, tmp_path, monkeypatch):
+        published = tmp_path / "performance.json"
+        published.write_text(
+            '{"schema_version": 2, "nav_as_of": "2026-09-08", "status": "ok"}\n',
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(ptb, "_PERF_PATH", published)
+        monkeypatch.setattr(ptb, "_DATA_DIR", tmp_path)
+        monkeypatch.delenv("TURSO_DB_URL", raising=False)
+        monkeypatch.delenv("TURSO_AUTH_TOKEN", raising=False)
+
+        ptb.persist_payload(
+            {
+                "schema_version": 2,
+                "nav_as_of": "2026-09-09",
+                "status": "ok",
+                "series": [],
+                "subperiods": [],
+            }
+        )
+
+        kept = _json.loads(published.read_text(encoding="utf-8"))
+        assert kept["nav_as_of"] == "2026-09-09"
