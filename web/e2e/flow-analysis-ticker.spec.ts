@@ -210,6 +210,28 @@ test.describe("Flow Analysis per-ticker route", () => {
     await expect(report).not.toContainText("C/P Ratio");
   });
 
+  test("history tab keeps the session table inside table-wrap on a phone", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await setupBaseMocks(page);
+    const fresh = bullishReport("AAPL", new Date().toISOString());
+    await page.route("**/api/flow-analysis/AAPL**", (r) =>
+      r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(fresh) }),
+    );
+
+    await page.goto("/flow-analysis/AAPL");
+    await page.getByRole("tab", { name: "History" }).click();
+
+    const wrap = page.getByTestId("daily-dp-history-table-wrap");
+    await expect(wrap).toBeVisible();
+    await expect(wrap).toHaveClass(/table-wrap/);
+    await expect(wrap.locator("table.ticker-flow-daily")).toBeVisible();
+    const overflow = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      innerWidth: window.innerWidth,
+    }));
+    expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.innerWidth + 1);
+  });
+
   test("missing cache triggers a scan and shows the analyzing state", async ({ page }) => {
     await setupBaseMocks(page);
 
