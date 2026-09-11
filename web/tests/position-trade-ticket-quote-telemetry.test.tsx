@@ -138,6 +138,42 @@ describe("PositionTradeTicket quote telemetry", () => {
     expect(container.querySelector(".price-bar")).not.toBeNull();
   });
 
+  it("renders HIGH/LOW/VOLUME as --- when the live option quote has no session ticks", () => {
+    const position = riskReversal();
+    const callKey = legPriceKey(position.ticker, position.expiry, position.legs[0])!;
+    const putKey = legPriceKey(position.ticker, position.expiry, position.legs[1])!;
+    const prices = {
+      [callKey]: makePriceData({ symbol: callKey, bid: 132, ask: 136, last: 133.93, close: 130 }),
+      [putKey]: makePriceData({
+        symbol: putKey,
+        bid: 40.5,
+        ask: 41.5,
+        last: 41.0,
+        lastIsCalculated: true,
+        close: 43.25,
+      }),
+    };
+    const { container } = render(
+      <PositionTradeTicket
+        position={position}
+        prices={prices}
+        portfolio={null}
+        target={{ kind: "leg", index: 1 }}
+        onClose={() => {}}
+      />,
+    );
+    const rows = [...container.querySelectorAll(".price-bar-item")].map((row) => ({
+      label: row.querySelector(".price-bar-label")?.textContent ?? "",
+      value: row.querySelector(".price-bar-value")?.textContent ?? "",
+    }));
+    const valueOf = (label: string) => rows.find((r) => r.label === label)?.value;
+    expect(valueOf("BID")).toContain("40.50");
+    expect(valueOf("ASK")).toContain("41.50");
+    expect(valueOf("VOLUME")).toBe("---");
+    expect(valueOf("HIGH")).toBe("---");
+    expect(valueOf("LOW")).toBe("---");
+  });
+
   it("shows the leg's own session stats, not the underlying's", () => {
     const { container } = renderTicket({ kind: "leg", index: 1 });
     const values = [...container.querySelectorAll(".price-bar-value")].map((n) => n.textContent ?? "");
