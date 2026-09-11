@@ -1,3 +1,29 @@
+# Task: Reliability delta audit 2026-09-11 [IN PROGRESS]
+
+Audit `9dce4b3a..f1f59a73` serially across the changed control-plane,
+collection, persistence, research-serving, and web surfaces. Do not change
+production behavior or interact with IB.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify runner markers, remote branch state, and ledger anchor.
+- T2 depends_on: [T1] - Inspect changed source plus direct blast radius and run standing sweeps.
+- T3 depends_on: [T2] - Append the frozen audit ledger and commit the nightly branch.
+
+## Checklist
+
+- [x] T1 Runner markers and anchor `9dce4b3a` verified; remote dated branch absent.
+- [x] T2 Reviewed 75 changed source files; placement/catalog sweeps hold; pytest unavailable in runner.
+- [x] T3 Appended 2026-09-11 audit record; validation and branch delivery follow.
+
+## Review
+
+No new source-actionable finding verified. The unchanged money-path chokepoints
+remain present; the newly touched `cta-sync`, `perf-twr`, `flex-pull`, and
+`ai-cycle` scheduled writers remain in both watchdog catalogs.
+
+---
+
 # Task: TWR coverage-lag overwrite 2026-09-11 [IN PROGRESS]
 
 Weekday radon-perf-twr must not clip Turso NAV to lagging mirrored-flow
