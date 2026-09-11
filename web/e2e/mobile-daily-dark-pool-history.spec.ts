@@ -134,6 +134,8 @@ async function openHistory(page: Page) {
   return history;
 }
 
+test.use({ viewport: { width: 393, height: 852 } });
+
 test.describe("daily dark pool history — mobile shell", () => {
   test("the session table scrolls in its wrapper, never the page", async ({ page }) => {
     await openHistory(page);
