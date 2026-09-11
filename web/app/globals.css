@@ -18755,6 +18755,26 @@ body[data-mobile="true"] td.right {
 
   .ticker-flow-daily {
     font-size: 11px;
+    min-width: max-content;
+  }
+
+  .ticker-flow-daily th,
+  .ticker-flow-daily td {
+    white-space: nowrap;
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+
+  .ticker-flow-daily th:first-child,
+  .ticker-flow-daily td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    background: var(--bg-panel);
+  }
+
+  .ticker-flow-daily thead th:first-child {
+    z-index: 3;
   }
 }
 
