@@ -838,6 +838,11 @@ settled facts and are safe to reserve from the mirror. An **empty** mirror is
 still `FAILED`: absence of evidence is not a verified zero, and inventing a
 zero flow set is what produced the +951% TWR.
 
+A weekday mirror must not clip Turso NAV to a lagging `covered_through` and
+overwrite a newer published tape. Newer NAV stays on the series; sessions
+past coverage are skipped, not chained as implicit zeros. `persist_payload`
+refuses an incoming `nav_as_of` older than the tape already on disk.
+
 Flex codes seen on this path: `1001` (statement not generatable right now),
 `1018` (the only real rate limit), `1019` (generation in progress),
 `1025` (too many failed attempts — a lockout earned by repeated failures).

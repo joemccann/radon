@@ -22,7 +22,7 @@ NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectHome=read-only
 InaccessiblePaths=-/etc/radon/env -/home/radon/radon-cloud/.env
-ReadWritePaths=/var/lib/radon/flex-inbox /var/lib/radon/flex-secrets
+ReadWritePaths=/var/lib/radon/flex-inbox /var/lib/radon/flex-secrets /home/radon/radon/data
 
 [Install]
 WantedBy=multi-user.target

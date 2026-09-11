@@ -1,3 +1,24 @@
+# Task: TWR coverage-lag overwrite 2026-09-11 [IN PROGRESS]
+
+Weekday radon-perf-twr must not clip Turso NAV to lagging mirrored-flow
+covered_through and overwrite a newer published tape. Flex-pull unit must
+keep ProtectHome=read-only and ReadWritePaths /home/radon/radon/data.
+Do not merge.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests for Sep-8 overwrite and persist no-clobber.
+- T2 depends_on: [T1] - Keep newer NAV, skip unverified TWR sessions, persist guard.
+- T3 depends_on: [T2] - Flex-pull ReadWritePaths, unit comments, focused pytest, draft PR.
+
+## Checklist
+
+- [x] T1 Failing overwrite / persist tests.
+- [x] T2 Builder + persist + warning.
+- [ ] T3 Flex-pull unit, hash pin, CI watch. No merge.
+
+---
+
 # Task: CTA vision cascade 2026-09-10 [IN PROGRESS]
 
 Never hard-fail radon-cta-sync.service on Anthropic Vision credit exhaustion.

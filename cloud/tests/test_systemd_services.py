@@ -1196,6 +1196,11 @@ class TestFlexPull:
         assert "flex_sftp_pull.py" in svc["execstart"]
         hidden = svc.get("inaccessiblepaths", "")
         assert "/etc/radon/env" in hidden
+        assert svc.get("protecthome") == "read-only"
+        rw = svc.get("readwritepaths", "")
+        assert "/var/lib/radon/flex-inbox" in rw
+        assert "/var/lib/radon/flex-secrets" in rw
+        assert "/home/radon/radon/data" in rw
 
     def test_timer_is_morning_after_with_empty_dir_retry(self, services_dir):
         text = (services_dir / "radon-flex-pull.timer").read_text()
