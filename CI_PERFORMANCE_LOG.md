@@ -1496,3 +1496,31 @@ python/web gate co-wall then the deploy floor (CIP-004).
   [#402](https://github.com/joemccann/radon/pull/402), and rolling issue
   [comment](https://github.com/joemccann/radon/issues/196#issuecomment-5630830093)
   are published; PR validation is owned by the later deliver phase.
+
+### 2026-09-11 - remediate - branch `ci-performance/2026-09-11`
+
+- Runner state: dedicated `.radon-weekend-runner` and
+  `.radon-ci-performance-runner` markers, clean dated audit branch, GitHub
+  authentication, `origin/main`, and the audit's 24 required protection
+  contexts were re-verified. `RADON_WEEKEND_REDUCED=1` confines remediation
+  to P0/P1; no live loop lock was present.
+- Remediation eligibility: CIP-011 supplies zero P0/P1 source-actionable
+  findings. The measured `scripts-rs`/node-image co-wall is work-bound and
+  cannot demonstrate the >=15-second/10% recurring critical-path threshold
+  before required coverage and protected deployment floors. Repartitioning it
+  would put recursive shard-union completeness and runner-minute use at risk.
+  No lower-priority candidate was substituted and no CIP experiment was
+  allocated.
+- Verification: `../venv-ci-performance/bin/python -m pytest
+  scripts/tests/test_ci_gate_integrity.py scripts/tests/test_ci_deploy_concurrency.py
+  scripts/tests/test_path_filter.py -q` — **89 passed in 9.32s**; Ruby YAML
+  parsing of `.github/workflows/ci.yml`, `bash -n
+  scripts/ci_performance_nightly.sh`, and both base/branch diff checks passed.
+  These local checks are safety evidence, not production timing claims.
+- Safety/impact: test inventory, coverage, path classification, required gate
+  closure, immutable pins, exact-SHA image provenance, host health, recovery,
+  rollback, cancellation, and the 40-second stability window are unchanged.
+  Runner-minute impact is zero. Outcome: `NO_SAFE_CHANGE` /
+  `INSUFFICIENT_SAMPLE`; CIP-005/CIP-007/CIP-009 remain `VALIDATING`, and
+  CIP-004/CIP-006/CIP-008 remain `DEFERRED`. Residual bottleneck remains the
+  required gate/image co-wall followed by the protected Deploy floor.

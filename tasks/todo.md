@@ -6384,6 +6384,27 @@ Dependency graph: T1 -> T2 -> T3.
 ## Review
 Pending measured audit evidence.
 
+# CI performance remediate (2026-09-11) [IN PROGRESS]
+
+Apply every eligible P0/P1 finding from CIP-011 while preserving the full
+test, provenance, and deployment-safety closure.
+
+## Dependency graph
+
+- T1 depends_on: [] - Re-verify dedicated runner, dated branch, reduced scope, and audit eligibility.
+- T2 depends_on: [T1] - Establish focused workflow-safety baseline and verify no P0/P1 source action exists.
+- T3 depends_on: [T2] - Append the reduced-scope remediation decision, commit, push, and update the nightly report.
+
+## Checklist
+
+- [x] T1 Dedicated markers, dated branch, GitHub authentication, and `RADON_WEEKEND_REDUCED=1` verified.
+- [x] T2 89 focused workflow safety contracts, YAML parsing, shell syntax, and diff checks.
+- [x] T3 Append-only remediation record ready; no lower-priority experiment substitution.
+
+## Review
+
+- [x] CIP-011 audit identified zero P0/P1 source-actionable findings. The existing work-bound `scripts-rs`/node-image co-wall is below the materiality floor and remains outside this reduced scope.
+
 # Form focus highlight audit (2026-09-10)
 
 Specification: one visible, aligned keyboard focus indicator per field, around the complete visual control (including currency prefixes). Audit shared/composite controls across Clear light/dark and desktop/mobile. Preserve native semantics and all order behavior; use mocked browser data. No local suites.
