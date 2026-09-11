@@ -139,6 +139,11 @@ RETRY_DELAY="${RADON_FLOW_REFRESH_RETRY_DELAY_SECS:-8}"
 # Distinct return code for "the general subprocess lane was full" (R-170), so
 # the caller can tell a capacity shed from a real scan failure.
 SHED_EXIT=75
+# Distinct from shed: discover.py (and siblings) exit 0 with
+# `error: required provider data unavailable` on a UW miss; FastAPI maps that
+# to HTTP 400. Not a duplicate-scan risk and not a unit fault — next slot
+# retries. 2026-09-11 14:00Z page f14a6918.
+PROVIDER_EXIT=76
 
 # The API raises HTTPException(502, detail=result.error) for EVERY failure -
 # capacity exhaustion, a nonzero script exit, an asyncio timeout at the script
@@ -146,6 +151,7 @@ SHED_EXIT=75
 # tell a shed from a fault, and the body is the only signal there is; the
 # marker matches scripts/api/server.py's _CAPACITY_SHED_MARKER. R-221.
 CAPACITY_SHED_MARKER="subprocess capacity exhausted"
+PROVIDER_UNAVAILABLE_MARKER="required provider data unavailable"
 
 _is_capacity_shed() {
     # $1 = curl exit, $2 = http code, $3 = response body
@@ -155,6 +161,13 @@ _is_capacity_shed() {
         *) return 1 ;;
     esac
     printf '%s' "$3" | tr '[:upper:]' '[:lower:]' | grep -qF "$CAPACITY_SHED_MARKER"
+}
+
+_is_provider_unavailable() {
+    # $1 = curl exit, $2 = http code, $3 = response body
+    [ "$1" -eq 0 ] || return 1
+    [ "$2" = "400" ] || return 1
+    printf '%s' "$3" | tr '[:upper:]' '[:lower:]' | grep -qF "$PROVIDER_UNAVAILABLE_MARKER"
 }
 
 _retryable_flow_shed() {
@@ -214,6 +227,11 @@ refresh_scan() {
         return "$SHED_EXIT"
     fi
 
+    if _is_provider_unavailable "$CURL_EXIT" "$HTTP_CODE" "$RESPONSE_BODY"; then
+        echo "$(date): ${label} provider data unavailable (http=${HTTP_CODE}); the next slot retries" >&2
+        return "$PROVIDER_EXIT"
+    fi
+
     if [ "$CURL_EXIT" -ne 7 ]; then
         echo "$(date): ${label} FastAPI outcome indeterminate (curl=${CURL_EXIT}, http=${HTTP_CODE}); not launching duplicate" >&2
         return 1
@@ -238,12 +256,14 @@ refresh_scan() {
 
 FAILURES=0
 SHED=0
+PROVIDER=0
 
 run_one() {
     refresh_scan "$@"
     case $? in
         0) ;;
         "$SHED_EXIT") SHED=$((SHED + 1)) ;;
+        "$PROVIDER_EXIT") PROVIDER=$((PROVIDER + 1)) ;;
         *) FAILURES=$((FAILURES + 1)) ;;
     esac
 }
@@ -255,6 +275,14 @@ run_one "discover" "/discover?force=true" scripts/discover.py --min-alerts 3 --d
 if [ "$FAILURES" -gt 0 ]; then
     echo "$(date): Flow refresh finished with ${FAILURES} failed scan(s)" >&2
     exit 1
+fi
+
+if [ "$PROVIDER" -gt 0 ]; then
+    echo "$(date): Flow refresh provider data unavailable on ${PROVIDER} scan(s); the next slot retries" >&2
+    # Exit 0 so the unit watchdog does not page P1 hourly for a UW miss
+    # discover.py already handled. Error row keeps it visible. 2026-09-11.
+    _flow_health "error" "provider data unavailable on ${PROVIDER} scan(s)"
+    exit 0
 fi
 
 if [ "$SHED" -gt 0 ]; then

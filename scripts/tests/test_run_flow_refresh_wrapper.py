@@ -443,3 +443,66 @@ def test_persistent_502_sheds_without_direct_fallback(tmp_path: Path) -> None:
     assert "fallback" not in combined
     assert "scanner-direct" not in combined
     assert stub.hits.get(SCAN_PATH, 0) >= 3, stub.hits
+
+
+def test_discover_provider_unavailable_400_does_not_page_or_duplicate(
+    tmp_path: Path,
+) -> None:
+    """2026-09-11 14:00Z page f14a6918: scanner 200, flow-analysis shed,
+    discover 502-shed then HTTP 400 ``required provider data unavailable``.
+
+    discover.py already exits 0 with that error key on a UW miss (429 in the
+    same minute as vol-cone Too Many Requests). FastAPI maps it to 400.
+    The wrapper treated 400 as indeterminate, skipped the duplicate (correct),
+    and exited 1 so the oneshot paged P1. Next hourly slot retries; do not
+    fail the unit and do not launch a second discover.py.
+    """
+    repo_dir = _repo(tmp_path)
+    python_bin = _stage_python(tmp_path / "bin")
+    _stage_scanner_stub(repo_dir / "scripts", "scanner.py", "scanner-direct")
+    _stage_scanner_stub(repo_dir / "scripts", "flow_analysis.py", "flow-direct")
+    _stage_scanner_stub(repo_dir / "scripts", "discover.py", "discover-direct")
+
+    port = _free_port()
+    stub = _FastApiStub(
+        port,
+        fail_paths=frozenset({DISCOVER_PATH}),
+        fail_status=400,
+        fail_body=b'{"detail": "required provider data unavailable"}',
+    )
+    stub.start()
+    try:
+        result = _run(repo_dir, python_bin, port, retries=2, delay=1)
+    finally:
+        stub.stop()
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    combined = (result.stdout + result.stderr).lower()
+    assert "provider" in combined and "unavailable" in combined
+    assert "indeterminate" not in combined
+    assert "fallback" not in combined
+    assert "discover-direct" not in combined
+    assert stub.hits.get(DISCOVER_PATH, 0) == 1, stub.hits
+    assert stub.hits.get(SCAN_PATH, 0) == 1, stub.hits
+
+
+def test_http_400_without_provider_marker_still_fails(tmp_path: Path) -> None:
+    """A 400 that is not the discover.py UW-miss payload stays a unit fault."""
+    repo_dir = _repo(tmp_path)
+    python_bin = _stage_python(tmp_path / "bin")
+    port = _free_port()
+    stub = _FastApiStub(
+        port,
+        fail_paths=frozenset({DISCOVER_PATH}),
+        fail_status=400,
+        fail_body=b'{"detail": "discover does not accept positional arguments"}',
+    )
+    stub.start()
+    try:
+        result = _run(repo_dir, python_bin, port, retries=2, delay=1)
+    finally:
+        stub.stop()
+
+    assert result.returncode != 0
+    assert stub.hits.get(DISCOVER_PATH, 0) == 1, stub.hits
+    assert "indeterminate" in (result.stdout + result.stderr).lower()

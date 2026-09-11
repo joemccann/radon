@@ -76,6 +76,29 @@ def test_force_bypasses_discover_cooldown(client, monkeypatch):
     assert run_mock.call_count == 2
 
 
+async def _stub_provider_miss(*args, **kwargs):
+    return _fake(
+        ok=True,
+        data={
+            "error": "required provider data unavailable",
+            "degraded": True,
+            "candidates": [],
+        },
+    )
+
+
+def test_discover_provider_unavailable_is_http_400_not_cache_write(
+    client, isolated_data_dir
+):
+    """discover.py exits 0 with an error key on a UW miss. The hourly wrapper
+    classifies this 400 as a provider miss (not a duplicate, not a P1)."""
+    with patch("scripts.api.server.run_script", side_effect=_stub_provider_miss):
+        res = client.post("/discover?force=true")
+    assert res.status_code == 400
+    assert res.json()["detail"] == "required provider data unavailable"
+    assert not (isolated_data_dir / "discover.json").exists()
+
+
 def test_scan_cooldown_does_not_call_script_twice(client, monkeypatch):
     with patch("scripts.api.server.run_script", side_effect=_stub_ok) as run_mock:
         client.post("/scan")

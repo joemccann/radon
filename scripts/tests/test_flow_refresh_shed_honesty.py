@@ -320,3 +320,33 @@ class TestTheProbeOutageWritesItsRow:
 
         assert result.returncode == 0, result.stderr or result.stdout
         assert _health_writes(calls) == [("flow-refresh", "ok")]
+
+
+class TestProviderUnavailableIsVisibleNotAPage:
+    """2026-09-11 14:00Z: discover HTTP 400 after a UW miss must not page P1,
+    and must not look like a clean run or a capacity shed."""
+
+    def test_a_provider_400_writes_an_error_row_and_exits_zero(self, tmp_path):
+        repo = _repo(tmp_path)
+        calls = _stage_health_recorder(repo)
+        python_bin = _stage_python(tmp_path / "bin", trading_day=True)
+        port = _free_port()
+        stub = _FastApiStub(
+            port,
+            fail_paths=frozenset({"/discover"}),
+            fail_status=400,
+            fail_body=b'{"detail": "required provider data unavailable"}',
+        )
+        stub.start()
+        try:
+            result = _run(repo, python_bin, port, retries=0)
+        finally:
+            stub.stop()
+
+        assert result.returncode == 0, result.stderr or result.stdout
+        assert _health_writes(calls) == [("flow-refresh", "error")], (
+            "a provider miss left the watchdog with no row: "
+            f"{_health_writes(calls)}"
+        )
+        assert "provider" in _health_messages(calls)[0], _health_messages(calls)
+        assert "shed" not in (result.stdout + result.stderr).lower()

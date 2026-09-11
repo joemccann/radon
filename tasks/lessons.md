@@ -1,4 +1,9 @@
 # Lessons
+## 2026-09-11 — Discover UW miss is HTTP 400, not a oneshot fault
+
+- `discover.py` already exits 0 with `error: required provider data unavailable` on `UWAPIError`. FastAPI `_run_flow_tab` maps that key to HTTP 400. The hourly wrapper used to treat 400 as indeterminate and fail the oneshot, paging P1 (page `f14a6918`, 2026-09-11 14:00Z) while `/health/lite` stayed authenticated and vol-cone logged Too Many Requests in the same minute.
+- Classify that 400 by body marker. Exit 0, heartbeat `error`, keep the last cache. Do not call it a capacity shed (R-221). A 400 without the marker still fails the unit.
+
 ## 2026-09-10 — Run the PR test loop on GitHub
 
 - The operator requires PR test suites to run on GitHub, not the laptop, because GitHub has more compute. Do not start local suites for PR preparation or CI repairs unless explicitly requested.

@@ -1435,6 +1435,47 @@ all three flow-tab POSTs hit the FastAPI subprocess slot cap.** Peak:
 
 ---
 
+## flow-refresh-discover-provider-400
+
+**`radon-flow-refresh.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) when `/discover` returns HTTP 400 after a UW miss.**
+Peak: 2026-09-11 14:00Z, page `f14a6918…`. Scanner 200; flow-analysis
+capacity-shed (correct); discover 502-shed twice then HTTP 400.
+
+- **Mechanism:** `discover.py` catches `UWAPIError` on the market-wide
+  flow fetch, prints JSON with `error: required provider data unavailable`
+  and `degraded: true`, and exits 0. `_run_flow_tab` maps any payload
+  `error` key to HTTP 400 and skips the cache write. The wrapper treated
+  non-7 / non-2xx / non-capacity-shed as indeterminate, refused the
+  duplicate, and exited 1. `Type=oneshot` has no `Restart=`, so
+  `NRestarts=0`. Sibling `radon-vol-cone-intraday` logged
+  `Too Many Requests` in the same minute. `/health/lite` stayed 200 /
+  authenticated. Last good `discover.json` kept (no cache write on 400).
+- **Discriminating check:** unit journal
+  `discover FastAPI outcome indeterminate (curl=0, http=400)` then
+  `Flow refresh finished with 1 failed scan(s)`; body
+  `required provider data unavailable`; `/health/lite` 200. Instant 502
+  with the capacity marker is `flow-refresh-capacity-502`. Script-failed
+  502 logs `Script discover.py failed (code 1)` and takes seconds.
+  `Result=signal` is deploy stop-clean. If `/health/lite` is down too
+  → API, stand down.
+- **Remediation (code):** classify HTTP 400 whose body matches
+  `required provider data unavailable` as a provider miss
+  (`PROVIDER_EXIT=76`). Do not retry, do not launch the duplicate.
+  Persistent miss exits 0 with a `flow-refresh` `error` heartbeat so the
+  unit watchdog does not page P1 hourly; the next slot retries. Real
+  400s (no marker) and script-failed 502s still exit 1. R-221 still
+  holds: a traceback 502 is not a shed and is not this case.
+- **Regression:**
+  `test_run_flow_refresh_wrapper.py::test_discover_provider_unavailable_400_does_not_page_or_duplicate`,
+  `test_http_400_without_provider_marker_still_fails`,
+  `test_flow_refresh_shed_honesty.py::TestProviderUnavailableIsVisibleNotAPage`,
+  `test_flow_tab_cooldown.py::test_discover_provider_unavailable_is_http_400_not_cache_write`.
+- **Code:** `scripts/run_flow_refresh.sh` (`PROVIDER_UNAVAILABLE_MARKER`,
+  `PROVIDER_EXIT`), `scripts/api/server.py` (`_run_flow_tab` 400).
+
+---
+
 ## orders-sync-capacity-shed-stale
 
 **Autonomous `orders-sync` loop pages P1 `kind=stale` during RTH when
