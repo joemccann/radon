@@ -81,6 +81,7 @@ class FakeSftp:
             return completed
         lines = [ln.strip() for ln in stdin.splitlines() if ln.strip()]
         cwd = ""
+        saw_get = False
         for line in lines:
             if line.startswith("cd "):
                 cwd = line.split(maxsplit=1)[1]
@@ -93,11 +94,18 @@ class FakeSftp:
                 )
                 return completed
             if line.startswith("get "):
+                # One OpenSSH `sftp -b` session can carry many `get` lines.
+                # Returning after the first get made the suite unable to express
+                # the 2026-09-11 connection-storm topology (N files → N SSH
+                # sessions → IBKR kex reset). Process every get in the batch.
                 _, remote, local = line.split(maxsplit=2)
                 key = remote.split("/")[-1]
                 Path(local).write_bytes(self.files[key])
                 self.cwd = cwd
-                return completed
+                saw_get = True
+                continue
+        if saw_get:
+            return completed
         raise AssertionError(f"unexpected sftp batch: {stdin!r}")
 
 
@@ -386,6 +394,101 @@ def test_multi_file_delivery_pulls_every_file(tmp_path, monkeypatch):
     assert code == 0
     assert len(ingested) == 3
     assert sorted(p.name for p in inbox.glob("*.gpg")) == ["one.gpg", "three.gpg", "two.gpg"]
+
+
+def test_multi_file_delivery_uses_one_sftp_get_session(tmp_path, monkeypatch):
+    """IBKR resets kex after a per-file SSH storm (P1 2026-09-11 flex-pull).
+
+    Remote `outgoing` accumulates statements (IBKR never removes them). Opening
+    one sFTP session per `get` tripped `kex_exchange_identification: read:
+    Connection reset by peer` on the tail files; a single batch session pulls
+    the same set cleanly. Encode that topology: N files → exactly one get
+    session, not N.
+    """
+    import flex_sftp_pull as pull
+
+    monkeypatch.setattr(pull, "_heartbeat", lambda *a, **k: None)
+    config = _ssh_config(tmp_path / "ssh_config")
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    trades = TRADES.read_bytes()
+    files = {f"f{i:02d}.gpg": trades for i in range(12)}
+    fake = FakeSftp(files)
+    code = pull.run(
+        config=config,
+        inbox=inbox,
+        runner=fake,
+        decrypt=lambda data, **k: data.decode(),
+        ingest=lambda *a, **k: {"ok": True, "outcome": "applied"},
+        now=AFTER_FIRST_DELIVERY,
+    )
+    assert code == 0
+    get_batches = [inp for inp in fake.inputs if "get " in inp]
+    assert len(get_batches) == 1, (
+        f"expected one batch get session, got {len(get_batches)}"
+    )
+    # `cd outgoing` + `get outgoing/name` doubles the remote path on IBKR
+    # (`/joemcc/outgoing/outgoing/... not found`). Batch must use the same
+    # login-cwd relative path the pre-R-615 single get used.
+    assert "cd " not in get_batches[0]
+    assert "outgoing/outgoing/" not in get_batches[0]
+    for name in files:
+        assert f"get outgoing/{name}" in get_batches[0]
+    # retain_newest_gpg keeps 3; the storm fix is about sessions, not retention.
+    assert len(list(inbox.glob("*.gpg"))) == 3
+
+
+def test_transient_kex_reset_retries_batch_get(tmp_path, monkeypatch):
+    """A single Connection-reset on the batch get must retry, not page. P1 2026-09-11."""
+    import flex_sftp_pull as pull
+
+    import time
+
+    monkeypatch.setattr(pull, "_heartbeat", lambda *a, **k: None)
+    monkeypatch.setattr(time, "sleep", lambda _s: None)
+    config = _ssh_config(tmp_path / "ssh_config")
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    trades = TRADES.read_bytes()
+
+    class FlakyBatch(FakeSftp):
+        def __init__(self):
+            super().__init__({"trades.gpg": trades})
+            self.gets = 0
+
+        def __call__(self, args, **kwargs):
+            stdin = kwargs.get("input") or ""
+            if isinstance(stdin, bytes):
+                stdin = stdin.decode()
+            if "get " in stdin:
+                self.gets += 1
+                if self.gets == 1:
+                    self.calls.append(list(args))
+                    self.inputs.append(stdin)
+                    return SimpleNamespace(
+                        args=args,
+                        returncode=255,
+                        stdout="",
+                        stderr=(
+                            "kex_exchange_identification: read: "
+                            "Connection reset by peer\n"
+                            "Connection reset by 64.190.196.110 port 22\n"
+                        ),
+                    )
+            return super().__call__(args, **kwargs)
+
+    fake = FlakyBatch()
+    code = pull.run(
+        config=config,
+        inbox=inbox,
+        runner=fake,
+        decrypt=lambda data, **k: data.decode(),
+        ingest=lambda *a, **k: {"ok": True, "outcome": "applied"},
+        now=AFTER_FIRST_DELIVERY,
+    )
+    assert code == 0
+    assert fake.gets == 2
+    assert (inbox / "trades.gpg").exists()
 
 
 def test_no_trade_session_trade_confirm_is_ok(tmp_path, monkeypatch):

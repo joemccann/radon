@@ -13,10 +13,11 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 from xml.etree import ElementTree as ET
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -65,7 +66,21 @@ REQUIRED_CONFIG: dict[str, Optional[str]] = {
 # Well under the unit's TimeoutStartSec=120: past that systemd SIGKILLs the
 # process, `_heartbeat` never runs, and there is no error row at all — only a
 # `failed` unit, surfaced a day later by the 26h window. R-417.
-SFTP_TIMEOUT_SECS = 45
+# 90s (was 45): one batch session now pulls every remote file; a 20-file live
+# pull measured ~10s, and the remote only grows (IBKR never deletes). R-615.
+SFTP_TIMEOUT_SECS = 90
+# Per-file `get` opened N SSH sessions against IBKR sFTP; at ~20 files the
+# server answered the tail with `kex_exchange_identification: read:
+# Connection reset by peer` and the oneshot paged P1 (2026-09-11). One batch
+# session pulls the same set; transient kex resets retry with backoff. R-615.
+SFTP_GET_ATTEMPTS = 3
+SFTP_RETRY_SLEEP_SECS: Tuple[float, ...] = (2.0, 5.0, 10.0)
+_TRANSIENT_SFTP_MARKERS = (
+    "connection reset by peer",
+    "kex_exchange_identification",
+    "connection timed out",
+    "connection closed by remote host",
+)
 
 
 class FlexSftpError(RuntimeError):
@@ -179,6 +194,11 @@ def _write_gpg(dest: Path, data: bytes) -> None:
     os.chmod(dest, 0o600)
 
 
+def _is_transient_sftp(stderr: str) -> bool:
+    low = (stderr or "").lower()
+    return any(marker in low for marker in _TRANSIENT_SFTP_MARKERS)
+
+
 def pull_gpg(
     name: str,
     dest: Path,
@@ -187,15 +207,72 @@ def pull_gpg(
     runner,
     remote_dir: str = DEFAULT_REMOTE_DIR,
 ) -> None:
-    remote = f"{remote_dir}/{name}" if remote_dir else name
-    result = _sftp(f"get {remote} {dest}", config=config, runner=runner)
-    if result.returncode != 0:
-        stderr = result.stderr or ""
-        if "host key" in stderr.lower():
-            raise FlexSftpError(f"host key verification failed: {stderr.strip()}")
-        raise FlexSftpError(f"sftp_get_failed:{name}:{stderr.strip()}")
-    if dest.is_file():
-        os.chmod(dest, 0o600)
+    """Single-file get. Prefer ``pull_gpg_batch`` for production runs (R-615)."""
+    pull_gpg_batch(
+        [name],
+        dest.parent,
+        config=config,
+        runner=runner,
+        remote_dir=remote_dir,
+    )
+
+
+def pull_gpg_batch(
+    names: Sequence[str],
+    inbox: Path,
+    *,
+    config: Path,
+    runner,
+    remote_dir: str = DEFAULT_REMOTE_DIR,
+) -> None:
+    """Pull every remote name in ONE OpenSSH sFTP session.
+
+    IBKR's hosted sFTP rate-limits a rapid per-file SSH storm; a single
+    `sftp -b` batch with one `get` per file is the measured fix (R-615).
+    Transient kex / connection-reset failures retry with backoff.
+    """
+    if not names:
+        return
+    _ensure_inbox(inbox)
+    # Do NOT `cd` then `get {remote_dir}/{name}` — that resolves to
+    # `{remote_dir}/{remote_dir}/{name}` on IBKR's server
+    # (`/joemcc/outgoing/outgoing/... not found`). Match the pre-R-615
+    # single-get path: `get outgoing/<name> <local>` from the login cwd.
+    destinations: List[Tuple[str, Path]] = []
+    lines: List[str] = []
+    for name in names:
+        dest = inbox / Path(name).name
+        remote = f"{remote_dir}/{name}" if remote_dir else name
+        lines.append(f"get {remote} {dest}")
+        destinations.append((name, dest))
+    batch = "\n".join(lines) + "\n"
+
+    last_stderr = ""
+    for attempt in range(SFTP_GET_ATTEMPTS):
+        try:
+            result = _sftp(batch, config=config, runner=runner)
+        except subprocess.TimeoutExpired:
+            if attempt + 1 >= SFTP_GET_ATTEMPTS:
+                raise
+            time.sleep(SFTP_RETRY_SLEEP_SECS[min(attempt, len(SFTP_RETRY_SLEEP_SECS) - 1)])
+            continue
+        if result.returncode == 0:
+            missing = [name for name, dest in destinations if not dest.is_file()]
+            if not missing:
+                for _, dest in destinations:
+                    os.chmod(dest, 0o600)
+                return
+            last_stderr = f"sftp_get_missing:{','.join(missing)}"
+            # A zero exit with missing locals is not a transient kex reset.
+            raise FlexSftpError(last_stderr)
+        last_stderr = (result.stderr or "").strip()
+        if "host key" in last_stderr.lower():
+            raise FlexSftpError(f"host key verification failed: {last_stderr}")
+        if _is_transient_sftp(last_stderr) and attempt + 1 < SFTP_GET_ATTEMPTS:
+            time.sleep(SFTP_RETRY_SLEEP_SECS[min(attempt, len(SFTP_RETRY_SLEEP_SECS) - 1)])
+            continue
+        raise FlexSftpError(f"sftp_get_failed:{last_stderr}")
+    raise FlexSftpError(f"sftp_get_failed:{last_stderr}")
 
 
 def _gpg_decrypt(data: bytes, *, gnupg_home: Path) -> str:
@@ -451,6 +528,19 @@ def _run(
         return 1
 
     _ensure_inbox(inbox)
+    # R-615: one sFTP session for every get. A per-file SSH storm pages P1
+    # when IBKR resets kex on the tail of a growing `outgoing` directory.
+    try:
+        pull_gpg_batch(
+            names, inbox, config=config, runner=runner, remote_dir=remote_dir
+        )
+    except FlexSftpError as exc:
+        _heartbeat("error", exc)
+        return 1
+    except subprocess.TimeoutExpired as exc:
+        _heartbeat("error", f"TimeoutExpired: {exc}")
+        return 1
+
     failed = False
     ingested = 0
     newest_period_end: Optional[date] = None
@@ -458,7 +548,8 @@ def _run(
     for name in names:
         dest = inbox / Path(name).name
         try:
-            pull_gpg(name, dest, config=config, runner=runner, remote_dir=remote_dir)
+            if not dest.is_file():
+                raise FlexSftpError(f"sftp_get_missing:{name}")
             xml_text = decrypt_fn(dest.read_bytes())
             if not nightly_period_ok(xml_text):
                 raise FlexSftpError("period_gate: nightly path rejects 365-day/YTD")
