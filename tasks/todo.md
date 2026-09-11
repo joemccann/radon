@@ -11,8 +11,8 @@ Flow Analysis HISTORY table clips PRINTS on ~390px. Wrap in shared
 
 ## Checklist
 
-- [ ] T1 Failing wrap / sticky / overflow tests.
-- [ ] T2 table-wrap + sticky DATE CSS.
+- [x] T1 Failing wrap / sticky / overflow tests.
+- [x] T2 table-wrap + sticky DATE CSS.
 - [ ] T3 Green tests, PR against main, no merge.
 
 ---

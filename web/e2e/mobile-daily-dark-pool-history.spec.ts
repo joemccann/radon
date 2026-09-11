@@ -134,7 +134,12 @@ async function openHistory(page: Page) {
   return history;
 }
 
-test.use({ viewport: { width: 393, height: 852 } });
+test.use({
+  viewport: { width: 393, height: 852 },
+  ...(process.env.ARTIFACT_DIR
+    ? { video: { mode: "on" as const, size: { width: 393, height: 852 } } }
+    : {}),
+});
 
 test.describe("daily dark pool history — mobile shell", () => {
   test("the session table scrolls in its wrapper, never the page", async ({ page }) => {
@@ -157,6 +162,10 @@ test.describe("daily dark pool history — mobile shell", () => {
     }));
     expect(wrapperState.overflowX).toBe("auto");
     expect(wrapperState.scrollWidth).toBeGreaterThan(wrapperState.clientWidth);
+    if (process.env.ARTIFACT_DIR) {
+      await page.screenshot({ path: `${process.env.ARTIFACT_DIR}/daily_dp_history_mobile_at_rest.png` });
+      await wrap.screenshot({ path: `${process.env.ARTIFACT_DIR}/daily_dp_history_card_at_rest.png` });
+    }
   });
 
   test("DATE stays in view and PRINTS is fully readable after a horizontal scroll", async ({ page }) => {
@@ -210,5 +219,9 @@ test.describe("daily dark pool history — mobile shell", () => {
     expect(afterScroll.printsText).toBe("73000");
     expect(afterScroll.printsLeft).toBeGreaterThanOrEqual(afterScroll.wrapLeft);
     expect(afterScroll.printsRight).toBeLessThanOrEqual(afterScroll.wrapRight + 1);
+    if (process.env.ARTIFACT_DIR) {
+      await page.screenshot({ path: `${process.env.ARTIFACT_DIR}/daily_dp_history_mobile_scrolled.png` });
+      await wrap.screenshot({ path: `${process.env.ARTIFACT_DIR}/daily_dp_history_card_scrolled.png` });
+    }
   });
 });
