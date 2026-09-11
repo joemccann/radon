@@ -7,6 +7,7 @@ Output: JSON to stdout with supports/against/watch/neutral arrays.
 """
 import json
 import sys
+import time
 from datetime import datetime, timezone
 
 from db.readers import read_portfolio_positions
@@ -18,6 +19,13 @@ try:
 except Exception:  # pragma: no cover — DB layer optional
     def mirror_scan_snapshot(*args, **kwargs):  # type: ignore
         return None
+
+# POST /flow-analysis SIGKILLs at this plus persist slack (server.py).
+# Wrapper SCAN_TIMEOUT is 180s. 2026-09-11 20:00Z: 16:00 ET close walk of
+# 10 positions exceeded the old 120s FastAPI kill (121s HTTP 502, oneshot
+# exit 1, next timer Monday). Stop starting tickers before that kill so
+# a truncated walk still mirrors and the oneshot exits 0.
+SWEEP_BUDGET_S = 140.0
 
 def load_portfolio() -> list:
     """Load open positions from the latest Turso portfolio snapshot."""
@@ -118,13 +126,14 @@ def classify_position(pos: dict, flow_data: dict, analysis: dict) -> dict:
     }
 
 
-def run_analysis():
+def run_analysis(*, deadline: float | None = None):
     """Run flow analysis for all portfolio positions."""
     positions = load_portfolio()
     if not positions:
         output = {
             "analysis_time": datetime.now(timezone.utc).isoformat(),
             "positions_scanned": 0,
+            "positions_deferred": 0,
             "supports": [],
             "against": [],
             "watch": [],
@@ -139,11 +148,23 @@ def run_analysis():
     print(f"Analyzing flow for {len(positions)} positions...", file=sys.stderr)
 
     results = {"supports": [], "against": [], "watch": [], "neutral": []}
+    stop_at = time.monotonic() + SWEEP_BUDGET_S if deadline is None else deadline
+    scanned = 0
+    deferred = 0
 
     for i, pos in enumerate(positions, 1):
         ticker = pos.get("ticker", "")
         if not ticker:
             continue
+        if time.monotonic() >= stop_at:
+            deferred = sum(1 for rest in positions[i - 1 :] if rest.get("ticker"))
+            print(
+                f"  flow-analysis wall-clock budget spent "
+                f"({scanned}/{len(positions)}); deferring the rest",
+                file=sys.stderr,
+                flush=True,
+            )
+            break
 
         print(f"  [{i}/{len(positions)}] {ticker}...", file=sys.stderr, end=" ")
 
@@ -158,6 +179,7 @@ def run_analysis():
         classified = classify_position(pos, flow_data, analysis)
         category = classified.pop("category")
         results[category].append(classified)
+        scanned += 1
 
         print(f"{analysis.get('signal', 'N/A')} ({analysis.get('score', 0)})", file=sys.stderr)
 
@@ -167,7 +189,8 @@ def run_analysis():
 
     output = {
         "analysis_time": datetime.now(timezone.utc).isoformat(),
-        "positions_scanned": len(positions),
+        "positions_scanned": scanned,
+        "positions_deferred": deferred,
         **results,
     }
 

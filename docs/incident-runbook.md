@@ -1435,6 +1435,46 @@ all three flow-tab POSTs hit the FastAPI subprocess slot cap.** Peak:
 
 ---
 
+## flow-analysis-close-timeout-pages-p1
+
+**`radon-flow-refresh.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) when `POST /flow-analysis` SIGKILLs `flow_analysis.py`
+at the 16:00 ET close fire.** Peak: 2026-09-11 20:05Z, page `24ac3520…`.
+
+- **Mechanism:** hourly wrapper POSTs `/scan`, `/flow-analysis`,
+  `/discover` with a 180s curl budget each. FastAPI spawned
+  `flow_analysis.py` at `timeout=120`. The 16:00 ET fire is a full-day
+  darkpool walk (no interpolation) of every open position. 2026-09-11:
+  scanner OK in 7s; flow-analysis POST 20:00:07Z → 20:02:08Z (121s)
+  HTTP 502; wrapper
+  `flow-analysis FastAPI outcome indeterminate (curl=0, http=502)`
+  (body was the timeout, not `subprocess capacity exhausted`);
+  discover retried two 502s then OK; oneshot exit 1. `Type=oneshot`
+  has no `Restart=`. Next timer Monday 13:00 UTC. Edge and
+  `:8321/health/lite` stayed up / authenticated.
+- **Discriminating check:** unit journal a ~120s flow-analysis POST
+  then `outcome indeterminate (curl=0, http=502)` while scanner
+  already OK. Instant 502 with the capacity marker is
+  `flow-refresh-capacity-502`. `Result=signal` is deploy stop-clean.
+  Market-closed skip is exit 0. If `/health/lite` is down too → API,
+  stand down.
+- **Remediation (code):** `flow_analysis.py` `SWEEP_BUDGET_S=140` so
+  the sequential ticker walk stops, mirrors a truncated snapshot, and
+  exits 0 before FastAPI kills it. Raise `POST /flow-analysis`
+  `timeout` to 180 to match wrapper `SCAN_TIMEOUT` and `/discover`.
+  Do not restart-flap the hung run; after the fix deploys, one
+  `radon unit restart radon-flow-refresh.service` if the next timer
+  is >12h out (not on `RERUNNABLE_ONESHOT_UNITS`).
+- **Regression:**
+  `test_flow_analysis.py::TestSweepBudget`
+  (`test_tarpitted_fetch_stops_inside_the_wall_clock_budget`,
+  `test_tickers_finished_before_the_deadline_are_kept`,
+  `test_sweep_budget_fits_inside_fastapi_timeout`).
+- **Code:** `scripts/flow_analysis.py` (`SWEEP_BUDGET_S`,
+  `run_analysis`), `scripts/api/server.py` (`POST /flow-analysis`).
+
+---
+
 ## orders-sync-capacity-shed-stale
 
 **Autonomous `orders-sync` loop pages P1 `kind=stale` during RTH when

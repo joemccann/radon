@@ -2628,7 +2628,7 @@ async def flow_analysis(force: bool = False):
         "flow_analysis.json",
         "flow_analysis.py",
         [],
-        timeout=120,
+        timeout=180,
         force=force,
         demo_key="flow-analysis",
         demo_payload={"scan_time": "", "results": []},
