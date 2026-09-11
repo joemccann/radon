@@ -92,11 +92,13 @@ def test_pipeline_cannot_publish_before_independent_visual_checks(tmp_path):
 
 
 def test_model_rejects_truncation_and_never_exposes_remote_errors():
-    response=SimpleNamespace(status_code=200,iter_content=lambda _: [json.dumps({'stop_reason':'max_tokens','content':[{'type':'text','text':'{}'}]}).encode()],close=lambda:None)
+    response=SimpleNamespace(status_code=200,iter_content=lambda _: [json.dumps({'stop_reason':'max_tokens','content':[{'type':'text','text':'{}'}]}).encode()],close=lambda:None,text='')
     session=SimpleNamespace(post=lambda *a,**k:response)
-    with pytest.raises(ModelError,match='complete'):Reviewer('secret',session=session).ask('test')
+    with pytest.raises(ModelError,match='incomplete_response|Model ladder exhausted'):Reviewer('secret',session=session).ask('test')
     response.status_code=401
-    with pytest.raises(ModelError,match='HTTP 401'):Reviewer('secret',session=session).ask('test')
+    response.text='{"error":{"message":"invalid api key"}}'
+    response.iter_content=lambda _: [response.text.encode()]
+    with pytest.raises(ModelError,match='http_401|Model ladder exhausted'):Reviewer('secret',session=session).ask('test')
 
 
 def test_outbox_failure_does_not_acknowledge(tmp_path):

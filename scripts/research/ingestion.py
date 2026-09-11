@@ -140,7 +140,8 @@ def review_one(root, state, pipeline, publisher, publish):
         if not state.is_processing(work['key']):
             return True
         if work['attempts'] >= 5:
-            state.complete(work['key'], {'status': 'held', 'error': type(error).__name__})
+            from research.model import safe_error_message
+            state.complete(work['key'], {'status': 'held', 'error': safe_error_message(error)})
         else:
             state.retry(work['key'], error, delay=min(3600, 60 * 2 ** work['attempts']))
     if publish:

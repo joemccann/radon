@@ -502,7 +502,11 @@ than duplicating commands in this runbook.
 
 `radon-research.service` is optional and starts only after explicit activation. Its container receives a private read/write bind from `/var/lib/radon-private/research` to `/var/lib/radon/research`; the API receives the same bind read-only. The host anchor is root-owned `0700`, its research child is radon-owned `0700`, and provisioning rejects symlinked or writable ancestors. Seed approved batches through the container bind; host user radon cannot traverse the root-only anchor. Research files never enter the public media bind or demo mirror.
 
-The API credential staging/cleanup contract remains in force when research mount provisioning fails: decrypted credential files must be removed on failure as well as normal stop. The research worker receives no API master-key mount, public media mount, or IB lease mount. Dropbox offline credentials and the model provider key remain in restricted runtime configuration. Apply migration 71 and verify private media before publication, then enable the worker. Full import and activation order: [Dropbox research](dropbox-research.md).
+The API credential staging/cleanup contract remains in force when research mount provisioning fails: decrypted credential files must be removed on failure as well as normal stop. The research worker receives no API master-key mount, public media mount, or IB lease mount. Dropbox offline credentials and HTTP model provider keys remain in restricted runtime configuration. Apply migration 71 and verify private media before publication, then enable the worker. Full import and activation order: [Dropbox research](dropbox-research.md).
+
+## HTTP model ladder (multimodal callers)
+
+New HTTP multimodal work plugs into `scripts/clients/model_ladder.py` — one rung-order source of truth shared by CTA/MenthorQ vision (`clients/vision_cascade.py` wrapper) and Dropbox research review (`research/model.py`). Joe order: subscription band (`anthropic` → `grok` → `cursor` unwired skip → `codex` → `gemini`) → `nvidia` → `cerebras`. Credit/billing/quota/auth/5xx/network failures fall through; only a full-cascade miss is ops-only. Override rung order with `RADON_HTTP_MODEL_LADDER` (space-separated provider names). Per-provider model overrides use existing env keys (`RADON_RESEARCH_MODEL`, `ANTHROPIC_VISION_MODEL`, `XAI_MODEL`, etc.). Weekend CLI ladders (`RADON_WEEKEND_MODEL_LADDER` / `RADON_WEEKEND_PROVIDER_LADDER`) are a sibling shape and stay out of scope unless bridged trivially.
 
 ## Production Build Constraint
 

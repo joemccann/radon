@@ -137,7 +137,8 @@ def cycle(root, client, state, pipeline, publisher, publish=False, limit=4):
         except Exception as error:
             errors.append(type(error).__name__)
             if work['attempts'] >= 5:
-                state.complete(work['key'], {'status': 'held', 'error': type(error).__name__})
+                from research.model import safe_error_message
+                state.complete(work['key'], {'status': 'held', 'error': safe_error_message(error)})
             else:
                 delay = max(getattr(error, 'retry_after', 0) or 0, min(3600, 60 * 2 ** work['attempts']))
                 state.retry(work['key'], error, delay=delay)
