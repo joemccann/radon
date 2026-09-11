@@ -32,6 +32,7 @@ import {
   parseFundamentalRatios,
   updatePriceFromTickPrice,
   updatePriceFromTickSize,
+  updatePriceFromTickString,
 } from "./ib_tick_handler.js";
 import { LRUCache } from "./lib/lru-cache.js";
 import { RateLimiter } from "./lib/rate-limiter.js";
@@ -1958,9 +1959,28 @@ function onTickSize(tickerId, sizeType, size) {
 
   if (liveState) {
     updatePriceFromTickSize(liveState.data, sizeType, size);
+    // Size-only ticks (VOLUME, bid/ask size) used to sit in memory until a
+    // later tickPrice. Thin options often have a static book after the first
+    // quote, so volume never reached the order sheet.
+    hydrateAndBroadcast(symbol);
   }
   if (snapshotState) {
     updatePriceFromTickSize(snapshotState.data, sizeType, size);
+  }
+}
+
+function onTickString(tickerId, tickType, value) {
+  const symbol = requestIdToSymbol.get(tickerId);
+  markTick(symbol);
+  const liveState = symbol ? symbolStates.get(symbol) : null;
+  const snapshotState = snapshotRequests.get(tickerId);
+
+  if (liveState && updatePriceFromTickString(liveState.data, tickType, value)) {
+    verbose(`tickString ${symbol} type=${tickType} value=${value}`);
+    hydrateAndBroadcast(symbol);
+  }
+  if (snapshotState) {
+    updatePriceFromTickString(snapshotState.data, tickType, value);
   }
 }
 
@@ -2529,6 +2549,10 @@ function wireIBEvents() {
 
   ib.on(EventName.tickSize, (tickerId, sizeType, size) => {
     onTickSize(tickerId, sizeType, size);
+  });
+
+  ib.on(EventName.tickString, (tickerId, tickType, value) => {
+    onTickString(tickerId, tickType, value);
   });
 
   ib.on(EventName.tickSnapshotEnd, (tickerId) => {
