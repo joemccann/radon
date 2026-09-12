@@ -6740,6 +6740,16 @@ No local suites. Review confirms quantity-weighted prices preserve zero and sign
 
 - PR #394 intermediate integration `892f24b1`: 31 applicable checks green, source shard 2225 passed, browser 96 passed plus one demo. Final integration includes historical-fill PR #395 at `aae5e1e5`; repeat exact-head checks before merge.
 
+# Testing audit 2026-09-12
+
+Dependency graph: T1.
+
+- [x] T1 depends_on: [] - Audit the `9dce4b3a..3e394792` delta; record verified test-suite findings and gate evidence.
+
+## Review
+
+- T-491 is reproduced three times in isolation; detached full-gate stages cannot retain a child process in this runner, so no full-gate count is claimed.
+
 # Task: Testing delta audit 2026-09-13 [DONE]
 
 ## Dependency graph
