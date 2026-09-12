@@ -6459,3 +6459,13 @@ No local suites. Review confirms quantity-weighted prices preserve zero and sign
 - Integration verification: head 4d92842e passed every applicable check; GitHub CI 34507570000 ran 99 browser regressions plus one demo test. Desktop 1280px/mobile 393px full `/orders` screenshots reviewed (artifact 10164611383). Reintegrating main 722b1121 for the final merge gate; no local suites.
 
 - PR #394 intermediate integration `892f24b1`: 31 applicable checks green, source shard 2225 passed, browser 96 passed plus one demo. Final integration includes historical-fill PR #395 at `aae5e1e5`; repeat exact-head checks before merge.
+
+# Testing audit 2026-09-12
+
+Dependency graph: T1.
+
+- [x] T1 depends_on: [] - Audit the `9dce4b3a..3e394792` delta; record verified test-suite findings and gate evidence.
+
+## Review
+
+- T-491 is reproduced three times in isolation; detached full-gate stages cannot retain a child process in this runner, so no full-gate count is claimed.
