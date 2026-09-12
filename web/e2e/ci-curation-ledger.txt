@@ -90,6 +90,7 @@ mobile-chain-ladder.spec.ts
 mobile-charts.spec.ts
 mobile-cockpit-book-layout.spec.ts
 mobile-combo-instrument-switcher.spec.ts
+mobile-daily-dark-pool-history.spec.ts
 mobile-executed-journal.spec.ts
 mobile-newsfeed-layout.spec.ts
 mobile-order-ticket.spec.ts
@@ -308,3 +309,16 @@ ws-connection-stability.spec.ts
 
 # PROMOTED 2026-09-10 historical-trades-filter.spec.ts: full /orders route
 #   regression runs on GitHub with desktop/mobile screenshot artifacts.
+
+# REVIEWED 2026-09-11 mobile-daily-dark-pool-history.spec.ts - 2/2 Chromium
+#   cases passed against local next dev with RADON_AUTHLESS_TEST. Asserts the
+#   HISTORY table scrolls inside table-wrap (never the page) and that DATE
+#   stays sticky while PRINTS is fully readable after a horizontal scroll at
+#   393x852. Held out of e2e-financial-smoke: not yet preflighted 3x under
+#   production next start.
+
+# REVIEWED 2026-09-11 flow-analysis-ticker.spec.ts - added a 390px History-tab
+#   assertion that the session table stays inside table-wrap and the document
+#   does not scroll sideways. 1/1 new Chromium case passed locally against
+#   next dev with RADON_AUTHLESS_TEST. Held out of e2e-financial-smoke: the
+#   rest of the file remains uncurated pending next start preflight.

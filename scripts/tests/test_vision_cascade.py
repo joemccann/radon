@@ -272,7 +272,7 @@ class TestExhaustedMessaging:
                 post=router,
             )
         msg = str(exc.value).lower()
-        assert "vision cascade exhausted" in msg
+        assert "ladder exhausted" in msg
         assert "anthropic" in msg
         assert "grok" in msg
         assert "top up" not in msg
@@ -360,13 +360,13 @@ class TestMenthorQClientWiring:
                 ), patch(
                     "clients.menthorq_client.extract_via_vision",
                     side_effect=VisionCascadeExhausted(
-                        "Vision cascade exhausted. tried=anthropic:credit_balance grok:http_401"
+                        "Model ladder exhausted. tried=anthropic:credit_balance grok:http_401"
                     ),
                 ):
                     with pytest.raises(MenthorQExtractionError) as exc:
                         client.get_cta("2026-03-06")
                 msg = str(exc.value).lower()
-                assert "vision cascade exhausted" in msg
+                assert "ladder exhausted" in msg
                 assert "top up" not in msg
             finally:
                 client.close()
@@ -377,7 +377,7 @@ class TestHealthClassifier:
         from utils.cta_sync_health import classify_sync_error, retry_backoffs_for_error
 
         error_type, message = classify_sync_error(
-            "ERROR: Vision cascade exhausted. tried=anthropic:credit_balance grok:http_401"
+            "ERROR: Model ladder exhausted. tried=anthropic:credit_balance grok:http_401"
         )
         assert error_type == "vision_cascade_exhausted"
         assert retry_backoffs_for_error(error_type) == [0]
