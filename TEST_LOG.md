@@ -829,3 +829,9 @@ section before completion.
 |---|---|---|
 | T-490 | BLOCKED / operator-only | Red reverified in this runner: `test_portable_prompt_sync.py` is 52 passed / 21 failed. A fourth renderer attempt failed at `.codex` creation with `PermissionError`; full closing gates are not claimed while this deterministic P1 red remains. Operator: run `python3.13 scripts/render_loop_prompt.py --write` in a checkout where repository `.codex/` is writable, then run the focused contract and commit generated artifacts. |
 | T-488 | BLOCKED / operator-only | Unchanged after its three recorded fixture attempts. Operator: reproduce and repair the GNU-timeout process-tree behavior on Linux CI without widening the contract timeout. |
+
+## Remediation 2026-09-12
+
+| Task | Status | Evidence |
+|---|---|---|
+| T-491 | DONE | RED: `XAI_API_KEY=ambient-poison` against the old constructor: 1 failed, no `ModelError`. GREEN: explicit empty injected env preserves no-key rejection, 1 passed; `test_research_runtime.py` + `test_model_ladder.py`: 59 passed. |

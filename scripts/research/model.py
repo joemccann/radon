@@ -26,7 +26,7 @@ def _policy_text() -> str:
 
 class Reviewer:
     def __init__(self, api_key=None, model=None, session=None, env=None):
-        self.env = dict(env or os.environ)
+        self.env = dict(os.environ if env is None else env)
         if api_key:
             self.env["ANTHROPIC_API_KEY"] = api_key
         self.model = model or self.env.get("RADON_RESEARCH_MODEL")

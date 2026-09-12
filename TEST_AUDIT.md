@@ -9289,6 +9289,7 @@ Delta findings continue the T-### numbering in dated `## Delta audit` sections.
 - Audited through: `fcaa1c67` on 2026-09-08 — **4 new findings** (T-486…T-489: 4 P1) over 101 commits / 539 files. Full gates: pytest 12,392 passed / 2 failed; vitest 9,116 passed / 3 failed; cloud 1,808 passed / 4 failed. Every red reproduced in its owning file; 214 touched tests make scoped 3× reruns equivalent to full gates. No new code skip/only/xfail, exclusion growth, threshold decrease, or unclassified E2E spec.
 - Audited through: `964b6b77` on 2026-09-09 — **1 new finding** (T-490: P1) over 34 commits / 267 files. Full gates: pytest 12,709 passed / 21 failed; vitest 9,276 passed; cloud 1,841 passed / 4 failed. The 98 touched test files make scoped 3× reruns equivalent to full gates. No coverage threshold decrease, exclusion growth, or new `.only`/`xfail`; one new conditional `jq` skip is covered by CI's Ubuntu toolchain.
 - Audited through: `9dce4b3a` on 2026-09-10 — **0 new findings** over 6 commits / 53 paths, with existing deterministic T-490 (21 pytest reds) and T-488 (4 cloud reds) re-confirmed. Vitest green; changed Python, Vitest, and cloud test surfaces deterministic x3. No skip, exclusion, threshold, or CI-reachability drift.
+- Audited through: `3e394792` on 2026-09-12 — **1 new finding** (T-491, P1) over 24 commits / 180 paths. The focused research/model suite was 114 passed / 1 failed; the owning test failed 3/3 in isolation. No full-gate count is claimed: the required detached stage exited with no output and no `DONE` sentinel on this runner. No new executable skip, CI exclusion growth, threshold reduction, coverage-measurement change, or uncurated added E2E spec.
 
 ## Remediation 2026-08-29 — PR #140
 
@@ -10193,3 +10194,54 @@ the focused contract is 52 passed / 21 failed and a renderer write fails with
 `PermissionError` creating repository `.codex`. T-490 is therefore
 operator-only here until the generated artifacts can be written and committed;
 full closing gates are not claimed while that deterministic P1 red remains.
+
+## Delta audit 2026-09-12
+
+Range `9dce4b3a..3e394792`: 24 commits / 180 paths. The 63 touched test
+files span Python, Vitest, and browser roots. The required detached full-gate
+stage exited before writing output or its `DONE` sentinel, so no full-suite
+count is claimed.
+
+### T-491 — P1 — research reviewer no-key contract reads ambient provider credentials and is deterministic false-red on keyed runners
+
+`scripts/tests/test_research_runtime.py:68-73` deletes only
+`ANTHROPIC_API_KEY` then asserts `Reviewer()` has no configured provider.
+The delta changes `Reviewer` to accept every ladder provider through
+`wired_providers` (`scripts/research/model.py:27-35`), which scans Grok,
+Codex, Gemini, NVIDIA, and Cerebras credentials (`scripts/clients/model_ladder.py:142-166`).
+With an ambient non-Anthropic key, the assertion fails before the image-limit
+contract runs: **114 passed / 1 failed** in the focused set and **1 failed / 0
+passed** in this test **3/3** in isolation. CI can pass the same test simply
+because its environment has no alternate key, so it no longer proves the
+no-key behavior under the new source contract.
+
+### Backlog rows
+
+| ID | Sev | Acceptance criteria |
+|---|---|---|
+| T-491 | P1 | Construct the no-key case with `Reviewer(env={})` (or explicitly clear every ladder key), while retaining the oversized-image assertion with its explicit test key. Red: poison an alternate provider key and show the old ambient constructor fails; green: the isolated test is independent of all host credentials. |
+
+### Standing sweeps
+
+- Focused owner set: **114 passed / 1 failed**; all evidence is T-491. The
+  owner test was **1 failed** on each of three isolated runs.
+- Gate drift and ratchet: `.github/workflows/ci.yml:429-441,789-819` adds an
+  MCP artifact and curated E2E entries only. CI invocations, exclusions,
+  `deploy.needs`, coverage thresholds, and measurement inputs are unchanged.
+- Skip sweep: the zero-context delta contains no added executable `test.skip`,
+  `it.skip`, `pytest.mark.skip`, `xfail`, or `.only`; the only matching changed
+  line is prior audit prose. The existing conditional PDF-runtime skip at
+  `scripts/tests/test_research_pdf.py:13` is not introduced here.
+- Reachability: all 21 added unit tests are under CI-discovered roots; added
+  browser specs are either curated in `.github/workflows/ci.yml:789-803` or
+  recorded in `web/e2e/ci-curation-ledger.txt`.
+
+## Remediation 2026-09-12
+
+`RADON_WEEKEND_REDUCED=1`: T-491 is the only verified source-actionable P0/P1
+finding from this cycle. `Reviewer(env={})` now preserves the injected empty
+environment and falls back to ambient credentials only when `env is None`.
+
+| Task | Status | Evidence |
+|---|---|---|
+| T-491 | DONE | Red: `XAI_API_KEY=ambient-poison` made the old no-key assertion fail (no `ModelError`). Green: poison-key case 1 passed; research runtime plus model ladder 59 passed. |
