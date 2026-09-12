@@ -10274,6 +10274,16 @@ callback invocation or broadcast must red.
 |---|---|---|
 | T-491 | P1 | Construct the no-key case with `Reviewer(env={})` (or explicitly clear every ladder key), while retaining the oversized-image assertion with its explicit test key. Red: poison an alternate provider key and show the old ambient constructor fails; green: the isolated test is independent of all host credentials. |
 
+## Remediation 2026-09-12
+
+`RADON_WEEKEND_REDUCED=1`: T-491 is the only verified source-actionable P0/P1
+finding from this cycle. `Reviewer(env={})` now preserves the injected empty
+environment and falls back to ambient credentials only when `env is None`.
+
+| Task | Status | Evidence |
+|---|---|---|
+| T-491 | DONE | Red: `XAI_API_KEY=ambient-poison` made the old no-key assertion fail (no `ModelError`). Green: poison-key case 1 passed; research runtime plus model ladder 59 passed. |
+
 ### Backlog rows (2026-09-13)
 
 | ID | Sev | Acceptance criteria |
