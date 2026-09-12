@@ -13,12 +13,12 @@ Reduced capability rung (`RADON_WEEKEND_REDUCED=1`): remediate P0/P1 only.
 
 - [x] T1 RED fault injection for oversized production-shaped response.
 - [x] T2 Production implementation and GREEN focused suites.
-- [ ] T3 Reliability log, codemap, commit, and branch push.
-- [ ] T4 Closing drills and gates.
+- [x] T3 Reliability log, codemap, commit, and branch push.
+- [x] T4 Closing drills and gates BLOCKED after three sentinel-less detached stages.
 
 ## Review
 
-Pending.
+- REL-254 source contract is green; closing gates are BLOCKED by three sentinel-less detached-stage terminations.
 
 ---
 
