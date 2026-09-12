@@ -1514,3 +1514,29 @@ python/web gate co-wall then the deploy floor (CIP-004).
   `git diff --check origin/main...HEAD` passed. No source change; runner-minute
   impact zero. Revert trigger: any future candidate that shrinks gate closure,
   inventory, coverage, provenance, health, recovery, rollback, or stability.
+
+### 2026-09-12 - remediate - branch `ci-performance/2026-09-12`
+
+- Runner state: dedicated markers, dated remote branch, GitHub authentication,
+  clean `origin/main` baseline, and the wrapper-owned exclusive lock remain
+  valid. `RADON_WEEKEND_REDUCED=1` limits this phase to verified P0/P1 findings.
+- Remediation eligibility: the completed audit supplied zero P0/P1
+  source-actionable findings. Its only source-level lead, the work-bound
+  `scripts-rs` shard, has a demonstrated critical-path ceiling below 15 seconds
+  before the node-image and protected Deploy floors; changing it would risk the
+  recursive shard-union contract and higher runner minutes. No lower-priority
+  substitute or CIP ID was allocated.
+- Verification: `../venv-ci-performance/bin/python -m pytest
+  scripts/tests/test_ci_gate_integrity.py scripts/tests/test_ci_deploy_concurrency.py
+  scripts/tests/test_path_filter.py -q` — **89 passed in 9.22s**; Ruby YAML
+  parsing of `.github/workflows/ci.yml`, `bash -n
+  scripts/ci_performance_nightly.sh`, base/worktree `git diff --check`, and the
+  Production environment API passed. These are safety baselines, not production
+  timing claims.
+- Safety/impact: test inventory, coverage, fail-closed path classification,
+  required-gate closure, immutable pins, artifact provenance, exact-SHA image
+  verification, health, recovery, rollback, cancellation, and the 40-second
+  stability window are unchanged. Runner-minute impact is zero. Outcome:
+  `NO_SAFE_CHANGE` / `INSUFFICIENT_SAMPLE`; CIP-005/CIP-007/CIP-009 remain
+  `VALIDATING`, CIP-004/CIP-006/CIP-008 remain `DEFERRED`, and the residual
+  bottleneck is the required `scripts-rs`/node-image co-wall followed by Deploy.
