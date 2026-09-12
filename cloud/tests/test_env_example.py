@@ -1,6 +1,7 @@
 """Tests for .env.example configuration."""
 
 import re
+import sys
 
 
 KNOWN_PLACEHOLDER_PATTERNS = [
@@ -96,6 +97,36 @@ class TestUWToken:
     def test_contains_uw_token(self, root):
         env_vars = parse_env_vars(read_env_example(root))
         assert "UW_TOKEN" in env_vars
+
+
+class TestCTAVisionModelLadder:
+    def test_contains_every_source_owned_optional_provider_key(self, root):
+        """The cloud template is the operator inventory, not required-env.
+
+        `model_ladder.py` owns aliases and provider order.  Importing its key
+        groups keeps this template aligned when a fallback is added or renamed.
+        """
+        scripts_dir = root.parent / "scripts"
+        sys.path.insert(0, str(scripts_dir))
+        try:
+            from clients import model_ladder
+        finally:
+            sys.path.pop(0)
+
+        source_owned = {
+            key
+            for group in (
+                model_ladder._ANTHROPIC_KEYS,
+                model_ladder._GROK_KEYS,
+                model_ladder._CODEX_KEYS,
+                model_ladder._GEMINI_KEYS,
+                model_ladder._NVIDIA_KEYS,
+                model_ladder._CEREBRAS_KEYS,
+            )
+            for key in group
+        }
+        env_vars = parse_env_vars(read_env_example(root))
+        assert source_owned <= env_vars.keys()
 
 
 class TestDropboxResearchVariables:
