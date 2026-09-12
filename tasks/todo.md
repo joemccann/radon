@@ -1,3 +1,50 @@
+# Task: Reliability remediation 2026-09-12 [IN PROGRESS]
+
+Reduced capability rung (`RADON_WEEKEND_REDUCED=1`): remediate P0/P1 only.
+
+## Dependency graph
+
+- T1 depends_on: [] - Add REL-254 production-transport byte-bound fault injection.
+- T2 depends_on: [T1] - Stream and close every model-ladder provider response before parsing.
+- T3 depends_on: [T2] - Run focused verification, record REL-254, regenerate codemap, commit and push.
+- T4 depends_on: [T3] - Re-run permanent drills and required gate stages or record a verified blocker.
+
+## Checklist
+
+- [x] T1 RED fault injection for oversized production-shaped response.
+- [x] T2 Production implementation and GREEN focused suites.
+- [x] T3 Reliability log, codemap, commit, and branch push.
+- [x] T4 Closing drills and gates BLOCKED after three sentinel-less detached stages.
+
+## Review
+
+- REL-254 source contract is green; closing gates are BLOCKED by three sentinel-less detached-stage terminations.
+
+---
+
+# Task: Reliability delta audit 2026-09-12 [IN PROGRESS]
+
+Audit `9dce4b3a..HEAD` for changed reliability surfaces and standing safety
+contracts. Audit-only: no production source changes.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify runner, branch, ledger anchor, and delta.
+- T2 depends_on: [T1] - Review changed safety, persistence, resources, and observability surfaces; run standing sweeps.
+- T3 depends_on: [T2] - Append deduplicated findings and ledger, validate tables, commit/push, and update the audit PR.
+
+## Checklist
+
+- [x] T1 Runner markers, isolated branch, remote collision check, and anchor verified.
+- [x] T2 Serial changed-surface review and standing sweeps.
+- [x] T3 Audit report and frozen-ID validation complete; commit/push and PR update follow.
+
+## Review
+
+- R-675 is source-verified against the pinned production transport; all standing safety and catalog sweeps hold.
+
+---
+
 # Task: Daily Dark Pool History mobile overflow --- 2026-09-11 [IN PROGRESS]
 
 Flow Analysis HISTORY table clips PRINTS on ~390px. Wrap in shared

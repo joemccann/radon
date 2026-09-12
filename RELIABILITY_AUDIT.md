@@ -222,6 +222,7 @@ Delta findings continue the R-### numbering in dated `## Delta audit` sections.
 - Audited through: `90071618` on 2026-09-08 (second pass) — 0 new findings. Anchor `cc77928d` verified; range is 12 commits. The order-admission, daily frontier refresh, research-ingestion, credential, indicator-freshness, and loop surfaces were inspected serially. Standing sweeps HOLD: no new unguarded placement site; halt/order-limit/exit-ack/Hrana chokepoints and both catalog entries for the new `aa-frontier-basket` writer remain present.
 - Audited through: `964b6b77` on 2026-09-09 — 0 new findings. Anchor `15e74ff1` verified (`rev-parse --verify` resolves; ancestor of HEAD); range is 12 commits / 28 changed source files. Serial review covered AI-cycle collection and archive durability, loop completion reporting, CI artifacts, research publishing, ticker routing, and chat attachment/stream recovery. All standing sweeps HOLD: no delta placement or health writer, existing halt/order-limit/exit-ack/Hrana chokepoints remain wired, and `NEW_FINDINGS` plus the REL-021b remainder have no changed-surface instance.
 - Audited through: `9dce4b3a` on 2026-09-10 — 0 new findings. Anchor `1ed5aa84` verified (`rev-parse --verify` resolves; ancestor of HEAD); range is 5 commits / 42 changed files. Serial review covered compact AI-cycle snapshot persistence and serving, Ramp curated ingestion, MenthorQ session recovery, and the related control-plane timeout increase. All standing sweeps HOLD: no delta placement or health writer, halt/order-limit/exit-ack/Hrana chokepoints remain wired, and `NEW_FINDINGS` plus the REL-021b remainder have no changed-surface instance. Focused pytest could not start because this runner's `python3.13` lacks pytest.
+- Audited through: `3e394792` on 2026-09-12 — 1 new finding (R-675; P1), backlog REL-254. Anchor `9dce4b3a` verified (`rev-parse --verify` resolves; ancestor of HEAD); range is 20 commits / 180 changed files. Serial review covered the shared model ladder, AI-cycle archive, research persistence, flow/TWR, quote relay, systemd changes, and web surfaces. Standing money-path and watchdog sweeps hold; `NEW_FINDINGS` and REL-021b have no changed-surface instance.
 
 ## 7. Exit criteria check (A5)
 
@@ -2515,3 +2516,31 @@ no `placeOrder` / `place_order` or `service_health` writer, so no new bypass
 or catalog gap exists. `NEW_FINDINGS` and REL-021b remain standing P2
 candidates with no changed-surface instance. Focused pytest could not start:
 this runner's `python3.13` lacks pytest. No new finding was verified.
+
+---
+
+## Delta audit 2026-09-12
+
+Anchor `9dce4b3a` verified (`git rev-parse --verify` resolves to
+`9dce4b3a`; `git merge-base --is-ancestor` confirms it is an ancestor). Range
+`9dce4b3a..3e394792` is 20 commits / 180 changed files. Serial review covered
+the new shared model ladder and its MenthorQ/research callers, AI-cycle raw
+evidence persistence, research state and publishing, dark-pool/TWR changes,
+the quote relay, and changed units/UI. Standing sweeps HOLD: halt and
+order-limit chokepoints remain wired (`scripts/ib_place_order.py:240-255`),
+`_NON_IDEMPOTENT_IB_SCRIPTS` remains enforced (`scripts/api/server.py:5546,
+5655,5733`), exit-order acknowledgement remains polled
+(`scripts/monitor_daemon/handlers/exit_orders.py:202,766`), and daemon state
+uses Hrana (`scripts/db/writer.py:2360-2379`). No delta placement site or new
+service-health writer bypasses those controls; `NEW_FINDINGS` and REL-021b
+remain standing P2 candidates with no changed-surface instance.
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-675 | P1 | `scripts/clients/model_ladder.py:330-378,624-703,838-861`; `scripts/research/model.py:43-53`; `requirements.txt:49` | **The new research model ladder's advertised 2 MB response bound is not enforced on its real HTTP transport, so a provider response can exhaust the worker.** `Reviewer.ask()` turns on Anthropic streaming and passes `max_response_bytes=2_000_000`, but `_default_post` invokes `httpx.post` without a streaming client. The bound is then attempted only for a response exposing requests-style `iter_content`; otherwise `_request` immediately materializes `.text` and `.json` with no cap. The five non-Anthropic providers never receive a byte limit at all. A malformed or oversized valid-HTTP provider response therefore consumes unbounded memory in the single research worker, denying queued documents and contradicting the bounded-reviewer contract. |
+
+### Backlog (continuing)
+
+| ID | Sev | Findings | Task | Acceptance |
+|---|---|---|---|---|
+| REL-254 | P1 | R-675 | **Make every model-ladder response genuinely byte-bounded on the production HTTP transport.** Use a managed streaming client/response API compatible with pinned `httpx==0.28.1`, enforce the cap before JSON/text materialization for every provider, close responses on all paths, and preserve bounded connect/read timeouts and failover. | Red first: a fake production-shaped streaming response exceeding 2 MB makes `Reviewer.ask()` raise the safe bounded-response error without calling `.text`/`.json`; each provider route is passed the same cap; a sub-cap Anthropic/Grok response still parses and the response is closed. |

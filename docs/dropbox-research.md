@@ -36,7 +36,7 @@ Provider references: [Dropbox change detection](https://developers.dropbox.com/d
 
 ### Model ladder (shared HTTP)
 
-New multimodal or text-JSON model callers must use `scripts/clients/model_ladder.py` (import `complete_multimodal_json` or `extract_via_vision`). Do not add a third cascade. `scripts/clients/vision_cascade.py` is a thin re-export for CTA/MenthorQ. Weekend bash CLI ladders (`RADON_WEEKEND_MODEL_LADDER` in `scripts/*_weekend.sh`) remain separate subprocess rungs; see `scripts/tests/test_weekend_model_ladder.py`.
+New multimodal or text-JSON model callers must use `scripts/clients/model_ladder.py` (import `complete_multimodal_json` or `extract_via_vision`). Text-JSON responses stream through a 2 MiB cap and close before parsing on every provider rung. Do not add a third cascade. `scripts/clients/vision_cascade.py` is a thin re-export for CTA/MenthorQ. Weekend bash CLI ladders (`RADON_WEEKEND_MODEL_LADDER` in `scripts/*_weekend.sh`) remain separate subprocess rungs; see `scripts/tests/test_weekend_model_ladder.py`.
 
 ### Verified host placement
 

@@ -327,9 +327,42 @@ def _text_from_gemini(payload: dict[str, Any]) -> str:
     return "".join(str(part.get("text") or "") for part in parts if isinstance(part, dict))
 
 
-def _default_post(url: str, *, headers: dict[str, str], json: dict[str, Any], timeout: float):
+class _StreamingHTTPResponse:
+    """Own an httpx client until its streamed response is closed."""
+
+    def __init__(self, client: Any, response: Any):
+        self._client = client
+        self._response = response
+        self.status_code = response.status_code
+
+    def iter_content(self, chunk_size: int):
+        return self._response.iter_bytes(chunk_size=chunk_size)
+
+    def close(self) -> None:
+        try:
+            self._response.close()
+        finally:
+            self._client.close()
+
+
+def _default_post(
+    url: str,
+    *,
+    headers: dict[str, str],
+    json: dict[str, Any],
+    timeout: float | tuple[float, float],
+    stream: bool = False,
+):
     import httpx
 
+    if stream:
+        client = httpx.Client(timeout=timeout)
+        try:
+            request = client.build_request("POST", url, headers=headers, json=json)
+            return _StreamingHTTPResponse(client, client.send(request, stream=True))
+        except Exception:
+            client.close()
+            raise
     return httpx.post(url, headers=headers, json=json, timeout=timeout)
 
 
@@ -370,12 +403,18 @@ def _request(
                 close()
         return status, text, payload
 
-    text = getattr(resp, "text", "") or ""
     try:
-        payload = resp.json()
-    except Exception:
-        payload = None
-    return int(getattr(resp, "status_code", 0) or 0), text, payload
+        text = getattr(resp, "text", "") or ""
+        try:
+            payload = resp.json()
+        except Exception:
+            payload = None
+        return int(getattr(resp, "status_code", 0) or 0), text, payload
+    finally:
+        if stream:
+            close = getattr(resp, "close", None)
+            if callable(close):
+                close()
 
 
 def _anthropic_vision_body(model: str, b64: str, prompt: str) -> dict[str, Any]:
@@ -635,8 +674,8 @@ def _call_text_provider(
             },
             body,
             timeout=(10.0, read_timeout),
-            stream=stream_anthropic,
-            max_bytes=max_response_bytes if stream_anthropic else 0,
+            stream=True,
+            max_bytes=max_response_bytes,
         )
     if name == "grok":
         return _request(
@@ -650,6 +689,8 @@ def _call_text_provider(
                 model, system, instruction, labeled_b64, max_tokens=max_tokens
             ),
             timeout=read_timeout,
+            stream=True,
+            max_bytes=max_response_bytes,
         )
     if name == "codex":
         return _request(
@@ -663,6 +704,8 @@ def _call_text_provider(
                 model, system, instruction, labeled_b64, max_tokens=max_tokens
             ),
             timeout=read_timeout,
+            stream=True,
+            max_bytes=max_response_bytes,
         )
     if name == "gemini":
         url, body = _gemini_multimodal_body(
@@ -674,6 +717,8 @@ def _call_text_provider(
             {"content-type": "application/json"},
             body,
             timeout=read_timeout,
+            stream=True,
+            max_bytes=max_response_bytes,
         )
     if name == "nvidia":
         return _request(
@@ -687,6 +732,8 @@ def _call_text_provider(
                 model, system, instruction, labeled_b64, max_tokens=max_tokens
             ),
             timeout=read_timeout,
+            stream=True,
+            max_bytes=max_response_bytes,
         )
     if name == "cerebras":
         return _request(
@@ -700,6 +747,8 @@ def _call_text_provider(
                 model, system, instruction, labeled_b64, max_tokens=max_tokens
             ),
             timeout=read_timeout,
+            stream=True,
+            max_bytes=max_response_bytes,
         )
     raise RuntimeError(f"{name}:unwired")
 
@@ -741,6 +790,8 @@ def _run_ladder(
         )
         try:
             status, raw, payload = call_provider(name, api_key, model)
+        except ModelResponseError:
+            raise
         except RuntimeError as exc:
             code = str(exc) or "network"
             attempted.append(f"{name}:{code}")

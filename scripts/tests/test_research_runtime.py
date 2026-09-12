@@ -59,14 +59,17 @@ def test_model_valid_multimodal_request_is_tool_free_and_bounded(tmp_path):
     ({"stop_reason":"end_turn","content":[{"type":"text","text":"not json"}]},None),
     ({"stop_reason":"end_turn","content":[{"type":"text"}]},None),
 ])
-def test_model_malformed_response_fails_closed(value,raw):
+def test_model_malformed_response_fails_closed(value,raw,monkeypatch):
+    for key in ("ANTHROPIC_API_KEY", "CLAUDE_CODE_API_KEY", "CLAUDE_API_KEY", "XAI_API_KEY", "GROK_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "NVIDIA_API_KEY", "CEREBRAS_API_KEY"):
+        monkeypatch.delenv(key, raising=False)
     session,closed,_=session_response(value,raw)
     with pytest.raises(model.ModelError): model.Reviewer("test",session=session).ask("evaluate")
     assert closed==[True]
 
 
 def test_model_requires_key_and_rejects_large_images_before_request(tmp_path,monkeypatch):
-    monkeypatch.delenv("ANTHROPIC_API_KEY",raising=False)
+    for key in ("ANTHROPIC_API_KEY", "CLAUDE_CODE_API_KEY", "CLAUDE_API_KEY", "XAI_API_KEY", "GROK_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "NVIDIA_API_KEY", "CEREBRAS_API_KEY"):
+        monkeypatch.delenv(key, raising=False)
     with pytest.raises(model.ModelError,match="No keyed model provider"): model.Reviewer()
     path=tmp_path/"large.png"; path.write_bytes(b"x"*5_000_001)
     session=SimpleNamespace(post=lambda *a,**kw:pytest.fail("oversized image reached remote request"))
