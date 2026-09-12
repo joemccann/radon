@@ -1,3 +1,26 @@
+# Task: Reliability delta audit 2026-09-12 [IN PROGRESS]
+
+Audit `9dce4b3a..HEAD` for changed reliability surfaces and standing safety
+contracts. Audit-only: no production source changes.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify runner, branch, ledger anchor, and delta.
+- T2 depends_on: [T1] - Review changed safety, persistence, resources, and observability surfaces; run standing sweeps.
+- T3 depends_on: [T2] - Append deduplicated findings and ledger, validate tables, commit/push, and update the audit PR.
+
+## Checklist
+
+- [x] T1 Runner markers, isolated branch, remote collision check, and anchor verified.
+- [x] T2 Serial changed-surface review and standing sweeps.
+- [x] T3 Audit report and frozen-ID validation complete; commit/push and PR update follow.
+
+## Review
+
+- R-675 is source-verified against the pinned production transport; all standing safety and catalog sweeps hold.
+
+---
+
 # Task: Daily Dark Pool History mobile overflow --- 2026-09-11 [IN PROGRESS]
 
 Flow Analysis HISTORY table clips PRINTS on ~390px. Wrap in shared
