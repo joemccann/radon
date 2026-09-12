@@ -1,3 +1,24 @@
+# Task: Testing weekend remediate 2026-09-11 [COMPLETE]
+
+Reconcile every verified P0/P1 finding after the 2026-09-11 testing audit.
+Reduced rung permits P0/P1 only; preserve operator-only and blocked outcomes.
+
+## Dependency graph
+
+- T1 depends_on: [] - Reverify T-490 render-contract limitation and T-488 fixture blocker.
+- T2 depends_on: [T1] - Append remediation/log outcome, commit, and push dated branch.
+
+## Checklist
+
+- [x] T1 Focused verification: T-490 reproduced 52 passed / 21 failed; T-488 detached stage exited without output or DONE.
+- [x] T2 Durable dated outcome.
+
+## Review
+
+- [x] No source-actionable P0/P1 left unclassified; T-490 operator-only and T-488 blocked.
+
+---
+
 # Task: Daily Dark Pool History mobile overflow --- 2026-09-11 [IN PROGRESS]
 
 Flow Analysis HISTORY table clips PRINTS on ~390px. Wrap in shared

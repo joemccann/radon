@@ -9289,6 +9289,7 @@ Delta findings continue the T-### numbering in dated `## Delta audit` sections.
 - Audited through: `fcaa1c67` on 2026-09-08 — **4 new findings** (T-486…T-489: 4 P1) over 101 commits / 539 files. Full gates: pytest 12,392 passed / 2 failed; vitest 9,116 passed / 3 failed; cloud 1,808 passed / 4 failed. Every red reproduced in its owning file; 214 touched tests make scoped 3× reruns equivalent to full gates. No new code skip/only/xfail, exclusion growth, threshold decrease, or unclassified E2E spec.
 - Audited through: `964b6b77` on 2026-09-09 — **1 new finding** (T-490: P1) over 34 commits / 267 files. Full gates: pytest 12,709 passed / 21 failed; vitest 9,276 passed; cloud 1,841 passed / 4 failed. The 98 touched test files make scoped 3× reruns equivalent to full gates. No coverage threshold decrease, exclusion growth, or new `.only`/`xfail`; one new conditional `jq` skip is covered by CI's Ubuntu toolchain.
 - Audited through: `9dce4b3a` on 2026-09-10 — **0 new findings** over 6 commits / 53 paths, with existing deterministic T-490 (21 pytest reds) and T-488 (4 cloud reds) re-confirmed. Vitest green; changed Python, Vitest, and cloud test surfaces deterministic x3. No skip, exclusion, threshold, or CI-reachability drift.
+- Audited through: `f1f59a73` on 2026-09-11 — **0 new findings** over 14 commits / 146 paths. Full gates: pytest 12,850 passed / 21 failed (all existing T-490); vitest 9,442 passed / 4 failed only because the dedicated runner lacked declared `web` dependency `exceljs`, then the four owning tests passed after local dependency provisioning; cloud 1,843 passed / 4 failed (all existing T-488). No delta-added skip/xfail/`.only`, CI exclusion, reachability, or coverage-ratchet drift.
 
 ## Remediation 2026-08-29 — PR #140
 
@@ -10193,3 +10194,62 @@ the focused contract is 52 passed / 21 failed and a renderer write fails with
 `PermissionError` creating repository `.codex`. T-490 is therefore
 operator-only here until the generated artifacts can be written and committed;
 full closing gates are not claimed while that deterministic P1 red remains.
+
+## Delta audit 2026-09-11
+
+Range `9dce4b3a..f1f59a73`: 14 commits / 146 paths / 51 touched test files.
+
+### Findings
+
+No new test-suite-health finding. The money-path TWR coverage change, vision
+cascade, research workbench, newsfeed credits, historical fills, systemd
+changes, and their diff-local tests were inspected against their cited source
+paths. New browser specs are in `.github/workflows/ci.yml:786-808`; no
+introduced test relies on a new skip, xfail, `.only`, blanket exclusion, or a
+reduced coverage threshold.
+
+### Standing sweeps
+
+- `python3.13 -m pytest`: **12,850 passed / 21 failed / 19 skipped / 90
+  deselected** in 1,928 s; all failures are the existing T-490 portable-prompt
+  contract in `scripts/tests/test_portable_prompt_sync.py`.
+- `npx vitest run`: **9,442 passed / 4 failed / 18 skipped**. Every failure
+  was `Cannot find package 'exceljs'` from
+  `web/lib/researchWorkbench/artifacts.ts:53`; `exceljs` is declared in
+  `web/package.json:39`, and its two owning files reran **11 passed** after
+  local dependency provisioning, so this is runner state rather than a source
+  finding.
+- `python3.13 -m pytest cloud/tests`: **1,843 passed / 4 failed / 76 skipped**;
+  all four are the existing T-488 GNU-timeout fixture failures in
+  `cloud/tests/test_deploy_corrections.py:1495-1586`.
+- Delta determinism was not rerun 3×: 51 touched tests span `cloud`,
+  `scripts`, root Python, site, and Vitest roots, making a faithful rerun a
+  second full-gate set after the 32-minute pytest gate. No new flake is claimed.
+- Coverage-ratchet and gate-drift review: `.github/workflows/ci.yml:426-444`
+  only adds the MCP report artifact; its browser additions are curated at
+  `:786-808`. `deploy.needs`, exclusions, and thresholds are unchanged.
+
+## Remediation 2026-09-11
+
+`RADON_WEEKEND_REDUCED=1`: the 2026-09-11 audit filed no P0/P1 finding, so
+the reduced rung admits no new source remediation. The complete P0/P1
+reconciliation leaves T-490 operator-only and T-488 blocked: neither has a
+safe in-repository action available in this runner.
+
+- **T-490 — operator-only:** the dedicated runner has no repository
+  `.codex/skills/` directory. The focused contract reproduced **52 passed / 21
+  failed**; every failure is one of the four required rendered-skill trees or
+  its interface file. This CLI may not create that protected repository path.
+  Operator: run `python3.13 scripts/render_loop_prompt.py --write` in a
+  checkout where `.codex/` is writable, run
+  `python3.13 -m pytest scripts/tests/test_portable_prompt_sync.py -q`, and
+  commit the generated artifacts.
+- **T-488 — blocked:** the prior three fixture attempts remain the only
+  meaningful source-level attempts. A new detached focused rerun was killed
+  before pytest wrote output or its `DONE` sentinel (`/tmp/tw-2026-09-11/t488.rc`
+  remained `PENDING`), so it is incomplete evidence, not a fourth attempt.
+  Operator: reproduce and repair the GNU-timeout process-tree behavior on
+  Linux CI without widening the fixed contract timeout.
+
+Closing full gates are not claimed: T-490 remains deterministically red and
+the required detached T-488 stage did not complete.

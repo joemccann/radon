@@ -829,3 +829,16 @@ section before completion.
 |---|---|---|
 | T-490 | BLOCKED / operator-only | Red reverified in this runner: `test_portable_prompt_sync.py` is 52 passed / 21 failed. A fourth renderer attempt failed at `.codex` creation with `PermissionError`; full closing gates are not claimed while this deterministic P1 red remains. Operator: run `python3.13 scripts/render_loop_prompt.py --write` in a checkout where repository `.codex/` is writable, then run the focused contract and commit generated artifacts. |
 | T-488 | BLOCKED / operator-only | Unchanged after its three recorded fixture attempts. Operator: reproduce and repair the GNU-timeout process-tree behavior on Linux CI without widening the contract timeout. |
+
+## Remediation 2026-09-11
+
+`RADON_WEEKEND_REDUCED=1`: no source-actionable P0/P1 was filed in this
+cycle. Focused T-490 verification using
+`/Users/asymmetricholdingsltd./radon-weekend/venv-testing/bin/python` was
+**52 passed / 21 failed**: all failures require absent protected
+`.codex/skills/*` rendered artifacts. T-490 remains operator-only with the
+recorded writable-checkout render action. T-488 remains BLOCKED after its
+three recorded attempts. Its new detached focused rerun exited before output
+and without `DONE`; no gate count is claimed. Closing full gates were not run
+because T-490 remains deterministic red and the required T-488 stage was
+incomplete.
