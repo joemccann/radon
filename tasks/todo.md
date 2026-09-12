@@ -1,3 +1,21 @@
+# Task: Assistant September P&L empty-final 2026-09-11
+
+Grok 4.6 burned 49 tool calls on "analyze all my trades for september 2026 and tell me my P&L" then showed the canned max-rounds string.
+
+## Dependency graph
+
+- T1 depends_on: [] - Prove prefetch, tool_choice=none forced final, Grok reasoning_effort=low, P&L synthesis.
+- T2 depends_on: [T1] - Prefetch get_realized_pnl, keep tools on cap-hit, unwrap fenced payloads.
+- T3 depends_on: [T2] - Focused assistant/provider tests, PR, GitHub CI, Pushover.
+
+## Checklist
+
+- [x] T1 Screenshot prompt maps to 2026-09-01..2026-09-30; empty Grok final still renders dollars.
+- [x] T2 Loop prefetch + tool_choice none + reasoning_effort low + 90s timeout + system-prompt routing.
+- [ ] T3 PR, exact-head CI green, Pushover.
+
+---
+
 # Task: Daily Dark Pool History mobile overflow --- 2026-09-11 [IN PROGRESS]
 
 Flow Analysis HISTORY table clips PRINTS on ~390px. Wrap in shared
