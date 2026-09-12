@@ -1,5 +1,5 @@
 /**
- * IB tick handler — pure functions for processing tickPrice/tickSize events.
+ * IB tick handler — pure functions for processing tickPrice/tickSize/tickString events.
  * Extracted from ib_realtime_server.js so they can be unit-tested independently.
  */
 
@@ -275,6 +275,39 @@ export function parseFundamentalRatios(data, fundString) {
     data.timestamp = new Date().toISOString();
   }
   return updated;
+}
+
+/* ─── RT Volume (tickString type 48 / 77, generic tick 233) ───── */
+
+/**
+ * IB RTVolume / RT Trade Volume string:
+ *   lastPrice;lastSize;lastTime;totalVolume;vwap;singleTrade
+ * Only totalVolume is recoverable here. The payload has no session high/low —
+ * those stay tickPrice 6/7 (or delayed 72/73). Empty or unparseable volume
+ * returns null so a prior tickSize VOLUME is not wiped.
+ */
+export function parseRtVolume(value) {
+  if (typeof value !== "string" || value.length === 0) return null;
+  const parts = value.split(";");
+  if (parts.length < 4) return null;
+  const volumeRaw = parts[3].trim();
+  if (volumeRaw === "") return null;
+  return normalizeNumber(Number(volumeRaw));
+}
+
+export function updatePriceFromTickString(data, tickType, value) {
+  switch (tickType) {
+    case TICK_TYPE.RT_VOLUME:       // 48 — generic tick 233
+    case TICK_TYPE.RT_TRD_VOLUME: { // 77
+      const volume = parseRtVolume(value);
+      if (volume == null) return false;
+      data.volume = volume;
+      data.timestamp = new Date().toISOString();
+      return true;
+    }
+    default:
+      return false;
+  }
 }
 
 export function updatePriceFromTickSize(data, sizeType, value) {

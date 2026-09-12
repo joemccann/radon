@@ -13,6 +13,14 @@ import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from research.model import ModelError, safe_error_message as _safe_model_message
+
+
+def _persist_error(error: BaseException) -> str:
+    if isinstance(error, ModelError):
+        return _safe_model_message(error)
+    return type(error).__name__
+
 ROOT = '/joe mccann/current'
 MONTHS = ('January February March April May June July August September October November December').split()
 
@@ -156,10 +164,10 @@ class State:
         with self.db:
             self.db.execute("""UPDATE ingestion SET status=CASE WHEN attempts>=6 THEN 'held' ELSE 'pending' END,
                 error=?,available_at=? WHERE work_key=? AND status='parsing'""",
-                (type(error).__name__,time.time()+max(0,delay),key))
+                (_persist_error(error),time.time()+max(0,delay),key))
             self.db.execute('''UPDATE work SET status='complete',result=?,error=? WHERE key=? AND status='pending'
                 AND EXISTS(SELECT 1 FROM ingestion WHERE work_key=? AND status='held')''',
-                (json.dumps({'status':'held','stage':'extraction','error':type(error).__name__}),type(error).__name__,key,key))
+                (json.dumps({'status':'held','stage':'extraction','error':_persist_error(error)}),_persist_error(error),key,key))
 
     def ready(self, limit=20):
         rows = self.db.execute("""SELECT w.*,i.pdf FROM work w JOIN ingestion i ON i.work_key=w.key
@@ -202,7 +210,7 @@ class State:
 
     def retry(self, key, error, delay=60):
         # Error must be a safe classification, never an HTTP body or credentials.
-        safe_error = type(error).__name__ if isinstance(error, BaseException) else 'processing_failed'
+        safe_error = _persist_error(error) if isinstance(error, BaseException) else 'processing_failed'
         with self.db:
             self.db.execute("UPDATE work SET status='pending',error=?,available_at=? WHERE key=? AND status='processing'", (safe_error,time.time()+max(0,delay),key))
 

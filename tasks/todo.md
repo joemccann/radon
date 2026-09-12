@@ -48,6 +48,46 @@ mandatory drill and gate closure without touching IB or live orders.
 
 ---
 
+# Task: Daily Dark Pool History mobile overflow --- 2026-09-11 [IN PROGRESS]
+
+Flow Analysis HISTORY table clips PRINTS on ~390px. Wrap in shared
+`table-wrap` with sticky DATE. Layout/CSS only. Do not merge.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests for table-wrap + sticky DATE + mobile overflow.
+- T2 depends_on: [T1] - DailyTable wrap + globals.css sticky/nowrap.
+- T3 depends_on: [T2] - Focused vitest/e2e, draft PR, no merge.
+
+## Checklist
+
+- [x] T1 Failing wrap / sticky / overflow tests.
+- [x] T2 table-wrap + sticky DATE CSS.
+- [ ] T3 Green tests, PR against main, no merge.
+
+---
+
+# Task: Option order-sheet High/Low/Volume --- 2026-09-11 [IN PROGRESS]
+
+Positions → order sheet for a short single-leg option (SNDK $1750C 2026-09-25)
+shows High/Low/Volume as `---` while Bid/Mid/Ask/Mark/Day% populate.
+Fix relay drops of RT_VOLUME / tickSize volume; do not invent High/Low.
+Do not merge.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests for RT_VOLUME parse and tickSize broadcast.
+- T2 depends_on: [T1] - parse RT_VOLUME; hydrateAndBroadcast on tickSize + tickString.
+- T3 depends_on: [T2] - Focused vitest, draft PR, CI watch. No merge.
+
+## Checklist
+
+- [x] T1 Failing RT_VOLUME / broadcast / option-null-OHLV tests.
+- [x] T2 Handler + relay wiring.
+- [ ] T3 Green tests, PR against main, no merge.
+
+---
+
 # Task: TWR coverage-lag overwrite 2026-09-11 [IN PROGRESS]
 
 Weekday radon-perf-twr must not clip Turso NAV to lagging mirrored-flow
