@@ -1,3 +1,27 @@
+# Task: Reliability remediation 2026-09-12 [IN PROGRESS]
+
+Reduced capability rung (`RADON_WEEKEND_REDUCED=1`): remediate P0/P1 only.
+
+## Dependency graph
+
+- T1 depends_on: [] - Add REL-254 production-transport byte-bound fault injection.
+- T2 depends_on: [T1] - Stream and close every model-ladder provider response before parsing.
+- T3 depends_on: [T2] - Run focused verification, record REL-254, regenerate codemap, commit and push.
+- T4 depends_on: [T3] - Re-run permanent drills and required gate stages or record a verified blocker.
+
+## Checklist
+
+- [x] T1 RED fault injection for oversized production-shaped response.
+- [x] T2 Production implementation and GREEN focused suites.
+- [ ] T3 Reliability log, codemap, commit, and branch push.
+- [ ] T4 Closing drills and gates.
+
+## Review
+
+Pending.
+
+---
+
 # Task: Reliability delta audit 2026-09-12 [IN PROGRESS]
 
 Audit `9dce4b3a..HEAD` for changed reliability surfaces and standing safety
