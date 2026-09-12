@@ -14,6 +14,27 @@ Grok 4.6 burned 49 tool calls on "analyze all my trades for september 2026 and t
 - [x] T2 Loop prefetch + tool_choice none + reasoning_effort low + 90s timeout + system-prompt routing.
 - [ ] T3 PR, exact-head CI green, Pushover.
 
+---
+
+# Task: Daily Dark Pool History mobile overflow --- 2026-09-11 [IN PROGRESS]
+
+Flow Analysis HISTORY table clips PRINTS on ~390px. Wrap in shared
+`table-wrap` with sticky DATE. Layout/CSS only. Do not merge.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests for table-wrap + sticky DATE + mobile overflow.
+- T2 depends_on: [T1] - DailyTable wrap + globals.css sticky/nowrap.
+- T3 depends_on: [T2] - Focused vitest/e2e, draft PR, no merge.
+
+## Checklist
+
+- [x] T1 Failing wrap / sticky / overflow tests.
+- [x] T2 table-wrap + sticky DATE CSS.
+- [ ] T3 Green tests, PR against main, no merge.
+
+---
+
 # Task: Option order-sheet High/Low/Volume --- 2026-09-11 [IN PROGRESS]
 
 Positions → order sheet for a short single-leg option (SNDK $1750C 2026-09-25)
