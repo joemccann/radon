@@ -1439,3 +1439,104 @@ python/web gate co-wall then the deploy floor (CIP-004).
   `INSUFFICIENT_SAMPLE`; CIP-005/CIP-007/CIP-009 remain `VALIDATING`, and
   CIP-004/CIP-006/CIP-008 remain `DEFERRED`. Residual bottleneck remains the
   required `scripts-rs`/image co-wall followed by the protected Deploy floor.
+
+### 2026-09-12 - audit - branch `ci-performance/2026-09-12`
+
+- Runner state: dedicated `.radon-weekend-runner` and
+  `.radon-ci-performance-runner` markers, clean `origin/main` base, GitHub
+  authentication, required toolchain, and the wrapper-owned exclusive lock
+  were verified. The lock was observed but not mutated by this child phase.
+  Production has its custom branch policy enabled. `RADON_WEEKEND_REDUCED=1`
+  applies to the following remediation phase only.
+- Audited range: `1998fb77..3e394792` (23 commits). CI changes at
+  `.github/workflows/ci.yml:399-435` add the MCP report to the existing
+  `scripts-jm` shard, and `:759-850` add curated, explicitly non-gating
+  Playwright specs and failure screenshots. The range also changes cloud
+  systemd units, application, scripts, web, tests, docs, and codemap data; it
+  does not alter cache keys, required deploy dependencies, image provenance,
+  path-filter fallback, or deployment code.
+- Measured 20 recent organic main-push runs (successes plus separate failure /
+  cancellation reliability evidence): [34655414656](https://github.com/joemccann/radon/actions/runs/34655414656),
+  [34566867492](https://github.com/joemccann/radon/actions/runs/34566867492),
+  [34534064875](https://github.com/joemccann/radon/actions/runs/34534064875),
+  [34532719143](https://github.com/joemccann/radon/actions/runs/34532719143),
+  [34510340199](https://github.com/joemccann/radon/actions/runs/34510340199),
+  [34509793412](https://github.com/joemccann/radon/actions/runs/34509793412),
+  [34506365648](https://github.com/joemccann/radon/actions/runs/34506365648),
+  [34495969963](https://github.com/joemccann/radon/actions/runs/34495969963),
+  [34495237026](https://github.com/joemccann/radon/actions/runs/34495237026),
+  [34494461813](https://github.com/joemccann/radon/actions/runs/34494461813),
+  [34493844137](https://github.com/joemccann/radon/actions/runs/34493844137),
+  [34485204127](https://github.com/joemccann/radon/actions/runs/34485204127),
+  [34434618475](https://github.com/joemccann/radon/actions/runs/34434618475),
+  [34421932230](https://github.com/joemccann/radon/actions/runs/34421932230),
+  [34385767860](https://github.com/joemccann/radon/actions/runs/34385767860),
+  [34380080645](https://github.com/joemccann/radon/actions/runs/34380080645),
+  [34378888892](https://github.com/joemccann/radon/actions/runs/34378888892),
+  [34377837829](https://github.com/joemccann/radon/actions/runs/34377837829),
+  [34305489737](https://github.com/joemccann/radon/actions/runs/34305489737), and
+  [34303977126](https://github.com/joemccann/radon/actions/runs/34303977126).
+  Primary clocks (createdAt to Deploy completion) are 565, 264, 289, 357, 296,
+  289, 287, 299, 174, 222, 160, 294, 281, 281, 277, 183, 177, 185, 503, and
+  272 seconds: p50 280s, p95 565s. Classes and cache state vary (web/node,
+  Python/cloud, mixed; ordinary/warm only), so this is `INSUFFICIENT_SAMPLE`,
+  not a performance comparison. Failed runs 34642195003 and 34611662506 and
+  cancelled run 34485150434 remain reliability evidence, excluded from wins.
+- Representative current mixed run 34655414656 had 3s initial queue delay and
+  follows Path filter (8s) -> node-image build/publish (129s, its 107s build
+  step) plus `scripts-rs` (109s, pytest 97s) -> Python coverage (18s) ->
+  parallel prestage/prepull (25s/18s) -> Deploy (151s, SSH 148s). Its longer
+  565s wall includes scheduling between the authorized host-preparation jobs
+  and Deploy; that is reported separately, not claimed as code latency.
+- Safety/DAG sweep: `.github/workflows/ci.yml:864-1044` retains identical
+  complete gate closures for prestage and prepull, exact-SHA app-image need,
+  and non-canceling production deploy. `scripts/tests/test_ci_gate_integrity.py`
+  and `test_ci_deploy_concurrency.py` retain derived closure, shard-union,
+  coverage-ratchet, exact-image, and fail-closed assertions; `test_path_filter.py`
+  retains unknown-path fallback. Pinned actions remain immutable. Deploy
+  recovery, rollback, transition journal, health probes, and stability checking
+  remain in `cloud/scripts/deploy.sh:935-1618`.
+- Candidate ranking: no CIP-011 allocated. The new MCP evaluation is zero
+  seconds in run 34655414656 and the enlarged Playwright smoke is absent from
+  `deploy.needs`; neither affects push-to-production. Repartitioning the
+  observed work-bound `scripts-rs` lead has no demonstrated >=15s critical-path
+  saving before the 129s node image and 148s deploy floors, risks the recursive
+  inventory contract, and can increase runner minutes. Queue/scheduling delay
+  requires GitHub/runner capacity, not a safe source change. Expected recurring
+  saving <15s; confidence low; risk/validation cost high; runner-minute effect
+  unknown on the free-plan API. Outcome: `NO_SAFE_CHANGE` /
+  `INSUFFICIENT_SAMPLE`; CIP-005/CIP-007/CIP-009 remain `VALIDATING` and
+  CIP-004/CIP-006/CIP-008 remain `DEFERRED`.
+- Verification: `../venv-ci-performance/bin/python -m pytest
+  scripts/tests/test_ci_gate_integrity.py scripts/tests/test_ci_deploy_concurrency.py
+  scripts/tests/test_path_filter.py -q` — **89 passed in 9.04s**; CI YAML parse,
+  `bash -n scripts/ci_performance_nightly.sh`, Production API, and
+  `git diff --check origin/main...HEAD` passed. No source change; runner-minute
+  impact zero. Revert trigger: any future candidate that shrinks gate closure,
+  inventory, coverage, provenance, health, recovery, rollback, or stability.
+
+### 2026-09-12 - remediate - branch `ci-performance/2026-09-12`
+
+- Runner state: dedicated markers, dated remote branch, GitHub authentication,
+  clean `origin/main` baseline, and the wrapper-owned exclusive lock remain
+  valid. `RADON_WEEKEND_REDUCED=1` limits this phase to verified P0/P1 findings.
+- Remediation eligibility: the completed audit supplied zero P0/P1
+  source-actionable findings. Its only source-level lead, the work-bound
+  `scripts-rs` shard, has a demonstrated critical-path ceiling below 15 seconds
+  before the node-image and protected Deploy floors; changing it would risk the
+  recursive shard-union contract and higher runner minutes. No lower-priority
+  substitute or CIP ID was allocated.
+- Verification: `../venv-ci-performance/bin/python -m pytest
+  scripts/tests/test_ci_gate_integrity.py scripts/tests/test_ci_deploy_concurrency.py
+  scripts/tests/test_path_filter.py -q` — **89 passed in 9.22s**; Ruby YAML
+  parsing of `.github/workflows/ci.yml`, `bash -n
+  scripts/ci_performance_nightly.sh`, base/worktree `git diff --check`, and the
+  Production environment API passed. These are safety baselines, not production
+  timing claims.
+- Safety/impact: test inventory, coverage, fail-closed path classification,
+  required-gate closure, immutable pins, artifact provenance, exact-SHA image
+  verification, health, recovery, rollback, cancellation, and the 40-second
+  stability window are unchanged. Runner-minute impact is zero. Outcome:
+  `NO_SAFE_CHANGE` / `INSUFFICIENT_SAMPLE`; CIP-005/CIP-007/CIP-009 remain
+  `VALIDATING`, CIP-004/CIP-006/CIP-008 remain `DEFERRED`, and the residual
+  bottleneck is the required `scripts-rs`/node-image co-wall followed by Deploy.

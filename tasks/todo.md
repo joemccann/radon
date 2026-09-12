@@ -1,3 +1,26 @@
+# Task: CI performance remediate 2026-09-12 [COMPLETE]
+
+Apply every eligible P0/P1 finding from the 2026-09-12 CI-performance audit
+without weakening the required gate, provenance, or deployment-safety closure.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify dedicated runner, dated audit branch, and reduced scope.
+- T2 depends_on: [T1] - Recheck audited P0/P1 remediation candidates and safety baseline.
+- T3 depends_on: [T2] - Append the attributable remediation decision and commit it.
+
+## Checklist
+
+- [x] T1 Dedicated markers, branch, GitHub access, and wrapper lock ownership verified.
+- [x] T2 Audit has zero P0/P1 source-actionable findings; focused safety baseline passed.
+- [x] T3 Appended the no-safe-change decision; no lower-priority substitute introduced.
+
+## Review
+
+- [x] `RADON_WEEKEND_REDUCED=1` admitted only P0/P1 work; `scripts-rs` remains below the materiality floor.
+
+---
+
 # Task: Daily Dark Pool History mobile overflow --- 2026-09-11 [IN PROGRESS]
 
 Flow Analysis HISTORY table clips PRINTS on ~390px. Wrap in shared
