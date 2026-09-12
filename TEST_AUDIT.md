@@ -10235,3 +10235,13 @@ no-key behavior under the new source contract.
 - Reachability: all 21 added unit tests are under CI-discovered roots; added
   browser specs are either curated in `.github/workflows/ci.yml:789-803` or
   recorded in `web/e2e/ci-curation-ledger.txt`.
+
+## Remediation 2026-09-12
+
+`RADON_WEEKEND_REDUCED=1`: T-491 is the only verified source-actionable P0/P1
+finding from this cycle. `Reviewer(env={})` now preserves the injected empty
+environment and falls back to ambient credentials only when `env is None`.
+
+| Task | Status | Evidence |
+|---|---|---|
+| T-491 | DONE | Red: `XAI_API_KEY=ambient-poison` made the old no-key assertion fail (no `ModelError`). Green: poison-key case 1 passed; research runtime plus model ladder 59 passed. |
