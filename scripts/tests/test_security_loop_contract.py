@@ -398,6 +398,10 @@ class TestTheSetupIsCredentialFree:
         (clone / "config").mkdir()
         (clone / "requirements.txt").write_text("", encoding="utf-8")
         shutil.copy(PLIST, clone / "config" / PLIST.name)
+        shutil.copy(
+            REPO / "config" / "com.radon.security-deepsec.plist",
+            clone / "config" / "com.radon.security-deepsec.plist",
+        )
         venv_bin = root / "venv-security" / "bin"
         venv_bin.mkdir(parents=True)
         for tool in ("python", "pip"):

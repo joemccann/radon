@@ -140,6 +140,8 @@ def _add_worktree(root: Path, name: str, *, pushed: bool, age_days: float = 30.0
         ("venv-reliability", "venv"),
         ("venv-reliability/lib/__pycache__", "venv"),
         ("radon/.deepsec", "deepsec"),
+        ("radon-security-deepsec", "deepsec"),
+        (".security-deepsec.lock", "deepsec"),
         (".security-nightly-scratch", "scratch"),
         ("radon", "loop clone"),
     ],
