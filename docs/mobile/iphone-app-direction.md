@@ -119,3 +119,10 @@ This foundation does **not**:
 
 Joe reviews. If the loop is right, the next work is references + Figma, not a
 repo-wide iOS target. Keep this file as the owner when that work lands.
+
+## Review
+
+- Source thread is credited. Phases, Figma lock, and never-auto-trade are pinned
+  by `TestIphoneAppDirection`.
+- `apps/ios/` is README-only. No Xcode project, no App Store job.
+- Web UI, trading gates, and Chat propose-then-confirm are unchanged.

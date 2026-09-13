@@ -13,7 +13,7 @@ optional `apps/ios` stub only. Do not merge.
 
 - [x] T1 Failing iPhone-direction contract tests.
 - [x] T2 Direction doc + index + stub.
-- [ ] T3 Green tests, PR against main, no merge.
+- [x] T3 Draft PR #416 against main. No merge.
 
 ---
 
