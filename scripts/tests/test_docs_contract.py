@@ -362,6 +362,44 @@ class TestThinIndex:
         assert "npm run" not in text
 
 
+class TestIphoneAppDirection:
+    """Foundation pin: iPhone path is documented, not claimed shipping."""
+
+    _SOURCE = "https://x.com/breejeanadkat/status/2098728437133476089"
+    _DOC = _ROOT / "docs" / "mobile" / "iphone-app-direction.md"
+    _STUB = _ROOT / "apps" / "ios" / "README.md"
+
+    def test_direction_doc_exists_and_is_indexed(self):
+        assert self._DOC.is_file(), "docs/mobile/iphone-app-direction.md is the iPhone foundation"
+        index = (_ROOT / "docs" / "README.md").read_text(encoding="utf-8")
+        assert "mobile/iphone-app-direction.md" in index
+
+    def test_direction_doc_credits_source_and_states_non_goals(self):
+        text = self._DOC.read_text(encoding="utf-8")
+        assert self._SOURCE in text
+        for marker in (
+            "references",
+            "AI draft",
+            "specific critique",
+            "Figma",
+            "interactive MVP",
+            "propose",
+            "never auto-trade",
+            "not rewriting the web UI",
+            "not shipping",
+            "App Store",
+        ):
+            assert marker in text, marker
+
+    def test_ios_readme_is_a_stub_not_a_project(self):
+        assert self._STUB.is_file()
+        text = self._STUB.read_text(encoding="utf-8")
+        assert "docs/mobile/iphone-app-direction.md" in text
+        assert "xcodeproj" not in text.lower()
+        ios_files = [p.name for p in self._STUB.parent.iterdir() if p.is_file()]
+        assert ios_files == ["README.md"], ios_files
+
+
 class TestEdgeHealthRunbook:
     def test_edge_health_status_caveat_states_the_200_body_contract(self):
         # R-444: after cd6af110 / b8eda2b6 every failure mode of
