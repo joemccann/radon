@@ -1,3 +1,26 @@
+# Task: Reliability delta audit 2026-09-13 [COMPLETE]
+
+Audit `f1f59a73..9db44a3f` serially; preserve frozen reliability identifiers
+and do not interact with IB or live orders.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify runner markers, dated branch, remote state, and ledger anchor.
+- T2 depends_on: [T1] - Inspect changed source/direct blast radius and run standing sweeps.
+- T3 depends_on: [T2] - Append verified findings, backlog, ledger, and review record.
+
+## Checklist
+
+- [x] T1 Runner markers and anchor `f1f59a73` verified; dated remote branch absent.
+- [x] T2 Reviewed 35 changed files; money-path and catalog sweeps hold.
+- [x] T3 Filed R-675 / REL-254 with fault-injection acceptance criteria.
+
+## Review
+
+- [x] Research worker default streaming adapter failure is source-verified at the production call path.
+
+---
+
 # Task: Reliability delta audit 2026-09-11 [IN PROGRESS]
 
 Audit `9dce4b3a..f1f59a73` serially across the changed control-plane,

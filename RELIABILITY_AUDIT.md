@@ -224,6 +224,8 @@ Delta findings continue the R-### numbering in dated `## Delta audit` sections.
 - Audited through: `9dce4b3a` on 2026-09-10 — 0 new findings. Anchor `1ed5aa84` verified (`rev-parse --verify` resolves; ancestor of HEAD); range is 5 commits / 42 changed files. Serial review covered compact AI-cycle snapshot persistence and serving, Ramp curated ingestion, MenthorQ session recovery, and the related control-plane timeout increase. All standing sweeps HOLD: no delta placement or health writer, halt/order-limit/exit-ack/Hrana chokepoints remain wired, and `NEW_FINDINGS` plus the REL-021b remainder have no changed-surface instance. Focused pytest could not start because this runner's `python3.13` lacks pytest.
 - Audited through: `f1f59a73` on 2026-09-11 — 0 new findings. Anchor `9dce4b3a` verified (`rev-parse --verify` resolves; ancestor of HEAD); range is 13 commits / 75 changed source files. Serial review covered the CTA vision cascade, AI-cycle OpenDesign ingestion, TWR coverage persistence, dark-pool cache semantics, hosted MCP bounded reads, authenticated research assets, and newsfeed provenance. All standing sweeps HOLD: no delta placement or health writer, halt/order-limit/exit-ack/Hrana chokepoints remain wired, and `NEW_FINDINGS` plus the REL-021b remainder have no changed-surface instance. Focused pytest could not start because this runner's `python3.13` lacks pytest.
 
+- Audited through: `9db44a3f` on 2026-09-13 — 1 new finding (R-675; 0 P0, 1 P1), backlog REL-254. Anchor `f1f59a73` verified (`rev-parse --verify` resolves to `f1f59a732d25edcb7839a769006f12ba9a554af7`, `merge-base --is-ancestor` confirms); range is 14 commits / 35 changed files. Serial review covered the shared model ladder and research worker, IB realtime-volume relay, mobile flow history, and share-copy rendering. Standing sweeps HOLD: halt/order-limit/exit-ack/Hrana chokepoints and `_NON_IDEMPOTENT_IB_SCRIPTS` remain wired; no changed placement path or service-health writer bypasses its guard/catalog.
+
 ## 7. Exit criteria check (A5)
 
 - RELIABILITY_AUDIT.md exists; every finding cites file:line — **yes** (§3).
@@ -2538,3 +2540,31 @@ writers remain in both watchdog catalogs. `NEW_FINDINGS` and REL-021b remain
 standing P2 candidates with no changed-surface instance. Focused pytest could
 not start because this runner's `python3.13` lacks pytest. No new finding was
 verified.
+
+---
+
+## Delta audit 2026-09-13
+
+Anchor `f1f59a73` verified (`git rev-parse --verify` resolves to
+`f1f59a732d25edcb7839a769006f12ba9a554af7`; `git merge-base --is-ancestor`
+confirms it is an ancestor). Range `f1f59a73..9db44a3f` is 14 commits and 35
+changed files. Serial review covered the shared model ladder and research
+worker, IB realtime volume relay, mobile flow history, and share-copy rendering.
+Standing sweeps HOLD: halt chokepoints (`scripts/ib_place_order.py:240-242`),
+order limits (`scripts/ib_place_order.py:253-255`), `_NON_IDEMPOTENT_IB_SCRIPTS`
+(`scripts/api/server.py:5546`), exit-order acknowledgement
+(`scripts/monitor_daemon/handlers/exit_orders.py:490-502`), and daemon-state
+Hrana writes (`scripts/db/writer.py:2360-2373`) remain wired. The delta adds no
+`placeOrder` / `place_order` or `service_health` writer, so no new bypass or
+catalog gap exists. `NEW_FINDINGS` and REL-021b have no changed-surface
+instance. IDs R-675+/REL-254+ are free across both ledgers and commit subjects.
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-675 | P1 | `scripts/research/worker.py:195-204`; `scripts/research/model.py:43-53`; `scripts/clients/model_ladder.py:330-350,624-640,829-850`; `requirements.txt:45-49`; pin `scripts/tests/test_model_ladder.py` | **The production research worker cannot complete with an Anthropic-only configuration.** The worker constructs `Reviewer()` without a session, so `complete_multimodal_json()` selects `_default_post`; its default `stream_anthropic=True` passes `stream=True` to that adapter, but `_default_post` accepts only `url`, `headers`, `json`, and `timeout`. `_request` converts the resulting `TypeError` to a provider failure; with no later keyed provider the document is retried then held. Existing ladder and reviewer tests explicitly force `stream_anthropic=False` or provide a mock adapter that accepts `stream`, leaving the production default unexercised. The mandatory `httpx==0.28.1` runtime makes the adapter path live. |
+
+### Backlog (continuing)
+
+| ID | Sev | Findings | Task | Acceptance |
+|---|---|---|---|---|
+| REL-254 | P1 | R-675 | **Make the default research HTTP adapter support the configured Anthropic response mode, and test the worker-default path.** Either perform a bounded non-streamed request or provide a bounded streaming adapter whose call signature and response iteration match httpx; preserve the 2 MiB response cap and ladder fallthrough. | Red first: Anthropic-only `Reviewer()` with the production default adapter reaches a completed JSON response without `TypeError`; an oversized streamed response is bounded and a provider failure still falls through to the next keyed rung. Existing mocked non-streaming tests remain green. |
