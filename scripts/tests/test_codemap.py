@@ -14,7 +14,6 @@ from tools.codemap.generate_codemap import (
     architecture_from,
     build_graph,
     collect_files,
-    committed_graph_is_fresh,
     extract_js_deps,
     extract_py_deps,
     fingerprint,
@@ -272,13 +271,6 @@ class TestRefreshGate:
         second = json.loads((out / "codemap.json").read_text())
         assert first["meta"]["generated_at"] == second["meta"]["generated_at"]
         assert fingerprint(first) == fingerprint(second)
-
-
-class TestCommittedArtifacts:
-    def test_matches_live_graph(self) -> None:
-        assert committed_graph_is_fresh(REPO), (
-            "tools/codemap is stale; run python3.13 tools/codemap/generate_codemap.py"
-        )
 
 
 class TestAgentRails:

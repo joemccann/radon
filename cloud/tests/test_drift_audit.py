@@ -2,6 +2,7 @@
 
 import importlib.util
 import pathlib
+import subprocess
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -612,3 +613,45 @@ class TestASuppressingRoleNeedsARootOwnedSource:
     def test_the_process_environment_may_select_app(self, tmp_path, monkeypatch):
         monkeypatch.setattr(da, "CANONICAL_ENV_FILE", tmp_path / "missing")
         assert da.resolve_host_role({"RADON_HOST_ROLE": "app"}) == "app"
+
+
+class TestRepoBlobTrustedTip:
+    """F20260913-D02: the git: comparison basis is the GitHub main tip.
+
+    Local HEAD lives in the radon-writable checkout, so a rewritten local
+    branch could hide compose drift from this root audit. The blob must come
+    from the pinned GitHub remote, and a fetch failure must surface as a
+    missing repo artifact (visible drift), never fall back to local history.
+    """
+
+    def _patch_git(self, monkeypatch, results):
+        calls = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append(list(cmd))
+            joined = " ".join(cmd)
+            for needle, (rc, out) in results.items():
+                if needle in joined:
+                    return subprocess.CompletedProcess(cmd, rc, stdout=out, stderr="")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        monkeypatch.setattr(da.subprocess, "run", fake_run)
+        da._TIP_STORE.clear()
+        return calls
+
+    def test_blob_comes_from_the_pinned_remote_not_local_head(self, monkeypatch):
+        calls = self._patch_git(
+            monkeypatch, {" show ": (0, "tip-blob"), "show FETCH_HEAD": (0, "tip-blob")}
+        )
+
+        assert da._read_repo_blob("docker-compose.yml") == "tip-blob"
+
+        flat = [" ".join(cmd) for cmd in calls]
+        assert any("fetch" in c and da.UNIT_REMOTE in c for c in flat), flat
+        assert not any(str(da.GIT_REPO) in c for c in flat), flat
+        assert not any(arg.startswith("HEAD:") for cmd in calls for arg in cmd), flat
+
+    def test_fetch_failure_is_a_visible_missing_repo_artifact(self, monkeypatch):
+        self._patch_git(monkeypatch, {"fetch": (128, "")})
+
+        assert da._read_repo_blob("docker-compose.yml") is None
