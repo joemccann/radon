@@ -6586,3 +6586,39 @@ No local suites. Review confirms quantity-weighted prices preserve zero and sign
 - Integration verification: head 4d92842e passed every applicable check; GitHub CI 34507570000 ran 99 browser regressions plus one demo test. Desktop 1280px/mobile 393px full `/orders` screenshots reviewed (artifact 10164611383). Reintegrating main 722b1121 for the final merge gate; no local suites.
 
 - PR #394 intermediate integration `892f24b1`: 31 applicable checks green, source shard 2225 passed, browser 96 passed plus one demo. Final integration includes historical-fill PR #395 at `aae5e1e5`; repeat exact-head checks before merge.
+
+# Task: Testing delta audit 2026-09-13 [DONE]
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify runner markers, clean tree, ledger anchor, and changed surface.
+- T2 depends_on: [T1] - Review delta, standing candidates, CI reachability, skips, and coverage drift.
+- T3 depends_on: [T2] - Record verified findings and audit evidence on testing/2026-09-13.
+
+## Checklist
+
+- [x] T1 Dedicated testing runner and anchor 9dce4b3a verified.
+- [x] T2 Filed T-491 from cited relay test/source lines; CI and skip/ratchet review complete.
+- [x] T3 Appended TEST_AUDIT.md and TEST_LOG.md.
+
+## Review
+
+Detached full-gate runner ended without the required DONE sentinel; no gate
+counts or green result are claimed.
+
+# Task: Testing remediation 2026-09-13 [COMPLETE]
+
+## Dependency graph
+
+- T1 depends_on: [] - Reconcile every audit backlog row and standing P0/P1 status under the reduced-capability rung.
+- T2 depends_on: [T1] - Record the remediation verdict and preserve the closing-gate evidence contract.
+
+## Checklist
+
+- [x] T1 T-491 is P2 and excluded by `RADON_WEEKEND_REDUCED=1`; no source-actionable P0/P1 finding is open.
+- [x] T2 T-488 and T-490 remain operator-only; remediation record is append-only.
+
+## Review
+
+- Detached closing stage prewrote nine result slots but stopped in `pytest_1`
+  without a `DONE` sentinel; no gate count is claimed and the phase is incomplete.
