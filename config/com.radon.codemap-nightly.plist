@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.radon.codemap-nightly</string>
+
+    <!-- __CODEMAP_REPO__ / __HOME__ are substituted by scripts/setup_codemap_nightly.sh.
+         The wrapper hard-resets the clone to origin/main itself. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>__CODEMAP_REPO__/scripts/codemap_nightly.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__CODEMAP_REPO__</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:__HOME__/.local/bin</string>
+        <key>RADON_CODEMAP_REPO</key>
+        <string>__CODEMAP_REPO__</string>
+        <key>HOME</key>
+        <string>__HOME__</string>
+    </dict>
+
+    <!-- Daily 02:00 local, after the 00:00-00:40 nightly loops. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>2</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/radon-weekend/logs/codemap-nightly.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/radon-weekend/logs/codemap-nightly.err</string>
+</dict>
+</plist>

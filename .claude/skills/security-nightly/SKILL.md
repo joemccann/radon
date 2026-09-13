@@ -90,8 +90,8 @@ the public run log:
 4. Only when the phase truly completed — every applicable stage finished or
    cleanly recorded `OPERATOR_REQUIRED`/`BLOCKED`, private archival done or
    explicitly recorded as the blocker, verification gates satisfied — write
-   the terminal status into `run-record.md` and print, as the phase's LAST
-   stdout line, exactly:
+   the terminal status into `run-record.md` and print a dedicated stdout
+   line that starts with exactly:
 
    `SECURITY-NIGHTLY PHASE COMPLETE: <phase> run_id=<run-id>`
 
@@ -100,9 +100,13 @@ the public run log:
    `pr:`, `deliver_status:` and any operator-written `released:` lines, so
    a resumed deliver picks up the same branch and PR.
 
-   The wrapper greps that prefix; without it an exit-0 phase is reported
-   INCOMPLETE and exits non-zero. A clean fail-closed `OPERATOR_REQUIRED`
-   night IS complete and DOES print the marker. Never emit the marker text
+   The wrapper accepts the last line in this round that starts with that
+   prefix. Trailing Done/Next prose after an honest stamp does not
+   invalidate it. A mid-sentence recital does not count. Without a
+   dedicated marker line an exit-0 phase is reported INCOMPLETE and exits
+   non-zero. For deliver, that last stamp must appear after the verdict
+   line in the same round. A clean fail-closed `OPERATOR_REQUIRED` night
+   IS complete and DOES print the marker. Never emit the marker text
    anywhere else — not in a plan, a quote of this skill, or an interim
    message.
 
@@ -742,7 +746,7 @@ Security rails for this phase, in addition to every hard rail above:
    --check <name>` when a check is still red or pending at the cap) and post
    the three-section issue comment (§Dead-man reporting) naming the PR URL
    and, when INCOMPLETE, the failing check.
-6. Print, as the LAST stdout line of the phase, the verdict line from
+6. Print the verdict line from
    `python3.13 scripts/nightly_deliver.py verdict --loop security --ready <url>...`
    (or `--incomplete <check> --pr-url <url>`). The wrapper greps it:
    `NIGHTLY DELIVER READY: loop=security prs=<n> <urls>` becomes the operator
@@ -752,7 +756,8 @@ Security rails for this phase, in addition to every hard rail above:
    fire resumes the same branch and PR from the record. An exit-0 deliver
    phase without the line is INCOMPLETE. Never emit the line anywhere else.
    Then print the completion marker (`SECURITY-NIGHTLY PHASE COMPLETE:
-   deliver run_id=<run-id>`) as the very last line, after the verdict.
+   deliver run_id=<run-id>`) after the verdict. Trailing Done/Next after
+   that stamp is tolerated; do not print the stamp before the verdict.
 
 ## Pull request output
 

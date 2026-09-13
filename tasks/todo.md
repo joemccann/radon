@@ -1,3 +1,53 @@
+# Task: Research model ladder rung fixes [IN PROGRESS]
+
+Fix three keyed-rung bugs that exhaust the research Reviewer ladder and
+leave sticky review health red. Independent of the merged ZH intermediary
+policy. Do not requeue held rows or clear health-review.json.
+
+## Dependency graph
+
+- T1 depends_on: [] - Add red tests for httpx stream misuse, Codex max_tokens, archived Cerebras scout id.
+- T2 depends_on: [T1] - Fix Anthropic default httpx stream, Codex max_completion_tokens, Cerebras qwen-3.8-27b.
+- T3 depends_on: [T2] - Run focused pytest, open PR, do not merge or requeue.
+
+## Checklist
+
+- [x] T1 Red regression tests in `scripts/tests/test_model_ladder.py`.
+- [x] T2 Three rung fixes in `scripts/clients/model_ladder.py`.
+- [x] T3 Focused tests green; PR #425 open with per-rung changelog. Rebased onto main after #424.
+
+## Review
+
+- Anthropic: default adapter uses `httpx.Client.send(stream=True)`.
+- Codex: gpt-5.x sends `max_completion_tokens`.
+- Cerebras: `qwen-3.8-27b` (public multimodal; scout archived).
+
+---
+
+# Task: ZH intermediary recap selection [COMPLETE]
+
+Joe locked: Zero Hedge / intermediary market recaps are valuable. Stop holding
+solely for Tyler Durden/ZH wrap provenance, missing original bank PDF, or
+omnibus aggregator shape. No Sep 11 requeue in this PR.
+
+## Dependency graph
+
+- T1 depends_on: [] - Failing regressions for ZH Goldman-desk recap selection and byline dates
+- T2 depends_on: [T1] - Update policy.md, SELECT_SCHEMA, VERIFY_INSTRUCTION, date_evidence roles
+- T3 depends_on: [T2] - Align dropbox-research.md and lessons.md
+
+## Checklist
+
+- [x] T1 Red/green regressions for ZH wrap selection, byline dates, and rendered ZH ban
+- [x] T2 Selection policy and date-role gate accept intermediary market recaps
+- [x] T3 Docs/lessons aligned; no Sep 11 requeue
+
+## Review
+
+Focused research tests 171 passed. ZH Goldman-desk fixture publishes; rendered ZH still banned. No Sep 11 requeue.
+
+---
+
 # Task: CI performance remediate 2026-09-13 [COMPLETE]
 
 Apply every eligible P0/P1 finding from CIP-012 while preserving the complete
