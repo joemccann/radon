@@ -67,10 +67,8 @@ def test_model_malformed_response_fails_closed(value,raw,monkeypatch):
     assert closed==[True]
 
 
-def test_model_requires_key_and_rejects_large_images_before_request(tmp_path,monkeypatch):
-    for key in ("ANTHROPIC_API_KEY", "CLAUDE_CODE_API_KEY", "CLAUDE_API_KEY", "XAI_API_KEY", "GROK_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "NVIDIA_API_KEY", "CEREBRAS_API_KEY"):
-        monkeypatch.delenv(key, raising=False)
-    with pytest.raises(model.ModelError,match="No keyed model provider"): model.Reviewer()
+def test_model_requires_key_and_rejects_large_images_before_request(tmp_path):
+    with pytest.raises(model.ModelError,match="No keyed model provider"): model.Reviewer(env={})
     path=tmp_path/"large.png"; path.write_bytes(b"x"*5_000_001)
     session=SimpleNamespace(post=lambda *a,**kw:pytest.fail("oversized image reached remote request"))
     with pytest.raises(model.ModelError,match="byte limit"): model.Reviewer("test",session=session).ask("evaluate",[("page",path)])

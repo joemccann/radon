@@ -6740,6 +6740,18 @@ No local suites. Review confirms quantity-weighted prices preserve zero and sign
 
 - PR #394 intermediate integration `892f24b1`: 31 applicable checks green, source shard 2225 passed, browser 96 passed plus one demo. Final integration includes historical-fill PR #395 at `aae5e1e5`; repeat exact-head checks before merge.
 
+# Testing audit 2026-09-12
+
+Dependency graph: T1.
+
+- [x] T1 depends_on: [] - Audit the `9dce4b3a..3e394792` delta; record verified test-suite findings and gate evidence.
+- [x] T2 depends_on: [T1] - Make T-491's no-key reviewer contract independent of ambient ladder credentials.
+
+## Review
+
+- T-491 is reproduced three times in isolation; detached full-gate stages cannot retain a child process in this runner, so no full-gate count is claimed.
+- T-491 red: `XAI_API_KEY=ambient-poison` made the former no-key assertion pass; green preserves explicit empty env injection and keeps ambient fallback only when `env is None`.
+
 # Task: Testing delta audit 2026-09-13 [DONE]
 
 ## Dependency graph
