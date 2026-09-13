@@ -40,13 +40,22 @@ export type LlmTool = {
 /** `grok` is accepted as an alias of `xai`. */
 export type LlmProviderName = "xai" | "grok" | "anthropic" | "openai" | "gemini";
 
+export type LlmToolChoice = "auto" | "none" | "required";
+export type LlmReasoningEffort = "low" | "medium" | "high";
+
 export type LlmChatRequest = {
   messages: LlmMessage[];
   system?: string;
   tools?: LlmTool[];
+  /** OpenAI/xAI string; Anthropic is mapped to `{ type }`. Omit to leave provider default. */
+  toolChoice?: LlmToolChoice;
+  /** xAI grok-4.6 defaults to high; the assistant loop must pass low for tool rounds. */
+  reasoningEffort?: LlmReasoningEffort;
   model?: string;
   provider?: LlmProviderName;
   maxTokens?: number;
+  /** Override the 45s provider HTTP timeout (assistant tool rounds use 90s). */
+  timeoutMs?: number;
   /** Per-turn abort (client hung up, wall clock); merged with the request timeout. */
   signal?: AbortSignal;
 };
@@ -214,8 +223,8 @@ async function readErrorDetail(response: Response): Promise<string> {
 
 const LLM_REQUEST_TIMEOUT_MS = 45_000;
 
-function llmRequestSignal(request: Pick<LlmChatRequest, "signal">): AbortSignal {
-  const timeout = AbortSignal.timeout(LLM_REQUEST_TIMEOUT_MS);
+function llmRequestSignal(request: Pick<LlmChatRequest, "signal" | "timeoutMs">): AbortSignal {
+  const timeout = AbortSignal.timeout(request.timeoutMs ?? LLM_REQUEST_TIMEOUT_MS);
   return request.signal ? AbortSignal.any([request.signal, timeout]) : timeout;
 }
 
@@ -251,7 +260,12 @@ async function callAnthropic(request: LlmChatRequest): Promise<LlmChatResponse> 
     messages: request.messages.map((message) => ({ role: message.role, content: message.content })),
   };
   if (request.system) body.system = request.system;
-  if (request.tools?.length) body.tools = request.tools;
+  if (request.tools?.length) {
+    body.tools = request.tools;
+    if (request.toolChoice === "none") body.tool_choice = { type: "none" };
+    else if (request.toolChoice === "required") body.tool_choice = { type: "any" };
+    else if (request.toolChoice === "auto") body.tool_choice = { type: "auto" };
+  }
 
   const response = await fetch(url, {
     method: "POST",
@@ -417,7 +431,7 @@ function toOpenAiTools(tools: LlmTool[] | undefined) {
     type: "function",
     function: {
       name: tool.name,
-      description: tool.description,
+      ...(tool.description ? { description: tool.description } : {}),
       parameters: tool.input_schema,
     },
   }));
@@ -447,7 +461,11 @@ async function callOpenAiCompatible(
     messages: toOpenAiMessages(request),
   };
   const tools = toOpenAiTools(request.tools);
-  if (tools) body.tools = tools;
+  if (tools) {
+    body.tools = tools;
+    if (request.toolChoice) body.tool_choice = request.toolChoice;
+  }
+  if (request.reasoningEffort) body.reasoning_effort = request.reasoningEffort;
 
   const response = await fetch(url, {
     method: "POST",
@@ -582,7 +600,7 @@ function dispatch(
 export async function assistantChat(
   messages: LlmMessage[],
   system?: string,
-  options?: Pick<LlmChatRequest, "tools" | "model" | "provider" | "maxTokens">,
+  options?: Pick<LlmChatRequest, "tools" | "toolChoice" | "reasoningEffort" | "model" | "provider" | "maxTokens" | "timeoutMs">,
 ): Promise<LlmChatResponse> {
   return chat({ messages, system, ...options });
 }

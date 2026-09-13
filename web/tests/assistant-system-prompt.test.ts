@@ -48,6 +48,10 @@ describe("assistant system prompt", () => {
     expect(SYSTEM_PROMPT).toContain("get_realized_pnl");
     expect(SYSTEM_PROMPT).toContain("query_journal");
     expect(SYSTEM_PROMPT).toContain("go straight to the journal tools");
+    expect(SYSTEM_PROMPT).toContain("Do not use list_apis or call_api for P&L");
+    expect(SYSTEM_PROMPT.indexOf("get_realized_pnl")).toBeLessThan(
+      SYSTEM_PROMPT.indexOf("Use list_apis then call_api"),
+    );
     // Tool-surface sentence mentions the journal alongside the live surfaces.
     expect(SYSTEM_PROMPT).toContain("the trade journal");
     expect(SYSTEM_PROMPT).toContain("get_quote");

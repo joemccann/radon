@@ -1,4 +1,11 @@
 # Lessons
+## 2026-09-11 — Grok 4.6 P&L turns cannot omit tools or starve max_tokens
+
+- grok-4.6 reasoning_effort defaults to high and cannot be disabled. A 1200 max_tokens budget is eaten by reasoning, so a cap-hit forced-final with tools omitted returns empty text and the canned "Reached the maximum tool-calling rounds" string.
+- Keep the tool schemas on the forced-final request and set tool_choice=none. Pass reasoning_effort=low and a 4k/8k token budget on assistant tool rounds.
+- Period P&L prompts ("september 2026", weekly, mtd) prefetch get_realized_pnl. Do not lead the system prompt with list_apis/call_api; that sends Grok on a 49-call catalog walk.
+- executeTool wraps journal results in fencePayload. Any synthesizer must read body.total_realized_pnl, not the envelope.
+
 ## 2026-09-10 — Run the PR test loop on GitHub
 
 - The operator requires PR test suites to run on GitHub, not the laptop, because GitHub has more compute. Do not start local suites for PR preparation or CI repairs unless explicitly requested.
