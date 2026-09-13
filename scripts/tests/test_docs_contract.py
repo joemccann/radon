@@ -373,6 +373,8 @@ class TestIphoneAppDirection:
         assert self._DOC.is_file(), "docs/mobile/iphone-app-direction.md is the iPhone foundation"
         index = (_ROOT / "docs" / "README.md").read_text(encoding="utf-8")
         assert "mobile/iphone-app-direction.md" in index
+        rules = _load_owners()["rules"]
+        assert any(rule.get("id") == "iphone-app" for rule in rules)
 
     def test_direction_doc_credits_source_and_states_non_goals(self):
         text = self._DOC.read_text(encoding="utf-8")

@@ -107,7 +107,7 @@ is not a reason to invent a quote.
 
 This foundation does **not**:
 
-- rewrite or restyle the web UI (not rewriting the web UI now)
+- not rewriting the web UI, and not restyling it as a side effect
 - claim native iOS is shipping, in TestFlight, or in review
 - start an App Store submission, signing, or release pipeline
 - stand up a full Xcode project, CocoaPods/SPM app target, or CI App Store job
