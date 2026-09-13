@@ -835,3 +835,14 @@ section before completion.
 | Task | Status | Evidence |
 |---|---|---|
 | T-491 | OPEN | Delta audit: web/tests/ib-rt-volume-relay.test.ts:29-50 source-greps relay callbacks instead of dispatching tickSize 8 / tickString 48 and observing a broadcast. Full-gate detached stage has no DONE sentinel; no result claimed. |
+
+## Remediation 2026-09-13 (testing/2026-09-13)
+
+| Task | Status | Evidence |
+|---|---|---|
+| Scope | DONE | `RADON_WEEKEND_REDUCED=1`: T-491 is P2 and excluded. Reconciled all standing P0/P1 entries; no source-actionable P0/P1 remains. |
+| T-488 | operator-only | After three recorded genuine attempts, reproduce and repair GNU-timeout process-tree behavior on Linux CI without widening the fixed test timeout. |
+| T-490 | operator-only | In this runner the tracked `.codex` artifacts cannot be written; run `python3.13 scripts/render_loop_prompt.py --write` in a writable checkout, run the focused portable-render contract, and commit generated artifacts. |
+
+Closing-gate results are appended only after each detached stage has its required
+`DONE` sentinel; no counts are claimed by this entry.
