@@ -1,3 +1,27 @@
+# Task: ZH intermediary recap selection [COMPLETE]
+
+Joe locked: Zero Hedge / intermediary market recaps are valuable. Stop holding
+solely for Tyler Durden/ZH wrap provenance, missing original bank PDF, or
+omnibus aggregator shape. No Sep 11 requeue in this PR.
+
+## Dependency graph
+
+- T1 depends_on: [] - Failing regressions for ZH Goldman-desk recap selection and byline dates
+- T2 depends_on: [T1] - Update policy.md, SELECT_SCHEMA, VERIFY_INSTRUCTION, date_evidence roles
+- T3 depends_on: [T2] - Align dropbox-research.md and lessons.md
+
+## Checklist
+
+- [x] T1 Red/green regressions for ZH wrap selection, byline dates, and rendered ZH ban
+- [x] T2 Selection policy and date-role gate accept intermediary market recaps
+- [x] T3 Docs/lessons aligned; no Sep 11 requeue
+
+## Review
+
+Focused research tests 171 passed. ZH Goldman-desk fixture publishes; rendered ZH still banned. No Sep 11 requeue.
+
+---
+
 # Task: CI performance remediate 2026-09-13 [COMPLETE]
 
 Apply every eligible P0/P1 finding from CIP-012 while preserving the complete
