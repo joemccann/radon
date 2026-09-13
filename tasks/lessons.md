@@ -1012,3 +1012,7 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 ## 2026-09-10 - Market Ear chart credits are per-image evidence
 - Preserve explicitly supplied image providers from Market Ear (for example Ramp) through scraping, media URL rewriting, durable storage, and image captions. An article publisher and its chart's original source are different fields.
 - Match attribution by image URL across failed downloads, never by the filtered output index. Uncredited charts must not inherit another chart's provider.
+
+## 2026-09-13: ZH intermediary recaps are eligible
+
+- Do not empty-hold Dropbox research PDFs solely because they are Tyler Durden / Zero Hedge wraps, lack the original bank PDF, or are omnibus multi-theme aggregator recaps. Select measured market findings and publish with the best allowable attribution (named desk or person, or institutional desk commentary). A complete aggregator byline date is valid publication-date evidence. Rendered copy still must not name ZeroHedge.
