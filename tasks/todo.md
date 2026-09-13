@@ -6559,3 +6559,19 @@ No local suites. Review confirms quantity-weighted prices preserve zero and sign
 
 Detached full-gate runner ended without the required DONE sentinel; no gate
 counts or green result are claimed.
+
+# Task: Testing remediation 2026-09-13 [COMPLETE]
+
+## Dependency graph
+
+- T1 depends_on: [] - Reconcile every audit backlog row and standing P0/P1 status under the reduced-capability rung.
+- T2 depends_on: [T1] - Record the remediation verdict and preserve the closing-gate evidence contract.
+
+## Checklist
+
+- [x] T1 T-491 is P2 and excluded by `RADON_WEEKEND_REDUCED=1`; no source-actionable P0/P1 finding is open.
+- [x] T2 T-488 and T-490 remain operator-only; remediation record is append-only.
+
+## Review
+
+- Closing full-gate evidence is deliberately not claimed in this pre-gate commit.

@@ -10239,3 +10239,12 @@ callback invocation or broadcast must red.
 | T-491 | P2 | Exercise registered relay callbacks against a live symbol-state fixture and broadcast spy for tickSize 8 and tickString 48; deleting either update/broadcast invocation must red. |
 
 - Audited through: 9db44a3f on 2026-09-13 — 1 new finding (T-491) over 53 commits / 182 paths; detached full-gate stage INCOMPLETE (no DONE sentinel), so no test counts are claimed.
+
+## Remediation 2026-09-13
+
+`RADON_WEEKEND_REDUCED=1`: T-491 is P2 and therefore out of scope. Reconciled
+the standing P0/P1 ledger: T-488 remains operator-only after its three recorded
+GNU-timeout fixture attempts; T-490 remains operator-only in this restricted
+runner because the tracked `.codex` artifacts cannot be materialized here.
+There is no source-actionable P0/P1 finding to implement. Closing gates, if
+completed, are recorded in `TEST_LOG.md`; no result is asserted in advance.
