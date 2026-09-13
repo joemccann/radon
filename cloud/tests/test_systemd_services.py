@@ -1202,6 +1202,16 @@ class TestFlexPull:
         assert "/var/lib/radon/flex-secrets" in rw
         assert "/home/radon/radon/data" in rw
 
+    def test_journal_and_portfolio_stay_read_only(self, unit):
+        # F20260913-D03: ingest legitimately atomic-writes sibling caches in
+        # data/ (performance.json, cash_flows.json, nav caches), so the dir
+        # grant stays -- but this unit must never be able to rewrite the
+        # append-only journal or the portfolio file.
+        svc = unit("radon-flex-pull.service")["Service"]
+        ro = svc.get("readonlypaths", "")
+        assert "/home/radon/radon/data/trade_log.json" in ro
+        assert "/home/radon/radon/data/portfolio.json" in ro
+
     def test_timer_is_morning_after_with_empty_dir_retry(self, services_dir):
         text = (services_dir / "radon-flex-pull.timer").read_text()
         assert "OnCalendar=Tue..Sat *-*-* 07:30:00 America/New_York" in text
