@@ -89,12 +89,22 @@ def _security_marker() -> str:
     return re.search(r'PHASE_COMPLETE_MARKER="([^"]+)"', src).group(1)
 
 
-def _build(tmp_path: Path, loop: str, *, deliver_lines: str = "", extra_env: dict | None = None) -> dict:
+def _build(
+    tmp_path: Path,
+    loop: str,
+    *,
+    deliver_lines: str = "",
+    extra_env: dict | None = None,
+    after_marker: str = "",
+    emit_marker: bool = True,
+) -> dict:
     """Stage a fake runner clone plus the stub binaries the wrapper calls.
 
     `deliver_lines` is what the stub agent prints when invoked for the
     deliver phase (the skill's verdict line, or nothing). Every phase of the
-    security loop also prints that loop's completion marker.
+    security loop also prints that loop's completion marker unless
+    `emit_marker` is false. `after_marker` is trailing agent prose after the
+    stamp (the 2026-09-13 Done/Next shape).
     """
     script, label, _skill_dir = LOOPS[loop]
     clone = tmp_path / "clone"
@@ -126,7 +136,11 @@ def _build(tmp_path: Path, loop: str, *, deliver_lines: str = "", extra_env: dic
     _executable(bin_dir / "git", '#!/bin/bash\n# REL-188: the wrapper reads commit evidence from git before calling a phase\n# OK, so the stub reports a fresh HEAD and a current committer date.\ncase "$*" in\n  *"rev-parse HEAD"*) date +%s%N; exit 0 ;;\n  *"--format=%ct"*) date +%s; exit 0 ;;\nesac\nexit 0\n')
     _executable(bin_dir / "python3", "#!/bin/bash\nexit 0\n")
 
-    complete = f"echo '{_security_marker()} '\"$PHASE\"' run_id=stub'\n" if loop == "security" else ""
+    complete = (
+        f"echo '{_security_marker()} '\"$PHASE\"' run_id=stub'\n"
+        if loop == "security" and emit_marker
+        else ""
+    )
     _executable(
         bin_dir / "claude",
         "#!/bin/bash\n"
@@ -138,6 +152,7 @@ def _build(tmp_path: Path, loop: str, *, deliver_lines: str = "", extra_env: dic
         f"{deliver_lines}"
         "fi\n"
         + complete
+        + after_marker
         + "exit 0\n",
     )
 
@@ -438,7 +453,56 @@ class TestTheDeliverNotifyLine:
         result = _run(cfg, "deliver")
         assert result.returncode == 75, _why(result, cfg)
         comment = _comments(cfg)[0]
-        assert f"**{nd.NO_VERDICT_STATUS}**" in comment, comment
+        if loop == "security":
+            # A security stamp with no prior verdict is not a completed
+            # deliver (2026-09-13 ordering). Other loops score the missing
+            # verdict line itself.
+            assert "INCOMPLETE" in comment, comment
+            assert (
+                f"**{nd.NO_VERDICT_STATUS}**" in comment
+                or "phase-completion marker" in comment
+            ), comment
+        else:
+            assert f"**{nd.NO_VERDICT_STATUS}**" in comment, comment
+
+    def test_sep13_trailing_done_next_after_an_honest_stamp_is_ready(self, tmp_path):
+        """Host log 20260913T000007: READY, PHASE COMPLETE, then Done/Next.
+        The wrapper must still page ready-to-merge, not a false INCOMPLETE."""
+        cfg = _build(
+            tmp_path,
+            "security",
+            deliver_lines=_ready("security", [URL1]),
+            after_marker=(
+                "echo '**Done**'\n"
+                "echo '- delivered PR 420'\n"
+                "echo '**Next**'\n"
+                "echo '- merge'\n"
+            ),
+        )
+        result = _run(cfg, "deliver")
+        assert result.returncode == 0, _why(result, cfg)
+        assert "**1 PR(s) green, ready to merge: " in _comments(cfg)[0], _comments(cfg)
+
+    def test_a_mid_prose_recital_is_not_a_security_completion_stamp(self, tmp_path):
+        cfg = _build(
+            tmp_path,
+            "security",
+            deliver_lines=(
+                _ready("security", [URL1])
+                + "echo 'remember to print SECURITY-NIGHTLY PHASE COMPLETE: "
+                "deliver run_id=x'\n"
+            ),
+            emit_marker=False,
+        )
+        result = _run(cfg, "deliver")
+        assert result.returncode == 75, _why(result, cfg)
+        assert "INCOMPLETE" in _comments(cfg)[0], _comments(cfg)
+
+    def test_a_security_stamp_with_no_deliver_verdict_is_incomplete(self, tmp_path):
+        cfg = _build(tmp_path, "security")
+        result = _run(cfg, "deliver")
+        assert result.returncode == 75, _why(result, cfg)
+        assert "INCOMPLETE" in _comments(cfg)[0], _comments(cfg)
 
     @pytest.mark.parametrize("loop", LOOP_IDS)
     def test_the_last_verdict_line_wins(self, tmp_path, loop):

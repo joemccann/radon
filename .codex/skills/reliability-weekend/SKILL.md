@@ -68,6 +68,9 @@ Goal: a DELTA audit — judge what changed, don't re-audit the world.
    Compute the changed surface: `git log --stat <last-sha>..HEAD`. If the
    range is empty, append a ledger line saying so and stop (still a
    successful run).
+   Widen it with `tools/codemap/codemap.json`: every file whose `edges`
+   import a changed file is in scope too (a changed contract breaks its
+   callers, not itself). Confirm with `rg`; the map refreshes nightly.
 2. Read `RELIABILITY_LOG.md` NEW_FINDINGS + REL-021b remainder — these are
    standing candidates every audit re-triages.
 3. Fan out parallel read-only agents over the changed files/subsystems,
