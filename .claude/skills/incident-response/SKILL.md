@@ -22,6 +22,11 @@ evidence; paste that evidence before claiming the step done.
 - Confirm blast radius from live evidence, not assumption:
   `curl -s localhost:3000/api/service-health | jq` (judge the BODY),
   `curl -s localhost:8321/health/lite`, `gh run list --workflow=ci.yml --limit 3`.
+- Locate the failing code and its blast radius from `tools/codemap/`, not a tree
+  walk: `architecture.json` for the area and hub modules, then `codemap.json`
+  `edges` (`[src, dst]` indexes into `nodes`) for who imports the suspect file.
+  Every importer is a candidate for the regression test and the fix review.
+  The map refreshes nightly, so confirm a hit with `rg` before trusting it.
 - If this is a NEW failure mode, you will add a runbook case in step 6.
 
 ## 1. Reproduce locally
