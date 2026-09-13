@@ -341,7 +341,7 @@ def _default_post(
     *,
     headers: dict[str, str],
     json: dict[str, Any],
-    timeout: float,
+    timeout: float | tuple[float, float],
     stream: bool = False,
 ):
     import httpx
@@ -413,12 +413,18 @@ def _request(
                 close()
         return status, text, payload
 
-    text = getattr(resp, "text", "") or ""
     try:
-        payload = resp.json()
-    except Exception:
-        payload = None
-    return int(getattr(resp, "status_code", 0) or 0), text, payload
+        text = getattr(resp, "text", "") or ""
+        try:
+            payload = resp.json()
+        except Exception:
+            payload = None
+        return int(getattr(resp, "status_code", 0) or 0), text, payload
+    finally:
+        if stream:
+            close = getattr(resp, "close", None)
+            if callable(close):
+                close()
 
 
 def _uses_max_completion_tokens(model: str) -> bool:
@@ -706,8 +712,8 @@ def _call_text_provider(
             },
             body,
             timeout=(10.0, read_timeout),
-            stream=stream_anthropic,
-            max_bytes=max_response_bytes if stream_anthropic else 0,
+            stream=True,
+            max_bytes=max_response_bytes,
         )
     if name == "grok":
         return _request(
@@ -721,6 +727,8 @@ def _call_text_provider(
                 model, system, instruction, labeled_b64, max_tokens=max_tokens
             ),
             timeout=read_timeout,
+            stream=True,
+            max_bytes=max_response_bytes,
         )
     if name == "codex":
         return _request(
@@ -734,6 +742,8 @@ def _call_text_provider(
                 model, system, instruction, labeled_b64, max_tokens=max_tokens
             ),
             timeout=read_timeout,
+            stream=True,
+            max_bytes=max_response_bytes,
         )
     if name == "gemini":
         url, body = _gemini_multimodal_body(
@@ -745,6 +755,8 @@ def _call_text_provider(
             {"content-type": "application/json"},
             body,
             timeout=read_timeout,
+            stream=True,
+            max_bytes=max_response_bytes,
         )
     if name == "nvidia":
         return _request(
@@ -758,6 +770,8 @@ def _call_text_provider(
                 model, system, instruction, labeled_b64, max_tokens=max_tokens
             ),
             timeout=read_timeout,
+            stream=True,
+            max_bytes=max_response_bytes,
         )
     if name == "cerebras":
         return _request(
@@ -776,6 +790,8 @@ def _call_text_provider(
                 extra=_CEREBRAS_REQUEST_EXTRAS,
             ),
             timeout=read_timeout,
+            stream=True,
+            max_bytes=max_response_bytes,
         )
     raise RuntimeError(f"{name}:unwired")
 
@@ -817,6 +833,8 @@ def _run_ladder(
         )
         try:
             status, raw, payload = call_provider(name, api_key, model)
+        except ModelResponseError:
+            raise
         except RuntimeError as exc:
             code = str(exc) or "network"
             attempted.append(f"{name}:{code}")
