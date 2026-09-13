@@ -7,8 +7,8 @@
 # Provisions the security loop's OWN dedicated clone
 # (~/radon-weekend/radon-security — never edit it by hand; every run
 # hard-resets it to origin/main), stamps BOTH runner markers, installs the
-# single daily launchd job (one cycle: audit then remediate), creates the
-# dead-man label, and verifies the toolchain. The clone is deliberately
+# daily launchd jobs (security cycle plus the DeepSec sibling worker),
+# creates both dead-man labels, and verifies the toolchain. The clone is deliberately
 # separate from every other loop's; all loops hard-reset their tree per
 # round, so a shared clone destroys in-flight work (2026-08-16 incident).
 #
@@ -23,6 +23,7 @@ set -euo pipefail
 
 WEEKEND_ROOT="${RADON_WEEKEND_ROOT:-$HOME/radon-weekend}"
 WEEKEND_REPO="$WEEKEND_ROOT/radon-security"
+DEEPSEC_REPO="$WEEKEND_ROOT/radon-security-deepsec"
 # Per-loop venv. The legacy $WEEKEND_ROOT/venv is not deleted here
 # (operator follow-up after this ships).
 WEEKEND_VENV="$WEEKEND_ROOT/venv-security"
@@ -114,13 +115,18 @@ fi
 # The SIBLING loop's clone too. Each loop now has its own venv; the
 # lock stays so a setup does not race a live sibling. R-266.
 for SIBLING_REPO in "$WEEKEND_ROOT/radon" "$WEEKEND_ROOT/radon-testing" \
-  "$WEEKEND_ROOT/radon-ci-performance" "$WEEKEND_ROOT/radon-documentation"; do
+  "$WEEKEND_ROOT/radon-ci-performance" "$WEEKEND_ROOT/radon-documentation" \
+  "$WEEKEND_ROOT/radon-security-deepsec"; do
   if [[ -d "$SIBLING_REPO" ]] \
     && kill -0 "$(cat "$SIBLING_REPO/.weekend-runner.lock/pid" 2>/dev/null)" 2>/dev/null; then
     echo "  a weekend run is in flight in $SIBLING_REPO; re-run when it finishes"
     exit 1
   fi
 done
+if kill -0 "$(cat "$WEEKEND_ROOT/.security-deepsec.lock/pid" 2>/dev/null)" 2>/dev/null; then
+  echo "  a DeepSec worker is in flight; re-run when it finishes"
+  exit 1
+fi
 # An already-provisioned clone must carry the current config/ and scripts/
 # before the job is installed from it. main is force-reset; any weekend
 # branch and its commits survive.
@@ -133,6 +139,17 @@ touch "$WEEKEND_REPO/.radon-weekend-runner"
 # credential-free security work in a sibling loop or operator checkout.
 touch "$WEEKEND_REPO/.radon-security-runner"
 mkdir -p "$WEEKEND_REPO/logs/security-nightly"
+# Dedicated DeepSec worktree: the security clone hard-resets every phase
+# and must not yank source out from under a sibling that outlives the 2h
+# audit cap. Operator-bootstrapped .deepsec stays in this worktree.
+if [[ ! -e "$DEEPSEC_REPO/.git" ]]; then
+  git -C "$WEEKEND_REPO" worktree add "$DEEPSEC_REPO" origin/main \
+    || git clone "$ORIGIN_URL" "$DEEPSEC_REPO"
+fi
+mkdir -p "$DEEPSEC_REPO/logs/security-deepsec"
+touch "$DEEPSEC_REPO/.radon-weekend-runner"
+touch "$DEEPSEC_REPO/.radon-security-deepsec-runner"
+touch "$DEEPSEC_REPO/.weekend-keep"
 
 # Rail 5: the security clone receives NO Radon credential. Unlike the other
 # nightly loops, this setup deliberately does NOT provision web/.env (or the
@@ -175,10 +192,18 @@ echo "[4/4] dead-man label + launchd jobs"
 gh label create security-nightly \
   --description "Nightly security loop dead-man (sanitized status only)" --color B60205 \
   >/dev/null 2>&1 || true
+gh label create security-deepsec \
+  --description "DeepSec sibling worker dead-man (sanitized status only)" --color B60205 \
+  >/dev/null 2>&1 || true
 if gh label list --limit 200 2>/dev/null | grep -q '^security-nightly'; then
   echo "  ok  label security-nightly"
 else
   echo "  MISSING  label security-nightly (dead-man comments will be dropped)"
+fi
+if gh label list --limit 200 2>/dev/null | grep -q '^security-deepsec'; then
+  echo "  ok  label security-deepsec"
+else
+  echo "  MISSING  label security-deepsec (DeepSec dead-man comments will be dropped)"
 fi
 mkdir -p "$LAUNCH_AGENTS"
 JOB_PLIST="$LAUNCH_AGENTS/com.radon.security-daily.plist"
@@ -188,6 +213,14 @@ plutil -lint "$JOB_PLIST" >/dev/null
 launchctl unload "$JOB_PLIST" 2>/dev/null || true
 launchctl load "$JOB_PLIST"
 echo "  loaded $JOB_PLIST"
+DEEPSEC_PLIST="$LAUNCH_AGENTS/com.radon.security-deepsec.plist"
+sed -e "s|__DEEPSEC_REPO__|$DEEPSEC_REPO|g" -e "s|__WEEKEND_ROOT__|$WEEKEND_ROOT|g" \
+  -e "s|__HOME__|$HOME|g" \
+  "$WEEKEND_REPO/config/com.radon.security-deepsec.plist" > "$DEEPSEC_PLIST"
+plutil -lint "$DEEPSEC_PLIST" >/dev/null
+launchctl unload "$DEEPSEC_PLIST" 2>/dev/null || true
+launchctl load "$DEEPSEC_PLIST"
+echo "  loaded $DEEPSEC_PLIST"
 
 # Read the cadence back off the installed job so this copy cannot drift.
 SCHED_HOUR="$(plutil -extract StartCalendarInterval.Hour raw -o - "$JOB_PLIST")"
@@ -197,10 +230,15 @@ echo
 printf 'Done. Schedule: one cycle daily at %02d:%02d local (audit, then remediate),\n' \
   "$SCHED_HOUR" "$SCHED_MIN"
 echo "in the security loop's own clone at $WEEKEND_REPO."
-echo "Dead-man: GitHub issue labeled 'security-nightly' gets a comment per"
-echo "phase, plus a Pushover when $WEEKEND_ENV carries creds."
-echo "A quiet day means the runner did not fire OR the previous cycle is"
-echo "still running: launchd will not start a second instance of the label."
+echo "DeepSec is a sibling worker (com.radon.security-deepsec) in"
+echo "$DEEPSEC_REPO with its own cap and lock. It does not remediate or deliver."
+echo "Dead-men (two issues):"
+echo "  security-nightly  audit/remediate/deliver. TIMEOUT is the 2h audit cap"
+echo "                    on fast scanners, not DeepSec still chewing."
+echo "  security-deepsec  still running | failed | export ready | harvested."
+echo "                    A quiet DeepSec issue plus a live lock is still running."
+echo "A quiet security-nightly day means that runner did not fire OR the"
+echo "previous cycle is still running: launchd will not start a second instance."
 echo "Check with: launchctl list | grep radon"
 echo "Smoke test now with:"
 echo "  RADON_WEEKEND_REPO=$WEEKEND_REPO bash $WEEKEND_REPO/scripts/security_nightly.sh audit"
