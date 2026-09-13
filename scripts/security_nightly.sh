@@ -359,14 +359,16 @@ BG_CEILING_MARKER="Background tasks still running after"
 # background run completes") and text that matched no ceiling marker, so the
 # wrapper paged OK while the private run-record still had a full pytest suite
 # in flight. Exit code 0 alone is therefore NOT completion for this loop: the
-# skill prints this exact prefix as the LAST line of a phase that actually
+# skill prints this exact prefix on a dedicated line of a phase that actually
 # finished (a clean fail-closed OPERATOR_REQUIRED night included), and an
 # exit-0 round without it is INCOMPLETE — reported as such, exited non-zero,
 # audited SHA untouched, so the next fire resumes the same private run in
 # ~/radon-weekend/.security-nightly-scratch/ instead of calling the night OK.
+# Trailing Done/Next after an honest stamp is not incomplete (2026-09-13
+# deliver, cycle 20260913T000007).
 PHASE_COMPLETE_MARKER="SECURITY-NIGHTLY PHASE COMPLETE:"
 
-# Deliver phase (2026-09-02): the skill's last line is a verdict the wrapper
+# Deliver phase (2026-09-02): the skill prints a verdict the wrapper
 # turns into the cycle's final notification — "N PR(s) green, ready to merge:
 # <urls>" or "INCOMPLETE: <check>". Printed by scripts/nightly_deliver.py
 # verdict; parsed here in bash (never exec disk python after the agent). An
@@ -470,15 +472,37 @@ deliver_status() {
   esac
 }
 
-# REL-188 (R-535): a `grep -qF` over the whole round slice is satisfied by the
-# agent RECITING the marker mid-sentence — which the skill's own text invites,
-# since it names the marker. The skill prints it as the LAST line of a phase
-# that actually finished, so that is the only line that counts.
+# REL-188 (R-535) + 2026-09-13: a `grep -qF` over the whole round slice is
+# satisfied by the agent RECITING the marker mid-sentence — which the skill's
+# own text invites, since it names the marker. Match only a dedicated line
+# that STARTS with the prefix (last such line in this round's slice). The
+# stamp does not have to be the transcript's last line: honest trailing
+# Done/Next after a real stamp is still complete. Deliver additionally
+# requires that last stamp to appear AFTER a verdict line in the same
+# round (READY or INCOMPLETE), so a stamp cannot precede the verdict.
+phase_marker_in_slice() {
+  local slice="$1" phase="${2:-}"
+  local marker="" verdict_seen=0 line
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      "$DELIVER_READY_MARKER"*|"$DELIVER_INCOMPLETE_MARKER"*)
+        verdict_seen=1 ;;
+      "$PHASE_COMPLETE_MARKER"*)
+        if [[ "$phase" == "deliver" && "$verdict_seen" -eq 0 ]]; then
+          marker=""
+        else
+          marker="$line"
+        fi
+        ;;
+    esac
+  done < <(printf '%s\n' "$slice")
+  [[ -n "$marker" ]]
+}
+
 phase_marker_present() {
-  local last
-  last="$(tail -c "+$((ROUND_LOG_MARK + 1))" "$RUN_LOG" 2>/dev/null \
-    | grep -v '^[[:space:]]*$' | tail -n 1 || true)"
-  [[ "$last" == "$PHASE_COMPLETE_MARKER"* ]]
+  local slice
+  slice="$(tail -c "+$((ROUND_LOG_MARK + 1))" "$RUN_LOG" 2>/dev/null || true)"
+  phase_marker_in_slice "$slice" "${PHASE:-}"
 }
 
 phase_status() {
