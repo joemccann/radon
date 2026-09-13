@@ -1,4 +1,27 @@
-# Task: CI performance audit 2026-09-13 [IN PROGRESS]
+# Task: CI performance remediate 2026-09-13 [COMPLETE]
+
+Apply every eligible P0/P1 finding from CIP-012 while preserving the complete
+test, provenance, and deployment-safety closure.
+
+## Dependency graph
+
+- T1 depends_on: [] - Re-verify dedicated runner, dated branch, reduced scope, and audit eligibility.
+- T2 depends_on: [T1] - Establish the workflow-safety baseline and verify no P0/P1 source action exists.
+- T3 depends_on: [T2] - Append the reduced-scope remediation decision, commit, push, and update the nightly report.
+
+## Checklist
+
+- [x] T1 Dedicated markers, stale-lock preservation, dated branch, GitHub authentication, and `RADON_WEEKEND_REDUCED=1` verified.
+- [x] T2 89 workflow-safety contracts, YAML parsing, shell syntax, and diff checks passed; CIP-012 has zero eligible P0/P1 findings.
+- [x] T3 Append-only remediation record and publication update prepared; no lower-priority experiment substitution.
+
+## Review
+
+- [x] The work-bound `scripts-rs`/node-image co-wall remains below the materiality floor and outside reduced remediation scope.
+
+---
+
+# Task: CI performance audit 2026-09-13 [COMPLETE]
 
 Audit `f1f59a73..9db44a3f` against organic `main` GitHub Actions runs. Preserve
 all gates and deployment rails; append evidence only during this phase.
