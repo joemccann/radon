@@ -1,3 +1,22 @@
+# Task: iPhone app direction foundation --- 2026-09-13 [IN PROGRESS]
+
+In-repo design/build direction for the eventual iPhone app. Docs +
+optional `apps/ios` stub only. Do not merge.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red contract pins for the direction doc, index row, source credit, non-goals, iOS stub.
+- T2 depends_on: [T1] - Write `docs/mobile/iphone-app-direction.md`, index row, `apps/ios/README.md` stub.
+- T3 depends_on: [T2] - Green contract tests, draft PR against main with a 5-bullet Joe summary. No merge.
+
+## Checklist
+
+- [x] T1 Failing iPhone-direction contract tests.
+- [x] T2 Direction doc + index + stub.
+- [x] T3 Draft PR #416 against main. No merge.
+
+---
+
 # Task: Assistant September P&L empty-final 2026-09-11
 
 Grok 4.6 burned 49 tool calls on "analyze all my trades for september 2026 and tell me my P&L" then showed the canned max-rounds string.

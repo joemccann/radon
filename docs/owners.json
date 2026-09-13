@@ -162,6 +162,12 @@
       ],
       "owners": ["docs/cloud-services.md"],
       "note": "Drift-audit scope and allowlist semantics live in the cloud runbook (DOC-090)."
+    },
+    {
+      "id": "iphone-app",
+      "globs": ["docs/mobile/**", "apps/ios/**"],
+      "owners": ["docs/mobile/iphone-app-direction.md"],
+      "note": "iPhone path is foundation-only. Direction doc owns the loop, trading-safety contract, and the apps/ios stub. No Xcode project."
     }
   ]
 }
