@@ -829,3 +829,9 @@ section before completion.
 |---|---|---|
 | T-490 | BLOCKED / operator-only | Red reverified in this runner: `test_portable_prompt_sync.py` is 52 passed / 21 failed. A fourth renderer attempt failed at `.codex` creation with `PermissionError`; full closing gates are not claimed while this deterministic P1 red remains. Operator: run `python3.13 scripts/render_loop_prompt.py --write` in a checkout where repository `.codex/` is writable, then run the focused contract and commit generated artifacts. |
 | T-488 | BLOCKED / operator-only | Unchanged after its three recorded fixture attempts. Operator: reproduce and repair the GNU-timeout process-tree behavior on Linux CI without widening the contract timeout. |
+
+## Audit 2026-09-13 (testing/2026-09-13)
+
+| Task | Status | Evidence |
+|---|---|---|
+| T-491 | OPEN | Delta audit: web/tests/ib-rt-volume-relay.test.ts:29-50 source-greps relay callbacks instead of dispatching tickSize 8 / tickString 48 and observing a broadcast. Full-gate detached stage has no DONE sentinel; no result claimed. |

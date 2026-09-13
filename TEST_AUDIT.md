@@ -10193,3 +10193,49 @@ the focused contract is 52 passed / 21 failed and a renderer write fails with
 `PermissionError` creating repository `.codex`. T-490 is therefore
 operator-only here until the generated artifacts can be written and committed;
 full closing gates are not claimed while that deterministic P1 red remains.
+
+## Delta audit 2026-09-13 (audit mode)
+
+Range 9dce4b3a..9db44a3f: 53 commits, 182 paths, 64 touched test files.
+The changed money-path and daemon surfaces include dark-pool cache completeness,
+IB RT-volume relay wiring, TWR persistence, CTA model fallback, and research
+serving. CI adds three curated E2E specs and an MCP report, retains both
+coverage ratchets, and adds no executable skip, xfail, .only, exclusion, or
+threshold decrease. The 64 touched tests span four collection roots, so a
+scoped three-times determinism pass would substantially duplicate the full
+gates.
+
+### T-491 — P2 — RT-volume relay wiring is tested by source-text inspection, not dispatch behavior
+
+web/tests/ib-rt-volume-relay.test.ts:29-50 reads
+scripts/ib_realtime_server.js and asserts substrings/regexes for
+EventName.tickString, updatePriceFromTickString, and
+hydrateAndBroadcast(symbol). The pure parser assertion at :53-61 is real,
+but it never dispatches a tick through the relay or observes a broadcast. A
+dead event callback, mismatched argument order, or an update on a detached
+state object can retain every asserted string while option volume remains
+null on the order sheet. The production wiring is at
+scripts/ib_realtime_server.js:1954-1985,2550-2556.
+
+**AC:** extract or inject the relay event registration and a broadcast spy;
+dispatch tickSize 8 and RT-volume tickString 48 into a live symbol state and
+assert the emitted payload carries volume. A mutation that removes either
+callback invocation or broadcast must red.
+
+### Standing sweeps
+
+- The detached serial full-gate stage prewrote all three rc placeholders but
+  exited before pytest wrote output and without its required DONE sentinel;
+  therefore no gate count, determinism result, or green verdict is claimed.
+- Post-stage working tree was clean. The preflight interpreter lacks pytest;
+  the dedicated venv-testing interpreter was selected for the stage.
+- Existing operator-only T-488 and T-490 remain standing candidates; neither
+  is in the changed test-quality surface.
+
+### Backlog rows
+
+| ID | Sev | Acceptance criteria |
+|---|---|---|
+| T-491 | P2 | Exercise registered relay callbacks against a live symbol-state fixture and broadcast spy for tickSize 8 and tickString 48; deleting either update/broadcast invocation must red. |
+
+- Audited through: 9db44a3f on 2026-09-13 — 1 new finding (T-491) over 53 commits / 182 paths; detached full-gate stage INCOMPLETE (no DONE sentinel), so no test counts are claimed.
