@@ -37,6 +37,8 @@ So: a **chat UI** renders turns; a **prompt** is one input to one call; a **mode
 
 Two framework observations relevant to Radon. smolagents' pitch is that "the logic for agents fits in ~thousand lines of code" and it is model-agnostic through LiteLLM ([smolagents](https://huggingface.co/docs/smolagents/index)); that is roughly the size of Radon's existing `loop.ts` + `tools.ts` + `dispatch.ts` (1,771 lines). Anthropic's original taxonomy separates "workflows" (LLMs and tools orchestrated through predefined code paths) from "agents" (LLMs dynamically direct their own processes) and recommends "poka-yoke" tool design ([Building effective agents](https://www.anthropic.com/engineering/building-effective-agents)). Radon's 7-milestone evaluate is a workflow; the chat assistant is an agent; a Radon harness has to host both.
 
+LangChain's custom-harness guide frames the same checklist as a middleware stack over `create_agent(model, tools, system_prompt)`, with hooks before/after each **model** call and each **tool** call plus startup/teardown ([LangChain, How to build a custom agent harness](https://www.langchain.com/blog/how-to-build-a-custom-agent-harness)). Its catalog maps onto the table above: context overflow (`SummarizationMiddleware`, `ContextEditingMiddleware`), memory (`FilesystemMiddleware`, `MemoryMiddleware`, `SkillsMiddleware`), delegation (`SubAgentMiddleware`, `TodoListMiddleware`), failure handling (`ToolRetryMiddleware`, `ModelRetryMiddleware`, `ModelFallbackMiddleware`), policy (`PIIMiddleware`, `HumanInTheLoopMiddleware`), and cost (`ModelCallLimitMiddleware`, `PromptCachingMiddleware`). Three points it adds that the other sources underweight: deterministic business rules, policy and dynamic model swapping belong in middleware, not prompts; tool setup/teardown is a harness lifecycle concern separate from the agent definition; and "task-harness fit" means the middleware stack is chosen per task, so a trading harness and a coding-loop harness should not share one stack.
+
 ---
 
 ## 2. Pi, studied
@@ -142,6 +144,7 @@ Every surveyed framework treats the provider as a plug: Pi `streamFn`, OpenAI Ag
 | Claude Agent SDK | Best-in-class permissions order, hooks, sessions, cost caps, subagents. But tools are Claude Code's file/bash set plus MCP; the trading agent should have none of those. Locks the interactive harness to Claude and API-key billing. | Adopt for the **nightly engineering loops** (replace bash wrappers' `claude -p --dangerously-skip-permissions` with SDK `dontAsk` + `disallowedTools`, `PreToolUse` hooks, `max_budget_usd`). Not for the trading harness. |
 | Pi (as dependency) | Loop, TypeBox tools, JSONL sessions, extension `tool_call` block hook, RPC mode. TypeScript, same language as `web/`. Core is small enough to read. | Adopt the **design**, and optionally `@earendil-works/pi-agent-core` + `pi-ai` as packages, behind Radon's own interfaces. Do not adopt the coding-agent CLI. |
 | OpenAI Agents SDK | Guardrails and `RunState` approvals are the cleanest HITL model surveyed. Python. | Borrow the guardrail/tripwire and durable-interruption ideas; not worth a second runtime. |
+| LangChain `create_agent` + middleware | Composable before/after model and tool hooks with prebuilt retry, fallback, PII, HITL, call-limit and caching middleware. Pulls in the LangChain runtime; Radon's provider layer and tools already exist. | Borrow the **hook taxonomy** (model-call hooks, lifecycle hooks, per-task stacks); not the dependency. |
 | LangGraph / Letta / OpenHands / smolagents | Orchestration, memory, sandbox, code-agents respectively. | Not needed; Radon's tools are HTTP and its orchestration is milestone-shaped. |
 | Build from scratch | Radon already did, in `loop.ts`. | The work is extraction and hardening, not a rewrite. |
 
@@ -188,8 +191,10 @@ Verified reuse points:
 **Phase 1: harness core (2 to 3 weeks).**
 - Session store: append every entry (user, assistant blocks, tool_use, tool_result, proposal, gate verdicts) as JSONL with `id`/`parentId` to disk and mirror to a new Turso `assistant_sessions` table (migration + production row check per CLAUDE.md "Data Persistence"). Resume and fork by id.
 - Hook pipeline: `before_agent_start` (context injection), `tool_call` (can block with reason), `tool_result` (knowledge isolation, truncation), `session_before_compact`. Port the existing guards (repeated-call nudge, spawn budget, explicit-intent check) into hooks so they are visible and testable individually.
-- Compaction: Pi's reserve/keep-recent algorithm; preserve tool names, tickers touched, gate verdicts and proposals in the summary.
-- Budgets: per-turn round cap (today `MAX_ROUNDS = 8`), per-session token and dollar cap from `usage`, surfaced in the result like the Agent SDK's `error_max_budget_usd`.
+- Model-call hooks, per the LangChain middleware split: `before_model` / `after_model` alongside the tool hooks. `wrap_model_call` owns retry with backoff and provider fallback (the `provider.ts` ladder, today only in the bash wrappers) and prompt-cache breakpoints; `tool_result` also redacts account figures and key shapes (a PII hook, not just secrets). Lifecycle `startup` / `teardown` hooks own tool setup, e.g. the knowledge client (risk 7), so a failed dependency fails the session start instead of the first call.
+- Per-consumer stacks ("task-harness fit"): ChatPanel gets gates, intent, untrusted-content and PII hooks; the nightly driver gets IB/gateway deny rails, budget and fallback hooks. One core, stacks declared per mode.
+- Compaction: first clear stale tool results in place (LangChain `ContextEditingMiddleware`; cheap, lossless for the transcript on disk), then Pi's reserve/keep-recent summarization; preserve tool names, tickers touched, gate verdicts and proposals in the summary.
+- Budgets: per-turn round cap (today `MAX_ROUNDS = 8`), per-session model-call, token and dollar cap from `usage`, surfaced in the result like the Agent SDK's `error_max_budget_usd`.
 
 **Phase 2: gates-as-code and tool typing (2 weeks).**
 - `place_order` gains a mandatory `gate_evaluation` step in the `tool_call` hook: compute max gain / max loss from the priced legs (`rank_spreads`/`spreads.ts` already prices verticals), run convexity, Kelly with bankroll from `get_portfolio`, `order_limits`, `trading_halt`. A failing gate returns `{ block: true, reason: "GATE 1 convexity: 1.4x < 2x" }` and the proposal never renders. Test at the wire per CLAUDE.md: assert the blocked call produced no `/api/orders/place` request.
@@ -298,6 +303,7 @@ Comparison protocol: run the current `/api/assistant` route and the harness agai
 - https://github.com/OpenHands/OpenHands
 - https://huggingface.co/docs/smolagents/index
 - https://docs.langchain.com/oss/python/langgraph/overview
+- https://www.langchain.com/blog/how-to-build-a-custom-agent-harness
 - https://docs.letta.com/concepts/letta
 - https://arxiv.org/abs/2604.01483 (Type-Checked Compliance / Lean-Agent Protocol)
 - https://arxiv.org/abs/2605.27333 (FinHarness)
