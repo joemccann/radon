@@ -79,6 +79,9 @@ loop's job; yours is whether the tests guarding it are real.
 1. Read `TEST_AUDIT.md` §Audit ledger for the last audited SHA. Compute
    the changed surface: `git log --stat <last-sha>..HEAD`. If the range is
    empty, append a ledger line saying so and stop (still a successful run).
+   Use `tools/codemap/codemap.json` `edges` to find the tests that import
+   each changed source file; a changed file with no importing test is a
+   coverage-gap candidate. Confirm with `rg`; the map refreshes nightly.
 2. Read `TEST_LOG.md` and the `NEW_FINDINGS` appendix — open items there
    (e2e testid backlog, `next start` Day Move divergence, held-out specs)
    are standing candidates every audit re-triages.
