@@ -972,6 +972,10 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 ## Deployment completion (2026-09-07)
 - A merged feature with a reproducible deployment failure still needs a concrete repair when requested; trace supervisor, unit and outer deadlines together, add a failing regression, and verify the corrected release reaches production.
 
+## 2026-09-13 - Detached stage sentinel is authoritative
+
+- The remediation closing stage prewrote all nine result slots but its child stopped at `pytest_1` with a zero-byte log and no `DONE` sentinel. Record the phase as incomplete and never infer a passing or failing count from an empty artifact.
+
 
 ## 2026-09-07 - Social share publisher exclusions
 - Never include The Market Ear or ZeroHedge names, attribution, or links in generated social-share captions, posts, Story cards, or Reels/TikTok text. Apply the same exclusion to embedded text and edited outbound captions, not only the source footer.
@@ -1008,3 +1012,7 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 ## 2026-09-10 - Market Ear chart credits are per-image evidence
 - Preserve explicitly supplied image providers from Market Ear (for example Ramp) through scraping, media URL rewriting, durable storage, and image captions. An article publisher and its chart's original source are different fields.
 - Match attribution by image URL across failed downloads, never by the filtered output index. Uncredited charts must not inherit another chart's provider.
+
+## 2026-09-13: ZH intermediary recaps are eligible
+
+- Do not empty-hold Dropbox research PDFs solely because they are Tyler Durden / Zero Hedge wraps, lack the original bank PDF, or are omnibus multi-theme aggregator recaps. Select measured market findings and publish with the best allowable attribution (named desk or person, or institutional desk commentary). A complete aggregator byline date is valid publication-date evidence. Rendered copy still must not name ZeroHedge.

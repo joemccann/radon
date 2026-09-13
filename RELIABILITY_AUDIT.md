@@ -222,6 +222,7 @@ Delta findings continue the R-### numbering in dated `## Delta audit` sections.
 - Audited through: `90071618` on 2026-09-08 (second pass) — 0 new findings. Anchor `cc77928d` verified; range is 12 commits. The order-admission, daily frontier refresh, research-ingestion, credential, indicator-freshness, and loop surfaces were inspected serially. Standing sweeps HOLD: no new unguarded placement site; halt/order-limit/exit-ack/Hrana chokepoints and both catalog entries for the new `aa-frontier-basket` writer remain present.
 - Audited through: `964b6b77` on 2026-09-09 — 0 new findings. Anchor `15e74ff1` verified (`rev-parse --verify` resolves; ancestor of HEAD); range is 12 commits / 28 changed source files. Serial review covered AI-cycle collection and archive durability, loop completion reporting, CI artifacts, research publishing, ticker routing, and chat attachment/stream recovery. All standing sweeps HOLD: no delta placement or health writer, existing halt/order-limit/exit-ack/Hrana chokepoints remain wired, and `NEW_FINDINGS` plus the REL-021b remainder have no changed-surface instance.
 - Audited through: `9dce4b3a` on 2026-09-10 — 0 new findings. Anchor `1ed5aa84` verified (`rev-parse --verify` resolves; ancestor of HEAD); range is 5 commits / 42 changed files. Serial review covered compact AI-cycle snapshot persistence and serving, Ramp curated ingestion, MenthorQ session recovery, and the related control-plane timeout increase. All standing sweeps HOLD: no delta placement or health writer, halt/order-limit/exit-ack/Hrana chokepoints remain wired, and `NEW_FINDINGS` plus the REL-021b remainder have no changed-surface instance. Focused pytest could not start because this runner's `python3.13` lacks pytest.
+- Audited through: `f1f59a73` on 2026-09-11 — 0 new findings. Anchor `9dce4b3a` verified (`rev-parse --verify` resolves; ancestor of HEAD); range is 13 commits / 75 changed source files. Serial review covered the CTA vision cascade, AI-cycle OpenDesign ingestion, TWR coverage persistence, dark-pool cache semantics, hosted MCP bounded reads, authenticated research assets, and newsfeed provenance. All standing sweeps HOLD: no delta placement or health writer, halt/order-limit/exit-ack/Hrana chokepoints remain wired, and `NEW_FINDINGS` plus the REL-021b remainder have no changed-surface instance. Focused pytest could not start because this runner's `python3.13` lacks pytest.
 
 ## 7. Exit criteria check (A5)
 
@@ -2515,3 +2516,25 @@ no `placeOrder` / `place_order` or `service_health` writer, so no new bypass
 or catalog gap exists. `NEW_FINDINGS` and REL-021b remain standing P2
 candidates with no changed-surface instance. Focused pytest could not start:
 this runner's `python3.13` lacks pytest. No new finding was verified.
+
+---
+
+## Delta audit 2026-09-11
+
+Anchor `9dce4b3a` verified (`git rev-parse --verify` resolves to
+`9dce4b3a3ec515b442a3e384270da42420539e08`; `git merge-base --is-ancestor`
+confirms it is an ancestor). Range `9dce4b3a..f1f59a73` is 13 commits and 75
+changed source files. Serial review covered the CTA vision cascade and its
+scheduled health path, bounded OpenDesign Arena collection, TWR
+coverage-lag persistence, dark-pool cache completeness, hosted MCP reads,
+authenticated research assets, and newsfeed provenance. Standing sweeps HOLD:
+halt chokepoints (`scripts/ib_place_order.py:240-242`), order limits
+(`scripts/ib_place_order.py:253-255`), `_NON_IDEMPOTENT_IB_SCRIPTS`
+(`scripts/api/server.py:5540,5649,5727`), exit-order acknowledgement
+(`scripts/monitor_daemon/handlers/exit_orders.py:185-220`), and daemon-state
+Hrana writes (`scripts/db/writer.py:2360-2373`) remain wired. The delta adds
+no `placeOrder` / `place_order` or `service_health` writer; changed scheduled
+writers remain in both watchdog catalogs. `NEW_FINDINGS` and REL-021b remain
+standing P2 candidates with no changed-surface instance. Focused pytest could
+not start because this runner's `python3.13` lacks pytest. No new finding was
+verified.
