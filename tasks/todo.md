@@ -1,3 +1,29 @@
+# Task: Research model ladder rung fixes [IN PROGRESS]
+
+Fix three keyed-rung bugs that exhaust the research Reviewer ladder and
+leave sticky review health red. Independent of the merged ZH intermediary
+policy. Do not requeue held rows or clear health-review.json.
+
+## Dependency graph
+
+- T1 depends_on: [] - Add red tests for httpx stream misuse, Codex max_tokens, archived Cerebras scout id.
+- T2 depends_on: [T1] - Fix Anthropic default httpx stream, Codex max_completion_tokens, Cerebras qwen-3.8-27b.
+- T3 depends_on: [T2] - Run focused pytest, open PR, do not merge or requeue.
+
+## Checklist
+
+- [x] T1 Red regression tests in `scripts/tests/test_model_ladder.py`.
+- [x] T2 Three rung fixes in `scripts/clients/model_ladder.py`.
+- [x] T3 Focused tests green; PR #425 open with per-rung changelog. Rebased onto main after #424.
+
+## Review
+
+- Anthropic: default adapter uses `httpx.Client.send(stream=True)`.
+- Codex: gpt-5.x sends `max_completion_tokens`.
+- Cerebras: `qwen-3.8-27b` (public multimodal; scout archived).
+
+---
+
 # Task: ZH intermediary recap selection [COMPLETE]
 
 Joe locked: Zero Hedge / intermediary market recaps are valuable. Stop holding
