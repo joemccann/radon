@@ -327,9 +327,39 @@ def _text_from_gemini(payload: dict[str, Any]) -> str:
     return "".join(str(part.get("text") or "") for part in parts if isinstance(part, dict))
 
 
-def _default_post(url: str, *, headers: dict[str, str], json: dict[str, Any], timeout: float):
+def _default_post(
+    url: str,
+    *,
+    headers: dict[str, str],
+    json: dict[str, Any],
+    timeout: float,
+    stream: bool = False,
+):
     import httpx
 
+    if stream:
+        client = httpx.Client(timeout=timeout)
+        try:
+            request = client.build_request("POST", url, headers=headers, json=json)
+            response = client.send(request, stream=True)
+        except Exception:
+            client.close()
+            raise
+
+        class StreamingResponse:
+            def __getattr__(self, name: str) -> Any:
+                return getattr(response, name)
+
+            def iter_bytes(self, chunk_size: int):
+                return response.iter_bytes(chunk_size)
+
+            def close(self) -> None:
+                try:
+                    response.close()
+                finally:
+                    client.close()
+
+        return StreamingResponse()
     return httpx.post(url, headers=headers, json=json, timeout=timeout)
 
 
@@ -351,10 +381,11 @@ def _request(
     except Exception as exc:  # noqa: BLE001 — network is a hard provider fail
         raise RuntimeError(f"network:{type(exc).__name__}") from exc
 
-    if stream and max_bytes and hasattr(resp, "iter_content"):
+    stream_iter = getattr(resp, "iter_content", None) or getattr(resp, "iter_bytes", None)
+    if stream and max_bytes and callable(stream_iter):
         raw = bytearray()
         try:
-            for chunk in resp.iter_content(65536):
+            for chunk in stream_iter(65536):
                 raw.extend(chunk)
                 if len(raw) > max_bytes:
                     raise ModelResponseError(

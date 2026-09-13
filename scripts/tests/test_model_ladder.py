@@ -161,6 +161,47 @@ class TestTextJsonPath:
 
 
 class TestResearchReviewerFailover:
+    def test_worker_default_adapter_streams_anthropic_response(self, monkeypatch):
+        """The production worker uses no injected session or post adapter."""
+        from research.model import Reviewer
+
+        closed = []
+
+        class Response:
+            status_code = 200
+
+            def iter_bytes(self, _chunk_size):
+                yield json.dumps(
+                    {
+                        "stop_reason": "end_turn",
+                        "content": [{"type": "text", "text": json.dumps(OBJ)}],
+                    }
+                ).encode()
+
+            def close(self):
+                closed.append("response")
+
+        class Client:
+            def __init__(self, *, timeout):
+                assert timeout == (10.0, 120.0)
+
+            def build_request(self, method, url, *, headers, json):
+                assert method == "POST"
+                assert "api.anthropic.com" in url
+                return object()
+
+            def send(self, request, *, stream):
+                assert stream is True
+                return Response()
+
+            def close(self):
+                closed.append("client")
+
+        monkeypatch.setattr("httpx.Client", Client)
+        reviewer = Reviewer(env={"ANTHROPIC_API_KEY": "a"})
+        assert reviewer.ask("evaluate") == OBJ
+        assert closed == ["response", "client"]
+
     def test_reviewer_falls_through_anthropic_credit(self):
         from research.model import Reviewer
 

@@ -1,3 +1,28 @@
+# Task: Reliability remediate 2026-09-13 [IN PROGRESS]
+
+Reduced rung permits P0/P1 only. Close REL-254's default Anthropic research
+adapter failure without interacting with IB or live orders.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify runner, dated branch, reduced-rung eligibility, and REL-254 source path.
+- T2 depends_on: [T1] - Add red fault-injection coverage for the worker-default streaming adapter.
+- T3 depends_on: [T2] - Implement the bounded adapter fix, run focused verification, append the log, commit, and push.
+- T4 depends_on: [T3] - Run mandatory drills and serial closing gates with sentinel evidence.
+
+## Checklist
+
+- [x] T1 Runner markers, branch, `RADON_WEEKEND_REDUCED=1`, and REL-254 verified.
+- [x] T2 Red worker-default adapter test (`network:TypeError`), then green.
+- [x] T3 Surgical fix, focused verification, and append-only REL-254 record; commit and push pending.
+- [ ] T4 Mandatory drills and closing gates.
+
+## Review
+
+- [x] Default `httpx` adapter accepts the bounded Anthropic streaming call shape and closes both response and client.
+
+---
+
 # Task: Reliability delta audit 2026-09-13 [COMPLETE]
 
 Audit `f1f59a73..9db44a3f` serially; preserve frozen reliability identifiers
