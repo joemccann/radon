@@ -6574,4 +6574,5 @@ counts or green result are claimed.
 
 ## Review
 
-- Closing full-gate evidence is deliberately not claimed in this pre-gate commit.
+- Detached closing stage prewrote nine result slots but stopped in `pytest_1`
+  without a `DONE` sentinel; no gate count is claimed and the phase is incomplete.
