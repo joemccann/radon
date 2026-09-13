@@ -15,11 +15,12 @@ adapter failure without interacting with IB or live orders.
 - [x] T1 Runner markers, branch, `RADON_WEEKEND_REDUCED=1`, and REL-254 verified.
 - [x] T2 Red worker-default adapter test (`network:TypeError`), then green.
 - [x] T3 Surgical fix, focused verification, and append-only REL-254 record; commit and push pending.
-- [ ] T4 Mandatory drills and closing gates.
+- [x] T4 BLOCKED: detached drill stage exited without any result or `DONE` sentinel; prior identical attempts establish the harness root-cause hypothesis.
 
 ## Review
 
 - [x] Default `httpx` adapter accepts the bounded Anthropic streaming call shape and closes both response and client.
+- [x] Closing gates are BLOCKED by the pre-existing detached-child termination failure; no incomplete stage is counted as passing.
 
 ---
 
