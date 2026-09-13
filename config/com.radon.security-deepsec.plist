@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.radon.security-deepsec</string>
+
+    <!-- Sibling of com.radon.security-daily. This job runs DeepSec only.
+         It does not remediate, deliver, or merge. __DEEPSEC_REPO__ is the
+         dedicated worktree; the security clone's nightly reset must not
+         reach it. Stand down on the DeepSec lock so a resume-friendly
+         fire cannot reset the tree under a live worker. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>-c</string>
+        <string>C=__DEEPSEC_REPO__; W=__WEEKEND_ROOT__; kill -0 "$(cat "$W/.security-deepsec.lock/pid" 2&gt;/dev/null)" 2&gt;/dev/null || { T="$(command -v timeout || true)"; ${T:+"$T" -k 15 180} git -C "$C" -c core.sshCommand="ssh -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4" fetch -q origin &amp;&amp; git -C "$C" checkout -f -q main &amp;&amp; git -C "$C" reset --hard -q origin/main; }; exec /bin/bash "$C/scripts/security_deepsec_worker.sh" run</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__DEEPSEC_REPO__</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:__HOME__/.local/bin:__HOME__/.bun/bin</string>
+        <key>RADON_WEEKEND_DEEPSEC_REPO</key>
+        <string>__DEEPSEC_REPO__</string>
+        <key>RADON_WEEKEND_REPO</key>
+        <string>__DEEPSEC_REPO__</string>
+        <key>HOME</key>
+        <string>__HOME__</string>
+        <key>DISABLE_AUTOUPDATER</key>
+        <string>1</string>
+    </dict>
+
+    <!-- Same 00:40 slot as security-daily. DeepSec is a sibling, not a
+         sixth staggered loop; the 2h audit cap does not bind this job. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>0</integer>
+        <key>Minute</key>
+        <integer>40</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>__DEEPSEC_REPO__/logs/security-deepsec/launchd-deepsec.log</string>
+    <key>StandardErrorPath</key>
+    <string>__DEEPSEC_REPO__/logs/security-deepsec/launchd-deepsec.err</string>
+</dict>
+</plist>
