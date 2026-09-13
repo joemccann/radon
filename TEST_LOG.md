@@ -846,3 +846,8 @@ section before completion.
 
 Closing-gate results are appended only after each detached stage has its required
 `DONE` sentinel; no counts are claimed by this entry.
+
+Closing gates: INCOMPLETE. The 2026-09-13 detached stage prewrote all nine
+result placeholders, then stopped during `pytest_1` with a zero-byte log and
+without `DONE`; therefore no gate result or closing three-run verification is
+claimed. Resume on a runner that preserves detached children.

@@ -972,6 +972,10 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 ## Deployment completion (2026-09-07)
 - A merged feature with a reproducible deployment failure still needs a concrete repair when requested; trace supervisor, unit and outer deadlines together, add a failing regression, and verify the corrected release reaches production.
 
+## 2026-09-13 - Detached stage sentinel is authoritative
+
+- The remediation closing stage prewrote all nine result slots but its child stopped at `pytest_1` with a zero-byte log and no `DONE` sentinel. Record the phase as incomplete and never infer a passing or failing count from an empty artifact.
+
 
 ## 2026-09-07 - Social share publisher exclusions
 - Never include The Market Ear or ZeroHedge names, attribution, or links in generated social-share captions, posts, Story cards, or Reels/TikTok text. Apply the same exclusion to embedded text and edited outbound captions, not only the source footer.
