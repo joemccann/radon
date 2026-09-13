@@ -44,6 +44,25 @@ all gates and deployment rails; append evidence only during this phase.
 
 ---
 
+# Task: DeepSec sibling worker [IN PROGRESS]
+
+Split DeepSec from the security-nightly 2h audit cap. Not a second
+audit-remediate-deliver loop. Do not merge. Do not advance last-audited by hand.
+
+## Dependency graph
+
+- T1 depends_on: [] - Classify/harvest/queue-lock tests and `security_deepsec.py`
+- T2 depends_on: [T1] - Worker, plist, wrapper harvest, setup, SKILL, ops
+- T3 depends_on: [T2] - Focused tests green, draft PR from main (not #421)
+
+## Checklist
+
+- [x] T1 Red tests for still-running != TIMEOUT, harvest-when-ready, queue lock
+- [x] T2 Sibling worker + harvest handoff + two dead-men
+- [ ] T3 Green tests, PR against main, no merge
+
+---
+
 # Task: Reliability delta audit 2026-09-11 [IN PROGRESS]
 
 Audit `9dce4b3a..f1f59a73` serially across the changed control-plane,

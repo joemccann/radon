@@ -3,6 +3,9 @@
 # runner (Mac mini). One job fires daily and runs `cycle`: the audit phase,
 # then the remediate phase, then the deliver phase (push, PR, CI green,
 # operator told what to merge), sequentially, in this loop's own clone.
+# DeepSec is a sibling worker (security_deepsec_worker.sh /
+# com.radon.security-deepsec): audit harvests a ready export and must not
+# report TIMEOUT solely because DeepSec is still running.
 # Sequencing them inside one clone is what keeps two phases from checking
 # out over each other. Each phase still runs standalone (`audit` /
 # `remediate` / `deliver`). See .claude/skills/security-nightly/.
@@ -122,6 +125,9 @@ MODE="${1:?usage: security_nightly.sh audit|remediate|deliver|cycle}"
 
 REPO="${RADON_WEEKEND_REPO:-$HOME/radon-weekend/radon-security}"
 WEEKEND_ROOT="$(dirname "$REPO")"
+# Shared private scratch with the DeepSec sibling worker. Audit harvests
+# whatever export is already ready; DeepSec keeps its own lock and cap.
+SECURITY_SCRATCH="${RADON_WEEKEND_SECURITY_SCRATCH:-$WEEKEND_ROOT/.security-nightly-scratch}"
 # Per-loop venv. The legacy $WEEKEND_ROOT/venv is not deleted here
 # (operator follow-up after this ships).
 VENV="$WEEKEND_ROOT/venv-security"
@@ -481,6 +487,33 @@ phase_marker_present() {
   [[ "$last" == "$PHASE_COMPLETE_MARKER"* ]]
 }
 
+# origin/main copy, isolated interpreter: same defence as prune / deliver.
+_security_deepsec_py() {
+  [[ -n "${TIMEOUT_BIN:-}" ]] || return 1
+  mkdir -p "$SECURITY_SCRATCH"
+  git -C "$REPO" show origin/main:scripts/security_deepsec.py 2>/dev/null \
+    | "$TIMEOUT_BIN" 30 /usr/bin/python3 -I - "$@"
+}
+
+harvest_deepsec_if_ready() {
+  # Thin handoff. Never fatal: a harvest miss leaves the export for the
+  # next audit/remediate fire. Queue lock lives in security_deepsec.py.
+  [[ "$PHASE" == "audit" || "$PHASE" == "remediate" ]] || return 0
+  _security_deepsec_py harvest --scratch "$SECURITY_SCRATCH" \
+    >> "${RUN_LOG:-/dev/null}" 2>&1 || true
+  return 0
+}
+
+classify_audit_timeout() {
+  local head out
+  head="$(git -C "$REPO" rev-parse HEAD 2>/dev/null || true)"
+  out="$(_security_deepsec_py classify-audit --rc 124 \
+    --scratch "$SECURITY_SCRATCH" --head-sha "$head" \
+    --cap-secs "$CAP_SECS" 2>/dev/null || true)"
+  [[ -n "$out" ]] || return 1
+  printf '%s' "$out"
+}
+
 phase_status() {
   # rc + run log -> the one status string every dead-man channel carries.
   # `mark` is the size of $run_log before THIS round's invocation. RUN_LOG is
@@ -490,6 +523,17 @@ phase_status() {
   # remediations the detector was added to protect. R-426.
   local rc="$1" run_log="$2" mark="${3:-0}"
   if [[ $rc -eq 124 ]]; then
+    # DeepSec is a sibling worker. A 2h audit cap must not mark the night
+    # TIMEOUT solely because DeepSec is still chewing (2026-09-13).
+    if [[ "${PHASE:-}" == "audit" ]]; then
+      local classified status
+      classified="$(classify_audit_timeout || true)"
+      status="${classified%%$'\t'*}"
+      if [[ "$status" == "OK (fast engines complete; DeepSec still running)" ]]; then
+        printf '%s' "$status"
+        return 0
+      fi
+    fi
     printf 'TIMEOUT after %ss' "$CAP_SECS"
   elif [[ $rc -ne 0 ]]; then
     printf 'FAILED (exit %s)' "$rc"
@@ -1178,6 +1222,7 @@ run_phase() {
   begin_phase "$1"
   trap on_crash ERR
   echo "[security-nightly] $PHASE start $STAMP repo=$REPO cap=${CAP_SECS}s${BILLING_IGNORED:+ ignored=${BILLING_IGNORED// /,}}" | tee -a "$RUN_LOG"
+  harvest_deepsec_if_ready
   arm_deliver_record
   # NOT bare. Under `set -Eeuo pipefail` with the ERR trap armed, a failed
   # fetch made on_crash report and then the shell exit anyway — so
@@ -1282,6 +1327,10 @@ run_phase() {
   # mode-0700 run dir and archive.
   local status
   status="$(phase_status "$RC" "$RUN_LOG" "$ROUND_LOG_MARK")"
+  if [[ "$status" == "OK (fast engines complete; DeepSec still running)" ]]; then
+    RC=0
+  fi
+  harvest_deepsec_if_ready
   # An exhausted ladder is a provider spend stop, which the skill classifies as
   # INCOMPLETE — not failed, and never OK. FAILED is neither OK nor
   # INCOMPLETE*, so it fell to the generic `*)` arm: the one arm that withholds
@@ -1330,6 +1379,8 @@ run_phase() {
       report "$status" "CI could not be made green inside the deliver cap — this phase is INCOMPLETE; the branch and PR number are in the private run-record and the next fire resumes them" ;;
     "INCOMPLETE (exit 0 without the deliver verdict line)")
       report "$status" "the agent exited 0 without declaring the deliver verdict — this phase is INCOMPLETE; the next fire resumes the same private run, branch and PR" ;;
+    "OK (fast engines complete; DeepSec still running)")
+      report "$status" "fast scanners finished. DeepSec is the sibling worker and was left running. Non-DeepSec engines may advance. DeepSec SHA did not." ;;
     OK)
       report "$status" "0 public findings to disclose. The phase completed. Verified findings stay private." ;;
     INCOMPLETE*)
