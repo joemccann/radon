@@ -1,3 +1,26 @@
+# Task: CI performance audit 2026-09-13 [IN PROGRESS]
+
+Audit `f1f59a73..9db44a3f` against organic `main` GitHub Actions runs. Preserve
+all gates and deployment rails; append evidence only during this phase.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify dedicated runner, lock, SHA range, GitHub access, and protection closure.
+- T2 depends_on: [T1] - Measure 20 relevant runs, reconstruct representative paths, and sweep workflow/deploy invariants.
+- T3 depends_on: [T2] - Append audit evidence, commit/push the dated branch, and update the nightly PR and rolling issue.
+
+## Checklist
+
+- [x] T1 Dedicated markers, stale-lock preservation, `origin/main@9db44a3f`, GitHub auth, and 24 required contexts verified.
+- [x] T2 Classified 25 CI runs, retrieved representative job evidence, and passed gate/deploy/path-filter contracts (89 passed).
+- [x] T3 Appended the audit record; commit, push, PR, and issue comment follow.
+
+## Review
+
+- [x] No source-actionable critical-path optimization met the 15s/10% materiality floor without rail risk.
+
+---
+
 # Task: Reliability delta audit 2026-09-11 [IN PROGRESS]
 
 Audit `9dce4b3a..f1f59a73` serially across the changed control-plane,
