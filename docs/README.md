@@ -63,6 +63,7 @@ Archived session artifacts live in [`docs/archive/`](archive/).
 | Chart system | [`docs/chart-system.md`](chart-system.md) |
 | Brand identity | [`docs/brand-identity.md`](brand-identity.md) |
 | Public agent-design surface + eval scenarios | [`docs/design-evals.md`](design-evals.md) |
+| iPhone app direction (foundation; not shipping) | [`docs/mobile/iphone-app-direction.md`](mobile/iphone-app-direction.md) |
 | Short locate / borrow playbook | [`docs/short-locate-borrow.md`](short-locate-borrow.md) |
 | OAuth subscription auth | [`docs/oauth-subscription-auth.md`](oauth-subscription-auth.md) |
 
