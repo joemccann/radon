@@ -835,6 +835,7 @@ section before completion.
 | Task | Status | Evidence |
 |---|---|---|
 | T-491 | DONE | RED: `XAI_API_KEY=ambient-poison` against the old constructor: 1 failed, no `ModelError`. GREEN: explicit empty injected env preserves no-key rejection, 1 passed; `test_research_runtime.py` + `test_model_ladder.py`: 59 passed. |
+<<<<<<< HEAD
 
 ## Audit 2026-09-13 (testing/2026-09-13)
 
@@ -857,3 +858,15 @@ Closing gates: INCOMPLETE. The 2026-09-13 detached stage prewrote all nine
 result placeholders, then stopped during `pytest_1` with a zero-byte log and
 without `DONE`; therefore no gate result or closing three-run verification is
 claimed. Resume on a runner that preserves detached children.
+=======
+## Audit 2026-09-12 (second pass, wrapper 19:00 fire)
+
+Delta range `3e394792..origin/main` empty; completed the first pass's
+unclaimed full gates. pytest 12880 passed / 19 skipped / 0 failed (2019s);
+vitest 9479 passed / 4 failed — all one environment cause (`exceljs` missing
+from this clone; failed set 11 passed / 0 failed x2 after
+`bun install --frozen-lockfile`, repo untouched); cloud 5 failed / 1910
+passed, all `test_caddy_edge_timeouts.py` with bash 5.3.9 resolved and caddy
+absent (T-484). Focused T-491 suite 52 passed x4. Post-gate tree clean x2;
+no new skips; no threshold or CI-reachability drift. 0 new findings.
+>>>>>>> 7f31d90c (test(audit): second-pass 2026-09-12 ledger — full gates completed, 0 new findings)
