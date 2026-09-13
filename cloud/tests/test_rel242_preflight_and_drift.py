@@ -206,11 +206,22 @@ def _blob_repo(tmp_path: Path) -> Path:
 def test_installed_compose_is_compared_against_the_git_blob(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """R-636: the comparison basis is HEAD's blob, not the radon-writable tree."""
+    """R-636/F20260913-D02: the basis is the fetched GitHub main-tip blob,
+    never the radon-writable tree (nor its local history)."""
     cloud = _blob_repo(tmp_path)
     blob_text = (cloud / "docker-compose.yml").read_text(encoding="utf-8")
     monkeypatch.setattr(da, "REPO", cloud)
     monkeypatch.setattr(da, "GIT_REPO", tmp_path)
+    # Stand in for the fetched tip store: a bare clone of the committed repo
+    # with FETCH_HEAD at its tip. No network in tests.
+    bare = tmp_path / "tip-store.git"
+    trcp._git(tmp_path, "clone", "-q", "--bare", str(tmp_path), str(bare))
+    tip = subprocess.run(
+        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    (bare / "FETCH_HEAD").write_text(f"{tip}\n", encoding="utf-8")
+    monkeypatch.setitem(da._TIP_STORE, "store", bare)
 
     # A working-tree edit that never landed on HEAD must not move the basis.
     (cloud / "docker-compose.yml").write_text(

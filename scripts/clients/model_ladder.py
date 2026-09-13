@@ -77,7 +77,12 @@ _DEFAULT_VISION_MODELS = {
     "codex": "gpt-5.5",
     "gemini": "gemini-2.5-flash",
     "nvidia": "meta/llama-3.2-11b-vision-instruct",
-    "cerebras": "llama-4-scout-17b-16e-instruct",
+    # Public multimodal Chat Completions id (Cerebras changelog 2026-09).
+    # llama-4-scout-17b-16e-instruct is archived. gemma-4-31b left public
+    # endpoints 2026-09-03 (dedicated only). gpt-oss-120b is text-only.
+    # qwen-3.8-27b accepts PNG/JPEG data URIs, matching Reviewer and CTA
+    # vision bodies. Override with CEREBRAS_VISION_MODEL / CEREBRAS_MODEL.
+    "cerebras": "qwen-3.8-27b",
 }
 
 _DEFAULT_TEXT_MODELS = {
@@ -86,8 +91,12 @@ _DEFAULT_TEXT_MODELS = {
     "codex": "gpt-5.5",
     "gemini": "gemini-2.5-flash",
     "nvidia": "meta/llama-3.3-70b-instruct",
-    "cerebras": "llama-4-scout-17b-16e-instruct",
+    "cerebras": "qwen-3.8-27b",
 }
+
+# qwen-3.8-27b defaults reasoning to high; disable so JSON/vision extraction
+# is not consumed by chain-of-thought on the last ladder rung.
+_CEREBRAS_REQUEST_EXTRAS = {"reasoning_effort": "none"}
 
 _SECRET_PATTERN = re.compile(
     r"(sk-[a-zA-Z0-9_-]{8,}|xai-[a-zA-Z0-9_-]{8,}|nvapi-[a-zA-Z0-9_-]{8,}|"
@@ -327,9 +336,42 @@ def _text_from_gemini(payload: dict[str, Any]) -> str:
     return "".join(str(part.get("text") or "") for part in parts if isinstance(part, dict))
 
 
-def _default_post(url: str, *, headers: dict[str, str], json: dict[str, Any], timeout: float):
+def _default_post(
+    url: str,
+    *,
+    headers: dict[str, str],
+    json: dict[str, Any],
+    timeout: float,
+    stream: bool = False,
+):
     import httpx
 
+    if stream:
+        client = httpx.Client(timeout=timeout)
+        try:
+            request = client.build_request("POST", url, headers=headers, json=json)
+            response = client.send(request, stream=True)
+        except Exception:
+            client.close()
+            raise
+
+        class StreamingResponse:
+            def __getattr__(self, name: str) -> Any:
+                return getattr(response, name)
+
+            def iter_bytes(self, chunk_size: int = 65536):
+                return response.iter_bytes(chunk_size)
+
+            def iter_content(self, chunk_size: int = 65536):
+                return response.iter_bytes(chunk_size)
+
+            def close(self) -> None:
+                try:
+                    response.close()
+                finally:
+                    client.close()
+
+        return StreamingResponse()
     return httpx.post(url, headers=headers, json=json, timeout=timeout)
 
 
@@ -351,10 +393,11 @@ def _request(
     except Exception as exc:  # noqa: BLE001 — network is a hard provider fail
         raise RuntimeError(f"network:{type(exc).__name__}") from exc
 
-    if stream and max_bytes and hasattr(resp, "iter_content"):
+    stream_iter = getattr(resp, "iter_content", None) or getattr(resp, "iter_bytes", None)
+    if stream and max_bytes and callable(stream_iter):
         raw = bytearray()
         try:
-            for chunk in resp.iter_content(65536):
+            for chunk in stream_iter(65536):
                 raw.extend(chunk)
                 if len(raw) > max_bytes:
                     raise ModelResponseError(
@@ -376,6 +419,18 @@ def _request(
     except Exception:
         payload = None
     return int(getattr(resp, "status_code", 0) or 0), text, payload
+
+
+def _uses_max_completion_tokens(model: str) -> bool:
+    """OpenAI gpt-5.x / o-series chat completions reject max_tokens (HTTP 400)."""
+    lowered = (model or "").strip().lower()
+    return lowered.startswith("gpt-5") or lowered.startswith(("o1", "o3", "o4"))
+
+
+def _openai_token_field(model: str, max_tokens: int) -> dict[str, int]:
+    if _uses_max_completion_tokens(model):
+        return {"max_completion_tokens": max_tokens}
+    return {"max_tokens": max_tokens}
 
 
 def _anthropic_vision_body(model: str, b64: str, prompt: str) -> dict[str, Any]:
@@ -401,10 +456,15 @@ def _anthropic_vision_body(model: str, b64: str, prompt: str) -> dict[str, Any]:
     }
 
 
-def _openai_vision_body(model: str, b64: str, prompt: str) -> dict[str, Any]:
-    return {
+def _openai_vision_body(
+    model: str,
+    b64: str,
+    prompt: str,
+    extra: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    body: dict[str, Any] = {
         "model": model,
-        "max_tokens": 4096,
+        **_openai_token_field(model, 4096),
         "messages": [
             {
                 "role": "user",
@@ -418,6 +478,9 @@ def _openai_vision_body(model: str, b64: str, prompt: str) -> dict[str, Any]:
             }
         ],
     }
+    if extra:
+        body.update(extra)
+    return body
 
 
 def _gemini_vision_body(model: str, b64: str, prompt: str) -> tuple[str, dict[str, Any]]:
@@ -491,6 +554,7 @@ def _openai_multimodal_body(
     labeled_b64: Sequence[tuple[str, str]],
     *,
     max_tokens: int,
+    extra: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     content: list[dict[str, Any]] = []
     for label, b64 in labeled_b64:
@@ -508,7 +572,14 @@ def _openai_multimodal_body(
     if system:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": content})
-    return {"model": model, "max_tokens": max_tokens, "messages": messages}
+    body: dict[str, Any] = {
+        "model": model,
+        **_openai_token_field(model, max_tokens),
+        "messages": messages,
+    }
+    if extra:
+        body.update(extra)
+    return body
 
 
 def _gemini_multimodal_body(
@@ -602,7 +673,7 @@ def _call_vision_provider(
                 "authorization": f"Bearer {api_key}",
                 "content-type": "application/json",
             },
-            _openai_vision_body(model, b64, prompt),
+            _openai_vision_body(model, b64, prompt, extra=_CEREBRAS_REQUEST_EXTRAS),
         )
     raise RuntimeError(f"{name}:unwired")
 
@@ -697,7 +768,12 @@ def _call_text_provider(
                 "content-type": "application/json",
             },
             _openai_multimodal_body(
-                model, system, instruction, labeled_b64, max_tokens=max_tokens
+                model,
+                system,
+                instruction,
+                labeled_b64,
+                max_tokens=max_tokens,
+                extra=_CEREBRAS_REQUEST_EXTRAS,
             ),
             timeout=read_timeout,
         )

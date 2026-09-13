@@ -23,6 +23,11 @@ PrivateTmp=yes
 ProtectHome=read-only
 InaccessiblePaths=-/etc/radon/env -/home/radon/radon-cloud/.env
 ReadWritePaths=/var/lib/radon/flex-inbox /var/lib/radon/flex-secrets /home/radon/radon/data
+# Ingest atomic-writes sibling caches across data/ (performance.json,
+# cash_flows.json, nav caches), so the dir grant is required -- but the
+# journal and portfolio must never be writable from this unit. Deepest
+# path wins, so these file binds override the data/ grant above.
+ReadOnlyPaths=-/home/radon/radon/data/trade_log.json -/home/radon/radon/data/portfolio.json
 
 [Install]
 WantedBy=multi-user.target

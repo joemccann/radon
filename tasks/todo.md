@@ -16,6 +16,152 @@ Grok 4.6 burned 49 tool calls on "analyze all my trades for september 2026 and t
 
 ---
 
+# Task: Research model ladder rung fixes [IN PROGRESS]
+
+Fix three keyed-rung bugs that exhaust the research Reviewer ladder and
+leave sticky review health red. Independent of the merged ZH intermediary
+policy. Do not requeue held rows or clear health-review.json.
+
+## Dependency graph
+
+- T1 depends_on: [] - Add red tests for httpx stream misuse, Codex max_tokens, archived Cerebras scout id.
+- T2 depends_on: [T1] - Fix Anthropic default httpx stream, Codex max_completion_tokens, Cerebras qwen-3.8-27b.
+- T3 depends_on: [T2] - Run focused pytest, open PR, do not merge or requeue.
+
+## Checklist
+
+- [x] T1 Red regression tests in `scripts/tests/test_model_ladder.py`.
+- [x] T2 Three rung fixes in `scripts/clients/model_ladder.py`.
+- [x] T3 Focused tests green; PR #425 open with per-rung changelog. Rebased onto main after #424.
+
+## Review
+
+- Anthropic: default adapter uses `httpx.Client.send(stream=True)`.
+- Codex: gpt-5.x sends `max_completion_tokens`.
+- Cerebras: `qwen-3.8-27b` (public multimodal; scout archived).
+
+---
+
+# Task: ZH intermediary recap selection [COMPLETE]
+
+Joe locked: Zero Hedge / intermediary market recaps are valuable. Stop holding
+solely for Tyler Durden/ZH wrap provenance, missing original bank PDF, or
+omnibus aggregator shape. No Sep 11 requeue in this PR.
+
+## Dependency graph
+
+- T1 depends_on: [] - Failing regressions for ZH Goldman-desk recap selection and byline dates
+- T2 depends_on: [T1] - Update policy.md, SELECT_SCHEMA, VERIFY_INSTRUCTION, date_evidence roles
+- T3 depends_on: [T2] - Align dropbox-research.md and lessons.md
+
+## Checklist
+
+- [x] T1 Red/green regressions for ZH wrap selection, byline dates, and rendered ZH ban
+- [x] T2 Selection policy and date-role gate accept intermediary market recaps
+- [x] T3 Docs/lessons aligned; no Sep 11 requeue
+
+## Review
+
+Focused research tests 171 passed. ZH Goldman-desk fixture publishes; rendered ZH still banned. No Sep 11 requeue.
+
+---
+
+# Task: CI performance remediate 2026-09-13 [COMPLETE]
+
+Apply every eligible P0/P1 finding from CIP-012 while preserving the complete
+test, provenance, and deployment-safety closure.
+
+## Dependency graph
+
+- T1 depends_on: [] - Re-verify dedicated runner, dated branch, reduced scope, and audit eligibility.
+- T2 depends_on: [T1] - Establish the workflow-safety baseline and verify no P0/P1 source action exists.
+- T3 depends_on: [T2] - Append the reduced-scope remediation decision, commit, push, and update the nightly report.
+
+## Checklist
+
+- [x] T1 Dedicated markers, stale-lock preservation, dated branch, GitHub authentication, and `RADON_WEEKEND_REDUCED=1` verified.
+- [x] T2 89 workflow-safety contracts, YAML parsing, shell syntax, and diff checks passed; CIP-012 has zero eligible P0/P1 findings.
+- [x] T3 Append-only remediation record and publication update prepared; no lower-priority experiment substitution.
+
+## Review
+
+- [x] The work-bound `scripts-rs`/node-image co-wall remains below the materiality floor and outside reduced remediation scope.
+
+---
+
+# Task: CI performance audit 2026-09-13 [COMPLETE]
+
+Audit `f1f59a73..9db44a3f` against organic `main` GitHub Actions runs. Preserve
+all gates and deployment rails; append evidence only during this phase.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify dedicated runner, lock, SHA range, GitHub access, and protection closure.
+- T2 depends_on: [T1] - Measure 20 relevant runs, reconstruct representative paths, and sweep workflow/deploy invariants.
+- T3 depends_on: [T2] - Append audit evidence, commit/push the dated branch, and update the nightly PR and rolling issue.
+
+## Checklist
+
+- [x] T1 Dedicated markers, stale-lock preservation, `origin/main@9db44a3f`, GitHub auth, and 24 required contexts verified.
+- [x] T2 Classified 25 CI runs, retrieved representative job evidence, and passed gate/deploy/path-filter contracts (89 passed).
+- [x] T3 Appended the audit record; commit, push, PR, and issue comment follow.
+
+## Review
+
+- [x] No source-actionable critical-path optimization met the 15s/10% materiality floor without rail risk.
+
+---
+
+# Task: Reliability delta audit 2026-09-11 [IN PROGRESS]
+
+Audit `9dce4b3a..f1f59a73` serially across the changed control-plane,
+collection, persistence, research-serving, and web surfaces. Do not change
+production behavior or interact with IB.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify runner markers, remote branch state, and ledger anchor.
+- T2 depends_on: [T1] - Inspect changed source plus direct blast radius and run standing sweeps.
+- T3 depends_on: [T2] - Append the frozen audit ledger and commit the nightly branch.
+
+## Checklist
+
+- [x] T1 Runner markers and anchor `9dce4b3a` verified; remote dated branch absent.
+- [x] T2 Reviewed 75 changed source files; placement/catalog sweeps hold; pytest unavailable in runner.
+- [x] T3 Appended 2026-09-11 audit record; validation and branch delivery follow.
+
+## Review
+
+No new source-actionable finding verified. The unchanged money-path chokepoints
+remain present; the newly touched `cta-sync`, `perf-twr`, `flex-pull`, and
+`ai-cycle` scheduled writers remain in both watchdog catalogs.
+
+---
+
+# Task: Reliability remediate 2026-09-11 [IN PROGRESS]
+
+Reduced rung permits P0/P1 only. The completed audit has no new P0/P1
+finding; REL-251 through REL-253 source work remains DONE. Re-run the
+mandatory drill and gate closure without touching IB or live orders.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify runner markers, dated branch, reduced-rung eligibility, and backlog state.
+- T2 depends_on: [T1] - Run permanent drills using the reliability venv with detached sentinel evidence.
+- T3 depends_on: [T2] - Append the remediation outcome, commit, and push the dated branch.
+
+## Checklist
+
+- [x] T1 `RADON_WEEKEND_REDUCED=1`; no open P0/P1 item found; REL-251 through REL-253 are DONE.
+- [x] T2 Drill stage started with prewritten fields and exited before either result or `DONE` sentinel.
+- [x] T3 Appended the blocked verification record; branch delivery follows.
+
+## Review
+
+- [x] The detached child reproduced the existing runner-stage blocker; no incomplete suite is represented as passing.
+
+---
+
 # Task: Daily Dark Pool History mobile overflow --- 2026-09-11 [IN PROGRESS]
 
 Flow Analysis HISTORY table clips PRINTS on ~390px. Wrap in shared
@@ -6432,6 +6578,37 @@ Dependency graph: T1 -> T2 -> T3.
 ## Review
 No local suites. CI 34494032484 reproduces outdated download signature matching. Main 1998fb77 merges cleanly.
 
+# CI performance audit (2026-09-11)
+
+Dependency graph: T1 -> T2 -> T3.
+- [x] T1 depends_on: [] - Verify dedicated runner state, exclusive lock, GitHub access, and the audited main delta.
+- [x] T2 depends_on: [T1] - Measured 20 organic main runs, reconstructed the gate/deploy critical path, and swept safety contracts.
+- [x] T3 depends_on: [T2] - Appended the append-only audit ledger, published `c12493a3`, opened PR #402, and posted the rolling issue report.
+
+## Review
+Pending measured audit evidence.
+
+# CI performance remediate (2026-09-11) [COMPLETE]
+
+Apply every eligible P0/P1 finding from CIP-011 while preserving the full
+test, provenance, and deployment-safety closure.
+
+## Dependency graph
+
+- T1 depends_on: [] - Re-verify dedicated runner, dated branch, reduced scope, and audit eligibility.
+- T2 depends_on: [T1] - Establish focused workflow-safety baseline and verify no P0/P1 source action exists.
+- T3 depends_on: [T2] - Append the reduced-scope remediation decision, commit, push, and update the nightly report.
+
+## Checklist
+
+- [x] T1 Dedicated markers, dated branch, GitHub authentication, and `RADON_WEEKEND_REDUCED=1` verified.
+- [x] T2 89 focused workflow safety contracts, YAML parsing, shell syntax, and diff checks.
+- [x] T3 Append-only remediation record ready; no lower-priority experiment substitution.
+
+## Review
+
+- [x] CIP-011 audit identified zero P0/P1 source-actionable findings. The existing work-bound `scripts-rs`/node-image co-wall is below the materiality floor and remains outside this reduced scope.
+
 # Form focus highlight audit (2026-09-10)
 
 Specification: one visible, aligned keyboard focus indicator per field, around the complete visual control (including currency prefixes). Audit shared/composite controls across Clear light/dark and desktop/mobile. Preserve native semantics and all order behavior; use mocked browser data. No local suites.
@@ -6477,3 +6654,39 @@ No local suites. Review confirms quantity-weighted prices preserve zero and sign
 - Integration verification: head 4d92842e passed every applicable check; GitHub CI 34507570000 ran 99 browser regressions plus one demo test. Desktop 1280px/mobile 393px full `/orders` screenshots reviewed (artifact 10164611383). Reintegrating main 722b1121 for the final merge gate; no local suites.
 
 - PR #394 intermediate integration `892f24b1`: 31 applicable checks green, source shard 2225 passed, browser 96 passed plus one demo. Final integration includes historical-fill PR #395 at `aae5e1e5`; repeat exact-head checks before merge.
+
+# Task: Testing delta audit 2026-09-13 [DONE]
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify runner markers, clean tree, ledger anchor, and changed surface.
+- T2 depends_on: [T1] - Review delta, standing candidates, CI reachability, skips, and coverage drift.
+- T3 depends_on: [T2] - Record verified findings and audit evidence on testing/2026-09-13.
+
+## Checklist
+
+- [x] T1 Dedicated testing runner and anchor 9dce4b3a verified.
+- [x] T2 Filed T-491 from cited relay test/source lines; CI and skip/ratchet review complete.
+- [x] T3 Appended TEST_AUDIT.md and TEST_LOG.md.
+
+## Review
+
+Detached full-gate runner ended without the required DONE sentinel; no gate
+counts or green result are claimed.
+
+# Task: Testing remediation 2026-09-13 [COMPLETE]
+
+## Dependency graph
+
+- T1 depends_on: [] - Reconcile every audit backlog row and standing P0/P1 status under the reduced-capability rung.
+- T2 depends_on: [T1] - Record the remediation verdict and preserve the closing-gate evidence contract.
+
+## Checklist
+
+- [x] T1 T-491 is P2 and excluded by `RADON_WEEKEND_REDUCED=1`; no source-actionable P0/P1 finding is open.
+- [x] T2 T-488 and T-490 remain operator-only; remediation record is append-only.
+
+## Review
+
+- Detached closing stage prewrote nine result slots but stopped in `pytest_1`
+  without a `DONE` sentinel; no gate count is claimed and the phase is incomplete.
