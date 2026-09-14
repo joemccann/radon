@@ -668,6 +668,44 @@ largecaps scan.** Peak: 2026-08-20 14:15Z, page `99554c7a…`. Recurred
 
 ---
 
+## leap-reports-permission-502
+
+**`radon-leap.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
+after a mid-scan FastAPI 502 whose body is `PermissionError: … 'reports'`.**
+Peak: 2026-09-14 14:02:25Z, page `2ff864f6…`. Same shape 2026-09-11 14:01:33Z.
+
+- **Mechanism:** `/leap/scan` always passes `--json` with default
+  `--output reports/leap-scan-uw.html`. The radon-api image ships
+  `/home/radon/radon` root-owned and no `reports/` dir (only `data/` is the
+  writable bind mount). `main()` wrote the HTML report *before*
+  `data/leap.json`, so `mkdir(reports)` raised `PermissionError` after UW
+  work had already succeeded. FastAPI mapped the traceback to HTTP 502.
+  The wrapper (R-144 / R-221) saw a non-capacity 502, logged
+  `LEAP FastAPI outcome indeterminate (curl=0, http=502)`, refused the
+  direct fallback, and exited 1. `leap-scan` health and `leap.json` stayed
+  on the prior success (2026-09-08). Sibling GARCH in the same minute
+  completed OK because `--json` skips its HTML path.
+- **Detection:** unit journal indeterminate 502 after ~60–120s (not
+  instant); POST `/leap/scan?tickers=SPY` returns
+  `{"detail":"PermissionError: [Errno 13] Permission denied: 'reports'"}`;
+  container `ls` shows no `reports/` under root-owned `/home/radon/radon`;
+  `/health/lite` 200 / authenticated; UW cache writes during the window.
+- **Discriminating check:** 502 body contains `PermissionError` +
+  `reports` (this case). Instant capacity-exhausted body is
+  `leap-capacity-502`. Cache `len(results) > 0` with exit 1 is
+  `leap-partial-ticker-exit-pages-p1`. Zero results with cache preserved
+  is HB-013. If `/health/lite` is down too → API/IB, stand down.
+- **Remediation (code):** write `data/leap.json` + `leap-scan` health
+  first; treat the HTML / sidecar JSON under `--output` as best-effort
+  (`OSError` → stderr warning, exit still 0 when results exist). After
+  deploy, `reset-failed` + start (unit is on `RERUNNABLE_ONESHOT_UNITS`)
+  or wait for the next timer.
+- **Regression:**
+  `test_leap_scanner.py::test_unwritable_html_report_still_writes_cache_and_exits_zero`.
+- **Code:** `scripts/leap_scanner_uw.py` (`main` write order).
+
+---
+
 ## leap-capacity-502
 
 **`radon-leap.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
@@ -693,7 +731,8 @@ on an instant FastAPI 502 capacity shed at the 10:00 ET timer.** Peak:
   not this one. (The 2026-08-27 page predates the retry and shows the
   indeterminate line.)
 - **Discriminating check:** instant 502 with the capacity-exhausted
-  body (this case). A long run that ends
+  body (this case). A ~60–120s run whose 502 body is `PermissionError`
+  on `reports` is `leap-reports-permission-502`. A long run that ends
   `Script leap_scanner_uw.py failed (code 1)` after `SCAN COMPLETE` is
   `leap-partial-ticker-exit-pages-p1`. `Result=signal` is deploy
   stop-clean. If `/health/lite` is down too → API/IB, stand down.
