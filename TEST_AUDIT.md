@@ -10227,7 +10227,7 @@ threshold decrease. The 64 touched tests span four collection roots, so a
 scoped three-times determinism pass would substantially duplicate the full
 gates.
 
-### T-491 — P2 — RT-volume relay wiring is tested by source-text inspection, not dispatch behavior
+### T-493 — P2 — RT-volume relay wiring is tested by source-text inspection, not dispatch behavior
 
 web/tests/ib-rt-volume-relay.test.ts:29-50 reads
 scripts/ib_realtime_server.js and asserts substrings/regexes for
@@ -10289,7 +10289,7 @@ environment and falls back to ambient credentials only when `env is None`.
 
 | ID | Sev | Acceptance criteria |
 |---|---|---|
-| T-491 | P2 | Exercise registered relay callbacks against a live symbol-state fixture and broadcast spy for tickSize 8 and tickString 48; deleting either update/broadcast invocation must red. |
+| T-493 | P2 | Exercise registered relay callbacks against a live symbol-state fixture and broadcast spy for tickSize 8 and tickString 48; deleting either update/broadcast invocation must red. |
 
 - Audited through: 9db44a3f on 2026-09-13 — 1 new finding (T-491) over 53 commits / 182 paths; detached full-gate stage INCOMPLETE (no DONE sentinel), so no test counts are claimed.
 
@@ -10342,3 +10342,16 @@ GNU-timeout fixture attempts; T-490 remains operator-only in this restricted
 runner because the tracked `.codex` artifacts cannot be materialized here.
 There is no source-actionable P0/P1 finding to implement. Closing gates, if
 completed, are recorded in `TEST_LOG.md`; no result is asserted in advance.
+
+## Remediation 2026-09-14
+
+`RADON_WEEKEND_REDUCED=1`: T-492 was the sole source-actionable P1. T-488
+remains operator-only after three genuine attempts: reproduce and repair the
+GNU-timeout process-tree behavior on Linux CI without widening its fixed
+contract timeout. T-490 remains operator-only in this runner: render the
+Codex artifacts from a checkout where `.codex/` is writable, run its focused
+contract, and commit generated artifacts.
+
+| Task | Status | Evidence |
+|---|---|---|
+| T-492 | DONE | RED: ledger-integrity contract 2 failed / 2 passed on the committed conflict markers and duplicate T-491 headings. GREEN: copied-ledger marker and duplicate injections reject; real ledgers and append-only contracts 9 passed. Both historical conflict sides remain in `TEST_LOG.md`; only the markers were removed. The relay P2 received the next unused ID, T-493. |

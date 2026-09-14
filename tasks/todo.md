@@ -1,4 +1,28 @@
-# Task: Testing delta audit 2026-09-14 [IN PROGRESS]
+# Task: Testing remediation 2026-09-14 [IN PROGRESS]
+
+Reduced-capability rung (`RADON_WEEKEND_REDUCED=1`): remediate every verified
+P0/P1 finding. T-492 is the sole source-actionable P1; T-488 and T-490 remain
+operator-only with their recorded actions.
+
+## Dependency graph
+
+- T1 depends_on: [] - Add red ledger-integrity contract for conflict markers and duplicate finding headings.
+- T2 depends_on: [T1] - Reconcile both committed ledger tails append-only and assign the relay finding a fresh ID.
+- T3 depends_on: [T2] - Run focused verification, append remediation evidence, commit, and push.
+
+## Checklist
+
+- [x] T1 Red: integrity contract 2 failed / 2 passed on the committed corruption.
+- [x] T2 Reconciled both tails, removed markers, and assigned the relay finding T-493.
+- [x] T3 Focused integrity plus append-only contracts green; remediation evidence appended.
+
+## Review
+
+- [x] No IB access or production-system operation.
+
+---
+
+# Task: Testing delta audit 2026-09-14 [COMPLETE]
 
 Audit `9db44a3f..HEAD` for test-suite health only; never contact IB.
 
