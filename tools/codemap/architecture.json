@@ -1,15 +1,15 @@
 {
-  "generated_at": "2026-09-14T09:00:08Z",
-  "node_count": 3330,
-  "edge_count": 6741,
+  "generated_at": "2026-09-13T13:17:26Z",
+  "node_count": 3326,
+  "edge_count": 6735,
   "areas": {
-    "web": 1959,
+    "web": 1957,
     "site": 155,
-    "scripts": 1103,
+    "scripts": 1100,
     "cloud": 66,
     "lib": 28,
     "tests": 17,
-    "tools": 2
+    "tools": 3
   },
   "groups": [
     {
@@ -35,7 +35,7 @@
     {
       "id": "web/lib",
       "area": "web",
-      "count": 388
+      "count": 387
     },
     {
       "id": "web/public",
@@ -50,7 +50,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 906
+      "count": 905
     },
     {
       "id": "site/app",
@@ -85,7 +85,7 @@
     {
       "id": "scripts",
       "area": "scripts",
-      "count": 152
+      "count": 151
     },
     {
       "id": "scripts/ai_cycle",
@@ -195,7 +195,7 @@
     {
       "id": "scripts/tests",
       "area": "scripts",
-      "count": 546
+      "count": 544
     },
     {
       "id": "scripts/trade_blotter",
@@ -245,7 +245,7 @@
     {
       "id": "tools/codemap",
       "area": "tools",
-      "count": 2
+      "count": 3
     }
   ],
   "hubs": [
