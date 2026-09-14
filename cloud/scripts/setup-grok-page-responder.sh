@@ -32,7 +32,9 @@ import sys
 from pathlib import Path
 src, dest = Path(sys.argv[1]), Path(sys.argv[2])
 keep = ("TURSO_DB_URL", "TURSO_AUTH_TOKEN", "PUSHOVER_USER", "PUSHOVER_TOKEN")
+optional = ("GH_TOKEN",)
 wanted = {k: None for k in keep}
+extras = {k: None for k in optional}
 for raw in src.read_text().splitlines():
     line = raw.strip()
     if not line or line.startswith("#") or "=" not in line:
@@ -40,11 +42,15 @@ for raw in src.read_text().splitlines():
     key, _, value = line.partition("=")
     if key in wanted:
         wanted[key] = value
+    if key in extras:
+        extras[key] = value
 missing = [k for k, v in wanted.items() if not v]
 if missing:
     raise SystemExit("missing in production env: " + ", ".join(missing))
+optional_lines = [f"{k}={extras[k]}" for k in optional if extras[k]]
 dest.write_text(
     "\n".join(f"{k}={wanted[k]}" for k in keep)
+    + (("\n" + "\n".join(optional_lines)) if optional_lines else "")
     + "\nGROK_PAGE_NO_DOTENV=1\nGROK_PAGE_SYNC_REMOTE=1\n"
     + "GROK_BIN=/home/radon/.local/bin/grok\n"
 )
