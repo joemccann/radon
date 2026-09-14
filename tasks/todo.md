@@ -19,6 +19,8 @@ operator-only with their recorded actions.
 ## Review
 
 - [x] No IB access or production-system operation.
+- [x] Closing full-gate stage is INCOMPLETE: no rc file or `DONE` sentinel;
+  no counts claimed.
 
 ---
 

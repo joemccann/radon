@@ -881,3 +881,8 @@ no new skips; no threshold or CI-reachability drift. 0 new findings.
 | T-492 | DONE | RED: 2 failed / 2 passed with the new ledger-integrity contract against the committed conflict markers and duplicate T-491 headings. GREEN: 9 passed across the integrity and append-only contracts; copied marker and duplicate injections reject. Both conflict sides are preserved, only their three marker lines were removed; relay finding renumbered to fresh T-493. |
 | T-488 | operator-only | Reproduce and repair the GNU-timeout process-tree behavior on Linux CI without widening the fixed contract timeout. |
 | T-490 | operator-only | Render Codex artifacts in a checkout with writable `.codex/`, run the focused portable-render contract, and commit generated artifacts. |
+
+Closing gates: INCOMPLETE. The detached stage did not create
+`/tmp/tw-2026-09-14/closing-gates.rc` and therefore never wrote its required
+`DONE` sentinel. No full-gate counts are claimed; resume on a runner that
+preserves detached children.
