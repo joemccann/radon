@@ -735,6 +735,13 @@ class TestNightlyLoopIndex:
                 "docs/operations.md documents that marker as the rail"
             )
 
+    def test_deepsec_failure_has_a_safe_operator_path(self):
+        """DOC-109: a failed sibling worker is never an in-run repair."""
+        text = _operations_text()
+        assert "A `failed` DeepSec status is operator-only" in text
+        assert "`launchctl list | grep radon`" in text
+        assert "Do not bootstrap or restart DeepSec from a nightly run." in text
+
     # DOC-084 (2026-09-04): three SKILL.md rails named only
     # `.radon-weekend-runner`, so an agent reading its own rail believed the
     # shared marker was the whole gate while its wrapper also required the
@@ -765,6 +772,20 @@ _LEDGERS = {
     "CI_PERFORMANCE_LOG.md": r"^### CIP-\d+",
 }
 
+_MERGE_MARKER = re.compile(r"^(?:<<<<<<<|=======|>>>>>>>)", re.MULTILINE)
+_FINDING_HEADING = re.compile(r"^### (T-\d+) —", re.MULTILINE)
+
+
+def _assert_ledger_integrity(ledger: str, text: str) -> None:
+    marker = _MERGE_MARKER.search(text)
+    assert marker is None, (
+        f"{ledger} contains an unresolved merge marker at line "
+        f"{text.count(chr(10), 0, marker.start()) + 1}"
+    )
+    headings = _FINDING_HEADING.findall(text)
+    duplicates = sorted({heading for heading in headings if headings.count(heading) > 1})
+    assert not duplicates, f"{ledger} reuses finding heading(s): {', '.join(duplicates)}"
+
 
 class TestRootLedgersAreAppendOnly:
     @pytest.mark.parametrize("ledger,row", sorted(_LEDGERS.items()))
@@ -785,6 +806,22 @@ class TestRootLedgersAreAppendOnly:
             "history (see TEST_LOG.md, truncated 543 -> 2 lines in 4584e84a "
             "with every gate green)"
         )
+
+
+class TestTestLedgersHaveNoUnresolvedMergeState:
+    @pytest.mark.parametrize("ledger", ("TEST_AUDIT.md", "TEST_LOG.md"))
+    def test_real_ledger_is_integral(self, ledger):
+        _assert_ledger_integrity(
+            ledger, (_ROOT / ledger).read_text(encoding="utf-8")
+        )
+
+    def test_conflict_marker_in_a_copied_ledger_is_rejected(self):
+        with pytest.raises(AssertionError, match="unresolved merge marker"):
+            _assert_ledger_integrity("copy.md", "# ledger\n<<<<<<< HEAD\n")
+
+    def test_duplicate_finding_heading_in_a_copied_ledger_is_rejected(self):
+        with pytest.raises(AssertionError, match="reuses finding heading.*T-492"):
+            _assert_ledger_integrity("copy.md", "### T-492 — first\n### T-492 — second\n")
 
 
 # --- the workflow has to hand this contract a history it can diff -------------
