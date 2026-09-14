@@ -224,6 +224,7 @@ Delta findings continue the R-### numbering in dated `## Delta audit` sections.
 - Audited through: `9dce4b3a` on 2026-09-10 — 0 new findings. Anchor `1ed5aa84` verified (`rev-parse --verify` resolves; ancestor of HEAD); range is 5 commits / 42 changed files. Serial review covered compact AI-cycle snapshot persistence and serving, Ramp curated ingestion, MenthorQ session recovery, and the related control-plane timeout increase. All standing sweeps HOLD: no delta placement or health writer, halt/order-limit/exit-ack/Hrana chokepoints remain wired, and `NEW_FINDINGS` plus the REL-021b remainder have no changed-surface instance. Focused pytest could not start because this runner's `python3.13` lacks pytest.
 - Audited through: `f1f59a73` on 2026-09-11 — 0 new findings. Anchor `9dce4b3a` verified (`rev-parse --verify` resolves; ancestor of HEAD); range is 13 commits / 75 changed source files. Serial review covered the CTA vision cascade, AI-cycle OpenDesign ingestion, TWR coverage persistence, dark-pool cache semantics, hosted MCP bounded reads, authenticated research assets, and newsfeed provenance. All standing sweeps HOLD: no delta placement or health writer, halt/order-limit/exit-ack/Hrana chokepoints remain wired, and `NEW_FINDINGS` plus the REL-021b remainder have no changed-surface instance. Focused pytest could not start because this runner's `python3.13` lacks pytest.
 - Audited through: `3e394792` on 2026-09-12 — 1 new finding (R-675; P1), backlog REL-254. Anchor `9dce4b3a` verified (`rev-parse --verify` resolves; ancestor of HEAD); range is 20 commits / 180 changed files. Serial review covered the shared model ladder, AI-cycle archive, research persistence, flow/TWR, quote relay, systemd changes, and web surfaces. Standing money-path and watchdog sweeps hold; `NEW_FINDINGS` and REL-021b have no changed-surface instance.
+- Audited through: `9b9a65c7` on 2026-09-14 — 1 new finding (R-676; P1), backlog REL-255. Anchor `3e394792` verified (`rev-parse --verify` resolves; ancestor of HEAD); range is 53 commits / 78 changed paths. Serial review covered control-plane provenance, model-ladder/research, DeepSec security-loop state, codemap scheduling, assistant P&L, and the codemap caller blast radius. Standing money-path and watchdog sweeps hold; `NEW_FINDINGS` and REL-021b have no changed-surface instance.
 
 ## 7. Exit criteria check (A5)
 
@@ -2567,3 +2568,32 @@ remain standing P2 candidates with no changed-surface instance.
 | ID | Sev | Findings | Task | Acceptance |
 |---|---|---|---|---|
 | REL-254 | P1 | R-675 | **Make every model-ladder response genuinely byte-bounded on the production HTTP transport.** Use a managed streaming client/response API compatible with pinned `httpx==0.28.1`, enforce the cap before JSON/text materialization for every provider, close responses on all paths, and preserve bounded connect/read timeouts and failover. | Red first: a fake production-shaped streaming response exceeding 2 MB makes `Reviewer.ask()` raise the safe bounded-response error without calling `.text`/`.json`; each provider route is passed the same cap; a sub-cap Anthropic/Grok response still parses and the response is closed. |
+
+---
+
+## Delta audit 2026-09-14
+
+Anchor `3e394792` verified (`git rev-parse --verify` resolves to
+`3e394792601f42a83de9f6eeb8936acff209b4b5`; `git merge-base --is-ancestor`
+confirms it is an ancestor). Range `3e394792..9b9a65c7` is 53 commits / 78
+changed paths. Serial review covered trusted control-plane drift comparison,
+Flex-pull filesystem permissions, bounded model-ladder transport, research
+selection, codemap scheduling, assistant P&L recovery, and the DeepSec
+sibling-worker handoff. Codemap import edges added 35 callers to the changed
+source scope. Standing sweeps HOLD: halt/order-limit chokepoints
+(`scripts/ib_place_order.py:240-255`), `_NON_IDEMPOTENT_IB_SCRIPTS`
+(`scripts/api/server.py:5546,5655,5733`), exit-order acknowledgement
+(`scripts/monitor_daemon/handlers/exit_orders.py:202,766`), and daemon-state
+Hrana writes (`scripts/db/writer.py:2360-2379`) remain wired. No delta
+placement site or service-health writer bypasses those controls; `NEW_FINDINGS`
+and REL-021b have no changed-surface instance.
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-676 | P1 | `scripts/security_deepsec.py:164-179,182-198`; `scripts/security_nightly.sh:521-538` | **A stale DeepSec fast-engine marker can convert an uncompleted timed-out security audit into an OK result.** `fast_engines_complete()` accepts either `fast-engines.complete` marker merely by existence, without comparing its contents to `head_sha`; `classify_audit()` then returns `OK (fast engines complete; DeepSec still running)` for a timed-out audit whenever status is `running`. A direct isolated repro wrote `old-head` into the marker, set `head_sha='new-head'`, and produced `fast_engines_complete=True` and the OK classification. The security wrapper treats that classification as successful, so the next audit may advance/report completion although its fast engines never audited the current commit. |
+
+### Backlog (continuing)
+
+| ID | Sev | Findings | Task | Acceptance |
+|---|---|---|---|---|
+| REL-255 | P1 | R-676 | **Bind DeepSec fast-engine completion evidence to the exact audited SHA.** Parse and require a marker/run-record SHA equal to `head_sha`; stale or malformed evidence must retain the timeout result. | Red first: an old marker plus `status=running` and a different requested head returns `TIMEOUT`; an exact-head marker returns the existing sibling-worker OK result; malformed marker and stale run-record cases fail closed. |
