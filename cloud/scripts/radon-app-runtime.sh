@@ -413,6 +413,14 @@ render_env_file() {
       -e "s/^([A-Za-z_][A-Za-z0-9_]*=)'(.*)'[[:space:]]*\$/\1\2/" \
       -e 's/^([A-Za-z_][A-Za-z0-9_]*=)"(.*)"[[:space:]]*$/\1\2/' \
       "$ENV_FILE" > "$out"
+    # The newsfeed's Chromium renders third-party web content with the
+    # sandbox disabled; hand that unit only the keys its own code reads,
+    # never the full production secret set.
+    if [[ "$unit" == "radon-newsfeed.service" ]]; then
+      grep -E '^(#|$|(NODE_ENV|ANTHROPIC_API_KEY|CEREBRAS_API_KEY|TURSO_DB_URL|TURSO_AUTH_TOKEN|PLAYWRIGHT_CHROMIUM_SANDBOX|RADON_DB_NO_REPLICA|RADON_DB_USE_REPLICA|RADON_MEDIA_LOCAL|RADON_MEDIA_REMOTE|RADON_NEWSFEED_[A-Z0-9_]+)=)' \
+        "$out" > "${out}.filtered" || true
+      mv "${out}.filtered" "$out"
+    fi
   )
   printf '%s\n' "$out"
 }
@@ -540,9 +548,14 @@ cmd_run() {
     chown "$ids" "$LEASE_DIR" 2>/dev/null || true
   fi
 
+  # Newsfeed renders third-party content in a sandbox-disabled Chromium: it
+  # gets an isolated bridge network (egress only), never the host stack.
+  local container_network=host
+  [[ "$unit" == "radon-newsfeed.service" ]] && container_network=bridge
+
   set -- \
     run \
-    --network host \
+    --network "$container_network" \
     --user "$ids" \
     --rm \
     --name "$unit" \
