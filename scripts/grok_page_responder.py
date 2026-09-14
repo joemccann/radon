@@ -56,6 +56,7 @@ load_repo_dotenv()
 from watchdog import notify
 from watchdog import pages as pages_mod
 from watchdog import units as units_mod
+import ir_ensure_pr
 
 
 GROK_TIMEOUT_SECS = 3600
@@ -124,8 +125,8 @@ SystemctlRunner = Callable[[list[str]], object]
 
 # Every autonomy switch defaults CLOSED. A missing or renamed
 # EnvironmentFile is indistinguishable here from a deliberate stand-down, and
-# an agent that runs `grok --always-approve` and can `git push origin main`
-# into the production auto-deploy must read that ambiguity as "stop".
+# an agent that runs `grok --always-approve` and can push a `fix/*` branch
+# must read that ambiguity as "stop". Merge stays Joe / Mac Mini / loops.
 def responder_enabled() -> bool:
     return _flag("GROK_PAGE_RESPONDER", False)
 
@@ -371,7 +372,11 @@ def build_prompt(page: dict, *, autoship: bool, autopush: bool) -> str:
     push_line = (
         "AUTOPUSH is on: after a green focused suite, wait until "
         "`gh run list --workflow=ci.yml --limit 1` is not in_progress, "
-        "then `git push origin main` once. If a deploy is in flight, wait."
+        "then checkout a `fix/<short-slug>` branch, "
+        "`git push -u origin HEAD`, and run "
+        "`python3.13 scripts/ir_ensure_pr.py` so an open PR exists "
+        "against main. Never `git push origin main`. Never merge. "
+        "If a deploy is in flight, wait."
         if autopush and autoship
         else "AUTOPUSH is off: do not push."
     )
@@ -502,6 +507,7 @@ def run_cycle(
     now: Optional[datetime] = None,
     grok_runner: Optional[GrokRunner] = None,
     systemctl_runner: Optional[SystemctlRunner] = None,
+    ensure_ir_pr: Optional[Callable] = None,
 ) -> int:
     now = now or datetime.now(timezone.utc)
     if not responder_enabled():
@@ -616,6 +622,22 @@ def run_cycle(
             return 0
 
         disposition, summary = parse_grok_result(stdout)
+        pr_error = None
+        if (
+            disposition == "code_fix"
+            and autopush_enabled()
+            and autoship_enabled()
+        ):
+            ensure = ensure_ir_pr or ir_ensure_pr.ensure_after_code_fix
+            try:
+                pr_info = ensure(repo_root, page=page, summary=summary)
+            except ir_ensure_pr.IrEnsurePrError as exc:
+                pr_error = str(exc)
+                summary = f"{summary} PR_FAILED: {pr_error}"
+            else:
+                url = (pr_info or {}).get("url")
+                if url:
+                    summary = f"{summary} {url}"
         finished = datetime.now(timezone.utc)
         pages_mod.complete_page(
             page["page_id"],
@@ -635,6 +657,9 @@ def run_cycle(
             "disposition": disposition,
             "summary": summary,
         }))
+        if pr_error:
+            print(pr_error, file=sys.stderr)
+            return 2
         return 0
     except BaseException:
         # A cycle that died on Turso or git is not a healthy poll. Let the

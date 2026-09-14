@@ -32,7 +32,9 @@ VPS timer (30s after last cycle)
     stand_down | ops_only | code_fix
   normal follow-up               → iPhone
 code_fix + AUTOPUSH
-  git push origin main
+  git push -u origin fix/<slug>
+  python3.13 scripts/ir_ensure_pr.py   # open PR against main; never merge
+  Joe / Mac Mini / loops merge after CI green
   CI test gate
   VPS deploy.sh live gate
   radon deploy live              → iPhone
@@ -91,20 +93,43 @@ systemctl is-active radon-grok-page-responder.timer
 journalctl -u radon-grok-page-responder -n 20 --no-pager
 ```
 
+## Enable IR open-PR (Dev, after this ships)
+
+Grok pushes `fix/<slug>` and `scripts/ir_ensure_pr.py` opens the PR.
+The helper never merges. Branch-only is not a ship: missing `gh` or a
+PAT without `pull_requests: write` fails the cycle with an operator error.
+
+Fine-grained PAT on `joemccann/radon` for the VPS `radon` user:
+
+- Contents: Read and write
+- Pull requests: Read and write
+- Do not grant Administration, or bypass rules on protected `main`
+
+```bash
+# as radon, once — paste the PAT
+sudo -u radon -H gh auth login --hostname github.com --with-token
+sudo -u radon -H gh auth status
+# optional: add GH_TOKEN=... to /home/radon/radon-page-responder.env (0600)
+# then: python3.13 scripts/ir_ensure_pr.py --head fix/<slug> --issue '...' --fix '...'
+```
+
+No live VPS install in the wiring PR. After merge, Dev runs the login
+above on Hetzner. The poller already calls `ir_ensure_pr` after
+`code_fix` + `GROK_PAGE_AUTOPUSH=1`.
+
 ## Kill switches
 
 **Unset means OFF** (REL-030 / R-055). Each switch is an explicit opt-in.
 A missing or renamed `EnvironmentFile` is indistinguishable here from a
 deliberate stand-down, and an agent that runs `grok --always-approve` and can
-`git push origin main` into the production auto-deploy must read that
-ambiguity as "stop". Before this the three flags all defaulted on, so a broken
-env file yielded maximum autonomy.
+push a `fix/*` branch must read that ambiguity as "stop". Before this the
+three flags all defaulted on, so a broken env file yielded maximum autonomy.
 
 | Env | When `1` | When unset or `0` |
 |---|---|---|
 | `GROK_PAGE_RESPONDER` | Claim and launch | Do not claim or launch |
 | `GROK_PAGE_AUTOSHIP` | Edit, test, commit | Diagnose only. No edits or commits |
-| `GROK_PAGE_AUTOPUSH` | Push after a green suite | Commit locally. Do not push |
+| `GROK_PAGE_AUTOPUSH` | Push `fix/*` and ensure an open PR | Commit locally. Do not push |
 
 `GROK_BIN` overrides the `grok` executable.
 

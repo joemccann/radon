@@ -1023,3 +1023,12 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 ## 2026-09-13: ZH intermediary recaps are eligible
 
 - Do not empty-hold Dropbox research PDFs solely because they are Tyler Durden / Zero Hedge wraps, lack the original bank PDF, or are omnibus multi-theme aggregator recaps. Select measured market findings and publish with the best allowable attribution (named desk or person, or institutional desk commentary). A complete aggregator byline date is valid publication-date evidence. Rendered copy still must not name ZeroHedge.
+
+## 2026-09-09 - Ornn trials require an approved research grant
+
+- The operator clarified that Ornn must approve a research grant before its 72-hour Premium trial is available. Distinguish requesting approval from activating an immediately available trial in recommendations and summaries. Never imply a gated vendor trial is self-serve; preserve approval dependencies even when shortening a researched answer.
+
+## 2026-09-14 — `tailscale ping` does not prove an ACL allows the port
+
+- `tailscale ping` pongs at the WireGuard/disco layer and succeeds even when the ACL drops every TCP port. From the tagged `ib-gateway` node, ping to `joes-mac-mini` returned 19ms while `ssh` to port 22 timed out. Test the real port (`nc -z -w5 <ip> 22`) before concluding the peer is reachable.
+- Tagged devices (`tagged-devices` owner) and user-owned devices sit in different ACL groups. When a tagged node must reach a user device, route through a user-owned peer (`ProxyJump radon-broker`) or add an explicit ACL rule; do not keep retrying the direct route.
