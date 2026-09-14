@@ -64,6 +64,101 @@ Durable grok incident-response open-PR after `fix/**` push.
 - [x] No merge from this hook. PAT stays Contents + Pull requests. No live VPS install.
 
 ---
+
+# Task: Merge conflict resolution 2026-09-14 [IN PROGRESS]
+
+Resolve the branch merge against `main` without changing the REL-255 fix or
+discarding upstream task ledger entries.
+
+## Dependency graph
+
+- T1 depends_on: [] - Fetch `main`, reproduce the merge conflict, and inspect both task-ledger heads.
+- T2 depends_on: [T1] - Reconcile `tasks/todo.md` append-only so branch and upstream sections both survive.
+- T3 depends_on: [T2] - Run focused verification, finish the merge commit, and publish the branch update.
+
+## Checklist
+
+- [x] T1 Fetch, merge attempt, and conflict inspection.
+- [x] T2 Reconciled `tasks/todo.md` without losing branch or upstream sections.
+- [x] T3 Focused verification, merge commit, and publication.
+
+## Review
+
+- Merge conflict was confined to `tasks/todo.md`; `git diff --check` is clean and no REL-255 source file required manual resolution.
+
+---
+
+# Task: Reliability remediation 2026-09-14 [IN PROGRESS]
+
+Reduced capability rung (`RADON_WEEKEND_REDUCED=1`): remediate P0/P1 only.
+
+## Dependency graph
+
+- T1 depends_on: [] - Add REL-255 stale/malformed DeepSec completion-evidence regressions.
+- T2 depends_on: [T1] - Bind completion markers and run records to the requested audited SHA.
+- T3 depends_on: [T2] - Run focused red/green verification, append the reliability record, commit, and push.
+- T4 depends_on: [T3] - Re-run permanent drills and closing gates or record an evidence-backed blocker.
+
+## Checklist
+
+- [x] T1 RED stale/malformed completion-evidence fault injection.
+- [x] T2 SHA-bound completion implementation.
+- [x] T3 Focused verification, reliability log, commit, and push.
+- [x] T4 Closing drills BLOCKED by detached-stage termination; full gates not started.
+
+## Review
+
+- REL-255 source contract is green; the permanent Python drills are green, while the detached stage was terminated before its Vitest rung and DONE sentinel.
+
+---
+
+# Task: Reliability delta audit 2026-09-14 [IN PROGRESS]
+
+Audit `3e394792..HEAD` across the changed control-plane, model-ladder, security-loop,
+research, assistant, and health surfaces. Audit-only: no production source changes.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify runner, dated branch, ledger anchor, remote collision state, and delta.
+- T2 depends_on: [T1] - Derive codemap blast radius; review changed source and standing candidates serially.
+- T3 depends_on: [T2] - Run standing money-path and watchdog-catalog sweeps.
+- T4 depends_on: [T3] - Append deduplicated findings and ledger; validate frozen IDs; commit, push, and publish the audit PR.
+
+## Checklist
+
+- [x] T1 Dedicated runner markers, anchor, branch, and remote collision state verified.
+- [x] T2 Changed-surface and blast-radius review.
+- [x] T3 Standing sweeps and candidate re-triage.
+- [x] T4 Ledger/report publication and commit.
+
+## Review
+
+- R-676 is lead-executed: a stale marker classified a current timed-out audit as OK; REL-255 is queued with SHA-bound fault injection criteria.
+
+---
+
+# Task: IR ensure-PR hook [IN PROGRESS]
+
+Durable grok incident-response open-PR after `fix/**` push.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red contract for create / noop / fail-closed / never merge.
+- T2 depends_on: [T1] - `scripts/ir_ensure_pr.py` + `scripts/ir_open_pr.sh`.
+- T3 depends_on: [T2] - Grok prompt + poller backstop; skill/docs/PAT checklist.
+
+## Checklist
+
+- [x] T1 Red tests in `scripts/tests/test_ir_ensure_pr.py`.
+- [x] T2 Helper + wrapper.
+- [x] T3 Playbook, grok poller, operator enablement.
+
+## Review
+
+- [x] No merge from this hook. PAT stays Contents + Pull requests. No live VPS install.
+
+---
+
 # Task: Testing remediation 2026-09-14 [IN PROGRESS]
 
 Reduced-capability rung (`RADON_WEEKEND_REDUCED=1`): remediate every verified
