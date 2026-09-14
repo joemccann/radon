@@ -1,3 +1,27 @@
+# Task: Reliability remediation 2026-09-14 [IN PROGRESS]
+
+Reduced capability rung (`RADON_WEEKEND_REDUCED=1`): remediate P0/P1 only.
+
+## Dependency graph
+
+- T1 depends_on: [] - Add REL-255 stale/malformed DeepSec completion-evidence regressions.
+- T2 depends_on: [T1] - Bind completion markers and run records to the requested audited SHA.
+- T3 depends_on: [T2] - Run focused red/green verification, append the reliability record, commit, and push.
+- T4 depends_on: [T3] - Re-run permanent drills and closing gates or record an evidence-backed blocker.
+
+## Checklist
+
+- [x] T1 RED stale/malformed completion-evidence fault injection.
+- [x] T2 SHA-bound completion implementation.
+- [ ] T3 Focused verification, reliability log, commit, and push.
+- [ ] T4 Closing drills and gates.
+
+## Review
+
+- Pending: REL-255 must fail closed unless completion evidence names the requested audited SHA.
+
+---
+
 # Task: Reliability delta audit 2026-09-14 [IN PROGRESS]
 
 Audit `3e394792..HEAD` across the changed control-plane, model-ladder, security-loop,
