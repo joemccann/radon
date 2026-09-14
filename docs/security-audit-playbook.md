@@ -152,6 +152,14 @@ line here whenever you ship a security fix.**
   gitignored pattern, so a crash inside the window cannot leave a
   commit-visible secret file in a PR-opening clone. Pinned by
   `cloud/tests/test_env_example.py::TestGitignore`.
+- **A unit that renders third-party content gets least-privilege env and network**
+  — a container whose workload parses or renders untrusted external content
+  (e.g. the newsfeed's sandbox-disabled Chromium) receives only the env keys
+  its own code reads, never the full `/etc/radon/env` set, and runs on an
+  isolated bridge network, never `--network host`. Pinned by
+  `cloud/tests/test_app_runtime.py::test_run_newsfeed_env_file_carries_only_its_allowlisted_keys`
+  and the per-unit network assertions in
+  `test_run_allowlisted_unit_uses_host_net_and_radon_user`.
 - **Root provisioning never dereferences a path an unprivileged account can replace**
   — `cloud/scripts/setup-vps.sh` runs as root; every chmod/chown of the env file passes `require_regular_file` (a symlink is refused, never followed)
   and every unit, drop-in, journald conf, Caddyfile, helper, sudoers and polkit
