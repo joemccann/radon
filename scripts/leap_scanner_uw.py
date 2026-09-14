@@ -974,14 +974,6 @@ def main():
         for r in sorted(mispriced, key=lambda x: x.best_gap, reverse=True)[:5]:
             print(f"   {r.ticker}: HV20={r.vol_data.hv_20:.1f}% vs LEAP IV gap +{r.best_gap:.1f}%")
     
-    # Generate report (HTML only when there is something to show)
-    output_path = Path(args.output)
-    if results:
-        report = generate_report(results, args.min_gap)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(report)
-        print(f"\n✓ Report saved to {output_path}")
-
     if not results:
         print(
             "✗ No ticker produced a valid provider result; preserving the last good cache",
@@ -989,20 +981,18 @@ def main():
         )
         return 1
 
+    output_path = Path(args.output)
+    json_data = None
     if args.json:
         json_data = build_json_payload(results, args.min_gap, universe, tickers)
         json_data["failed_tickers"] = failed_tickers
         json_data["provider_failures"] = provider_failures
         json_data["status"] = "degraded" if exhausted else "ok"
-        json_path = output_path.with_suffix(".json")
-        json_path.parent.mkdir(parents=True, exist_ok=True)
-        json_path.write_text(json.dumps(json_data, indent=2))
-        print(f"✓ JSON saved to {json_path}")
 
-        # Also mirror to data/leap.json so the dashboard
-        # Opportunities → LEAP tab can read the latest scan via the
-        # /api/leap route. Other scans (scanner, discover) follow the
-        # same data/<scan>.json convention.
+        # Canonical path first. The radon-api image ships /home/radon/radon as
+        # root-owned with no reports/ dir; mkdir(reports) raised PermissionError
+        # and aborted before this write (P1 2026-09-14). data/ is the writable
+        # bind mount; GARCH already skips HTML on --json for the same reason.
         cache_path = DASHBOARD_CACHE_PATH
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         # atomic_save, not write_text: this file is CANONICAL (no table
@@ -1029,6 +1019,19 @@ def main():
             else None
         )
         mirror_scan_snapshot("leap-scan", json_data, health_error=health_error)
+
+    # HTML (+ optional sidecar JSON under --output) is best-effort. An
+    # unwritable reports/ must not fail the oneshot after the cache is warm.
+    try:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(generate_report(results, args.min_gap))
+        print(f"\n✓ Report saved to {output_path}")
+        if json_data is not None:
+            json_path = output_path.with_suffix(".json")
+            json_path.write_text(json.dumps(json_data, indent=2))
+            print(f"✓ JSON saved to {json_path}")
+    except OSError as exc:
+        print(f"⚠ Report not saved ({output_path}): {exc}", file=sys.stderr)
 
     if exhausted:
         print(
