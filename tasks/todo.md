@@ -1,3 +1,25 @@
+# Task: Testing delta audit 2026-09-14 [IN PROGRESS]
+
+Audit `9db44a3f..HEAD` for test-suite health only; never contact IB.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify dedicated runner, anchor, nightly branch, and toolchain.
+- T2 depends_on: [T1] - Review delta and codemap blast radius; run required gates and determinism sweeps.
+- T3 depends_on: [T2] - Append deduplicated findings, ledger, log, commit, push, and publish nightly PR.
+
+## Checklist
+
+- [x] T1 Runner markers, clean tree, anchor, and dated branch verified.
+- [x] T2 Delta review and static standing sweeps; gate stages remain pending sentinels.
+- [ ] T3 Append-only audit record and publication.
+
+## Review
+
+- [ ] Audit-only; no production or IB operation.
+
+---
+
 # Task: Reliability remediation 2026-09-12 [IN PROGRESS]
 
 Reduced capability rung (`RADON_WEEKEND_REDUCED=1`): remediate P0/P1 only.

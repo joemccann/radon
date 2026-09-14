@@ -10293,6 +10293,41 @@ environment and falls back to ambient credentials only when `env is None`.
 
 - Audited through: 9db44a3f on 2026-09-13 — 1 new finding (T-491) over 53 commits / 182 paths; detached full-gate stage INCOMPLETE (no DONE sentinel), so no test counts are claimed.
 
+## Delta audit 2026-09-14
+
+Range `9db44a3f..9b9a65c7`: 48 commits / 76 paths. The codemap names 25 direct
+test importers for the changed source surface; two map candidates
+(`scripts/clients/model_ladder.py`, `cloud/scripts/drift_audit.py`) have
+dedicated tests confirmed by `rg`. CI invocation, coverage thresholds,
+exclusions, and deploy dependencies are unchanged.
+
+### T-492 — P1 — append-only test ledgers accept unresolved merge state and a reused finding ID
+
+`TEST_LOG.md:838,861,872` contains committed `<<<<<<<`, `=======`, and
+`>>>>>>>` markers, so the nightly remediation history has two incompatible
+tails. `TEST_AUDIT.md:10206` and `:10230` both define `### T-491` for distinct
+findings, violating the continuing-ID contract. The only ledger test at
+`scripts/tests/test_docs_contract.py:616-632` checks the header and row count;
+it passes with both corruption forms, so the next audit/remediation can
+mis-deduplicate or lose a verified item.
+
+| ID | Sev | Acceptance criteria |
+|---|---|---|
+| T-492 | P1 | Add a ledger-integrity contract that fails on conflict markers in `TEST_AUDIT.md` or `TEST_LOG.md` and on duplicate `### T-###` finding headings. Red: inject each corruption into a copied ledger and assert rejection. Green: reconcile the committed tails without deleting history, assign the relay finding its next unused ID, and run the focused contract. |
+
+### Standing sweeps
+
+- Full-gate and delta-file determinism stages are in progress under
+  `/tmp/tw-2026-09-14/`; no count is claimed until each stage has its `DONE`
+  sentinel.
+- Added-line skip/xfail/`.only` sweep found no executable test skip or focus;
+  coverage configuration and `.github/workflows/ci.yml` invocations are
+  unchanged in the range.
+- `git diff --check 9db44a3f..HEAD` is clean; the committed ledger conflict
+  markers are semantic corruption, not whitespace conflict markers.
+
+- Audited through: 9b9a65c7 on 2026-09-14 — 1 new finding (T-492) over 48 commits / 76 paths; gate stage pending required DONE sentinels.
+
 ## Remediation 2026-09-13
 
 `RADON_WEEKEND_REDUCED=1`: T-491 is P2 and therefore out of scope. Reconciled

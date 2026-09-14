@@ -835,6 +835,12 @@ section before completion.
 | Task | Status | Evidence |
 |---|---|---|
 | T-491 | DONE | RED: `XAI_API_KEY=ambient-poison` against the old constructor: 1 failed, no `ModelError`. GREEN: explicit empty injected env preserves no-key rejection, 1 passed; `test_research_runtime.py` + `test_model_ladder.py`: 59 passed. |
+
+## Audit 2026-09-14 (testing/2026-09-14)
+
+| Task | Status | Evidence |
+|---|---|---|
+| T-492 | OPEN | Delta audit verified committed conflict markers in `TEST_LOG.md:838,861,872`, reused `### T-491` headings in `TEST_AUDIT.md:10206,10230`, and an append-only contract that does not reject either form at `scripts/tests/test_docs_contract.py:616-632`. Full-gate and scoped determinism results pending required detached-stage sentinels. |
 <<<<<<< HEAD
 
 ## Audit 2026-09-13 (testing/2026-09-13)
