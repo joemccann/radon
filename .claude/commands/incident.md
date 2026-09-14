@@ -35,7 +35,7 @@ Cross-check (a) against (b): the failing test must fail via the mechanism (a) id
 
 ## Phase 3 — Fix and ship (Mode B only, and skip when --analyze-only or when the runbook says stand down)
 
-Follow the skill's steps 3 to 8 exactly: fix the root cause surgically, make the regression test green, run BOTH full gates from the repo root, commit focused (staged by path, never `git add -A`), update the runbook case with the new commit SHA (new case section if this was an undocumented mode), push once after confirming no deploy is in flight, watch CI to green, verify live (browser screenshot for UI, curl plus live Turso for data), then confirm the incident artifact resolves on the next watchdog cycle.
+Follow the skill's steps 3 to 8 exactly: fix the root cause surgically, make the regression test green, run BOTH full gates from the repo root, commit focused (staged by path, never `git add -A`), update the runbook case with the new commit SHA (new case section if this was an undocumented mode), push a `fix/**` branch once after confirming no deploy is in flight, run `python3.13 scripts/ir_ensure_pr.py` so an open PR exists against `main` (never merge), watch CI on that PR to green, verify live (browser screenshot for UI, curl plus live Turso for data), then confirm the incident artifact resolves on the next watchdog cycle.
 
 If Phase 2 concludes the incident is an upstream/platform outage or a false positive, do NOT ship code: follow the skill's stand-down criteria, update the incident JSON with the finding, and report.
 
