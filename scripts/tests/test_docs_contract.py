@@ -700,6 +700,13 @@ class TestNightlyLoopIndex:
                 "docs/operations.md documents that marker as the rail"
             )
 
+    def test_deepsec_failure_has_a_safe_operator_path(self):
+        """DOC-109: a failed sibling worker is never an in-run repair."""
+        text = _operations_text()
+        assert "A `failed` DeepSec status is operator-only" in text
+        assert "`launchctl list | grep radon`" in text
+        assert "Do not bootstrap or restart DeepSec from a nightly run." in text
+
     # DOC-084 (2026-09-04): three SKILL.md rails named only
     # `.radon-weekend-runner`, so an agent reading its own rail believed the
     # shared marker was the whole gate while its wrapper also required the
