@@ -542,6 +542,25 @@ def _merge_covered_call_groups(groups: dict) -> dict:
     return merged
 
 
+def _split_stacked_verticals(legs: list) -> list:
+    """Split a same-right option group of 4+ legs into independent verticals.
+
+    Legs sorted by strike must pair adjacently into one long + one short of
+    equal size; otherwise the group is returned whole. Each vertical can then
+    be closed on its own instead of as a single multi-leg BAG.
+    """
+    if len(legs) < 4 or len(legs) % 2:
+        return [legs]
+    if any(l['secType'] != 'OPT' for l in legs) or len({l.get('right') for l in legs}) != 1:
+        return [legs]
+    ordered = sorted(legs, key=lambda l: l.get('strike', 0))
+    pairs = [ordered[i:i + 2] for i in range(0, len(ordered), 2)]
+    for a, b in pairs:
+        if a['position'] != -b['position'] or a.get('strike') == b.get('strike'):
+            return [legs]
+    return pairs
+
+
 def _position_basis_source(formatted_legs: list) -> Optional[str]:
     """`session_fills` only when EVERY leg is; `mixed` when they disagree."""
     if not formatted_legs:
@@ -575,8 +594,12 @@ def collapse_positions(positions: list) -> list:
     
     collapsed = []
     position_id = 1
-    
-    for (account_id, symbol, expiry), legs in groups.items():
+
+    split_groups = [
+        (key, part) for key, legs in groups.items() for part in _split_stacked_verticals(legs)
+    ]
+
+    for (account_id, symbol, expiry), legs in split_groups:
         structure_type, risk_profile = detect_structure_type(legs)
         structure_desc = format_structure_description(structure_type, legs)
         
