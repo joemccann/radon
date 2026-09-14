@@ -13,12 +13,12 @@ Reduced capability rung (`RADON_WEEKEND_REDUCED=1`): remediate P0/P1 only.
 
 - [x] T1 RED stale/malformed completion-evidence fault injection.
 - [x] T2 SHA-bound completion implementation.
-- [ ] T3 Focused verification, reliability log, commit, and push.
-- [ ] T4 Closing drills and gates.
+- [x] T3 Focused verification, reliability log, commit, and push.
+- [x] T4 Closing drills BLOCKED by detached-stage termination; full gates not started.
 
 ## Review
 
-- Pending: REL-255 must fail closed unless completion evidence names the requested audited SHA.
+- REL-255 source contract is green; the permanent Python drills are green, while the detached stage was terminated before its Vitest rung and DONE sentinel.
 
 ---
 
