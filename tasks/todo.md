@@ -12,7 +12,7 @@ Audit `9db44a3f..HEAD` for test-suite health only; never contact IB.
 
 - [x] T1 Runner markers, clean tree, anchor, and dated branch verified.
 - [x] T2 Delta review and static standing sweeps; gate stages remain pending sentinels.
-- [x] T3 Append-only audit record, commit, and branch publication.
+- [x] T3 Append-only audit record, commit, branch publication, and PR #430.
 
 ## Review
 
