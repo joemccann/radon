@@ -156,5 +156,8 @@ def test_container_dropin_forwards_notify_socket() -> None:
     assert "docker.sock" not in runtime
     assert "NOTIFY_SOCKET" in runtime
     assert "WATCHDOG_USEC" in runtime
-    assert "--network host" in runtime
+    # Host network is now per-unit: the default stays host, newsfeed is
+    # isolated on bridge (see test_app_runtime.py network assertions).
+    assert "container_network=host" in runtime
+    assert '--network "$container_network"' in runtime
     assert "--cgroupns" in runtime
