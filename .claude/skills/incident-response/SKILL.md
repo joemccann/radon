@@ -1,6 +1,6 @@
 ---
 name: incident-response
-description: The exact Radon triage playbook for a production incident - reproduce locally, write a FAILING regression test first, fix, run the full test gate, commit a focused single-purpose commit, push once, wait for CI green, verify live in the browser. Use whenever an incident JSON from data/incidents/ or a production bug report is being worked; /incident orchestrates the parallel-analysis phase on top of this playbook.
+description: The exact Radon triage playbook for a production incident - reproduce locally, write a FAILING regression test first, fix, run the full test gate, commit a focused single-purpose commit, push a fix/** branch, ensure an open PR (never merge), wait for CI green, verify live in the browser. Use whenever an incident JSON from data/incidents/ or a production bug report is being worked; /incident orchestrates the parallel-analysis phase on top of this playbook.
 ---
 
 # Incident response — the Radon playbook
@@ -85,15 +85,20 @@ evidence; paste that evidence before claiming the step done.
 - If the incident came from a correction or a wrong first diagnosis, add the
   pattern to `tasks/lessons.md`.
 
-## 7. Push ONCE and wait for CI green
+## 7. Push a `fix/**` branch ONCE, then ensure an open PR
 
+- Never `git push origin main` from VPS/grok. Protected `main` merge stays
+  Joe / Mac Mini `gh` / loops after CI green. This playbook never merges.
+- Branch prefix is exactly `fix/` (example: `fix/leap-reports-permission-502`).
 - Check nothing is mid-deploy: `gh run list --workflow=ci.yml --limit 1`.
   If a run is in progress, WAIT — rapid-fire pushes cancelled an in-flight
   deploy and corrupted the production build (2026-07-08).
-- `git push origin main` (main, never beta), then watch to completion:
-  `gh run watch` or poll `gh run list --workflow=ci.yml --limit 1` until
-  `completed/success`. The deploy job is gated on the full test matrix and
-  holds a non-canceling production lock.
+- `git push -u origin HEAD` from that branch, then ensure a PR exists:
+  `python3.13 scripts/ir_ensure_pr.py` (or `bash scripts/ir_open_pr.sh`).
+  That creates a PR against `main` if none is open for this head; no-op if
+  one exists. Fail closed if `gh` is missing or the PAT lacks
+  `pull_requests: write`. Branch-only is not a ship.
+- Watch CI on the PR (`gh pr checks`) until green. Do not merge.
 
 ## 8. Verify live
 

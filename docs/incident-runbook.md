@@ -1902,9 +1902,10 @@ hour). VPS `radon-grok-page-responder.timer` (`scripts/grok_page_responder.py`,
 dedicated clone `/home/radon/radon-page-responder`) claims the row and
 runs headless Grok with this playbook: diagnose, stand down when this
 runbook says so, otherwise TDD and ship. A normal-priority `radon grok:`
-follow-up reports the disposition. After `git push origin main` and a
-green live gate, `deploy_notify.py` sends `radon deploy live`. Neither
-follow-up is P1.
+follow-up reports the disposition. After a `fix/**` push,
+`scripts/ir_ensure_pr.py` opens a PR against `main` (never merges). Joe
+or Mac Mini `gh` merges after CI green. Then a green live gate,
+`deploy_notify.py` sends `radon deploy live`. Neither follow-up is P1.
 
 Laptop launchd is off. Kill switches: `GROK_PAGE_RESPONDER=0`,
 `GROK_PAGE_AUTOSHIP=0` (diagnose only), `GROK_PAGE_AUTOPUSH=0`.
