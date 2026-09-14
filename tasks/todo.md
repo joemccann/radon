@@ -1,3 +1,28 @@
+# Task: Reliability delta audit 2026-09-14 [IN PROGRESS]
+
+Audit `3e394792..HEAD` across the changed control-plane, model-ladder, security-loop,
+research, assistant, and health surfaces. Audit-only: no production source changes.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify runner, dated branch, ledger anchor, remote collision state, and delta.
+- T2 depends_on: [T1] - Derive codemap blast radius; review changed source and standing candidates serially.
+- T3 depends_on: [T2] - Run standing money-path and watchdog-catalog sweeps.
+- T4 depends_on: [T3] - Append deduplicated findings and ledger; validate frozen IDs; commit, push, and publish the audit PR.
+
+## Checklist
+
+- [x] T1 Dedicated runner markers, anchor, branch, and remote collision state verified.
+- [x] T2 Changed-surface and blast-radius review.
+- [x] T3 Standing sweeps and candidate re-triage.
+- [x] T4 Ledger/report publication and commit.
+
+## Review
+
+- R-676 is lead-executed: a stale marker classified a current timed-out audit as OK; REL-255 is queued with SHA-bound fault injection criteria.
+
+---
+
 # Task: Reliability remediation 2026-09-12 [IN PROGRESS]
 
 Reduced capability rung (`RADON_WEEKEND_REDUCED=1`): remediate P0/P1 only.
