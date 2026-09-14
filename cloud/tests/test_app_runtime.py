@@ -439,7 +439,13 @@ def test_run_allowlisted_unit_uses_host_net_and_radon_user(
     result = _run(tmp_path, ["run", unit])
     assert result.returncode == 0, result.stderr + result.stdout
     log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
-    assert "--network host" in log
+    # The newsfeed renders third-party web content in a sandbox-disabled
+    # Chromium; it gets an isolated bridge network, never the host stack.
+    if unit == "radon-newsfeed.service":
+        assert "--network bridge" in log
+        assert "--network host" not in log
+    else:
+        assert "--network host" in log
     assert "--user 1000:1000" in log
     assert "--env-file" in log
     assert "--init" in log
@@ -1046,6 +1052,72 @@ def test_run_hands_docker_an_unquoted_root_only_copy_of_the_env_file(
     )
     # The host file is the secret of record and is never rewritten.
     assert "XAI_API_KEY='xai-abc$1'" in host_env.read_text(encoding="utf-8")
+
+
+def test_run_newsfeed_env_file_carries_only_its_allowlisted_keys(
+    tmp_path: Path,
+) -> None:
+    """The newsfeed unit drives a sandbox-disabled Chromium over third-party
+    content; its rendered env file must carry only the keys its own code
+    reads, never the full production secret set."""
+    host_env = tmp_path / "secrets.env"
+    host_env.write_text(
+        "NODE_ENV=production\n"
+        + QUOTED_GATEWAY_SECRET_LINE +
+        "TURSO_DB_URL=libsql://example.turso.io\n"
+        "TURSO_AUTH_TOKEN='tok'\n"
+        "ANTHROPIC_API_KEY=k1\n"
+        "CEREBRAS_API_KEY=k2\n"
+        "RADON_NEWSFEED_HEADLESS=1\n"
+        "RADON_MEDIA_REMOTE=/home/radon/radon-cloud/media/\n"
+        "CLERK_SECRET_KEY=sk\n"
+        "MENTHORQ_PASS=mq\n",
+        encoding="utf-8",
+    )
+    result = _run(
+        tmp_path, ["run", "radon-newsfeed.service"],
+        extra_env={"RADON_TEST_ENV_FILE": str(host_env)},
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    match = re.search(r"--env-file (\S+)", _run_line(result))
+    assert match, _run_line(result)
+    rendered = Path(match.group(1)).read_text(encoding="utf-8")
+    keys = {
+        line.split("=", 1)[0]
+        for line in rendered.splitlines()
+        if "=" in line and not line.startswith("#")
+    }
+    assert GATEWAY_SECRET_KEY not in keys
+    assert "CLERK_SECRET_KEY" not in keys
+    assert "MENTHORQ_PASS" not in keys
+    assert {
+        "NODE_ENV",
+        "TURSO_DB_URL",
+        "TURSO_AUTH_TOKEN",
+        "ANTHROPIC_API_KEY",
+        "CEREBRAS_API_KEY",
+        "RADON_NEWSFEED_HEADLESS",
+        "RADON_MEDIA_REMOTE",
+    } <= keys
+    # Quote stripping still applies on the filtered path.
+    assert "TURSO_AUTH_TOKEN=tok" in rendered.splitlines()
+
+
+def test_run_non_newsfeed_units_keep_the_full_env_file(tmp_path: Path) -> None:
+    host_env = tmp_path / "secrets.env"
+    host_env.write_text(
+        "NODE_ENV=production\n" + UNQUOTED_GATEWAY_SECRET_LINE,
+        encoding="utf-8",
+    )
+    result = _run(
+        tmp_path, ["run", "radon-api.service"],
+        extra_env={"RADON_TEST_ENV_FILE": str(host_env)},
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    match = re.search(r"--env-file (\S+)", _run_line(result))
+    assert match, _run_line(result)
+    rendered = Path(match.group(1)).read_text(encoding="utf-8")
+    assert UNQUOTED_GATEWAY_SECRET_LINE.strip() in rendered.splitlines()
 
 
 def test_a_failed_docker_rm_does_not_delete_a_live_containers_credential(
