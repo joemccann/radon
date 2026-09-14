@@ -273,6 +273,17 @@ class TestRefreshGate:
         assert fingerprint(first) == fingerprint(second)
 
 
+class TestNightlyRefresh:
+    def test_verifies_generated_artifacts_before_opening_a_pr(self) -> None:
+        """Nightly ownership must fail closed on an invalid generated graph."""
+        script = (REPO / "scripts/codemap_nightly.sh").read_text(encoding="utf-8")
+        generate = "python3.13 tools/codemap/generate_codemap.py"
+        verify = "python3.13 -m pytest scripts/tests/test_codemap.py::TestCommittedArtifacts::test_matches_live_graph -q"
+        assert generate in script
+        assert verify in script
+        assert script.index(generate) < script.index(verify) < script.index("if git diff --quiet")
+
+
 class TestAgentRails:
     def test_instruction_files_point_at_the_code_path_map(self) -> None:
         root = Path(__file__).resolve().parents[2]
