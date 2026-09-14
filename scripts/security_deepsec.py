@@ -18,6 +18,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 import time
 from contextlib import contextmanager
@@ -161,18 +162,40 @@ def _run_dirs(scratch: Path) -> List[Path]:
     return sorted(out, key=lambda p: p.name, reverse=True)
 
 
+def _completion_marker_matches(path: Path, head_sha: str) -> bool:
+    """Accept only a completion marker written for this exact audit head."""
+    if not head_sha or not path.is_file():
+        return False
+    try:
+        return path.read_text(encoding="utf-8").strip() == head_sha
+    except OSError:
+        return False
+
+
+def _run_record_matches(path: Path, head_sha: str) -> bool:
+    """Require both the completion state and exact head in legacy run records."""
+    if not head_sha or not path.is_file():
+        return False
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return bool(
+        re.search(r"(?m)^fast_engines:\s*complete\s*$", text)
+        and re.search(rf"(?m)^head_sha:\s*{re.escape(head_sha)}\s*$", text)
+    )
+
+
 def fast_engines_complete(scratch: Path, head_sha: str = "") -> bool:
     marker = Path(scratch) / FAST_ENGINES_MARKER
-    if marker.is_file():
+    if _completion_marker_matches(marker, head_sha):
         return True
     for run in _run_dirs(scratch):
-        if (run / FAST_ENGINES_MARKER).is_file():
+        if _completion_marker_matches(run / FAST_ENGINES_MARKER, head_sha):
             return True
         record = run / "run-record.md"
-        if record.is_file():
-            text = record.read_text(encoding="utf-8")
-            if "fast_engines: complete" in text:
-                return True
+        if _run_record_matches(record, head_sha):
+            return True
     if not head_sha:
         return False
     state = load_last_audited(scratch)

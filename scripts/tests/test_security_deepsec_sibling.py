@@ -94,6 +94,56 @@ class TestClassifyAuditDoesNotTimeoutSolelyOnDeepSec:
         assert rc == 124
         assert status.startswith("TIMEOUT")
 
+    def test_timeout_wins_when_completion_marker_is_for_an_older_head(self, tmp_path):
+        scratch = _scratch(tmp_path)
+        _write_fast_complete(scratch, PREV)
+        _write_status(scratch, "running", pid=4242)
+
+        status, rc = deepsec.classify_audit(
+            rc=124, scratch=scratch, head_sha=HEAD, cap_secs=7200
+        )
+
+        assert rc == 124
+        assert status.startswith("TIMEOUT")
+
+    @pytest.mark.parametrize(
+        "record",
+        [
+            "fast_engines: complete\nhead_sha: " + PREV + "\n",
+            "fast_engines: complete\nhead_sha: not-a-sha\n",
+        ],
+    )
+    def test_timeout_wins_when_run_record_is_stale_or_malformed(self, tmp_path, record):
+        scratch = _scratch(tmp_path)
+        run = scratch / "20260914-audit"
+        run.mkdir()
+        (run / "run-record.md").write_text(record, encoding="utf-8")
+        _write_status(scratch, "running", pid=4242)
+
+        status, rc = deepsec.classify_audit(
+            rc=124, scratch=scratch, head_sha=HEAD, cap_secs=7200
+        )
+
+        assert rc == 124
+        assert status.startswith("TIMEOUT")
+
+    def test_exact_head_run_record_keeps_sibling_worker_timeout_exemption(self, tmp_path):
+        scratch = _scratch(tmp_path)
+        run = scratch / "20260914-audit"
+        run.mkdir()
+        (run / "run-record.md").write_text(
+            "fast_engines: complete\nhead_sha: " + HEAD + "\n",
+            encoding="utf-8",
+        )
+        _write_status(scratch, "running", pid=4242)
+
+        status, rc = deepsec.classify_audit(
+            rc=124, scratch=scratch, head_sha=HEAD, cap_secs=7200
+        )
+
+        assert rc == 0
+        assert status == deepsec.AUDIT_OK_DEEPSEC_RUNNING
+
     def test_timeout_still_wins_when_deepsec_failed(self, tmp_path):
         scratch = _scratch(tmp_path)
         _write_fast_complete(scratch)
