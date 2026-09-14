@@ -840,7 +840,7 @@ section before completion.
 
 | Task | Status | Evidence |
 |---|---|---|
-| T-492 | OPEN | Delta audit verified committed conflict markers in `TEST_LOG.md:838,861,872`, reused `### T-491` headings in `TEST_AUDIT.md:10206,10230`, and an append-only contract that does not reject either form at `scripts/tests/test_docs_contract.py:616-632`. Full-gate and scoped determinism results pending required detached-stage sentinels. |
+| T-492 | OPEN | Delta audit verified committed conflict markers in `TEST_LOG.md:844,867,878`, reused `### T-491` headings in `TEST_AUDIT.md:10206,10230`, and an append-only contract that does not reject either form at `scripts/tests/test_docs_contract.py:616-632`. First stage DONE 3: pytest collection blocked by missing `ib_insync`; vitest 9479 passed; cloud 1847 passed / 4 standing T-488 failures. Python retry follows corrected runner toolchain. |
 <<<<<<< HEAD
 
 ## Audit 2026-09-13 (testing/2026-09-13)

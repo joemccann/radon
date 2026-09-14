@@ -10303,7 +10303,7 @@ exclusions, and deploy dependencies are unchanged.
 
 ### T-492 — P1 — append-only test ledgers accept unresolved merge state and a reused finding ID
 
-`TEST_LOG.md:838,861,872` contains committed `<<<<<<<`, `=======`, and
+`TEST_LOG.md:844,867,878` contains committed `<<<<<<<`, `=======`, and
 `>>>>>>>` markers, so the nightly remediation history has two incompatible
 tails. `TEST_AUDIT.md:10206` and `:10230` both define `### T-491` for distinct
 findings, violating the continuing-ID contract. The only ledger test at
@@ -10317,16 +10317,20 @@ mis-deduplicate or lose a verified item.
 
 ### Standing sweeps
 
-- Full-gate and delta-file determinism stages are in progress under
-  `/tmp/tw-2026-09-14/`; no count is claimed until each stage has its `DONE`
-  sentinel.
+- Serial full-gate stage reached its `DONE 3` sentinel: pytest failed at
+  collection (`76 errors`) because this runner's new Python venv lacked
+  `ib_insync`; after installing the pinned runtime dependencies, the required
+  retry is in progress. Vitest passed **9,479 / 0 failed** (950 files, 18
+  skipped); cloud was **1,847 passed / 4 failed / 76 skipped** in 404s, with
+  all four failures in the standing T-488 GNU-timeout class at
+  `cloud/tests/test_deploy_corrections.py:1495-1586`.
 - Added-line skip/xfail/`.only` sweep found no executable test skip or focus;
   coverage configuration and `.github/workflows/ci.yml` invocations are
   unchanged in the range.
 - `git diff --check 9db44a3f..HEAD` is clean; the committed ledger conflict
   markers are semantic corruption, not whitespace conflict markers.
 
-- Audited through: 9b9a65c7 on 2026-09-14 — 1 new finding (T-492) over 48 commits / 76 paths; gate stage pending required DONE sentinels.
+- Audited through: 9b9a65c7 on 2026-09-14 — 1 new finding (T-492) over 48 commits / 76 paths; Python retry required after corrected runner toolchain.
 
 ## Remediation 2026-09-13
 
