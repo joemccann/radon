@@ -634,6 +634,41 @@ class TestTestLogLedgerIsAppendOnly:
         )
 
 
+# T-492 (2026-09-13): PR #411 merged onto a tree that already carried the
+# 2026-09-13 TEST_LOG section and left unresolved conflict markers on main.
+# The append-only row-count tests stayed green because both sides' T-rows
+# survived inside the conflict. A marker scan is the gate that would have
+# redded that merge.
+def _is_git_conflict_marker(line: str) -> bool:
+    return (
+        line.startswith("<<<<<<< ")
+        or line.startswith(">>>>>>> ")
+        or line == "======="
+    )
+_TESTING_LEDGERS = (
+    "TEST_LOG.md",
+    "TEST_AUDIT.md",
+    "REMEDIATION_LOG.md",
+)
+
+
+class TestTestingLedgersHaveNoConflictMarkers:
+    @pytest.mark.parametrize("ledger", _TESTING_LEDGERS)
+    def test_no_unresolved_conflict_markers(self, ledger):
+        path = _ROOT / ledger
+        if not path.is_file():
+            pytest.skip(f"{ledger} is not in this tree")
+        hits = [
+            i
+            for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+            if _is_git_conflict_marker(line)
+        ]
+        assert hits == [], (
+            f"{ledger} has unresolved git conflict markers at lines {hits}; "
+            "keep both sides of a TEST_LOG merge, never ship the markers"
+        )
+
+
 # DOC-032 / DOC-033 (2026-09-01): docs/operations.md is the one place that
 # indexes all five nightly loops. Its "all fire 00:00 local" sentence had been
 # wrong since the loops were staggered, and its rails named only the shared

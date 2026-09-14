@@ -10343,6 +10343,39 @@ runner because the tracked `.codex` artifacts cannot be materialized here.
 There is no source-actionable P0/P1 finding to implement. Closing gates, if
 completed, are recorded in `TEST_LOG.md`; no result is asserted in advance.
 
+## Delta audit 2026-09-13 (surfaced by remediation)
+
+### T-494 — P1 — `TEST_LOG.md` on `origin/main` shipped unresolved git conflict markers
+
+PR #411 (`testing/2026-09-12`, merge `9b9a65c7`) landed on a tree that already
+carried the 2026-09-13 TEST_LOG section from PR #417. The merge kept both
+sides as conflict markers at `TEST_LOG.md:838` (`<<<<<<< HEAD`), `:861`
+(`=======`), and `:872` (`>>>>>>> 7f31d90c …`). `TestTestLogLedgerIsAppendOnly`
+and `TestRootLedgersAreAppendOnly` stayed green: they count `^\| T-\d+`
+rows, and both sides' rows survived inside the conflict. The testing-loop
+dead-man ledger was therefore unreadable while every gate reported pass.
+
+**AC:** a contract over `TEST_LOG.md` / `TEST_AUDIT.md` / `REMEDIATION_LOG.md`
+reds on `<<<<<<< `, `>>>>>>> `, or a lone `=======` line. Red today at HEAD.
+Green: both 2026-09-12 second-pass and 2026-09-13 sections kept, markers gone.
+
+### Backlog rows (T-494)
+
+| ID | Sev | Acceptance criteria |
+|---|---|---|
+| T-494 | P1 | Conflict-marker scan of the testing ledgers is red against the merged `TEST_LOG.md` at `9b9a65c7` and green after both sides are kept without markers. |
+
+## Remediation 2026-09-13 (second pass)
+
+`RADON_WEEKEND_REDUCED=1`. T-494 is the new source-actionable P1.
+T-491 (P2 RT-volume relay wiring) stays out of scope. T-488 remains
+operator-only. T-490's `.codex` write blocker is gone on this runner.
+
+| Task | Status | Evidence |
+|---|---|---|
+| T-494 | DONE | Red: marker contract 1 failed / 2 passed at lines 838, 861, 872. Green: 3 passed after keeping both ledger sections. `test_docs_contract.py` 55 passed. |
+| T-490 | DONE | `render_loop_prompt.py --write` succeeded; portable-prompt sync plus docs contract 128 passed. |
+
 ## Remediation 2026-09-14
 
 `RADON_WEEKEND_REDUCED=1`: T-492 was the sole source-actionable P1. T-488
