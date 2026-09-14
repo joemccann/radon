@@ -835,13 +835,28 @@ section before completion.
 | Task | Status | Evidence |
 |---|---|---|
 | T-491 | DONE | RED: `XAI_API_KEY=ambient-poison` against the old constructor: 1 failed, no `ModelError`. GREEN: explicit empty injected env preserves no-key rejection, 1 passed; `test_research_runtime.py` + `test_model_ladder.py`: 59 passed. |
-<<<<<<< HEAD
+
+## Audit 2026-09-12 (second pass, wrapper 19:00 fire)
+
+Delta range `3e394792..origin/main` empty; completed the first pass's
+unclaimed full gates. pytest 12880 passed / 19 skipped / 0 failed (2019s);
+vitest 9479 passed / 4 failed — all one environment cause (`exceljs` missing
+from this clone; failed set 11 passed / 0 failed x2 after
+`bun install --frozen-lockfile`, repo untouched); cloud 5 failed / 1910
+passed, all `test_caddy_edge_timeouts.py` with bash 5.3.9 resolved and caddy
+absent (T-484). Focused T-491 suite 52 passed x4. Post-gate tree clean x2;
+no new skips; no threshold or CI-reachability drift. 0 new findings.
+## Audit 2026-09-14 (testing/2026-09-14)
+
+| Task | Status | Evidence |
+|---|---|---|
+| T-492 | OPEN | Delta audit verified committed conflict markers in `TEST_LOG.md:844,867,878`, reused `### T-491` headings in `TEST_AUDIT.md:10206,10230`, and an append-only contract that does not reject either form at `scripts/tests/test_docs_contract.py:616-632`. First stage DONE 3: pytest collection blocked by missing `ib_insync`; vitest 9479 passed; cloud 1847 passed / 4 standing T-488 failures. Corrected pinned toolchain collects 12959 tests / 90 deselected; clean full-pytest result is unclaimed. |
 
 ## Audit 2026-09-13 (testing/2026-09-13)
 
 | Task | Status | Evidence |
 |---|---|---|
-| T-491 | OPEN | Delta audit: web/tests/ib-rt-volume-relay.test.ts:29-50 source-greps relay callbacks instead of dispatching tickSize 8 / tickString 48 and observing a broadcast. Full-gate detached stage has no DONE sentinel; no result claimed. |
+| T-493 | OPEN | Delta audit: web/tests/ib-rt-volume-relay.test.ts:29-50 source-greps relay callbacks instead of dispatching tickSize 8 / tickString 48 and observing a broadcast. Full-gate detached stage has no DONE sentinel; no result claimed. |
 
 ## Remediation 2026-09-13 (testing/2026-09-13)
 
@@ -858,15 +873,31 @@ Closing gates: INCOMPLETE. The 2026-09-13 detached stage prewrote all nine
 result placeholders, then stopped during `pytest_1` with a zero-byte log and
 without `DONE`; therefore no gate result or closing three-run verification is
 claimed. Resume on a runner that preserves detached children.
-=======
-## Audit 2026-09-12 (second pass, wrapper 19:00 fire)
+## Remediation 2026-09-13 (second pass, testing/2026-09-13)
 
-Delta range `3e394792..origin/main` empty; completed the first pass's
-unclaimed full gates. pytest 12880 passed / 19 skipped / 0 failed (2019s);
-vitest 9479 passed / 4 failed — all one environment cause (`exceljs` missing
-from this clone; failed set 11 passed / 0 failed x2 after
-`bun install --frozen-lockfile`, repo untouched); cloud 5 failed / 1910
-passed, all `test_caddy_edge_timeouts.py` with bash 5.3.9 resolved and caddy
-absent (T-484). Focused T-491 suite 52 passed x4. Post-gate tree clean x2;
-no new skips; no threshold or CI-reachability drift. 0 new findings.
->>>>>>> 7f31d90c (test(audit): second-pass 2026-09-12 ledger — full gates completed, 0 new findings)
+PR #411 (`testing/2026-09-12`) merged onto a tree that already carried the
+2026-09-13 TEST_LOG section and left unresolved conflict markers on
+`origin/main` at lines 838/861/872. The append-only row-count tests stayed
+green because both sides' T-rows survived inside the conflict. `RADON_WEEKEND_REDUCED=1`:
+T-491 (P2 RT-volume relay) stays out of scope; T-488 and T-490 remain
+operator-only.
+
+| Task | Status | Evidence |
+|---|---|---|
+| T-492 | DONE | RED: `TestTestingLedgersHaveNoConflictMarkers` failed on TEST_LOG.md lines 838, 861, 872 (`1 failed / 2 passed`). GREEN: both ledger sides kept, markers gone; same class 3 passed. `test_docs_contract.py` 55 passed. |
+| T-491 | out of scope | P2 under reduced-capability rung; no source change. |
+| T-488 | operator-only | Unchanged: reproduce GNU-timeout process-tree behavior on Linux CI without widening the contract timeout. |
+| T-490 | DONE | This runner can write `.codex/` now. `python3.13 scripts/render_loop_prompt.py --write` succeeded; `test_portable_prompt_sync.py` + docs contract 128 passed / 0 failed. Prior operator-only action is complete for this clone. |
+
+## Remediation 2026-09-14 (testing/2026-09-14)
+
+| Task | Status | Evidence |
+|---|---|---|
+| T-492 | DONE | RED: 2 failed / 2 passed with the new ledger-integrity contract against the committed conflict markers and duplicate T-491 headings. GREEN: 9 passed across the integrity and append-only contracts; copied marker and duplicate injections reject. Both conflict sides are preserved, only their three marker lines were removed; relay finding renumbered to fresh T-493. |
+| T-488 | operator-only | Reproduce and repair the GNU-timeout process-tree behavior on Linux CI without widening the fixed contract timeout. |
+| T-490 | operator-only | Render Codex artifacts in a checkout with writable `.codex/`, run the focused portable-render contract, and commit generated artifacts. |
+
+Closing gates: INCOMPLETE. The detached stage did not create
+`/tmp/tw-2026-09-14/closing-gates.rc` and therefore never wrote its required
+`DONE` sentinel. No full-gate counts are claimed; resume on a runner that
+preserves detached children.

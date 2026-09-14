@@ -634,6 +634,41 @@ class TestTestLogLedgerIsAppendOnly:
         )
 
 
+# T-492 (2026-09-13): PR #411 merged onto a tree that already carried the
+# 2026-09-13 TEST_LOG section and left unresolved conflict markers on main.
+# The append-only row-count tests stayed green because both sides' T-rows
+# survived inside the conflict. A marker scan is the gate that would have
+# redded that merge.
+def _is_git_conflict_marker(line: str) -> bool:
+    return (
+        line.startswith("<<<<<<< ")
+        or line.startswith(">>>>>>> ")
+        or line == "======="
+    )
+_TESTING_LEDGERS = (
+    "TEST_LOG.md",
+    "TEST_AUDIT.md",
+    "REMEDIATION_LOG.md",
+)
+
+
+class TestTestingLedgersHaveNoConflictMarkers:
+    @pytest.mark.parametrize("ledger", _TESTING_LEDGERS)
+    def test_no_unresolved_conflict_markers(self, ledger):
+        path = _ROOT / ledger
+        if not path.is_file():
+            pytest.skip(f"{ledger} is not in this tree")
+        hits = [
+            i
+            for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+            if _is_git_conflict_marker(line)
+        ]
+        assert hits == [], (
+            f"{ledger} has unresolved git conflict markers at lines {hits}; "
+            "keep both sides of a TEST_LOG merge, never ship the markers"
+        )
+
+
 # DOC-032 / DOC-033 (2026-09-01): docs/operations.md is the one place that
 # indexes all five nightly loops. Its "all fire 00:00 local" sentence had been
 # wrong since the loops were staggered, and its rails named only the shared
@@ -700,6 +735,13 @@ class TestNightlyLoopIndex:
                 "docs/operations.md documents that marker as the rail"
             )
 
+    def test_deepsec_failure_has_a_safe_operator_path(self):
+        """DOC-109: a failed sibling worker is never an in-run repair."""
+        text = _operations_text()
+        assert "A `failed` DeepSec status is operator-only" in text
+        assert "`launchctl list | grep radon`" in text
+        assert "Do not bootstrap or restart DeepSec from a nightly run." in text
+
     # DOC-084 (2026-09-04): three SKILL.md rails named only
     # `.radon-weekend-runner`, so an agent reading its own rail believed the
     # shared marker was the whole gate while its wrapper also required the
@@ -730,6 +772,20 @@ _LEDGERS = {
     "CI_PERFORMANCE_LOG.md": r"^### CIP-\d+",
 }
 
+_MERGE_MARKER = re.compile(r"^(?:<<<<<<<|=======|>>>>>>>)", re.MULTILINE)
+_FINDING_HEADING = re.compile(r"^### (T-\d+) —", re.MULTILINE)
+
+
+def _assert_ledger_integrity(ledger: str, text: str) -> None:
+    marker = _MERGE_MARKER.search(text)
+    assert marker is None, (
+        f"{ledger} contains an unresolved merge marker at line "
+        f"{text.count(chr(10), 0, marker.start()) + 1}"
+    )
+    headings = _FINDING_HEADING.findall(text)
+    duplicates = sorted({heading for heading in headings if headings.count(heading) > 1})
+    assert not duplicates, f"{ledger} reuses finding heading(s): {', '.join(duplicates)}"
+
 
 class TestRootLedgersAreAppendOnly:
     @pytest.mark.parametrize("ledger,row", sorted(_LEDGERS.items()))
@@ -750,6 +806,22 @@ class TestRootLedgersAreAppendOnly:
             "history (see TEST_LOG.md, truncated 543 -> 2 lines in 4584e84a "
             "with every gate green)"
         )
+
+
+class TestTestLedgersHaveNoUnresolvedMergeState:
+    @pytest.mark.parametrize("ledger", ("TEST_AUDIT.md", "TEST_LOG.md"))
+    def test_real_ledger_is_integral(self, ledger):
+        _assert_ledger_integrity(
+            ledger, (_ROOT / ledger).read_text(encoding="utf-8")
+        )
+
+    def test_conflict_marker_in_a_copied_ledger_is_rejected(self):
+        with pytest.raises(AssertionError, match="unresolved merge marker"):
+            _assert_ledger_integrity("copy.md", "# ledger\n<<<<<<< HEAD\n")
+
+    def test_duplicate_finding_heading_in_a_copied_ledger_is_rejected(self):
+        with pytest.raises(AssertionError, match="reuses finding heading.*T-492"):
+            _assert_ledger_integrity("copy.md", "### T-492 — first\n### T-492 — second\n")
 
 
 # --- the workflow has to hand this contract a history it can diff -------------
