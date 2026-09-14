@@ -1,3 +1,26 @@
+# Task: CI performance audit 2026-09-14 [IN PROGRESS]
+
+Audit `9db44a3f..origin/main` against organic GitHub Actions production runs;
+append evidence only and preserve every gate and deploy rail.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify dedicated runner, exclusive lock, branch, ledger anchor, GitHub access, and protection closure.
+- T2 depends_on: [T1] - Measure relevant runs, reconstruct critical paths, and sweep workflow/deploy invariants.
+- T3 depends_on: [T2] - Append audit evidence, verify contracts, commit/push, and publish the dated audit PR and rolling issue report.
+
+## Checklist
+
+- [x] T1 Dedicated markers, stale-lock preservation, dated branch, GitHub auth, and `origin/main` verified.
+- [x] T2 Classified 25 runs, reconstructed representative paths, swept safety closure, and ranked CIP-013.
+- [ ] T3 Ledger and focused safety verification complete; audit commit, push, PR, and rolling issue report pending.
+
+## Review
+
+- [x] CIP-013 is a P0 gate-restoration handoff; no material safe latency experiment was found.
+
+---
+
 # Task: Reliability remediation 2026-09-12 [IN PROGRESS]
 
 Reduced capability rung (`RADON_WEEKEND_REDUCED=1`): remediate P0/P1 only.
