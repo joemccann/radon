@@ -1,3 +1,70 @@
+# Task: CI performance remediate 2026-09-14 [IN PROGRESS]
+
+Reduced capability rung (`RADON_WEEKEND_REDUCED=1`): remediate P0/P1 only.
+
+## Dependency graph
+
+- T1 depends_on: [] - Re-verify dated audit branch, runner rails, reduced scope, and CIP-013 eligibility.
+- T2 depends_on: [T1] - Add a red nightly codemap artifact-freshness contract.
+- T3 depends_on: [T2] - Make the nightly refresh verify generated artifacts before publication.
+- T4 depends_on: [T3] - Run serial focused and full gates, append the ledger, commit, and push CIP-013.
+
+## Checklist
+
+- [x] T1 Dated audit branch and P0 CIP-013 eligibility re-verified.
+- [x] T2 Red regression contract.
+- [x] T3 Minimal nightly verification restoration.
+- [x] T4 Serial gates, ledger, commit, and remote push.
+
+## Review
+
+- [x] Preserve nightly-only generated artifact ownership; never require feature branches to commit codemap output.
+
+---
+
+# Task: CI performance audit 2026-09-14 [IN PROGRESS]
+
+Audit `9db44a3f..origin/main` against organic GitHub Actions production runs;
+append evidence only and preserve every gate and deploy rail.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify dedicated runner, exclusive lock, branch, ledger anchor, GitHub access, and protection closure.
+- T2 depends_on: [T1] - Measure relevant runs, reconstruct critical paths, and sweep workflow/deploy invariants.
+- T3 depends_on: [T2] - Append audit evidence, verify contracts, commit/push, and publish the dated audit PR and rolling issue report.
+
+## Checklist
+
+- [x] T1 Dedicated markers, stale-lock preservation, dated branch, GitHub auth, and `origin/main` verified.
+- [x] T2 Classified 25 runs, reconstructed representative paths, swept safety closure, and ranked CIP-013.
+- [x] T3 Audit ledger, 118 focused safety contracts, commit/push, PR #429, and rolling issue report published.
+
+## Review
+
+- [x] CIP-013 is a P0 gate-restoration handoff; no material safe latency experiment was found.
+
+# Task: IR ensure-PR hook [IN PROGRESS]
+
+Durable grok incident-response open-PR after `fix/**` push.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red contract for create / noop / fail-closed / never merge.
+- T2 depends_on: [T1] - `scripts/ir_ensure_pr.py` + `scripts/ir_open_pr.sh`.
+- T3 depends_on: [T2] - Grok prompt + poller backstop; skill/docs/PAT checklist.
+
+## Checklist
+
+- [x] T1 Red tests in `scripts/tests/test_ir_ensure_pr.py`.
+- [x] T2 Helper + wrapper.
+- [x] T3 Playbook, grok poller, operator enablement.
+
+## Review
+
+- [x] No merge from this hook. PAT stays Contents + Pull requests. No live VPS install.
+
+---
+
 # Task: Merge conflict resolution 2026-09-14 [IN PROGRESS]
 
 Resolve the branch merge against `main` without changing the REL-255 fix or
