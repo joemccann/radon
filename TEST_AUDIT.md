@@ -10319,8 +10319,10 @@ mis-deduplicate or lose a verified item.
 
 - Serial full-gate stage reached its `DONE 3` sentinel: pytest failed at
   collection (`76 errors`) because this runner's new Python venv lacked
-  `ib_insync`; after installing the pinned runtime dependencies, the required
-  retry is in progress. Vitest passed **9,479 / 0 failed** (950 files, 18
+  `ib_insync`; a second collection attempt exposed unpinned `mcp` 2.x and a
+  missing Python Playwright package. The corrected pinned toolchain collects
+  **12,959 tests / 90 deselected** in 7.13s, but no clean full-pytest count is
+  claimed in this capped audit. Vitest passed **9,479 / 0 failed** (950 files, 18
   skipped); cloud was **1,847 passed / 4 failed / 76 skipped** in 404s, with
   all four failures in the standing T-488 GNU-timeout class at
   `cloud/tests/test_deploy_corrections.py:1495-1586`.
@@ -10330,7 +10332,7 @@ mis-deduplicate or lose a verified item.
 - `git diff --check 9db44a3f..HEAD` is clean; the committed ledger conflict
   markers are semantic corruption, not whitespace conflict markers.
 
-- Audited through: 9b9a65c7 on 2026-09-14 — 1 new finding (T-492) over 48 commits / 76 paths; Python retry required after corrected runner toolchain.
+- Audited through: 9b9a65c7 on 2026-09-14 — 1 new finding (T-492) over 48 commits / 76 paths; full Python gate remains unclaimed after runner-toolchain correction.
 
 ## Remediation 2026-09-13
 
