@@ -1,3 +1,27 @@
+# Task: CI performance remediate 2026-09-14 [IN PROGRESS]
+
+Reduced capability rung (`RADON_WEEKEND_REDUCED=1`): remediate P0/P1 only.
+
+## Dependency graph
+
+- T1 depends_on: [] - Re-verify dated audit branch, runner rails, reduced scope, and CIP-013 eligibility.
+- T2 depends_on: [T1] - Add a red nightly codemap artifact-freshness contract.
+- T3 depends_on: [T2] - Make the nightly refresh verify generated artifacts before publication.
+- T4 depends_on: [T3] - Run serial focused and full gates, append the ledger, commit, and push CIP-013.
+
+## Checklist
+
+- [x] T1 Dated audit branch and P0 CIP-013 eligibility re-verified.
+- [x] T2 Red regression contract.
+- [x] T3 Minimal nightly verification restoration.
+- [x] T4 Serial gates, ledger, commit, and remote push.
+
+## Review
+
+- [x] Preserve nightly-only generated artifact ownership; never require feature branches to commit codemap output.
+
+---
+
 # Task: CI performance audit 2026-09-14 [IN PROGRESS]
 
 Audit `9db44a3f..origin/main` against organic GitHub Actions production runs;

@@ -1553,3 +1553,36 @@ python/web gate co-wall then the deploy floor (CIP-004).
 - Candidate ranking: `CIP-013` (P0 safety, hand to remediate) restores fail-closed artifact-freshness coverage for the deleted codemap cross-tree contract without returning generated codemap artifacts to per-PR feature branches. Evidence is `f7bb7620` removing the contract and its test coverage; risk is a silent stale or invalid generated import graph, not an asserted elapsed-time win. Expected critical-path effect 0s, confidence high, effort low, runner-minute effect zero on the main deploy path, and validation cost is the path-filter/codemap contract suite. No safe material latency experiment is ranked behind it: repartitioning the 115--116s co-wall has <15s demonstrated ceiling and risks shard-union completeness and runner minutes. Outcome: `NO_SAFE_CHANGE` for performance / `VALIDATING` CIP-013 safety restoration; CIP-005/CIP-007/CIP-009 remain `VALIDATING`, CIP-004/CIP-006/CIP-008 remain `DEFERRED`.
 - Verification: `../venv-ci-performance/bin/python -m pytest scripts/tests/test_ci_gate_integrity.py scripts/tests/test_ci_deploy_concurrency.py scripts/tests/test_path_filter.py scripts/tests/test_codemap.py -q` -- **118 passed in 21.01s**; workflow YAML parse, `bash -n scripts/ci_performance_nightly.sh`, Production environment API, and `git diff --check origin/main...HEAD` passed. No production action was invoked. Revert trigger: reject any remediation that shrinks gate closure, test inventory, path fallback, artifact provenance, health/recovery/rollback, or stability behavior.
 - Publication: audit commit `7cabd4a3`, PR [#429](https://github.com/joemccann/radon/pull/429), and rolling issue comment are published; PR validation is owned by the later deliver phase.
+
+### 2026-09-14 - remediate - branch `ci-performance/2026-09-14`
+
+- Runner state: dedicated markers, dated remote branch, GitHub authentication,
+  `origin/main`, and the audit's Production-protection closure were
+  re-verified. `RADON_WEEKEND_REDUCED=1` confines remediation to P0/P1;
+  CIP-013 is the sole eligible source-actionable P0.
+- CIP-013 hypothesis and change: `f7bb7620` removed the per-PR codemap
+  freshness assertion with no replacement at the nightly artifact owner. Add
+  `TestNightlyRefresh::test_verifies_generated_artifacts_before_opening_a_pr`
+  and make `scripts/codemap_nightly.sh` regenerate then run
+  `TestCommittedArtifacts::test_matches_live_graph` before its diff/PR path.
+  The expected primary-clock saving is 0s; this is a fail-closed safety
+  restoration with zero main-deploy runner-minute impact. Generated artifacts
+  remain nightly-owned and are not returned to feature branches.
+- Red/green evidence: the new focused test failed before the shell command
+  existed and passed after it; `../venv-ci-performance/bin/python -m pytest
+  scripts/tests/test_ci_gate_integrity.py scripts/tests/test_ci_deploy_concurrency.py
+  scripts/tests/test_path_filter.py scripts/tests/test_codemap.py -q` passed
+  **119 tests in 14.46s**. `bash -n scripts/codemap_nightly.sh`, workflow YAML
+  parsing, and `git diff --check` passed.
+- Serial full baseline: scripts pytest completed **11,527 passed, 50 failed,
+  19 skipped** in 1870.27s; cloud and Vitest also failed outside the two
+  changed codemap paths, while root pytest passed. The sentinel recorded every
+  stage (`scripts=1`, `cloud=1`, `root=0`, `vitest=1`, `DONE 1`); no unrelated
+  failure was changed or bypassed. This is local baseline evidence only, not a
+  production timing claim.
+- Safety/impact: gate selection, recursive inventory, cache/artifact
+  provenance, exact-SHA image checks, health, recovery, rollback, cancellation,
+  and the 40-second stability floor are unchanged. Outcome: `VALIDATING`
+  CIP-013; revert if the nightly flow can publish without a regenerated graph
+  passing the committed-artifact contract. Residual performance bottleneck
+  remains the `scripts-rs`/node-image co-wall and protected Deploy floor.
