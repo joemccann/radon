@@ -10,6 +10,7 @@ cadence (quarterly + before major releases) and **add to it** as the app grows.
 | `.claude/workflows/security-audit.mjs` | The audit engine. Fans out one finder per dimension, adversarially verifies every finding, runs a completeness + regression critic. Returns structured JSON. |
 | `scripts/security/gen_security_report.py` | Deterministic JSON → HTML report renderer. |
 | `docs/security-audit-playbook.md` | This file — methodology, dimension catalog, regression invariants, audit log. |
+| `docs/security-approved-tools.md` | Approved tool pins for the nightly security loop (Claude Code, claude-security plugin, gitleaks, deepsec) and how each is re-derived. |
 | `docs/security-audit-<date>.html` | One rendered report per run. **This repo is PUBLIC — the report enumerates the attack surface and quotes secret/topology strings, so it is gitignored (`docs/security-audit-*.html`) and MUST be filed in the private `radon-cloud:security-archive`, never committed here.** |
 
 ## How to run
