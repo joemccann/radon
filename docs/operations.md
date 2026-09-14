@@ -127,6 +127,17 @@ through the root-owned `radon-docker-gw` shim instead. **Operator (live
 hosts provisioned before this change):** run `sudo gpasswd -d radon docker`,
 then verify with `id -nG radon` (no `docker` in the output).
 
+**Newsfeed least privilege.** `radon-newsfeed.service` runs a
+sandbox-disabled Chromium against third-party web content, so
+`radon-app-runtime` hands it a filtered env file — only the keys the
+newsfeed code reads (`NODE_ENV`, `ANTHROPIC_API_KEY`, `CEREBRAS_API_KEY`,
+Turso, media, `PLAYWRIGHT_CHROMIUM_SANDBOX`, replica toggles, and
+`RADON_NEWSFEED_*`), never the full production secret set — and starts its
+container on an isolated bridge network (egress only) instead of the host
+stack every other unit uses. Adding an env var the newsfeed needs means
+extending the allowlist in `render_env_file`; the contract tests in
+`cloud/tests/test_app_runtime.py` pin both behaviors.
+
 There is no escrow, and `secrets.db` is
 bound to its key by fingerprint (`key_binding` table): with rows present and
 the key file missing, the store refuses to open rather than minting a new key
