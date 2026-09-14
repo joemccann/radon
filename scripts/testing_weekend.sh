@@ -599,17 +599,53 @@ fi
 # scanner reloads itself, or a Claude Code settings file carrying an
 # apiKeyHelper / env reroute. The lists are what `strings` on the installed
 # CLI actually honors; a hand copy of six of them was the old hole.
-# Re-derived against the INSTALLED CLI on 2026-09-07 (2.1.263, drifted from
-# the 2.1.258 this list was pinned to): `strings` on the binary names two
-# routing variables the list did not cover, CLAUDE_CODE_API_BASE_URL and
-# CLAUDE_CODE_HFI_BEARER_TOKEN, both now unset and refused. Deliberately NOT
-# added: CLAUDE_CODE_OAUTH_TOKEN and its _FILE_DESCRIPTOR — that is the
-# subscription credential itself, and unsetting it would break the very
-# billing path this rail exists to protect. CLAUDE_CODE_API_KEY is no longer
-# referenced by the binary; it stays listed because unsetting a dead name
-# costs nothing and an older CLI may still read it.
-BILLING_REROUTE_KEYS="ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL CLAUDE_CODE_API_KEY CLAUDE_CODE_API_BASE_URL CLAUDE_CODE_HFI_BEARER_TOKEN CLAUDE_API_KEY CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR AWS_BEARER_TOKEN_BEDROCK ANTHROPIC_AWS_API_KEY ANTHROPIC_AWS_BASE_URL ANTHROPIC_BEDROCK_BASE_URL ANTHROPIC_BEDROCK_MANTLE_BASE_URL ANTHROPIC_VERTEX_BASE_URL ANTHROPIC_GOOGLE_CLOUD_BASE_URL ANTHROPIC_FOUNDRY_API_KEY ANTHROPIC_FOUNDRY_AUTH_TOKEN ANTHROPIC_FOUNDRY_BASE_URL ANTHROPIC_FOUNDRY_RESOURCE ANTHROPIC_IDENTITY_TOKEN ANTHROPIC_IDENTITY_TOKEN_FILE"
-BILLING_REROUTE_FLAGS="CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY CLAUDE_CODE_USE_GATEWAY CLAUDE_CODE_USE_MANTLE CLAUDE_CODE_USE_ANTHROPIC_AWS CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD"
+# Re-derived against the INSTALLED CLI on 2026-09-14 (2.1.270, the approved
+# pin; see docs/security-approved-tools.md). History: pinned to 2.1.258,
+# re-derived 2026-09-07 against 2.1.263 (added CLAUDE_CODE_API_BASE_URL and
+# CLAUDE_CODE_HFI_BEARER_TOKEN). The 2026-09-14 pass read every new
+# ANTHROPIC_* / CLAUDE_CODE_* / AWS_BEARER_* name in its code context:
+#   ADDED (reroute model auth/billing off the claude.ai login):
+#   - CLAUDE_CODE_GATEWAY_TOKEN_FILE_DESCRIPTOR: the bearer CLAUDE_CODE_USE_GATEWAY
+#     consumes when ANTHROPIC_AUTH_TOKEN is absent. CLAUDE_CODE_GATEWAY_TOKEN
+#     is only a runner passthrough name, listed because a dead name costs
+#     nothing to unset.
+#   - CLAUDE_CODE_HOST_AUTH_ENV_VAR: names the env var the CLI reads the
+#     request bearer from (default ANTHROPIC_AUTH_TOKEN) and marks the
+#     provider host-managed.
+#   - CLAUDE_CODE_HOST_CREDS_FILE: an owner-only credentials file the CLI
+#     loads host auth material from.
+#   - ANTHROPIC_UNIX_SOCKET: routes the model API over a local socket
+#     (a third-party transport, "unix_socket_3p" in the binary).
+#   - ANTHROPIC_PROFILE: selects a ~/.config/anthropic profile credential
+#     that "takes precedence over any stored claude.ai login".
+#   - ANTHROPIC_FEDERATION_RULE_ID, ANTHROPIC_ORGANIZATION_ID: workload
+#     identity federation for that profile path; unset with it.
+#   - CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST (flag): truthy hands auth to the
+#     host process and skips the login pin.
+#   NOT added, and why:
+#   - CLAUDE_CODE_OAUTH_TOKEN, its _FILE_DESCRIPTOR and
+#     CLAUDE_CODE_OAUTH_REFRESH_TOKEN: the subscription credential itself.
+#   - CLAUDE_CODE_CUSTOM_OAUTH_URL: only moves the OAuth endpoint, and the
+#     binary throws unless the value is on its own Anthropic allowlist.
+#   - CLAUDE_CODE_SESSION_ACCESS_TOKEN: session-ingress JWT (git credential,
+#     code-sign, file downloads), not a model bearer.
+#   - ANTHROPIC_ENVIRONMENT_KEY: environments-worker polling key.
+#   - CLAUDE_CODE_USE_CCR_V2: cloud-runner session mode, not a provider.
+#   - CLAUDE_CODE_GB_BASE_URL: GrowthBook feature-flag base URL.
+#   - CLAUDE_CODE_PROXY_URL / _PROXY_AUTHENTICATE / _ENABLE_PROXY_AUTH_HELPER:
+#     HTTP egress proxy authorization, not model billing.
+#   - ANTHROPIC_VERTEX_PROJECT_ID, ANTHROPIC_GOOGLE_CLOUD_PROJECT,
+#     ANTHROPIC_BEDROCK_REGION_PREFIX: provider config that is inert once
+#     the CLAUDE_CODE_USE_* flag it belongs to is unset.
+#   - CLAUDE_CODE_MEMORY_API_*, CLAUDE_CODE_ARTIFACTS_API_*,
+#     CLAUDE_CODE_MESSAGING_TOKEN, CLAUDE_CODE_MCP_SERVE_AUTH_TOKEN,
+#     CLAUDE_CODE_CLIENT_KEY (mTLS): artifact / memory / messaging / MCP /
+#     transport tokens, none of them a model biller.
+#   CLAUDE_CODE_API_KEY is no longer referenced by the binary; it stays
+#   listed because unsetting a dead name costs nothing and an older CLI may
+#   still read it.
+BILLING_REROUTE_KEYS="ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL CLAUDE_CODE_API_KEY CLAUDE_CODE_API_BASE_URL CLAUDE_CODE_HFI_BEARER_TOKEN CLAUDE_API_KEY CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR AWS_BEARER_TOKEN_BEDROCK ANTHROPIC_AWS_API_KEY ANTHROPIC_AWS_BASE_URL ANTHROPIC_BEDROCK_BASE_URL ANTHROPIC_BEDROCK_MANTLE_BASE_URL ANTHROPIC_VERTEX_BASE_URL ANTHROPIC_GOOGLE_CLOUD_BASE_URL ANTHROPIC_FOUNDRY_API_KEY ANTHROPIC_FOUNDRY_AUTH_TOKEN ANTHROPIC_FOUNDRY_BASE_URL ANTHROPIC_FOUNDRY_RESOURCE ANTHROPIC_IDENTITY_TOKEN ANTHROPIC_IDENTITY_TOKEN_FILE CLAUDE_CODE_GATEWAY_TOKEN CLAUDE_CODE_GATEWAY_TOKEN_FILE_DESCRIPTOR CLAUDE_CODE_HOST_AUTH_ENV_VAR CLAUDE_CODE_HOST_CREDS_FILE ANTHROPIC_UNIX_SOCKET ANTHROPIC_PROFILE ANTHROPIC_FEDERATION_RULE_ID ANTHROPIC_ORGANIZATION_ID"
+BILLING_REROUTE_FLAGS="CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY CLAUDE_CODE_USE_GATEWAY CLAUDE_CODE_USE_MANTLE CLAUDE_CODE_USE_ANTHROPIC_AWS CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST"
 BILLING_IGNORED=""
 for _billing_var in $BILLING_REROUTE_KEYS; do
   [[ -n "${!_billing_var:-}" ]] || continue

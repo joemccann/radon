@@ -36,15 +36,28 @@ LOOPS = {
 }
 CREDENTIAL_LOOPS = sorted(loop for loop in LOOPS if loop != "security")
 
-# Every var the installed CLI (2.1.258) honors as an off-subscription route:
-# `strings` on the binary, filtered to key / token / base-url / USE_* names.
+# Every var the installed CLI (2.1.270, re-derived 2026-09-14) honors as an
+# off-subscription route: `strings` on the binary, filtered to key / token /
+# base-url / creds-file / USE_* names, then read in context. Approved pins:
+# docs/security-approved-tools.md.
 BILLING_REROUTE_KEYS = (
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_AUTH_TOKEN",
     "ANTHROPIC_BASE_URL",
     "CLAUDE_CODE_API_KEY",
+    "CLAUDE_CODE_API_BASE_URL",
+    "CLAUDE_CODE_HFI_BEARER_TOKEN",
     "CLAUDE_API_KEY",
     "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR",
+    # 2.1.270 additions (2026-09-14)
+    "CLAUDE_CODE_GATEWAY_TOKEN",
+    "CLAUDE_CODE_GATEWAY_TOKEN_FILE_DESCRIPTOR",
+    "CLAUDE_CODE_HOST_AUTH_ENV_VAR",
+    "CLAUDE_CODE_HOST_CREDS_FILE",
+    "ANTHROPIC_UNIX_SOCKET",
+    "ANTHROPIC_PROFILE",
+    "ANTHROPIC_FEDERATION_RULE_ID",
+    "ANTHROPIC_ORGANIZATION_ID",
     "AWS_BEARER_TOKEN_BEDROCK",
     "ANTHROPIC_AWS_API_KEY",
     "ANTHROPIC_AWS_BASE_URL",
@@ -67,6 +80,8 @@ BILLING_REROUTE_FLAGS = (
     "CLAUDE_CODE_USE_MANTLE",
     "CLAUDE_CODE_USE_ANTHROPIC_AWS",
     "CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD",
+    # 2.1.270 addition (2026-09-14)
+    "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST",
 )
 BILLING_REROUTE_VARS = BILLING_REROUTE_KEYS + BILLING_REROUTE_FLAGS
 TRUTHY_FLAG_VALUES = ("1", "true", "yes", "TRUE", "Yes")
@@ -214,14 +229,40 @@ class TestTheWrapperNamesEveryBillingReroute:
         for var in BILLING_REROUTE_VARS:
             assert var in listed, (
                 f"{loop}: {var} is not in the reroute list; Claude Code "
-                "2.1.258 prefers it over the claude.ai login"
+                "2.1.270 prefers it over the claude.ai login"
             )
+
+    def test_the_comment_block_names_the_approved_pin(self, loop):
+        body = LOOPS[loop].read_text(encoding="utf-8")
+        assert "2026-09-14 (2.1.270" in body, (
+            f"{loop}: the reroute comment block must record the re-derivation "
+            "date and the approved Claude Code pin"
+        )
 
     def test_the_wrapper_unsets_from_the_lists(self, loop):
         body = LOOPS[loop].read_text(encoding="utf-8")
         assert re.search(
             r"^unset \$BILLING_REROUTE_KEYS \$BILLING_REROUTE_FLAGS", body, re.M
         ), f"{loop}: the unset must cover the whole list, not a hand copy"
+
+
+def _reroute_lists(wrapper: Path) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    body = wrapper.read_text(encoding="utf-8")
+    keys = re.search(r'^BILLING_REROUTE_KEYS="([^"]*)"$', body, re.M)
+    flags = re.search(r'^BILLING_REROUTE_FLAGS="([^"]*)"$', body, re.M)
+    assert keys and flags, f"{wrapper.name}: the reroute lists are not declared"
+    return tuple(keys.group(1).split()), tuple(flags.group(1).split())
+
+
+def test_all_five_wrappers_carry_identical_reroute_lists():
+    """One re-derivation, five copies: a drift in any wrapper is a hole."""
+    lists = {loop: _reroute_lists(path) for loop, path in LOOPS.items()}
+    reference = lists["security"]
+    for loop, found in lists.items():
+        assert found == reference, (
+            f"{loop}: reroute lists differ from the security wrapper's: "
+            f"{found} != {reference}"
+        )
 
 
 @pytest.mark.parametrize("loop", sorted(LOOPS))
