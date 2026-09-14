@@ -10227,7 +10227,7 @@ threshold decrease. The 64 touched tests span four collection roots, so a
 scoped three-times determinism pass would substantially duplicate the full
 gates.
 
-### T-491 — P2 — RT-volume relay wiring is tested by source-text inspection, not dispatch behavior
+### T-493 — P2 — RT-volume relay wiring is tested by source-text inspection, not dispatch behavior
 
 web/tests/ib-rt-volume-relay.test.ts:29-50 reads
 scripts/ib_realtime_server.js and asserts substrings/regexes for
@@ -10289,9 +10289,50 @@ environment and falls back to ambient credentials only when `env is None`.
 
 | ID | Sev | Acceptance criteria |
 |---|---|---|
-| T-491 | P2 | Exercise registered relay callbacks against a live symbol-state fixture and broadcast spy for tickSize 8 and tickString 48; deleting either update/broadcast invocation must red. |
+| T-493 | P2 | Exercise registered relay callbacks against a live symbol-state fixture and broadcast spy for tickSize 8 and tickString 48; deleting either update/broadcast invocation must red. |
 
 - Audited through: 9db44a3f on 2026-09-13 — 1 new finding (T-491) over 53 commits / 182 paths; detached full-gate stage INCOMPLETE (no DONE sentinel), so no test counts are claimed.
+
+## Delta audit 2026-09-14
+
+Range `9db44a3f..9b9a65c7`: 48 commits / 76 paths. The codemap names 25 direct
+test importers for the changed source surface; two map candidates
+(`scripts/clients/model_ladder.py`, `cloud/scripts/drift_audit.py`) have
+dedicated tests confirmed by `rg`. CI invocation, coverage thresholds,
+exclusions, and deploy dependencies are unchanged.
+
+### T-492 — P1 — append-only test ledgers accept unresolved merge state and a reused finding ID
+
+`TEST_LOG.md:844,867,878` contains committed `<<<<<<<`, `=======`, and
+`>>>>>>>` markers, so the nightly remediation history has two incompatible
+tails. `TEST_AUDIT.md:10206` and `:10230` both define `### T-491` for distinct
+findings, violating the continuing-ID contract. The only ledger test at
+`scripts/tests/test_docs_contract.py:616-632` checks the header and row count;
+it passes with both corruption forms, so the next audit/remediation can
+mis-deduplicate or lose a verified item.
+
+| ID | Sev | Acceptance criteria |
+|---|---|---|
+| T-492 | P1 | Add a ledger-integrity contract that fails on conflict markers in `TEST_AUDIT.md` or `TEST_LOG.md` and on duplicate `### T-###` finding headings. Red: inject each corruption into a copied ledger and assert rejection. Green: reconcile the committed tails without deleting history, assign the relay finding its next unused ID, and run the focused contract. |
+
+### Standing sweeps
+
+- Serial full-gate stage reached its `DONE 3` sentinel: pytest failed at
+  collection (`76 errors`) because this runner's new Python venv lacked
+  `ib_insync`; a second collection attempt exposed unpinned `mcp` 2.x and a
+  missing Python Playwright package. The corrected pinned toolchain collects
+  **12,959 tests / 90 deselected** in 7.13s, but no clean full-pytest count is
+  claimed in this capped audit. Vitest passed **9,479 / 0 failed** (950 files, 18
+  skipped); cloud was **1,847 passed / 4 failed / 76 skipped** in 404s, with
+  all four failures in the standing T-488 GNU-timeout class at
+  `cloud/tests/test_deploy_corrections.py:1495-1586`.
+- Added-line skip/xfail/`.only` sweep found no executable test skip or focus;
+  coverage configuration and `.github/workflows/ci.yml` invocations are
+  unchanged in the range.
+- `git diff --check 9db44a3f..HEAD` is clean; the committed ledger conflict
+  markers are semantic corruption, not whitespace conflict markers.
+
+- Audited through: 9b9a65c7 on 2026-09-14 — 1 new finding (T-492) over 48 commits / 76 paths; full Python gate remains unclaimed after runner-toolchain correction.
 
 ## Remediation 2026-09-13
 
@@ -10304,7 +10345,7 @@ completed, are recorded in `TEST_LOG.md`; no result is asserted in advance.
 
 ## Delta audit 2026-09-13 (surfaced by remediation)
 
-### T-492 — P1 — `TEST_LOG.md` on `origin/main` shipped unresolved git conflict markers
+### T-494 — P1 — `TEST_LOG.md` on `origin/main` shipped unresolved git conflict markers
 
 PR #411 (`testing/2026-09-12`, merge `9b9a65c7`) landed on a tree that already
 carried the 2026-09-13 TEST_LOG section from PR #417. The merge kept both
@@ -10318,19 +10359,32 @@ dead-man ledger was therefore unreadable while every gate reported pass.
 reds on `<<<<<<< `, `>>>>>>> `, or a lone `=======` line. Red today at HEAD.
 Green: both 2026-09-12 second-pass and 2026-09-13 sections kept, markers gone.
 
-### Backlog rows (T-492)
+### Backlog rows (T-494)
 
 | ID | Sev | Acceptance criteria |
 |---|---|---|
-| T-492 | P1 | Conflict-marker scan of the testing ledgers is red against the merged `TEST_LOG.md` at `9b9a65c7` and green after both sides are kept without markers. |
+| T-494 | P1 | Conflict-marker scan of the testing ledgers is red against the merged `TEST_LOG.md` at `9b9a65c7` and green after both sides are kept without markers. |
 
 ## Remediation 2026-09-13 (second pass)
 
-`RADON_WEEKEND_REDUCED=1`. T-492 is the new source-actionable P1.
+`RADON_WEEKEND_REDUCED=1`. T-494 is the new source-actionable P1.
 T-491 (P2 RT-volume relay wiring) stays out of scope. T-488 remains
 operator-only. T-490's `.codex` write blocker is gone on this runner.
 
 | Task | Status | Evidence |
 |---|---|---|
-| T-492 | DONE | Red: marker contract 1 failed / 2 passed at lines 838, 861, 872. Green: 3 passed after keeping both ledger sections. `test_docs_contract.py` 55 passed. |
+| T-494 | DONE | Red: marker contract 1 failed / 2 passed at lines 838, 861, 872. Green: 3 passed after keeping both ledger sections. `test_docs_contract.py` 55 passed. |
 | T-490 | DONE | `render_loop_prompt.py --write` succeeded; portable-prompt sync plus docs contract 128 passed. |
+
+## Remediation 2026-09-14
+
+`RADON_WEEKEND_REDUCED=1`: T-492 was the sole source-actionable P1. T-488
+remains operator-only after three genuine attempts: reproduce and repair the
+GNU-timeout process-tree behavior on Linux CI without widening its fixed
+contract timeout. T-490 remains operator-only in this runner: render the
+Codex artifacts from a checkout where `.codex/` is writable, run its focused
+contract, and commit generated artifacts.
+
+| Task | Status | Evidence |
+|---|---|---|
+| T-492 | DONE | RED: ledger-integrity contract 2 failed / 2 passed on the committed conflict markers and duplicate T-491 headings. GREEN: copied-ledger marker and duplicate injections reject; real ledgers and append-only contracts 9 passed. Both historical conflict sides remain in `TEST_LOG.md`; only the markers were removed. The relay P2 received the next unused ID, T-493. |
