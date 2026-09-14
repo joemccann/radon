@@ -34,8 +34,9 @@ echo "  - Docker containers and volumes"
 echo "  - Caddy and its config"
 echo "  - Python 3.13, Node.js 22, Docker CE"
 echo "  - /home/radon/ (repos, venv, data)"
-echo "  - /etc/radon/ secrets and the stored secret-store key"
-echo "  - /var/lib/radon/ host state"
+echo "  - /etc/radon/ secrets and the stored secret-store key (shredded)"
+echo "  - /var/lib/radon/ host state and the /var/lib/radon-private corpus"
+echo "  - Root control-plane helpers (/usr/local/{sbin,bin,lib}/radon*)"
 echo "  - radon sudoers and polkit grants"
 echo "  - The radon user account"
 echo ""
@@ -76,9 +77,17 @@ systemctl disable radon-nextjs 2>/dev/null || true
 systemctl disable radon-ib-gateway 2>/dev/null || true
 systemctl disable radon-refresh 2>/dev/null || true
 
-log_info "Removing systemd unit files..."
+log_info "Removing systemd unit files and drop-ins..."
 rm -f /etc/systemd/system/radon-*.service
 rm -f /etc/systemd/system/radon-*.timer
+# `radon-*.service` cannot match the drop-in DIRECTORIES the control plane
+# installs (radon-.service.d/ fleet prefix, radon-<unit>.service.d/
+# runtime-container.conf). Left behind, a fresh setup-vps.sh silently
+# re-provisions in container mode as User=root.
+rm -rf /etc/systemd/system/radon-.service.d
+rm -rf /etc/systemd/system/radon-*.service.d
+rm -rf /etc/systemd/system/radon-*.timer.d
+rm -f /etc/systemd/journald.conf.d/radon.conf
 systemctl daemon-reload
 
 # -- Docker cleanup -----------------------------------------------------------
@@ -98,6 +107,8 @@ systemctl stop caddy 2>/dev/null || true
 systemctl disable caddy 2>/dev/null || true
 apt-get remove -y caddy 2>/dev/null || true
 rm -f /etc/caddy/Caddyfile
+rm -rf /etc/caddy
+rm -rf /var/lib/caddy
 rm -rf /var/log/caddy
 rm -f /usr/share/keyrings/caddy-stable-archive-keyring.gpg
 rm -f /etc/apt/sources.list.d/caddy-stable.list
@@ -117,9 +128,28 @@ rm -rf /home/radon
 # behind, a re-provision finds a key that decrypts nothing (the store is
 # key-bound by fingerprint and refuses to open, so every /credentials route
 # answers 503) — and a decommissioned host is handed back with a live key.
-log_info "Removing secret-store master credential..."
+# Shred BEFORE unlink: an rm here would leave the shred below with nothing to
+# overwrite and the key bytes recoverable from the block device.
+log_info "Shredding secret-store master credential..."
+shred -u /etc/credstore.encrypted/radon-secret-store-key 2>/dev/null || true
 rm -f /etc/credstore.encrypted/radon-secret-store-key
 rmdir /etc/credstore.encrypted 2>/dev/null || true
+
+# -- Remove root control plane --------------------------------------------------
+
+# bootstrap-control-plane.sh installs root-owned helpers outside /home/radon.
+# They survive userdel and would execute stale-release root code on a host
+# that believes itself clean.
+log_info "Removing root control-plane helpers..."
+rm -f /usr/local/sbin/radon-deploy-root
+rm -f /usr/local/sbin/radon-app-runtime
+rm -f /usr/local/sbin/radon-docker-gw
+rm -f /usr/local/bin/radon
+rm -f /usr/local/bin/radon-ib-gateway-control
+rm -rf /usr/local/lib/radon
+rm -rf /run/radon-app-runtime
+rm -f /run/radon-deploy-root.lock
+groupdel radon-secrets 2>/dev/null || true
 
 # -- Remove sudoers and polkit ------------------------------------------------
 
@@ -139,15 +169,16 @@ rm -f /etc/polkit-1/rules.d/50-radon-services.rules
 log_info "Shredding radon secrets and host state..."
 find /etc/radon -type f -exec shred -u {} + 2>/dev/null || true
 rm -rf /etc/radon
-shred -u /etc/credstore.encrypted/radon-secret-store-key 2>/dev/null || true
-rm -f /etc/credstore.encrypted/radon-secret-store-key
 rm -rf /var/lib/radon
+# Private research corpus anchored by radon-app-runtime.sh.
+rm -rf /var/lib/radon-private
 
 # -- Remove packages ----------------------------------------------------------
 
 log_info "Removing Docker CE..."
 apt-get remove -y docker-ce docker-ce-cli containerd.io docker-compose-plugin 2>/dev/null || true
 rm -f /usr/share/keyrings/docker.gpg
+rm -f /etc/apt/keyrings/docker.gpg
 rm -f /etc/apt/sources.list.d/docker.list
 
 log_info "Removing Python 3.13..."
