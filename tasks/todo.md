@@ -13,7 +13,7 @@ append evidence only and preserve every gate and deploy rail.
 
 - [x] T1 Dedicated markers, stale-lock preservation, dated branch, GitHub auth, and `origin/main` verified.
 - [x] T2 Classified 25 runs, reconstructed representative paths, swept safety closure, and ranked CIP-013.
-- [ ] T3 Ledger and focused safety verification complete; audit commit, push, PR, and rolling issue report pending.
+- [x] T3 Audit ledger, 118 focused safety contracts, commit/push, PR #429, and rolling issue report published.
 
 ## Review
 
