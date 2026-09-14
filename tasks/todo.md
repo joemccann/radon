@@ -70,6 +70,28 @@ research, assistant, and health surfaces. Audit-only: no production source chang
 
 ---
 
+# Task: IR ensure-PR hook [IN PROGRESS]
+
+Durable grok incident-response open-PR after `fix/**` push.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red contract for create / noop / fail-closed / never merge.
+- T2 depends_on: [T1] - `scripts/ir_ensure_pr.py` + `scripts/ir_open_pr.sh`.
+- T3 depends_on: [T2] - Grok prompt + poller backstop; skill/docs/PAT checklist.
+
+## Checklist
+
+- [x] T1 Red tests in `scripts/tests/test_ir_ensure_pr.py`.
+- [x] T2 Helper + wrapper.
+- [x] T3 Playbook, grok poller, operator enablement.
+
+## Review
+
+- [x] No merge from this hook. PAT stays Contents + Pull requests. No live VPS install.
+
+---
+
 # Task: Testing remediation 2026-09-14 [IN PROGRESS]
 
 Reduced-capability rung (`RADON_WEEKEND_REDUCED=1`): remediate every verified

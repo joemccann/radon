@@ -1124,6 +1124,17 @@ how this loop improves as the codebase grows.
   rule, expect repo guards (docs-ownership) to fire on the fix itself: that is
   the guard working; update the owner doc, don't docs-skip past it wholesale.
 
+- **2026-09-13 (remediate): two same-loop dated PRs can merge in either
+  order and leave conflict markers on `main` while every append-only
+  row-count test stays green.** PR #417 (`testing/2026-09-13`) merged first;
+  PR #411 (`testing/2026-09-12`) merged later as `9b9a65c7` and shipped
+  `<<<<<<< HEAD` in `TEST_LOG.md` because both sides' `| T-### |` rows
+  survived inside the conflict. Rails: after checking out the nightly
+  branch, `git show origin/main:TEST_LOG.md` for conflict markers before
+  treating main as a clean base; resolve by keeping both sections (the
+  2026-08-23 keep-both rule); and gate the markers themselves, not only
+  the T-row count (T-492).
+
 
 ---
 
