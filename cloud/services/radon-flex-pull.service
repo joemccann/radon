@@ -17,7 +17,11 @@ ExecCondition=/usr/bin/test -f /home/radon/radon/scripts/flex_sftp_pull.py
 ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/flex_sftp_pull.py
 StandardOutput=journal
 StandardError=journal
-TimeoutStartSec=120
+# 2026-09-15: 120s killed a Tue catch-up (24 remote files + two ~60s
+# perf_twr ingests) at Result=timeout / NRestarts=0 with no heartbeat.
+# Script self-limits at SWEEP_BUDGET_S=780; headroom covers one in-flight
+# ingest. Must stay under the 07:30→08:30 ET timer gap (3600s).
+TimeoutStartSec=900
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectHome=read-only

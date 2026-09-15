@@ -11,7 +11,7 @@ R-416: the cutover date is a hardcoded constant with no env override, and
 scheduled runs.
 
 R-417: `_sftp` passes no `timeout=`, so a hung session reaches systemd's
-`TimeoutStartSec=120` SIGKILL and no heartbeat runs at all.
+`TimeoutStartSec` SIGKILL and no heartbeat runs at all.
 
 R-418: ssh_config validation is a raw substring scan. `StrictHostKeyChecking
 off` is not in the reject list, and ssh_config is FIRST-MATCH-WINS, so an `off`
@@ -130,7 +130,17 @@ class TestAHungSessionStillHeartbeats:
 
         pull.list_remote_gpg(config=_write(tmp_path, _config_lines()), runner=_runner)
         assert seen and seen[0].get("timeout"), seen
-        assert seen[0]["timeout"] < 120, "must be well under TimeoutStartSec=120"
+        unit = (
+            Path(__file__).resolve().parents[2]
+            / "cloud"
+            / "services"
+            / "radon-flex-pull.service"
+        )
+        timeout_line = next(
+            ln for ln in unit.read_text().splitlines() if ln.startswith("TimeoutStartSec=")
+        )
+        unit_timeout = int(timeout_line.split("=", 1)[1])
+        assert seen[0]["timeout"] < unit_timeout, "must be well under TimeoutStartSec"
 
     def test_a_timeout_exits_one_with_an_error_row(self, tmp_path, monkeypatch):
         beats: list[tuple] = []
