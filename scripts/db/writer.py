@@ -1215,6 +1215,47 @@ def upsert_ma_ratio_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] 
     db.commit()
 
 
+def upsert_calm_streak_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
+    """CALM STREAK indicator: one row per SPX session, idempotent on date.
+
+    Chunked multi-row INSERTs (Hrana I/O bounding): a first run backfills
+    ~10.5k sessions from 1985. ``open`` is nullable (Cboe reports 0 pre-1996).
+    """
+    if not rows:
+        return
+    stamp = recorded_at or _now_iso()
+    db = get_db()
+    for start in range(0, len(rows), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
+        chunk = rows[start:start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
+        placeholders = ", ".join("(?, ?, ?, ?, ?, ?, ?, ?)" for _ in chunk)
+        params: list[Any] = []
+        for row in chunk:
+            open_ = row.get("open")
+            params.extend(
+                (
+                    row["date"],
+                    float(open_) if open_ is not None else None,
+                    float(row["high"]),
+                    float(row["low"]),
+                    float(row["close"]),
+                    float(row["band_pct"]),
+                    int(row["streak"]),
+                    stamp,
+                )
+            )
+        db.execute(
+            "INSERT INTO calm_streak_history "
+            "(date, open, high, low, close, band_pct, streak, recorded_at) "
+            f"VALUES {placeholders} "
+            "ON CONFLICT(date) DO UPDATE SET "
+            "open = excluded.open, high = excluded.high, low = excluded.low, "
+            "close = excluded.close, band_pct = excluded.band_pct, "
+            "streak = excluded.streak, recorded_at = excluded.recorded_at",
+            tuple(params),
+        )
+    db.commit()
+
+
 def upsert_hyad_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
     """HYAD indicator — one row per date, idempotent on date.
 

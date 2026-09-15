@@ -68,6 +68,7 @@ dispersion-tab.spec.ts
 divyield-tab.spec.ts
 dollar-delta-leverage.spec.ts
 ma-ratio-tab.spec.ts
+calm-streak-tab.spec.ts
 fill-toast.spec.ts
 flow-analysis-ticker.spec.ts
 header-fullscreen.spec.ts
