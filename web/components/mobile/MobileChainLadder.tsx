@@ -356,11 +356,12 @@ export default function MobileChainLadder({
   const spotMoved = currentPrice != null && anchorPrice != null &&
     strikes.findIndex(strike => strike >= currentPrice) !== strikes.findIndex(strike => strike >= anchorPrice);
   const panesReady = !loading && visibleStrikes.length > 0;
+  const paneStrikesKey = visibleStrikes.map(row => row.strike).join(",");
 
   useLayoutEffect(() => {
     if (upperPaneRef.current) upperPaneRef.current.scrollTop = upperPaneRef.current.scrollHeight;
     if (lowerPaneRef.current) lowerPaneRef.current.scrollTop = 0;
-  }, [revision, panesReady]);
+  }, [revision, panesReady, paneStrikesKey]);
 
   // Compute live net mid for the pending strip so the operator can see the
   // current market mid without opening the ticket.
