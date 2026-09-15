@@ -1,3 +1,30 @@
+# Task: Testing delta audit 2026-09-15 [IN PROGRESS]
+
+Audit `9b9a65c7..fe96fdac` for test-suite-health regressions only. Local full
+suites are excluded by the recorded operator direction; inspect CI and run no
+local suites.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify runner rails, clean tree, audit anchor, branch, and changed surface.
+- T2 depends_on: [T1] - Review delta coverage, fragile/net-negative tests, CI reachability, and gate drift.
+- T3 depends_on: [T2] - Append audit evidence, commit, push, and open/update the nightly PR.
+
+## Checklist
+
+- [x] T1 Dedicated markers, clean tree, anchor `9b9a65c7`, and dated branch verified.
+- [x] T2 Static delta and CI evidence review.
+- [x] T3 Append-only audit record and PR publication.
+
+## Review
+
+- [x] Zero findings: 26 codemap importers and changed-test source evidence
+  reviewed; CI/gate configuration and executable-skip sweep unchanged.
+- [x] Local full gates deliberately not run per recorded operator direction;
+  GitHub has no CI workflow result for `fe96fdac` at audit time.
+
+---
+
 # Task: CI performance remediate 2026-09-14 [IN PROGRESS]
 
 Reduced capability rung (`RADON_WEEKEND_REDUCED=1`): remediate P0/P1 only.
@@ -6997,6 +7024,26 @@ No local suites. Review confirms quantity-weighted prices preserve zero and sign
 - Integration verification: head 4d92842e passed every applicable check; GitHub CI 34507570000 ran 99 browser regressions plus one demo test. Desktop 1280px/mobile 393px full `/orders` screenshots reviewed (artifact 10164611383). Reintegrating main 722b1121 for the final merge gate; no local suites.
 
 - PR #394 intermediate integration `892f24b1`: 31 applicable checks green, source shard 2225 passed, browser 96 passed plus one demo. Final integration includes historical-fill PR #395 at `aae5e1e5`; repeat exact-head checks before merge.
+
+# Task: Testing remediation 2026-09-15 [IN PROGRESS]
+
+Reduced capability rung (`RADON_WEEKEND_REDUCED=1`): remediate P0/P1 only.
+
+## Dependency graph
+
+- T1 depends_on: [] - Reconcile all verified audit backlog entries and operator-only status.
+- T2 depends_on: [T1] - Run focused ledger contracts and three detached serial full gates.
+- T3 depends_on: [T2] - Append dated remediation evidence, commit, and push the nightly branch.
+
+## Checklist
+
+- [x] T1 No source-actionable P0/P1 remains; T-488 is operator-only and T-493 is P2.
+- [x] T2 Focused verification: 117 passed; detached closing stage stopped before `pytest_1` wrote a result or DONE sentinel.
+- [x] T3 Append-only remediation record and durable commit.
+
+## Review
+
+- [x] No full-gate result is claimed; the detached-child runner failure is recorded for resumption.
 
 # Testing audit 2026-09-12
 
