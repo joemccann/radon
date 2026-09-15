@@ -47,7 +47,7 @@ describe("Mobile chain anchored browsing", () => {
     expect(cell.querySelector(".mobile-chain__meta")).toBeNull();
 
     rerender(<MobileChainLadder {...initial} prices={prices} sideFilter="calls" />);
-    expect(cell.querySelector(".mobile-chain__last")?.textContent).toBe("1.30");
+    expect(cell.querySelector(".mobile-chain__last")?.textContent).toBe("$1.30");
     expect(cell.querySelector(".mobile-chain__meta")?.textContent).toContain("IV 40.0%");
   });
 
