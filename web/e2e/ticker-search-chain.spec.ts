@@ -244,7 +244,7 @@ test.describe("Ticker Search → Detail Page → Chain", () => {
     await expect(expirySelect).toBeVisible();
 
     // Should show the strike grid table
-    const chainGrid = detail.locator(".chain-grid");
+    const chainGrid = detail.locator(".chain-grid").first();
     await expect(chainGrid).toBeVisible();
 
     // Should have CALLS and PUTS headers
@@ -283,7 +283,7 @@ test.describe("Ticker Search → Detail Page → Chain", () => {
     await detail.waitFor({ timeout: 5_000 });
 
     // Wait for chain to load
-    await detail.locator(".chain-grid").waitFor();
+    await detail.locator(".chain-grid").first().waitFor();
 
     // Click a call mid price (should add BUY leg)
     const callMid = detail.locator('.chain-mid.chain-clickable').first();
@@ -318,7 +318,7 @@ test.describe("Ticker Search → Detail Page → Chain", () => {
 
     const detail = page.locator(".ticker-detail-page").last();
     await detail.waitFor({ timeout: 5_000 });
-    await detail.locator(".chain-grid").waitFor();
+    await detail.locator(".chain-grid").first().waitFor();
 
     const putRow = detail.getByRole("row", { name: /\$200\.00/ }).first();
     await putRow.locator(".chain-bid.chain-clickable").last().click();
@@ -377,7 +377,7 @@ test.describe("Ticker Search → Detail Page → Chain", () => {
 
     const detail = page.locator(".ticker-detail-page");
     await detail.waitFor({ timeout: 5_000 });
-    await detail.locator(".chain-grid").waitFor();
+    await detail.locator(".chain-grid").first().waitFor();
 
     const putRow = detail.getByRole("row", { name: /\$200\.00/ }).first();
     await putRow.locator(".chain-bid.chain-clickable").last().click();
@@ -430,7 +430,7 @@ test.describe("Ticker Search → Detail Page → Chain", () => {
 
     const detail = page.locator(".ticker-detail-page").last();
     await detail.waitFor({ timeout: 5_000 });
-    await detail.locator(".chain-grid").waitFor();
+    await detail.locator(".chain-grid").first().waitFor();
 
     const putRow = detail.getByRole("row", { name: /\$200\.00/ }).first();
     await putRow.locator(".chain-bid.chain-clickable").last().click();
