@@ -115,3 +115,62 @@ class TestNoNewRowsIsNotAFreshScan:
 
         assert writer.health[-1][1] == "error"
         assert writer.snapshots == []
+
+    def test_hrana_timeout_on_the_no_new_rows_heartbeat_does_not_fail_the_oneshot(
+        self, monkeypatch, tmp_path,
+    ):
+        """2026-09-15 13:22Z page e7d4d053: persist_result's no-new-rows path
+        called record_service_health; HRANA_TIMEOUT_S=4 fired
+        (`HranaHttpError: TimeoutError: The read operation timed out`) while
+        radon-knowledge held Turso. The oneshot has no Restart=, so that
+        uncaught raise became Result=exit-code / NRestarts=0 / P1. Heartbeat
+        is telemetry; a cycle that added nothing must still exit 0 and keep
+        the JSON fallback. Sibling fetch_ivrank already treats this as
+        non-fatal."""
+        from db.hrana_http import HranaHttpError
+        import fetch_trin as trin
+
+        writer = _Writer()
+
+        def boom(*_a, **_k):
+            raise HranaHttpError("TimeoutError: The read operation timed out")
+
+        writer.record_service_health = boom  # type: ignore[method-assign]
+        monkeypatch.setattr(trin, "writer", writer, raising=False)
+        cache = tmp_path / "trin.json"
+        monkeypatch.setattr(trin, "TRIN_JSON", cache)
+
+        trin.persist_result(_payload_with_history(), [], [])
+
+        assert cache.is_file()
+        assert writer.snapshots == []
+
+    def test_main_exits_zero_when_the_no_new_rows_heartbeat_times_out(
+        self, monkeypatch, tmp_path,
+    ):
+        from db.hrana_http import HranaHttpError
+        import fetch_trin as trin
+
+        writer = _Writer()
+
+        def boom(*_a, **_k):
+            raise HranaHttpError("TimeoutError: The read operation timed out")
+
+        writer.record_service_health = boom  # type: ignore[method-assign]
+        monkeypatch.setattr(trin, "writer", writer, raising=False)
+        monkeypatch.setattr(trin, "TRIN_JSON", tmp_path / "trin.json")
+        monkeypatch.setattr(
+            trin,
+            "load_cached_samples",
+            lambda: [{
+                "ts": "2026-08-21T14:35:00Z",
+                "session_date": "2026-08-21",
+                "trin": 0.9,
+                "source": "cache",
+            }],
+        )
+        monkeypatch.setattr(trin, "load_cached_daily", lambda: [("2026-08-21", 0.95)])
+        monkeypatch.setattr(trin, "sample_live", lambda: (None, "ib-skipped"))
+        monkeypatch.setattr(trin, "fetch_daily_if_stale", lambda _cached: [])
+
+        assert trin.main([]) == 0
