@@ -163,6 +163,47 @@ describe("Mobile chain anchored browsing", () => {
     expect(lower.scrollTop).toBe(0);
   });
 
+  it("positions newly loaded cached strikes even when the parent anchor revision is unchanged", () => {
+    const initial = props();
+    const { rerender } = render(
+      <MobileChainLadder {...initial} anchorPrice={102} anchorRevision="SPY:1" />,
+    );
+    const upper = screen.getByTestId("chain-upper-pane");
+    const lower = screen.getByTestId("chain-lower-pane");
+    Object.defineProperty(upper, "scrollHeight", { configurable: true, value: 800 });
+    upper.scrollTop = 30;
+    lower.scrollTop = 80;
+    const cachedStrikes = [85, 90, 95, 100, 105, 110].map((strike) => ({
+      strike,
+      callKey: optionKey({ symbol: "SPY", expiry: EXPIRY, strike, right: "C" }),
+      putKey: optionKey({ symbol: "SPY", expiry: EXPIRY, strike, right: "P" }),
+    }));
+
+    rerender(
+      <MobileChainLadder {...initial} visibleStrikes={cachedStrikes} anchorPrice={102} anchorRevision="SPY:1" />,
+    );
+
+    expect(upper.scrollTop).toBe(800);
+    expect(lower.scrollTop).toBe(0);
+    expect(within(upper).getByTestId("mobile-chain-row-85")).toBeTruthy();
+
+    upper.scrollTop = 45;
+    lower.scrollTop = 80;
+    fireEvent.touchStart(lower);
+    rerender(
+      <MobileChainLadder
+        {...initial}
+        visibleStrikes={cachedStrikes.map((row) => ({ ...row }))}
+        currentPrice={108}
+        anchorPrice={102}
+        anchorRevision="SPY:1"
+      />,
+    );
+
+    expect(upper.scrollTop).toBe(45);
+    expect(lower.scrollTop).toBe(80);
+  });
+
   it("keeps side filtering and contract selection available inside either pane", () => {
     const onAddLeg = vi.fn();
     render(<MobileChainLadder {...props()} sideFilter="puts" onAddLeg={onAddLeg} />);

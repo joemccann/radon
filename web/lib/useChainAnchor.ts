@@ -14,7 +14,7 @@ type ChainAnchorInput = {
 };
 
 function validPrice(value: number | null | undefined): number | null {
-  return value != null && Number.isFinite(value) && value > 0 ? value : null;
+  return value != null && Number.isFinite(value) ? value : null;
 }
 
 export function useChainAnchor({

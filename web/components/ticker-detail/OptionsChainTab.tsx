@@ -1308,7 +1308,7 @@ export default function OptionsChainTab({
 
   // Determine ATM strike
   const rawCurrentPrice = tickerPriceData?.last ?? prevClose ?? null;
-  const currentPrice = rawCurrentPrice != null && Number.isFinite(rawCurrentPrice) && rawCurrentPrice > 0 ? rawCurrentPrice : null;
+  const currentPrice = rawCurrentPrice != null && Number.isFinite(rawCurrentPrice) ? rawCurrentPrice : null;
   const priceIsClose = tickerPriceData?.last == null && prevClose != null;
   const atmStrike = useMemo(() => {
     if (currentPrice == null) return null;
@@ -1662,6 +1662,7 @@ export default function OptionsChainTab({
                 aria-label={side === "upper" ? "Lower strikes" : "Higher strikes"}
                 tabIndex={0}
                 onScroll={syncChainScroll}
+                onPointerDown={markBrowsing}
                 onWheel={markBrowsing}
                 onTouchStart={markBrowsing}
                 onKeyDown={markBrowsing}

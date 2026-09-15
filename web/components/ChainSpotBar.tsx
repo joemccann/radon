@@ -15,7 +15,7 @@ type ChainSpotBarProps = {
 export default function ChainSpotBar({
   ticker, currentPrice, anchorPrice, priceIsClose = false, spotMoved, onRecenter,
 }: ChainSpotBarProps) {
-  const available = currentPrice != null && Number.isFinite(currentPrice) && currentPrice > 0;
+  const available = currentPrice != null && Number.isFinite(currentPrice);
   return (
     <div className="chain-spot-bar" data-testid="chain-spot-bar">
       <div className={`chain-spot-bar__anchor${spotMoved ? " chain-spot-bar__anchor--moved" : ""}`}>

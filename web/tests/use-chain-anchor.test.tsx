@@ -171,7 +171,7 @@ describe("useChainAnchor", () => {
     expect(result.current.anchorStrike).toBe(115);
   });
 
-  it.each([null, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, 0, -1])(
+  it.each([null, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])(
     "does not anchor or recenter at an unavailable quote (%s)",
     (currentPrice) => {
       const { result, rerender } = renderAnchor({ currentPrice });
@@ -189,6 +189,24 @@ describe("useChainAnchor", () => {
       expect(result.current.revision).toBe(anchoredRevision);
     },
   );
+
+  it.each([0, -5])("accepts finite underlying prices at or below zero (%s)", (currentPrice) => {
+    const strikes = [-10, -5, 0, 5, 10];
+    const { result, rerender } = renderAnchor({ strikes, currentPrice });
+
+    expect(result.current.anchorPrice).toBe(currentPrice);
+    expect(result.current.anchorStrike).toBe(currentPrice);
+
+    rerender({ ...defaultOptions, strikes, currentPrice: 5 });
+    act(() => result.current.recenter());
+    expect(result.current.anchorPrice).toBe(5);
+
+    rerender({ ...defaultOptions, strikes, currentPrice });
+    act(() => result.current.recenter());
+
+    expect(result.current.anchorPrice).toBe(currentPrice);
+    expect(result.current.anchorStrike).toBe(currentPrice);
+  });
 
   it("uses a late first valid quote when the user has not started browsing", () => {
     const { result, rerender } = renderAnchor({ currentPrice: null });

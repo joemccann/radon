@@ -527,6 +527,7 @@ export default function MobileChainLadder({
             role="region"
             aria-label="Lower strikes"
             tabIndex={0}
+            onPointerDown={markBrowsing}
             onWheel={markBrowsing}
             onTouchStart={markBrowsing}
             onKeyDown={markBrowsing}
@@ -548,6 +549,7 @@ export default function MobileChainLadder({
             role="region"
             aria-label="Higher strikes"
             tabIndex={0}
+            onPointerDown={markBrowsing}
             onWheel={markBrowsing}
             onTouchStart={markBrowsing}
             onKeyDown={markBrowsing}
