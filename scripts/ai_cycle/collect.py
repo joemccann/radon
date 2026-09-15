@@ -36,6 +36,7 @@ SOURCES = (
     "portkey",
     "ramp",
     "open-design-arena",
+    "liquidcompute",
     "issuer-disclosures",
     "lambda",
 )
@@ -247,7 +248,12 @@ def _main(argv=None):
                     checked_at=checked,
                 )
                 if store:
-                    store.append_observations(rows)
+                    if source == "liquidcompute":
+                        from .liquidcompute import persist_ticker
+
+                        persist_ticker(store, rows)
+                    else:
+                        store.append_observations(rows)
                     completed.add(key)
                     if checkpoint:
                         checkpoint.parent.mkdir(parents=True, exist_ok=True)

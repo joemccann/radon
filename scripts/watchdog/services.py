@@ -170,6 +170,9 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     "aa-frontier-basket": {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     "ai-cycle-backfill":  {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     "ai-cycle":         {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+    # liquidcompute — radon-liquidcompute.timer, daily 07:30 UTC homepage
+    # GPU index ticker. Uniform 26h window. Public HTTP only, no IB.
+    "liquidcompute":    {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     "model-catalog":    {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     # yield-curve — radon-yield-curve.timer, daily 22:30 UTC every calendar
     # day (weekend/holiday runs heartbeat with no new Treasury rows). Uniform
@@ -545,6 +548,7 @@ BUCKETS: dict[str, list[str]] = {
         "aa-frontier-basket",
         "ai-cycle-backfill",
         "ai-cycle",
+        "liquidcompute",
         # Daily 22:30 UTC Treasury yield-curve pull — hourly check surfaces
         # a missed run within 1h of the 26h window expiring.
         "yield-curve",
