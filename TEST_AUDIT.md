@@ -9291,6 +9291,7 @@ Delta findings continue the T-### numbering in dated `## Delta audit` sections.
 - Audited through: `9dce4b3a` on 2026-09-10 — **0 new findings** over 6 commits / 53 paths, with existing deterministic T-490 (21 pytest reds) and T-488 (4 cloud reds) re-confirmed. Vitest green; changed Python, Vitest, and cloud test surfaces deterministic x3. No skip, exclusion, threshold, or CI-reachability drift.
 - Audited through: `3e394792` on 2026-09-12 — **1 new finding** (T-491, P1) over 24 commits / 180 paths. The focused research/model suite was 114 passed / 1 failed; the owning test failed 3/3 in isolation. No full-gate count is claimed: the required detached stage exited with no output and no `DONE` sentinel on this runner. No new executable skip, CI exclusion growth, threshold reduction, coverage-measurement change, or uncurated added E2E spec.
 - Audited through: `3e394792` on 2026-09-12 (**second pass**, wrapper 19:00 fire, same clone) — **0 new findings**; the delta range `3e394792..origin/main` is EMPTY (main unmoved since the 00:13 first pass), so this run's work was the first pass's unclaimed full gates, run serially detached with full PATH. pytest **12880 passed / 19 skipped / 0 failed** (2019s) — T-490's 21 reds are GONE, matching the recorded operator completion. vitest **9479 passed / 4 failed in 2 files**, ALL one environment cause: `exceljs` (declared `web/package.json:39`, added in the first pass's range at `1f0734af`) absent from this clone's `node_modules` — the 2026-09-05 lesson recurring a third time; after `bun install --frozen-lockfile` in `web/` (86 packages, <1s) the failed set re-ran **11 passed / 0 failed ×2**, repo untouched. cloud **5 failed / 1910 passed / 8 skipped**: sorted FAILED list entirely `test_caddy_edge_timeouts.py`, with resolved `bash` 5.3.9 (homebrew) and `caddy` ABSENT recorded per T-484 — same 5-list class as the 2026-09-05 second pass; T-488's 4 reds do not reproduce under this PATH. Focused T-491 owner suite **52 passed ×4** (fix verified green; determinism 3× clean). Post-gate tree clean (T-275); secret sweep vacuous — no wrapper secrets exported in this shell (T-381); no executable skip/`.only`/`xfail` added on the branch (audit-prose grep hits only). Note: `~/radon-weekend/venv-testing` does not exist on this host; `/opt/homebrew/bin/python3.13` carries pytest, pytest-asyncio, and xdist and is what the gates ran.
+- Audited through: `fe96fdac` on 2026-09-15 — 0 new findings over 35 commits / 51 paths; static coverage, gate-drift, and skip sweeps clean; local gates intentionally not run and no CI result exists for this merge head.
 
 ## Remediation 2026-08-29 — PR #140
 
@@ -10388,3 +10389,34 @@ contract, and commit generated artifacts.
 | Task | Status | Evidence |
 |---|---|---|
 | T-492 | DONE | RED: ledger-integrity contract 2 failed / 2 passed on the committed conflict markers and duplicate T-491 headings. GREEN: copied-ledger marker and duplicate injections reject; real ledgers and append-only contracts 9 passed. Both historical conflict sides remain in `TEST_LOG.md`; only the markers were removed. The relay P2 received the next unused ID, T-493. |
+
+## Delta audit 2026-09-15
+
+Range `9b9a65c7..fe96fdac`: 35 commits / 51 paths. Codemap review finds 26
+test importers for changed money-path and daemon sources, confirmed with
+`rg`: the new stacked-vertical behavior is covered by
+`scripts/tests/test_split_vertical_combos.py:28-69`; the LEAP cache-before-
+report ordering by `scripts/tests/test_leap_scanner.py:457-493`; incident PR
+creation/fail-closed paths by `scripts/tests/test_ir_ensure_pr.py:131-496`; and
+newsfeed bridge-network plus secret allowlist behavior by
+`cloud/tests/test_app_runtime.py:435-460,1057-1121`. The new dependency-floor
+contract parses every matching resolved lockfile entry rather than direct
+manifest ranges at `web/tests/dependency-security-floors.test.ts:34-50`.
+
+### Standing sweeps
+
+- `.github/workflows/ci.yml`, coverage thresholds, collection roots, exclusions,
+  and `deploy.needs` are byte-identical across this range. All new unit tests
+  are under CI-discovered roots; no browser spec was added.
+- The added-line scan found no executable `test.skip`, `it.skip`,
+  `pytest.mark.skip`, `xfail`, or `.only`. The sole changed `pytest.skip` is
+  the pre-existing optional-ledger guard at
+  `scripts/tests/test_docs_contract.py:655-669`, and its absence condition is
+  explicit rather than a test outcome exemption.
+- Per the recorded operator direction, no local full pytest, Vitest, or cloud
+  gate was launched. GitHub records no CI workflow run for merge head
+  `fe96fdac` at audit time, so no green verdict is claimed. The 14 touched
+  test files are below the full-suite threshold, but determinism reruns are
+  likewise deferred to CI under that direction.
+
+- Audited through: `fe96fdac` on 2026-09-15 — 0 new findings over 35 commits / 51 paths; static coverage, gate-drift, and skip sweeps clean; local gates intentionally not run and no CI result exists for this merge head.

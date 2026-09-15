@@ -836,6 +836,17 @@ section before completion.
 |---|---|---|
 | T-491 | DONE | RED: `XAI_API_KEY=ambient-poison` against the old constructor: 1 failed, no `ModelError`. GREEN: explicit empty injected env preserves no-key rejection, 1 passed; `test_research_runtime.py` + `test_model_ladder.py`: 59 passed. |
 
+## Delta audit 2026-09-15 (audit mode)
+
+Range `9b9a65c7..fe96fdac`: 35 commits / 51 paths. Zero new test-suite-health
+findings. Codemap and `rg` confirm direct behavior coverage for stacked
+verticals, LEAP cache-first persistence, incident PR fail-closure, and
+newsfeed network/env isolation. CI invocations, collection roots, coverage
+thresholds, exclusions, and `deploy.needs` are unchanged; no executable
+skip/xfail/focus line was added. Local full gates and 3x determinism reruns
+were not run under the recorded operator directive; GitHub has no CI run for
+`fe96fdac`, so no green verdict is claimed.
+
 ## Audit 2026-09-12 (second pass, wrapper 19:00 fire)
 
 Delta range `3e394792..origin/main` empty; completed the first pass's

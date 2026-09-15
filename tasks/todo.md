@@ -1,3 +1,30 @@
+# Task: Testing delta audit 2026-09-15 [IN PROGRESS]
+
+Audit `9b9a65c7..fe96fdac` for test-suite-health regressions only. Local full
+suites are excluded by the recorded operator direction; inspect CI and run no
+local suites.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify runner rails, clean tree, audit anchor, branch, and changed surface.
+- T2 depends_on: [T1] - Review delta coverage, fragile/net-negative tests, CI reachability, and gate drift.
+- T3 depends_on: [T2] - Append audit evidence, commit, push, and open/update the nightly PR.
+
+## Checklist
+
+- [x] T1 Dedicated markers, clean tree, anchor `9b9a65c7`, and dated branch verified.
+- [x] T2 Static delta and CI evidence review.
+- [x] T3 Append-only audit record and PR publication.
+
+## Review
+
+- [x] Zero findings: 26 codemap importers and changed-test source evidence
+  reviewed; CI/gate configuration and executable-skip sweep unchanged.
+- [x] Local full gates deliberately not run per recorded operator direction;
+  GitHub has no CI workflow result for `fe96fdac` at audit time.
+
+---
+
 # Task: CI performance remediate 2026-09-14 [IN PROGRESS]
 
 Reduced capability rung (`RADON_WEEKEND_REDUCED=1`): remediate P0/P1 only.
