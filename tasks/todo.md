@@ -137,6 +137,31 @@ research, assistant, and health surfaces. Audit-only: no production source chang
 
 ---
 
+# Task: Reliability delta audit 2026-09-15 [IN PROGRESS]
+
+Audit `9b9a65c7..HEAD` across the changed order-reconstruction, security,
+control-plane, and loop surfaces. Audit-only: no production source changes.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify runner, dated branch, anchor, remote collision state, and delta.
+- T2 depends_on: [T1] - Derive codemap blast radius and serially review changed source plus callers.
+- T3 depends_on: [T2] - Run standing money-path and watchdog-catalog sweeps; re-triage standing candidates.
+- T4 depends_on: [T3] - Append deduplicated findings and ledger; validate frozen IDs; commit, push, and publish the audit PR.
+
+## Checklist
+
+- [x] T1 Dedicated runner markers, anchor, branch, and remote collision state verified.
+- [x] T2 Changed-surface and 27-caller blast-radius review.
+- [x] T3 Standing sweeps and candidate re-triage.
+- [x] T4 Ledger/report publication and commit.
+
+## Review
+
+- [x] R-677 / REL-256 continue frozen numbering; no reliability log rewrite.
+
+---
+
 # Task: IR ensure-PR hook [IN PROGRESS]
 
 Durable grok incident-response open-PR after `fix/**` push.
