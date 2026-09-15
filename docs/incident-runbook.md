@@ -1974,6 +1974,17 @@ Peak incident: 2026-08-15, operator signed in as joemccann on app.radon.run,
 - **Fix:** `normalizePerformanceData` fills missing arrays and derives NAV equity before either panel reads the payload. Builder now emits the same keys on new writes. Existing Turso rows stay valid through the adapter.
 - **Regression:** `web/tests/performance-panel-twr-payload.test.tsx`, `web/tests/performance-twr.test.ts` normalize case, `web/e2e/performance-twr-payload.spec.ts`, `tests/test_portfolio_performance.py`.
 
+## performance-twr-statement-replaces-history
+
+**`/performance` shows a window of a few days (`Since first NAV <recent date>`, `N=1`).**
+2026-09-15, app.radon.run/performance: `2026-09-11 to 2026-09-14`, every gated metric blank.
+
+- **Mechanism:** `flex_delivery_ingest.py` calls `perf_twr_builder.build_and_persist(from_file=...)` with the nightly sFTP Activity statement, which covers one or a few sessions. The from-file path used that statement as the whole NAV series, so the payload's `period_start` jumped to the statement's first date. The persist guard only refuses an OLDER `nav_as_of`, so the shorter, newer tape overwrote the full one the weekday build had published an hour earlier.
+- **Detection:** `data/performance.json` has `nav_source: flex_from_file` and a recent `period_start`; `radon-flex-pull` journal shows `period_from == period_to` for the source statement while `radon-perf-twr` logged `period=2025-12-31..` earlier the same morning.
+- **Fix:** the from-file build merges the statement over the stored series from `get_nav_snapshots(sendrequest=False)` (statement wins on overlapping dates).
+- **Recovery:** after deploy, the next weekday `radon-perf-twr` run or the next sFTP ingest republishes the full window; no data was lost (Turso `nav_history` / disk cache untouched).
+- **Regression:** `scripts/tests/test_flex_from_file.py::test_twr_from_file_keeps_stored_nav_history`.
+
 ## Grok auto-response on iPhone P1 pages
 
 Canonical: [`grok-page-responder.md`](grok-page-responder.md).
