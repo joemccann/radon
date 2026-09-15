@@ -722,6 +722,23 @@ the incremental window raises and asks for `--backfill`. Installed by the deploy
 `install-units` verb from `installed-units.sha256`. Spec:
 [`indicators/dispersion.md`](indicators/dispersion.md).
 
+### Liquid Compute GPU index (`radon-liquidcompute.timer`)
+
+Daily `07:30 UTC` (`RandomizedDelaySec=300`), oneshot
+`python -m scripts.ai_cycle.liquidcompute --record`, `TimeoutStartSec=180`.
+Fetches the public homepage GPU index ticker
+(`GET https://liquidcompute.com/api/market/ticker`), identifies as Radon,
+and backs off on non-200. Host-tagged rows land in Turso/SQLite
+`liquidcompute_index` (`source=liquidcompute`, `series_id` = index id,
+`date`/`vintage` = publisher `asOf`, `unit=usd_per_gpu_per_hr`), idempotent
+on `(source, series_id, asOf)`. Compute pane `C5` on `/regime/llm`. Third
+venue versus the rental book; methodology opaque until licensed. Never
+spliced onto gpurentalprices or Silicon Data. robots.txt Disallows `/api/`
+but the public homepage loads this ticker; do not scrape `/auth/` or
+`/ingest/`. Heartbeat `liquidcompute`. Enable:
+`systemctl enable --now radon-liquidcompute.timer`. The same source is also
+collected by `radon-ai-cycle.timer`.
+
 ### Model catalog (`radon-model-catalog.timer`)
 
 Daily `03:10 UTC` (`RandomizedDelaySec=300`), oneshot

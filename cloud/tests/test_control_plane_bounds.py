@@ -233,6 +233,8 @@ EXPECTED_AUTO_SYNC_UNITS = (
     "radon-knowledge.timer",
     "radon-leap.service",
     "radon-leap.timer",
+    "radon-liquidcompute.service",
+    "radon-liquidcompute.timer",
     "radon-margin-debt.service",
     "radon-margin-debt.timer",
     "radon-media-backup.service",

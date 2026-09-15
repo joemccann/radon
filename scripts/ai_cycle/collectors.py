@@ -26,6 +26,7 @@ URLS = {
     "vast": "https://console.vast.ai/api/v0/bundles/",
     "noaa": "https://www.ncei.noaa.gov/access/services/data/v1",
     "open-design-arena": "https://open-design.ai/llm-arena-for-design/",
+    "liquidcompute": "https://liquidcompute.com/api/market/ticker",
 }
 GPU_HISTORY_INDEX = "https://api.github.com/repos/adriannutiu/gpu-rental-prices/contents/data/snapshots"
 NOAA_DOM_STATIONS = (
@@ -1207,6 +1208,11 @@ def collect_source(source, transport, start, end, *, env=None, basket=()):
     if source == "open-design-arena":
         html, digest, fetched, meta = transport.fetch_html(URLS[source], headers={"User-Agent": OPENDESI_UA})
         return parse_opendesi(html, digest, fetched, published=_http_published(meta.get("last_modified")))
+    if source == "liquidcompute":
+        from .liquidcompute import fetch_ticker, parse_ticker
+
+        _store_rows, observations = parse_ticker(*fetch_ticker(transport))
+        return observations
     if source == "noaa":
         return parse_noaa(
             *transport.fetch(
