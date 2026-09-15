@@ -779,7 +779,9 @@ Install dependency: IBKR-hosted sFTP, not Flex Web Service. Full recipe:
 [`flex-sftp-setup.md`](flex-sftp-setup.md).
 
 `Tue..Sat 07:30 ET` plus `08:30 ET` empty-dir retry. Oneshot
-`scripts/flex_sftp_pull.py`. The effective `ssh_config` is validated before
+`scripts/flex_sftp_pull.py`, `TimeoutStartSec=900` (script self-limits at
+`SWEEP_BUDGET_S=780` with newest-first ordering and SIGTERM unwind; must stay
+under the 07:30→08:30 ET gap). The effective `ssh_config` is validated before
 connecting: global directives above the first `Host` block count toward the
 alias (first-match-wins), and `Include` / `Match` — which pull in
 configuration the validator cannot see — fail closed
