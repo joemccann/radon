@@ -1654,3 +1654,30 @@ python/web gate co-wall then the deploy floor (CIP-004).
   [#441](https://github.com/joemccann/radon/pull/441), and rolling issue
   [comment](https://github.com/joemccann/radon/issues/196#issuecomment-5676243449)
   are published; PR validation is owned by the later deliver phase.
+
+### 2026-09-15 - remediate - branch `ci-performance/2026-09-15`
+
+- Runner state: dedicated markers, the dated remote branch, GitHub
+  authentication, `origin/main`, the audit's 24 required protection contexts,
+  and exclusive runner-lock ownership were re-verified.
+  `RADON_WEEKEND_REDUCED=1` confines this phase to verified P0/P1 findings.
+- Remediation eligibility: the completed audit supplies zero P0/P1
+  source-actionable findings. The work-bound `scripts-rs`/node-image co-wall
+  has no demonstrated safe recurring >=15-second/10% reduction; cache-degraded
+  node variance lacks a comparable source-controlled sample. No lower-priority
+  change was substituted and no CIP experiment was allocated.
+- Verification: `../venv-ci-performance/bin/python -m pytest
+  scripts/tests/test_ci_gate_integrity.py scripts/tests/test_ci_deploy_concurrency.py
+  scripts/tests/test_path_filter.py scripts/tests/test_codemap.py -q` passed
+  **119 tests in 14.60s**; both workflow YAML files parsed, `bash -n
+  scripts/ci_performance_nightly.sh`, and both diff checks passed. The detached
+  serial broader baseline prewrote `scripts/cloud/root/vitest` result slots but
+  produced no `DONE` sentinel; it is explicitly not counted as a passing gate.
+- Safety/impact: no test inventory, coverage, path classification, gate
+  dependency, immutable pin, cache or artifact provenance, exact-SHA image
+  verification, health, recovery, rollback, cancellation, or 40-second
+  stability behavior changed. Runner-minute impact is zero. Outcome:
+  `NO_SAFE_CHANGE` / `INSUFFICIENT_SAMPLE`; CIP-005/CIP-007/CIP-009/CIP-013
+  remain `VALIDATING`, CIP-004/CIP-006/CIP-008 remain `DEFERRED`. Residual
+  bottleneck remains the required gate/image co-wall then protected Deploy
+  floor. Revert trigger: reject any candidate that weakens a protected rail.
