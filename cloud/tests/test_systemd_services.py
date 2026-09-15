@@ -134,6 +134,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-divyield.timer",
     "radon-ma-ratio.service",
     "radon-ma-ratio.timer",
+    "radon-calm-streak.service",
+    "radon-calm-streak.timer",
     "radon-hyad.service",
     "radon-hyad.timer",
     "radon-hhlev.service",
