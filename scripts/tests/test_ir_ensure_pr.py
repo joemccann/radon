@@ -374,6 +374,9 @@ class TestGrokCycleEnsuresPr:
         monkeypatch.setattr(responder, "_send_followup", lambda **k: None)
         monkeypatch.setattr(responder, "_heartbeat", lambda *a, **k: None)
         monkeypatch.setattr(responder, "sync_remote_clone", lambda _root: "disabled")
+        monkeypatch.setattr(
+            responder, "install_push_guard", lambda _root: Path("pre-push")
+        )
 
         class _Proc:
             returncode = 0
@@ -418,6 +421,9 @@ class TestGrokCycleEnsuresPr:
         monkeypatch.setattr(responder, "_send_followup", lambda **k: None)
         monkeypatch.setattr(responder, "_heartbeat", lambda *a, **k: None)
         monkeypatch.setattr(responder, "sync_remote_clone", lambda _root: "disabled")
+        monkeypatch.setattr(
+            responder, "install_push_guard", lambda _root: Path("pre-push")
+        )
 
         class _Proc:
             returncode = 0
@@ -449,6 +455,9 @@ class TestGrokCycleEnsuresPr:
         monkeypatch.setattr(responder, "_send_followup", lambda **k: None)
         monkeypatch.setattr(responder, "_heartbeat", lambda *a, **k: None)
         monkeypatch.setattr(responder, "sync_remote_clone", lambda _root: "disabled")
+        monkeypatch.setattr(
+            responder, "install_push_guard", lambda _root: Path("pre-push")
+        )
 
         class _Proc:
             returncode = 0

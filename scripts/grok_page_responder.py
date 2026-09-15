@@ -183,6 +183,55 @@ def sync_remote_clone(repo_root: Path) -> str:
     return "synced"
 
 
+# The prompt tells grok never to push main or merge, but prompt text is not a
+# control: page excerpts are untrusted and the clone's credential can push any
+# ref. This hook is the git-level chokepoint — reinstalled every cycle so a
+# prior run (or the agent itself, last cycle) cannot leave it weakened.
+PRE_PUSH_GUARD = """#!/bin/sh
+# radon push guard (installed by grok_page_responder; do not edit)
+status=0
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$remote_ref" in
+    refs/heads/fix/*)
+      if [ "$local_sha" = "0000000000000000000000000000000000000000" ]; then
+        echo "radon push guard: refused delete of $remote_ref" >&2
+        status=1
+      fi
+      ;;
+    *)
+      echo "radon push guard: refused push to $remote_ref (only refs/heads/fix/*)" >&2
+      status=1
+      ;;
+  esac
+done
+exit $status
+"""
+
+
+def install_push_guard(repo_root: Path) -> Optional[Path]:
+    """Write the fix/*-only pre-push hook into the clone. None on failure."""
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--git-path", "hooks"],
+            cwd=repo_root, capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    hooks_dir = Path((proc.stdout or "").strip())
+    if not hooks_dir.is_absolute():
+        hooks_dir = repo_root / hooks_dir
+    try:
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        hook = hooks_dir / "pre-push"
+        hook.write_text(PRE_PUSH_GUARD)
+        hook.chmod(0o755)
+    except OSError:
+        return None
+    return hook
+
+
 def cache_dir(repo_root: Path) -> Path:
     path = repo_root / CACHE_REL
     path.mkdir(parents=True, exist_ok=True)
@@ -527,6 +576,14 @@ def run_cycle(
     runner = grok_runner or _default_grok_runner
     completed = True
     try:
+        if autopush_enabled() and install_push_guard(repo_root) is None:
+            # A push-capable cycle without the git-level refspec guard is
+            # prompt-only containment. Stand down; the timer retries.
+            print(
+                "push guard install failed; refusing push-capable cycle",
+                file=sys.stderr,
+            )
+            return 1
         sync_state = sync_remote_clone(repo_root)
         if sync_state not in {"disabled", "synced", "dirty"}:
             print(json.dumps({"at": now.isoformat(), "sync": sync_state}), file=sys.stderr)
