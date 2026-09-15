@@ -1849,6 +1849,12 @@ def build_and_persist(
     """Resolve NAV + flows, apply the gates, assemble and optionally persist."""
     if from_file:
         resolution = _resolution_from_file(from_file)
+        # The nightly sFTP statement carries a few sessions. It extends the
+        # stored series (statement wins on overlap) instead of replacing it:
+        # alone it published a 2026-09-11..09-14 window, N=1 (2026-09-15).
+        if resolution.by_date:
+            stored = get_nav_snapshots(sendrequest=False).by_date
+            resolution = _replace(resolution, by_date={**stored, **resolution.by_date})
     else:
         resolution = get_nav_snapshots(sendrequest=sendrequest)
     observations = [
