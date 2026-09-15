@@ -225,6 +225,7 @@ Delta findings continue the R-### numbering in dated `## Delta audit` sections.
 - Audited through: `f1f59a73` on 2026-09-11 — 0 new findings. Anchor `9dce4b3a` verified (`rev-parse --verify` resolves; ancestor of HEAD); range is 13 commits / 75 changed source files. Serial review covered the CTA vision cascade, AI-cycle OpenDesign ingestion, TWR coverage persistence, dark-pool cache semantics, hosted MCP bounded reads, authenticated research assets, and newsfeed provenance. All standing sweeps HOLD: no delta placement or health writer, halt/order-limit/exit-ack/Hrana chokepoints remain wired, and `NEW_FINDINGS` plus the REL-021b remainder have no changed-surface instance. Focused pytest could not start because this runner's `python3.13` lacks pytest.
 - Audited through: `3e394792` on 2026-09-12 — 1 new finding (R-675; P1), backlog REL-254. Anchor `9dce4b3a` verified (`rev-parse --verify` resolves; ancestor of HEAD); range is 20 commits / 180 changed files. Serial review covered the shared model ladder, AI-cycle archive, research persistence, flow/TWR, quote relay, systemd changes, and web surfaces. Standing money-path and watchdog sweeps hold; `NEW_FINDINGS` and REL-021b have no changed-surface instance.
 - Audited through: `9b9a65c7` on 2026-09-14 — 1 new finding (R-676; P1), backlog REL-255. Anchor `3e394792` verified (`rev-parse --verify` resolves; ancestor of HEAD); range is 53 commits / 78 changed paths. Serial review covered control-plane provenance, model-ladder/research, DeepSec security-loop state, codemap scheduling, assistant P&L, and the codemap caller blast radius. Standing money-path and watchdog sweeps hold; `NEW_FINDINGS` and REL-021b have no changed-surface instance.
+- Audited through: `eb5b8cb0` on 2026-09-15 — 1 new finding (R-677; P1), backlog REL-256. Anchor `9b9a65c7` verified (`rev-parse --verify` resolves to `9b9a65c7156f1b9d705db5cf6f659590b15297d9`; ancestor of HEAD); range is 29 commits / 51 changed paths. Serial review covered incident-response PR delivery, Grok responder state, order reconstruction, control-plane isolation, DeepSec evidence, wrapper subscription rails, and codemap callers. Standing money-path and watchdog sweeps hold; `NEW_FINDINGS` and REL-021b have no changed-surface instance.
 
 ## 7. Exit criteria check (A5)
 
@@ -2597,3 +2598,34 @@ and REL-021b have no changed-surface instance.
 | ID | Sev | Findings | Task | Acceptance |
 |---|---|---|---|---|
 | REL-255 | P1 | R-676 | **Bind DeepSec fast-engine completion evidence to the exact audited SHA.** Parse and require a marker/run-record SHA equal to `head_sha`; stale or malformed evidence must retain the timeout result. | Red first: an old marker plus `status=running` and a different requested head returns `TIMEOUT`; an exact-head marker returns the existing sibling-worker OK result; malformed marker and stale run-record cases fail closed. |
+
+---
+
+## Delta audit 2026-09-15
+
+Anchor `9b9a65c7` verified (`git rev-parse --verify` resolves to
+`9b9a65c7156f1b9d705db5cf6f659590b15297d9`; `git merge-base --is-ancestor`
+confirms it is an ancestor). Range `9b9a65c7..eb5b8cb0` is 29 commits / 51
+changed paths; codemap import edges add 27 callers, chiefly IB-sync contract
+tests. Serial review covered incident-response PR delivery, Grok responder
+state, stacked-vertical reconstruction, newsfeed runtime isolation, DeepSec
+handoff, wrapper subscription rails, and direct callers. Standing sweeps HOLD:
+halt/order-limit chokepoints (`scripts/ib_place_order.py:240-255`;
+`scripts/api/server.py:2883-2899`), `_NON_IDEMPOTENT_IB_SCRIPTS`
+(`scripts/api/server.py:5546,5655,5733`), exit-order acknowledgement
+(`scripts/monitor_daemon/handlers/exit_orders.py:196-222,766-780`), and
+daemon-state Hrana writes (`scripts/db/writer.py:35-46,2360-2373`) remain
+wired. The delta adds no placement call or service-health writer; the changed
+Grok responder writer remains in both catalogs (`scripts/watchdog/services.py:394-398,506`;
+`web/lib/serviceHealthWindows.ts:551-558`). `NEW_FINDINGS` and REL-021b remain
+standing P2 candidates with no changed-surface instance.
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-677 | P1 | `scripts/grok_page_responder.py:624-647,660-671`; `scripts/watchdog/pages.py:211-249` | **An incident code fix with no PR is irreversibly marked done and its responder heartbeat remains healthy.** When `ensure_after_code_fix` rejects a missing/unauthorized `gh` or PR-create failure, the handler stores `PR_FAILED` but calls `complete_page(... status="done")` before returning 2. The page therefore leaves the retry queue; the `finally` still writes an `ok` heartbeat. The next 30-second timer can only process another page, while the pushed `fix/*` branch has no review/deploy path despite the helper's explicit “Branch-only is not a ship” contract. |
+
+### Backlog (continuing)
+
+| ID | Sev | Findings | Task | Acceptance |
+|---|---|---|---|---|
+| REL-256 | P1 | R-677 | **Keep an incident page actionable until its pushed code fix has a verified open PR.** On `IrEnsurePrError`, record a bounded failed attempt/pending state instead of `done`, report degraded responder health, and retain the PR error without discarding the branch. | Red first: a `code_fix` fixture whose PR ensure raises leaves the page pending with an incremented attempt and emits non-`ok` health; a later ensure returning a PR URL completes it once with that URL; the third PR failure follows the existing bounded-attempt terminal policy and remains operator-visible. |

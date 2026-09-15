@@ -622,7 +622,6 @@ def run_cycle(
             return 0
 
         disposition, summary = parse_grok_result(stdout)
-        pr_error = None
         if (
             disposition == "code_fix"
             and autopush_enabled()
@@ -633,7 +632,26 @@ def run_cycle(
                 pr_info = ensure(repo_root, page=page, summary=summary)
             except ir_ensure_pr.IrEnsurePrError as exc:
                 pr_error = str(exc)
-                summary = f"{summary} PR_FAILED: {pr_error}"
+                finished = datetime.now(timezone.utc)
+                status = pages_mod.record_attempt_failure(
+                    page["page_id"],
+                    now=finished,
+                    error=f"PR_FAILED: {pr_error}",
+                )
+                # A pushed branch without an open PR has no review/deploy path.
+                # Keep the ticket actionable and let the responder's own health
+                # surface the stalled incident rather than reporting a clean poll.
+                _heartbeat("error", finished)
+                completed = False
+                print(json.dumps({
+                    "at": finished.isoformat(),
+                    "page_id": page["page_id"],
+                    "service": page["service"],
+                    "status": status,
+                    "error": f"PR_FAILED: {pr_error}",
+                }))
+                print(pr_error, file=sys.stderr)
+                return 2
             else:
                 url = (pr_info or {}).get("url")
                 if url:
@@ -657,9 +675,6 @@ def run_cycle(
             "disposition": disposition,
             "summary": summary,
         }))
-        if pr_error:
-            print(pr_error, file=sys.stderr)
-            return 2
         return 0
     except BaseException:
         # A cycle that died on Turso or git is not a healthy poll. Let the
