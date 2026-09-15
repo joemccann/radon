@@ -162,6 +162,30 @@ control-plane, and loop surfaces. Audit-only: no production source changes.
 
 ---
 
+# Task: Reliability remediation 2026-09-15 [IN PROGRESS]
+
+Reduced capability rung (`RADON_WEEKEND_REDUCED=1`): remediate P0/P1 only.
+
+## Dependency graph
+
+- T1 depends_on: [] - Add REL-256 PR-failure fault injection to the responder cycle.
+- T2 depends_on: [T1] - Preserve the ticket for bounded retry and degrade responder health on PR failure.
+- T3 depends_on: [T2] - Run focused red/green verification, append the reliability record, commit, and push.
+- T4 depends_on: [T3] - Re-run permanent drills and closing gates or record evidence-backed blocker.
+
+## Checklist
+
+- [x] T1 RED PR-ensure failure and bounded-retry regression.
+- [x] T2 Pending/error implementation.
+- [x] T3 Focused verification and reliability record; commit and push pending.
+- [ ] T4 Closing drills and gates.
+
+## Review
+
+- [x] Reduced rung excludes P2/P3 backlog items.
+
+---
+
 # Task: IR ensure-PR hook [IN PROGRESS]
 
 Durable grok incident-response open-PR after `fix/**` push.
