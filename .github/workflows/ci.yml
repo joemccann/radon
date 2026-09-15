@@ -794,6 +794,7 @@ jobs:
           e2e/orders-partial-realized-pnl.spec.ts
           e2e/share-pnl-entry-exit.spec.ts
           e2e/chain-deck-ticket-scroll.spec.ts
+          e2e/chain-anchored-scroll.spec.ts
           e2e/leap-order-prefill.spec.ts
           e2e/mobile-orders-session.spec.ts
           e2e/orders-session-window.spec.ts
@@ -832,6 +833,13 @@ jobs:
           path: |
             web/test-results/**/research-*.png
             web/test-results/**/*share*.png
+          retention-days: 7
+      - name: Upload chain anchor screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: chain-anchor-screenshots
+          path: web/test-results/**/chain-anchor-*.png
           retention-days: 7
       - name: Upload traces on failure
         if: failure()

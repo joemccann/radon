@@ -6874,6 +6874,21 @@ Dependency graph: T1 -> T2 -> T3 -> T4 -> T5.
 
 # Task: Radon AI conversation experience (2026-09-08)
 
+## Approved anchored options chain (2026-09-15)
+
+Plan and review: `tasks/options-chain-anchor.md`.
+Dependency graph: T1 -> T2; T1 -> T3; T1 -> T4; T2 + T3 + T4 -> T5 -> T6.
+- [x] T1 depends_on: [] - Approved design and isolated implementation checkout.
+- [x] T2 depends_on: [T1] - Stable anchor and desktop implementation.
+- [x] T3 depends_on: [T1] - Mobile implementation and unit regressions.
+- [x] T4 depends_on: [T1] - Browser regression coverage and CI selection.
+- [x] T5 depends_on: [T2,T3,T4] - Integration review and PR #449.
+- [ ] T6 depends_on: [T5] - Exact-head CI, visual evidence and notification.
+
+### Review
+PR https://github.com/joemccann/radon/pull/449; initial runner screenshots reviewed, CI repair loop active. Details in tasks/options-chain-anchor.md. No local suites or production deployment.
+
+
 ## Specification
 Replace the anonymous composer-only overlay with a readable Clear conversation workspace: explicit identity and close/new controls; task-specific editable starters; honest current-page context; multiline composer with visible attachment and model controls; cancellable generation, retry/edit recovery, retained session on close; readable transcript and inspectable tool evidence. Preserve order-risk approvals, quote provenance, auth and root socket ownership. Do not persist sensitive conversation data to disk. Desktop is a spacious centered workspace, mobile fills the viewport with accessible controls. No local test suites; GitHub CI owns Vitest and Playwright execution.
 

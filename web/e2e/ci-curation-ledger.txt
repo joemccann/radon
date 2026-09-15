@@ -1,4 +1,13 @@
 # research-workbench.spec.ts is curated in ci.yml: source citations, mobile/desktop, exports and safe handoff.
+# REVIEWED 2026-09-15 aaoi-risk-reversal-max-loss.spec.ts - Static locator adaptation to the shared header table; existing order assertions retained. Browser suite remains held out.
+# REVIEWED 2026-09-15 chain-held-leg-prices.spec.ts - Static locator adaptation to the shared header table; existing price assertions retained. Browser suite remains held out.
+# REVIEWED 2026-09-15 chain-sticky-header.spec.ts - Static review of stationary header geometry and hit-testing across both panes; curated chain-anchored-scroll covers header stability. This suite remains held out.
+# REVIEWED 2026-09-15 chain-strikes-selector.spec.ts - Static locator adaptation to the shared header table; strike-count assertions retained. Browser suite remains held out.
+# REVIEWED 2026-09-15 crcl-spread-builder.spec.ts - Static locator adaptation to the shared header table; order-builder assertions retained. Browser suite remains held out.
+# REVIEWED 2026-09-15 pltr-chain-position-focus.spec.ts - Static locator adaptation to the shared header table; position-focus assertions retained. Browser suite remains held out.
+# REVIEWED 2026-09-15 risk-reversal-skew.spec.ts - Static locator adaptation to the shared header table; skew assertions retained. Browser suite remains held out.
+# REVIEWED 2026-09-15 short-strangle-skew.spec.ts - Static locator adaptation to the shared header table; skew assertions retained. Browser suite remains held out.
+# REVIEWED 2026-09-15 ticker-search-chain.spec.ts - Static locator adaptation to the shared header table; search and order assertions retained. Browser suite remains held out.
 # CI e2e curation ledger — every web/e2e/*.spec.ts must appear HERE or in the
 # curated `npx playwright test` arg list of the `e2e-financial-smoke` job in
 # .github/workflows/ci.yml. scripts/tests/test_e2e_ci_curation.py enforces it.
