@@ -95,6 +95,20 @@ describe("useChainAnchor", () => {
     expect(result.current.revision).toBe(initialRevision);
   });
 
+  it("resolves the anchor against a newly loaded expiry's disjoint strike list", () => {
+    const { result, rerender } = renderAnchor();
+    const nextExpiryOptions = { ...defaultOptions, expiry: "2026-09-25", currentPrice: 114 };
+
+    rerender(nextExpiryOptions);
+    expect(result.current.anchorPrice).toBe(114);
+    expect(result.current.anchorStrike).toBe(115);
+
+    rerender({ ...nextExpiryOptions, strikes: [92, 102, 112, 122], currentPrice: 121 });
+
+    expect(result.current.anchorPrice).toBe(114);
+    expect(result.current.anchorStrike).toBe(112);
+  });
+
   it("explicitly recenters at the latest live quote", () => {
     const { result, rerender } = renderAnchor();
     const initialRevision = result.current.revision;

@@ -1382,11 +1382,12 @@ export default function OptionsChainTab({
   }, [ticker, selectedExpiry, visibleStrikes, strikesPerSide, strikes, anchorStrike, setChainContracts]);
 
   const panesReady = !loadingStrikes && !loadingExpiries && !showMobileChain;
+  const paneStrikesKey = visibleStrikes.map(row => row.strike).join(",");
   useLayoutEffect(() => {
     if (!panesReady) return;
     if (upperPaneRef.current) upperPaneRef.current.scrollTop = upperPaneRef.current.scrollHeight;
     if (lowerPaneRef.current) lowerPaneRef.current.scrollTop = 0;
-  }, [anchorRevision, panesReady]);
+  }, [anchorRevision, panesReady, paneStrikesKey]);
 
   const syncChainScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
     const source = event.currentTarget;
