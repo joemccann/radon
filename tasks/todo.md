@@ -1,3 +1,29 @@
+# Task: IR flow-refresh analysis timeout 2026-09-15 [IN PROGRESS]
+
+P1 `radon-flow-refresh.service` Result=exit-code at 20:00Z. Journal:
+capacity-shed retry then `flow-analysis FastAPI outcome indeterminate
+(curl=0, http=502)` at +128s. Same ~120s kill on 2026-09-11 20:00Z.
+`/flow-analysis` timeout=120 while wrapper SCAN_TIMEOUT default is 180
+and `/discover` already uses 180.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red regression: POST /flow-analysis timeout == wrapper budget
+- T2 depends_on: [T1] - Raise endpoint timeout to 180; runbook case
+- T3 depends_on: [T2] - Focused green, commit, push fix/*, ensure PR
+
+## Checklist
+
+- [x] T1 Failing test (120 vs 180 red)
+- [x] T2 Fix + runbook (`flow-refresh-analysis-timeout`)
+- [ ] T3 Ship branch/PR
+
+## Review
+
+- [x] Live journal: capacity shed then +128s indeterminate 502; health/lite authenticated; reproduce POST 200 after incident
+
+---
+
 # Task: PR #450 CI green leftover workflow tests + e2e ledger [IN PROGRESS]
 
 Unblock `chore/remove-workflow-composer` CI. Do not merge.

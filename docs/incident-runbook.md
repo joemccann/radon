@@ -1513,6 +1513,39 @@ all three flow-tab POSTs hit the FastAPI subprocess slot cap.** Peak:
 
 ---
 
+## flow-refresh-analysis-timeout
+
+**`radon-flow-refresh.service` oneshot pages P1 `Result=exit-code` when
+`POST /flow-analysis` hits the FastAPI script timeout while scanner and
+discover succeed.** Peak: 2026-09-15 20:00:00Z, page `8e4a8285…`.
+Prior: 2026-09-11 20:00Z (same ~120s kill, no shed).
+
+- **Mechanism:** wrapper `SCAN_TIMEOUT` default is 180s and the unit
+  comment budgets three 180s POSTs inside `TimeoutStartSec=600`.
+  `/discover` already used `timeout=180`, but `/flow-analysis` stayed at
+  `timeout=120`. At the close, after an optional capacity-shed retry
+  (instant 502 + 8s sleep), `flow_analysis.py` ran to the 120s API kill.
+  FastAPI returned HTTP 502 `Script timed out after 120s` (no capacity
+  marker). The wrapper logged
+  `flow-analysis FastAPI outcome indeterminate (curl=0, http=502)` and
+  exited 1. `/health/lite` stayed authenticated; discover still OK.
+- **Discriminating check:** unit journal shows one flow-analysis POST
+  then indeterminate 502 ~120–128s later (optional
+  `FastAPI transient … retry 1/2` first); scanner OK; discover OK or
+  shed; radon-api `Script flow_analysis.py timed out after 120s`; not
+  `Subprocess capacity exhausted` on the final attempt. Deploy
+  stop-clean is `Result=signal`. Pure capacity shed is
+  `flow-refresh-capacity-502`.
+- **Remediation (code):** raise `/flow-analysis` `run_script` timeout to
+  180 so it matches the wrapper SCAN_TIMEOUT default and `/discover`.
+  Keep capacity-shed classification on the body marker; a real timeout
+  still exits 1.
+- **Regression:**
+  `scripts/api/tests/test_flow_tab_cooldown.py::test_flow_analysis_timeout_matches_wrapper_scan_budget`.
+- **Code:** `scripts/api/server.py` (`flow_analysis`).
+
+---
+
 ## orders-sync-capacity-shed-stale
 
 **Autonomous `orders-sync` loop pages P1 `kind=stale` during RTH when

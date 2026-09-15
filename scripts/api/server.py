@@ -2540,7 +2540,10 @@ async def flow_analysis(force: bool = False):
         "flow_analysis.json",
         "flow_analysis.py",
         [],
-        timeout=120,
+        # Match run_flow_refresh.sh SCAN_TIMEOUT default (180). A 120s kill
+        # at the close (2026-09-11 / 2026-09-15 20:00Z) paged the oneshot
+        # after a capacity-shed retry while discover already sat at 180.
+        timeout=180,
         force=force,
         demo_key="flow-analysis",
         demo_payload={"scan_time": "", "results": []},
