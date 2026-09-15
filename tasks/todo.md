@@ -6860,11 +6860,11 @@ Dependency graph: T1 -> T2; T1 -> T3; T1 -> T4; T2 + T3 + T4 -> T5 -> T6.
 - [x] T2 depends_on: [T1] - Stable anchor and desktop implementation.
 - [x] T3 depends_on: [T1] - Mobile implementation and unit regressions.
 - [x] T4 depends_on: [T1] - Browser regression coverage and CI selection.
-- [ ] T5 depends_on: [T2,T3,T4] - Integration review and PR.
+- [x] T5 depends_on: [T2,T3,T4] - Integration review and PR #449.
 - [ ] T6 depends_on: [T5] - Exact-head CI, visual evidence and notification.
 
 ### Review
-Pending; no local suites or production deployment.
+PR https://github.com/joemccann/radon/pull/449; initial runner screenshots reviewed, CI repair loop active. Details in tasks/options-chain-anchor.md. No local suites or production deployment.
 
 
 ## Specification
