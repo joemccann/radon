@@ -9293,6 +9293,24 @@ Delta findings continue the T-### numbering in dated `## Delta audit` sections.
 - Audited through: `3e394792` on 2026-09-12 (**second pass**, wrapper 19:00 fire, same clone) — **0 new findings**; the delta range `3e394792..origin/main` is EMPTY (main unmoved since the 00:13 first pass), so this run's work was the first pass's unclaimed full gates, run serially detached with full PATH. pytest **12880 passed / 19 skipped / 0 failed** (2019s) — T-490's 21 reds are GONE, matching the recorded operator completion. vitest **9479 passed / 4 failed in 2 files**, ALL one environment cause: `exceljs` (declared `web/package.json:39`, added in the first pass's range at `1f0734af`) absent from this clone's `node_modules` — the 2026-09-05 lesson recurring a third time; after `bun install --frozen-lockfile` in `web/` (86 packages, <1s) the failed set re-ran **11 passed / 0 failed ×2**, repo untouched. cloud **5 failed / 1910 passed / 8 skipped**: sorted FAILED list entirely `test_caddy_edge_timeouts.py`, with resolved `bash` 5.3.9 (homebrew) and `caddy` ABSENT recorded per T-484 — same 5-list class as the 2026-09-05 second pass; T-488's 4 reds do not reproduce under this PATH. Focused T-491 owner suite **52 passed ×4** (fix verified green; determinism 3× clean). Post-gate tree clean (T-275); secret sweep vacuous — no wrapper secrets exported in this shell (T-381); no executable skip/`.only`/`xfail` added on the branch (audit-prose grep hits only). Note: `~/radon-weekend/venv-testing` does not exist on this host; `/opt/homebrew/bin/python3.13` carries pytest, pytest-asyncio, and xdist and is what the gates ran.
 - Audited through: `fe96fdac` on 2026-09-15 — 0 new findings over 35 commits / 51 paths; static coverage, gate-drift, and skip sweeps clean; local gates intentionally not run and no CI result exists for this merge head.
 
+## Remediation 2026-09-15
+
+`RADON_WEEKEND_REDUCED=1`: the current-cycle audit filed no P0/P1 finding.
+The standing P1 T-488 remains operator-only after its three recorded genuine
+attempts: reproduce and repair its GNU-timeout process-tree behavior on Linux
+CI without widening the fixed contract timeout. T-493 is P2 and out of scope.
+
+| Task | Status | Evidence |
+|---|---|---|
+| Scope | DONE | Reconciled current-cycle and standing P0/P1 entries; no source-actionable item remains under the reduced rung. |
+| T-488 | operator-only | Reproduce and repair the GNU-timeout process-tree behavior on Linux CI without widening the fixed contract timeout. |
+
+Focused ledger and phase contracts are **117 passed**. Closing gates are
+INCOMPLETE: detached serial stage `/tmp/tw-2026-09-15/remediate-gates.sh`
+prewrote nine result slots, then its process died during `pytest_1` with a
+zero-byte log and no `DONE` sentinel. No full-gate count or green verdict is
+claimed.
+
 ## Remediation 2026-08-29 — PR #140
 
 All **35 un-DONE P0/P1 findings** from the same cycle's audit are DONE:

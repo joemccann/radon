@@ -6976,6 +6976,26 @@ No local suites. Review confirms quantity-weighted prices preserve zero and sign
 
 - PR #394 intermediate integration `892f24b1`: 31 applicable checks green, source shard 2225 passed, browser 96 passed plus one demo. Final integration includes historical-fill PR #395 at `aae5e1e5`; repeat exact-head checks before merge.
 
+# Task: Testing remediation 2026-09-15 [IN PROGRESS]
+
+Reduced capability rung (`RADON_WEEKEND_REDUCED=1`): remediate P0/P1 only.
+
+## Dependency graph
+
+- T1 depends_on: [] - Reconcile all verified audit backlog entries and operator-only status.
+- T2 depends_on: [T1] - Run focused ledger contracts and three detached serial full gates.
+- T3 depends_on: [T2] - Append dated remediation evidence, commit, and push the nightly branch.
+
+## Checklist
+
+- [x] T1 No source-actionable P0/P1 remains; T-488 is operator-only and T-493 is P2.
+- [x] T2 Focused verification: 117 passed; detached closing stage stopped before `pytest_1` wrote a result or DONE sentinel.
+- [x] T3 Append-only remediation record and durable commit.
+
+## Review
+
+- [x] No full-gate result is claimed; the detached-child runner failure is recorded for resumption.
+
 # Testing audit 2026-09-12
 
 Dependency graph: T1.

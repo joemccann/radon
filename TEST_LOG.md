@@ -912,3 +912,15 @@ Closing gates: INCOMPLETE. The detached stage did not create
 `/tmp/tw-2026-09-14/closing-gates.rc` and therefore never wrote its required
 `DONE` sentinel. No full-gate counts are claimed; resume on a runner that
 preserves detached children.
+
+## Remediation 2026-09-15 (testing/2026-09-15)
+
+| Task | Status | Evidence |
+|---|---|---|
+| Scope | DONE | `RADON_WEEKEND_REDUCED=1`; current audit has zero P0/P1 and every standing P0/P1 is DONE or operator-only. Focused ledger/phase contracts: 117 passed. |
+| T-488 | operator-only | Reproduce and repair GNU-timeout process-tree behavior on Linux CI without widening the fixed test timeout. |
+
+Closing gates: INCOMPLETE. Detached serial stage prewrote `pytest`, `vitest`,
+and `cloud` slots for rounds 1-3, then died in `pytest_1`; its log is zero-byte
+and `/tmp/tw-2026-09-15/remediate-gates.rc` has no `DONE` sentinel. No gate
+counts or green verdict are claimed.
