@@ -175,7 +175,8 @@ describe("Options chain ATM auto-centering", () => {
     const { rerender } = render(content(153.1));
 
     await waitFor(() => {
-      expect(document.querySelector(".chain-grid-wrapper")).not.toBeNull();
+      expect(document.querySelectorAll(".chain-row")).toHaveLength(5);
+      expect(screen.getByTestId("chain-spot-bar").textContent).toContain("View at $153.10");
     });
 
     expect(scrollIntoViewSpy).not.toHaveBeenCalled();

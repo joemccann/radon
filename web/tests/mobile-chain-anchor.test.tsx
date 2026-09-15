@@ -42,7 +42,7 @@ describe("Mobile chain anchored browsing", () => {
     const prices = { [initial.visibleStrikes[1].callKey]: quote };
     const { rerender } = render(<MobileChainLadder {...initial} prices={prices} />);
     const cell = screen.getByTestId("mobile-chain-call-100");
-    expect(cell.querySelector(".mobile-chain__bid-ask--primary")?.textContent).toBe("1.20 x 1.40");
+    expect(cell.querySelector(".mobile-chain__bid-ask--primary")?.textContent).toBe("$1.20 x $1.40");
     expect(cell.querySelector(".mobile-chain__last")).toBeNull();
     expect(cell.querySelector(".mobile-chain__meta")).toBeNull();
 
