@@ -10,7 +10,10 @@ from clients.model_ladder import (
     MODEL_LADDER_TIERS,
     ModelLadderExhausted,
     ModelResponseError,
+    accept_distill_payload,
+    accept_tags_payload,
     complete_multimodal_json,
+    complete_text_json,
     extract_via_vision,
     wired_providers,
 )
@@ -358,6 +361,73 @@ class TestCodexTokenParam:
         assert result.provider == "grok"
         assert captured[0]["max_tokens"] == 6000
         assert "max_completion_tokens" not in captured[0]
+
+
+class TestCompleteTextJson:
+    def test_cerebras_is_not_attempted_when_anthropic_wins(self):
+        router = _Router(
+            {
+                "api.anthropic.com": _anthropic_obj_ok({"tags": ["PUTS", "OPTIONS", "POSITIONING"]}),
+                "api.cerebras.ai": _openai_obj_ok({"tags": ["SHOULD", "NOT", "WIN"]}),
+            }
+        )
+        result = complete_text_json(
+            "tag this",
+            env=ALL_KEYS,
+            post=router,
+            accept=accept_tags_payload,
+        )
+        assert result.provider == "anthropic"
+        assert result.data["tags"] == ["PUTS", "OPTIONS", "POSITIONING"]
+        assert not any("cerebras" in url for url in router.calls)
+        assert any("api.anthropic.com" in url for url in router.calls)
+
+    def test_cerebras_is_last_after_earlier_keyed_failures(self):
+        router = _Router(
+            {
+                "api.anthropic.com": _credit_low(),
+                "api.x.ai": _Resp(429, {"error": {"message": "rate limit"}}),
+                "api.openai.com": _Resp(500, {"error": {"message": "overloaded"}}),
+                "generativelanguage.googleapis.com": _Resp(403, {"error": {"message": "quota"}}),
+                "integrate.api.nvidia.com": _Resp(401, {"error": {"message": "auth"}}),
+                "api.cerebras.ai": _openai_obj_ok(
+                    {"summary": "What fixed the relay?", "tickers": ["spy"]}
+                ),
+            }
+        )
+        result = complete_text_json(
+            "distill this",
+            env=ALL_KEYS,
+            post=router,
+            accept=accept_distill_payload,
+        )
+        assert result.provider == "cerebras"
+        assert [url for url in router.calls if "cerebras" in url]
+        first_cerebras = next(i for i, url in enumerate(router.calls) if "cerebras" in url)
+        assert first_cerebras == len(router.calls) - 1
+
+    def test_no_keyed_provider_raises_exhausted(self):
+        def must_not_post(*_args, **_kwargs):
+            raise AssertionError("ladder posted with no keys")
+
+        with pytest.raises(ModelLadderExhausted, match="no keyed provider"):
+            complete_text_json("tag this", env={}, post=must_not_post)
+
+    def test_accept_rejects_short_tag_list_and_walks_on(self):
+        router = _Router(
+            {
+                "api.anthropic.com": _anthropic_obj_ok({"tags": ["ONLY", "TWO"]}),
+                "api.x.ai": _openai_obj_ok({"tags": ["MACRO", "FED", "RATES"]}),
+            }
+        )
+        result = complete_text_json(
+            "tag this",
+            env={"ANTHROPIC_API_KEY": "a", "XAI_API_KEY": "x"},
+            post=router,
+            accept=accept_tags_payload,
+        )
+        assert result.provider == "grok"
+        assert result.data["tags"] == ["MACRO", "FED", "RATES"]
 
 
 class TestCerebrasModelId:

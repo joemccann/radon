@@ -9,7 +9,7 @@ Module split: `paths`, `browser`, `auth`, `cdp`, `extract`, `media`, `store`, `t
 ## Key Behaviors
 
 - **Headless Playwright** replaces chrome-cdp. Env: `THEMARKETEAR_EMAIL`, `THEMARKETEAR_PASSWORD`. Session stored at `data/newsfeed-storage.json` (gitignored, ~30d), reuses across runs; full re-auth ~6h. `cdp.js` is a back-compat shim.
-- **IPv4 forced** for `themarketear.com` CDN and `api.cerebras.ai` — both AAAA-unreachable from residential IPv6.
+- **IPv4 forced** for `themarketear.com` CDN and `api.anthropic.com` (vision tagger) — AAAA-unreachable from residential IPv6.
 - **Cookie-gated images:** `media.js` accepts a `getCookieHeader` callback; Playwright `context.cookies()` follows `/images/<hash>.png` 301 → digitaloceanspaces.
 - **Rollover** at 500 KB → archive + keep ⌈N × 0.2⌉. `mergePosts` preserves `tags`.
 
@@ -20,12 +20,12 @@ Module split: `paths`, `browser`, `auth`, `cdp`, `extract`, `media`, `store`, `t
 Router: vision tagger for posts with images; text tagger otherwise.
 
 - **Vision tagger:** `claude-haiku-4-5`, ~$0.003 / post.
-- **Text tagger:** Cerebras `gpt-oss-120b` → fallback `qwen-3-235b-a22b-instruct-2507`. `gpt-oss-120b` needs `max_tokens: 800` (reasoning model — undersized budget truncates the output and produces no tags).
+- **Text tagger:** shared model ladder (`complete_text_json`) via `scripts/clients/model_ladder_cli.py`. Order: anthropic -> grok -> cursor -> codex -> gemini -> nvidia -> cerebras last. Soft-fail when no keyed provider works.
 - Exactly **3 tags per post**, free-form.
 - **Naming** (`__normaliseTags`): UPPERCASE, multi-word `UPPERCASE-KEBAB-CASE` (`PUT-CALL-RATIO`), allowed `A-Z 0-9 - &`, case-insensitive dedup.
 - `hydrateTags` skips posts with `tags.length >= 3` unless `force=true`.
 - `data/tag_taxonomy.json` force-tracked. Filter chips on the dashboard auto-derive from it.
-- Either `CEREBRAS_API_KEY` or `ANTHROPIC_API_KEY` is sufficient.
+- Any keyed ladder provider is sufficient for text tagging.
 
 ---
 
