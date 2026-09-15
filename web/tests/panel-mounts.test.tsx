@@ -8,7 +8,7 @@
  *  - The flow-analysis surface mounts <InformedFlowPanel ticker={...}/> for the
  *    active ticker (Congress & Insider Activity surface).
  *  - The alerts page renders <AlertsPanel/> (Signal Alert Rules surface).
- *  - WorkspaceShell navItems include reachable Alerts + Workflow entries.
+ *  - WorkspaceShell navItems include a reachable Alerts entry.
  *
  * Data hooks are mocked so no live UW/IB/Turso/network is touched.
  */
@@ -125,12 +125,5 @@ describe("FU3 nav wiring", () => {
     expect(alerts).toBeTruthy();
     expect(alerts?.href).toBe("/alerts");
     expect(alerts?.hidden).not.toBe(true);
-  });
-
-  it("navItems includes a reachable Workflow entry", () => {
-    const workflow = navItems.find((i) => i.route === "workflow");
-    expect(workflow).toBeTruthy();
-    expect(workflow?.href).toBe("/workflow");
-    expect(workflow?.hidden).not.toBe(true);
   });
 });

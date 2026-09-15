@@ -152,8 +152,6 @@ const PINNED: Record<string, PinnedCapability> = {
   "watchlist": { GET: "read", POST: "mutate.workspace" },
   "watchlist/[symbol]": "mutate.workspace",
   "webhooks/clerk": "internal",
-  "workflow": { GET: "read", POST: "mutate.workspace" },
-  "workflow/run": "mutate.trading",
   "yield-curve": "read",
   "yield-curve/live": "read",
 };

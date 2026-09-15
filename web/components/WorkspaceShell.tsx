@@ -76,8 +76,7 @@ export default function WorkspaceShell({ section, tickerParam, initialPortfolio 
   const activeLabel = activeSection === "ticker-detail" && tickerParam ? tickerParam : navLabel;
   const headerOwnsPageHeading = activeSection !== "ticker-detail"
     && activeSection !== "watchlist"
-    && activeSection !== "admin"
-    && activeSection !== "workflow";
+    && activeSection !== "admin";
   const { toasts, exitingIds, addToast, upsertToast, dismissToast, hasToastKey } = useToast();
   const marketState = useMarketHours();
   const isMarketActive = marketState !== MarketState.CLOSED;
@@ -621,7 +620,7 @@ export default function WorkspaceShell({ section, tickerParam, initialPortfolio 
             />
           ) : null}
 
-          {activeSection !== "dashboard" && activeSection !== "ticker-detail" && activeSection !== "watchlist" && activeSection !== "admin" && activeSection !== "preferences" && activeSection !== "profile" && activeSection !== "alerts" && activeSection !== "workflow" && activeSection !== "research-workbench" && !isOptionsWorkspace ? <div className={isStale ? "metric-cards--stale" : undefined}><MetricCards portfolio={portfolio} prices={prices} realizedPnl={todayRealizedPnl} executedOrders={executedOrders} section={activeSection} /></div> : null}
+          {activeSection !== "dashboard" && activeSection !== "ticker-detail" && activeSection !== "watchlist" && activeSection !== "admin" && activeSection !== "preferences" && activeSection !== "profile" && activeSection !== "alerts" && activeSection !== "research-workbench" && !isOptionsWorkspace ? <div className={isStale ? "metric-cards--stale" : undefined}><MetricCards portfolio={portfolio} prices={prices} realizedPnl={todayRealizedPnl} executedOrders={executedOrders} section={activeSection} /></div> : null}
 
           {activeSection === "portfolio" ? (
             <PortfolioSections portfolio={portfolio} prices={pricesForSections} />

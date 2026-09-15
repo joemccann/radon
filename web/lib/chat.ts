@@ -561,10 +561,6 @@ export function resolveSectionFromPath(pathname: string | null, fallback: Worksp
   }
 
   if (pathname.startsWith("/research-workbench")) return "research-workbench";
-  if (pathname.startsWith("/workflow")) {
-    return "workflow";
-  }
-
   if (pathname.startsWith("/admin")) {
     return "admin";
   }

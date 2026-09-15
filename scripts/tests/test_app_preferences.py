@@ -53,14 +53,13 @@ class TestRegistryIntegrity:
             if pref.value_type in {"int", "float"}:
                 assert pref.hard_min <= pref.default <= pref.hard_max
 
-    def test_registry_contains_all_five_order_limit_keys(self):
+    def test_registry_contains_all_four_order_limit_keys(self):
         keys = {pref.key for pref in app_preferences.registry()}
         assert {
             "RADON_MAX_ORDER_QTY",
             "RADON_MAX_STOCK_ORDER_QTY",
             "RADON_MAX_ORDER_NOTIONAL",
             "RADON_MAX_ORDERS_PER_MIN",
-            "RADON_WORKFLOW_MAX_ORDERS",
         } <= keys
 
     def test_no_em_dash_in_labels_or_descriptions(self):
@@ -423,12 +422,10 @@ class TestOrderLimitsDelegation:
             "RADON_MAX_STOCK_ORDER_QTY": "2000",
             "RADON_MAX_ORDER_NOTIONAL": "50000.0",
             "RADON_MAX_ORDERS_PER_MIN": "4",
-            "RADON_WORKFLOW_MAX_ORDERS": "2",
         })
         assert order_limits.max_stock_order_qty() == 2000
         assert order_limits.max_order_notional() == 50000.0
         assert order_limits.max_orders_per_min() == 4
-        assert order_limits.workflow_max_orders() == 2
 
     def test_check_order_limits_uses_stored_cap(self):
         app_preferences.seed_snapshot_for_tests({"RADON_MAX_ORDER_QTY": "100"})

@@ -55,7 +55,7 @@ Preserve current deep links while refining visible navigation. `lib/data.ts` is 
 | Positions | Holdings (`/portfolio`), orders (`/orders`), journal (`/journal`) |
 | Research | Scanner (`/scanner`), watchlist (`/watchlist`), flow (`/flow-analysis`), options (`/options`), instrument detail; preserve any contextual Discover links |
 | Risk | Regime (`/regime/cri` and other regime subroutes), CTA (`/cta`), alerts (`/alerts`) |
-| Account / workspace menu | Workflow (`/workflow`), operator (`/admin`), preferences (`/preferences`), profile (`/profile`) |
+| Account / workspace menu | Operator (`/admin`), preferences (`/preferences`), profile (`/profile`) |
 
 This grouping must expose the difference between account overview and individual positions through labels and page headings. Do not duplicate inaccessible desktop navigation beneath mobile chrome. Keep contextual research links and browser Back semantics intact.
 

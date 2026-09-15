@@ -133,7 +133,6 @@ CATALOG: dict[CatalogKey, Capability] = {
     ("POST", "/uw/usage/record"): "internal",
     ("POST", "/vcg/scan"): "read.spawn",
     ("POST", "/vcg/share"): "internal",
-    ("POST", "/workflow/run"): "mutate.trading",
     ("POST", "/ws-ticket"): "internal",
     ("POST", "/ws-ticket/validate"): "internal",
 }
