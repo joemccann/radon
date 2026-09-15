@@ -660,6 +660,20 @@ unchanged-data heartbeats. Heartbeat `ma-ratio`. Installed by the deploy's
 `install-units` verb from `installed-units.sha256`. Spec:
 [`indicators/ma-ratio.md`](indicators/ma-ratio.md).
 
+### CALM STREAK (`radon-calm-streak.timer`)
+
+Daily `02:40 UTC` and `14:30 UTC` (`RandomizedDelaySec=120`), oneshot
+`scripts/fetch_calm_streak.py`, `TimeoutStartSec=300`. Pulls Cboe's official
+`_SPX.json` daily OHLC history with a conditional GET, counts consecutive
+completed sessions whose `(high - low) / prior close` stays at or under 1%,
+and writes `calm_streak_history` (only new sessions; an empty table backfills
+from 1985) plus the `calm-streak` snapshot. The regeneration time of the Cboe
+file is not published, so the evening slot and the morning slot (after the
+observed ~13:02 UTC regeneration) both run; unchanged runs are 304
+heartbeats. Heartbeat `calm-streak`. Installed by the deploy's
+`install-units` verb from `installed-units.sha256`. Spec:
+[`indicators/calm-streak.md`](indicators/calm-streak.md).
+
 ### HY AD (`radon-hyad.timer`)
 
 `Tue..Sat 11:00 UTC` (`RandomizedDelaySec=300`), oneshot `scripts/fetch_hyad.py`,
