@@ -933,6 +933,8 @@ def complete_multimodal_json(
     read_timeout: float = 120.0,
     max_response_bytes: int = 2_000_000,
     require_end_turn: bool = True,
+    accept: Callable[[Any], bool] | None = None,
+    log_prefix: str = "research",
 ) -> LadderResult:
     """Run multimodal JSON completion through the shared ladder."""
     src = env if env is not None else os.environ
@@ -963,13 +965,15 @@ def complete_multimodal_json(
             )
         text = _extract_text(name, payload)
         obj = parse_json_object(text)
+        if obj is not None and accept is not None and not accept(obj):
+            return None, text
         return obj, text
 
     parsed, text, provider, model, attempted = _run_ladder(
         env=src,
         post=sender,
         kind="text",
-        log_prefix="research",
+        log_prefix=log_prefix,
         call_provider=call_provider,
         parse_success=parse_success,
         model_override=model_override,
@@ -983,13 +987,62 @@ def complete_multimodal_json(
     )
 
 
+def accept_tags_payload(obj: Any) -> bool:
+    """Newsfeed text-tagger contract: JSON object with at least 3 tags."""
+    tags = obj.get("tags") if isinstance(obj, dict) else None
+    return isinstance(tags, list) and len(tags) >= 3
+
+
+def accept_distill_payload(obj: Any) -> bool:
+    """Knowledge distill contract: JSON object with a non-empty summary."""
+    if not isinstance(obj, dict):
+        return False
+    summary = obj.get("summary")
+    return isinstance(summary, str) and bool(summary.strip())
+
+
+def complete_text_json(
+    instruction: str,
+    *,
+    system: str = "",
+    env: Mapping[str, str] | None = None,
+    post: Callable[..., Any] | None = None,
+    model_override: str | None = None,
+    max_tokens: int = 800,
+    read_timeout: float = 30.0,
+    max_response_bytes: int = 2_000_000,
+    require_end_turn: bool = False,
+    accept: Callable[[Any], bool] | None = None,
+    log_prefix: str = "text",
+) -> LadderResult:
+    """Text-only JSON completion through the shared ladder. Cerebras is last."""
+    return complete_multimodal_json(
+        instruction,
+        images=(),
+        system=system,
+        env=env,
+        post=post,
+        model_override=model_override,
+        max_tokens=max_tokens,
+        stream_anthropic=True,
+        read_timeout=read_timeout,
+        max_response_bytes=max_response_bytes,
+        require_end_turn=require_end_turn,
+        accept=accept,
+        log_prefix=log_prefix,
+    )
+
+
 __all__ = [
     "MODEL_LADDER_ORDER",
     "MODEL_LADDER_TIERS",
     "LadderResult",
     "ModelLadderExhausted",
     "VisionResult",
+    "accept_distill_payload",
+    "accept_tags_payload",
     "complete_multimodal_json",
+    "complete_text_json",
     "extract_via_vision",
     "parse_json_object",
     "parse_json_rows",

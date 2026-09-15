@@ -1,3 +1,28 @@
+# Task: Newsfeed + distill on shared model ladder 2026-09-15 [IN PROGRESS]
+
+Stop Cerebras-first text tagging and KB distillation. Both walk
+`scripts/clients/model_ladder.py` (subscription -> nvidia -> cerebras last).
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests: Cerebras not first; soft-fail; 3-tag + distill JSON
+- T2 depends_on: [T1] - `complete_text_json` + CLI; wire distill.py and tagger.js
+- T3 depends_on: [T2] - Docs/allowlist that claimed Cerebras-first
+- T4 depends_on: [T3] - Focused green, PR, watch CI. Do not merge.
+
+## Checklist
+
+- [x] T1 Failing tests for order, soft-fail, contracts
+- [x] T2 Shared text JSON helper; JS tagger subprocess bridge
+- [x] T3 Owner docs + newsfeed env allowlist
+- [ ] T4 PR open, CI green, no merge
+
+## Review
+
+- [ ] JS tagger reaches the ladder via `scripts/clients/model_ladder_cli.py`
+
+---
+
 # Task: IR flow-refresh analysis timeout 2026-09-15 [IN PROGRESS]
 
 P1 `radon-flow-refresh.service` Result=exit-code at 20:00Z. Journal:
