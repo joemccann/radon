@@ -415,6 +415,9 @@ class TestGrokCycleEnsuresPr:
         monkeypatch.setattr(responder.pages_mod, "actions_since", lambda **_: 0)
         monkeypatch.setattr(responder.pages_mod, "claim_page", lambda *a, **k: True)
         monkeypatch.setattr(responder.pages_mod, "complete_page", lambda *a, **k: None)
+        monkeypatch.setattr(
+            responder.pages_mod, "record_attempt_failure", lambda *a, **k: "pending"
+        )
         monkeypatch.setattr(responder, "_send_followup", lambda **k: None)
         monkeypatch.setattr(responder, "_heartbeat", lambda *a, **k: None)
         monkeypatch.setattr(responder, "sync_remote_clone", lambda _root: "disabled")
@@ -433,6 +436,51 @@ class TestGrokCycleEnsuresPr:
             ensure_ir_pr=ensure,
         )
         assert rc == 2
+
+    def test_pr_failure_keeps_the_page_pending_and_degrades_health(self, tmp_path, monkeypatch):
+        """REL-256: a pushed fix without an open PR is not a completed page."""
+        monkeypatch.setenv("GROK_PAGE_RESPONDER", "1")
+        monkeypatch.setenv("GROK_PAGE_AUTOSHIP", "1")
+        monkeypatch.setenv("GROK_PAGE_AUTOPUSH", "1")
+        monkeypatch.setattr(responder.pages_mod, "list_actionable_pages", lambda **_: [_page()])
+        monkeypatch.setattr(responder.pages_mod, "actions_since", lambda **_: 0)
+        monkeypatch.setattr(responder.pages_mod, "claim_page", lambda *a, **k: True)
+        completed = []
+        failures = []
+        health = []
+        monkeypatch.setattr(
+            responder.pages_mod,
+            "complete_page",
+            lambda *a, **k: completed.append((a, k)),
+        )
+        monkeypatch.setattr(
+            responder.pages_mod,
+            "record_attempt_failure",
+            lambda *a, **k: failures.append((a, k)) or "pending",
+        )
+        monkeypatch.setattr(responder, "_heartbeat", lambda state, *_: health.append(state))
+        monkeypatch.setattr(responder, "_send_followup", lambda **k: None)
+        monkeypatch.setattr(responder, "sync_remote_clone", lambda _root: "disabled")
+
+        class _Proc:
+            returncode = 0
+            stdout = "RESULT: code_fix | leap PermissionError"
+            stderr = ""
+
+        def ensure(*_args, **_kwargs):
+            raise ir.IrEnsurePrError(ir.PAT_SCOPE_ERROR)
+
+        rc = responder.run_cycle(
+            tmp_path,
+            grok_runner=lambda *a, **k: _Proc(),
+            ensure_ir_pr=ensure,
+        )
+
+        assert rc == 2
+        assert completed == []
+        assert len(failures) == 1
+        assert ir.PAT_SCOPE_ERROR in failures[0][1]["error"]
+        assert health == ["error"]
 
     def test_stand_down_does_not_open_a_pr(self, tmp_path, monkeypatch):
         monkeypatch.setenv("GROK_PAGE_RESPONDER", "1")
