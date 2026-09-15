@@ -97,7 +97,9 @@ journalctl -u radon-grok-page-responder -n 20 --no-pager
 
 Grok pushes `fix/<slug>` and `scripts/ir_ensure_pr.py` opens the PR.
 The helper never merges. Branch-only is not a ship: missing `gh` or a
-PAT without `pull_requests: write` fails the cycle with an operator error.
+PAT without `pull_requests: write` keeps the page pending, records the
+attempt failure, and marks the responder health row `error`; the ordinary
+three-attempt limit then governs escalation.
 
 Fine-grained PAT on `joemccann/radon` for the VPS `radon` user:
 
