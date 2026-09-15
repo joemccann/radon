@@ -1190,7 +1190,7 @@ class TestFlexPull:
     def test_oneshot_stripped_env_and_timeout(self, unit):
         svc = unit("radon-flex-pull.service")["Service"]
         assert svc["type"] == "oneshot"
-        assert int(svc["timeoutstartsec"]) >= 120
+        assert int(svc["timeoutstartsec"]) >= 900
         assert svc["environmentfile"].lstrip("-") == STRIPPED_ENV_SERVICES["radon-flex-pull.service"]
         assert "/etc/radon/env" not in svc["environmentfile"]
         assert "flex_sftp_pull.py" in svc["execstart"]
@@ -1222,6 +1222,25 @@ class TestFlexPull:
         text = allowlist.read_text()
         assert "radon-flex-pull.service" in text
         assert "radon-flex-pull.timer" in text
+
+
+class TestFlexPullScanBudget:
+    """Tue..Sat 07:30 ET sFTP pull. TimeoutStartSec=120 killed the 2026-09-15
+    run (Result=timeout, NRestarts=0, 11:30:01Z → 11:32:01Z) while ingesting
+    a multi-statement catch-up (24 remote files, perf_twr ~60s each). The
+    process now self-limits at SWEEP_BUDGET_S=780; this TimeoutStartSec must
+    cover that budget plus one in-flight INGEST_HEADROOM_S and still end
+    before the 08:30 ET retry. Nesting is pinned in
+    test_flex_pull_ingest_timeout.py::TestSweepBudget."""
+
+    def test_service_is_oneshot_with_start_timeout(self, unit):
+        svc = unit("radon-flex-pull.service")["Service"]
+        assert svc["type"] == "oneshot"
+        assert int(svc["timeoutstartsec"]) == 900
+
+    def test_start_budget_ends_before_the_retry_fire(self, unit):
+        svc = unit("radon-flex-pull.service")["Service"]
+        assert int(svc["timeoutstartsec"]) < 3600
 
 
 class TestGrokPageResponder:
