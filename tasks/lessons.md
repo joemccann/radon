@@ -1032,3 +1032,11 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 
 - `tailscale ping` pongs at the WireGuard/disco layer and succeeds even when the ACL drops every TCP port. From the tagged `ib-gateway` node, ping to `joes-mac-mini` returned 19ms while `ssh` to port 22 timed out. Test the real port (`nc -z -w5 <ip> 22`) before concluding the peer is reachable.
 - Tagged devices (`tagged-devices` owner) and user-owned devices sit in different ACL groups. When a tagged node must reach a user device, route through a user-owned peer (`ProxyJump radon-broker`) or add an explicit ACL rule; do not keep retrying the direct route.
+
+## 2026-09-15 — flow-refresh analysis timeout vs capacity shed
+
+- `FastAPI outcome indeterminate (curl=0, http=502)` after ~120s is a
+  script timeout body, not capacity shed. Discriminate on duration and
+  the absence of `subprocess capacity exhausted` on the final attempt.
+- Wrapper SCAN_TIMEOUT and each `/flow-tab` `run_script` timeout must
+  match; discover at 180 with flow-analysis at 120 pages the oneshot.
