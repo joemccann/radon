@@ -836,6 +836,17 @@ section before completion.
 |---|---|---|
 | T-491 | DONE | RED: `XAI_API_KEY=ambient-poison` against the old constructor: 1 failed, no `ModelError`. GREEN: explicit empty injected env preserves no-key rejection, 1 passed; `test_research_runtime.py` + `test_model_ladder.py`: 59 passed. |
 
+## Delta audit 2026-09-15 (audit mode)
+
+Range `9b9a65c7..fe96fdac`: 35 commits / 51 paths. Zero new test-suite-health
+findings. Codemap and `rg` confirm direct behavior coverage for stacked
+verticals, LEAP cache-first persistence, incident PR fail-closure, and
+newsfeed network/env isolation. CI invocations, collection roots, coverage
+thresholds, exclusions, and `deploy.needs` are unchanged; no executable
+skip/xfail/focus line was added. Local full gates and 3x determinism reruns
+were not run under the recorded operator directive; GitHub has no CI run for
+`fe96fdac`, so no green verdict is claimed.
+
 ## Audit 2026-09-12 (second pass, wrapper 19:00 fire)
 
 Delta range `3e394792..origin/main` empty; completed the first pass's
@@ -901,3 +912,15 @@ Closing gates: INCOMPLETE. The detached stage did not create
 `/tmp/tw-2026-09-14/closing-gates.rc` and therefore never wrote its required
 `DONE` sentinel. No full-gate counts are claimed; resume on a runner that
 preserves detached children.
+
+## Remediation 2026-09-15 (testing/2026-09-15)
+
+| Task | Status | Evidence |
+|---|---|---|
+| Scope | DONE | `RADON_WEEKEND_REDUCED=1`; current audit has zero P0/P1 and every standing P0/P1 is DONE or operator-only. Focused ledger/phase contracts: 117 passed. |
+| T-488 | operator-only | Reproduce and repair GNU-timeout process-tree behavior on Linux CI without widening the fixed test timeout. |
+
+Closing gates: INCOMPLETE. Detached serial stage prewrote `pytest`, `vitest`,
+and `cloud` slots for rounds 1-3, then died in `pytest_1`; its log is zero-byte
+and `/tmp/tw-2026-09-15/remediate-gates.rc` has no `DONE` sentinel. No gate
+counts or green verdict are claimed.
