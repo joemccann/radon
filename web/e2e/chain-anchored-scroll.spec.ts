@@ -101,7 +101,9 @@ for (const mobile of [false, true]) {
       const before = { upper: await paneState(upper), lower: await paneState(lower), page: await page.evaluate(() => window.scrollY) };
       expect(before.upper.visible.length).toBeGreaterThan(0);
       expect(before.lower.visible.length).toBeGreaterThan(0);
-      await testInfo.attach("chain-scrolled", { body: await page.screenshot(), contentType: "image/png" });
+      const scrolledPath = testInfo.outputPath(`chain-anchor-${mobile ? "mobile" : "desktop"}-${theme}-scrolled.png`);
+      await page.screenshot({ path: scrolledPath });
+      await testInfo.attach("chain-scrolled", { path: scrolledPath, contentType: "image/png" });
       moveSpot(127);
       await expect(spot).toContainText("127.00");
       expect(await paneState(upper)).toEqual(before.upper);
@@ -110,7 +112,9 @@ for (const mobile of [false, true]) {
       expect(await spot.boundingBox()).toEqual(spotBefore);
       expect(await header.boundingBox()).toEqual(headerBefore);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-      await testInfo.attach("chain-live-crossing", { body: await page.screenshot(), contentType: "image/png" });
+      const crossingPath = testInfo.outputPath(`chain-anchor-${mobile ? "mobile" : "desktop"}-${theme}-live-crossing.png`);
+      await page.screenshot({ path: crossingPath });
+      await testInfo.attach("chain-live-crossing", { path: crossingPath, contentType: "image/png" });
       await spot.getByRole("button", { name: "Recenter options chain", exact: true }).click();
       await expect.poll(async () => (await paneState(lower)).scrollTop).toBe(0);
       await expect.poll(async () => (await paneState(upper)).partition).not.toEqual(before.upper.partition);
