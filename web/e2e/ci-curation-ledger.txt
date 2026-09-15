@@ -68,6 +68,7 @@ dispersion-tab.spec.ts
 divyield-tab.spec.ts
 dollar-delta-leverage.spec.ts
 ma-ratio-tab.spec.ts
+calm-streak-tab.spec.ts
 fill-toast.spec.ts
 flow-analysis-ticker.spec.ts
 header-fullscreen.spec.ts
@@ -322,3 +323,11 @@ ws-connection-stability.spec.ts
 #   does not scroll sideways. 1/1 new Chromium case passed locally against
 #   next dev with RADON_AUTHLESS_TEST. Held out of e2e-financial-smoke: the
 #   rest of the file remains uncurated pending next start preflight.
+
+# REVIEWED 2026-09-15 calm-streak-tab.spec.ts - 3/3 Chromium cases passed
+#   against local next dev (port 3100, RADON_AUTHLESS_TEST). A separate live
+#   pass with no route mocks loaded /regime/calm-streak off a real Cboe pull:
+#   strip 28 / EXTREME CALM / window max 26 / record 64, 6 stroked chart paths,
+#   0 NaN paths, countdown matching the 14:30 UTC timer slot; screenshot in
+#   docs/indicators/calm-streak-tab.png. Held out of e2e-financial-smoke: not
+#   yet preflighted 3x under production next start.

@@ -479,6 +479,17 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
     expect(requiresIb("ma-ratio")).toBe(false);
   });
 
+  // ``calm-streak``: radon-calm-streak.timer fires 02:40 and 14:30 UTC every
+  // calendar day; uniform 26h window. Cboe SPX HTTP + Turso only.
+  it("calm-streak is registered as scheduled with a uniform 26h window", () => {
+    expect(SERVICE_FRESHNESS_WINDOWS["calm-streak"]).toBeDefined();
+    expect(getServiceCategory("calm-streak")).toBe("scheduled");
+    for (const state of ["open", "extended", "closed"] as MarketState[]) {
+      expect(getFreshnessWindowMs("calm-streak", state)).toBe(26 * HOUR);
+    }
+    expect(requiresIb("calm-streak")).toBe(false);
+  });
+
   // ``hy-ad`` — radon-hyad.timer fires Tue..Sat 11:00 UTC, the morning after
   // FINRA TRACE end-of-day finalization (T+1). Uniform 120h window covers the
   // T+1 lag plus 3-day weekends and bond-market-only holidays; older means
