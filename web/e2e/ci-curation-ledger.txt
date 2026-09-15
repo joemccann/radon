@@ -322,3 +322,9 @@ ws-connection-stability.spec.ts
 #   does not scroll sideways. 1/1 new Chromium case passed locally against
 #   next dev with RADON_AUTHLESS_TEST. Held out of e2e-financial-smoke: the
 #   rest of the file remains uncurated pending next start preflight.
+
+# REVIEWED 2026-09-15 mobile-p2-polish.spec.ts - incidental to Workflow
+#   composer removal: deleted the /workflow canvas add-node/drag case only.
+#   Remaining mobile polish cases are unchanged (no new mobile behavior).
+#   Held out of e2e-financial-smoke; not curated because the edit is a
+#   deletion of a removed-page test, not new browser behavior.

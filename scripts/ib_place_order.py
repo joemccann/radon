@@ -234,8 +234,7 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
     permId, no confirm-poll). The finally still disconnects.
     """
     # Kill switch (REL-004): every placement path funnels through here
-    # (/orders/place subprocess, workflow bridge) — refuse before touching
-    # IB. what_if previews are read-only and stay allowed.
+    # (/orders/place subprocess) — refuse before touching IB. what_if previews are read-only and stay allowed.
     if not what_if:
         from trading_halt import is_trading_halted, get_halt_state
 
@@ -248,7 +247,7 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
             }
 
         # Server-side fat-finger bounds (REL-005) — authoritative for every
-        # placement path incl. the workflow bridge. what-if previews are
+        # placement path. what-if previews are
         # exempt so the risk UI can still price an over-limit order.
         from order_limits import check_order_limits
 

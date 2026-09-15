@@ -21105,16 +21105,16 @@ body[data-mobile="true"] .alerts-rule__channel {
 .agent-chip--action:hover { background: var(--bg-panel-raised); color: var(--text-primary); }
 
 /* Shared panel head pattern */
-.engine-trace__head, .approval-gate__head, .task-runs__head, .proposal-card__head {
+.engine-trace__head, .approval-gate__head, .proposal-card__head {
   display: flex; align-items: center; gap: 8px;
   height: 32px; padding: 0 12px;
   border-bottom: 1px solid var(--line-grid);
 }
-.approval-gate__module, .task-runs__module, .proposal-card__module {
+.approval-gate__module, .proposal-card__module {
   font-family: var(--font-mono); font-size: var(--text-meta);
   letter-spacing: 0.08em; color: var(--text-muted);
 }
-.engine-trace__title, .approval-gate__title, .task-runs__title, .proposal-card__title {
+.engine-trace__title, .approval-gate__title, .proposal-card__title {
   font-size: var(--text-panel-title); font-weight: 600; color: var(--text-primary);
 }
 
@@ -21150,21 +21150,6 @@ body[data-mobile="true"] .alerts-rule__channel {
 .approval-gate__option[data-selected="true"] .approval-gate__option-meta { color: var(--signal-core-text); }
 .approval-gate__actions { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
 .approval-gate__expiry { margin-left: auto; font-family: var(--font-mono); font-size: var(--text-meta); letter-spacing: 0.08em; color: var(--text-muted); }
-
-/* — TaskRuns — */
-.task-runs { background: var(--bg-panel); border: 1px solid var(--line-grid); border-radius: 4px; }
-.task-runs__status { margin-left: auto; display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: var(--text-meta); letter-spacing: 0.08em; color: var(--warn-text); }
-.task-runs__list { list-style: none; margin: 0; padding: 4px 12px 8px; }
-.task-runs__task { border-bottom: 1px solid var(--line-grid); padding: 8px 0; }
-.task-runs__task:last-child { border-bottom: none; }
-.task-runs__row { display: flex; align-items: center; gap: 10px; }
-.task-runs__index { width: 14px; font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
-.task-runs__task-title { flex: 1; font-size: var(--text-label); font-weight: 500; color: var(--text-primary); }
-.task-runs__task[data-state="queued"] .task-runs__task-title { color: var(--text-muted); }
-.task-runs__task-meta { font-family: var(--font-mono); font-size: var(--text-meta); letter-spacing: 0.08em; color: var(--text-muted); text-transform: uppercase; }
-.task-runs__substeps { list-style: none; margin: 6px 0 0; padding: 0 0 0 40px; display: flex; flex-direction: column; gap: 4px; }
-.task-runs__substep { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: var(--text-meta); color: var(--text-secondary); }
-.task-runs__substep-meta { color: var(--text-muted); }
 
 /* — AskComposer — */
 .ask-composer { border: 1px solid var(--line-grid); border-radius: 4px; background: var(--bg-panel); }

@@ -1,3 +1,25 @@
+# Task: PR #450 CI green leftover workflow tests + e2e ledger [IN PROGRESS]
+
+Unblock `chore/remove-workflow-composer` CI. Do not merge.
+
+## Dependency graph
+
+- T1 depends_on: [] - Delete leftover `scripts/tests/test_workflow_*.py` that still import the removed package.
+- T2 depends_on: [T1] - Stamp `# REVIEWED 2026-09-15 mobile-p2-polish.spec.ts` for the incidental hold-out edit.
+- T3 depends_on: [T2] - Focused pytest, push to the same PR, watch CI.
+
+## Checklist
+
+- [ ] T1 Delete `test_workflow_order_preflight.py` and `test_workflow_scanner_source.py`.
+- [ ] T2 Ledger annotation dated on or after the spec change.
+- [ ] T3 Focused pytest green; push; CI green or only non-gating failures.
+
+## Review
+
+- [ ] Do not merge. Report what was fixed.
+
+---
+
 # Task: Liquid Compute GPU index poller [DONE]
 
 Third-venue public ticker as host-tagged AI-infra series. Never splice onto

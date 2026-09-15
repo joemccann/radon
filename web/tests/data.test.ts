@@ -205,7 +205,6 @@ describe("navItems", () => {
       "regime",
       "cta",
       "alerts",
-      "workflow",
       "admin",
       "preferences",
     ]);
@@ -232,7 +231,6 @@ describe("quickPromptsBySection", () => {
     "regime",
     "cta",
     "alerts",
-    "workflow",
     "admin",
     "preferences",
     "ticker-detail",
@@ -289,7 +287,6 @@ describe("sectionDescription", () => {
     "regime",
     "cta",
     "alerts",
-    "workflow",
     "admin",
     "preferences",
     "ticker-detail",

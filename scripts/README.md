@@ -60,7 +60,7 @@ Do not invent a second copy of the scan logic here.
 | `utils/` | Shared Python helpers |
 | `lib/` | Shared JS (relay) + TWR math |
 | `tests/` | pytest for this tree |
-| `forecasting/`, `backtest/`, `paper/`, `workflow/` | Research / paper |
+| `forecasting/`, `backtest/`, `paper/` | Research / paper |
 
 New scripts stay at this top level unless a shim plan is explicit.
 Go-forward grouping (`scripts/fetch/`, `scripts/scan/`, `scripts/ib/`)

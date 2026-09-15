@@ -2420,94 +2420,6 @@ async def backtest_registry():
     return {"strategies": list_strategies()}
 
 
-def _execute_workflow_graph(graph: dict, confirm_order: bool) -> dict:
-    """Run a workflow graph off the event loop and serialize the report.
-
-    The executor is pure for the tested node paths; any external effect lives
-    behind the patchable seams in ``workflow.nodes``. Order-emitting nodes block
-    unless ``confirm_order`` is set — the OrderRiskGate confirmation seam.
-    """
-    from workflow.executor import WorkflowError, execute_graph
-
-    try:
-        report = execute_graph(graph, confirm_order=confirm_order)
-    except WorkflowError as exc:
-        return {"ok": False, "error": str(exc), "invalid": True}
-    return {
-        "ok": report.ok,
-        "blocked_by": report.blocked_by,
-        "blocked_gate": report.blocked_gate,
-        "requires_confirmation": report.requires_confirmation,
-        "steps": [
-            {
-                "node_id": step.node_id,
-                "node_type": step.node_type,
-                "rows_in": step.rows_in,
-                "rows_out": step.rows_out,
-                "blocked": step.blocked,
-                "info": step.info,
-            }
-            for step in report.steps
-        ],
-        "final_rows": report.final_rows,
-    }
-
-
-_MAX_CONCURRENT_WORKFLOWS = 2
-_active_workflows = 0
-
-
-def _release_workflow_job(task: asyncio.Task) -> None:
-    global _active_workflows
-    _active_workflows = max(0, _active_workflows - 1)
-    # A timed-out request no longer awaits the worker. Consume any eventual
-    # exception so asyncio does not emit an unhandled-task warning.
-    try:
-        task.exception()
-    except (asyncio.CancelledError, Exception):
-        pass
-
-
-@app.post("/workflow/run")
-async def workflow_run(request: Request):
-    """F14 — execute an operator-authored flow-pipeline graph server-side.
-
-    Body: ``{"graph": {nodes, edges}, "confirm_order": bool}``. Returns the
-    serialized execution report. Order-emitting nodes require ``confirm_order``;
-    a failing gate names the blocking node + gate.
-    """
-    body = await request.json()
-    graph = body.get("graph")
-    if not isinstance(graph, dict) or "nodes" not in graph:
-        raise HTTPException(status_code=400, detail="body.graph {nodes, edges} required")
-    confirm_order = bool(body.get("confirm_order", False))
-    global _active_workflows
-    if _active_workflows >= _MAX_CONCURRENT_WORKFLOWS:
-        raise HTTPException(status_code=429, detail="workflow capacity exhausted")
-    _active_workflows += 1
-    task = asyncio.create_task(
-        asyncio.to_thread(_execute_workflow_graph, graph, confirm_order)
-    )
-    released = False
-    try:
-        report = await asyncio.wait_for(asyncio.shield(task), timeout=31.0)
-    except asyncio.TimeoutError as exc:
-        task.add_done_callback(_release_workflow_job)
-        released = True
-        raise HTTPException(status_code=504, detail="workflow execution timed out") from exc
-    finally:
-        if not released:
-            if task.done():
-                _release_workflow_job(task)
-            else:
-                # Client cancellation must not leak the admission slot while
-                # the shielded worker completes in its thread.
-                task.add_done_callback(_release_workflow_job)
-    if report.get("invalid"):
-        raise HTTPException(status_code=400, detail=report.get("error", "invalid graph"))
-    return report
-
-
 _PAPER_PLACE_REQUIRED = ("ticker", "side", "order_type", "quantity")
 
 
@@ -2890,9 +2802,8 @@ def _refuse_if_order_limits_violated(params: dict) -> None:
 def _refuse_if_trading_halted() -> None:
     """Kill switch (REL-004): fast 409 before any subprocess spawn.
 
-    ib_place_order.place_order re-checks the flag (covers the workflow
-    bridge that bypasses these routes); this route-level check just fails
-    faster and cheaper.
+    ib_place_order.place_order re-checks the flag; this route-level check
+    just fails faster and cheaper.
     """
     from trading_halt import get_halt_state, is_trading_halted
 

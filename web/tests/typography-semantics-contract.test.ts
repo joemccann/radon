@@ -11,7 +11,7 @@ describe("workspace typography semantics", () => {
     const shell = source("components/WorkspaceShell.tsx");
 
     expect(header).toContain('<h1 className="rail-section" title={activeLabel}>{activeLabel}</h1>');
-    for (const route of ["ticker-detail", "watchlist", "admin", "workflow"]) {
+    for (const route of ["ticker-detail", "watchlist", "admin"]) {
       expect(shell).toContain(`activeSection !== "${route}"`);
     }
   });
