@@ -178,11 +178,11 @@ Reduced capability rung (`RADON_WEEKEND_REDUCED=1`): remediate P0/P1 only.
 - [x] T1 RED PR-ensure failure and bounded-retry regression.
 - [x] T2 Pending/error implementation.
 - [x] T3 Focused verification and reliability record; commit and push pending.
-- [ ] T4 Closing drills and gates.
+- [x] T4 Closing gates BLOCKED by detached-stage termination; no full-gate pass claimed.
 
 ## Review
 
-- [x] Reduced rung excludes P2/P3 backlog items.
+- [x] Reduced rung excludes P2/P3 backlog items; closing-stage blocker is recorded append-only.
 
 ---
 
