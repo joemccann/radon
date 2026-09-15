@@ -2,7 +2,7 @@
 
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 // OptionsChainTab deep-links its filters via useChainUrlState (next/navigation).
 // Provide a no-op router so useRouter() doesn't throw "app router not mounted".
@@ -151,8 +151,8 @@ describe("Options chain ATM auto-centering", () => {
     vi.restoreAllMocks();
   });
 
-  it("centers the ATM row inside the chain wrapper only — never via scrollIntoView", async () => {
-    render(
+  it("resets only the independent panes and preserves browsing across live strike crossings", async () => {
+    const content = (last: number) => (
       React.createElement(
         OrderActionsProvider,
         null,
@@ -163,35 +163,44 @@ describe("Options chain ATM auto-centering", () => {
             ticker: "PLTR",
             activeTab: "c", // deck key for Chain (cockpit nav contract; opens the Chain deck)
             onTabChange: vi.fn(),
-            prices: { PLTR: PRICE },
+            prices: { PLTR: { ...PRICE, last } },
             fundamentals: {},
             portfolio: PORTFOLIO,
             orders: ORDERS,
             theme: "dark",
           }),
         ),
-      ),
+      )
     );
+    const { rerender } = render(content(153.1));
 
     await waitFor(() => {
       expect(document.querySelector(".chain-grid-wrapper")).not.toBeNull();
     });
 
-    await waitFor(() => {
-      expect(scrollToSpy).toHaveBeenCalled();
-    });
-
-    // The ATM row must NEVER call scrollIntoView — that would propagate to
-    // page-level scroll containers and drag the Order Builder with it.
     expect(scrollIntoViewSpy).not.toHaveBeenCalled();
-
-    // The scrollTo call must be on the chain wrapper element, not document
-    // or some ancestor.
-    const wrapper = document.querySelector(".chain-grid-wrapper");
-    expect(wrapper).not.toBeNull();
-    const calledOnWrapper = scrollToSpy.mock.instances.some(
-      (instance) => instance === wrapper,
-    );
-    expect(calledOnWrapper).toBe(true);
+    const upper = screen.getByTestId("chain-upper-pane");
+    const lower = screen.getByTestId("chain-lower-pane");
+    expect(scrollToSpy.mock.instances.every((instance) => instance === upper || instance === lower)).toBe(true);
+    upper.scrollTop = 40;
+    lower.scrollTop = 70;
+    fireEvent.scroll(upper);
+    fireEvent.scroll(lower);
+    const strikes = (pane: HTMLElement) => Array.from(pane.querySelectorAll(".chain-strike"), (cell) => cell.textContent);
+    const before = { upper: strikes(upper), lower: strikes(lower) };
+    scrollToSpy.mockClear();
+    rerender(content(156));
+    await waitFor(() => expect(screen.getByTestId("chain-spot-bar").textContent).toContain("156.00"));
+    expect(strikes(upper)).toEqual(before.upper);
+    expect(strikes(lower)).toEqual(before.lower);
+    expect(upper.scrollTop).toBe(40);
+    expect(lower.scrollTop).toBe(70);
+    expect(scrollToSpy).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Recenter options chain", exact: true }));
+    await waitFor(() => expect(lower.scrollTop).toBe(0));
+    expect(upper.scrollTop).toBe(upper.scrollHeight);
+    expect(strikes(upper)).not.toEqual(before.upper);
+    expect(scrollToSpy.mock.instances.every((instance) => instance === upper || instance === lower)).toBe(true);
+    expect(scrollIntoViewSpy).not.toHaveBeenCalled();
   });
 });

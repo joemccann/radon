@@ -794,6 +794,7 @@ jobs:
           e2e/orders-partial-realized-pnl.spec.ts
           e2e/share-pnl-entry-exit.spec.ts
           e2e/chain-deck-ticket-scroll.spec.ts
+          e2e/chain-anchored-scroll.spec.ts
           e2e/leap-order-prefill.spec.ts
           e2e/mobile-orders-session.spec.ts
           e2e/orders-session-window.spec.ts
