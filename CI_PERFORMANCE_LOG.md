@@ -1650,3 +1650,7 @@ python/web gate co-wall then the deploy floor (CIP-004).
   runner-minute impact. Revert trigger: reject any future candidate that
   shrinks gate closure, inventory, coverage, path fallback, immutable
   provenance, health/recovery/rollback, or stability behavior.
+- Publication: audit commit `0b30b5c5`, PR
+  [#441](https://github.com/joemccann/radon/pull/441), and rolling issue
+  [comment](https://github.com/joemccann/radon/issues/196#issuecomment-5676243449)
+  are published; PR validation is owned by the later deliver phase.

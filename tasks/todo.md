@@ -7011,7 +7011,7 @@ append evidence only and preserve every gate and deploy rail.
 
 - [x] T1 Dedicated markers, stale-lock preservation, dated branch, GitHub auth, and origin/main verified.
 - [x] T2 Classified recent runs, reconstructed representative paths, and swept safety closure.
-- [ ] T3 Audit ledger, safety contracts, commit/push, PR, and rolling issue report published.
+- [x] T3 Audit ledger, safety contracts, commit/push, PR, and rolling issue report published.
 
 ## Review
 
