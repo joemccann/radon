@@ -1694,6 +1694,49 @@ cycle is its own fault, not a cascade.
 
 ---
 
+## flex-pull-ingest-timeout
+
+**`radon-flex-pull.service` oneshot pages P1 `Result=timeout` (`NRestarts=0`)
+on the Tue..Sat 07:30 ET fire.** Peak: 2026-09-15 11:35Z, page `68388b70…`.
+
+- **Mechanism:** IBKR never removes deliveries from `outgoing`, so a morning
+  ls returns the full history (24 `.pgp` files on 2026-09-15: 12 Equity_Summary
+  + 12 Trade_History). The puller walked alphabetical oldest-first, re-pulled
+  duplicates, then ran NEW statement ingest (each `perf_twr` ~60s).
+  `TimeoutStartSec=120` SIGTERM'd mid-second Equity_Summary
+  (11:30:01Z → 11:32:01Z, `ExecMainStatus=15`). `Type=oneshot` has no
+  `Restart=`, so `NRestarts=0`. No `flex-pull` heartbeat (kill sat inside
+  ingest; prior row stayed 2026-09-12). IB unused; `/health/lite` stayed up.
+- **Detection:** `systemctl show radon-flex-pull.service -p
+  Result,NRestarts,ExecMainStartTimestamp,InactiveEnterTimestamp` →
+  `timeout` / `0` / span exactly `TimeoutStartSec`; journal shows
+  `[perf_twr] Wrote` then a second statement-shape WARN with no run-end
+  heartbeat; edge and `:8321/health/lite` up. `service_health.flex-pull`
+  may still be an older `error`/`ok` row.
+- **Discriminating check:** `Result=timeout` with ExecMainStart→Inactive
+  equal to `TimeoutStartSec` and mid-ingest journal (perf_twr / statement
+  shape) with no `[flex-pull]` terminal heartbeat. `Result=signal` is deploy
+  stop-clean (do not raise the budget). sFTP auth/host-key abort is
+  `Result=exit-code` with a health `error` row. If `/health/lite` is down
+  too → API, stand down.
+- **Remediation (code):** wall-clock `SWEEP_BUDGET_S=780` with newest-first
+  ordering so a budget stop still lands today's statement; SIGTERM→SystemExit
+  unwind heartbeats `class=timeout`. `TimeoutStartSec=900` covers the budget
+  plus one in-flight `INGEST_HEADROOM_S=90`. `FLEX_CLAIM_STALE_AFTER_S` raised
+  to 20 min so it stays above the start timeout and below the 07:30→08:30
+  gap. Do not restart-flap the hung run; the 08:30 ET timer retries. After
+  the fix deploys, `systemctl reset-failed radon-flex-pull.service` clears
+  the sticky timeout latch if the retry has not yet fired.
+- **Regression:**
+  `test_flex_pull_ingest_timeout.py::TestSweepBudget`,
+  `test_flex_pull_ingest_timeout.py::TestSigtermHeartbeat`,
+  `test_systemd_services.py::TestFlexPullScanBudget`.
+- **Code:** `scripts/flex_sftp_pull.py` (`SWEEP_BUDGET_S`, `order_for_ingest`,
+  `install_sigterm_unwind`), `cloud/services/radon-flex-pull.service`,
+  `scripts/db/writer.py` (`FLEX_CLAIM_STALE_AFTER_S`).
+
+---
+
 ## flex-1025-lockout
 
 **IBKR Flex code 1025 is a token lockout.** Routine ingest is sFTP

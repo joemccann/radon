@@ -651,11 +651,11 @@ def _journal_payload_with_compact_expiry(payload: dict[str, Any]) -> dict[str, A
 
 
 # A lease older than this is dead. `radon-flex-pull.service` bounds a run at
-# TimeoutStartSec=120 and the timer's closest two runs are 07:30 and 08:30, so
-# the window must sit between the two: long enough that no live run is ever
-# stolen from, short enough that the 08:30 re-pull repairs a 07:30 failure
-# instead of waiting a day. R-436.
-FLEX_CLAIM_STALE_AFTER_S = 15 * 60
+# TimeoutStartSec=900 and the timer's closest two runs are 07:30 and 08:30, so
+# the window must sit between the two: longer than TimeoutStartSec (no live run
+# is stolen), shorter than the 3600s timer gap (08:30 re-pull repairs a 07:30
+# failure instead of waiting a day). R-436; raised with the 2026-09-15 budget.
+FLEX_CLAIM_STALE_AFTER_S = 20 * 60
 
 
 def claim_flex_delivery(
