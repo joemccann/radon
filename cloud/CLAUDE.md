@@ -357,13 +357,14 @@ Immutable runners under `~/.radon-deploy-runners/` are extracted `a-w`.
 
 ## Systemd And Drift
 
-`setup-vps.sh` includes the `radon-aa-frontier-refresh`, `radon-ai-cycle-backfill`
-and `radon-ai-cycle` service/timer pairs in the full-host installation inventory.
-Setup installs all three pairs and enables only their timers; existing hosts receive
+`setup-vps.sh` includes the `radon-aa-frontier-refresh`, `radon-ai-cycle-backfill`,
+`radon-ai-cycle` and `radon-liquidcompute` service/timer pairs in the full-host
+installation inventory.
+Setup installs those pairs and enables only their timers; existing hosts receive
 them through the hash-pinned `install-units` path. Historical collection resumes
 at 05:30 UTC, the frontier timer updates the fixed Artificial Analysis cohort at
-07:00 UTC, and current collection runs at 07:15 UTC, each with up to five minutes
-of jitter. Provider credentials are optional source
+07:00 UTC, current collection runs at 07:15 UTC, and the Liquid Compute public
+GPU index ticker runs at 07:30 UTC, each with up to five minutes of jitter. Provider credentials are optional source
 entitlements; missing keys leave those measurements unavailable. Collection,
 reviewed disclosures and source limits are documented in
 [`docs/ai-infrastructure-operations.md`](../docs/ai-infrastructure-operations.md).

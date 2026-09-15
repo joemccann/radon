@@ -1,3 +1,26 @@
+# Task: Liquid Compute GPU index poller [DONE]
+
+Third-venue public ticker as host-tagged AI-infra series. Never splice onto
+gpurentalprices / Silicon Data / `gpu-rental`.
+
+## Dependency graph
+
+- T1 depends_on: [] - Parse/upsert/backoff contracts and live-shape fixture.
+- T2 depends_on: [T1] - Collector, host-tagged store, C5 snapshot surface.
+- T3 depends_on: [T2] - Daily timer, docs, focused tests, PR.
+
+## Checklist
+
+- [x] T1 Red contracts for parse, idempotent `(source, series_id, asOf)`, non-200 backoff.
+- [x] T2 Persist `liquidcompute` rows and C5 without mixing C1 / `gpu-aggregator`.
+- [x] T3 `radon-liquidcompute.timer` plus owner docs; PR open, not merged.
+
+## Review
+
+- [x] Third venue labeled opaque until licensed; rental book untouched.
+
+---
+
 # Task: Testing delta audit 2026-09-15 [IN PROGRESS]
 
 Audit `9b9a65c7..fe96fdac` for test-suite-health regressions only. Local full
