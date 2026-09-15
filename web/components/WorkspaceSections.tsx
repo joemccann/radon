@@ -4280,7 +4280,7 @@ function WorkspaceSections({ section, portfolio, orders, prices, depths, tape, t
       return <WatchlistContent prices={prices} portfolio={portfolio ?? null} orders={orders ?? null} />;
     case "ticker-detail":
       return tickerParam ? (
-        <TickerWorkspace ticker={tickerParam} theme={theme ?? "dark"} depths={depths} tape={tape} />
+        <TickerWorkspace ticker={tickerParam} theme={theme ?? "dark"} prices={prices} depths={depths} tape={tape} />
       ) : null;
     default:
       return <FlowSections tickerParam={tickerParam} />;

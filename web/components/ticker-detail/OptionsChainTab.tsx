@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type Ref } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Ref, type UIEvent } from "react";
 import { useSearchParams } from "next/navigation";
 import type { PriceData, OptionContract } from "@/lib/pricesProtocol";
 import { optionKey, normalizeOptionExpiry } from "@/lib/pricesProtocol";
@@ -44,6 +44,8 @@ import ComboSkewPanel from "@/components/ComboSkewPanel";
 import TicketRiskBlock from "@/components/ticker-detail/TicketRiskBlock";
 import { netPremiumForPayoff, payoffAtExpiry, payoffCurve } from "@/lib/order/payoff";
 import { placeOrderFeedback } from "@/lib/orders/placeOrderFeedback";
+import { useChainAnchor } from "@/lib/useChainAnchor";
+import ChainSpotBar from "@/components/ChainSpotBar";
 
 /* ─── Types ─── */
 
@@ -109,6 +111,7 @@ function StrikeRow({
   sideFilter,
   riskFreeRate,
   staged,
+  currentPrice,
 }: {
   ticker: string;
   expiry: string;
@@ -124,6 +127,7 @@ function StrikeRow({
   riskFreeRate: number;
   /** Which sides of THIS strike are staged in the ticket. */
   staged?: { call: boolean; put: boolean };
+  currentPrice: number | null;
 }) {
   const callData = prices[callKey] ?? null;
   const putData = prices[putKey] ?? null;
@@ -169,14 +173,14 @@ function StrikeRow({
 
   // Bidirectional reference: a leg staged in the ticket stays visible in the
   // chain row it came from, per side.
-  const callTint = staged?.call ? " chain-cell--staged-call" : "";
-  const putTint = staged?.put ? " chain-cell--staged-put" : "";
+  const callTint = staged?.call ? " chain-cell--staged-call" : currentPrice != null && strike < currentPrice ? " chain-cell--itm" : "";
+  const putTint = staged?.put ? " chain-cell--staged-put" : currentPrice != null && strike > currentPrice ? " chain-cell--itm" : "";
   const rowClass = `chain-row ${isAtm ? "chain-row-atm" : ""}`;
   const showCalls = sideFilter !== "puts";
   const showPuts = sideFilter !== "calls";
 
   return (
-    <tr className={rowClass} ref={atmRef}>
+    <tr className={rowClass} ref={atmRef} data-strike={strike}>
       {/* Call side */}
       {showCalls && (
         <>
@@ -1067,8 +1071,9 @@ export default function OptionsChainTab({
   const { isMobile, hasMounted } = useViewport();
   const showMobileChain = isMobile && hasMounted;
   const riskFreeRate = useRiskFreeRate();
-  const atmRef = useRef<HTMLTableRowElement>(null);
-  const wrapperRef = useRef<HTMLDivElement>(null);
+  const upperPaneRef = useRef<HTMLDivElement>(null);
+  const lowerPaneRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLDivElement>(null);
   const initialFocusAppliedRef = useRef(false);
   const appliedLegsParamRef = useRef<string | null>(null);
   const orderBuilderRef = useRef<HTMLDivElement>(null);
@@ -1302,7 +1307,8 @@ export default function OptionsChainTab({
   }, [ticker, tickerPriceData?.last]);
 
   // Determine ATM strike
-  const currentPrice = tickerPriceData?.last ?? prevClose ?? null;
+  const rawCurrentPrice = tickerPriceData?.last ?? prevClose ?? null;
+  const currentPrice = rawCurrentPrice != null && Number.isFinite(rawCurrentPrice) ? rawCurrentPrice : null;
   const priceIsClose = tickerPriceData?.last == null && prevClose != null;
   const atmStrike = useMemo(() => {
     if (currentPrice == null) return null;
@@ -1322,17 +1328,33 @@ export default function OptionsChainTab({
     ));
   }, [focusPosition, focusedExpiry, selectedExpiry, currentPrice]);
 
+  const focusKey = JSON.stringify([focusedExpiry, focusPosition?.legs.map(leg => [leg.strike, leg.type, leg.direction]) ?? []]);
+  const chainAnchor = useChainAnchor({
+    ticker,
+    expiry: selectedExpiry,
+    strikes,
+    currentPrice,
+    strikesPerSide,
+    focusKey,
+    focusStrike: focusedStrike,
+  });
+  const { anchorPrice, anchorStrike, revision: anchorRevision, markBrowsing, recenter } = chainAnchor;
+
   // Filter strikes around ATM
   const visibleStrikes = useMemo<ChainStrike[]>(() => {
     if (!selectedExpiry || strikes.length === 0) return [];
-    const anchorStrike = focusedStrike ?? atmStrike;
     const visible = getVisibleStrikes(strikes, anchorStrike, strikesPerSide);
     return visible.map((strike) => ({
       strike,
       callKey: optionKey({ symbol: ticker, expiry: selectedExpiry, strike, right: "C" }),
       putKey: optionKey({ symbol: ticker, expiry: selectedExpiry, strike, right: "P" }),
     }));
-  }, [ticker, selectedExpiry, strikes, focusedStrike, atmStrike, strikesPerSide]);
+  }, [ticker, selectedExpiry, strikes, anchorStrike, strikesPerSide]);
+
+  const upperStrikes = useMemo(() => visibleStrikes.filter(row => anchorPrice != null && row.strike < anchorPrice), [visibleStrikes, anchorPrice]);
+  const lowerStrikes = useMemo(() => visibleStrikes.filter(row => anchorPrice == null || row.strike >= anchorPrice), [visibleStrikes, anchorPrice]);
+  const spotMoved = anchorPrice != null && currentPrice != null
+    && strikes.findIndex(strike => strike >= anchorPrice) !== strikes.findIndex(strike => strike >= currentPrice);
 
   // Subscribe visible chain contracts for WS price streaming
   const { setChainContracts } = useTickerDetail();
@@ -1346,7 +1368,7 @@ export default function OptionsChainTab({
     const WS_CAP = 50;
     const strikesToStream =
       strikesPerSide === ALL_STRIKES
-        ? getVisibleStrikes(strikes, focusedStrike ?? atmStrike, WS_CAP)
+        ? getVisibleStrikes(strikes, anchorStrike, WS_CAP)
         : visibleStrikes.map((r) => r.strike);
     const streamSet = new Set(strikesToStream);
     const contracts: OptionContract[] = [];
@@ -1357,23 +1379,22 @@ export default function OptionsChainTab({
     }
     setChainContracts(contracts);
     return () => setChainContracts([]);
-  }, [ticker, selectedExpiry, visibleStrikes, strikesPerSide, strikes, focusedStrike, atmStrike, setChainContracts]);
+  }, [ticker, selectedExpiry, visibleStrikes, strikesPerSide, strikes, anchorStrike, setChainContracts]);
 
-  // Center the ATM row inside the chain wrapper only — scrollIntoView would
-  // also scroll page-level ancestors, dragging the Order Builder with it.
-  useEffect(() => {
-    const atmEl = atmRef.current;
-    const wrapper = wrapperRef.current;
-    if (!atmEl || !wrapper) return;
-    const wrapperRect = wrapper.getBoundingClientRect();
-    const atmRect = atmEl.getBoundingClientRect();
-    const target =
-      wrapper.scrollTop +
-      (atmRect.top - wrapperRect.top) +
-      atmRect.height / 2 -
-      wrapper.clientHeight / 2;
-    wrapper.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
-  }, [visibleStrikes]);
+  const panesReady = !loadingStrikes && !loadingExpiries && !showMobileChain;
+  const paneStrikesKey = visibleStrikes.map(row => row.strike).join(",");
+  useLayoutEffect(() => {
+    if (!panesReady) return;
+    if (upperPaneRef.current) upperPaneRef.current.scrollTop = upperPaneRef.current.scrollHeight;
+    if (lowerPaneRef.current) lowerPaneRef.current.scrollTop = 0;
+  }, [anchorRevision, panesReady, paneStrikesKey]);
+
+  const syncChainScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
+    const source = event.currentTarget;
+    for (const pane of [upperPaneRef.current, lowerPaneRef.current, headerRef.current]) {
+      if (pane && pane !== source && pane.scrollLeft !== source.scrollLeft) pane.scrollLeft = source.scrollLeft;
+    }
+  }, []);
 
   // Add leg from chain click
   const handleAddLeg = useCallback(
@@ -1479,6 +1500,11 @@ export default function OptionsChainTab({
         atmStrike={atmStrike}
         prices={prices}
         currentPrice={currentPrice}
+        anchorPrice={anchorPrice}
+        anchorRevision={anchorRevision}
+        onRecenter={recenter}
+        onBrowse={markBrowsing}
+        priceIsClose={priceIsClose}
         loading={loadingStrikes}
         sideFilter={sideFilter}
         onSideFilterChange={setSideFilter}
@@ -1537,11 +1563,6 @@ export default function OptionsChainTab({
             </option>
           ))}
         </select>
-        <span style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--text-secondary)" }}>
-          {currentPrice != null
-            ? `${priceIsClose ? "Prev Close" : "Underlying"}: ${fmtPrice(currentPrice)}`
-            : ""}
-        </span>
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px" }}>
           <div className="chain-side-toggle">
             {(["both", "calls", "puts"] as const).map((val) => (
@@ -1573,13 +1594,14 @@ export default function OptionsChainTab({
         </div>
       </div>
 
-      {loadingStrikes ? (
-        <div style={{ padding: "24px 0", textAlign: "center" }}>
-          <SpectralLoader label="Loading chain" />
-        </div>
-      ) : (
-        <div className="chain-grid-wrapper" ref={wrapperRef}>
-          <table className="chain-grid" data-sortable-exempt="chain-layout">
+        <div className="chain-grid-wrapper chain-anchor-panes" data-side={sideFilter}>
+          <div className="chain-anchor-header" ref={headerRef} onScroll={syncChainScroll}>
+          <table className="chain-grid" data-sortable-exempt="chain-layout" aria-label="Options chain columns">
+            <colgroup>
+              {sideFilter !== "puts" && Array.from({ length: 8 }, (_, index) => <col key={`call-${index}`} />)}
+              <col className="chain-anchor-strike-col" />
+              {sideFilter !== "calls" && Array.from({ length: 8 }, (_, index) => <col key={`put-${index}`} />)}
+            </colgroup>
             <thead>
               <tr>
                 {sideFilter !== "puts" && (
@@ -1618,8 +1640,42 @@ export default function OptionsChainTab({
                 {sideFilter !== "calls" && <th className="chain-side-label" colSpan={8}>PUTS</th>}
               </tr>
             </thead>
-            <tbody>
-              {visibleStrikes.map((row) => {
+          </table>
+          </div>
+          {(["upper", "lower"] as const).map((side) => (
+            <div className="chain-anchor-section" key={side}>
+              {side === "lower" && (
+                <ChainSpotBar
+                  ticker={ticker}
+                  currentPrice={currentPrice}
+                  anchorPrice={anchorPrice}
+                  priceIsClose={priceIsClose}
+                  spotMoved={spotMoved}
+                  onRecenter={recenter}
+                />
+              )}
+              <div
+                ref={side === "upper" ? upperPaneRef : lowerPaneRef}
+                className={`chain-anchor-pane chain-anchor-pane--${side}`}
+                data-testid={`chain-${side}-pane`}
+                role="region"
+                aria-label={side === "upper" ? "Lower strikes" : "Higher strikes"}
+                tabIndex={0}
+                onScroll={syncChainScroll}
+                onPointerDown={markBrowsing}
+                onWheel={markBrowsing}
+                onTouchStart={markBrowsing}
+                onKeyDown={markBrowsing}
+              >
+                {loadingStrikes ? <div className="chain-anchor-empty"><SpectralLoader label="Loading chain" /></div> : (
+                  <table className="chain-grid" data-sortable-exempt="chain-layout" aria-label={`${side === "upper" ? "Lower" : "Higher"} strikes, calls and puts`}>
+                    <colgroup>
+                      {sideFilter !== "puts" && Array.from({ length: 8 }, (_, index) => <col key={`call-${index}`} />)}
+                      <col className="chain-anchor-strike-col" />
+                      {sideFilter !== "calls" && Array.from({ length: 8 }, (_, index) => <col key={`put-${index}`} />)}
+                    </colgroup>
+                    <tbody>
+              {(side === "upper" ? upperStrikes : lowerStrikes).map((row) => {
                 const isAtm = row.strike === atmStrike;
                 return (
                   <StrikeRow
@@ -1633,17 +1689,23 @@ export default function OptionsChainTab({
                     isAtm={isAtm}
                     onClickCall={handleCallClick}
                     onClickPut={handlePutClick}
-                    atmRef={isAtm ? atmRef : undefined}
                     sideFilter={sideFilter}
                     riskFreeRate={riskFreeRate}
                     staged={stagedSides.get(row.strike)}
+                    currentPrice={currentPrice}
                   />
                 );
               })}
-            </tbody>
-          </table>
+                    </tbody>
+                  </table>
+                )}
+                {!loadingStrikes && (side === "upper" ? upperStrikes : lowerStrikes).length === 0 && (
+                  <div className="chain-anchor-empty">No listed strikes in this range.</div>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
-      )}
 
       {orderLegs.length > 0 && (
         <div className="chain-rail-hint">
