@@ -24,7 +24,7 @@
   },
   "dependencies": {
     "@clerk/nextjs": "^7.5.9",
-    "@clerk/themes": "^2.4.57",
+    "@clerk/themes": "^2.4.63",
     "@fontsource/ibm-plex-mono": "^5.2.7",
     "@libsql/client": "^0.17.3",
     "@sinclair/typebox": "0.34.48",
