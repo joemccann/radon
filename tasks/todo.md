@@ -7092,3 +7092,45 @@ counts or green result are claimed.
 
 - Detached closing stage prewrote nine result slots but stopped in `pytest_1`
   without a `DONE` sentinel; no gate count is claimed and the phase is incomplete.
+# Task: CI performance remediate 2026-09-15 [IN PROGRESS]
+
+Reduced capability rung (`RADON_WEEKEND_REDUCED=1`): remediate every verified
+P0/P1 audit finding; retain no-source-actionable verdict only after serial
+safety-gate verification.
+
+## Dependency graph
+
+- T1 depends_on: [] - Re-verify the dated audit branch, runner lock, reduced scope, and CIP eligibility.
+- T2 depends_on: [T1] - Re-run the focused safety contracts and serial baseline gates.
+- T3 depends_on: [T2] - Append the remediation verdict, commit, and push the dated branch.
+
+## Checklist
+
+- [x] T1 Audit has zero P0/P1 source-actionable findings; no lower-priority substitute is allowed.
+- [x] T2 Focused safety contracts green; detached serial baseline has no DONE sentinel and is not counted.
+- [x] T3 Append remediation evidence, commit, and push.
+
+## Review
+
+- [x] No workflow, test, deployment, image, or trading-state change without an eligible audit finding.
+
+# Task: CI performance audit 2026-09-15 [IN PROGRESS]
+
+Audit `9b9a65c7..origin/main` against organic GitHub Actions production runs;
+append evidence only and preserve every gate and deploy rail.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify dedicated runner, exclusive lock, dated branch, ledger anchor, GitHub access, and protection closure.
+- T2 depends_on: [T1] - Measure relevant runs, reconstruct critical paths, and sweep workflow/deploy invariants.
+- T3 depends_on: [T2] - Append audit evidence, verify contracts, commit/push, and publish the dated audit PR and rolling issue report.
+
+## Checklist
+
+- [x] T1 Dedicated markers, stale-lock preservation, dated branch, GitHub auth, and origin/main verified.
+- [x] T2 Classified recent runs, reconstructed representative paths, and swept safety closure.
+- [x] T3 Audit ledger, safety contracts, commit/push, PR, and rolling issue report published.
+
+## Review
+
+- [x] Audit-only; no production or trading-system operation.
