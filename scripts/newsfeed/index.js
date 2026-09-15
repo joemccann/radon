@@ -26,8 +26,8 @@ import { runScrapeCycle } from "./cycle.js";
 import { createDeliveryState } from "./deliveryState.js";
 
 // Concurrently spawns this process without env inheritance from `next dev`,
-// so neither CEREBRAS_API_KEY nor ANTHROPIC_API_KEY are present. Load web/.env
-// (and root .env for completeness) up-front so both taggers can construct.
+// so model-ladder keys are absent. Load web/.env and root .env up-front so
+// the text tagger CLI and the vision tagger can construct.
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, "../../.env") });

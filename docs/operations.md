@@ -10,7 +10,7 @@ Live-trading operational concerns: IB Gateway connection modes, background servi
 ANTHROPIC_API_KEY=
 UW_TOKEN=
 EXA_API_KEY=
-CEREBRAS_API_KEY=                       # optional, newsfeed text tagger
+CEREBRAS_API_KEY=                       # optional, last-rung model ladder
 
 # Clerk authentication
 # MFA is scoped to the operator account (Clerk policy "optional" + operator has TOTP enrolled),
@@ -130,7 +130,7 @@ then verify with `id -nG radon` (no `docker` in the output).
 **Newsfeed least privilege.** `radon-newsfeed.service` runs a
 sandbox-disabled Chromium against third-party web content, so
 `radon-app-runtime` hands it a filtered env file — only the keys the
-newsfeed code reads (`NODE_ENV`, `ANTHROPIC_API_KEY`, `CEREBRAS_API_KEY`,
+newsfeed code reads (`NODE_ENV`, model-ladder keys including `ANTHROPIC_API_KEY` and `CEREBRAS_API_KEY` last,
 Turso, media, `PLAYWRIGHT_CHROMIUM_SANDBOX`, replica toggles, and
 `RADON_NEWSFEED_*`), never the full production secret set — and starts its
 container on an isolated bridge network (egress only) instead of the host
