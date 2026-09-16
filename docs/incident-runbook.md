@@ -1824,6 +1824,49 @@ on the Tue..Sat 07:30 ET fire.** Peak: 2026-09-15 11:35Z, page `68388b70…`.
 
 ---
 
+## flex-pull-twr-degraded-exit
+
+**`radon-flex-pull.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
+on the Tue..Sat 07:30 ET fire after today's Activity statement is applied.**
+Peak: 2026-09-16 11:35Z, page `5a2eb828…`.
+
+- **Mechanism:** newest-first ingest of `Equity_Summary_in_Base.20260915`
+  ran `cash_flow_sync --from-file` (exit 0) then
+  `perf_twr_builder.build_and_persist`. TWR persisted and returned
+  `status=degraded`. `ingest_xml` treated any TWR status other than
+  `ok`/`stale` as `ok: False`, released the claim, and
+  `flex_sftp_pull` raised `ingest_failed`. IBKR then RST'd kex on older
+  `outgoing` files (`sftp_get_failed` / `Connection reset by peer`);
+  any file error fails the oneshot. `Type=oneshot` has no `Restart=`,
+  so `NRestarts=0`. `radon-perf-twr` published `status=ok` three
+  minutes later. Edge and `:8321/health/lite` stayed up.
+- **Detection:** journal `[flex-pull] … ingest_failed:{… 'cash_exit': 0,
+  'twr_status': 'degraded' …}` then `sftp_get_failed` /
+  `kex_exchange_identification`; `systemctl show` → `exit-code` / `0`;
+  ExecMainStart→Inactive ~2 min, not `TimeoutStartSec`.
+- **Discriminating check:** `cash_exit=0` with `twr_status=degraded`
+  (this case). `Result=timeout` with no terminal heartbeat is
+  `flex-pull-ingest-timeout`. Host-key / auth abort is still
+  `Result=exit-code` with no ingest. If `/health/lite` is down too →
+  API, stand down.
+- **Remediation (code):** activity ingest is `ok` after cash exit 0;
+  TWR status is reported, not a delivery failure (REL-220; TWR
+  exceptions still release the claim). Transient `sftp_get_failed`
+  (kex RST / connection reset / timed out) after at least one file
+  was processed does not fail the oneshot. Newest-file RST still
+  fails. Do not restart-flap; the 08:30 ET timer retries. After
+  deploy, `systemctl reset-failed radon-flex-pull.service` if the
+  retry has not yet fired.
+- **Regression:**
+  `test_flex_delivery_ingest_atomicity.py::TestActivityShortCircuit::test_degraded_twr_after_cash_success_still_applies_the_claim`,
+  `test_flex_sftp_pull.py::test_historical_sftp_rst_after_newest_ingest_does_not_fail_the_oneshot`,
+  `test_flex_sftp_pull.py::test_historical_sftp_rst_after_duplicate_newest_does_not_fail_the_oneshot`,
+  `test_flex_sftp_pull.py::test_sftp_rst_on_the_newest_statement_still_fails_the_oneshot`.
+- **Code:** `scripts/flex_delivery_ingest.py` (`_apply_classified`),
+  `scripts/flex_sftp_pull.py` (`_is_transient_sftp_get`).
+
+---
+
 ## flex-1025-lockout
 
 **IBKR Flex code 1025 is a token lockout.** Routine ingest is sFTP
