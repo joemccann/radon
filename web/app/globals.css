@@ -13443,7 +13443,7 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
  */
 .order-builder-leg {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px 8px;
   padding: 4px 6px;
@@ -13487,15 +13487,12 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
   background: color-mix(in srgb, var(--negative) 8%, transparent);
 }
 
+/* The 384px docked rail used to shrink this first; strike and right must stay. */
 .order-builder-leg-contract {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-primary);
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: 11rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex: 0 0 auto;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
@@ -13715,13 +13712,8 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
     max-width: 100%;
   }
   .order-builder-leg {
-    flex-wrap: wrap;
     width: 100%;
     row-gap: 4px;
-  }
-  .order-builder-leg-contract {
-    max-width: none;
-    flex: 1 1 auto;
   }
   .order-builder .short-strangle-skew__grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
