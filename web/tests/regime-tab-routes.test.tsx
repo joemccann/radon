@@ -73,6 +73,7 @@ describe.each([
   ["trin", "app/regime/trin/page.tsx"],
   ["divyield", "app/regime/divyield/page.tsx"],
   ["ma-ratio", "app/regime/ma-ratio/page.tsx"],
+  ["calm-streak", "app/regime/calm-streak/page.tsx"],
   ["hyad", "app/regime/hyad/page.tsx"],
   ["hhlev", "app/regime/hhlev/page.tsx"],
   ["cot", "app/regime/cot/page.tsx"],
@@ -159,6 +160,9 @@ vi.mock("../components/DivYieldPanel", () => ({
 }));
 vi.mock("../components/MaRatioPanel", () => ({
   default: () => <div data-testid="ma-ratio-panel-stub" />,
+}));
+vi.mock("../components/CalmStreakPanel", () => ({
+  default: () => <div data-testid="calm-streak-panel-stub" />,
 }));
 vi.mock("../components/HyAdPanel", () => ({
   default: () => <div data-testid="hyad-panel-stub" />,
@@ -450,6 +454,20 @@ describe("RegimePanel — tab is URL-driven", () => {
     const { container } = render(<RegimePanel prices={{}} />);
     within(container).getByRole("button", { name: /^MA RATIO$/ }).click();
     expect(pushSpy).toHaveBeenCalledWith("/regime/ma-ratio");
+  });
+
+  it("renders the CALM STREAK panel when pathname is /regime/calm-streak", () => {
+    mockedPathname = "/regime/calm-streak";
+    const { container } = render(<RegimePanel prices={{}} />);
+    expect(within(container).getByTestId("calm-streak-panel-stub")).toBeTruthy();
+    expect(within(container).queryByTestId("ma-ratio-panel-stub")).toBeNull();
+  });
+
+  it("clicking CALM STREAK tab pushes /regime/calm-streak", () => {
+    mockedPathname = "/regime/cri";
+    const { container } = render(<RegimePanel prices={{}} />);
+    within(container).getByRole("button", { name: /^CALM STREAK$/ }).click();
+    expect(pushSpy).toHaveBeenCalledWith("/regime/calm-streak");
   });
 
   it("renders the HY AD panel when pathname is /regime/hyad", () => {

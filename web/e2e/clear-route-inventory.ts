@@ -10,7 +10,7 @@ export type ClearRouteCase = {
 };
 
 const regimePages = [
-  "ats", "backtest", "bpi", "breadth", "cor", "cot", "credit", "cri",
+  "ats", "backtest", "bpi", "breadth", "calm-streak", "cor", "cot", "credit", "cri",
   "curve", "dispersion", "divyield", "gex", "grg", "hhlev", "hyad", "iei-hyg",
   "iv-spread", "ivrank", "llm", "ma-ratio", "margin", "short", "skew", "skew2d",
   "straddle", "streaks", "trin", "vcg", "vixcor", "vixts",
@@ -18,7 +18,7 @@ const regimePages = [
 
 const regimeLoaded: Record<string, string> = {
   ats: '[data-testid="ats-venue-share-table"]', backtest: ".backtest-chart", bpi: '[data-testid="bpi-chart-section"]', breadth: '[data-testid="breadth-history-chart-section"]',
-  cor: '[data-testid="cor-chart-section"]', cot: '[data-testid="cot-chart-section"]', credit: '[data-testid="credit-spread-chart-section"]', cri: ".regime-hero, .m-regime-headline",
+  "calm-streak": '[data-testid="calm-streak-chart-section"]', cor: '[data-testid="cor-chart-section"]', cot: '[data-testid="cot-chart-section"]', credit: '[data-testid="credit-spread-chart-section"]', cri: ".regime-hero, .m-regime-headline",
   curve: '[data-testid="yield-curve-chart-section"]', dispersion: '[data-testid="dispersion-chart-section"]', divyield: '[data-testid="divyield-chart-section"]',
   gex: '[data-testid="gex-laplace-chart"]', grg: '[data-testid="grg-chart"]', hhlev: '[data-testid="hhlev-chart-section"]', hyad: '[data-testid="hyad-chart-section"]',
   "iei-hyg": '[data-testid="iei-hyg-chart-section"]', "iv-spread": '[data-testid="iv-spread-chart-section"]', ivrank: '[data-testid="ivrank-chart-section"]',

@@ -189,6 +189,10 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # window: no weekend/holiday gap to widen for. Shared price_history_daily
     # member closes (Yahoo sweep) + Turso — no IB dependency.
     "ma-ratio":         {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+    # calm-streak — radon-calm-streak.timer, daily 02:40 + 14:30 UTC every
+    # calendar day (304 runs heartbeat). Uniform 26h window. Cboe official
+    # SPX daily OHLC — no IB dependency.
+    "calm-streak":      {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     # credit-spread — radon-credit-spread.timer, daily 21:45 UTC every calendar
     # day (weekend/holiday runs heartbeat with no new rows). Uniform
     # 26h window: no weekend/holiday gap to widen for. IB HYG + SPX first,
@@ -558,6 +562,9 @@ BUCKETS: dict[str, list[str]] = {
         # Daily 22:45 UTC SPX 50d/200d MA breadth-ratio sweep — hourly check
         # surfaces a missed run within 1h of the 26h window expiring.
         "ma-ratio",
+        # Daily 02:40 + 14:30 UTC Cboe SPX intraday-band streak pull — hourly
+        # check surfaces a missed run within 1h of the 26h window expiring.
+        "calm-streak",
         # Tue..Sat 11:00 UTC FINRA HY bond breadth pull — hourly check
         # surfaces a missed run within 1h of the 120h window expiring.
         "hy-ad",
