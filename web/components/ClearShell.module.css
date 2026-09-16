@@ -153,8 +153,8 @@
   }
   .workspace:has(:global(.chain-first-cockpit)) .telemetryTrigger:hover,
   .workspace:has(:global(.chain-first-cockpit)) .telemetryTrigger[aria-expanded="true"] { background: var(--bg-hover); }
-  .workspace:has(:global(.chain-first-cockpit)) .telemetryTrigger[data-integrity="warn"] { color: var(--warn-text); }
-  .workspace:has(:global(.chain-first-cockpit)) .telemetryTrigger[data-integrity="dead"] { color: var(--fault); }
+  .workspace:has(:global(.chain-first-cockpit)) .telemetryTrigger[data-feed-integrity="warn"] { color: var(--warn-text); }
+  .workspace:has(:global(.chain-first-cockpit)) .telemetryTrigger[data-feed-integrity="dead"] { color: var(--fault); }
   .workspace:has(:global(.chain-first-cockpit)) .telemetryTrigger:focus-visible {
     outline: 2px solid var(--signal-core);
     outline-offset: -2px;

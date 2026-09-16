@@ -209,7 +209,7 @@ export default function Header({
           aria-label={`Feed & sync: ${integrity.text}${isStale ? ", stale snapshot" : ""}`}
           title="Feed, freshness and sync"
           data-testid="chain-feed-trigger"
-          data-integrity={isStale ? "warn" : integrity.cls}
+          data-feed-integrity={isStale ? "warn" : integrity.cls}
           onClick={() => setTelemetryOpen((open) => !open)}
         >
           <span className={`rail-integrity-dot rail-integrity-dot-${isStale ? "warn" : integrity.cls}`} aria-hidden />
