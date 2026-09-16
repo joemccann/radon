@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-09-16T17:51:43Z",
-  "node_count": 3336,
-  "edge_count": 6769,
+  "generated_at": "2026-09-16T18:24:01Z",
+  "node_count": 3337,
+  "edge_count": 6770,
   "areas": {
     "web": 1966,
     "site": 155,
-    "scripts": 1102,
+    "scripts": 1103,
     "cloud": 66,
     "lib": 28,
     "tests": 17,
@@ -195,7 +195,7 @@
     {
       "id": "scripts/tests",
       "area": "scripts",
-      "count": 548
+      "count": 549
     },
     {
       "id": "scripts/trade_blotter",

@@ -561,6 +561,48 @@ def _split_stacked_verticals(legs: list) -> list:
     return pairs
 
 
+def _split_stacked_risk_reversals(legs: list) -> list:
+    """Split two calls + two puts into two independent risk reversals.
+
+    Applies when every call carries one sign and every put the opposite sign
+    (bullish: long calls / short puts, bearish: long puts / short calls). Each
+    call is paired with the put whose contract count matches it; the pairing
+    with the most size-matched pairs wins, and a tie (all four legs the same
+    size) or no match at all returns the group whole so nothing is guessed.
+    """
+    if len(legs) != 4 or any(l['secType'] != 'OPT' for l in legs):
+        return [legs]
+    calls = [l for l in legs if l.get('right') == 'C']
+    puts = [l for l in legs if l.get('right') == 'P']
+    if len(calls) != 2 or len(puts) != 2:
+        return [legs]
+    call_sign = {l['position'] > 0 for l in calls}
+    put_sign = {l['position'] > 0 for l in puts}
+    if len(call_sign) != 1 or len(put_sign) != 1 or call_sign == put_sign:
+        return [legs]
+
+    def _size_matches(pairing):
+        return sum(abs(c['position']) == abs(p['position']) for c, p in pairing)
+
+    pairings = [
+        [(calls[0], puts[0]), (calls[1], puts[1])],
+        [(calls[0], puts[1]), (calls[1], puts[0])],
+    ]
+    scores = [_size_matches(pairing) for pairing in pairings]
+    best = max(scores)
+    if best == 0 or scores.count(best) != 1:
+        return [legs]
+    return [list(pair) for pair in pairings[scores.index(best)]]
+
+
+def _split_stacked_structures(legs: list) -> list:
+    """Break a same-expiry group into the independent structures it stacks."""
+    parts = _split_stacked_verticals(legs)
+    if len(parts) > 1:
+        return parts
+    return _split_stacked_risk_reversals(legs)
+
+
 def _position_basis_source(formatted_legs: list) -> Optional[str]:
     """`session_fills` only when EVERY leg is; `mixed` when they disagree."""
     if not formatted_legs:
@@ -596,7 +638,7 @@ def collapse_positions(positions: list) -> list:
     position_id = 1
 
     split_groups = [
-        (key, part) for key, legs in groups.items() for part in _split_stacked_verticals(legs)
+        (key, part) for key, legs in groups.items() for part in _split_stacked_structures(legs)
     ]
 
     for (account_id, symbol, expiry), legs in split_groups:
