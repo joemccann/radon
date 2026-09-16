@@ -1,3 +1,21 @@
+# Task: Contextual browser tab titles 2026-09-16 [IN PROGRESS]
+
+Tabs currently all read "Radon Terminal". Every App Router page must export
+a page-first title (`Orders · Radon`, `Positions · Radon`) so truncated tabs
+stay distinct.
+
+## Dependency graph
+
+- T1 depends_on: [] - Title helper + failing contract that every page.tsx sets metadata
+- T2 depends_on: [T1] - Root title template and routeMetadata/generateMetadata on every page
+- T3 depends_on: [T2] - Focused Vitest green, PR, exact-head CI, Pushover. Do not merge.
+
+## Checklist
+
+- [x] T1 Red contract for missing per-page titles
+- [x] T2 Template `%s · Radon`; static, ticker, regime, options, scanner titles
+- [ ] T3 Focused tests, PR, CI green, Pushover
+
 # Task: Order ticket shows full option contract 2026-09-16 [IN PROGRESS]
 
 Docked 384px ticket ellipsizes `1x $strike Call` to `1x...`. The strike and
@@ -7300,6 +7318,15 @@ Dependency graph: T1 -> {T2,T3,T4} -> T5 -> T6.
 - [ ] T6 depends_on: [T5] Commit, create PR, follow every applicable CI check on exact head through green and deliver Pushover notification.
 
 Review: desktop Position, News and Book & trade visually verified at 1440x800 and 1280x720 in both themes; mobile Position/News verified at 393x852 in both themes. Persistent 208px sidebar, 48px header, 56px view toolbar and internal content scrolling; no document horizontal overflow. TypeScript and focused ESLint pass; codemap regenerated. Added 8 cross-view browser cases, active-navigation unit coverage and CI screenshot artifacts. No local test suites; GitHub runners execute suites. Browser verification uses isolated API/socket fixtures and never submits live orders. Exact-head CI and Pushover pending PR creation.
+
+## Resolve and merge PR466 (2026-09-16)
+Dependency graph: T1 -> {T2,T3} -> T4 -> T5.
+- [x] T1 depends_on: [] Inspect PR and isolate head from unrelated local edits.
+- [x] T2 depends_on: [T1] Merge current main and resolve conflicts preserving page-title behavior and current base changes.
+- [x] T3 depends_on: [T1] Review title contract/integration risks and applicable validation.
+- [ ] T4 depends_on: [T2,T3] Push resolution, verify all applicable CI on exact head green, send Pushover.
+- [ ] T5 depends_on: [T4] Merge the verified head and confirm merged state.
+Review: resolved tasks/todo conflicts by retaining both task records; retained main generated code maps under nightly ownership. Page-title route metadata preserved; added own-key registry and matching Options symbol validation with focused regressions. TypeScript passed before final helper hardening; commit hooks recheck final source. Suites execute only on GitHub. Exact-head CI and merge pending.
 
 ## Performance TWR regression (2026-09-16)
 

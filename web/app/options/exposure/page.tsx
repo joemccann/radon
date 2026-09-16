@@ -1,4 +1,7 @@
 import { redirect } from "next/navigation";
+import { routeMetadata } from "@/lib/pageTitle";
+
+export const metadata = routeMetadata("/options/exposure");
 
 export const dynamic = "force-dynamic";
 
