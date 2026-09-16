@@ -7267,3 +7267,17 @@ Implementation B rendered with isolated broker/API fixtures. Browser geometry: 1
 PR: https://github.com/joemccann/radon/pull/463. Initial head b04ff560 passed all 8 Vitest shards and all Python shards; browser checks still running. Additional direct browser review verified separate underlying120.00/held spread0.85, fixed the feed disclosure stacking above the chain, and added pointer hit-testing plus Sync actionability to browser coverage.
 
 Initial browser run:114 passed, including all8 new chain cases. Demo assertion exposed duplicate canonical data-integrity markers on the new hidden disclosure trigger; use a disclosure-specific data-feed-integrity attribute so the existing demo regression remains unchanged. Latest exact-head verification continues in PR463.
+
+## Consistent instrument workspace (2026-09-16)
+
+Extend selected Chain-first B across the same instrument's Position, News, Ratings, Seasonality, Company, 13F, Filings, Commands and Book & trade. Keep the 48px global bar, persistent instrument context, full remaining desktop canvas and clear active navigation. Preserve mobile, calculations, quote provenance, order-risk gates and URL/keyboard navigation.
+
+Dependency graph: T1 -> {T2,T3,T4} -> T5 -> T6.
+- [x] T1 depends_on: [] Inspect merged B, instructions and codemap; isolate branch from unrelated work.
+- [x] T2 depends_on: [T1] Generalize persistent desktop sidebar, active navigation and compact shell across instrument views.
+- [x] T3 depends_on: [T1] Extend full-height main canvas and consistent deck toolbar/content spacing; retain usable Book & trade and mobile.
+- [x] T4 depends_on: [T1] Add cross-view navigation/layout regressions and preserve existing chain, demo and order coverage. Eight isolated Playwright cases cover both themes, two laptop sizes, mobile, signed held spread quotes, actual position risk review, every reference deck, news empty/error/recovery, and persistent canvas geometry. CI selection and screenshot artifacts updated; syntax inspection passes, execution remains on GitHub runners.
+- [x] T5 depends_on: [T2,T3,T4] Visually verify representative real rendered views in both themes, laptop and mobile; static checks and generated codemap.
+- [ ] T6 depends_on: [T5] Commit, create PR, follow every applicable CI check on exact head through green and deliver Pushover notification.
+
+Review: desktop Position, News and Book & trade visually verified at 1440x800 and 1280x720 in both themes; mobile Position/News verified at 393x852 in both themes. Persistent 208px sidebar, 48px header, 56px view toolbar and internal content scrolling; no document horizontal overflow. TypeScript and focused ESLint pass; codemap regenerated. Added 8 cross-view browser cases, active-navigation unit coverage and CI screenshot artifacts. No local test suites; GitHub runners execute suites. Browser verification uses isolated API/socket fixtures and never submits live orders. Exact-head CI and Pushover pending PR creation.

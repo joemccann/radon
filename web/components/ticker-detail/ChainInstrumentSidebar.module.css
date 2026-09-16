@@ -5,7 +5,7 @@
   .workspace:global(.cockpit) {
     grid-template-columns: 208px minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr);
-    grid-template-areas: "instrument chain";
+    grid-template-areas: "instrument view";
     height: 100%;
     min-width: 0;
     overflow: hidden;
@@ -14,15 +14,53 @@
   .workspace > :global(.book-region),
   .workspace > :global(.act-region),
   .workspace > :global(.glyph-rail) { display: none; }
-  .workspace > :global(.asset-deck--wide) {
-    grid-area: chain;
+  .workspace > :global(.asset-deck) {
+    grid-area: view;
     min-width: 0;
     min-height: 0;
     border: 0;
     box-shadow: none;
+    background: var(--bg-base);
   }
-  .workspace :global(.asset-deck-hd) { display: none; }
-  .workspace :global(.asset-deck-body) { padding: 0; overflow: hidden; display: flex; min-width: 0; }
+  .workspace :global(.asset-deck-hd) {
+    flex: none;
+    height: 56px;
+    padding: 0 20px;
+    background: var(--bg-base);
+    border-bottom: 1px solid var(--border-dim);
+    color: var(--text-primary);
+    font: 600 14px var(--font-sans);
+    letter-spacing: 0;
+    text-transform: none;
+  }
+  .workspace :global(.asset-deck-x) {
+    min-width: 44px;
+    min-height: 36px;
+    border-radius: 6px;
+    font: 400 12px var(--font-sans);
+    letter-spacing: 0;
+  }
+  .workspace :global(.asset-deck-x):hover { background: var(--bg-hover); }
+  .workspace :global(.asset-deck-x):focus-visible { outline: 2px solid var(--signal-core); outline-offset: -2px; }
+  .workspace :global(.asset-deck-body) {
+    min-width: 0;
+    padding: 20px;
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+  .workspace[data-active-deck="c"] :global(.asset-deck-hd) { display: none; }
+  .workspace[data-active-deck="c"] :global(.asset-deck-body) { padding: 0; overflow: hidden; display: flex; }
+  /* The book keeps its focused quote strip and live order ticket. Switching
+     to a reference view uses the same sidebar and the whole content canvas. */
+  .workspace[data-active-deck="book"] {
+    grid-template-columns: 208px minmax(0, 1fr) 360px;
+    grid-template-rows: 40px minmax(0, 1fr);
+    grid-template-areas: "instrument head head" "instrument book act";
+  }
+  .workspace[data-active-deck="book"] > :global(.cockpit-head) { display: flex; gap: 12px; background: var(--bg-base); }
+  .workspace[data-active-deck="book"] > :global(.book-region),
+  .workspace[data-active-deck="book"] > :global(.act-region) { display: flex; }
+  .workspace[data-active-deck="book"] > :global(.asset-deck) { display: none; }
   .sidebar {
     grid-area: instrument;
     display: flex;
@@ -54,7 +92,7 @@
   }
   .navigation button svg, .bookLink svg, .more summary svg { flex: none; stroke-width: 1.5px; }
   .navigation button:hover, .more summary:hover, .bookLink:hover { background: var(--bg-hover); color: var(--text-primary); }
-  .navigation button[aria-current="page"] { background: color-mix(in srgb, var(--signal-core) 10%, transparent); color: var(--signal-core-text); font-weight: 600; }
+  .navigation button[aria-current="page"], .more summary[data-active="true"], .bookLink[aria-current="page"] { background: color-mix(in srgb, var(--signal-core) 10%, transparent); color: var(--signal-core-text); font-weight: 600; }
   .navigation kbd, .bookLink span { margin-left: auto; color: var(--text-muted); font: 12px var(--font-mono); }
   .more summary { list-style: none; }
   .more summary::-webkit-details-marker { display: none; }
@@ -70,6 +108,13 @@
 }
 @media (min-width: 1024px) and (max-width: 1250px) {
   .workspace:global(.cockpit) { grid-template-columns: 192px minmax(0, 1fr); }
+  .workspace[data-active-deck="book"] { grid-template-columns: 192px minmax(0, 1fr) 340px; }
+  .workspace[data-active-deck="book"] :global(.cockpit-head) { gap: 8px; }
+  .workspace[data-active-deck="book"] :global(.book-body-grid) { display: flex; flex-direction: column; }
+  .workspace[data-active-deck="book"] :global(.book-montage) { flex: 1 1 60%; border-right: 0; border-bottom: 1px solid var(--border-dim); }
+  .workspace[data-active-deck="book"] :global(.book-tape-cell) { flex: 1 1 40%; min-height: 0; }
+  .workspace[data-active-deck="book"] :global(.tape-hidden .book-tape-cell) { display: none; }
+  .workspace[data-active-deck="book"] :global(.tape-hidden .book-montage) { flex-basis: 100%; border-bottom: 0; }
   .sidebar { padding-inline: 12px; }
 }
 @media (min-width: 1024px) and (pointer: coarse) {
