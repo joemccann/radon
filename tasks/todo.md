@@ -7245,3 +7245,21 @@ append evidence only and preserve every gate and deploy rail.
 ## Review
 
 - [x] Audit-only; no production or trading-system operation.
+
+## Chain-first desktop implementation B (2026-09-16)
+
+User selected B and authorized implementation, PR, and CI verification. Work isolated from unrelated edits in /private/tmp/radon-chain-first-20260916.
+
+Dependency graph: T1 -> {T2, T3, T4} -> T5 -> T6.
+
+- [x] T1 depends_on: [] Inspect selected prototype, current source, instructions, and establish isolated branch.
+- [x] T2 depends_on: [T1] Compact desktop shell to 48px and retain search, navigation, theme, freshness and sync.
+- [x] T3 depends_on: [T1] Implement instrument sidebar and viewport-filling chain with readable 40px rows, compact toolbar, preserved builder and mobile.
+- [x] T4 depends_on: [T1] Add focused behavior/layout regression coverage for density, navigation, builder and responsive themes.
+- [x] T5 depends_on: [T2, T3, T4] Visually inspect real rendered application; inspect changes and regenerate codemap. No local test suites.
+- [ ] T6 depends_on: [T5] Commit, create PR, watch all applicable GitHub checks on exact head until green, send required Pushover notification.
+
+Acceptance: at least 12 full strike rows at 1280x720 and 14 at 1440x800 without a staged ticket; no document horizontal overflow; underlying and held spread quotes remain distinct; expiry, side, strike, recenter and instrument navigation work; staged ticket remains usable; mobile and both themes preserved.
+
+### Review
+Implementation B rendered with isolated broker/API fixtures. Browser geometry: 14 complete strikes at1440×800,12 at1280×720,first quotes y156,40px rows; no document horizontal overflow at1440,1280,1024 or393px. Staged ticket and mobile visually inspected; light/dark captures recorded locally. TypeScript and focused ESLint static checks pass. Added 8 browser cases and 8 sidebar unit regressions; execution pending GitHub CI. No local test suites run.

@@ -15,6 +15,8 @@ import ActHeldSummary from "./ActHeldSummary";
 import CockpitHeader from "./CockpitHeader";
 import GlyphRail from "./GlyphRail";
 import AssetDeck from "./AssetDeck";
+import ChainInstrumentSidebar, { type HeldChainQuote } from "./ChainInstrumentSidebar";
+import chainStyles from "./ChainInstrumentSidebar.module.css";
 
 /** Deck keys map 1:1 to the glyph rail + URL deck param.
  *  `:` (command palette) and `o` (order ticket) are local-only — not in
@@ -36,6 +38,7 @@ export type AssetCockpitProps = {
   bookPriceData?: PriceData | null;
   /** Depth-NBBO-corrected quote; single source for the header scalars. */
   quotePriceData: PriceData | null;
+  heldQuote?: HeldChainQuote;
   /** Resolved option/underlying price data threaded to the ticket + book. */
   priceData: PriceData | null;
   isSpreadNet?: boolean;
@@ -94,6 +97,7 @@ export default function AssetCockpit({
   bookKind,
   bookPriceData,
   quotePriceData,
+  heldQuote,
   priceData,
   isSpreadNet,
   tickerOrders,
@@ -134,7 +138,16 @@ export default function AssetCockpit({
   };
 
   return (
-    <div className={`cockpit cockpit-host ${mobile ? "cockpit--mobile" : ""}`} data-testid="cockpit-host">
+    <div className={`cockpit cockpit-host ${mobile ? "cockpit--mobile" : ""} ${activeDeck === "c" ? `chain-first-cockpit ${chainStyles.workspace}` : ""}`} data-testid="cockpit-host">
+      {activeDeck === "c" && (
+        <ChainInstrumentSidebar
+          ticker={ticker}
+          position={position}
+          underlyingQuote={prices[ticker] ?? null}
+          heldQuote={heldQuote ?? { priceData: null }}
+          onDeckChange={onDeckChange}
+        />
+      )}
       <CockpitHeader
         ticker={ticker}
         kind={bookKind}

@@ -1,7 +1,7 @@
 "use client";
 
-import { useRef, useEffect, useCallback, type ReactNode } from "react";
-import { Maximize2, Minimize2, Moon, Sun } from "lucide-react";
+import { useRef, useEffect, useCallback, useState, useId, type ReactNode } from "react";
+import { ChevronDown, Maximize2, Minimize2, Moon, Sun } from "lucide-react";
 import TickerSearch from "./TickerSearch";
 import { useTickerNav } from "@/lib/useTickerNav";
 import { useIBStatusContext, type IBDisplayStatus } from "@/lib/IBStatusContext";
@@ -84,6 +84,10 @@ export default function Header({
   onSyncNow,
 }: HeaderProps) {
   const searchRef = useRef<HTMLInputElement | null>(null);
+  const telemetryRef = useRef<HTMLDivElement | null>(null);
+  const telemetryTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const [telemetryOpen, setTelemetryOpen] = useState(false);
+  const telemetryId = useId();
   const { navigateToTicker } = useTickerNav();
   const { displayStatus } = useIBStatusContext();
   const integrity = integrityFor(displayStatus);
@@ -101,6 +105,36 @@ export default function Header({
     return () => document.removeEventListener("keydown", handler);
   }, [onOpenPalette]);
 
+  useEffect(() => {
+    if (!telemetryOpen) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (event.target instanceof Node
+        && !telemetryRef.current?.contains(event.target)
+        && !telemetryTriggerRef.current?.contains(event.target)) setTelemetryOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      // CSS owns the responsive chain scope. An open disclosure can outlive
+      // that scope after a resize or a deck change; do not consume Escape
+      // intended for the now-visible workspace or focus a hidden trigger.
+      const trigger = telemetryTriggerRef.current;
+      if (!trigger || window.getComputedStyle(trigger).display === "none") {
+        setTelemetryOpen(false);
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      setTelemetryOpen(false);
+      telemetryTriggerRef.current?.focus();
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("keydown", closeOnEscape, true);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("keydown", closeOnEscape, true);
+    };
+  }, [telemetryOpen]);
+
   const handleSelect = useCallback(
     (symbol: string) => {
       pushRecentTicker(symbol);
@@ -112,52 +146,76 @@ export default function Header({
   return (
     <header className={`header ${styles.header}${compact ? ` ${styles.compact}` : ""}`}>
       <div className={styles.navigationSlot}>{navigation}</div>
-      <div className={`telemetry-rail${isStale ? " telemetry-rail--stale" : ""}`} aria-label="Workspace telemetry">
-        {isPageHeading ? (
-          <h1 className="rail-section" title={activeLabel}>{activeLabel}</h1>
-        ) : (
-          <span className="rail-section" title={activeLabel}>{activeLabel}</span>
-        )}
-        <span className="rail-sep" aria-hidden>·</span>
-        <span className="rail-meta">
-          <span className="rail-k">sample</span>
-          <span className="rail-v">{sampleAt} ET</span>
-        </span>
-        <span className="rail-sep" aria-hidden>·</span>
-        <span className="rail-meta">
-          <span className="rail-k">feed</span>
-          <span className="rail-v">IB·UW</span>
-        </span>
-        <span className="rail-sep" aria-hidden>·</span>
-        <span
-          className={`rail-integrity rail-integrity-${integrity.cls}`}
-          data-integrity={integrity.cls}
-          aria-live="polite"
-          aria-atomic="true"
-        >
+      <div
+        ref={telemetryRef}
+        id={telemetryId}
+        className={styles.telemetryPanel}
+        data-open={telemetryOpen}
+        data-testid="chain-feed-panel"
+      >
+        <div className={`telemetry-rail${isStale ? " telemetry-rail--stale" : ""}`} aria-label="Workspace telemetry">
+          {isPageHeading ? (
+            <h1 className="rail-section" title={activeLabel}>{activeLabel}</h1>
+          ) : (
+            <span className="rail-section" title={activeLabel}>{activeLabel}</span>
+          )}
+          <span className="rail-sep" aria-hidden>·</span>
+          <span className="rail-meta">
+            <span className="rail-k">sample</span>
+            <span className="rail-v">{sampleAt} ET</span>
+          </span>
+          <span className="rail-sep" aria-hidden>·</span>
+          <span className="rail-meta">
+            <span className="rail-k">feed</span>
+            <span className="rail-v">IB·UW</span>
+          </span>
+          <span className="rail-sep" aria-hidden>·</span>
           <span
-            className={`rail-integrity-dot rail-integrity-dot-${integrity.cls}`}
-            aria-hidden
-          />
-          {integrity.text}
-        </span>
-        {isStale && staleAgeMinutes != null && (
-          <>
-            <span className="rail-sep" aria-hidden>·</span>
-            <span className="stale-pill" data-testid="stale-pill">
-              stale {staleAgeMinutes}m
-              {onSyncNow && (
-                <button type="button" onClick={onSyncNow} aria-label="Sync now">Sync</button>
-              )}
-            </span>
-          </>
-        )}
-      </div>
-      <div className={styles.contextTools}>
-        {futuresStrip ?? null}
-        {children}
+            className={`rail-integrity rail-integrity-${integrity.cls}`}
+            data-integrity={integrity.cls}
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            <span
+              className={`rail-integrity-dot rail-integrity-dot-${integrity.cls}`}
+              aria-hidden
+            />
+            {integrity.text}
+          </span>
+          {isStale && staleAgeMinutes != null && (
+            <>
+              <span className="rail-sep" aria-hidden>·</span>
+              <span className="stale-pill" data-testid="stale-pill">
+                stale {staleAgeMinutes}m
+                {onSyncNow && (
+                  <button type="button" onClick={onSyncNow} aria-label="Sync now">Sync</button>
+                )}
+              </span>
+            </>
+          )}
+        </div>
+        <div className={styles.contextTools}>
+          {futuresStrip ?? null}
+          {children}
+        </div>
       </div>
       <div className="header-actions" suppressHydrationWarning>
+        <button
+          ref={telemetryTriggerRef}
+          type="button"
+          className={styles.telemetryTrigger}
+          aria-expanded={telemetryOpen}
+          aria-controls={telemetryId}
+          aria-label={`Feed & sync: ${integrity.text}${isStale ? ", stale snapshot" : ""}`}
+          title="Feed, freshness and sync"
+          data-testid="chain-feed-trigger"
+          data-integrity={isStale ? "warn" : integrity.cls}
+          onClick={() => setTelemetryOpen((open) => !open)}
+        >
+          <span className={`rail-integrity-dot rail-integrity-dot-${isStale ? "warn" : integrity.cls}`} aria-hidden />
+          <span>{isStale ? `Stale${staleAgeMinutes != null ? ` ${staleAgeMinutes}m` : ""}` : integrity.text}</span>
+          <ChevronDown size={12} aria-hidden />
+        </button>
         <button
           type="button"
           className="command-palette-trigger"

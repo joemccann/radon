@@ -27,6 +27,7 @@ import { useWatchlist } from "@/lib/useWatchlist";
 import Sidebar from "@/components/Sidebar";
 import Header from "@/components/Header";
 import clearResearch from "@/components/ClearResearch.module.css";
+import clearShell from "@/components/ClearShell.module.css";
 import MetricCards from "@/components/MetricCards";
 import ToastContainer from "@/components/Toast";
 import DashboardSurface from "@/components/dashboard/DashboardSurface";
@@ -559,7 +560,7 @@ export default function WorkspaceShell({ section, tickerParam, initialPortfolio 
   const pricesForSections = sectionNeedsPrices ? prices : undefined;
 
   return (
-    <div className={`app-shell clear-workstation ${clearResearch.surfaces}`} data-workspace-section={activeSection} suppressHydrationWarning>
+    <div className={`app-shell clear-workstation ${clearResearch.surfaces} ${clearShell.workspace}`} data-workspace-section={activeSection} suppressHydrationWarning>
       <a href="#main-content" className="skip-link">Skip to content</a>
       {showMobileChrome ? (
         <MobileShell title={activeLabel} isPageHeading={headerOwnsPageHeading} ibConnected={ibConnected} lastSync={lastSync} />
