@@ -930,3 +930,10 @@ Closing gates: INCOMPLETE. Detached serial stage prewrote `pytest`, `vitest`,
 and `cloud` slots for rounds 1-3, then died in `pytest_1`; its log is zero-byte
 and `/tmp/tw-2026-09-15/remediate-gates.rc` has no `DONE` sentinel. No gate
 counts or green verdict are claimed.
+
+## Remediation 2026-09-16 (testing/2026-09-16)
+
+| Task | Status | Evidence |
+|---|---|---|
+| Scope | DONE | `RADON_WEEKEND_REDUCED=1`: this cycle's sole verified finding, T-495, is P2; no source-actionable P0/P1 is open. Full gates are recorded only if their detached stage writes `DONE`. |
+| T-488 | operator-only | Reproduce and repair GNU-timeout process-tree behavior on Linux CI without widening the fixed test timeout. |

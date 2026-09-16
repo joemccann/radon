@@ -7263,3 +7263,22 @@ append evidence only and preserve every gate and deploy rail.
 ## Review
 
 - [x] Audit-only; no production or trading-system operation.
+
+# Task: Testing remediation 2026-09-16 [COMPLETE]
+
+Reduced-capability rung (`RADON_WEEKEND_REDUCED=1`): remediate verified P0/P1
+findings only; T-495 is P2 and remains out of scope.
+
+## Dependency graph
+
+- T1 depends_on: [] - Reconcile this cycle's audit finding and every standing P0/P1 status.
+- T2 depends_on: [T1] - Record the reduced-scope remediation decision and preserve full-gate evidence separately.
+
+## Checklist
+
+- [x] T1 T-495 is P2; no current source-actionable P0/P1 finding exists.
+- [x] T2 T-488 remains operator-only after three genuine attempts; remediation decision is append-only.
+
+## Review
+
+- [x] No P2 substitute was implemented on the reduced rung.

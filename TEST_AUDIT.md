@@ -10463,3 +10463,11 @@ or executable skip/xfail.
   51 commits / 206 paths. The detached serial-gate stage ended before writing
   its required `DONE` sentinel, with `pytest_rc=RUNNING`; no gate count is
   claimed and the next phase must rerun the gates.
+
+## Remediation 2026-09-16
+
+`RADON_WEEKEND_REDUCED=1`: T-495 is P2 and therefore outside this phase's
+permitted remediation scope. Reconciliation found no verified
+source-actionable P0/P1 finding. T-488 remains operator-only after three
+genuine attempts: reproduce and repair the GNU-timeout process-tree behavior
+on Linux CI without widening its fixed test timeout.
