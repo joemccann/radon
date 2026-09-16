@@ -1067,7 +1067,12 @@ def test_run_newsfeed_env_file_carries_only_its_allowlisted_keys(
         "TURSO_DB_URL=libsql://example.turso.io\n"
         "TURSO_AUTH_TOKEN='tok'\n"
         "ANTHROPIC_API_KEY=k1\n"
+        "XAI_API_KEY=k-xai\n"
+        "OPENAI_API_KEY=k-oai\n"
+        "GEMINI_API_KEY=k-gem\n"
+        "NVIDIA_API_KEY=k-nv\n"
         "CEREBRAS_API_KEY=k2\n"
+        "RADON_PYTHON_BIN=/usr/bin/python3.13\n"
         "RADON_NEWSFEED_HEADLESS=1\n"
         "RADON_MEDIA_REMOTE=/home/radon/radon-cloud/media/\n"
         "CLERK_SECRET_KEY=sk\n"
@@ -1095,7 +1100,12 @@ def test_run_newsfeed_env_file_carries_only_its_allowlisted_keys(
         "TURSO_DB_URL",
         "TURSO_AUTH_TOKEN",
         "ANTHROPIC_API_KEY",
+        "XAI_API_KEY",
+        "OPENAI_API_KEY",
+        "GEMINI_API_KEY",
+        "NVIDIA_API_KEY",
         "CEREBRAS_API_KEY",
+        "RADON_PYTHON_BIN",
         "RADON_NEWSFEED_HEADLESS",
         "RADON_MEDIA_REMOTE",
     } <= keys

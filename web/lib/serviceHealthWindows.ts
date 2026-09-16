@@ -246,6 +246,9 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   "aa-frontier-basket": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
   "ai-cycle-backfill": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
   "ai-cycle": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+  // ``liquidcompute``: radon-liquidcompute.timer fires daily 07:30 UTC.
+  // Homepage-public GPU index ticker. Uniform 26h window. HTTP only, no IB.
+  "liquidcompute": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
   "model-catalog": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
   // ``vixts`` — radon-vixts.timer fires daily 02:45 UTC every calendar day,

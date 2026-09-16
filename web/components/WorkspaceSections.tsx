@@ -144,7 +144,6 @@ import FlowAnalysisTickerInput from "./flow-analysis/FlowAnalysisTickerInput";
 import { InformedFlowPanel } from "./flow-analysis/InformedFlowPanel";
 import { AlertsPanel } from "./alerts/AlertsPanel";
 import ResearchWorkbench from "@/components/research/ResearchWorkbench";
-import WorkflowComposer from "@/app/workflow/WorkflowComposer";
 import { MarketState } from "@/lib/useMarketHours";
 
 /* ─── Re-exports for backward compat ──────────────────── */
@@ -4271,8 +4270,6 @@ function WorkspaceSections({ section, portfolio, orders, prices, depths, tape, t
       );
     case "research-workbench":
       return <ResearchWorkbench portfolio={portfolio} />;
-    case "workflow":
-      return <WorkflowComposer />;
     case "admin":
       return <AdminWorkspace />;
     case "preferences":
@@ -4283,7 +4280,7 @@ function WorkspaceSections({ section, portfolio, orders, prices, depths, tape, t
       return <WatchlistContent prices={prices} portfolio={portfolio ?? null} orders={orders ?? null} />;
     case "ticker-detail":
       return tickerParam ? (
-        <TickerWorkspace ticker={tickerParam} theme={theme ?? "dark"} depths={depths} tape={tape} />
+        <TickerWorkspace ticker={tickerParam} theme={theme ?? "dark"} prices={prices} depths={depths} tape={tape} />
       ) : null;
     default:
       return <FlowSections tickerParam={tickerParam} />;

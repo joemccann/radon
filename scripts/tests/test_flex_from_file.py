@@ -74,6 +74,31 @@ def test_twr_from_file_parses_flows_from_the_file_without_a_token(monkeypatch):
     assert not [w for w in payload.get("warnings", []) if w.get("code") == "FLOWS_FETCH_FAILED"]
 
 
+def test_twr_from_file_keeps_stored_nav_history(monkeypatch):
+    """The nightly sFTP statement carries one or a few sessions. Building the
+    page from that statement alone replaced the 2025-12-31.. history with a
+    2026-09-11..09-14 window (N=1) on 2026-09-15. The statement must extend the
+    stored series, not replace it."""
+    import perf_twr_builder
+
+    monkeypatch.setattr(perf_twr_builder, "fetch_flex_xml", lambda *a, **k: (_ for _ in ()).throw(AssertionError("SendRequest")))
+    monkeypatch.setattr(perf_twr_builder, "load_benchmark_closes", lambda *a, **k: {})
+    monkeypatch.setattr(perf_twr_builder, "get_risk_free_rate", lambda **k: (0.0, "test"))
+    statement = perf_twr_builder._resolution_from_file(str(ACTIVITY))
+    first_statement_date = min(statement.by_date)
+    history = {"2000-01-03": 100_000.0, "2000-01-04": 100_500.0}
+    monkeypatch.setattr(
+        perf_twr_builder,
+        "get_nav_snapshots",
+        lambda **k: perf_twr_builder.NavResolution(dict(history), "turso", (), None),
+    )
+
+    payload = perf_twr_builder.build_and_persist(from_file=str(ACTIVITY), persist=False)
+
+    assert payload.get("period_start") == "2000-01-03", (payload.get("period_start"), first_statement_date)
+    assert payload.get("nav_as_of") == max(statement.by_date)
+
+
 def test_ingest_does_not_import_gdcdyn():
     source = (SCRIPTS / "flex_delivery_ingest.py").read_text()
     assert "gdcdyn" not in source

@@ -52,7 +52,19 @@ _PAT_MARKERS = (
     "403 forbidden",
 )
 
+SUMMARY_MAX_CHARS = 300
+_CONTROL_RUN = re.compile(r"[\x00-\x1f\x7f]+")
+
 Runner = Callable[..., object]
+
+
+def sanitize_summary(text: str) -> str:
+    """Flatten page-derived grok output to one control-free line.
+
+    The summary comes from untrusted incident-page text; it may not carry
+    newlines or control characters into a PR title or body.
+    """
+    return _CONTROL_RUN.sub(" ", text or "").strip()[:SUMMARY_MAX_CHARS]
 
 
 class IrEnsurePrError(Exception):
@@ -110,7 +122,9 @@ def format_ir_pr_body(
 
 
 def _default_runner(argv: list[str], **kwargs) -> subprocess.CompletedProcess:
-    if len(argv) >= 3 and argv[1] == "pr" and argv[2] == "merge":
+    # Token scan, not positional: flag-shuffled subcommand spellings and
+    # `gh api .../pulls/N/merge` are merges too.
+    if any(tok == "merge" or tok.endswith("/merge") for tok in argv[1:]):
         raise IrEnsurePrError("IR automation never merges")
     return subprocess.run(
         argv,
@@ -344,6 +358,7 @@ def ensure_after_code_fix(
             "no fix/** branch found after code_fix; grok must push "
             f"{IR_BRANCH_PREFIX}<slug>. Branch-only is not a ship."
         )
+    summary = sanitize_summary(summary)
     issue = summary or f"{page.get('service') or 'service'} P1"
     fix_text = summary or issue
     return ensure_pr(

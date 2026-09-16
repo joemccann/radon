@@ -599,8 +599,12 @@ fi
 # scanner reloads itself, or a Claude Code settings file carrying an
 # apiKeyHelper / env reroute. The lists are what `strings` on the installed
 # CLI actually honors; a hand copy of six of them was the old hole.
-# Re-derived against the INSTALLED CLI on 2026-09-14 (2.1.270, the approved
-# pin; see docs/security-approved-tools.md). History: pinned to 2.1.258,
+# Re-derived against the INSTALLED CLI on 2026-09-15 (2.1.272, the approved
+# pin; see docs/security-approved-tools.md). 2.1.272 adds no reroute: its new
+# names (CLAUDE_CODE_ARTIFACT_FD / _PATH_PIN / _QUICKSTART, the
+# _AUTO_MODE_SERVER classifier toggle, _DISABLE_TURN_HANDOFF,
+# _MCP_CONNECTOR_PREWAIT_MS, _SLEEPY_SNOWFLAKE) touch no model auth or
+# billing. Previous pass 2026-09-14 (2.1.270). History: pinned to 2.1.258,
 # re-derived 2026-09-07 against 2.1.263 (added CLAUDE_CODE_API_BASE_URL and
 # CLAUDE_CODE_HFI_BEARER_TOKEN). The 2026-09-14 pass read every new
 # ANTHROPIC_* / CLAUDE_CODE_* / AWS_BEARER_* name in its code context:

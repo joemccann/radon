@@ -374,6 +374,9 @@ class TestGrokCycleEnsuresPr:
         monkeypatch.setattr(responder, "_send_followup", lambda **k: None)
         monkeypatch.setattr(responder, "_heartbeat", lambda *a, **k: None)
         monkeypatch.setattr(responder, "sync_remote_clone", lambda _root: "disabled")
+        monkeypatch.setattr(
+            responder, "install_push_guard", lambda _root: Path("pre-push")
+        )
 
         class _Proc:
             returncode = 0
@@ -421,6 +424,9 @@ class TestGrokCycleEnsuresPr:
         monkeypatch.setattr(responder, "_send_followup", lambda **k: None)
         monkeypatch.setattr(responder, "_heartbeat", lambda *a, **k: None)
         monkeypatch.setattr(responder, "sync_remote_clone", lambda _root: "disabled")
+        monkeypatch.setattr(
+            responder, "install_push_guard", lambda _root: Path("pre-push")
+        )
 
         class _Proc:
             returncode = 0
@@ -461,6 +467,11 @@ class TestGrokCycleEnsuresPr:
         monkeypatch.setattr(responder, "_heartbeat", lambda state, *_: health.append(state))
         monkeypatch.setattr(responder, "_send_followup", lambda **k: None)
         monkeypatch.setattr(responder, "sync_remote_clone", lambda _root: "disabled")
+        # AUTOPUSH installs the pre-push guard before grok; stub it like the
+        # sibling cycle tests so a bare tmp_path does not fail-closed at rc=1.
+        monkeypatch.setattr(
+            responder, "install_push_guard", lambda _root: Path("pre-push")
+        )
 
         class _Proc:
             returncode = 0
@@ -497,6 +508,9 @@ class TestGrokCycleEnsuresPr:
         monkeypatch.setattr(responder, "_send_followup", lambda **k: None)
         monkeypatch.setattr(responder, "_heartbeat", lambda *a, **k: None)
         monkeypatch.setattr(responder, "sync_remote_clone", lambda _root: "disabled")
+        monkeypatch.setattr(
+            responder, "install_push_guard", lambda _root: Path("pre-push")
+        )
 
         class _Proc:
             returncode = 0

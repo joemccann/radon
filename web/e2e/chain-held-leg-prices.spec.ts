@@ -274,7 +274,7 @@ test.describe("Chain held-leg pricing", () => {
 
     const detail = page.locator(".ticker-detail-page");
     await detail.waitFor({ timeout: 5_000 });
-    await detail.locator(".chain-grid").waitFor();
+    await detail.locator(".chain-grid").first().waitFor();
 
     const shortCallRow = detail.getByRole("row", { name: /\$200\.00/ }).first();
     await expect(shortCallRow).toContainText("$1.35");

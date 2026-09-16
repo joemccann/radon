@@ -78,7 +78,6 @@ export const NEXT_MODULES: Record<string, () => Promise<NextRouteModule>> = {
   "vol-cone": () => import("@/app/api/vol-cone/route") as Promise<NextRouteModule>,
   "watchlist": () => import("@/app/api/watchlist/route") as Promise<NextRouteModule>,
   "watchlist/[symbol]": () => import("@/app/api/watchlist/[symbol]/route") as Promise<NextRouteModule>,
-  "workflow": () => import("@/app/api/workflow/route") as Promise<NextRouteModule>,
   "yield-curve": () => import("@/app/api/yield-curve/route") as Promise<NextRouteModule>,
   "yield-curve/live": () => import("@/app/api/yield-curve/live/route") as Promise<NextRouteModule>,
 };

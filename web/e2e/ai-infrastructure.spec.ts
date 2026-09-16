@@ -21,8 +21,8 @@ test.describe("AI infrastructure", () => {
       await page.getByRole("tab", { name, exact: true }).click();
       await expect(page.getByRole("tab", { name, exact: true })).toHaveAttribute("aria-selected", "true");
       const sliders = page.getByRole("slider", { name: /Inspect .* history/ });
-      // Demand hosts D1 plus D5 (Ramp), so two inspect sliders share the pane.
-      await expect(sliders).toHaveCount(name === "Demand" ? 2 : 1);
+      // Demand hosts D1 plus D5 (Ramp). Compute hosts C1 plus C5 (Liquid Compute).
+      await expect(sliders).toHaveCount(name === "Demand" || name === "Compute" ? 2 : 1);
       await expect(sliders.first()).toBeVisible();
     }
     const opener = page.getByRole("button", { name: "Sources and method: Cash funding coverage" }); await opener.click();

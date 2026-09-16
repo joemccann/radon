@@ -36,7 +36,7 @@ LOOPS = {
 }
 CREDENTIAL_LOOPS = sorted(loop for loop in LOOPS if loop != "security")
 
-# Every var the installed CLI (2.1.270, re-derived 2026-09-14) honors as an
+# Every var the installed CLI (2.1.272, re-derived 2026-09-15) honors as an
 # off-subscription route: `strings` on the binary, filtered to key / token /
 # base-url / creds-file / USE_* names, then read in context. Approved pins:
 # docs/security-approved-tools.md.

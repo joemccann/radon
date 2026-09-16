@@ -15,7 +15,7 @@ const ROUTES = [
   "regime", "scanner", "scanner/strength", "scanner/strength/scan",
   "scanner/theta", "scanner/theta/scan", "short-availability/[ticker]", "streaks",
   "ticker/info", "ticker/news", "ticker/ratings", "ticker/seasonality", "vcg",
-  "workflow/run", "service-health",
+  "service-health",
 ] as const;
 
 const SHARE_ROUTES = ["gex", "internals", "menthorq/cta", "newsfeed", "regime", "vcg"] as const;
@@ -84,7 +84,7 @@ const MIDDLEWARE_PERIMETER_ONLY_ROUTES = [
   // its llm-token-index sibling, so the middleware perimeter is the only layer.
   "models", "prices",
   "risk-free-rate", "skew", "skew2d", "straddle", "vixcor", "vixts",
-  "vol-cone", "watchlist", "watchlist/[symbol]", "workflow", "yield-curve",
+  "vol-cone", "watchlist", "watchlist/[symbol]", "yield-curve",
   "yield-curve/live",
 ] as const;
 

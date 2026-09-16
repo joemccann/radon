@@ -135,6 +135,18 @@ three flags all defaulted on, so a broken env file yielded maximum autonomy.
 
 `GROK_BIN` overrides the `grok` executable.
 
+## Push guard
+
+The prompt tells grok never to push `main` or merge, but prompt text is not
+a control: page excerpts are untrusted input. Every push-capable cycle
+(`GROK_PAGE_AUTOPUSH=1`) reinstalls a `pre-push` hook in the clone that
+refuses any ref outside `refs/heads/fix/*`, including branch deletes and
+tags, before grok is launched. If the hook cannot be installed the cycle
+stands down (exit 1) instead of running push-capable. `ir_ensure_pr.py`
+refuses any merge-shaped `gh` invocation by token scan, and the page-derived
+summary is flattened to one control-free line before it enters PR metadata.
+Regressions: `scripts/tests/test_grok_push_guard.py`.
+
 ## Global daily action cap
 
 The per-ticket bounds (3 attempts; one ticket per service/severity/kind/hour)
