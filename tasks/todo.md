@@ -7301,3 +7301,12 @@ Dependency graph: T1 -> {T2,T3,T4} -> T5 -> T6.
 - [ ] T6 depends_on: [T5] Commit, create PR, follow every applicable CI check on exact head through green and deliver Pushover notification.
 
 Review: desktop Position, News and Book & trade visually verified at 1440x800 and 1280x720 in both themes; mobile Position/News verified at 393x852 in both themes. Persistent 208px sidebar, 48px header, 56px view toolbar and internal content scrolling; no document horizontal overflow. TypeScript and focused ESLint pass; codemap regenerated. Added 8 cross-view browser cases, active-navigation unit coverage and CI screenshot artifacts. No local test suites; GitHub runners execute suites. Browser verification uses isolated API/socket fixtures and never submits live orders. Exact-head CI and Pushover pending PR creation.
+
+## Resolve and merge PR466 (2026-09-16)
+Dependency graph: T1 -> {T2,T3} -> T4 -> T5.
+- [x] T1 depends_on: [] Inspect PR and isolate head from unrelated local edits.
+- [ ] T2 depends_on: [T1] Merge current main and resolve conflicts preserving page-title behavior and current base changes.
+- [ ] T3 depends_on: [T1] Review title contract/integration risks and applicable validation.
+- [ ] T4 depends_on: [T2,T3] Push resolution, verify all applicable CI on exact head green, send Pushover.
+- [ ] T5 depends_on: [T4] Merge the verified head and confirm merged state.
+Review: pending; suites execute only on GitHub.
