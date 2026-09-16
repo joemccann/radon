@@ -12,11 +12,12 @@ Audit `eb5b8cb0..HEAD` for source-actionable reliability regressions only.
 
 - [x] T1 Dedicated markers, verified anchor `eb5b8cb0`, and `reliability/2026-09-16` checked out.
 - [x] T2 Delta, blast-radius, and standing-sweep evidence reviewed.
-- [x] T3 Append-only audit record prepared; commit, push, and PR publication pending.
+- [x] T3 Audit record committed (`bd0efb5b`), pushed, and PR #460 opened.
 
 ## Review
 
 - [x] Finding IDs and backlog IDs strictly ascend; markdown cells escape pipes.
+- [x] Static validation passed; focused pytest unavailable (`python3.13`: no `pytest`).
 
 ---
 
