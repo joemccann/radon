@@ -934,6 +934,33 @@ export type StrengthConfirmationData = {
   results: StrengthConfirmationResult[];
 };
 
+export type VolSkewMrVerdict = "TOP_MR" | "BOTTOM_MR" | "BREAKOUT" | "BREAKDOWN" | "NO_SIGNAL" | string;
+
+export type VolSkewMrResult = {
+  ticker: string;
+  verdict: VolSkewMrVerdict;
+  spot: number;
+  rsi: number | null;
+  pct_b: number | null;
+  extension: "HIGH" | "LOW" | "MID" | string;
+  iv_path: string;
+  skew_path: string;
+  suggested_structure: string | null;
+  gates: { technicals: boolean; iv: boolean; skew: boolean };
+  errors: string[];
+};
+
+export type VolSkewMrData = {
+  scan_time: string;
+  source: string;
+  universe: string;
+  requested_tickers?: string[];
+  tickers_scanned: number;
+  candidates_found: number;
+  actionable_count: number;
+  results: VolSkewMrResult[];
+};
+
 // Flow Analysis types
 export type FlowAnalysisPosition = {
   ticker: string;

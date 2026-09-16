@@ -4,16 +4,16 @@
 import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { ScannerModeTabs } from "../components/ScannerModeTabs";
+import { SCANNER_MODE_COUNT, ScannerModeTabs } from "../components/ScannerModeTabs";
 import { SigMeter } from "../components/SigMeter";
 
 afterEach(cleanup);
 
 describe("ScannerModeTabs", () => {
-  it("renders all seven modes with the existing classes and roles", () => {
+  it("renders all scanner modes with the existing classes and roles", () => {
     render(<ScannerModeTabs mode="flow" onModeChange={() => {}} counts={{}} />);
     const tabs = screen.getAllByRole("tab");
-    expect(tabs).toHaveLength(7);
+    expect(tabs).toHaveLength(SCANNER_MODE_COUNT);
     expect(tabs[0].className).toContain("scanner-mode-tab--active");
     expect(tabs[1].className).toBe("scanner-mode-tab");
     expect(screen.getByRole("tab", { name: "VOL CONE" })).toBeTruthy();
@@ -27,6 +27,8 @@ describe("ScannerModeTabs", () => {
     expect(onModeChange).toHaveBeenCalledWith("garch");
     fireEvent.click(screen.getByRole("tab", { name: /VOL CONE/i }));
     expect(onModeChange).toHaveBeenCalledWith("vol-cone");
+    fireEvent.click(screen.getByRole("tab", { name: /Vol\/Skew MR/i }));
+    expect(onModeChange).toHaveBeenCalledWith("vol-skew-mr");
   });
 
   it("shows a hot count chip when a tab has results", () => {

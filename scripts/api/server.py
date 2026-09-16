@@ -4049,6 +4049,93 @@ async def strength_confirmation_scan(preset: str = "ndx100", limit: int = 0, tic
         }
 
 
+# ── Vol/Skew MR scanner ─────────────────────────────────────────────
+
+_vol_skew_mr_last_scan: float = 0.0
+_vol_skew_mr_scan_lock: Optional[asyncio.Lock] = None
+VOL_SKEW_MR_COOLDOWN_S = 3600  # 1h — matches strength/theta operator cadence
+
+
+def _vol_skew_mr_cache_matches_preset(cached: Any, preset: str) -> bool:
+    if not isinstance(cached, dict):
+        return False
+    universe = str(cached.get("universe") or "")
+    preset_key = preset.lower()
+    return universe.lower() in {f"preset:{preset_key}", f"fallback:{preset_key}"}
+
+
+@app.post("/vol-skew-mr/scan")
+async def vol_skew_mr_scan(preset: str = "ndx100", limit: int = 0, ticker: str = "", tickers: str = ""):
+    """Run vol_skew_mr_scanner.py against a preset or explicit tickers.
+
+    The script writes data/vol_skew_mr.json and records its own
+    service_health row. Ticker scans bypass preset cooldown for operator probes.
+    """
+    global _vol_skew_mr_last_scan, _vol_skew_mr_scan_lock
+    ticker = ticker.upper().strip()
+    if ticker and not re.fullmatch(r"[A-Z]{1,6}", ticker):
+        raise HTTPException(status_code=400, detail="ticker must be 1-6 letters")
+    preset = preset.strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,32}", preset):
+        raise HTTPException(status_code=400, detail="preset must be 1-32 chars [A-Za-z0-9_-]")
+    requested = _parse_scan_tickers(tickers) if tickers.strip() else ([ticker] if ticker else [])
+    if test_mode:
+        return await demo_scan_response(
+            "vol-skew-mr",
+            {
+                "scan_time": "",
+                "source": "Unusual Whales + Radon vol/skew feeds",
+                "universe": f"preset:{preset}",
+                "requested_tickers": [],
+                "tickers_scanned": 0,
+                "candidates_found": 0,
+                "actionable_count": 0,
+                "results": [],
+            },
+        )
+    if _vol_skew_mr_scan_lock is None:
+        _vol_skew_mr_scan_lock = asyncio.Lock()
+    now = time.monotonic()
+    is_ticker_scan = bool(requested)
+    if not is_ticker_scan and now - _vol_skew_mr_last_scan < VOL_SKEW_MR_COOLDOWN_S:
+        cached = _read_cache(DATA_DIR / "vol_skew_mr.json")
+        if _vol_skew_mr_cache_matches_preset(cached, preset):
+            return cached
+    async with _vol_skew_mr_scan_lock:
+        if not is_ticker_scan and time.monotonic() - _vol_skew_mr_last_scan < VOL_SKEW_MR_COOLDOWN_S:
+            cached = _read_cache(DATA_DIR / "vol_skew_mr.json")
+            if _vol_skew_mr_cache_matches_preset(cached, preset):
+                return cached
+        workers = _bounded_env_int("RADON_VOL_SKEW_MR_WORKERS", 24)
+        args = ["--json", "--workers", str(workers)]
+        if is_ticker_scan:
+            args.extend(requested)
+        else:
+            args.extend(["--preset", preset])
+        if not is_ticker_scan and limit and limit > 0:
+            args.extend(["--limit", str(limit)])
+        result = await run_script("vol_skew_mr_scanner.py", args, timeout=480)
+        if not result.ok:
+            raise HTTPException(status_code=502, detail=result.error)
+        payload = result.data if isinstance(result.data, dict) else None
+        scan_status = (payload or {}).get("scan_status")
+        if not is_ticker_scan and not scan_status:
+            _vol_skew_mr_last_scan = time.monotonic()
+        if scan_status and payload is not None:
+            return payload
+        cached = _read_cache(DATA_DIR / "vol_skew_mr.json")
+        return cached or {
+            "scan_time": "",
+            "source": "Unusual Whales + Radon vol/skew feeds",
+            "universe": "explicit" if is_ticker_scan else f"preset:{preset}",
+            "requested_tickers": requested,
+            "tickers_scanned": 0,
+            "candidates_found": 0,
+            "actionable_count": 0,
+            "results": [],
+        }
+
+
 # ── Market calendar (IBKR-sourced trading schedule) ─────────────────
 
 

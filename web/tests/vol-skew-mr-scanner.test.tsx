@@ -1,0 +1,108 @@
+/**
+ * @vitest-environment jsdom
+ */
+
+import React from "react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import VolSkewMrScanner, { volSkewMrOrderHref } from "../components/VolSkewMrScanner";
+import type { VolSkewMrData, VolSkewMrResult } from "../lib/types";
+
+vi.mock("@/lib/useTickerNav", () => ({
+  useTickerNav: () => ({
+    navigateToTicker: vi.fn(),
+  }),
+}));
+
+afterEach(() => {
+  cleanup();
+});
+
+const data: VolSkewMrData = {
+  scan_time: "2026-09-16T15:00:00Z",
+  source: "Unusual Whales + Radon vol/skew feeds",
+  universe: "fallback:ndx100",
+  tickers_scanned: 3,
+  candidates_found: 3,
+  actionable_count: 2,
+  results: [
+    {
+      ticker: "AAPL",
+      verdict: "TOP_MR",
+      spot: 212.4,
+      rsi: 78,
+      pct_b: 1.04,
+      extension: "HIGH",
+      iv_path: "falling",
+      skew_path: "falling",
+      suggested_structure: "put spread",
+      gates: { technicals: true, iv: true, skew: true },
+      errors: [],
+    },
+    {
+      ticker: "INTC",
+      verdict: "BOTTOM_MR",
+      spot: 22.1,
+      rsi: 24,
+      pct_b: -0.05,
+      extension: "LOW",
+      iv_path: "flat",
+      skew_path: "falling",
+      suggested_structure: "call spread",
+      gates: { technicals: true, iv: true, skew: true },
+      errors: [],
+    },
+    {
+      ticker: "NVDA",
+      verdict: "BREAKOUT",
+      spot: 181.4,
+      rsi: 74,
+      pct_b: 1.1,
+      extension: "HIGH",
+      iv_path: "rising",
+      skew_path: "rising",
+      suggested_structure: null,
+      gates: { technicals: true, iv: true, skew: false },
+      errors: [],
+    },
+  ],
+};
+
+describe("VolSkewMrScanner", () => {
+  it("renders AAPL-class top, bottom, and continue labels", () => {
+    render(<VolSkewMrScanner data={data} />);
+    expect(screen.getByTestId("vol-skew-mr-section")).toBeTruthy();
+    expect(screen.getAllByText("TOP MR").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("BOTTOM MR").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("BREAKOUT").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("put spread").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("call spread").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("continue").length).toBeGreaterThan(0);
+  });
+
+  it("credits Options Insight in the help tooltip", () => {
+    render(<VolSkewMrScanner data={data} />);
+    fireEvent.mouseEnter(screen.getByTestId("vol-skew-mr-title-tooltip"));
+    expect(screen.getByTestId("vol-skew-mr-title-tooltip-content").textContent).toContain("Options Insight");
+    expect(screen.getByTestId("vol-skew-mr-title-tooltip-content").textContent).toContain("Imran Lakha");
+  });
+
+  it("fires comma ticker search through onTickerScan", () => {
+    const onTickerScan = vi.fn();
+    render(<VolSkewMrScanner data={data} onTickerScan={onTickerScan} />);
+    fireEvent.change(screen.getByLabelText("Ticker symbols"), { target: { value: "AAPL, MSFT" } });
+    fireEvent.submit(screen.getByLabelText("Ticker symbols").closest("form") as HTMLFormElement);
+    expect(onTickerScan).toHaveBeenCalledWith(["AAPL", "MSFT"]);
+  });
+
+  it("opens a chain href for MR rows and skips NO_SIGNAL", () => {
+    const quiet: VolSkewMrResult = {
+      ...data.results[0],
+      ticker: "IBM",
+      verdict: "NO_SIGNAL",
+    };
+    expect(volSkewMrOrderHref(data.results[0])).toBe("/AAPL?deck=c&src=vol-skew-mr");
+    expect(volSkewMrOrderHref(quiet)).toBeNull();
+  });
+});
