@@ -193,8 +193,11 @@ for (const theme of ["light", "dark"] as const) {
     await sidebar.locator("summary").click();
     await sidebar.getByRole("button", { name: /^Position\b/ }).click();
     await expect(page.locator(".chain-first-cockpit")).toHaveCount(0);
-    await expect(page.locator(".cockpit-head")).toBeVisible();
-    await expect(page.getByTestId("chain-feed-trigger")).toBeHidden();
+    await expect(page.locator(".instrument-workspace")).toBeVisible();
+    await expect(sidebar).toBeVisible();
+    await expect(sidebar.getByRole("button", { name: /^Position\b/ })).toHaveAttribute("aria-current", "page");
+    await expect(page.locator(".asset-deck.open .asset-deck-hd")).toBeVisible();
+    await expect(page.getByTestId("chain-feed-trigger")).toBeVisible();
   });
 
   test(`chain-first ${theme}: mobile retains its ladder, expiry and pending-order controls`, async ({ page }, testInfo) => {
