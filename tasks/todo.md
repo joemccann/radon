@@ -1,3 +1,25 @@
+# Task: Reliability delta audit 2026-09-16 [IN PROGRESS]
+
+Audit `eb5b8cb0..HEAD` for source-actionable reliability regressions only.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify runner rails, ledger anchor, dated branch, and delta scope.
+- T2 depends_on: [T1] - Review changed source plus codemap callers and standing safety sweeps.
+- T3 depends_on: [T2] - Append frozen-contract findings/ledger, commit, push, and publish audit PR.
+
+## Checklist
+
+- [x] T1 Dedicated markers, verified anchor `eb5b8cb0`, and `reliability/2026-09-16` checked out.
+- [x] T2 Delta, blast-radius, and standing-sweep evidence reviewed.
+- [x] T3 Append-only audit record prepared; commit, push, and PR publication pending.
+
+## Review
+
+- [x] Finding IDs and backlog IDs strictly ascend; markdown cells escape pipes.
+
+---
+
 # Task: Newsfeed + distill on shared model ladder 2026-09-15 [IN PROGRESS]
 
 Stop Cerebras-first text tagging and KB distillation. Both walk
