@@ -1187,6 +1187,21 @@ on a Turso heartbeat timeout while the cycle added no new rows.** Peak:
   `test_nextjs_unit_starting_stays_starting`,
   `test_newsfeed_unit_starting_payload_keeps_edge_ok`,
   `test_local_degraded_aggregate_clears_fresh_aggregate_down`.
+- **App-host remote broker down → false `aggregate_down` (2026-09-15,
+  page `3a6de316`):** REL-243 expired the app-role gateway exclusion
+  whenever nested `radon-api:broker` was not up past the 900s dwell,
+  including a true app host whose local unit is `UnitFileState=disabled`
+  `Result=success` (absent since the 2026-08-30 two-host split). Tuesday
+  19:50 ET is still inside the 04:00-20:00 EXT window, so dwell then
+  collapsed the aggregate to `down`. Off-box paged P1 while ping and
+  `/sign-in` stayed 200 and api/relay/nextjs stayed `up`. Nested broker
+  unreachable is already `radon-api:broker` (degraded). Discriminating
+  check: `host_role=app` + local gateway `Result=success` + serving path
+  up + `role_suppression_expired=true` → stay `degraded`, keep
+  `not_applicable`. A local crash (`Result=exit-code`) still expires
+  and pages. Do not restart the disabled app-host unit (2FA).
+  Regression:
+  `test_rel243_role_suppression_precondition.py::test_true_app_host_clean_absent_gateway_stays_degraded_when_broker_is_down`.
 
 ---
 
