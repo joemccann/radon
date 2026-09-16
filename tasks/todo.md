@@ -7245,3 +7245,24 @@ append evidence only and preserve every gate and deploy rail.
 ## Review
 
 - [x] Audit-only; no production or trading-system operation.
+
+# Task: CI performance audit 2026-09-16 [IN PROGRESS]
+
+Audit `fe96fdac..origin/main` against recent organic GitHub Actions production
+runs, recording evidence only and preserving every release rail.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify dedicated runner, lock, dated branch, ledger anchor, GitHub access, and protection closure.
+- T2 depends_on: [T1] - Classify recent runs, reconstruct the critical path, and sweep workflow/deploy invariants.
+- T3 depends_on: [T2] - Validate safety contracts, append the audit ledger, commit/push, and publish the audit PR and issue report.
+
+## Checklist
+
+- [x] T1 Dedicated markers, stale-lock preservation, dated branch, GitHub auth, origin/main, Production policy, and 24 required contexts verified.
+- [x] T2 Classified 30 recent Actions runs and inspected the delta, DAG, image cache, and deploy safety surfaces.
+- [x] T3 119 focused safety contracts, workflow YAML, shell syntax, and diff checks passed; ledger evidence is ready to commit and publish.
+
+## Review
+
+- [x] Audit-only; no production or trading-system operation was invoked.
