@@ -103,3 +103,43 @@ def test_ingest_does_not_import_gdcdyn():
     source = (SCRIPTS / "flex_delivery_ingest.py").read_text()
     assert "gdcdyn" not in source
     assert "FlexReport(" not in source
+
+
+def test_nightly_statement_preserves_verified_historical_external_flows(monkeypatch):
+    """Extending NAV must also retain the observed deposits behind that NAV.
+
+    A short, flow-free statement cannot turn a prior $80k deposit into a
+    return or quarantine the session as an unexplained NAV jump.
+    """
+    import perf_twr_builder as ptb
+
+    xml = """<FlexQueryResponse><FlexStatements>
+      <FlexStatement accountId="U1" fromDate="20260115" toDate="20260116">
+        <CashTransactions /><Transfers />
+      </FlexStatement>
+    </FlexStatements></FlexQueryResponse>"""
+    statement = ptb.NavResolution(
+        {"2026-01-14": 181000.0, "2026-01-15": 182000.0, "2026-01-16": 183000.0},
+        "flex_from_file", (), ptb.FlexDocument("from-file", xml),
+    )
+    monkeypatch.setattr(ptb, "_resolution_from_file", lambda _path: statement)
+    monkeypatch.setattr(ptb, "get_nav_snapshots", lambda **_kw: ptb.NavResolution(
+        {"2026-01-12": 100000.0, "2026-01-13": 180000.0, "2026-01-14": 181000.0}, "turso",
+    ))
+    monkeypatch.setattr(ptb, "load_flows_from_turso", lambda: {"2026-01-13": 80000.0})
+    monkeypatch.setattr(ptb, "load_flows_coverage_state", lambda: ("2026-01-14", True))
+    monkeypatch.setattr(ptb, "flow_divergence_warnings", lambda: [])
+    monkeypatch.setattr(ptb, "load_benchmark_closes", lambda *_a, **_kw: {})
+    monkeypatch.setattr(ptb, "get_risk_free_rate", lambda **_kw: (0.0, ""))
+    monkeypatch.setattr(ptb, "sessions_behind", lambda *_a, **_kw: 0)
+    monkeypatch.setattr(ptb, "fetch_flex_xml", lambda *_a, **_kw: pytest.fail("SendRequest"))
+
+    payload = ptb.build_and_persist(from_file="nightly.xml", persist=False)
+
+    deposit_day = next(row for row in payload["subperiods"] if row["date"] == "2026-01-13")
+    assert deposit_day["c"] == 80000.0
+    assert deposit_day["r"] == 0.0
+    assert payload["counts"]["n_suspect"] == 0
+    assert payload["equity"]["net_external_flows"] == 80000.0
+    assert payload["equity"]["investment_pnl"] == 3000.0
+    assert payload["nav_as_of"] == "2026-01-16"

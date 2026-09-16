@@ -7281,3 +7281,14 @@ Dependency graph: T1 -> {T2,T3,T4} -> T5 -> T6.
 - [ ] T6 depends_on: [T5] Commit, create PR, follow every applicable CI check on exact head through green and deliver Pushover notification.
 
 Review: desktop Position, News and Book & trade visually verified at 1440x800 and 1280x720 in both themes; mobile Position/News verified at 393x852 in both themes. Persistent 208px sidebar, 48px header, 56px view toolbar and internal content scrolling; no document horizontal overflow. TypeScript and focused ESLint pass; codemap regenerated. Added 8 cross-view browser cases, active-navigation unit coverage and CI screenshot artifacts. No local test suites; GitHub runners execute suites. Browser verification uses isolated API/socket fixtures and never submits live orders. Exact-head CI and Pushover pending PR creation.
+
+## Performance TWR regression (2026-09-16)
+
+Dependency graph: T1 -> {T2,T3} -> T4 -> T5.
+- [x] T1 depends_on: [] Isolate current main and record screenshot symptoms; preserve unrelated work.
+- [ ] T2 depends_on: [T1] Trace NAV/flow sources and recent builder changes against actual available incident data.
+- [ ] T3 depends_on: [T1] Inspect frontend null/degraded contract and regression coverage independently.
+- [ ] T4 depends_on: [T2,T3] Implement minimal evidence-backed repair and regressions; inspect rendered recovery without relaxing financial integrity.
+- [ ] T5 depends_on: [T4] Publish PR, verify all exact-head GitHub checks green, notify and record results.
+
+Review: pending. No local test suites; all suite execution on GitHub. Never infer deposits into canonical returns without source evidence.
