@@ -1,0 +1,11 @@
+{
+  "asOf": "2026-09-14",
+  "units": "usd_per_gpu_per_hr",
+  "indices": [
+    {"id": "a100-us", "label": "A100", "value": 1.5316, "changePct": -0.6873297886136651},
+    {"id": "h100-us", "label": "H100", "value": 2.6766, "changePct": -0.09331491918927799},
+    {"id": "h200-us", "label": "H200", "value": 3.4086, "changePct": 0.26768642447417745},
+    {"id": "b200-us", "label": "B200", "value": 4.9955, "changePct": 0.022024667627745093},
+    {"id": "b300-us", "label": "B300", "value": 6.6431, "changePct": 0.26110054634911484}
+  ]
+}

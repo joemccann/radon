@@ -186,6 +186,12 @@ line here whenever you ship a security fix.**
   skips a bound); a future with no valid contract multiplier refuses; a stock
   leg in a BAG never nulls the combo loss computation.
   (`scripts/tests/test_order_limits_fail_open_inputs.py`)
+- **Unattended agent push authority is enforced by git, not prompt text** — a
+  push-capable Grok responder cycle installs the `fix/*`-only `pre-push` guard
+  (no deletes, no tags) before launching the agent and stands down when it
+  cannot; the PR helper refuses merge-shaped `gh` invocations by token scan;
+  page-derived summaries are flattened before entering PR metadata.
+  (`scripts/tests/test_grok_push_guard.py`)
 
 ## Triage & patch policy
 

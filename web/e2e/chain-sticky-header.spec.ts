@@ -94,10 +94,11 @@ test.describe("Options chain sticky header", () => {
     await page.goto("/AAPL?tab=chain");
 
     // Wait for chain grid to load
-    const chainGrid = page.locator(".chain-grid");
+    const chainGrid = page.locator(".chain-grid").first();
     await chainGrid.waitFor({ timeout: 10_000 });
 
-    const wrapper = page.locator(".chain-grid-wrapper");
+    const upper = page.getByTestId("chain-upper-pane");
+    const lower = page.getByTestId("chain-lower-pane");
     const header = page.locator("th.chain-header").first();
 
     // Verify sticky position and z-index on the header cells
@@ -108,25 +109,15 @@ test.describe("Options chain sticky header", () => {
     expect(headerStyles.position).toBe("sticky");
     expect(Number(headerStyles.zIndex)).toBeGreaterThanOrEqual(10);
 
-    // Scroll the wrapper down significantly
-    await wrapper.evaluate((el) => {
-      el.scrollTop = 300;
-    });
-
-    // After scrolling, the header top should be at or near the wrapper top
-    const positions = await page.evaluate(() => {
-      const w = document.querySelector(".chain-grid-wrapper")!;
-      const th = document.querySelector("th.chain-header")!;
-      const wRect = w.getBoundingClientRect();
-      const thRect = th.getBoundingClientRect();
-      return {
-        wrapperTop: wRect.top,
-        headerTop: thRect.top,
-      };
-    });
-
-    // Header should be pinned at the top of the wrapper (within 2px tolerance)
-    expect(Math.abs(positions.headerTop - positions.wrapperTop)).toBeLessThan(2);
+    const before = await header.boundingBox();
+    for (const pane of [upper, lower]) {
+      await pane.evaluate((element) => { element.scrollTop = element.scrollTop === 0 ? 300 : 0; });
+      expect(await header.boundingBox()).toEqual(before);
+    }
+    expect(await header.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      return document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2)?.closest("th") === element;
+    })).toBe(true);
   });
 
   test("chain-side-label has correct sticky z-index", async ({ page }) => {
@@ -135,7 +126,7 @@ test.describe("Options chain sticky header", () => {
 
     await page.goto("/AAPL?tab=chain");
 
-    const chainGrid = page.locator(".chain-grid");
+    const chainGrid = page.locator(".chain-grid").first();
     await chainGrid.waitFor({ timeout: 10_000 });
 
     const sideLabel = page.locator("th.chain-side-label").first();

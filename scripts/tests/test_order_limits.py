@@ -136,39 +136,6 @@ class TestPlacementFunnelEnforcement:
         assert "limit" not in (result.get("message") or "").lower()
 
 
-class TestWorkflowEmitCap:
-    def test_emit_refuses_over_cap_atomically(self, monkeypatch):
-        from workflow import nodes
-
-        monkeypatch.setenv("RADON_WORKFLOW_MAX_ORDERS", "3")
-        placed = []
-        monkeypatch.setattr(nodes, "run_order_placement", lambda p: placed.append(p))
-
-        rows = [
-            {"ticker": f"T{i}", "action": "BUY", "quantity": 1, "limit_price": 1.0}
-            for i in range(5)
-        ]
-        with pytest.raises(Exception) as exc_info:
-            nodes.emit_order(rows, {})
-        assert "cap" in str(exc_info.value).lower()
-        assert placed == []  # atomic refusal — no partial mass-placement
-
-    def test_emit_within_cap_places_each(self, monkeypatch):
-        from workflow import nodes
-
-        monkeypatch.setenv("RADON_WORKFLOW_MAX_ORDERS", "3")
-        placed = []
-        monkeypatch.setattr(nodes, "run_order_placement", lambda p: placed.append(p))
-
-        rows = [
-            {"ticker": f"T{i}", "action": "BUY", "quantity": 1, "limit_price": 1.0}
-            for i in range(2)
-        ]
-        nodes.emit_order(rows, {})
-        assert len(placed) == 2
-
-
-# ---------------------------------------------------------------------------
 def test_risk_reversal_notional_is_the_debit_not_the_put_strike(monkeypatch):
     """Production 2026-08-21: 100-lot 200P/205C risk reversal @ $0.47 debit.
 

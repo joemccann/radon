@@ -1,12 +1,12 @@
 /**
- * Pure derivations feeding the four remaining agent primitives.
+ * Pure derivations feeding the remaining agent primitives.
  *
  * Each of these replaces what would otherwise be placeholder props: the trace
  * comes from the assistant loop's real tool telemetry, sources from the real
- * two-stage tagging pipeline, tasks from the executor's real RunReport, and the
+ * two-stage tagging pipeline, and the
  * scanner proposal from the engine's own verdict + gate map.
  *
- * The invariant worth protecting across all four: when the underlying data is
+ * The invariant worth protecting across all three: when the underlying data is
  * absent or not actionable, these return empty/null so the surface renders
  * nothing — never a fabricated citation, score, or run.
  */
@@ -15,9 +15,7 @@ import { describe, expect, it } from "vitest";
 
 import { buildTurnSteps, describeEngines, describeTool, formatElapsed } from "../lib/agent/turnSteps";
 import { buildAnalysisSources, buildFollowUps } from "../lib/agent/analysisSources";
-import { graphToRunningTasks, runReportToTasks } from "../lib/agent/workflowTasks";
 import { buildScannerProposal, isActionable } from "../lib/agent/scannerProposal";
-import type { RunReport } from "../app/workflow/workflowClient";
 import type { AssistantToolEvent, ThetaHarvesterResult, ThetaHarvesterStructure } from "../lib/types";
 
 // ── EngineTrace ────────────────────────────────────────────────────────────
@@ -148,81 +146,6 @@ describe("buildFollowUps", () => {
 
   it("returns nothing when there are no tags", () => {
     expect(buildFollowUps({})).toEqual([]);
-  });
-});
-
-// ── TaskRuns ───────────────────────────────────────────────────────────────
-
-function report(overrides: Partial<RunReport> = {}): RunReport {
-  return {
-    ok: true,
-    blocked_by: null,
-    blocked_gate: null,
-    requires_confirmation: false,
-    steps: [],
-    final_rows: [],
-    ...overrides,
-  };
-}
-
-describe("runReportToTasks", () => {
-  it("maps executed nodes to done with their real row counts", () => {
-    const tasks = runReportToTasks(
-      report({
-        steps: [
-          { node_id: "n1", node_type: "universe", rows_in: 0, rows_out: 34, blocked: false, info: {} },
-          { node_id: "n2", node_type: "filter", rows_in: 34, rows_out: 6, blocked: false, info: {} },
-        ],
-      }),
-    );
-
-    expect(tasks.map((t) => t.state)).toEqual(["done", "done"]);
-    expect(tasks[0].title).toBe("Universe · n1");
-    expect(tasks[1].meta).toBe("6 ROWS");
-    expect(tasks[1].steps).toEqual([
-      { label: "rows in", meta: "34" },
-      { label: "rows out", meta: "6" },
-    ]);
-  });
-
-  it("leaves a blocked node queued and names the gate that stopped it", () => {
-    const tasks = runReportToTasks(
-      report({
-        ok: false,
-        blocked_by: "n2",
-        blocked_gate: "convexity",
-        steps: [
-          { node_id: "n1", node_type: "universe", rows_in: 0, rows_out: 4, blocked: false, info: {} },
-          { node_id: "n2", node_type: "order", rows_in: 4, rows_out: 0, blocked: true, info: { gate: "convexity" } },
-        ],
-      }),
-    );
-
-    expect(tasks[0].state).toBe("done");
-    expect(tasks[1].state).toBe("queued");
-    expect(tasks[1].steps).toContainEqual({ label: "gate", meta: "CONVEXITY" });
-  });
-
-  it("returns nothing for a report with no steps", () => {
-    expect(runReportToTasks(report())).toEqual([]);
-  });
-});
-
-describe("graphToRunningTasks", () => {
-  it("marks only the first node running and queues the rest", () => {
-    const tasks = graphToRunningTasks({
-      nodes: [
-        { id: "a", type: "universe", params: {} },
-        { id: "b", type: "filter", params: {} },
-        { id: "c", type: "order", params: {} },
-      ],
-      edges: [],
-    });
-    expect(tasks.map((t) => t.state)).toEqual(["running", "queued", "queued"]);
-  });
-
-  it("handles an empty graph", () => {
-    expect(graphToRunningTasks({ nodes: [], edges: [] })).toEqual([]);
   });
 });
 

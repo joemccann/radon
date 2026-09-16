@@ -109,7 +109,6 @@ const ROUTES: ReadonlyArray<{ path: string; params?: Record<string, string>; ext
   { path: "ticker/ratings" },
   { path: "ticker/seasonality" },
   { path: "vcg" },
-  { path: "workflow/run" },
   { path: "service-health" },
 ];
 

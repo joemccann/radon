@@ -4,8 +4,8 @@
 // Novel tags returned by the model are auto-appended to data/tag_taxonomy.json.
 //
 // Routing: posts with a local image use the Anthropic vision tagger
-// (claude-haiku-4-5); text-only posts use the Cerebras text tagger. Throttle
-// targets the more conservative Cerebras 30 rpm limit.
+// (claude-haiku-4-5); text-only posts use the shared model ladder via
+// tagger.js -> model_ladder_cli.py. Throttle stays conservative.
 
 import path from "path";
 import { fileURLToPath } from "url";
@@ -41,7 +41,7 @@ function printHelp() {
       "Usage: node scripts/newsfeed/backfill_tags.js [--retag]",
       "",
       "Dual-classifies every post in web/public/data/posts.json:",
-      "  - tags_text   : Cerebras text tagger (gpt-oss-120b → qwen-3-235b fallback)",
+      "  - tags_text   : shared model ladder (subscription -> nvidia -> cerebras last)",
       "  - tags_vision : Anthropic Claude vision tagger (claude-haiku-4-5)",
       "  - tags        : union of the two (deduped, dashboard-facing)",
       "",
@@ -94,7 +94,7 @@ async function main() {
   }
 
   if (!textTagger && !visionTagger) {
-    throw new Error("no taggers available — set CEREBRAS_API_KEY and/or ANTHROPIC_API_KEY");
+    throw new Error("no taggers available — set a model-ladder key (ANTHROPIC_API_KEY first, CEREBRAS_API_KEY last) and/or ANTHROPIC_API_KEY for vision");
   }
 
   console.log(`[backfill] taggers: text=${textTagger ? "ON" : "off"} vision=${visionTagger ? "ON" : "off"}`);

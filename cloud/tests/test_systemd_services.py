@@ -83,6 +83,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-grok-page-responder.timer",
     "radon-leap.service",
     "radon-leap.timer",
+    "radon-liquidcompute.service",
+    "radon-liquidcompute.timer",
     "radon-llm-index.service",
     "radon-llm-index.timer",
     "radon-nextjs-db-watchdog.service",
@@ -272,6 +274,23 @@ class TestAaFrontierRefresh:
     def test_runs_daily_before_ai_cycle_with_catchup(self, unit):
         timer = unit(self.TIMER)["Timer"]
         assert timer["oncalendar"] == "*-*-* 07:00:00 UTC"
+        assert timer["persistent"] == "true"
+        assert int(timer["randomizeddelaysec"]) <= 300
+
+
+class TestLiquidCompute:
+    SERVICE = "radon-liquidcompute.service"
+    TIMER = "radon-liquidcompute.timer"
+
+    def test_is_oneshot_daily_ticker_poll(self, unit):
+        svc = unit(self.SERVICE)["Service"]
+        assert svc["type"] == "oneshot"
+        assert svc["timeoutstartsec"] == "180"
+        assert svc["execstart"].endswith("-m scripts.ai_cycle.liquidcompute --record")
+
+    def test_runs_daily_after_ai_cycle_with_catchup(self, unit):
+        timer = unit(self.TIMER)["Timer"]
+        assert timer["oncalendar"] == "*-*-* 07:30:00 UTC"
         assert timer["persistent"] == "true"
         assert int(timer["randomizeddelaysec"]) <= 300
 

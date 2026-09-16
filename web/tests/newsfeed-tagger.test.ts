@@ -1,63 +1,35 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-const originalFetch = global.fetch;
-const originalKey = process.env.CEREBRAS_API_KEY;
-
-beforeEach(() => {
-  process.env.CEREBRAS_API_KEY = "test-key";
-});
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 afterEach(() => {
-  global.fetch = originalFetch;
-  process.env.CEREBRAS_API_KEY = originalKey;
   vi.restoreAllMocks();
 });
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-
-function chatCompletion(content: string): unknown {
-  return { choices: [{ message: { content } }] };
-}
 
 const TAXONOMY = ["BTC", "VOL", "POSITIONING", "MACRO"];
 
 describe("createTagger.tagPost (open vocabulary)", () => {
   it("returns the model's 3 tags normalised to uppercase", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse(chatCompletion(JSON.stringify({ tags: ["puts", "put-call-ratio", "positioning"] }))),
-    );
-    global.fetch = fetchMock as typeof fetch;
-
+    const completeJson = vi.fn().mockResolvedValue({ tags: ["puts", "put-call-ratio", "positioning"] });
     const { createTagger } = await import("../../scripts/newsfeed/tagger.js");
     const tagger = createTagger({
       getTaxonomySnapshot: async () => TAXONOMY,
+      completeJson,
     });
 
     const tags = await tagger.tagPost({ id: "p1", title: "Hated puts", content: "Put call ratio imploded" });
 
     expect(tags).toEqual(["PUTS", "PUT-CALL-RATIO", "POSITIONING"]);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
-    expect(body.model).toBe("gpt-oss-120b");
-    const systemMsg = body.messages.find((m: { role: string }) => m.role === "system").content;
-    expect(systemMsg).toMatch(/BTC, VOL, POSITIONING, MACRO/);
-    expect(systemMsg).toMatch(/EXACTLY 3 tags/);
-    expect(systemMsg).toMatch(/ALL TAGS ARE UPPERCASE/);
+    expect(completeJson).toHaveBeenCalledTimes(1);
+    const arg = completeJson.mock.calls[0][0];
+    expect(arg.system).toMatch(/BTC, VOL, POSITIONING, MACRO/);
+    expect(arg.system).toMatch(/EXACTLY 3 tags/);
+    expect(arg.system).toMatch(/ALL TAGS ARE UPPERCASE/);
+    expect(arg.instruction).toMatch(/Hated puts/);
   });
 
   it("primes the model with technical-analysis vocabulary (candlesticks, indicators, chart patterns)", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse(chatCompletion(JSON.stringify({ tags: ["SHOOTING-STAR", "SPX", "EQUITIES"] }))),
-    );
-    global.fetch = fetchMock as typeof fetch;
-
+    const completeJson = vi.fn().mockResolvedValue({ tags: ["SHOOTING-STAR", "SPX", "EQUITIES"] });
     const { createTagger } = await import("../../scripts/newsfeed/tagger.js");
-    const tagger = createTagger({ getTaxonomySnapshot: async () => TAXONOMY });
+    const tagger = createTagger({ getTaxonomySnapshot: async () => TAXONOMY, completeJson });
 
     const tags = await tagger.tagPost({
       id: "p-ta",
@@ -66,9 +38,7 @@ describe("createTagger.tagPost (open vocabulary)", () => {
     });
 
     expect(tags).toEqual(["SHOOTING-STAR", "SPX", "EQUITIES"]);
-
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
-    const systemMsg = body.messages.find((m: { role: string }) => m.role === "system").content;
+    const systemMsg = completeJson.mock.calls[0][0].system as string;
     expect(systemMsg).toMatch(/TECHNICAL SIGNAL/);
     expect(systemMsg).toMatch(/SHOOTING-STAR/);
     expect(systemMsg).toMatch(/HAMMER/);
@@ -79,79 +49,104 @@ describe("createTagger.tagPost (open vocabulary)", () => {
     expect(systemMsg).toMatch(/RESISTANCE/);
   });
 
-  it("falls back to qwen-3-235b on a 429 from gpt-oss-120b", async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ error: "rate limited" }, 429))
-      .mockResolvedValueOnce(
-        jsonResponse(chatCompletion(JSON.stringify({ tags: ["MACRO", "FED", "RATES"] }))),
-      );
-    global.fetch = fetchMock as typeof fetch;
-
+  it("returns null when the ladder soft-fails", async () => {
+    const completeJson = vi.fn().mockResolvedValue(null);
     const { createTagger } = await import("../../scripts/newsfeed/tagger.js");
-    const tagger = createTagger({ getTaxonomySnapshot: async () => TAXONOMY });
-
-    const tags = await tagger.tagPost({ id: "p2", title: "Fed cuts", content: "Rate path" });
-
-    expect(tags).toEqual(["MACRO", "FED", "RATES"]);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    const second = JSON.parse(fetchMock.mock.calls[1][1].body as string);
-    expect(second.model).toBe("qwen-3-235b-a22b-instruct-2507");
-  });
-
-  it("returns null when both gpt-oss and qwen fail", async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ error: "rate limited" }, 429))
-      .mockResolvedValueOnce(jsonResponse({ error: "rate limited" }, 429));
-    global.fetch = fetchMock as typeof fetch;
-
-    const { createTagger } = await import("../../scripts/newsfeed/tagger.js");
-    const tagger = createTagger({ getTaxonomySnapshot: async () => TAXONOMY });
+    const tagger = createTagger({ getTaxonomySnapshot: async () => TAXONOMY, completeJson });
 
     const tags = await tagger.tagPost({ id: "p3", title: "X", content: "Y" });
-
     expect(tags).toBeNull();
   });
 
   it("trims to exactly 3 tags when the model returns more", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse(chatCompletion(JSON.stringify({ tags: ["puts", "options", "positioning", "vol", "hedging"] }))),
-    );
-    global.fetch = fetchMock as typeof fetch;
-
+    const completeJson = vi.fn().mockResolvedValue({
+      tags: ["puts", "options", "positioning", "vol", "hedging"],
+    });
     const { createTagger } = await import("../../scripts/newsfeed/tagger.js");
-    const tagger = createTagger({ getTaxonomySnapshot: async () => TAXONOMY });
+    const tagger = createTagger({ getTaxonomySnapshot: async () => TAXONOMY, completeJson });
 
     const tags = await tagger.tagPost({ id: "p4", title: "X", content: "Y" });
     expect(tags).toEqual(["PUTS", "OPTIONS", "POSITIONING"]);
   });
 
-  it("falls back if normalised tag count drops below 3 (post-cleanup junk)", async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(
-        jsonResponse(chatCompletion(JSON.stringify({ tags: ["puts", "", "  "] }))),
-      )
-      .mockResolvedValueOnce(
-        jsonResponse(chatCompletion(JSON.stringify({ tags: ["puts", "options", "positioning"] }))),
-      );
-    global.fetch = fetchMock as typeof fetch;
-
+  it("returns null if normalised tag count drops below 3", async () => {
+    const completeJson = vi.fn().mockResolvedValue({ tags: ["puts", "", "  "] });
     const { createTagger } = await import("../../scripts/newsfeed/tagger.js");
-    const tagger = createTagger({ getTaxonomySnapshot: async () => TAXONOMY });
+    const tagger = createTagger({ getTaxonomySnapshot: async () => TAXONOMY, completeJson });
 
     const tags = await tagger.tagPost({ id: "p5", title: "X", content: "Y" });
-    expect(tags).toEqual(["PUTS", "OPTIONS", "POSITIONING"]);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(tags).toBeNull();
   });
 
-  it("throws if CEREBRAS_API_KEY is not set", async () => {
+  it("does not require CEREBRAS_API_KEY", async () => {
+    const original = process.env.CEREBRAS_API_KEY;
     delete process.env.CEREBRAS_API_KEY;
     const { createTagger } = await import("../../scripts/newsfeed/tagger.js");
-    expect(() => createTagger({ getTaxonomySnapshot: async () => TAXONOMY })).toThrow(/CEREBRAS_API_KEY/);
+    expect(() => createTagger({
+      getTaxonomySnapshot: async () => TAXONOMY,
+      completeJson: async () => ({ tags: ["A", "B", "C"] }),
+    })).not.toThrow();
+    process.env.CEREBRAS_API_KEY = original;
   });
 
   it("throws if getTaxonomySnapshot is missing", async () => {
     const { createTagger } = await import("../../scripts/newsfeed/tagger.js");
     expect(() => createTagger({})).toThrow(/getTaxonomySnapshot/);
+  });
+});
+
+describe("completeViaLadder (Python CLI bridge)", () => {
+  it("spawns model_ladder_cli.py with accept=tags and never calls cerebras.ai", async () => {
+    let stdin = "";
+    const spawnImpl = vi.fn((_bin: string, args: string[]) => {
+      const listeners: Record<string, Array<(value?: unknown) => void>> = {
+        data: [],
+        close: [],
+        error: [],
+      };
+      return {
+        stdin: {
+          write(chunk: string) { stdin += chunk; },
+          end() {
+            queueMicrotask(() => {
+              for (const fn of listeners.data) {
+                fn(JSON.stringify({
+                  ok: true,
+                  data: { tags: ["PUTS", "OPTIONS", "POSITIONING"] },
+                  provider: "anthropic",
+                }));
+              }
+              for (const fn of listeners.close) fn(0);
+            });
+          },
+        },
+        stdout: { on(ev: string, fn: (value?: unknown) => void) { if (ev === "data") listeners.data.push(fn); } },
+        stderr: { on() {} },
+        on(ev: string, fn: (value?: unknown) => void) {
+          if (ev === "close" || ev === "error") listeners[ev].push(fn);
+        },
+        kill() {},
+        args,
+      };
+    });
+
+    const { completeViaLadder } = await import("../../scripts/newsfeed/tagger.js");
+    const data = await completeViaLadder({
+      system: "Pick EXACTLY 3 tags",
+      instruction: "Title: X\nBody: Y",
+      spawnImpl: spawnImpl as never,
+      pythonBin: "python3.13",
+    });
+
+    expect(data).toEqual({ tags: ["PUTS", "OPTIONS", "POSITIONING"] });
+    expect(spawnImpl).toHaveBeenCalledTimes(1);
+    const [, args] = spawnImpl.mock.calls[0];
+    expect(args[0]).toMatch(/model_ladder_cli\.py$/);
+    const payload = JSON.parse(stdin);
+    expect(payload.accept).toBe("tags");
+    expect(payload.system).toMatch(/EXACTLY 3 tags/);
+    expect(JSON.stringify(payload)).not.toMatch(/cerebras\.ai/);
+    expect(JSON.stringify(payload)).not.toMatch(/gpt-oss-120b/);
   });
 });
 
@@ -278,23 +273,16 @@ describe("hydrateTags", () => {
   });
 });
 
-// R-466 / REL-165: same unbounded-fetch shape as the vision tagger. A
-// half-open connection to api.cerebras.ai held the cycle; the bound is a
-// per-model tagging failure (the fallback model is still tried), never a hang.
-describe("R-466 / REL-165: the text fetch is bounded", () => {
-  function hangUntilAborted(init?: RequestInit): Promise<Response> {
-    return new Promise((_resolve, reject) => {
-      const signal = init?.signal;
-      if (signal) signal.addEventListener("abort", () => reject(signal.reason));
-    });
-  }
-
-  it("a fetch that never answers settles tagPost as untagged within the bound", async () => {
-    const fetchMock = vi.fn((_url: string, init?: RequestInit) => hangUntilAborted(init));
-    global.fetch = fetchMock as unknown as typeof fetch;
-
+// R-466 / REL-165: a hung ladder walk is a per-post tagging failure, never a cycle hang.
+describe("R-466 / REL-165: the text ladder walk is bounded", () => {
+  it("a completeJson that never answers settles tagPost as untagged within the bound", async () => {
+    const completeJson = vi.fn(() => new Promise(() => {}));
     const { createTagger } = await import("../../scripts/newsfeed/tagger.js");
-    const tagger = createTagger({ getTaxonomySnapshot: async () => TAXONOMY, timeoutMs: 50 });
+    const tagger = createTagger({
+      getTaxonomySnapshot: async () => TAXONOMY,
+      completeJson,
+      timeoutMs: 50,
+    });
 
     const outcome = await Promise.race([
       tagger.tagPost({ id: "p1", title: "Hangs", content: "x" }).then((tags) => ({ tags })),
@@ -302,39 +290,18 @@ describe("R-466 / REL-165: the text fetch is bounded", () => {
     ]);
 
     expect(outcome).toEqual({ tags: null });
-    // Both models were tried and both carried the bound on the wire.
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    for (const [, init] of fetchMock.mock.calls) {
-      expect(init?.signal).toBeInstanceOf(AbortSignal);
-    }
   });
 });
 
-// T-374: the tests above all inject timeoutMs, so the 30 s DEFAULT (the
-// REL-165 incident constant) was a free variable. AbortSignal.timeout runs on
-// Node's internal timer, which vitest fake timers cannot advance (verified:
-// advanceTimersByTimeAsync(30_001) leaves the signal un-aborted), so the
-// default's wiring is asserted directly: the AbortSignal.timeout spy sees
-// exactly 30 000 ms and the fetch carries the very signal it returned. The
-// abort path itself is proven end-to-end by the timeoutMs: 50 test above.
-describe("T-374: the default fetch bound is exactly 30 000 ms", () => {
-  it("with no timeoutMs override, the model call carries AbortSignal.timeout(30000) on the wire", async () => {
-    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
-    const fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse(chatCompletion(JSON.stringify({ tags: ["puts", "options", "positioning"] }))),
-    );
-    global.fetch = fetchMock as typeof fetch;
-
-    const { createTagger } = await import("../../scripts/newsfeed/tagger.js");
-    const tagger = createTagger({ getTaxonomySnapshot: async () => TAXONOMY });
+describe("T-374: the default ladder bound is exactly 30 000 ms", () => {
+  it("with no timeoutMs override, completeJson receives 30000", async () => {
+    const completeJson = vi.fn().mockResolvedValue({ tags: ["puts", "options", "positioning"] });
+    const { createTagger, DEFAULT_TAGGER_TIMEOUT_MS } = await import("../../scripts/newsfeed/tagger.js");
+    expect(DEFAULT_TAGGER_TIMEOUT_MS).toBe(30_000);
+    const tagger = createTagger({ getTaxonomySnapshot: async () => TAXONOMY, completeJson });
 
     const tags = await tagger.tagPost({ id: "p-t374", title: "X", content: "Y" });
     expect(tags).toEqual(["PUTS", "OPTIONS", "POSITIONING"]);
-
-    expect(timeoutSpy).toHaveBeenCalledTimes(1);
-    expect(timeoutSpy).toHaveBeenCalledWith(30_000);
-    const init = fetchMock.mock.calls[0][1] as RequestInit;
-    expect(init.signal).toBeInstanceOf(AbortSignal);
-    expect(init.signal).toBe(timeoutSpy.mock.results[0].value);
+    expect(completeJson).toHaveBeenCalledWith(expect.objectContaining({ timeoutMs: 30_000 }));
   });
 });

@@ -143,7 +143,7 @@ test("short strangle proposals show skew and signed delta telemetry", async ({ p
   await page.goto("/AAPL?tab=chain");
   const detail = page.locator(".ticker-detail-page").last();
   await detail.waitFor({ timeout: 5_000 });
-  await detail.locator(".chain-grid").waitFor();
+  await detail.locator(".chain-grid").first().waitFor();
 
   await detail.getByRole("row", { name: /\$105\.00/ }).first().locator(".chain-bid.chain-clickable").last().click();
   await detail.getByRole("row", { name: /\$115\.00/ }).first().locator(".chain-bid.chain-clickable").first().click();

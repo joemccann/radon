@@ -203,21 +203,6 @@ REGISTRY: Tuple[Preference, ...] = (
         applies_immediately=True,
     ),
     Preference(
-        key="RADON_WORKFLOW_MAX_ORDERS",
-        label="Max orders per workflow run",
-        group="Order Limits",
-        value_type="int",
-        default=3,
-        hard_min=1,
-        hard_max=18,
-        unit="orders",
-        description=(
-            "Orders a single automated workflow run may place before it is cut "
-            "off. The refusal is atomic, so no partial batch is sent."
-        ),
-        applies_immediately=True,
-    ),
-    Preference(
         key="RADON_SCANNER_WORKERS",
         label="Watchlist scanner workers",
         group="Scanning",

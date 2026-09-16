@@ -1,3 +1,99 @@
+# Task: Newsfeed + distill on shared model ladder 2026-09-15 [IN PROGRESS]
+
+Stop Cerebras-first text tagging and KB distillation. Both walk
+`scripts/clients/model_ladder.py` (subscription -> nvidia -> cerebras last).
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests: Cerebras not first; soft-fail; 3-tag + distill JSON
+- T2 depends_on: [T1] - `complete_text_json` + CLI; wire distill.py and tagger.js
+- T3 depends_on: [T2] - Docs/allowlist that claimed Cerebras-first
+- T4 depends_on: [T3] - Focused green, PR, watch CI. Do not merge.
+
+## Checklist
+
+- [x] T1 Failing tests for order, soft-fail, contracts
+- [x] T2 Shared text JSON helper; JS tagger subprocess bridge
+- [x] T3 Owner docs + newsfeed env allowlist
+- [ ] T4 PR open, CI green, no merge
+
+## Review
+
+- [ ] JS tagger reaches the ladder via `scripts/clients/model_ladder_cli.py`
+
+---
+
+# Task: IR flow-refresh analysis timeout 2026-09-15 [IN PROGRESS]
+
+P1 `radon-flow-refresh.service` Result=exit-code at 20:00Z. Journal:
+capacity-shed retry then `flow-analysis FastAPI outcome indeterminate
+(curl=0, http=502)` at +128s. Same ~120s kill on 2026-09-11 20:00Z.
+`/flow-analysis` timeout=120 while wrapper SCAN_TIMEOUT default is 180
+and `/discover` already uses 180.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red regression: POST /flow-analysis timeout == wrapper budget
+- T2 depends_on: [T1] - Raise endpoint timeout to 180; runbook case
+- T3 depends_on: [T2] - Focused green, commit, push fix/*, ensure PR
+
+## Checklist
+
+- [x] T1 Failing test (120 vs 180 red)
+- [x] T2 Fix + runbook (`flow-refresh-analysis-timeout`)
+- [ ] T3 Ship branch/PR
+
+## Review
+
+- [x] Live journal: capacity shed then +128s indeterminate 502; health/lite authenticated; reproduce POST 200 after incident
+
+---
+
+# Task: PR #450 CI green leftover workflow tests + e2e ledger [IN PROGRESS]
+
+Unblock `chore/remove-workflow-composer` CI. Do not merge.
+
+## Dependency graph
+
+- T1 depends_on: [] - Delete leftover `scripts/tests/test_workflow_*.py` that still import the removed package.
+- T2 depends_on: [T1] - Stamp `# REVIEWED 2026-09-15 mobile-p2-polish.spec.ts` for the incidental hold-out edit.
+- T3 depends_on: [T2] - Focused pytest, push to the same PR, watch CI.
+
+## Checklist
+
+- [ ] T1 Delete `test_workflow_order_preflight.py` and `test_workflow_scanner_source.py`.
+- [ ] T2 Ledger annotation dated on or after the spec change.
+- [ ] T3 Focused pytest green; push; CI green or only non-gating failures.
+
+## Review
+
+- [ ] Do not merge. Report what was fixed.
+
+---
+
+# Task: Liquid Compute GPU index poller [DONE]
+
+Third-venue public ticker as host-tagged AI-infra series. Never splice onto
+gpurentalprices / Silicon Data / `gpu-rental`.
+
+## Dependency graph
+
+- T1 depends_on: [] - Parse/upsert/backoff contracts and live-shape fixture.
+- T2 depends_on: [T1] - Collector, host-tagged store, C5 snapshot surface.
+- T3 depends_on: [T2] - Daily timer, docs, focused tests, PR.
+
+## Checklist
+
+- [x] T1 Red contracts for parse, idempotent `(source, series_id, asOf)`, non-200 backoff.
+- [x] T2 Persist `liquidcompute` rows and C5 without mixing C1 / `gpu-aggregator`.
+- [x] T3 `radon-liquidcompute.timer` plus owner docs; PR open, not merged.
+
+## Review
+
+- [x] Third venue labeled opaque until licensed; rental book untouched.
+
+---
+
 # Task: Testing delta audit 2026-09-15 [IN PROGRESS]
 
 Audit `9b9a65c7..fe96fdac` for test-suite-health regressions only. Local full
@@ -6828,6 +6924,21 @@ Dependency graph: T1 -> T2 -> T3 -> T4 -> T5.
 ---
 
 # Task: Radon AI conversation experience (2026-09-08)
+
+## Approved anchored options chain (2026-09-15)
+
+Plan and review: `tasks/options-chain-anchor.md`.
+Dependency graph: T1 -> T2; T1 -> T3; T1 -> T4; T2 + T3 + T4 -> T5 -> T6.
+- [x] T1 depends_on: [] - Approved design and isolated implementation checkout.
+- [x] T2 depends_on: [T1] - Stable anchor and desktop implementation.
+- [x] T3 depends_on: [T1] - Mobile implementation and unit regressions.
+- [x] T4 depends_on: [T1] - Browser regression coverage and CI selection.
+- [x] T5 depends_on: [T2,T3,T4] - Integration review and PR #449.
+- [ ] T6 depends_on: [T5] - Exact-head CI, visual evidence and notification.
+
+### Review
+PR https://github.com/joemccann/radon/pull/449; initial runner screenshots reviewed, CI repair loop active. Details in tasks/options-chain-anchor.md. No local suites or production deployment.
+
 
 ## Specification
 Replace the anonymous composer-only overlay with a readable Clear conversation workspace: explicit identity and close/new controls; task-specific editable starters; honest current-page context; multiline composer with visible attachment and model controls; cancellable generation, retry/edit recovery, retained session on close; readable transcript and inspectable tool evidence. Preserve order-risk approvals, quote provenance, auth and root socket ownership. Do not persist sensitive conversation data to disk. Desktop is a spacious centered workspace, mobile fills the viewport with accessible controls. No local test suites; GitHub CI owns Vitest and Playwright execution.

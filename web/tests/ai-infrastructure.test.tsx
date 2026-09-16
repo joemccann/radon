@@ -32,12 +32,19 @@ describe("AI infrastructure evidence", () => {
     expect(source?.querySelector("a")?.getAttribute("href")).toBe("https://example.com/evidence");
     expect(screen.getByTestId("ai-indicator-D5")).toBeTruthy();
     expect(screen.getByTestId("ai-indicator-D5").textContent).toContain("Ramp business AI spend");
+    fireEvent.click(screen.getByRole("tab", { name: "Compute" }));
+    const thirdVenue = screen.getByTestId("ai-indicator-C5");
+    expect(thirdVenue.textContent).toContain("Liquid Compute GPU index");
+    expect(thirdVenue.textContent).toContain("Third venue versus the rental book");
+    expect(thirdVenue.textContent).toContain("opaque until licensed");
+    expect(thirdVenue.querySelector('[data-testid="ai-source-liquidcompute"]')?.textContent).toContain("Liquid Compute GPU index");
   });
   it("keeps a page-level coverage board for every snapshot source on every pane", () => {
     render(<AiInfrastructureView data={aiFixture} error={null} loading={false} refresh={() => {}} />);
     const board = screen.getByTestId("ai-source-coverage");
     expect(board.querySelector('[data-testid="ai-coverage-fixture"]')?.textContent).toContain("Fixture publisher");
     expect(board.querySelector('[data-testid="ai-coverage-ramp"]')?.textContent).toContain("Ramp AI Index");
+    expect(board.querySelector('[data-testid="ai-coverage-liquidcompute"]')?.textContent).toContain("Liquid Compute GPU index");
     fireEvent.click(screen.getByRole("tab", { name: "Finance" }));
     expect(screen.getByTestId("ai-source-coverage").querySelector('[data-testid="ai-coverage-ramp"]')?.textContent).toContain("128");
   });
