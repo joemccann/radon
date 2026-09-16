@@ -115,7 +115,10 @@ for (const mobile of [false, true]) {
       const crossingPath = testInfo.outputPath(`chain-anchor-${mobile ? "mobile" : "desktop"}-${theme}-live-crossing.png`);
       await page.screenshot({ path: crossingPath });
       await testInfo.attach("chain-live-crossing", { path: crossingPath, contentType: "image/png" });
-      await spot.getByRole("button", { name: "Recenter options chain", exact: true }).click();
+      await (mobile
+        ? spot.getByRole("button", { name: "Recenter options chain", exact: true })
+        : page.getByRole("button", { name: "Recenter chain view", exact: true })
+      ).click();
       await expect.poll(async () => (await paneState(lower)).scrollTop).toBe(0);
       await expect.poll(async () => (await paneState(upper)).partition).not.toEqual(before.upper.partition);
       await expect.poll(() => upper.evaluate((element) => Math.abs(element.scrollTop - (element.scrollHeight - element.clientHeight)))).toBeLessThan(2);
