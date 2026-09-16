@@ -184,7 +184,10 @@ def test_nightly_statement_cannot_invent_historical_zero_flows(nightly_builder, 
     assert payload["flows_status"] == "failed"
     assert payload["twr"] is None
     assert payload["nav_as_of"] == "2026-01-16"
-    assert len(payload["series"]) == 5
+    assert payload["counts"]["n_nav_observations"] == 5
+    assert payload["period_start"] == "2026-01-12"
+    assert payload["equity"]["ending"] == 183000.0
+    assert payload["series"] == []  # Existing failed-flow contract suppresses the curve.
     assert any(w["context"].get("reason") == "historical_flow_coverage_unverified" for w in payload["warnings"])
 
 
