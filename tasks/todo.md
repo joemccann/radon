@@ -7266,3 +7266,24 @@ runs, recording evidence only and preserving every release rail.
 ## Review
 
 - [x] Audit-only; no production or trading-system operation was invoked.
+
+# Task: CI performance remediate 2026-09-16 [IN PROGRESS]
+
+Reduced capability rung (`RADON_WEEKEND_REDUCED=1`): remediate verified P0/P1
+findings only; do not substitute an unmeasured lower-priority optimization.
+
+## Dependency graph
+
+- T1 depends_on: [] - Re-verify dedicated runner, dated audit branch, lock, reduced scope, and P0/P1 eligibility.
+- T2 depends_on: [T1] - Run serial safety and full-gate baselines without changing protected release behavior.
+- T3 depends_on: [T2] - Append the remediation disposition, commit, push, and update the dated PR and rolling issue.
+
+## Checklist
+
+- [x] T1 Audit handoff re-verified: zero P0/P1 source-actionable findings; 24 required contexts remain protected.
+- [x] T2 Focused safety contracts, YAML parsing, shell syntax, and diff checks passed; the detached full baseline lacked its required `DONE` sentinel and is not counted as passing.
+- [x] T3 Reduced-scope `NO_SAFE_CHANGE` disposition recorded for commit/push and PR/issue publication.
+
+## Review
+
+- [x] No production operation or gate weakening; local timing is not claimed as a CI improvement.
