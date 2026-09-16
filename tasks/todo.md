@@ -7225,6 +7225,24 @@ safety-gate verification.
 
 - [x] No workflow, test, deployment, image, or trading-state change without an eligible audit finding.
 
+# Task: Testing audit 2026-09-16 [IN PROGRESS]
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify runner safety, branch, audit ledger, and delta surface.
+- T2 depends_on: [T1] - Run required serial gates and targeted determinism checks.
+- T3 depends_on: [T1, T2] - Re-triage findings, append audit evidence, commit, push, and publish the nightly PR.
+
+## Checklist
+
+- [x] T1 Dedicated runner markers, clean tree, audit base, and dated branch verified.
+- [x] T2 Static delta sweeps recorded; detached serial gates remain unclaimed without `DONE`.
+- [x] T3 Delta report prepared for the dated branch.
+
+## Review
+
+- [x] T-495 filed with source location and red/green acceptance criteria; no gate count is claimed before the detached stage completes.
+
 # Task: CI performance audit 2026-09-15 [IN PROGRESS]
 
 Audit `9b9a65c7..origin/main` against organic GitHub Actions production runs;

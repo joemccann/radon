@@ -869,6 +869,12 @@ no new skips; no threshold or CI-reachability drift. 0 new findings.
 |---|---|---|
 | T-493 | OPEN | Delta audit: web/tests/ib-rt-volume-relay.test.ts:29-50 source-greps relay callbacks instead of dispatching tickSize 8 / tickString 48 and observing a broadcast. Full-gate detached stage has no DONE sentinel; no result claimed. |
 
+## Audit 2026-09-16 (testing/2026-09-16)
+
+| Task | Status | Evidence |
+|---|---|---|
+| T-495 | OPEN | `web/e2e/chain-anchored-scroll.spec.ts:93-102` uses `page.waitForTimeout(250)` between two scroll assertions and its post-scroll snapshot. The contract can sample before rendering settles and cannot catch a regression that renders after the arbitrary window. AC: replace the delay with a web-first settled-pane assertion; a deliberately delayed rerender must fail. Detached full gates are still running; no count claimed without `DONE`. |
+
 ## Remediation 2026-09-13 (testing/2026-09-13)
 
 | Task | Status | Evidence |
