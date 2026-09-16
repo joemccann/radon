@@ -110,14 +110,14 @@
 }
 
 /* Keep one telemetry subtree: ordinary routes participate in the header grid,
-   while the desktop chain exposes it through a compact status disclosure. */
+   while the desktop instrument workspace exposes it through a compact status disclosure. */
 .telemetryPanel { display: contents; }
 .telemetryTrigger { display: none; }
 
 @media (min-width: 1024px) {
-  .workspace:has(:global(.chain-first-cockpit)) .header {
+  .workspace:has(:global(.instrument-workspace)) .header {
     --clear-shell-gutter: 16px;
-    /* The chain deck owns z-index 40; header disclosures must paint above it. */
+    /* Instrument decks own z-index 40; header disclosures must paint above it. */
     z-index: 41;
     grid-template-rows: 48px;
     min-height: 48px;
@@ -125,18 +125,18 @@
     flex-shrink: 0;
     column-gap: 16px;
   }
-  .workspace:has(:global(.chain-first-cockpit)) .header::after { top: 47px; }
-  .workspace:has(:global(.chain-first-cockpit)) .navigation { gap: 20px; }
-  .workspace:has(:global(.chain-first-cockpit)) .brand { font-size: 23px; gap: 7px; margin-right: 10px; }
-  .workspace:has(:global(.chain-first-cockpit)) .brand svg { width: 25px; height: 25px; }
-  .workspace:has(:global(.chain-first-cockpit)) .primary { gap: 22px; }
-  .workspace:has(:global(.chain-first-cockpit)) .primaryLink { font-size: 13px; }
-  .workspace:has(:global(.chain-first-cockpit)) .avatar { width: 30px; height: 30px; }
-  .workspace:has(:global(.chain-first-cockpit)) .menu { top: 48px; max-height: calc(100dvh - 72px); }
-  .workspace:has(:global(.chain-first-cockpit)) .header :global(.header-actions) { gap: 4px; }
-  .workspace:has(:global(.chain-first-cockpit)) .header :global(.search-input-wrapper) { width: clamp(150px, 15vw, 216px); }
-  .workspace:has(:global(.chain-first-cockpit)) .header :global(.search-input-wrapper input) { min-height: 32px; height: 32px; }
-  .workspace:has(:global(.chain-first-cockpit)) .telemetryTrigger {
+  .workspace:has(:global(.instrument-workspace)) .header::after { top: 47px; }
+  .workspace:has(:global(.instrument-workspace)) .navigation { gap: 20px; }
+  .workspace:has(:global(.instrument-workspace)) .brand { font-size: 23px; gap: 7px; margin-right: 10px; }
+  .workspace:has(:global(.instrument-workspace)) .brand svg { width: 25px; height: 25px; }
+  .workspace:has(:global(.instrument-workspace)) .primary { gap: 22px; }
+  .workspace:has(:global(.instrument-workspace)) .primaryLink { font-size: 13px; }
+  .workspace:has(:global(.instrument-workspace)) .avatar { width: 30px; height: 30px; }
+  .workspace:has(:global(.instrument-workspace)) .menu { top: 48px; max-height: calc(100dvh - 72px); }
+  .workspace:has(:global(.instrument-workspace)) .header :global(.header-actions) { gap: 4px; }
+  .workspace:has(:global(.instrument-workspace)) .header :global(.search-input-wrapper) { width: clamp(150px, 15vw, 216px); }
+  .workspace:has(:global(.instrument-workspace)) .header :global(.search-input-wrapper input) { min-height: 32px; height: 32px; }
+  .workspace:has(:global(.instrument-workspace)) .telemetryTrigger {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -151,15 +151,15 @@
     white-space: nowrap;
     cursor: pointer;
   }
-  .workspace:has(:global(.chain-first-cockpit)) .telemetryTrigger:hover,
-  .workspace:has(:global(.chain-first-cockpit)) .telemetryTrigger[aria-expanded="true"] { background: var(--bg-hover); }
-  .workspace:has(:global(.chain-first-cockpit)) .telemetryTrigger[data-feed-integrity="warn"] { color: var(--warn-text); }
-  .workspace:has(:global(.chain-first-cockpit)) .telemetryTrigger[data-feed-integrity="dead"] { color: var(--fault); }
-  .workspace:has(:global(.chain-first-cockpit)) .telemetryTrigger:focus-visible {
+  .workspace:has(:global(.instrument-workspace)) .telemetryTrigger:hover,
+  .workspace:has(:global(.instrument-workspace)) .telemetryTrigger[aria-expanded="true"] { background: var(--bg-hover); }
+  .workspace:has(:global(.instrument-workspace)) .telemetryTrigger[data-feed-integrity="warn"] { color: var(--warn-text); }
+  .workspace:has(:global(.instrument-workspace)) .telemetryTrigger[data-feed-integrity="dead"] { color: var(--fault); }
+  .workspace:has(:global(.instrument-workspace)) .telemetryTrigger:focus-visible {
     outline: 2px solid var(--signal-core);
     outline-offset: -2px;
   }
-  .workspace:has(:global(.chain-first-cockpit)) .telemetryPanel {
+  .workspace:has(:global(.instrument-workspace)) .telemetryPanel {
     display: none;
     position: absolute;
     top: 48px;
@@ -174,18 +174,18 @@
     border-radius: 8px;
     background: var(--bg-base);
   }
-  .workspace:has(:global(.chain-first-cockpit)) .telemetryPanel[data-open="true"] { display: block; }
-  .workspace:has(:global(.chain-first-cockpit)) .telemetryPanel :global(.telemetry-rail) { padding: 0; gap: 8px; }
-  .workspace:has(:global(.chain-first-cockpit)) .telemetryPanel :global(.rail-section) { font-size: 18px; margin-bottom: 4px; }
-  .workspace:has(:global(.chain-first-cockpit)) .contextTools { margin-top: 16px; justify-content: flex-start; gap: 12px; }
-  .workspace:has(:global(.chain-first-cockpit)) .contextTools :global(.futures-strip) { flex-wrap: wrap; gap: 10px 16px; border: 0; padding: 0; }
-  .workspace:has(:global(.chain-first-cockpit)) :global(.content) { padding: 0; min-height: 0; overflow: hidden; scrollbar-gutter: auto; }
-  .workspace:has(:global(.chain-first-cockpit)) :global(.footer-strip) { height: 28px; min-height: 28px; padding-block: 0; }
+  .workspace:has(:global(.instrument-workspace)) .telemetryPanel[data-open="true"] { display: block; }
+  .workspace:has(:global(.instrument-workspace)) .telemetryPanel :global(.telemetry-rail) { padding: 0; gap: 8px; }
+  .workspace:has(:global(.instrument-workspace)) .telemetryPanel :global(.rail-section) { font-size: 18px; margin-bottom: 4px; }
+  .workspace:has(:global(.instrument-workspace)) .contextTools { margin-top: 16px; justify-content: flex-start; gap: 12px; }
+  .workspace:has(:global(.instrument-workspace)) .contextTools :global(.futures-strip) { flex-wrap: wrap; gap: 10px 16px; border: 0; padding: 0; }
+  .workspace:has(:global(.instrument-workspace)) :global(.content) { padding: 0; min-height: 0; overflow: hidden; scrollbar-gutter: auto; }
+  .workspace:has(:global(.instrument-workspace)) :global(.footer-strip) { height: 28px; min-height: 28px; padding-block: 0; }
 }
 
 @media (min-width: 1024px) and (max-width: 1200px) {
-  .workspace:has(:global(.chain-first-cockpit)) .navigation { gap: 12px; }
-  .workspace:has(:global(.chain-first-cockpit)) .primary { gap: 14px; }
-  .workspace:has(:global(.chain-first-cockpit)) .brand { margin-right: 0; }
-  .workspace:has(:global(.chain-first-cockpit)) .header :global(.search-input-wrapper) { width: 150px; }
+  .workspace:has(:global(.instrument-workspace)) .navigation { gap: 12px; }
+  .workspace:has(:global(.instrument-workspace)) .primary { gap: 14px; }
+  .workspace:has(:global(.instrument-workspace)) .brand { margin-right: 0; }
+  .workspace:has(:global(.instrument-workspace)) .header :global(.search-input-wrapper) { width: 150px; }
 }

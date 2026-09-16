@@ -117,9 +117,73 @@ describe("chain-first instrument context", () => {
     // the default summary click action, so expose it explicitly for callbacks.
     disclosure.open = true;
     for (const [name, key] of [["Book & trade", null], ["Ratings", "r"], ["Seasonality", "s"], ["Company", "i"], ["13F holdings", "h"], ["Filings", "f"], ["Commands", ":"]] as const) {
+      disclosure.open = true;
       fireEvent.click(within(disclosure).getByRole("button", { name, exact: true }));
       expect(onDeckChange).toHaveBeenLastCalledWith(key);
     }
+  });
+
+  it.each([
+    ["c", /^Options chain/], ["p", /^Position/], ["n", /^News/],
+  ] as const)("marks only the selected primary view for deck %s", (activeDeck, name) => {
+    sidebar({ activeDeck });
+    const nav = screen.getByRole("navigation", { name: "Instrument views" });
+    expect(within(nav).getByRole("button", { name }).getAttribute("aria-current")).toBe("page");
+    expect(nav.querySelectorAll('[aria-current="page"]')).toHaveLength(1);
+    expect(nav.querySelector("summary")?.textContent).toContain("More views");
+  });
+
+  it.each([
+    ["r", "Ratings"], ["s", "Seasonality"], ["i", "Company"],
+    ["h", "13F holdings"], ["f", "Filings"], [":", "Commands"],
+  ] as const)("reflects the selected secondary view %s in the disclosure", (activeDeck, label) => {
+    sidebar({ activeDeck });
+    const nav = screen.getByRole("navigation", { name: "Instrument views" });
+    const details = nav.querySelector("details")!;
+    const summary = details.querySelector("summary")!;
+    expect(summary.textContent).toContain(label);
+    expect(summary.getAttribute("data-active")).toBe("true");
+    details.open = true;
+    expect(within(details).getByRole("button", { name: label, exact: true }).getAttribute("aria-current")).toBe("page");
+    expect(nav.querySelectorAll('[aria-current="page"]')).toHaveLength(1);
+  });
+
+  it("marks Book & trade when no deck is selected", () => {
+    sidebar({ activeDeck: null });
+    const bookButton = screen.getByTestId("chain-instrument-sidebar").querySelector(":scope > button");
+    expect(bookButton?.getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("button", { name: /^Options chain/ }).hasAttribute("aria-current")).toBe(false);
+  });
+
+  it("closes More views on Escape before the workspace can close its deck", () => {
+    const { onDeckChange } = sidebar({ activeDeck: "i" });
+    const details = screen.getByRole("navigation", { name: "Instrument views" }).querySelector("details")!;
+    const summary = details.querySelector("summary")!;
+    details.open = true;
+    const workspaceEscape = vi.fn();
+    document.addEventListener("keydown", workspaceEscape);
+    try {
+      fireEvent.keyDown(summary, { key: "Escape" });
+      expect(details.open).toBe(false);
+      expect(document.activeElement).toBe(summary);
+      expect(workspaceEscape).not.toHaveBeenCalled();
+      expect(onDeckChange).not.toHaveBeenCalled();
+      // Once closed, Escape belongs to the instrument workspace again.
+      fireEvent.keyDown(summary, { key: "Escape" });
+      expect(workspaceEscape).toHaveBeenCalledOnce();
+    } finally {
+      document.removeEventListener("keydown", workspaceEscape);
+    }
+  });
+
+  it("closes the native disclosure and preserves focus when choosing a secondary view", () => {
+    const { onDeckChange } = sidebar();
+    const details = screen.getByRole("navigation", { name: "Instrument views" }).querySelector("details")!;
+    details.open = true;
+    fireEvent.click(within(details).getByRole("button", { name: "Company", exact: true }));
+    expect(onDeckChange).toHaveBeenLastCalledWith("i");
+    expect(details.open).toBe(false);
+    expect(document.activeElement).toBe(details.querySelector("summary"));
   });
 
   it("preserves the watchlist control and releases its busy state", async () => {

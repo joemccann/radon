@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, BookOpen, ChevronDown, Layers, Newspaper, Table2 } from "lucide-react";
 import type { PriceData } from "@/lib/pricesProtocol";
@@ -18,6 +18,7 @@ type Props = {
   position: PortfolioPosition | null;
   underlyingQuote: PriceData | null;
   heldQuote: HeldChainQuote;
+  activeDeck?: DeckKey | null;
   onDeckChange: (deck: DeckKey | null) => void;
 };
 
@@ -31,9 +32,19 @@ const MORE_VIEWS: { key: DeckKey | null; label: string }[] = [
   { key: ":", label: "Commands" },
 ];
 
-export default function ChainInstrumentSidebar({ ticker, position, underlyingQuote, heldQuote, onDeckChange }: Props) {
+export default function ChainInstrumentSidebar({ ticker, position, underlyingQuote, heldQuote, activeDeck = "c", onDeckChange }: Props) {
   const { isWatched, toggleWatch } = useWatchlist();
   const [watchBusy, setWatchBusy] = useState(false);
+  const moreRef = useRef<HTMLDetailsElement>(null);
+  const moreSummaryRef = useRef<HTMLElement>(null);
+  const activeMore = MORE_VIEWS.find(({ key }) => key !== null && key === activeDeck);
+  const selectDeck = (deck: DeckKey | null, fromMore = false) => {
+    if (moreRef.current?.open) {
+      moreRef.current.open = false;
+      if (fromMore) moreSummaryRef.current?.focus();
+    }
+    onDeckChange(deck);
+  };
   // Keep closed/stale labels current even when the quote stream stops.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -63,12 +74,24 @@ export default function ChainInstrumentSidebar({ ticker, position, underlyingQuo
         </span>
       </section>
       <nav className={styles.navigation} aria-label="Instrument views">
-        <button type="button" aria-current="page" onClick={() => onDeckChange("c")}><Table2 size={16} /> Options chain <kbd>c</kbd></button>
-        <button type="button" onClick={() => onDeckChange("p")}><Layers size={16} /> Position <kbd>p</kbd></button>
-        <button type="button" onClick={() => onDeckChange("n")}><Newspaper size={16} /> News <kbd>n</kbd></button>
-        <details className={styles.more}>
-          <summary><BookOpen size={16} /> More views <ChevronDown size={14} /></summary>
-          <div>{MORE_VIEWS.map(({ key, label }) => <button type="button" key={label} onClick={() => onDeckChange(key)}>{label}</button>)}</div>
+        <button type="button" aria-current={activeDeck === "c" ? "page" : undefined} onClick={() => selectDeck("c")}><Table2 size={16} /> Options chain <kbd>c</kbd></button>
+        <button type="button" aria-current={activeDeck === "p" ? "page" : undefined} onClick={() => selectDeck("p")}><Layers size={16} /> Position <kbd>p</kbd></button>
+        <button type="button" aria-current={activeDeck === "n" ? "page" : undefined} onClick={() => selectDeck("n")}><Newspaper size={16} /> News <kbd>n</kbd></button>
+        <details
+          ref={moreRef}
+          className={styles.more}
+          onKeyDownCapture={(event) => {
+            if (event.key !== "Escape" || !event.currentTarget.open) return;
+            event.preventDefault();
+            event.stopPropagation();
+            event.currentTarget.open = false;
+            moreSummaryRef.current?.focus();
+          }}
+        >
+          <summary ref={moreSummaryRef} data-active={Boolean(activeMore)} aria-label={activeMore ? `${activeMore.label}, more instrument views` : "More views"}>
+            <BookOpen size={16} /> {activeMore?.label ?? "More views"} <ChevronDown size={14} />
+          </summary>
+          <div>{MORE_VIEWS.map(({ key, label }) => <button type="button" key={label} aria-current={activeDeck === key ? "page" : undefined} onClick={() => selectDeck(key, true)}>{label}</button>)}</div>
         </details>
       </nav>
       <section className={styles.position} aria-label="Held position">
@@ -83,7 +106,7 @@ export default function ChainInstrumentSidebar({ ticker, position, underlyingQuo
           </div>
         </> : <span className={styles.label}>No open position</span>}
       </section>
-      <button className={styles.bookLink} type="button" onClick={() => onDeckChange(null)}><BookOpen size={15} /> Book & trade <span>Esc</span></button>
+      <button className={styles.bookLink} type="button" aria-current={activeDeck === null ? "page" : undefined} onClick={() => selectDeck(null)}><BookOpen size={15} /> Book & trade <span>Esc</span></button>
     </aside>
   );
 }

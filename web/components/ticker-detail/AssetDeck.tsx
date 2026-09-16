@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import views from "./InstrumentViews.module.css";
 import type { OpenOrder, PortfolioData, PortfolioPosition } from "@/lib/types";
 import type { PriceData, FundamentalsData } from "@/lib/pricesProtocol";
 import type { DeckKey } from "./AssetCockpit";
@@ -102,12 +103,13 @@ export default function AssetDeck({
 
   return (
     <div
-      className={`asset-deck ${open ? "open" : ""} ${wide ? "asset-deck--wide" : ""}`}
+      className={`asset-deck ${views.views} ${open ? "open" : ""} ${wide ? "asset-deck--wide" : ""}`}
+      data-deck={activeDeck ?? "book"}
       aria-hidden={!open}
     >
       <div className="asset-deck-hd">
-        <span>{title}</span>
-        <button type="button" className="asset-deck-x" onClick={() => onDeckChange(null)}>
+        <span role="heading" aria-level={2}>{title}</span>
+        <button type="button" className="asset-deck-x" aria-label="Return to book and trade" onClick={() => onDeckChange(null)}>
           esc ✕
         </button>
       </div>
