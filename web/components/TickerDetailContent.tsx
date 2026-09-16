@@ -186,12 +186,16 @@ export default function TickerDetailContent({
     return orders.open_orders.filter((o) => o.contract.symbol === ticker);
   }, [ticker, orders]);
 
+  const heldQuote = useMemo(
+    () => resolveTickerQuoteTelemetry(ticker, position, prices, portfolio?.last_sync ?? null),
+    [ticker, position, prices, portfolio?.last_sync],
+  );
   const { priceData, priceKey: chartPriceKey, isSpreadNet } = useMemo(
     () =>
       viewUnderlying
         ? { priceData: prices[ticker] ?? null, priceKey: undefined, isSpreadNet: false }
-        : resolveTickerQuoteTelemetry(ticker, position, prices, portfolio?.last_sync ?? null),
-    [ticker, position, prices, viewUnderlying, portfolio?.last_sync],
+        : heldQuote,
+    [ticker, prices, viewUnderlying, heldQuote],
   );
 
   // The focused subject's depth book key: a user-pinned leg (e.g. a combo leg's
@@ -341,6 +345,7 @@ export default function TickerDetailContent({
       bookKind={bookKind}
       bookPriceData={bookPriceData}
       quotePriceData={quotePriceData}
+      heldQuote={heldQuote}
       priceData={priceData}
       isSpreadNet={bookIsSpreadNet}
       tickerOrders={tickerOrders}

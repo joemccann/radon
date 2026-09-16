@@ -1,0 +1,77 @@
+.sidebar { display: none; }
+
+@media (min-width: 1024px) {
+  :global(.ticker-detail-page):has(.workspace) > :global(.ticker-back-nav) { display: none; }
+  .workspace:global(.cockpit) {
+    grid-template-columns: 208px minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    grid-template-areas: "instrument chain";
+    height: 100%;
+    min-width: 0;
+    overflow: hidden;
+  }
+  .workspace > :global(.cockpit-head),
+  .workspace > :global(.book-region),
+  .workspace > :global(.act-region),
+  .workspace > :global(.glyph-rail) { display: none; }
+  .workspace > :global(.asset-deck--wide) {
+    grid-area: chain;
+    min-width: 0;
+    min-height: 0;
+    border: 0;
+    box-shadow: none;
+  }
+  .workspace :global(.asset-deck-hd) { display: none; }
+  .workspace :global(.asset-deck-body) { padding: 0; overflow: hidden; display: flex; min-width: 0; }
+  .sidebar {
+    grid-area: instrument;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    min-height: 0;
+    min-width: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 14px 16px;
+    border-right: 1px solid var(--border-dim);
+    background: var(--bg-panel);
+    font: 13px/1.5 var(--font-sans);
+    color: var(--text-primary);
+  }
+  .back { display: flex; align-items: center; gap: 6px; min-height: 32px; color: var(--text-secondary); text-decoration: none; font-size: 12px; }
+  .identity { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .identity h1 { margin: 0; font: 600 26px/1.1 var(--font-sans); letter-spacing: -.7px; overflow-wrap: anywhere; }
+  .identity :global(.star-toggle) { min-width: 32px; min-height: 32px; }
+  .label { color: var(--text-muted); font-size: 12px; }
+  .quote { display: flex; flex-direction: column; gap: 4px; font-variant-numeric: tabular-nums; }
+  .quote strong { font: 550 28px/1.2 var(--font-sans); letter-spacing: -.7px; }
+  .positive { color: var(--positive); }
+  .negative { color: var(--negative); }
+  .navigation { display: flex; flex-direction: column; gap: 3px; padding-block: 14px; border-block: 1px solid var(--border-dim); }
+  .navigation button, .more summary, .bookLink {
+    display: flex; align-items: center; gap: 8px; width: 100%; min-height: 36px; padding: 6px 8px;
+    border: 0; border-radius: 6px; background: transparent; color: var(--text-secondary); cursor: pointer; font: inherit; text-align: left;
+  }
+  .navigation button svg, .bookLink svg, .more summary svg { flex: none; stroke-width: 1.5px; }
+  .navigation button:hover, .more summary:hover, .bookLink:hover { background: var(--bg-hover); color: var(--text-primary); }
+  .navigation button[aria-current="page"] { background: color-mix(in srgb, var(--signal-core) 10%, transparent); color: var(--signal-core-text); font-weight: 600; }
+  .navigation kbd, .bookLink span { margin-left: auto; color: var(--text-muted); font: 12px var(--font-mono); }
+  .more summary { list-style: none; }
+  .more summary::-webkit-details-marker { display: none; }
+  .more summary svg:last-child { margin-left: auto; }
+  .more > div { padding-left: 22px; }
+  .position { display: flex; flex-direction: column; gap: 5px; overflow-wrap: anywhere; }
+  .position b { font-weight: 550; }
+  .heldQuote { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; font-variant-numeric: tabular-nums; }
+  .heldQuote > div { display: flex; justify-content: space-between; gap: 8px; }
+  .heldQuote > div > span:first-child { color: var(--text-secondary); font-size: 12px; }
+  .bookLink { margin-top: auto; flex-shrink: 0; }
+  .sidebar :is(button, a, summary):focus-visible { outline: 2px solid var(--signal-core); outline-offset: 2px; }
+}
+@media (min-width: 1024px) and (max-width: 1250px) {
+  .workspace:global(.cockpit) { grid-template-columns: 192px minmax(0, 1fr); }
+  .sidebar { padding-inline: 12px; }
+}
+@media (min-width: 1024px) and (pointer: coarse) {
+  .sidebar :is(button, summary, a) { min-height: 44px; }
+}
