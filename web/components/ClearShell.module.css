@@ -117,6 +117,8 @@
 @media (min-width: 1024px) {
   .workspace:has(:global(.chain-first-cockpit)) .header {
     --clear-shell-gutter: 16px;
+    /* The chain deck owns z-index 40; header disclosures must paint above it. */
+    z-index: 41;
     grid-template-rows: 48px;
     min-height: 48px;
     height: 48px;
