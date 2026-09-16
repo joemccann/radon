@@ -43,6 +43,7 @@ const PINNED: Record<string, PinnedCapability> = {
   "breadth": { GET: "read", POST: "read.spawn" },
   "cash-flows": "read",
   "catalysts": "read",
+  "calm-streak": "read",
   "cor": "read",
   "credentials": { GET: "admin" },
   "credentials/[service]": "admin",
