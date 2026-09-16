@@ -1,3 +1,22 @@
+# Task: Order ticket shows full option contract 2026-09-16 [IN PROGRESS]
+
+Docked 384px ticket ellipsizes `1x $strike Call` to `1x...`. The strike and
+right must stay fully visible; wrap controls instead of clipping the contract.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red CSS/source contract that the leg label cannot ellipsize
+- T2 depends_on: [T1] - Stop shrinking the contract; wrap the row
+- T3 depends_on: [T2] - Focused tests, PR, CI green. Do not merge.
+
+## Checklist
+
+- [x] T1 Failing layout contract
+- [x] T2 Full `1x $strike Call/Put` in the rail
+- [ ] T3 PR + CI
+
+---
+
 # Task: Newsfeed + distill on shared model ladder 2026-09-15 [IN PROGRESS]
 
 Stop Cerebras-first text tagging and KB distillation. Both walk
