@@ -98,7 +98,7 @@ export default function NewsTab({ ticker, active }: NewsTabProps) {
               {item.created_at ? new Date(item.created_at).toLocaleDateString() : ""}
             </span>
             {item.source && <span className="news-source">{item.source}</span>}
-            {item.is_major && <span className="pill defined" style={{ fontSize: "8px", padding: "1px 4px" }}>MAJOR</span>}
+            {item.is_major && <span className="pill defined" style={{ fontSize: "var(--instrument-meta-size, 8px)", padding: "1px 4px" }}>MAJOR</span>}
           </div>
           <div className="news-headline">
             {item.headline}

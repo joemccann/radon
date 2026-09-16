@@ -21,7 +21,7 @@ import chainStyles from "./ChainInstrumentSidebar.module.css";
 /** Deck keys map 1:1 to the glyph rail + URL deck param.
  *  `:` (command palette) and `o` (order ticket) are local-only — not in
  *  VALID_DECKS, so they never reach the URL. `o` is the mobile entry to the
- *  order ticket, which on desktop lives in the always-visible act column. */
+ *  order ticket, which on desktop lives in the Book & trade act column. */
 export type DeckKey = "c" | "p" | "n" | "r" | "s" | "i" | "h" | "f" | ":" | "o";
 
 export type AssetCockpitProps = {
@@ -138,16 +138,15 @@ export default function AssetCockpit({
   };
 
   return (
-    <div className={`cockpit cockpit-host ${mobile ? "cockpit--mobile" : ""} ${activeDeck === "c" ? `chain-first-cockpit ${chainStyles.workspace}` : ""}`} data-testid="cockpit-host">
-      {activeDeck === "c" && (
-        <ChainInstrumentSidebar
-          ticker={ticker}
-          position={position}
-          underlyingQuote={prices[ticker] ?? null}
-          heldQuote={heldQuote ?? { priceData: null }}
-          onDeckChange={onDeckChange}
-        />
-      )}
+    <div className={`cockpit cockpit-host instrument-workspace ${chainStyles.workspace} ${mobile ? "cockpit--mobile" : ""} ${activeDeck === "c" ? "chain-first-cockpit" : ""}`} data-active-deck={activeDeck ?? "book"} data-testid="cockpit-host">
+      <ChainInstrumentSidebar
+        ticker={ticker}
+        position={position}
+        underlyingQuote={prices[ticker] ?? null}
+        heldQuote={heldQuote ?? { priceData: null }}
+        onDeckChange={onDeckChange}
+        activeDeck={activeDeck}
+      />
       <CockpitHeader
         ticker={ticker}
         kind={bookKind}

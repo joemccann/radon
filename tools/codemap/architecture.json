@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-09-16T18:22:43Z",
-  "node_count": 3336,
+  "generated_at": "2026-09-16T18:24:01Z",
+  "node_count": 3337,
   "edge_count": 6770,
   "areas": {
-    "web": 1965,
+    "web": 1966,
     "site": 155,
     "scripts": 1103,
     "cloud": 66,
@@ -25,7 +25,7 @@
     {
       "id": "web/e2e",
       "area": "web",
-      "count": 195
+      "count": 196
     },
     {
       "id": "web",
