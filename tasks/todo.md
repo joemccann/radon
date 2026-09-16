@@ -7263,3 +7263,5 @@ Acceptance: at least 12 full strike rows at 1280x720 and 14 at 1440x800 without 
 
 ### Review
 Implementation B rendered with isolated broker/API fixtures. Browser geometry: 14 complete strikes at1440×800,12 at1280×720,first quotes y156,40px rows; no document horizontal overflow at1440,1280,1024 or393px. Staged ticket and mobile visually inspected; light/dark captures recorded locally. TypeScript and focused ESLint static checks pass. Added 8 browser cases and 8 sidebar unit regressions; execution pending GitHub CI. No local test suites run.
+
+PR: https://github.com/joemccann/radon/pull/463. Initial head b04ff560 passed all 8 Vitest shards and all Python shards; browser checks still running. Additional direct browser review verified separate underlying120.00/held spread0.85, fixed the feed disclosure stacking above the chain, and added pointer hit-testing plus Sync actionability to browser coverage.

@@ -143,8 +143,18 @@ for (const theme of ["light", "dark"] as const) {
 
     const beforeDisclosure = await toolbar.boundingBox();
     await page.getByTestId("chain-feed-trigger").click();
-    await expect(page.getByTestId("chain-feed-panel")).toBeVisible();
+    const feedPanel = page.getByTestId("chain-feed-panel");
+    await expect(feedPanel).toBeVisible();
+    // Visibility alone passes when a higher stacking context paints over the
+    // panel. The center must hit the disclosure, and its sync action must be
+    // reachable without issuing an actual refresh.
+    await expect.poll(() => feedPanel.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return element.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2));
+    })).toBe(true);
+    await feedPanel.getByRole("button", { name: "Sync Now", exact: true }).click({ trial: true });
     expect(await toolbar.boundingBox()).toEqual(beforeDisclosure);
+    await screenshot(page, testInfo, `${theme}-feed-disclosure`);
     await page.keyboard.press("Escape");
     await expect(page.getByTestId("chain-feed-panel")).toBeHidden();
     await expect(page.getByTestId("chain-feed-trigger")).toBeFocused();
