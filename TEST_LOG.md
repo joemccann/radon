@@ -937,3 +937,7 @@ counts or green verdict are claimed.
 |---|---|---|
 | Scope | DONE | `RADON_WEEKEND_REDUCED=1`: this cycle's sole verified finding, T-495, is P2; no source-actionable P0/P1 is open. Full gates are recorded only if their detached stage writes `DONE`. |
 | T-488 | operator-only | Reproduce and repair GNU-timeout process-tree behavior on Linux CI without widening the fixed test timeout. |
+
+Closing gates: INCOMPLETE. `/tmp/tw-2026-09-16/remediate-gates.rc` prewrote all
+nine slots, then the detached process died during `pytest_1` with a zero-byte
+log and no `DONE` sentinel. No full-gate count or green verdict is claimed.

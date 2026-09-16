@@ -7282,3 +7282,4 @@ findings only; T-495 is P2 and remains out of scope.
 ## Review
 
 - [x] No P2 substitute was implemented on the reduced rung.
+- [x] Detached closing stage died without its `DONE` sentinel; no gate count is claimed.
