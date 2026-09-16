@@ -16,6 +16,23 @@ stay distinct.
 - [x] T2 Template `%s · Radon`; static, ticker, regime, options, scanner titles
 - [ ] T3 Focused tests, PR, CI green, Pushover
 
+# Task: Order ticket shows full option contract 2026-09-16 [IN PROGRESS]
+
+Docked 384px ticket ellipsizes `1x $strike Call` to `1x...`. The strike and
+right must stay fully visible; wrap controls instead of clipping the contract.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red CSS/source contract that the leg label cannot ellipsize
+- T2 depends_on: [T1] - Stop shrinking the contract; wrap the row
+- T3 depends_on: [T2] - Focused tests, PR, CI green. Do not merge.
+
+## Checklist
+
+- [x] T1 Failing layout contract
+- [x] T2 Full `1x $strike Call/Put` in the rail
+- [ ] T3 PR + CI
+
 ---
 
 # Task: Newsfeed + distill on shared model ladder 2026-09-15 [IN PROGRESS]
@@ -7305,8 +7322,21 @@ Review: desktop Position, News and Book & trade visually verified at 1440x800 an
 ## Resolve and merge PR466 (2026-09-16)
 Dependency graph: T1 -> {T2,T3} -> T4 -> T5.
 - [x] T1 depends_on: [] Inspect PR and isolate head from unrelated local edits.
-- [ ] T2 depends_on: [T1] Merge current main and resolve conflicts preserving page-title behavior and current base changes.
-- [ ] T3 depends_on: [T1] Review title contract/integration risks and applicable validation.
+- [x] T2 depends_on: [T1] Merge current main and resolve conflicts preserving page-title behavior and current base changes.
+- [x] T3 depends_on: [T1] Review title contract/integration risks and applicable validation.
 - [ ] T4 depends_on: [T2,T3] Push resolution, verify all applicable CI on exact head green, send Pushover.
 - [ ] T5 depends_on: [T4] Merge the verified head and confirm merged state.
-Review: pending; suites execute only on GitHub.
+Review: resolved tasks/todo conflicts by retaining both task records; retained main generated code maps under nightly ownership. Page-title route metadata preserved; added own-key registry and matching Options symbol validation with focused regressions. TypeScript passed before final helper hardening; commit hooks recheck final source. Suites execute only on GitHub. Exact-head CI and merge pending.
+
+## Performance TWR regression (2026-09-16)
+
+Dependency graph: T1 -> {T2,T3} -> T4 -> T5.
+- [x] T1 depends_on: [] Isolate current main and record screenshot symptoms; preserve unrelated work.
+- [x] T2 depends_on: [T1] Trace NAV/flow sources and recent builder changes against actual available incident data.
+- [x] T3 depends_on: [T1] Inspect frontend null/degraded contract and regression coverage independently. Added isolated browser incident-to-repaired refresh coverage using actual historical flow amounts, full date window, positive TWR, return count, suppressed/drawn curve and warning removal; promoted payload spec to CI with screenshot artifacts. No frontend logic change or local suite execution.
+- [x] T4 depends_on: [T2,T3] Implement minimal evidence-backed repair and regressions; inspect rendered recovery without relaxing financial integrity.
+- [ ] T5 depends_on: [T4] Publish PR, verify all exact-head GitHub checks green, notify and record results.
+
+Review: GitHub red phase9e517457 reproduced lost flow (expected80000,actual0) in test_nightly_statement_preserves_verified_historical_external_flows. Repair retains historical observed flows only with per-session coverage, statement overrides its interval including zeros, and unknown evidence remains gated. Added18Python cases plus a browser degraded-to-recovered refresh case; no production UI gating changes. Static compilation and diff checks pass. Operational no-fetch preview restored184returns/0suspects; production rebuild inprogress. Final exact-head CI and screenshot review pending. No local test suites; all suite execution on GitHub. Never infer deposits into canonical returns without source evidence.
+
+Incident evidence: production disk payload generated2026-09-16T12:31:06.516Z, flex_from_file, nav_as_of2026-09-15, empty_verified flows,185NAV/184subperiods/182returns/two suspect sessions. Retained ledger has actual Jan13 deposit80007.13 and Feb6 transfer655497.16; residual candidates are not deposits. Latest nightly statement coversSep15only and has both flow sections withzeroentries. Initial regression commit9e517457 published inPR468 forGitHub red/green evidence.

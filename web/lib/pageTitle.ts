@@ -47,6 +47,9 @@ const SCANNER_MODE_TITLES: Record<string, string> = {
   "vol-cone": "Vol Cone",
 };
 
+// Match the Options pages: letter first, up to ten letters/digits/dots/hyphens.
+const OPTIONS_SYMBOL_RE = /^[A-Za-z][A-Za-z0-9.-]{0,9}$/;
+
 export function pageMetadata(title: string): Metadata {
   return { title };
 }
@@ -91,9 +94,10 @@ export function titleForPathname(
   const path = rawPath.replace(/\/+$/, "") || "/";
 
   const mode = search?.get("mode") ?? "";
-  const symbol = (search?.get("symbol") ?? "").toUpperCase();
+  const rawSymbol = search?.get("symbol") ?? "";
+  const symbol = OPTIONS_SYMBOL_RE.test(rawSymbol) ? rawSymbol.toUpperCase() : "";
 
-  if (path === "/scanner" && mode && SCANNER_MODE_TITLES[mode]) {
+  if (path === "/scanner" && Object.prototype.hasOwnProperty.call(SCANNER_MODE_TITLES, mode)) {
     return SCANNER_MODE_TITLES[mode];
   }
 
@@ -108,7 +112,7 @@ export function titleForPathname(
   if (flow) return `${flow[1].toUpperCase()} Flow`;
 
   const regime = path.match(/^\/regime\/([^/]+)$/);
-  if (regime && regime[1] in REGIME_TAB_LABEL) {
+  if (regime && Object.prototype.hasOwnProperty.call(REGIME_TAB_LABEL, regime[1])) {
     return REGIME_TAB_LABEL[regime[1] as RegimeTab];
   }
 

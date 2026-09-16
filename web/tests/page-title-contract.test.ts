@@ -84,6 +84,32 @@ describe("document title helper", () => {
     }
   });
 
+  it("does not resolve inherited object properties as page titles", async () => {
+    for (const mode of ["constructor", "toString", "__proto__", "unknown"]) {
+      await expect(metadataForPath("/scanner", Promise.resolve({ mode })))
+        .resolves.toEqual({ title: "Scanner" });
+      expect(titleForPathname(`/regime/${mode}`)).toBe(DEFAULT_DOCUMENT_TITLE);
+    }
+  });
+
+  it.each([
+    ["/options/net-gex", "Net GEX"],
+    ["/options/exposure", "Net GEX"],
+    ["/options/rv-ratio", "Rel Vol"],
+  ])("keeps %s titles aligned with the page's accepted symbols", async (path, label) => {
+    for (const symbol of ["brk.b", "brk-b", "vix3m", "ABC1234567"]) {
+      await expect(metadataForPath(path, Promise.resolve({ symbol })))
+        .resolves.toEqual({ title: `${symbol.toUpperCase()} ${label}` });
+    }
+    for (const symbol of ["BAD!", "NVDA:US", "1ABC", "ABCDEFGHIJK", "nv da", ""]) {
+      await expect(metadataForPath(path, Promise.resolve({ symbol })))
+        .resolves.toEqual({ title: label });
+    }
+    // The page consumes the first repeated parameter, even if a later one is valid.
+    await expect(metadataForPath(path, Promise.resolve({ symbol: ["BAD!", "NVDA"] })))
+      .resolves.toEqual({ title: label });
+  });
+
   it("titles instrument routes with the ticker", () => {
     expect(titleForPathname("/AAPL")).toBe("AAPL");
     expect(titleForPathname("/vix")).toBe("VIX");
