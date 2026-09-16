@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { Activity, CheckCircle2, Loader2, XCircle } from "lucide-react";
 import InfoTooltip from "./InfoTooltip";
 import ScannerInstrumentShell from "./ScannerInstrumentShell";
@@ -10,7 +11,7 @@ import TickerLink from "./TickerLink";
 import { useSort } from "@/lib/useSort";
 import type { VolSkewMrData, VolSkewMrResult } from "@/lib/types";
 
-type VolSkewSortKey = "ticker" | "extension" | "iv_path" | "skew_path" | "verdict" | "structure";
+type VolSkewSortKey = "ticker" | "spot" | "extension" | "iv_path" | "skew_path" | "verdict" | "structure";
 
 type VolSkewMrScannerProps = {
   data: VolSkewMrData | null;
@@ -34,6 +35,7 @@ const GATE_HELP: Record<string, string> = {
 function extract(row: VolSkewMrResult, key: VolSkewSortKey): string | number | null {
   switch (key) {
     case "ticker": return row.ticker;
+    case "spot": return row.spot;
     case "extension": return row.extension;
     case "iv_path": return row.iv_path;
     case "skew_path": return row.skew_path;
@@ -48,6 +50,20 @@ function fmtNum(value: number | null | undefined, digits = 1): string {
   return value.toFixed(digits);
 }
 
+function fmtPrice(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return "---";
+  return `$${value.toFixed(2)}`;
+}
+
+/**
+ * A verdict is either a trade idea or a reason to stand aside. NO_SIGNAL has
+ * no position to continue, so it must not borrow the continuation label.
+ */
+function structureLabel(row: VolSkewMrResult): string {
+  if (row.suggested_structure) return row.suggested_structure;
+  return row.verdict === "NO_SIGNAL" ? "---" : "continue";
+}
+
 function verdictLabel(verdict: string): string {
   if (verdict === "TOP_MR") return "TOP MR";
   if (verdict === "BOTTOM_MR") return "BOTTOM MR";
@@ -59,8 +75,7 @@ function verdictLabel(verdict: string): string {
 function verdictTone(verdict: string): string {
   if (verdict === "BOTTOM_MR" || verdict === "BREAKOUT") return "pos";
   if (verdict === "TOP_MR" || verdict === "BREAKDOWN") return "neg";
-  if (verdict === "NO_SIGNAL") return "mut";
-  return "warn";
+  return "mut";
 }
 
 function extensionLabel(row: VolSkewMrResult): string {
@@ -69,12 +84,33 @@ function extensionLabel(row: VolSkewMrResult): string {
   return `${row.extension} · ${rsi} · ${band}`;
 }
 
+/**
+ * Deep-link a row into the ticker's chain deck. The row is ticker-level — no
+ * expiry, strike, or right — so `?deck=c` opens the chain and leaves the order
+ * builder empty rather than guessing a contract. Null when there is no setup.
+ */
 export function volSkewMrOrderHref(row: VolSkewMrResult): string | null {
   const ticker = row.ticker.trim().toUpperCase();
   if (!ticker) return null;
   if (row.verdict === "NO_SIGNAL") return null;
   const params = new URLSearchParams({ deck: "c", src: "vol-skew-mr" });
   return `/${encodeURIComponent(ticker)}?${params.toString()}`;
+}
+
+function SpotChainLink({ row }: { row: VolSkewMrResult }) {
+  const href = volSkewMrOrderHref(row);
+  if (!href) return <>{fmtPrice(row.spot)}</>;
+  const ticker = row.ticker.trim().toUpperCase();
+  return (
+    <Link
+      href={href}
+      className="ticker-link"
+      data-testid={`vol-skew-mr-order-link-${ticker}`}
+      title={`Open the ${ticker} options chain`}
+    >
+      {fmtPrice(row.spot)}
+    </Link>
+  );
 }
 
 function StatusPill({ row }: { row: VolSkewMrResult }) {
@@ -96,9 +132,9 @@ function GateChip({ label, passed }: { label: string; passed: boolean }) {
 function GateMap({ row }: { row: VolSkewMrResult }) {
   return (
     <div className="strength-factor-strip" aria-label={`${row.ticker} vol/skew gates`}>
-      <GateChip label="TECH" passed={row.gates.technicals} />
-      <GateChip label="IV" passed={row.gates.iv} />
-      <GateChip label="SKEW" passed={row.gates.skew} />
+      <GateChip label="TECH" passed={row.gates?.technicals ?? false} />
+      <GateChip label="IV" passed={row.gates?.iv ?? false} />
+      <GateChip label="SKEW" passed={row.gates?.skew ?? false} />
     </div>
   );
 }
@@ -186,6 +222,7 @@ export default function VolSkewMrScanner({
               <thead>
                 <tr>
                   <SortTh<VolSkewSortKey> label="Ticker" sortKey="ticker" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  <SortTh<VolSkewSortKey> label="Spot" sortKey="spot" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                   <SortTh<VolSkewSortKey> label="Spot ext" sortKey="extension" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                   <SortTh<VolSkewSortKey> label="IV path" sortKey="iv_path" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                   <SortTh<VolSkewSortKey> label="Skew path" sortKey="skew_path" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
@@ -210,11 +247,12 @@ export default function VolSkewMrScanner({
                     <td>
                       <TickerLink ticker={row.ticker} />
                     </td>
+                    <td className="mono"><SpotChainLink row={row} /></td>
                     <td className="mono">{extensionLabel(row)}</td>
                     <td className="mono">{row.iv_path}</td>
                     <td className="mono">{row.skew_path}</td>
                     <td><StatusPill row={row} /></td>
-                    <td className="mono">{row.suggested_structure ?? "continue"}</td>
+                    <td className="mono">{structureLabel(row)}</td>
                     <td>
                       <GateMap row={row} />
                     </td>
@@ -230,12 +268,12 @@ export default function VolSkewMrScanner({
                 <div className="strength-card__head">
                   <div>
                     <TickerLink ticker={row.ticker} />
-                    <div className="strength-card__meta">{extensionLabel(row)}</div>
+                    <div className="strength-card__meta">{fmtPrice(row.spot)} · {extensionLabel(row)}</div>
                   </div>
                   <StatusPill row={row} />
                 </div>
                 <div className="strength-card__score">
-                  <span>{row.suggested_structure ?? "continue"}</span>
+                  <span>{structureLabel(row)}</span>
                   <em>STRUCTURE</em>
                 </div>
                 <GateMap row={row} />

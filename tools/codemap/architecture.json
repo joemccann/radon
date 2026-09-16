@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-09-16T19:44:51Z",
-  "node_count": 3337,
-  "edge_count": 6770,
+  "generated_at": "2026-09-16T23:29:47Z",
+  "node_count": 3350,
+  "edge_count": 6870,
   "areas": {
-    "web": 1966,
+    "web": 1976,
     "site": 155,
-    "scripts": 1103,
+    "scripts": 1106,
     "cloud": 66,
     "lib": 28,
     "tests": 17,
@@ -15,17 +15,17 @@
     {
       "id": "web/app",
       "area": "web",
-      "count": 208
+      "count": 211
     },
     {
       "id": "web/components",
       "area": "web",
-      "count": 250
+      "count": 251
     },
     {
       "id": "web/e2e",
       "area": "web",
-      "count": 196
+      "count": 197
     },
     {
       "id": "web",
@@ -35,7 +35,7 @@
     {
       "id": "web/lib",
       "area": "web",
-      "count": 389
+      "count": 391
     },
     {
       "id": "web/public",
@@ -50,7 +50,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 909
+      "count": 912
     },
     {
       "id": "site/app",
@@ -85,7 +85,7 @@
     {
       "id": "scripts",
       "area": "scripts",
-      "count": 154
+      "count": 155
     },
     {
       "id": "scripts/ai_cycle",
@@ -100,7 +100,7 @@
     {
       "id": "scripts/api",
       "area": "scripts",
-      "count": 115
+      "count": 116
     },
     {
       "id": "scripts/backtest",
@@ -195,7 +195,7 @@
     {
       "id": "scripts/tests",
       "area": "scripts",
-      "count": 549
+      "count": 550
     },
     {
       "id": "scripts/trade_blotter",
@@ -247,7 +247,7 @@
     {
       "id": "web/lib/types.ts",
       "area": "web",
-      "in": 274,
+      "in": 277,
       "out": 1,
       "test": false
     },
@@ -261,8 +261,15 @@
     {
       "id": "web/lib/apiContracts.ts",
       "area": "web",
-      "in": 112,
+      "in": 114,
       "out": 0,
+      "test": false
+    },
+    {
+      "id": "web/components/WorkspaceSections.tsx",
+      "area": "web",
+      "in": 20,
+      "out": 76,
       "test": false
     },
     {
@@ -280,23 +287,16 @@
       "test": false
     },
     {
-      "id": "web/components/WorkspaceSections.tsx",
-      "area": "web",
-      "in": 20,
-      "out": 74,
-      "test": false
-    },
-    {
       "id": "web/lib/routeAccess.ts",
       "area": "web",
-      "in": 88,
+      "in": 90,
       "out": 4,
       "test": false
     },
     {
       "id": "web/lib/radonApi.ts",
       "area": "web",
-      "in": 91,
+      "in": 92,
       "out": 0,
       "test": false
     },
@@ -318,7 +318,7 @@
       "id": "web/lib/assistant/nextLoaders.ts",
       "area": "web",
       "in": 2,
-      "out": 73,
+      "out": 75,
       "test": false
     },
     {
@@ -326,6 +326,13 @@
       "area": "scripts",
       "in": 72,
       "out": 0,
+      "test": false
+    },
+    {
+      "id": "web/lib/pageTitle.ts",
+      "area": "web",
+      "in": 65,
+      "out": 2,
       "test": false
     },
     {
@@ -352,28 +359,28 @@
     {
       "id": "web/lib/db.ts",
       "area": "web",
-      "in": 53,
+      "in": 54,
       "out": 1,
       "test": false
     },
     {
       "id": "web/lib/useSyncHook.ts",
       "area": "web",
-      "in": 46,
+      "in": 47,
       "out": 4,
       "test": false
     },
     {
       "id": "web/lib/dbFirstRead.ts",
       "area": "web",
-      "in": 44,
+      "in": 45,
       "out": 5,
       "test": false
     },
     {
       "id": "web/components/SectionEmptyState.tsx",
       "area": "web",
-      "in": 46,
+      "in": 47,
       "out": 0,
       "test": false
     },
@@ -387,7 +394,7 @@
     {
       "id": "web/components/InfoTooltip.tsx",
       "area": "web",
-      "in": 43,
+      "in": 44,
       "out": 0,
       "test": false
     },
@@ -513,13 +520,6 @@
     {
       "id": "web/components/RegimeStrip.tsx",
       "area": "web",
-      "in": 30,
-      "out": 0,
-      "test": false
-    },
-    {
-      "id": "scripts/utils/market_calendar.py",
-      "area": "scripts",
       "in": 30,
       "out": 0,
       "test": false

@@ -14,8 +14,9 @@ function cacheMatchesRequest(cached: Record<string, unknown>, tickers: string[],
   if (tickers.length > 0) {
     return requested.length === tickers.length && tickers.every((ticker, idx) => requested[idx] === ticker);
   }
-  const universe = typeof cached.universe === "string" ? cached.universe : "";
-  return universe === `preset:${preset}` || universe === `fallback:${preset}`;
+  const universe = (typeof cached.universe === "string" ? cached.universe : "").toLowerCase();
+  const key = preset.toLowerCase();
+  return universe === `preset:${key}` || universe === `fallback:${key}`;
 }
 
 export const radonCapability = "read.spawn";
@@ -46,7 +47,7 @@ export async function POST(request: Request): Promise<Response> {
     tickers = parsed.tickers;
     params.set("tickers", tickers.join(","));
   } else if (typeof body.preset === "string") {
-    params.set("preset", body.preset);
+    params.set("preset", preset);
   }
   if (tickers.length === 0 && typeof body.limit === "number" && Number.isFinite(body.limit) && body.limit > 0) {
     params.set("limit", String(Math.trunc(body.limit)));

@@ -107,5 +107,8 @@ test.describe("/scanner?mode=vol-skew-mr", () => {
     await expect(section).toContainText("BREAKOUT");
     await expect(section).toContainText("put spread");
     await expect(section.getByTestId("vol-skew-mr-title-tooltip")).toBeVisible();
+
+    const chainLink = section.getByTestId("vol-skew-mr-order-link-AAPL").first();
+    await expect(chainLink).toHaveAttribute("href", "/AAPL?deck=c&src=vol-skew-mr");
   });
 });

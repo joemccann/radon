@@ -96,6 +96,39 @@ describe("VolSkewMrScanner", () => {
     expect(onTickerScan).toHaveBeenCalledWith(["AAPL", "MSFT"]);
   });
 
+  it("labels a NO_SIGNAL row as no structure rather than continue", () => {
+    const quiet: VolSkewMrData = {
+      ...data,
+      results: [{ ...data.results[0], ticker: "IBM", verdict: "NO_SIGNAL", suggested_structure: null }],
+    };
+    render(<VolSkewMrScanner data={quiet} />);
+    expect(screen.queryByText("continue")).toBeNull();
+  });
+
+  it("renders every row without a gate map payload", () => {
+    const partial = {
+      ...data,
+      results: [{ ...data.results[0], gates: undefined as unknown as VolSkewMrResult["gates"] }],
+    };
+    render(<VolSkewMrScanner data={partial} />);
+    expect(screen.getByTestId("vol-skew-mr-row-AAPL")).toBeTruthy();
+  });
+
+  it("links spot into the chain deck for actionable rows only", () => {
+    render(<VolSkewMrScanner data={data} />);
+    const link = screen.getByTestId("vol-skew-mr-order-link-AAPL") as HTMLAnchorElement;
+    expect(link.getAttribute("href")).toBe("/AAPL?deck=c&src=vol-skew-mr");
+    expect(link.textContent).toBe("$212.40");
+    cleanup();
+    const quiet: VolSkewMrData = {
+      ...data,
+      results: [{ ...data.results[0], verdict: "NO_SIGNAL", suggested_structure: null }],
+    };
+    render(<VolSkewMrScanner data={quiet} />);
+    expect(screen.queryByTestId("vol-skew-mr-order-link-AAPL")).toBeNull();
+    expect(screen.getAllByText("$212.40").length).toBeGreaterThan(0);
+  });
+
   it("opens a chain href for MR rows and skips NO_SIGNAL", () => {
     const quiet: VolSkewMrResult = {
       ...data.results[0],

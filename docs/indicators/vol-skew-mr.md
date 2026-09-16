@@ -28,3 +28,29 @@ Mirrors strength / theta: `scripts/vol_skew_mr_scanner.py`, disk cache
 `data/vol_skew_mr.json`, Turso `vol_skew_mr_snapshots` (migration 0075),
 GET `/api/scanner/vol-skew-mr`, POST `/api/scanner/vol-skew-mr/scan`,
 comma ticker search, NDX preset.
+
+## Data sources per ticker
+
+Daily closes come from IB first (`fetch_daily_closes`), UW OHLC only on a
+short or failed IB read. Each remaining UW call is isolated so one failure
+degrades a single gate instead of dropping the ticker:
+
+| Gate | Source | Notes |
+|---|---|---|
+| Technicals | IB daily closes (UW fallback) | RSI(14), %B(20, 2) |
+| IV path | UW `get_iv_rank` | last six readings, vol points |
+| Skew path | UW `get_historical_risk_reversal_skew` | falls back to a 25-delta put/call IV spread from the chain only when the history is shorter than two points |
+
+The scanner never reads strike GEX, so it spends no UW quota on it.
+
+Risk-reversal values arrive as decimals on some UW endpoints and as vol
+points on others. `_as_vol_points` restates the whole window in vol points
+before `PATH_FLAT_EPS` is applied — a decimal series would otherwise read
+`flat` on every name and pass the skew gate unconditionally.
+
+## Acting on a row
+
+Spot is a link into the ticker's chain deck (`?deck=c&src=vol-skew-mr`) for
+every row with a verdict, mirroring strength / LEAP / GARCH. `NO_SIGNAL`
+rows render plain spot and no structure label; `BREAKOUT` / `BREAKDOWN`
+render `continue`.

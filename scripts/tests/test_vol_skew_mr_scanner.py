@@ -230,3 +230,112 @@ def test_save_cache_preserves_last_good_on_empty_scan(tmp_path, monkeypatch) -> 
     assert stored["actionable_count"] == 1
     assert stored["results"][0]["ticker"] == "AAPL"
     assert mirrored == [("vol-skew-mr", good)]
+
+
+class _FakeClient:
+    """Records every UW method the scanner reaches for."""
+
+    def __init__(self, *, iv_rank=None, rr=None, contracts=None, fail: str = "") -> None:
+        self.calls: list[str] = []
+        self._iv_rank = iv_rank if iv_rank is not None else {"data": []}
+        self._rr = rr if rr is not None else {"data": []}
+        self._contracts = contracts if contracts is not None else {"data": []}
+        self._fail = fail
+
+    def _guard(self, name: str):
+        self.calls.append(name)
+        if self._fail == name:
+            raise RuntimeError(f"{name} unavailable")
+
+    def get_stock_ohlc(self, ticker, **_kwargs):
+        self._guard("get_stock_ohlc")
+        return {"data": [{"close": price} for price in _rising_closes()]}
+
+    def get_iv_rank(self, ticker, **_kwargs):
+        self._guard("get_iv_rank")
+        return self._iv_rank
+
+    def get_historical_risk_reversal_skew(self, ticker, **_kwargs):
+        self._guard("get_historical_risk_reversal_skew")
+        return self._rr
+
+    def get_option_contracts(self, ticker, **_kwargs):
+        self._guard("get_option_contracts")
+        return self._contracts
+
+    def get_greek_exposure_by_strike(self, ticker, **_kwargs):
+        self._guard("get_greek_exposure_by_strike")
+        return {"data": []}
+
+
+def _iv_rows(values: list[float]) -> dict:
+    return {"data": [{"date": f"2026-09-{idx + 1:02d}", "volatility": value} for idx, value in enumerate(values)]}
+
+
+def _rr_rows(values: list[float]) -> dict:
+    return {"data": [{"date": f"2026-09-{idx + 1:02d}", "value": value} for idx, value in enumerate(values)]}
+
+
+def test_decimal_risk_reversal_skew_is_read_in_vol_points() -> None:
+    decimal_series = vsmr._as_vol_points(vsmr._dated_series(_rr_rows([0.012, 0.020, 0.031]), ("value",)))
+    assert decimal_series == pytest.approx([1.2, 2.0, 3.1])
+    assert vsmr.series_path(decimal_series) == "rising"
+
+
+def test_vol_point_risk_reversal_skew_is_left_alone() -> None:
+    assert vsmr._as_vol_points(vsmr._dated_series(_rr_rows([6.0, 4.4, 2.9]), ("value",))) == [6.0, 4.4, 2.9]
+
+
+def test_negative_decimal_skew_keeps_its_sign() -> None:
+    assert vsmr._as_vol_points([-0.042, -0.031]) == pytest.approx([-4.2, -3.1])
+
+
+def test_scan_ticker_survives_an_iv_rank_failure() -> None:
+    client = _FakeClient(fail="get_iv_rank", rr=_rr_rows([6.0, 4.4, 2.9]))
+    row = vsmr.scan_ticker("AAPL", client)
+    assert row is not None
+    assert row.ticker == "AAPL"
+    assert row.iv_path == "unknown"
+    assert any(error.startswith("iv_rank:") for error in row.errors)
+
+
+def test_scan_ticker_never_spends_quota_on_greek_exposure() -> None:
+    client = _FakeClient(iv_rank=_iv_rows([28.0, 26.5, 24.0]), rr=_rr_rows([6.0, 4.4, 2.9]))
+    row = vsmr.scan_ticker("AAPL", client)
+    assert row is not None
+    assert row.verdict == "TOP_MR"
+    assert row.suggested_structure == "put spread"
+    assert "get_greek_exposure_by_strike" not in client.calls
+
+
+def test_scan_ticker_skips_the_contract_chain_when_skew_history_exists() -> None:
+    client = _FakeClient(iv_rank=_iv_rows([28.0, 26.5, 24.0]), rr=_rr_rows([6.0, 4.4, 2.9]))
+    vsmr.scan_ticker("AAPL", client)
+    assert "get_option_contracts" not in client.calls
+
+
+def test_scan_ticker_falls_back_to_the_chain_without_skew_history() -> None:
+    client = _FakeClient(iv_rank=_iv_rows([28.0, 26.5, 24.0]))
+    vsmr.scan_ticker("AAPL", client)
+    assert "get_option_contracts" in client.calls
+
+
+def test_put_call_skew_ignores_contracts_without_a_delta() -> None:
+    contracts = {
+        "data": [
+            {"option_symbol": "AAPL260116C00300000", "implied_volatility": 0.10},
+            {"option_symbol": "AAPL260116C00250000", "implied_volatility": 0.20, "delta": 0.25},
+            {"option_symbol": "AAPL260116P00150000", "implied_volatility": 0.32, "delta": -0.25},
+        ]
+    }
+    assert vsmr._current_put_call_skew(contracts) == pytest.approx(12.0)
+
+
+def test_put_call_skew_is_none_when_no_side_reports_a_delta() -> None:
+    contracts = {
+        "data": [
+            {"option_symbol": "AAPL260116C00250000", "implied_volatility": 0.20},
+            {"option_symbol": "AAPL260116P00150000", "implied_volatility": 0.32},
+        ]
+    }
+    assert vsmr._current_put_call_skew(contracts) is None

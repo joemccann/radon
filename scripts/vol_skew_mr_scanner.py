@@ -40,7 +40,7 @@ from utils.scan_health import (
     record_scan_degraded,
 )
 from utils.uw_budget import should_block_universe_scan
-from utils.uw_surface import fetch_surface, scan_ib_session
+from utils.uw_surface import fetch_daily_closes, scan_ib_session
 
 try:
     from db.scan_mirror import mirror_scan_snapshot  # type: ignore
@@ -65,6 +65,7 @@ BB_STD = 2.0
 RSI_HIGH = 70.0
 RSI_LOW = 30.0
 PATH_FLAT_EPS = 0.25
+SKEW_DECIMAL_CEILING = 1.0
 DEFAULT_MAX_WORKERS = 24
 RATE_LIMIT_ABORT = 8
 SERVICE_NAME = "vol-skew-mr"
@@ -136,6 +137,23 @@ def _vol_pct(value: Any) -> Optional[float]:
     if num is None or num <= 0:
         return None
     return num * 100 if num <= 3 else num
+
+
+def _as_vol_points(values: Sequence[float]) -> List[float]:
+    """Restate a risk-reversal series in vol points.
+
+    UW serves the skew as a decimal (0.031) on some endpoints and as vol
+    points (3.1) on others. ``PATH_FLAT_EPS`` is calibrated in vol points, so
+    a decimal series would read ``flat`` forever and pass the skew gate on
+    every row. Decide per series, not per value: a real skew never sits below
+    one vol point across a whole window, and one decimal unit would be 100.
+    """
+    series = list(values)
+    if not series:
+        return series
+    if max(abs(value) for value in series) >= SKEW_DECIMAL_CEILING:
+        return series
+    return [value * 100 for value in series]
 
 
 def _prices_from_ohlc(payload: Any) -> List[float]:
@@ -275,16 +293,13 @@ def classify_from_series(
     return result
 
 
-def _dated_series(payload: Any, keys: Sequence[str]) -> List[float]:
+def _dated_series(payload: Any, keys: Sequence[str], convert=_to_float) -> List[float]:
     rows = sorted(_as_rows(payload), key=lambda row: str(row.get("date") or row.get("timestamp") or ""))
     values: List[float] = []
     for row in rows:
         value = None
         for key in keys:
-            if key in {"volatility", "iv", "atm_iv"}:
-                value = _vol_pct(row.get(key))
-            else:
-                value = _to_float(row.get(key))
+            value = convert(row.get(key))
             if value is not None:
                 break
         if value is not None:
@@ -323,10 +338,10 @@ def _current_put_call_skew(contracts_payload: Any) -> Optional[float]:
         return None
     target = sorted({row["expiry"] for row in options})[0]
     expiry_rows = [row for row in options if row["expiry"] == target]
-    calls = [row for row in expiry_rows if row["right"] == "C"]
-    puts = [row for row in expiry_rows if row["right"] == "P"]
-    call25 = min(calls, key=lambda row: abs((row.get("delta") or 0.25) - 0.25), default=None)
-    put25 = min(puts, key=lambda row: abs(abs(row.get("delta") or -0.25) - 0.25), default=None)
+    calls = [row for row in expiry_rows if row["right"] == "C" and row["delta"] is not None]
+    puts = [row for row in expiry_rows if row["right"] == "P" and row["delta"] is not None]
+    call25 = min(calls, key=lambda row: abs(row["delta"] - 0.25), default=None)
+    put25 = min(puts, key=lambda row: abs(abs(row["delta"]) - 0.25), default=None)
     if call25 is None or put25 is None:
         return None
     return put25["iv"] - call25["iv"]
@@ -346,10 +361,20 @@ def scan_ticker(
         client = own_client
     errors: List[str] = []
     ticker = ticker.upper()
-    try:
+
+    def fetch(label: str, func, default: Any) -> Any:
         try:
-            surface = fetch_surface(client, ticker, ib=ib)
-            prices = _prices_from_ohlc(surface["ohlc"])
+            return func()
+        except UWRateLimitError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - scanner degrades by gate
+            errors.append(f"{label}:{exc}")
+            return default
+
+    try:
+        empty: Dict[str, Any] = {"data": []}
+        try:
+            prices = _prices_from_ohlc(fetch_daily_closes(ticker, ib=ib, uw=client))
         except UWRateLimitError:
             raise
         except Exception as exc:
@@ -359,25 +384,26 @@ def scan_ticker(
             errors.append("insufficient_price_history")
             return None
 
-        def fetch(label: str, func, default: Any) -> Any:
-            try:
-                return func()
-            except UWRateLimitError:
-                raise
-            except Exception as exc:  # noqa: BLE001 - scanner degrades by gate
-                errors.append(f"{label}:{exc}")
-                return default
-
-        empty = {"data": []}
-        iv_series = _dated_series(fetch("iv_rank", lambda: surface["iv_rank"], empty), ("volatility", "iv"))
+        iv_series = _dated_series(
+            fetch("iv_rank", lambda: client.get_iv_rank(ticker), empty),
+            ("volatility", "iv"),
+            _vol_pct,
+        )
         rr = fetch(
             "risk_reversal",
             lambda: client.get_historical_risk_reversal_skew(ticker),
             empty,
         )
-        skew_series = _dated_series(rr, ("value", "skew", "risk_reversal"))
+        skew_series = _as_vol_points(_dated_series(rr, ("value", "skew", "risk_reversal")))
         if len(skew_series) < 2:
-            current = _current_put_call_skew(fetch("contracts", lambda: surface["contracts"], empty))
+            contracts = fetch(
+                "contracts",
+                lambda: client.get_option_contracts(
+                    ticker, exclude_zero_vol_chains=True, maybe_otm_only=True
+                ),
+                empty,
+            )
+            current = _current_put_call_skew(contracts)
             if current is not None:
                 skew_series = skew_series + [current] if skew_series else [current]
 
