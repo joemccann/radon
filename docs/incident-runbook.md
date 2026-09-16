@@ -2062,3 +2062,13 @@ scans `data/incidents_remote/*.diagnosis.md`, pairs each with its
 missing) as a session-start banner plus model context, so the session opens
 ready to address the diagnosis. Resolved incidents never nag. No output = hook
 silent.
+
+## performance-twr-nightly-flow-history
+
+**`/performance` retains the full NAV window but shows `-- TWR`, `INFERRED_FLOW_CANDIDATE`, and `SUBPERIOD_SUSPECT` after nightly Activity ingestion.**
+
+- **Incident:** 2026-09-16, a one-day September 15 statement produced 185 NAV observations, 182 included returns and two suspect sessions. The January 13 and February 6 external flows remained in the verified ledger but were absent from the new payload.
+- **Mechanism:** extending the saved NAV series without extending its corresponding flow history treated the short statement's empty flow section as zero flows for the entire account history.
+- **Repair:** reconcile statement-covered flows with verified historical flow coverage alongside the NAV extension. The statement owns its covered interval, including explicit zero-flow corrections. Missing ledger or coverage evidence must still suppress publication; never apply the suggested NAV residual as a deposit.
+- **Recovery:** use the existing no-SendRequest performance rebuild against retained NAV and flow mirrors after checking their coverage. Confirm `n_suspect=0`, correct external-flow totals, full period bounds and non-null TWR in both the disk payload and served snapshot. The nightly ingest repair is still required to prevent recurrence.
+- **Regression:** `scripts/tests/test_flex_from_file.py` covers historical deposits with a short empty-flow statement; browser coverage preserves degraded gating and verifies a corrected payload restores the full-period TWR.

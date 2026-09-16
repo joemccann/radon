@@ -797,6 +797,7 @@ jobs:
           e2e/chain-anchored-scroll.spec.ts
           e2e/chain-first-layout.spec.ts
           e2e/instrument-workspace-layout.spec.ts
+          e2e/performance-twr-payload.spec.ts
           e2e/leap-order-prefill.spec.ts
           e2e/mobile-orders-session.spec.ts
           e2e/orders-session-window.spec.ts
@@ -856,6 +857,13 @@ jobs:
         with:
           name: instrument-workspace-screenshots
           path: web/test-results/**/instrument-workspace-*.png
+          retention-days: 7
+      - name: Upload performance flow history screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: performance-flow-history-screenshots
+          path: web/test-results/**/performance-flow-history-*.png
           retention-days: 7
       - name: Upload traces on failure
         if: failure()

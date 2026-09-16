@@ -29,8 +29,6 @@
 #      account-day-move-ib-daily-pnl.spec.ts
 #          Day Move renders differently under `next dev` and `next start`; the
 #          spec pins the dev reading. Runs locally only. (ci.yml:505-508)
-#      performance-twr-payload.spec.ts
-#          Asserts against a live TWR payload; no CI data source.
 #
 #   2. UNTRIAGED BACKLOG — everything else below. These have NOT been
 #      preflighted under `next start`, which is the only reason they are not
@@ -135,7 +133,6 @@ performance-chart-axes.spec.ts
 performance-chart-theme.spec.ts
 performance-market-closed.spec.ts
 performance-page.spec.ts
-performance-twr-payload.spec.ts
 pltr-chain-position-focus.spec.ts
 portfolio-leg-row-runtime.spec.ts
 portfolio-market-closed.spec.ts
