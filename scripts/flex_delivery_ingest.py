@@ -248,14 +248,16 @@ def _apply_classified(kind: str, xml_text: str, digest: str, source_path: str) -
             }
         # REL-220 (R-588): this ok deliberately precedes the TWR build — it
         # reports the CASH-FLOW write, which is complete and (per R-329's
-        # id-keyed upsert) convergent under the retry a TWR failure triggers:
-        # the caller releases the claim, and re-ingesting the same bytes
-        # re-applies to identical rows. The TWR half reports through its own
-        # perf-twr surface. Pinned by test_rel220_twr_retry_convergence.
+        # id-keyed upsert) convergent under the retry a TWR *exception*
+        # triggers. A returned TWR status of degraded/unavailable is not an
+        # ingest failure: persist already ran, and perf-twr owns that page.
+        # 2026-09-16 page 5a2eb828: cash_exit=0 + twr_status=degraded failed
+        # radon-flex-pull (Result=exit-code) while radon-perf-twr published
+        # ok three minutes later.
         _heartbeat_cash_flow_sync("ok")
         twr = perf_twr_builder.build_and_persist(from_file=source_path, persist=True)
         return {
-            "ok": twr.get("status") in ("ok", "stale"),
+            "ok": True,
             "classified_as": kind,
             "content_sha256": digest,
             "cash_exit": cash_code,
