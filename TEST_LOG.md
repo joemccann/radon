@@ -873,7 +873,7 @@ no new skips; no threshold or CI-reachability drift. 0 new findings.
 
 | Task | Status | Evidence |
 |---|---|---|
-| T-495 | OPEN | `web/e2e/chain-anchored-scroll.spec.ts:93-102` uses `page.waitForTimeout(250)` between two scroll assertions and its post-scroll snapshot. The contract can sample before rendering settles and cannot catch a regression that renders after the arbitrary window. AC: replace the delay with a web-first settled-pane assertion; a deliberately delayed rerender must fail. Detached full gates are still running; no count claimed without `DONE`. |
+| T-495 | OPEN | `web/e2e/chain-anchored-scroll.spec.ts:93-102` uses `page.waitForTimeout(250)` between two scroll assertions and its post-scroll snapshot. The contract can sample before rendering settles and cannot catch a regression that renders after the arbitrary window. AC: replace the delay with a web-first settled-pane assertion; a deliberately delayed rerender must fail. Detached full-gate stage ended without `DONE` at `pytest_rc=RUNNING`; no count claimed. |
 
 ## Remediation 2026-09-13 (testing/2026-09-13)
 

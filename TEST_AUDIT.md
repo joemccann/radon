@@ -10460,5 +10460,6 @@ or executable skip/xfail.
   `data-testid` state) and prove a deliberately delayed rerender fails.
 
 - Audited through: `8d1d0f52` on 2026-09-16 — 1 new finding (T-495, P2) over
-  51 commits / 206 paths. Detached serial gates started with the verified
-  venv toolchain; this audit records no count until their rc file has `DONE`.
+  51 commits / 206 paths. The detached serial-gate stage ended before writing
+  its required `DONE` sentinel, with `pytest_rc=RUNNING`; no gate count is
+  claimed and the next phase must rerun the gates.

@@ -7236,7 +7236,7 @@ safety-gate verification.
 ## Checklist
 
 - [x] T1 Dedicated runner markers, clean tree, audit base, and dated branch verified.
-- [x] T2 Static delta sweeps recorded; detached serial gates remain unclaimed without `DONE`.
+- [x] T2 Static delta sweeps recorded; detached serial-gate stage ended without `DONE` at pytest.
 - [x] T3 Delta report prepared for the dated branch.
 
 ## Review
