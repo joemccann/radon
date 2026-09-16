@@ -7286,9 +7286,11 @@ Review: desktop Position, News and Book & trade visually verified at 1440x800 an
 
 Dependency graph: T1 -> {T2,T3} -> T4 -> T5.
 - [x] T1 depends_on: [] Isolate current main and record screenshot symptoms; preserve unrelated work.
-- [ ] T2 depends_on: [T1] Trace NAV/flow sources and recent builder changes against actual available incident data.
-- [ ] T3 depends_on: [T1] Inspect frontend null/degraded contract and regression coverage independently.
-- [ ] T4 depends_on: [T2,T3] Implement minimal evidence-backed repair and regressions; inspect rendered recovery without relaxing financial integrity.
+- [x] T2 depends_on: [T1] Trace NAV/flow sources and recent builder changes against actual available incident data.
+- [x] T3 depends_on: [T1] Inspect frontend null/degraded contract and regression coverage independently. Added isolated browser incident-to-repaired refresh coverage using actual historical flow amounts, full date window, positive TWR, return count, suppressed/drawn curve and warning removal; promoted payload spec to CI with screenshot artifacts. No frontend logic change or local suite execution.
+- [x] T4 depends_on: [T2,T3] Implement minimal evidence-backed repair and regressions; inspect rendered recovery without relaxing financial integrity.
 - [ ] T5 depends_on: [T4] Publish PR, verify all exact-head GitHub checks green, notify and record results.
 
-Review: pending. No local test suites; all suite execution on GitHub. Never infer deposits into canonical returns without source evidence.
+Review: GitHub red phase9e517457 reproduced lost flow (expected80000,actual0) in test_nightly_statement_preserves_verified_historical_external_flows. Repair retains historical observed flows only with per-session coverage, statement overrides its interval including zeros, and unknown evidence remains gated. Added18Python cases plus a browser degraded-to-recovered refresh case; no production UI gating changes. Static compilation and diff checks pass. Operational no-fetch preview restored184returns/0suspects; production rebuild inprogress. Final exact-head CI and screenshot review pending. No local test suites; all suite execution on GitHub. Never infer deposits into canonical returns without source evidence.
+
+Incident evidence: production disk payload generated2026-09-16T12:31:06.516Z, flex_from_file, nav_as_of2026-09-15, empty_verified flows,185NAV/184subperiods/182returns/two suspect sessions. Retained ledger has actual Jan13 deposit80007.13 and Feb6 transfer655497.16; residual candidates are not deposits. Latest nightly statement coversSep15only and has both flow sections withzeroentries. Initial regression commit9e517457 published inPR468 forGitHub red/green evidence.
