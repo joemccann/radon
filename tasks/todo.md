@@ -1,3 +1,23 @@
+# Task: Contextual browser tab titles 2026-09-16 [IN PROGRESS]
+
+Tabs currently all read "Radon Terminal". Every App Router page must export
+a page-first title (`Orders · Radon`, `Positions · Radon`) so truncated tabs
+stay distinct.
+
+## Dependency graph
+
+- T1 depends_on: [] - Title helper + failing contract that every page.tsx sets metadata
+- T2 depends_on: [T1] - Root title template and routeMetadata/generateMetadata on every page
+- T3 depends_on: [T2] - Focused Vitest green, PR, exact-head CI, Pushover. Do not merge.
+
+## Checklist
+
+- [x] T1 Red contract for missing per-page titles
+- [x] T2 Template `%s · Radon`; static, ticker, regime, options, scanner titles
+- [ ] T3 Focused tests, PR, CI green, Pushover
+
+---
+
 # Task: Newsfeed + distill on shared model ladder 2026-09-15 [IN PROGRESS]
 
 Stop Cerebras-first text tagging and KB distillation. Both walk

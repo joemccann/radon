@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-09-16T18:24:01Z",
-  "node_count": 3337,
-  "edge_count": 6770,
+  "generated_at": "2026-09-16T19:03:25Z",
+  "node_count": 3340,
+  "edge_count": 6839,
   "areas": {
-    "web": 1966,
+    "web": 1969,
     "site": 155,
     "scripts": 1103,
     "cloud": 66,
@@ -15,7 +15,7 @@
     {
       "id": "web/app",
       "area": "web",
-      "count": 208
+      "count": 209
     },
     {
       "id": "web/components",
@@ -35,7 +35,7 @@
     {
       "id": "web/lib",
       "area": "web",
-      "count": 389
+      "count": 390
     },
     {
       "id": "web/public",
@@ -50,7 +50,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 909
+      "count": 910
     },
     {
       "id": "site/app",
@@ -329,6 +329,13 @@
       "test": false
     },
     {
+      "id": "web/lib/pageTitle.ts",
+      "area": "web",
+      "in": 65,
+      "out": 2,
+      "test": false
+    },
+    {
       "id": "scripts/api/server.py",
       "area": "scripts",
       "in": 45,
@@ -513,13 +520,6 @@
     {
       "id": "web/components/RegimeStrip.tsx",
       "area": "web",
-      "in": 30,
-      "out": 0,
-      "test": false
-    },
-    {
-      "id": "scripts/utils/market_calendar.py",
-      "area": "scripts",
       "in": 30,
       "out": 0,
       "test": false
