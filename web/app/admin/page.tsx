@@ -1,6 +1,9 @@
 import WorkspaceShell from "@/components/WorkspaceShell";
 import { requireRouteAccess } from "@/lib/routeAccess";
 import { notFound, redirect } from "next/navigation";
+import { routeMetadata } from "@/lib/pageTitle";
+
+export const metadata = routeMetadata("/admin");
 
 export const dynamic = "force-dynamic";
 

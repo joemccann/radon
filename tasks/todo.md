@@ -1,3 +1,66 @@
+# Task: Vol/Skew MR scanner mode 2026-09-16 [IN PROGRESS]
+
+Scanner mode `vol-skew-mr` (UI: Vol/Skew MR, `/scanner?mode=vol-skew-mr`).
+Lakha / Options Insight short-term top/bottom framing. Mirror strength/theta
+family. Credit in help tooltip. Do not merge.
+
+## Dependency graph
+
+- T1 depends_on: [] - Failing gate tests (RSI/%B, IV path, skew, verdicts)
+- T2 depends_on: [T1] - `vol_skew_mr_scanner.py` + disk/Turso snapshot
+- T3 depends_on: [T2] - FastAPI + Next GET/POST, UI tab, comma ticker search
+- T4 depends_on: [T3] - Route/UI/e2e tests, PR, CI green. No merge.
+
+## Checklist
+
+- [x] T1 Red gate tests
+- [x] T2 Scanner + snapshot
+- [x] T3 Routes + Vol/Skew MR tab
+- [ ] T4 Focused green, PR, watch CI
+
+## Review
+
+- [ ] `/scanner?mode=vol-skew-mr` renders TOP_MR / BOTTOM_MR / continue
+
+---
+
+# Task: Contextual browser tab titles 2026-09-16 [IN PROGRESS]
+
+Tabs currently all read "Radon Terminal". Every App Router page must export
+a page-first title (`Orders · Radon`, `Positions · Radon`) so truncated tabs
+stay distinct.
+
+## Dependency graph
+
+- T1 depends_on: [] - Title helper + failing contract that every page.tsx sets metadata
+- T2 depends_on: [T1] - Root title template and routeMetadata/generateMetadata on every page
+- T3 depends_on: [T2] - Focused Vitest green, PR, exact-head CI, Pushover. Do not merge.
+
+## Checklist
+
+- [x] T1 Red contract for missing per-page titles
+- [x] T2 Template `%s · Radon`; static, ticker, regime, options, scanner titles
+- [ ] T3 Focused tests, PR, CI green, Pushover
+
+# Task: Order ticket shows full option contract 2026-09-16 [IN PROGRESS]
+
+Docked 384px ticket ellipsizes `1x $strike Call` to `1x...`. The strike and
+right must stay fully visible; wrap controls instead of clipping the contract.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red CSS/source contract that the leg label cannot ellipsize
+- T2 depends_on: [T1] - Stop shrinking the contract; wrap the row
+- T3 depends_on: [T2] - Focused tests, PR, CI green. Do not merge.
+
+## Checklist
+
+- [x] T1 Failing layout contract
+- [x] T2 Full `1x $strike Call/Put` in the rail
+- [ ] T3 PR + CI
+
+---
+
 # Task: Newsfeed + distill on shared model ladder 2026-09-15 [IN PROGRESS]
 
 Stop Cerebras-first text tagging and KB distillation. Both walk
@@ -7283,3 +7346,79 @@ findings only; T-495 is P2 and remains out of scope.
 
 - [x] No P2 substitute was implemented on the reduced rung.
 - [x] Detached closing stage died without its `DONE` sentinel; no gate count is claimed.
+## Chain-first desktop implementation B (2026-09-16)
+
+User selected B and authorized implementation, PR, and CI verification. Work isolated from unrelated edits in /private/tmp/radon-chain-first-20260916.
+
+Dependency graph: T1 -> {T2, T3, T4} -> T5 -> T6.
+
+- [x] T1 depends_on: [] Inspect selected prototype, current source, instructions, and establish isolated branch.
+- [x] T2 depends_on: [T1] Compact desktop shell to 48px and retain search, navigation, theme, freshness and sync.
+- [x] T3 depends_on: [T1] Implement instrument sidebar and viewport-filling chain with readable 40px rows, compact toolbar, preserved builder and mobile.
+- [x] T4 depends_on: [T1] Add focused behavior/layout regression coverage for density, navigation, builder and responsive themes.
+- [x] T5 depends_on: [T2, T3, T4] Visually inspect real rendered application; inspect changes and regenerate codemap. No local test suites.
+- [ ] T6 depends_on: [T5] Commit, create PR, watch all applicable GitHub checks on exact head until green, send required Pushover notification.
+
+Acceptance: at least 12 full strike rows at 1280x720 and 14 at 1440x800 without a staged ticket; no document horizontal overflow; underlying and held spread quotes remain distinct; expiry, side, strike, recenter and instrument navigation work; staged ticket remains usable; mobile and both themes preserved.
+
+### Review
+Implementation B rendered with isolated broker/API fixtures. Browser geometry: 14 complete strikes at1440×800,12 at1280×720,first quotes y156,40px rows; no document horizontal overflow at1440,1280,1024 or393px. Staged ticket and mobile visually inspected; light/dark captures recorded locally. TypeScript and focused ESLint static checks pass. Added 8 browser cases and 8 sidebar unit regressions; execution pending GitHub CI. No local test suites run.
+
+PR: https://github.com/joemccann/radon/pull/463. Initial head b04ff560 passed all 8 Vitest shards and all Python shards; browser checks still running. Additional direct browser review verified separate underlying120.00/held spread0.85, fixed the feed disclosure stacking above the chain, and added pointer hit-testing plus Sync actionability to browser coverage.
+
+Initial browser run:114 passed, including all8 new chain cases. Demo assertion exposed duplicate canonical data-integrity markers on the new hidden disclosure trigger; use a disclosure-specific data-feed-integrity attribute so the existing demo regression remains unchanged. Latest exact-head verification continues in PR463.
+
+## Consistent instrument workspace (2026-09-16)
+
+Extend selected Chain-first B across the same instrument's Position, News, Ratings, Seasonality, Company, 13F, Filings, Commands and Book & trade. Keep the 48px global bar, persistent instrument context, full remaining desktop canvas and clear active navigation. Preserve mobile, calculations, quote provenance, order-risk gates and URL/keyboard navigation.
+
+Dependency graph: T1 -> {T2,T3,T4} -> T5 -> T6.
+- [x] T1 depends_on: [] Inspect merged B, instructions and codemap; isolate branch from unrelated work.
+- [x] T2 depends_on: [T1] Generalize persistent desktop sidebar, active navigation and compact shell across instrument views.
+- [x] T3 depends_on: [T1] Extend full-height main canvas and consistent deck toolbar/content spacing; retain usable Book & trade and mobile.
+- [x] T4 depends_on: [T1] Add cross-view navigation/layout regressions and preserve existing chain, demo and order coverage. Eight isolated Playwright cases cover both themes, two laptop sizes, mobile, signed held spread quotes, actual position risk review, every reference deck, news empty/error/recovery, and persistent canvas geometry. CI selection and screenshot artifacts updated; syntax inspection passes, execution remains on GitHub runners.
+- [x] T5 depends_on: [T2,T3,T4] Visually verify representative real rendered views in both themes, laptop and mobile; static checks and generated codemap.
+- [ ] T6 depends_on: [T5] Commit, create PR, follow every applicable CI check on exact head through green and deliver Pushover notification.
+
+Review: desktop Position, News and Book & trade visually verified at 1440x800 and 1280x720 in both themes; mobile Position/News verified at 393x852 in both themes. Persistent 208px sidebar, 48px header, 56px view toolbar and internal content scrolling; no document horizontal overflow. TypeScript and focused ESLint pass; codemap regenerated. Added 8 cross-view browser cases, active-navigation unit coverage and CI screenshot artifacts. No local test suites; GitHub runners execute suites. Browser verification uses isolated API/socket fixtures and never submits live orders. Exact-head CI and Pushover pending PR creation.
+
+## Resolve and merge PR466 (2026-09-16)
+Dependency graph: T1 -> {T2,T3} -> T4 -> T5.
+- [x] T1 depends_on: [] Inspect PR and isolate head from unrelated local edits.
+- [x] T2 depends_on: [T1] Merge current main and resolve conflicts preserving page-title behavior and current base changes.
+- [x] T3 depends_on: [T1] Review title contract/integration risks and applicable validation.
+- [ ] T4 depends_on: [T2,T3] Push resolution, verify all applicable CI on exact head green, send Pushover.
+- [ ] T5 depends_on: [T4] Merge the verified head and confirm merged state.
+Review: resolved tasks/todo conflicts by retaining both task records; retained main generated code maps under nightly ownership. Page-title route metadata preserved; added own-key registry and matching Options symbol validation with focused regressions. TypeScript passed before final helper hardening; commit hooks recheck final source. Suites execute only on GitHub. Exact-head CI and merge pending.
+
+## Performance TWR regression (2026-09-16)
+
+Dependency graph: T1 -> {T2,T3} -> T4 -> T5.
+- [x] T1 depends_on: [] Isolate current main and record screenshot symptoms; preserve unrelated work.
+- [x] T2 depends_on: [T1] Trace NAV/flow sources and recent builder changes against actual available incident data.
+- [x] T3 depends_on: [T1] Inspect frontend null/degraded contract and regression coverage independently. Added isolated browser incident-to-repaired refresh coverage using actual historical flow amounts, full date window, positive TWR, return count, suppressed/drawn curve and warning removal; promoted payload spec to CI with screenshot artifacts. No frontend logic change or local suite execution.
+- [x] T4 depends_on: [T2,T3] Implement minimal evidence-backed repair and regressions; inspect rendered recovery without relaxing financial integrity.
+- [ ] T5 depends_on: [T4] Publish PR, verify all exact-head GitHub checks green, notify and record results.
+
+Review: GitHub red phase9e517457 reproduced lost flow (expected80000,actual0) in test_nightly_statement_preserves_verified_historical_external_flows. Repair retains historical observed flows only with per-session coverage, statement overrides its interval including zeros, and unknown evidence remains gated. Added18Python cases plus a browser degraded-to-recovered refresh case; no production UI gating changes. Static compilation and diff checks pass. Operational no-fetch preview restored184returns/0suspects; production rebuild inprogress. Final exact-head CI and screenshot review pending. No local test suites; all suite execution on GitHub. Never infer deposits into canonical returns without source evidence.
+
+Incident evidence: production disk payload generated2026-09-16T12:31:06.516Z, flex_from_file, nav_as_of2026-09-15, empty_verified flows,185NAV/184subperiods/182returns/two suspect sessions. Retained ledger has actual Jan13 deposit80007.13 and Feb6 transfer655497.16; residual candidates are not deposits. Latest nightly statement coversSep15only and has both flow sections withzeroentries. Initial regression commit9e517457 published inPR468 forGitHub red/green evidence.
+
+
+## Testing audit 2026-09-17
+
+- [x] T1 Audit delta `fe96fdac..HEAD`; depends_on: []
+- [x] T2 Run CI-gated suite and determinism sweeps; depends_on: [T1]
+- [x] T3 Append ledger and findings, then commit audit evidence; depends_on: [T1, T2]
+- Review: one P2 filed as T-495; no production source changed.
+
+## Testing remediate 2026-09-17
+
+- [x] T1 Reconcile all verified P0/P1 findings; depends_on: []
+- [x] T2 Reverify standing P1 T-490 and record operator action; depends_on: [T1]
+- [x] T3 Append remediation result and commit it; depends_on: [T1, T2]
+- Review: reduced scope excludes T-495 (P2); T-490 remains blocked by the
+  runner's `.codex` filesystem policy and T-488 remains operator-only.
+
+## AI industry B production implementation (2026-09-17)
+Plan: `tasks/ai-industry-plan.md`. Dependency graph: T1 -> T2,T3,T4; T2+T3+T4 -> T5 -> T6. See plan for depends_on/checklist and review. Isolated worktree; no local suites.

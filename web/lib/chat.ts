@@ -552,6 +552,8 @@ export function resolveSectionFromPath(pathname: string | null, fallback: Worksp
     return "journal";
   }
 
+  if (pathname === "/ai-industry" || pathname.startsWith("/ai-industry/")) return "ai-industry";
+
   if (pathname.startsWith("/regime")) {
     return "regime";
   }

@@ -941,3 +941,17 @@ counts or green verdict are claimed.
 Closing gates: INCOMPLETE. `/tmp/tw-2026-09-16/remediate-gates.rc` prewrote all
 nine slots, then the detached process died during `pytest_1` with a zero-byte
 log and no `DONE` sentinel. No full-gate count or green verdict is claimed.
+## Remediation 2026-09-17 (testing/2026-09-17)
+
+`RADON_WEEKEND_REDUCED=1`: this cycle's T-495 is P2 and out of scope. The
+standing P1s were reverified before closing gates: T-490 is deterministically
+blocked by the runner's filesystem policy, and T-488 remains operator-only
+after its three recorded fixture attempts.
+
+| Task | Status | Evidence |
+|---|---|---|
+| T-490 | BLOCKED / operator-only | RED: `render_loop_prompt.py --check` listed all eight absent `.codex` artifacts and `test_portable_prompt_sync.py` was 21 failed / 52 passed. Attempt: `render_loop_prompt.py --write` reached `.codex/skills/ci-performance` then failed `PermissionError`. Operator: run `python3.13 scripts/render_loop_prompt.py --write` in a checkout permitted to create repository `.codex/`, then run `python3.13 -m pytest scripts/tests/test_portable_prompt_sync.py -q` and commit the generated artifacts. |
+| T-488 | operator-only | Reproduce and repair the GNU-timeout process-tree behavior on Linux CI without widening the fixed test timeout. |
+
+Closing gates: not run. The focused P1 blocker is deterministic, so three
+full-gate runs cannot honestly be claimed.

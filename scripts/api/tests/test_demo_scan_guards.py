@@ -80,6 +80,7 @@ SNAPSHOT_ENDPOINTS = [
     "/flow-analysis",
     "/theta-harvester/scan",
     "/strength-confirmation/scan",
+    "/vol-skew-mr/scan",
     "/leap/scan",
     "/garch-convergence/scan",
     "/vcg/scan",
