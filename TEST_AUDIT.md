@@ -9328,6 +9328,14 @@ not cover this newly introduced spec.
 
 - Audited through: `0833758b` on 2026-09-17 — 1 new finding (T-495) over 55 commits / 315 paths; static, gate-drift, skip, and coverage-ratchet sweeps clean; gates recorded above with standing T-490/T-488 baseline reds.
 
+## Remediation 2026-09-17
+
+`RADON_WEEKEND_REDUCED=1`: T-495 is P2 and out of scope. Reverification found
+no new source-actionable P0/P1: T-490 is BLOCKED by this runner's prohibition
+on creating `.codex/`, and T-488 remains operator-only after three recorded
+genuine attempts. See the append-only TEST_LOG entry for exact operator
+actions; closing gates are not claimed while T-490 is deterministically red.
+
 ## Remediation 2026-09-15
 
 `RADON_WEEKEND_REDUCED=1`: the current-cycle audit filed no P0/P1 finding.

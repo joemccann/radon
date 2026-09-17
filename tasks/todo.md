@@ -7374,3 +7374,11 @@ Incident evidence: production disk payload generated2026-09-16T12:31:06.516Z, fl
 - [x] T2 Run CI-gated suite and determinism sweeps; depends_on: [T1]
 - [x] T3 Append ledger and findings, then commit audit evidence; depends_on: [T1, T2]
 - Review: one P2 filed as T-495; no production source changed.
+
+## Testing remediate 2026-09-17
+
+- [x] T1 Reconcile all verified P0/P1 findings; depends_on: []
+- [x] T2 Reverify standing P1 T-490 and record operator action; depends_on: [T1]
+- [x] T3 Append remediation result and commit it; depends_on: [T1, T2]
+- Review: reduced scope excludes T-495 (P2); T-490 remains blocked by the
+  runner's `.codex` filesystem policy and T-488 remains operator-only.
