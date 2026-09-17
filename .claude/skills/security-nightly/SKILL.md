@@ -25,6 +25,38 @@ inside the audit phase. A budgeted full-repository refresh runs on the first
 Sunday of each month and after a material auth, order, topology, workflow,
 dependency, or threat-model change.
 
+## Substantive publication gate (all phases)
+
+Publish only a substantive net change against current `origin/main`: source,
+tests, maintained product/operator documentation, configuration, or an actual
+CI experiment. A real experiment remains eligible while `VALIDATING` or
+`INSUFFICIENT_SAMPLE`; status words do not decide whether its diff has value.
+Known nightly audit/log ledgers, `tasks/`, runner-only reports, checkpoint
+dates and lessons alone are bookkeeping, not a reason for a commit, push or
+PR. Maintained product reports, documentation and real generated-content
+changes remain eligible; never exclude `docs/` or `reports/` wholesale. Never
+manufacture a change to satisfy a completion check. Inspect the diff before
+committing; keep report-only security work in durable private runner scratch
+and the private archive; the wrapper alone reports sanitized issue health. This rule governs every commit/push instruction and historical
+lesson below.
+
+After a substantive task is committed, run
+`python3.13 scripts/nightly_publish.py check --base origin/main --head HEAD`.
+Exit 0 means substantive; 3 means no-op; 1 means error and must stop publication.
+The publisher rechecks current main before any push. All new PR creation goes
+through `python3.13 scripts/nightly_publish.py publish --base main --head <branch> --title <title> --body-file <body-file>`.
+It owns the push; do not push a new nightly branch first or bypass the guard.
+Read JSON `status`: `published` (exit 0) includes `pr_url` and `head_sha`;
+`noop` exits 3 without publication; `error` exits 1 and must stop. Never invent a URL. Existing
+substantive PRs still resume through the deliver record and CI watch.
+
+Security disclosure rails still take precedence: keep findings and audited
+SHAs in the durable private run-record/archive outside the clone; only the
+wrapper posts sanitized health to the existing rolling issue. Never copy a
+private checkpoint or finding into a public report. A zero-finding, unreleased
+or no-safe-public-change run creates no artificial commit or PR and retains
+the security completion marker.
+
 ## Runner integration and fail-closed default
 
 The wrapper (`scripts/security_nightly.sh`) owns the runner mechanics: it
@@ -645,15 +677,16 @@ are not security severities. Classify them as `BLOCKED`, `INCOMPLETE`, or
 (independently verified against current code) from this cycle's audit,
 highest severity first, not the first one and not one per night. Group fixes
 by root cause into separate commits on one dated branch `security/<YYYY-MM-DD>` (one
-branch per loop per day; the deliver phase turns it into one PR). Red/green
+branch per loop per day; the deliver phase publishes its substantive diff as one PR). Red/green
 per fix; the full project gates before every commit. Independent fixes may
 run in parallel as subagents in separate worktrees of this clone
 (`git worktree add ../wt-<id> -b security/<date>-<id> security/<date>`), each
 committing to its own branch; this phase merges them back onto the dated
 branch, reruns the gates on the merged result, and removes the worktrees
-(`git worktree remove`, `git branch -d`). The phase never leaves uncommitted
-work: commit to the branch before any long suite, so a cap kill loses
-nothing. A finding is done only as DONE, BLOCKED (root-cause hypothesis
+(`git worktree remove`, `git branch -d`). Preserve substantive work with a local
+commit before any long suite. Keep
+report-only state in durable private scratch and the private archive; it does not
+require a commit. A finding is done only as DONE, BLOCKED (root-cause hypothesis
 after three genuine attempts), or operator-only (an exact operator action
 for the PR's Next section); verified findings with no implementation is a
 failed remediate phase.
@@ -697,7 +730,7 @@ approaches, record `BLOCKED` privately and stop modifying that finding.
 
 ## Mode: deliver (third phase of the daily cycle)
 
-Goal: every commit the remediate phase landed on `security/<YYYY-MM-DD>` reaches the
+Goal: every substantive net change the remediate phase landed on `security/<YYYY-MM-DD>` reaches the
 operator as ONE pull request with CI green, in this same cycle, and the
 operator is told exactly what is ready to merge. The loop never merges.
 The wrapper caps this phase at 3h (`RADON_WEEKEND_DELIVER_CAP_SECS`,
@@ -725,9 +758,17 @@ Security rails for this phase, in addition to every hard rail above:
    and PR number are the run to finish: check the branch out, make its CI
    green (step 4), record the outcome, then continue with today's branch.
    Never open a second PR for a branch that already has one.
-2. Push the dated branch. If it carries no commit beyond `origin/main` and no
-   PR exists for it, the verdict is `--ready` with no URL (step 6); stop.
-3. Open ONE PR for the branch via §Pull request output (`--loop security`);
+2. Classify the dated branch with
+   `python3.13 scripts/nightly_publish.py check --base origin/main --head HEAD`.
+   Exit 3 means no substantive diff, even when ledger-only commits exist.
+   If this phase has no substantive PR to resume or report, record
+   `python3.13 scripts/nightly_deliver.py record --loop security --branch "" --status green`
+   with no PR number or URL, then emit the step 6 verdict with no URLs:
+   `NIGHTLY DELIVER READY: loop=security prs=0`. Do not push or create a PR.
+   Keep any resumed substantive PR's record and URL in the final verdict even
+   when today's branch is no-op; do not erase it with an empty record.
+   Exit 1 is INCOMPLETE, never no-op. Exit 0 continues to guarded publication.
+3. Publish ONE substantive PR through the guarded publisher in §Pull request output (`--loop security`);
    update the existing PR when one is already open for the branch (`gh api
    -X PATCH`). Every operator-only finding from this cycle's audit (external
    state, credential rotation, host policy, a `BLOCKED` item) goes into the
@@ -743,9 +784,9 @@ Security rails for this phase, in addition to every hard rail above:
    until green or the cap. Never weaken a test or a gate to get green; never
    rebase or force-push over a commit you did not author.
 5. Record the outcome (`record ... --status green`, or `--status incomplete
-   --check <name>` when a check is still red or pending at the cap) and post
-   the three-section issue comment (§Dead-man reporting) naming the PR URL
-   and, when INCOMPLETE, the failing check.
+   --check <name>` when a check is still red or pending at the cap) in the
+   private run-record. The wrapper alone posts sanitized issue health;
+   never post the private findings or checkpoint to the rolling issue.
 6. Print the verdict line from
    `python3.13 scripts/nightly_deliver.py verdict --loop security --ready <url>...`
    (or `--incomplete <check> --pr-url <url>`). The wrapper greps it:
@@ -775,15 +816,14 @@ The body has exactly three sections, in this order: **Issue discovered**,
 **What was done to fix it**, **Next**. The public PR stays sanitized: no
 route, file, attack, secret, topology, or vulnerability detail (rail 7).
 Title shape: `Security <YYYY-MM-DD>`. The plain-language issue goes only
-in the body. Create a new dated branch, or a new remediation PR after the
-audit PR merged, with
-`gh pr create --title <title> --body <body> --head <branch> --base main`
-(or `POST /repos/{owner}/{repo}/pulls` with `head`, `base`, `title`, and
-`body`). Formatter `--json` is `{title, body}` only; do not POST it as the
-create payload. Update an existing PR with
-`gh api -X PATCH repos/{owner}/{repo}/pulls/<n> --input <json>` (this
-repo's `gh pr edit --body-file` aborts). Verify with a grep for a phrase
-you just wrote.
+in the body. Publish a substantive dated branch, including a new remediation after an
+older PR merged, only through
+`python3.13 scripts/nightly_publish.py publish --base main --head <branch> --title <title> --body-file <body-file>`.
+Write the formatter's exact body to that file. The publisher owns the guarded
+push and PR lookup/creation; inspect its JSON result. A no-op result publishes
+nothing. Update the body of an existing substantive PR with
+`gh api -X PATCH repos/{owner}/{repo}/pulls/<n> --input <json>` when needed
+(this repo's `gh pr edit --body-file` aborts), then verify the resulting body.
 
 A zero-finding night still creates no public PR (rail: no public audit
 artifact). P0/P1 stay private until the operator coordinates disclosure.

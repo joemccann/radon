@@ -30,6 +30,44 @@ The first argument is the mode: `audit`, `remediate` or `deliver`. The
 launchd job fires daily at 00:20 local and runs `audit`, then `remediate`,
 then `deliver` in this loop's dedicated clone. The loop never merges.
 
+## Substantive publication gate (all phases)
+
+Publish only a substantive net change against current `origin/main`: source,
+tests, maintained product/operator documentation, configuration, or an actual
+CI experiment. A real experiment remains eligible while `VALIDATING` or
+`INSUFFICIENT_SAMPLE`; status words do not decide whether its diff has value.
+Known nightly audit/log ledgers, `tasks/`, runner-only reports, checkpoint
+dates and lessons alone are bookkeeping, not a reason for a commit, push or
+PR. Maintained product reports, documentation and real generated-content
+changes remain eligible; never exclude `docs/` or `reports/` wholesale. Never
+manufacture a change to satisfy a completion check. Inspect the diff before
+committing; keep report-only work in durable runner scratch and the existing
+rolling issue. This rule governs every commit/push instruction and historical
+lesson below.
+
+After a substantive task is committed, run
+`python3.13 scripts/nightly_publish.py check --base origin/main --head HEAD`.
+Exit 0 means substantive; 3 means no-op; 1 means error and must stop publication.
+The publisher rechecks current main before any push. All new PR creation goes
+through `python3.13 scripts/nightly_publish.py publish --base main --head <branch> --title <title> --body-file <body-file>`.
+It owns the push; do not push a new nightly branch first or bypass the guard.
+Read JSON `status`: `published` (exit 0) includes `pr_url` and `head_sha`;
+`noop` exits 3 without publication; `error` exits 1 and must stop. Never invent a URL. Existing
+substantive PRs still resume through the deliver record and CI watch.
+
+For report-only audits, post the completed audit range, findings/acceptance
+criteria and `audited-through: <verified-origin-main-sha>` to the existing
+rolling issue before declaring completion. That issue is the authoritative
+checkpoint and remediation handoff when the disposable worktree is discarded;
+a local ledger alone is not durable. Every successful checkpoint must carry
+forward ALL still-open findings, their IDs, source evidence, acceptance criteria
+and blocked/operator actions from the previous checkpoint, even on a zero-delta
+night. Include resolved IDs with evidence so closure is explicit. Both audit
+and remediation read this complete checkpoint before legacy ledgers; no open
+finding may disappear when older issue comments are pruned. Do not advance the
+checkpoint after an incomplete audit. A zero-finding/no-safe-change run reports its reason there, creates no
+artificial commit or PR, and follows the no-op contract below.
+
 ## Objective
 
 - Minimize the push-to-green-production critical path, not the sum of parallel
@@ -115,7 +153,7 @@ Violating any rail is a failed run.
 11. **Keep experiments attributable.** Change one bottleneck per experiment,
     or a small inseparable batch with separately measurable effects. Do not
     mix opportunistic refactors into performance work.
-12. **Stay bounded and recoverable.** Commit and push every completed task.
+12. **Stay bounded and recoverable.** Commit every completed substantive task and publish through the shared guard.
     Never leave half-applied changes. After three genuine failed approaches,
     record `BLOCKED` with the root-cause hypothesis and move on.
 13. **Stay off the other loops' lanes.** The reliability loop
@@ -211,8 +249,9 @@ evidence-backed optimization candidate.
 1. Verify the dedicated clone marker, exclusive lock, clean tree, GitHub auth,
    `origin/main`, and required toolchain. Recoverably stash orphaned runner
    state and record the stash ref; never discard it or mix it into this run.
-2. Read `CI_PERFORMANCE_LOG.md`. Resolve and verify its last audited SHA. If
-   absent, use the first-run bootstrap below. Inspect
+2. Resolve the newest successful `audited-through:` checkpoint on the
+   existing rolling issue; use `CI_PERFORMANCE_LOG.md` only if absent. Verify
+   the SHA, or use the first-run bootstrap below if neither exists. Inspect
    `<last-audited-sha>..origin/main` and record the changed CI, test, build,
    image, and deploy surfaces.
 3. Fetch at least the last 20 relevant GitHub Actions runs. Classify them,
@@ -246,9 +285,10 @@ evidence-backed optimization candidate.
    effort. Every candidate that passes the rails is handed to the remediate
    phase, highest value first; none is dropped for being second. Do not
    select work merely because it is easy or fashionable.
-9. Append the audit and candidate to `CI_PERFORMANCE_LOG.md`, commit it, push
-   the nightly branch, and open or update the nightly PR via §Pull request
-   output. Zero findings still updates the log and PR as dead-man evidence.
+9. Record the audit, candidates and verified audited-through checkpoint on
+   the existing rolling issue. The local ledger may aid handoff, but alone
+   creates no commit, push or PR. Declare the completed audit no-op unless
+   the branch carries an actual eligible experiment/change.
 
 ## Mode: remediate
 
@@ -258,15 +298,16 @@ invariant, one commit per `CIP-###` so each experiment stays attributable.
 **Remediate mandate.** Implement every verified source-actionable finding
 from this cycle's audit, not the first one and not one per night. Group fixes
 by root cause into separate commits on one dated branch `ci-performance/<YYYY-MM-DD>` (one
-branch per loop per day; the deliver phase turns it into one PR). Red/green
+branch per loop per day; the deliver phase publishes its substantive diff as one PR). Red/green
 per fix; the full project gates before every commit. Independent fixes may
 run in parallel as subagents in separate worktrees of this clone
 (`git worktree add ../wt-<id> -b ci-performance/<date>-<id> ci-performance/<date>`), each
 committing to its own branch; this phase merges them back onto the dated
 branch, reruns the gates on the merged result, and removes the worktrees
-(`git worktree remove`, `git branch -d`). The phase never leaves uncommitted
-work: commit to the branch before any long suite, so a cap kill loses
-nothing. A finding is done only as DONE, BLOCKED (root-cause hypothesis
+(`git worktree remove`, `git branch -d`). Preserve substantive work with a local
+commit before any long suite. Keep
+report-only state in durable scratch and the rolling issue; it does not
+require a commit. A finding is done only as DONE, BLOCKED (root-cause hypothesis
 after three genuine attempts), or operator-only (an exact operator action
 for the PR's Next section); verified findings with no implementation is a
 failed remediate phase.
@@ -290,7 +331,7 @@ failed remediate phase.
 6. Run the full project gates serially before committing. Compare any existing
    platform-specific failures with clean `origin/main` and do not attribute or
    fix unrelated baseline failures.
-7. Commit with the `CIP-###` ID and push immediately. Rewrite the PR via
+7. Commit the actual experiment with the `CIP-###` ID and publish through
    §Pull request output. Hypothesis, before evidence, predicted savings,
    tests, safety checks, runner-minute estimate, and validation plan stay
    on the rolling issue and in `CI_PERFORMANCE_LOG.md`.
@@ -303,7 +344,7 @@ failed remediate phase.
 
 ## Mode: deliver (third phase of the daily cycle)
 
-Goal: every commit the remediate phase landed on `ci-performance/<YYYY-MM-DD>` reaches the
+Goal: every substantive net change the remediate phase landed on `ci-performance/<YYYY-MM-DD>` reaches the
 operator as ONE pull request with CI green, in this same cycle, and the
 operator is told exactly what is ready to merge. The loop never merges.
 The wrapper caps this phase at 3h (`RADON_WEEKEND_DELIVER_CAP_SECS`,
@@ -315,9 +356,17 @@ default 10800).
    and PR number are the run to finish: check the branch out, make its CI
    green (step 4), record the outcome, then continue with today's branch.
    Never open a second PR for a branch that already has one.
-2. Push the dated branch. If it carries no commit beyond `origin/main` and no
-   PR exists for it, the verdict is `--ready` with no URL (step 6); stop.
-3. Open ONE PR for the branch via §Pull request output (`--loop ci-performance`);
+2. Classify the dated branch with
+   `python3.13 scripts/nightly_publish.py check --base origin/main --head HEAD`.
+   Exit 3 means no substantive diff, even when ledger-only commits exist.
+   If this phase has no substantive PR to resume or report, record
+   `python3.13 scripts/nightly_deliver.py record --loop ci-performance --branch "" --status green`
+   with no PR number or URL, then emit the step 6 verdict with no URLs:
+   `NIGHTLY DELIVER READY: loop=ci-performance prs=0`. Do not push or create a PR.
+   Keep any resumed substantive PR's record and URL in the final verdict even
+   when today's branch is no-op; do not erase it with an empty record.
+   Exit 1 is INCOMPLETE, never no-op. Exit 0 continues to guarded publication.
+3. Publish ONE substantive PR through the guarded publisher in §Pull request output (`--loop ci-performance`);
    update the existing PR when one is already open for the branch (`gh api
    -X PATCH`). Every operator-only finding from this cycle's audit (external
    state, credential rotation, host policy, a `BLOCKED` item) goes into the
@@ -352,46 +401,29 @@ default 10800).
 
 ## Declaring a no-op phase
 
-The wrapper scores `audit` and `remediate` on a commit landing on the nightly
-branch during the phase: exit 0 with an unmoved HEAD is `INCOMPLETE (agent
-exited 0 without committing to the nightly branch)`, exit 75. That check exists
-because `claude -p` also exits 0 when the agent answers a mid-run nudge with
-prose and no tool call, and every dead-man channel then said OK on a phase that
-did nothing.
+Complete the audit/remediation work and persist the rolling-issue checkpoint
+and report first. Zero findings, no safe actionable change, or bookkeeping-only
+diffs are successful no-op outcomes, not a reason to commit or open a PR.
+Print the following as the LAST stdout line, at column 0, with this loop and
+the phase actually completed:
 
-A finished phase with genuinely nothing to commit is indistinguishable from
-that stall by HEAD alone, so you declare the difference. When you have done the
-full phase — the whole delta range read, every sweep run, the report written —
-and the honest result is that there is nothing to commit, print exactly this as
-the last thing you emit, unindented, at column 0:
-
-```
-NIGHTLY PHASE NO-OP: loop=ci-performance phase=<audit|remediate> <one-line reason>
+```text
+    NIGHTLY PHASE NO-OP: loop=ci-performance phase=<audit|remediate> reason=<one-line reason>
 ```
 
-For example (indented here on purpose — see the third rule below):
+Examples are indented so echoing this manual is not a declaration:
 
+```text
+    NIGHTLY PHASE NO-OP: loop=ci-performance phase=audit reason=no new findings in the delta range
+    NIGHTLY PHASE NO-OP: loop=ci-performance phase=remediate reason=no safe source-actionable changes
 ```
-    NIGHTLY PHASE NO-OP: loop=ci-performance phase=audit no new findings in the delta range
-    NIGHTLY PHASE NO-OP: loop=ci-performance phase=remediate 0 source-actionable P0/P1 items
-```
 
-Rules, all of them enforced by `scripts/tests/test_phase_noop_declaration.py`:
-
-- The line must name THIS loop and THIS phase. A line copied from a sibling
-  loop or a different phase does not count.
-- It must start at column 0. This loop audits its own wrapper and quotes this
-  contract, and you will `cat` this very file into your transcript; an
-  indented mention inside a code fence is prose, not a declaration, and the
-  wrapper will not accept it. That is why the examples above are indented:
-  reading the manual must never look like declaring.
-- It is a declaration of completion, not an excuse. Emit it only when the phase
-  ran end to end. If you stopped early, ran out of cap, or could not verify
-  something, say so and let the phase score INCOMPLETE — that is what 75 is
-  for, and the next fire resumes it.
-- Never emit it when you did commit. A commit is its own evidence.
-- Silence is still INCOMPLETE. Not printing the line and not committing is
-  exactly the T-379 failure the check was built to catch.
+The wrapper accepts this explicit completion instead of a commit. Emit it only
+when every applicable stage finished and the checkpoint/report is durable;
+cap exhaustion, an unverified gate or unfinished work is INCOMPLETE. Do not
+emit it after landing substantive work. Silence remains INCOMPLETE. A sibling
+loop/phase marker or an indented quote is not a declaration. The protocol is
+covered by `scripts/tests/test_phase_noop_declaration.py`.
 
 ## Long stages run detached and are awaited in-session
 
@@ -501,8 +533,8 @@ If `CI_PERFORMANCE_LOG.md` does not exist:
    comparable class and cache state.
 4. Verify the current required-gate closure and deployment invariants before
    proposing `CIP-001`.
-5. Commit the bootstrap ledger to the nightly branch and open the nightly PR
-   via §Pull request output.
+5. Persist bootstrap evidence and the verified checkpoint on the existing
+   rolling issue. A bootstrap ledger alone creates no commit, push or PR.
 
 ## Pull request output
 
@@ -521,18 +553,17 @@ full sample windows stay on the rolling GitHub issue and in
 `CI_PERFORMANCE_LOG.md`, not the PR. For a time-saving fix, `--fix` MUST
 include the compact **CI build time** table (or one bullet per job with
 before, after, and % change) from `ci-time-savings`. Title shape: `CI
-Performance <YYYY-MM-DD>: <plain-language issue>`. Create a new dated
-branch, or a new remediation PR after the audit PR merged, with
-`gh pr create --title <title> --body <body> --head <branch> --base main`
-(or `POST /repos/{owner}/{repo}/pulls` with `head`, `base`, `title`, and
-`body`). Formatter `--json` is `{title, body}` only; do not POST it as
-the create payload. Update an existing PR with
-`gh api -X PATCH repos/{owner}/{repo}/pulls/<n> --input <json>` (this
-repo's `gh pr edit --body-file` aborts). Verify with a grep for a phrase
-you just wrote.
+Performance <YYYY-MM-DD>: <plain-language issue>`. Publish a substantive dated branch, including a new remediation after an
+older PR merged, only through
+`python3.13 scripts/nightly_publish.py publish --base main --head <branch> --title <title> --body-file <body-file>`.
+Write the formatter's exact body to that file. The publisher owns the guarded
+push and PR lookup/creation; inspect its JSON result. A no-op result publishes
+nothing. Update the body of an existing substantive PR with
+`gh api -X PATCH repos/{owner}/{repo}/pulls/<n> --input <json>` when needed
+(this repo's `gh pr edit --body-file` aborts), then verify the resulting body.
 
-Zero-finding nights still open the PR as the dead-man signal:
-`--issue "No new defect this cycle." --fix "Recorded the audit. No code change." --next "No deploy needed."`
+Zero-finding and bookkeeping-only nights report on the existing rolling issue;
+no PR is opened or updated merely as proof of life.
 
 ## Required nightly report
 
@@ -598,7 +629,7 @@ not green at the cap; the next fire resumes the same branch and PR).
 ## Self-improvement
 
 If the loop hits friction, append a short dated lesson to the end of this file
-and include it in the nightly commit. Record wrong assumptions, noisy metrics,
+and include it only alongside substantive changes; otherwise use the rolling issue. Record wrong assumptions, noisy metrics,
 missing rails, toolchain drift, runner contention, and validation gaps. Turn
 each correction into a concrete rule that prevents recurrence.
 
@@ -695,4 +726,12 @@ else decides whether tonight counted:
   `python3 scripts/nightly_deliver.py record ...` exactly as the manual
   describes. READY means CI is green on every PR you are naming. Never print
   READY for a PR whose checks are pending, failing, or unknown.
+  Resume existing substantive PRs before considering today's no-op. If the
+  shared publisher finds no substantive diff and no PR needs resuming or
+  reporting from this phase, record
+  `python3.13 scripts/nightly_deliver.py record --loop ci-performance --branch "" --status green`
+  without a PR number or URL and emit `NIGHTLY DELIVER READY: loop=ci-performance prs=0`.
+  A no-op today must not erase a resumed PR's record or final verdict URL.
+  Bookkeeping-only commits never justify a push or PR. Publication uses only
+  `python3.13 scripts/nightly_publish.py publish --base main --head <branch> --title <title> --body-file <body-file>`.
 

@@ -369,16 +369,18 @@ class TestSkillsInstructTheFormatter:
         assert "update the PR body with: tasks DONE/BLOCKED" not in testing
 
     @pytest.mark.parametrize("loop", LOOPS)
-    def test_pull_request_output_can_create_and_update(self, loop):
+    def test_pull_request_output_uses_guarded_creation_and_can_update(self, loop):
         raw = (SKILLS / loop / "SKILL.md").read_text(encoding="utf-8")
         start = raw.index("## Pull request output")
         nxt = raw.find("\n## ", start + 1)
         section = raw[start:nxt if nxt != -1 else None]
         text = " ".join(section.split())
-        assert "gh pr create" in text, loop
-        assert "--head" in text and "--base" in text, loop
+        assert "scripts/nightly_publish.py publish" in text, loop
+        assert "--head" in text and "--base main" in text, loop
+        assert "--title" in text and "--body-file" in text, loop
         assert "PATCH" in text, loop
-        assert "title, body" in text or "{title, body}" in text, loop
+        assert "gh pr create" not in raw, loop
+        assert "POST /repos/{owner}/{repo}/pulls" not in raw, loop
 
     def test_security_skill_documents_date_only_title(self):
         raw = (SKILLS / "security-nightly" / "SKILL.md").read_text(encoding="utf-8")

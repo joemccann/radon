@@ -83,9 +83,36 @@ def test_the_contract_names_what_the_wrapper_actually_greps(skill, phase):
         assert "NIGHTLY DELIVER INCOMPLETE:" in contract
     else:
         assert render_mod.BRANCH_PREFIX[skill] in contract, (
-            "the wrapper scores audit and remediate on a commit to the dated "
-            "branch; the prompt has to say which branch"
+            "substantive audit/remediation work must name its dated branch"
         )
+        assert f"NIGHTLY PHASE NO-OP: loop={LOOPS[skill]} phase=" in contract
+
+
+@pytest.mark.parametrize("skill,phase", CASES)
+def test_publication_contract_never_requires_bookkeeping_prs(skill, phase):
+    """Overrides must not reintroduce the unconditional-commit rule that
+    defeated canonical no-op instructions on fallback providers."""
+    contract = render_mod.render(skill, phase).split("# CONTRACT", 1)[1]
+    assert "scripts/nightly_publish.py publish --base main" in contract
+    assert "--body-file" in contract
+    assert "at least one commit" not in contract
+    assert "An exit without a commit is scored" not in contract
+    if phase == "deliver":
+        assert f"NIGHTLY DELIVER READY: loop={LOOPS[skill]} prs=0" in contract
+        assert '--branch "" --status green' in contract
+    else:
+        assert "0 substantive, 3 no-op, 1 error" in contract
+        assert "VALIDATING" in contract and "INSUFFICIENT_SAMPLE" in contract
+        assert "rolling issue is authoritative" in contract
+        assert "carries forward all still-open findings" in contract
+
+
+@pytest.mark.parametrize("skill", sorted(LOOPS))
+def test_native_skill_completion_contract_preserves_noop(skill):
+    contract = render_mod.render_codex_skill(skill).split("# CONTRACT", 1)[1]
+    assert f"NIGHTLY PHASE NO-OP: loop={LOOPS[skill]} phase=" in contract
+    assert f"NIGHTLY DELIVER READY: loop={LOOPS[skill]} prs=0" in contract
+    assert "at least one commit" not in contract
 
 
 def test_the_deliver_verdict_matches_the_wrapper_regex():
