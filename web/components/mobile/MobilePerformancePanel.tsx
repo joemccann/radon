@@ -1,5 +1,6 @@
 "use client";
 
+import { userErrorMessage } from "@/lib/userError";
 import { Activity, AlertTriangle, ChevronDown, Gauge, History, ShieldAlert, TrendingDown } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { buildPerformanceChartModel } from "@/lib/performanceChart";
@@ -517,7 +518,7 @@ export function MobilePerformanceView({ performance }: { performance: ReturnType
             />
             {error ? (
               <div style={{ padding: "10px 16px", fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--text-secondary)" }}>
-                {error}
+                {userErrorMessage(error, "Data could not be loaded. Try again.")}
               </div>
             ) : null}
           </div>

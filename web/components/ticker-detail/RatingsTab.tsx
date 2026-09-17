@@ -1,5 +1,6 @@
 "use client";
 
+import { userErrorMessage } from "@/lib/userError";
 import { useCallback, useEffect, useState } from "react";
 import { Gauge } from "lucide-react";
 import { fmtPrice } from "@/lib/positionUtils";
@@ -160,7 +161,7 @@ export default function RatingsTab({ ticker, active, currentPrice }: RatingsTabP
     return <div className="tab-loading"><div className="tab-loading-text">Loading ratings...</div></div>;
   }
   if (error) {
-    return <div className="tab-error">{error}</div>;
+    return <div className="tab-error">{userErrorMessage(error, 'This instrument data could not be loaded. Try again.')}</div>;
   }
   if (!data) {
     return (

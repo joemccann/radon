@@ -1,5 +1,6 @@
 "use client";
 
+import { userErrorMessage } from "@/lib/userError";
 import { useState } from "react";
 import { Activity, TrendingUp, TrendingDown, ArrowUpRight, ArrowDownRight } from "lucide-react";
 import { useGex, type GexData, type GexBucket, type GexLevel, type GexHistoryEntry, type IvData, type MqLevels, type SourceDelta, type SourceDeltaEntry } from "@/lib/useGex";
@@ -465,7 +466,7 @@ export default function GexPanel({ marketState }: GexPanelProps) {
           </div>
         </div>
         <div className="section-body" style={{ padding: "16px" }}>
-          <div className="alert-item bearish">{error}</div>
+          <div className="alert-item bearish">{userErrorMessage(error, 'Exposure data could not be loaded. Try again.')}</div>
         </div>
       </div>
     );

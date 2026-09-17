@@ -1,5 +1,6 @@
 "use client";
 
+import { userErrorMessage } from "@/lib/userError";
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, TrendingUp, Zap } from "lucide-react";
 import InfoTooltip from "./InfoTooltip";
@@ -221,7 +222,7 @@ export default function VcgPanel({ marketState }: VcgPanelProps) {
           </div>
         </div>
         <div className="section-body" style={{ padding: "16px" }}>
-          <div className="alert-item bearish">{error}</div>
+          <div className="alert-item bearish">{userErrorMessage(error, 'Volatility data could not be loaded. Try again.')}</div>
         </div>
       </div>
     );

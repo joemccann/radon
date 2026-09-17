@@ -1,5 +1,7 @@
 "use client";
 
+import { userErrorMessage, readErrorResponse } from "./userError";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import { readOfflineMeta } from "./offline/offlineStatus";
 import {
@@ -155,7 +157,7 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         const failure = new Error(
-          (body as { error?: string }).error ?? `Sync failed (${res.status})`,
+          userErrorMessage(body, userErrorMessage(`HTTP ${res.status}`, "The data could not be refreshed. Please try again.")),
         ) as Error & { scanFailed?: boolean };
         // R-643: routes stamp `scan_succeeded: false` on a degraded fallback
         // body; that failure must surface even over previously-good data.
@@ -163,12 +165,13 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
         throw failure;
       }
       const json = (await res.json()) as T;
-      setData(json);
-      setLastSync(extractTimestamp ? extractTimestamp(json) : new Date().toISOString());
+      const scanFailed = (json as { scan_succeeded?: unknown } | null)?.scan_succeeded === false;
+      setData(previous => scanFailed ? previous ?? json : json);
+      setLastSync(previous => scanFailed ? previous : extractTimestamp ? extractTimestamp(json) : new Date().toISOString());
       // R-643: a 2xx body can still carry a body-level scan failure (cached
       // fallback attached). Surface it instead of pretending the sync worked.
       if ((json as { scan_succeeded?: unknown } | null)?.scan_succeeded === false) {
-        setError((json as { error?: string }).error ?? "Scan failed upstream - showing cached data");
+        setError(userErrorMessage((json as { error?: string }).error, "The scan could not be completed. Showing the last available data."));
       } else {
         setError(null);
       }
@@ -182,7 +185,7 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
       const scanFailed = err instanceof Error && (err as Error & { scanFailed?: boolean }).scanFailed === true;
       setData((prev) => {
         if (!prev || showBackgroundError || scanFailed) {
-          setError(err instanceof Error ? err.message : "Sync failed");
+          setError(userErrorMessage(err, "The data could not be refreshed. Please try again."));
         }
         return prev;
       });
@@ -233,11 +236,13 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
         const meta = readOfflineMeta(res.headers);
         if (meta.servedOffline) reportOfflineServed(meta.cachedAt);
         else reportFetchSuccess();
-        if (!res.ok) throw new Error("Failed to fetch cached data");
+        if (!res.ok) throw new Error(await readErrorResponse(res, "The data could not be loaded. Please try again."));
         const json = (await res.json()) as T;
         setData(json);
         setLastSync(extractTimestamp ? extractTimestamp(json) : null);
-        setError(null);
+        setError((json as { scan_succeeded?: unknown } | null)?.scan_succeeded === false
+          ? userErrorMessage((json as { error?: string }).error, "The scan could not be completed. Showing the last available data.")
+          : null);
         setLoading(false);
         didInitialRead.current = true;
 
@@ -252,7 +257,7 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
         }
       } catch (err) {
         if (!networkResolved) reportFetchFailure();
-        setError(err instanceof Error ? err.message : "Unknown error");
+        setError(userErrorMessage(err, "The data could not be loaded. Please try again."));
         setLoading(false);
         didInitialRead.current = true;
         if (!isDemoMode && active && !didInitialSync.current) {

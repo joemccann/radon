@@ -1,5 +1,6 @@
 "use client";
 
+import { userErrorMessage } from "@/lib/userError";
 import { useState } from "react";
 import type {
   ServiceAction,
@@ -106,7 +107,7 @@ export default function ServiceControlPanel({
         <header className="admin-card-header">
           <span className="admin-card-title">Service Control</span>
         </header>
-        <p className="admin-card-empty admin-card-error">{error}</p>
+        <p className="admin-card-empty admin-card-error">{userErrorMessage(error, 'Service status could not be loaded. Try again.')}</p>
       </section>
     );
   }

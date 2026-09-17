@@ -1,5 +1,6 @@
 "use client";
 
+import { userErrorMessage } from "@/lib/userError";
 import { AlertTriangle } from "lucide-react";
 
 /**
@@ -19,7 +20,7 @@ export default function PanelRefreshError({
   return (
     <span
       data-testid={testId ?? "panel-refresh-error"}
-      title={error}
+      title={userErrorMessage(error, "Refresh failed. Previously loaded data remains visible.")}
       style={{
         display: "inline-flex",
         alignItems: "center",

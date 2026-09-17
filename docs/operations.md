@@ -537,3 +537,7 @@ The API credential staging/cleanup contract remains in force when research mount
 ## Production Build Constraint
 
 Next.js 16 prerender crashes on `/_global-error` and `/_not-found` because the root ClerkProvider context isn't materialised in isolated workers. `web/package.json` build pins `next build --experimental-build-mode=compile`. The error and not-found shells (`app/error.tsx`, `app/[ticker]/not-found.tsx`, `app/global-error.tsx`) use plain `<a>` and pure JSX (no `next/link`, `useEffect`, or `globals.css`) for the same reason.
+
+### User-facing request errors
+
+Page and setup failures use the shared safe error presentation boundary (`web/lib/userError.ts`). UI messages explain the failure and recovery without exposing JSON envelopes, HTML, backend paths or stack traces. Scanner retries preserve prior results and requested tickers; unconfirmed order requests instruct the operator to check order status first. HTTP statuses and server diagnostic bodies remain unchanged. The route-family review is recorded in [the page error audit](audits/page-error-audit-20260917.md).

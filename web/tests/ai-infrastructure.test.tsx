@@ -18,7 +18,7 @@ describe("AI infrastructure evidence", () => {
   });
   it("never turns no data or transport error into clear", () => {
     render(<AiInfrastructureView data={{ ...aiFixture, indicators: [], shadow: { ...aiFixture.shadow, state: "clear" } }} error="HTTP 503" loading={false} refresh={() => {}} />);
-    expect(screen.getByText(/Experimental research state · Insufficient evidence/)).toBeTruthy(); expect(screen.getByRole("alert").textContent).toContain("HTTP 503"); expect(screen.getByText(/No verified observations in this view/)).toBeTruthy();
+    expect(screen.getByText(/Experimental research state · Insufficient evidence/)).toBeTruthy(); expect(screen.getByRole("alert").textContent).toContain("temporarily unavailable"); expect(screen.getByText(/No verified observations in this view/)).toBeTruthy();
   });
   it("keeps stale measurement state visible", () => {
     render(<AiInfrastructureView data={{ ...aiFixture, indicators: [{ ...aiFixture.indicators[0], status: "stale" }] }} error={null} loading={false} refresh={() => {}} />); expect(screen.getAllByText(/stale/).length).toBeGreaterThan(0);

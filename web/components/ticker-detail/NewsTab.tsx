@@ -1,5 +1,6 @@
 "use client";
 
+import { userErrorMessage } from "@/lib/userError";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ExternalLink, Newspaper } from "lucide-react";
 import SectionEmptyState from "@/components/SectionEmptyState";
@@ -74,7 +75,7 @@ export default function NewsTab({ ticker, active }: NewsTabProps) {
   }
 
   if (isCurrentTicker && error) {
-    return <div className="tab-error">{error}</div>;
+    return <div className="tab-error">{userErrorMessage(error, 'This instrument data could not be loaded. Try again.')}</div>;
   }
 
   if (isCurrentTicker && fetched && news.length === 0) {

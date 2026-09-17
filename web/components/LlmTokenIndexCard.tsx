@@ -2,6 +2,7 @@
 
 /** Preserved v1 inference price history. Membership and price direction do not establish scarcity. */
 
+import { userErrorMessage } from "@/lib/userError";
 import { useMemo } from "react";
 import AiIndustryHistoryChart from "./AiIndustryHistoryChart";
 import { historyGroups, type AiHistoryPoint } from "@/lib/aiInfrastructure";
@@ -135,7 +136,7 @@ export default function LlmTokenIndexCard() {
 
       {error && !data && (
         <div className="regime-empty" data-testid="llm-token-index-error">
-          Unable to load LLM Token Index: {error}
+          {userErrorMessage(error, "The LLM Token Index could not be loaded. Try again.")}
         </div>
       )}
 

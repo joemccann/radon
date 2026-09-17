@@ -1,5 +1,6 @@
 "use client";
 
+import { userErrorMessage } from "@/lib/userError";
 import { useEffect, useMemo, useState } from "react";
 
 import {
@@ -119,7 +120,7 @@ export default function RvRatioPanel({ symbol }: RvRatioPanelProps) {
       <MeasurementState
         kind="error"
         label="MEASUREMENT FAULT"
-        message={error}
+        message={userErrorMessage(error, "Volatility history could not be loaded. Try again.")}
         onRetry={() => void refresh()}
       />
     );

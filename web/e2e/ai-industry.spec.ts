@@ -123,7 +123,7 @@ test.describe("AI industry value chain", () => {
     await expect(page.getByRole("article", { name: "Power demand context evidence" }).getByText("stale", { exact: true })).toBeVisible();
     await page.route("**/api/ai-cycle", route => route.fulfill({ status: 503, json: { detail: "Unavailable" } }));
     await page.getByRole("button", { name: "Refresh snapshot" }).click();
-    await expect(page.getByTestId("ai-infrastructure-panel").getByRole("alert")).toContainText("HTTP 503");
+    await expect(page.getByTestId("ai-infrastructure-panel").getByRole("alert")).toContainText("temporarily unavailable");
     await expect(page.getByTestId("ai-infrastructure-panel").getByRole("alert")).toContainText("Previous snapshot remains visible");
   });
   test("initial loading and first-request failure do not imply zero-valued evidence", async ({ page }) => {
@@ -135,7 +135,7 @@ test.describe("AI industry value chain", () => {
       await expect(page.getByRole("button", { name: "Loading…", exact: true })).toBeDisabled();
       await expect(page.getByText("Retrieving source observations…", { exact: true })).toBeVisible();
     } finally { release(); }
-    await expect(page.getByTestId("ai-infrastructure-panel").getByRole("alert")).toContainText("HTTP 503");
+    await expect(page.getByTestId("ai-infrastructure-panel").getByRole("alert")).toContainText("temporarily unavailable");
     await expect(page.getByTestId("ai-industry-history-chart")).toHaveCount(0);
   });
   test("dashboard and ticker handoffs use the top-level category without order mutations", async ({ page }) => {

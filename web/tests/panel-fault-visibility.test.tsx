@@ -272,15 +272,15 @@ describe("VolConePanel can render a fault", () => {
     mockUseVolCone.mockReturnValue(idle<VolConeData>({ error: "fetch failed" }));
     const { container } = render(<VolConePanel />);
 
-    expect(container.textContent).toContain("Vol cone unavailable");
+    expect(container.textContent).toContain("Unable to connect");
     expect(container.textContent).not.toContain("Data appears after the first successful pull");
   });
 
-  it("puts the failure reason itself in the DOM", () => {
+  it("puts a safe recovery message in the DOM", () => {
     mockUseVolCone.mockReturnValue(idle<VolConeData>({ error: "fetch failed" }));
     const { container } = render(<VolConePanel />);
 
-    expect(container.textContent).toContain("fetch failed");
+    expect(container.textContent).toContain("Unable to connect");
   });
 });
 

@@ -1,5 +1,6 @@
 "use client";
 
+import { userErrorMessage } from "@/lib/userError";
 import { useEffect, useMemo, useState } from "react";
 import { useTickerDetailOptional } from "@/lib/TickerDetailContext";
 import { useFuturesChain, type FuturesChainContract } from "@/lib/useFuturesChain";
@@ -186,7 +187,7 @@ export function FuturesOrderForm({ ticker, portfolio, priceData }: FuturesOrderF
     return <div className="futures-form-loading">Loading {symbol} futures chain…</div>;
   }
   if (error) {
-    return <div className="futures-form-error">Chain error: {error}</div>;
+    return <div className="futures-form-error">{userErrorMessage(error, "The contract chain could not be loaded. Try again.")}</div>;
   }
   if (!data || data.contracts.length === 0) {
     return <div className="futures-form-empty">No listed {symbol} futures.</div>;

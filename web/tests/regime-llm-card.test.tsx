@@ -96,7 +96,7 @@ describe("LlmTokenIndexCard", () => {
     await waitFor(() =>
       expect(screen.getByTestId("llm-token-index-error")).toBeTruthy(),
     );
-    expect(screen.getByTestId("llm-token-index-error").textContent).toMatch(/HTTP 502/);
+    expect(screen.getByTestId("llm-token-index-error").textContent).toMatch(/temporarily unavailable/);
   });
 
   it("uses brand tokens — no raw hex in the rendered markup", async () => {

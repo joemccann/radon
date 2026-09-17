@@ -6,6 +6,7 @@ import { CheckCircle2, Loader2, Search, ShieldCheck, XCircle } from "lucide-reac
 import InfoTooltip from "./InfoTooltip";
 import ScannerInstrumentShell from "./ScannerInstrumentShell";
 import SectionEmptyState from "./SectionEmptyState";
+import RequestError from "./RequestError";
 import SortTh from "./SortTh";
 import TickerLink from "./TickerLink";
 import { useSort } from "@/lib/useSort";
@@ -18,6 +19,7 @@ type StrengthConfirmationScannerProps = {
   loading?: boolean;
   scanning?: boolean;
   error?: string | null;
+  onRetry?: () => void;
   lastSync?: string | null;
   onScan?: () => void;
   onTickerScan?: (ticker: string) => void;
@@ -215,6 +217,7 @@ export default function StrengthConfirmationScanner({
   loading = false,
   scanning = false,
   error = null,
+  onRetry,
   lastSync = null,
   onScan,
   onTickerScan,
@@ -310,15 +313,12 @@ export default function StrengthConfirmationScanner({
       className="strength-confirmation"
       testId="strength-confirmation-section"
     >
-      {loading ? (
+      {error && <div className="section-body"><RequestError error={error} onRetry={scanning ? undefined : onRetry} retainedData={rows.length > 0} /></div>}
+      {loading && rows.length === 0 ? (
         <div className="section-body">
           <div className="snapshot-card__empty">Measuring seven strength factors...</div>
         </div>
-      ) : error ? (
-        <div className="section-body">
-          <div className="alert-item bearish">{error}</div>
-        </div>
-      ) : rows.length === 0 ? (
+      ) : error && rows.length === 0 ? null : rows.length === 0 ? (
         <div className="section-body">
           <SectionEmptyState
             icon={ShieldCheck}

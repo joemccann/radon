@@ -1,5 +1,6 @@
 "use client";
 
+import { userErrorMessage } from "@/lib/userError";
 import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Flame } from "lucide-react";
@@ -107,7 +108,7 @@ export default function StreaksPanel() {
         icon={Flame}
         tone="danger"
         headline="Streak feed unreachable"
-        secondary={`The streaks route did not answer for ${symbol}: ${error}`}
+        secondary={userErrorMessage(error, "Streak history could not be loaded. Try again.")}
       />
     );
   } else if (!payload || payload.missing || !payload.current || !payload.stats || total === 0) {

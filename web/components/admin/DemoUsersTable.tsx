@@ -1,5 +1,6 @@
 "use client";
 
+import { userErrorMessage } from "@/lib/userError";
 import { useCallback, useEffect, useState } from "react";
 import {
   deriveDemoStatus,
@@ -72,7 +73,7 @@ export default function DemoUsersTable() {
         });
         if (!response.ok) {
           const body = await response.json().catch(() => ({})) as { error?: string };
-          setActionError(body.error ?? `Action failed (${response.status})`);
+          setActionError(userErrorMessage(body.error, "The access change could not be completed. Try again."));
           return;
         }
         await load();

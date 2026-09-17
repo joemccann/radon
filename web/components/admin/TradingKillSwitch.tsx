@@ -1,5 +1,6 @@
 "use client";
 
+import { userErrorMessage } from "@/lib/userError";
 import { useCallback, useEffect, useRef, useState } from "react";
 import ConfirmDialog from "./ConfirmDialog";
 
@@ -39,7 +40,7 @@ export default function TradingKillSwitch() {
       setStatus(data);
       setStatusError(null);
     } catch (err) {
-      setStatusError(err instanceof Error ? err.message : "status probe failed");
+      setStatusError(userErrorMessage(err, "status probe failed"));
     } finally {
       inflightRef.current = false;
     }
@@ -68,13 +69,13 @@ export default function TradingKillSwitch() {
             typeof (body.error as { message?: string })?.message === "string"
               ? (body.error as { message: string }).message
               : `HTTP ${res.status}`;
-          setLastResult(`${action} failed: ${detail}`);
+          setLastResult(`${action} failed: ${userErrorMessage(detail, "The action could not be completed. Review trading status before retrying.")}`);
         } else {
           setLastResult(actionResultLine(action, body));
         }
       } catch (err) {
         setLastResult(
-          `${action} failed: ${err instanceof Error ? err.message : "request error"}`,
+          `${action} failed: ${userErrorMessage(err, "request error")}`,
         );
       } finally {
         setPending(null);

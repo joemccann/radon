@@ -1,5 +1,6 @@
 "use client";
 
+import { userErrorMessage } from "@/lib/userError";
 import { useCallback, useEffect, useState } from "react";
 import { FileSearch } from "lucide-react";
 import InfoTooltip from "@/components/InfoTooltip";
@@ -218,7 +219,7 @@ export default function FilingForensicsDossier({
       <SectionEmptyState
         icon={FileSearch}
         headline="Filing forensics unavailable"
-        secondary={`${error}. Treat this as unknown, not as an all clear.`}
+        secondary={`${userErrorMessage(error, "Filing data could not be loaded.")} Treat this as unknown, not as an all clear.`}
         tone="danger"
         testId="filing-forensics-error"
       />

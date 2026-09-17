@@ -9,6 +9,7 @@
  * the server's value, so a rejected save leaves the displayed value untouched.
  */
 
+import { userErrorMessage } from "@/lib/userError";
 import { useCallback, useEffect, useState } from "react";
 import ConfirmDialog from "@/components/admin/ConfirmDialog";
 import {
@@ -41,7 +42,7 @@ function isWidening(entry: PreferenceEntry, next: number | boolean): boolean {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error && error.message ? error.message : "preferences request failed";
+  return userErrorMessage(error, "Your changes could not be saved. Refresh and try again.");
 }
 
 function rangeLabel(entry: PreferenceEntry): string {

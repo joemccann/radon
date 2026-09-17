@@ -1,5 +1,6 @@
 "use client";
 
+import { userErrorMessage } from "@/lib/userError";
 import { Activity, AlertTriangle, Gauge, History, ShieldAlert, TrendingDown } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -475,7 +476,7 @@ export default function PerformancePanel({ portfolioLastSync = null, marketState
             secondary="Performance is measured from Flex NAV. No snapshots are available for this period."
             testId="performance-empty"
           />
-          {error ? <div className="performance-error-copy">{error}</div> : null}
+          {error ? <div className="performance-error-copy">{userErrorMessage(error, 'Performance data could not be loaded. Try again.')}</div> : null}
         </div>
       </div>
     );

@@ -21,7 +21,7 @@ describe("WorkspaceShell live-data degraded banner", () => {
     expect(source).toContain("priceError,");
     expect(source).toContain('data-testid="live-data-degraded"');
     expect(source).toContain("Live data degraded");
-    expect(source).toContain("<span>{liveDataError}</span>");
+    expect(source).toContain("userErrorMessage(liveDataError,");
 
     const helperSource = readFileSync(
       resolve(projectRoot, "lib", "offline", "offlineStatus.ts"),

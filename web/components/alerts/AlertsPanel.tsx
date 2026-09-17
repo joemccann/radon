@@ -1,5 +1,6 @@
 "use client";
 
+import { userErrorMessage } from "@/lib/userError";
 import { useState } from "react";
 import { useAlerts, type AlertRule } from "@/lib/useAlerts";
 import { formatRelativeTime } from "@/lib/adminFormat";
@@ -94,7 +95,7 @@ export function AlertsPanel() {
       setTicker("");
       setThreshold("");
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : "Failed to create alert rule");
+      setFormError(userErrorMessage(err, "Failed to create alert rule"));
     } finally {
       setSubmitting(false);
     }
@@ -105,7 +106,7 @@ export function AlertsPanel() {
     try {
       await deleteRule(id);
     } catch (err) {
-      setDeleteError(err instanceof Error ? err.message : "Failed to delete alert rule");
+      setDeleteError(userErrorMessage(err, "Failed to delete alert rule"));
     }
   }
 
@@ -191,7 +192,7 @@ export function AlertsPanel() {
           <div className="snapshot-card__empty">Loading rules</div>
         ) : error ? (
           <div className="snapshot-card__error">
-            {error}
+            {userErrorMessage(error, "Data could not be loaded. Try again.")}
             <button
               type="button"
               className="snapshot-card__see-all snapshot-card__see-all--action alerts-error__retry"

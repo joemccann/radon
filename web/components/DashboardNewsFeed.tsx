@@ -1,5 +1,6 @@
 "use client";
 
+import { userErrorMessage } from "@/lib/userError";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
@@ -353,7 +354,7 @@ export default function DashboardNewsFeed() {
         {loading ? (
           <div className="news-feed-empty">Collecting market analysis…</div>
         ) : error ? (
-          <div className="news-feed-error">{error}</div>
+          <div className="news-feed-error">{userErrorMessage(error, 'News could not be loaded. Try again.')}</div>
         ) : posts.length === 0 ? (
           <div className="news-feed-empty">No market analysis captured yet.</div>
         ) : items.length === 0 ? (

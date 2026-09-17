@@ -11,6 +11,7 @@
  * the operator pastes keys from the vendor dashboards they already have.
  */
 
+import { userErrorMessage } from "@/lib/userError";
 import { useCallback, useMemo, useState } from "react";
 import type { CredentialServiceEntry, CredentialsPayload } from "@/lib/credentials";
 import {
@@ -82,7 +83,7 @@ export default function SetupWizard() {
       setRegistry(status.credentials);
       setStep("collect");
     } catch (error) {
-      setTokenError(error instanceof Error ? error.message : "token check failed");
+      setTokenError(userErrorMessage(error, "token check failed"));
     } finally {
       setTokenBusy(false);
     }
@@ -132,7 +133,7 @@ export default function SetupWizard() {
           ...current,
           [service.id]: {
             status: "error",
-            message: error instanceof Error ? error.message : "check failed",
+            message: userErrorMessage(error, "check failed"),
           },
         }));
       } finally {
@@ -163,7 +164,7 @@ export default function SetupWizard() {
       setResult(data);
       setStep("done");
     } catch (error) {
-      setCompleteError(error instanceof Error ? error.message : "setup failed");
+      setCompleteError(userErrorMessage(error, "setup failed"));
     } finally {
       setCompleting(false);
     }
@@ -240,7 +241,7 @@ export default function SetupWizard() {
             {result.outcomes.map((outcome) => (
               <li key={outcome.service}>
                 {outcome.service}: {outcome.stored ? "stored" : "NOT stored"}
-                {outcome.validation.message ? ` (${outcome.validation.message})` : ""}
+                {outcome.validation.message ? ` (${userErrorMessage(outcome.validation.message, "Credential validation did not complete. Try again.")})` : ""}
               </li>
             ))}
           </ul>
@@ -349,7 +350,7 @@ export default function SetupWizard() {
                       role={verdict.status === "invalid" ? "alert" : "status"}
                       data-testid={`setup-verdict-${service.id}`}
                     >
-                      {verdict.message || verdict.status}
+                      {userErrorMessage(verdict.message, verdict.status)}
                     </p>
                   ) : null}
                 </div>

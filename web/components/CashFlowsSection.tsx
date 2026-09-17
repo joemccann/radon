@@ -1,5 +1,6 @@
 "use client";
 
+import { userErrorMessage } from "@/lib/userError";
 import { useMemo, useState } from "react";
 import { ChevronDown, TriangleAlert, Wallet } from "lucide-react";
 import { useCashFlows, type CashFlowRow, type CashFlowType } from "@/lib/useCashFlows";
@@ -144,7 +145,7 @@ export default function CashFlowsSection() {
         : `${syncedPrefix} · Flex throttled`;
     }
     if (isErrored) {
-      const tag = syncStatus?.error_summary ?? "sync failed";
+      const tag = userErrorMessage(syncStatus?.error_summary, "Sync failed");
       return retryHint ? `${syncedPrefix} · ${tag}, retry ${retryHint}` : `${syncedPrefix} · ${tag}`;
     }
     if (!lastSyncedRelative) return null;
@@ -153,7 +154,7 @@ export default function CashFlowsSection() {
   const lozengeTooltip = isThrottled
     ? THROTTLE_LOZENGE_EXPLANATION
     : isErrored
-      ? syncStatus?.error_summary ?? SYNC_LOZENGE_EXPLANATION
+      ? userErrorMessage(syncStatus?.error_summary, SYNC_LOZENGE_EXPLANATION)
       : SYNC_LOZENGE_EXPLANATION;
   const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   const pageStart = page * PAGE_SIZE;
@@ -252,7 +253,7 @@ export default function CashFlowsSection() {
                 icon={TriangleAlert}
                 tone="danger"
                 headline="Couldn't load cash flows"
-                secondary={error}
+                secondary={userErrorMessage(error, "Data could not be loaded. Try again.")}
                 testId="cash-flows-error"
               />
             </div>

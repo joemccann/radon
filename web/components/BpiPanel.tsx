@@ -1,5 +1,6 @@
 "use client";
 
+import { userErrorMessage } from "@/lib/userError";
 import { useMemo, useState } from "react";
 import { Gauge } from "lucide-react";
 
@@ -234,7 +235,7 @@ export default function BpiPanel() {
       <SectionEmptyState
         icon={Gauge}
         headline="Bullish percent measurement unavailable"
-        secondary={error}
+        secondary={userErrorMessage(error, "Data could not be loaded. Try again.")}
       />
     );
   }

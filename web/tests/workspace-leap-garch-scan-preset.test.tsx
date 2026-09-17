@@ -163,3 +163,21 @@ describe("WorkspaceSections SCAN default preset", () => {
     });
   });
 });
+
+describe("scanner request error presentation", () => {
+  it.each([
+    { status: 502, body: JSON.stringify({ error: "Radon API 502: Subprocess capacity exhausted" }), copy: "This service is busy." },
+    { status: 502, body: "<!DOCTYPE html><html>Bad Gateway</html>", copy: "temporarily unavailable" },
+    { status: 429, body: JSON.stringify({ detail: "Too many requests" }), copy: "Too many requests" },
+    { status: 200, body: JSON.stringify({ scan_succeeded: false, error: "Subprocess capacity exhausted" }), copy: "This service is busy." },
+  ])("formats $status responses without exposing transport bodies", async ({ status, body, copy }) => {
+    searchParamsMock.mockReturnValue(new URLSearchParams("mode=leap"));
+    fetchMock.mockResolvedValueOnce(new Response(body, { status }));
+    render(<WorkspaceSections section="scanner" />);
+    const section = screen.getByTestId("leap-scanner-section");
+    fireEvent.click(within(section).getByRole("button", { name: "SCAN" }));
+    await waitFor(() => expect(within(section).getByRole("alert").textContent).toContain(copy));
+    expect(section.textContent).not.toMatch(/Subprocess|DOCTYPE|scan_succeeded|Radon API/);
+    expect(within(section).getByRole("button", { name: "Try again" })).toBeTruthy();
+  });
+});
