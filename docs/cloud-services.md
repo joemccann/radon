@@ -825,7 +825,7 @@ newest statement period is more than `MAX_DELIVERY_LAG_DAYS` (1) behind the
 last session AND an empty remote is not expected for the date, R-389 + R-448;
 never on `cash-flow-sync`; once any file heartbeats `error`, later `ok`
 heartbeats in the same run are suppressed, so the row reports the batch's
-worst outcome, REL-210). Stripped env
+worst outcome, REL-210). A transient sFTP `get` failure (peer reset, kex drop, connect timeout; `_is_transient_sftp_get`) on an already-processed older file does not fail the oneshot, and a TWR build that returns `degraded` / `unavailable` after the cash-flow persist is not an ingest failure (perf-twr owns that page), page 5a2eb828, 2026-09-16. Stripped env
 `/var/lib/radon/flex-secrets/env` (no `TWS_PASSWORD`). Units on
 `auto-sync-units.txt`.
 
