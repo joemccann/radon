@@ -51,6 +51,14 @@ export type AssistantTool = LlmTool & {
    * consumes the same per-turn spawn budget call_api enforces (RC-B6).
    */
   spawns?: true;
+  /**
+   * F20260917-C07: the tool's backend target, declared so executeTool can
+   * pass it through the same catalog authorize() chokepoint as call_api /
+   * fetch_backend. The operatorOnly flag then binds to the principal instead
+   * of being bypassed by the named-tool path. Unresolvable targets fail
+   * closed for non-operator principals.
+   */
+  backend?: { method: string; path: string };
 };
 
 export type ToolResult = {
@@ -589,6 +597,7 @@ export const ASSISTANT_TOOLS: AssistantTool[] = [
       type: "object",
       properties: {},
     },
+    backend: { method: "POST", path: "/portfolio/sync" },
     run: (_input, token) =>
       radonFetch("/portfolio/sync", { method: "POST", timeout: 35_000, token }),
   },
@@ -967,6 +976,17 @@ export async function executeTool(
     }
     if (!tool.run) {
       return { ok: false, error: `Tool ${name} cannot be executed.` };
+    }
+    // F20260917-C07: a named tool's declared backend target passes through the
+    // same authorize() chokepoint as call_api/fetch_backend, so operatorOnly
+    // binds to the principal. An unresolvable target (catalog outage/unknown
+    // path) fails closed for non-operator principals.
+    if (tool.backend) {
+      const authz = authorize(tool.backend.method, tool.backend.path);
+      const operatorRequired = authz.ok ? Boolean(authz.operation.operatorOnly) : true;
+      if (operatorRequired && !isOperatorPrincipal(principal)) {
+        return { ok: false, error: "Operator-only API. This principal cannot run it." };
+      }
     }
     // RC-B6: named tools whose backend target spawns a subprocess share the
     // per-turn spawn budget with call_api and fetch_backend.

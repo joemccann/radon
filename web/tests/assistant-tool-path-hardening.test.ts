@@ -109,6 +109,28 @@ describe("assistant tool-path hardening", () => {
     });
   });
 
+  describe("C07: named tools' backend targets pass through catalog authorize", () => {
+    it("refuses get_portfolio for a demo principal — /portfolio/sync never fires", async () => {
+      const { executeTool } = await import("@/lib/assistant/tools");
+      const result = await executeTool("get_portfolio", {}, DEMO);
+      expect(result.ok).toBe(false);
+      expect(result.error).toMatch(/operator/i);
+      const syncCalls = mocks.radonFetch.mock.calls.filter(([p]) => p === "/portfolio/sync");
+      expect(syncCalls).toHaveLength(0);
+      expect(mocks.radonFetch).not.toHaveBeenCalled();
+    });
+
+    it("still runs get_portfolio for the operator", async () => {
+      const { executeTool } = await import("@/lib/assistant/tools");
+      const result = await executeTool("get_portfolio", {}, OPERATOR);
+      expect(result.ok).toBe(true);
+      expect(mocks.radonFetch).toHaveBeenCalledWith(
+        "/portfolio/sync",
+        expect.objectContaining({ method: "POST", token: "jwt-op" }),
+      );
+    });
+  });
+
   describe("B7: non-knowledge tool results are neutralized and fenced", () => {
     it("a fetch_backend payload cannot forge the close delimiter or emit raw HTML", async () => {
       mocks.radonFetch.mockResolvedValue({
