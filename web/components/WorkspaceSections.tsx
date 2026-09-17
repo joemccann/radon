@@ -467,10 +467,13 @@ export function positionGroupShareData(
           const onlyLeg = matchingPosition.legs[0];
           entryPrice = onlyLeg.avg_cost / legMultiplier(onlyLeg);
         } else if (matchingPosition.legs.length > 1 && matchingPosition.contracts > 0) {
-          // Net entry price for combo = sum of (direction-adjusted per-share avg_cost per leg)
+          // Debit positive / credit negative — same polarity as
+          // resolveOpeningLegBasis and closedGroupOpenCash. avg_cost may already
+          // be signed on shorts, so take magnitude and apply direction.
           const netCost = matchingPosition.legs.reduce((sum, leg) => {
-            const sign = leg.direction === "LONG" ? -1 : 1; // Long = paid, Short = received
-            return sum + sign * (leg.avg_cost / legMultiplier(leg));
+            const premium = Math.abs(leg.avg_cost) / legMultiplier(leg);
+            const sign = leg.direction === "LONG" ? 1 : -1;
+            return sum + sign * premium;
           }, 0);
           entryPrice = netCost;
         }
