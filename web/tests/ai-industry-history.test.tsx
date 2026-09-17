@@ -58,7 +58,7 @@ describe("shared Regime renderer for AI series", () => {
     const paths = container.querySelectorAll(`path[stroke="${chartSeriesColor("primary")}"][stroke-width="2"]`);
     expect(paths).toHaveLength(1);
     expect(paths[0].getAttribute("d")).toMatch(/^M.+[CL]/);
-    expect(container.querySelectorAll(".dot-value")).toHaveLength(120);
+    expect(container.querySelectorAll(".dot-value")).toHaveLength(0);
     expect(container.querySelectorAll(".history-bar")).toHaveLength(0);
   });
   it("keeps missing sampled periods disconnected in the rendered line", () => {
@@ -67,11 +67,21 @@ describe("shared Regime renderer for AI series", () => {
     const paths = container.querySelectorAll(`path[stroke="${chartSeriesColor("primary")}"][stroke-width="2"]`);
     expect(paths).toHaveLength(2);
     for (const path of paths) expect(path.getAttribute("d")).toMatch(/^M.+[CL]/);
-    expect(container.querySelectorAll(".dot-value")).toHaveLength(6);
+    expect(container.querySelectorAll(".dot-value")).toHaveLength(0);
+  });
+  it("preserves an isolated observation between disconnected line segments", () => {
+    const history = [1, 8, 15, 36, 57, 64, 71].map((day, i) => point(new Date(Date.UTC(2026, 0, day)).toISOString(), 10 + i));
+    const { container } = render(<AiIndustryHistoryChart points={history} cadence="daily" />);
+    const paths = container.querySelectorAll(`path[stroke="${chartSeriesColor("primary")}"][stroke-width="2"]`);
+    expect(paths).toHaveLength(2);
+    const markers = container.querySelectorAll(".dot-value");
+    expect(markers).toHaveLength(1);
+    expect((markers[0] as SVGCircleElement & { __data__: AiHistoryPoint }).__data__).toEqual(history[3]);
   });
   it("renders one genuine legend/axis and permits keyboard observation inspection", () => {
     const { container } = render(<CriHistoryChart history={[point("2026-01-01", 10), point("2026-01-02", 12)]} series={[{ key: "value", label: "Tokens", color: "green", axis: "left" }]} title="Usage" />);
     expect(container.querySelectorAll(".chart-legend-item")).toHaveLength(1);
+    expect(container.querySelectorAll(".dot-value")).toHaveLength(2);
     const slider = screen.getByRole("slider", { name: "Inspect Usage history" });
     fireEvent.keyDown(slider, { key: "Home" });
     expect(slider.getAttribute("aria-valuetext")).toContain("2026-01-01: Tokens 10.00");

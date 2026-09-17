@@ -197,6 +197,7 @@ for (const width of [390, 1440]) {
     const line = chart.locator('path[stroke-width="2"]').filter({ visible: true });
     await expect(line).toHaveCount(1);
     await expect(line).toHaveAttribute("d", /^M.+[CL]/);
+    await expect(chart.locator(".dot-value")).toHaveCount(0);
     await chart.screenshot({ path: testInfo.outputPath(`ai-industry-token-line-${width}.png`), animations: "disabled" });
     await page.getByText("Latest reported observations (8)", { exact: true }).click();
     const cards = page.getByTestId("ai-observation-card");
@@ -205,7 +206,7 @@ for (const width of [390, 1440]) {
     await expect(share).toContainText("6.7");
     await expect(cards.filter({ hasText: "Token growth · 28 days" })).toContainText("71.2");
     const info = share.getByRole("button", { name: "About Unlisted models' share of tokens" });
-    await share.scrollIntoViewIfNeeded();
+    await share.evaluate(element => element.scrollIntoView({ block: "center" }));
     await page.mouse.move(0, 0);
     const restingBackground = await share.evaluate(element => getComputedStyle(element).backgroundColor);
     const restingBounds = await share.boundingBox();
