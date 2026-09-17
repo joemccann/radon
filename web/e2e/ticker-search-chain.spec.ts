@@ -227,8 +227,11 @@ test.describe("Ticker Search → Detail Page → Chain", () => {
     const detail = page.locator(".ticker-detail-page").last();
     await detail.waitFor({ timeout: 5_000 });
 
-    // Verify L1 order book section exists
-    await expect(detail.locator("text=ORDER BOOK")).toBeVisible();
+    const book = detail.getByTestId("book-window");
+    await expect(book).toBeVisible();
+    await expect(book.locator(".book-head-stat.bid b")).toHaveText("205.40");
+    await expect(book.locator(".book-head-stat.ask b")).toHaveText("205.60");
+    await expect(book.locator(".book-head-stat").filter({ hasText: "SPRD" })).toContainText("0.20");
   });
 
   test("Chain tab loads expirations and shows strike grid", async ({ page }) => {

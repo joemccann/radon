@@ -101,7 +101,7 @@ test("Radon Chat renders safe recovery copy instead of provider JSON", async ({ 
 
   const assistantMessage = dialog.getByTestId("chat-message-assistant").last();
   await expect(assistantMessage.getByTestId("chat-role")).toHaveText("Radon");
-  await expect(page.getByRole("alert")).toContainText(SAFE_ASSISTANT_ERROR);
+  await expect(page.locator("[data-toast-viewport]").getByRole("alert").filter({ hasText: SAFE_ASSISTANT_ERROR })).toBeVisible();
   await expect(assistantMessage.getByTestId("chat-message-body")).toBeEmpty();
   await expect(dialog.getByTestId("chat-messages")).toHaveAttribute("aria-busy", "false");
   for (const internalDetail of [
@@ -145,4 +145,18 @@ test("Radon Chat keeps an active short turn grouped with the composer", async ({
   await dialog.getByTestId("chat-launcher-panel").screenshot({
     path: testInfo.outputPath("active-short-turn-dark.png"),
   });
+
+  // Bottom anchoring must not shrink long messages or make older history
+  // unreachable once the transcript exceeds the panel height.
+  await expect(dialog.getByTestId("chat-messages")).toHaveAttribute("aria-busy", "false");
+  await composer.fill(Array.from({ length: 40 }, (_, index) => `Source observation ${index + 1}: verify timestamp and flow evidence.`).join("\n"));
+  await composer.press("Enter");
+  const transcript = dialog.getByTestId("chat-messages");
+  await expect(transcript).toHaveAttribute("aria-busy", "false");
+  expect(await transcript.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+  await transcript.evaluate((element) => { element.scrollTop = 0; });
+  await expect(dialog.getByTestId("chat-message-user").first()).toBeInViewport();
+  await transcript.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+  await expect(dialog.getByTestId("chat-message-assistant").last()).toBeInViewport();
+  await expect(composer).toBeInViewport();
 });

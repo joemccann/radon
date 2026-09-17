@@ -325,7 +325,7 @@ test.describe("Flow Analysis per-ticker route", () => {
     await page.goto("/flow-analysis/JOBY");
 
     const report = page.getByTestId("ticker-flow-report");
-    await expect(page.locator(".toast-container").getByRole("alert").filter({ hasText: "Scan lane is full" })).toBeVisible();
+    await expect(page.locator(".toast-container").getByRole("alert").filter({ hasText: "This service is busy. Please try again shortly." })).toBeVisible();
     await expect(report.getByRole("alert")).toHaveCount(0);
     await expect(report.locator('[role="status"][data-status="error"]')).toContainText(/Flow report/i);
     await expect(report).not.toContainText(/Analyzing JOBY/i);

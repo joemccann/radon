@@ -137,11 +137,20 @@ test("keyboard focus remains in the dialog and Escape returns it to the opener",
   const controls = dialog.locator("button:visible:not([disabled]), textarea:visible, select:visible, a[href]:visible");
   const first = controls.first();
   const last = controls.last();
+  // The modal owns global recovery toasts too: they follow its controls in
+  // the keyboard cycle, rather than becoming unreachable outside the trap.
+  await expect(page.getByTestId("live-data-degraded")).toBeVisible();
+  const toastControls = page.locator("[data-toast-viewport] button:visible:not([disabled])");
   await last.focus();
+  await page.keyboard.press("Tab");
+  await expect(toastControls.first()).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(last).toBeFocused();
+  await toastControls.last().focus();
   await page.keyboard.press("Tab");
   await expect(first).toBeFocused();
   await page.keyboard.press("Shift+Tab");
-  await expect(last).toBeFocused();
+  await expect(toastControls.last()).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
   await expect(opener).toBeFocused();
