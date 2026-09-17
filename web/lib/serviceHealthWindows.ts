@@ -370,6 +370,10 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // and the tight open window cannot false-page at 09:31 off Friday's close.
   "theta-harvester": { open: 3 * HOUR, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
   "strength-confirmation": { open: 3 * HOUR, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
+  // ``vol-skew-mr`` is operator POST only (no signals-refresh timer). Same
+  // UW vol/skew surface as strength/leap. On-demand so a quiet day does not
+  // page; closed window bridges a weekend like the other UW scanners.
+  "vol-skew-mr": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },
   "discover": { open: 4 * DAY, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
   "flow-analysis": { open: 4 * DAY, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
   "analyst-ratings": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },

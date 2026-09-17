@@ -134,6 +134,7 @@ SNAPSHOT_RETENTION_POLICIES: Sequence[Policy] = (
     KeepLatestPolicy("scanner_snapshots", "scan_time", DEFAULT_KEEP),
     KeepLatestPolicy("theta_harvester_snapshots", "scan_time", DEFAULT_KEEP),
     KeepLatestPolicy("strength_confirmation_snapshots", "scan_time", DEFAULT_KEEP),
+    KeepLatestPolicy("vol_skew_mr_snapshots", "scan_time", DEFAULT_KEEP),
     KeepLatestPolicy("flow_analysis_snapshots", "scan_time", DEFAULT_KEEP),
     KeepLatestPolicy("performance_snapshots", "taken_at", DEFAULT_KEEP),
     KeepLatestPolicy("discover_snapshots", "scan_time", DEFAULT_KEEP),

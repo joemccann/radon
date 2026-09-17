@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 /**
- * Scanner mode strip on a phone: seven modes overflow a 393px viewport, so
+ * Scanner mode strip on a phone: eight modes overflow a 393px viewport, so
  * the shell must SAY so — edge fades driven by data-overflow-left/right.
  * Before this shipped the strip could end flush at the viewport edge and
  * read as three-tabs-total.
@@ -59,7 +59,7 @@ test("overflowing mode strip shows a trailing fade, and the fade follows the scr
   const shell = page.locator(".scanner-mode-tabs-shell");
   const strip = page.locator(".scanner-mode-tabs");
   await expect(shell).toBeVisible();
-  await expect(strip.getByRole("tab")).toHaveCount(7);
+  await expect(strip.getByRole("tab")).toHaveCount(8);
 
   // At rest the strip is scrolled to the start: content off-screen to the
   // right only.

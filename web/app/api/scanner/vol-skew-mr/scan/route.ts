@@ -1,0 +1,87 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
+
+import { NextResponse } from "next/server";
+import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
+import { radonFetch, RadonApiError } from "@/lib/radonApi";
+import { tickersBodyToRaw, validateTickerList } from "@/lib/scanTickerList";
+import { emptyVolSkewMrPayload, readVolSkewMrCache } from "../route";
+
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
+function cacheMatchesRequest(cached: Record<string, unknown>, tickers: string[], preset: string): boolean {
+  const requested = Array.isArray(cached.requested_tickers) ? cached.requested_tickers : [];
+  if (tickers.length > 0) {
+    return requested.length === tickers.length && tickers.every((ticker, idx) => requested[idx] === ticker);
+  }
+  const universe = (typeof cached.universe === "string" ? cached.universe : "").toLowerCase();
+  const key = preset.toLowerCase();
+  return universe === `preset:${key}` || universe === `fallback:${key}`;
+}
+
+export const radonCapability = "read.spawn";
+
+export async function POST(request: Request): Promise<Response> {
+  const access = await requireRouteAccess(undefined, { rate: { key: "scanner/vol-skew-mr/scan:route", limit: 20, windowMs: 60_000 }, durableRateTier: "B" });
+  if (!access.ok) return access.response;
+  const requestId = getRequestId();
+  let body: Record<string, unknown> = {};
+  try {
+    body = (await request.json()) as Record<string, unknown>;
+  } catch {
+    // Empty body is valid. FastAPI supplies defaults.
+  }
+
+  const params = new URLSearchParams();
+  const rawTickers = tickersBodyToRaw(body.tickers) || (typeof body.ticker === "string" ? body.ticker : "");
+  const preset = typeof body.preset === "string" && body.preset.trim() ? body.preset.trim() : "ndx100";
+  let tickers: string[] = [];
+  if (rawTickers.trim().length > 0) {
+    const parsed = validateTickerList(rawTickers);
+    if (!parsed.ok) {
+      return setNoStoreResponseHeaders(
+        NextResponse.json({ ...emptyVolSkewMrPayload(), error: parsed.error }, { status: 400 }),
+        requestId,
+      );
+    }
+    tickers = parsed.tickers;
+    params.set("tickers", tickers.join(","));
+  } else if (typeof body.preset === "string") {
+    params.set("preset", preset);
+  }
+  if (tickers.length === 0 && typeof body.limit === "number" && Number.isFinite(body.limit) && body.limit > 0) {
+    params.set("limit", String(Math.trunc(body.limit)));
+  }
+
+  const path = params.toString()
+    ? `/vol-skew-mr/scan?${params.toString()}`
+    : "/vol-skew-mr/scan";
+
+  try {
+    const data = await radonFetch<Record<string, unknown>>(path, {
+      method: "POST",
+      timeout: 490_000,
+    });
+    return setNoStoreResponseHeaders(NextResponse.json({ ...data, scan_succeeded: true }), requestId);
+  } catch (err) {
+    const status = err instanceof RadonApiError ? err.status : 502;
+    if (status >= 500) try {
+      const cached = await readVolSkewMrCache();
+      if (cached && cacheMatchesRequest(cached, tickers, preset)) {
+        const res = NextResponse.json(
+          { ...cached, is_stale: true, scan_succeeded: false },
+          { status },
+        );
+        res.headers.set("X-Sync-Warning", "Radon API unavailable - matching cached vol/skew MR scan attached");
+        return setNoStoreResponseHeaders(res, requestId);
+      }
+    } catch {
+      // Preserve the upstream failure below.
+    }
+    const message = err instanceof Error ? err.message : "Vol/skew MR scan failed";
+    return setNoStoreResponseHeaders(
+      NextResponse.json({ ...emptyVolSkewMrPayload(), scan_succeeded: false, error: message }, { status }),
+      requestId,
+    );
+  }
+}

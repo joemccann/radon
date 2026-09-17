@@ -71,6 +71,7 @@ describe("document title helper", () => {
     expect(titleForPathname("/options/rv-ratio", new URLSearchParams("symbol=QQQ"))).toBe("QQQ Rel Vol");
     expect(titleForPathname("/scanner", new URLSearchParams("mode=discover"))).toBe("Discover");
     expect(titleForPathname("/scanner", new URLSearchParams("mode=vol-cone"))).toBe("Vol Cone");
+    expect(titleForPathname("/scanner", new URLSearchParams("mode=vol-skew-mr"))).toBe("Vol/Skew MR");
     expect(titleForPathname("/sign-in")).toBe("Sign in");
     expect(titleForPathname("/demo-pending")).toBe("Setting up your demo");
   });

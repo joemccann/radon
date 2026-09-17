@@ -48,6 +48,7 @@ SNAPSHOT_UPSERTS: dict[str, Optional[str]] = {
     "garch-scan": "upsert_scan_snapshot",
     "theta-harvester": "upsert_theta_harvester_snapshot",
     "strength-confirmation": "upsert_strength_confirmation_snapshot",
+    "vol-skew-mr": "upsert_vol_skew_mr_snapshot",
     "breadth-scan": "upsert_breadth_snapshot",
 }
 

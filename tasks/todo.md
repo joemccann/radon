@@ -1,3 +1,29 @@
+# Task: Vol/Skew MR scanner mode 2026-09-16 [IN PROGRESS]
+
+Scanner mode `vol-skew-mr` (UI: Vol/Skew MR, `/scanner?mode=vol-skew-mr`).
+Lakha / Options Insight short-term top/bottom framing. Mirror strength/theta
+family. Credit in help tooltip. Do not merge.
+
+## Dependency graph
+
+- T1 depends_on: [] - Failing gate tests (RSI/%B, IV path, skew, verdicts)
+- T2 depends_on: [T1] - `vol_skew_mr_scanner.py` + disk/Turso snapshot
+- T3 depends_on: [T2] - FastAPI + Next GET/POST, UI tab, comma ticker search
+- T4 depends_on: [T3] - Route/UI/e2e tests, PR, CI green. No merge.
+
+## Checklist
+
+- [x] T1 Red gate tests
+- [x] T2 Scanner + snapshot
+- [x] T3 Routes + Vol/Skew MR tab
+- [ ] T4 Focused green, PR, watch CI
+
+## Review
+
+- [ ] `/scanner?mode=vol-skew-mr` renders TOP_MR / BOTTOM_MR / continue
+
+---
+
 # Task: Contextual browser tab titles 2026-09-16 [IN PROGRESS]
 
 Tabs currently all read "Radon Terminal". Every App Router page must export

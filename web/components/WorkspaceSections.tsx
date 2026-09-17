@@ -22,7 +22,7 @@ import {
   Wrench,
   XCircle,
 } from "lucide-react";
-import { ScannerModeTabs } from "./ScannerModeTabs";
+import { ScannerModeTabs, type ScannerMode } from "./ScannerModeTabs";
 import { SigMeter } from "./SigMeter";
 import SectionEmptyState from "./SectionEmptyState";
 import type { BlotterTrade, DiscoverCandidate, ExecutedOrder, FlowAnalysisPosition, OpenOrder, OrdersData, PortfolioData, PortfolioPosition, ScannerSignal, TradeEntry, WorkspaceSection } from "@/lib/types";
@@ -42,6 +42,7 @@ import { useFlowAnalysis } from "@/lib/useFlowAnalysis";
 import { useScanner } from "@/lib/useScanner";
 import { useThetaHarvester } from "@/lib/useThetaHarvester";
 import { useStrengthConfirmation } from "@/lib/useStrengthConfirmation";
+import { useVolSkewMr } from "@/lib/useVolSkewMr";
 import { useLeap } from "@/lib/useLeap";
 import { useGarchConvergence } from "@/lib/useGarchConvergence";
 import { useVolCone } from "@/lib/useVolCone";
@@ -137,6 +138,7 @@ import TickerWorkspace from "./TickerWorkspace";
 import TickerFlowReport from "./flow-analysis/TickerFlowReport";
 import ThetaHarvesterScanner, { type ThetaScanParams } from "./ThetaHarvesterScanner";
 import StrengthConfirmationScanner from "./StrengthConfirmationScanner";
+import VolSkewMrScanner from "./VolSkewMrScanner";
 import LeapScanner from "./LeapScanner";
 import GarchConvergenceScanner from "./GarchConvergenceScanner";
 import VolConePanel from "./VolConePanel";
@@ -1321,7 +1323,6 @@ function FlowSectionsBody() {
 /* ─── Scanner table ─────────────────────────────────────── */
 
 type ScannerSortKey = "ticker" | "signal" | "direction" | "score" | "strength" | "buy_ratio" | "sustained_days" | "num_prints";
-type ScannerMode = "flow" | "discover" | "theta" | "strength" | "leap" | "garch" | "vol-cone";
 
 const SCANNER_HEADER_HELP = {
   signal: "Flow intensity bucket from dark-pool activity. STRONG means the flow score is high enough to review immediately.",
@@ -1401,12 +1402,15 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
           ? "garch"
           : queryModeParam === "vol-cone"
             ? "vol-cone"
-            : "flow";
+            : queryModeParam === "vol-skew-mr"
+              ? "vol-skew-mr"
+              : "flow";
   const queryMode = defaultMode ?? parsedQueryMode;
   const [mode, setModeState] = useState<ScannerMode>(queryMode);
   const { data, syncing, error, lastSync, syncNow } = useScanner(mode === "flow");
   const theta = useThetaHarvester(mode === "theta");
   const strength = useStrengthConfirmation(mode === "strength");
+  const volSkewMr = useVolSkewMr(mode === "vol-skew-mr");
   const leap = useLeap(mode === "leap");
   const garch = useGarchConvergence(mode === "garch");
   const volCone = useVolCone(mode === "vol-cone");
@@ -1414,6 +1418,8 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
   const [thetaScanError, setThetaScanError] = useState<string | null>(null);
   const [strengthScanning, setStrengthScanning] = useState(false);
   const [strengthScanError, setStrengthScanError] = useState<string | null>(null);
+  const [volSkewMrScanning, setVolSkewMrScanning] = useState(false);
+  const [volSkewMrScanError, setVolSkewMrScanError] = useState<string | null>(null);
   const [leapScanning, setLeapScanning] = useState(false);
   const [leapScanError, setLeapScanError] = useState<string | null>(null);
   const [garchScanning, setGarchScanning] = useState(false);
@@ -1495,6 +1501,29 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
     }
   };
 
+  const runVolSkewMrScan = async (tickers?: string[]) => {
+    if (volSkewMrScanning) return;
+    setVolSkewMrScanError(null);
+    setVolSkewMrScanning(true);
+    try {
+      const res = await fetch("/api/scanner/vol-skew-mr/scan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(tickers && tickers.length > 0 ? { tickers } : { preset: "ndx100" }),
+        cache: "no-store",
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(text || `Vol/skew MR scan failed (${res.status})`);
+      }
+      volSkewMr.syncNow();
+    } catch (err) {
+      setVolSkewMrScanError(err instanceof Error ? err.message : "Vol/skew MR scan failed");
+    } finally {
+      setVolSkewMrScanning(false);
+    }
+  };
+
   const runLeapScan = async (tickers?: string[]) => {
     if (leapScanning) return;
     setLeapScanError(null);
@@ -1549,6 +1578,7 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
         flow: data ? data.signals_found ?? 0 : undefined,
         theta: theta.data ? theta.data.theta_harvest_count ?? 0 : undefined,
         strength: strength.data ? strength.data.confirmed_strength_count ?? 0 : undefined,
+        "vol-skew-mr": volSkewMr.data ? volSkewMr.data.actionable_count ?? 0 : undefined,
         leap: leap.data ? (leap.data.results ?? []).filter((r) => r.is_mispriced).length : undefined,
         garch: garch.data ? (garch.data.pairs ?? []).filter((p) => p.gates_passed).length : undefined,
         "vol-cone": volCone.data && !volCone.data.missing ? volCone.data.hit_count : undefined,
@@ -1604,6 +1634,23 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
           lastSync={strength.lastSync}
           onScan={() => { void runStrengthScan(); }}
           onTickerScan={(ticker) => { void runStrengthScan(ticker); }}
+        />
+      </div>
+    );
+  }
+
+  if (mode === "vol-skew-mr") {
+    return (
+      <div className="scanner-page-shell">
+        {modeTabs}
+        <VolSkewMrScanner
+          data={volSkewMr.data ?? null}
+          loading={volSkewMr.loading}
+          scanning={volSkewMrScanning}
+          error={volSkewMrScanError || volSkewMr.error}
+          lastSync={volSkewMr.lastSync}
+          onScan={() => { void runVolSkewMrScan(); }}
+          onTickerScan={(tickers) => { void runVolSkewMrScan(tickers); }}
         />
       </div>
     );
