@@ -1,3 +1,26 @@
+# Task: Reliability remediate 2026-09-17 [DONE]
+
+Reduced-capability rung: remediate P0/P1 only. Today's audit carries one P2
+(REL-257), which remains outside this run; REL-251 through REL-256 source
+tasks are DONE. Closing gates remain BLOCKED by the previously documented
+detached-stage termination after seven genuine attempts.
+
+## Dependency graph
+
+- T1 depends_on: [] - Reconcile P0/P1 backlog against RELIABILITY_LOG.md.
+- T2 depends_on: [T1] - Re-run permanent drill availability check and record outcome.
+
+## Checklist
+
+- [x] T1 Reduced-rung P0/P1 reconciliation
+- [x] T2 Permanent drill path resolution
+
+## Review
+
+- [x] No new source-actionable P0/P1 finding; P2 REL-257 intentionally excluded.
+
+---
+
 # Task: Vol/Skew MR scanner mode 2026-09-16 [IN PROGRESS]
 
 Scanner mode `vol-skew-mr` (UI: Vol/Skew MR, `/scanner?mode=vol-skew-mr`).
