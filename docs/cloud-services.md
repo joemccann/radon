@@ -825,7 +825,7 @@ newest statement period is more than `MAX_DELIVERY_LAG_DAYS` (1) behind the
 last session AND an empty remote is not expected for the date, R-389 + R-448;
 never on `cash-flow-sync`; once any file heartbeats `error`, later `ok`
 heartbeats in the same run are suppressed, so the row reports the batch's
-worst outcome, REL-210). Stripped env
+worst outcome, REL-210). A transient sFTP `get` failure (peer reset, kex drop, connect timeout; `is_transient_sftp_error`) on an already-ingested older file is counted, not treated as `failed`, so the 08:30 ET re-pull of the full `outgoing` history no longer pages P1 after today's statement landed (page e8da0c53, 2026-09-17). Stripped env
 `/var/lib/radon/flex-secrets/env` (no `TWS_PASSWORD`). Units on
 `auto-sync-units.txt`.
 
