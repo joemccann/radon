@@ -61,7 +61,7 @@ describe("document title helper", () => {
     expect(titleForPathname("/journal")).toBe("Journal");
     expect(titleForPathname("/research-workbench")).toBe("Research workbench");
     expect(titleForPathname("/admin")).toBe("Operator");
-    expect(titleForPathname("/ai-industry")).toBe("AI industry");
+    expect(titleForPathname("/ai-industry")).toBe("AI Industry");
   });
 
   it("titles nested research, options, and auth routes", () => {

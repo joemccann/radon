@@ -1076,3 +1076,6 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 
 ## 2026-09-17 — Errors belong in toasts
 - User-facing request, refresh, validation and action failures must use toast presentation, never inline banners. Preserve retry actions and safe broker/service guidance. Audit shared presenters and custom render branches together; explicitly report framework fallback and diagnostic-record exceptions.
+
+## 2026-09-17 — AI Industry capitalization
+- Use “AI Industry” consistently for navigation, headings, page titles, links, prose references and accessible names. Keep regression expectations case-sensitive.

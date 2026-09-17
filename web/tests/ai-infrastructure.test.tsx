@@ -60,11 +60,11 @@ describe("AI infrastructure evidence", () => {
   });
 });
 
-describe("AI industry value-chain presentation", () => {
+describe("AI Industry value-chain presentation", () => {
   it("keeps every configured measure available in independently expandable explanations", () => {
     render(<AiInfrastructureView data={aiFixture} error={null} loading={false} refresh={() => {}} />);
     for (const indicator of aiFixture.indicators) expect(screen.getByTestId(`ai-indicator-${indicator.id}`).tagName).toBe("DETAILS");
-    expect(screen.getByRole("heading", { level: 1, name: "AI industry" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1, name: "AI Industry" })).toBeTruthy();
     expect(screen.getByText("6 measures")).toBeTruthy();
     expect(screen.getByText("3 sources")).toBeTruthy();
   });

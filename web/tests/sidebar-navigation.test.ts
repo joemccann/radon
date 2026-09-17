@@ -24,7 +24,7 @@ describe("Clear workspace navigation", () => {
     );
 
     const primary = within(screen.getByRole("navigation", { name: "Primary navigation" }));
-    expect(primary.getAllByRole("link").map((link) => link.textContent)).toEqual(["Portfolio", "Research", "Risk", "Positions", "AI industry"]);
+    expect(primary.getAllByRole("link").map((link) => link.textContent)).toEqual(["Portfolio", "Research", "Risk", "Positions", "AI Industry"]);
     expect(primary.getByRole("link", { name: "Portfolio" }).getAttribute("href")).toBe("/dashboard");
     expect(primary.getByRole("link", { name: "Positions" }).getAttribute("href")).toBe("/portfolio");
     expect(primary.getByRole("link", { name: "Positions" }).getAttribute("aria-current")).toBe("page");

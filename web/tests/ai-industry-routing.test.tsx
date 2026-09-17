@@ -21,7 +21,7 @@ vi.mock("@/lib/IBStatusContext", () => ({ useIBStatusContext: () => ({ displaySt
 vi.mock("@clerk/nextjs", () => ({ useUser: () => ({ user: null }), useClerk: () => ({ signOut: vi.fn() }) }));
 afterEach(cleanup);
 
-describe("AI industry standalone navigation", () => {
+describe("AI Industry standalone navigation", () => {
   it.each(["demand", "compute", "delivery", "finance"])("preserves the legacy %s pane and repeated filters", async (pane) => {
     await expect(LegacyAiPage({ searchParams: Promise.resolve({ pane, source: ["a", "b"], q: "AI & GPU", empty: "", missing: undefined }) }))
       .rejects.toThrow(`redirect:/ai-industry?pane=${pane}&source=a&source=b&q=AI+%26+GPU&empty=`);
@@ -38,20 +38,20 @@ describe("AI industry standalone navigation", () => {
     expect(REGIME_TABS).not.toContain("llm");
   });
 
-  it("marks AI industry as its own desktop destination and retains all workspaces", () => {
+  it("marks AI Industry as its own desktop destination and retains all workspaces", () => {
     render(<Sidebar activeSection="ai-industry" actionTone="var(--signal-core)" />);
     const primary = within(screen.getByRole("navigation", { name: "Primary navigation" }));
-    expect(primary.getByRole("link", { name: "AI industry" }).getAttribute("aria-current")).toBe("page");
+    expect(primary.getByRole("link", { name: "AI Industry" }).getAttribute("aria-current")).toBe("page");
     expect(primary.getByRole("link", { name: "Risk" }).getAttribute("aria-current")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Open all workspaces" }));
-    expect(within(screen.getByRole("navigation", { name: "All workspaces" })).getByRole("link", { name: "AI industry" }).getAttribute("href")).toBe("/ai-industry");
+    expect(within(screen.getByRole("navigation", { name: "All workspaces" })).getByRole("link", { name: "AI Industry" }).getAttribute("href")).toBe("/ai-industry");
   });
 
-  it("retains four mobile destinations and exposes AI industry in the complete menu", () => {
+  it("retains four mobile destinations and exposes AI Industry in the complete menu", () => {
     render(<><MobileTabBar onOpenMore={vi.fn()} /><MobileMoreDrawer open onClose={vi.fn()} /></>);
     expect(screen.getByRole("navigation", { name: "Primary mobile navigation" }).querySelectorAll("a")).toHaveLength(4);
     const menu = within(screen.getByRole("navigation", { name: "Overflow navigation" }));
-    expect(menu.getByRole("link", { name: "AI industry" }).getAttribute("href")).toBe("/ai-industry");
+    expect(menu.getByRole("link", { name: "AI Industry" }).getAttribute("href")).toBe("/ai-industry");
   });
 
   it("sends ticker research to the standalone category", () => {

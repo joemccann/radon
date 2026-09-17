@@ -7595,3 +7595,10 @@ Validation: no local test suites; GitHub runners execute unit and browser suites
 - Three-agent component audit and independent shared-presenter review complete. Fatal framework fallback, financial safety and stored diagnostic exceptions documented in docs/reviews/2026-09-17-toast-errors.md.
 - Regression coverage includes scanner retained-data retry, persistent dismissal/recovery, shared stacking, dialog keyboard access, order field validation, watchlist failures and AST prevention of inline error surfaces.
 - Local suites intentionally not run; GitHub exact-head CI and screenshot review pending.
+
+## AI Industry capitalization (2026-09-17)
+- [x] T1 Audit all application labels; depends_on: []
+- [x] T2 Normalize labels and existing regression expectations; depends_on: [T1]
+- [ ] T3 Verify exact PR head in GitHub CI; depends_on: [T2]
+Dependency graph: T1 -> T2 -> T3.
+Review: Copy-only change; no local suites. CI includes AI Industry browser screenshots and navigation assertions.

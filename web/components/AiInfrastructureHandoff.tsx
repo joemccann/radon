@@ -5,8 +5,8 @@ import { AI_RESEARCH_MAPPING } from "@/lib/aiInfrastructure";
 export default function AiInfrastructureHandoff({ ticker }: { ticker: string }) {
   const mapping = AI_RESEARCH_MAPPING[ticker.toUpperCase()];
   if (!mapping) return null;
-  return <aside aria-label="AI industry research" style={{ padding: "16px 0", borderBottom: "1px solid var(--line-grid)", fontSize: 14 }}>
-    <strong>AI industry · {mapping.role}</strong>
+  return <aside aria-label="AI Industry research" style={{ padding: "16px 0", borderBottom: "1px solid var(--line-grid)", fontSize: 14 }}>
+    <strong>AI Industry · {mapping.role}</strong>
     <p style={{ color: "var(--text-muted)", fontSize: 12, margin: "6px 0" }}>Research classification · September 7, 2026. Exposure magnitude and current revenue sensitivity are unverified.</p>
     <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}><Link href={`/ai-industry?pane=${mapping.pane}`} style={{ minHeight: 44, display: "inline-flex", alignItems: "center", color: "var(--signal-core-text)" }}>Review industry evidence ↗</Link><a href={mapping.source} target="_blank" rel="noopener noreferrer" style={{ minHeight: 44, display: "inline-flex", alignItems: "center", color: "var(--signal-core-text)" }}>Issuer disclosures ↗</a></div>
   </aside>;

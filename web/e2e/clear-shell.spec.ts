@@ -11,7 +11,7 @@ for (const width of [360, 390, 768, 1024, 1440]) {
     const mobile = width <= 640;
     const navigation = page.getByRole("navigation", { name: mobile ? "Primary mobile navigation" : "Primary navigation", exact: true });
     await expect(navigation).toBeVisible();
-    const primaryItems = mobile ? clearPrimaryNavigation.filter((item) => item.label !== "AI industry") : clearPrimaryNavigation;
+    const primaryItems = mobile ? clearPrimaryNavigation.filter((item) => item.label !== "AI Industry") : clearPrimaryNavigation;
     await expect(navigation.getByRole("link")).toHaveCount(mobile ? 4 : 5);
     for (const item of primaryItems) {
       const link = navigation.getByRole("link", { name: item.label, exact: true });

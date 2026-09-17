@@ -22,7 +22,7 @@ export const STATIC_ROUTE_TITLES: Record<string, string> = {
   "/options/rv-ratio": "Rel Vol",
   "/journal": "Journal",
   "/regime": "Regime",
-  "/ai-industry": "AI industry",
+  "/ai-industry": "AI Industry",
   "/regime/vol-cone": "Vol Cone",
   "/cta": "CTA",
   "/alerts": "Alerts",

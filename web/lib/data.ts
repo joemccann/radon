@@ -42,7 +42,7 @@ export const clearPrimaryNavigation: { label: string; href: string; sections: Wo
   { label: "Research", href: "/scanner", sections: ["research-workbench", "scanner", "discover", "flow-analysis", "options", "watchlist"] },
   { label: "Risk", href: "/regime/cri", sections: ["regime", "cta"] },
   { label: "Positions", href: "/portfolio", sections: ["portfolio", "orders"] },
-  { label: "AI industry", href: "/ai-industry", sections: ["ai-industry"] },
+  { label: "AI Industry", href: "/ai-industry", sections: ["ai-industry"] },
 ];
 
 export const navItems: WorkspaceNavItem[] = [
@@ -56,7 +56,7 @@ export const navItems: WorkspaceNavItem[] = [
   { label: "Flow Analysis", route: "flow-analysis", href: "/flow-analysis", icon: FlowGlyph, group: "research" },
   { label: "Options", route: "options", href: "/options", icon: ExposureGlyph, group: "research" },
   { label: "Discover", route: "discover", href: "/discover", icon: DiscoverGlyph, hidden: true, group: "research" },
-  { label: "AI industry", route: "ai-industry", href: "/ai-industry", icon: ExposureGlyph, group: "research" },
+  { label: "AI Industry", route: "ai-industry", href: "/ai-industry", icon: ExposureGlyph, group: "research" },
   { label: "Journal", route: "journal", href: "/journal", icon: JournalGlyph, group: "operations" },
   { label: "Regime", route: "regime", href: "/regime/cri", icon: RegimeGlyph, group: "risk" },
   { label: "CTA", route: "cta", href: "/cta", icon: CTAGlyph, group: "risk" },
