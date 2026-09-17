@@ -10,6 +10,7 @@ import SpectralLoader from "@/components/SpectralLoader";
 import ThinkingWait from "@/components/fx/ThinkingWait";
 import { useViewport } from "@/lib/useViewport";
 import DailyDarkPoolHistory from "@/components/flow-analysis/DailyDarkPoolHistory";
+import FlowSkewPanel from "@/components/flow-analysis/FlowSkewPanel";
 import { flowReportErrorCopy } from "@/lib/flowReportError";
 import { flowReportAgeLabel } from "@/lib/flowReportStaleness";
 
@@ -295,6 +296,11 @@ function MobileTickerFlowReport({
                 {verdict.rationale}
               </p>
             )}
+            {data && (
+              <div style={{ marginTop: 12 }}>
+                <FlowSkewPanel skew={data.skew} compact />
+              </div>
+            )}
           </>
         )}
 
@@ -366,6 +372,9 @@ function MobileTickerFlowReport({
               <span className="m-metric__value m-metric__value--primary">
                 {optionsFlow.put_premium != null ? `$${formatFlowNumber(optionsFlow.put_premium)}` : "---"}
               </span>
+            </div>
+            <div style={{ gridColumn: "1 / -1" }}>
+              <FlowSkewPanel skew={data?.skew} compact />
             </div>
           </div>
         )}
@@ -667,6 +676,8 @@ function ReportSections({
           />
         </div>
       </section>
+
+      <FlowSkewPanel skew={data.skew} />
 
       {daily.length > 0 && <DailyDarkPoolHistory daily={daily} />}
 

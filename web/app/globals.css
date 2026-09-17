@@ -18756,6 +18756,214 @@ body[data-mobile="true"] td.right {
   font-variant-numeric: tabular-nums;
 }
 
+/* ── Volatility skew (25Δ put minus call, from the Vol/Skew MR snapshot) ── */
+
+.ticker-flow-skew {
+  --skew-tone: var(--text-muted);
+}
+
+.ticker-flow-skew[data-tone="positive"] {
+  --skew-tone: var(--positive);
+}
+
+.ticker-flow-skew[data-tone="negative"] {
+  --skew-tone: var(--negative);
+}
+
+.ticker-flow-skew > .section-body {
+  padding: 16px;
+}
+
+/* One rack row: reading | direction | six-session path | read. The change
+   sits under the reading so the figure and its delta stay one glance. */
+.ticker-flow-skew-body {
+  display: grid;
+  grid-template-columns: max-content max-content minmax(160px, 260px) 1fr;
+  grid-template-areas:
+    "figure path spark note"
+    "change path spark note";
+  column-gap: 24px;
+  row-gap: 4px;
+  align-items: center;
+}
+
+.ticker-flow-skew-figure {
+  grid-area: figure;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  animation: ticker-flow-skew-enter 320ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+.ticker-flow-skew-change {
+  grid-area: change;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  min-height: 1em;
+}
+
+.ticker-flow-skew-spark {
+  grid-area: spark;
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+}
+
+.ticker-flow-skew-note {
+  grid-area: note;
+}
+
+@media (max-width: 900px) {
+  .ticker-flow-skew-body {
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "figure path"
+      "spark spark"
+      "change change"
+      "note note";
+    row-gap: 8px;
+  }
+}
+
+.ticker-flow-skew-value {
+  font-family: var(--font-mono);
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.ticker-flow-skew-unit {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.ticker-flow-skew-path {
+  grid-area: path;
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  /* Icon glyphs sit a hair high against uppercase mono; the 1px top offset
+     keeps the arrow optically level with the label. */
+  padding: 5px 9px 4px;
+  border-radius: 2px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--skew-tone);
+  background: color-mix(in srgb, var(--skew-tone) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--skew-tone) 28%, transparent);
+  animation: ticker-flow-skew-enter 320ms cubic-bezier(0.2, 0, 0, 1) 80ms both;
+}
+
+.ticker-flow-skew-path svg {
+  flex-shrink: 0;
+  margin-top: -1px;
+}
+
+.ticker-flow-skew-sparkline {
+  display: block;
+  width: 100%;
+  height: auto;
+  color: var(--skew-tone);
+  overflow: visible;
+  animation: ticker-flow-skew-enter 320ms cubic-bezier(0.2, 0, 0, 1) 160ms both;
+}
+
+.ticker-flow-skew-expiry {
+  grid-area: expiry;
+  justify-self: end;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.ticker-flow-skew-note {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  text-wrap: pretty;
+}
+
+/* Mobile tile: same reading, no section chrome. */
+.ticker-flow-skew-compact {
+  padding: 12px 14px;
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+  background: var(--bg-panel);
+}
+
+.ticker-flow-skew-compact .ticker-flow-skew-value {
+  font-size: 24px;
+}
+
+.ticker-flow-skew-compact .ticker-flow-skew-body {
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    "figure path"
+    "spark spark"
+    "change expiry"
+    "note note";
+  row-gap: 8px;
+}
+
+.ticker-flow-skew-compact .ticker-flow-skew-path {
+  justify-self: end;
+}
+
+.ticker-flow-skew-eyebrow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.ticker-flow-skew-eyebrow-meta {
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+
+@keyframes ticker-flow-skew-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ticker-flow-skew-figure,
+  .ticker-flow-skew-path,
+  .ticker-flow-skew-sparkline {
+    animation: none;
+  }
+}
+
 .ticker-flow-metric-value.tone-positive {
   color: var(--positive);
 }

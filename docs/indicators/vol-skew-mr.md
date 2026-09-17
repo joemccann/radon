@@ -29,6 +29,16 @@ Mirrors strength / theta: `scripts/vol_skew_mr_scanner.py`, disk cache
 GET `/api/scanner/vol-skew-mr`, POST `/api/scanner/vol-skew-mr/scan`,
 comma ticker search, NDX preset.
 
+## Shared skew snapshot
+
+`fetch_skew_snapshot(client, ticker)` is the one reader of the skew path:
+expiry selection, the dated history call, vol-point conversion, and
+`series_path`. The scanner gates on it, and `scripts/flow_report.py` embeds
+the same snapshot as the `skew` block of every per-ticker flow report
+(`/flow-analysis/<TICKER>` renders value, direction, one-session change, and
+the six-session sparkline via `web/lib/flowSkew.ts`). A skew failure degrades
+that block alone; the dark pool and options sections never depend on it.
+
 ## Data sources per ticker
 
 Daily closes come from IB first (`fetch_daily_closes`), UW OHLC only on a
