@@ -218,7 +218,7 @@ test("GARCH tab scan-by-ticker posts the parsed pair and renders the results", a
   expect(captures.garch.body).toEqual({ tickers: ["NVDA", "AMD"] });
 });
 
-test("GARCH tab rejects an odd ticker count inline without posting", async ({ page }) => {
+test("GARCH tab rejects an odd ticker count with a toast without posting", async ({ page }) => {
   const { state, captures } = freshState();
   await stubApis(page, state, captures);
   await installMockWebSocket(page);

@@ -11,10 +11,13 @@ function sourceFiles(directory: string): string[] {
   });
 }
 
-// These are live financial safety facts, not failed requests. They must remain
-// visible beside the order while submission is gated, even after dismissing a toast.
+// These are live financial safety or measurement-provenance facts, not failed
+// requests. They remain visible after dismissing an operational error toast.
 const safetyClasses: Record<string, string[]> = {
   "components/ModifyOrderModal.tsx": ["modify-order-fill-stale"],
+  // Dispersion's persisted stale scan timestamp explains why measurements are
+  // withheld. The custom-component check below pins its only danger caller.
+  "components/SectionEmptyState.tsx": ["section-empty-state"],
   "components/ticker-detail/OrderTab.tsx": ["order-error"],
   "components/ticker-detail/PositionTradeTicket.tsx": ["order-error"],
   "lib/order/components/OrderConfirmSummary.tsx": ["order-confirm-undefined-risk"],
@@ -29,6 +32,18 @@ function violations(path: string): string[] {
   function visit(node: ts.Node) {
     if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
       const tag = node.tagName.getText(source);
+      if (tag === "SectionEmptyState") {
+        const attributes = node.attributes.properties.filter(ts.isJsxAttribute);
+        const attribute = (key: string) => attributes.find(item => item.name.getText(source) === key)?.initializer;
+        const tone = attribute("tone");
+        if (tone && !(ts.isStringLiteral(tone) && tone.text === "default")) {
+          const testId = attribute("testId");
+          const provenanceOnly = name === "components/DispersionPanel.tsx"
+            && ts.isStringLiteral(tone) && tone.text === "danger"
+            && testId && ts.isStringLiteral(testId) && testId.text === "dispersion-writer-stale";
+          if (!provenanceOnly) found.push(`${name}: inline danger empty state outside approved dispersion provenance`);
+        }
+      }
       if (/^[a-z]/.test(tag)) {
         const attributes = node.attributes.properties.filter(ts.isJsxAttribute);
         const attribute = (key: string) => attributes.find(item => item.name.getText(source) === key)?.initializer;

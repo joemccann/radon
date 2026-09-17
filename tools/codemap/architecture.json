@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-09-17T18:57:58Z",
-  "node_count": 3386,
-  "edge_count": 7064,
+  "generated_at": "2026-09-17T19:03:40Z",
+  "node_count": 3387,
+  "edge_count": 7066,
   "areas": {
-    "web": 2002,
+    "web": 2003,
     "site": 155,
     "scripts": 1116,
     "cloud": 66,
@@ -50,7 +50,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 927
+      "count": 928
     },
     {
       "id": "site/app",
@@ -413,6 +413,13 @@
       "test": false
     },
     {
+      "id": "web/components/ErrorToast.tsx",
+      "area": "web",
+      "in": 41,
+      "out": 1,
+      "test": false
+    },
+    {
       "id": "web/lib/userError.ts",
       "area": "web",
       "in": 41,
@@ -421,13 +428,6 @@
     },
     {
       "id": "web/lib/useViewport.ts",
-      "area": "web",
-      "in": 40,
-      "out": 1,
-      "test": false
-    },
-    {
-      "id": "web/components/ErrorToast.tsx",
       "area": "web",
       "in": 40,
       "out": 1,

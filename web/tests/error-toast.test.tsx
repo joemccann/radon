@@ -54,7 +54,8 @@ describe("toast-only error presentation", () => {
     expect(document.querySelectorAll("[data-toast-viewport]")).toHaveLength(1);
     expect(document.querySelectorAll("[data-toast-viewport] > .toast")).toHaveLength(3);
     fireEvent.click(screen.getAllByRole("button", { name: "Dismiss" })[1]);
-    expect(screen.getByText("Saved")).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toContain("Saved");
+    expect(screen.getByRole("alert").closest('[role="status"]')).toBeNull();
     expect(screen.getByText("Sync failed.")).toBeTruthy();
     unmount();
     expect(document.querySelector("[data-toast-viewport]")).toBeNull();

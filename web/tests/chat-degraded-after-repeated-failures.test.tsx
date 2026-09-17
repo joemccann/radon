@@ -32,6 +32,16 @@ describe("ChatPanel degraded indicator", () => {
     });
   });
 
+  it("removes failure toasts when the retained chat panel closes", async () => {
+    const { container, rerender } = render(<ChatPanel activeSection="portfolio" isOpen />);
+    await failingTurn(container, "one");
+    await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
+    rerender(<ChatPanel activeSection="portfolio" isOpen={false} />);
+    expect(screen.queryByRole("alert")).toBeNull();
+    rerender(<ChatPanel activeSection="portfolio" isOpen />);
+    expect(screen.getByRole("alert")).toBeTruthy();
+  });
+
   it("shows no degraded chip after a single failure", async () => {
     const { container } = render(<ChatPanel activeSection="portfolio" />);
     await failingTurn(container, "one");

@@ -76,7 +76,7 @@ type TurnEvidence = { tools: AssistantToolEvent[]; model: string | null; failed?
 
 const STICK_THRESHOLD_PX = 80;
 
-function CopyButton({ content }: { content: string }) {
+function CopyButton({ content, isOpen }: { content: string; isOpen: boolean }) {
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
   const onCopy = useCallback(() => {
@@ -89,7 +89,7 @@ function CopyButton({ content }: { content: string }) {
   }, [content]);
   return (
     <>
-    {copyFailed ? <ErrorToast message="The message could not be copied. Select the text to copy it." /> : null}
+    {isOpen && copyFailed ? <ErrorToast message="The message could not be copied. Select the text to copy it." /> : null}
     <button type="button" className="chat-action-btn" onClick={onCopy} aria-label="Copy message">
       {copied ? <Check size={11} /> : <Copy size={11} />}
       {copied ? "Copied" : "Copy"}
@@ -542,7 +542,7 @@ export default function ChatPanel({
                     <ol>{buildTurnSteps(meta.tools, "done").map((step) => <li key={step.id}><span>{step.label}</span><span>{step.meta}</span></li>)}</ol>
                   </details> : null}
                   {isAssistant && (message.content || meta?.failed) && !isBusy ? <div className="chat-actions">
-                    {message.content ? <CopyButton content={message.content} /> : null}
+                    {message.content ? <CopyButton content={message.content} isOpen={isOpen} /> : null}
                     {isCurrent && requestRef.current ? <button type="button" className="chat-action-btn" onClick={retry} disabled={isPlacing}><RotateCcw size={14} />{meta?.failed || meta?.stopped ? "Try again" : "Regenerate"}</button> : null}
                     {meta?.model ? <span className="chat-response-model">{meta.model}</span> : null}
                     {meta?.stopped && message.content !== "Response stopped." ? <span className="chat-response-model">Response stopped</span> : null}
@@ -566,7 +566,7 @@ export default function ChatPanel({
           {messages.length ? <button type="button" className="chat-jump-btn" data-hidden={!showJump} onClick={jumpToBottom} aria-label="Scroll to latest" tabIndex={showJump ? 0 : -1}><ArrowDown size={14} />Latest</button> : null}
         </div>
 
-          {lastError ? <ErrorToast message={<>
+          {isOpen && lastError ? <ErrorToast message={<>
             <div>{lastError}</div>
             {consecutiveFailures >= DEGRADED_AFTER_FAILURES ? <div>{`The assistant has failed ${consecutiveFailures} turns in a row. The provider or the backend is degraded; retrying will not help until it recovers.`}</div> : null}
           </>} /> : null}
