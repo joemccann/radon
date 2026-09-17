@@ -266,7 +266,7 @@ describe("T-472: fills advance 16 -> 100 while the dialog is open", () => {
     expect(calls).toHaveLength(0);
     // Refuse + reseed: field now shows the CURRENT remainder, operator warned.
     expect(qtyInput().value).toBe("900");
-    expect(document.querySelector(".modify-fill-race")?.textContent).toMatch(/fill/i);
+    expect(document.querySelector(".toast-error")?.textContent).toMatch(/fill/i);
   });
 });
 

@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 
 const base = "/api/newsfeed/research/files/";
@@ -10,6 +10,16 @@ const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="600"><
 
 const excludedPublisher = /(?:the\s*)?market\s*ear|zero[\s-]*hedge/i;
 type ShareCapture = { drawn: string[]; copied: string };
+
+async function dismissNotices(page: Page) {
+  // Persistent toasts are real interactive overlays. Acknowledge them using
+  // their visible controls before continuing into the narrow mobile lightbox.
+  const dismiss = page.locator(".toast-container").getByRole("button", { name: "Dismiss", exact: true });
+  for (let count = 0; count < 16 && await dismiss.count(); count += 1) {
+    await dismiss.first().click();
+  }
+  await expect(dismiss).toHaveCount(0);
+}
 
 test.beforeEach(async ({ page }) => {
   await page.route("**/api/newsfeed/share", async route => {
@@ -150,11 +160,13 @@ test("news sharing retains sanitized fallback and retries a failed voice rewrite
   const item = page.getByTestId("news-feed-item").filter({ hasText: post.title });
   await item.getByRole("button", { name: "Share", exact: true }).click();
   const panel = item.getByRole("region", { name: "Share news item" });
-  await expect(panel.getByRole("button", { name: "Retry voice rewrite" })).toBeVisible();
+  const failure = page.locator(".toast-container").getByRole("alert").filter({ hasText: "Showing the original copy" });
+  await expect(failure.getByRole("button", { name: "Try again" })).toBeVisible();
+  await expect(panel.getByRole("alert")).toHaveCount(0);
   expect(await panel.getByRole("textbox", { name: "Post caption" }).inputValue()).toContain(post.title);
   expect(await panel.getByRole("textbox", { name: "Post caption" }).inputValue()).not.toMatch(excludedPublisher);
   await expect(panel.getByRole("button", { name: "Download Story image" })).toBeEnabled();
-  await panel.getByRole("button", { name: "Retry voice rewrite" }).click();
+  await failure.getByRole("button", { name: "Try again" }).click();
   await expect(panel.getByRole("textbox", { name: "Post caption" })).toHaveValue("Retry succeeds\n\nPositioning remains the tell.");
   expect(requests).toBe(2);
 });
@@ -287,6 +299,7 @@ for (const width of [1440, 393]) {
     await item.getByRole("button", { name: "Open chart 2: Weekly distribution" }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog.locator(".newsfeed-lightbox__image")).toHaveAttribute("src", second);
+    await dismissNotices(page);
     await dialog.getByRole("button", { name: "Share", exact: true }).click();
     const lightboxPanel = dialog.getByRole("region", { name: "Share news item" });
     await expect(lightboxPanel.getByRole("img")).toBeVisible({ timeout: 30_000 });

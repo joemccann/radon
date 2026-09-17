@@ -839,6 +839,48 @@ Incident: 2026-08-15 00:24Z, P1 page `34ab3e3c…`.
 
 ---
 
+## ai-cycle-raw-archive-resend-timeout
+
+**`radon-ai-cycle.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
+when daily `import_raw_archive` re-POSTs every on-disk raw blob to Turso.**
+Peak: 2026-09-17 07:22Z, page `1e842638…`. Timer next ~24h.
+
+- **Mechanism:** end of `--record` calls `store.import_raw_archive` over
+  `~/.radon/ai-cycle/raw` (1117 files / ~97MB that day). Each file became an
+  `INSERT OR IGNORE INTO ai_cycle_raw` of the full base64+zlib payload under
+  `HRANA_TIMEOUT_S=4`, even when the hash was already present (1105/1117).
+  One `HranaHttpError: TimeoutError` aborted before `persist_api_snapshot`.
+  Exception-path `_write_health` then also timed out and replaced the raised
+  error via "During handling". Observations for the day had already landed;
+  API snapshot stayed on the earlier backfill stamp. `Type=oneshot` has no
+  `Restart=`. Edge and `:8321/health/lite` stayed up; Python Turso canary
+  81 ms after the page.
+- **Detection:** journal stack at `store.import_raw_archive` /
+  `archive_raw` / `hrana_execute` with `TimeoutError: The read operation
+  timed out`; `systemctl show` → `exit-code` / `0`; ExecMainStart to
+  InactiveEnter minutes (collection + import), not the 1200s start budget;
+  `ai_cycle_observations` for today populated while `ai_cycle_api_snapshot`
+  `generated_at` is still the backfill time.
+- **Discriminating check:** Turso canary `SELECT 1` succeeds; failure is on
+  raw-archive INSERT (or the secondary health write), not provider fetch;
+  `SELECT COUNT(*) FROM ai_cycle_raw` already near on-disk file count.
+  Canary fail too → Turso platform, stand down. `Result=signal` is deploy
+  stop-clean. IB `/health/lite` down → API/IB, stand down.
+- **Remediation (code):** `import_raw_archive` SELECTs existing hashes once
+  and skips them; only missing digests INSERT. `_write_health` is
+  best-effort (log `[ai-cycle] service_health write failed`, do not raise).
+  Do not restart-flap before the skip-existing fix is live — a rerun still
+  re-sends every payload. After deploy, `radon unit restart
+  radon-ai-cycle.service` (or the next 07:15 UTC timer) recovers the
+  snapshot.
+- **Regression:**
+  `test_ai_cycle_core.py::test_import_raw_archive_does_not_resend_existing_payloads`,
+  `test_ai_cycle_collectors.py::test_production_health_write_timeout_does_not_mask_collection_failure`.
+- **Code:** `scripts/ai_cycle/store.py` (`import_raw_archive`),
+  `scripts/ai_cycle/collect.py` (`_write_health`).
+
+---
+
 ## trin-health-heartbeat-timeout
 
 **`radon-trin.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
@@ -1867,6 +1909,49 @@ on the Tue..Sat 07:30 ET fire.** Peak: 2026-09-15 11:35Z, page `68388b70…`.
 - **Code:** `scripts/flex_sftp_pull.py` (`SWEEP_BUDGET_S`, `order_for_ingest`,
   `install_sigterm_unwind`), `cloud/services/radon-flex-pull.service`,
   `scripts/db/writer.py` (`FLEX_CLAIM_STALE_AFTER_S`).
+
+---
+
+## flex-pull-twr-degraded-exit
+
+**`radon-flex-pull.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
+on the Tue..Sat 07:30 ET fire after today's Activity statement is applied.**
+Peak: 2026-09-16 11:35Z, page `5a2eb828…`.
+
+- **Mechanism:** newest-first ingest of `Equity_Summary_in_Base.20260915`
+  ran `cash_flow_sync --from-file` (exit 0) then
+  `perf_twr_builder.build_and_persist`. TWR persisted and returned
+  `status=degraded`. `ingest_xml` treated any TWR status other than
+  `ok`/`stale` as `ok: False`, released the claim, and
+  `flex_sftp_pull` raised `ingest_failed`. IBKR then RST'd kex on older
+  `outgoing` files (`sftp_get_failed` / `Connection reset by peer`);
+  any file error fails the oneshot. `Type=oneshot` has no `Restart=`,
+  so `NRestarts=0`. `radon-perf-twr` published `status=ok` three
+  minutes later. Edge and `:8321/health/lite` stayed up.
+- **Detection:** journal `[flex-pull] … ingest_failed:{… 'cash_exit': 0,
+  'twr_status': 'degraded' …}` then `sftp_get_failed` /
+  `kex_exchange_identification`; `systemctl show` → `exit-code` / `0`;
+  ExecMainStart→Inactive ~2 min, not `TimeoutStartSec`.
+- **Discriminating check:** `cash_exit=0` with `twr_status=degraded`
+  (this case). `Result=timeout` with no terminal heartbeat is
+  `flex-pull-ingest-timeout`. Host-key / auth abort is still
+  `Result=exit-code` with no ingest. If `/health/lite` is down too →
+  API, stand down.
+- **Remediation (code):** activity ingest is `ok` after cash exit 0;
+  TWR status is reported, not a delivery failure (REL-220; TWR
+  exceptions still release the claim). Transient `sftp_get_failed`
+  (kex RST / connection reset / timed out) after at least one file
+  was processed does not fail the oneshot. Newest-file RST still
+  fails. Do not restart-flap; the 08:30 ET timer retries. After
+  deploy, `systemctl reset-failed radon-flex-pull.service` if the
+  retry has not yet fired.
+- **Regression:**
+  `test_flex_delivery_ingest_atomicity.py::TestActivityShortCircuit::test_degraded_twr_after_cash_success_still_applies_the_claim`,
+  `test_flex_sftp_pull.py::test_historical_sftp_rst_after_newest_ingest_does_not_fail_the_oneshot`,
+  `test_flex_sftp_pull.py::test_historical_sftp_rst_after_duplicate_newest_does_not_fail_the_oneshot`,
+  `test_flex_sftp_pull.py::test_sftp_rst_on_the_newest_statement_still_fails_the_oneshot`.
+- **Code:** `scripts/flex_delivery_ingest.py` (`_apply_classified`),
+  `scripts/flex_sftp_pull.py` (`_is_transient_sftp_get`).
 
 ---
 

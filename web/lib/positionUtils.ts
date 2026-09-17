@@ -641,9 +641,19 @@ function parseDateOnly(rawDate: string | undefined): string | null {
   return `${get("year")}-${get("month")}-${get("day")}`;
 }
 
+/**
+ * Overnight leg plus a same-session add (roll, hedge, convert to spread).
+ * Position-level `entry_date` is often stamped today when the new leg fills,
+ * but yesterday's close is still the overnight leg's baseline.
+ */
+export function isMixedAgeCombo(pos: PortfolioPosition): boolean {
+  return hasBlendedLegBasis(pos);
+}
+
 /** True when the position was opened today. Yesterday's close is
  *  meaningless as a baseline because the position didn't exist. */
 export function isSameDay(pos: PortfolioPosition): boolean {
+  if (isMixedAgeCombo(pos)) return false;
   const entryDate = parseDateOnly(pos.entry_date);
   return entryDate != null && entryDate === todayInET();
 }
@@ -789,6 +799,68 @@ export function positionDirectionSign(pos: PortfolioPosition): number {
 
 /* ─── Today's P&L (dollars) ──────────────────────────────── */
 
+function legDirectionSign(leg: { direction: string }): number {
+  return leg.direction === "LONG" ? 1 : -1;
+}
+
+function resolvedLegMark(
+  pos: PortfolioPosition,
+  leg: PortfolioPosition["legs"][number],
+  prices?: Record<string, PriceData>,
+): number | null {
+  const key = legPriceKey(pos.ticker, pos.expiry, leg);
+  const lp = key
+    ? prices?.[key] ?? null
+    : leg.type === "Stock"
+      ? prices?.[pos.ticker] ?? prices?.[pos.ticker.toUpperCase()] ?? null
+      : null;
+  return resolveRealtimePrice(lp, leg.market_price, Boolean(leg.market_price_is_calculated)).price;
+}
+
+function sessionFillLegTodayPnl(
+  pos: PortfolioPosition,
+  leg: PortfolioPosition["legs"][number],
+  prices?: Record<string, PriceData>,
+): number | null {
+  const current = resolvedLegMark(pos, leg, prices);
+  if (current == null || !Number.isFinite(leg.entry_cost)) return null;
+  const sign = legDirectionSign(leg);
+  return sign * current * leg.contracts * getLegMultiplier(leg) - sign * Math.abs(leg.entry_cost);
+}
+
+function overnightLegTodayPnl(
+  pos: PortfolioPosition,
+  leg: PortfolioPosition["legs"][number],
+  prices?: Record<string, PriceData>,
+): number | null {
+  const current = resolvedLegMark(pos, leg, prices);
+  if (current == null) return null;
+  const key = legPriceKey(pos.ticker, pos.expiry, leg);
+  const lp = key && prices ? prices[key] : null;
+  const close = lp?.close;
+  if (close == null || close <= 0) return null;
+  return legDirectionSign(leg) * (current - close) * leg.contracts * getLegMultiplier(leg);
+}
+
+function mixedAgeTodayPnl(
+  pos: PortfolioPosition,
+  prices?: Record<string, PriceData>,
+): number | null {
+  // IB reqPnLSingle is per-conId: overnight legs vs close, same-day vs fill.
+  if (pos.ib_daily_pnl != null) return pos.ib_daily_pnl;
+  let pnl = 0;
+  let any = false;
+  for (const leg of pos.legs) {
+    const part = leg.basis_source === "session_fills"
+      ? sessionFillLegTodayPnl(pos, leg, prices)
+      : overnightLegTodayPnl(pos, leg, prices);
+    if (part == null) continue;
+    pnl += part;
+    any = true;
+  }
+  return any ? pnl : null;
+}
+
 export function getTodayPnlDollars(pos: PortfolioPosition, prices?: Record<string, PriceData>): number | null {
   if (pos.structure_type === "Stock") {
     // Same-day position: Today's P&L = Total P&L (the shares didn't exist
@@ -802,6 +874,12 @@ export function getTodayPnlDollars(pos: PortfolioPosition, prices?: Record<strin
     // Sign-aware: a SHORT loses when price rises. `pos.contracts` is a positive
     // magnitude, so apply the direction sign (long stays +; short flips).
     return positionDirectionSign(pos) * (p.last - p.close) * Math.abs(pos.contracts);
+  }
+
+  // Mixed-age combo: overnight legs vs close, same-session legs vs fill.
+  // Do not apply the same-day MV − EC identity to the whole structure.
+  if (isMixedAgeCombo(pos)) {
+    return mixedAgeTodayPnl(pos, prices);
   }
 
   // Same-day position: Today's P&L = Total P&L (position didn't exist yesterday)

@@ -54,8 +54,10 @@ describe("skill-stack shell chrome", () => {
     expect(shell).toContain('type="button"');
 
     const toast = src("components/Toast.tsx");
-    expect(toast).toContain('role="status"');
-    expect(toast).toContain('aria-live="polite"');
+    // Each item owns its live-region semantics: status implies polite,
+    // alert implies assertive. A wrapping status would double-announce errors.
+    expect(toast).toContain('role={toast.type === "error" ? "alert" : "status"}');
+    expect(toast).toContain("ToastViewport");
 
     const sidebar = src("components/Sidebar.tsx");
     expect(sidebar).toContain('aria-current={item.route === activeSection ? "page" : undefined}');

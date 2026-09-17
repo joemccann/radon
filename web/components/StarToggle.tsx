@@ -1,6 +1,7 @@
 "use client";
+import RequestError from "@/components/RequestError";
 
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 
 export type StarToggleProps = {
   active: boolean;
@@ -24,15 +25,19 @@ export default function StarToggle({
   label,
   busy = false,
 }: StarToggleProps) {
-  const handleClick = useCallback(() => {
+  const [error, setError] = useState<unknown>(null);
+  const handleClick = useCallback(async () => {
     if (busy) return;
-    void onToggle();
+    setError(null);
+    try { await onToggle(); } catch (reason) { setError(reason); }
   }, [busy, onToggle]);
 
   const glyphSize = size === "sm" ? 14 : 18;
   const title = active ? "Starred. Click to remove." : "Click to star.";
 
   return (
+    <>
+    <RequestError error={error} fallback="The bookmark could not be updated. Try again." />
     <button
       type="button"
       data-testid="star-toggle"
@@ -58,5 +63,6 @@ export default function StarToggle({
       </svg>
       {label ? <span className="star-toggle__label">{label}</span> : null}
     </button>
+    </>
   );
 }

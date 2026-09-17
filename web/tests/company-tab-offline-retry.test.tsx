@@ -35,10 +35,10 @@ describe("CompanyTab offline retry", () => {
     vi.stubGlobal("fetch", fetchMock);
     const CompanyTab = await loadCompanyTab(offlineRef);
 
-    const { container, rerender } = render(
+    const { rerender } = render(
       <CompanyTab ticker="AAPL" active priceData={null} fundamentals={null} />,
     );
-    await waitFor(() => expect(container.querySelector(".tab-error")).not.toBeNull());
+    await waitFor(() => expect(document.querySelector(".toast-error")).not.toBeNull());
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     offlineRef.current = { offline: true, cachedAt: null, offlineSince: 1 };

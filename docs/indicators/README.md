@@ -19,7 +19,7 @@ Owner specs for regime tabs and the cheap-wing scanner. Add a row here when a sp
 | trin | `/regime/trin` | `trin` | [trin.md](trin.md) (spec; build in flight) |
 | divyield | `/regime/divyield` | `div-yield` | [divyield.md](divyield.md) |
 | ma-ratio | `/regime/ma-ratio` | `ma-ratio` | [ma-ratio.md](ma-ratio.md) |
-| calm-streak | `/regime/calm-streak` | `calm-streak` | [calm-streak.md](calm-streak.md) |
+| calm-streak | `/regime/calm-streak` | `calm-streak` | [calm-streak.md](calm-streak.md) (migration renumbered 0074 to 0076 2026-09-17; `migrate.py` now refuses duplicate version numbers) |
 | hyad | `/regime/hyad` | `hy-ad` | [hyad.md](hyad.md) |
 | hhlev | `/regime/hhlev` | `hhlev` | [hhlev.md](hhlev.md) |
 | vixts | `/regime/vixts` | `vixts` | [vixts.md](vixts.md) |
@@ -52,3 +52,5 @@ parent, or a spent UW daily cap fails its unit and pages a P1 every run. See
 Every UW-backed indicator shares one daily-cap breaker,
 `scripts/utils/uw_embargo.py`. Give a new writer its own sidecar file through
 `UwEmbargo(service, path_source)`; do not re-implement the reset arithmetic.
+
+The Vol/Skew MR scanner measures 25-delta put-minus-call IV history for one listed expiry nearest 30 DTE. Missing history is shown explicitly and cannot satisfy the skew gate; see [source and comparability rules](vol-skew-mr.md#data-sources-per-ticker).

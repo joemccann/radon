@@ -1,5 +1,7 @@
 "use client";
+import RequestError from "@/components/RequestError";
 
+import { userErrorMessage } from "@/lib/userError";
 import { useCallback, useEffect, useState } from "react";
 import { FileSearch } from "lucide-react";
 import InfoTooltip from "@/components/InfoTooltip";
@@ -215,13 +217,7 @@ export default function FilingForensicsDossier({
 
   if (error) {
     return (
-      <SectionEmptyState
-        icon={FileSearch}
-        headline="Filing forensics unavailable"
-        secondary={`${error}. Treat this as unknown, not as an all clear.`}
-        tone="danger"
-        testId="filing-forensics-error"
-      />
+      <><RequestError error={error} testId="filing-forensics-error" /><SectionEmptyState icon={FileSearch} headline="Filing forensics" secondary="No current dossier to display. Treat this as unknown, not as an all clear." action={{ label: "Refresh", onClick: () => void load() }} /></>
     );
   }
 

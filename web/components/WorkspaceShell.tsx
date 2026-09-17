@@ -1,5 +1,7 @@
 "use client";
 
+import RequestError from "@/components/RequestError";
+
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
@@ -76,6 +78,7 @@ export default function WorkspaceShell({ section, tickerParam, initialPortfolio 
   const navLabel = navItems.find((item) => item.route === activeSection)?.label ?? "Dashboard";
   const activeLabel = activeSection === "ticker-detail" && tickerParam ? tickerParam : navLabel;
   const headerOwnsPageHeading = activeSection !== "ticker-detail"
+    && activeSection !== "ai-industry"
     && activeSection !== "watchlist"
     && activeSection !== "admin";
   const { toasts, exitingIds, addToast, upsertToast, dismissToast, hasToastKey } = useToast();
@@ -606,10 +609,7 @@ export default function WorkspaceShell({ section, tickerParam, initialPortfolio 
         <div className="content">
           <OfflineBanner />
           {liveDataError ? (
-            <div className="live-data-degraded" role="alert" data-testid="live-data-degraded">
-              <strong>Live data degraded</strong>
-              <span>{liveDataError}</span>
-            </div>
+            <RequestError error={liveDataError} fallback="Live data could not be refreshed. Previously loaded values may be out of date." testId="live-data-degraded" />
           ) : null}
 
           {activeSection === "dashboard" ? (

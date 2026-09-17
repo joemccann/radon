@@ -1,3 +1,6 @@
+# Toast error audit 2026-09-17: chat-launcher-focus, flow-analysis-ticker, scanner-ticker-scan and ticker-search-chain now execute in the CI curated suite.
+# REVIEWED 2026-09-17 portfolio-mixed-combo-today-pnl.spec.ts - jsdom PositionTable Today P&L +$1,000 vs P&L +$3,500; Vitest SPY 740/760 screenshot numbers. Browser suite remains held out pending next start preflight.
+# clear-shell.spec.ts is curated in ci.yml for AI industry desktop/mobile navigation verification.
 # research-workbench.spec.ts is curated in ci.yml: source citations, mobile/desktop, exports and safe handoff.
 # REVIEWED 2026-09-15 aaoi-risk-reversal-max-loss.spec.ts - Static locator adaptation to the shared header table; existing order assertions retained. Browser suite remains held out.
 # REVIEWED 2026-09-15 chain-held-leg-prices.spec.ts - Static locator adaptation to the shared header table; existing price assertions retained. Browser suite remains held out.
@@ -9,6 +12,7 @@
 # REVIEWED 2026-09-15 short-strangle-skew.spec.ts - Static locator adaptation to the shared header table; skew assertions retained. Browser suite remains held out.
 # REVIEWED 2026-09-15 ticker-search-chain.spec.ts - Static locator adaptation to the shared header table; search and order assertions retained. Browser suite remains held out.
 # REVIEWED 2026-09-16 mobile-scanner-mode-tabs-overflow.spec.ts - Tab count pin 7 to 8 for Vol/Skew MR. Vitest scanner-mode-tabs covers the new tab. Browser suite remains held out pending next start preflight.
+# REVIEWED 2026-09-17 mobile-info-tooltip-safe-area.spec.ts - Stubbed scanner payload; asserts the tooltip popup clears an injected --safe-top inset and every viewport edge. Browser suite remains held out.
 # REVIEWED 2026-09-16 vol-skew-mr-scanner.spec.ts - Stubbed mode tab + TOP_MR/BOTTOM_MR/continue labels. Vitest + gate pytest cover the family. Held out pending next start preflight.
 # CI e2e curation ledger — every web/e2e/*.spec.ts must appear HERE or in the
 # curated `npx playwright test` arg list of the `e2e-financial-smoke` job in
@@ -50,7 +54,6 @@ catalyst-card-weekend.spec.ts
 chain-held-leg-prices.spec.ts
 chain-sticky-header.spec.ts
 chain-strikes-selector.spec.ts
-chat-launcher-focus.spec.ts
 clear-accessibility.spec.ts
 clear-admin-component.spec.ts
 clear-all-pages.spec.ts
@@ -59,7 +62,6 @@ clear-metric-accessibility.spec.ts
 clear-overview.spec.ts
 clear-performance.spec.ts
 clear-research.spec.ts
-clear-shell.spec.ts
 clear-workspace-interactions.spec.ts
 cor-tab.spec.ts
 crcl-spread-builder.spec.ts
@@ -79,7 +81,6 @@ dollar-delta-leverage.spec.ts
 ma-ratio-tab.spec.ts
 calm-streak-tab.spec.ts
 fill-toast.spec.ts
-flow-analysis-ticker.spec.ts
 header-fullscreen.spec.ts
 hhlev-tab.spec.ts
 hyad-tab.spec.ts
@@ -102,6 +103,7 @@ mobile-cockpit-book-layout.spec.ts
 mobile-combo-instrument-switcher.spec.ts
 mobile-daily-dark-pool-history.spec.ts
 mobile-executed-journal.spec.ts
+mobile-info-tooltip-safe-area.spec.ts
 mobile-newsfeed-layout.spec.ts
 mobile-order-ticket.spec.ts
 mobile-orders.spec.ts
@@ -138,6 +140,7 @@ performance-page.spec.ts
 pltr-chain-position-focus.spec.ts
 portfolio-leg-row-runtime.spec.ts
 portfolio-market-closed.spec.ts
+portfolio-mixed-combo-today-pnl.spec.ts
 portfolio-ratio-risk-reversal-label.spec.ts
 portfolio-request-cadence.spec.ts
 portfolio-return-capital.spec.ts
@@ -171,7 +174,6 @@ rv-ratio.spec.ts
 scanner-discover.spec.ts
 scanner-leap-garch-tabs.spec.ts
 scanner-tab-gaps.spec.ts
-scanner-ticker-scan.spec.ts
 short-strangle-skew.spec.ts
 sidebar-performance-hidden.spec.ts
 skew-tab.spec.ts
@@ -184,12 +186,10 @@ sync-fallback.spec.ts
 theta-harvester-prefill.spec.ts
 theta-harvester-scanner.spec.ts
 ticker-page.spec.ts
-ticker-search-chain.spec.ts
 ticker-search-live.spec.ts
 trin-tab.spec.ts
 vixcor-tab.spec.ts
 vol-cone-tab.spec.ts
-vol-skew-mr-scanner.spec.ts
 vxn-index-routing.spec.ts
 watchlist-page.spec.ts
 ws-connection-stability.spec.ts

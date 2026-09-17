@@ -1,6 +1,6 @@
 ---
 name: reliability-weekend
-description: Weekend reliability loop - daily delta-audit of everything merged since the last audited SHA (new findings appended to RELIABILITY_AUDIT.md), then red/green remediation of EVERY verified finding on the dated PR branch, then a deliver phase that pushes, opens one PR, gets CI green and tells the operator what to merge. Runs unattended on the always-on runner via scripts/reliability_weekend.sh, one daily cycle at 00:00 local that runs audit, remediate, then deliver; invoke as /reliability-weekend audit, /reliability-weekend remediate or /reliability-weekend deliver.
+description: Weekend reliability loop - daily delta-audit of everything merged since the last audited SHA (new findings appended to RELIABILITY_AUDIT.md), then red/green remediation of EVERY verified finding on the dated PR branch, then a deliver phase that publishes substantive changes only, gets their CI green and tells the operator what to merge. Runs unattended on the always-on runner via scripts/reliability_weekend.sh, one daily cycle at 00:00 local that runs audit, remediate, then deliver; invoke as /reliability-weekend audit, /reliability-weekend remediate or /reliability-weekend deliver.
 ---
 
 # Reliability Weekend Loop
@@ -33,13 +33,51 @@ unattended job fires once a day at 00:00 local and runs `audit`, then
 `remediate`, then `deliver` sequentially in this loop's own clone. The loop
 never merges; the human merge is the deploy trigger.
 
+## Substantive publication gate (all phases)
+
+Publish only a substantive net change against current `origin/main`: source,
+tests, maintained product/operator documentation, configuration, or an actual
+CI experiment. A real experiment remains eligible while `VALIDATING` or
+`INSUFFICIENT_SAMPLE`; status words do not decide whether its diff has value.
+Known nightly audit/log ledgers, `tasks/`, runner-only reports, checkpoint
+dates and lessons alone are bookkeeping, not a reason for a commit, push or
+PR. Maintained product reports, documentation and real generated-content
+changes remain eligible; never exclude `docs/` or `reports/` wholesale. Never
+manufacture a change to satisfy a completion check. Inspect the diff before
+committing; keep report-only work in durable runner scratch and the existing
+rolling issue. This rule governs every commit/push instruction and historical
+lesson below.
+
+After a substantive task is committed, run
+`python3.13 scripts/nightly_publish.py check --base origin/main --head HEAD`.
+Exit 0 means substantive; 3 means no-op; 1 means error and must stop publication.
+The publisher rechecks current main before any push. All new PR creation goes
+through `python3.13 scripts/nightly_publish.py publish --base main --head <branch> --title <title> --body-file <body-file>`.
+It owns the push; do not push a new nightly branch first or bypass the guard.
+Read JSON `status`: `published` (exit 0) includes `pr_url` and `head_sha`;
+`noop` exits 3 without publication; `error` exits 1 and must stop. Never invent a URL. Existing
+substantive PRs still resume through the deliver record and CI watch.
+
+For report-only audits, post the completed audit range, findings/acceptance
+criteria and `audited-through: <verified-origin-main-sha>` to the existing
+rolling issue before declaring completion. That issue is the authoritative
+checkpoint and remediation handoff when the disposable worktree is discarded;
+a local ledger alone is not durable. Every successful checkpoint must carry
+forward ALL still-open findings, their IDs, source evidence, acceptance criteria
+and blocked/operator actions from the previous checkpoint, even on a zero-delta
+night. Include resolved IDs with evidence so closure is explicit. Both audit
+and remediation read this complete checkpoint before legacy ledgers; no open
+finding may disappear when older issue comments are pruned. Do not advance the
+checkpoint after an incomplete audit. A zero-finding/no-safe-change run reports its reason there, creates no
+artificial commit or PR, and follows the no-op contract below.
+
 ## Hard rails (both modes — violating any of these is a failed run)
 
 1. **Never touch the IB Gateway.** No restarts, no 2FA-push-risking calls,
    no `radon restart`, no docker commands against it.
 2. **Never place, modify, or cancel a live order.** Fault injection is
    fakes/mocks only. Never set or clear the production trading halt.
-3. **Never push to `main`.** All changes land on a branch
+3. **Never push to `main`.** Substantive changes land on a branch
    `reliability/<YYYY-MM-DD>` and a PR. The human merge is the
    deploy trigger.
 4. **Never run against the operator's working clone.** Refuse (exit
@@ -52,8 +90,8 @@ never merges; the human merge is the deploy trigger.
 6. **Bounded per session, complete overall.** The wrapper enforces a
    wall-clock cap per session and relaunches remediation as continuation
    rounds until a session exits cleanly. Never leave work half-applied;
-   commit after every completed task, never mid-task, and push the branch
-   after every task commit so a killed round loses nothing. In remediate
+   commit after every completed substantive task, never mid-task, and publish
+   through the shared guard so a killed round loses nothing. In remediate
    mode, `DEFERRED` is not an allowed outcome: do not stop early to log
    un-started work for a future date — keep working the backlog until it
    is empty (the only non-DONE end state is `BLOCKED` with a root-cause
@@ -64,10 +102,11 @@ never merges; the human merge is the deploy trigger.
 
 Goal: a DELTA audit — judge what changed, don't re-audit the world.
 
-1. Read `RELIABILITY_AUDIT.md` §Audit ledger for the last audited SHA.
+1. Read the newest successful `audited-through:` checkpoint from the existing
+   rolling issue; fall back to `RELIABILITY_AUDIT.md` §Audit ledger only if absent.
    Compute the changed surface: `git log --stat <last-sha>..HEAD`. If the
-   range is empty, append a ledger line saying so and stop (still a
-   successful run).
+   range is empty, complete the standing sweeps, persist the checkpoint on
+   the rolling issue, and declare no-op (still a successful run).
    Widen it with `tools/codemap/codemap.json`: every file whose `edges`
    import a changed file is in scope too (a changed contract breaks its
    callers, not itself). Confirm with `rg`; the map refreshes nightly.
@@ -92,10 +131,10 @@ Goal: a DELTA audit — judge what changed, don't re-audit the world.
    backlog rows (continuing REL-numbers) with fault-injection acceptance
    criteria. Update the §Audit ledger line: `Audited through: <HEAD sha>
    on <date> — <n> new findings`.
-6. Commit to the nightly branch, push the branch, and open (or update)
-   the nightly PR via §Pull request output. Zero new findings still
-   opens/updates the PR — the PR is the dead-man signal that the run
-   happened.
+6. Post the complete audit checkpoint and remediation handoff to the existing
+   rolling issue. Finding/ledger-only work is not a publishable change;
+   declare audit no-op after the handoff is durable. Publish only if the
+   branch already contains a substantive change under the shared gate.
 
 ## Mode: remediate (second phase of the daily cycle)
 
@@ -108,15 +147,16 @@ BLOCKED-with-root-cause.
 **Remediate mandate.** Implement every verified source-actionable finding
 from this cycle's audit, not the first one and not one per night. Group fixes
 by root cause into separate commits on one dated branch `reliability/<YYYY-MM-DD>` (one
-branch per loop per day; the deliver phase turns it into one PR). Red/green
+branch per loop per day; the deliver phase publishes its substantive diff as one PR). Red/green
 per fix; the full project gates before every commit. Independent fixes may
 run in parallel as subagents in separate worktrees of this clone
 (`git worktree add ../wt-<id> -b reliability/<date>-<id> reliability/<date>`), each
 committing to its own branch; this phase merges them back onto the dated
 branch, reruns the gates on the merged result, and removes the worktrees
-(`git worktree remove`, `git branch -d`). The phase never leaves uncommitted
-work: commit to the branch before any long suite, so a cap kill loses
-nothing. A finding is done only as DONE, BLOCKED (root-cause hypothesis
+(`git worktree remove`, `git branch -d`). Preserve substantive work with a local
+commit before any long suite. Keep
+report-only state in durable scratch and the rolling issue; it does not
+require a commit. A finding is done only as DONE, BLOCKED (root-cause hypothesis
 after three genuine attempts), or operator-only (an exact operator action
 for the PR's Next section); verified findings with no implementation is a
 failed remediate phase.
@@ -131,7 +171,7 @@ failed remediate phase.
    (d) run the full gates from the repo root (`python3.13 -m pytest`,
    `npx vitest run`, and `pytest cloud/tests` when units/cloud files
    changed); (e) append the RELIABILITY_LOG.md row with red/green counts;
-   (f) commit with the REL-### id and push the branch. Forbidden moves: widening a catch
+   (f) commit with the REL-### id and publish through the shared guard. Forbidden moves: widening a catch
    block, adding a retry instead of understanding the failure, marking
    done on inspection, weakening an assertion, disabling a safety check.
 3. If blocked after 3 attempts on a task, log `BLOCKED` with a root-cause
@@ -143,14 +183,15 @@ failed remediate phase.
    `test_daemon_bounded`, `test_snapshot_unavailable`,
    `order-idempotency-durability`) plus three consecutive full-gate runs.
    Record the counts in the log.
-5. Push the branch; rewrite the PR via §Pull request output. DONE/BLOCKED
+5. If substantive work exists, publish via §Pull request output; otherwise
+   finish the report and declare no-op. DONE/BLOCKED
    tables and gate counts ×3 go on the rolling issue. If `cloud/services/*`
    changed, `--next` is the root `bootstrap-control-plane.sh` install-copy
    before merge. CI on that PR is the deliver phase's job (§Mode: deliver).
 
 ## Mode: deliver (third phase of the daily cycle)
 
-Goal: every commit the remediate phase landed on `reliability/<YYYY-MM-DD>` reaches the
+Goal: every substantive net change the remediate phase landed on `reliability/<YYYY-MM-DD>` reaches the
 operator as ONE pull request with CI green, in this same cycle, and the
 operator is told exactly what is ready to merge. The loop never merges.
 The wrapper caps this phase at 3h (`RADON_WEEKEND_DELIVER_CAP_SECS`,
@@ -162,9 +203,17 @@ default 10800).
    and PR number are the run to finish: check the branch out, make its CI
    green (step 4), record the outcome, then continue with today's branch.
    Never open a second PR for a branch that already has one.
-2. Push the dated branch. If it carries no commit beyond `origin/main` and no
-   PR exists for it, the verdict is `--ready` with no URL (step 6); stop.
-3. Open ONE PR for the branch via §Pull request output (`--loop reliability`);
+2. Classify the dated branch with
+   `python3.13 scripts/nightly_publish.py check --base origin/main --head HEAD`.
+   Exit 3 means no substantive diff, even when ledger-only commits exist.
+   If this phase has no substantive PR to resume or report, record
+   `python3.13 scripts/nightly_deliver.py record --loop reliability --branch "" --status green`
+   with no PR number or URL, then emit the step 6 verdict with no URLs:
+   `NIGHTLY DELIVER READY: loop=reliability prs=0`. Do not push or create a PR.
+   Keep any resumed substantive PR's record and URL in the final verdict even
+   when today's branch is no-op; do not erase it with an empty record.
+   Exit 1 is INCOMPLETE, never no-op. Exit 0 continues to guarded publication.
+3. Publish ONE substantive PR through the guarded publisher in §Pull request output (`--loop reliability`);
    update the existing PR when one is already open for the branch (`gh api
    -X PATCH`). Every operator-only finding from this cycle's audit (external
    state, credential rotation, host policy, a `BLOCKED` item) goes into the
@@ -195,46 +244,29 @@ default 10800).
 
 ## Declaring a no-op phase
 
-The wrapper scores `audit` and `remediate` on a commit landing on the nightly
-branch during the phase: exit 0 with an unmoved HEAD is `INCOMPLETE (agent
-exited 0 without committing to the nightly branch)`, exit 75. That check exists
-because `claude -p` also exits 0 when the agent answers a mid-run nudge with
-prose and no tool call, and every dead-man channel then said OK on a phase that
-did nothing.
+Complete the audit/remediation work and persist the rolling-issue checkpoint
+and report first. Zero findings, no safe actionable change, or bookkeeping-only
+diffs are successful no-op outcomes, not a reason to commit or open a PR.
+Print the following as the LAST stdout line, at column 0, with this loop and
+the phase actually completed:
 
-A finished phase with genuinely nothing to commit is indistinguishable from
-that stall by HEAD alone, so you declare the difference. When you have done the
-full phase — the whole delta range read, every sweep run, the report written —
-and the honest result is that there is nothing to commit, print exactly this as
-the last thing you emit, unindented, at column 0:
-
-```
-NIGHTLY PHASE NO-OP: loop=reliability phase=<audit|remediate> <one-line reason>
+```text
+    NIGHTLY PHASE NO-OP: loop=reliability phase=<audit|remediate> reason=<one-line reason>
 ```
 
-For example (indented here on purpose — see the third rule below):
+Examples are indented so echoing this manual is not a declaration:
 
+```text
+    NIGHTLY PHASE NO-OP: loop=reliability phase=audit reason=no new findings in the delta range
+    NIGHTLY PHASE NO-OP: loop=reliability phase=remediate reason=no safe source-actionable changes
 ```
-    NIGHTLY PHASE NO-OP: loop=reliability phase=audit no new findings in the delta range
-    NIGHTLY PHASE NO-OP: loop=reliability phase=remediate 0 source-actionable P0/P1 items
-```
 
-Rules, all of them enforced by `scripts/tests/test_phase_noop_declaration.py`:
-
-- The line must name THIS loop and THIS phase. A line copied from a sibling
-  loop or a different phase does not count.
-- It must start at column 0. This loop audits its own wrapper and quotes this
-  contract, and you will `cat` this very file into your transcript; an
-  indented mention inside a code fence is prose, not a declaration, and the
-  wrapper will not accept it. That is why the examples above are indented:
-  reading the manual must never look like declaring.
-- It is a declaration of completion, not an excuse. Emit it only when the phase
-  ran end to end. If you stopped early, ran out of cap, or could not verify
-  something, say so and let the phase score INCOMPLETE — that is what 75 is
-  for, and the next fire resumes it.
-- Never emit it when you did commit. A commit is its own evidence.
-- Silence is still INCOMPLETE. Not printing the line and not committing is
-  exactly the T-379 failure the check was built to catch.
+The wrapper accepts this explicit completion instead of a commit. Emit it only
+when every applicable stage finished and the checkpoint/report is durable;
+cap exhaustion, an unverified gate or unfinished work is INCOMPLETE. Do not
+emit it after landing substantive work. Silence remains INCOMPLETE. A sibling
+loop/phase marker or an indented quote is not a declaration. The protocol is
+covered by `scripts/tests/test_phase_noop_declaration.py`.
 
 ## Long stages run detached and are awaited in-session
 
@@ -285,24 +317,25 @@ The body has exactly three sections, in this order: **Issue discovered**,
 **What was done to fix it**, **Next**. Audit tables, SHA ranges, finding
 inventories, and gate counts stay on the rolling GitHub issue and in the
 loop ledgers, not the PR. Title shape: `Reliability <date>: <plain-language
-issue>`. Create a new dated branch, or a new remediation PR after the
-audit PR merged, with `gh pr create --title <title> --body <body>
---head <branch> --base main` (or `POST /repos/{owner}/{repo}/pulls` with
-`head`, `base`, `title`, and `body`). Formatter `--json` is `{title, body}`
-only; do not POST it as the create payload. Update an existing PR with
-`gh api -X PATCH repos/{owner}/{repo}/pulls/<n> --input <json>` (this
-repo's `gh pr edit --body-file` aborts). Verify with a grep for a phrase
-you just wrote.
+issue>`. Publish a substantive dated branch, including a new remediation after an
+older PR merged, only through
+`python3.13 scripts/nightly_publish.py publish --base main --head <branch> --title <title> --body-file <body-file>`.
+Write the formatter's exact body to that file. The publisher owns the guarded
+push and PR lookup/creation; inspect its JSON result. A no-op result publishes
+nothing. Update the body of an existing substantive PR with
+`gh api -X PATCH repos/{owner}/{repo}/pulls/<n> --input <json>` when needed
+(this repo's `gh pr edit --body-file` aborts), then verify the resulting body.
 
-Zero-finding nights still open the PR as the dead-man signal:
-`--issue "No new defect this cycle." --fix "Recorded the audit. No code change." --next "No deploy needed."`
+Zero-finding and bookkeeping-only nights report on the existing rolling issue;
+no PR is opened or updated merely as proof of life.
 
 ## Dead-man reporting
 
-Every phase outcome is reported three ways, so a silent-dead runner shows up
+Every phase outcome is reported through the issue and notification, so a
+silent-dead runner shows up
 the next morning at the latest: a comment on the rolling GitHub issue
 labeled `reliability-nightly`, a Pushover notification per phase carrying
-the status and the nightly PR link when one exists, and the PR itself.
+the status and the nightly PR link when one exists, and a PR only for substantive work.
 
 The wrapper posts one runner-health comment per phase, not the three-section
 write-up:
@@ -358,7 +391,8 @@ phase, not a quiet night.
 
 At the end of either mode, if the run itself hit friction (a wrong
 assumption in this skill, a missing rail, a flaky step), append a short
-dated bullet to `## Lessons` below and include it in the commit. That is
+dated bullet to `## Lessons` below alongside substantive work only; otherwise
+persist it on the rolling issue. That is
 how this loop improves as the codebase grows.
 
 ## Lessons
@@ -499,8 +533,8 @@ how this loop improves as the codebase grows.
   merged mid-weekend, so `gh pr list --head <branch>` returned `[]` and step 5's
   "update the PR body" had nothing to update. Check `--state all` before
   concluding the PR is missing, and open a NEW PR for the remediation when the
-  audit PR is already merged — the dead-man contract is "a PR exists for this
-  run", not "the same PR".
+  audit PR is already merged — the substantive publication gate still applies: resume or publish only
+  actual unmerged work; report-only runs need no PR.
 - 2026-08-23 (remediate): **run the full gate BEFORE the drills, not after.**
   Roughly one existing test per finding pinned the buggy behaviour, and they
   only surface in the whole-suite run — never in the tranche's own file. Budget
@@ -988,10 +1022,27 @@ These win over the manual on every conflict.
 The wrapper does not read your prose. It reads these signals, and nothing
 else decides whether tonight counted:
 
-- **audit / remediate:** the phase counts as complete only if you have made at
-  least one commit on the branch `reliability/<YYYY-MM-DD>` (today's date, the
-  branch the manual tells you to use). An exit without a commit is scored
-  INCOMPLETE, whatever you print.
+- **audit / remediate:** substantive work is committed on
+  `reliability/<YYYY-MM-DD>`. A completed phase with zero findings, no safe change,
+  or only audit/log/tasks bookkeeping instead persists its checkpoint and
+  handoff on the existing rolling issue and prints this LAST stdout line:
+
+      NIGHTLY PHASE NO-OP: loop=reliability phase=<audit|remediate> reason=<one-line reason>
+
+  Emit the actual phase at column 0, not the indented example. Do not create
+  an artificial commit or PR for completion evidence. An unfinished phase or
+  an exit with neither substantive work nor a valid no-op is INCOMPLETE.
+  The rolling issue is authoritative after a disposable worktree is removed.
+  Every successful checkpoint carries forward all still-open findings and
+  acceptance criteria; remediation reads it before legacy local ledgers.
+
+- **publication:** preflight committed work with
+  `python3.13 scripts/nightly_publish.py check --base origin/main --head HEAD`:
+  0 substantive, 3 no-op, 1 error. Create PRs only with
+  `python3.13 scripts/nightly_publish.py publish --base main --head <branch> --title <title> --body-file <body-file>`.
+  It owns the guarded push and returns JSON; never bypass it. A real source,
+  docs, test or CI experiment remains eligible while VALIDATING or
+  INSUFFICIENT_SAMPLE; report-only status churn does not.
 
 - **deliver:** your FINAL line of stdout must be exactly one of
 
@@ -1002,4 +1053,12 @@ else decides whether tonight counted:
   `python3 scripts/nightly_deliver.py record ...` exactly as the manual
   describes. READY means CI is green on every PR you are naming. Never print
   READY for a PR whose checks are pending, failing, or unknown.
+  Resume existing substantive PRs before considering today's no-op. If the
+  shared publisher finds no substantive diff and no PR needs resuming or
+  reporting from this phase, record
+  `python3.13 scripts/nightly_deliver.py record --loop reliability --branch "" --status green`
+  without a PR number or URL and emit `NIGHTLY DELIVER READY: loop=reliability prs=0`.
+  A no-op today must not erase a resumed PR's record or final verdict URL.
+  Bookkeeping-only commits never justify a push or PR. Publication uses only
+  `python3.13 scripts/nightly_publish.py publish --base main --head <branch> --title <title> --body-file <body-file>`.
 

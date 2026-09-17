@@ -329,11 +329,15 @@ class TestGrokPromptAndPlaybook:
         assert "fix/" in text
         assert "ir_ensure_pr.py" in text
 
-    def test_grok_doc_documents_pat_scopes_and_enablement(self):
+    def test_grok_doc_keeps_the_credential_off_the_vps(self):
+        """Push and merge are the same GitHub permission, so the host running
+        an agent over untrusted page text holds no credential: it commits, and
+        the Mac mini pickup job pushes and opens the PR."""
         text = GROK_DOC.read_text(encoding="utf-8")
-        assert "Contents" in text
-        assert "Pull requests" in text
-        assert "Administration" not in text or "not" in text.lower()
+        assert "no GitHub credential" in text
+        assert "grok_fix_pickup.py" in text
+        assert "GROK_PAGE_AUTOPUSH=0" in text
+        assert ".github/" in text
         assert "ir_ensure_pr.py" in text
         assert "git push origin main" not in text.split("## Path", 1)[1].split(
             "## Install", 1

@@ -78,6 +78,32 @@ type PlaceBody = {
   idempotencyKey?: string;
 };
 
+/** F20260917-C05: the futures multiplier feeds order_limits' notional cap, so
+ *  it must come from the contract definition, never the client. Resolve it from
+ *  FastAPI /futures/chain (conId preferred, else expiry+exchange). Returns null
+ *  when the contract or a valid multiplier cannot be resolved — the caller
+ *  fails closed. */
+async function resolveFuturesMultiplier(body: PlaceBody): Promise<number | null> {
+  try {
+    const chain = await radonFetch<{ contracts?: Array<Record<string, unknown>> }>(
+      `/futures/chain?symbol=${encodeURIComponent(body.symbol.toUpperCase())}`,
+      { timeout: 28_000 },
+    );
+    const contracts = Array.isArray(chain?.contracts) ? chain.contracts : [];
+    const match = contracts.find((c) =>
+      body.conId != null
+        ? Number(c.conId) === body.conId
+        : String(c.expiry ?? "") === String(body.expiry ?? "")
+          && String(c.exchange ?? "") === String(body.exchange ?? ""),
+    );
+    if (!match) return null;
+    const multiplier = Number(match.multiplier);
+    return Number.isFinite(multiplier) && multiplier > 0 ? multiplier : null;
+  } catch {
+    return null;
+  }
+}
+
 async function readOrdersSnapshotBestEffort() {
   try {
     return await readOrdersSnapshotFromDb();
@@ -315,6 +341,37 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
 
+    // F20260917-C05: server-resolved futures multiplier. A client-supplied
+    // value that mismatches the contract's is refused; unresolvable fails
+    // closed before anything reaches IB.
+    let futuresMultiplier: number | null = null;
+    if (body.type === "future") {
+      futuresMultiplier = await resolveFuturesMultiplier(body);
+      if (futuresMultiplier == null) {
+        return setNoStoreResponseHeaders(
+          jsonApiError({
+            message:
+              "Futures contract multiplier could not be resolved from the contract definition — order refused",
+            status: 422,
+            code: "VALIDATION_ERROR",
+            requestId,
+          }),
+          requestId,
+        );
+      }
+      if (body.multiplier != null && body.multiplier !== futuresMultiplier) {
+        return setNoStoreResponseHeaders(
+          jsonApiError({
+            message: "multiplier does not match the contract definition",
+            status: 400,
+            code: "VALIDATION_ERROR",
+            requestId,
+          }),
+          requestId,
+        );
+      }
+    }
+
     const orderPayload = {
       type: body.type || "stock",
       symbol: body.symbol.toUpperCase(),
@@ -348,7 +405,8 @@ export async function POST(request: Request): Promise<Response> {
             ...(body.conId != null ? { conId: body.conId } : {}),
             ...(body.expiry ? { expiry: body.expiry } : {}),
             ...(body.exchange ? { exchange: body.exchange } : {}),
-            ...(body.multiplier != null ? { multiplier: body.multiplier } : {}),
+            // F20260917-C05: always the server-resolved value, never the client's.
+            multiplier: futuresMultiplier,
           }
         : {}),
       ...(body.type === "combo" && body.legs

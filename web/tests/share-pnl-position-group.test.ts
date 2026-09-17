@@ -386,22 +386,128 @@ describe("short call buy-to-close return %", () => {
  * principles and shown inline so a wrong assertion cannot hide a real bug.
  */
 
-describe("multi-leg portfolio fallback — direction sign must be: LONG = paid (−1), SHORT = received (+1)", () => {
+describe("multi-leg portfolio fallback — debit entry is positive (share-card polarity)", () => {
+  /* Closed SPCX bull call 10/16 (Short $170 Call / Long $155 Call).
+   * Opening fills are off the executed-orders lookback; the position is still
+   * in the portfolio snapshot. Share-card entry must match opening-leg / P&L
+   * identity polarity: debit paid is POSITIVE, credit received is NEGATIVE.
+   *
+   * avg_cost is per-CONTRACT:
+   *   LONG  $155 Call  498 → $4.98/share
+   *   SHORT $170 Call  100 → $1.00/share
+   *   net debit = 4.98 − 1.00 = $3.98
+   *
+   * Pre-fix: LONG=−1 / SHORT=+1 yielded −$3.98 on the social card.
+   */
+  const contracts = 10;
+  const totalPnL = 1100;
+  const closeGroup: PositionFillGroup = {
+    id: "close-spcx-bcs",
+    symbol: "SPCX",
+    description: "Closed SPCX Bull Call Spread 10/16 (Short $170 Call / Long $155 Call)",
+    isClosing: true,
+    totalQuantity: contracts,
+    netPrice: 5.08,
+    totalCommission: -5.0,
+    totalPnL,
+    time: "2026-09-17T18:29:00+00:00",
+    fills: [
+      makeOptionFill({
+        execId: "close-spcx-long",
+        symbol: "SPCX",
+        side: "SLD",
+        quantity: contracts,
+        avgPrice: 6.10,
+        realizedPNL: 800,
+        time: "2026-09-17T18:29:00+00:00",
+        contract: { conId: 155001, symbol: "SPCX", strike: 155, right: "C", expiry: "2026-10-16" },
+      }),
+      makeOptionFill({
+        execId: "close-spcx-short",
+        symbol: "SPCX",
+        side: "BOT",
+        quantity: contracts,
+        avgPrice: 1.02,
+        realizedPNL: 300,
+        time: "2026-09-17T18:29:00+00:00",
+        contract: { conId: 170001, symbol: "SPCX", strike: 170, right: "C", expiry: "2026-10-16" },
+      }),
+    ],
+  };
+
+  const portfolioCombo = (
+    shortAvgCost: number,
+  ): PortfolioPosition => ({
+    id: 42,
+    ticker: "SPCX",
+    structure: "Bull Call Spread $155/$170",
+    structure_type: "defined",
+    risk_profile: "defined",
+    expiry: "2026-10-16",
+    contracts,
+    direction: "LONG",
+    entry_cost: 3980,
+    max_risk: 3980,
+    market_value: null,
+    legs: [
+      {
+        direction: "LONG",
+        contracts,
+        type: "Call",
+        strike: 155,
+        entry_cost: 4980,
+        avg_cost: 498,
+        market_price: null,
+        market_value: null,
+      },
+      {
+        direction: "SHORT",
+        contracts,
+        type: "Call",
+        strike: 170,
+        entry_cost: -1000,
+        avg_cost: shortAvgCost,
+        market_price: null,
+        market_value: null,
+      },
+    ],
+    kelly_optimal: null,
+    target: null,
+    stop: null,
+    entry_date: "2026-09-04",
+  });
+
+  it("bull call share entry is the $3.98 debit paid, not a negative cash-flow", () => {
+    const data = positionGroupShareData(closeGroup, [closeGroup], [portfolioCombo(100)]);
+    expect(data.entryPrice).toBeCloseTo(3.98, 2);
+    expect(data.entryPrice).toBeGreaterThan(0);
+    expect(data.exitPrice).toBeCloseTo(5.08, 2);
+    expect(data.entryTime).toBe("2026-09-04");
+  });
+
+  it("still treats a short-leg avg_cost that is already signed as a $1.00 credit", () => {
+    const data = positionGroupShareData(closeGroup, [closeGroup], [portfolioCombo(-100)]);
+    expect(data.entryPrice).toBeCloseTo(3.98, 2);
+    expect(data.entryPrice).toBeGreaterThan(0);
+  });
+});
+
+describe("multi-leg portfolio fallback — direction sign must be: LONG = debit (+1), SHORT = credit (−1)", () => {
   /* Bull Call Spread: Long $90 Call / Short $95 Call, 10 contracts.
    *
    * avg_cost is per-CONTRACT for options (already ×100):
    *   LONG $90 Call  avg_cost = 800  → per-share = 800 / 100 = $8.00
    *   SHORT $95 Call avg_cost = 300  → per-share = 300 / 100 = $3.00
    *
-   * Net entry price (per share, sign convention: paid = negative):
-   *   sign(LONG)  = −1  →  −1 × 8.00 = −8.00
-   *   sign(SHORT) = +1  →  +1 × 3.00 = +3.00
-   *   netCost = −8.00 + 3.00 = −5.00  (net debit)
+   * Net entry price (per share, same polarity as opening-leg matching):
+   *   sign(LONG)  = +1  →  +1 × 8.00 = +8.00
+   *   sign(SHORT) = −1  →  −1 × 3.00 = −3.00
+   *   netCost = +8.00 − 3.00 = +5.00  (net debit paid)
    *
-   * Mutating LONG→+1 / SHORT→−1 gives netCost = +8.00 − 3.00 = +5.00 (wrong sign).
-   * The test pins entryPrice < 0 (debit position) to kill that mutant.
+   * Mutating LONG→−1 / SHORT→+1 gives netCost = −5.00 (cash-flow sign, wrong
+   * on the share card — SPCX bull call rendered ENTRY -$3.98).
    *
-   * entryNotional = |−5.00| × 10 contracts × 100 = $5,000
+   * entryNotional = |+5.00| × 10 contracts × 100 = $5,000
    * pnlPct        = 2,500 / 5,000 × 100 = +50%
    */
   const totalPnL = 2500;
@@ -411,7 +517,7 @@ describe("multi-leg portfolio fallback — direction sign must be: LONG = paid (
   const multiplier = 100;
   const longPerShare = longAvgCostPerContract / multiplier;    // $8.00
   const shortPerShare = shortAvgCostPerContract / multiplier;  // $3.00
-  const netCost = -longPerShare + shortPerShare;               // −5.00 (debit)
+  const netCost = longPerShare - shortPerShare;                // +5.00 (debit paid)
   const entryNotional = Math.abs(netCost) * contracts * multiplier; // $5,000
   const expectedPct = (totalPnL / entryNotional) * 100;       // +50%
 
@@ -478,13 +584,13 @@ describe("multi-leg portfolio fallback — direction sign must be: LONG = paid (
     entry_date: "2026-06-01",
   };
 
-  it("multi-leg net cost uses LONG=paid(−1) / SHORT=received(+1) sign convention", () => {
+  it("multi-leg net cost uses LONG=debit(+1) / SHORT=credit(−1) sign convention", () => {
     const data = positionGroupShareData(closeGroup, [closeGroup], [portfolioCombo]);
 
-    // entryPrice must be negative — a net debit position was paid for
-    // Mutation M14 (sign flip: LONG→+1, SHORT→−1) gives +5.00 (wrong)
-    expect(data.entryPrice).toBeCloseTo(netCost, 6);   // ≈ −5.00
-    expect(data.entryPrice).toBeLessThan(0);
+    // entryPrice must be positive — a net debit was paid
+    // Mutation M14 (sign flip: LONG→−1, SHORT→+1) gives −5.00 (wrong on the card)
+    expect(data.entryPrice).toBeCloseTo(netCost, 6);   // ≈ +5.00
+    expect(data.entryPrice).toBeGreaterThan(0);
 
     // pnlPct = 2500 / 5000 × 100 = +50.00%
     // Mutation M14 leaves |entryNotional| the same → pnlPct is still 50%,
