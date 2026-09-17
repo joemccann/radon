@@ -10481,3 +10481,36 @@ manifest ranges at `web/tests/dependency-security-floors.test.ts:34-50`.
   likewise deferred to CI under that direction.
 
 - Audited through: `fe96fdac` on 2026-09-15 — 0 new findings over 35 commits / 51 paths; static coverage, gate-drift, and skip sweeps clean; local gates intentionally not run and no CI result exists for this merge head.
+
+## Delta audit 2026-09-16
+
+Range `fe96fdac..8d1d0f52`: 51 commits / 206 paths. The dedicated runner
+markers and clean tree were verified before the audit. Codemap plus `rg`
+confirmed tests for the changed Python and web sources; the three map misses
+are test-covered registry or executable entry points, not gaps. CI, threshold,
+and skip scans found no newly widened CI exclusion, coverage threshold change,
+or executable skip/xfail.
+
+- **T-495 [P2] The new live options-chain browser contract relies on a fixed
+  delay instead of a rendered settle condition.**
+  `web/e2e/chain-anchored-scroll.spec.ts:93-102` scrolls both panes, then
+  uses `page.waitForTimeout(250)` before snapshotting the state asserted after
+  a live quote. A slow renderer can snapshot the pre-scroll layout and fail;
+  a regression that settles after 250 ms can pass. This is distinct from
+  T-309's deck-specific CSS entry point and T-494's relay-source grep.
+  **AC:** replace the sleep with a web-first assertion of the intended stable
+  pane state (for example the two visible-row snapshots or a dedicated
+  `data-testid` state) and prove a deliberately delayed rerender fails.
+
+- Audited through: `8d1d0f52` on 2026-09-16 — 1 new finding (T-495, P2) over
+  51 commits / 206 paths. The detached serial-gate stage ended before writing
+  its required `DONE` sentinel, with `pytest_rc=RUNNING`; no gate count is
+  claimed and the next phase must rerun the gates.
+
+## Remediation 2026-09-16
+
+`RADON_WEEKEND_REDUCED=1`: T-495 is P2 and therefore outside this phase's
+permitted remediation scope. Reconciliation found no verified
+source-actionable P0/P1 finding. T-488 remains operator-only after three
+genuine attempts: reproduce and repair the GNU-timeout process-tree behavior
+on Linux CI without widening its fixed test timeout.

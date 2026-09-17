@@ -7288,6 +7288,24 @@ safety-gate verification.
 
 - [x] No workflow, test, deployment, image, or trading-state change without an eligible audit finding.
 
+# Task: Testing audit 2026-09-16 [IN PROGRESS]
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify runner safety, branch, audit ledger, and delta surface.
+- T2 depends_on: [T1] - Run required serial gates and targeted determinism checks.
+- T3 depends_on: [T1, T2] - Re-triage findings, append audit evidence, commit, push, and publish the nightly PR.
+
+## Checklist
+
+- [x] T1 Dedicated runner markers, clean tree, audit base, and dated branch verified.
+- [x] T2 Static delta sweeps recorded; detached serial-gate stage ended without `DONE` at pytest.
+- [x] T3 Delta report prepared for the dated branch.
+
+## Review
+
+- [x] T-495 filed with source location and red/green acceptance criteria; no gate count is claimed before the detached stage completes.
+
 # Task: CI performance audit 2026-09-15 [IN PROGRESS]
 
 Audit `9b9a65c7..origin/main` against organic GitHub Actions production runs;
@@ -7309,6 +7327,25 @@ append evidence only and preserve every gate and deploy rail.
 
 - [x] Audit-only; no production or trading-system operation.
 
+# Task: Testing remediation 2026-09-16 [COMPLETE]
+
+Reduced-capability rung (`RADON_WEEKEND_REDUCED=1`): remediate verified P0/P1
+findings only; T-495 is P2 and remains out of scope.
+
+## Dependency graph
+
+- T1 depends_on: [] - Reconcile this cycle's audit finding and every standing P0/P1 status.
+- T2 depends_on: [T1] - Record the reduced-scope remediation decision and preserve full-gate evidence separately.
+
+## Checklist
+
+- [x] T1 T-495 is P2; no current source-actionable P0/P1 finding exists.
+- [x] T2 T-488 remains operator-only after three genuine attempts; remediation decision is append-only.
+
+## Review
+
+- [x] No P2 substitute was implemented on the reduced rung.
+- [x] Detached closing stage died without its `DONE` sentinel; no gate count is claimed.
 ## Chain-first desktop implementation B (2026-09-16)
 
 User selected B and authorized implementation, PR, and CI verification. Work isolated from unrelated edits in /private/tmp/radon-chain-first-20260916.
