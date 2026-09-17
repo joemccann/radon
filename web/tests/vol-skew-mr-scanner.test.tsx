@@ -104,16 +104,15 @@ describe("VolSkewMrScanner", () => {
     expect(before).toEqual(["vol-skew-mr-row-NVDA", "vol-skew-mr-row-INTC", "vol-skew-mr-row-AAPL"]);
 
     const trigger = screen.getByTestId(`vol-skew-mr-${id}-tooltip`);
-    expect(trigger.getAttribute("aria-label")).toBe(`${label} details`);
-    const button = within(trigger).getByRole("button");
-    fireEvent.focus(trigger);
+    const button = within(trigger).getByRole("button", { name: `${label} details` });
+    fireEvent.focus(button);
     expect(screen.getByTestId(`vol-skew-mr-${id}-tooltip-content`).textContent).toMatch(explanation);
     expect(rowOrder()).toEqual(before);
     fireEvent.click(button);
     expect(screen.queryByTestId(`vol-skew-mr-${id}-tooltip-content`)).toBeNull();
     fireEvent.click(button);
     expect(screen.getByTestId(`vol-skew-mr-${id}-tooltip-content`).textContent).toMatch(explanation);
-    fireEvent.keyDown(trigger, { key: "Enter" });
+    fireEvent.keyDown(button, { key: "Enter" });
     fireEvent.keyDown(button, { key: " " });
     expect(rowOrder()).toEqual(before);
     expect(tickerHeader.getAttribute("aria-sort")).toBe("descending");

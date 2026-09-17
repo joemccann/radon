@@ -299,7 +299,7 @@ describe("GexPanel", () => {
 
   it("renders InfoTooltip on section title", () => {
     const { container } = renderWithData();
-    // The section title tooltip trigger is a span with tabIndex=0 containing '?'
+    // The section title exposes a named information button.
     const triggers = Array.from(container.querySelectorAll("[data-testid='gex-section-tooltip-trigger']"));
     expect(triggers.length).toBeGreaterThan(0);
   });
@@ -311,7 +311,7 @@ describe("GexPanel", () => {
     const netGexLabel = metricLabels.find((el) => el.textContent?.includes("NET GEX"));
     expect(netGexLabel).toBeTruthy();
     // Has a tooltip trigger inside
-    expect(netGexLabel?.querySelector("span[tabindex='0']")).toBeTruthy();
+    expect(within(netGexLabel as HTMLElement).getByRole("button", { name: "More information" })).toBeTruthy();
   });
 
   it("renders InfoTooltip on IV 30D metric label", () => {
@@ -319,7 +319,7 @@ describe("GexPanel", () => {
     const metricLabels = Array.from(container.querySelectorAll(".gex-metric-label"));
     const ivLabel = metricLabels.find((el) => el.textContent?.includes("IV 30D"));
     expect(ivLabel).toBeTruthy();
-    expect(ivLabel?.querySelector("span[tabindex='0']")).toBeTruthy();
+    expect(within(ivLabel as HTMLElement).getByRole("button", { name: "More information" })).toBeTruthy();
   });
 
   it("renders ShareReportModal share button in panel header", () => {

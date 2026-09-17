@@ -31,19 +31,18 @@ function renderObservations() {
 }
 
 describe("AI observation explanations", () => {
-  it("gives every reported observation a named keyboard-accessible info bubble", () => {
+  it.each(observations)("explains %s with a named keyboard-accessible info bubble", (id, _rawLabel, _value, _unit, label) => {
     const details = renderObservations();
     expect(within(details).getAllByTestId("ai-observation-card")).toHaveLength(8);
-    for (const [id, , , , label] of observations) {
-      const button = within(details).getByRole("button", { name: `About ${label}` });
-      fireEvent.focus(button);
-      const tooltip = screen.getByTestId(`ai-observation-description-${id}`);
-      expect(tooltip.getAttribute("role")).toBe("tooltip");
-      expect(tooltip.textContent?.length).toBeGreaterThan(80);
-      expect(button.getAttribute("aria-describedby")).toBe(tooltip.id);
-      fireEvent.keyDown(button, { key: "Escape" });
-      expect(screen.queryByTestId(`ai-observation-description-${id}`)).toBeNull();
-    }
+    const trigger = within(details).getByTestId(`ai-observation-info-${id}`);
+    const button = within(trigger).getByRole("button", { name: `About ${label}` });
+    fireEvent.focus(button);
+    const tooltip = within(trigger).getByTestId(`ai-observation-description-${id}`);
+    expect(tooltip.getAttribute("role")).toBe("tooltip");
+    expect(tooltip.textContent?.length).toBeGreaterThan(80);
+    expect(button.getAttribute("aria-describedby")).toBe(tooltip.id);
+    fireEvent.keyDown(button, { key: "Escape" });
+    expect(within(trigger).queryByTestId(`ai-observation-description-${id}`)).toBeNull();
   });
   it("shows understandable percentage values and preserves model identity in explanations", () => {
     const details = renderObservations();

@@ -189,7 +189,8 @@ for (const width of [390, 1440]) {
     const activity = { ...base, metrics: keys.map((id, i) => ({ ...base.metrics[0], id, label: id.replaceAll("_", " "), value: values[i], unit: i === 0 || i === 2 ? "ratio" : "tokens" })), history: ["other", "other_share", "total_tokens"].flatMap((key, k) => Array.from({ length: 120 }, (_, i) => ({ date: new Date(Date.UTC(2025, 0, 1 + i * 5)).toISOString().slice(0, 10), value: k === 1 ? 0.05 + i / 10000 : 1e10 + (i + 1) ** 2 * 1e9, unit: k === 1 ? "ratio" : "tokens", source_id: "openrouter", series_id: `${key}:ai-cycle-v2:publisher-v1:1`, label: key.replaceAll("_", " ") }))) };
     await page.route("**/api/ai-cycle", route => route.fulfill({ json: { ...snapshot, indicators: [activity, ...snapshot.indicators.slice(1)] } }));
     await ready(page);
-    const selector = page.getByLabel("Observation series", { exact: true });
+    await page.getByRole("combobox", { name: "Measure", exact: true }).selectOption("D1");
+    const selector = page.getByRole("combobox", { name: "Observation series", exact: true });
     await expect(selector.locator("option")).toHaveText(["Tokens from unlisted models · tokens · OpenRouter", "Unlisted models' share of tokens · % · OpenRouter", "Total routed tokens · tokens · OpenRouter"]);
     await selector.selectOption("2");
     const chart = page.getByTestId("ai-industry-history-chart");
@@ -205,7 +206,12 @@ for (const width of [390, 1440]) {
     await expect(cards.filter({ hasText: "Token growth · 28 days" })).toContainText("71.2");
     const info = share.getByRole("button", { name: "About Unlisted models' share of tokens" });
     await share.scrollIntoViewIfNeeded();
+    await page.mouse.move(0, 0);
+    const restingBackground = await share.evaluate(element => getComputedStyle(element).backgroundColor);
+    const restingBounds = await share.boundingBox();
     await share.hover();
+    await expect.poll(() => share.evaluate(element => getComputedStyle(element).backgroundColor)).not.toBe(restingBackground);
+    expect(await share.boundingBox()).toEqual(restingBounds);
     await info.focus();
     await expect(page.getByRole("tooltip")).toContainText("divided by all reported OpenRouter tokens");
     await page.screenshot({ path: testInfo.outputPath(`ai-industry-observation-help-${width}.png`), animations: "disabled" });
