@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -339,14 +340,20 @@ def main(argv=None):
 
 
 def _write_health(backfill, state, started, error):
-    """Keep both literal health identities discoverable by fleet parity checks."""
+    """Best-effort heartbeat. A Turso timeout must not mask collection failure
+    (2026-09-17 07:22Z radon-ai-cycle: archive import timed out, then this
+    write also timed out and became the oneshot's raised error). Matches trin.
+    """
     from scripts.db.hrana_http import write_service_health_http
 
     kwargs = dict(started_at=started, finished_at=now_iso(), error=error, timeout=8)
-    if backfill:
-        write_service_health_http(BACKFILL_HEALTH_SERVICE, state, **kwargs)
-    else:
-        write_service_health_http(HEALTH_SERVICE, state, **kwargs)
+    try:
+        if backfill:
+            write_service_health_http(BACKFILL_HEALTH_SERVICE, state, **kwargs)
+        else:
+            write_service_health_http(HEALTH_SERVICE, state, **kwargs)
+    except Exception as exc:  # noqa: BLE001 — heartbeat is telemetry
+        print(f"[ai-cycle] service_health write failed: {exc}", file=sys.stderr)
 
 
 if __name__ == "__main__":

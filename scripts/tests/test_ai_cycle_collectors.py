@@ -752,6 +752,31 @@ def test_production_heartbeat_on_failure(monkeypatch):
     assert calls[0][1]["timeout"] == 8
 
 
+def test_production_health_write_timeout_does_not_mask_collection_failure(monkeypatch):
+    """Telemetry must not replace the collection exception (trin pattern).
+
+    2026-09-17 07:22Z: archive import timed out, then _write_health also
+    timed out and became the oneshot's raised error via 'During handling'.
+    """
+    from scripts.ai_cycle import collect
+    from scripts.db.hrana_http import HranaHttpError
+
+    monkeypatch.delenv("RADON_AI_CYCLE_DB_PATH", raising=False)
+
+    def boom(_flags):
+        raise RuntimeError("archive import failed")
+
+    monkeypatch.setattr(collect, "_main", boom)
+    import scripts.db.hrana_http as db
+
+    def health_boom(*_a, **_k):
+        raise HranaHttpError("TimeoutError: The read operation timed out")
+
+    monkeypatch.setattr(db, "write_service_health_http", health_boom)
+    with pytest.raises(RuntimeError, match="archive import failed"):
+        collect.main(["--record"])
+
+
 def test_production_backfill_uses_separate_health_identity(monkeypatch):
     from scripts.ai_cycle import collect
 
