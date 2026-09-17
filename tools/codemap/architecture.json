@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-09-17T19:45:58Z",
-  "node_count": 3394,
-  "edge_count": 7076,
+  "generated_at": "2026-09-17T20:47:49Z",
+  "node_count": 3398,
+  "edge_count": 7084,
   "areas": {
-    "web": 2009,
+    "web": 2013,
     "site": 155,
     "scripts": 1117,
     "cloud": 66,
@@ -35,7 +35,7 @@
     {
       "id": "web/lib",
       "area": "web",
-      "count": 397
+      "count": 398
     },
     {
       "id": "web/public",
@@ -50,7 +50,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 931
+      "count": 934
     },
     {
       "id": "site/app",
@@ -387,7 +387,7 @@
     {
       "id": "web/components/InfoTooltip.tsx",
       "area": "web",
-      "in": 45,
+      "in": 47,
       "out": 0,
       "test": false
     },
@@ -420,17 +420,17 @@
       "test": false
     },
     {
-      "id": "web/lib/userError.ts",
-      "area": "web",
-      "in": 41,
-      "out": 0,
-      "test": false
-    },
-    {
       "id": "web/lib/useViewport.ts",
       "area": "web",
       "in": 40,
       "out": 1,
+      "test": false
+    },
+    {
+      "id": "web/lib/userError.ts",
+      "area": "web",
+      "in": 40,
+      "out": 0,
       "test": false
     },
     {
@@ -478,7 +478,7 @@
     {
       "id": "web/lib/chartSystem.ts",
       "area": "web",
-      "in": 34,
+      "in": 35,
       "out": 0,
       "test": false
     },

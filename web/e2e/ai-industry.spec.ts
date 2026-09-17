@@ -177,3 +177,40 @@ test.describe("AI Industry value chain", () => {
     });
   }
 });
+
+for (const width of [390, 1440]) {
+  test(`readable activity observations and connected history at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 1000 });
+    await installClearFixtures(page);
+    await page.addInitScript(() => localStorage.setItem("theme", "dark"));
+    const keys = ["growth_28d", "mean_7d", "other_share", "sum_28d", "total_tokens", "visible_nonfree_tokens", "anthropic/claude-4.6-sonnet-20260217", "anthropic/claude-4.8-opus-20260528"];
+    const values = [0.712, 17.856e12, 0.067, 464.739e12, 18.403e12, 15.821e12, 62.056e9, 114.369e9];
+    const base = snapshot.indicators[0];
+    const activity = { ...base, metrics: keys.map((id, i) => ({ ...base.metrics[0], id, label: id.replaceAll("_", " "), value: values[i], unit: i === 0 || i === 2 ? "ratio" : "tokens" })), history: ["other", "other_share", "total_tokens"].flatMap((key, k) => Array.from({ length: 120 }, (_, i) => ({ date: new Date(Date.UTC(2025, 0, 1 + i * 5)).toISOString().slice(0, 10), value: k === 1 ? 0.05 + i / 10000 : 1e10 + (i + 1) ** 2 * 1e9, unit: k === 1 ? "ratio" : "tokens", source_id: "openrouter", series_id: `${key}:ai-cycle-v2:publisher-v1:1`, label: key.replaceAll("_", " ") }))) };
+    await page.route("**/api/ai-cycle", route => route.fulfill({ json: { ...snapshot, indicators: [activity, ...snapshot.indicators.slice(1)] } }));
+    await ready(page);
+    const selector = page.getByLabel("Observation series", { exact: true });
+    await expect(selector.locator("option")).toHaveText(["Tokens from unlisted models · tokens · OpenRouter", "Unlisted models' share of tokens · % · OpenRouter", "Total routed tokens · tokens · OpenRouter"]);
+    await selector.selectOption("2");
+    const chart = page.getByTestId("ai-industry-history-chart");
+    const line = chart.locator('path[stroke-width="2"]').filter({ visible: true });
+    await expect(line).toHaveCount(1);
+    await expect(line).toHaveAttribute("d", /^M.+[CL]/);
+    await chart.screenshot({ path: testInfo.outputPath(`ai-industry-token-line-${width}.png`), animations: "disabled" });
+    await page.getByText("Latest reported observations (8)", { exact: true }).click();
+    const cards = page.getByTestId("ai-observation-card");
+    await expect(cards).toHaveCount(8);
+    const share = cards.filter({ hasText: "Unlisted models' share of tokens" });
+    await expect(share).toContainText("6.7");
+    await expect(cards.filter({ hasText: "Token growth · 28 days" })).toContainText("71.2");
+    const info = share.getByRole("button", { name: "About Unlisted models' share of tokens" });
+    await share.scrollIntoViewIfNeeded();
+    await share.hover();
+    await info.focus();
+    await expect(page.getByRole("tooltip")).toContainText("divided by all reported OpenRouter tokens");
+    await page.screenshot({ path: testInfo.outputPath(`ai-industry-observation-help-${width}.png`), animations: "disabled" });
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("tooltip")).toHaveCount(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  });
+}

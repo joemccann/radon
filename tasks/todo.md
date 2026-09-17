@@ -7602,3 +7602,14 @@ Validation: no local test suites; GitHub runners execute unit and browser suites
 - [ ] T3 Verify exact PR head in GitHub CI; depends_on: [T2]
 Dependency graph: T1 -> T2 -> T3.
 Review: Copy-only change; no local suites. CI includes AI Industry browser screenshots and navigation assertions.
+
+## 2026-09-17 AI metric clarity and line history
+Dependency graph: T1 -> {T2,T3,T3b} -> T4 -> T5.
+- [x] T1 depends_on: [] Isolate latest main and inspect metric definitions and chart gap logic.
+- [x] T2 depends_on: [T1] Replace ambiguous series labels and internal selector identifiers with descriptive names.
+- [x] T3 depends_on: [T1] Render token history as a line while preserving meaningful data gaps; add regression coverage.
+- [x] T3b depends_on: [T1] Refine observation card hover/focus and add per-metric info bubbles.
+- [ ] T4 depends_on: [T2,T3,T3b] Integrate, static-check, create PR and run GitHub verification.
+- [ ] T5 depends_on: [T4] Verify exact-head checks and screenshots, notify and record results.
+
+Review: descriptive residual-model labels, display-only percentages, eight metric info bubbles and stable hover/focus surfaces. Sampled token histories connect at normal observation intervals and preserve larger gaps. TypeScript and Impeccable detector pass; suites and screenshots run on GitHub only.
