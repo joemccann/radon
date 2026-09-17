@@ -7366,3 +7366,19 @@ Dependency graph: T1 -> {T2,T3} -> T4 -> T5.
 Review: GitHub red phase9e517457 reproduced lost flow (expected80000,actual0) in test_nightly_statement_preserves_verified_historical_external_flows. Repair retains historical observed flows only with per-session coverage, statement overrides its interval including zeros, and unknown evidence remains gated. Added18Python cases plus a browser degraded-to-recovered refresh case; no production UI gating changes. Static compilation and diff checks pass. Operational no-fetch preview restored184returns/0suspects; production rebuild inprogress. Final exact-head CI and screenshot review pending. No local test suites; all suite execution on GitHub. Never infer deposits into canonical returns without source evidence.
 
 Incident evidence: production disk payload generated2026-09-16T12:31:06.516Z, flex_from_file, nav_as_of2026-09-15, empty_verified flows,185NAV/184subperiods/182returns/two suspect sessions. Retained ledger has actual Jan13 deposit80007.13 and Feb6 transfer655497.16; residual candidates are not deposits. Latest nightly statement coversSep15only and has both flow sections withzeroentries. Initial regression commit9e517457 published inPR468 forGitHub red/green evidence.
+
+
+## Testing audit 2026-09-17
+
+- [x] T1 Audit delta `fe96fdac..HEAD`; depends_on: []
+- [x] T2 Run CI-gated suite and determinism sweeps; depends_on: [T1]
+- [x] T3 Append ledger and findings, then commit audit evidence; depends_on: [T1, T2]
+- Review: one P2 filed as T-495; no production source changed.
+
+## Testing remediate 2026-09-17
+
+- [x] T1 Reconcile all verified P0/P1 findings; depends_on: []
+- [x] T2 Reverify standing P1 T-490 and record operator action; depends_on: [T1]
+- [x] T3 Append remediation result and commit it; depends_on: [T1, T2]
+- Review: reduced scope excludes T-495 (P2); T-490 remains blocked by the
+  runner's `.codex` filesystem policy and T-488 remains operator-only.
