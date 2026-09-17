@@ -41,8 +41,8 @@ const TONE_COLORS: Record<Tone, string> = {
 };
 
 const MONO_META: React.CSSProperties = {
-  fontFamily: "var(--font-mono)",
-  fontSize: "9px",
+  fontFamily: "var(--instrument-ui-font, var(--font-mono))",
+  fontSize: "var(--instrument-meta-size, 9px)",
   color: "var(--text-muted)",
 };
 
@@ -60,8 +60,8 @@ function HolderRow({ holder, index }: { holder: Holder; index: number }) {
         gap: "8px",
         padding: "6px 8px",
         borderBottom: "1px solid color-mix(in srgb, var(--text-muted) 18%, transparent)",
-        fontFamily: "var(--font-mono)",
-        fontSize: "11px",
+        fontFamily: "var(--instrument-ui-font, var(--font-mono))",
+        fontSize: "var(--instrument-body-size, 11px)",
       }}
     >
       <span style={{ color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis" }}>
@@ -92,8 +92,8 @@ function SuperInvestorRow({
         gap: "8px",
         padding: "6px 8px",
         borderBottom: "1px solid color-mix(in srgb, var(--text-muted) 18%, transparent)",
-        fontFamily: "var(--font-mono)",
-        fontSize: "11px",
+        fontFamily: "var(--instrument-ui-font, var(--font-mono))",
+        fontSize: "var(--instrument-body-size, 11px)",
       }}
     >
       <span style={{ color: "var(--text-primary)" }}>{position.investor}</span>
@@ -142,7 +142,7 @@ export default function SmartMoney13FPanel({ ticker }: { ticker: string }) {
             13F Positioning Context
           </div>
           <ToneText tone={stalenessTone(disclosure?.staleness)}>
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: "10px" }}>
+            <span style={{ fontFamily: "var(--instrument-ui-font, var(--font-mono))", fontSize: "var(--instrument-meta-size, 10px)" }}>
               {vintageHeadline(disclosure)}
             </span>
           </ToneText>

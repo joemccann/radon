@@ -794,6 +794,10 @@ jobs:
           e2e/orders-partial-realized-pnl.spec.ts
           e2e/share-pnl-entry-exit.spec.ts
           e2e/chain-deck-ticket-scroll.spec.ts
+          e2e/chain-anchored-scroll.spec.ts
+          e2e/chain-first-layout.spec.ts
+          e2e/instrument-workspace-layout.spec.ts
+          e2e/performance-twr-payload.spec.ts
           e2e/leap-order-prefill.spec.ts
           e2e/mobile-orders-session.spec.ts
           e2e/orders-session-window.spec.ts
@@ -801,8 +805,21 @@ jobs:
           e2e/research-workbench.spec.ts
           e2e/newsfeed-research-media.spec.ts
           e2e/newsfeed-sharing.spec.ts
-          e2e/ai-infrastructure.spec.ts
+          e2e/vol-skew-mr-scanner.spec.ts
+          e2e/ai-industry.spec.ts
+          e2e/clear-shell.spec.ts
           e2e/chat-experience.spec.ts
+          e2e/chat-launcher-focus.spec.ts
+          e2e/flow-analysis-ticker.spec.ts
+          e2e/scanner-ticker-scan.spec.ts
+          e2e/ticker-search-chain.spec.ts
+      - name: Upload toast error screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: toast-error-screenshots
+          path: web/test-results/**/vol-skew-safe-error-*.png
+          retention-days: 7
       - name: Upload historical fill screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -824,6 +841,23 @@ jobs:
           name: chat-experience-screenshots
           path: web/test-results/**/chat-experience-*.png
           retention-days: 7
+      - name: Upload vol-skew missing history screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: vol-skew-missing-screenshots
+          path: |
+            web/test-results/**/vol-skew-missing-*.png
+            web/test-results/**/vol-skew-safe-error-*.png
+            web/test-results/**/vol-skew-header-*.png
+          retention-days: 7
+      - name: Upload AI industry screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ai-industry-screenshots
+          path: web/test-results/**/ai-industry-*.png
+          retention-days: 7
       - name: Upload research rendering screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -832,6 +866,34 @@ jobs:
           path: |
             web/test-results/**/research-*.png
             web/test-results/**/*share*.png
+          retention-days: 7
+      - name: Upload chain anchor screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: chain-anchor-screenshots
+          path: web/test-results/**/chain-anchor-*.png
+          retention-days: 7
+      - name: Upload chain-first screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: chain-first-screenshots
+          path: web/test-results/**/chain-first-*.png
+          retention-days: 7
+      - name: Upload instrument workspace screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: instrument-workspace-screenshots
+          path: web/test-results/**/instrument-workspace-*.png
+          retention-days: 7
+      - name: Upload performance flow history screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: performance-flow-history-screenshots
+          path: web/test-results/**/performance-flow-history-*.png
           retention-days: 7
       - name: Upload traces on failure
         if: failure()

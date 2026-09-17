@@ -1,4 +1,5 @@
 "use client";
+import ErrorToast from "@/components/ErrorToast";
 
 import { ArrowDownRight, ArrowUpRight, Minus, RefreshCw } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -10,6 +11,7 @@ import SpectralLoader from "@/components/SpectralLoader";
 import ThinkingWait from "@/components/fx/ThinkingWait";
 import { useViewport } from "@/lib/useViewport";
 import DailyDarkPoolHistory from "@/components/flow-analysis/DailyDarkPoolHistory";
+import FlowSkewPanel from "@/components/flow-analysis/FlowSkewPanel";
 import { flowReportErrorCopy } from "@/lib/flowReportError";
 import { flowReportAgeLabel } from "@/lib/flowReportStaleness";
 
@@ -49,13 +51,7 @@ export default function TickerFlowReport({ ticker }: Props) {
     <div className="ticker-flow-report" data-testid="ticker-flow-report">
       <SignalBadge ticker={ticker} verdict={verdict} status={status} error={error} cachedAge={cachedAge} onRefresh={refresh} />
 
-      {error && !cachedAge && (
-        <div className="section">
-          <div className="section-body">
-            <div className="alert-item bearish" role="alert">{flowReportErrorCopy(error)}</div>
-          </div>
-        </div>
-      )}
+      {error && <ErrorToast message={flowReportErrorCopy(error)} onRetry={() => void refresh()} />}
 
       {isAnalyzing && !data && (
         <AnalyzingPanel
@@ -218,15 +214,11 @@ function MobileTickerFlowReport({
         </button>
       </div>
 
-      {error && !cachedAge && (
-        <div style={{ padding: "8px 16px" }}>
-          <div className="alert-item bearish" role="alert">{flowReportErrorCopy(error)}</div>
-        </div>
-      )}
+      {error && <ErrorToast message={flowReportErrorCopy(error)} onRetry={() => void onRefresh()} />}
 
       {cachedAge && (
         <div style={{ padding: "8px 16px" }}>
-          <div className="alert-item bearish" role="alert" data-testid="flow-stale-age">
+          <div className="alert-item bearish" role="status" data-testid="flow-stale-age">
             Last good scan {cachedAge}. Every figure below is from that scan, not from live flow.
             {status === "pending" ? ` ${PENDING_NOTE}` : ""}
           </div>
@@ -294,6 +286,11 @@ function MobileTickerFlowReport({
               >
                 {verdict.rationale}
               </p>
+            )}
+            {data && (
+              <div style={{ marginTop: 12 }}>
+                <FlowSkewPanel skew={data.skew} compact />
+              </div>
             )}
           </>
         )}
@@ -366,6 +363,9 @@ function MobileTickerFlowReport({
               <span className="m-metric__value m-metric__value--primary">
                 {optionsFlow.put_premium != null ? `$${formatFlowNumber(optionsFlow.put_premium)}` : "---"}
               </span>
+            </div>
+            <div style={{ gridColumn: "1 / -1" }}>
+              <FlowSkewPanel skew={data?.skew} compact />
             </div>
           </div>
         )}
@@ -492,7 +492,7 @@ function SignalBadge({
         </div>
         <div className="ticker-flow-badge-body">
           <div className="ticker-flow-badge-label">
-            {failed ? "Scan failed" : showVerdict && verdict ? meta.label : `Analyzing ${ticker}`}
+            {failed ? `Flow report · ${ticker}` : showVerdict && verdict ? meta.label : `Analyzing ${ticker}`}
             {servingStale && verdict && (
               <span className="ticker-flow-badge-stale" data-testid="flow-hero-stale">
                 {" "}LAST GOOD SCAN{cachedAge ? ` · ${cachedAge}` : ""}
@@ -501,16 +501,11 @@ function SignalBadge({
           </div>
           <div className="ticker-flow-badge-rationale">
             {failed
-              ? flowReportErrorCopy(error)
+              ? "No current scan is available."
               : showVerdict && verdict
                 ? verdict.rationale
                 : "Reconstructing dark pool and options flow"}
           </div>
-          {servingStale && error && (
-            <div className="ticker-flow-badge-stale-note" data-testid="flow-hero-stale-note">
-              {flowReportErrorCopy(error)}
-            </div>
-          )}
           {status === "pending" && (
             <div className="ticker-flow-badge-stale-note" data-testid="flow-hero-pending">
               {PENDING_NOTE}
@@ -577,7 +572,7 @@ function CachedReportAge({ ageLabel }: { ageLabel: string }) {
   return (
     <section className="section">
       <div className="section-body">
-        <div className="alert-item bearish" role="alert" data-testid="flow-stale-age">
+        <div className="alert-item bearish" role="status" data-testid="flow-stale-age">
           Last good scan {ageLabel}. Every figure below is from that scan, not from live flow.
         </div>
       </div>
@@ -667,6 +662,8 @@ function ReportSections({
           />
         </div>
       </section>
+
+      <FlowSkewPanel skew={data.skew} />
 
       {daily.length > 0 && <DailyDarkPoolHistory daily={daily} />}
 

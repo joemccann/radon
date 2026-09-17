@@ -1,5 +1,7 @@
 "use client";
 
+import RequestError from "@/components/RequestError";
+
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
@@ -27,6 +29,7 @@ import { useWatchlist } from "@/lib/useWatchlist";
 import Sidebar from "@/components/Sidebar";
 import Header from "@/components/Header";
 import clearResearch from "@/components/ClearResearch.module.css";
+import clearShell from "@/components/ClearShell.module.css";
 import MetricCards from "@/components/MetricCards";
 import ToastContainer from "@/components/Toast";
 import DashboardSurface from "@/components/dashboard/DashboardSurface";
@@ -75,9 +78,9 @@ export default function WorkspaceShell({ section, tickerParam, initialPortfolio 
   const navLabel = navItems.find((item) => item.route === activeSection)?.label ?? "Dashboard";
   const activeLabel = activeSection === "ticker-detail" && tickerParam ? tickerParam : navLabel;
   const headerOwnsPageHeading = activeSection !== "ticker-detail"
+    && activeSection !== "ai-industry"
     && activeSection !== "watchlist"
-    && activeSection !== "admin"
-    && activeSection !== "workflow";
+    && activeSection !== "admin";
   const { toasts, exitingIds, addToast, upsertToast, dismissToast, hasToastKey } = useToast();
   const marketState = useMarketHours();
   const isMarketActive = marketState !== MarketState.CLOSED;
@@ -560,7 +563,7 @@ export default function WorkspaceShell({ section, tickerParam, initialPortfolio 
   const pricesForSections = sectionNeedsPrices ? prices : undefined;
 
   return (
-    <div className={`app-shell clear-workstation ${clearResearch.surfaces}`} data-workspace-section={activeSection} suppressHydrationWarning>
+    <div className={`app-shell clear-workstation ${clearResearch.surfaces} ${clearShell.workspace}`} data-workspace-section={activeSection} suppressHydrationWarning>
       <a href="#main-content" className="skip-link">Skip to content</a>
       {showMobileChrome ? (
         <MobileShell title={activeLabel} isPageHeading={headerOwnsPageHeading} ibConnected={ibConnected} lastSync={lastSync} />
@@ -606,10 +609,7 @@ export default function WorkspaceShell({ section, tickerParam, initialPortfolio 
         <div className="content">
           <OfflineBanner />
           {liveDataError ? (
-            <div className="live-data-degraded" role="alert" data-testid="live-data-degraded">
-              <strong>Live data degraded</strong>
-              <span>{liveDataError}</span>
-            </div>
+            <RequestError error={liveDataError} fallback="Live data could not be refreshed. Previously loaded values may be out of date." testId="live-data-degraded" />
           ) : null}
 
           {activeSection === "dashboard" ? (
@@ -621,7 +621,7 @@ export default function WorkspaceShell({ section, tickerParam, initialPortfolio 
             />
           ) : null}
 
-          {activeSection !== "dashboard" && activeSection !== "ticker-detail" && activeSection !== "watchlist" && activeSection !== "admin" && activeSection !== "preferences" && activeSection !== "profile" && activeSection !== "alerts" && activeSection !== "workflow" && activeSection !== "research-workbench" && !isOptionsWorkspace ? <div className={isStale ? "metric-cards--stale" : undefined}><MetricCards portfolio={portfolio} prices={prices} realizedPnl={todayRealizedPnl} executedOrders={executedOrders} section={activeSection} /></div> : null}
+          {activeSection !== "dashboard" && activeSection !== "ticker-detail" && activeSection !== "watchlist" && activeSection !== "admin" && activeSection !== "preferences" && activeSection !== "profile" && activeSection !== "alerts" && activeSection !== "research-workbench" && !isOptionsWorkspace ? <div className={isStale ? "metric-cards--stale" : undefined}><MetricCards portfolio={portfolio} prices={prices} realizedPnl={todayRealizedPnl} executedOrders={executedOrders} section={activeSection} /></div> : null}
 
           {activeSection === "portfolio" ? (
             <PortfolioSections portfolio={portfolio} prices={pricesForSections} />

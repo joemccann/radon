@@ -81,6 +81,26 @@ class FlexSftpError(RuntimeError):
     """Fail-closed sFTP / PGP / period error. Never a token fetch."""
 
 
+# OpenSSH kex RST / idle drop on a later `get`. IBKR never removes files from
+# `outgoing`, so a morning ls re-gets the full history; a peer reset on an
+# already-processed older file must not fail the oneshot after today's
+# statement landed (2026-09-16 page 5a2eb828).
+_TRANSIENT_SFTP_GET_MARKERS = (
+    "kex_exchange_identification",
+    "connection reset",
+    "connection timed out",
+)
+
+
+def _is_transient_sftp_get(exc: BaseException) -> bool:
+    if not isinstance(exc, FlexSftpError):
+        return False
+    text = str(exc).lower()
+    if not text.startswith("sftp_get_failed:"):
+        return False
+    return any(marker in text for marker in _TRANSIENT_SFTP_GET_MARKERS)
+
+
 _INSECURE_HOST_KEY = {"no", "off", "accept-new"}
 
 
@@ -511,6 +531,7 @@ def _run(
     _ensure_inbox(inbox)
     failed = False
     ingested = 0
+    processed = 0
     newest_period_end: Optional[date] = None
     newest_by_key: Dict[str, date] = {}
     deadline = time.monotonic() + SWEEP_BUDGET_S
@@ -564,11 +585,14 @@ def _run(
             # Only a NEW statement is progress. R-389.
             if result.get("outcome") != "duplicate":
                 ingested += 1
+            processed += 1
         except Exception as exc:  # noqa: BLE001 — one bad file must not abort the batch
             # Was `(FlexSftpError, FlexClassifyError, OSError)`, which covered
             # neither a `TimeoutExpired` from the decrypt nor anything out of
             # `ingest_xml`. R-400.
             print(f"[flex-pull] {name}: {type(exc).__name__}: {exc}", file=sys.stderr)
+            if processed and _is_transient_sftp_get(exc):
+                continue
             failed = True
             continue
 

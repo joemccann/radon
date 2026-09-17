@@ -183,6 +183,8 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
 
   // ``ma-ratio`` — radon-ma-ratio.timer fires daily 22:45 UTC every calendar day (weekend runs are unchanged-data heartbeats), so a uniform 26h window matches its div-yield sibling; shared price_history_daily member closes (Yahoo sweep) + Turso only, no IB.
   "ma-ratio": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+  // ``calm-streak``: radon-calm-streak.timer fires 02:40 and 14:30 UTC every calendar day (304 runs are heartbeats), so a uniform 26h window; Cboe SPX HTTP + Turso only.
+  "calm-streak": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
   // ``credit-spread`` — radon-credit-spread.timer fires daily 21:45 UTC every
   // calendar day (weekend runs heartbeat), so a uniform 26h window fits;
@@ -244,6 +246,9 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   "aa-frontier-basket": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
   "ai-cycle-backfill": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
   "ai-cycle": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+  // ``liquidcompute``: radon-liquidcompute.timer fires daily 07:30 UTC.
+  // Homepage-public GPU index ticker. Uniform 26h window. HTTP only, no IB.
+  "liquidcompute": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
   "model-catalog": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
   // ``vixts`` — radon-vixts.timer fires daily 02:45 UTC every calendar day,
@@ -365,6 +370,10 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // and the tight open window cannot false-page at 09:31 off Friday's close.
   "theta-harvester": { open: 3 * HOUR, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
   "strength-confirmation": { open: 3 * HOUR, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
+  // ``vol-skew-mr`` is operator POST only (no signals-refresh timer). Same
+  // UW vol/skew surface as strength/leap. On-demand so a quiet day does not
+  // page; closed window bridges a weekend like the other UW scanners.
+  "vol-skew-mr": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },
   "discover": { open: 4 * DAY, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
   "flow-analysis": { open: 4 * DAY, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
   "analyst-ratings": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },

@@ -1,5 +1,7 @@
 "use client";
 
+import ErrorToast from "@/components/ErrorToast";
+
 /**
  * Operator preferences surface for /preferences.
  *
@@ -9,6 +11,7 @@
  * the server's value, so a rejected save leaves the displayed value untouched.
  */
 
+import { userErrorMessage } from "@/lib/userError";
 import { useCallback, useEffect, useState } from "react";
 import ConfirmDialog from "@/components/admin/ConfirmDialog";
 import {
@@ -41,7 +44,7 @@ function isWidening(entry: PreferenceEntry, next: number | boolean): boolean {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error && error.message ? error.message : "preferences request failed";
+  return userErrorMessage(error, "Your changes could not be saved. Refresh and try again.");
 }
 
 function rangeLabel(entry: PreferenceEntry): string {
@@ -210,9 +213,7 @@ export default function PreferencesSection() {
   if (pageError || !payload) {
     return (
       <div className="preferences-shell" data-testid="preferences-section">
-        <p className="admin-card-note admin-card-error" role="alert" data-testid="preferences-error">
-          {pageError ?? "preferences request failed"}
-        </p>
+        <ErrorToast message={pageError ?? "preferences request failed"} testId="preferences-error" />
       </div>
     );
   }
@@ -223,9 +224,7 @@ export default function PreferencesSection() {
   return (
     <div className="preferences-shell" data-testid="preferences-section">
       {storeUnavailable ? (
-        <p className="admin-card-note preferences-store-banner" role="status" data-testid="preferences-store-banner">
-          Preferences store unavailable. Showing environment and code defaults. Saving is disabled.
-        </p>
+        <ErrorToast message="Preferences store unavailable. Showing environment and code defaults. Saving is disabled." testId="preferences-store-banner" />
       ) : null}
 
       {groups.map(({ group, entries }) => {
@@ -358,13 +357,7 @@ export default function PreferencesSection() {
                   </div>
 
                   {message ? (
-                    <p
-                      className="admin-card-note admin-card-error"
-                      role="alert"
-                      data-testid={`preference-error-${entry.key}`}
-                    >
-                      {message}
-                    </p>
+                    <ErrorToast message={message} testId={`preference-error-${entry.key}`} />
                   ) : null}
                 </div>
               );

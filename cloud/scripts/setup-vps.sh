@@ -55,6 +55,8 @@ readonly SERVICE_FILES=(
   radon-ai-cycle-backfill.timer
   radon-ai-cycle.service
   radon-ai-cycle.timer
+  radon-liquidcompute.service
+  radon-liquidcompute.timer
   radon-ib-gateway.service
   radon-ib-gateway-preheld-restart.service
   radon-ib-gateway-remote.service
@@ -177,6 +179,8 @@ readonly SERVICE_FILES=(
   radon-divyield.timer
   radon-ma-ratio.service
   radon-ma-ratio.timer
+  radon-calm-streak.service
+  radon-calm-streak.timer
   radon-hyad.service
   radon-hyad.timer
   radon-hhlev.service

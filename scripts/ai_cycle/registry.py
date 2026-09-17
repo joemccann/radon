@@ -87,6 +87,13 @@ _SOURCE_ROWS = [
         "Public design-task leaderboard HTML; LLM/model-quality only, never GPU scarcity",
     ),
     (
+        "liquidcompute",
+        "Liquid Compute GPU index",
+        "https://liquidcompute.com/api/market/ticker",
+        "daily",
+        "Homepage-public US GPU index ticker; methodology opaque until licensed. Third venue versus the rental book, never Silicon Data or gpurentalprices",
+    ),
+    (
         "ib",
         "Interactive Brokers",
         "https://www.interactivebrokers.com/",
@@ -203,6 +210,15 @@ _ROWS = [
         ["artificial-analysis"],
         [],
         "Cost per successful task requires licensed benchmark, accuracy, latency and context constraints; arbitrary benchmark division prohibited.",
+    ),
+    (
+        "C5",
+        "Liquid Compute GPU index",
+        "compute",
+        "P2",
+        ["liquidcompute"],
+        ["NVDA", "AMD"],
+        "Public homepage GPU index levels in usd_per_gpu_per_hr. Third venue versus the rental book. Index methodology is opaque until licensed. Never spliced onto gpurentalprices, Silicon Data, or matched asking-price cohorts.",
     ),
     (
         "H1",

@@ -1,5 +1,8 @@
 "use client";
+import ErrorToast from "@/components/ErrorToast";
+import RequestError from "@/components/RequestError";
 
+import { userErrorMessage } from "@/lib/userError";
 import { useMemo, useState } from "react";
 import { ChevronDown, TriangleAlert, Wallet } from "lucide-react";
 import { useCashFlows, type CashFlowRow, type CashFlowType } from "@/lib/useCashFlows";
@@ -139,22 +142,18 @@ export default function CashFlowsSection() {
     // for the full 7-day embargo.
     const syncedPrefix = lastSyncedRelative ? `Synced ${lastSyncedRelative}` : "Never synced";
     if (isThrottled) {
-      return retryHint
-        ? `${syncedPrefix} · Flex throttled, retry ${retryHint}`
-        : `${syncedPrefix} · Flex throttled`;
+      return `${syncedPrefix} · STALE`;
     }
     if (isErrored) {
-      const tag = syncStatus?.error_summary ?? "sync failed";
-      return retryHint ? `${syncedPrefix} · ${tag}, retry ${retryHint}` : `${syncedPrefix} · ${tag}`;
+      return `${syncedPrefix} · STALE`;
     }
     if (!lastSyncedRelative) return null;
     return `Synced ${lastSyncedRelative}`;
   })();
-  const lozengeTooltip = isThrottled
+  const lozengeTooltip = SYNC_LOZENGE_EXPLANATION;
+  const syncFailure = isThrottled
     ? THROTTLE_LOZENGE_EXPLANATION
-    : isErrored
-      ? syncStatus?.error_summary ?? SYNC_LOZENGE_EXPLANATION
-      : SYNC_LOZENGE_EXPLANATION;
+    : isErrored ? userErrorMessage(syncStatus?.error_summary, "Cash flow sync could not be completed.") : null;
   const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   const pageStart = page * PAGE_SIZE;
   const pageRows = sorted.slice(pageStart, pageStart + PAGE_SIZE);
@@ -162,6 +161,7 @@ export default function CashFlowsSection() {
 
   return (
     <div className="section" id="orders-cash" data-testid="cash-flows-section">
+      {syncFailure && <ErrorToast message={`${syncFailure}${retryHint ? ` Next attempt ${retryHint}.` : ""}`} /> }
       <div
         className="section-header cash-flows-header"
         role="button"
@@ -247,15 +247,7 @@ export default function CashFlowsSection() {
       {expanded && (
         <div id="cash-flows-body">
           {error && (
-            <div className="section-body">
-              <SectionEmptyState
-                icon={TriangleAlert}
-                tone="danger"
-                headline="Couldn't load cash flows"
-                secondary={error}
-                testId="cash-flows-error"
-              />
-            </div>
+            <RequestError error={error} testId="cash-flows-error" />
           )}
 
           {!error && loading && !data ? (

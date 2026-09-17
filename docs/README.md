@@ -15,7 +15,8 @@ Archived session artifacts live in [`docs/archive/`](archive/).
 | Operator contributing rules | [`CONTRIBUTING.md`](../CONTRIBUTING.md) |
 | Security reports | [`SECURITY.md`](../SECURITY.md) |
 | Support (proprietary, unsupported clones) | [`SUPPORT.md`](../SUPPORT.md) |
-| External services, credential setup, and optional service fallbacks (incl. Robinhood read-only MCP; host secret locations) | [`docs/external-services.md`](external-services.md) |
+| External services, credential setup, and optional service fallbacks (incl. Robinhood read-only MCP; host secret locations; text JSON model ladder with Cerebras last) | [`docs/external-services.md`](external-services.md) |
+| TradingView integration (alert webhook ingress, read-only MCP client, ladder placement) | [`docs/tradingview-integration.md`](tradingview-integration.md) |
 | CLI commands | [`docs/scripts-reference.md`](scripts-reference.md) |
 | Python script map | [`scripts/README.md`](../scripts/README.md) |
 | Repo layout plan | [`docs/monorepo-legibility-plan.md`](monorepo-legibility-plan.md) |
@@ -40,7 +41,7 @@ Archived session artifacts live in [`docs/archive/`](archive/).
 |-------|-----|
 | Regime and scanner indicator specs | [`docs/indicators/README.md`](indicators/README.md) |
 | AI boom leading indicators | [`docs/ai-boom-leading-indicators.md`](ai-boom-leading-indicators.md) |
-| AI infrastructure evidence, source verification and rollout | [Design](ai-infrastructure-plan.md) · [Collection](ai-infrastructure-operations.md) · [Verification](ai-infrastructure-verification.md). Demand D6 OpenDesign Arena is LLM/model-quality only, never GPU scarcity |
+| AI infrastructure evidence, source verification and rollout | [Design](ai-infrastructure-plan.md) · [Collection](ai-infrastructure-operations.md) · [Verification](ai-infrastructure-verification.md). Demand D6 OpenDesign Arena is LLM/model-quality only, never GPU scarcity. Compute C5 Liquid Compute is a third-venue public GPU index, never the rental book |
 | Social-share voice provenance and export constraints | [`docs/joe-mccann-social-voice.md`](joe-mccann-social-voice.md) |
 | Equibles market-structure API | [`docs/equibles-api.md`](equibles-api.md) |
 | Strategy specs | [`docs/strategies.md`](strategies.md) |

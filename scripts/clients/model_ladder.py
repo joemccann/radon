@@ -7,13 +7,23 @@ unavailable:
   2. nvidia (free NIM endpoints)
   3. cerebras (cheap paid, last)
 
+Subscription-tier rungs prefer Joe's consumer subscriptions (Claude Max OAuth,
+Grok device-auth, ChatGPT+Codex OAuth, Gemini sub / API key) over prepaid API
+credit wallets that meter ``credit_balance``. Prepaid ``*_API_KEY`` values remain
+a last-resort fallback when no subscription credential is visible — the weekend
+CLI pattern (unset prepaid, bill claude.ai) is the sibling for Claude Code
+subprocesses; see ``docs/oauth-subscription-auth.md`` and
+``docs/dropbox-research.md``.
+
 Cursor has no vision HTTP path in Radon; it is recorded as unwired and the rest
 of the subscription band still runs. Only a full-cascade miss is an ops_only /
 hard fail — never "top up Anthropic" while another keyed provider remains.
 
-Weekend bash CLI ladders (``RADON_WEEKEND_MODEL_LADDER``) are a sibling pattern
-for Claude Code subprocesses; they are documented separately and not consolidated
-here.
+NVIDIA is first-class before Cerebras whenever ``NVIDIA_API_KEY`` is present.
+Default vision model is the largest Llama vision on NIM
+(``meta/llama-3.2-90b-vision-instruct``), with an automatic fallback to
+``meta/llama-3.2-11b-vision-instruct`` on timeout/error. Override with
+``NVIDIA_VISION_MODEL`` (inject via ``/etc/radon/env``; never commit secrets).
 """
 from __future__ import annotations
 
@@ -48,12 +58,27 @@ MODEL_LADDER_TIERS = {
     "cerebras": "cerebras",
 }
 
-_ANTHROPIC_KEYS = ("ANTHROPIC_API_KEY", "CLAUDE_CODE_API_KEY", "CLAUDE_API_KEY")
-_GROK_KEYS = ("XAI_API_KEY", "GROK_API_KEY")
-_CODEX_KEYS = ("OPENAI_API_KEY",)
-_GEMINI_KEYS = ("GEMINI_API_KEY",)
+# Prepaid / console API wallets — wrong meter for subscription-tier rungs when
+# a subscription credential is also present. Kept as last-resort fallback only.
+_ANTHROPIC_PREPAID_KEYS = ("ANTHROPIC_API_KEY", "CLAUDE_CODE_API_KEY", "CLAUDE_API_KEY")
+_GROK_PREPAID_KEYS = ("XAI_API_KEY", "GROK_API_KEY")
+_CODEX_PREPAID_KEYS = ("OPENAI_API_KEY",)
+_GEMINI_KEYS = ("GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_API_KEY")
 _NVIDIA_KEYS = ("NVIDIA_API_KEY",)
 _CEREBRAS_KEYS = ("CEREBRAS_API_KEY",)
+
+# Claude Max / Pro subscription (claude setup-token or ~/.claude/.credentials.json).
+_ANTHROPIC_SUBSCRIPTION_ENV = ("CLAUDE_CODE_OAUTH_TOKEN",)
+_ANTHROPIC_OAUTH_BETA = "oauth-2025-04-20"
+
+_NVIDIA_VISION_DEFAULT = "meta/llama-3.2-90b-vision-instruct"
+_NVIDIA_VISION_FALLBACK = "meta/llama-3.2-11b-vision-instruct"
+
+# Back-compat aliases for cloud/.env.example inventory tests and callers.
+_ANTHROPIC_KEYS = _ANTHROPIC_PREPAID_KEYS + _ANTHROPIC_SUBSCRIPTION_ENV + ("CLAUDE_CODE_OAUTH_TOKEN_FILE",)
+_GROK_KEYS = _GROK_PREPAID_KEYS
+_CODEX_KEYS = _CODEX_PREPAID_KEYS
+_OPTIONAL_LADDER_ENV = ("NVIDIA_VISION_MODEL", "GEMINI_OAUTH_TOKEN", "GOOGLE_OAUTH_ACCESS_TOKEN", "CLAUDE_CONFIG_DIR", "CODEX_HOME")
 
 _CREDIT_MARKERS = (
     "credit balance",
@@ -76,7 +101,7 @@ _DEFAULT_VISION_MODELS = {
     "grok": "grok-4.6",
     "codex": "gpt-5.5",
     "gemini": "gemini-2.5-flash",
-    "nvidia": "meta/llama-3.2-11b-vision-instruct",
+    "nvidia": _NVIDIA_VISION_DEFAULT,
     # Public multimodal Chat Completions id (Cerebras changelog 2026-09).
     # llama-4-scout-17b-16e-instruct is archived. gemma-4-31b left public
     # endpoints 2026-09-03 (dedicated only). gpt-oss-120b is text-only.
@@ -118,6 +143,15 @@ class ModelResponseError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class AuthMaterial:
+    """Resolved bearer/api credential for one ladder rung."""
+
+    token: str
+    kind: str  # "subscription" | "api_key"
+    mechanism: str  # env var name, auth file path label, etc.
+
+
+@dataclass(frozen=True)
 class LadderResult:
     """Successful ladder completion with parsed JSON payload."""
 
@@ -149,31 +183,196 @@ def _first_env_model(env: Mapping[str, str], *names: str, default: str) -> str:
 
 
 def wired_providers(env: Mapping[str, str] | None = None) -> tuple[str, ...]:
-    """Return ladder providers that have a real HTTP path and a key."""
+    """Return ladder providers that have a real HTTP path and a credential."""
     src = env if env is not None else os.environ
     wired: list[str] = []
     for name in MODEL_LADDER_ORDER:
         if name == "cursor":
             continue
-        if _key_for(name, src):
+        if _auth_for(name, src) is not None:
             wired.append(name)
     return tuple(wired)
 
 
-def _key_for(name: str, env: Mapping[str, str]) -> str:
-    if name == "anthropic":
-        return _env_get(env, *_ANTHROPIC_KEYS)
-    if name == "grok":
-        return _env_get(env, *_GROK_KEYS)
-    if name == "codex":
-        return _env_get(env, *_CODEX_KEYS)
-    if name == "gemini":
-        return _env_get(env, *_GEMINI_KEYS)
-    if name == "nvidia":
-        return _env_get(env, *_NVIDIA_KEYS)
-    if name == "cerebras":
-        return _env_get(env, *_CEREBRAS_KEYS)
+def _home_dir(env: Mapping[str, str]) -> Path:
+    raw = (env.get("HOME") or "").strip()
+    return Path(raw) if raw else Path.home()
+
+
+def _read_secret_file(path: Path) -> str:
+    try:
+        if not path.is_file():
+            return ""
+        return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def _json_load_object(path: Path) -> dict[str, Any] | None:
+    try:
+        if not path.is_file():
+            return None
+        parsed = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _token_from_mapping(data: Mapping[str, Any], *paths: tuple[str, ...]) -> str:
+    for path in paths:
+        cur: Any = data
+        for key in path:
+            if not isinstance(cur, Mapping):
+                cur = None
+                break
+            cur = cur.get(key)
+        if isinstance(cur, str) and cur.strip():
+            return cur.strip()
     return ""
+
+
+def _anthropic_subscription_auth(env: Mapping[str, str]) -> AuthMaterial | None:
+    token = _env_get(env, *_ANTHROPIC_SUBSCRIPTION_ENV)
+    if token:
+        return AuthMaterial(token, "subscription", "CLAUDE_CODE_OAUTH_TOKEN")
+    file_env = (env.get("CLAUDE_CODE_OAUTH_TOKEN_FILE") or "").strip()
+    if file_env:
+        token = _read_secret_file(Path(file_env))
+        if token:
+            return AuthMaterial(token, "subscription", "CLAUDE_CODE_OAUTH_TOKEN_FILE")
+    config_dir = (env.get("CLAUDE_CONFIG_DIR") or "").strip()
+    cred_path = (
+        Path(config_dir) / ".credentials.json"
+        if config_dir
+        else _home_dir(env) / ".claude" / ".credentials.json"
+    )
+    data = _json_load_object(cred_path)
+    if data:
+        token = _token_from_mapping(
+            data,
+            ("claudeAiOauth", "accessToken"),
+            ("claudeAiOauth", "access_token"),
+            ("accessToken",),
+            ("access_token",),
+        )
+        if token:
+            return AuthMaterial(
+                token, "subscription", f"claude_credentials:{cred_path.name}"
+            )
+    return None
+
+
+def _codex_subscription_auth(env: Mapping[str, str]) -> AuthMaterial | None:
+    codex_home = (env.get("CODEX_HOME") or "").strip()
+    auth_path = (
+        Path(codex_home) / "auth.json"
+        if codex_home
+        else _home_dir(env) / ".codex" / "auth.json"
+    )
+    data = _json_load_object(auth_path)
+    if not data:
+        return None
+    token = _token_from_mapping(
+        data,
+        ("tokens", "access_token"),
+        ("tokens", "accessToken"),
+        ("access_token",),
+        ("accessToken",),
+        ("OPENAI_API_KEY",),  # some installs mint a subscription-scoped key here
+    )
+    if token:
+        return AuthMaterial(token, "subscription", "codex_auth.json")
+    return None
+
+
+def _grok_subscription_auth(env: Mapping[str, str]) -> AuthMaterial | None:
+    auth_path = _home_dir(env) / ".grok" / "auth.json"
+    data = _json_load_object(auth_path)
+    if not data:
+        return None
+    token = _token_from_mapping(
+        data,
+        ("access_token",),
+        ("accessToken",),
+        ("token",),
+        ("api_key",),
+        ("apiKey",),
+        ("credentials", "access_token"),
+        ("credentials", "api_key"),
+    )
+    if token:
+        return AuthMaterial(token, "subscription", "grok_auth.json")
+    return None
+
+
+def _gemini_subscription_auth(env: Mapping[str, str]) -> AuthMaterial | None:
+    token = _env_get(env, "GEMINI_OAUTH_TOKEN", "GOOGLE_OAUTH_ACCESS_TOKEN")
+    if token:
+        mech = (
+            "GEMINI_OAUTH_TOKEN"
+            if (env.get("GEMINI_OAUTH_TOKEN") or "").strip()
+            else "GOOGLE_OAUTH_ACCESS_TOKEN"
+        )
+        return AuthMaterial(token, "subscription", mech)
+    return None
+
+
+def _auth_for(name: str, env: Mapping[str, str]) -> AuthMaterial | None:
+    """Prefer subscription credentials over prepaid API wallets for sub-tier rungs."""
+    if name == "anthropic":
+        sub = _anthropic_subscription_auth(env)
+        if sub is not None:
+            return sub
+        prepaid = _env_get(env, *_ANTHROPIC_PREPAID_KEYS)
+        if prepaid:
+            return AuthMaterial(prepaid, "api_key", "ANTHROPIC_API_KEY")
+        return None
+    if name == "grok":
+        sub = _grok_subscription_auth(env)
+        if sub is not None:
+            return sub
+        prepaid = _env_get(env, *_GROK_PREPAID_KEYS)
+        if prepaid:
+            return AuthMaterial(prepaid, "api_key", "XAI_API_KEY")
+        return None
+    if name == "codex":
+        sub = _codex_subscription_auth(env)
+        if sub is not None:
+            return sub
+        prepaid = _env_get(env, *_CODEX_PREPAID_KEYS)
+        if prepaid:
+            return AuthMaterial(prepaid, "api_key", "OPENAI_API_KEY")
+        return None
+    if name == "gemini":
+        sub = _gemini_subscription_auth(env)
+        if sub is not None:
+            return sub
+        prepaid = _env_get(env, *_GEMINI_KEYS)
+        if prepaid:
+            mech = "GEMINI_API_KEY"
+            for candidate in _GEMINI_KEYS:
+                if (env.get(candidate) or "").strip():
+                    mech = candidate
+                    break
+            return AuthMaterial(prepaid, "api_key", mech)
+        return None
+    if name == "nvidia":
+        token = _env_get(env, *_NVIDIA_KEYS)
+        if token:
+            return AuthMaterial(token, "api_key", "NVIDIA_API_KEY")
+        return None
+    if name == "cerebras":
+        token = _env_get(env, *_CEREBRAS_KEYS)
+        if token:
+            return AuthMaterial(token, "api_key", "CEREBRAS_API_KEY")
+        return None
+    return None
+
+
+def _key_for(name: str, env: Mapping[str, str]) -> str:
+    """Back-compat: token string only. Prefer ``_auth_for`` for kind/mechanism."""
+    auth = _auth_for(name, env)
+    return auth.token if auth is not None else ""
 
 
 def _model_for(name: str, env: Mapping[str, str], *, kind: str = "vision") -> str:
@@ -204,14 +403,42 @@ def _model_for(name: str, env: Mapping[str, str], *, kind: str = "vision") -> st
             )
         return _first_env_model(env, "GEMINI_MODEL", default=defaults["gemini"])
     if name == "nvidia":
+        if kind == "vision":
+            return _first_env_model(
+                env,
+                "NVIDIA_VISION_MODEL",
+                "NVIDIA_MODEL",
+                default=_NVIDIA_VISION_DEFAULT,
+            )
         return _first_env_model(
-            env, "NVIDIA_VISION_MODEL", "NVIDIA_MODEL", default=defaults["nvidia"]
+            env, "NVIDIA_MODEL", default=defaults["nvidia"]
         )
     if name == "cerebras":
         return _first_env_model(
             env, "CEREBRAS_VISION_MODEL", "CEREBRAS_MODEL", default=defaults["cerebras"]
         )
     return name
+
+
+def _nvidia_vision_models(env: Mapping[str, str]) -> tuple[str, ...]:
+    """Primary NVIDIA vision id, then 11B fallback when distinct."""
+    primary = _model_for("nvidia", env, kind="vision")
+    models = [primary]
+    if primary != _NVIDIA_VISION_FALLBACK:
+        models.append(_NVIDIA_VISION_FALLBACK)
+    return tuple(models)
+
+
+def _anthropic_headers(api_key: str, *, subscription: bool) -> dict[str, str]:
+    headers = {
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+    }
+    if subscription:
+        # Claude Max / setup-token OAuth requires the oauth beta on Messages.
+        headers["anthropic-beta"] = _ANTHROPIC_OAUTH_BETA
+    return headers
 
 
 def _classify_http_failure(status: int, body: str) -> str:
@@ -616,21 +843,18 @@ def _gemini_multimodal_body(
 
 def _call_vision_provider(
     name: str,
-    api_key: str,
+    auth: AuthMaterial,
     model: str,
     b64: str,
     prompt: str,
     post: Callable[..., Any],
 ) -> tuple[int, str, Any]:
+    api_key = auth.token
     if name == "anthropic":
         return _request(
             post,
             "https://api.anthropic.com/v1/messages",
-            {
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
+            _anthropic_headers(api_key, subscription=auth.kind == "subscription"),
             _anthropic_vision_body(model, b64, prompt),
         )
     if name == "grok":
@@ -686,7 +910,7 @@ def _call_vision_provider(
 
 def _call_text_provider(
     name: str,
-    api_key: str,
+    auth: AuthMaterial,
     model: str,
     system: str,
     instruction: str,
@@ -698,6 +922,7 @@ def _call_text_provider(
     read_timeout: float,
     max_response_bytes: int,
 ) -> tuple[int, str, Any]:
+    api_key = auth.token
     if name == "anthropic":
         body = _anthropic_multimodal_body(
             model, system, instruction, labeled_b64, max_tokens=max_tokens
@@ -705,11 +930,7 @@ def _call_text_provider(
         return _request(
             post,
             "https://api.anthropic.com/v1/messages",
-            {
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
+            _anthropic_headers(api_key, subscription=auth.kind == "subscription"),
             body,
             timeout=(10.0, read_timeout),
             stream=True,
@@ -804,16 +1025,32 @@ def _extract_text(name: str, payload: dict[str, Any]) -> str:
     return _text_from_openai(payload)
 
 
+def _models_for_attempt(
+    name: str,
+    env: Mapping[str, str],
+    *,
+    kind: str,
+    model_override: str | None,
+    nvidia_vision: bool,
+) -> tuple[str, ...]:
+    if name == "anthropic" and model_override:
+        return (model_override,)
+    if name == "nvidia" and (kind == "vision" or nvidia_vision):
+        return _nvidia_vision_models(env)
+    return (_model_for(name, env, kind=kind),)
+
+
 def _run_ladder(
     *,
     env: Mapping[str, str],
     post: Callable[..., Any],
     kind: str,
     log_prefix: str,
-    call_provider: Callable[[str, str, str], tuple[int, str, Any]],
+    call_provider: Callable[[str, AuthMaterial, str], tuple[int, str, Any]],
     parse_success: Callable[[str, dict[str, Any]], Any],
     model_override: str | None = None,
     providers: Sequence[str] | None = None,
+    nvidia_vision: bool = False,
 ) -> tuple[Any, str, str, str, tuple[str, ...]]:
     attempted: list[str] = []
     skipped: list[str] = []
@@ -824,53 +1061,97 @@ def _run_ladder(
             skipped.append("cursor:unwired")
             logger.info("%s skip provider=cursor reason=unwired", log_prefix)
             continue
-        api_key = _key_for(name, env)
-        if not api_key:
+        auth = _auth_for(name, env)
+        if auth is None:
             skipped.append(f"{name}:no_key")
             continue
-        model = model_override if name == "anthropic" and model_override else _model_for(
-            name, env, kind=kind
+        logger.info(
+            "%s try provider=%s auth=%s mechanism=%s",
+            log_prefix,
+            name,
+            auth.kind,
+            auth.mechanism,
         )
-        try:
-            status, raw, payload = call_provider(name, api_key, model)
-        except ModelResponseError:
-            raise
-        except RuntimeError as exc:
-            code = str(exc) or "network"
-            attempted.append(f"{name}:{code}")
-            logger.warning("%s provider=%s failed %s", log_prefix, name, code)
-            continue
+        models = _models_for_attempt(
+            name, env, kind=kind, model_override=model_override, nvidia_vision=nvidia_vision
+        )
+        provider_won = False
+        won_model = ""
+        won_parsed: Any = None
+        won_text = ""
+        for model in models:
+            try:
+                status, raw, payload = call_provider(name, auth, model)
+            except ModelResponseError:
+                raise
+            except RuntimeError as exc:
+                code = str(exc) or "network"
+                attempted.append(f"{name}:{code}")
+                logger.warning(
+                    "%s provider=%s model=%s failed %s", log_prefix, name, model, code
+                )
+                continue
 
-        body_text = raw if isinstance(raw, str) else ""
-        if payload is None or _is_hard_fail(status, body_text):
-            code = _classify_http_failure(status, body_text)
-            attempted.append(f"{name}:{code}")
-            logger.warning(
-                "%s provider=%s model=%s failed %s", log_prefix, name, model, code
+            body_text = raw if isinstance(raw, str) else ""
+            if payload is None or _is_hard_fail(status, body_text):
+                code = _classify_http_failure(status, body_text)
+                attempted.append(f"{name}:{code}")
+                logger.warning(
+                    "%s provider=%s model=%s auth=%s failed %s",
+                    log_prefix,
+                    name,
+                    model,
+                    auth.kind,
+                    code,
+                )
+                continue
+
+            if not isinstance(payload, dict):
+                attempted.append(f"{name}:unparseable")
+                logger.warning(
+                    "%s provider=%s model=%s unparseable", log_prefix, name, model
+                )
+                continue
+
+            try:
+                parsed, text = parse_success(name, payload)
+            except ModelResponseError:
+                raise
+            except (ValueError, TypeError, KeyError):
+                attempted.append(f"{name}:unparseable")
+                logger.warning(
+                    "%s provider=%s model=%s unparseable", log_prefix, name, model
+                )
+                continue
+
+            if parsed is None:
+                attempted.append(f"{name}:unparseable")
+                logger.warning(
+                    "%s provider=%s model=%s unparseable", log_prefix, name, model
+                )
+                continue
+
+            provider_won = True
+            won_model = model
+            won_parsed = parsed
+            won_text = text
+            break
+
+        if provider_won:
+            logger.info(
+                "%s won provider=%s model=%s auth=%s",
+                log_prefix,
+                name,
+                won_model,
+                auth.kind,
             )
-            continue
-
-        if not isinstance(payload, dict):
-            attempted.append(f"{name}:unparseable")
-            logger.warning("%s provider=%s model=%s unparseable", log_prefix, name, model)
-            continue
-
-        try:
-            parsed, text = parse_success(name, payload)
-        except ModelResponseError:
-            raise
-        except (ValueError, TypeError, KeyError):
-            attempted.append(f"{name}:unparseable")
-            logger.warning("%s provider=%s model=%s unparseable", log_prefix, name, model)
-            continue
-
-        if parsed is None:
-            attempted.append(f"{name}:unparseable")
-            logger.warning("%s provider=%s model=%s unparseable", log_prefix, name, model)
-            continue
-
-        logger.info("%s won provider=%s model=%s", log_prefix, name, model)
-        return parsed, text, name, model, tuple(attempted + [f"{name}:ok"])
+            return (
+                won_parsed,
+                won_text,
+                name,
+                won_model,
+                tuple(attempted + [f"{name}:ok"]),
+            )
 
     tried = " ".join(attempted) or "none"
     skip = " ".join(skipped) or "none"
@@ -896,8 +1177,8 @@ def extract_via_vision(
     sender = post or _default_post
     b64 = base64.b64encode(png_bytes).decode("utf-8")
 
-    def call_provider(name: str, api_key: str, model: str) -> tuple[int, str, Any]:
-        return _call_vision_provider(name, api_key, model, b64, prompt, sender)
+    def call_provider(name: str, auth: AuthMaterial, model: str) -> tuple[int, str, Any]:
+        return _call_vision_provider(name, auth, model, b64, prompt, sender)
 
     def parse_success(name: str, payload: dict[str, Any]) -> tuple[Any, str]:
         text = _extract_text(name, payload)
@@ -911,6 +1192,7 @@ def extract_via_vision(
         log_prefix="vision",
         call_provider=call_provider,
         parse_success=parse_success,
+        nvidia_vision=True,
     )
     return VisionResult(
         rows=parsed,
@@ -933,17 +1215,19 @@ def complete_multimodal_json(
     read_timeout: float = 120.0,
     max_response_bytes: int = 2_000_000,
     require_end_turn: bool = True,
+    accept: Callable[[Any], bool] | None = None,
+    log_prefix: str = "research",
 ) -> LadderResult:
     """Run multimodal JSON completion through the shared ladder."""
     src = env if env is not None else os.environ
     sender = post or _default_post
     labeled_b64 = _labeled_images_to_b64(images)
 
-    def call_provider(name: str, api_key: str, model: str) -> tuple[int, str, Any]:
+    def call_provider(name: str, auth: AuthMaterial, model: str) -> tuple[int, str, Any]:
         use_stream = stream_anthropic and name == "anthropic"
         return _call_text_provider(
             name,
-            api_key,
+            auth,
             model,
             system,
             instruction,
@@ -963,16 +1247,19 @@ def complete_multimodal_json(
             )
         text = _extract_text(name, payload)
         obj = parse_json_object(text)
+        if obj is not None and accept is not None and not accept(obj):
+            return None, text
         return obj, text
 
     parsed, text, provider, model, attempted = _run_ladder(
         env=src,
         post=sender,
         kind="text",
-        log_prefix="research",
+        log_prefix=log_prefix,
         call_provider=call_provider,
         parse_success=parse_success,
         model_override=model_override,
+        nvidia_vision=bool(labeled_b64),
     )
     return LadderResult(
         data=parsed,
@@ -983,13 +1270,63 @@ def complete_multimodal_json(
     )
 
 
+def accept_tags_payload(obj: Any) -> bool:
+    """Newsfeed text-tagger contract: JSON object with at least 3 tags."""
+    tags = obj.get("tags") if isinstance(obj, dict) else None
+    return isinstance(tags, list) and len(tags) >= 3
+
+
+def accept_distill_payload(obj: Any) -> bool:
+    """Knowledge distill contract: JSON object with a non-empty summary."""
+    if not isinstance(obj, dict):
+        return False
+    summary = obj.get("summary")
+    return isinstance(summary, str) and bool(summary.strip())
+
+
+def complete_text_json(
+    instruction: str,
+    *,
+    system: str = "",
+    env: Mapping[str, str] | None = None,
+    post: Callable[..., Any] | None = None,
+    model_override: str | None = None,
+    max_tokens: int = 800,
+    read_timeout: float = 30.0,
+    max_response_bytes: int = 2_000_000,
+    require_end_turn: bool = False,
+    accept: Callable[[Any], bool] | None = None,
+    log_prefix: str = "text",
+) -> LadderResult:
+    """Text-only JSON completion through the shared ladder. Cerebras is last."""
+    return complete_multimodal_json(
+        instruction,
+        images=(),
+        system=system,
+        env=env,
+        post=post,
+        model_override=model_override,
+        max_tokens=max_tokens,
+        stream_anthropic=True,
+        read_timeout=read_timeout,
+        max_response_bytes=max_response_bytes,
+        require_end_turn=require_end_turn,
+        accept=accept,
+        log_prefix=log_prefix,
+    )
+
+
 __all__ = [
     "MODEL_LADDER_ORDER",
     "MODEL_LADDER_TIERS",
+    "AuthMaterial",
     "LadderResult",
     "ModelLadderExhausted",
     "VisionResult",
+    "accept_distill_payload",
+    "accept_tags_payload",
     "complete_multimodal_json",
+    "complete_text_json",
     "extract_via_vision",
     "parse_json_object",
     "parse_json_rows",

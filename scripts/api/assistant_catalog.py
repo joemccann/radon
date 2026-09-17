@@ -124,6 +124,7 @@ CATALOG: dict[CatalogKey, Capability] = {
     ("GET", "/streaks/{ticker}"): "read.spawn",
     ("POST", "/strength-confirmation/scan"): "read.spawn",
     ("POST", "/theta-harvester/scan"): "read.spawn",
+    ("POST", "/vol-skew-mr/scan"): "read.spawn",
     ("GET", "/ticker/ratings"): "read",
     ("POST", "/trading/halt"): "admin",
     ("POST", "/trading/kill"): "admin",
@@ -133,7 +134,6 @@ CATALOG: dict[CatalogKey, Capability] = {
     ("POST", "/uw/usage/record"): "internal",
     ("POST", "/vcg/scan"): "read.spawn",
     ("POST", "/vcg/share"): "internal",
-    ("POST", "/workflow/run"): "mutate.trading",
     ("POST", "/ws-ticket"): "internal",
     ("POST", "/ws-ticket/validate"): "internal",
 }

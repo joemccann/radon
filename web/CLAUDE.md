@@ -4,6 +4,10 @@ Frontend rules and correctness invariants for the Next.js app. Loaded automatica
 
 ---
 
+## Error presentation
+
+Request, refresh, broker, validation and action errors use `RequestError` / `ErrorToast` (or the shared toast system), never inline banners. Preserve retry and retained-data guidance. Fatal framework fallbacks, financial risk conditions and stored diagnostic records are explicit exceptions; see `docs/reviews/2026-09-17-toast-errors.md`.
+
 ## Sortable Tables
 
 Every product `<table>` uses `SortTh` + `useSort`. Structural exceptions set `data-sortable-exempt` to one of: `chain-layout`, `matrix`, `markdown`, `chrome`, `kit-demo`. Contract: `web/tests/sortable-table-contract.test.ts`.
@@ -104,6 +108,8 @@ Per-leg: `sign × (last - close) × contracts × 100`. Impl: `getOptionDailyChg(
 
 **Same-day exception:** `entry_date == today (ET)` → yesterday's close meaningless. Day Chg + Today P&L use entry-cost baseline → Today P&L = Total P&L = `MV − EC`. `ib_daily_pnl` ignored same-day.
 
+**Mixed-age combos are not same-day** (2026-09-17). Overnight long + same-session short (SPY 740P held since May, 760P sold today → bull put spread) stamps `basis_source: mixed` and often `entry_date=today`. The same-day identity then prints the overnight leg's entire accumulated P&L as Today P&L (−$162k). `isSameDay` is false for mixed; Today P&L is per-leg: overnight vs prior close, `session_fills` vs fill. Prefer `ib_daily_pnl` when IB already mixed-lot summed. Tests: `mixed-age-combo-today-pnl.test.ts`.
+
 **The exception covers STOCKS as well as options** (2026-08-11). It shipped options-only, so equities opened today kept the close baseline and reported a Today P&L that contradicted their own P&L (QQQ 666 sh @ $717.83, last $718.46: P&L +$421, Today P&L −$1,605). Impls: `getStockDailyChg()` + the stock branch of `getTodayPnlDollars()`, and the `isSameDay` branch in `computeDayMoveBreakdown` (which feeds the Day P&L card — a stock-only carve-out there makes the card disagree with the column it summarises). IB's own `reqPnLSingle` daily P&L for a same-day equity equals `MV − EC` to the cent, so the broker is the tiebreaker. Never reintroduce a stock-only inline copy of Today P&L in `PositionTable` / `MobilePositionList`; both must call `getTodayPnlDollars`. Tests: `same-day-stock-pnl.test.ts`, `e2e/portfolio-same-day-equity-pnl.spec.ts`.
 
 **ONE market value per position (2026-08-26).** `resolveRealtimeMarketValue()` in `lib/positionUtils.ts` is the only real-time market-value walk. Every surface calls it and falls back with `?? resolveMarketValue(pos)`; none re-walks `pos.legs` to accumulate its own. Calling `getTodayPnlDollars` is not enough — the same-day identity is `todayPnl === mv − ec`, so a surface that derives `mv` its own way publishes a Today P&L that contradicts its own total even with the shared helper on the other half. That is what happened to a META 40x short $580 put opened that morning: the mobile card walked the legs off raw `prices[k].last` while `getTodayPnlDollars` resolved the same leg through `resolveRealtimePrice`, which prefers the mid on a wide spread — +$1,097 total against −$103 today. `PositionTab` carried a third walk (unsigned for short stock) and `PositionTable` a fourth. Pinned by `market-value-single-source-contract.test.ts` (no surface accumulates a market value), `same-day-pnl-surface-parity.test.tsx`, and the rendered-DOM property suite `fuzz/same-day-pnl-surfaces.fuzz.test.tsx` — lib-level properties do NOT catch this class, because the lib was self-consistent through both regressions.
@@ -112,13 +118,12 @@ Per-leg: `sign × (last - close) × contracts × 100`. Impl: `getOptionDailyChg(
 
 Strict ordered fallback, MOST → LEAST specific:
 0. **session fills covering the WHOLE live position** — net signed session-fill qty == live size means the contract was flat at the session open, so nothing older can be this lot's entry
-1. blotter (per-contract: `ticker|expiry|right|strike`)
+1. **per-leg** blotter / fill / prev-contract dates (min). Incomplete coverage still wins when any date is overnight, so adding a same-day short to an overnight long does not stamp the combo today
 2. trade_log (`ticker|structure`)
-3. IB fills (per-contract, same-session)
-4. prev portfolio (`ticker|structure|expiry`, excluding today)
-5. **today** ← brand-new positions land here
+3. prev portfolio (`ticker|structure|expiry`, excluding today)
+4. **today** ← brand-new positions land here
 
-**Never use per-ticker blotter fallback.** Test: `test_combo_entry_date.py`.
+Journal OCC tickers (`SPY   260918P00740000`) normalize to the underlying root before the contract key is written. **Never use per-ticker blotter fallback.** Test: `test_combo_entry_date.py`.
 
 Step 0 outranks the journal because the journal keeps the EARLIEST date per contract and hands back a prior round-trip's date when a contract is reopened. META 575C 2026-08-28 was closed 2026-08-26, reopened 2026-08-27, and rendered Today P&L -$9,425 against a -$1,750 total. Test: `test_session_open_entry_date.py`.
 
