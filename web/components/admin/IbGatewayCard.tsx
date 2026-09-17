@@ -1,5 +1,6 @@
 "use client";
 
+import { userErrorMessage } from "@/lib/userError";
 import { useMemo } from "react";
 import type { AdminHealthPayload } from "@/lib/adminTypes";
 import {
@@ -54,7 +55,7 @@ export default function IbGatewayCard({ health, loading, error }: IbGatewayCardP
         <header className="admin-card-header">
           <span className="admin-card-title">IB Gateway</span>
         </header>
-        <p className="admin-card-empty admin-card-error">{error}</p>
+        <p className="admin-card-empty admin-card-error">{userErrorMessage(error, 'Gateway status could not be loaded. Try again.')}</p>
       </section>
     );
   }

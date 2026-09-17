@@ -1,5 +1,6 @@
 "use client";
 
+import { userErrorMessage } from "@/lib/userError";
 import { useMemo, useRef, useState, type FormEvent } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
@@ -50,7 +51,7 @@ function SourceForm({ onAdd }: { onAdd: (document: SourceDocument) => void }) {
         publishedAt: String(fields.get("publishedAt")), ticker: String(fields.get("ticker") ?? "").trim().toUpperCase() || null, kind };
       onAdd(filename ? importResearchTextFile(filename, String(fields.get("text")), metadata) : createSourceDocument({ ...metadata, text: fields.get("text") }));
       form.reset(); setFilename(null); setError(null);
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Source could not be imported."); }
+    } catch (reason) { setError(userErrorMessage(reason, "Source could not be imported.")); }
   }
   return <form onSubmit={submit} className={styles.form}>
     <label className={styles.field}>Document title<input name="title" required maxLength={500} autoComplete="off" /></label>
@@ -61,7 +62,7 @@ function SourceForm({ onAdd }: { onAdd: (document: SourceDocument) => void }) {
     <label className={styles.field}>Plaintext file (optional)<input type="file" accept=".txt,.md,.eml,text/plain" onChange={async (event) => {
       const file = event.target.files?.[0]; if (!file) { setFilename(null); return; }
       try { if (file.size > 1_000_000) throw new Error("Source file exceeds 1 MB."); const text = await file.text(); if (textRef.current) textRef.current.value = text; setFilename(file.name); setError(null); }
-      catch (reason) { setError(reason instanceof Error ? reason.message : "File could not be read."); }
+      catch (reason) { setError(userErrorMessage(reason, "File could not be read.")); }
     }} /></label>
     <label className={styles.field}>Source text<textarea ref={textRef} name="text" rows={8} required maxLength={250000} placeholder="Paste the exact filing, transcript, desk note, or deal email passage." /></label>
     <span className={styles.meta}>Text stays in this page until you export it. Reloading clears this workspace. Evidence exports contain sources and facts; model assumptions and the analysis date stay on this page.</span>
@@ -78,10 +79,10 @@ function FeedSources({ onAdd }: { onAdd: (document: SourceDocument) => void }) {
       onAdd(createSourceDocument({ id: `feed-${post.id}`, title: `Feed summary: ${post.title}`, url: post.href,
         publishedAt: post.source?.documentDate ?? post.isoTimestamp.slice(0, 10), kind: "desk-note", ticker: null, text: post.content }));
       setMessage(`Imported ${post.title}. Feed summaries retain their source attribution; verify against the original document.`);
-    } catch (reason) { setMessage(reason instanceof Error ? reason.message : "Feed source could not be imported."); }
+    } catch (reason) { setMessage(userErrorMessage(reason, "Feed source could not be imported.")); }
   }
   return <div>{loading ? <p role="status">Loading research feed…</p> : null}
-    {error ? <p className={styles.error}>Feed unavailable: {error} <button className={styles.button} onClick={() => void refresh()}>Retry feed</button></p> : null}
+    {error ? <p className={styles.error}>Feed unavailable: {userErrorMessage(error, "The feed could not be loaded. Try again.")} <button className={styles.button} onClick={() => void refresh()}>Retry feed</button></p> : null}
     {!loading && candidates.length === 0 ? <p className={styles.muted}>No textual notes are available in the current feed. Add a source passage above.</p> : null}
     <ul className={styles.sourceList}>{candidates.map((post) => <li key={post.id}><span>{post.title}</span><span className={styles.meta}>{post.source?.publisher ?? "Market Ear"} · {post.isoTimestamp.slice(0, 10)}</span><button className={styles.button} onClick={() => add(post)}>Import note</button></li>)}</ul>
     {message ? <p role="status">{message}</p> : null}</div>;
@@ -127,17 +128,17 @@ export default function ResearchWorkbench({ portfolio }: { portfolio?: Portfolio
       const importedIds = new Set(documents.map((document) => document.id));
       const next = parseResearchWorkspace({ version: 1, documents: [...workspace.documents, ...documents], facts: [...workspace.facts, ...incoming.facts.filter((fact) => importedIds.has(fact.documentId))] });
       setWorkspace(next); setNotice(`Imported ${documents.length} sources. Existing sources were preserved.`); setError(null);
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Workspace could not be imported."); }
+    } catch (reason) { setError(userErrorMessage(reason, "Workspace could not be imported.")); }
     if (fileRef.current) fileRef.current.value = "";
   }
   function draftWithAssistant() {
     try { emitAsk(buildResearchPrompt(workspace, undefined, asOf)); setError(null); }
-    catch (reason) { setError(reason instanceof Error ? reason.message : "Research prompt could not be prepared."); }
+    catch (reason) { setError(userErrorMessage(reason, "Research prompt could not be prepared.")); }
   }
   const download = (kind: "json" | "md" | "ics") => {
     try { const content = kind === "json" ? JSON.stringify(workspace, null, 2) : kind === "md" ? researchMarkdown(workspace, asOf) : researchCalendarIcs(workspace, asOf);
       downloadResearchFile(content, `radon-research-${asOf}.${kind}`, kind === "json" ? "application/json" : kind === "ics" ? "text/calendar" : "text/markdown");
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Export failed."); }
+    } catch (reason) { setError(userErrorMessage(reason, "Export failed.")); }
   };
   return <div className={styles.workbench} data-testid="research-workbench">
     <header className={styles.header}><div><h2>Evidence to decision</h2><p>Trace the claim. Compare the periods. Review the trade.</p><span className={styles.meta}>{workspace.documents.length} sources · {workspace.facts.length} cited facts · Unsaved evidence</span></div>
@@ -158,7 +159,7 @@ export default function ResearchWorkbench({ portfolio }: { portfolio?: Portfolio
       {tab === "Calendar" ? <><div className={styles.sectionHead}><div><h2>Earnings & blackout calendar</h2><p className={styles.muted}>Source-stated dates only. A generic earnings date does not establish a company buyback blackout.</p></div><button className={styles.button} disabled={!analysis.calendar.length} onClick={() => download("ics")}>Export calendar holds</button></div>{analysis.calendar.length ? analysis.calendar.map((hold) => <article className={styles.fact} key={hold.id}><span className={styles.meta}>{hold.status} · {hold.basis}</span><h3>{hold.ticker} {hold.title}</h3><p className={styles.factValue}>{hold.startDate}{hold.endDate !== hold.startDate ? ` to ${hold.endDate}` : ""}</p>{cite(hold.citation)}</article>) : <Empty title="No supported calendar holds"><p>Annotate an exact earnings date or a passage that explicitly states both blackout boundaries. Estimated windows remain outside the calendar.</p></Empty>}</> : null}
       {tab === "Deals" ? <><h2>Private-company diligence</h2><p className={styles.muted}>Funding and investor claims retain the source text. Missing valuation and comparable-company evidence stay unresolved.</p>{analysis.deals.length ? analysis.deals.map((deal) => <article className={styles.fact} key={deal.id}><h3>{deal.company}</h3><p>{deal.stage ?? "Stage unavailable"} · {deal.amount === null ? "Funding amount unavailable" : `${deal.amount.toLocaleString("en-US")} ${deal.unit}`}</p><p>Investors: {deal.investors.join(", ") || "Unverified"}</p><h3>Diligence questions</h3><ul>{deal.diligence.map((item) => <li key={item}>{item}</li>)}</ul>{deal.citations.map(cite)}</article>) : <Empty title="No sourced deals yet"><p>Paste a deal email or authorized DocSend text, then annotate the company, round, investors, and amount. URL access and inbox ingestion are not connected.</p></Empty>}</> : null}
       {tab === "Signals" ? <><h2>Transcript signal changes</h2><p className={styles.muted}>Guidance, capex, buybacks, and AI spending. Keyword candidates require review with your configured assistant. Changes require comparable cited periods and units.</p>{analysis.themes.length ? analysis.themes.map((theme) => <article className={styles.fact} key={theme.id}><h3>{theme.ticker} · {theme.theme}</h3><p>{theme.interpretation}</p>{theme.delta !== null ? <p className={styles.factValue}>{theme.delta > 0 ? "+" : ""}{theme.delta.toLocaleString("en-US")} {theme.unit}</p> : null}{cite(theme.current)}{theme.previous ? cite(theme.previous) : null}</article>) : <Empty title="No comparable transcript signals"><p>Import source text and annotate guidance, buyback, capex, or AI-spend figures. A change in language alone does not establish a tradeable edge.</p></Empty>}</> : null}
-      {tab === "AI infrastructure" ? <><h2>AI spending in company context</h2><p className={styles.muted}>Company capex and revenue share a period and currency scale. Cross-check market indicators in the existing regime workspace.</p><Link href="/regime/llm">Open AI market indicators</Link>{analysis.aiInfrastructure.length ? analysis.aiInfrastructure.map((row) => <article className={styles.fact} key={`${row.ticker}-${row.period}`}><h3>{row.ticker} · {row.period}</h3><p>Capex / revenue: {row.capexToRevenue === null ? "Unavailable" : `${(row.capexToRevenue * 100).toFixed(1)}%`}</p><p>AI spending: {row.aiSpend ? `${row.aiSpend.value?.toLocaleString("en-US")} ${row.aiSpend.unit}` : "Not separately disclosed in this evidence"}</p>{row.citations.map(cite)}</article>) : <Empty title="No supported spending comparison"><p>Add capex and revenue for a common period. General capex is not relabeled as AI spending.</p></Empty>}</> : null}
+      {tab === "AI infrastructure" ? <><h2>AI spending in company context</h2><p className={styles.muted}>Company capex and revenue share a period and currency scale. Cross-check market indicators in the AI industry workspace.</p><Link href="/ai-industry">Open AI market indicators</Link>{analysis.aiInfrastructure.length ? analysis.aiInfrastructure.map((row) => <article className={styles.fact} key={`${row.ticker}-${row.period}`}><h3>{row.ticker} · {row.period}</h3><p>Capex / revenue: {row.capexToRevenue === null ? "Unavailable" : `${(row.capexToRevenue * 100).toFixed(1)}%`}</p><p>AI spending: {row.aiSpend ? `${row.aiSpend.value?.toLocaleString("en-US")} ${row.aiSpend.unit}` : "Not separately disclosed in this evidence"}</p>{row.citations.map(cite)}</article>) : <Empty title="No supported spending comparison"><p>Add capex and revenue for a common period. General capex is not relabeled as AI spending.</p></Empty>}</> : null}
       {visited.has("Labs & exports") ? <div hidden={tab !== "Labs & exports"}><ResearchLabs workspace={workspace} analysis={analysis} portfolio={portfolio} asOf={asOf} /></div> : null}
       {visited.has("Controls") ? <div hidden={tab !== "Controls"}><ResearchControls /></div> : null}
       {current ? <section ref={sourceRef} className={styles.sourcePreview} aria-label="Document inspector"><div className={styles.sectionHead}><div><h2>{current.title}</h2><span className={styles.meta}>{current.publishedAt} · {current.kind} · {current.ticker ?? "No ticker"}</span></div><button className={styles.button} onClick={() => setSelected(null)}>Close inspector</button></div><pre>{current.text}</pre><FactAnnotation source={current} onAdd={(fact) => { const next = parseResearchWorkspace({ ...workspace, facts: [...workspace.facts, fact] }); setWorkspace(next); setNotice(`Added cited fact: ${fact.label}.`); }} /></section> : null}
@@ -178,7 +179,7 @@ function TradeReview({ workspace, asOf }: { workspace: ResearchWorkspace; asOf: 
   function apply() {
     try { const sources = availableDocuments.filter((document) => document.ticker === selectedTicker).map((document) => ({ title: document.title, url: document.url ?? "", passage: document.text.slice(0, 500) }));
       const href = applyResearchChecklist(selectedTicker, items, sources); window.location.assign(href);
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Checklist could not be applied."); }
+    } catch (reason) { setError(userErrorMessage(reason, "Checklist could not be applied.")); }
   }
   return <section className={styles.review}><h2>Desk note to trade review</h2><p>Carry the source context into the existing ticket. Contract selection, sizing, portfolio coverage, and order confirmation remain part of the ticket review.</p>
     <label className={styles.field}>Review ticker<select value={selectedTicker} disabled={!tickers.length} onChange={(event) => setTicker(event.target.value)}>{tickers.length ? tickers.map((item) => <option key={item}>{item}</option>) : <option value="">Add a source with a ticker</option>}</select></label>
@@ -203,7 +204,7 @@ function FactAnnotation({ source, onAdd }: { source: SourceDocument; onAdd: (fac
       if (value("period")) fact.period = value("period");
       if (value("value")) { fact.value = Number(value("value")); fact.unit = value("unit"); }
       onAdd(fact); form.reset(); setError(null);
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Fact could not be added."); }
+    } catch (reason) { setError(userErrorMessage(reason, "Fact could not be added.")); }
   }
   return <details><summary>Annotate a cited fact</summary><form className={styles.form} onSubmit={submit}>
     <div className={styles.pair}><label className={styles.field}>Fact type<select value={kind} onChange={(event) => setKind(event.target.value as ResearchFact["kind"])}>{(["metric", "blackout", "earnings", "deal", "theme"] as const).map((item) => <option key={item}>{item}</option>)}</select></label><label className={styles.field}>Fact label<input name="label" required maxLength={500} /></label></div>

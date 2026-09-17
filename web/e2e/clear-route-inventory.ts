@@ -10,15 +10,15 @@ export type ClearRouteCase = {
 };
 
 const regimePages = [
-  "ats", "backtest", "bpi", "breadth", "cor", "cot", "credit", "cri",
+  "ats", "backtest", "bpi", "breadth", "calm-streak", "cor", "cot", "credit", "cri",
   "curve", "dispersion", "divyield", "gex", "grg", "hhlev", "hyad", "iei-hyg",
-  "iv-spread", "ivrank", "llm", "ma-ratio", "margin", "short", "skew", "skew2d",
+  "iv-spread", "ivrank", "ma-ratio", "margin", "short", "skew", "skew2d",
   "straddle", "streaks", "trin", "vcg", "vixcor", "vixts",
 ] as const;
 
 const regimeLoaded: Record<string, string> = {
   ats: '[data-testid="ats-venue-share-table"]', backtest: ".backtest-chart", bpi: '[data-testid="bpi-chart-section"]', breadth: '[data-testid="breadth-history-chart-section"]',
-  cor: '[data-testid="cor-chart-section"]', cot: '[data-testid="cot-chart-section"]', credit: '[data-testid="credit-spread-chart-section"]', cri: ".regime-hero, .m-regime-headline",
+  "calm-streak": '[data-testid="calm-streak-chart-section"]', cor: '[data-testid="cor-chart-section"]', cot: '[data-testid="cot-chart-section"]', credit: '[data-testid="credit-spread-chart-section"]', cri: ".regime-hero, .m-regime-headline",
   curve: '[data-testid="yield-curve-chart-section"]', dispersion: '[data-testid="dispersion-chart-section"]', divyield: '[data-testid="divyield-chart-section"]',
   gex: '[data-testid="gex-laplace-chart"]', grg: '[data-testid="grg-chart"]', hhlev: '[data-testid="hhlev-chart-section"]', hyad: '[data-testid="hyad-chart-section"]',
   "iei-hyg": '[data-testid="iei-hyg-chart-section"]', "iv-spread": '[data-testid="iv-spread-chart-section"]', ivrank: '[data-testid="ivrank-chart-section"]',
@@ -29,6 +29,8 @@ const regimeLoaded: Record<string, string> = {
 };
 
 export const CLEAR_ROUTE_CASES: ClearRouteCase[] = [
+  { source: "app/ai-industry/page.tsx", path: "/ai-industry", selector: '[data-testid="ai-infrastructure-panel"]' },
+  { source: "app/regime/llm/page.tsx", path: "/regime/llm", destination: "/ai-industry", selector: '[data-testid="ai-infrastructure-panel"]' },
   { source: "app/page.tsx", path: "/", selector: '[role="slider"][aria-label="Inspect account value history"]', text: "$1,246,820.42" },
   { source: "app/dashboard/page.tsx", path: "/dashboard", selector: '[role="slider"][aria-label="Inspect account value history"]', text: "$1,246,820.42" },
   { source: "app/portfolio/page.tsx", path: "/portfolio", selector: '[data-testid="position-table"], [data-testid="mobile-position-list"]', text: "AAPL" },
@@ -47,7 +49,6 @@ export const CLEAR_ROUTE_CASES: ClearRouteCase[] = [
   { source: "app/journal/page.tsx", path: "/journal", selector: '[data-testid="journal-trade-count"]', text: "MSFT" },
   { source: "app/cta/page.tsx", path: "/cta", selector: '[data-testid="vol-targeting-model"]', text: "SPX" },
   { source: "app/alerts/page.tsx", path: "/alerts", selector: ".alerts-rule", text: "Flow Strength > 70" },
-  { source: "app/workflow/page.tsx", path: "/workflow", selector: ".react-flow", text: "Flow Pipeline Composer" },
   { source: "app/preferences/page.tsx", path: "/preferences", selector: '[data-testid="preference-input-RADON_MAX_ORDER_QTY"]' },
   { source: "app/profile/page.tsx", path: "/profile", selector: ".profile-field__input" },
   { source: "app/regime/page.tsx", path: "/regime", regimeTab: "cri", selector: regimeLoaded.cri },

@@ -2,7 +2,10 @@
 
 /** Preserved v1 inference price history. Membership and price direction do not establish scarcity. */
 
+import { userErrorMessage } from "@/lib/userError";
 import { useMemo } from "react";
+import AiIndustryHistoryChart from "./AiIndustryHistoryChart";
+import { historyGroups, type AiHistoryPoint } from "@/lib/aiInfrastructure";
 import {
   useLlmTokenIndex,
   type LlmTokenIndexRow,
@@ -21,10 +24,21 @@ function formatChange(rows: LlmTokenIndexRow[]): {
   if (rows.length < 2) return { pct: null, label: "---" };
   const first = rows[0].index_value;
   const last = rows[rows.length - 1].index_value;
-  if (!Number.isFinite(first) || first === 0) return { pct: null, label: "---" };
+  if (!Number.isFinite(first) || first === 0 || rows.some(row => row.methodology_version !== rows[0].methodology_version)) return { pct: null, label: "---" };
   const pct = ((last - first) / first) * 100;
   const sign = pct >= 0 ? "+" : "";
   return { pct, label: `${sign}${pct.toFixed(1)}% over ${rows.length}d` };
+}
+
+export function legacyIndexHistory(rows: LlmTokenIndexRow[]): AiHistoryPoint[][] {
+  return historyGroups(rows.map(row => ({
+    date: row.date,
+    value: row.index_value,
+    unit: "index (first observation = 1)",
+    series_id: `legacy-inference-price-v${row.methodology_version}`,
+    label: `Legacy inference price basket · methodology v${row.methodology_version}`,
+    source_id: "radon-llm-token-index",
+  })));
 }
 
 /* ─── Component ───────────────────────────────────────── */
@@ -35,6 +49,7 @@ export default function LlmTokenIndexCard() {
   const { data, loading, error } = useLlmTokenIndex(HISTORY_DAYS);
 
   const rows = data?.rows ?? [];
+  const histories = useMemo(() => legacyIndexHistory(rows), [rows]);
   const change = useMemo(() => formatChange(rows), [rows]);
   const latest = rows[rows.length - 1] ?? null;
   const directionColor = "var(--text-secondary)";
@@ -121,7 +136,7 @@ export default function LlmTokenIndexCard() {
 
       {error && !data && (
         <div className="regime-empty" data-testid="llm-token-index-error">
-          Unable to load LLM Token Index: {error}
+          {userErrorMessage(error, "The LLM Token Index could not be loaded. Try again.")}
         </div>
       )}
 
@@ -132,16 +147,15 @@ export default function LlmTokenIndexCard() {
         </div>
       )}
 
-      {rows.length >= 2 && (
+      {histories.length > 0 && (
         <div data-testid="llm-token-index-chart">
-          <svg viewBox="0 0 660 180" role="img" aria-label="Legacy inference price basket, normalized index" style={{ width: "100%", height: "auto" }}>
-            <polyline fill="none" stroke="var(--text-secondary)" strokeWidth="2" points={rows.map((row, i) => {
-              const min = Math.min(...rows.map(point => point.index_value));
-              const max = Math.max(...rows.map(point => point.index_value));
-              return `${20 + i / (rows.length - 1) * 620},${160 - (row.index_value - min) / (max - min || 1) * 140}`;
-            }).join(" ")} />
-          </svg>
-          <p style={{ color: "var(--text-muted)", fontSize: 12 }}>{rows[0].date} to {latest?.date} · normalized index only</p>
+          {histories.map(points => <AiIndustryHistoryChart
+            key={points[0].series_id}
+            points={points}
+            cadence="daily"
+            sourceLabel="Radon legacy token index"
+          />)}
+          <p style={{ color: "var(--text-muted)", fontSize: 12 }}>Normalized index only. Methodology versions remain separate; raw USD per million tokens are not plotted on this axis.</p>
         </div>
       )}
     </div>

@@ -69,7 +69,7 @@ export function classifyRateTier(
 // rel244-demo-rate-budget.test.ts fails when a new segment ships unlisted.
 export const KNOWN_API_SEGMENTS: ReadonlySet<string> = new Set([
   "admin", "ai-cycle", "alerts", "assistant", "attribution", "backtest", "blotter",
-  "bookmarks", "bpi", "breadth", "cash-flows", "catalysts", "cor",
+  "bookmarks", "bpi", "breadth", "calm-streak", "cash-flows", "catalysts", "cor",
   "credentials", "credit-spread", "discover", "dispersion", "divyield",
   "equibles-ats-venue-share", "equibles-cot-positioning",
   "equibles-filing-forensics", "equibles-short-crowding",
@@ -83,7 +83,7 @@ export const KNOWN_API_SEGMENTS: ReadonlySet<string> = new Set([
   "prices", "probe", "profile", "regime", "research", "risk-free-rate", "scanner",
   "service-health", "setup", "share", "short-availability", "skew", "skew2d",
   "straddle", "streaks", "ticker", "trin", "vcg", "vixcor", "vixts",
-  "vol-cone", "watchlist", "webhooks", "workflow", "yield-curve",
+  "vol-cone", "watchlist", "webhooks", "yield-curve",
 ]);
 
 /**

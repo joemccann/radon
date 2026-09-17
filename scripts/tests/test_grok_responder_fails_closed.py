@@ -109,6 +109,9 @@ class TestGlobalDailyActionCap:
         monkeypatch.setenv("GROK_PAGE_AUTOSHIP", "1")
         monkeypatch.setenv("GROK_PAGE_AUTOPUSH", "1")
         monkeypatch.setattr(
+            responder, "install_push_guard", lambda _root: Path("pre-push")
+        )
+        monkeypatch.setattr(
             pages_mod, "list_actionable_pages", lambda **_: [_page()]
         )
         monkeypatch.setattr(

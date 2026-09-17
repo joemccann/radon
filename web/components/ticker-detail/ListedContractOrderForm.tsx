@@ -1,5 +1,6 @@
 "use client";
 
+import OrderErrorBanner from "@/components/OrderErrorBanner";
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { OrderQuoteTelemetry } from "@/components/QuoteTelemetry";
 import { OrderRiskGate, type OrderRiskInput, type OrderRiskState } from "@/lib/order";
@@ -298,7 +299,7 @@ export function ListedContractOrderForm({
         {submitting ? "Submitting…" : typeof submitLabel === "function" ? submitLabel(action) : submitLabel}
       </button>
 
-      {submitError && <div className="futures-form-error">{submitError}</div>}
+      <OrderErrorBanner error={submitError} />
       {submitOk && (
         <div
           className={`futures-form-success${submitOk.deduplicated ? " futures-form-success--dedup" : ""}`}

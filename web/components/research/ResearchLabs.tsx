@@ -1,4 +1,5 @@
 "use client";
+import { userErrorMessage } from "@/lib/userError";
 import {useState} from 'react';
 import type {PortfolioData} from '@/lib/types';
 import type {ResearchWorkspace,ResearchAnalysis} from '@/lib/researchWorkbench';
@@ -20,18 +21,18 @@ export default function ResearchLabs({workspace,portfolio,asOf}:{workspace:Resea
   const [notes,setNotes]=useState('');
   const [peerText,setPeerText]=useState('');
   let peerMedian:number|null=null;let peerError='';let peers:ComparableCompany[]=[];
-  if(peerText.trim()){try{peers=peerText.trim().split('\n').map(line=>{const parts=line.split('|').map(v=>v.trim());if(parts.length!==3)throw new Error('Use Company | Enterprise value | EBITDA, one company per line.');return {name:parts[0],enterpriseValue:Number(parts[1]),ebitda:Number(parts[2])};});peerMedian=medianMultiple(peers);}catch(e){peerError=e instanceof Error?e.message:'Invalid comparables.';}}
+  if(peerText.trim()){try{peers=peerText.trim().split('\n').map(line=>{const parts=line.split('|').map(v=>v.trim());if(parts.length!==3)throw new Error('Use Company | Enterprise value | EBITDA, one company per line.');return {name:parts[0],enterpriseValue:Number(parts[1]),ebitda:Number(parts[2])};});peerMedian=medianMultiple(peers);}catch(e){peerError=userErrorMessage(e, 'Invalid comparables.');}}
   const complete=fields.every(f=>values[f.key].trim()!=='')&&ticker.trim()!=='';
   const input={ticker,...Object.fromEntries(fields.map(f=>[f.key,Number(values[f.key])]))} as ValuationInputs;
   const errors=complete?valuationErrors(input):[];
   let result:ReturnType<typeof calculateValuation>|null=null;
-  if(complete&&!errors.length){try{result=calculateValuation(input);}catch(e){errors.push(e instanceof Error?e.message:'Invalid scenario.');}}
+  if(complete&&!errors.length){try{result=calculateValuation(input);}catch(e){errors.push(userErrorMessage(e, 'Invalid scenario.'));}}
   async function exportFile(kind:'scenario'|'xlsx'|'pptx') {
     setBusy(true);setError('');
     try {
       const artifact=buildInvestorArtifactInput({workspace,asOf:asOf??new Date().toISOString().slice(0,10),ticker,notes,portfolio});
       if(kind==='scenario')await downloadValuation(input,artifact.sources,peers);else await downloadInvestorArtifacts(artifact,kind);
-    }catch(e){setError(e instanceof Error?e.message:'Export failed. Retry the download.');}finally{setBusy(false);}
+    }catch(e){setError(userErrorMessage(e, 'Export failed. Retry the download.'));}finally{setBusy(false);}
   }
   return <div className="research-labs">
     <section aria-labelledby="valuation-heading">

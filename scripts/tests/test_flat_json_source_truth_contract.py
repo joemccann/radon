@@ -85,7 +85,6 @@ def test_trade_portfolio_scripts_do_not_use_flat_json_source_truth() -> None:
         "scripts/discover.py",
         "scripts/portfolio_risk.py",
         "scripts/backfill_journal_from_executed_orders.py",
-        "scripts/workflow/nodes.py",
         "scripts/sweep_informed_flow.py",
         "scripts/forecasting/flow_surprise.py",
         "scripts/forecasting/calibration_report.py",

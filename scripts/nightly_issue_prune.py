@@ -9,9 +9,10 @@ The rule: while this loop still has an OPEN pull request (branch name
 starting with ``--branch-prefix``), every existing comment belongs to that
 pending run and stays untouched — the operator still needs the full history
 until they merge it. Once no PR is open for this loop (merged, closed, or
-none was ever needed — a zero-finding night), there is nothing left to keep:
-delete every existing comment before the next one posts, so the issue always
-shows at most one loop's worth of current status.
+none was ever needed — a zero-finding night), retain the latest audit checkpoint
+and latest detailed/no-op report alongside the wrapper's just-posted status.
+Prune only superseded comments: the issue now owns the audit cursor and findings
+handoff even when no branch or PR is needed.
 
 Stdlib only, 3.9-clean (invoked via ``python3 -I -``, same as
 ``weekend_prune.py``). ``gh`` does all network I/O; this module only decides
@@ -23,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 
@@ -85,7 +87,7 @@ def open_pr_head_refs(gh_bin: str, *, timeout: int) -> list[str] | None:
     return [row.get("headRefName", "") for row in rows if isinstance(row, dict)]
 
 
-def issue_comment_ids(gh_bin: str, issue: str, *, timeout: int) -> list[str] | None:
+def issue_comments(gh_bin: str, issue: str, *, timeout: int) -> list[dict[str, str]] | None:
     out = _run(
         gh_bin,
         [
@@ -93,13 +95,46 @@ def issue_comment_ids(gh_bin: str, issue: str, *, timeout: int) -> list[str] | N
             f"repos/{{owner}}/{{repo}}/issues/{issue}/comments",
             "--paginate",
             "--jq",
-            ".[].id",
+            ".[] | {id, body} | @json",
         ],
         timeout=timeout,
     )
     if out is None:
         return None
-    return [line.strip() for line in out.splitlines() if line.strip()]
+    comments: list[dict[str, str]] = []
+    try:
+        for line in out.splitlines():
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            if not isinstance(row, dict) or not str(row.get("id", "")).isdigit() or not isinstance(row.get("body"), str):
+                return None
+            comments.append({"id": str(row["id"]), "body": row["body"]})
+    except json.JSONDecodeError:
+        return None
+    return comments
+
+
+CHECKPOINT = re.compile(r"\baudited-through:\s*`?[0-9a-f]{7,40}\b", re.IGNORECASE)
+NOOP_REPORT = re.compile(r"\b(?:NO_ACTIONABLE_DRIFT\b|NO_SAFE_CHANGE\b|NIGHTLY PHASE NO-OP:)")
+
+
+def state_comment_ids(comments: list[dict[str, str]]) -> set[str]:
+    """Keep the newest durable cursor and report, not a nightly PR as storage.
+
+    GitHub comment IDs are monotonically allocated. Sorting them preserves
+    creation order even if pagination or a stub returns pages out of order;
+    editing an old report must not make its older checkpoint authoritative.
+    """
+    checkpoint = report = None
+    for comment in sorted(comments, key=lambda row: int(row["id"])):
+        body = comment["body"]
+        if CHECKPOINT.search(body):
+            checkpoint = comment["id"]
+        detailed = all(title in body for title in ("Issue discovered", "What was done to fix it", "Next"))
+        if detailed or NOOP_REPORT.search(body):
+            report = comment["id"]
+    return {cid for cid in (checkpoint, report) if cid is not None}
 
 
 def delete_comment(gh_bin: str, comment_id: str, *, timeout: int) -> bool:
@@ -148,12 +183,12 @@ def main(argv: list[str] | None = None) -> int:
         print("skip: an open PR is still pending for this loop", file=sys.stderr)
         return 0
 
-    ids = issue_comment_ids(args.gh_bin, args.issue, timeout=args.timeout)
-    if ids is None:
+    comments = issue_comments(args.gh_bin, args.issue, timeout=args.timeout)
+    if comments is None:
         print("skip: comment listing unknown — pruning nothing", file=sys.stderr)
         return 0
-    keep = {str(k).strip() for k in args.keep if str(k).strip()}
-    ids = [cid for cid in ids if cid not in keep]
+    keep = {str(k).strip() for k in args.keep if str(k).strip()} | state_comment_ids(comments)
+    ids = [comment["id"] for comment in comments if comment["id"] not in keep]
     deleted = sum(1 for cid in ids if delete_comment(args.gh_bin, cid, timeout=args.timeout))
     print(f"pruned {deleted}/{len(ids)} comments", file=sys.stderr)
     return 0

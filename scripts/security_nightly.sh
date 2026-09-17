@@ -664,8 +664,12 @@ refuse_credential_files
 # scanner reloads itself, or a Claude Code settings file carrying an
 # apiKeyHelper / env reroute. The lists are what `strings` on the installed
 # CLI actually honors; a hand copy of six of them was the old hole.
-# Re-derived against the INSTALLED CLI on 2026-09-14 (2.1.270, the approved
-# pin; see docs/security-approved-tools.md). History: pinned to 2.1.258,
+# Re-derived against the INSTALLED CLI on 2026-09-15 (2.1.272, the approved
+# pin; see docs/security-approved-tools.md). 2.1.272 adds no reroute: its new
+# names (CLAUDE_CODE_ARTIFACT_FD / _PATH_PIN / _QUICKSTART, the
+# _AUTO_MODE_SERVER classifier toggle, _DISABLE_TURN_HANDOFF,
+# _MCP_CONNECTOR_PREWAIT_MS, _SLEEPY_SNOWFLAKE) touch no model auth or
+# billing. Previous pass 2026-09-14 (2.1.270). History: pinned to 2.1.258,
 # re-derived 2026-09-07 against 2.1.263 (added CLAUDE_CODE_API_BASE_URL and
 # CLAUDE_CODE_HFI_BEARER_TOKEN). The 2026-09-14 pass read every new
 # ANTHROPIC_* / CLAUDE_CODE_* / AWS_BEARER_* name in its code context:
@@ -792,7 +796,7 @@ acquire_runner_lock "$RUNNER_LOCK" || {
   report "REFUSED (lock held)" "another weekend run owns $REPO (pid $(cat "$RUNNER_LOCK/pid" 2>/dev/null || echo unknown)); if no cycle is running, the recorded pid was reused — remove $RUNNER_LOCK" || true
   exit 3
 }
-trap 'release_runner_lock "$RUNNER_LOCK"' EXIT
+trap 'release_runner_lock "$RUNNER_LOCK"; if [[ -n "${NIGHTLY_PR_GUARD_DIR:-}" ]]; then rm -rf -- "$NIGHTLY_PR_GUARD_DIR"; fi' EXIT
 
 LOG_DIR="$REPO/logs/security-nightly"
 mkdir -p "$LOG_DIR"
@@ -1122,7 +1126,38 @@ rejection_regex() {
 # One launch per rung. Backgrounded and `wait`ed, never foreground: bash defers
 # trap handling until a foreground child exits, and `-k` escalates to SIGKILL so
 # a CLI blocked on a hung child cannot make the cap advisory. R-384, R-386.
+# Install a gh policy shim only in the agent's PATH. Reporting uses the saved
+# GH_BIN directly. Helpers are loaded lazily from origin/main, never the
+# agent-writable checkout; missing helpers fail closed on publication.
+install_nightly_pr_guard() {
+  if [[ -z "${NIGHTLY_PR_GUARD_DIR:-}" ]]; then
+    NIGHTLY_PR_GUARD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/radon-${LOOP_SLUG}-pr-guard.XXXXXX")" || return 1
+  fi
+  export RADON_NIGHTLY_REAL_GH="$GH_BIN"
+  export RADON_NIGHTLY_GUARD_REPO="$REPO"
+  export RADON_NIGHTLY_GUARD_PYTHON="$(command -v python3.13 || command -v python3)"
+  cat > "$NIGHTLY_PR_GUARD_DIR/gh" <<'GUARD'
+#!/bin/bash
+set -euo pipefail
+case " $* " in
+  *" pr create "*|*" api "*)
+    guard_dir="$(mktemp -d "${TMPDIR:-/tmp}/radon-pr-check.XXXXXX")"
+    trap 'rm -rf -- "$guard_dir"' EXIT
+    for helper in nightly_publish.py nightly_pr_guard.py; do
+      git -C "$RADON_NIGHTLY_GUARD_REPO" show "origin/main:scripts/$helper" > "$guard_dir/$helper"
+      [[ -s "$guard_dir/$helper" ]] || exit 1
+    done
+    "$RADON_NIGHTLY_GUARD_PYTHON" -I "$guard_dir/nightly_pr_guard.py" "$@"
+    ;;
+  *) exec "$RADON_NIGHTLY_REAL_GH" "$@" ;;
+esac
+GUARD
+  chmod 700 "$NIGHTLY_PR_GUARD_DIR/gh"
+}
+
 launch_round() {
+  local PATH="$NIGHTLY_PR_GUARD_DIR:$PATH"
+  export PATH
   local remain="$1" prompt_file="$PORTABLE_PROMPT_DIR/$LOOP_SKILL.$PHASE.md"
   # A bare rung names no model on purpose: the CLI/account default is what runs
   # and the vendor migrates it forward. An empty --model is NOT the same thing,
@@ -1296,6 +1331,7 @@ run_phase() {
     echo "[security-nightly] $PHASE done rc=$RC" | tee -a "$RUN_LOG"
     return 0
   fi
+  install_nightly_pr_guard
   # Rail 5b again: the previous phase's agent may have planted a key file
   # or a settings reroute the reset does not remove; refuse before this
   # phase's `claude` launches.

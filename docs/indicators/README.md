@@ -5,6 +5,7 @@ Owner specs for regime tabs and the cheap-wing scanner. Add a row here when a sp
 | Slug | Route | Service | Spec |
 |---|---|---|---|
 | vol-cone | `/scanner?mode=vol-cone` | `vol-cone`, `vol-cone-intraday` | [vol-cone.md](vol-cone.md) |
+| vol-skew-mr | `/scanner?mode=vol-skew-mr` | `vol-skew-mr` (on-demand) | [vol-skew-mr.md](vol-skew-mr.md) |
 | skew | `/regime/skew` | `skew` | [skew.md](skew.md) |
 | skew2d | `/regime/skew2d` | `skew2d` | [skew2d.md](skew2d.md) |
 | straddle | `/regime/straddle` | `straddle` | [straddle.md](straddle.md) |
@@ -18,6 +19,7 @@ Owner specs for regime tabs and the cheap-wing scanner. Add a row here when a sp
 | trin | `/regime/trin` | `trin` | [trin.md](trin.md) (spec; build in flight) |
 | divyield | `/regime/divyield` | `div-yield` | [divyield.md](divyield.md) |
 | ma-ratio | `/regime/ma-ratio` | `ma-ratio` | [ma-ratio.md](ma-ratio.md) |
+| calm-streak | `/regime/calm-streak` | `calm-streak` | [calm-streak.md](calm-streak.md) |
 | hyad | `/regime/hyad` | `hy-ad` | [hyad.md](hyad.md) |
 | hhlev | `/regime/hhlev` | `hhlev` | [hhlev.md](hhlev.md) |
 | vixts | `/regime/vixts` | `vixts` | [vixts.md](vixts.md) |
@@ -50,3 +52,5 @@ parent, or a spent UW daily cap fails its unit and pages a P1 every run. See
 Every UW-backed indicator shares one daily-cap breaker,
 `scripts/utils/uw_embargo.py`. Give a new writer its own sidecar file through
 `UwEmbargo(service, path_source)`; do not re-implement the reset arithmetic.
+
+The Vol/Skew MR scanner measures 25-delta put-minus-call IV history for one listed expiry nearest 30 DTE. Missing history is shown explicitly and cannot satisfy the skew gate; see [source and comparability rules](vol-skew-mr.md#data-sources-per-ticker).

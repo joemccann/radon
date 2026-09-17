@@ -660,6 +660,20 @@ unchanged-data heartbeats. Heartbeat `ma-ratio`. Installed by the deploy's
 `install-units` verb from `installed-units.sha256`. Spec:
 [`indicators/ma-ratio.md`](indicators/ma-ratio.md).
 
+### CALM STREAK (`radon-calm-streak.timer`)
+
+Daily `02:40 UTC` and `14:30 UTC` (`RandomizedDelaySec=120`), oneshot
+`scripts/fetch_calm_streak.py`, `TimeoutStartSec=300`. Pulls Cboe's official
+`_SPX.json` daily OHLC history with a conditional GET, counts consecutive
+completed sessions whose `(high - low) / prior close` stays at or under 1%,
+and writes `calm_streak_history` (only new sessions; an empty table backfills
+from 1985) plus the `calm-streak` snapshot. The regeneration time of the Cboe
+file is not published, so the evening slot and the morning slot (after the
+observed ~13:02 UTC regeneration) both run; unchanged runs are 304
+heartbeats. Heartbeat `calm-streak`. Installed by the deploy's
+`install-units` verb from `installed-units.sha256`. Spec:
+[`indicators/calm-streak.md`](indicators/calm-streak.md).
+
 ### HY AD (`radon-hyad.timer`)
 
 `Tue..Sat 11:00 UTC` (`RandomizedDelaySec=300`), oneshot `scripts/fetch_hyad.py`,
@@ -721,6 +735,23 @@ as `stale_source` with an `error` heartbeat and exits non-zero; a gap wider than
 the incremental window raises and asks for `--backfill`. Installed by the deploy's
 `install-units` verb from `installed-units.sha256`. Spec:
 [`indicators/dispersion.md`](indicators/dispersion.md).
+
+### Liquid Compute GPU index (`radon-liquidcompute.timer`)
+
+Daily `07:30 UTC` (`RandomizedDelaySec=300`), oneshot
+`python -m scripts.ai_cycle.liquidcompute --record`, `TimeoutStartSec=180`.
+Fetches the public homepage GPU index ticker
+(`GET https://liquidcompute.com/api/market/ticker`), identifies as Radon,
+and backs off on non-200. Host-tagged rows land in Turso/SQLite
+`liquidcompute_index` (`source=liquidcompute`, `series_id` = index id,
+`date`/`vintage` = publisher `asOf`, `unit=usd_per_gpu_per_hr`), idempotent
+on `(source, series_id, asOf)`. Compute pane `C5` on `/regime/llm`. Third
+venue versus the rental book; methodology opaque until licensed. Never
+spliced onto gpurentalprices or Silicon Data. robots.txt Disallows `/api/`
+but the public homepage loads this ticker; do not scrape `/auth/` or
+`/ingest/`. Heartbeat `liquidcompute`. Enable:
+`systemctl enable --now radon-liquidcompute.timer`. The same source is also
+collected by `radon-ai-cycle.timer`.
 
 ### Model catalog (`radon-model-catalog.timer`)
 

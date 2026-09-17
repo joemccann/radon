@@ -143,7 +143,7 @@ test("risk reversal proposals show skew and signed delta telemetry", async ({ pa
   await page.goto("/AAPL?tab=chain");
   const detail = page.locator(".ticker-detail-page").last();
   await detail.waitFor({ timeout: 5_000 });
-  await detail.locator(".chain-grid").waitFor();
+  await detail.locator(".chain-grid").first().waitFor();
 
   // Bullish risk reversal: SELL $105 put (put bid), BUY $115 call (call ask)
   await detail.getByRole("row", { name: /\$105\.00/ }).first().locator(".chain-bid.chain-clickable").last().click();

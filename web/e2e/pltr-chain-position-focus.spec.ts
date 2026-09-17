@@ -332,7 +332,7 @@ test.describe("PLTR chain position focus", () => {
     await page.goto("http://127.0.0.1:3000/PLTR?posId=16&tab=chain");
 
     const detail = page.locator(".ticker-detail-page").last();
-    await detail.locator(".chain-grid").waitFor();
+    await detail.locator(".chain-grid").first().waitFor();
 
     const expirySelect = detail.locator(".chain-expiry-select").first();
     await expect(expirySelect).toHaveValue("20260327");

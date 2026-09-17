@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -26,6 +26,8 @@ import BottomSheet from "./BottomSheet";
 import MobileOrderTicket from "./MobileOrderTicket";
 import SpectralLoader from "@/components/SpectralLoader";
 import { OrderQuoteTelemetry } from "@/components/QuoteTelemetry";
+import ChainSpotBar from "@/components/ChainSpotBar";
+import { useChainAnchor } from "@/lib/useChainAnchor";
 
 type Strike = {
   strike: number;
@@ -58,6 +60,11 @@ type MobileChainLadderProps = {
   atmStrike: number | null;
   prices: Record<string, PriceData>;
   currentPrice: number | null;
+  anchorPrice?: number | null;
+  anchorRevision?: string;
+  onRecenter?: () => void;
+  onBrowse?: () => void;
+  priceIsClose?: boolean;
   loading?: boolean;
   /** Calls / puts / both filter — mirrors desktop, deep-linked via the URL. */
   sideFilter: SideFilter;
@@ -126,6 +133,7 @@ function SideCell({
   data,
   align,
   expanded,
+  isItm,
   selectedAction,
   onSelect,
   onAddLeg,
@@ -135,6 +143,7 @@ function SideCell({
   data: PriceData | null;
   align: "left" | "right";
   expanded: boolean;
+  isItm: boolean;
   /** BUY / SELL when this contract is an active order leg — drives the
    *  selection tint (P5). null = not in the pending order. */
   selectedAction: "BUY" | "SELL" | null;
@@ -220,7 +229,7 @@ function SideCell({
     <div
       role="button"
       tabIndex={0}
-      className={`mobile-chain__cell mobile-chain__cell--${right === "C" ? "call" : "put"}${align === "right" ? " mobile-chain__cell--right" : ""}${selectedClass}`}
+      className={`mobile-chain__cell mobile-chain__cell--${right === "C" ? "call" : "put"}${align === "right" ? " mobile-chain__cell--right" : ""}${isItm ? " mobile-chain__cell--itm" : ""}${selectedClass}`}
       onClick={handleClick}
       onKeyDown={handleKeyDown}
       onPointerDown={handlePointerDown}
@@ -232,14 +241,16 @@ function SideCell({
       aria-label={`${right === "C" ? "Call" : "Put"} ${strike}`}
       aria-pressed={selectedAction != null}
     >
-      <span className="mobile-chain__last">{fmtLast(data?.last)}</span>
-      <span className="mobile-chain__bid-ask">{fmtBidAsk(data?.bid, data?.ask)}</span>
-      <span className="mobile-chain__meta">
-        <span>IV {fmtIv(data?.impliedVol)}</span>
-        {expanded ? <span>Δ {fmtGreek(data?.delta, 2)}</span> : null}
-        {expanded ? <span>V {fmtOi(data?.volume)}</span> : null}
-        <span>AVG VOL {fmtOi(data?.avgVolume)}</span>
-      </span>
+      {expanded && <span className="mobile-chain__last">{fmtLast(data?.last)}</span>}
+      <span className={`mobile-chain__bid-ask${expanded ? "" : " mobile-chain__bid-ask--primary"}`}>{fmtBidAsk(data?.bid, data?.ask)}</span>
+      {expanded && (
+        <span className="mobile-chain__meta">
+          <span>IV {fmtIv(data?.impliedVol)}</span>
+          <span>Δ {fmtGreek(data?.delta, 2)}</span>
+          <span>V {fmtOi(data?.volume)}</span>
+          <span>AVG VOL {fmtOi(data?.avgVolume)}</span>
+        </span>
+      )}
 
       {quickAddOpen ? (
         <>
@@ -306,6 +317,11 @@ export default function MobileChainLadder({
   atmStrike,
   prices,
   currentPrice,
+  anchorPrice: controlledAnchorPrice,
+  anchorRevision,
+  onRecenter,
+  onBrowse,
+  priceIsClose,
   loading,
   sideFilter,
   onSideFilterChange,
@@ -321,28 +337,31 @@ export default function MobileChainLadder({
 }: MobileChainLadderProps) {
   const [selected, setSelected] = useState<SelectedCell | null>(null);
   const [ticketOpen, setTicketOpen] = useState(false);
-  const ladderRef = useRef<HTMLDivElement>(null);
-  const atmRowRef = useRef<HTMLDivElement>(null);
+  const upperPaneRef = useRef<HTMLDivElement>(null);
+  const lowerPaneRef = useRef<HTMLDivElement>(null);
+  const strikes = useMemo(() => visibleStrikes.map(({ strike }) => strike), [visibleStrikes]);
+  const localAnchor = useChainAnchor({
+    ticker,
+    expiry: selectedExpiry,
+    strikes,
+    currentPrice,
+    strikesPerSide,
+  });
+  const anchorPrice = controlledAnchorPrice === undefined ? localAnchor.anchorPrice : controlledAnchorPrice;
+  const revision = anchorRevision ?? localAnchor.revision;
+  const markBrowsing = onBrowse ?? localAnchor.markBrowsing;
+  const recenter = onRecenter ?? localAnchor.recenter;
+  const upperStrikes = visibleStrikes.filter(({ strike }) => anchorPrice != null && strike < anchorPrice);
+  const lowerStrikes = visibleStrikes.filter(({ strike }) => anchorPrice == null || strike >= anchorPrice);
+  const spotMoved = currentPrice != null && anchorPrice != null &&
+    strikes.findIndex(strike => strike >= currentPrice) !== strikes.findIndex(strike => strike >= anchorPrice);
+  const panesReady = !loading && visibleStrikes.length > 0;
+  const paneStrikesKey = visibleStrikes.map(row => row.strike).join(",");
 
-  // Auto-scroll to ATM strike on mount and when expiry/strikes change.
-  // scrollIntoView is used for the initial snap; on subsequent expiry
-  // changes the manual offsetTop path centers the row within the scroller.
-  useEffect(() => {
-    if (!atmRowRef.current || !ladderRef.current) return;
-    const atm = atmRowRef.current;
-    const wrapper = ladderRef.current;
-    // Center the ATM row WITHIN the ladder scroller only. scrollIntoView would
-    // bubble to scrollable ancestors (the deck body), dragging the sticky
-    // controls out of view — measure against the wrapper rect instead.
-    const wrapperRect = wrapper.getBoundingClientRect();
-    const atmRect = atm.getBoundingClientRect();
-    const target =
-      wrapper.scrollTop +
-      (atmRect.top - wrapperRect.top) +
-      atmRect.height / 2 -
-      wrapper.clientHeight / 2;
-    wrapper.scrollTo({ top: Math.max(0, target), behavior: "instant" });
-  }, [selectedExpiry, visibleStrikes.length, atmStrike]);
+  useLayoutEffect(() => {
+    if (upperPaneRef.current) upperPaneRef.current.scrollTop = upperPaneRef.current.scrollHeight;
+    if (lowerPaneRef.current) lowerPaneRef.current.scrollTop = 0;
+  }, [revision, panesReady, paneStrikesKey]);
 
   // Compute live net mid for the pending strip so the operator can see the
   // current market mid without opening the ticket.
@@ -390,18 +409,51 @@ export default function MobileChainLadder({
   // ladder head and every row so they stay aligned.
   const gridClass = !singleSide ? "mc-grid-both" : showCalls ? "mc-grid-calls" : "mc-grid-puts";
 
+  const renderRows = (rows: Strike[]) => rows.map(({ strike, callKey, putKey }) => {
+    const call = prices[callKey] ?? null;
+    const put = prices[putKey] ?? null;
+    const isAtm = atmStrike != null && strike === atmStrike;
+    const rowClass = `mobile-chain__row ${gridClass}${isAtm ? " mobile-chain__row--atm" : ""}`;
+
+    return (
+      <div key={strike} className={rowClass} data-testid={`mobile-chain-row-${strike}`}>
+        {showCalls && (
+          <SideCell
+            right="C"
+            strike={strike}
+            data={call}
+            align="left"
+            expanded={singleSide}
+            isItm={currentPrice != null && strike < currentPrice}
+            selectedAction={legActionByKey.get(`${strike}_C`) ?? null}
+            onSelect={() => setSelected({ strike, right: "C", data: call })}
+            onAddLeg={onAddLeg}
+          />
+        )}
+        <div className="mobile-chain__strike">{strike}</div>
+        {showPuts && (
+          <SideCell
+            right="P"
+            strike={strike}
+            data={put}
+            align={singleSide ? "left" : "right"}
+            expanded={singleSide}
+            isItm={currentPrice != null && strike > currentPrice}
+            selectedAction={legActionByKey.get(`${strike}_P`) ?? null}
+            onSelect={() => setSelected({ strike, right: "P", data: put })}
+            onAddLeg={onAddLeg}
+          />
+        )}
+      </div>
+    );
+  });
+
   return (
     <div className="mobile-chain" data-testid="mobile-chain">
       <div className="mobile-chain__header">
         <div className="mobile-chain__control" data-testid="mobile-chain-expiry-control">
           <div className="mobile-chain__control-head">
             <span className="mobile-chain__control-label">EXPIRY</span>
-            <span className="mobile-chain__spot">
-              {ticker.toUpperCase()}{" "}
-              <span className="mobile-chain__spot-val">
-                {currentPrice != null ? fmtPrice(currentPrice) : "—"}
-              </span>
-            </span>
           </div>
           <div className="mobile-chain__expiry-bar" data-testid="mobile-chain-expiry-bar">
             {expiryChips.map((exp) => {
@@ -467,61 +519,52 @@ export default function MobileChainLadder({
         {showPuts && <div className="mobile-chain__side-label">PUTS</div>}
       </div>
 
-      {loading ? (
-        <div className="mobile-empty-state" data-testid="mobile-chain-loading">
-          <SpectralLoader label="Loading chain" />
-        </div>
-      ) : visibleStrikes.length === 0 ? (
-        <div className="mobile-empty-state" data-testid="mobile-chain-empty">
-          <span>No strikes for this expiry.</span>
-        </div>
-      ) : (
-        <div className="mobile-chain__ladder" ref={ladderRef} data-testid="mobile-chain-ladder">
-          {visibleStrikes.map(({ strike, callKey, putKey }) => {
-            const call = prices[callKey] ?? null;
-            const put = prices[putKey] ?? null;
-            const isAtm = atmStrike != null && strike === atmStrike;
-            const rowClass = `mobile-chain__row ${gridClass}${isAtm ? " mobile-chain__row--atm" : ""}`;
-
-            return (
-              <div
-                key={strike}
-                className={rowClass}
-                ref={isAtm ? atmRowRef : undefined}
-                data-testid={`mobile-chain-row-${strike}`}
-              >
-                {showCalls && (
-                  <SideCell
-                    right="C"
-                    strike={strike}
-                    data={call}
-                    align="left"
-                    expanded={singleSide}
-                    selectedAction={legActionByKey.get(`${strike}_C`) ?? null}
-                    onSelect={() => setSelected({ strike, right: "C", data: call })}
-                    onAddLeg={onAddLeg}
-                  />
-                )}
-
-                <div className="mobile-chain__strike">{strike}</div>
-
-                {showPuts && (
-                  <SideCell
-                    right="P"
-                    strike={strike}
-                    data={put}
-                    align={singleSide ? "left" : "right"}
-                    expanded={singleSide}
-                    selectedAction={legActionByKey.get(`${strike}_P`) ?? null}
-                    onSelect={() => setSelected({ strike, right: "P", data: put })}
-                    onAddLeg={onAddLeg}
-                  />
-                )}
+        <div className="mobile-chain__ladder chain-anchor-panes" data-testid="mobile-chain-ladder">
+          <div
+            ref={upperPaneRef}
+            className="chain-anchor-pane chain-anchor-pane--upper"
+            data-testid="chain-upper-pane"
+            role="region"
+            aria-label="Lower strikes"
+            tabIndex={0}
+            onPointerDown={markBrowsing}
+            onWheel={markBrowsing}
+            onTouchStart={markBrowsing}
+            onKeyDown={markBrowsing}
+          >
+            {!loading && renderRows(upperStrikes)}
+          </div>
+          <ChainSpotBar
+            ticker={ticker}
+            currentPrice={currentPrice}
+            anchorPrice={anchorPrice}
+            priceIsClose={priceIsClose}
+            spotMoved={spotMoved}
+            onRecenter={recenter}
+          />
+          <div
+            ref={lowerPaneRef}
+            className="chain-anchor-pane chain-anchor-pane--lower"
+            data-testid="chain-lower-pane"
+            role="region"
+            aria-label="Higher strikes"
+            tabIndex={0}
+            onPointerDown={markBrowsing}
+            onWheel={markBrowsing}
+            onTouchStart={markBrowsing}
+            onKeyDown={markBrowsing}
+          >
+            {loading ? (
+              <div className="mobile-empty-state" data-testid="mobile-chain-loading">
+                <SpectralLoader label="Loading chain" />
               </div>
-            );
-          })}
+            ) : visibleStrikes.length === 0 ? (
+              <div className="mobile-empty-state" data-testid="mobile-chain-empty">
+                <span>No strikes for this expiry.</span>
+              </div>
+            ) : renderRows(lowerStrikes)}
+          </div>
         </div>
-      )}
 
       {orderLegs.length > 0 ? (
         // F2: single thumb bar. Tapping the bar (the primary Review affordance)

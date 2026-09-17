@@ -1,0 +1,22 @@
+[Unit]
+Description=Radon CALM STREAK Indicator (Cboe SPX daily OHLC, consecutive sessions without a >1% intraday band)
+After=network.target
+
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+User=radon
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/etc/radon/env
+Environment=RADON_DB_NO_REPLICA=1
+ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/fetch_calm_streak.py
+StandardOutput=journal
+StandardError=journal
+# One ~1.7 MB Cboe GET (30s timeout) plus a first-run ~10.5k-row chunked
+# backfill (27 statements); later runs upsert only new sessions.
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

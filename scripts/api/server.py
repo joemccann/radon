@@ -2074,9 +2074,28 @@ async def get_ws_ticket(payload: dict = Depends(verify_clerk_jwt)):
     return {"ticket": ticket}
 
 
+# Auth-exempt handlers parse the body before any credential check, so an
+# anonymous caller must never be able to stream an unbounded body into this
+# process. Checked against Content-Length BEFORE the body is read; the edge
+# (Caddy request_body 1MB) is the outer layer of the same bound.
+AUTH_EXEMPT_BODY_MAX_BYTES = 64 * 1024
+
+
+def _require_bounded_body(request: Request) -> None:
+    """413 an oversized body, 411 a length-less one, without reading it."""
+    content_length = request.headers.get("content-length")
+    try:
+        size = int(content_length)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=411, detail="Content-Length required")
+    if size > AUTH_EXEMPT_BODY_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Request body too large")
+
+
 @app.post("/ws-ticket/validate")
 async def validate_ws_ticket(request: Request):
     """Validate a WebSocket ticket (called by the Node.js relay). Internal only."""
+    _require_bounded_body(request)
     body = await request.json()
     ticket = body.get("ticket", "")
     user_id = validate_ticket(ticket)
@@ -2097,6 +2116,7 @@ async def demo_trial_expiry(request: Request):
     """
     from utils.demo_trial import DEFAULT_TRADING_DAYS, trial_expiry_handler
 
+    _require_bounded_body(request)
     body = await request.json()
     start_iso_et = body.get("start_iso_et")
     if not start_iso_et:
@@ -2420,94 +2440,6 @@ async def backtest_registry():
     return {"strategies": list_strategies()}
 
 
-def _execute_workflow_graph(graph: dict, confirm_order: bool) -> dict:
-    """Run a workflow graph off the event loop and serialize the report.
-
-    The executor is pure for the tested node paths; any external effect lives
-    behind the patchable seams in ``workflow.nodes``. Order-emitting nodes block
-    unless ``confirm_order`` is set — the OrderRiskGate confirmation seam.
-    """
-    from workflow.executor import WorkflowError, execute_graph
-
-    try:
-        report = execute_graph(graph, confirm_order=confirm_order)
-    except WorkflowError as exc:
-        return {"ok": False, "error": str(exc), "invalid": True}
-    return {
-        "ok": report.ok,
-        "blocked_by": report.blocked_by,
-        "blocked_gate": report.blocked_gate,
-        "requires_confirmation": report.requires_confirmation,
-        "steps": [
-            {
-                "node_id": step.node_id,
-                "node_type": step.node_type,
-                "rows_in": step.rows_in,
-                "rows_out": step.rows_out,
-                "blocked": step.blocked,
-                "info": step.info,
-            }
-            for step in report.steps
-        ],
-        "final_rows": report.final_rows,
-    }
-
-
-_MAX_CONCURRENT_WORKFLOWS = 2
-_active_workflows = 0
-
-
-def _release_workflow_job(task: asyncio.Task) -> None:
-    global _active_workflows
-    _active_workflows = max(0, _active_workflows - 1)
-    # A timed-out request no longer awaits the worker. Consume any eventual
-    # exception so asyncio does not emit an unhandled-task warning.
-    try:
-        task.exception()
-    except (asyncio.CancelledError, Exception):
-        pass
-
-
-@app.post("/workflow/run")
-async def workflow_run(request: Request):
-    """F14 — execute an operator-authored flow-pipeline graph server-side.
-
-    Body: ``{"graph": {nodes, edges}, "confirm_order": bool}``. Returns the
-    serialized execution report. Order-emitting nodes require ``confirm_order``;
-    a failing gate names the blocking node + gate.
-    """
-    body = await request.json()
-    graph = body.get("graph")
-    if not isinstance(graph, dict) or "nodes" not in graph:
-        raise HTTPException(status_code=400, detail="body.graph {nodes, edges} required")
-    confirm_order = bool(body.get("confirm_order", False))
-    global _active_workflows
-    if _active_workflows >= _MAX_CONCURRENT_WORKFLOWS:
-        raise HTTPException(status_code=429, detail="workflow capacity exhausted")
-    _active_workflows += 1
-    task = asyncio.create_task(
-        asyncio.to_thread(_execute_workflow_graph, graph, confirm_order)
-    )
-    released = False
-    try:
-        report = await asyncio.wait_for(asyncio.shield(task), timeout=31.0)
-    except asyncio.TimeoutError as exc:
-        task.add_done_callback(_release_workflow_job)
-        released = True
-        raise HTTPException(status_code=504, detail="workflow execution timed out") from exc
-    finally:
-        if not released:
-            if task.done():
-                _release_workflow_job(task)
-            else:
-                # Client cancellation must not leak the admission slot while
-                # the shielded worker completes in its thread.
-                task.add_done_callback(_release_workflow_job)
-    if report.get("invalid"):
-        raise HTTPException(status_code=400, detail=report.get("error", "invalid graph"))
-    return report
-
-
 _PAPER_PLACE_REQUIRED = ("ticker", "side", "order_type", "quantity")
 
 
@@ -2628,7 +2560,10 @@ async def flow_analysis(force: bool = False):
         "flow_analysis.json",
         "flow_analysis.py",
         [],
-        timeout=120,
+        # Match run_flow_refresh.sh SCAN_TIMEOUT default (180). A 120s kill
+        # at the close (2026-09-11 / 2026-09-15 20:00Z) paged the oneshot
+        # after a capacity-shed retry while discover already sat at 180.
+        timeout=180,
         force=force,
         demo_key="flow-analysis",
         demo_payload={"scan_time": "", "results": []},
@@ -2890,9 +2825,8 @@ def _refuse_if_order_limits_violated(params: dict) -> None:
 def _refuse_if_trading_halted() -> None:
     """Kill switch (REL-004): fast 409 before any subprocess spawn.
 
-    ib_place_order.place_order re-checks the flag (covers the workflow
-    bridge that bypasses these routes); this route-level check just fails
-    faster and cheaper.
+    ib_place_order.place_order re-checks the flag; this route-level check
+    just fails faster and cheaper.
     """
     from trading_halt import get_halt_state, is_trading_halted
 
@@ -4131,6 +4065,93 @@ async def strength_confirmation_scan(preset: str = "ndx100", limit: int = 0, tic
             "tickers_scanned": 0,
             "candidates_found": 0,
             "confirmed_strength_count": 0,
+            "results": [],
+        }
+
+
+# ── Vol/Skew MR scanner ─────────────────────────────────────────────
+
+_vol_skew_mr_last_scan: float = 0.0
+_vol_skew_mr_scan_lock: Optional[asyncio.Lock] = None
+VOL_SKEW_MR_COOLDOWN_S = 3600  # 1h — matches strength/theta operator cadence
+
+
+def _vol_skew_mr_cache_matches_preset(cached: Any, preset: str) -> bool:
+    if not isinstance(cached, dict):
+        return False
+    universe = str(cached.get("universe") or "")
+    preset_key = preset.lower()
+    return universe.lower() in {f"preset:{preset_key}", f"fallback:{preset_key}"}
+
+
+@app.post("/vol-skew-mr/scan")
+async def vol_skew_mr_scan(preset: str = "ndx100", limit: int = 0, ticker: str = "", tickers: str = ""):
+    """Run vol_skew_mr_scanner.py against a preset or explicit tickers.
+
+    The script writes data/vol_skew_mr.json and records its own
+    service_health row. Ticker scans bypass preset cooldown for operator probes.
+    """
+    global _vol_skew_mr_last_scan, _vol_skew_mr_scan_lock
+    ticker = ticker.upper().strip()
+    if ticker and not re.fullmatch(r"[A-Z]{1,6}", ticker):
+        raise HTTPException(status_code=400, detail="ticker must be 1-6 letters")
+    preset = preset.strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,32}", preset):
+        raise HTTPException(status_code=400, detail="preset must be 1-32 chars [A-Za-z0-9_-]")
+    requested = _parse_scan_tickers(tickers) if tickers.strip() else ([ticker] if ticker else [])
+    if test_mode:
+        return await demo_scan_response(
+            "vol-skew-mr",
+            {
+                "scan_time": "",
+                "source": "Unusual Whales + Radon vol/skew feeds",
+                "universe": f"preset:{preset}",
+                "requested_tickers": [],
+                "tickers_scanned": 0,
+                "candidates_found": 0,
+                "actionable_count": 0,
+                "results": [],
+            },
+        )
+    if _vol_skew_mr_scan_lock is None:
+        _vol_skew_mr_scan_lock = asyncio.Lock()
+    now = time.monotonic()
+    is_ticker_scan = bool(requested)
+    if not is_ticker_scan and now - _vol_skew_mr_last_scan < VOL_SKEW_MR_COOLDOWN_S:
+        cached = _read_cache(DATA_DIR / "vol_skew_mr.json")
+        if _vol_skew_mr_cache_matches_preset(cached, preset):
+            return cached
+    async with _vol_skew_mr_scan_lock:
+        if not is_ticker_scan and time.monotonic() - _vol_skew_mr_last_scan < VOL_SKEW_MR_COOLDOWN_S:
+            cached = _read_cache(DATA_DIR / "vol_skew_mr.json")
+            if _vol_skew_mr_cache_matches_preset(cached, preset):
+                return cached
+        workers = _bounded_env_int("RADON_VOL_SKEW_MR_WORKERS", 24)
+        args = ["--json", "--workers", str(workers)]
+        if is_ticker_scan:
+            args.extend(requested)
+        else:
+            args.extend(["--preset", preset])
+        if not is_ticker_scan and limit and limit > 0:
+            args.extend(["--limit", str(limit)])
+        result = await run_script("vol_skew_mr_scanner.py", args, timeout=480)
+        if not result.ok:
+            raise HTTPException(status_code=502, detail=result.error)
+        payload = result.data if isinstance(result.data, dict) else None
+        scan_status = (payload or {}).get("scan_status")
+        if not is_ticker_scan and not scan_status:
+            _vol_skew_mr_last_scan = time.monotonic()
+        if scan_status and payload is not None:
+            return payload
+        cached = _read_cache(DATA_DIR / "vol_skew_mr.json")
+        return cached or {
+            "scan_time": "",
+            "source": "Unusual Whales + Radon vol/skew feeds",
+            "universe": "explicit" if is_ticker_scan else f"preset:{preset}",
+            "requested_tickers": requested,
+            "tickers_scanned": 0,
+            "candidates_found": 0,
+            "actionable_count": 0,
             "results": [],
         }
 

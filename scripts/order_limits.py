@@ -15,7 +15,6 @@ and discards any stored value outside the declared hard band:
   RADON_MAX_ORDER_NOTIONAL   max $ per order (qty×price×mult) (default 250_000)
   RADON_MAX_COMBO_LOSS_DOLLARS combo worst-case loss cap     (default 10_000_000)
   RADON_MAX_ORDERS_PER_MIN   max accepted placements per min  (default 10)
-  RADON_WORKFLOW_MAX_ORDERS  max orders per workflow run      (default 3)
 
 These are deliberately generous ceilings that normal Radon trading never
 touches (typical position: tens of contracts, ~$40k) — they exist to stop
@@ -64,10 +63,6 @@ def max_combo_loss_dollars() -> float:
 
 def max_orders_per_min() -> int:
     return app_preferences.get_int("RADON_MAX_ORDERS_PER_MIN")
-
-
-def workflow_max_orders() -> int:
-    return app_preferences.get_int("RADON_WORKFLOW_MAX_ORDERS")
 
 
 def _finite(value: Any) -> Optional[float]:

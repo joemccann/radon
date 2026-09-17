@@ -75,8 +75,8 @@ describe("Chain sticky headers (CSS)", () => {
     expect(match).not.toBeNull();
   });
 
-  it("chain-grid-wrapper has overflow-y: auto for scroll context", () => {
-    const match = CSS_SRC.match(/\.chain-grid-wrapper\s*\{[^}]*overflow-y:\s*auto/);
+  it("each chain pane has overflow-y: auto for its own scroll context", () => {
+    const match = CSS_SRC.match(/\.chain-anchor-pane\s*\{[^}]*overflow-y:\s*auto/);
     expect(match).not.toBeNull();
   });
 });

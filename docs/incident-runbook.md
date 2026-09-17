@@ -839,6 +839,48 @@ Incident: 2026-08-15 00:24Z, P1 page `34ab3e3c…`.
 
 ---
 
+## ai-cycle-raw-archive-resend-timeout
+
+**`radon-ai-cycle.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
+when daily `import_raw_archive` re-POSTs every on-disk raw blob to Turso.**
+Peak: 2026-09-17 07:22Z, page `1e842638…`. Timer next ~24h.
+
+- **Mechanism:** end of `--record` calls `store.import_raw_archive` over
+  `~/.radon/ai-cycle/raw` (1117 files / ~97MB that day). Each file became an
+  `INSERT OR IGNORE INTO ai_cycle_raw` of the full base64+zlib payload under
+  `HRANA_TIMEOUT_S=4`, even when the hash was already present (1105/1117).
+  One `HranaHttpError: TimeoutError` aborted before `persist_api_snapshot`.
+  Exception-path `_write_health` then also timed out and replaced the raised
+  error via "During handling". Observations for the day had already landed;
+  API snapshot stayed on the earlier backfill stamp. `Type=oneshot` has no
+  `Restart=`. Edge and `:8321/health/lite` stayed up; Python Turso canary
+  81 ms after the page.
+- **Detection:** journal stack at `store.import_raw_archive` /
+  `archive_raw` / `hrana_execute` with `TimeoutError: The read operation
+  timed out`; `systemctl show` → `exit-code` / `0`; ExecMainStart to
+  InactiveEnter minutes (collection + import), not the 1200s start budget;
+  `ai_cycle_observations` for today populated while `ai_cycle_api_snapshot`
+  `generated_at` is still the backfill time.
+- **Discriminating check:** Turso canary `SELECT 1` succeeds; failure is on
+  raw-archive INSERT (or the secondary health write), not provider fetch;
+  `SELECT COUNT(*) FROM ai_cycle_raw` already near on-disk file count.
+  Canary fail too → Turso platform, stand down. `Result=signal` is deploy
+  stop-clean. IB `/health/lite` down → API/IB, stand down.
+- **Remediation (code):** `import_raw_archive` SELECTs existing hashes once
+  and skips them; only missing digests INSERT. `_write_health` is
+  best-effort (log `[ai-cycle] service_health write failed`, do not raise).
+  Do not restart-flap before the skip-existing fix is live — a rerun still
+  re-sends every payload. After deploy, `radon unit restart
+  radon-ai-cycle.service` (or the next 07:15 UTC timer) recovers the
+  snapshot.
+- **Regression:**
+  `test_ai_cycle_core.py::test_import_raw_archive_does_not_resend_existing_payloads`,
+  `test_ai_cycle_collectors.py::test_production_health_write_timeout_does_not_mask_collection_failure`.
+- **Code:** `scripts/ai_cycle/store.py` (`import_raw_archive`),
+  `scripts/ai_cycle/collect.py` (`_write_health`).
+
+---
+
 ## trin-health-heartbeat-timeout
 
 **`radon-trin.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
@@ -1187,6 +1229,21 @@ on a Turso heartbeat timeout while the cycle added no new rows.** Peak:
   `test_nextjs_unit_starting_stays_starting`,
   `test_newsfeed_unit_starting_payload_keeps_edge_ok`,
   `test_local_degraded_aggregate_clears_fresh_aggregate_down`.
+- **App-host remote broker down → false `aggregate_down` (2026-09-15,
+  page `3a6de316`):** REL-243 expired the app-role gateway exclusion
+  whenever nested `radon-api:broker` was not up past the 900s dwell,
+  including a true app host whose local unit is `UnitFileState=disabled`
+  `Result=success` (absent since the 2026-08-30 two-host split). Tuesday
+  19:50 ET is still inside the 04:00-20:00 EXT window, so dwell then
+  collapsed the aggregate to `down`. Off-box paged P1 while ping and
+  `/sign-in` stayed 200 and api/relay/nextjs stayed `up`. Nested broker
+  unreachable is already `radon-api:broker` (degraded). Discriminating
+  check: `host_role=app` + local gateway `Result=success` + serving path
+  up + `role_suppression_expired=true` → stay `degraded`, keep
+  `not_applicable`. A local crash (`Result=exit-code`) still expires
+  and pages. Do not restart the disabled app-host unit (2FA).
+  Regression:
+  `test_rel243_role_suppression_precondition.py::test_true_app_host_clean_absent_gateway_stays_degraded_when_broker_is_down`.
 
 ---
 
@@ -1510,6 +1567,39 @@ all three flow-tab POSTs hit the FastAPI subprocess slot cap.** Peak:
 - **Host:** CI deploy `install-units` (hash bumped). No control-plane
   bootstrap. `reset-failed` is not required after this SHA: a shed no
   longer enters failed, and a leftover latch is digest-only.
+
+---
+
+## flow-refresh-analysis-timeout
+
+**`radon-flow-refresh.service` oneshot pages P1 `Result=exit-code` when
+`POST /flow-analysis` hits the FastAPI script timeout while scanner and
+discover succeed.** Peak: 2026-09-15 20:00:00Z, page `8e4a8285…`.
+Prior: 2026-09-11 20:00Z (same ~120s kill, no shed).
+
+- **Mechanism:** wrapper `SCAN_TIMEOUT` default is 180s and the unit
+  comment budgets three 180s POSTs inside `TimeoutStartSec=600`.
+  `/discover` already used `timeout=180`, but `/flow-analysis` stayed at
+  `timeout=120`. At the close, after an optional capacity-shed retry
+  (instant 502 + 8s sleep), `flow_analysis.py` ran to the 120s API kill.
+  FastAPI returned HTTP 502 `Script timed out after 120s` (no capacity
+  marker). The wrapper logged
+  `flow-analysis FastAPI outcome indeterminate (curl=0, http=502)` and
+  exited 1. `/health/lite` stayed authenticated; discover still OK.
+- **Discriminating check:** unit journal shows one flow-analysis POST
+  then indeterminate 502 ~120–128s later (optional
+  `FastAPI transient … retry 1/2` first); scanner OK; discover OK or
+  shed; radon-api `Script flow_analysis.py timed out after 120s`; not
+  `Subprocess capacity exhausted` on the final attempt. Deploy
+  stop-clean is `Result=signal`. Pure capacity shed is
+  `flow-refresh-capacity-502`.
+- **Remediation (code):** raise `/flow-analysis` `run_script` timeout to
+  180 so it matches the wrapper SCAN_TIMEOUT default and `/discover`.
+  Keep capacity-shed classification on the body marker; a real timeout
+  still exits 1.
+- **Regression:**
+  `scripts/api/tests/test_flow_tab_cooldown.py::test_flow_analysis_timeout_matches_wrapper_scan_budget`.
+- **Code:** `scripts/api/server.py` (`flow_analysis`).
 
 ---
 
@@ -1974,6 +2064,17 @@ Peak incident: 2026-08-15, operator signed in as joemccann on app.radon.run,
 - **Fix:** `normalizePerformanceData` fills missing arrays and derives NAV equity before either panel reads the payload. Builder now emits the same keys on new writes. Existing Turso rows stay valid through the adapter.
 - **Regression:** `web/tests/performance-panel-twr-payload.test.tsx`, `web/tests/performance-twr.test.ts` normalize case, `web/e2e/performance-twr-payload.spec.ts`, `tests/test_portfolio_performance.py`.
 
+## performance-twr-statement-replaces-history
+
+**`/performance` shows a window of a few days (`Since first NAV <recent date>`, `N=1`).**
+2026-09-15, app.radon.run/performance: `2026-09-11 to 2026-09-14`, every gated metric blank.
+
+- **Mechanism:** `flex_delivery_ingest.py` calls `perf_twr_builder.build_and_persist(from_file=...)` with the nightly sFTP Activity statement, which covers one or a few sessions. The from-file path used that statement as the whole NAV series, so the payload's `period_start` jumped to the statement's first date. The persist guard only refuses an OLDER `nav_as_of`, so the shorter, newer tape overwrote the full one the weekday build had published an hour earlier.
+- **Detection:** `data/performance.json` has `nav_source: flex_from_file` and a recent `period_start`; `radon-flex-pull` journal shows `period_from == period_to` for the source statement while `radon-perf-twr` logged `period=2025-12-31..` earlier the same morning.
+- **Fix:** the from-file build merges the statement over the stored series from `get_nav_snapshots(sendrequest=False)` (statement wins on overlapping dates).
+- **Recovery:** after deploy, the next weekday `radon-perf-twr` run or the next sFTP ingest republishes the full window; no data was lost (Turso `nav_history` / disk cache untouched).
+- **Regression:** `scripts/tests/test_flex_from_file.py::test_twr_from_file_keeps_stored_nav_history`.
+
 ## Grok auto-response on iPhone P1 pages
 
 Canonical: [`grok-page-responder.md`](grok-page-responder.md).
@@ -2003,3 +2104,13 @@ scans `data/incidents_remote/*.diagnosis.md`, pairs each with its
 missing) as a session-start banner plus model context, so the session opens
 ready to address the diagnosis. Resolved incidents never nag. No output = hook
 silent.
+
+## performance-twr-nightly-flow-history
+
+**`/performance` retains the full NAV window but shows `-- TWR`, `INFERRED_FLOW_CANDIDATE`, and `SUBPERIOD_SUSPECT` after nightly Activity ingestion.**
+
+- **Incident:** 2026-09-16, a one-day September 15 statement produced 185 NAV observations, 182 included returns and two suspect sessions. The January 13 and February 6 external flows remained in the verified ledger but were absent from the new payload.
+- **Mechanism:** extending the saved NAV series without extending its corresponding flow history treated the short statement's empty flow section as zero flows for the entire account history.
+- **Repair:** reconcile statement-covered flows with verified historical flow coverage alongside the NAV extension. The statement owns its covered interval, including explicit zero-flow corrections. Missing ledger or coverage evidence must still suppress publication; never apply the suggested NAV residual as a deposit.
+- **Recovery:** use the existing no-SendRequest performance rebuild against retained NAV and flow mirrors after checking their coverage. Confirm `n_suspect=0`, correct external-flow totals, full period bounds and non-null TWR in both the disk payload and served snapshot. The nightly ingest repair is still required to prevent recurrence.
+- **Regression:** `scripts/tests/test_flex_from_file.py` covers historical deposits with a short empty-flow statement; browser coverage preserves degraded gating and verifies a corrected payload restores the full-period TWR.
