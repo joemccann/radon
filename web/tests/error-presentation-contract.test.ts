@@ -27,7 +27,12 @@ const presenters = new Set(["components/ErrorToast.tsx", "components/Toast.tsx"]
 function violations(path: string): string[] {
   const name = relative(root, path);
   if (presenters.has(name)) return [];
-  const source = ts.createSourceFile(path, readFileSync(path, "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const text = readFileSync(path, "utf8");
+  // Most source files contain no UI error surface. Avoid constructing an AST
+  // for those files while preserving every attribute/call inspected below.
+  const candidate = /\brole\s*=\s*(?:["']alert["']|\{[^}]*["']alert["'])|\bclassName\s*=\s*(?:["'][^"']*error[^"']*["']|\{[^}]*styles\.error)|\btone\s*=|\b(?:window\.)?alert\s*\(/s;
+  if (!candidate.test(text)) return [];
+  const source = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const found: string[] = [];
   function visit(node: ts.Node) {
     if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
@@ -71,5 +76,6 @@ describe("application error presentation contract", () => {
   it("uses shared toast presenters instead of inline alert/error surfaces or browser alerts", () => {
     const paths = ["app", "components", "lib"].flatMap(directory => sourceFiles(join(root, directory)));
     expect(paths.flatMap(violations)).toEqual([]);
-  });
+  // The contract inventories the entire application on shared CI runners.
+  }, 30_000);
 });

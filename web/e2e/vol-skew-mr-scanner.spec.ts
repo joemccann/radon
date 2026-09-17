@@ -52,10 +52,17 @@ const payload = {
 };
 
 async function stubApis(page: Page) {
+  await page.routeWebSocket(/(?:localhost|127\.0\.0\.1):(?:18765|8765)|\/ws(?:\?|$)/, socket => {
+    socket.onMessage(() => socket.send(JSON.stringify({ type: "status", ib_connected: true, subscriptions: [] })));
+  });
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path === "/api/scanner/vol-skew-mr" || path === "/api/scanner/vol-skew-mr/scan") {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(payload) });
+      return;
+    }
+    if (path === "/api/ib/ws-ticket") {
+      await route.fulfill({ json: { ticket: "isolated-scanner-ticket" } });
       return;
     }
     if (path === "/api/scanner") {
@@ -186,6 +193,8 @@ for (const width of [390, 1440]) {
     await stubApis(page);
     const requests: unknown[] = [];
     await page.route("**/api/scanner/vol-skew-mr/scan", async route => {
+      expect(route.request().url()).toBe(new URL("/api/scanner/vol-skew-mr/scan", page.url()).href);
+      expect(route.request().method()).toBe("POST");
       requests.push(route.request().postDataJSON());
       await route.fulfill(requests.length === 1
         ? { status: 502, json: { scan_time: "", scan_succeeded: false, results: [], error: "Radon API 502: Subprocess capacity exhausted" } }
@@ -196,7 +205,7 @@ for (const width of [390, 1440]) {
     const input = section.getByRole("textbox");
     await input.fill("AAPL, NVDA");
     await input.press("Enter");
-    const alert = page.locator(".toast-container").getByRole("alert");
+    const alert = page.locator(".toast-container").getByRole("alert").filter({ hasText: "This service is busy" });
     await expect(section.getByRole("alert")).toHaveCount(0);
     await expect(alert).toBeVisible();
     await expect(alert).toContainText("This service is busy");

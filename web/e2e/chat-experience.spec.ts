@@ -220,7 +220,8 @@ test("failed turns offer edit and retry without repeating provider internals or 
   const prompt = "Explain the latest flow evidence";
   await composer.fill(prompt);
   await composer.press("Enter");
-  await expect(page.getByRole("alert")).toContainText(SAFE_ERROR);
+  const failure = page.locator(".toast-container").getByRole("alert").filter({ hasText: SAFE_ERROR });
+  await expect(failure).toBeVisible();
   await expect(dialog.getByTestId("chat-message-assistant").last()).not.toContainText(SAFE_ERROR);
   await expect(dialog).not.toContainText("unsupported_parameter");
   await dialog.getByRole("button", { name: "Edit prompt", exact: true }).click();
