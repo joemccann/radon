@@ -1,4 +1,17 @@
 # Lessons
+## 2026-09-17 — Two 00NN_ migration files silently skip the later table
+
+- `apply_pending_migrations` keys on the integer prefix, not the filename.
+  A second `0074_*.sql` is skipped once 74 is in `schema_migrations`.
+  radon-calm-streak then died with `no such table: calm_streak_history`
+  while `liquidcompute_index` (the first 74) was already there.
+- Pin unique prefixes in `test_migrate.py`. `_list_migrations` must
+  abort on a collision so ExecStartPre fails closed.
+- Per-indicator tests that apply THEIR file into a fresh sqlite do not
+  catch this. The real migrations directory is the topology.
+- A prior unpushed fix chose 0075; vol-skew-mr later took 75 on main.
+  Recurrence page `b4a46e16` needed 0076. Do not leave migration
+  renumbers on unmerged `fix/**` branches overnight.
 
 ## 2026-09-17 — Mixed-age combos are not same-day
 
