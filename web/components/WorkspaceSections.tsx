@@ -1227,7 +1227,7 @@ function FlowSectionsBody() {
 
       {error && (
         <div className="section">
-          <div className="section-body"><RequestError error={error} /></div>
+          <RequestError error={error} />
         </div>
       )}
 
@@ -1929,7 +1929,7 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
             </span>
           </div>
         </div>
-        {error && <div className="section-body"><RequestError error={error} /></div>}
+        {error && <RequestError error={error} />}
         {signals.length === 0 && !syncing && !error && (
           <div className="section-body">
             <SectionEmptyState
@@ -2224,7 +2224,7 @@ function DiscoverSections() {
             </span>
           </div>
         </div>
-        {error && <div className="section-body"><RequestError error={error} /></div>}
+        {error && <RequestError error={error} />}
         {candidates.length === 0 && !syncing && !error && (
           <div className="section-body">
             <SectionEmptyState
@@ -2539,8 +2539,8 @@ function JournalSections() {
           </div>
         )}
 
-        {error && <div className="section-body"><RequestError error={error} /></div>}
-        {syncError && <div className="section-body"><div className="alert-item bearish">IB Sync: {syncError}</div></div>}
+        {error && <RequestError error={error} />}
+        {syncError && <RequestError error={syncError} fallback="IB sync could not be completed. Try again." />}
         {loading && <div className="section-body p-6"><SpectralLoader label="Loading journal" /></div>}
         {!loading && trades.length === 0 && !error && (
           <div className="section-body">
@@ -4124,14 +4124,7 @@ export function HistoricalTradesSection({
       {expanded && (
       <div id="historical-trades-body" className="section-body">
         {error && (
-          <SectionEmptyState
-            icon={TriangleAlert}
-            tone="danger"
-            headline="Couldn't load historical trades"
-            secondary={userErrorMessage(error)}
-            action={{ label: syncing ? "Refreshing…" : "Refresh", onClick: syncNow, disabled: syncing }}
-            testId="historical-trades-error"
-          />
+          <RequestError error={error} onRetry={syncNow} testId="historical-trades-error" />
         )}
         {loading && <div className="p-6"><SpectralLoader label="Loading historical trades" /></div>}
         {!loading && !error && totalCount === 0 && (

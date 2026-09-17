@@ -1,4 +1,5 @@
 "use client";
+import RequestError from "@/components/RequestError";
 
 import { userErrorMessage } from "@/lib/userError";
 import { useState } from "react";
@@ -466,7 +467,7 @@ export default function GexPanel({ marketState }: GexPanelProps) {
           </div>
         </div>
         <div className="section-body" style={{ padding: "16px" }}>
-          <div className="alert-item bearish">{userErrorMessage(error, 'Exposure data could not be loaded. Try again.')}</div>
+          <RequestError error={error} fallback={'Exposure data could not be loaded. Try again.'} />
         </div>
       </div>
     );
@@ -503,6 +504,7 @@ export default function GexPanel({ marketState }: GexPanelProps) {
 
   return (
     <div className="section gex-panel regime-relationship-panel">
+      {error && <RequestError error={error} retainedData />}
       {/* ── Header ── */}
       <div className="regime-relationship-panel-head">
         <div className="regime-panel-title">

@@ -311,8 +311,8 @@ test.describe("Flow Analysis per-ticker route", () => {
     await page.goto("/flow-analysis/JOBY");
 
     const report = page.getByTestId("ticker-flow-report");
-    await expect(report.getByRole("alert")).toContainText(/Scan lane is full/i);
-    await expect(report.getByRole("status")).toContainText(/Scan failed/i);
+    await expect(page.getByRole("alert")).toContainText(/Scan lane is full/i);
+    await expect(report.getByRole("status")).toContainText(/Flow report/i);
     await expect(report).not.toContainText(/Analyzing JOBY/i);
   });
 

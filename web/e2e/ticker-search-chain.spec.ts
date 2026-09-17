@@ -442,7 +442,7 @@ test.describe("Ticker Search → Detail Page → Chain", () => {
     await orderBuilder.getByRole("button", { name: /Place Short Put/i }).click();
     await orderBuilder.getByRole("button", { name: /^Confirm Order$/i }).click();
 
-    const error = orderBuilder.locator(".order-error");
+    const error = page.locator(".toast-error:has(.order-error-summary)");
     await expect(error).toBeVisible();
     await expect(error).toContainText("Order rejected by IB: insufficient margin.");
     await expect(error).toContainText("Previous-day equity with loan value is $644,770.54");

@@ -101,7 +101,8 @@ test("Radon Chat renders safe recovery copy instead of provider JSON", async ({ 
 
   const assistantMessage = dialog.getByTestId("chat-message-assistant").last();
   await expect(assistantMessage.getByTestId("chat-role")).toHaveText("Radon");
-  await expect(assistantMessage.getByTestId("chat-message-body")).toHaveText(SAFE_ASSISTANT_ERROR);
+  await expect(page.getByRole("alert")).toContainText(SAFE_ASSISTANT_ERROR);
+  await expect(assistantMessage.getByTestId("chat-message-body")).toBeEmpty();
   await expect(dialog.getByTestId("chat-messages")).toHaveAttribute("aria-busy", "false");
   for (const internalDetail of [
     "OpenAI request failed",

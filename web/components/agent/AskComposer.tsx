@@ -1,5 +1,7 @@
 "use client";
 
+import ErrorToast from "@/components/ErrorToast";
+
 import {
   type ClipboardEvent,
   type FormEvent,
@@ -108,7 +110,6 @@ export default function AskComposer({
   const [attachmentErrors, setAttachmentErrors] = useState<string[]>([]);
   const [pendingReads, setPendingReads] = useState(0);
   const helpId = useId();
-  const errorId = useId();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const attachmentsRef = useRef<ChatImageAttachment[]>([]);
   const pendingReadsRef = useRef(0);
@@ -308,7 +309,7 @@ export default function AskComposer({
           maxLength={1000}
           placeholder={placeholder}
           aria-label="Ask Radon"
-          aria-describedby={`${helpId}${attachmentErrors.length ? ` ${errorId}` : ""}`}
+          aria-describedby={helpId}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
           onPaste={onPaste}
@@ -321,9 +322,7 @@ export default function AskComposer({
         />
       </div>
       {attachmentErrors.length ? (
-        <p className="ask-composer__error" id={errorId} role="alert">
-          {attachmentErrors.join(" ")}
-        </p>
+        <ErrorToast message={attachmentErrors.join(" ")} />
       ) : null}
       <div className="ask-composer__rail">
         <input

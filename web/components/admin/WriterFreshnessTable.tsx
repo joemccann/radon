@@ -1,5 +1,7 @@
 "use client";
 
+import ErrorToast from "@/components/ErrorToast";
+
 import { userErrorMessage } from "@/lib/userError";
 import { getMarketStateFromDate, isStale, type MarketState } from "@/lib/serviceHealthWindows";
 import { humanizeDetail } from "@/lib/adminFormat";
@@ -57,7 +59,7 @@ export default function WriterFreshnessTable({
         </table>
         </div>
       ) : !reachable ? (
-        <p className="admin-card-empty">Edge health unreachable. Writer freshness unavailable.</p>
+        <ErrorToast message="Edge health unreachable. Writer freshness unavailable." />
       ) : rows.length === 0 ? (
         <p className="admin-card-empty">No writer health rows reported.</p>
       ) : (

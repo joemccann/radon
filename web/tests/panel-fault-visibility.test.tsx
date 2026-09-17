@@ -314,9 +314,9 @@ describe("Panels surface a failed refresh behind a cached payload", () => {
     expect(container.querySelector("[data-testid='options-exposure-panel']")).toBeTruthy();
     expect(screen.getByRole("table", { name: /options exposure by strike/i })).toBeTruthy();
     // ... and it is labelled as stale, carrying the reason.
-    const flag = screen.getByText("REFRESH FAILED");
-    expect(flag.getAttribute("title")).toBe("fetch failed");
-    expect(flag.getAttribute("role")).toBe("status");
+    const flag = screen.getByRole("alert");
+    expect(flag.textContent).toContain("Showing the last available data");
+    expect(flag.closest("[data-toast-viewport]")).toBeTruthy();
   });
 });
 

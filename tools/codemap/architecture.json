@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-09-17T18:08:48Z",
-  "node_count": 3377,
-  "edge_count": 6992,
+  "generated_at": "2026-09-17T18:57:58Z",
+  "node_count": 3386,
+  "edge_count": 7064,
   "areas": {
-    "web": 1995,
+    "web": 2002,
     "site": 155,
-    "scripts": 1114,
+    "scripts": 1116,
     "cloud": 66,
     "lib": 28,
     "tests": 17,
@@ -20,7 +20,7 @@
     {
       "id": "web/components",
       "area": "web",
-      "count": 253
+      "count": 255
     },
     {
       "id": "web/e2e",
@@ -50,7 +50,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 922
+      "count": 927
     },
     {
       "id": "site/app",
@@ -85,7 +85,7 @@
     {
       "id": "scripts",
       "area": "scripts",
-      "count": 157
+      "count": 158
     },
     {
       "id": "scripts/ai_cycle",
@@ -195,7 +195,7 @@
     {
       "id": "scripts/tests",
       "area": "scripts",
-      "count": 555
+      "count": 556
     },
     {
       "id": "scripts/trade_blotter",
@@ -357,13 +357,6 @@
       "test": false
     },
     {
-      "id": "web/lib/userError.ts",
-      "area": "web",
-      "in": 55,
-      "out": 0,
-      "test": false
-    },
-    {
       "id": "web/lib/db.ts",
       "area": "web",
       "in": 54,
@@ -399,6 +392,13 @@
       "test": false
     },
     {
+      "id": "web/components/RequestError.tsx",
+      "area": "web",
+      "in": 43,
+      "out": 2,
+      "test": false
+    },
+    {
       "id": "web/lib/dbExecute.ts",
       "area": "web",
       "in": 40,
@@ -413,7 +413,21 @@
       "test": false
     },
     {
+      "id": "web/lib/userError.ts",
+      "area": "web",
+      "in": 41,
+      "out": 0,
+      "test": false
+    },
+    {
       "id": "web/lib/useViewport.ts",
+      "area": "web",
+      "in": 40,
+      "out": 1,
+      "test": false
+    },
+    {
+      "id": "web/components/ErrorToast.tsx",
       "area": "web",
       "in": 40,
       "out": 1,
@@ -508,20 +522,6 @@
       "area": "scripts",
       "in": 21,
       "out": 11,
-      "test": false
-    },
-    {
-      "id": "web/lib/serviceHealthWindows.ts",
-      "area": "web",
-      "in": 31,
-      "out": 0,
-      "test": false
-    },
-    {
-      "id": "scripts/clients/uw_client.py",
-      "area": "scripts",
-      "in": 29,
-      "out": 2,
       "test": false
     }
   ],

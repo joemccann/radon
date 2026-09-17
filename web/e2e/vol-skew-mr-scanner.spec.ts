@@ -196,8 +196,11 @@ for (const width of [390, 1440]) {
     const input = section.getByRole("textbox");
     await input.fill("AAPL, NVDA");
     await input.press("Enter");
-    const alert = section.getByRole("alert");
+    const alert = page.locator(".toast-container").getByRole("alert");
+    await expect(section.getByRole("alert")).toHaveCount(0);
     await expect(alert).toBeVisible();
+    await expect(alert).toContainText("This service is busy");
+    await expect(alert).toContainText("Showing the last available data");
     await expect(alert).not.toContainText("Subprocess");
     await expect(alert).not.toContainText("scan_succeeded");
     await expect(section).toContainText("TOP MR");

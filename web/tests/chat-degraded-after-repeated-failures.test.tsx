@@ -35,7 +35,7 @@ describe("ChatPanel degraded indicator", () => {
   it("shows no degraded chip after a single failure", async () => {
     const { container } = render(<ChatPanel activeSection="portfolio" />);
     await failingTurn(container, "one");
-    expect(container.querySelector(".chat-degraded")).toBeNull();
+    expect(screen.queryByText(/The assistant has failed 3 turns in a row/)).toBeNull();
   });
 
   it("shows the degraded chip once failures are consecutive", async () => {
@@ -44,7 +44,7 @@ describe("ChatPanel degraded indicator", () => {
     await failingTurn(container, "two");
     await failingTurn(container, "three");
     await waitFor(() => {
-      expect(container.querySelector(".chat-degraded")).not.toBeNull();
+      expect(screen.queryByText(/The assistant has failed 3 turns in a row/)).not.toBeNull();
     });
   });
 
@@ -54,7 +54,7 @@ describe("ChatPanel degraded indicator", () => {
     await failingTurn(container, "two");
     await failingTurn(container, "three");
     await waitFor(() => {
-      expect(container.querySelector(".chat-degraded")).not.toBeNull();
+      expect(screen.queryByText(/The assistant has failed 3 turns in a row/)).not.toBeNull();
     });
 
     // @ts-expect-error test stub
@@ -63,7 +63,7 @@ describe("ChatPanel degraded indicator", () => {
     } as Response));
     await failingTurn(container, "four");
     await waitFor(() => {
-      expect(container.querySelector(".chat-degraded")).toBeNull();
+      expect(screen.queryByText(/The assistant has failed 3 turns in a row/)).toBeNull();
     });
   });
 });

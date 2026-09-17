@@ -231,6 +231,6 @@ test("GARCH tab rejects an odd ticker count inline without posting", async ({ pa
   await section.getByLabel("Ticker symbols").fill("NVDA, AMD, TSM");
   await section.getByRole("button", { name: "Scan", exact: true }).click();
 
-  await expect(section.getByRole("alert")).toHaveText("Enter pairs: an even number of tickers.");
+  await expect(page.locator(".toast-container").getByRole("alert")).toContainText("Enter pairs: an even number of tickers.");
   expect(captures.garch.body).toBeNull();
 });

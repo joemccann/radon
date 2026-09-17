@@ -1,4 +1,5 @@
 "use client";
+import ErrorToast from "@/components/ErrorToast";
 
 import { userErrorMessage } from "@/lib/userError";
 import {
@@ -105,7 +106,7 @@ export function InformedFlowPanel({ ticker }: { ticker: string }) {
       {isLoading ? (
         <div className="snapshot-card__empty">Loading…</div>
       ) : error ? (
-        <div className="snapshot-card__error">{userErrorMessage(error, 'Flow data could not be loaded. Try again.')}</div>
+        <ErrorToast message={userErrorMessage(error, 'Flow data could not be loaded. Try again.')} />
       ) : !hasActivity ? (
         <div className="snapshot-card__empty">No congress or insider activity</div>
       ) : (

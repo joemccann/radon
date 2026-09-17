@@ -7580,3 +7580,18 @@ Review: PR #480; GitHub first run reproduced stale copy contracts and over-broad
 - [x] T2 Add focused interaction and browser coverage, including sort isolation. depends_on: []
 - [ ] T3 Publish PR, await exact-head CI, inspect browser screenshots. depends_on: [T1, T2]
 Dependency graph: T1 + T2 -> T3. Existing Clear design and shared InfoTooltip; no calculation or layout changes.
+
+## 2026-09-17 Toast-only error presentation
+- [x] T1 depends_on: [] Review recent error commits and isolate from unrelated local work.
+- [x] T2 depends_on: [T1] Implement shared toast error presentation, preserving safe copy, retry and stale-data guidance.
+- [x] T3 depends_on: [T1] Audit/migrate scanner, research, dashboard and indicator errors.
+- [x] T4 depends_on: [T1] Audit/migrate trading, admin, profile, setup and assistant errors.
+- [x] T5 depends_on: [T2,T3,T4] Review full application inventory, document explicit exceptions, add regression/browser coverage.
+- [ ] T6 depends_on: [T5] Create PR, verify exact-head GitHub CI, inspect visual artifacts, send green notification and open show-me report.
+Dependency graph: T1 -> {T2,T3,T4} -> T5 -> T6.
+Validation: no local test suites; GitHub runners execute unit and browser suites. Preserve trading gates, safe error formatting, existing retry actions and cached-data provenance. Fatal framework fallback pages and operational diagnostic records must be explicitly inventoried.
+
+### Toast error audit review
+- Three-agent component audit and independent shared-presenter review complete. Fatal framework fallback, financial safety and stored diagnostic exceptions documented in docs/reviews/2026-09-17-toast-errors.md.
+- Regression coverage includes scanner retained-data retry, persistent dismissal/recovery, shared stacking, dialog keyboard access, order field validation, watchlist failures and AST prevention of inline error surfaces.
+- Local suites intentionally not run; GitHub exact-head CI and screenshot review pending.
