@@ -28,6 +28,14 @@ type VolSkewMrScannerProps = {
 const SECTION_HELP =
   "Short-term top and bottom framing from vol and skew versus spot extension. RSI and/or Bollinger percent B mark an extended high or low. Falling or flat IV into a high is TOP_MR; rising IV with the rally is BREAKOUT. Symmetric for BOTTOM_MR and BREAKDOWN. When vol and skew both diverge from spot, the row suggests a put spread (tops) or call spread (bottoms). Framing inspired by Options Insight / Imran Lakha.";
 
+const COLUMN_HELP = {
+  extension: "Spot extension measures how far price has moved. HIGH: 14-session RSI at least 70 or Bollinger percent B at least 1 (upper band). LOW: RSI at most 30 or percent B at most 0 (lower band). MID: neither extreme, or conflicting readings. Bands use 20 sessions and two standard deviations.",
+  iv_path: "Direction of implied volatility across the latest six available observations. Rising or falling means the last reading is more than 0.25 volatility points above or below the first; otherwise flat. Unknown means fewer than two readings.",
+  skew_path: "Direction of 25-delta put IV minus call IV for one listed expiry nearest 30 days, using up to six recent sessions. Rising means puts are becoming relatively more expensive; falling means less expensive. Changes within 0.25 volatility points are flat. Insufficient history means fewer than two comparable sessions.",
+  verdict: "TOP MR and BOTTOM MR flag a possible reversal at a high or low price extreme when IV is falling or flat. BREAKOUT and BREAKDOWN flag continuation when IV is rising. NO SIGNAL means price is not extended or IV history is missing. Skew confirms the suggested structure separately.",
+  structure: "Put spread for TOP MR or call spread for BOTTOM MR when skew is falling or flat. Continue means no mean-reversion spread is confirmed; it is not an instruction to hold or trade. A dash means no signal. Expiry, strikes, pricing, and risk still require review.",
+};
+
 const GATE_HELP: Record<string, string> = {
   technicals: "Spot extension gate: RSI at or beyond 70/30 and/or Bollinger percent B outside 0 to 1.",
   iv: "IV path into the move. Falling or flat IV at an extreme is mean-reversion; rising IV with spot is continuation.",
@@ -226,11 +234,11 @@ export default function VolSkewMrScanner({
                 <tr>
                   <SortTh<VolSkewSortKey> label="Ticker" sortKey="ticker" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                   <SortTh<VolSkewSortKey> label="Spot" sortKey="spot" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <SortTh<VolSkewSortKey> label="Spot ext" sortKey="extension" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <SortTh<VolSkewSortKey> label="IV path" sortKey="iv_path" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <SortTh<VolSkewSortKey> label="Skew path" sortKey="skew_path" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <SortTh<VolSkewSortKey> label="Verdict" sortKey="verdict" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <SortTh<VolSkewSortKey> label="Structure" sortKey="structure" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  <SortTh<VolSkewSortKey> label="Spot ext" helpText={COLUMN_HELP.extension} helpAriaLabel="Spot ext details" helpTriggerTestId="vol-skew-mr-extension-tooltip" helpContentTestId="vol-skew-mr-extension-tooltip-content" sortKey="extension" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  <SortTh<VolSkewSortKey> label="IV path" helpText={COLUMN_HELP.iv_path} helpAriaLabel="IV path details" helpTriggerTestId="vol-skew-mr-iv-path-tooltip" helpContentTestId="vol-skew-mr-iv-path-tooltip-content" sortKey="iv_path" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  <SortTh<VolSkewSortKey> label="Skew path" helpText={COLUMN_HELP.skew_path} helpAriaLabel="Skew path details" helpTriggerTestId="vol-skew-mr-skew-path-tooltip" helpContentTestId="vol-skew-mr-skew-path-tooltip-content" sortKey="skew_path" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  <SortTh<VolSkewSortKey> label="Verdict" helpText={COLUMN_HELP.verdict} helpAriaLabel="Verdict details" helpTriggerTestId="vol-skew-mr-verdict-tooltip" helpContentTestId="vol-skew-mr-verdict-tooltip-content" sortKey="verdict" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  <SortTh<VolSkewSortKey> label="Structure" helpText={COLUMN_HELP.structure} helpAriaLabel="Structure details" helpTriggerTestId="vol-skew-mr-structure-tooltip" helpContentTestId="vol-skew-mr-structure-tooltip-content" sortKey="structure" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                   <th className="center strength-factor-header-cell">
                     <span className="strength-factor-header">
                       <span>Gates</span>

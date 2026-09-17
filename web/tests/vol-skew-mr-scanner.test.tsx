@@ -3,7 +3,7 @@
  */
 
 import React from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import VolSkewMrScanner, { volSkewMrOrderHref } from "../components/VolSkewMrScanner";
@@ -86,6 +86,43 @@ describe("VolSkewMrScanner", () => {
     fireEvent.mouseEnter(screen.getByTestId("vol-skew-mr-title-tooltip"));
     expect(screen.getByTestId("vol-skew-mr-title-tooltip-content").textContent).toContain("Options Insight");
     expect(screen.getByTestId("vol-skew-mr-title-tooltip-content").textContent).toContain("Imran Lakha");
+  });
+
+  it.each([
+    ["Spot ext", "extension", /RSI/i],
+    ["IV path", "iv-path", /implied volatility/i],
+    ["Skew path", "skew-path", /put/i],
+    ["Verdict", "verdict", /TOP MR/i],
+    ["Structure", "structure", /spread/i],
+  ] as const)("explains %s without changing table sorting", (label, id, explanation) => {
+    render(<VolSkewMrScanner data={data} />);
+    const tickerHeader = screen.getByRole("columnheader", { name: "Ticker" });
+    fireEvent.click(tickerHeader);
+    fireEvent.click(tickerHeader);
+    const rowOrder = () => screen.getAllByTestId(/^vol-skew-mr-row-/).map(row => row.dataset.testid);
+    const before = rowOrder();
+    expect(before).toEqual(["vol-skew-mr-row-NVDA", "vol-skew-mr-row-INTC", "vol-skew-mr-row-AAPL"]);
+
+    const trigger = screen.getByTestId(`vol-skew-mr-${id}-tooltip`);
+    expect(trigger.getAttribute("aria-label")).toBe(`${label} details`);
+    const button = within(trigger).getByRole("button");
+    fireEvent.focus(trigger);
+    expect(screen.getByTestId(`vol-skew-mr-${id}-tooltip-content`).textContent).toMatch(explanation);
+    expect(rowOrder()).toEqual(before);
+    fireEvent.click(button);
+    expect(screen.queryByTestId(`vol-skew-mr-${id}-tooltip-content`)).toBeNull();
+    fireEvent.click(button);
+    expect(screen.getByTestId(`vol-skew-mr-${id}-tooltip-content`).textContent).toMatch(explanation);
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    fireEvent.keyDown(button, { key: " " });
+    expect(rowOrder()).toEqual(before);
+    expect(tickerHeader.getAttribute("aria-sort")).toBe("descending");
+
+    const header = trigger.closest("th") as HTMLTableCellElement;
+    fireEvent.click(within(header).getByText(label, { exact: true }));
+    expect(header.getAttribute("aria-sort")).toBe("ascending");
+    fireEvent.keyDown(header, { key: "Enter" });
+    expect(header.getAttribute("aria-sort")).toBe("descending");
   });
 
   it("fires comma ticker search through onTickerScan", () => {
