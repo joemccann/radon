@@ -1,5 +1,6 @@
 "use client";
 
+import { userErrorMessage } from "@/lib/userError";
 import { X } from "lucide-react";
 import type { Toast } from "@/lib/useToast";
 
@@ -25,7 +26,7 @@ export default function ToastContainer({ toasts, exitingIds, onDismiss }: ToastC
           className={`toast toast-${toast.type}${exitingIds.has(toast.id) ? " toast--exiting" : ""}`}
           role={toast.type === "error" ? "alert" : undefined}
         >
-          <span className="toast-message">{toast.message}</span>
+          <span className="toast-message">{toast.type === "error" ? userErrorMessage(toast.message) : toast.message}</span>
           <button type="button" className="toast-close" onClick={() => onDismiss(toast.id)} aria-label="Dismiss">
             <X size={12} />
           </button>

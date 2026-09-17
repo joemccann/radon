@@ -1,3 +1,5 @@
+import { errorMessageCandidate, isTechnicalError } from "./userError";
+
 export type FormattedOrderError = {
   summary: string;
   details: string[];
@@ -48,12 +50,15 @@ function formatUsdNumber(value: string): string {
 }
 
 export function formatOrderError(message: string | null | undefined): FormattedOrderError {
-  const raw = String(message ?? "").trim();
+  const raw = errorMessageCandidate(message);
   if (!raw) {
     return { summary: "Order placement failed.", details: [] };
   }
 
   const cleaned = stripTransportWrappers(raw);
+  if (isTechnicalError(cleaned, 5000)) {
+    return { summary: "The order request could not be confirmed. Check order status before trying again.", details: [] };
+  }
   const rejectedReason = stripRejectedPrefix(cleaned);
 
   if (/network error placing order/i.test(cleaned)) {

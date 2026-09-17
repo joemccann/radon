@@ -1,5 +1,6 @@
 "use client";
 
+import { userErrorMessage } from "@/lib/userError";
 import { useMemo, useRef, useState, type FormEvent } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
@@ -50,7 +51,7 @@ function SourceForm({ onAdd }: { onAdd: (document: SourceDocument) => void }) {
         publishedAt: String(fields.get("publishedAt")), ticker: String(fields.get("ticker") ?? "").trim().toUpperCase() || null, kind };
       onAdd(filename ? importResearchTextFile(filename, String(fields.get("text")), metadata) : createSourceDocument({ ...metadata, text: fields.get("text") }));
       form.reset(); setFilename(null); setError(null);
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Source could not be imported."); }
+    } catch (reason) { setError(userErrorMessage(reason, "Source could not be imported.")); }
   }
   return <form onSubmit={submit} className={styles.form}>
     <label className={styles.field}>Document title<input name="title" required maxLength={500} autoComplete="off" /></label>
@@ -61,7 +62,7 @@ function SourceForm({ onAdd }: { onAdd: (document: SourceDocument) => void }) {
     <label className={styles.field}>Plaintext file (optional)<input type="file" accept=".txt,.md,.eml,text/plain" onChange={async (event) => {
       const file = event.target.files?.[0]; if (!file) { setFilename(null); return; }
       try { if (file.size > 1_000_000) throw new Error("Source file exceeds 1 MB."); const text = await file.text(); if (textRef.current) textRef.current.value = text; setFilename(file.name); setError(null); }
-      catch (reason) { setError(reason instanceof Error ? reason.message : "File could not be read."); }
+      catch (reason) { setError(userErrorMessage(reason, "File could not be read.")); }
     }} /></label>
     <label className={styles.field}>Source text<textarea ref={textRef} name="text" rows={8} required maxLength={250000} placeholder="Paste the exact filing, transcript, desk note, or deal email passage." /></label>
     <span className={styles.meta}>Text stays in this page until you export it. Reloading clears this workspace. Evidence exports contain sources and facts; model assumptions and the analysis date stay on this page.</span>
@@ -78,10 +79,10 @@ function FeedSources({ onAdd }: { onAdd: (document: SourceDocument) => void }) {
       onAdd(createSourceDocument({ id: `feed-${post.id}`, title: `Feed summary: ${post.title}`, url: post.href,
         publishedAt: post.source?.documentDate ?? post.isoTimestamp.slice(0, 10), kind: "desk-note", ticker: null, text: post.content }));
       setMessage(`Imported ${post.title}. Feed summaries retain their source attribution; verify against the original document.`);
-    } catch (reason) { setMessage(reason instanceof Error ? reason.message : "Feed source could not be imported."); }
+    } catch (reason) { setMessage(userErrorMessage(reason, "Feed source could not be imported.")); }
   }
   return <div>{loading ? <p role="status">Loading research feed…</p> : null}
-    {error ? <p className={styles.error}>Feed unavailable: {error} <button className={styles.button} onClick={() => void refresh()}>Retry feed</button></p> : null}
+    {error ? <p className={styles.error}>Feed unavailable: {userErrorMessage(error, "The feed could not be loaded. Try again.")} <button className={styles.button} onClick={() => void refresh()}>Retry feed</button></p> : null}
     {!loading && candidates.length === 0 ? <p className={styles.muted}>No textual notes are available in the current feed. Add a source passage above.</p> : null}
     <ul className={styles.sourceList}>{candidates.map((post) => <li key={post.id}><span>{post.title}</span><span className={styles.meta}>{post.source?.publisher ?? "Market Ear"} · {post.isoTimestamp.slice(0, 10)}</span><button className={styles.button} onClick={() => add(post)}>Import note</button></li>)}</ul>
     {message ? <p role="status">{message}</p> : null}</div>;
@@ -127,17 +128,17 @@ export default function ResearchWorkbench({ portfolio }: { portfolio?: Portfolio
       const importedIds = new Set(documents.map((document) => document.id));
       const next = parseResearchWorkspace({ version: 1, documents: [...workspace.documents, ...documents], facts: [...workspace.facts, ...incoming.facts.filter((fact) => importedIds.has(fact.documentId))] });
       setWorkspace(next); setNotice(`Imported ${documents.length} sources. Existing sources were preserved.`); setError(null);
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Workspace could not be imported."); }
+    } catch (reason) { setError(userErrorMessage(reason, "Workspace could not be imported.")); }
     if (fileRef.current) fileRef.current.value = "";
   }
   function draftWithAssistant() {
     try { emitAsk(buildResearchPrompt(workspace, undefined, asOf)); setError(null); }
-    catch (reason) { setError(reason instanceof Error ? reason.message : "Research prompt could not be prepared."); }
+    catch (reason) { setError(userErrorMessage(reason, "Research prompt could not be prepared.")); }
   }
   const download = (kind: "json" | "md" | "ics") => {
     try { const content = kind === "json" ? JSON.stringify(workspace, null, 2) : kind === "md" ? researchMarkdown(workspace, asOf) : researchCalendarIcs(workspace, asOf);
       downloadResearchFile(content, `radon-research-${asOf}.${kind}`, kind === "json" ? "application/json" : kind === "ics" ? "text/calendar" : "text/markdown");
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Export failed."); }
+    } catch (reason) { setError(userErrorMessage(reason, "Export failed.")); }
   };
   return <div className={styles.workbench} data-testid="research-workbench">
     <header className={styles.header}><div><h2>Evidence to decision</h2><p>Trace the claim. Compare the periods. Review the trade.</p><span className={styles.meta}>{workspace.documents.length} sources · {workspace.facts.length} cited facts · Unsaved evidence</span></div>
@@ -178,7 +179,7 @@ function TradeReview({ workspace, asOf }: { workspace: ResearchWorkspace; asOf: 
   function apply() {
     try { const sources = availableDocuments.filter((document) => document.ticker === selectedTicker).map((document) => ({ title: document.title, url: document.url ?? "", passage: document.text.slice(0, 500) }));
       const href = applyResearchChecklist(selectedTicker, items, sources); window.location.assign(href);
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Checklist could not be applied."); }
+    } catch (reason) { setError(userErrorMessage(reason, "Checklist could not be applied.")); }
   }
   return <section className={styles.review}><h2>Desk note to trade review</h2><p>Carry the source context into the existing ticket. Contract selection, sizing, portfolio coverage, and order confirmation remain part of the ticket review.</p>
     <label className={styles.field}>Review ticker<select value={selectedTicker} disabled={!tickers.length} onChange={(event) => setTicker(event.target.value)}>{tickers.length ? tickers.map((item) => <option key={item}>{item}</option>) : <option value="">Add a source with a ticker</option>}</select></label>
@@ -203,7 +204,7 @@ function FactAnnotation({ source, onAdd }: { source: SourceDocument; onAdd: (fac
       if (value("period")) fact.period = value("period");
       if (value("value")) { fact.value = Number(value("value")); fact.unit = value("unit"); }
       onAdd(fact); form.reset(); setError(null);
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Fact could not be added."); }
+    } catch (reason) { setError(userErrorMessage(reason, "Fact could not be added.")); }
   }
   return <details><summary>Annotate a cited fact</summary><form className={styles.form} onSubmit={submit}>
     <div className={styles.pair}><label className={styles.field}>Fact type<select value={kind} onChange={(event) => setKind(event.target.value as ResearchFact["kind"])}>{(["metric", "blackout", "earnings", "deal", "theme"] as const).map((item) => <option key={item}>{item}</option>)}</select></label><label className={styles.field}>Fact label<input name="label" required maxLength={500} /></label></div>

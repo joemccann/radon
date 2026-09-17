@@ -1,3 +1,5 @@
+import { userErrorMessage } from "./userError";
+
 /**
  * Normalize ``service_health.last_error`` payloads into a single human-
  * readable line of plain text suitable for direct rendering inside the
@@ -331,5 +333,5 @@ export function humanizeServiceHealthError(
   const body = matched ?? stripped;
   const composed = `${body}${retry}`.trim();
 
-  return truncateAtWordBoundary(composed, maxLength);
+  return truncateAtWordBoundary(userErrorMessage(composed, FALLBACK_MESSAGE), maxLength);
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import { userErrorMessage } from "@/lib/userError";
 import { getMarketStateFromDate, isStale, type MarketState } from "@/lib/serviceHealthWindows";
 import { humanizeDetail } from "@/lib/adminFormat";
 import type { ServiceHealthRow } from "@/lib/adminTypes";
@@ -120,8 +121,8 @@ function WriterRow({ row }: { row: ServiceHealthRow }) {
         </div>
       </td>
       <td className="admin-unit-activity">{relAge(lastRun)}</td>
-      <td className="admin-unit-desc" title={row.last_error || undefined}>
-        {humanizeDetail(row.last_error) || "--"}
+      <td className="admin-unit-desc" title={row.last_error ? userErrorMessage(row.last_error, "Writer update failed. Review service logs for details.") : undefined}>
+        {row.last_error ? userErrorMessage(row.last_error, "Writer update failed. Review service logs for details.") : "--"}
       </td>
     </tr>
   );

@@ -1,5 +1,6 @@
 "use client";
 
+import { userErrorMessage } from "@/lib/userError";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Share2 } from "lucide-react";
 import { buildShareCaption, buildXShareUrl, sanitizeShareText, renderShareCard, canvasToPng, canvasToMp4, supportsMp4Export, type SharePost } from "@/lib/newsfeedShare";
@@ -86,7 +87,7 @@ function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: s
       canvas.current = rendered;
       url = URL.createObjectURL(blob);
       setPreview(url);
-    }).catch(err => { if (!cancelled) setError(err instanceof Error ? err.message : "Could not prepare the image. Retry to export."); });
+    }).catch(err => { if (!cancelled) setError(userErrorMessage(err, "Could not prepare the image. Retry to export.")); });
     return () => { cancelled = true; if (url) URL.revokeObjectURL(url); };
   }, [sharePost, imageUrl, attempt, rewriting]);
 
@@ -106,7 +107,7 @@ function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: s
       setMessage(video ? "Video downloaded. Upload it in Instagram or TikTok and paste your caption." : "Image downloaded. Add it to your Story or attach it to your X post.");
     } catch (err) {
       if (active.current && !(err instanceof DOMException && err.name === "AbortError")) {
-        setError(err instanceof Error ? err.message : "Export failed. Try again.");
+        setError(userErrorMessage(err, "Export failed. Try again."));
       }
     } finally { if (active.current) setBusy(false); }
   }

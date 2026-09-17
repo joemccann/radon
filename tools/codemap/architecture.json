@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-09-17T17:39:13Z",
-  "node_count": 3372,
-  "edge_count": 6920,
+  "generated_at": "2026-09-17T18:02:43Z",
+  "node_count": 3377,
+  "edge_count": 6991,
   "areas": {
-    "web": 1990,
+    "web": 1995,
     "site": 155,
     "scripts": 1114,
     "cloud": 66,
@@ -20,7 +20,7 @@
     {
       "id": "web/components",
       "area": "web",
-      "count": 252
+      "count": 253
     },
     {
       "id": "web/e2e",
@@ -35,7 +35,7 @@
     {
       "id": "web/lib",
       "area": "web",
-      "count": 394
+      "count": 395
     },
     {
       "id": "web/public",
@@ -50,7 +50,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 919
+      "count": 922
     },
     {
       "id": "site/app",
@@ -269,7 +269,14 @@
       "id": "web/components/WorkspaceSections.tsx",
       "area": "web",
       "in": 20,
-      "out": 77,
+      "out": 79,
+      "test": false
+    },
+    {
+      "id": "web/components/WorkspaceShell.tsx",
+      "area": "web",
+      "in": 53,
+      "out": 43,
       "test": false
     },
     {
@@ -277,13 +284,6 @@
       "area": "scripts",
       "in": 90,
       "out": 5,
-      "test": false
-    },
-    {
-      "id": "web/components/WorkspaceShell.tsx",
-      "area": "web",
-      "in": 53,
-      "out": 42,
       "test": false
     },
     {
@@ -357,6 +357,13 @@
       "test": false
     },
     {
+      "id": "web/lib/userError.ts",
+      "area": "web",
+      "in": 55,
+      "out": 0,
+      "test": false
+    },
+    {
       "id": "web/lib/db.ts",
       "area": "web",
       "in": 54,
@@ -366,8 +373,8 @@
     {
       "id": "web/lib/useSyncHook.ts",
       "area": "web",
-      "in": 47,
-      "out": 4,
+      "in": 48,
+      "out": 5,
       "test": false
     },
     {
@@ -515,13 +522,6 @@
       "area": "scripts",
       "in": 29,
       "out": 2,
-      "test": false
-    },
-    {
-      "id": "web/components/RegimeStrip.tsx",
-      "area": "web",
-      "in": 30,
-      "out": 0,
       "test": false
     }
   ],

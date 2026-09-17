@@ -1,4 +1,5 @@
 "use client";
+import { userErrorMessage } from "@/lib/userError";
 import { useState } from "react";
 import SortTh from "@/components/SortTh";
 import { useSort } from "@/lib/useSort";
@@ -17,7 +18,7 @@ export default function ResearchReliability() {
       catch (reason) { setError(reason instanceof Error ? reason.message : "Report could not be imported."); }
       input.value = "";
     }} /></label>
-    {error ? <p role="alert" className={styles.error}>{error}</p> : null}
+    {error ? <p role="alert" className={styles.error}>{userErrorMessage(error, 'Reliability data could not be loaded. Try again.')}</p> : null}
     {report ? <><p className={styles.meta}>{report.mode === "offline-contracts" ? "Offline fixture contracts" : "Public live probes"} · {report.generated_at} · Operator-imported report</p>
       <p>{report.metrics.passed}/{report.metrics.total} contracts passed · {(report.metrics.contract_accuracy * 100).toFixed(1)}% agreement · p50 {report.metrics.p50_ms.toFixed(2)} ms · p95 {report.metrics.p95_ms.toFixed(2)} ms</p>
       <p className={styles.muted}>{report.mode === "offline-contracts" ? "Latency measures fixture execution, not service performance." : "Public probes do not measure licensed data or operator-book accuracy."} Contract agreement is not financial fact accuracy.</p>

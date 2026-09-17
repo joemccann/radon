@@ -43,8 +43,8 @@ describe("flowReportErrorCopy", () => {
     );
   });
 
-  it("leaves a real script failure intact", () => {
-    expect(flowReportErrorCopy("Script timed out after 300s")).toBe("Script timed out after 300s");
+  it("explains a timeout without exposing script diagnostics", () => {
+    expect(flowReportErrorCopy("Script timed out after 300s")).toBe("The request took too long. Please try again.");
   });
 });
 
