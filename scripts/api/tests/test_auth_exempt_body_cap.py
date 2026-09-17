@@ -7,15 +7,11 @@ oversized (or length-less) bodies without reading them.
 """
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-
-# Must be set before importing server (test_mode is read at import time).
-os.environ.setdefault("RADON_API_TEST_MODE", "1")
 
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent
 if str(SCRIPTS_DIR) not in sys.path:
