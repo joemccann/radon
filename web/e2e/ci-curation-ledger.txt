@@ -1,3 +1,4 @@
+# REVIEWED 2026-09-17 portfolio-mixed-combo-today-pnl.spec.ts - jsdom PositionTable Today P&L +$1,000 vs P&L +$3,500; Vitest SPY 740/760 screenshot numbers. Browser suite remains held out pending next start preflight.
 # clear-shell.spec.ts is curated in ci.yml for AI industry desktop/mobile navigation verification.
 # research-workbench.spec.ts is curated in ci.yml: source citations, mobile/desktop, exports and safe handoff.
 # REVIEWED 2026-09-15 aaoi-risk-reversal-max-loss.spec.ts - Static locator adaptation to the shared header table; existing order assertions retained. Browser suite remains held out.
