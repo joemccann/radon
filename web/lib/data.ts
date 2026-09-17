@@ -36,12 +36,13 @@ export const NAV_GROUP_LABEL: Record<import("./types").NavGroupId, string> = {
 
 export const NAV_GROUP_ORDER: import("./types").NavGroupId[] = ["overview", "positions", "research", "risk", "operations"];
 
-/** The four recurring decisions in the Clear workstation, shared across viewports. */
+/** Desktop workspaces; the mobile tab bar retains its four recurring tasks. */
 export const clearPrimaryNavigation: { label: string; href: string; sections: WorkspaceSection[] }[] = [
   { label: "Portfolio", href: "/dashboard", sections: ["dashboard", "performance"] },
   { label: "Research", href: "/scanner", sections: ["research-workbench", "scanner", "discover", "flow-analysis", "options", "watchlist"] },
   { label: "Risk", href: "/regime/cri", sections: ["regime", "cta"] },
   { label: "Positions", href: "/portfolio", sections: ["portfolio", "orders"] },
+  { label: "AI industry", href: "/ai-industry", sections: ["ai-industry"] },
 ];
 
 export const navItems: WorkspaceNavItem[] = [
@@ -55,11 +56,11 @@ export const navItems: WorkspaceNavItem[] = [
   { label: "Flow Analysis", route: "flow-analysis", href: "/flow-analysis", icon: FlowGlyph, group: "research" },
   { label: "Options", route: "options", href: "/options", icon: ExposureGlyph, group: "research" },
   { label: "Discover", route: "discover", href: "/discover", icon: DiscoverGlyph, hidden: true, group: "research" },
+  { label: "AI industry", route: "ai-industry", href: "/ai-industry", icon: ExposureGlyph, group: "research" },
   { label: "Journal", route: "journal", href: "/journal", icon: JournalGlyph, group: "operations" },
   { label: "Regime", route: "regime", href: "/regime/cri", icon: RegimeGlyph, group: "risk" },
   { label: "CTA", route: "cta", href: "/cta", icon: CTAGlyph, group: "risk" },
   { label: "Alerts", route: "alerts", href: "/alerts", icon: ScannerGlyph, group: "operations" },
-  { label: "Workflow", route: "workflow", href: "/workflow", icon: OperatorGlyph, group: "operations" },
   { label: "Operator", route: "admin", href: "/admin", icon: OperatorGlyph, group: "operations" },
   { label: "Preferences", route: "preferences", href: "/preferences", icon: PreferencesGlyph, group: "operations" },
   // Profile is reached via the dedicated user card above the sidebar footer,
@@ -69,6 +70,7 @@ export const navItems: WorkspaceNavItem[] = [
 ];
 
 export const quickPromptsBySection: Record<WorkspaceSection, string[]> = {
+  "ai-industry": ["evaluate nvda", "portfolio", "help"],
   "research-workbench": ["portfolio", "evaluate nvda", "help"],
   dashboard: ["portfolio", "scan --top 12", "compare support vs against", "review watch list", "help"],
   "flow-analysis": ["analyze nvda", "compare support vs against", "what are action items", "review watch list", "scan --top 12", "evaluate nvda", "portfolio"],
@@ -83,7 +85,6 @@ export const quickPromptsBySection: Record<WorkspaceSection, string[]> = {
   regime: ["cri-scan", "portfolio", "scan --top 12", "help"],
   cta: ["menthorq-cta", "cri-scan", "portfolio", "help"],
   alerts: ["scan --top 12", "portfolio", "help"],
-  workflow: ["scan --top 12", "portfolio", "help"],
   admin: ["help"],
   preferences: ["help"],
   profile: ["portfolio", "scan --top 12", "help"],
@@ -91,6 +92,7 @@ export const quickPromptsBySection: Record<WorkspaceSection, string[]> = {
 };
 
 export const sectionDescription: Record<WorkspaceSection, string> = {
+  "ai-industry": "AI demand, compute economics, physical capacity and financing evidence.",
   "research-workbench": "Source-backed research, assumptions, and trade review.",
   dashboard: "Portfolio snapshot and command control panel.",
   "flow-analysis": "Flow and position analysis context.",
@@ -105,7 +107,6 @@ export const sectionDescription: Record<WorkspaceSection, string> = {
   regime: "Crash Risk Index: real-time CTA deleveraging monitor.",
   cta: "CTA positioning, vol-targeting exposure model and institutional flow.",
   alerts: "Signal alert rules evaluated against incoming scan rows.",
-  workflow: "Visual flow-pipeline composer for chaining scans and signals.",
   admin: "Operator controls for IB Gateway 2FA and Radon services.",
   preferences: "Operator tunable runtime limits, scanner concurrency and feature flags.",
   profile: "Your account, saved articles and symbol watchlist.",

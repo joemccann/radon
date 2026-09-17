@@ -533,3 +533,83 @@ class TestWrapperAuditCapDoesNotOwnDeepSec:
         assert "TIMEOUT" not in comments
         assert "still running" in comments.lower()
         assert "fast engines" in comments.lower()
+
+
+class TestWorkerTimeoutBinIsResolvedWithoutPath:
+    """launchd hands the worker a thin PATH; `command -v timeout` alone can
+    come back empty and every DeepSec step then ran without its wall-clock
+    cap. The worker must find coreutils timeout off PATH, and refuse to run
+    DeepSec uncapped when it cannot.
+    """
+
+    def _worker_env(self, tmp_path: Path, timeout_dirs: str) -> tuple[Path, dict, Path]:
+        weekend = tmp_path / "weekend"
+        repo = weekend / "radon-security-deepsec"
+        (repo / "scripts").mkdir(parents=True)
+        shutil.copy2(WORKER, repo / "scripts" / "security_deepsec_worker.sh")
+        (repo / ".radon-weekend-runner").write_text("", encoding="utf-8")
+        (repo / ".radon-security-deepsec-runner").write_text("", encoding="utf-8")
+        calls = tmp_path / "deepsec-calls.log"
+        ds_bin = repo / ".deepsec" / "node_modules" / ".bin"
+        ds_bin.mkdir(parents=True)
+        deepsec_exe = ds_bin / "deepsec"
+        deepsec_exe.write_text(
+            f'#!/bin/bash\nprintf "%s\\n" "$*" >> "{calls}"\nexit 0\n', encoding="utf-8"
+        )
+        deepsec_exe.chmod(0o755)
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        stubs = {
+            "git": f'#!/bin/bash\nif [[ "$*" == *rev-parse* ]]; then echo "{HEAD}"; fi\nexit 0\n',
+            "gh": "#!/bin/bash\nexit 0\n",
+            "dirname": '#!/bin/bash\necho "${1%/*}"\n',
+            "date": "#!/bin/bash\necho 20260915T000000\n",
+            "mkdir": '#!/bin/bash\nexec /bin/mkdir "$@"\n',
+            "chmod": '#!/bin/bash\nexec /bin/chmod "$@"\n',
+            "cat": '#!/bin/bash\nexec /bin/cat "$@"\n',
+            "tee": '#!/bin/bash\nexec /usr/bin/tee "$@"\n',
+            "rm": '#!/bin/bash\nexec /bin/rm "$@"\n',
+        }
+        for name, body in stubs.items():
+            exe = bin_dir / name
+            exe.write_text(body, encoding="utf-8")
+            exe.chmod(0o755)
+        env = {
+            "PATH": str(bin_dir),
+            "HOME": str(tmp_path / "home"),
+            "RADON_WEEKEND_DEEPSEC_REPO": str(repo),
+            "RADON_WEEKEND_TIMEOUT_DIRS": timeout_dirs,
+        }
+        return repo, env, calls
+
+    def test_timeout_found_off_path_caps_deepsec(self, tmp_path):
+        tdir = tmp_path / "coreutils"
+        tdir.mkdir()
+        used = tmp_path / "timeout-used.log"
+        stub = tdir / "timeout"
+        stub.write_text(
+            "#!/bin/bash\n"
+            f'echo used >> "{used}"\n'
+            'while [ $# -gt 0 ]; do case "$1" in -k) shift 2;; *) shift; break;; esac; done\n'
+            'exec "$@"\n',
+            encoding="utf-8",
+        )
+        stub.chmod(0o755)
+        repo, env, calls = self._worker_env(tmp_path, str(tdir))
+        proc = subprocess.run(
+            [BASH, str(repo / "scripts" / "security_deepsec_worker.sh"), "run"],
+            cwd=repo, env=env, capture_output=True, text=True, timeout=60,
+        )
+        assert used.exists(), (proc.returncode, proc.stdout, proc.stderr)
+        assert calls.exists()
+
+    def test_no_timeout_anywhere_refuses_to_run_deepsec_uncapped(self, tmp_path):
+        empty = tmp_path / "nothing"
+        empty.mkdir()
+        repo, env, calls = self._worker_env(tmp_path, str(empty))
+        proc = subprocess.run(
+            [BASH, str(repo / "scripts" / "security_deepsec_worker.sh"), "run"],
+            cwd=repo, env=env, capture_output=True, text=True, timeout=60,
+        )
+        assert not calls.exists(), "DeepSec ran without a wall-clock cap"
+        assert "OPERATOR_REQUIRED" in proc.stdout + proc.stderr

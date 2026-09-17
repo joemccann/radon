@@ -105,7 +105,7 @@ describe("InformedFlowPanel", () => {
   it("surfaces an error when the fetch fails", async () => {
     global.fetch = vi.fn(async () => new Response("boom", { status: 500 })) as typeof fetch;
     render(<InformedFlowPanel ticker="AAPL" />);
-    await waitFor(() => expect(screen.getByText(/failed/i)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Unable to connect/i)).toBeTruthy());
   });
 
   it("renders no raw hex colors", async () => {

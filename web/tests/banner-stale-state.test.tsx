@@ -41,8 +41,8 @@ describe("<ServiceHealthBanner /> stale variant", () => {
     const { default: Banner } = await import("../components/ServiceHealthBanner");
     render(<Banner />);
     const banner = screen.getByTestId("service-health-banner");
-    // Banner uses data-severity to style stale vs error distinctly.
-    expect(banner.getAttribute("data-severity")).toBe("stale");
+    // Both failure classes notify via the shared floating error stack.
+    expect(banner.classList.contains("toast-error")).toBe(true);
     expect(banner.textContent).toContain("newsfeed-scraper");
     // The "stale" copy should make the silence explicit, not call it a
     // crash.
@@ -59,6 +59,6 @@ describe("<ServiceHealthBanner /> stale variant", () => {
     const { default: Banner } = await import("../components/ServiceHealthBanner");
     render(<Banner />);
     const banner = screen.getByTestId("service-health-banner");
-    expect(banner.getAttribute("data-severity")).toBe("error");
+    expect(banner.classList.contains("toast-error")).toBe(true);
   });
 });

@@ -22,14 +22,15 @@ Data sources (priority order):
      higher-priority sources fail; COR1M reaches Yahoo only if IB + Cboe fail.
 
 Usage:
-    python3 scripts/cri_scan.py                 # HTML report (opens in browser)
+    python3 scripts/cri_scan.py                 # HTML report (prints path)
     python3 scripts/cri_scan.py --json           # JSON to stdout
-    python3 scripts/cri_scan.py --no-open        # HTML report, don't open browser
+    python3 scripts/cri_scan.py --open           # HTML report, open in browser
 """
 from __future__ import annotations
 
 import argparse
 import csv
+import html as html_lib
 import json
 import math
 import os
@@ -1231,6 +1232,11 @@ def _pctile_tone_class(p: Optional[int]) -> str:
     return "text-negative" if p < 25 else "text-positive" if p > 75 else "text-warning"
 
 
+def _esc(value: Any) -> str:
+    """Escape a vendor-feed / non-numeric value for HTML interpolation."""
+    return html_lib.escape(str(value), quote=True)
+
+
 def generate_html_report(
     result: Dict[str, Any],
     market_open: bool,
@@ -1263,7 +1269,7 @@ def generate_html_report(
 <header class="header">
   <div>
     <h1 class="title">Crash Risk Index (CRI) Scanner</h1>
-    <p class="subtitle">{result['date']} | Market {market_label}</p>
+    <p class="subtitle">{_esc(result['date'])} | Market {market_label}</p>
   </div>
   <div class="header-actions">
     <span class="{pill_cls} pill">{cri['level']} — {cri['score']:.0f}/100</span>
@@ -1386,7 +1392,7 @@ def generate_html_report(
     # ── MenthorQ CTA Positioning ──
     menthorq = result.get("menthorq_cta")
     if menthorq and menthorq.get("tables"):
-        body_parts.append(f"""<div class="section-header">MenthorQ CTA Positioning <span style="font-size:10px;color:var(--text-muted);font-weight:400">(institutional data — {menthorq.get('date', '---')})</span></div>""")
+        body_parts.append(f"""<div class="section-header">MenthorQ CTA Positioning <span style="font-size:10px;color:var(--text-muted);font-weight:400">(institutional data — {_esc(menthorq.get('date', '---'))})</span></div>""")
 
         # SPX highlight card
         spx = menthorq.get("spx")
@@ -1407,11 +1413,11 @@ def generate_html_report(
   <div class="metric">
     <div class="metric-label">SPX CTA Position</div>
     <div class="metric-value">{pos_t:.2f}</div>
-    <div class="metric-change">Yesterday: {spx.get('position_yesterday', '---')}</div>
+    <div class="metric-change">Yesterday: {_esc(spx.get('position_yesterday', '---'))}</div>
   </div>
   <div class="metric">
     <div class="metric-label">1M Ago</div>
-    <div class="metric-value">{spx.get('position_1m_ago', '---')}</div>
+    <div class="metric-value">{_esc(spx.get('position_1m_ago', '---'))}</div>
     <div class="metric-change">Position delta</div>
   </div>
   <div class="metric">
@@ -1449,17 +1455,17 @@ def generate_html_report(
                 p1m = entry.get("position_1m_ago", "---")
                 pctl = entry.get("percentile_3m")
                 zs = entry.get("z_score_3m", "---")
-                pt_str = f"{pt:.2f}" if isinstance(pt, (int, float)) else str(pt)
-                py_str = f"{py_:.2f}" if isinstance(py_, (int, float)) else str(py_)
-                p1m_str = f"{p1m:.2f}" if isinstance(p1m, (int, float)) else str(p1m)
+                pt_str = f"{pt:.2f}" if isinstance(pt, (int, float)) else _esc(pt)
+                py_str = f"{py_:.2f}" if isinstance(py_, (int, float)) else _esc(py_)
+                p1m_str = f"{p1m:.2f}" if isinstance(p1m, (int, float)) else _esc(p1m)
                 pctl_str = str(pctl) if isinstance(pctl, (int, float)) else "---"
-                zs_str = f"{zs:.2f}" if isinstance(zs, (int, float)) else str(zs)
+                zs_str = f"{zs:.2f}" if isinstance(zs, (int, float)) else _esc(zs)
                 # Highlight low percentiles
                 row_cls = ""
                 if isinstance(pctl, (int, float)) and pctl < 20:
                     row_cls = ' class="highlight"'
                 body_parts.append(
-                    f'<tr{row_cls}><td>{name}</td>'
+                    f'<tr{row_cls}><td>{_esc(name)}</td>'
                     f'<td class="text-right">{pt_str}</td>'
                     f'<td class="text-right">{py_str}</td>'
                     f'<td class="text-right">{p1m_str}</td>'
@@ -1487,11 +1493,11 @@ def generate_html_report(
                 pt = entry.get("position_today", "---")
                 pctl = entry.get("percentile_3m", "---")
                 zs = entry.get("z_score_3m", "---")
-                pt_str = f"{pt:.2f}" if isinstance(pt, (int, float)) else str(pt)
-                pctl_str = str(pctl) if isinstance(pctl, (int, float)) else str(pctl)
-                zs_str = f"{zs:.2f}" if isinstance(zs, (int, float)) else str(zs)
+                pt_str = f"{pt:.2f}" if isinstance(pt, (int, float)) else _esc(pt)
+                pctl_str = str(pctl) if isinstance(pctl, (int, float)) else _esc(pctl)
+                zs_str = f"{zs:.2f}" if isinstance(zs, (int, float)) else _esc(zs)
                 body_parts.append(
-                    f'<tr><td>{name}</td>'
+                    f'<tr><td>{_esc(name)}</td>'
                     f'<td class="text-right">{pt_str}</td>'
                     f'<td class="text-right">{pctl_str}</td>'
                     f'<td class="text-right">{zs_str}</td></tr>'
@@ -1571,7 +1577,7 @@ def generate_html_report(
         hl = ' class="highlight"' if is_last else ""
         dist_cls = "text-negative" if h["spx_vs_ma_pct"] < -5 else "text-warning" if h["spx_vs_ma_pct"] < 0 else ""
         body_parts.append(
-            f'<tr{hl}><td>{h["date"]}</td>'
+            f'<tr{hl}><td>{_esc(h["date"])}</td>'
             f'<td class="text-right">{h["vix"]:.2f}</td>'
             f'<td class="text-right">{h["vvix"]:.2f}</td>'
             f'<td class="text-right">${h["spy"]:.2f}</td>'
@@ -1594,7 +1600,7 @@ def generate_html_report(
 </div>""")
 
     body = "\n".join(body_parts)
-    title = f"CRI Scan — {result['date']}"
+    title = f"CRI Scan — {_esc(result['date'])}"
     html = template.replace("{{TITLE}}", title)
     html = html.replace("{{BODY}}", body)
     return html
@@ -1727,7 +1733,7 @@ def _read_cached_scan(path: Path) -> Optional[dict]:
     return data if isinstance(data, dict) else None
 
 
-def main():
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Crash Risk Index (CRI) Scanner",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1740,15 +1746,28 @@ distance from the 100-day moving average. When the crash trigger fires
 Examples:
   python3 scripts/cri_scan.py                  # HTML report
   python3 scripts/cri_scan.py --json           # JSON output
-  python3 scripts/cri_scan.py --no-open        # Don't open browser
+  python3 scripts/cri_scan.py --open           # Open the report in a browser
 """,
     )
     parser.add_argument("--json", action="store_true", help="Output JSON to stdout")
-    parser.add_argument("--no-open", action="store_true", help="Don't open HTML report in browser")
+    parser.add_argument("--open", action="store_true", help="Open the HTML report in a browser (default: just print the path)")
     parser.add_argument("--output", "-o", help="Custom output path for HTML")
     parser.add_argument("--force", action="store_true", help="Fetch fresh even when the market is closed (bypass off-hours cache gate)")
+    return parser
 
-    args = parser.parse_args()
+
+def emit_html_report(html: str, out_path: Path, open_browser: bool = False) -> None:
+    """Write the report and only open a browser when explicitly asked."""
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(html)
+    print(f"  Report: {out_path}", file=sys.stderr)
+    if open_browser:
+        import webbrowser
+        webbrowser.open(f"file://{out_path.resolve()}")
+
+
+def main():
+    args = build_parser().parse_args()
 
     market_open = is_market_open()
 
@@ -1911,13 +1930,7 @@ Examples:
         html = generate_html_report(result, market_open, elapsed)
         date_str = datetime.now().strftime("%Y-%m-%d")
         out_path = Path(args.output) if args.output else _PROJECT_DIR / f"reports/cri-scan-{date_str}.html"
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(html)
-        print(f"  Report: {out_path}", file=sys.stderr)
-
-        if not args.no_open:
-            import webbrowser
-            webbrowser.open(f"file://{out_path.resolve()}")
+        emit_html_report(html, out_path, open_browser=args.open)
 
 
 if __name__ == "__main__":

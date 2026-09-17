@@ -2,7 +2,7 @@ import { requireRouteAccess } from "@/lib/routeAccess";
 
 import { NextRequest, NextResponse } from "next/server";
 import { radonFetch } from "@/lib/radonApi";
-import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
+import { getRequestId, setNoStoreResponseHeaders, scrubSecrets } from "@/lib/apiContracts";
 import { buildDemoCashFlows } from "@/lib/demo/fixtures/cashFlows";
 
 // Disable Next.js static caching: cash flows update once per day but the
@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
     setNoStoreResponseHeaders(res, requestId);
     return res;
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
+    const message = scrubSecrets(err instanceof Error ? err.message : "Unknown error");
     const res = NextResponse.json(
       { rows: [], count: 0, summary: null, error: message },
       { status: 502 },

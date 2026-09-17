@@ -234,11 +234,13 @@ def effective_not_applicable(probe_results: dict, units: dict,
     The app-role gateway suppression was unconditional, so `RADON_HOST_ROLE=app`
     copied onto a host that IS running a local gateway dropped the :4001 probe
     from the aggregate forever — edge-green with a dead gateway. The exclusion
-    now holds only while the nested `radon-api:broker` probe is observed up
-    (the broker is genuinely covered from elsewhere); anything else degrades to
-    counted once the gateway unit has been non-up past the existing 900s
-    dependency dwell. Inside the dwell the suppression still absorbs flaps, and
-    the broker failure itself is already counted as `radon-api:broker`.
+    now holds while the nested `radon-api:broker` probe is observed up (the
+    broker is genuinely covered from elsewhere) OR the local unit is a
+    clean-inactive Result=success (true app host, unit disabled by the
+    two-host split). A local crash (not Result=success) degrades to counted
+    once the unit has been non-up past the 900s dependency dwell. Inside the
+    dwell the suppression still absorbs flaps, and the broker failure itself
+    is already counted as `radon-api:broker`.
     """
     names = not_applicable_names(host_role)
     if not names:
@@ -246,6 +248,15 @@ def effective_not_applicable(probe_results: dict, units: dict,
     if _nested_api_state(probe_results) == "up":
         return names
     gateway = (units or {}).get(GATEWAY_UNIT)
+    # True app host: the local unit is disabled / clean-inactive
+    # Result=success by design (two-host split). Nested broker-down is
+    # already counted as radon-api:broker (degraded). Expiring the
+    # exclusion here re-counts that absent unit; during 04:00-20:00 ET
+    # the dwell then collapses the edge to down (2026-09-15 23:50Z
+    # page 3a6de316, ping and /sign-in stayed 200). Expire only when
+    # the local unit looks like a crash (not Result=success).
+    if isinstance(gateway, dict) and str(gateway.get("result", "")).lower() == "success":
+        return names
     dwell = gateway.get("non_up_secs") if isinstance(gateway, dict) else None
     if (
         isinstance(dwell, (int, float))

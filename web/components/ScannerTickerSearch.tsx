@@ -1,4 +1,5 @@
 "use client";
+import ErrorToast from "@/components/ErrorToast";
 
 import { useState, type FormEvent } from "react";
 import { Loader2, Search } from "lucide-react";
@@ -58,7 +59,6 @@ export default function ScannerTickerSearch({
         spellCheck={false}
         aria-label="Ticker symbols"
         aria-invalid={error ? "true" : "false"}
-        aria-describedby={error ? `${id}-error` : undefined}
       />
       <button
         type="submit"
@@ -69,9 +69,7 @@ export default function ScannerTickerSearch({
         Scan
       </button>
       {error && (
-        <span id={`${id}-error`} className="theta-search__error" role="alert">
-          {error}
-        </span>
+        <ErrorToast message={error} />
       )}
     </form>
   );

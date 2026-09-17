@@ -1,14 +1,13 @@
 import DemoPendingLogo from "./DemoPendingLogo";
 import DemoPendingRetry from "./DemoPendingRetry";
+import { routeMetadata } from "@/lib/pageTitle";
 
 // Public holding page for a demo signup whose trial has not landed yet
 // (middleware isPublicRoute). The demo gate redirects here instead of the bare
 // 403 that 4eaaf5e9 shipped. Deliberately a bare leaf: no workspace shell, no
 // account data, no Clerk identity echoed — it is reachable unauthenticated on
 // BOTH deployments, so it must render nothing a stranger should not see.
-export const metadata = {
-  title: "Setting up your demo · Radon",
-};
+export const metadata = routeMetadata("/demo-pending");
 
 export default function DemoPendingPage() {
   return (

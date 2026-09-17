@@ -1,4 +1,24 @@
 # Lessons
+## 2026-09-17 — Two 00NN_ migration files silently skip the later table
+
+- `apply_pending_migrations` keys on the integer prefix, not the filename.
+  A second `0074_*.sql` is skipped once 74 is in `schema_migrations`.
+  radon-calm-streak then died with `no such table: calm_streak_history`
+  while `liquidcompute_index` (the first 74) was already there.
+- Pin unique prefixes in `test_migrate.py`. `_list_migrations` must
+  abort on a collision so ExecStartPre fails closed.
+- Per-indicator tests that apply THEIR file into a fresh sqlite do not
+  catch this. The real migrations directory is the topology.
+- A prior unpushed fix chose 0075; vol-skew-mr later took 75 on main.
+  Recurrence page `b4a46e16` needed 0076. Do not leave migration
+  renumbers on unmerged `fix/**` branches overnight.
+
+## 2026-09-17 — Mixed-age combos are not same-day
+
+- Selling a same-day short against an overnight long (SPY 740P since May, 760P sold today) groups as a bull put spread with `basis_source: mixed` and often `entry_date=today`.
+- The same-day identity Today P&L = MV − EC then prints the overnight leg's entire accumulated loss as today's drawdown.
+- `isSameDay` is false for mixed. Today P&L is per-leg: overnight vs prior close, `session_fills` vs fill. Incomplete blotter + a new-leg fill must not stamp the combo today. OCC journal tickers map to the underlying root.
+
 ## 2026-09-11 — Grok 4.6 P&L turns cannot omit tools or starve max_tokens
 
 - grok-4.6 reasoning_effort defaults to high and cannot be disabled. A 1200 max_tokens budget is eaten by reasoning, so a cap-hit forced-final with tools omitted returns empty text and the canned "Reached the maximum tool-calling rounds" string.
@@ -1032,3 +1052,27 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 
 - `tailscale ping` pongs at the WireGuard/disco layer and succeeds even when the ACL drops every TCP port. From the tagged `ib-gateway` node, ping to `joes-mac-mini` returned 19ms while `ssh` to port 22 timed out. Test the real port (`nc -z -w5 <ip> 22`) before concluding the peer is reachable.
 - Tagged devices (`tagged-devices` owner) and user-owned devices sit in different ACL groups. When a tagged node must reach a user device, route through a user-owned peer (`ProxyJump radon-broker`) or add an explicit ACL rule; do not keep retrying the direct route.
+
+## 2026-09-15 — flow-refresh analysis timeout vs capacity shed
+
+- `FastAPI outcome indeterminate (curl=0, http=502)` after ~120s is a
+  script timeout body, not capacity shed. Discriminate on duration and
+  the absence of `subprocess capacity exhausted` on the final attempt.
+- Wrapper SCAN_TIMEOUT and each `/flow-tab` `run_script` timeout must
+  match; discover at 180 with flow-analysis at 120 pages the oneshot.
+
+## 2026-09-16 - Performance regression reports need source reconciliation
+- When TWR disappears with excluded NAV sessions, trace the actual NAV and external-flow provenance before changing presentation or weakening integrity gates. Verify historical flow coverage survives refreshed statements and mirror selection; retain the reported dates as regression cases.
+
+## 2026-09-17 - AI charts share the Regime renderer
+- Reuse ChartPanel, CriHistoryChart, HistoryRangeChips and BrushMinimap for AI evidence, including legacy charts. Preserve source cadence, units and missing observations while matching the approved Regime composition.
+
+## 2026-09-17 - Nightly evidence is not a deliverable
+- A nightly audit may complete successfully without a commit or PR. Report no-op results and checkpoints through the rolling issue and runner state; never create empty commits to satisfy phase completion.
+- Gate PR creation on the net substantive base-to-head diff, excluding audit/task bookkeeping and generated timestamp churn. Commit counts and nonempty diffs alone do not prove a useful change. Apply the policy to every scheduled publisher and provider prompt.
+
+## 2026-09-17 - Error bodies are not UI copy
+- Never render response.text(), JSON envelopes, stack traces, or raw infrastructure exceptions as user-facing errors. Route failures through the established error pattern with safe copy and recovery, retaining prior data and financial rejection semantics. Audit shared consumers whenever a page leaks a raw error.
+
+## 2026-09-17 — Errors belong in toasts
+- User-facing request, refresh, validation and action failures must use toast presentation, never inline banners. Preserve retry actions and safe broker/service guidance. Audit shared presenters and custom render branches together; explicitly report framework fallback and diagnostic-record exceptions.

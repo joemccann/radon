@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -36,6 +37,7 @@ SOURCES = (
     "portkey",
     "ramp",
     "open-design-arena",
+    "liquidcompute",
     "issuer-disclosures",
     "lambda",
 )
@@ -247,7 +249,12 @@ def _main(argv=None):
                     checked_at=checked,
                 )
                 if store:
-                    store.append_observations(rows)
+                    if source == "liquidcompute":
+                        from .liquidcompute import persist_ticker
+
+                        persist_ticker(store, rows)
+                    else:
+                        store.append_observations(rows)
                     completed.add(key)
                     if checkpoint:
                         checkpoint.parent.mkdir(parents=True, exist_ok=True)
@@ -333,14 +340,20 @@ def main(argv=None):
 
 
 def _write_health(backfill, state, started, error):
-    """Keep both literal health identities discoverable by fleet parity checks."""
+    """Best-effort heartbeat. A Turso timeout must not mask collection failure
+    (2026-09-17 07:22Z radon-ai-cycle: archive import timed out, then this
+    write also timed out and became the oneshot's raised error). Matches trin.
+    """
     from scripts.db.hrana_http import write_service_health_http
 
     kwargs = dict(started_at=started, finished_at=now_iso(), error=error, timeout=8)
-    if backfill:
-        write_service_health_http(BACKFILL_HEALTH_SERVICE, state, **kwargs)
-    else:
-        write_service_health_http(HEALTH_SERVICE, state, **kwargs)
+    try:
+        if backfill:
+            write_service_health_http(BACKFILL_HEALTH_SERVICE, state, **kwargs)
+        else:
+            write_service_health_http(HEALTH_SERVICE, state, **kwargs)
+    except Exception as exc:  # noqa: BLE001 — heartbeat is telemetry
+        print(f"[ai-cycle] service_health write failed: {exc}", file=sys.stderr)
 
 
 if __name__ == "__main__":

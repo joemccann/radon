@@ -869,6 +869,12 @@ no new skips; no threshold or CI-reachability drift. 0 new findings.
 |---|---|---|
 | T-493 | OPEN | Delta audit: web/tests/ib-rt-volume-relay.test.ts:29-50 source-greps relay callbacks instead of dispatching tickSize 8 / tickString 48 and observing a broadcast. Full-gate detached stage has no DONE sentinel; no result claimed. |
 
+## Audit 2026-09-16 (testing/2026-09-16)
+
+| Task | Status | Evidence |
+|---|---|---|
+| T-495 | OPEN | `web/e2e/chain-anchored-scroll.spec.ts:93-102` uses `page.waitForTimeout(250)` between two scroll assertions and its post-scroll snapshot. The contract can sample before rendering settles and cannot catch a regression that renders after the arbitrary window. AC: replace the delay with a web-first settled-pane assertion; a deliberately delayed rerender must fail. Detached full-gate stage ended without `DONE` at `pytest_rc=RUNNING`; no count claimed. |
+
 ## Remediation 2026-09-13 (testing/2026-09-13)
 
 | Task | Status | Evidence |
@@ -924,3 +930,28 @@ Closing gates: INCOMPLETE. Detached serial stage prewrote `pytest`, `vitest`,
 and `cloud` slots for rounds 1-3, then died in `pytest_1`; its log is zero-byte
 and `/tmp/tw-2026-09-15/remediate-gates.rc` has no `DONE` sentinel. No gate
 counts or green verdict are claimed.
+
+## Remediation 2026-09-16 (testing/2026-09-16)
+
+| Task | Status | Evidence |
+|---|---|---|
+| Scope | DONE | `RADON_WEEKEND_REDUCED=1`: this cycle's sole verified finding, T-495, is P2; no source-actionable P0/P1 is open. Full gates are recorded only if their detached stage writes `DONE`. |
+| T-488 | operator-only | Reproduce and repair GNU-timeout process-tree behavior on Linux CI without widening the fixed test timeout. |
+
+Closing gates: INCOMPLETE. `/tmp/tw-2026-09-16/remediate-gates.rc` prewrote all
+nine slots, then the detached process died during `pytest_1` with a zero-byte
+log and no `DONE` sentinel. No full-gate count or green verdict is claimed.
+## Remediation 2026-09-17 (testing/2026-09-17)
+
+`RADON_WEEKEND_REDUCED=1`: this cycle's T-495 is P2 and out of scope. The
+standing P1s were reverified before closing gates: T-490 is deterministically
+blocked by the runner's filesystem policy, and T-488 remains operator-only
+after its three recorded fixture attempts.
+
+| Task | Status | Evidence |
+|---|---|---|
+| T-490 | BLOCKED / operator-only | RED: `render_loop_prompt.py --check` listed all eight absent `.codex` artifacts and `test_portable_prompt_sync.py` was 21 failed / 52 passed. Attempt: `render_loop_prompt.py --write` reached `.codex/skills/ci-performance` then failed `PermissionError`. Operator: run `python3.13 scripts/render_loop_prompt.py --write` in a checkout permitted to create repository `.codex/`, then run `python3.13 -m pytest scripts/tests/test_portable_prompt_sync.py -q` and commit the generated artifacts. |
+| T-488 | operator-only | Reproduce and repair the GNU-timeout process-tree behavior on Linux CI without widening the fixed test timeout. |
+
+Closing gates: not run. The focused P1 blocker is deterministic, so three
+full-gate runs cannot honestly be claimed.

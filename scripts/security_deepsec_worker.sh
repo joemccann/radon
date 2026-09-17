@@ -18,7 +18,17 @@ LOCK="$WEEKEND_ROOT/.security-deepsec.lock"
 LOG_DIR="$REPO/logs/security-deepsec"
 CAP_SECS="${RADON_WEEKEND_DEEPSEC_CAP_SECS:-28800}"
 NET_TIMEOUT_SECS="${RADON_WEEKEND_NET_TIMEOUT_SECS:-120}"
-TIMEOUT_BIN="$(command -v timeout || true)"
+# launchd's PATH is thin, so `command -v` alone can miss coreutils and leave
+# DeepSec uncapped. Fall back to the known install dirs; the run refuses below
+# when neither finds one.
+TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
+if [[ -z "$TIMEOUT_BIN" ]]; then
+  for _tdir in ${RADON_WEEKEND_TIMEOUT_DIRS:-/opt/homebrew/bin /usr/local/bin /opt/homebrew/opt/coreutils/libexec/gnubin /usr/bin}; do
+    for _tname in timeout gtimeout; do
+      if [[ -x "$_tdir/$_tname" ]]; then TIMEOUT_BIN="$_tdir/$_tname"; break 2; fi
+    done
+  done
+fi
 GH_BIN="$(command -v gh || true)"
 DEADMAN_LABEL="security-deepsec"
 DEADMAN_TITLE="Nightly DeepSec worker"
@@ -168,6 +178,13 @@ if [[ ! -x "$DEEPSEC_BIN" ]]; then
   write_status "failed"
   report "failed" "OPERATOR_REQUIRED: DeepSec workspace is not bootstrapped"
   echo "[deepsec] OPERATOR_REQUIRED: no deepsec binary" | tee -a "$RUN_LOG"
+  exit 0
+fi
+
+if [[ -z "$TIMEOUT_BIN" ]]; then
+  write_status "failed"
+  report "failed" "OPERATOR_REQUIRED: no timeout binary, refusing an uncapped DeepSec run"
+  echo "[deepsec] OPERATOR_REQUIRED: no timeout binary" | tee -a "$RUN_LOG"
   exit 0
 fi
 

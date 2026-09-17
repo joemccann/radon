@@ -1,6 +1,9 @@
+/** @vitest-environment jsdom */
 import React from "react";
-import { renderToStaticMarkup } from "react-dom/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+afterEach(cleanup);
 
 const mockUseRegime = vi.fn();
 const mockUseMenthorqCta = vi.fn();
@@ -79,12 +82,15 @@ describe("components/CtaPage.tsx — freshness states", () => {
     });
 
     const { default: CtaPage } = await import("../components/CtaPage");
-    const html = renderToStaticMarkup(React.createElement(CtaPage));
+    const { container } = render(React.createElement(CtaPage));
+    const html = container.innerHTML;
 
     expect(html).toContain("CTA CACHE STALE");
     expect(html).toContain("2026-03-10");
     expect(html).toContain("2026-03-11");
-    expect(html).toContain("Your username or password was incorrect");
+    expect(screen.getByRole("alert").textContent).toContain("Your username or password was incorrect");
+    expect(screen.getByRole("alert").closest("[data-toast-viewport]")).toBeTruthy();
+    expect(html).not.toContain("Your username or password was incorrect");
   });
 
   it("omits the stale warning when the CTA cache is fresh", async () => {
@@ -128,7 +134,8 @@ describe("components/CtaPage.tsx — freshness states", () => {
     });
 
     const { default: CtaPage } = await import("../components/CtaPage");
-    const html = renderToStaticMarkup(React.createElement(CtaPage));
+    const { container } = render(React.createElement(CtaPage));
+    const html = container.innerHTML;
 
     expect(html).not.toContain("CTA CACHE STALE");
     expect(html).toContain("MENTHORQ CTA POSITIONING");

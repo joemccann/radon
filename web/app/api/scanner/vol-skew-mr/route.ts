@@ -1,0 +1,126 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
+
+import { NextResponse } from "next/server";
+import { readFile } from "fs/promises";
+import { statSync } from "fs";
+import { join } from "path";
+import { getDb } from "@/lib/db";
+import { cachedRead } from "@/lib/dbCache";
+import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
+import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
+import { isCoverageFailedScan, pickUsableScanSnapshot } from "@/lib/scanCoverage";
+
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
+const CACHE_PATH = join(process.cwd(), "..", "data", "vol_skew_mr.json");
+const STALE_THRESHOLD_SECONDS = 6 * 60 * 60;
+const READ_CACHE_TTL_MS = 10_000;
+
+type CacheMeta = {
+  last_refresh: string | null;
+  age_seconds: number | null;
+  is_stale: boolean;
+  stale_threshold_seconds: number;
+};
+
+function buildCacheMeta(filePath: string): CacheMeta {
+  try {
+    const s = statSync(filePath);
+    const ageSeconds = (Date.now() - s.mtime.getTime()) / 1000;
+    return {
+      last_refresh: s.mtime.toISOString(),
+      age_seconds: Math.round(ageSeconds),
+      is_stale: ageSeconds > STALE_THRESHOLD_SECONDS,
+      stale_threshold_seconds: STALE_THRESHOLD_SECONDS,
+    };
+  } catch {
+    return {
+      last_refresh: null,
+      age_seconds: null,
+      is_stale: true,
+      stale_threshold_seconds: STALE_THRESHOLD_SECONDS,
+    };
+  }
+}
+
+function buildResultCacheMeta(timestampMs: number | null, fresh: boolean): CacheMeta {
+  const ageSeconds = timestampMs == null ? null : Math.max(0, Math.round((Date.now() - timestampMs) / 1000));
+  return {
+    last_refresh: timestampMs == null ? null : new Date(timestampMs).toISOString(),
+    age_seconds: ageSeconds,
+    is_stale: !fresh,
+    stale_threshold_seconds: STALE_THRESHOLD_SECONDS,
+  };
+}
+
+export function emptyVolSkewMrPayload() {
+  return {
+    scan_time: "",
+    source: "Unusual Whales + Radon vol/skew feeds",
+    universe: "preset:ndx100",
+    requested_tickers: [],
+    tickers_scanned: 0,
+    candidates_found: 0,
+    actionable_count: 0,
+    results: [],
+  };
+}
+
+export const radonCapability = "read";
+
+export async function readVolSkewMrCache(): Promise<Record<string, unknown> | null> {
+  const raw = await readFile(CACHE_PATH, "utf-8");
+  return JSON.parse(raw) as Record<string, unknown>;
+}
+
+async function readVolSkewMrFromDb(): Promise<TimestampedRead<Record<string, unknown>> | null> {
+  const db = getDb();
+  const result = await db.execute({
+    sql: `SELECT scan_time, payload FROM vol_skew_mr_snapshots ORDER BY scan_time DESC LIMIT 30`,
+    args: [],
+  });
+  const picked = pickUsableScanSnapshot(
+    result.rows as unknown as Array<{ scan_time: string; payload: string }>,
+  );
+  if (picked == null) return null;
+  return {
+    data: picked.data,
+    timestampMs: contentTimestampMs(picked.scanTime),
+  };
+}
+
+async function readVolSkewMrFromDisk(): Promise<TimestampedRead<Record<string, unknown>> | null> {
+  const data = await readVolSkewMrCache();
+  if (data == null) return null;
+  return { data, timestampMs: contentTimestampMs(data.scan_time) };
+}
+
+export async function GET(): Promise<Response> {
+  const access = await requireRouteAccess();
+  if (!access.ok) return access.response;
+  const requestId = getRequestId();
+  const diskCacheMeta = buildCacheMeta(CACHE_PATH);
+  const result = await cachedRead("scanner:vol-skew-mr", READ_CACHE_TTL_MS, () =>
+    dbFirstRead({
+      fromDb: readVolSkewMrFromDb,
+      fromDisk: readVolSkewMrFromDisk,
+      maxAgeMs: STALE_THRESHOLD_SECONDS * 1000,
+      label: "vol-skew-mr",
+      isDegraded: (data) => isCoverageFailedScan(data),
+    }),
+  );
+  if (result.ok) {
+    const cache_meta = result.source === "disk"
+      ? diskCacheMeta
+      : buildResultCacheMeta(result.timestampMs, result.fresh);
+    return setNoStoreResponseHeaders(
+      NextResponse.json({ ...result.data, cache_meta }),
+      requestId,
+    );
+  }
+  return setNoStoreResponseHeaders(
+    NextResponse.json({ ...emptyVolSkewMrPayload(), cache_meta: diskCacheMeta }),
+    requestId,
+  );
+}

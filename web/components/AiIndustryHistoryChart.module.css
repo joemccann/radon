@@ -1,0 +1,12 @@
+.history { min-width: 0; margin-block: 22px; }
+.units, .note, .range, .inspection { font-size: var(--text-meta); line-height: 1.6; color: var(--text-muted); }
+.units { margin-block: 12px; }
+.range { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin-block: 12px; font-variant-numeric: tabular-nums; }
+.note { max-inline-size: 75ch; }
+.history :global(.chart-panel-inline) { margin-bottom: 24px; }
+.history :global(.chart-tooltip-date), .history :global(.chart-tooltip-row), .history :global(.chart-tooltip-label), .history :global(.chart-tooltip-value) { font-size: var(--text-meta); }
+.history :global(.chart-surface):focus-visible, .history :global(.brush-minimap-handle):focus-visible { outline: 2px solid var(--signal-core-text); outline-offset: 3px; }
+.inspection { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); }
+.inspection:focus-within { position: static; inline-size: auto; block-size: auto; overflow: visible; clip-path: none; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding-block: 12px; }
+.inspection input { accent-color: var(--signal-core-text); }
+@media (max-width: 640px) { .history :global(.chart-panel-header) { padding: 16px; } }

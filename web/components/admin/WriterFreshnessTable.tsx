@@ -1,5 +1,8 @@
 "use client";
 
+import ErrorToast from "@/components/ErrorToast";
+
+import { userErrorMessage } from "@/lib/userError";
 import { getMarketStateFromDate, isStale, type MarketState } from "@/lib/serviceHealthWindows";
 import { humanizeDetail } from "@/lib/adminFormat";
 import type { ServiceHealthRow } from "@/lib/adminTypes";
@@ -56,7 +59,7 @@ export default function WriterFreshnessTable({
         </table>
         </div>
       ) : !reachable ? (
-        <p className="admin-card-empty">Edge health unreachable. Writer freshness unavailable.</p>
+        <ErrorToast message="Edge health unreachable. Writer freshness unavailable." />
       ) : rows.length === 0 ? (
         <p className="admin-card-empty">No writer health rows reported.</p>
       ) : (
@@ -120,8 +123,8 @@ function WriterRow({ row }: { row: ServiceHealthRow }) {
         </div>
       </td>
       <td className="admin-unit-activity">{relAge(lastRun)}</td>
-      <td className="admin-unit-desc" title={row.last_error || undefined}>
-        {humanizeDetail(row.last_error) || "--"}
+      <td className="admin-unit-desc" title={row.last_error ? userErrorMessage(row.state === "ok" ? humanizeDetail(row.last_error) : row.last_error, "Writer update failed. Review service logs for details.") : undefined}>
+        {row.last_error ? userErrorMessage(row.state === "ok" ? humanizeDetail(row.last_error) : row.last_error, "Writer update failed. Review service logs for details.") : "--"}
       </td>
     </tr>
   );
