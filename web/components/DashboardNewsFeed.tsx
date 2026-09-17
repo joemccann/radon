@@ -1,5 +1,7 @@
 "use client";
+import ErrorToast from "@/components/ErrorToast";
 
+import { userErrorMessage } from "@/lib/userError";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
@@ -152,8 +154,6 @@ export default function DashboardNewsFeed() {
       setBookmarkBusy((prev) => new Set(prev).add(post.id));
       try {
         await toggleBookmark({ id: post.id, snapshot: buildPostSnapshot(post) });
-      } catch {
-        // hook already rolled back the optimistic state
       } finally {
         setBookmarkBusy((prev) => {
           const next = new Set(prev);
@@ -353,7 +353,7 @@ export default function DashboardNewsFeed() {
         {loading ? (
           <div className="news-feed-empty">Collecting market analysis…</div>
         ) : error ? (
-          <div className="news-feed-error">{error}</div>
+          <ErrorToast message={userErrorMessage(error, 'News could not be loaded. Try again.')} />
         ) : posts.length === 0 ? (
           <div className="news-feed-empty">No market analysis captured yet.</div>
         ) : items.length === 0 ? (

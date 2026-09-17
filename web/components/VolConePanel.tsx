@@ -1,5 +1,7 @@
 "use client";
 
+import RequestError from "./RequestError";
+
 import { useMemo, useState, type MouseEvent } from "react";
 import Link from "next/link";
 import { Cone } from "lucide-react";
@@ -148,7 +150,7 @@ function RowAsOfMarker({ name }: { name: VolConeName }) {
 }
 
 export default function VolConePanel() {
-  const { data, loading, syncing, lastSync, error } = useVolCone();
+  const { data, loading, syncing, lastSync, error, syncNow } = useVolCone();
   const { isMobile, hasMounted } = useViewport();
   const compact = hasMounted && isMobile;
 
@@ -182,19 +184,7 @@ export default function VolConePanel() {
     return <SpectralLoader label="Loading UW vol cone scan" />;
   }
 
-  if (error && !data) {
-    // Without this the component fell through to the empty state below, whose
-    // copy ("Data appears after the first successful pull") renders a fetch
-    // fault verbatim as a benign pre-population state — there was no code
-    // path here that could display an error at all. R-246.
-    return (
-      <SectionEmptyState
-        icon={Cone}
-        headline="Vol cone unavailable"
-        secondary={`The last /api/vol-cone request failed: ${error}`}
-      />
-    );
-  }
+  if (error && !data) return <><RequestError error={error} /><SectionEmptyState icon={Cone} headline="Volatility cone" secondary="No current scan to display." action={{ label: "Refresh", onClick: syncNow }} /></>;
 
   if (!data || data.missing || !data.current) {
     return (
@@ -220,6 +210,7 @@ export default function VolConePanel() {
 
   return (
     <>
+      {error && <RequestError error={error} retainedData />}
       <div className="section">
         <div className="section-header">
           <div className="section-title">

@@ -1,5 +1,7 @@
 "use client";
 
+import ErrorToast from "@/components/ErrorToast";
+
 import { useEffect, useMemo, useState } from "react";
 import type { OpenOrder, PortfolioData, PortfolioLeg } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
@@ -935,9 +937,7 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, op
         />
 
         {fillRaceNotice && (
-          <div className="modify-fill-race" role="alert">
-            {fillRaceNotice}
-          </div>
+          <ErrorToast message={fillRaceNotice} />
         )}
 
         {!quoteGate.open && (

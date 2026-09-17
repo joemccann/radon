@@ -1,4 +1,5 @@
 "use client";
+import RequestError from "@/components/RequestError";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Share2 } from "lucide-react";
@@ -78,6 +79,7 @@ export default function SharePnlButton({ data, size = 13 }: SharePnlButtonProps)
   const [showDollar, setShowDollar] = useState(false);
   const [showPct, setShowPct] = useState(true);
   const [copying, setCopying] = useState(false);
+  const [shareError, setShareError] = useState<unknown>(null);
   const [copied, setCopied] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
   const exitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -149,11 +151,12 @@ export default function SharePnlButton({ data, size = 13 }: SharePnlButtonProps)
   const handleCopy = useCallback(async () => {
     if (copying) return;
     setCopying(true);
+    setShareError(null);
     try {
       const blob = await generateImage();
       await copyToClipboard(blob);
     } catch (err) {
-      console.error("Share PnL copy failed:", err);
+      setShareError(err);
     } finally {
       setCopying(false);
       setOpen(false);
@@ -163,6 +166,7 @@ export default function SharePnlButton({ data, size = 13 }: SharePnlButtonProps)
   const handleCopyAndTweet = useCallback(async () => {
     if (copying) return;
     setCopying(true);
+    setShareError(null);
     try {
       const blob = await generateImage();
       await copyToClipboard(blob);
@@ -177,7 +181,7 @@ export default function SharePnlButton({ data, size = 13 }: SharePnlButtonProps)
       const tweetUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`;
       window.open(tweetUrl, "_blank", "noopener,noreferrer");
     } catch (err) {
-      console.error("Share PnL tweet failed:", err);
+      setShareError(err);
     } finally {
       setCopying(false);
       setOpen(false);
@@ -186,6 +190,7 @@ export default function SharePnlButton({ data, size = 13 }: SharePnlButtonProps)
 
   return (
     <div style={{ position: "relative", display: "inline-flex" }} ref={popoverRef}>
+      <RequestError error={shareError} fallback="The P&L image could not be copied. Try again." />
       <button
         type="button"
         className="share-pnl-button"

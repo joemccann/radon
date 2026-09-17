@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from contextlib import contextmanager
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -235,12 +236,14 @@ def test_save_cache_preserves_last_good_on_empty_scan(tmp_path, monkeypatch) -> 
 class _FakeClient:
     """Records every UW method the scanner reaches for."""
 
-    def __init__(self, *, iv_rank=None, rr=None, contracts=None, fail: str = "") -> None:
+    def __init__(self, *, iv_rank=None, rr=None, contracts=None, expiries=None, fail: str = "") -> None:
         self.calls: list[str] = []
         self._iv_rank = iv_rank if iv_rank is not None else {"data": []}
         self._rr = rr if rr is not None else {"data": []}
         self._contracts = contracts if contracts is not None else {"data": []}
         self._fail = fail
+        self.expiry = (datetime.now(timezone.utc).date() + timedelta(days=30)).isoformat()
+        self._expiries = expiries if expiries is not None else {"data": [{"expiry": self.expiry}]}
 
     def _guard(self, name: str):
         self.calls.append(name)
@@ -255,7 +258,12 @@ class _FakeClient:
         self._guard("get_iv_rank")
         return self._iv_rank
 
-    def get_historical_risk_reversal_skew(self, ticker, **_kwargs):
+    def get_expiry_breakdown(self, ticker):
+        self._guard("get_expiry_breakdown")
+        return self._expiries
+
+    def get_historical_risk_reversal_skew(self, ticker, **kwargs):
+        assert kwargs == {"expiry": self.expiry, "delta": 25, "timeframe": "1M"}
         self._guard("get_historical_risk_reversal_skew")
         return self._rr
 
@@ -273,7 +281,7 @@ def _iv_rows(values: list[float]) -> dict:
 
 
 def _rr_rows(values: list[float]) -> dict:
-    return {"data": [{"date": f"2026-09-{idx + 1:02d}", "value": value} for idx, value in enumerate(values)]}
+    return {"data": [{"date": f"2026-09-{idx + 1:02d}", "value": value, "risk_reversal": value / 100, "delta": 25} for idx, value in enumerate(values)]}
 
 
 def test_decimal_risk_reversal_skew_is_read_in_vol_points() -> None:
@@ -314,10 +322,14 @@ def test_scan_ticker_skips_the_contract_chain_when_skew_history_exists() -> None
     assert "get_option_contracts" not in client.calls
 
 
-def test_scan_ticker_falls_back_to_the_chain_without_skew_history() -> None:
+def test_scan_ticker_keeps_unknown_without_skew_history() -> None:
     client = _FakeClient(iv_rank=_iv_rows([28.0, 26.5, 24.0]))
-    vsmr.scan_ticker("AAPL", client)
-    assert "get_option_contracts" in client.calls
+    row = vsmr.scan_ticker("AAPL", client)
+    assert row is not None
+    assert row.skew_path == "unknown"
+    assert row.gates["skew"] is False
+    assert "skew_history:insufficient_distinct_sessions:0" in row.errors
+    assert "get_option_contracts" not in client.calls
 
 
 def test_put_call_skew_ignores_contracts_without_a_delta() -> None:
@@ -339,3 +351,130 @@ def test_put_call_skew_is_none_when_no_side_reports_a_delta() -> None:
         ]
     }
     assert vsmr._current_put_call_skew(contracts) is None
+
+
+@pytest.mark.parametrize("expiries", [[], [{"expiry": "bad"}], [{"expiry": "2020-01-01"}]])
+def test_scan_ticker_reports_missing_expiry_without_invalid_request(expiries) -> None:
+    client = _FakeClient(expiries={"data": expiries})
+    row = vsmr.scan_ticker("AAPL", client)
+    assert row is not None
+    assert row.skew_path == "unknown"
+    assert "skew_history:no_future_listed_expiry" in row.errors
+    assert "get_historical_risk_reversal_skew" not in client.calls
+    assert "get_option_contracts" not in client.calls
+
+
+def test_skew_expiry_selects_actual_nearest_30_dte_deterministically() -> None:
+    payload = {"data": [{"expiry": value} for value in [
+        "2026-09-17", "2026-09-18", "2026-10-18", "2026-10-16", "bad"
+    ]]}
+    assert vsmr._skew_expiry(payload, date(2026, 9, 17)) == "2026-10-16"
+
+
+def test_risk_reversal_history_is_signed_decimal_unique_comparable_sessions() -> None:
+    payload = {"data": [
+        {"date": "2026-09-16", "risk_reversal": "-0.021", "delta": 25},
+        {"date": "2026-09-15", "risk_reversal": "0", "delta": 25},
+        {"date": "2026-09-16", "risk_reversal": "-0.023", "delta": 25},
+        {"date": "2026-09-17", "risk_reversal": "0.2", "delta": 10},
+        {"date": "2026-09-17", "risk_reversal": "0.2", "expiry": "2026-12-18"},
+        {"date": "2026-09-17", "risk_reversal": "0.2", "expires": "2026-12-18"},
+        {"date": "2026-09-18", "risk_reversal": "0.2"},
+        {"date": "bad", "risk_reversal": "0.2"},
+        {"date": "2026-09-17", "risk_reversal": "NaN"},
+    ]}
+    assert vsmr._risk_reversal_history(payload, "2026-10-16", date(2026, 9, 17)) == pytest.approx([0, -2.3])
+
+
+def test_risk_reversal_history_does_not_guess_units_above_one() -> None:
+    payload = {"data": [{"date": "2026-09-16", "risk_reversal": "1.1"}]}
+    assert vsmr._risk_reversal_history(payload, "2026-10-16", date(2026, 9, 17)) == pytest.approx([110])
+
+
+def test_single_session_never_combines_with_current_chain_to_invent_path() -> None:
+    client = _FakeClient(
+        iv_rank=_iv_rows([28, 26, 24]),
+        rr={"data": [
+            {"date": "2026-09-16", "risk_reversal": "0.04"},
+            {"date": "2026-09-16", "risk_reversal": "0.03"},
+        ]},
+        contracts={"data": [
+            {"option_symbol": "AAPL261016C00250000", "implied_volatility": 0.20, "delta": 0.25},
+            {"option_symbol": "AAPL261016P00150000", "implied_volatility": 0.21, "delta": -0.25},
+        ]},
+    )
+    row = vsmr.scan_ticker("AAPL", client)
+    assert row is not None
+    assert row.skew_path == "unknown"
+    assert row.suggested_structure is None
+    assert row.gates["skew"] is False
+    assert "skew_history:insufficient_distinct_sessions:1" in row.errors
+    assert "get_option_contracts" not in client.calls
+
+
+def test_skew_expiry_accepts_live_expires_field() -> None:
+    assert vsmr._skew_expiry(
+        {"data": [{"expires": "2026-10-16"}, {"expires": "2026-09-18"}]},
+        date(2026, 9, 17),
+    ) == "2026-10-16"
+
+
+def test_risk_reversal_history_keeps_latest_six_sessions() -> None:
+    payload = {"data": [
+        {"date": f"2026-09-{day:02d}", "risk_reversal": str(day / 100)}
+        for day in range(10, 0, -1)
+    ]}
+    assert vsmr._risk_reversal_history(payload, "2026-10-16", date(2026, 9, 17)) == pytest.approx([5, 6, 7, 8, 9, 10])
+
+
+# ── fetch_skew_snapshot: the per-ticker skew the flow report reuses ──────────
+
+
+def test_fetch_skew_snapshot_reports_value_prior_change_and_path() -> None:
+    client = _FakeClient(rr=_rr_rows([6.0, 5.2, 4.4, 3.1, 2.9]))
+    snapshot = vsmr.fetch_skew_snapshot(client, "AAPL")
+    assert snapshot["expiry"] == client.expiry
+    assert snapshot["delta"] == 25
+    assert [row["date"] for row in snapshot["sessions"]] == [f"2026-09-0{i}" for i in range(1, 6)]
+    assert snapshot["value"] == pytest.approx(2.9)
+    assert snapshot["prior"] == pytest.approx(3.1)
+    assert snapshot["change"] == pytest.approx(-0.2)
+    assert snapshot["path"] == "falling"
+    assert snapshot["errors"] == []
+
+
+def test_fetch_skew_snapshot_is_unknown_without_a_listed_expiry() -> None:
+    client = _FakeClient(expiries={"data": []}, rr=_rr_rows([6.0, 4.4]))
+    snapshot = vsmr.fetch_skew_snapshot(client, "AAPL")
+    assert snapshot["expiry"] is None
+    assert snapshot["value"] is None
+    assert snapshot["path"] == "unknown"
+    assert snapshot["errors"] == ["skew_history:no_future_listed_expiry"]
+    assert "get_historical_risk_reversal_skew" not in client.calls
+
+
+def test_fetch_skew_snapshot_keeps_a_lone_session_as_value_without_a_path() -> None:
+    client = _FakeClient(rr=_rr_rows([3.4]))
+    snapshot = vsmr.fetch_skew_snapshot(client, "AAPL")
+    assert snapshot["value"] == pytest.approx(3.4)
+    assert snapshot["prior"] is None
+    assert snapshot["change"] is None
+    assert snapshot["path"] == "unknown"
+    assert snapshot["errors"] == ["skew_history:insufficient_distinct_sessions:1"]
+
+
+def test_fetch_skew_snapshot_records_a_history_failure() -> None:
+    client = _FakeClient(fail="get_historical_risk_reversal_skew")
+    snapshot = vsmr.fetch_skew_snapshot(client, "AAPL")
+    assert snapshot["value"] is None
+    assert snapshot["path"] == "unknown"
+    assert any(error.startswith("risk_reversal:") for error in snapshot["errors"])
+
+
+def test_fetch_skew_snapshot_propagates_rate_limits() -> None:
+    class _Limited(_FakeClient):
+        def get_historical_risk_reversal_skew(self, ticker, **kwargs):
+            raise vsmr.UWRateLimitError("429")
+
+    with pytest.raises(vsmr.UWRateLimitError):
+        vsmr.fetch_skew_snapshot(_Limited(), "AAPL")

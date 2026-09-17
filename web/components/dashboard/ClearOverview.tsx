@@ -1,4 +1,5 @@
 "use client";
+import RequestError from "@/components/RequestError";
 
 import { memo, useMemo, useState, type KeyboardEvent } from "react";
 import Link from "next/link";
@@ -97,7 +98,7 @@ export function AccountHistory({ data, loading = false, error = null }: { data: 
       ) : (
         <div className={styles.historyEmpty}>
           <strong>{loading ? "Loading account history" : "Account history unavailable"}</strong>
-          <p>{loading ? "Retrieving daily closing values." : error ? "The account history source could not be reached. Your current account snapshot remains above." : "At least two verified dollar NAV observations are needed to draw this chart."}</p>
+          {error ? <RequestError error={error} fallback="The account history source could not be reached. Your current account snapshot remains above." /> : <p>{loading ? "Retrieving daily closing values." : "At least two verified dollar NAV observations are needed to draw this chart."}</p>}
           {!loading ? <Link href="/performance" className={styles.textLink}>View performance details <ArrowRight size={15} aria-hidden="true" /></Link> : null}
         </div>
       )}
@@ -191,7 +192,7 @@ export default function ClearOverview({ portfolio, prices = EMPTY_PRICES }: { po
           <p>Explore ranked structures, institutional flow, and the catalysts behind your next decision.</p>
           <Link href="/scanner" className={styles.primary}>Explore research <ArrowRight size={17} aria-hidden="true" /></Link>
           <Link href="/watchlist" className={styles.secondaryAction}>Open your watchlist</Link>
-          <Link href="/regime/llm" className={styles.textLink}>AI infrastructure evidence <ArrowUpRight size={15} aria-hidden="true" /></Link>
+          <Link href="/ai-industry" className={styles.textLink}>AI Industry evidence <ArrowUpRight size={15} aria-hidden="true" /></Link>
           <a href="#clear-market-intelligence" className={styles.textLink}>News, signals &amp; catalysts <ArrowRight size={15} aria-hidden="true" /></a>
         </section>
       </aside>
