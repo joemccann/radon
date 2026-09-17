@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-09-17T19:37:43Z",
-  "node_count": 3389,
-  "edge_count": 7068,
+  "generated_at": "2026-09-17T19:45:58Z",
+  "node_count": 3394,
+  "edge_count": 7076,
   "areas": {
-    "web": 2005,
+    "web": 2009,
     "site": 155,
-    "scripts": 1116,
+    "scripts": 1117,
     "cloud": 66,
     "lib": 28,
     "tests": 17,
@@ -20,7 +20,7 @@
     {
       "id": "web/components",
       "area": "web",
-      "count": 255
+      "count": 256
     },
     {
       "id": "web/e2e",
@@ -35,7 +35,7 @@
     {
       "id": "web/lib",
       "area": "web",
-      "count": 396
+      "count": 397
     },
     {
       "id": "web/public",
@@ -50,7 +50,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 929
+      "count": 931
     },
     {
       "id": "site/app",
@@ -195,7 +195,7 @@
     {
       "id": "scripts/tests",
       "area": "scripts",
-      "count": 556
+      "count": 557
     },
     {
       "id": "scripts/trade_blotter",
