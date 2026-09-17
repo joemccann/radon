@@ -39,6 +39,8 @@ CACHE_TTL_SECONDS: float = 5.0
 DB_READ_TIMEOUT_S: float = 2.0
 DB_WRITE_TIMEOUT_S: float = 4.0
 GROUP_ORDER: Tuple[str, ...] = ("Order Limits", "Scanning")
+# Groups whose values bound how much money one order can move.
+RISK_GATED_GROUPS: Tuple[str, ...] = ("Order Limits",)
 
 _WARN_INTERVAL_S = 60.0
 _UPDATED_BY_MAX_LEN = 64
@@ -94,6 +96,15 @@ class Preference:
     description: str
     applies_immediately: bool
 
+    @property
+    def risk_gated(self) -> bool:
+        """Widening this value can cost money, so the UI confirms before saving.
+
+        Declared here, not in the UI, so a renamed or added group cannot
+        silently drop the type-to-confirm gate.
+        """
+        return self.group in RISK_GATED_GROUPS
+
 
 @dataclass(frozen=True)
 class ResolvedPreference:
@@ -118,6 +129,7 @@ class ResolvedPreference:
             "unit": pref.unit,
             "description": pref.description,
             "applies_immediately": pref.applies_immediately,
+            "risk_gated": pref.risk_gated,
             "source": self.source,
             "db_rejected": self.db_rejected,
             "updated_at": self.updated_at,
@@ -239,6 +251,42 @@ REGISTRY: Tuple[Preference, ...] = (
         hard_max=64,
         unit="threads",
         description="Concurrent worker threads for the strength confirmation scanner.",
+        applies_immediately=True,
+    ),
+    Preference(
+        key="RADON_VOL_SKEW_MR_WORKERS",
+        label="Vol/Skew MR scanner workers",
+        group="Scanning",
+        value_type="int",
+        default=24,
+        hard_min=1,
+        hard_max=64,
+        unit="threads",
+        description="Concurrent worker threads for the Vol/Skew mean-reversion scanner.",
+        applies_immediately=True,
+    ),
+    Preference(
+        key="RADON_LEAP_SCANNER_WORKERS",
+        label="LEAP scanner workers",
+        group="Scanning",
+        value_type="int",
+        default=16,
+        hard_min=1,
+        hard_max=64,
+        unit="threads",
+        description="Concurrent worker threads for the LEAP IV-mispricing scanner.",
+        applies_immediately=True,
+    ),
+    Preference(
+        key="RADON_GARCH_SCANNER_WORKERS",
+        label="GARCH scanner workers",
+        group="Scanning",
+        value_type="int",
+        default=16,
+        hard_min=1,
+        hard_max=64,
+        unit="threads",
+        description="Concurrent worker threads for the GARCH convergence scanner.",
         applies_immediately=True,
     ),
 )

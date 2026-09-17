@@ -199,6 +199,19 @@ export default function CredentialsPanel() {
 
   return (
     <div className="preferences-shell" data-testid="credentials-panel">
+      {payload.bootstrap_error ? (
+        <section className="admin-card preferences-group" role="status" data-testid="credentials-bootstrap-error">
+          <header className="admin-card-header">
+            <span className="admin-card-title">Encrypted store did not open at boot</span>
+            <span className="preferences-badge preferences-badge--rejected">STORED VALUES INACTIVE</span>
+          </header>
+          <p className="preferences-row__description">
+            Every field below is running on its .env fallback, not on what is stored here. Saving still
+            writes the store; the running process picks stored values up at the next FastAPI restart.
+            Detail: {payload.bootstrap_error}
+          </p>
+        </section>
+      ) : null}
       {groups.map(({ group, services }) => (
         <section className="admin-card preferences-group" key={group}>
           <header className="admin-card-header">

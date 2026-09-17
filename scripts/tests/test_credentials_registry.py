@@ -6,6 +6,7 @@ real validator or an explicit note saying why it cannot be checked live.
 """
 
 import re
+from pathlib import Path
 
 import credential_validators
 from ai_cycle.collect import KEYS as AI_CYCLE_KEYS
@@ -93,8 +94,30 @@ class TestExpectedSurface:
             "IB_FLEX_TOKEN",
             "TWS_USERID",
             "TWS_PASSWORD",
+            "NVIDIA_API_KEY",
+            "FRED_API_KEY",
         ):
             assert expected in names, expected
+
+    def test_mdw_is_an_inbound_secret_not_a_market_data_probe(self):
+        """MDW presents this key to us on X-API-Key (scripts/api/auth.py);
+        listing it beside vendor keys "verified on first use" described a
+        probe that never happens."""
+        service = service_by_id("mdw")
+        assert service.group == "Infrastructure"
+        assert service.validator is None
+        assert "X-API-Key" in service.note
+
+    def test_setup_wizard_web_env_keys_are_a_subset_of_the_registry(self):
+        """`web/lib/setup/envFiles.ts` keeps a hand-written key catalog for the
+        offline completion path; it must never name a key the registry does
+        not manage, or the wizard writes a credential the tab cannot rotate."""
+        wizard = (Path(__file__).resolve().parents[2] / "web" / "lib" / "setup" / "envFiles.ts").read_text()
+        block = re.search(r"WEB_ENV_KEYS = new Set\(\[(.*?)\]\)", wizard, re.S)
+        assert block, "WEB_ENV_KEYS catalog not found"
+        wizard_keys = set(re.findall(r'"([A-Z0-9_]+)"', block.group(1)))
+        assert wizard_keys
+        assert wizard_keys <= set(fields_by_name()), wizard_keys - set(fields_by_name())
 
     def test_ai_cycle_operator_fields_are_profile_manageable(self):
         names = fields_by_name()

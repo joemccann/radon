@@ -2383,7 +2383,7 @@ async def _run_flow_tab(
 @app.post("/scan")
 async def scan(force: bool = False):
     """Run watchlist scanner (scanner.py --top 25)."""
-    workers = _bounded_env_int("RADON_SCANNER_WORKERS", 24)
+    workers = app_preferences.get_int("RADON_SCANNER_WORKERS")
     return await _run_flow_tab(
         "scanner",
         "scanner.json",
@@ -3797,7 +3797,7 @@ async def leap_scan(preset: str = "largecaps", min_gap: float = 10.0, tickers: s
             if _scan_cache_matches_preset(cached, preset):
                 return cached
             raise _preset_cooldown_429("leap", _leap_last_scan, LEAP_COOLDOWN_S)
-        workers = _bounded_env_int("RADON_LEAP_SCANNER_WORKERS", 16)
+        workers = app_preferences.get_int("RADON_LEAP_SCANNER_WORKERS")
         if is_ticker_scan:
             args = [
                 "--tickers", ",".join(requested),
@@ -3945,7 +3945,7 @@ async def theta_harvester_scan(
             cached = _read_cache(DATA_DIR / "theta_harvester.json")
             if _theta_cache_matches(cached, preset, min_dte, max_dte, min_credit):
                 return cached
-        workers = _bounded_env_int("RADON_THETA_SCANNER_WORKERS", 24)
+        workers = app_preferences.get_int("RADON_THETA_SCANNER_WORKERS")
         args = ["--json", "--workers", str(workers)]
         if is_ticker_scan:
             args.append(ticker)
@@ -4037,7 +4037,7 @@ async def strength_confirmation_scan(preset: str = "ndx100", limit: int = 0, tic
             cached = _read_cache(DATA_DIR / "strength_confirmation.json")
             if _strength_cache_matches_preset(cached, preset):
                 return cached
-        workers = _bounded_env_int("RADON_STRENGTH_SCANNER_WORKERS", 24)
+        workers = app_preferences.get_int("RADON_STRENGTH_SCANNER_WORKERS")
         args = ["--json", "--workers", str(workers)]
         if is_ticker_scan:
             args.append(ticker)
@@ -4126,7 +4126,7 @@ async def vol_skew_mr_scan(preset: str = "ndx100", limit: int = 0, ticker: str =
             cached = _read_cache(DATA_DIR / "vol_skew_mr.json")
             if _vol_skew_mr_cache_matches_preset(cached, preset):
                 return cached
-        workers = _bounded_env_int("RADON_VOL_SKEW_MR_WORKERS", 24)
+        workers = app_preferences.get_int("RADON_VOL_SKEW_MR_WORKERS")
         args = ["--json", "--workers", str(workers)]
         if is_ticker_scan:
             args.extend(requested)
@@ -4494,7 +4494,7 @@ async def garch_convergence_scan(preset: str = "largecaps", tickers: str = ""):
             if _scan_cache_matches_preset(cached, preset):
                 return cached
             raise _preset_cooldown_429("garch", _garch_last_scan, GARCH_COOLDOWN_S)
-        workers = _bounded_env_int("RADON_GARCH_SCANNER_WORKERS", 16)
+        workers = app_preferences.get_int("RADON_GARCH_SCANNER_WORKERS")
         if is_ticker_scan:
             args = [
                 "--tickers", ",".join(requested),
