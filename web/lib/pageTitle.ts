@@ -45,6 +45,7 @@ const SCANNER_MODE_TITLES: Record<string, string> = {
   leap: "LEAP",
   garch: "GARCH",
   "vol-cone": "Vol Cone",
+  "vol-skew-mr": "Vol/Skew MR",
 };
 
 // Match the Options pages: letter first, up to ten letters/digits/dots/hyphens.

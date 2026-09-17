@@ -905,6 +905,20 @@ def upsert_strength_confirmation_snapshot(scan_time: str, payload: dict[str, Any
     db.commit()
 
 
+def upsert_vol_skew_mr_snapshot(scan_time: str, payload: dict[str, Any]) -> None:
+    """Mirror the Vol/Skew MR scan into Turso so every host reads the same
+    latest scan (the file cache is host-local; no auto-timer)."""
+    db = get_db()
+    db.execute(
+        """
+        INSERT OR REPLACE INTO vol_skew_mr_snapshots (scan_time, payload)
+        VALUES (?, ?)
+        """,
+        (scan_time, json.dumps(payload)),
+    )
+    db.commit()
+
+
 def upsert_flow_analysis_snapshot(scan_time: str, payload: dict[str, Any]) -> None:
     """Phase 2.2 — flow_analysis.py output (intraday dark-pool interp)."""
     db = get_db()

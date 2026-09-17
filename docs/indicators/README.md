@@ -5,6 +5,7 @@ Owner specs for regime tabs and the cheap-wing scanner. Add a row here when a sp
 | Slug | Route | Service | Spec |
 |---|---|---|---|
 | vol-cone | `/scanner?mode=vol-cone` | `vol-cone`, `vol-cone-intraday` | [vol-cone.md](vol-cone.md) |
+| vol-skew-mr | `/scanner?mode=vol-skew-mr` | `vol-skew-mr` (on-demand) | [vol-skew-mr.md](vol-skew-mr.md) |
 | skew | `/regime/skew` | `skew` | [skew.md](skew.md) |
 | skew2d | `/regime/skew2d` | `skew2d` | [skew2d.md](skew2d.md) |
 | straddle | `/regime/straddle` | `straddle` | [straddle.md](straddle.md) |

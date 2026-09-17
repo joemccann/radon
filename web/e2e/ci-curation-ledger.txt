@@ -8,6 +8,8 @@
 # REVIEWED 2026-09-15 risk-reversal-skew.spec.ts - Static locator adaptation to the shared header table; skew assertions retained. Browser suite remains held out.
 # REVIEWED 2026-09-15 short-strangle-skew.spec.ts - Static locator adaptation to the shared header table; skew assertions retained. Browser suite remains held out.
 # REVIEWED 2026-09-15 ticker-search-chain.spec.ts - Static locator adaptation to the shared header table; search and order assertions retained. Browser suite remains held out.
+# REVIEWED 2026-09-16 mobile-scanner-mode-tabs-overflow.spec.ts - Tab count pin 7 to 8 for Vol/Skew MR. Vitest scanner-mode-tabs covers the new tab. Browser suite remains held out pending next start preflight.
+# REVIEWED 2026-09-16 vol-skew-mr-scanner.spec.ts - Stubbed mode tab + TOP_MR/BOTTOM_MR/continue labels. Vitest + gate pytest cover the family. Held out pending next start preflight.
 # CI e2e curation ledger — every web/e2e/*.spec.ts must appear HERE or in the
 # curated `npx playwright test` arg list of the `e2e-financial-smoke` job in
 # .github/workflows/ci.yml. scripts/tests/test_e2e_ci_curation.py enforces it.
@@ -187,6 +189,7 @@ ticker-search-live.spec.ts
 trin-tab.spec.ts
 vixcor-tab.spec.ts
 vol-cone-tab.spec.ts
+vol-skew-mr-scanner.spec.ts
 vxn-index-routing.spec.ts
 watchlist-page.spec.ts
 ws-connection-stability.spec.ts
