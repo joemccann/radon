@@ -1489,6 +1489,52 @@ transient Turso HTTP 502 reading `scan_snapshots`.** Peak: 2026-08-21
 
 ---
 
+## calm-streak-shadowed-migration
+
+**`radon-calm-streak.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) with `no such table: calm_streak_history`.** Peak:
+2026-09-16 14:30Z, page `f6dc051e…`. Recurred 2026-09-17 14:31Z, page
+`b4a46e16…`.
+
+- **Mechanism:** two files shared version 74. `e4c76d9b` applied
+  `0074_liquidcompute_index` at 17:53Z (`schema_migrations` row 74,
+  `liquidcompute_index` present). `52b5c89e` / merge `95fd0430` later
+  added `0074_calm_streak.sql`. `apply_pending_migrations` skips any
+  file whose version is already in `schema_migrations`, so the
+  calm-streak table was never created. The 14:30 UTC oneshot probed
+  max(date) (non-fatal), then `upsert_calm_streak_rows` raised
+  `SQLITE_UNKNOWN: no such table`. `Type=oneshot` has no `Restart=`,
+  `NRestarts=0`. Edge and `:8321/health/lite` stayed up. Re-running
+  `migrate.py` is a no-op (version 74 already recorded). By the
+  2026-09-17 recurrence, `0075_vol_skew_mr_snapshots` had also landed
+  (max=75), so the free version became 76.
+- **Detection:** journal
+  `stored max-date probe non-fatal: ... no such table: calm_streak_history`
+  then `run failed:` same error;
+  `systemctl show` → `exit-code` / `0`.
+- **Discriminating check:** Turso canary `SELECT 1` succeeds;
+  `SELECT MAX(version) FROM schema_migrations` is 74+ with
+  `liquidcompute_index` present and `calm_streak_history` absent; two
+  files `0074_*.sql` in `scripts/db/migrations` on the failing SHA.
+  Canary fail too → Turso platform, stand down. `Result=signal` is
+  deploy stop-clean. If `/health/lite` is down too → API, stand down.
+- **Remediation (code):** give calm-streak the next free version
+  (0076 after vol-skew-mr took 75). `_list_migrations` aborts on a
+  duplicate version prefix so a collision fails ExecStartPre instead
+  of shipping a timer against a missing table. After deploy,
+  `radon-api` ExecStartPre applies 0076. Then
+  `systemctl reset-failed radon-calm-streak.service` and start, or
+  wait for the 02:40 UTC timer. Unit is not on
+  `RERUNNABLE_ONESHOT_UNITS`.
+- **Regression:**
+  `test_migrate.py::TestListMigrations::test_real_migration_version_prefixes_are_unique`,
+  `test_a_second_file_reusing_an_applied_version_aborts_instead_of_skipping`,
+  `test_calm_streak.py::TestStorage::test_migration_registers_version_76_and_reruns`.
+- **Code:** `scripts/db/migrations/0076_calm_streak.sql`,
+  `scripts/db/migrate.py` (`_list_migrations`).
+
+---
+
 ## signals-refresh-capacity-502
 
 **`radon-signals-refresh.service` oneshot pages P1 `Result=exit-code` when
