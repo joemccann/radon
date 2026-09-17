@@ -200,13 +200,22 @@ class ObservationStore:
         imported = 0
         if not root.is_dir():
             return 0
+        self.initialize()
+        # Skip hashes already in Turso/SQLite. Re-sending every on-disk payload
+        # via INSERT OR IGNORE still posts the full blob under HRANA_TIMEOUT_S
+        # and failed the 2026-09-17 daily oneshot after ~1117 local files.
+        existing = {row[0] for row in self._query("SELECT hash FROM ai_cycle_raw")}
         for path in root.iterdir():
             if path.suffix != ".json" or path.name.startswith("."):
                 continue
             raw = path.read_bytes()
             if digest(raw) != path.stem:
                 continue
+            if path.stem in existing:
+                imported += 1
+                continue
             self.archive_raw(raw)
+            existing.add(path.stem)
             imported += 1
         return imported
 

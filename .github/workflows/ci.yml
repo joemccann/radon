@@ -805,7 +805,9 @@ jobs:
           e2e/research-workbench.spec.ts
           e2e/newsfeed-research-media.spec.ts
           e2e/newsfeed-sharing.spec.ts
-          e2e/ai-infrastructure.spec.ts
+          e2e/vol-skew-mr-scanner.spec.ts
+          e2e/ai-industry.spec.ts
+          e2e/clear-shell.spec.ts
           e2e/chat-experience.spec.ts
       - name: Upload historical fill screenshots
         if: always()
@@ -827,6 +829,23 @@ jobs:
         with:
           name: chat-experience-screenshots
           path: web/test-results/**/chat-experience-*.png
+          retention-days: 7
+      - name: Upload vol-skew missing history screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: vol-skew-missing-screenshots
+          path: |
+            web/test-results/**/vol-skew-missing-*.png
+            web/test-results/**/vol-skew-safe-error-*.png
+            web/test-results/**/vol-skew-header-*.png
+          retention-days: 7
+      - name: Upload AI industry screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ai-industry-screenshots
+          path: web/test-results/**/ai-industry-*.png
           retention-days: 7
       - name: Upload research rendering screenshots
         if: always()

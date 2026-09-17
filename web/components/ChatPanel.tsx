@@ -1,5 +1,7 @@
 "use client";
 
+import { formatOrderErrorMessage } from "@/lib/orderError";
+import { userErrorMessage } from "@/lib/userError";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, ArrowUpRight, Copy, Check, Plus, X, RotateCcw, Pencil, Activity } from "lucide-react";
 import { ApprovalGate, AskComposer, EngineTrace } from "@/components/agent";
@@ -379,7 +381,7 @@ export default function ChatPanel({
       const isPiCommand = Boolean(piCommand);
       const errorMessage =
         isPiCommand && error instanceof Error
-          ? error.message
+          ? userErrorMessage(error, "The command could not be completed. Try again.")
           : isPiCommand
             ? "Unexpected PI command error."
             : assistantErrorMessage();
@@ -429,13 +431,13 @@ export default function ChatPanel({
           id: `a-${Date.now()}-order`,
           role: "assistant",
           timestamp: createTimestamp(),
-          content: result.ok ? result.message : `Order failed: ${result.message}`,
+          content: result.ok ? result.message : `Order failed: ${formatOrderErrorMessage(result.message)}`,
         },
       ]);
-      if (!result.ok) setLastError(result.message);
+      if (!result.ok) setLastError(formatOrderErrorMessage(result.message));
       setProposal(null);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Order placement failed.";
+      const message = formatOrderErrorMessage(error instanceof Error ? error.message : "Order placement failed.");
       setLastError(message);
     } finally {
       setPlacing(false);

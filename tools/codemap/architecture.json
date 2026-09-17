@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-09-16T23:29:47Z",
-  "node_count": 3350,
-  "edge_count": 6870,
+  "generated_at": "2026-09-17T18:08:48Z",
+  "node_count": 3377,
+  "edge_count": 6992,
   "areas": {
-    "web": 1976,
+    "web": 1995,
     "site": 155,
-    "scripts": 1106,
+    "scripts": 1114,
     "cloud": 66,
     "lib": 28,
     "tests": 17,
@@ -15,17 +15,17 @@
     {
       "id": "web/app",
       "area": "web",
-      "count": 211
+      "count": 212
     },
     {
       "id": "web/components",
       "area": "web",
-      "count": 251
+      "count": 253
     },
     {
       "id": "web/e2e",
       "area": "web",
-      "count": 197
+      "count": 199
     },
     {
       "id": "web",
@@ -35,7 +35,7 @@
     {
       "id": "web/lib",
       "area": "web",
-      "count": 391
+      "count": 395
     },
     {
       "id": "web/public",
@@ -50,7 +50,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 912
+      "count": 922
     },
     {
       "id": "site/app",
@@ -85,7 +85,7 @@
     {
       "id": "scripts",
       "area": "scripts",
-      "count": 155
+      "count": 157
     },
     {
       "id": "scripts/ai_cycle",
@@ -100,7 +100,7 @@
     {
       "id": "scripts/api",
       "area": "scripts",
-      "count": 116
+      "count": 117
     },
     {
       "id": "scripts/backtest",
@@ -195,7 +195,7 @@
     {
       "id": "scripts/tests",
       "area": "scripts",
-      "count": 550
+      "count": 555
     },
     {
       "id": "scripts/trade_blotter",
@@ -247,21 +247,21 @@
     {
       "id": "web/lib/types.ts",
       "area": "web",
-      "in": 277,
+      "in": 278,
       "out": 1,
       "test": false
     },
     {
       "id": "web/lib/pricesProtocol.ts",
       "area": "web",
-      "in": 196,
+      "in": 197,
       "out": 0,
       "test": false
     },
     {
       "id": "web/lib/apiContracts.ts",
       "area": "web",
-      "in": 114,
+      "in": 116,
       "out": 0,
       "test": false
     },
@@ -269,7 +269,14 @@
       "id": "web/components/WorkspaceSections.tsx",
       "area": "web",
       "in": 20,
-      "out": 76,
+      "out": 79,
+      "test": false
+    },
+    {
+      "id": "web/components/WorkspaceShell.tsx",
+      "area": "web",
+      "in": 53,
+      "out": 43,
       "test": false
     },
     {
@@ -277,13 +284,6 @@
       "area": "scripts",
       "in": 90,
       "out": 5,
-      "test": false
-    },
-    {
-      "id": "web/components/WorkspaceShell.tsx",
-      "area": "web",
-      "in": 53,
-      "out": 42,
       "test": false
     },
     {
@@ -296,7 +296,7 @@
     {
       "id": "web/lib/radonApi.ts",
       "area": "web",
-      "in": 92,
+      "in": 93,
       "out": 0,
       "test": false
     },
@@ -310,7 +310,7 @@
     {
       "id": "scripts/api/__init__.py",
       "area": "scripts",
-      "in": 79,
+      "in": 80,
       "out": 0,
       "test": false
     },
@@ -331,7 +331,7 @@
     {
       "id": "web/lib/pageTitle.ts",
       "area": "web",
-      "in": 65,
+      "in": 66,
       "out": 2,
       "test": false
     },
@@ -345,7 +345,7 @@
     {
       "id": "web/lib/positionUtils.ts",
       "area": "web",
-      "in": 56,
+      "in": 57,
       "out": 2,
       "test": false
     },
@@ -354,6 +354,13 @@
       "area": "web",
       "in": 3,
       "out": 53,
+      "test": false
+    },
+    {
+      "id": "web/lib/userError.ts",
+      "area": "web",
+      "in": 55,
+      "out": 0,
       "test": false
     },
     {
@@ -366,8 +373,8 @@
     {
       "id": "web/lib/useSyncHook.ts",
       "area": "web",
-      "in": 47,
-      "out": 4,
+      "in": 48,
+      "out": 5,
       "test": false
     },
     {
@@ -385,24 +392,24 @@
       "test": false
     },
     {
-      "id": "web/components/SpectralLoader.tsx",
-      "area": "web",
-      "in": 44,
-      "out": 0,
-      "test": false
-    },
-    {
       "id": "web/components/InfoTooltip.tsx",
       "area": "web",
-      "in": 44,
+      "in": 45,
       "out": 0,
       "test": false
     },
     {
       "id": "web/lib/dbExecute.ts",
       "area": "web",
-      "in": 39,
-      "out": 4,
+      "in": 40,
+      "out": 5,
+      "test": false
+    },
+    {
+      "id": "web/components/SpectralLoader.tsx",
+      "area": "web",
+      "in": 44,
+      "out": 0,
       "test": false
     },
     {
@@ -455,14 +462,14 @@
       "test": false
     },
     {
-      "id": "web/lib/refreshSchedule.ts",
+      "id": "web/lib/chartSystem.ts",
       "area": "web",
-      "in": 33,
+      "in": 34,
       "out": 0,
       "test": false
     },
     {
-      "id": "web/lib/chartSystem.ts",
+      "id": "web/lib/refreshSchedule.ts",
       "area": "web",
       "in": 33,
       "out": 0,
@@ -515,13 +522,6 @@
       "area": "scripts",
       "in": 29,
       "out": 2,
-      "test": false
-    },
-    {
-      "id": "web/components/RegimeStrip.tsx",
-      "area": "web",
-      "in": 30,
-      "out": 0,
       "test": false
     }
   ],

@@ -1585,6 +1585,20 @@ def build_fill_dates(client, fills=None) -> dict:
     return fill_dates
 
 
+def _option_contract_key(ticker, expiry, leg) -> Optional[str]:
+    """ticker|YYYY-MM-DD|R|strike for a collapsed Call/Put leg, or None."""
+    leg_type = leg.get("type")
+    strike = leg.get("strike")
+    if leg_type not in ("Call", "Put") or strike in (None, 0):
+        return None
+    right = "C" if leg_type == "Call" else "P"
+    try:
+        strike_key = float(strike)
+    except (TypeError, ValueError):
+        return None
+    return f"{ticker}|{expiry}|{right}|{strike_key}"
+
+
 def _basis_carry_key(ticker, structure, expiry) -> str:
     """Size-independent key for same-side basis carry-forward. A stock's
     `structure` embeds the share count ("Stock (-1000.0 shares)"), which changes
@@ -1634,6 +1648,7 @@ def convert_to_portfolio_format(account: dict, collapsed_positions: list, pnl_da
 
     # Previous portfolio dates + per-unit basis (fallback)
     prev_dates: dict[str, str] = {}
+    prev_contract_dates: dict[str, str] = {}
     prev_basis: dict[str, dict] = {}
     try:
         prev = read_latest_portfolio_snapshot() or {}
@@ -1644,6 +1659,12 @@ def convert_to_portfolio_format(account: dict, collapsed_positions: list, pnl_da
             # the old bug where every sync set entry_date = today)
             if ed and ed != today:
                 prev_dates[key] = ed
+                for prev_leg in p.get("legs") or []:
+                    ck = _option_contract_key(p.get("ticker"), p.get("expiry"), prev_leg)
+                    if not ck:
+                        continue
+                    if ck not in prev_contract_dates or ed < prev_contract_dates[ck]:
+                        prev_contract_dates[ck] = ed
             # Per-unit basis for same-side reduce carry-forward (a partial close
             # must NOT change per-unit basis; IB drifts pos.avgCost on a reduce
             # and assignment-originated stock has no journal opener).
@@ -1666,42 +1687,30 @@ def convert_to_portfolio_format(account: dict, collapsed_positions: list, pnl_da
         structure = pos.get("structure", "")
         expiry = pos.get("expiry", "")
 
-        # Build per-contract blotter keys from collapsed option legs.
-        # Collapsed portfolio legs use the UI-facing `type` field ("Call"/"Put"),
-        # not the raw IB `secType`/`right` shape, so derive the contract keys
-        # from those normalized fields.
-        blotter_contract_date = None
+        # Per-leg dates from THIS combo's contracts only (never per-ticker).
+        # A new short against an overnight long must not stamp the combo
+        # today just because the new leg has a same-session fill.
         legs = pos.get("legs", [])
-        contract_dates = []
+        per_leg_dates = []
+        n_option_legs = 0
         for leg in legs:
-            leg_type = leg.get("type")
-            strike = leg.get("strike")
-            if leg_type not in ("Call", "Put") or strike in (None, 0):
+            contract_key = _option_contract_key(ticker, expiry, leg)
+            if not contract_key:
                 continue
-            right = "C" if leg_type == "Call" else "P"
-            contract_key = f"{ticker}|{expiry}|{right}|{float(strike)}"
-            contract_date = blotter_dates.get(contract_key)
-            if contract_date:
-                contract_dates.append(contract_date)
-        if contract_dates and len(contract_dates) == len([
-            leg for leg in legs
-            if leg.get("type") in ("Call", "Put") and leg.get("strike") not in (None, 0)
-        ]):
-            blotter_contract_date = min(contract_dates)
-
-        # IB fill dates (same-session trades not yet in journal)
-        fill_contract_date = None
-        if fill_dates:
-            for leg in legs:
-                leg_type = leg.get("type")
-                strike = leg.get("strike")
-                if leg_type not in ("Call", "Put") or strike in (None, 0):
-                    continue
-                right = "C" if leg_type == "Call" else "P"
-                fill_key = f"{ticker}|{expiry}|{right}|{float(strike)}"
-                fd = fill_dates.get(fill_key)
-                if fd:
-                    fill_contract_date = min(fill_contract_date, fd) if fill_contract_date else fd
+            n_option_legs += 1
+            leg_date = (
+                blotter_dates.get(contract_key)
+                or (fill_dates or {}).get(contract_key)
+                or prev_contract_dates.get(contract_key)
+            )
+            if leg_date:
+                per_leg_dates.append(leg_date)
+        combo_contract_date = None
+        if per_leg_dates and (
+            len(per_leg_dates) == n_option_legs
+            or any(d < today for d in per_leg_dates)
+        ):
+            combo_contract_date = min(per_leg_dates)
 
         # Fallback chain — ORDERED FROM MOST → LEAST SPECIFIC. Anything weaker
         # than per-contract risks attributing a brand-new contract to an
@@ -1712,18 +1721,18 @@ def convert_to_portfolio_format(account: dict, collapsed_positions: list, pnl_da
         #   0. session fills that account for the WHOLE live position — the
         #      contract was flat at the session open, so nothing older can be
         #      this lot's entry (see `_session_fill_open_date`)
-        #   1. journal (per-contract: ticker|expiry|right|strike)
+        #   1. per-leg journal / fill / prev-contract dates (min). Incomplete
+        #      coverage still wins when any resolved date is overnight, so
+        #      adding a same-day hedge does not mark the structure same-day.
         #   2. journal (ticker|structure)
-        #   3. IB fills (per-contract, same-session)
-        #   4. prev portfolio (ticker|structure|expiry, excluding today)
-        #   5. today  ← brand-new positions default here so the frontend's
+        #   3. prev portfolio (ticker|structure|expiry, excluding today)
+        #   4. today  ← brand-new positions default here so the frontend's
         #              same-day P&L branch fires correctly. We deliberately
         #              do NOT use a per-ticker blotter fallback or "unknown".
         pos['entry_date'] = (
             pos.get("session_fill_date")
-            or blotter_contract_date
+            or combo_contract_date
             or trade_log_dates.get(f"{ticker}|{structure}")
-            or fill_contract_date
             or prev_dates.get(key)
             or today
         )

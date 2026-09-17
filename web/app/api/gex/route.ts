@@ -6,7 +6,7 @@ import { join } from "path";
 import { isGexDataStale } from "@/lib/gexStaleness";
 import { radonFetch, RadonApiError } from "@/lib/radonApi";
 import { createBackgroundScanTrigger } from "@/lib/backgroundScan";
-import { getRequestId, setCacheResponseHeaders, setNoStoreResponseHeaders } from "@/lib/apiContracts";
+import { getRequestId, setCacheResponseHeaders, setNoStoreResponseHeaders, scrubSecrets } from "@/lib/apiContracts";
 import { dbExecute } from "@/lib/dbExecute";
 import { cachedRead } from "@/lib/dbCache";
 import { buildDemoGexFixture } from "@/lib/demo/fixtures/regime";
@@ -212,7 +212,7 @@ export async function POST(): Promise<Response> {
     } catch {
       // Preserve the upstream failure below.
     }
-    const message = err instanceof Error ? err.message : "GEX scan failed";
+    const message = scrubSecrets(err instanceof Error ? err.message : "GEX scan failed");
     return NextResponse.json({ error: message, scan_succeeded: false }, { status });
   }
 }

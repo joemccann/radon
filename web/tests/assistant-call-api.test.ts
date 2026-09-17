@@ -60,11 +60,17 @@ async function callApi(
 }
 
 function watchlistFrom(data: unknown): Array<{ symbol: string }> {
-  const payload = data as {
-    body?: { watchlist?: Array<{ symbol: string }> };
-    watchlist?: Array<{ symbol: string }>;
-  };
-  return payload.body?.watchlist ?? payload.watchlist ?? [];
+  const payload = data as { excerpt?: string; watchlist?: Array<{ symbol: string }> };
+  if (typeof payload.excerpt === "string") {
+    const lines = payload.excerpt.split("\n");
+    try {
+      const inner = JSON.parse(lines.slice(1, -1).join("\n")) as { watchlist?: Array<{ symbol: string }> };
+      if (inner?.watchlist) return inner.watchlist;
+    } catch {
+      // fall through
+    }
+  }
+  return payload.watchlist ?? [];
 }
 
 describe("assistant call_api catalog client", () => {

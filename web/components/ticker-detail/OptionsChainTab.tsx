@@ -1,5 +1,6 @@
 "use client";
 
+import { userErrorMessage } from "@/lib/userError";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Ref, type UIEvent } from "react";
 import { useSearchParams } from "next/navigation";
 import { Crosshair } from "lucide-react";
@@ -1479,7 +1480,7 @@ export default function OptionsChainTab({
     return (
       <div style={{ padding: "24px 0", textAlign: "center" }}>
         <span style={{ fontFamily: "var(--font-mono)", fontSize: "12px", color: "var(--fault)" }}>
-          {error}
+          {userErrorMessage(error, "The options chain could not be loaded. Try again.")}
         </span>
       </div>
     );

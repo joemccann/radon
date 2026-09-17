@@ -11,6 +11,7 @@
  * login, so their submit shows a scenic-route delay notice while in flight.
  */
 
+import { userErrorMessage } from "@/lib/userError";
 import { useCallback, useEffect, useState } from "react";
 import {
   CredentialsRequestError,
@@ -34,9 +35,7 @@ type ServiceNotice = {
 };
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error && error.message
-    ? error.message
-    : "credentials request failed";
+  return userErrorMessage(error, "Your changes could not be saved. Refresh and try again.");
 }
 
 function serviceSlug(id: string): string {

@@ -498,3 +498,16 @@ func resolveAPIKey(provider: String) async throws -> String {
 - [ ] Inference call with Bearer token
 - [ ] Logout (clear Keychain)
 - [ ] Error handling (refresh failures → re-login prompt)
+
+---
+
+## Radon HTTP model ladder (server)
+
+Native Mac OAuth above is the product pattern. On Radon hosts, the shared HTTP ladder in `scripts/clients/model_ladder.py` prefers the same subscription meters for research review and CTA vision:
+
+- **Anthropic:** `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) or Linux `~/.claude/.credentials.json` — not prepaid `ANTHROPIC_API_KEY` when a subscription token is present.
+- **Codex:** `~/.codex/auth.json` ChatGPT OAuth access token before `OPENAI_API_KEY`.
+- **Grok:** `~/.grok/auth.json` before `XAI_API_KEY`.
+- **Gemini:** `GEMINI_OAUTH_TOKEN` / `GOOGLE_OAUTH_ACCESS_TOKEN` or `GEMINI_API_KEY` / `GOOGLE_API_KEY`.
+
+Weekend bash wrappers remain the Claude Code CLI sibling (they *unset* prepaid keys so the agent bills claude.ai). See the auth matrix in [Dropbox research](dropbox-research.md#auth-matrix-research--cta).

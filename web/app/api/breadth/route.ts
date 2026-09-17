@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { readFile } from "fs/promises";
 import { join } from "path";
 import { radonFetch } from "@/lib/radonApi";
-import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
+import { getRequestId, setCacheResponseHeaders, scrubSecrets } from "@/lib/apiContracts";
 import { getDb } from "@/lib/db";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
 // Disable Next.js static caching: this handler reads live disk state
@@ -88,7 +88,7 @@ export async function POST(): Promise<Response> {
     });
     return NextResponse.json(data);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Breadth scan failed";
+    const message = scrubSecrets(error instanceof Error ? error.message : "Breadth scan failed");
     const cached = await readCachedBreadth();
     if (cached) {
       const response = NextResponse.json(cached);
