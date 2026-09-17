@@ -140,6 +140,7 @@ performance-page.spec.ts
 pltr-chain-position-focus.spec.ts
 portfolio-leg-row-runtime.spec.ts
 portfolio-market-closed.spec.ts
+portfolio-mixed-combo-today-pnl.spec.ts
 portfolio-ratio-risk-reversal-label.spec.ts
 portfolio-request-cadence.spec.ts
 portfolio-return-capital.spec.ts
