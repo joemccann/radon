@@ -29,6 +29,8 @@ export interface ChartSeries<T = CriHistoryEntry> {
   format?: (v: number) => string;
   /** Y-scale for this series; log domains clamp to the smallest positive value. */
   scaleType?: "log" | "linear";
+  /** Sparse periodic measurements can retain a zero-based bar representation. */
+  renderAs?: "line" | "bar";
 }
 
 interface TooltipState<T> {
@@ -55,7 +57,7 @@ export interface ReferenceBand {
 
 interface CriHistoryChartProps<T extends { date: string }> {
   history: T[];
-  series: [ChartSeries<T>, ChartSeries<T>];
+  series: [ChartSeries<T>, ChartSeries<T>?];
   title: string;
   /** Plot both series on ONE y-scale (built from the union of their values
    *  and any reference levels) — for an indicator and its moving average. */
@@ -72,6 +74,8 @@ interface CriHistoryChartProps<T extends { date: string }> {
   xTickFormat?: (d: Date) => string;
   /** Minimum rendered distance between x-axis labels. Increase for long labels. */
   xTickMinSpacing?: number;
+  /** Do not connect observations separated by a known collection gap. */
+  maxGapMs?: number;
 }
 
 const MARGIN = { top: 20, right: 56, bottom: 44, left: 48 };
@@ -92,6 +96,7 @@ export default function CriHistoryChart<T extends { date: string }>({
   liveValues,
   xTickFormat,
   xTickMinSpacing,
+  maxGapMs,
   sharedAxis = false,
   referenceLevels,
   referenceBands,
@@ -169,7 +174,7 @@ export default function CriHistoryChart<T extends { date: string }>({
     // Helper: build Y scale for a series (or, on a shared axis, for both
     // series plus the reference levels).
     function buildYScale(s: ChartSeries<T>): d3.ScaleContinuousNumeric<number, number> {
-      const sources = sharedAxis ? [leftSeries, rightSeries] : [s];
+      const sources = sharedAxis ? series.filter((item): item is ChartSeries<T> => item != null) : [s];
       const vals = sources
         .flatMap((src) => chartData.map((d) => d[src.key] as number | null | undefined))
         .filter((v): v is number => isPlottable(s, v));
@@ -187,6 +192,7 @@ export default function CriHistoryChart<T extends { date: string }>({
         if (isPlottable(s, band.to)) vals.push(band.to);
       }
       if (vals.length === 0) return d3.scaleLinear().domain([0, 100]).range([innerH, 0]);
+      if (s.renderAs === "bar") vals.push(0);
       const ext = d3.extent(vals) as [number, number];
       if (s.scaleType === "log") {
         // `vals` is clamped to strictly positive, so ext[0] is the smallest
@@ -194,7 +200,7 @@ export default function CriHistoryChart<T extends { date: string }>({
         return d3.scaleLog().domain([ext[0] / 1.1, ext[1] * 1.1]).range([innerH, 0]);
       }
       const pad = (ext[1] - ext[0]) * 0.15 || 2;
-      return d3.scaleLinear().domain([ext[0] - pad, ext[1] + pad]).range([innerH, 0]);
+      return d3.scaleLinear().domain([s.renderAs === "bar" && ext[0] >= 0 ? 0 : ext[0] - pad, ext[1] + pad]).range([innerH, 0]);
     }
 
     // Axis/grid tick values — d3's log ticks explode into every mantissa step
@@ -209,9 +215,9 @@ export default function CriHistoryChart<T extends { date: string }>({
     }
 
     const yLeft = buildYScale(leftSeries);
-    const yRight = sharedAxis ? yLeft : buildYScale(rightSeries);
+    const yRight = sharedAxis || !rightSeries ? yLeft : buildYScale(rightSeries);
     const leftTickValues = buildYTickValues(leftSeries, yLeft);
-    const rightTickValues = buildYTickValues(rightSeries, yRight);
+    const rightTickValues = rightSeries ? buildYTickValues(rightSeries, yRight) : [];
 
     // Grid lines (based on left axis)
     const gridLines = leftTickValues;
@@ -235,6 +241,18 @@ export default function CriHistoryChart<T extends { date: string }>({
       const validData = chartData.filter((d) =>
         isPlottable(s, d[s.key] as number | null | undefined),
       );
+      if (validData.length < 1) return;
+      if (s.renderAs === "bar") {
+        const barWidth = Math.min(32, innerW / Math.max(chartData.length, 1) * 0.5);
+        g.selectAll(`.bar-${String(s.key)}`).data(validData).enter().append("rect")
+          .attr("class", "history-bar")
+          .attr("x", d => Math.max(0, Math.min(innerW - barWidth, xScale(new Date(d.date)) - barWidth / 2)))
+          .attr("y", d => yScale(Math.max(0, d[s.key] as number)))
+          .attr("width", barWidth)
+          .attr("height", d => Math.abs(yScale(d[s.key] as number) - yScale(0)))
+          .attr("fill", s.color);
+        return;
+      }
       if (validData.length < 2) return;
 
       const line = d3
@@ -243,12 +261,21 @@ export default function CriHistoryChart<T extends { date: string }>({
         .y((d) => yScale(d[s.key] as number))
         .curve(d3.curveMonotoneX);
 
-      g.append("path")
-        .datum(validData)
-        .attr("fill", "none")
-        .attr("stroke", s.color)
-        .attr("stroke-width", 2)
-        .attr("d", line);
+      const segments: T[][] = [];
+      for (const entry of chartData) {
+        if (!isPlottable(s, entry[s.key] as number | null | undefined)) {
+          segments.push([]);
+          continue;
+        }
+        const current = segments.at(-1);
+        const previous = current?.at(-1);
+        if (!current || (previous && maxGapMs != null && Date.parse(entry.date) - Date.parse(previous.date) > maxGapMs)) segments.push([entry]);
+        else current.push(entry);
+      }
+      for (const segment of segments) {
+        if (segment.length < 2) continue;
+        g.append("path").datum(segment).attr("fill", "none").attr("stroke", s.color).attr("stroke-width", 2).attr("d", line);
+      }
 
       // Dots
       g.selectAll(`.dot-${String(s.key)}`)
@@ -282,7 +309,7 @@ export default function CriHistoryChart<T extends { date: string }>({
     for (const band of referenceBands ?? []) {
       const scale = band.axis === "left" || sharedAxis ? yLeft : yRight;
       const bandSeries = band.axis === "left" ? leftSeries : rightSeries;
-      if (!isPlottable(bandSeries, band.from) || !isPlottable(bandSeries, band.to)) continue;
+      if (!bandSeries || !isPlottable(bandSeries, band.from) || !isPlottable(bandSeries, band.to)) continue;
       const color = band.color ?? CHART_AXIS_MUTED;
       const yTop = scale(Math.max(band.from, band.to));
       const yBottom = scale(Math.min(band.from, band.to));
@@ -341,7 +368,7 @@ export default function CriHistoryChart<T extends { date: string }>({
     }
 
     drawLine(leftSeries, yLeft);
-    drawLine(rightSeries, yRight);
+    if (rightSeries) drawLine(rightSeries, yRight);
 
     // Left Y-axis
     const leftFormat = leftSeries.format ?? defaultFormat;
@@ -363,6 +390,7 @@ export default function CriHistoryChart<T extends { date: string }>({
       });
 
     // Right Y-axis
+    if (rightSeries) {
     const rightFormat = rightSeries.format ?? defaultFormat;
     g.append("g")
       .attr("transform", `translate(${innerW},0)`)
@@ -381,6 +409,8 @@ export default function CriHistoryChart<T extends { date: string }>({
           .attr("font-size", "var(--text-meta)")
           .attr("font-family", "IBM Plex Mono, monospace");
       });
+
+    }
 
     // X-axis — use explicit sparse ticks so labels stay legible on 20-session charts
     const xTickValues = buildTimeXAxisTickValues(dates, innerW, xTickMinSpacing);
@@ -448,7 +478,7 @@ export default function CriHistoryChart<T extends { date: string }>({
       .on("touchend touchcancel", function () {
         setTooltip({ visible: false, x: 0, y: 0, d: null });
       });
-  }, [chartData, width, series, leftSeries, rightSeries, liveValues, xTickFormat, xTickMinSpacing, sharedAxis, referenceLevels, referenceBands]);
+  }, [chartData, width, series, leftSeries, rightSeries, liveValues, xTickFormat, xTickMinSpacing, sharedAxis, referenceLevels, referenceBands, maxGapMs]);
 
   const showEmpty = !chartData || chartData.length < 2;
   const tooltipSideStyle =
@@ -460,14 +490,28 @@ export default function CriHistoryChart<T extends { date: string }>({
     <ChartPanel
       family="analytical-time-series"
       title={title}
-      legend={series.map((item) => ({ label: item.label, color: item.color }))}
+      legend={series.filter((item): item is ChartSeries<T> => item != null).map((item) => ({ label: item.label, color: item.color }))}
       className="chart-panel-inline"
       bodyClassName="cri-history-chart-panel"
       contentClassName="cri-history-chart-content"
       dataTestId="cri-history-chart"
     >
       <div ref={containerRef} className="cri-history-chart-shell">
-        <div className="chart-surface cri-history-chart-surface">
+        <div className="chart-surface cri-history-chart-surface"
+          role={showEmpty ? undefined : "slider"}
+          tabIndex={showEmpty ? undefined : 0}
+          aria-label={`Inspect ${title} history`}
+          aria-valuemin={showEmpty ? undefined : 0}
+          aria-valuemax={showEmpty ? undefined : chartData.length - 1}
+          aria-valuenow={showEmpty ? undefined : Math.max(0, tooltip.d ? chartData.indexOf(tooltip.d) : chartData.length - 1)}
+          aria-valuetext={tooltip.d ? `${tooltip.d.date}: ${series.filter((s): s is ChartSeries<T> => s != null).map(s => `${s.label} ${tooltip.d![s.key] != null && Number.isFinite(tooltip.d![s.key] as number) ? (s.format ?? defaultFormat)(tooltip.d![s.key] as number) : "---"}`).join(", ")}` : undefined}
+          onKeyDown={event => {
+            if (showEmpty || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+            event.preventDefault();
+            const current = tooltip.d ? chartData.indexOf(tooltip.d) : chartData.length - 1;
+            const index = event.key === "Home" ? 0 : event.key === "End" ? chartData.length - 1 : Math.max(0, Math.min(chartData.length - 1, current + (event.key === "ArrowRight" ? 1 : -1)));
+            setTooltip({ visible: true, x: width / 2, y: 25, d: chartData[index] });
+          }} onBlur={() => setTooltip(t => ({ ...t, visible: false }))}>
           {showEmpty ? (
             <div className="chart-empty-state cri-history-chart-empty">
               NO HISTORY AVAILABLE
@@ -486,7 +530,7 @@ export default function CriHistoryChart<T extends { date: string }>({
             }}
           >
             <div className="chart-tooltip-date">{tooltip.d.date}</div>
-            {series.map((s) => {
+            {series.filter((item): item is ChartSeries<T> => item != null).map((s) => {
               const val = tooltip.d![s.key];
               const fmt = s.format ?? defaultFormat;
               return (

@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-09-17T03:28:23Z",
-  "node_count": 3352,
-  "edge_count": 6871,
+  "generated_at": "2026-09-17T15:34:50Z",
+  "node_count": 3359,
+  "edge_count": 6903,
   "areas": {
-    "web": 1978,
+    "web": 1985,
     "site": 155,
     "scripts": 1106,
     "cloud": 66,
@@ -15,12 +15,12 @@
     {
       "id": "web/app",
       "area": "web",
-      "count": 211
+      "count": 212
     },
     {
       "id": "web/components",
       "area": "web",
-      "count": 251
+      "count": 252
     },
     {
       "id": "web/e2e",
@@ -35,7 +35,7 @@
     {
       "id": "web/lib",
       "area": "web",
-      "count": 391
+      "count": 393
     },
     {
       "id": "web/public",
@@ -50,7 +50,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 913
+      "count": 916
     },
     {
       "id": "site/app",
@@ -269,7 +269,7 @@
       "id": "web/components/WorkspaceSections.tsx",
       "area": "web",
       "in": 20,
-      "out": 76,
+      "out": 77,
       "test": false
     },
     {
@@ -331,7 +331,7 @@
     {
       "id": "web/lib/pageTitle.ts",
       "area": "web",
-      "in": 65,
+      "in": 66,
       "out": 2,
       "test": false
     },
@@ -455,14 +455,14 @@
       "test": false
     },
     {
-      "id": "web/lib/refreshSchedule.ts",
+      "id": "web/lib/chartSystem.ts",
       "area": "web",
-      "in": 33,
+      "in": 34,
       "out": 0,
       "test": false
     },
     {
-      "id": "web/lib/chartSystem.ts",
+      "id": "web/lib/refreshSchedule.ts",
       "area": "web",
       "in": 33,
       "out": 0,

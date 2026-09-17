@@ -26,7 +26,7 @@ export const REGIME_RAIL_GROUPS: readonly RegimeRailGroup[] = [
   { label: "Volatility", tabs: ["vixcor", "vixts", "dispersion", "ivrank", "iv-spread", "skew", "skew2d", "curve", "straddle", "calm-streak"] },
   { label: "Positioning", tabs: ["gex", "margin", "hhlev", "credit", "iei-hyg", "cot", "short", "ats"] },
   { label: "Breadth & sentiment", tabs: ["breadth", "ma-ratio", "trin", "divyield", "hyad", "bpi", "cor", "streaks"] },
-  { label: "Models", tabs: ["llm", "backtest"] },
+  { label: "Models", tabs: ["backtest"] },
 ];
 
 export const REGIME_TABS: readonly RegimeTab[] = REGIME_RAIL_GROUPS.flatMap((g) => g.tabs);

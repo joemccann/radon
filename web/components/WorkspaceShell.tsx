@@ -76,6 +76,7 @@ export default function WorkspaceShell({ section, tickerParam, initialPortfolio 
   const navLabel = navItems.find((item) => item.route === activeSection)?.label ?? "Dashboard";
   const activeLabel = activeSection === "ticker-detail" && tickerParam ? tickerParam : navLabel;
   const headerOwnsPageHeading = activeSection !== "ticker-detail"
+    && activeSection !== "ai-industry"
     && activeSection !== "watchlist"
     && activeSection !== "admin";
   const { toasts, exitingIds, addToast, upsertToast, dismissToast, hasToastKey } = useToast();
