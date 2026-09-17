@@ -1,4 +1,11 @@
 # Lessons
+
+## 2026-09-17 — Mixed-age combos are not same-day
+
+- Selling a same-day short against an overnight long (SPY 740P since May, 760P sold today) groups as a bull put spread with `basis_source: mixed` and often `entry_date=today`.
+- The same-day identity Today P&L = MV − EC then prints the overnight leg's entire accumulated loss as today's drawdown.
+- `isSameDay` is false for mixed. Today P&L is per-leg: overnight vs prior close, `session_fills` vs fill. Incomplete blotter + a new-leg fill must not stamp the combo today. OCC journal tickers map to the underlying root.
+
 ## 2026-09-11 — Grok 4.6 P&L turns cannot omit tools or starve max_tokens
 
 - grok-4.6 reasoning_effort defaults to high and cannot be disabled. A 1200 max_tokens budget is eaten by reasoning, so a cap-hit forced-final with tools omitted returns empty text and the canned "Reached the maximum tool-calling rounds" string.
@@ -1043,3 +1050,10 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 
 ## 2026-09-16 - Performance regression reports need source reconciliation
 - When TWR disappears with excluded NAV sessions, trace the actual NAV and external-flow provenance before changing presentation or weakening integrity gates. Verify historical flow coverage survives refreshed statements and mirror selection; retain the reported dates as regression cases.
+
+## 2026-09-17 - AI charts share the Regime renderer
+- Reuse ChartPanel, CriHistoryChart, HistoryRangeChips and BrushMinimap for AI evidence, including legacy charts. Preserve source cadence, units and missing observations while matching the approved Regime composition.
+
+## 2026-09-17 - Nightly evidence is not a deliverable
+- A nightly audit may complete successfully without a commit or PR. Report no-op results and checkpoints through the rolling issue and runner state; never create empty commits to satisfy phase completion.
+- Gate PR creation on the net substantive base-to-head diff, excluding audit/task bookkeeping and generated timestamp churn. Commit counts and nonempty diffs alone do not prove a useful change. Apply the policy to every scheduled publisher and provider prompt.

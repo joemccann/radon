@@ -12,7 +12,7 @@ export type ClearRouteCase = {
 const regimePages = [
   "ats", "backtest", "bpi", "breadth", "calm-streak", "cor", "cot", "credit", "cri",
   "curve", "dispersion", "divyield", "gex", "grg", "hhlev", "hyad", "iei-hyg",
-  "iv-spread", "ivrank", "llm", "ma-ratio", "margin", "short", "skew", "skew2d",
+  "iv-spread", "ivrank", "ma-ratio", "margin", "short", "skew", "skew2d",
   "straddle", "streaks", "trin", "vcg", "vixcor", "vixts",
 ] as const;
 
@@ -29,6 +29,8 @@ const regimeLoaded: Record<string, string> = {
 };
 
 export const CLEAR_ROUTE_CASES: ClearRouteCase[] = [
+  { source: "app/ai-industry/page.tsx", path: "/ai-industry", selector: '[data-testid="ai-infrastructure-panel"]' },
+  { source: "app/regime/llm/page.tsx", path: "/regime/llm", destination: "/ai-industry", selector: '[data-testid="ai-infrastructure-panel"]' },
   { source: "app/page.tsx", path: "/", selector: '[role="slider"][aria-label="Inspect account value history"]', text: "$1,246,820.42" },
   { source: "app/dashboard/page.tsx", path: "/dashboard", selector: '[role="slider"][aria-label="Inspect account value history"]', text: "$1,246,820.42" },
   { source: "app/portfolio/page.tsx", path: "/portfolio", selector: '[data-testid="position-table"], [data-testid="mobile-position-list"]', text: "AAPL" },

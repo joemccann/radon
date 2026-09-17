@@ -132,10 +132,27 @@ else decides whether tonight counted:
 """
 
 CONTRACT_COMMIT = """
-- **audit / remediate:** the phase counts as complete only if you have made at
-  least one commit on the branch `{prefix}<YYYY-MM-DD>` (today's date, the
-  branch the manual tells you to use). An exit without a commit is scored
-  INCOMPLETE, whatever you print.
+- **audit / remediate:** substantive work is committed on
+  `{prefix}<YYYY-MM-DD>`. A completed phase with zero findings, no safe change,
+  or only audit/log/tasks bookkeeping instead persists its checkpoint and
+  handoff on the existing rolling issue and prints this LAST stdout line:
+
+      NIGHTLY PHASE NO-OP: loop={slug} phase=<audit|remediate> reason=<one-line reason>
+
+  Emit the actual phase at column 0, not the indented example. Do not create
+  an artificial commit or PR for completion evidence. An unfinished phase or
+  an exit with neither substantive work nor a valid no-op is INCOMPLETE.
+  The rolling issue is authoritative after a disposable worktree is removed.
+  Every successful checkpoint carries forward all still-open findings and
+  acceptance criteria; remediation reads it before legacy local ledgers.
+
+- **publication:** preflight committed work with
+  `python3.13 scripts/nightly_publish.py check --base origin/main --head HEAD`:
+  0 substantive, 3 no-op, 1 error. Create PRs only with
+  `python3.13 scripts/nightly_publish.py publish --base main --head <branch> --title <title> --body-file <body-file>`.
+  It owns the guarded push and returns JSON; never bypass it. A real source,
+  docs, test or CI experiment remains eligible while VALIDATING or
+  INSUFFICIENT_SAMPLE; report-only status churn does not.
 """
 
 CONTRACT_DELIVER = """
@@ -148,6 +165,14 @@ CONTRACT_DELIVER = """
   `python3 scripts/nightly_deliver.py record ...` exactly as the manual
   describes. READY means CI is green on every PR you are naming. Never print
   READY for a PR whose checks are pending, failing, or unknown.
+  Resume existing substantive PRs before considering today's no-op. If the
+  shared publisher finds no substantive diff and no PR needs resuming or
+  reporting from this phase, record
+  `python3.13 scripts/nightly_deliver.py record --loop {slug} --branch "" --status green`
+  without a PR number or URL and emit `NIGHTLY DELIVER READY: loop={slug} prs=0`.
+  A no-op today must not erase a resumed PR's record or final verdict URL.
+  Bookkeeping-only commits never justify a push or PR. Publication uses only
+  `python3.13 scripts/nightly_publish.py publish --base main --head <branch> --title <title> --body-file <body-file>`.
 """
 
 BRANCH_PREFIX = {
@@ -239,7 +264,7 @@ def render_codex_skill(skill: str) -> str:
     fm = _frontmatter(skill)
     contract = (
         CONTRACT_COMMON
-        + CONTRACT_COMMIT.format(prefix=BRANCH_PREFIX[skill])
+        + CONTRACT_COMMIT.format(prefix=BRANCH_PREFIX[skill], slug=slug)
         + CONTRACT_DELIVER.format(slug=slug)
     )
     return (
@@ -274,7 +299,7 @@ def render(skill: str, phase: str) -> str:
         contract = CONTRACT_COMMON + CONTRACT_DELIVER.format(slug=slug)
     else:
         contract = CONTRACT_COMMON + CONTRACT_COMMIT.format(
-            prefix=BRANCH_PREFIX[skill]
+            prefix=BRANCH_PREFIX[skill], slug=slug
         )
     return (
         PREAMBLE.format(skill=skill, phase=phase)

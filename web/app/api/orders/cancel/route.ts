@@ -1,4 +1,5 @@
 import { requireRouteAccess } from "@/lib/routeAccess";
+import { scrubSecrets } from "@/lib/apiContracts";
 
 import { NextResponse } from "next/server";
 import { RadonApiError, radonFetch } from "@/lib/radonApi";
@@ -123,7 +124,7 @@ export async function POST(request: Request): Promise<Response> {
       }
       return NextResponse.json({ error: error.detail }, { status: error.status });
     }
-    const message = error instanceof Error ? error.message : "Cancel failed";
+    const message = scrubSecrets(error instanceof Error ? error.message : "Cancel failed");
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
