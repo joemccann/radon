@@ -139,3 +139,9 @@ describe("VolSkewMrScanner", () => {
     expect(volSkewMrOrderHref(quiet)).toBeNull();
   });
 });
+
+ it("distinguishes missing skew history from a measured direction", () => {
+  render(<VolSkewMrScanner data={{ ...data, results: [{ ...data.results[0], skew_path: "unknown", gates: { technicals: true, iv: true, skew: false } }] }} />);
+  expect(screen.getByRole("status").textContent).toContain("Skew history unavailable for 1 of 1 names");
+  expect(screen.getAllByText(/Insufficient history/).length).toBeGreaterThan(0);
+ });

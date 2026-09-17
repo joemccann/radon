@@ -21,7 +21,7 @@ import os
 import sys
 from concurrent.futures import CancelledError, ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -307,6 +307,49 @@ def _dated_series(payload: Any, keys: Sequence[str], convert=_to_float) -> List[
     return values[-6:]
 
 
+def _skew_expiry(payload: Any, as_of: date) -> Optional[str]:
+    """Use one actual listed expiry nearest 30 DTE for the entire history."""
+    expiries: set[date] = set()
+    for row in _as_rows(payload):
+        try:
+            expiry = date.fromisoformat(str(row.get("expiry") or row.get("expires") or ""))
+        except ValueError:
+            continue
+        if expiry > as_of:
+            expiries.add(expiry)
+    selected = min(
+        expiries,
+        key=lambda expiry: (abs((expiry - as_of).days - 30), expiry),
+        default=None,
+    )
+    return selected.isoformat() if selected is not None else None
+
+
+def _risk_reversal_history(payload: Any, expiry: str, as_of: date) -> List[float]:
+    """UW's signed put-minus-call IV difference, in vol points per session.
+
+    The historical endpoint's risk_reversal field is decimal IV. Never infer
+    units from its magnitude or append a current chain with another maturity.
+    """
+    sessions: Dict[date, float] = {}
+    for row in _as_rows(payload):
+        try:
+            session = date.fromisoformat(str(row.get("date") or ""))
+        except ValueError:
+            continue
+        if session > as_of:
+            continue
+        row_expiry = row.get("expiry", row.get("expires"))
+        if row_expiry is not None and row_expiry != expiry:
+            continue
+        if row.get("delta") is not None and _to_float(row["delta"]) != 25:
+            continue
+        value = _to_float(row.get("risk_reversal"))
+        if value is not None:
+            sessions[session] = value * 100
+    return [sessions[session] for session in sorted(sessions)[-6:]]
+
+
 def _parse_option_symbol(symbol: str) -> Tuple[Optional[str], Optional[float], Optional[str]]:
     text = str(symbol or "").strip().upper()
     for idx in range(1, len(text) - 7):
@@ -389,23 +432,27 @@ def scan_ticker(
             ("volatility", "iv"),
             _vol_pct,
         )
-        rr = fetch(
-            "risk_reversal",
-            lambda: client.get_historical_risk_reversal_skew(ticker),
-            empty,
+        as_of = datetime.now(timezone.utc).date()
+        expiry = _skew_expiry(
+            fetch("skew_expiry", lambda: client.get_expiry_breakdown(ticker), empty),
+            as_of,
         )
-        skew_series = _as_vol_points(_dated_series(rr, ("value", "skew", "risk_reversal")))
-        if len(skew_series) < 2:
-            contracts = fetch(
-                "contracts",
-                lambda: client.get_option_contracts(
-                    ticker, exclude_zero_vol_chains=True, maybe_otm_only=True
+        skew_series: List[float] = []
+        if expiry is None:
+            errors.append("skew_history:no_future_listed_expiry")
+        else:
+            rr = fetch(
+                "risk_reversal",
+                lambda: client.get_historical_risk_reversal_skew(
+                    ticker, expiry=expiry, delta=25, timeframe="1M"
                 ),
                 empty,
             )
-            current = _current_put_call_skew(contracts)
-            if current is not None:
-                skew_series = skew_series + [current] if skew_series else [current]
+            skew_series = _risk_reversal_history(rr, expiry, as_of)
+            if len(skew_series) < 2:
+                errors.append(
+                    f"skew_history:insufficient_distinct_sessions:{len(skew_series)}"
+                )
 
         classified = classify_from_series(prices, iv_series, skew_series)
         return VolSkewCandidate(

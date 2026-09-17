@@ -39,14 +39,24 @@ degrades a single gate instead of dropping the ticker:
 |---|---|---|
 | Technicals | IB daily closes (UW fallback) | RSI(14), %B(20, 2) |
 | IV path | UW `get_iv_rank` | last six readings, vol points |
-| Skew path | UW `get_historical_risk_reversal_skew` | falls back to a 25-delta put/call IV spread from the chain only when the history is shorter than two points |
+| Skew path | UW `get_historical_risk_reversal_skew` | listed future expiry nearest 30 DTE, delta 25, one-month history; last six distinct sessions |
 
 The scanner never reads strike GEX, so it spends no UW quota on it.
 
-Risk-reversal values arrive as decimals on some UW endpoints and as vol
-points on others. `_as_vol_points` restates the whole window in vol points
-before `PATH_FLAT_EPS` is applied — a decimal series would otherwise read
-`flat` on every name and pass the skew gate unconditionally.
+The historical risk-reversal endpoint requires both `expiry` and `delta`.
+Discover the actual listed expiry through `get_expiry_breakdown`; choose the
+future expiry nearest 30 DTE (earlier date breaks ties), then request
+`expiry=<YYYY-MM-DD>&delta=25&timeframe=1M`. Every observation in a scan uses
+that same maturity and delta. The endpoint's signed `risk_reversal` field is
+put IV minus call IV in decimal units; multiply by 100 for vol points before
+applying `PATH_FLAT_EPS`.
+
+Ignore malformed/future dates, nonfinite values, and explicit expiry/delta
+mismatches. Deduplicate by session and retain the latest six sessions. A missing
+listed expiry or fewer than two valid sessions keeps skew `unknown`, leaves
+the skew gate closed, and records a `skew_history:` diagnostic in the row.
+Never append an undated current-chain snapshot: it cannot establish a path
+and may represent a different maturity or duplicate the latest session.
 
 ## Acting on a row
 

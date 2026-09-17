@@ -7504,3 +7504,11 @@ Dependency graph: T1 -> {T2,T3,T4} -> T5 -> T6.
 - [ ] T6 depends_on: [T5] Verify every applicable GitHub check on the latest head green, notify and record evidence.
 
 Review: six nightly PR publishers covered by a shared net-diff classifier and guarded publisher; five agent loops also intercept direct gh creation. Known audit ledgers/tasks and timestamp-only codemap changes do not qualify; real docs/tests/config/source and graph changes remain eligible. Five canonical skills and 16 generated manuals accept explicit no-op completion. Rolling-issue checkpoints and open findings survive report pruning; security state remains private. Python/shell syntax, generated prompt synchronization and diff checks pass. Independent review completed. PR #479 initial head fe587084 passed the nightly regression shard (2109 passed, 1 skipped); CI ownership check required the operations runbook update, now included. Publisher error-path coverage expanded before final exact-head CI. Final CI and notification pending. No local test suites.
+
+## Vol/Skew MR unknown skew investigation (2026-09-17)
+Dependency graph: T1 -> T2 -> T3.
+- [x] T1 depends_on: [] Trace live snapshot and upstream response against parser contract.
+- [x] T2 depends_on: [T1] Correct verified root cause, preserve signal gates, add regressions.
+- [ ] T3 depends_on: [T2] PR and exact-head GitHub verification; report cause and resolution.
+
+Review: production snapshot at 2026-09-17T16:37:26Z had 90/90 unknown, no row errors. Unparameterized UW returned HTTP 200 empty history. Corrected expiry/delta request returned six sessions each for NVDA, AMAT, SNPS. Regression suites and UI screenshots delegated to GitHub CI; no local suites.

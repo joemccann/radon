@@ -193,7 +193,6 @@ ticker-search-live.spec.ts
 trin-tab.spec.ts
 vixcor-tab.spec.ts
 vol-cone-tab.spec.ts
-vol-skew-mr-scanner.spec.ts
 vxn-index-routing.spec.ts
 watchlist-page.spec.ts
 ws-connection-stability.spec.ts
