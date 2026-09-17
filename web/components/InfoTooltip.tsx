@@ -14,6 +14,27 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
  * pointer can cross the gap into the text; re-entering either cancels it.
  */
 export const TOOLTIP_HIDE_DELAY_MS = 300;
+/** Gap between the trigger and the popup. */
+const TOOLTIP_GAP = 6;
+/** Breathing room kept between the popup and every viewport edge. */
+const TOOLTIP_MARGIN = 8;
+const TOOLTIP_WIDTH = 260;
+
+function clamp(value: number, low: number, high: number): number {
+  return Math.max(low, Math.min(value, Math.max(low, high)));
+}
+
+/**
+ * The notch / status-bar inset, read from the `--safe-top` token the layout
+ * already publishes. `top: 0` is not the top of the readable screen on a
+ * phone: a popup placed there renders under the Dynamic Island.
+ */
+function safeAreaTop(): number {
+  if (typeof window === "undefined" || typeof getComputedStyle !== "function") return 0;
+  const raw = getComputedStyle(document.documentElement).getPropertyValue("--safe-top");
+  const parsed = Number.parseFloat(raw);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
 
 type InfoTooltipProps = {
   text: string;
@@ -108,12 +129,33 @@ export default function InfoTooltip({ text, ariaLabel, triggerTestId, contentTes
     if (el) setPopupHeight(el.getBoundingClientRect().height);
   }, [rect, text]);
 
-  const flipBelow = (() => {
-    if (!rect || popupHeight === null) return false;
-    const needed = popupHeight + 14;
-    if (rect.top >= needed) return false;
-    const spaceBelow = (typeof window !== "undefined" ? window.innerHeight : 0) - rect.bottom;
-    return spaceBelow >= needed || spaceBelow > rect.top;
+  /**
+   * Place the popup inside the safe viewport on both axes. Both edges are
+   * clamped and the height is capped, so a long tooltip near the top of a
+   * phone screen scrolls inside its box instead of running off the display.
+   */
+  const placement = (() => {
+    if (!rect || popupHeight === null) return null;
+    const viewportWidth = typeof window === "undefined" ? 1024 : window.innerWidth;
+    const viewportHeight = typeof window === "undefined" ? 768 : window.innerHeight;
+    const top = safeAreaTop() + TOOLTIP_MARGIN;
+    const bottom = viewportHeight - TOOLTIP_MARGIN;
+
+    const width = Math.min(TOOLTIP_WIDTH, viewportWidth - TOOLTIP_MARGIN * 2);
+    const left = clamp(
+      rect.left + rect.width / 2 - width / 2,
+      TOOLTIP_MARGIN,
+      viewportWidth - TOOLTIP_MARGIN - width,
+    );
+
+    const maxHeight = Math.max(0, bottom - top);
+    const height = Math.min(popupHeight, maxHeight);
+    const roomAbove = rect.top - TOOLTIP_GAP - top;
+    const roomBelow = bottom - (rect.bottom + TOOLTIP_GAP);
+    const below = height > roomAbove && (height <= roomBelow || roomBelow > roomAbove);
+    const desired = below ? rect.bottom + TOOLTIP_GAP : rect.top - TOOLTIP_GAP - height;
+
+    return { top: clamp(desired, top, bottom - height), left, width, maxHeight };
   })();
 
   return (
@@ -180,15 +222,16 @@ export default function InfoTooltip({ text, ariaLabel, triggerTestId, contentTes
           onMouseLeave={scheduleHide}
           style={{
             position: "fixed",
-            visibility: popupHeight === null ? "hidden" : undefined,
-            ...(flipBelow
-              ? { top: rect.bottom + 6 }
-              : { top: rect.top - 6, transform: "translateY(-100%)" }),
-            left: Math.max(8, Math.min(rect.left + rect.width / 2 - 130, typeof window !== "undefined" ? window.innerWidth - 268 : 1200)),
+            visibility: placement === null ? "hidden" : undefined,
+            top: placement?.top ?? rect.top,
+            left: placement?.left ?? rect.left,
+            maxHeight: placement?.maxHeight,
+            overflowY: "auto",
+            overscrollBehavior: "contain",
             background: "var(--chart-tooltip-bg, var(--bg-panel))",
             border: "1px solid var(--chart-tooltip-border, var(--border-dim))",
             padding: "8px 10px",
-            width: 260,
+            width: placement?.width ?? TOOLTIP_WIDTH,
             fontSize: 11,
             fontFamily: "var(--font-mono)",
             color: "var(--text-primary)",
