@@ -35,14 +35,17 @@ const ORDERS = {
   executed_count: 0,
 };
 
+const FIXTURE_YEAR = new Date().getUTCFullYear() + 1;
+const EXPIRY = `${FIXTURE_YEAR}0416`;
+
 const EXPIRATIONS = {
   symbol: "AAPL",
-  expirations: ["20260320", "20260417", "20260515", "20260619"],
+  expirations: [EXPIRY, `${FIXTURE_YEAR}0521`, `${FIXTURE_YEAR}0618`],
 };
 
 const CHAIN_STRIKES = {
   symbol: "AAPL",
-  expiry: "20260417",
+  expiry: EXPIRY,
   exchange: "SMART",
   strikes: [180, 185, 190, 195, 200, 205, 210, 215, 220, 225, 230],
   multiplier: "100",
@@ -75,27 +78,27 @@ function makePriceData(symbol: string, last: number, bid: number, ask: number) {
   };
 }
 
-function stubApis(page: import("@playwright/test").Page) {
-  page.route("**/api/portfolio", (route) =>
+async function stubApis(page: import("@playwright/test").Page, priceOverrides: Record<string, ReturnType<typeof makePriceData>> = {}) {
+  await page.route("**/api/portfolio", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(PORTFOLIO) }),
   );
-  page.route("**/api/orders", (route) =>
+  await page.route("**/api/orders", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(ORDERS) }),
   );
-  page.route("**/api/regime", (route) =>
+  await page.route("**/api/regime", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ score: 15, cri: { score: 15 } }) }),
   );
-  page.route("**/api/ib-status", (route) =>
+  await page.route("**/api/ib-status", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ connected: false }) }),
   );
-  page.route("**/api/blotter", (route) =>
+  await page.route("**/api/blotter", (route) =>
     route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({ as_of: new Date().toISOString(), summary: { realized_pnl: 0 }, closed_trades: [], open_trades: [] }),
     }),
   );
-  page.route("**/api/ticker/**", (route) =>
+  await page.route("**/api/ticker/**", (route) =>
     route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -107,13 +110,27 @@ function stubApis(page: import("@playwright/test").Page) {
       }),
     }),
   );
-  page.route("**/api/options/expirations*", (route) =>
+  await page.route("**/api/options/expirations*", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(EXPIRATIONS) }),
   );
-  page.route("**/api/options/chain*", (route) =>
+  await page.route("**/api/options/chain*", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(CHAIN_STRIKES) }),
   );
-  page.route("**/api/prices", (route) => route.abort());
+  await page.route("**/api/prices", (route) => route.abort());
+  await page.route("**/api/ib/ws-ticket", (route) => route.fulfill({ json: { ticket: "isolated-chain-test" } }));
+  const fixtures: Record<string, ReturnType<typeof makePriceData>> = {
+    AAPL: makePriceData("AAPL", 205.5, 205.4, 205.6),
+  };
+  for (const expiry of EXPIRATIONS.expirations) {
+    for (const strike of CHAIN_STRIKES.strikes) {
+      for (const right of ["C", "P"]) {
+        const symbol = `AAPL_${expiry}_${strike}_${right}`;
+        const mid = right === "P" && strike === 200 ? 5.3 : right === "C" && strike === 210 ? 2.6 : 5;
+        fixtures[symbol] = makePriceData(symbol, mid, mid, mid);
+      }
+    }
+  }
+  await installMockWebSocket(page, { ...fixtures, ...priceOverrides });
 }
 
 function installMockWebSocket(
@@ -188,28 +205,21 @@ function installMockWebSocket(
 }
 
 test.describe("Ticker Search → Detail Page → Chain", () => {
-  test("search input focuses on CMD+K and opens detail page on selection", async ({ page }) => {
+  test("CMD+K opens instrument search in the command palette", async ({ page }) => {
     await page.unrouteAll({ behavior: "ignoreErrors" });
-    stubApis(page);
+    await stubApis(page);
     await page.goto("http://127.0.0.1:3000/portfolio");
 
     // Focus search via keyboard shortcut
     await page.keyboard.press("Meta+k");
-    const searchInput = page.locator('input[role="combobox"]');
+    const searchInput = page.getByTestId("command-palette-input");
     await expect(searchInput).toBeFocused();
   });
 
   test("Book tab shows L1 order book with bid/ask/spread", async ({ page }) => {
     await page.unrouteAll({ behavior: "ignoreErrors" });
-    stubApis(page);
+    await stubApis(page);
     await page.goto("http://127.0.0.1:3000/portfolio");
-
-    // Inject prices for AAPL
-    await page.evaluate((pd) => {
-      window.dispatchEvent(
-        new CustomEvent("ws-price", { detail: { type: "price", symbol: pd.symbol, data: pd } }),
-      );
-    }, makePriceData("AAPL", 205.50, 205.40, 205.60));
 
     // Navigate directly to ticker detail page
     await page.goto("/AAPL?tab=book");
@@ -223,15 +233,8 @@ test.describe("Ticker Search → Detail Page → Chain", () => {
 
   test("Chain tab loads expirations and shows strike grid", async ({ page }) => {
     await page.unrouteAll({ behavior: "ignoreErrors" });
-    stubApis(page);
+    await stubApis(page);
     await page.goto("http://127.0.0.1:3000/portfolio");
-
-    // Inject underlying price for ATM centering
-    await page.evaluate((pd) => {
-      window.dispatchEvent(
-        new CustomEvent("ws-price", { detail: { type: "price", symbol: pd.symbol, data: pd } }),
-      );
-    }, makePriceData("AAPL", 205.50, 205.40, 205.60));
 
     // Navigate directly to ticker detail page with chain tab
     await page.goto("http://127.0.0.1:3000/AAPL?tab=chain");
@@ -258,23 +261,8 @@ test.describe("Ticker Search → Detail Page → Chain", () => {
 
   test("clicking chain bid/ask adds legs to order builder", async ({ page }) => {
     await page.unrouteAll({ behavior: "ignoreErrors" });
-    stubApis(page);
+    await stubApis(page);
     await page.goto("http://127.0.0.1:3000/portfolio");
-
-    // Inject prices
-    const prices = [
-      makePriceData("AAPL", 205.50, 205.40, 205.60),
-      makePriceData("AAPL_20260417_200_C", 10.50, 10.30, 10.70),
-      makePriceData("AAPL_20260417_210_C", 5.20, 5.00, 5.40),
-      makePriceData("AAPL_20260417_200_P", 4.80, 4.60, 5.00),
-    ];
-    await page.evaluate((pds) => {
-      for (const pd of pds) {
-        window.dispatchEvent(
-          new CustomEvent("ws-price", { detail: { type: "price", symbol: (pd as { symbol: string }).symbol, data: pd } }),
-        );
-      }
-    }, prices);
 
     // Navigate directly to ticker detail page with chain tab
     await page.goto("http://127.0.0.1:3000/AAPL?tab=chain");
@@ -287,7 +275,8 @@ test.describe("Ticker Search → Detail Page → Chain", () => {
 
     // Click a call mid price (should add BUY leg)
     const callMid = detail.locator('.chain-mid.chain-clickable').first();
-    if (await callMid.isVisible()) {
+    await expect(callMid).toBeVisible();
+    {
       await callMid.click();
 
       // Order builder should appear
@@ -302,10 +291,12 @@ test.describe("Ticker Search → Detail Page → Chain", () => {
 
   test("ratio combos show normalized net credit and place normalized leg ratios", async ({ page }) => {
     await page.unrouteAll({ behavior: "ignoreErrors" });
-    stubApis(page);
+    await stubApis(page);
 
     let placedBody: Record<string, unknown> | null = null;
     await page.route("**/api/orders/place", async (route) => {
+      expect(route.request().method()).toBe("POST");
+      expect(route.request().url()).toBe("http://127.0.0.1:3000/api/orders/place");
       placedBody = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
       await route.fulfill({
         status: 200,
@@ -337,15 +328,17 @@ test.describe("Ticker Search → Detail Page → Chain", () => {
     await legRows.nth(0).locator('input[type="number"]').nth(1).fill("5.30");
     await legRows.nth(1).locator('input[type="number"]').nth(1).fill("2.60");
 
-    await orderBuilder.getByRole("button", { name: /MID/i }).click();
+    await orderBuilder.getByTestId("order-price-select-mid").click();
     const limitPriceInput = orderBuilder.locator(".modify-price-input");
-    await expect(limitPriceInput).toHaveValue("0.10");
-    await expect(orderBuilder.getByText("$250.00 notional")).toBeVisible();
+    await expect(limitPriceInput).toHaveValue("-0.10");
+    await expect(orderBuilder.getByText("$-250.00 notional")).toBeVisible();
 
-    await orderBuilder.getByRole("button", { name: /Place Risk Reversal/i }).click();
-    await orderBuilder.getByRole("button", { name: /Confirm: Risk Reversal @ \$0.10/i }).click();
+    expect(placedBody).toBeNull();
+    await orderBuilder.getByTestId("ticket-verify").click();
+    expect(placedBody).toBeNull();
+    await orderBuilder.getByTestId("ticket-transmit").click();
 
-    expect(placedBody).not.toBeNull();
+    await expect.poll(() => placedBody).not.toBeNull();
     expect(placedBody?.quantity).toBe(25);
     expect(placedBody?.type).toBe("combo");
 
@@ -356,15 +349,16 @@ test.describe("Ticker Search → Detail Page → Chain", () => {
 
   test("risk reversals auto-price from the combo quote and place a BUY combo envelope", async ({ page }) => {
     await page.unrouteAll({ behavior: "ignoreErrors" });
-    stubApis(page);
-    await installMockWebSocket(page, {
+    await stubApis(page, {
       AAPL: makePriceData("AAPL", 205.5, 205.4, 205.6),
-      AAPL_20260417_200_P: makePriceData("AAPL_20260417_200_P", 4.8, 4.8, 4.8),
-      AAPL_20260417_210_C: makePriceData("AAPL_20260417_210_C", 5.1, 5.1, 5.1),
+      [`AAPL_${EXPIRY}_200_P`]: makePriceData(`AAPL_${EXPIRY}_200_P`, 4.8, 4.8, 4.8),
+      [`AAPL_${EXPIRY}_210_C`]: makePriceData(`AAPL_${EXPIRY}_210_C`, 5.1, 5.1, 5.1),
     });
 
     let placedBody: Record<string, unknown> | null = null;
     await page.route("**/api/orders/place", async (route) => {
+      expect(route.request().method()).toBe("POST");
+      expect(route.request().url()).toBe("http://127.0.0.1:3000/api/orders/place");
       placedBody = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
       await route.fulfill({
         status: 200,
@@ -391,17 +385,19 @@ test.describe("Ticker Search → Detail Page → Chain", () => {
     const callRow = detail.getByRole("row", { name: /\$210\.00/ }).first();
     await callRow.locator(".chain-mid.chain-clickable").first().click();
 
-    const midButton = orderBuilder.getByRole("button", { name: /^MID /i });
-    await expect(midButton).toContainText("MID 0.30");
+    const midButton = orderBuilder.getByTestId("order-price-select-mid");
+    await expect(midButton.locator(".order-price-value")).toHaveText("$0.30");
 
     const comboMid = "0.30";
     await expect(limitPriceInput).not.toHaveValue("8.88");
     await expect(limitPriceInput).toHaveValue(comboMid);
 
-    await orderBuilder.getByRole("button", { name: /Place Risk Reversal/i }).click();
-    await orderBuilder.getByRole("button", { name: /Confirm: Risk Reversal @ /i }).click();
+    expect(placedBody).toBeNull();
+    await orderBuilder.getByTestId("ticket-verify").click();
+    expect(placedBody).toBeNull();
+    await orderBuilder.getByTestId("ticket-transmit").click();
 
-    expect(placedBody).not.toBeNull();
+    await expect.poll(() => placedBody).not.toBeNull();
     expect(placedBody?.action).toBe("BUY");
 
     const comboLegs = Array.isArray(placedBody?.legs) ? placedBody.legs as Array<Record<string, unknown>> : [];
@@ -410,13 +406,16 @@ test.describe("Ticker Search → Detail Page → Chain", () => {
 
   test("chain order builder rewrites noisy IB margin rejections into concise UI copy", async ({ page }) => {
     await page.unrouteAll({ behavior: "ignoreErrors" });
-    stubApis(page);
-    await installMockWebSocket(page, {
+    await stubApis(page, {
       AAPL: makePriceData("AAPL", 205.5, 205.4, 205.6),
-      AAPL_20260417_200_P: makePriceData("AAPL_20260417_200_P", 4.8, 4.6, 5.0),
+      [`AAPL_${EXPIRY}_200_P`]: makePriceData(`AAPL_${EXPIRY}_200_P`, 4.8, 4.6, 5.0),
     });
 
+    let placeRequests = 0;
     await page.route("**/api/orders/place", async (route) => {
+      expect(route.request().method()).toBe("POST");
+      expect(route.request().url()).toBe("http://127.0.0.1:3000/api/orders/place");
+      placeRequests += 1;
       await route.fulfill({
         status: 502,
         contentType: "application/json",
@@ -439,8 +438,10 @@ test.describe("Ticker Search → Detail Page → Chain", () => {
     await expect(orderBuilder).toBeVisible();
 
     await orderBuilder.locator(".modify-price-input").fill("4.60");
-    await orderBuilder.getByRole("button", { name: /Place Short Put/i }).click();
-    await orderBuilder.getByRole("button", { name: /^Confirm Order$/i }).click();
+    expect(placeRequests).toBe(0);
+    await orderBuilder.getByTestId("ticket-verify").click();
+    expect(placeRequests).toBe(0);
+    await orderBuilder.getByTestId("ticket-transmit").click();
 
     const error = page.locator(".toast-error:has(.order-error-summary)");
     await expect(error).toBeVisible();

@@ -66,7 +66,7 @@ const GARCH_SCANNED = {
   ],
 };
 
-type ScanCapture = { body: unknown | null };
+type ScanCapture = { body: unknown | null; url?: string; method?: string };
 
 async function stubApis(
   page: Page,
@@ -79,6 +79,8 @@ async function stubApis(
 
     if (path === "/api/leap/scan" && request.method() === "POST") {
       captures.leap.body = request.postDataJSON();
+      captures.leap.url = request.url();
+      captures.leap.method = request.method();
       state.leapScanned = true;
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(LEAP_SCANNED) });
       return;
@@ -95,6 +97,8 @@ async function stubApis(
 
     if (path === "/api/garch-convergence/scan" && request.method() === "POST") {
       captures.garch.body = request.postDataJSON();
+      captures.garch.url = request.url();
+      captures.garch.method = request.method();
       state.garchScanned = true;
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(GARCH_SCANNED) });
       return;
@@ -166,7 +170,7 @@ async function installMockWebSocket(page: Page) {
     // sockets pass through to the real implementation.
     const NativeWebSocket = window.WebSocket;
     const RelayAwareWebSocket = function (url: string | URL, protocols?: string | string[]) {
-      return String(url).includes("localhost:8765")
+      return /(?:localhost|127\.0\.0\.1):8765|\/ws(?:\?|$)/.test(String(url))
         ? (new MockWebSocket() as unknown as WebSocket)
         : new NativeWebSocket(url, protocols);
     } as unknown as typeof WebSocket;
@@ -198,6 +202,8 @@ test("LEAP tab scan-by-ticker posts the parsed list and renders the results", as
   await expect(section.getByRole("link", { name: "NVDA" })).toBeVisible();
   await expect(section.getByText("MISPRICED", { exact: true })).toBeVisible();
   expect(captures.leap.body).toEqual({ tickers: ["NVDA", "AMD"] });
+  expect(captures.leap.url).toBe(new URL("/api/leap/scan", page.url()).href);
+  expect(captures.leap.method).toBe("POST");
 });
 
 test("GARCH tab scan-by-ticker posts the parsed pair and renders the results", async ({ page }) => {
@@ -213,9 +219,12 @@ test("GARCH tab scan-by-ticker posts the parsed pair and renders the results", a
   await section.getByLabel("Ticker symbols").fill("NVDA, AMD");
   await section.getByRole("button", { name: "Scan", exact: true }).click();
 
-  await expect(section.getByText("NVDA ↔ AMD")).toBeVisible();
+  const pair = section.getByTestId("garch-row-NVDA-AMD");
+  await expect(pair.locator(".garch-pair-cell")).toContainText(/NVDA\s*→\s*AMD/);
   await expect(section.getByText("STRONG")).toBeVisible();
   expect(captures.garch.body).toEqual({ tickers: ["NVDA", "AMD"] });
+  expect(captures.garch.url).toBe(new URL("/api/garch-convergence/scan", page.url()).href);
+  expect(captures.garch.method).toBe("POST");
 });
 
 test("GARCH tab rejects an odd ticker count with a toast without posting", async ({ page }) => {
@@ -232,5 +241,6 @@ test("GARCH tab rejects an odd ticker count with a toast without posting", async
   await section.getByRole("button", { name: "Scan", exact: true }).click();
 
   await expect(page.locator(".toast-container").getByRole("alert")).toContainText("Enter pairs: an even number of tickers.");
+  await expect(section.getByRole("alert")).toHaveCount(0);
   expect(captures.garch.body).toBeNull();
 });

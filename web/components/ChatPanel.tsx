@@ -609,6 +609,7 @@ export default function ChatPanel({
           <div className="chat-composer">
             {editing ? <div className="chat-editing">Editing previous prompt<button type="button" onClick={() => { editHistoryRef.current = null; setEditing(false); setComposerDraft(""); }}>Cancel edit</button></div> : null}
             <AskComposer
+              active={isOpen}
               draft={draft}
               onModelChange={setSelectedModel}
               onStop={isBusy ? stopResponse : undefined}

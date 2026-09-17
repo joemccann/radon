@@ -88,6 +88,13 @@ function bullishReport(ticker: string, fetchedAt: string) {
 
 async function setupBaseMocks(page: Page) {
   await page.unrouteAll({ behavior: "ignoreErrors" });
+  // Isolate shell polling and the secondary informed-flow panel from live APIs.
+  // More specific test routes registered below override this fallback.
+  await page.route("**/api/**", route => route.fulfill({ status: 200, json: {} }));
+  await page.route("**/api/informed-flow/**", route => route.fulfill({
+    status: 200,
+    json: { ticker: new URL(route.request().url()).pathname.split("/").at(-1), congress_trades: [], insider_trades: [], institutional_summary: null },
+  }));
   await page.route("**/api/portfolio", (r) =>
     r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(PORTFOLIO) }),
   );
@@ -122,6 +129,7 @@ async function setupBaseMocks(page: Page) {
 test.describe("Flow Analysis per-ticker route", () => {
   test("ticker input on /flow-analysis navigates to /flow-analysis/{TICKER}", async ({ page }) => {
     await setupBaseMocks(page);
+    await page.route("**/api/flow-analysis/AAPL**", route => route.fulfill({ status: 200, json: bullishReport("AAPL", new Date().toISOString()) }));
     await page.goto("/flow-analysis");
 
     const input = page.getByTestId("flow-ticker-input-field");
@@ -236,6 +244,8 @@ test.describe("Flow Analysis per-ticker route", () => {
     await setupBaseMocks(page);
 
     let scanCalls = 0;
+    let releaseScan!: () => void;
+    const scanAllowed = new Promise<void>(resolve => { releaseScan = resolve; });
     await page.route("**/api/flow-analysis/NVDA**", async (route) => {
       const req = route.request();
       if (req.method() === "GET") {
@@ -250,8 +260,8 @@ test.describe("Flow Analysis per-ticker route", () => {
         return;
       }
       scanCalls += 1;
-      // Add a slight delay so we can observe the analyzing state
-      await new Promise((res) => setTimeout(res, 300));
+      // Hold the response until the browser has observed the loading state.
+      await scanAllowed;
       const report = bullishReport("NVDA", new Date().toISOString());
       report.verdict = { direction: "BEARISH", confidence: 60 };
       report.analysis = { signal: "STRONG", direction: "DISTRIBUTION", strength: 60 };
@@ -267,7 +277,11 @@ test.describe("Flow Analysis per-ticker route", () => {
     await page.goto("/flow-analysis/NVDA");
 
     const analyzing = page.locator(".ticker-flow-analyzing .spectral-loader__label");
-    await expect(analyzing).toContainText(/Sampling NVDA flow/i, { timeout: 5000 });
+    try {
+      await expect(analyzing).toContainText(/Sampling NVDA flow/i, { timeout: 5000 });
+    } finally {
+      releaseScan();
+    }
 
     // After scan completes, badge should resolve to BEARISH
     const badge = page.getByTestId("ticker-flow-report").locator(".ticker-flow-badge");
@@ -277,7 +291,7 @@ test.describe("Flow Analysis per-ticker route", () => {
     expect(scanCalls).toBeGreaterThanOrEqual(1);
   });
 
-  test("capacity 502 shows scan failed, not ANALYZING", async ({ page }) => {
+  test("capacity 502 shows a recovery toast without leaving the hero analyzing", async ({ page }) => {
     await setupBaseMocks(page);
     await page.route("**/api/informed-flow/**", (r) =>
       r.fulfill({
@@ -311,8 +325,9 @@ test.describe("Flow Analysis per-ticker route", () => {
     await page.goto("/flow-analysis/JOBY");
 
     const report = page.getByTestId("ticker-flow-report");
-    await expect(page.getByRole("alert")).toContainText(/Scan lane is full/i);
-    await expect(report.getByRole("status")).toContainText(/Flow report/i);
+    await expect(page.locator(".toast-container").getByRole("alert").filter({ hasText: "Scan lane is full" })).toBeVisible();
+    await expect(report.getByRole("alert")).toHaveCount(0);
+    await expect(report.locator('[role="status"][data-status="error"]')).toContainText(/Flow report/i);
     await expect(report).not.toContainText(/Analyzing JOBY/i);
   });
 

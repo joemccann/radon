@@ -67,6 +67,8 @@ function readBase64(file: File): Promise<string | null> {
 type AskComposerProps = {
   placeholder?: string;
   busy?: boolean;
+  /** Retained drawers hide notifications when their composer is closed. */
+  active?: boolean;
   onStop?: () => void;
   /** A changed id replaces the draft, including restored attachments, and focuses it. */
   draft?: { id: number; text: string; attachments?: ChatImageAttachment[] };
@@ -95,6 +97,7 @@ type AskComposerProps = {
 export default function AskComposer({
   placeholder = "Ask about your portfolio, risk, or a trade…",
   busy = false,
+  active = true,
   onStop,
   draft,
   sources = [],
@@ -321,7 +324,7 @@ export default function AskComposer({
           }}
         />
       </div>
-      {attachmentErrors.length ? (
+      {active && attachmentErrors.length ? (
         <ErrorToast message={attachmentErrors.join(" ")} />
       ) : null}
       <div className="ask-composer__rail">
