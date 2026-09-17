@@ -217,6 +217,9 @@ export default function VolSkewMrScanner({
         </div>
       ) : (
         <>
+          {rows.some(row => row.skew_path === "unknown") ? <div className="section-body" role="status">
+            Skew history unavailable for {rows.filter(row => row.skew_path === "unknown").length} of {rows.length} names. At least two dated observations for the same expiry and delta are required. Missing skew does not pass the skew gate.
+          </div> : null}
           <div className="section-body table-wrap strength-confirmation__table-wrap">
             <table>
               <thead>
@@ -250,7 +253,7 @@ export default function VolSkewMrScanner({
                     <td className="mono"><SpotChainLink row={row} /></td>
                     <td className="mono">{extensionLabel(row)}</td>
                     <td className="mono">{row.iv_path}</td>
-                    <td className="mono">{row.skew_path}</td>
+                    <td className="mono">{row.skew_path === "unknown" ? "Insufficient history" : row.skew_path}</td>
                     <td><StatusPill row={row} /></td>
                     <td className="mono">{structureLabel(row)}</td>
                     <td>
@@ -277,7 +280,7 @@ export default function VolSkewMrScanner({
                   <em>STRUCTURE</em>
                 </div>
                 <GateMap row={row} />
-                <div className="strength-card__failed">IV {row.iv_path} · SKEW {row.skew_path}</div>
+                <div className="strength-card__failed">IV {row.iv_path} · SKEW {row.skew_path === "unknown" ? "Insufficient history" : row.skew_path}</div>
               </article>
             ))}
           </div>
