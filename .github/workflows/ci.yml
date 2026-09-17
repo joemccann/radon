@@ -838,6 +838,7 @@ jobs:
           path: |
             web/test-results/**/vol-skew-missing-*.png
             web/test-results/**/vol-skew-safe-error-*.png
+            web/test-results/**/vol-skew-header-*.png
           retention-days: 7
       - name: Upload AI industry screenshots
         if: always()

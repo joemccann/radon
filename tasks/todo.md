@@ -7574,3 +7574,9 @@ Dependency graph: T1 -> T2,T3,T4 -> T5 -> T6.
 - [ ] T6 depends_on: [T5] PR, exact-head green checks and notification.
 
 Review: PR #480; GitHub first run reproduced stale copy contracts and over-broad diagnostic filtering. Preserved known service retry guidance, admin healthy measurements, broker margin rejection details and financial numbers; updated intentional user-copy expectations. CI scanner recovery cases pass at 390px and 1440px; both screenshots reviewed with retained results and readable inline retry. No local suites. Final exact-head checks and notification pending.
+
+## 2026-09-17 Vol/Skew header info bubbles
+- [x] T1 Add concise calculation-aligned help to five existing SortTh headers. depends_on: []
+- [x] T2 Add focused interaction and browser coverage, including sort isolation. depends_on: []
+- [ ] T3 Publish PR, await exact-head CI, inspect browser screenshots. depends_on: [T1, T2]
+Dependency graph: T1 + T2 -> T3. Existing Clear design and shared InfoTooltip; no calculation or layout changes.

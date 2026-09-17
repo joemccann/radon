@@ -113,6 +113,60 @@ test.describe("/scanner?mode=vol-skew-mr", () => {
   });
 });
 
+test("desktop header bubbles explain readings without sorting the table", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await stubApis(page);
+  await page.goto("/scanner?mode=vol-skew-mr");
+  const section = page.getByTestId("vol-skew-mr-section");
+  const tickerHeader = section.getByRole("columnheader", { name: "Ticker" });
+  await tickerHeader.click();
+  await tickerHeader.click();
+  const rows = section.locator("tbody tr");
+  await expect(rows.first()).toHaveAttribute("data-testid", "vol-skew-mr-row-NVDA");
+  const rowOrder = await rows.evaluateAll(elements => elements.map(element => element.getAttribute("data-testid")));
+
+  for (const [label, id, explanation] of [
+    ["Spot ext", "extension", /RSI/i],
+    ["IV path", "iv-path", /implied volatility/i],
+    ["Skew path", "skew-path", /put/i],
+    ["Verdict", "verdict", /TOP MR/i],
+    ["Structure", "structure", /spread/i],
+  ] as const) {
+    const trigger = section.getByTestId(`vol-skew-mr-${id}-tooltip`);
+    const content = section.getByTestId(`vol-skew-mr-${id}-tooltip-content`);
+    await expect(trigger).toHaveAttribute("aria-label", `${label} details`);
+    await trigger.focus();
+    await expect(content).toBeVisible();
+    await expect(content).toContainText(explanation);
+    await trigger.press("Enter");
+    await expect(tickerHeader).toHaveAttribute("aria-sort", "descending");
+    await trigger.getByRole("button").click();
+    await expect(content).toHaveCount(0);
+    await trigger.focus();
+    await expect(content).toBeVisible();
+    expect(await rows.evaluateAll(elements => elements.map(element => element.getAttribute("data-testid")))).toEqual(rowOrder);
+    await expect(tickerHeader).toHaveAttribute("aria-sort", "descending");
+    if (id === "skew-path") {
+      await testInfo.attach("vol-skew-header-info-desktop", {
+        body: await page.screenshot({ path: testInfo.outputPath("vol-skew-header-info-desktop.png") }),
+        contentType: "image/png",
+      });
+    }
+    await tickerHeader.focus();
+    await page.mouse.move(0, 0);
+    await expect(content).toHaveCount(0);
+  }
+
+  const ivHeader = section.getByRole("columnheader", { name: /^IV path/ });
+  await ivHeader.getByText("IV path", { exact: true }).click();
+  await expect(ivHeader).toHaveAttribute("aria-sort", "ascending");
+  await expect(rows.first()).toHaveAttribute("data-testid", "vol-skew-mr-row-AAPL");
+  await ivHeader.focus();
+  await ivHeader.press("Enter");
+  await expect(ivHeader).toHaveAttribute("aria-sort", "descending");
+  await expect(rows.first()).toHaveAttribute("data-testid", "vol-skew-mr-row-NVDA");
+});
+
 for (const width of [390, 1440]) {
   test(`missing skew is explained at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 1000 });
