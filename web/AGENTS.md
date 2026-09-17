@@ -65,7 +65,7 @@ Applies under `web/`. Mirrors `web/CLAUDE.md`; prefer the Claude file if it is n
 - Preserve credit/debit signs end to end. Never `Math.abs()` option values where sign matters.
 - Limit-priced ticket max-gain / max-loss are structural at the limit. Do not subtract quoted half-spread or estimated exit. A short put's max gain is the credit.
 - Daily change percent = Daily P&L / `|yesterday close value|`; never entry cost.
-- Same-day positions use entry-cost baseline: Today P&L = Total P&L = `MV - EC`; ignore `ib_daily_pnl`.
+- Same-day positions use entry-cost baseline: Today P&L = Total P&L = `MV - EC`; ignore `ib_daily_pnl`. Mixed-age combos (`basis_source: mixed`, overnight + session_fills legs) are not same-day: overnight vs close, session vs fill.
 - Entry-date fallback: blotter per-contract -> trade_log ticker/structure -> IB fills -> previous portfolio ticker/structure/expiry -> today. Never per-ticker blotter fallback.
 - `PortfolioLeg.avg_cost` is per-contract for options and per-share for stocks. Do not multiply option `avg_cost` by 100 again.
 - Journal lot-matched basis overrides IB's drifting VWAP; raw IB value is diagnostic.

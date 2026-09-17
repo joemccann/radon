@@ -102,10 +102,12 @@ function partiallyRolledVertical(
     entry_date: "2026-08-27",
     legs: [
       { direction: "LONG", contracts: 10, type: "Call", strike: 575,
-        entry_cost: 5000, avg_cost: 500, basis_source: "ib",
+        entry_cost: 5000, avg_cost: 500,
+        basis_source: basisSource === "mixed" ? "ib" : basisSource,
         market_price: 7.5, market_value: 7500 },
       { direction: "SHORT", contracts: 10, type: "Call", strike: 580,
-        entry_cost: 4000, avg_cost: 400, basis_source: "session_fills",
+        entry_cost: 4000, avg_cost: 400,
+        basis_source: basisSource === "mixed" ? "session_fills" : basisSource,
         market_price: 3.0, market_value: -3000 },
     ],
     ...overrides,
@@ -199,6 +201,7 @@ describe("PositionTable renders no basis for a `mixed` position", () => {
   const CELL_TESTIDS: Record<string, string> = {
     "P&L": "position-cell-pnl",
     "Return %": "position-cell-pnl-pct",
+    "Today P&L": "position-cell-today-pnl",
   };
 
   function cellUnder(header: string): string {
@@ -216,6 +219,17 @@ describe("PositionTable renders no basis for a `mixed` position", () => {
     render(<PositionTable positions={[MIXED]} prices={{}} />);
     expect(cellUnder("P&L")).toBe(BLENDED_PNL);
     expect(cellUnder("Return %")).toBe("N/A");
+  });
+
+  it("Today P&L does not reprint total P&L when entry_date is today", () => {
+    render(
+      <PositionTable
+        positions={[partiallyRolledVertical("mixed", { entry_date: todayET() })]}
+        prices={{}}
+      />,
+    );
+    expect(cellUnder("Today P&L")).toBe("+$1,000");
+    expect(cellUnder("P&L")).toBe(BLENDED_PNL);
   });
 
   it("still prints the P&L when every leg agrees", () => {
@@ -240,9 +254,11 @@ describe("mixed basis separates capital from measurable leg P&L", () => {
     expect(getPnlDollars(CLEAN, 4500)).toBe(3500);
   });
 
-  it("Today P&L for a same-day `mixed` position uses the measured leg sum", () => {
+  it("Today P&L for a same-day `mixed` position does not dump overnight P&L into today", () => {
     const sameDay = partiallyRolledVertical("mixed", { entry_date: todayET() });
-    expect(getTodayPnlDollars(sameDay, {})).toBe(3500);
+    // No closes: overnight long is unmeasured; session short is MV − EC = +$1,000.
+    // Total P&L is still +$3,500; that is not today's figure.
+    expect(getTodayPnlDollars(sameDay, {})).toBe(1000);
     const sameDayClean = partiallyRolledVertical("session_fills", { entry_date: todayET() });
     expect(getTodayPnlDollars(sameDayClean, {})).toBe(3500);
   });
