@@ -4,6 +4,10 @@ Frontend rules and correctness invariants for the Next.js app. Loaded automatica
 
 ---
 
+## Error presentation
+
+Request, refresh, broker, validation and action errors use `RequestError` / `ErrorToast` (or the shared toast system), never inline banners. Preserve retry and retained-data guidance. Fatal framework fallbacks, financial risk conditions and stored diagnostic records are explicit exceptions; see `docs/reviews/2026-09-17-toast-errors.md`.
+
 ## Sortable Tables
 
 Every product `<table>` uses `SortTh` + `useSort`. Structural exceptions set `data-sortable-exempt` to one of: `chain-layout`, `matrix`, `markdown`, `chrome`, `kit-demo`. Contract: `web/tests/sortable-table-contract.test.ts`.

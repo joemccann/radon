@@ -1,6 +1,6 @@
 "use client";
+import RequestError from "@/components/RequestError";
 
-import { userErrorMessage } from "@/lib/userError";
 import { BarChart3, Target, Crosshair, Shield } from "lucide-react";
 import { useAttribution } from "@/lib/useAttribution";
 import CorrelationRiskBanner from "@/components/CorrelationRiskBanner";
@@ -214,7 +214,7 @@ export default function AttributionPanel({
           <span className="pill undefined">UNAVAILABLE</span>
         </div>
         <div className="s-bd pe">
-          {userErrorMessage(error, "Attribution data not available.")}
+          {error ? <RequestError error={error} fallback="Attribution data could not be loaded. Try again." /> : "No attribution observations are available."}
         </div>
       </div>
     );

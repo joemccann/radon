@@ -1,4 +1,5 @@
 "use client";
+import ErrorToast from "@/components/ErrorToast";
 
 import { formatOrderErrorMessage } from "@/lib/orderError";
 import { userErrorMessage } from "@/lib/userError";
@@ -75,7 +76,7 @@ type TurnEvidence = { tools: AssistantToolEvent[]; model: string | null; failed?
 
 const STICK_THRESHOLD_PX = 80;
 
-function CopyButton({ content }: { content: string }) {
+function CopyButton({ content, isOpen }: { content: string; isOpen: boolean }) {
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
   const onCopy = useCallback(() => {
@@ -87,10 +88,13 @@ function CopyButton({ content }: { content: string }) {
     }).catch(() => setCopyFailed(true));
   }, [content]);
   return (
+    <>
+    {isOpen && copyFailed ? <ErrorToast message="The message could not be copied. Select the text to copy it." /> : null}
     <button type="button" className="chat-action-btn" onClick={onCopy} aria-label="Copy message">
       {copied ? <Check size={11} /> : <Copy size={11} />}
-      {copyFailed ? "Select text to copy" : copied ? "Copied" : "Copy"}
+      {copied ? "Copied" : "Copy"}
     </button>
+    </>
   );
 }
 
@@ -356,6 +360,14 @@ export default function ChatPanel({
         setEvidence((current) => ({ ...current, [assistantId]: { tools: turn.toolEvents, model: turn.model, failed: turn.failed } }));
         setTurnTools(turn.toolEvents);
         setTurnModel(turn.model);
+        // Failed turns belong only in the toast. Passing an empty string to
+        // streamMessage would synthesize its PI-command empty-output fallback.
+        if (turn.failed) {
+          setLastError(userErrorMessage(turn.content, assistantErrorMessage()));
+          setConsecutiveFailures((n) => n + 1);
+          setStatus("error");
+          return;
+        }
         setStatus("streaming");
         await streamMessage(assistantId, turn.content, setMessages, {
           signal: controller.signal,
@@ -363,11 +375,6 @@ export default function ChatPanel({
         // F7: never auto-execute. A destructive order proposal is surfaced as
         // a confirm card the operator must explicitly accept.
         if (controller.signal.aborted) return;
-        if (turn.failed) {
-          setConsecutiveFailures((n) => n + 1);
-          setStatus("error");
-          return;
-        }
         if (turn.proposal) {
           setProposal(turn.proposal);
         }
@@ -385,18 +392,14 @@ export default function ChatPanel({
           : isPiCommand
             ? "Unexpected PI command error."
             : assistantErrorMessage();
-      const fallbackContent = isPiCommand
-        ? `PI command failed to run in this session.\n\nFallback note: ${errorMessage}`
-        : errorMessage;
+      const fallbackContent = "";
 
       setMessages((current) =>
         current.map((message) =>
           message.id === assistantId ? { ...message, content: fallbackContent } : message,
         ),
       );
-      // The transcript already carries assistant failures. Keep the separate
-      // error rail for PI commands and order placement so copy is said once.
-      setLastError(isPiCommand ? errorMessage : "");
+      setLastError(errorMessage);
       setConsecutiveFailures((n) => n + 1);
       setStatus("error");
     } finally {
@@ -425,13 +428,13 @@ export default function ChatPanel({
     setLastError("");
     try {
       const result = await placeProposedOrder(proposal);
-      setMessages((current) => [
+      if (result.ok) setMessages((current) => [
         ...current,
         {
           id: `a-${Date.now()}-order`,
           role: "assistant",
           timestamp: createTimestamp(),
-          content: result.ok ? result.message : `Order failed: ${formatOrderErrorMessage(result.message)}`,
+          content: result.message,
         },
       ]);
       if (!result.ok) setLastError(formatOrderErrorMessage(result.message));
@@ -540,8 +543,8 @@ export default function ChatPanel({
                   {!isStreamingThis && meta?.tools.length ? <details className="chat-evidence"><summary>Activity · {meta.tools.length} tool {meta.tools.length === 1 ? "call" : "calls"}</summary>
                     <ol>{buildTurnSteps(meta.tools, "done").map((step) => <li key={step.id}><span>{step.label}</span><span>{step.meta}</span></li>)}</ol>
                   </details> : null}
-                  {isAssistant && message.content && !isBusy ? <div className="chat-actions">
-                    <CopyButton content={message.content} />
+                  {isAssistant && (message.content || meta?.failed) && !isBusy ? <div className="chat-actions">
+                    {message.content ? <CopyButton content={message.content} isOpen={isOpen} /> : null}
                     {isCurrent && requestRef.current ? <button type="button" className="chat-action-btn" onClick={retry} disabled={isPlacing}><RotateCcw size={14} />{meta?.failed || meta?.stopped ? "Try again" : "Regenerate"}</button> : null}
                     {meta?.model ? <span className="chat-response-model">{meta.model}</span> : null}
                     {meta?.stopped && message.content !== "Response stopped." ? <span className="chat-response-model">Response stopped</span> : null}
@@ -565,13 +568,10 @@ export default function ChatPanel({
           {messages.length ? <button type="button" className="chat-jump-btn" data-hidden={!showJump} onClick={jumpToBottom} aria-label="Scroll to latest" tabIndex={showJump ? 0 : -1}><ArrowDown size={14} />Latest</button> : null}
         </div>
 
-          {consecutiveFailures >= DEGRADED_AFTER_FAILURES ? (
-            <div className="chat-degraded" role="status">
-              {`The assistant has failed ${consecutiveFailures} turns in a row. The provider or the backend is degraded; retrying will not help until it recovers.`}
-            </div>
-          ) : null}
-
-          {lastError ? <div className="chat-error">{lastError}</div> : null}
+          {isOpen && lastError ? <ErrorToast message={<>
+            <div>{lastError}</div>
+            {consecutiveFailures >= DEGRADED_AFTER_FAILURES ? <div>{`The assistant has failed ${consecutiveFailures} turns in a row. The provider or the backend is degraded; retrying will not help until it recovers.`}</div> : null}
+          </>} /> : null}
 
           {/* F7: never auto-execute. TODO(agent-ui): when the assistant returns
               sized alternatives (split clips, hold), map them into `options` and
@@ -611,6 +611,7 @@ export default function ChatPanel({
           <div className="chat-composer">
             {editing ? <div className="chat-editing">Editing previous prompt<button type="button" onClick={() => { editHistoryRef.current = null; setEditing(false); setComposerDraft(""); }}>Cancel edit</button></div> : null}
             <AskComposer
+              active={isOpen}
               draft={draft}
               onModelChange={setSelectedModel}
               onStop={isBusy ? stopResponse : undefined}

@@ -161,7 +161,7 @@ describe("TickerFlowReport — pending is dated, not faulted (R-464 / R-465)", (
     expect(screen.getByTestId("flow-hero-stale").textContent).toContain("LAST GOOD SCAN");
     expect(screen.getByTestId("flow-hero-pending").textContent).toMatch(/still running/i);
     expect(screen.queryByText(/API unavailable/i)).toBeNull();
-    expect(screen.getByRole("status").getAttribute("data-status")).toBe("pending");
+    expect(screen.getAllByRole("status").find((node) => node.hasAttribute("data-status"))?.getAttribute("data-status")).toBe("pending");
   });
 
   it("keeps the Refresh control parked while the server scan is running", async () => {

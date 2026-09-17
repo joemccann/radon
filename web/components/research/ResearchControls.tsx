@@ -1,4 +1,5 @@
 "use client";
+import RequestError from "@/components/RequestError";
 import { userErrorMessage } from "@/lib/userError";
 import { useEffect, useState } from "react";
 import ResearchReliability from "./ResearchReliability";
@@ -33,7 +34,7 @@ export default function ResearchControls() {
     return () => controller.abort();
   }, [attempt]);
   return <section><h2>Execution controls & evidence</h2><p className={styles.muted}>Research prepares context. Existing authentication, risk checks, and explicit order confirmation govern execution.</p>
-    {error ? <p role="alert" className={styles.error}>{userErrorMessage(error, "Data could not be loaded. Try again.")} <button className={styles.button} onClick={() => setAttempt((value) => value + 1)}>Retry audit</button></p> : null}
+    {error ? <RequestError error={error} onRetry={() => setAttempt((value) => value + 1)} /> : null}
     {!report && !error ? <p role="status">Loading policy and audit evidence…</p> : null}
     {report ? <><div className={styles.sectionHead}><span className={styles.meta}>Generated {report.generatedAt}</span><a className={styles.button} href="/api/research/governance?download=1" download>Download audit JSON</a></div>
       <div className={styles.tableWrap}><table><thead><tr>{([['surface','Surface / roles'],['action','Action'],['control','Enforced control']] as const).map(([key,label]) => <SortTh key={key} label={label} sortKey={key} activeKey={sort.key} direction={sort.direction} onToggle={toggle} />)}</tr></thead><tbody>{sorted.map((policy) => <tr key={policy.surface}><td>{policy.surface}<span className={styles.meta}>{policy.roles.join(", ")}</span></td><td>{policy.action}</td><td>{policy.control}</td></tr>)}</tbody></table></div>

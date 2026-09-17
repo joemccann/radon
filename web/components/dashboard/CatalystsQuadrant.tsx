@@ -1,4 +1,5 @@
 "use client";
+import ErrorToast from "@/components/ErrorToast";
 
 import { userErrorMessage } from "@/lib/userError";
 import { useCallback, useMemo, useState } from "react";
@@ -152,7 +153,7 @@ export default function CatalystsQuadrant({ positionTickers }: Props) {
       {isLoading ? (
         <div className="news-feed-empty">Loading catalysts…</div>
       ) : error ? (
-        <div className="news-feed-error">{userErrorMessage(error, 'Catalysts could not be loaded. Try again.')}</div>
+        <ErrorToast message={userErrorMessage(error, 'Catalysts could not be loaded. Try again.')} />
       ) : upcomingCount === 0 ? (
         <div className="news-feed-empty">No upcoming catalysts in the current snapshot.</div>
       ) : (

@@ -1,6 +1,7 @@
 "use client";
 
-import { userErrorMessage } from "@/lib/userError";
+import RequestError from "@/components/RequestError";
+
 import { useState } from "react";
 import type {
   ServiceAction,
@@ -107,13 +108,14 @@ export default function ServiceControlPanel({
         <header className="admin-card-header">
           <span className="admin-card-title">Service Control</span>
         </header>
-        <p className="admin-card-empty admin-card-error">{userErrorMessage(error, 'Service status could not be loaded. Try again.')}</p>
+        <RequestError error={error} fallback="Service status could not be loaded. Try again." />
       </section>
     );
   }
 
   return (
     <section className="admin-card" data-testid="services-card">
+      <RequestError error={error} fallback="Service status could not be refreshed. Try again." retainedData={services != null} />
       <header className="admin-card-header">
         <span className="admin-card-title">Service Control</span>
       </header>

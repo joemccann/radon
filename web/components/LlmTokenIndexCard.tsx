@@ -1,4 +1,5 @@
 "use client";
+import RequestError from "@/components/RequestError";
 
 /** Preserved v1 inference price history. Membership and price direction do not establish scarcity. */
 
@@ -135,9 +136,7 @@ export default function LlmTokenIndexCard() {
       )}
 
       {error && !data && (
-        <div className="regime-empty" data-testid="llm-token-index-error">
-          {userErrorMessage(error, "The LLM Token Index could not be loaded. Try again.")}
-        </div>
+        <RequestError error={error} testId="llm-token-index-error" />
       )}
 
       {data && rows.length === 0 && (

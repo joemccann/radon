@@ -1,6 +1,6 @@
 "use client";
+import RequestError from "@/components/RequestError";
 
-import { userErrorMessage } from "@/lib/userError";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, AlertTriangle, TrendingDown, TrendingUp } from "lucide-react";
 import { MarketState } from "@/lib/useMarketHours";
@@ -419,7 +419,7 @@ export default function GammaRotationPanel({ marketState }: GammaRotationPanelPr
           <div className="section-title"><Activity size={14} /> Gamma Rotation Gap</div>
         </div>
         <div className="section-body" style={{ padding: "16px" }}>
-          <div className="alert-item bearish">{userErrorMessage(error, 'Gamma rotation data could not be loaded. Try again.')}</div>
+          <RequestError error={error} fallback="Gamma rotation data could not be loaded. Try again." />
         </div>
       </div>
     );

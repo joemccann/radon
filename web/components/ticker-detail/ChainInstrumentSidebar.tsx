@@ -1,5 +1,7 @@
 "use client";
 
+import RequestError from "@/components/RequestError";
+
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, BookOpen, ChevronDown, Layers, Newspaper, Table2 } from "lucide-react";
@@ -34,6 +36,7 @@ const MORE_VIEWS: { key: DeckKey | null; label: string }[] = [
 
 export default function ChainInstrumentSidebar({ ticker, position, underlyingQuote, heldQuote, activeDeck = "c", onDeckChange }: Props) {
   const { isWatched, toggleWatch } = useWatchlist();
+  const [watchError, setWatchError] = useState<unknown>(null);
   const [watchBusy, setWatchBusy] = useState(false);
   const moreRef = useRef<HTMLDetailsElement>(null);
   const moreSummaryRef = useRef<HTMLElement>(null);
@@ -55,12 +58,14 @@ export default function ChainInstrumentSidebar({ ticker, position, underlyingQuo
   const held = buildQuoteTelemetryModel(heldQuote.priceData, null, now);
   const toggle = async () => {
     setWatchBusy(true);
-    try { await toggleWatch(ticker); } catch { /* Hook rolls back failed updates. */ }
+    setWatchError(null);
+    try { await toggleWatch(ticker); } catch (error) { setWatchError(error); }
     finally { setWatchBusy(false); }
   };
 
   return (
     <aside className={styles.sidebar} data-testid="chain-instrument-sidebar" aria-label={`${ticker} instrument`}>
+      <RequestError error={watchError} fallback="The watchlist could not be updated. Try again." />
       <Link href="/portfolio" className={styles.back}><ArrowLeft size={14} /> Positions</Link>
       <div className={styles.identity}>
         <h1>{ticker}</h1>

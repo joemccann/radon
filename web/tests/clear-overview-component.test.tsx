@@ -81,12 +81,15 @@ describe("Clear account history interaction", () => {
   });
 
   it("reserves loading geometry and exposes missing history without fake curves", () => {
-    const { rerender } = render(<AccountHistory data={null} loading />);
+    const { container, rerender } = render(<AccountHistory data={null} loading />);
     expect(screen.getByText("Loading account history")).toBeDefined();
     expect(screen.queryByRole("slider")).toBeNull();
-    rerender(<AccountHistory data={null} error="Unavailable" />);
+    rerender(<AccountHistory data={null} error="TypeError: internal history failure" />);
     expect(screen.getByText("Account history unavailable")).toBeDefined();
-    expect(screen.getByText(/could not be reached/)).toBeDefined();
+    expect(screen.getByRole("alert").textContent).toContain("could not be reached");
+    expect(screen.getByRole("alert").textContent).not.toContain("TypeError");
+    expect(screen.getByRole("alert").closest("#radon-toast-viewport")).not.toBeNull();
+    expect(container.querySelector('[role="alert"]')).toBeNull();
     expect(screen.getByRole("link", { name: /View performance details/ }).getAttribute("href")).toBe("/performance");
   });
 });

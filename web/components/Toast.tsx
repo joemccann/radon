@@ -3,6 +3,7 @@
 import { formatOrderErrorMessage } from "@/lib/orderError";
 import { userErrorMessage } from "@/lib/userError";
 import { X } from "lucide-react";
+import ToastViewport from "@/components/ToastViewport";
 import type { Toast } from "@/lib/useToast";
 
 type ToastContainerProps = {
@@ -15,17 +16,12 @@ export default function ToastContainer({ toasts, exitingIds, onDismiss }: ToastC
   if (toasts.length === 0) return null;
 
   return (
-    <div
-      className="toast-container"
-      role="status"
-      aria-live="polite"
-      aria-atomic="true"
-    >
+    <ToastViewport>
       {toasts.map((toast) => (
         <div
           key={toast.id}
           className={`toast toast-${toast.type}${exitingIds.has(toast.id) ? " toast--exiting" : ""}`}
-          role={toast.type === "error" ? "alert" : undefined}
+          role={toast.type === "error" ? "alert" : "status"}
         >
           <span className="toast-message">{toast.type === "error" ? /\b(order|IB)\b/i.test(toast.message) ? formatOrderErrorMessage(toast.message) : userErrorMessage(toast.message) : toast.message}</span>
           <button type="button" className="toast-close" onClick={() => onDismiss(toast.id)} aria-label="Dismiss">
@@ -33,6 +29,6 @@ export default function ToastContainer({ toasts, exitingIds, onDismiss }: ToastC
           </button>
         </div>
       ))}
-    </div>
+    </ToastViewport>
   );
 }

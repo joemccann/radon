@@ -245,8 +245,8 @@ describe("ScannerHero reads the missing flag", () => {
     const { container } = render(<ScannerHero />);
     openConeTab();
 
-    expect(container.textContent).toContain("Vol cone data unavailable");
-    expect(screen.getByRole("alert").textContent).toContain("outage, not an empty result");
+    expect(screen.getByRole("alert").textContent).toContain("Vol cone data is unavailable. The last scan produced no payload.");
+    expect(container.contains(screen.getByRole("alert"))).toBe(false);
     // The benign "scan found nothing" copy must NOT be what an outage renders.
     expect(screen.queryByText(/No cheap vol cones/)).toBeNull();
   });
@@ -272,7 +272,9 @@ describe("VolConePanel can render a fault", () => {
     mockUseVolCone.mockReturnValue(idle<VolConeData>({ error: "fetch failed" }));
     const { container } = render(<VolConePanel />);
 
-    expect(container.textContent).toContain("Unable to connect");
+    expect(screen.getByRole("alert").textContent).toContain("Unable to connect");
+    expect(container.contains(screen.getByRole("alert"))).toBe(false);
+    expect(screen.getByRole("button", { name: "Refresh" })).toBeTruthy();
     expect(container.textContent).not.toContain("Data appears after the first successful pull");
   });
 
@@ -280,7 +282,9 @@ describe("VolConePanel can render a fault", () => {
     mockUseVolCone.mockReturnValue(idle<VolConeData>({ error: "fetch failed" }));
     const { container } = render(<VolConePanel />);
 
-    expect(container.textContent).toContain("Unable to connect");
+    expect(screen.getByRole("alert").textContent).toContain("Unable to connect");
+    expect(container.contains(screen.getByRole("alert"))).toBe(false);
+    expect(screen.getByRole("button", { name: "Refresh" })).toBeTruthy();
   });
 });
 
@@ -314,9 +318,9 @@ describe("Panels surface a failed refresh behind a cached payload", () => {
     expect(container.querySelector("[data-testid='options-exposure-panel']")).toBeTruthy();
     expect(screen.getByRole("table", { name: /options exposure by strike/i })).toBeTruthy();
     // ... and it is labelled as stale, carrying the reason.
-    const flag = screen.getByText("REFRESH FAILED");
-    expect(flag.getAttribute("title")).toBe("fetch failed");
-    expect(flag.getAttribute("role")).toBe("status");
+    const flag = screen.getByRole("alert");
+    expect(flag.textContent).toContain("Showing the last available data");
+    expect(flag.closest("[data-toast-viewport]")).toBeTruthy();
   });
 });
 

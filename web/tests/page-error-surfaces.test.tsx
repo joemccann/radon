@@ -9,11 +9,11 @@ const raw = JSON.stringify({ scan_succeeded: false, error: "Radon API 502: Subpr
 afterEach(cleanup);
 
 describe("non-scanner error presentation", () => {
-  it("does not leak the failed response through refresh tooltips", () => {
+  it("shows refresh failures as safe toasts without an inline footprint", () => {
     const { container } = render(<PanelRefreshError error={raw} />);
-    expect(screen.getByTestId("panel-refresh-error").getAttribute("title")).toBe("This service is busy. Please try again shortly.");
-    expect(container.innerHTML).not.toContain("Subprocess");
-    expect(screen.getByText("REFRESH FAILED")).toBeTruthy();
+    expect(screen.getByTestId("panel-refresh-error").textContent).toContain("This service is busy. Please try again shortly.");
+    expect(container.innerHTML).toBe("");
+    expect(screen.getByRole("alert").textContent).toContain("Showing the last available data");
   });
   it("keeps the existing gateway error surface with recovery copy", () => {
     const { container } = render(<IbGatewayCard health={null} loading={false} error={raw} />);

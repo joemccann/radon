@@ -363,9 +363,11 @@ describe("PreferencesSection", () => {
     expect(mocks.savePreference).not.toHaveBeenCalled();
   });
 
-  it("16. an unavailable store renders the banner and disables every control", async () => {
+  it("16. an unavailable store toasts and disables every control", async () => {
     await renderSection(payload({ store: { available: false, error: "HranaHttpError: down", checked_at: null } }));
-    expect(screen.getByTestId("preferences-store-banner")).toBeTruthy();
+    const notice = await screen.findByTestId("preferences-store-banner");
+    expect(notice.closest("[data-toast-viewport]")).not.toBeNull();
+    expect(screen.getByTestId("preferences-section").contains(notice)).toBe(false);
     for (const key of ["RADON_MAX_ORDER_QTY", "RADON_MAX_ORDER_NOTIONAL", "RADON_KB_EMBED_DISABLED"]) {
       expect((screen.getByTestId(`preference-save-${key}`) as HTMLButtonElement).disabled).toBe(true);
       expect((screen.getByTestId(`preference-reset-${key}`) as HTMLButtonElement).disabled).toBe(true);

@@ -1,4 +1,6 @@
 "use client";
+import RequestError from "@/components/RequestError";
+import ErrorToast from "@/components/ErrorToast";
 
 import { userErrorMessage } from "@/lib/userError";
 import { useState } from "react";
@@ -181,26 +183,15 @@ export function AlertsPanel() {
       </form>
 
       {formError ? (
-        <div className="snapshot-card__error" role="alert">
-          {formError}
-        </div>
+        <ErrorToast message={formError} />
       ) : null}
 
       <div role="status" aria-live="polite" aria-atomic="true">
-        {deleteError ? <div className="snapshot-card__error">{deleteError}</div> : null}
+        {deleteError ? <ErrorToast message={deleteError} /> : null}
         {isLoading ? (
           <div className="snapshot-card__empty">Loading rules</div>
         ) : error ? (
-          <div className="snapshot-card__error">
-            {userErrorMessage(error, "Data could not be loaded. Try again.")}
-            <button
-              type="button"
-              className="snapshot-card__see-all snapshot-card__see-all--action alerts-error__retry"
-              onClick={() => void retry()}
-            >
-              Retry
-            </button>
-          </div>
+          <RequestError error={error} onRetry={() => void retry()} />
         ) : rules.length === 0 ? (
           <div className="snapshot-card__empty">No alert rules yet. Add one above, e.g. AAPL Flow Strength &gt; 70.</div>
         ) : (

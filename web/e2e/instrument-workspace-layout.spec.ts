@@ -231,7 +231,7 @@ for (const theme of ["light", "dark"] as const) {
       await sidebar.getByRole("button", { name: /^Position\b/ }).click();
       await expectDeckUrl(page, "p");
       await sidebar.getByRole("button", { name: /^News\b/ }).click();
-      if (state === "error") await expect(page.locator(".asset-deck-body .tab-error")).toHaveText("News provider is temporarily unavailable");
+      if (state === "error") await expect(page.locator(".toast-error .toast-message").filter({ hasText: "News provider is temporarily unavailable" })).toContainText("News provider is temporarily unavailable");
       else await expect(page.locator(".news-item")).toHaveCount(30);
       await expectFullDeck(page);
       expect(await sidebar.boundingBox()).toEqual(originalSidebar);

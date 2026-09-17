@@ -1,4 +1,5 @@
 "use client";
+import RequestError from "@/components/RequestError";
 
 import { userErrorMessage } from "@/lib/userError";
 import { useEffect, useMemo, useState } from "react";
@@ -59,14 +60,14 @@ function MeasurementState({
   message,
   onRetry,
 }: {
-  kind: "error" | "empty";
+  kind: "empty";
   label: string;
   message: string;
   onRetry?: () => void;
 }) {
   return (
     <section className={styles.panel} data-testid="rv-ratio-panel" aria-label="Relative vol ratio">
-      <div className={styles.state} role={kind === "error" ? "alert" : "status"}>
+      <div className={styles.state} role="status">
         <span className={styles.stateLabel}>{label}</span>
         <p>{message}</p>
         {onRetry ? (
@@ -117,12 +118,7 @@ export default function RvRatioPanel({ symbol }: RvRatioPanelProps) {
   }
   if (error && !data) {
     return (
-      <MeasurementState
-        kind="error"
-        label="MEASUREMENT FAULT"
-        message={userErrorMessage(error, "Volatility history could not be loaded. Try again.")}
-        onRetry={() => void refresh()}
-      />
+      <><RequestError error={error} /><MeasurementState kind="empty" label="RELATIVE VOLATILITY" message="No current measurements to display." onRetry={() => void refresh()} /></>
     );
   }
   if (!data) {
@@ -142,6 +138,7 @@ export default function RvRatioPanel({ symbol }: RvRatioPanelProps) {
       data-testid="rv-ratio-panel"
       aria-labelledby="rv-ratio-heading"
     >
+      {error && <RequestError error={error} retainedData />}
       <header className={styles.header}>
         <div>
           <div className={styles.eyebrow}>OPTIONS / RELATIVE VOL</div>

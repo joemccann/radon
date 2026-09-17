@@ -132,10 +132,11 @@ describe("GexPanel", () => {
   it("renders error message in alert-item bearish card", () => {
     mockUseGex.mockReturnValue({ data: null, loading: false, error: "UW API down", lastSync: null, syncing: false, syncNow: vi.fn() });
     const { container } = render(<GexPanel />);
-    expect(container.textContent).toContain("UW API down");
-    const alertEl = container.querySelector(".alert-item.bearish");
-    expect(alertEl).not.toBeNull();
-    expect(alertEl?.textContent).toContain("UW API down");
+    const alertEl = screen.getByRole("alert");
+    expect(alertEl.textContent).toContain("UW API down");
+    expect(alertEl.closest("[data-toast-viewport]")).toBeTruthy();
+    expect(container.contains(alertEl)).toBe(false);
+    expect(container.textContent).not.toContain("UW API down");
   });
 
   it("renders ticker and date in header", () => {

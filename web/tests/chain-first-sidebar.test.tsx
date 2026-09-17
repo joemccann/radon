@@ -52,6 +52,17 @@ afterEach(() => {
 });
 
 describe("chain-first instrument context", () => {
+  it("shows a failed watchlist mutation only in the toast viewport", async () => {
+    watchlist.toggleWatch.mockRejectedValueOnce(new Error("TypeError: internal failure"));
+    const { container } = sidebar();
+    const star = screen.getByTestId("star-toggle") as HTMLButtonElement;
+    await act(async () => { fireEvent.click(star); });
+    expect(watchlist.toggleWatch).toHaveBeenCalledExactlyOnceWith("NVDA");
+    expect(star.disabled).toBe(false);
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(document.querySelector('#radon-toast-viewport [role="alert"]')?.textContent).toContain("watchlist could not be updated");
+  });
+
   it("keeps the underlying last/day separate from the signed held spread mark", () => {
     sidebar();
     const underlying = screen.getByTestId("chain-underlying-quote");

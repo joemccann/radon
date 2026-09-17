@@ -53,10 +53,10 @@ describe("ticker flow report capacity 502", () => {
     render(<TickerFlowReport ticker="JOBY" />);
 
     expect(screen.queryByText(/Analyzing JOBY/i)).toBeNull();
-    expect(screen.getByRole("alert").textContent).toBe(
+    expect(screen.getByRole("alert").textContent).toContain(
       "Scan lane is full. Wait a moment and refresh.",
     );
-    expect(screen.getByRole("status").textContent).toMatch(/Scan failed/i);
+    expect(screen.getByRole("status").textContent).toMatch(/Flow report/i);
   });
 });
 
@@ -98,7 +98,7 @@ describe("TickerFlowReport hero — a preserved verdict is marked stale", () => 
 
   it("names the Retry-After the route set", () => {
     renderWith({ data: CACHED, status: "error", error: "Too Many Requests retry-after: 30" });
-    expect(screen.getByTestId("flow-hero-stale-note").textContent).toContain("30s");
+    expect(screen.getByRole("alert").textContent).toContain("30s");
   });
 
   it("marks the hero for a degraded POST that returned 200", () => {

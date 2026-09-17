@@ -1,4 +1,5 @@
 "use client";
+import ErrorToast from "@/components/ErrorToast";
 
 import { userErrorMessage } from "@/lib/userError";
 import { Download, Share2, X } from "lucide-react";
@@ -161,20 +162,7 @@ export default function ShareReportModal({
         {sharing ? "Generating…" : buttonLabel}
       </button>
       {shareError && (
-        <div
-          style={{
-            margin: "8px 12px",
-            padding: "7px 10px",
-            border: "1px solid var(--negative)",
-            borderRadius: "3px",
-            background: "color-mix(in srgb, var(--negative) 6%, transparent)",
-            fontFamily: "var(--font-mono, monospace)",
-            fontSize: "var(--text-meta)",
-            color: "var(--negative)",
-          }}
-        >
-          {shareError}
-        </div>
+        <ErrorToast message={shareError} />
       )}
       {dialogOpen && (
         <div

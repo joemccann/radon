@@ -61,7 +61,15 @@ for (const viewport of [
 
     if (mobile) {
       await page.getByTestId(`mobile-order-single-${ORDER.permId}`).click();
-      await page.getByTestId("mobile-order-action-modify").click();
+      const modifyAction = page.getByTestId("mobile-order-action-modify");
+      await expect(modifyAction).toBeVisible();
+      const toastStack = page.locator("[data-toast-viewport]");
+      if (await toastStack.isVisible()) {
+        const toastBounds = await toastStack.boundingBox();
+        const actionBounds = await modifyAction.boundingBox();
+        expect(toastBounds!.y + toastBounds!.height).toBeLessThan(actionBounds!.y);
+      }
+      await modifyAction.click();
     } else {
       const row = page.locator("tbody tr").filter({ hasText: "SNDK" }).first();
       await row.getByRole("button", { name: "MODIFY", exact: true }).click();

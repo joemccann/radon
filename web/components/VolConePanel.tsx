@@ -150,7 +150,7 @@ function RowAsOfMarker({ name }: { name: VolConeName }) {
 }
 
 export default function VolConePanel() {
-  const { data, loading, syncing, lastSync, error } = useVolCone();
+  const { data, loading, syncing, lastSync, error, syncNow } = useVolCone();
   const { isMobile, hasMounted } = useViewport();
   const compact = hasMounted && isMobile;
 
@@ -184,7 +184,7 @@ export default function VolConePanel() {
     return <SpectralLoader label="Loading UW vol cone scan" />;
   }
 
-  if (error && !data) return <RequestError error={error} />;
+  if (error && !data) return <><RequestError error={error} /><SectionEmptyState icon={Cone} headline="Volatility cone" secondary="No current scan to display." action={{ label: "Refresh", onClick: syncNow }} /></>;
 
   if (!data || data.missing || !data.current) {
     return (

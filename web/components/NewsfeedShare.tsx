@@ -1,4 +1,5 @@
 "use client";
+import ErrorToast from "@/components/ErrorToast";
 
 import { userErrorMessage } from "@/lib/userError";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
@@ -123,7 +124,7 @@ function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: s
       <div className={styles.preview}>
         {/* Local blob generated on demand; next/image cannot optimize it. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        {preview ? <img src={preview} alt={`Portrait share preview: ${sanitizeShareText(post.title)}`} /> : <span>{error ? "Preview unavailable" : "Preparing preview…"}</span>}
+        {preview ? <img src={preview} alt={`Portrait share preview: ${sanitizeShareText(post.title)}`} /> : <span>{error ? "" : "Preparing preview…"}</span>}
       </div>
       <div className={styles.actions}>
         <a className={styles.action} href={buildXShareUrl(caption)} target="_blank" rel="noopener noreferrer">Compose on X</a>
@@ -137,8 +138,8 @@ function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: s
     <textarea id={id} disabled={rewriting} value={caption} onChange={event => setCaption(event.target.value)} rows={4} />
     <div className={styles.captionActions}><button type="button" disabled={rewriting} onClick={() => void copyCaption()}>Copy caption</button><span>{Array.from(caption).length} characters · edit to fit X</span></div>
     <p className={styles.note}>The image and video use the preview copy. Caption edits apply only to your post.</p>
-    {voiceError ? <div role="alert" className={styles.error}>{voiceError} <button type="button" disabled={busy || rewriting} onClick={() => setVoiceAttempt(value => value + 1)}>Retry voice rewrite</button></div> : null}
-    {error ? <div role="alert" className={styles.error}>{error} <button type="button" disabled={busy} onClick={() => { setError(""); setAttempt(value => value + 1); }}>Retry</button></div> : null}
+    {voiceError ? <ErrorToast message={voiceError} onRetry={busy || rewriting ? undefined : () => setVoiceAttempt(value => value + 1)} /> : null}
+    {error ? <ErrorToast message={error} onRetry={busy ? undefined : () => { setError(""); setAttempt(value => value + 1); }} /> : null}
     <p role="status" className={styles.status}>{rewriting ? "Writing in your voice…" : message || (busy ? "Creating your video. Keep this panel open." : "")}</p>
   </section>;
 }

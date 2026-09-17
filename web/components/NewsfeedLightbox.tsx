@@ -109,8 +109,6 @@ export default function NewsfeedLightbox({
           thumbnail: post.images?.[0] ?? focus.imageUrl,
         },
       });
-    } catch {
-      // hook already rolled back the optimistic state
     } finally {
       setBookmarkBusy(false);
     }

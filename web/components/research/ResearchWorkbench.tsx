@@ -1,4 +1,6 @@
 "use client";
+import RequestError from "@/components/RequestError";
+import ErrorToast from "@/components/ErrorToast";
 
 import { userErrorMessage } from "@/lib/userError";
 import { useMemo, useRef, useState, type FormEvent } from "react";
@@ -66,25 +68,28 @@ function SourceForm({ onAdd }: { onAdd: (document: SourceDocument) => void }) {
     }} /></label>
     <label className={styles.field}>Source text<textarea ref={textRef} name="text" rows={8} required maxLength={250000} placeholder="Paste the exact filing, transcript, desk note, or deal email passage." /></label>
     <span className={styles.meta}>Text stays in this page until you export it. Reloading clears this workspace. Evidence exports contain sources and facts; model assumptions and the analysis date stay on this page.</span>
-    {error ? <p role="alert" className={styles.error}>{error}</p> : null}
+    {error ? <ErrorToast message={error} /> : null}
     <button className={styles.primary} type="submit">Add source</button>
   </form>;
 }
 function FeedSources({ onAdd }: { onAdd: (document: SourceDocument) => void }) {
   const { posts, loading, error, refresh } = useNewsfeedPosts();
   const [message, setMessage] = useState<string | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
   const candidates = posts.filter((post) => post.content?.trim()).slice(0, 30);
   function add(post: NormalisedPost) {
+    setImportError(null);
     try {
       onAdd(createSourceDocument({ id: `feed-${post.id}`, title: `Feed summary: ${post.title}`, url: post.href,
         publishedAt: post.source?.documentDate ?? post.isoTimestamp.slice(0, 10), kind: "desk-note", ticker: null, text: post.content }));
       setMessage(`Imported ${post.title}. Feed summaries retain their source attribution; verify against the original document.`);
-    } catch (reason) { setMessage(userErrorMessage(reason, "Feed source could not be imported.")); }
+    } catch (reason) { setImportError(userErrorMessage(reason, "Feed source could not be imported.")); }
   }
   return <div>{loading ? <p role="status">Loading research feed…</p> : null}
-    {error ? <p className={styles.error}>Feed unavailable: {userErrorMessage(error, "The feed could not be loaded. Try again.")} <button className={styles.button} onClick={() => void refresh()}>Retry feed</button></p> : null}
+    {error ? <RequestError error={error} onRetry={() => void refresh()} /> : null}
     {!loading && candidates.length === 0 ? <p className={styles.muted}>No textual notes are available in the current feed. Add a source passage above.</p> : null}
     <ul className={styles.sourceList}>{candidates.map((post) => <li key={post.id}><span>{post.title}</span><span className={styles.meta}>{post.source?.publisher ?? "Market Ear"} · {post.isoTimestamp.slice(0, 10)}</span><button className={styles.button} onClick={() => add(post)}>Import note</button></li>)}</ul>
+    {importError ? <ErrorToast message={importError} /> : null}
     {message ? <p role="status">{message}</p> : null}</div>;
 }
 function Fundamentals({ workspace, onInspect, asOf }: { workspace: ResearchWorkspace; onInspect: (id: string) => void; asOf: string }) {
@@ -145,7 +150,7 @@ export default function ResearchWorkbench({ portfolio }: { portfolio?: Portfolio
       <div className={styles.actions}><button className={styles.button} onClick={() => fileRef.current?.click()}>Import evidence</button><button className={styles.button} disabled={!workspace.documents.length} onClick={() => download("json")}>Save evidence</button></div>
       <input ref={fileRef} type="file" accept="application/json,.json" hidden aria-label="Import workspace JSON" onChange={(event) => void importFile(event.target.files?.[0])} />
     </header>
-    {error ? <p className={`${styles.status} ${styles.error}`} role="alert">{error}</p> : null}
+    {error ? <ErrorToast message={error} /> : null}
     {notice ? <p className={styles.status} role="status">{notice}</p> : null}
     <div className={styles.layout}><aside className={styles.sources} aria-label="Research sources"><h2>Evidence</h2>
       <details open={!workspace.documents.length}><summary>Add source text</summary><SourceForm onAdd={add} /></details>
@@ -184,7 +189,7 @@ function TradeReview({ workspace, asOf }: { workspace: ResearchWorkspace; asOf: 
   return <section className={styles.review}><h2>Desk note to trade review</h2><p>Carry the source context into the existing ticket. Contract selection, sizing, portfolio coverage, and order confirmation remain part of the ticket review.</p>
     <label className={styles.field}>Review ticker<select value={selectedTicker} disabled={!tickers.length} onChange={(event) => setTicker(event.target.value)}>{tickers.length ? tickers.map((item) => <option key={item}>{item}</option>) : <option value="">Add a source with a ticker</option>}</select></label>
     {items.map((item) => <label className={styles.check} key={item}><input type="checkbox" checked={!!checks[`${selectedTicker}:${item}`]} onChange={(event) => setChecks({ ...checks, [`${selectedTicker}:${item}`]: event.target.checked })} /><span>{item}</span></label>)}
-    <button className={styles.primary} disabled={!checked || !selectedTicker} onClick={apply}>Apply checklist to ticket</button>{error ? <p role="alert" className={styles.error}>{error}</p> : null}
+    <button className={styles.primary} disabled={!checked || !selectedTicker} onClick={apply}>Apply checklist to ticket</button>{error ? <ErrorToast message={error} /> : null}
   </section>;
 }
 
@@ -213,6 +218,6 @@ function FactAnnotation({ source, onAdd }: { source: SourceDocument; onAdd: (fac
     {kind === "metric" ? <label className={styles.field}>Normalized metric<select name="metric">{["revenue", "net_income", "interest", "tax", "depreciation", "amortization", "exclusion", "adjusted_ebitda", "capex", "ai_spend", "guidance", "buybacks"].map((metric) => <option key={metric}>{metric}</option>)}</select></label> : null}
     {kind === "blackout" || kind === "earnings" ? <div className={styles.pair}><label className={styles.field}>Source-stated start date<input name="startDate" type="date" required /></label><label className={styles.field}>Source-stated end date<input name="endDate" type="date" required={kind === "blackout"} /></label></div> : null}
     {kind === "deal" ? <><label className={styles.field}>Company<input name="company" required /></label><label className={styles.field}>Round / stage<input name="stage" /></label><label className={styles.field}>Investors (semicolon separated)<input name="investors" /></label></> : null}
-    {error ? <p className={styles.error} role="alert">{error}</p> : null}<button type="submit" className={styles.primary}>Add cited fact</button>
+    {error ? <ErrorToast message={error} /> : null}<button type="submit" className={styles.primary}>Add cited fact</button>
   </form></details>;
 }

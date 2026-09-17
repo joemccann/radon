@@ -26,6 +26,8 @@ Applies under `web/`. Mirrors `web/CLAUDE.md`; prefer the Claude file if it is n
 
 ## UI Verification
 
+- Request, refresh, broker, validation and action errors use `RequestError` / `ErrorToast` (or the shared toast system), never inline banners. Preserve retry and retained-data guidance. Fatal framework fallbacks, financial risk conditions and stored diagnostic records are explicit exceptions; see `docs/reviews/2026-09-17-toast-errors.md`.
+
 - UI changes need focused Vitest plus Playwright E2E when behavior changes.
 - Visually verify rendered UI before done. Use `chrome-cdp` if available; otherwise Playwright screenshots.
 - Do not click live submit/place buttons during UI verification. If unavoidable, qty 1 max, far-away limit, immediate cancel, then verify IB open orders.

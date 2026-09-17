@@ -210,7 +210,7 @@ export default function VolSkewMrScanner({
       className="strength-confirmation"
       testId="vol-skew-mr-section"
     >
-      {error && <div className="section-body"><RequestError error={error} onRetry={scanning ? undefined : onRetry} retainedData={rows.length > 0} /></div>}
+      {error && <RequestError error={error} onRetry={scanning ? undefined : onRetry} retainedData={rows.length > 0} />}
       {loading && rows.length === 0 ? (
         <div className="section-body">
           <div className="snapshot-card__empty">Measuring spot extension, IV path, and skew...</div>

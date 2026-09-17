@@ -1,6 +1,7 @@
 "use client";
 
-import { userErrorMessage } from "@/lib/userError";
+import RequestError from "@/components/RequestError";
+
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Ref, type UIEvent } from "react";
 import { useSearchParams } from "next/navigation";
 import { Crosshair } from "lucide-react";
@@ -588,6 +589,7 @@ function OrderBuilder({
     }
   }, [
     confirmStep,
+    orderActions,
     ticker,
     legs,
     parsedPrice,
@@ -1244,6 +1246,7 @@ export default function OptionsChainTab({
   // Fetch strikes when expiry changes — check prefetch cache first
   useEffect(() => {
     if (!selectedExpiry) return;
+    setError(null);
 
     // Use cached strikes if available (from background prefetch)
     const cached = getCachedStrikes(selectedExpiry);
@@ -1479,9 +1482,7 @@ export default function OptionsChainTab({
   if (error && expirations.length === 0) {
     return (
       <div style={{ padding: "24px 0", textAlign: "center" }}>
-        <span style={{ fontFamily: "var(--font-mono)", fontSize: "12px", color: "var(--fault)" }}>
-          {userErrorMessage(error, "The options chain could not be loaded. Try again.")}
-        </span>
+        <RequestError error={error} fallback="The options chain could not be loaded. Try again." />
       </div>
     );
   }
@@ -1489,6 +1490,7 @@ export default function OptionsChainTab({
   if (showMobileChain) {
     return (
       <>
+      <RequestError error={error} fallback="The options chain could not be loaded. Try again." />
       {prefillUnavailable && (
         <div className="chain-prefill-unavailable" role="status" data-testid="prefill-unavailable">
           {prefillUnavailable}
@@ -1527,6 +1529,7 @@ export default function OptionsChainTab({
 
   return (
     <div className={`chain-tab ${styles.chainFirst}`}>
+      <RequestError error={error} fallback="The options chain could not be loaded. Try again." />
       {/* Chain column + docked ticket rail. The rail owns the whole deck
           height: the toolbar, chain and hint ride in the left column so the
           ticket starts level with them instead of below a full-width bar. */}

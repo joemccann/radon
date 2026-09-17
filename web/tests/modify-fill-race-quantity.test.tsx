@@ -165,7 +165,7 @@ describe("edited quantity while a fill lands mid-dialog", () => {
     expect(calls).toHaveLength(0);
     // Re-prompt: field reseeded to the CURRENT remainder, operator warned.
     expect(qtyInput().value).toBe("884");
-    expect(document.querySelector(".modify-fill-race")?.textContent).toMatch(/fill/i);
+    expect(document.querySelector(".toast-error")?.textContent).toMatch(/fill/i);
   });
 
   it("after the re-prompt, a resubmit uses the refreshed fill count", async () => {
@@ -309,6 +309,6 @@ describe("combo replace while a fill lands mid-dialog", () => {
       ),
     );
     expect(qtyInput().value).toBe("18");
-    expect(document.querySelector(".modify-fill-race")?.textContent).toMatch(/fill/i);
+    expect(document.querySelector(".toast-error")?.textContent).toMatch(/fill/i);
   });
 });

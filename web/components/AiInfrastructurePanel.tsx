@@ -1,4 +1,5 @@
 "use client";
+import RequestError from "@/components/RequestError";
 
 import { userErrorMessage } from "@/lib/userError";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -104,7 +105,7 @@ export function AiInfrastructureView({ data, error, loading, refresh }: { data: 
   return <section className={styles.workspace} data-testid="ai-infrastructure-panel" aria-busy={loading}>
     <header className={styles.heading}><div><span className={styles.eyebrow}>Industry research</span><h1>AI industry</h1><p className={styles.subtitle}>Follow the value chain from adoption to cash returns.</p></div><button type="button" onClick={refresh} disabled={loading}>{loading ? "Loading…" : "Refresh snapshot"}</button></header>
     <div className={styles.snapshotMeta}><span>{data?.indicators.length ?? 0} measures</span><span>{sources.length} sources</span><span>Snapshot {aiObservationDate(data?.as_of)}</span></div>
-    {error ? <div className={styles.error} role="alert"><strong>Snapshot could not be refreshed</strong><p>{userErrorMessage(error, 'The AI industry snapshot could not be refreshed. Try again.')}</p>{data ? <p>Previous snapshot remains visible below. Do not treat it as current evidence.</p> : null}</div> : null}
+    {error ? <RequestError error={error} fallback="The AI industry snapshot could not be refreshed. Try again." retainedData={Boolean(data)} /> : null}
     <div className={styles.stageCards} role="tablist" aria-label="AI industry value chain">{stageTabs.map((item, i) => <button key={item.id} id={`ai-tab-${item.id}`} role="tab" type="button" aria-selected={stage === item.id} aria-controls="ai-stage-evidence" tabIndex={stage === item.id || ((stage === "capability" || stage === "additional") && i === 0) ? 0 : -1} onClick={() => chooseStage(item.id)} onKeyDown={event => { if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return; event.preventDefault(); const next = event.key === "Home" ? 0 : event.key === "End" ? stageTabs.length - 1 : (i + (event.key === "ArrowRight" ? 1 : stageTabs.length - 1)) % stageTabs.length; chooseStage(stageTabs[next].id); document.getElementById(`ai-tab-${stageTabs[next].id}`)?.focus(); }}><span className={styles.eyebrow}>0{i + 1}</span><strong>{item.short}</strong><span>{item.subtitle}</span></button>)}</div>
     <div className={styles.capability}><span>A separate lens</span><button type="button" aria-pressed={stage === "capability"} onClick={() => chooseStage("capability")}>Model capability</button><span>Task quality is distinct from paid adoption.</span></div>
     <div id="ai-stage-evidence" role={stage === "capability" || stage === "additional" ? "region" : "tabpanel"} aria-label={active.name} aria-labelledby={stage === "capability" || stage === "additional" ? undefined : `ai-tab-${stage}`}>

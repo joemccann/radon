@@ -1,4 +1,5 @@
 "use client";
+import ErrorToast from "@/components/ErrorToast";
 
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
@@ -274,7 +275,6 @@ export default function StrengthConfirmationScanner({
                 spellCheck={false}
                 aria-label="Strength ticker symbol"
                 aria-invalid={tickerError ? "true" : "false"}
-                aria-describedby={tickerError ? "strength-ticker-search-error" : undefined}
               />
               <button
                 type="submit"
@@ -285,9 +285,7 @@ export default function StrengthConfirmationScanner({
                 Scan
               </button>
               {tickerError && (
-                <span id="strength-ticker-search-error" className="theta-search__error" role="alert">
-                  {tickerError}
-                </span>
+                <ErrorToast message={tickerError} />
               )}
             </form>
           )}
@@ -313,7 +311,7 @@ export default function StrengthConfirmationScanner({
       className="strength-confirmation"
       testId="strength-confirmation-section"
     >
-      {error && <div className="section-body"><RequestError error={error} onRetry={scanning ? undefined : onRetry} retainedData={rows.length > 0} /></div>}
+      {error && <RequestError error={error} onRetry={scanning ? undefined : onRetry} retainedData={rows.length > 0} />}
       {loading && rows.length === 0 ? (
         <div className="section-body">
           <div className="snapshot-card__empty">Measuring seven strength factors...</div>

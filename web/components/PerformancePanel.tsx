@@ -1,4 +1,5 @@
 "use client";
+import ErrorToast from "@/components/ErrorToast";
 
 import { userErrorMessage } from "@/lib/userError";
 import { Activity, AlertTriangle, Gauge, History, ShieldAlert, TrendingDown } from "lucide-react";
@@ -476,7 +477,7 @@ export default function PerformancePanel({ portfolioLastSync = null, marketState
             secondary="Performance is measured from Flex NAV. No snapshots are available for this period."
             testId="performance-empty"
           />
-          {error ? <div className="performance-error-copy">{userErrorMessage(error, 'Performance data could not be loaded. Try again.')}</div> : null}
+          {error ? <ErrorToast message={userErrorMessage(error, 'Performance data could not be loaded. Try again.')} /> : null}
         </div>
       </div>
     );
