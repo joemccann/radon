@@ -1,3 +1,23 @@
+# Task: Mixed-age combo Today P&L 2026-09-17 [IMPLEMENTED; PR CI PENDING]
+
+SPY bull put spread: overnight long 740P + same-day short 760P. Today P&L
+equals total P&L (-$162,085). Same-day identity must not apply to mixed-age
+combos.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests: SPY screenshot numbers, OCC journal ticker, partial fill_dates
+- T2 depends_on: [T1] - Per-leg Today P&L + combo entry_date from overnight legs
+- T3 depends_on: [T2] - Focused suites, Playwright, PR, CI green
+
+## Checklist
+
+- [x] T1 Failing web + ib_sync + journal-map tests
+- [x] T2 getTodayPnlDollars per-leg; isSameDay false for mixed; blotter OCC + partial fills
+- [ ] T3 Focused green, e2e, PR, CI, Pushover
+
+---
+
 # Task: Reliability delta audit 2026-09-16 [IN PROGRESS]
 
 Audit `eb5b8cb0..HEAD` for source-actionable reliability regressions only.
@@ -43,6 +63,9 @@ unfinished detached stage as a pass.
 
 - [x] No P2/P3 item was substituted into the reduced-rung remediation scope.
 - [x] Closing-gate blocker records the missing sentinel and the exact stage paths.
+
+---
+
 # Task: Vol/Skew MR scanner mode 2026-09-16 [IN PROGRESS]
 
 Scanner mode `vol-skew-mr` (UI: Vol/Skew MR, `/scanner?mode=vol-skew-mr`).

@@ -1,4 +1,11 @@
 # Lessons
+
+## 2026-09-17 — Mixed-age combos are not same-day
+
+- Selling a same-day short against an overnight long (SPY 740P since May, 760P sold today) groups as a bull put spread with `basis_source: mixed` and often `entry_date=today`.
+- The same-day identity Today P&L = MV − EC then prints the overnight leg's entire accumulated loss as today's drawdown.
+- `isSameDay` is false for mixed. Today P&L is per-leg: overnight vs prior close, `session_fills` vs fill. Incomplete blotter + a new-leg fill must not stamp the combo today. OCC journal tickers map to the underlying root.
+
 ## 2026-09-11 — Grok 4.6 P&L turns cannot omit tools or starve max_tokens
 
 - grok-4.6 reasoning_effort defaults to high and cannot be disabled. A 1200 max_tokens budget is eaten by reasoning, so a cap-hit forced-final with tools omitted returns empty text and the canned "Reached the maximum tool-calling rounds" string.

@@ -8,6 +8,7 @@ the legacy JSON-shaped dictionaries.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Optional, Sequence
 
 try:
@@ -70,6 +71,17 @@ def _float_key(value: Any) -> Optional[str]:
         return str(float(value))
     except (TypeError, ValueError):
         return None
+
+
+# Flex rehydrate stores the OCC symbol as ticker ("SPY   260918P00740000");
+# the live daemon stores the root. Same contract must share one map key.
+_OCC_TICKER_RE = re.compile(r"^([A-Z.]{1,6})\s+\d{6}[CP]\d{8}$")
+
+
+def _underlying_ticker(raw: str) -> str:
+    text = str(raw or "").strip().upper()
+    match = _OCC_TICKER_RE.match(text)
+    return match.group(1) if match else text
 
 
 def read_latest_portfolio_snapshot(db: Optional[Any] = None) -> Optional[dict[str, Any]]:
@@ -348,7 +360,8 @@ def read_journal_entry_date_maps(
         if payload is None:
             continue
         filled_at = _cell(row, 1, "filled_at")
-        ticker = str(payload.get("ticker") or payload.get("symbol") or "").strip().upper()
+        raw_ticker = str(payload.get("ticker") or payload.get("symbol") or "").strip().upper()
+        ticker = _underlying_ticker(raw_ticker)
         date = (
             _date_part(payload.get("date"))
             or _date_part(payload.get("filled_at"))
