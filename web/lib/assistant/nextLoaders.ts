@@ -62,6 +62,8 @@ export const NEXT_MODULES: Record<string, () => Promise<NextRouteModule>> = {
   "scanner": () => import("@/app/api/scanner/route") as Promise<NextRouteModule>,
   "scanner/strength": () => import("@/app/api/scanner/strength/route") as Promise<NextRouteModule>,
   "scanner/strength/scan": () => import("@/app/api/scanner/strength/scan/route") as Promise<NextRouteModule>,
+  "scanner/vol-skew-mr": () => import("@/app/api/scanner/vol-skew-mr/route") as Promise<NextRouteModule>,
+  "scanner/vol-skew-mr/scan": () => import("@/app/api/scanner/vol-skew-mr/scan/route") as Promise<NextRouteModule>,
   "scanner/theta": () => import("@/app/api/scanner/theta/route") as Promise<NextRouteModule>,
   "scanner/theta/scan": () => import("@/app/api/scanner/theta/scan/route") as Promise<NextRouteModule>,
   "service-health": () => import("@/app/api/service-health/route") as Promise<NextRouteModule>,

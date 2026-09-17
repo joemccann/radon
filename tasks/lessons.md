@@ -1040,3 +1040,9 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
   the absence of `subprocess capacity exhausted` on the final attempt.
 - Wrapper SCAN_TIMEOUT and each `/flow-tab` `run_script` timeout must
   match; discover at 180 with flow-analysis at 120 pages the oneshot.
+
+## 2026-09-16 - Performance regression reports need source reconciliation
+- When TWR disappears with excluded NAV sessions, trace the actual NAV and external-flow provenance before changing presentation or weakening integrity gates. Verify historical flow coverage survives refreshed statements and mirror selection; retain the reported dates as regression cases.
+
+## 2026-09-17 - AI charts share the Regime renderer
+- Reuse ChartPanel, CriHistoryChart, HistoryRangeChips and BrushMinimap for AI evidence, including legacy charts. Preserve source cadence, units and missing observations while matching the approved Regime composition.

@@ -19,6 +19,7 @@ const CACHED_READ_ROUTES: { path: string; key: string }[] = [
   { path: "app/api/scanner/route.ts", key: "scanner:snapshot" },
   { path: "app/api/scanner/theta/route.ts", key: "scanner:theta" },
   { path: "app/api/scanner/strength/route.ts", key: "scanner:strength" },
+  { path: "app/api/scanner/vol-skew-mr/route.ts", key: "scanner:vol-skew-mr" },
   { path: "app/api/discover/route.ts", key: "discover:snapshot" },
   { path: "app/api/flow-analysis/route.ts", key: "flow-analysis:snapshot" },
   { path: "app/api/newsfeed/posts/route.ts", key: "newsfeed:posts" },

@@ -1,0 +1,56 @@
+# Vol/Skew MR scanner
+
+Short-term top and bottom framing from spot extension versus IV and skew
+path. Mode id `vol-skew-mr`. UI label **Vol/Skew MR**. Route
+`/scanner?mode=vol-skew-mr`.
+
+Framing inspired by Options Insight / Imran Lakha (strategy inspiration
+only; Radon implements the gates against Unusual Whales and existing
+Radon vol/skew feeds).
+
+## Gates
+
+1. Technicals: RSI(14) and/or Bollinger percent B(20, 2). RSI at or
+   beyond 70/30, or percent B outside 0 to 1, marks an extended high or
+   low.
+2. IV path into the move:
+   - Extended high + falling or flat IV -> `TOP_MR`
+   - Rally + rising IV with spot -> `BREAKOUT`
+3. Skew: when vol and skew both diverge from spot, suggest a put spread
+   (tops) or call spread (bottoms).
+4. Symmetric `BOTTOM_MR` / `BREAKDOWN` on an extended low.
+
+Verdicts: `TOP_MR`, `BOTTOM_MR`, `BREAKOUT`, `BREAKDOWN`, `NO_SIGNAL`.
+
+## Family contract
+
+Mirrors strength / theta: `scripts/vol_skew_mr_scanner.py`, disk cache
+`data/vol_skew_mr.json`, Turso `vol_skew_mr_snapshots` (migration 0075),
+GET `/api/scanner/vol-skew-mr`, POST `/api/scanner/vol-skew-mr/scan`,
+comma ticker search, NDX preset.
+
+## Data sources per ticker
+
+Daily closes come from IB first (`fetch_daily_closes`), UW OHLC only on a
+short or failed IB read. Each remaining UW call is isolated so one failure
+degrades a single gate instead of dropping the ticker:
+
+| Gate | Source | Notes |
+|---|---|---|
+| Technicals | IB daily closes (UW fallback) | RSI(14), %B(20, 2) |
+| IV path | UW `get_iv_rank` | last six readings, vol points |
+| Skew path | UW `get_historical_risk_reversal_skew` | falls back to a 25-delta put/call IV spread from the chain only when the history is shorter than two points |
+
+The scanner never reads strike GEX, so it spends no UW quota on it.
+
+Risk-reversal values arrive as decimals on some UW endpoints and as vol
+points on others. `_as_vol_points` restates the whole window in vol points
+before `PATH_FLAT_EPS` is applied — a decimal series would otherwise read
+`flat` on every name and pass the skew gate unconditionally.
+
+## Acting on a row
+
+Spot is a link into the ticker's chain deck (`?deck=c&src=vol-skew-mr`) for
+every row with a verdict, mirroring strength / LEAP / GARCH. `NO_SIGNAL`
+rows render plain spot and no structure label; `BREAKOUT` / `BREAKDOWN`
+render `continue`.

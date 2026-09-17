@@ -13,7 +13,7 @@ afterEach(() => {
 });
 
 describe("Clear workspace navigation", () => {
-  it("keeps four primary tasks visible and every existing workspace accessible in More", () => {
+  it("keeps primary workspaces visible and every existing workspace accessible in More", () => {
     render(
       createElement(Sidebar, {
         activeSection: "portfolio",
@@ -24,7 +24,7 @@ describe("Clear workspace navigation", () => {
     );
 
     const primary = within(screen.getByRole("navigation", { name: "Primary navigation" }));
-    expect(primary.getAllByRole("link").map((link) => link.textContent)).toEqual(["Portfolio", "Research", "Risk", "Positions"]);
+    expect(primary.getAllByRole("link").map((link) => link.textContent)).toEqual(["Portfolio", "Research", "Risk", "Positions", "AI industry"]);
     expect(primary.getByRole("link", { name: "Portfolio" }).getAttribute("href")).toBe("/dashboard");
     expect(primary.getByRole("link", { name: "Positions" }).getAttribute("href")).toBe("/portfolio");
     expect(primary.getByRole("link", { name: "Positions" }).getAttribute("aria-current")).toBe("page");
