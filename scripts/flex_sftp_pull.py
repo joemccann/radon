@@ -207,6 +207,29 @@ def pull_gpg(
         os.chmod(dest, 0o600)
 
 
+def is_transient_sftp_error(exc: BaseException) -> bool:
+    """OpenSSH RST / kex drop on a single GET. Not host-key, not ingest.
+
+    IBKR never removes `outgoing`, so the 08:30 ET retry re-GETs the full
+    history after 07:30 already applied today. A connection reset on that
+    tail used to set `failed` and page P1 (`one or more files rejected`)
+    until the next calendar fire. 2026-09-17 page e8da0c53.
+    """
+    if not isinstance(exc, FlexSftpError):
+        return False
+    text = str(exc).lower()
+    if not text.startswith("sftp_get_failed:"):
+        return False
+    return any(
+        needle in text
+        for needle in (
+            "connection reset by peer",
+            "kex_exchange_identification",
+            "connection timed out",
+        )
+    )
+
+
 def _gpg_decrypt(data: bytes, *, gnupg_home: Path) -> str:
     result = subprocess.run(
         [
@@ -511,6 +534,7 @@ def _run(
     _ensure_inbox(inbox)
     failed = False
     ingested = 0
+    transient_gets = 0
     newest_period_end: Optional[date] = None
     newest_by_key: Dict[str, date] = {}
     deadline = time.monotonic() + SWEEP_BUDGET_S
@@ -569,6 +593,9 @@ def _run(
             # neither a `TimeoutExpired` from the decrypt nor anything out of
             # `ingest_xml`. R-400.
             print(f"[flex-pull] {name}: {type(exc).__name__}: {exc}", file=sys.stderr)
+            if is_transient_sftp_error(exc):
+                transient_gets += 1
+                continue
             failed = True
             continue
 
@@ -602,7 +629,13 @@ def _run(
             + " (IBKR has stopped delivering them, or every file is already ingested)",
         )
         return 1
-    _heartbeat("ok")
+    note = None
+    if transient_gets:
+        note = {
+            "message": f"transient sftp get failed for {transient_gets} file(s)",
+            "class": "sftp_transient",
+        }
+    _heartbeat("ok", note)
     return 0
 
 
