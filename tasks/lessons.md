@@ -1079,3 +1079,7 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 
 ## 2026-09-17 — AI Industry capitalization
 - Use “AI Industry” consistently for navigation, headings, page titles, links, prose references and accessible names. Keep regression expectations case-sensitive.
+
+## 2026-09-17 — AI metric labels and history
+- Translate residual categories into the measured population and unit; never expose bare “other”, “other share” or publisher/cohort IDs as selector copy.
+- Verify actual observation spacing before applying chart gap limits: a daily collection schedule does not imply daily points in publisher history. Token histories must render connected lines across normal sampling intervals.

@@ -46,9 +46,14 @@ function observationGaps(points: AiHistoryPoint[]): number[] {
 
 export function aiHistoryGapMs(points: AiHistoryPoint[], cadence?: string): number | undefined {
   const days: Record<string, number> = { daily: 1.8, weekly: 10, monthly: 45, quarterly: 120 };
-  if (cadence && days[cadence]) return days[cadence] * 86_400_000;
+  const declaredGap = cadence && days[cadence] ? days[cadence] * 86_400_000 : undefined;
   const gaps = observationGaps(points);
-  return gaps.length > 1 ? gaps[Math.floor((gaps.length - 1) / 2)] * 1.8 : undefined;
+  // Collection cadence is not necessarily chart spacing: API snapshots downsample
+  // long histories. Infer spacing only with repeated intervals, and keep larger
+  // missing periods as breaks instead of connecting every observation blindly.
+  const observedGap = gaps.length > 1 ? gaps[Math.floor((gaps.length - 1) / 2)] * 1.8 : undefined;
+  if (observedGap == null) return declaredGap;
+  return Math.max(declaredGap ?? 0, observedGap);
 }
 
 export function aiPeriodicBars(points: AiHistoryPoint[], cadence?: string): boolean {

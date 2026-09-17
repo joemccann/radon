@@ -1,10 +1,11 @@
 "use client";
 import RequestError from "@/components/RequestError";
 
-import { userErrorMessage } from "@/lib/userError";
+import { aiMetricChartPoint, aiMetricDescription, aiMetricDisplay, aiMetricLabel } from "@/lib/aiMetricPresentation";
+import InfoTooltip from "./InfoTooltip";
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { aiDate, aiObservationDate, aiNumber, historyGroups, sourceHref, type AiHistoryPoint, type AiIndicator, type AiSnapshot, type AiSource } from "@/lib/aiInfrastructure";
+import { aiDate, aiObservationDate, historyGroups, sourceHref, type AiHistoryPoint, type AiIndicator, type AiSnapshot, type AiSource } from "@/lib/aiInfrastructure";
 import { useAiInfrastructure } from "@/lib/useAiInfrastructure";
 import LlmTokenIndexCard from "./LlmTokenIndexCard";
 import AiIndustryHistoryChart from "./AiIndustryHistoryChart";
@@ -33,8 +34,8 @@ function SourceDrawer({ indicator, data, close, opener }: { indicator: AiIndicat
       <h3>Publisher access and coverage</h3>
       {sources.length ? sources.map(source => <section className={styles.source} key={source.id}><h4><SourceLink url={source.url}>{source.name}</SourceLink></h4><p>{source.status.replaceAll("_", " ")} · {source.reason}</p><dl className={styles.evidence}><div><dt>Checked</dt><dd>{aiDate(source.checked_at)}</dd></div><div><dt>Cadence</dt><dd>{source.cadence}</dd></div><div><dt>Usage rights</dt><dd>{source.license}</dd></div><div><dt>Shared lineage</dt><dd>{source.lineage_group}</dd></div></dl></section>) : <p>Source verification has not been recorded.</p>}
       <h3>Observation vintages</h3>
-      {indicator.metrics.length > 1 ? <label className={styles.seriesSelect}>Inspect observation<select value={Math.min(metricIndex, indicator.metrics.length - 1)} onChange={event => setMetricIndex(Number(event.target.value))}>{indicator.metrics.map((item, index) => <option value={index} key={`${item.source_id}-${item.id}-${item.methodology_version}-${item.cohort_version}`}>{item.label} · {item.unit} · {item.cohort_version}</option>)}</select></label> : null}
-      {metric ? [metric].map(metric => <section className={styles.source} key={`${metric.source_id}-${metric.id}-${metric.methodology_version}-${metric.cohort_version}`}><h4>{metric.label} · {aiNumber(metric.value)} {metric.unit}</h4><dl className={styles.evidence}>
+      {indicator.metrics.length > 1 ? <label className={styles.seriesSelect}>Inspect observation<select value={Math.min(metricIndex, indicator.metrics.length - 1)} onChange={event => setMetricIndex(Number(event.target.value))}>{indicator.metrics.map((item, index) => <option value={index} key={`${item.source_id}-${item.id}-${item.methodology_version}-${item.cohort_version}`}>{aiMetricLabel(item)} · {aiMetricDisplay(item).unit} · {data.sources.find(source => source.id === item.source_id)?.name ?? item.source_id}</option>)}</select></label> : null}
+      {metric ? [metric].map(metric => <section className={styles.source} key={`${metric.source_id}-${metric.id}-${metric.methodology_version}-${metric.cohort_version}`}><h4>{aiMetricLabel(metric)} · {aiMetricDisplay(metric).value} {aiMetricDisplay(metric).unit}</h4><dl className={styles.evidence}>
         <div><dt>Measurement</dt><dd>{metric.measurement}</dd></div><div><dt>Observed period</dt><dd>{aiObservationDate(metric.period_start)} to {aiObservationDate(metric.period_end)}</dd></div><div><dt>Publication time (UTC)</dt><dd>{metric.published_at ?? "Not disclosed; first-seen history only"}</dd></div><div><dt>Fetched time (UTC)</dt><dd>{metric.fetched_at || "Not recorded"}</dd></div><div><dt>Method / cohort version</dt><dd>{metric.methodology_version} / {metric.cohort_version}</dd></div><div><dt>Source lineage</dt><dd>{metric.lineage_group}</dd></div><div><dt>{metric.measurement === "derived" ? "Input-set SHA256" : "Raw snapshot SHA256"}</dt><dd className={styles.hash}>{metric.raw_hash || "Not recorded"}</dd></div><div><dt>Coverage / exclusions / definitions</dt><dd><pre>{Object.keys(metric.metadata ?? {}).length ? JSON.stringify(metric.metadata, null, 2) : "Coverage and exclusions not disclosed"}</pre></dd></div>
       </dl><SourceLink url={metric.source_url}>Original observation</SourceLink></section>) : <p>No verified observations. Missing values are not zero.</p>}
     </div>
@@ -67,7 +68,7 @@ function MeasureExplanation({ indicator, sources, inspect, select }: { indicator
 }
 
 function SelectedMeasure({ indicator, sources, inspect }: { indicator: AiIndicator; sources: AiSource[]; inspect: (opener: HTMLButtonElement) => void }) {
-  const groups = useMemo(() => historyGroups(indicator.history), [indicator.history]);
+  const groups = useMemo(() => historyGroups(indicator.history).map(group => group.map(aiMetricChartPoint)), [indicator.history]);
   const [seriesIndex, setSeriesIndex] = useState(0);
   const points = groups[Math.min(seriesIndex, groups.length - 1)];
   const source = sources.find(item => item.id === points?.[0].source_id);
@@ -76,10 +77,18 @@ function SelectedMeasure({ indicator, sources, inspect }: { indicator: AiIndicat
     <header className={styles.heading}><div><span className={styles.eyebrow}>{indicator.id} · {indicator.title}</span><h3>{copy.name}</h3></div><span className={styles.status} data-status={indicator.status}>{indicator.status.replaceAll("_", " ")}</span></header>
     <p className={styles.reading}>{copy.definition}</p>
     <p className={styles.note}>{indicator.reason}</p>
-    {groups.length ? <label className={styles.seriesSelect}>Observation series<select value={Math.min(seriesIndex, groups.length - 1)} onChange={event => setSeriesIndex(Number(event.target.value))}>{groups.map((group, index) => <option key={`${group[0].source_id}-${group[0].series_id}-${group[0].unit}`} value={index}>{group[0].label} · {group[0].unit} · {sources.find(item => item.id === group[0].source_id)?.name ?? group[0].source_id} · {group[0].series_id}</option>)}</select></label> : null}
+    {groups.length ? <label className={styles.seriesSelect}>Observation series<select value={Math.min(seriesIndex, groups.length - 1)} onChange={event => setSeriesIndex(Number(event.target.value))}>{groups.map((group, index) => <option key={`${group[0].source_id}-${group[0].series_id}-${group[0].unit}`} value={index}>{aiMetricLabel(group[0])} · {aiMetricDisplay(group[0]).unit} · {sources.find(item => item.id === group[0].source_id)?.name ?? group[0].source_id}</option>)}</select></label> : null}
     {points ? <AiIndustryHistoryChart key={`${points[0].source_id}-${points[0].series_id}-${points[0].unit}`} points={points} cadence={source?.cadence} sourceLabel={source?.name} /> : <p className={styles.empty}>No comparable history is available. Missing observations are not zero.</p>}
     <div className={styles.interpretation}><div><h4>Why it matters</h4><p>{copy.relevance}</p></div><div><h4>What it cannot prove</h4><p>{copy.limit}</p></div></div>
-    {indicator.metrics.length ? <details className={styles.observations}><summary>Latest reported observations ({indicator.metrics.length})</summary><dl className={styles.metrics}>{indicator.metrics.map(metric => <div key={`${metric.source_id}-${metric.id}-${metric.methodology_version}-${metric.cohort_version}`}><dt>{metric.label}</dt><dd>{aiNumber(metric.value)} <small>{metric.unit}</small></dd><span>{metric.measurement} · {aiObservationDate(metric.period_end)}</span></div>)}</dl></details> : <p className={styles.empty}>No verified observations. Collection or source verification is incomplete.</p>}
+    {indicator.metrics.length ? <details className={styles.observations}><summary>Latest reported observations ({indicator.metrics.length})</summary><dl className={styles.metrics}>{indicator.metrics.map(metric => {
+      const label = aiMetricLabel(metric);
+      const display = aiMetricDisplay(metric);
+      return <div className={styles.observationCard} data-testid="ai-observation-card" key={`${metric.source_id}-${metric.id}-${metric.methodology_version}-${metric.cohort_version}`}>
+        <dt className={styles.observationHeading}><span>{label}</span><InfoTooltip prose text={aiMetricDescription(metric)} ariaLabel={`About ${label}`} triggerTestId={`ai-observation-info-${metric.id}`} contentTestId={`ai-observation-description-${metric.id}`} /></dt>
+        <dd>{display.value} <small>{display.unit}</small></dd>
+        <dd className={styles.observationMeta}>{metric.measurement} · {aiObservationDate(metric.period_end)}</dd>
+      </div>;
+    })}</dl></details> : <p className={styles.empty}>No verified observations. Collection or source verification is incomplete.</p>}
     <footer className={styles.indicatorFooter}><button type="button" onClick={event => inspect(event.currentTarget)} aria-label={`Sources and method: ${indicator.title}`}>Sources &amp; methodology</button><span className={styles.tickers}>{indicator.tickers.map(ticker => <Link key={ticker} href={`/${encodeURIComponent(ticker)}?deck=i`} prefetch={false}>{ticker}</Link>)}</span></footer>
   </article>;
 }
