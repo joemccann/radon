@@ -2074,9 +2074,28 @@ async def get_ws_ticket(payload: dict = Depends(verify_clerk_jwt)):
     return {"ticket": ticket}
 
 
+# Auth-exempt handlers parse the body before any credential check, so an
+# anonymous caller must never be able to stream an unbounded body into this
+# process. Checked against Content-Length BEFORE the body is read; the edge
+# (Caddy request_body 1MB) is the outer layer of the same bound.
+AUTH_EXEMPT_BODY_MAX_BYTES = 64 * 1024
+
+
+def _require_bounded_body(request: Request) -> None:
+    """413 an oversized body, 411 a length-less one, without reading it."""
+    content_length = request.headers.get("content-length")
+    try:
+        size = int(content_length)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=411, detail="Content-Length required")
+    if size > AUTH_EXEMPT_BODY_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Request body too large")
+
+
 @app.post("/ws-ticket/validate")
 async def validate_ws_ticket(request: Request):
     """Validate a WebSocket ticket (called by the Node.js relay). Internal only."""
+    _require_bounded_body(request)
     body = await request.json()
     ticket = body.get("ticket", "")
     user_id = validate_ticket(ticket)
@@ -2097,6 +2116,7 @@ async def demo_trial_expiry(request: Request):
     """
     from utils.demo_trial import DEFAULT_TRADING_DAYS, trial_expiry_handler
 
+    _require_bounded_body(request)
     body = await request.json()
     start_iso_et = body.get("start_iso_et")
     if not start_iso_et:

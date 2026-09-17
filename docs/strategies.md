@@ -848,8 +848,8 @@ python3.13 scripts/cri_scan.py
 # JSON output
 python3.13 scripts/cri_scan.py --json
 
-# Don't open browser
-python3.13 scripts/cri_scan.py --no-open
+# Open the HTML report in a browser (default: just print the path)
+python3.13 scripts/cri_scan.py --open
 
 # Fetch MenthorQ CTA data (requires login, ~40s)
 python3.13 scripts/fetch_menthorq_cta.py
