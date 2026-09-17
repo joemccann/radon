@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { isFlowReportStale } from "@/lib/flowReportStaleness";
 import { flowReportErrorCopy } from "@/lib/flowReportError";
+import type { FlowSkew } from "@/lib/flowSkew";
 
 /**
  * Cache-then-scan hook for a single-ticker flow report.
@@ -84,6 +85,8 @@ export type FlowReportData = {
     put_premium?: number;
     total_alerts?: number;
   };
+  /** Vol/Skew MR scanner snapshot; absent on reports cached before it shipped. */
+  skew?: FlowSkew;
   combined_signal?: string;
   market_status?: string;
   trading_days_checked?: string[];

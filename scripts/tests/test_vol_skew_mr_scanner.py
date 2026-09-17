@@ -425,3 +425,56 @@ def test_risk_reversal_history_keeps_latest_six_sessions() -> None:
         for day in range(10, 0, -1)
     ]}
     assert vsmr._risk_reversal_history(payload, "2026-10-16", date(2026, 9, 17)) == pytest.approx([5, 6, 7, 8, 9, 10])
+
+
+# ── fetch_skew_snapshot: the per-ticker skew the flow report reuses ──────────
+
+
+def test_fetch_skew_snapshot_reports_value_prior_change_and_path() -> None:
+    client = _FakeClient(rr=_rr_rows([6.0, 5.2, 4.4, 3.1, 2.9]))
+    snapshot = vsmr.fetch_skew_snapshot(client, "AAPL")
+    assert snapshot["expiry"] == client.expiry
+    assert snapshot["delta"] == 25
+    assert [row["date"] for row in snapshot["sessions"]] == [f"2026-09-0{i}" for i in range(1, 6)]
+    assert snapshot["value"] == pytest.approx(2.9)
+    assert snapshot["prior"] == pytest.approx(3.1)
+    assert snapshot["change"] == pytest.approx(-0.2)
+    assert snapshot["path"] == "falling"
+    assert snapshot["errors"] == []
+
+
+def test_fetch_skew_snapshot_is_unknown_without_a_listed_expiry() -> None:
+    client = _FakeClient(expiries={"data": []}, rr=_rr_rows([6.0, 4.4]))
+    snapshot = vsmr.fetch_skew_snapshot(client, "AAPL")
+    assert snapshot["expiry"] is None
+    assert snapshot["value"] is None
+    assert snapshot["path"] == "unknown"
+    assert snapshot["errors"] == ["skew_history:no_future_listed_expiry"]
+    assert "get_historical_risk_reversal_skew" not in client.calls
+
+
+def test_fetch_skew_snapshot_keeps_a_lone_session_as_value_without_a_path() -> None:
+    client = _FakeClient(rr=_rr_rows([3.4]))
+    snapshot = vsmr.fetch_skew_snapshot(client, "AAPL")
+    assert snapshot["value"] == pytest.approx(3.4)
+    assert snapshot["prior"] is None
+    assert snapshot["change"] is None
+    assert snapshot["path"] == "unknown"
+    assert snapshot["errors"] == ["skew_history:insufficient_distinct_sessions:1"]
+
+
+def test_fetch_skew_snapshot_records_a_history_failure() -> None:
+    client = _FakeClient(fail="get_historical_risk_reversal_skew")
+    snapshot = vsmr.fetch_skew_snapshot(client, "AAPL")
+    assert snapshot["value"] is None
+    assert snapshot["path"] == "unknown"
+    assert any(error.startswith("risk_reversal:") for error in snapshot["errors"])
+
+
+def test_fetch_skew_snapshot_propagates_rate_limits() -> None:
+    class _Limited(_FakeClient):
+        def get_historical_risk_reversal_skew(self, ticker, **kwargs):
+            raise vsmr.UWRateLimitError("429")
+
+    with pytest.raises(vsmr.UWRateLimitError):
+        vsmr.fetch_skew_snapshot(_Limited(), "AAPL")

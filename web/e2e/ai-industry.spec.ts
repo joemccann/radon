@@ -56,7 +56,7 @@ async function ready(page: Page, route = "/ai-industry") {
   await expect(page.getByRole("button", { name: "Refresh snapshot" })).toBeEnabled({ timeout: 45_000 });
 }
 
-test.describe("AI industry value chain", () => {
+test.describe("AI Industry value chain", () => {
   test.setTimeout(90_000);
   test.beforeEach(async ({ page }) => {
     await installClearFixtures(page);
@@ -65,10 +65,10 @@ test.describe("AI industry value chain", () => {
   });
   test("four stages, separate capability and all 18 plain-language measure explanations", async ({ page }) => {
     await ready(page);
-    await expect(page.getByRole("heading", { name: "AI industry", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "AI Industry", exact: true })).toBeVisible();
     await expect(page.getByText("18 measures", { exact: true })).toBeVisible();
     await expect(page.getByText("16 sources", { exact: true })).toBeVisible();
-    const tabs = page.getByRole("tablist", { name: "AI industry value chain" });
+    const tabs = page.getByRole("tablist", { name: "AI Industry value chain" });
     await expect(tabs.getByRole("tab")).toHaveCount(4);
     for (const stage of ["Adoption", "Compute", "Buildout", "Funding"]) {
       const tab = tabs.getByRole("tab", { name: new RegExp(stage) });
@@ -143,12 +143,12 @@ test.describe("AI industry value chain", () => {
     const mutations: string[] = [];
     page.on("request", request => { if (/\/api\/orders\/(place|cancel|modify)/.test(request.url())) mutations.push(request.url()); });
     await page.goto("/dashboard");
-    const dashboardLink = page.getByTestId("clear-overview").getByRole("link", { name: "AI industry evidence" });
+    const dashboardLink = page.getByTestId("clear-overview").getByRole("link", { name: "AI Industry evidence" });
     await expect(dashboardLink).toHaveAttribute("href", "/ai-industry");
     await dashboardLink.click();
     await expect(page).toHaveURL(/\/ai-industry$/);
     await page.goto("/MSFT?deck=i");
-    const handoff = page.getByRole("complementary", { name: "AI industry research" });
+    const handoff = page.getByRole("complementary", { name: "AI Industry research" });
     await expect(handoff).toContainText("Cloud monetization");
     const link = handoff.getByRole("link", { name: "Review industry evidence" });
     await expect(link).toHaveAttribute("href", "/ai-industry?pane=finance");
@@ -170,7 +170,7 @@ test.describe("AI industry value chain", () => {
       const chartPath = testInfo.outputPath(`ai-industry-chart-${theme}-${mobile ? "mobile" : "desktop"}.png`);
       await page.getByTestId("ai-industry-history-chart").screenshot({ path: chartPath });
       await testInfo.attach("Shared Regime chart", { path: chartPath, contentType: "image/png" });
-      await testInfo.attach("AI industry visual evidence", { path, contentType: "image/png" });
+      await testInfo.attach("AI Industry visual evidence", { path, contentType: "image/png" });
       await page.getByRole("article", { name: "GPU rental prices evidence" }).getByRole("button", { name: "Sources and method: Matched GPU asking prices" }).click();
       await expect(page.getByRole("dialog")).toBeVisible();
       expect(await page.getByRole("dialog").evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
