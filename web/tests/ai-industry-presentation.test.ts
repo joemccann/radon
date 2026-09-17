@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { AI_INDUSTRY_STAGES, AI_MEASURE_COPY, industryStage, measureCopy } from "@/lib/aiIndustryPresentation";
 import { aiFixture } from "./fixtures/aiInfrastructure";
 
-describe("AI industry information architecture", () => {
+describe("AI Industry information architecture", () => {
   it("assigns 17 industry measures once, with M1 a cross-cutting handoff", () => {
     const ids = AI_INDUSTRY_STAGES.flatMap(stage => [...stage.ids]);
     expect(ids).toHaveLength(17);
