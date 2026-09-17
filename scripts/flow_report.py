@@ -15,8 +15,10 @@ import sys
 from datetime import datetime
 from typing import Any, Dict
 
+from clients.uw_client import UWClient
 from fetch_flow import fetch_flow
 from scanner import analyze_signal
+from vol_skew_mr_scanner import fetch_skew_snapshot, unavailable_skew
 
 
 _BULLISH_OPTION_BIAS = {"BULLISH", "STRONGLY_BULLISH"}
@@ -78,6 +80,19 @@ def _classify_direction(flow: Dict[str, Any], analysis: Dict[str, Any]) -> Dict[
     }
 
 
+def fetch_ticker_skew(ticker: str) -> Dict[str, Any]:
+    """The Vol/Skew MR scanner's 25-delta skew snapshot, isolated from the report.
+
+    A missing token, a UW outage, or a rate limit degrades this block alone;
+    the dark pool and options flow sections never depend on it.
+    """
+    try:
+        with UWClient(max_retries=0, backoff_factor=0) as client:
+            return fetch_skew_snapshot(client, ticker.upper())
+    except Exception as exc:  # noqa: BLE001 - skew is additive to the report
+        return unavailable_skew([f"skew:{exc}"])
+
+
 def build_report(ticker: str, lookback_days: int = DEFAULT_LOOKBACK_DAYS) -> Dict[str, Any]:
     """Run the flow fetch + analysis pipeline for a single ticker."""
     ticker = ticker.upper()
@@ -90,6 +105,7 @@ def build_report(ticker: str, lookback_days: int = DEFAULT_LOOKBACK_DAYS) -> Dic
         "fetched_at": datetime.utcnow().isoformat() + "Z",
         "lookback_days": lookback_days,
         "verdict": verdict,
+        "skew": fetch_ticker_skew(ticker),
         "analysis": analysis,
         "dark_pool": flow.get("dark_pool", {}),
         "options_flow": flow.get("options_flow", {}),
