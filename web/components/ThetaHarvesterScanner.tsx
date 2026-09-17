@@ -1,4 +1,5 @@
 "use client";
+import ErrorToast from "@/components/ErrorToast";
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import Link from "next/link";
@@ -490,7 +491,6 @@ export default function ThetaHarvesterScanner({
             spellCheck={false}
             aria-label="Ticker symbol"
             aria-invalid={tickerError ? "true" : "false"}
-            aria-describedby={tickerError ? "theta-ticker-search-error" : undefined}
           />
           <button
             type="submit"
@@ -501,9 +501,7 @@ export default function ThetaHarvesterScanner({
             Scan
           </button>
           {tickerError && (
-            <span id="theta-ticker-search-error" className="theta-search__error" role="alert">
-              {tickerError}
-            </span>
+            <ErrorToast message={tickerError} />
           )}
         </form>
       )}
@@ -586,7 +584,7 @@ export default function ThetaHarvesterScanner({
           onDismiss={() => setDismissedProposal(proposal.ticker)}
         />
       ) : null}
-      {error && <div className="section-body"><RequestError error={error} onRetry={scanning ? undefined : onRetry} retainedData={rows.length > 0} /></div>}
+      {error && <RequestError error={error} onRetry={scanning ? undefined : onRetry} retainedData={rows.length > 0} />}
       {loading && rows.length === 0 ? (
         <div className="section-body">
           <div className="snapshot-card__empty">Sampling theta surface...</div>

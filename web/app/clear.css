@@ -529,8 +529,11 @@ body.radon-clear[data-mobile="true"] :is(
 .chat-starters button span span { color: var(--text-muted); font-size: 12px; }
 .chat-starters svg { flex-shrink: 0; color: var(--text-muted); }
 .chat-starters button:hover strong, .chat-starters button:hover svg { color: var(--signal-core-text); }
-.chat-panel .chat-messages { padding: 28px 40px 24px; scrollbar-gutter: stable; }
-.chat-panel .chat-message { margin-bottom: 28px; min-width: 0; }
+/* Short conversations stay with the composer; overflowing history still scrolls. */
+.chat-panel .chat-messages { display: flex; flex-direction: column; padding: 28px 40px 24px; scrollbar-gutter: stable; }
+.chat-panel .chat-message { flex-shrink: 0; margin-bottom: 28px; min-width: 0; }
+.chat-panel .chat-message:first-child { margin-top: auto; }
+.chat-panel .chat-message:last-child { margin-bottom: 0; }
 .chat-panel .chat-message.user { max-width: 85%; padding: 12px 16px; background: var(--bg-subtle); border-radius: var(--radius-lg); }
 .chat-panel .chat-meta { margin-bottom: 8px; }
 .chat-panel .chat-role { font: 600 12px var(--font-sans); color: var(--text-primary); letter-spacing: 0; text-transform: none; }

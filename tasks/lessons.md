@@ -1073,3 +1073,6 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 
 ## 2026-09-17 - Error bodies are not UI copy
 - Never render response.text(), JSON envelopes, stack traces, or raw infrastructure exceptions as user-facing errors. Route failures through the established error pattern with safe copy and recovery, retaining prior data and financial rejection semantics. Audit shared consumers whenever a page leaks a raw error.
+
+## 2026-09-17 — Errors belong in toasts
+- User-facing request, refresh, validation and action failures must use toast presentation, never inline banners. Preserve retry actions and safe broker/service guidance. Audit shared presenters and custom render branches together; explicitly report framework fallback and diagnostic-record exceptions.

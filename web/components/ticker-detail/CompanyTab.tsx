@@ -1,6 +1,7 @@
 "use client";
 
-import { userErrorMessage } from "@/lib/userError";
+import RequestError from "@/components/RequestError";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Building2 } from "lucide-react";
 import type { PriceData, FundamentalsData } from "@/lib/pricesProtocol";
@@ -129,7 +130,7 @@ export default function CompanyTab({ ticker, active, priceData, fundamentals }: 
     return <div><AiInfrastructureHandoff ticker={ticker} /><div className="tab-loading"><div className="tab-loading-text">Loading company info...</div></div></div>;
   }
   if (error) {
-    return <div><AiInfrastructureHandoff ticker={ticker} /><div className="tab-error">{userErrorMessage(error, 'This instrument data could not be loaded. Try again.')}</div></div>;
+    return <div><AiInfrastructureHandoff ticker={ticker} /><RequestError error={error} fallback="This instrument data could not be loaded. Try again." onRetry={() => { void fetchInfo(); }} /><button type="button" className="btn-secondary" onClick={() => { void fetchInfo(); }}>Reload data</button></div>;
   }
   if (!data) {
     return (

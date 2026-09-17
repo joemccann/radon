@@ -186,7 +186,10 @@ describe("StreaksPanel gates", () => {
 
   it("shows the unreachable state when the route errored", () => {
     renderPanel(hookState({ error: "Failed to fetch streaks" }));
-    expect(screen.getByText("Streak feed unreachable")).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain("Unable to connect");
+    expect(screen.getByRole("alert").closest("[data-toast-viewport]")).toBeTruthy();
+    expect(screen.getByTestId("streaks-symbol-input")).toBeTruthy();
+    expect(screen.queryByText("Streak feed unreachable")).toBeNull();
   });
 
   it("shows the missing state naming the symbol", () => {

@@ -116,7 +116,8 @@ describe("news feed sharing", () => {
     render(<NewsfeedShare post={post} />);
     await openShare();
     expect(screen.getByRole("alert").textContent).toContain("Showing the original copy");
-    fireEvent.click(screen.getByRole("button", { name: "Retry voice rewrite" }));
+    expect(screen.getByRole("alert").closest("[data-toast-viewport]")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
     await screen.findByAltText("Portrait share preview: Yen hedge demand");
@@ -172,8 +173,9 @@ describe("news feed sharing", () => {
     render(<NewsfeedShare post={post} imageUrl="/chart-2.png" />);
     fireEvent.click(screen.getByRole("button", { name: "Share", exact: true }));
     expect((await screen.findByRole("alert")).textContent).toContain("Chart could not be loaded");
+    expect(screen.getByRole("alert").closest("[data-toast-viewport]")).toBeTruthy();
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "My edited caption" } });
-    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await screen.findByAltText("Portrait share preview: Yen hedge demand");
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("My edited caption");
     expect(screen.queryByRole("alert")).toBeNull();

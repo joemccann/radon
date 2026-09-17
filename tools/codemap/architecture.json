@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-09-17T19:14:36Z",
-  "node_count": 3381,
-  "edge_count": 6996,
+  "generated_at": "2026-09-17T19:37:43Z",
+  "node_count": 3389,
+  "edge_count": 7068,
   "areas": {
-    "web": 1997,
+    "web": 2005,
     "site": 155,
     "scripts": 1116,
     "cloud": 66,
@@ -20,7 +20,7 @@
     {
       "id": "web/components",
       "area": "web",
-      "count": 253
+      "count": 255
     },
     {
       "id": "web/e2e",
@@ -50,7 +50,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 923
+      "count": 929
     },
     {
       "id": "site/app",
@@ -357,13 +357,6 @@
       "test": false
     },
     {
-      "id": "web/lib/userError.ts",
-      "area": "web",
-      "in": 55,
-      "out": 0,
-      "test": false
-    },
-    {
       "id": "web/lib/db.ts",
       "area": "web",
       "in": 54,
@@ -399,6 +392,13 @@
       "test": false
     },
     {
+      "id": "web/components/RequestError.tsx",
+      "area": "web",
+      "in": 43,
+      "out": 2,
+      "test": false
+    },
+    {
       "id": "web/lib/dbExecute.ts",
       "area": "web",
       "in": 40,
@@ -409,6 +409,20 @@
       "id": "web/components/SpectralLoader.tsx",
       "area": "web",
       "in": 44,
+      "out": 0,
+      "test": false
+    },
+    {
+      "id": "web/components/ErrorToast.tsx",
+      "area": "web",
+      "in": 41,
+      "out": 1,
+      "test": false
+    },
+    {
+      "id": "web/lib/userError.ts",
+      "area": "web",
+      "in": 41,
       "out": 0,
       "test": false
     },
@@ -508,20 +522,6 @@
       "area": "scripts",
       "in": 21,
       "out": 11,
-      "test": false
-    },
-    {
-      "id": "web/lib/serviceHealthWindows.ts",
-      "area": "web",
-      "in": 31,
-      "out": 0,
-      "test": false
-    },
-    {
-      "id": "scripts/clients/uw_client.py",
-      "area": "scripts",
-      "in": 29,
-      "out": 2,
       "test": false
     }
   ],

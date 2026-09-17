@@ -1,5 +1,6 @@
 "use client";
 
+import ErrorToast from "@/components/ErrorToast";
 import { formatOrderError } from "@/lib/orderError";
 
 type OrderErrorBannerProps = {
@@ -12,13 +13,13 @@ export default function OrderErrorBanner({ error }: OrderErrorBannerProps) {
   const formatted = formatOrderError(error);
 
   return (
-    <div className="order-error" role="alert">
+    <ErrorToast message={<>
       <div className="order-error-summary">{formatted.summary}</div>
       {formatted.details.map((detail) => (
         <div key={detail} className="order-error-detail">
           {detail}
         </div>
       ))}
-    </div>
+    </>} />
   );
 }

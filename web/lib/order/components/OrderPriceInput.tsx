@@ -1,5 +1,7 @@
 "use client";
 
+import RequestError from "@/components/RequestError";
+
 /**
  * OrderPriceInput — Price input with $ prefix and quick-fill buttons
  *
@@ -53,6 +55,7 @@ export function OrderPriceInput({
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
           disabled={disabled}
+          aria-invalid={Boolean(error)}
         />
       </div>
       <OrderPriceButtons
@@ -61,7 +64,7 @@ export function OrderPriceInput({
         showPrices={showButtonPrices}
         disabled={disabled}
       />
-      {error && <span className="order-field-error">{error}</span>}
+      <RequestError error={error} />
     </div>
   );
 }

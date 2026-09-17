@@ -1,3 +1,4 @@
+# Toast error audit 2026-09-17: chat-launcher-focus, flow-analysis-ticker, scanner-ticker-scan and ticker-search-chain now execute in the CI curated suite.
 # REVIEWED 2026-09-17 portfolio-mixed-combo-today-pnl.spec.ts - jsdom PositionTable Today P&L +$1,000 vs P&L +$3,500; Vitest SPY 740/760 screenshot numbers. Browser suite remains held out pending next start preflight.
 # clear-shell.spec.ts is curated in ci.yml for AI industry desktop/mobile navigation verification.
 # research-workbench.spec.ts is curated in ci.yml: source citations, mobile/desktop, exports and safe handoff.
@@ -53,7 +54,6 @@ catalyst-card-weekend.spec.ts
 chain-held-leg-prices.spec.ts
 chain-sticky-header.spec.ts
 chain-strikes-selector.spec.ts
-chat-launcher-focus.spec.ts
 clear-accessibility.spec.ts
 clear-admin-component.spec.ts
 clear-all-pages.spec.ts
@@ -81,7 +81,6 @@ dollar-delta-leverage.spec.ts
 ma-ratio-tab.spec.ts
 calm-streak-tab.spec.ts
 fill-toast.spec.ts
-flow-analysis-ticker.spec.ts
 header-fullscreen.spec.ts
 hhlev-tab.spec.ts
 hyad-tab.spec.ts
@@ -175,7 +174,6 @@ rv-ratio.spec.ts
 scanner-discover.spec.ts
 scanner-leap-garch-tabs.spec.ts
 scanner-tab-gaps.spec.ts
-scanner-ticker-scan.spec.ts
 short-strangle-skew.spec.ts
 sidebar-performance-hidden.spec.ts
 skew-tab.spec.ts
@@ -188,7 +186,6 @@ sync-fallback.spec.ts
 theta-harvester-prefill.spec.ts
 theta-harvester-scanner.spec.ts
 ticker-page.spec.ts
-ticker-search-chain.spec.ts
 ticker-search-live.spec.ts
 trin-tab.spec.ts
 vixcor-tab.spec.ts
