@@ -12,7 +12,7 @@ import { backfillRealizedVolHistory, type RegimeHistoryEntry } from "@/lib/regim
 import { radonFetch } from "@/lib/radonApi";
 import { isSkewCacheFresh, matchesInternalsSkewVariant } from "@/lib/internalsSkewCache";
 import { dbExecute } from "@/lib/dbExecute";
-import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
+import { getRequestId, setNoStoreResponseHeaders, scrubSecrets } from "@/lib/apiContracts";
 import {
   toLongRangeSkewPoints,
   type LongRangeSkewHistoryPayload,
@@ -642,7 +642,7 @@ export async function POST(): Promise<Response> {
     const data = normalizeCriPayload(rawData, menthorqCache, menthorqSkewHistory);
     return setNoStoreResponseHeaders(NextResponse.json(data), requestId);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "CRI scan failed";
+    const message = scrubSecrets(error instanceof Error ? error.message : "CRI scan failed");
     return setNoStoreResponseHeaders(
       NextResponse.json({ error: message }, { status: 502 }),
       requestId,
