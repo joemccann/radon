@@ -3,7 +3,7 @@
  */
 
 import React from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import VolSkewMrScanner, { volSkewMrOrderHref } from "../components/VolSkewMrScanner";
@@ -88,6 +88,43 @@ describe("VolSkewMrScanner", () => {
     expect(screen.getByTestId("vol-skew-mr-title-tooltip-content").textContent).toContain("Imran Lakha");
   });
 
+  it.each([
+    ["Spot ext", "extension", /RSI/i],
+    ["IV path", "iv-path", /implied volatility/i],
+    ["Skew path", "skew-path", /put/i],
+    ["Verdict", "verdict", /TOP MR/i],
+    ["Structure", "structure", /spread/i],
+  ] as const)("explains %s without changing table sorting", (label, id, explanation) => {
+    render(<VolSkewMrScanner data={data} />);
+    const tickerHeader = screen.getByRole("columnheader", { name: "Ticker" });
+    fireEvent.click(tickerHeader);
+    fireEvent.click(tickerHeader);
+    const rowOrder = () => screen.getAllByTestId(/^vol-skew-mr-row-/).map(row => row.dataset.testid);
+    const before = rowOrder();
+    expect(before).toEqual(["vol-skew-mr-row-NVDA", "vol-skew-mr-row-INTC", "vol-skew-mr-row-AAPL"]);
+
+    const trigger = screen.getByTestId(`vol-skew-mr-${id}-tooltip`);
+    expect(trigger.getAttribute("aria-label")).toBe(`${label} details`);
+    const button = within(trigger).getByRole("button");
+    fireEvent.focus(trigger);
+    expect(screen.getByTestId(`vol-skew-mr-${id}-tooltip-content`).textContent).toMatch(explanation);
+    expect(rowOrder()).toEqual(before);
+    fireEvent.click(button);
+    expect(screen.queryByTestId(`vol-skew-mr-${id}-tooltip-content`)).toBeNull();
+    fireEvent.click(button);
+    expect(screen.getByTestId(`vol-skew-mr-${id}-tooltip-content`).textContent).toMatch(explanation);
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    fireEvent.keyDown(button, { key: " " });
+    expect(rowOrder()).toEqual(before);
+    expect(tickerHeader.getAttribute("aria-sort")).toBe("descending");
+
+    const header = trigger.closest("th") as HTMLTableCellElement;
+    fireEvent.click(within(header).getByText(label, { exact: true }));
+    expect(header.getAttribute("aria-sort")).toBe("ascending");
+    fireEvent.keyDown(header, { key: "Enter" });
+    expect(header.getAttribute("aria-sort")).toBe("descending");
+  });
+
   it("fires comma ticker search through onTickerScan", () => {
     const onTickerScan = vi.fn();
     render(<VolSkewMrScanner data={data} onTickerScan={onTickerScan} />);
@@ -137,5 +174,33 @@ describe("VolSkewMrScanner", () => {
     };
     expect(volSkewMrOrderHref(data.results[0])).toBe("/AAPL?deck=c&src=vol-skew-mr");
     expect(volSkewMrOrderHref(quiet)).toBeNull();
+  });
+});
+
+ it("distinguishes missing skew history from a measured direction", () => {
+  render(<VolSkewMrScanner data={{ ...data, results: [{ ...data.results[0], skew_path: "unknown", gates: { technicals: true, iv: true, skew: false } }] }} />);
+  expect(screen.getByRole("status").textContent).toContain("Skew history unavailable for 1 of 1 names");
+  expect(screen.getAllByText(/Insufficient history/).length).toBeGreaterThan(0);
+ });
+
+describe("safe scan failures", () => {
+  it.each([
+    JSON.stringify({ scan_succeeded: false, error: "Radon API 502: Subprocess capacity exhausted", results: [] }),
+    "<html><body>502 Bad Gateway nginx</body></html>",
+    "Traceback: internal service failure /srv/radon/scanner.py",
+  ])("keeps prior observations and renders a safe retry banner", (error) => {
+    const retry = vi.fn();
+    render(<VolSkewMrScanner data={data} error={error} onRetry={retry} />);
+    expect(screen.getByRole("alert").textContent).not.toContain(error);
+    expect(screen.getByRole("alert").textContent).not.toMatch(/Subprocess|Traceback|nginx|scan_succeeded|\/srv/);
+    expect(screen.getByTestId("vol-skew-mr-row-AAPL")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /retry|try again/i }));
+    expect(retry).toHaveBeenCalledOnce();
+  });
+
+  it("does not imply an empty successful scan when the initial request failed", () => {
+    render(<VolSkewMrScanner data={null} error="Radon API 502: Subprocess capacity exhausted" />);
+    expect(screen.getByRole("alert")).toBeTruthy();
+    expect(screen.queryByText("No vol/skew MR readings")).toBeNull();
   });
 });

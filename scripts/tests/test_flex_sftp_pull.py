@@ -57,11 +57,13 @@ class FakeSftp:
         returncode: int = 0,
         stderr: str = "",
         ls_stdout: str | None = None,
+        get_fail: dict[str, str] | None = None,
     ):
         self.files = files
         self.returncode = returncode
         self.stderr = stderr
         self.ls_stdout = ls_stdout
+        self.get_fail = get_fail or {}
         self.calls: list[list[str]] = []
         self.inputs: list[str] = []
 
@@ -95,6 +97,10 @@ class FakeSftp:
             if line.startswith("get "):
                 _, remote, local = line.split(maxsplit=2)
                 key = remote.split("/")[-1]
+                if key in self.get_fail:
+                    completed.returncode = 255
+                    completed.stderr = self.get_fail[key]
+                    return completed
                 Path(local).write_bytes(self.files[key])
                 self.cwd = cwd
                 return completed
@@ -648,3 +654,87 @@ def test_stale_remote_still_errors(tmp_path, monkeypatch):
     assert codes[-1] == 1
     assert heartbeats[-1][0] == "error"
     assert "stopped delivering" in str(heartbeats[-1][1])
+
+
+# 2026-09-16 page 5a2eb828: newest Equity_Summary ingested, then IBKR RST'd
+# kex on older outgoing files. Type=oneshot Result=exit-code / NRestarts=0.
+_PAGE_NOW = datetime(2026, 9, 16, 7, 30, tzinfo=ZoneInfo("America/New_York"))
+_RST_STDERR = (
+    "kex_exchange_identification: read: Connection reset by peer\n"
+    "Connection reset by 64.190.196.110 port 22\n"
+    "Connection closed\n"
+)
+
+
+def _two_statement_names():
+    newest = "U4698258.Equity_Summary_in_Base.20260915.20260915.xml.pgp"
+    older = "U4698258.Equity_Summary_in_Base.20260828.20260828.xml.pgp"
+    return newest, older
+
+
+def _run_two_statements(tmp_path, monkeypatch, *, get_fail, newest_outcome):
+    import flex_sftp_pull as pull
+
+    heartbeats = []
+    monkeypatch.setattr(pull, "_heartbeat", lambda state, error=None: heartbeats.append((state, error)))
+    newest, older = _two_statement_names()
+    files = {
+        newest: _statement_xml(date(2026, 9, 15)),
+        older: _statement_xml(date(2026, 8, 28)),
+    }
+    seen: list[str] = []
+
+    def ingest(xml_text, source_path="", **k):
+        seen.append(Path(source_path).name if source_path else "")
+        outcome = newest_outcome if "20260915" in (source_path or "") else "duplicate"
+        return {"ok": True, "outcome": outcome}
+
+    code = pull.run(
+        config=_ssh_config(tmp_path / "ssh_config"),
+        inbox=tmp_path / "inbox",
+        runner=FakeSftp(files, get_fail=get_fail),
+        decrypt=lambda data, **k: data.decode(),
+        ingest=ingest,
+        now=_PAGE_NOW,
+    )
+    return code, heartbeats, seen
+
+
+def test_historical_sftp_rst_after_newest_ingest_does_not_fail_the_oneshot(tmp_path, monkeypatch):
+    newest, older = _two_statement_names()
+    code, heartbeats, seen = _run_two_statements(
+        tmp_path,
+        monkeypatch,
+        get_fail={older: _RST_STDERR},
+        newest_outcome="applied",
+    )
+    assert seen == [newest.replace(".pgp", "")], seen
+    assert code == 0, heartbeats
+    assert heartbeats[-1][0] == "ok"
+
+
+def test_historical_sftp_rst_after_duplicate_newest_does_not_fail_the_oneshot(tmp_path, monkeypatch):
+    """08:30 retry: today's file is already applied; IBKR still RSTs the tail."""
+    newest, older = _two_statement_names()
+    code, heartbeats, seen = _run_two_statements(
+        tmp_path,
+        monkeypatch,
+        get_fail={older: _RST_STDERR},
+        newest_outcome="duplicate",
+    )
+    assert seen == [newest.replace(".pgp", "")], seen
+    assert code == 0, heartbeats
+    assert heartbeats[-1][0] == "ok"
+
+
+def test_sftp_rst_on_the_newest_statement_still_fails_the_oneshot(tmp_path, monkeypatch):
+    newest, older = _two_statement_names()
+    code, heartbeats, seen = _run_two_statements(
+        tmp_path,
+        monkeypatch,
+        get_fail={newest: _RST_STDERR},
+        newest_outcome="applied",
+    )
+    assert newest.replace(".pgp", "") not in seen
+    assert code == 1, heartbeats
+    assert heartbeats[-1][0] == "error"

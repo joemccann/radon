@@ -1,5 +1,7 @@
 "use client";
 
+import ErrorToast from "@/components/ErrorToast";
+
 import {
   type ClipboardEvent,
   type FormEvent,
@@ -65,6 +67,8 @@ function readBase64(file: File): Promise<string | null> {
 type AskComposerProps = {
   placeholder?: string;
   busy?: boolean;
+  /** Retained drawers hide notifications when their composer is closed. */
+  active?: boolean;
   onStop?: () => void;
   /** A changed id replaces the draft, including restored attachments, and focuses it. */
   draft?: { id: number; text: string; attachments?: ChatImageAttachment[] };
@@ -93,6 +97,7 @@ type AskComposerProps = {
 export default function AskComposer({
   placeholder = "Ask about your portfolio, risk, or a trade…",
   busy = false,
+  active = true,
   onStop,
   draft,
   sources = [],
@@ -108,7 +113,6 @@ export default function AskComposer({
   const [attachmentErrors, setAttachmentErrors] = useState<string[]>([]);
   const [pendingReads, setPendingReads] = useState(0);
   const helpId = useId();
-  const errorId = useId();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const attachmentsRef = useRef<ChatImageAttachment[]>([]);
   const pendingReadsRef = useRef(0);
@@ -308,7 +312,7 @@ export default function AskComposer({
           maxLength={1000}
           placeholder={placeholder}
           aria-label="Ask Radon"
-          aria-describedby={`${helpId}${attachmentErrors.length ? ` ${errorId}` : ""}`}
+          aria-describedby={helpId}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
           onPaste={onPaste}
@@ -320,10 +324,8 @@ export default function AskComposer({
           }}
         />
       </div>
-      {attachmentErrors.length ? (
-        <p className="ask-composer__error" id={errorId} role="alert">
-          {attachmentErrors.join(" ")}
-        </p>
+      {active && attachmentErrors.length ? (
+        <ErrorToast message={attachmentErrors.join(" ")} />
       ) : null}
       <div className="ask-composer__rail">
         <input

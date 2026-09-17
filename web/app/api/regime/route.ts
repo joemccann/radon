@@ -8,7 +8,7 @@ import { selectPreferredCriCandidate, type CriCacheCandidate } from "@/lib/criCa
 import { backfillRealizedVolHistory, type RegimeHistoryEntry } from "@/lib/regimeHistory";
 import { radonFetch, RadonApiError } from "@/lib/radonApi";
 import { createBackgroundScanTrigger } from "@/lib/backgroundScan";
-import { getRequestId, setCacheResponseHeaders, setNoStoreResponseHeaders } from "@/lib/apiContracts";
+import { getRequestId, setCacheResponseHeaders, setNoStoreResponseHeaders, scrubSecrets } from "@/lib/apiContracts";
 import { dbExecute } from "@/lib/dbExecute";
 import { cachedRead, invalidateCache } from "@/lib/dbCache";
 import { buildDemoCriFixture } from "@/lib/demo/fixtures/regime";
@@ -374,7 +374,7 @@ export async function POST(): Promise<Response> {
         return response;
       }
     }
-    const message = err instanceof Error ? err.message : "CRI scan failed";
+    const message = scrubSecrets(err instanceof Error ? err.message : "CRI scan failed");
     return NextResponse.json({ error: message, scan_succeeded: false }, { status });
   }
 }

@@ -12,7 +12,7 @@
  *   always-visible desktop `.act-ticket` column; the glyph rail decks are
  *   chain/posn/news/rate/seas/info only (components/ticker-detail/GlyphRail.tsx).
  * - Error copy still routes through `formatOrderError`
- *   (web/lib/orderError.ts) into `.order-error` via `<OrderErrorBanner>`;
+ *   (web/lib/orderError.ts) into `.toast-error` via `<OrderErrorBanner>`;
  *   success routes through `pushNotification` → the global `.toast-success`
  *   (components/ticker-detail/OrderTab.tsx:776, components/Toast.tsx:25).
  */
@@ -245,7 +245,7 @@ test.describe("SPXU combo order — rejection surfaces as error (RED → GREEN)"
     // Should show an error, not a success. `formatOrderError` maps
     // "Order rejected by IB: Cancelled" → summary "Order rejected by IB." +
     // detail "Cancelled." (web/lib/orderError.ts:63-65).
-    const errorMsg = ticket.locator(".order-error");
+    const errorMsg = page.locator(".toast-error:has(.order-error-summary)");
     await errorMsg.waitFor({ timeout: 5_000 });
     await expect(errorMsg).toBeVisible();
     await expect(errorMsg).toContainText(/rejected|Cancelled/i);
@@ -303,7 +303,7 @@ test.describe("SPXU combo order — rejection surfaces as error (RED → GREEN)"
     await expect(successMsg).toContainText(/Combo order placed.*\$2\.25/i, { timeout: 10_000 });
 
     // Error should NOT appear
-    await expect(ticket.locator(".order-error")).not.toBeVisible();
+    await expect(page.locator(".toast-error:has(.order-error-summary)")).not.toBeVisible();
   });
 
   test("GREEN: Unknown status (no IB ack) shows error not success", async ({ page }) => {
@@ -321,7 +321,7 @@ test.describe("SPXU combo order — rejection surfaces as error (RED → GREEN)"
     const ticket = await openSpxuOrderTicket(page);
     await fillComboForm(ticket, "2.25");
 
-    const errorMsg = ticket.locator(".order-error");
+    const errorMsg = page.locator(".toast-error:has(.order-error-summary)");
     await errorMsg.waitFor({ timeout: 5_000 });
     await expect(errorMsg).toBeVisible();
     await expect(page.locator(".toast-success")).not.toBeVisible();
@@ -342,7 +342,7 @@ test.describe("SPXU combo order — rejection surfaces as error (RED → GREEN)"
     const ticket = await openSpxuOrderTicket(page);
     await fillComboForm(ticket, "2.25");
 
-    const errorMsg = ticket.locator(".order-error");
+    const errorMsg = page.locator(".toast-error:has(.order-error-summary)");
     await errorMsg.waitFor({ timeout: 5_000 });
     await expect(errorMsg).toBeVisible();
     await expect(errorMsg).toContainText("Order rejected by IB: insufficient margin.");

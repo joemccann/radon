@@ -1,5 +1,7 @@
 "use client";
 
+import ErrorToast from "@/components/ErrorToast";
+
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useClerk, useUser } from "@clerk/nextjs";
@@ -211,7 +213,7 @@ export default function ProfileContent({ prices }: { prices?: Record<string, Pri
                   }}
                 />
                 {usernameError ? (
-                  <span className="profile-field__error">{usernameError}</span>
+                  <ErrorToast message={usernameError} />
                 ) : (
                   <span className="profile-field__hint">Saves on blur or Enter.</span>
                 )}
@@ -222,7 +224,7 @@ export default function ProfileContent({ prices }: { prices?: Record<string, Pri
               </div>
             </div>
           </div>
-          {photoError ? <span className="profile-field__error" style={{ display: "block", marginTop: "8px" }}>{photoError}</span> : null}
+          {photoError ? <ErrorToast message={photoError} /> : null}
           <input
             ref={fileInputRef}
             type="file"
@@ -348,7 +350,7 @@ export default function ProfileContent({ prices }: { prices?: Record<string, Pri
                 }}
               />
               {usernameError ? (
-                <span className="profile-field__error">{usernameError}</span>
+                <ErrorToast message={usernameError} />
               ) : (
                 <span className="profile-field__hint">Saves on blur or Enter.</span>
               )}
@@ -373,7 +375,7 @@ export default function ProfileContent({ prices }: { prices?: Record<string, Pri
               >
                 Sign out
               </button>
-              {photoError ? <span className="profile-field__error">{photoError}</span> : null}
+              {photoError ? <ErrorToast message={photoError} /> : null}
             </div>
             <input
               ref={fileInputRef}
