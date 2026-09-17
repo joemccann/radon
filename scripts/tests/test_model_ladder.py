@@ -459,3 +459,179 @@ class TestCerebrasModelId:
         assert captured[0]["model"] == "qwen-3.8-27b"
         assert "llama-4-scout" not in captured[0]["model"]
         assert captured[0]["reasoning_effort"] == "none"
+
+
+class TestSubscriptionAuthPreference:
+    def test_anthropic_oauth_preferred_over_prepaid_api_key(self):
+        from clients.model_ladder import _auth_for
+
+        auth = _auth_for(
+            "anthropic",
+            {
+                "CLAUDE_CODE_OAUTH_TOKEN": "oauth-sub-token",
+                "ANTHROPIC_API_KEY": "sk-ant-prepaid",
+            },
+        )
+        assert auth is not None
+        assert auth.kind == "subscription"
+        assert auth.token == "oauth-sub-token"
+        assert auth.mechanism == "CLAUDE_CODE_OAUTH_TOKEN"
+
+    def test_subscription_token_wires_anthropic_without_prepaid(self):
+        assert "anthropic" in wired_providers({"CLAUDE_CODE_OAUTH_TOKEN": "oauth"})
+
+    def test_codex_auth_json_preferred_over_openai_api_key(self, tmp_path):
+        from clients.model_ladder import _auth_for
+
+        codex_home = tmp_path / "codex"
+        codex_home.mkdir()
+        (codex_home / "auth.json").write_text(
+            json.dumps({"tokens": {"access_token": "codex-sub-token"}}),
+            encoding="utf-8",
+        )
+        auth = _auth_for(
+            "codex",
+            {"CODEX_HOME": str(codex_home), "OPENAI_API_KEY": "sk-openai-prepaid"},
+        )
+        assert auth is not None
+        assert auth.kind == "subscription"
+        assert auth.token == "codex-sub-token"
+
+    def test_grok_auth_json_preferred_over_xai_api_key(self, tmp_path):
+        from clients.model_ladder import _auth_for
+
+        home = tmp_path / "home"
+        (home / ".grok").mkdir(parents=True)
+        (home / ".grok" / "auth.json").write_text(
+            json.dumps({"access_token": "grok-sub-token"}),
+            encoding="utf-8",
+        )
+        auth = _auth_for(
+            "grok",
+            {"HOME": str(home), "XAI_API_KEY": "xai-prepaid"},
+        )
+        assert auth is not None
+        assert auth.kind == "subscription"
+        assert auth.token == "grok-sub-token"
+
+    def test_gemini_accepts_google_api_key_alias(self):
+        assert "gemini" in wired_providers({"GOOGLE_API_KEY": "goog-test"})
+
+    def test_anthropic_subscription_sends_oauth_beta_header(self):
+        captured: list[dict] = []
+
+        def post(url, *, headers=None, json=None, timeout=None, stream=False):
+            captured.append(headers or {})
+            return _anthropic_obj_ok()
+
+        result = complete_multimodal_json(
+            "evaluate",
+            env={"CLAUDE_CODE_OAUTH_TOKEN": "oauth-sub"},
+            post=post,
+            stream_anthropic=False,
+        )
+        assert result.provider == "anthropic"
+        assert captured[0].get("anthropic-beta") == "oauth-2025-04-20"
+        assert captured[0].get("x-api-key") == "oauth-sub"
+
+
+class TestPrepaidMissDoesNotExhaustWhenAlternatesExist:
+    def test_anthropic_credit_falls_to_nvidia_when_keyed(self):
+        router = _Router(
+            {
+                "api.anthropic.com": _credit_low(),
+                "integrate.api.nvidia.com": _openai_obj_ok(),
+            }
+        )
+        result = complete_multimodal_json(
+            "evaluate",
+            env={"ANTHROPIC_API_KEY": "sk-ant-empty", "NVIDIA_API_KEY": "nvapi-test"},
+            post=router,
+            stream_anthropic=False,
+        )
+        assert result.provider == "nvidia"
+        assert "credit_balance" in " ".join(result.attempted)
+
+    def test_only_nvidia_keyed_is_attempted(self):
+        router = _Router({"integrate.api.nvidia.com": _openai_obj_ok()})
+        result = complete_multimodal_json(
+            "evaluate",
+            images=[("page", PNG)],
+            env={"NVIDIA_API_KEY": "nvapi-test"},
+            post=router,
+            stream_anthropic=False,
+        )
+        assert result.provider == "nvidia"
+        assert result.model == "meta/llama-3.2-90b-vision-instruct"
+
+    def test_subscription_anthropic_wins_without_prepaid(self):
+        router = _Router({"api.anthropic.com": _anthropic_obj_ok()})
+        result = complete_multimodal_json(
+            "evaluate",
+            env={"CLAUDE_CODE_OAUTH_TOKEN": "oauth-sub"},
+            post=router,
+            stream_anthropic=False,
+        )
+        assert result.provider == "anthropic"
+
+
+class TestNvidiaVisionDefaultAndFallback:
+    def test_default_vision_model_is_90b(self):
+        from clients.model_ladder import _model_for, _nvidia_vision_models
+
+        assert _model_for("nvidia", {}, kind="vision") == (
+            "meta/llama-3.2-90b-vision-instruct"
+        )
+        assert _nvidia_vision_models({}) == (
+            "meta/llama-3.2-90b-vision-instruct",
+            "meta/llama-3.2-11b-vision-instruct",
+        )
+
+    def test_nvidia_vision_model_override_honored(self):
+        from clients.model_ladder import _nvidia_vision_models
+
+        models = _nvidia_vision_models(
+            {"NVIDIA_VISION_MODEL": "meta/llama-3.2-11b-vision-instruct"}
+        )
+        assert models == ("meta/llama-3.2-11b-vision-instruct",)
+
+    def test_multimodal_falls_from_90b_to_11b_on_error(self):
+        calls: list[str] = []
+
+        def post(url, *, headers=None, json=None, timeout=None, stream=False):
+            model = (json or {}).get("model", "")
+            calls.append(model)
+            if model.endswith("90b-vision-instruct"):
+                return _Resp(500, {"error": {"message": "timeout"}})
+            return _openai_obj_ok()
+
+        result = complete_multimodal_json(
+            "evaluate",
+            images=[("page", PNG)],
+            env={"NVIDIA_API_KEY": "nvapi-test"},
+            post=post,
+            stream_anthropic=False,
+        )
+        assert result.provider == "nvidia"
+        assert result.model == "meta/llama-3.2-11b-vision-instruct"
+        assert calls == [
+            "meta/llama-3.2-90b-vision-instruct",
+            "meta/llama-3.2-11b-vision-instruct",
+        ]
+
+    def test_vision_extract_uses_90b_then_11b(self):
+        calls: list[str] = []
+
+        def post(url, *, headers=None, json=None, timeout=None, stream=False):
+            model = (json or {}).get("model", "")
+            calls.append(model)
+            if "90b" in model:
+                return _Resp(503, {"error": {"message": "capacity"}})
+            return _openai_ok()
+
+        result = extract_via_vision(
+            PNG, PROMPT, env={"NVIDIA_API_KEY": "nvapi-test"}, post=post
+        )
+        assert result.provider == "nvidia"
+        assert result.model == "meta/llama-3.2-11b-vision-instruct"
+        assert calls[0] == "meta/llama-3.2-90b-vision-instruct"

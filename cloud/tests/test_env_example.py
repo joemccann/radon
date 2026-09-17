@@ -122,9 +122,12 @@ class TestCTAVisionModelLadder:
                 model_ladder._GEMINI_KEYS,
                 model_ladder._NVIDIA_KEYS,
                 model_ladder._CEREBRAS_KEYS,
+                getattr(model_ladder, "_OPTIONAL_LADDER_ENV", ()),
             )
             for key in group
         }
+        # Auth-file paths are not env inventory rows.
+        source_owned -= {"CLAUDE_CODE_OAUTH_TOKEN_FILE", "CLAUDE_CONFIG_DIR", "CODEX_HOME"}
         env_vars = parse_env_vars(read_env_example(root))
         assert source_owned <= env_vars.keys()
 
