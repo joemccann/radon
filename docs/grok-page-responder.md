@@ -93,31 +93,41 @@ systemctl is-active radon-grok-page-responder.timer
 journalctl -u radon-grok-page-responder -n 20 --no-pager
 ```
 
-## Enable IR open-PR (Dev, after this ships)
+## Open-PR path: the Mac mini picks the branch up
 
-Grok pushes `fix/<slug>` and `scripts/ir_ensure_pr.py` opens the PR.
-The helper never merges. Branch-only is not a ship: missing `gh` or a
-PAT without `pull_requests: write` keeps the page pending, records the
-attempt failure, and marks the responder health row `error`; the ordinary
-three-attempt limit then governs escalation.
+**The VPS holds no GitHub credential.** Pushing a branch and merging a pull
+request need the same GitHub permission, so any token on the host that runs
+`grok --always-approve` over untrusted page text could merge to `main` and
+deploy — the prompt rule and `ir_ensure_pr`'s merge refusal are guards the
+agent's own shell can walk around with `curl`. The responder therefore runs
+with `GROK_PAGE_AUTOPUSH=0`: it edits, tests and commits to `fix/<slug>` in
+its clone, and stops.
 
-Fine-grained PAT on `joemccann/radon` for the VPS `radon` user:
+`scripts/grok_fix_pickup.py` on the Mac mini (launchd
+`com.radon.grok-fix-pickup`, every 15 min) fetches those branches over the
+existing ssh access, pushes them to GitHub and calls `ir_ensure_pr`. It never
+merges; Joe merges after CI is green. Branch content is still untrusted, so
+pickup refuses:
 
-- Contents: Read and write
-- Pull requests: Read and write
-- Do not grant Administration, or bypass rules on protected `main`
+- refs outside `fix/<slug>` (no refspec, option or path tricks);
+- a diff touching `.github/` — a PR-triggered workflow runs from the PR head,
+  which would execute attacker-authored CI in this repository;
+- a branch that does not descend from `origin/main`, or exceeds the commit cap
+  (default 20).
+
+Fetching from a hostile repository is a supported git operation, and nothing
+in pickup executes code out of the fetched tree. Regressions:
+`scripts/tests/test_grok_fix_pickup.py`.
 
 ```bash
-# as radon, once — paste the PAT
-sudo -u radon -H gh auth login --hostname github.com --with-token
-sudo -u radon -H gh auth status
-# optional: add GH_TOKEN=... to /home/radon/radon-page-responder.env (0600)
-# then: python3.13 scripts/ir_ensure_pr.py --head fix/<slug> --issue '...' --fix '...'
+# Mac mini, once: dedicated clone + job
+git clone git@github.com:joemccann/radon.git ~/radon-weekend/radon-grok-pickup
+sed -e "s|__PICKUP_REPO__|$HOME/radon-weekend/radon-grok-pickup|g" \
+    -e "s|__HOME__|$HOME|g" \
+  config/com.radon.grok-fix-pickup.plist \
+  > ~/Library/LaunchAgents/com.radon.grok-fix-pickup.plist
+launchctl load ~/Library/LaunchAgents/com.radon.grok-fix-pickup.plist
 ```
-
-No live VPS install in the wiring PR. After merge, Dev runs the login
-above on Hetzner. The poller already calls `ir_ensure_pr` after
-`code_fix` + `GROK_PAGE_AUTOPUSH=1`.
 
 ## Kill switches
 
