@@ -129,10 +129,21 @@ function asPnlSummary(data: unknown): Record<string, unknown> | null {
   if (!data || typeof data !== "object") return null;
   const row = data as Record<string, unknown>;
   if (typeof row.total_realized_pnl === "number" && Number.isFinite(row.total_realized_pnl)) return row;
-  const body = row.body;
-  if (body && typeof body === "object" && !Array.isArray(body)) {
-    const inner = body as Record<string, unknown>;
-    if (typeof inner.total_realized_pnl === "number" && Number.isFinite(inner.total_realized_pnl)) return inner;
+  // F20260917-C09: the fencePayload envelope no longer carries an unfenced
+  // `body` duplicate — recover the summary from the fenced excerpt's JSON.
+  if (typeof row.excerpt === "string") {
+    const lines = row.excerpt.split("\n");
+    try {
+      const inner = JSON.parse(lines.slice(1, -1).join("\n")) as unknown;
+      if (inner && typeof inner === "object" && !Array.isArray(inner)) {
+        const parsed = inner as Record<string, unknown>;
+        if (typeof parsed.total_realized_pnl === "number" && Number.isFinite(parsed.total_realized_pnl)) {
+          return parsed;
+        }
+      }
+    } catch {
+      return null;
+    }
   }
   return null;
 }

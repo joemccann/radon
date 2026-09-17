@@ -201,6 +201,7 @@ describe("navItems", () => {
       "watchlist",
       "flow-analysis",
       "options",
+      "ai-industry",
       "journal",
       "regime",
       "cta",
@@ -217,6 +218,7 @@ describe("navItems", () => {
 
 describe("quickPromptsBySection", () => {
   const allSections: WorkspaceSection[] = [
+    "ai-industry",
     "dashboard",
     "flow-analysis",
     "options",
@@ -273,6 +275,7 @@ describe("quickPromptsBySection", () => {
 
 describe("sectionDescription", () => {
   const allSections: WorkspaceSection[] = [
+    "ai-industry",
     "dashboard",
     "flow-analysis",
     "options",
