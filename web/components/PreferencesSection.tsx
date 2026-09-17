@@ -24,9 +24,6 @@ import {
 } from "@/lib/preferences";
 import type { PreferenceEntry, PreferenceMutationResult, PreferencesPayload } from "@/lib/preferences";
 
-/** The group whose values bound how much money one order can move. */
-const RISK_GROUP = "Order Limits";
-
 function groupSlug(group: string): string {
   return group.toLowerCase().replace(/\s+/g, "-");
 }
@@ -35,10 +32,12 @@ function groupSlug(group: string): string {
  * Loosening a fat-finger stop is the only edit here that can cost money, and an
  * extra typed zero is exactly the mistake these caps exist to catch. Raising
  * one takes the same type-to-confirm gate as the gateway Stop control.
- * Tightening a cap, or changing anything outside Order Limits, saves directly.
+ * Tightening a cap, or changing anything the registry does not mark
+ * `risk_gated`, saves directly. The flag comes from the server so a renamed
+ * or added group can never silently drop the gate.
  */
 function isWidening(entry: PreferenceEntry, next: number | boolean): boolean {
-  if (entry.group !== RISK_GROUP) return false;
+  if (!entry.risk_gated) return false;
   if (typeof next !== "number" || typeof entry.value !== "number") return false;
   return next > entry.value;
 }
@@ -51,7 +50,16 @@ function rangeLabel(entry: PreferenceEntry): string {
   if (entry.value_type === "bool") {
     return "Allowed On or Off";
   }
-  return `Allowed ${entry.hard_min} to ${entry.hard_max}`;
+  const min = formatPreferenceValue({ ...entry, unit: "" }, entry.hard_min);
+  return `Allowed ${min} to ${formatPreferenceValue(entry, entry.hard_max)}`;
+}
+
+function provenanceLabel(entry: PreferenceEntry): string | null {
+  if (entry.source !== "db") return null;
+  const who = entry.updated_by?.trim() || "unknown";
+  const when = entry.updated_at ? new Date(entry.updated_at) : null;
+  if (!when || Number.isNaN(when.getTime())) return `Set by ${who}`;
+  return `Set by ${who} on ${when.toLocaleString()}`;
 }
 
 export default function PreferencesSection() {
@@ -274,6 +282,11 @@ export default function PreferencesSection() {
                     <span className="preferences-row__meta" data-testid={`preference-range-${entry.key}`}>
                       {rangeLabel(entry)}
                     </span>
+                    {provenanceLabel(entry) ? (
+                      <span className="preferences-row__meta" data-testid={`preference-provenance-${entry.key}`}>
+                        {provenanceLabel(entry)}
+                      </span>
+                    ) : null}
                     {entry.applies_immediately ? null : (
                       <span
                         className="preferences-badge preferences-badge--restart"

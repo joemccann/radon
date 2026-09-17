@@ -62,6 +62,11 @@ key in `.env` alone does nothing while a
 stored value exists: rotate in the Credentials tab, or delete the stored
 value first. Exception: the IB Gateway password. Saving it in the tab does
 not rotate what the Gateway reads (`TWS_PASSWORD_FILE` / docker secrets).
+Second exception: the Next.js process reads `UW_TOKEN` and the Anthropic /
+xAI keys from its own `web/.env` (ticker info, seasonality, news, chat), so a
+value rotated in the tab reaches FastAPI and its subprocesses immediately but
+reaches Next.js only at its next restart. Rotate `web/.env` alongside the tab
+for those names.
 The tab also refuses a `TURSO_DB_URL` that is not `libsql://` or `https://`,
 whose host is not under `*.turso.io`, or whose host differs from the
 `TURSO_DB_URL` already in the environment;

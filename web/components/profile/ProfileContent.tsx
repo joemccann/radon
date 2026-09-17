@@ -17,17 +17,9 @@ import { resizeImageToSquareDataUrl } from "@/lib/profile/resizeImage";
 import { formatRelative } from "@/lib/newsfeedTime";
 import { resolveDemoContext, type DemoPublicMetadata } from "@/lib/demo/demoContext";
 import type { PriceData } from "@/lib/pricesProtocol";
+import { initialProfileTab, resolveProfileTab, type ProfileTab } from "@/lib/profileTabs";
 
 const USERNAME_PATTERN = /^[A-Za-z0-9_\- ]{1,32}$/;
-
-type ProfileTab = "bookmarks" | "watchlist" | "preferences" | "credentials";
-
-const PROFILE_TABS = new Set<ProfileTab>(["bookmarks", "watchlist", "preferences", "credentials"]);
-
-function initialProfileTab(raw: string | null): ProfileTab {
-  if (raw && PROFILE_TABS.has(raw as ProfileTab)) return raw as ProfileTab;
-  return "bookmarks";
-}
 
 /** Defensive read of a bookmark snapshot. The snapshot is `unknown` per the
  *  Phase 1 contract; news posts shaped like MarketEarPost are the common case. */
@@ -98,7 +90,7 @@ export default function ProfileContent({ prices }: { prices?: Record<string, Pri
   const { isMobile, hasMounted } = useViewport();
   const compact = hasMounted && isMobile;
   const searchParams = useSearchParams();
-  const [tab, setTab] = useState<ProfileTab>(() => initialProfileTab(searchParams.get("tab")));
+  const [requestedTab, setTab] = useState<ProfileTab>(() => initialProfileTab(searchParams.get("tab")));
 
   const { profile, saveProfile } = useProfile();
   const { user } = useUser();
@@ -113,6 +105,7 @@ export default function ProfileContent({ prices }: { prices?: Record<string, Pri
   // sessions never reach /profile at all.
   const isOperator =
     resolveDemoContext(user?.publicMetadata as DemoPublicMetadata | undefined) === null;
+  const tab = resolveProfileTab(requestedTab, isOperator);
   const clerkImage = user?.imageUrl ?? null;
   const avatarUrl = profile?.avatar_url ?? clerkImage ?? null;
   const initials = initialsFor(profile?.username ?? null, email);
