@@ -588,6 +588,19 @@ class TestFlowRefresh:
         assert timer.get("persistent") == "false"
 
 
+class TestNoPrivilegedExecPrefixes:
+    def test_no_exec_line_uses_full_privilege_prefix(self, services_dir):
+        # An Exec*=+/! prefix runs the command as full root outside the unit's
+        # sandbox; directory provisioning belongs to StateDirectory= or a
+        # root-side installer that refuses symlinks.
+        import re
+
+        for path in sorted(services_dir.glob("*.service")):
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if re.match(r"^Exec[A-Za-z]+=\s*[+!]", line):
+                    raise AssertionError(f"{path.name}: privileged Exec prefix forbidden: {line}")
+
+
 class TestSecurityRemediationSchedules:
     def test_api_migration_timeout_requires_verified_current_schema(self, services_dir):
         raw = (services_dir / "radon-api.service").read_text()
@@ -1218,6 +1231,8 @@ class TestFlexPull:
         hidden = svc.get("inaccessiblepaths", "")
         assert "/etc/radon/env" in hidden
         assert svc.get("protecthome") == "read-only"
+        assert svc.get("statedirectory") == "radon/flex-inbox"
+        assert svc.get("statedirectorymode") == "0700"
         rw = svc.get("readwritepaths", "")
         assert "/var/lib/radon/flex-inbox" in rw
         assert "/var/lib/radon/flex-secrets" in rw

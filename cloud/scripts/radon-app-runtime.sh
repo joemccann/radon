@@ -472,6 +472,32 @@ print(child)
 PY_RESEARCH
 }
 
+# DATA_DIR's parent is radon-writable, so root must never follow a link while
+# creating or owning this child: mkdir refuses a symlink final component and
+# the fd-based fchown/fchmod cannot be retargeted between check and use.
+prepare_secret_store_dir() {
+  local ids="$1" dir="$2"
+  "$PYTHON" - "$dir" "$ids" "${RADON_APP_RUNTIME_TEST_MODE:-0}" <<'PY_SECRET_STORE' || exit 78
+import os, sys
+path, ids, test = sys.argv[1], sys.argv[2], sys.argv[3] == '1'
+uid, gid = (os.getuid(), os.getgid()) if test else tuple(int(part) for part in ids.split(':'))
+try:
+    try:
+        os.mkdir(path, 0o700)
+    except FileExistsError:
+        pass
+    fd = os.open(path, os.O_NOFOLLOW | os.O_DIRECTORY | os.O_RDONLY)
+    try:
+        os.fchown(fd, uid, gid)
+        os.fchmod(fd, 0o700)
+    finally:
+        os.close(fd)
+except OSError:
+    print('radon-app-runtime: secret store directory is a symlink or unusable; refusing', file=sys.stderr)
+    raise SystemExit(78)
+PY_SECRET_STORE
+}
+
 cmd_run() {
   local unit="${1:-}"
   local ids image workdir
@@ -529,9 +555,7 @@ cmd_run() {
   cleanup_runtime_credential "$unit"
 
   if [[ "$unit" == "radon-api.service" ]]; then
-    local secret_store_dir="${DATA_DIR}/secret_store"
-    install -d -m 0700 "$secret_store_dir"
-    "$CHOWN" "$ids" "$secret_store_dir"
+    prepare_secret_store_dir "$ids" "${DATA_DIR}/secret_store"
     stage_api_credential "$unit" "$credential_gid"
   fi
 
