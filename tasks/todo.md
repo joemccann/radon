@@ -7385,3 +7385,17 @@ Incident evidence: production disk payload generated2026-09-16T12:31:06.516Z, fl
 
 ## AI industry B production implementation (2026-09-17)
 Plan: `tasks/ai-industry-plan.md`. Dependency graph: T1 -> T2,T3,T4; T2+T3+T4 -> T5 -> T6. See plan for depends_on/checklist and review. Isolated worktree; no local suites.
+
+## Substantive nightly publication (2026-09-17)
+
+Only open nightly PRs for a net substantive change against the target base. Empty commits, audit logs, task bookkeeping and timestamp-only generated artifacts do not qualify. Preserve real documentation, tests, fixes and CI experiments, normal no-op reporting, audit checkpoints and resumable substantive PRs. All suites run on GitHub runners.
+
+Dependency graph: T1 -> {T2,T3,T4} -> T5 -> T6.
+- [x] T1 depends_on: [] Isolate current main, inspect shared delivery and inventory scheduled PR publishers.
+- [x] T2 depends_on: [T1] Add deterministic substantive-diff gate and guarded publication with behavioral regression coverage.
+- [x] T3 depends_on: [T1] Align all five canonical skills and generated provider prompts with valid no-op completion and guarded publication.
+- [x] T4 depends_on: [T1] Cover additional scheduled publishers, including codemap semantic changes, and enforce shared policy at runner boundaries.
+- [ ] T5 depends_on: [T2,T3,T4] Review integration and failure handling; static validation and publish PR.
+- [ ] T6 depends_on: [T5] Verify every applicable GitHub check on the latest head green, notify and record evidence.
+
+Review: six nightly PR publishers covered by a shared net-diff classifier and guarded publisher; five agent loops also intercept direct gh creation. Known audit ledgers/tasks and timestamp-only codemap changes do not qualify; real docs/tests/config/source and graph changes remain eligible. Five canonical skills and 16 generated manuals accept explicit no-op completion. Rolling-issue checkpoints and open findings survive report pruning; security state remains private. Python/shell syntax, generated prompt synchronization and diff checks pass. Behavioral regressions added; independent review and GitHub CI pending. No local test suites.
