@@ -1,3 +1,28 @@
+# Task: CI performance audit 2026-09-17 [COMPLETE]
+
+Measure organic `main` release-path runs since `8d1d0f52`, verify protected
+workflow/deploy invariants, and publish every evidence-backed candidate.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify dedicated runner rails, branch, lock, GitHub access, and audit delta.
+- T2 depends_on: [T1] - Classify 20+ Actions runs and reconstruct comparable critical paths.
+- T3 depends_on: [T2] - Sweep workflow/cache/image/deploy safety contracts and rank candidates.
+- T4 depends_on: [T3] - Append ledger, publish audit branch/PR, and post rolling issue report.
+
+## Checklist
+
+- [x] T1 Dedicated clone, stale-lock preservation, dated branch, GitHub auth, and `origin/main` verified.
+- [x] T2 Classified 35 Actions runs; reconstructed 26 completed deployment paths and rolling comparable samples.
+- [x] T3 Verified the complete deploy closure, immutable inputs, exact-SHA transfer, and recovery rails; no material safe candidate.
+- [x] T4 Ledger, publication branch, and rolling issue report prepared.
+
+## Review
+
+- [x] The E2E delta is explicitly non-gating; no change can reduce the protected release path.
+
+---
+
 # Task: Vol/Skew MR scanner mode 2026-09-16 [IN PROGRESS]
 
 Scanner mode `vol-skew-mr` (UI: Vol/Skew MR, `/scanner?mode=vol-skew-mr`).
