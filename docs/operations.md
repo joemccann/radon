@@ -170,6 +170,8 @@ does, so a legacy row can never abort the FastAPI lifespan bootstrap
 
 ### First-run setup wizard (`/setup`)
 
+Setup token, credential validation, registry/backend and completion failures appear in persistent dismissible toasts. Correct the values and retry with the wizard controls; dismissing a toast does not change validation or enable completion. Successful validation and stored credential outcomes remain in the wizard.
+
 With NO Clerk key configured and no completion latch, the whole app collapses
 to `/setup` plus its API: other pages redirect there and other APIs return
 503 `SETUP_MODE` (`web/middleware.ts`, `web/lib/setup/setupMode.ts`). The

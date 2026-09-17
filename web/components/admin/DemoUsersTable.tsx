@@ -1,5 +1,7 @@
 "use client";
 
+import ErrorToast from "@/components/ErrorToast";
+
 import { userErrorMessage } from "@/lib/userError";
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -97,7 +99,7 @@ export default function DemoUsersTable() {
       <p className="admin-card-subhead">
         demo.radon.run trials (3 trading days). Today&apos;s AI burn shown; revoke or extend below.
       </p>
-      {actionError ? <p className="admin-card-empty" role="alert">{actionError}</p> : null}
+      {actionError ? <ErrorToast message={actionError} /> : null}
 
       {loading ? (
         <p className="admin-card-empty">Loading demo users…</p>

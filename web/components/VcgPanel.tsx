@@ -1,4 +1,6 @@
 "use client";
+import ErrorToast from "@/components/ErrorToast";
+import RequestError from "@/components/RequestError";
 
 import { userErrorMessage } from "@/lib/userError";
 import { useEffect, useMemo, useState } from "react";
@@ -222,7 +224,7 @@ export default function VcgPanel({ marketState }: VcgPanelProps) {
           </div>
         </div>
         <div className="section-body" style={{ padding: "16px" }}>
-          <div className="alert-item bearish">{userErrorMessage(error, 'Volatility data could not be loaded. Try again.')}</div>
+          <RequestError error={error} fallback={'Volatility data could not be loaded. Try again.'} />
         </div>
       </div>
     );
@@ -244,9 +246,7 @@ export default function VcgPanel({ marketState }: VcgPanelProps) {
           </div>
         </div>
         <div className="section-body" style={{ padding: "16px" }}>
-          <div className="alert-item bearish">
-            Vol-credit feed unavailable: the last read reached neither the database nor the on-disk cache, so there is no signal to show.
-          </div>
+          <ErrorToast message="The vol-credit feed could not be loaded. No current signal is available." />
         </div>
       </div>
     );
@@ -260,6 +260,7 @@ export default function VcgPanel({ marketState }: VcgPanelProps) {
 
   return (
     <>
+      {error && <RequestError error={error} retainedData />}
       {/* ── Signal strip ──────────────────────────────────── */}
       <div className="section">
         <div className="section-header">

@@ -176,8 +176,12 @@ describe("scanner request error presentation", () => {
     render(<WorkspaceSections section="scanner" />);
     const section = screen.getByTestId("leap-scanner-section");
     fireEvent.click(within(section).getByRole("button", { name: "SCAN" }));
-    await waitFor(() => expect(within(section).getByRole("alert").textContent).toContain(copy));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain(copy));
+    const notification = screen.getByRole("alert");
+    expect(notification.closest("#radon-toast-viewport")).not.toBeNull();
+    expect(within(section).queryByRole("alert")).toBeNull();
+    expect(notification.textContent).not.toMatch(/Subprocess|DOCTYPE|scan_succeeded|Radon API/);
     expect(section.textContent).not.toMatch(/Subprocess|DOCTYPE|scan_succeeded|Radon API/);
-    expect(within(section).getByRole("button", { name: "Try again" })).toBeTruthy();
+    expect(within(notification).getByRole("button", { name: "Try again" })).toBeTruthy();
   });
 });

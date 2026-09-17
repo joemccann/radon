@@ -1,6 +1,7 @@
 "use client";
 
-import { userErrorMessage } from "@/lib/userError";
+import RequestError from "@/components/RequestError";
+
 import { Activity, AlertTriangle, ChevronDown, Gauge, History, ShieldAlert, TrendingDown } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { buildPerformanceChartModel } from "@/lib/performanceChart";
@@ -516,11 +517,6 @@ export function MobilePerformanceView({ performance }: { performance: ReturnType
               variant="compact"
               testId="performance-empty"
             />
-            {error ? (
-              <div style={{ padding: "10px 16px", fontFamily: "var(--font-mono)", fontSize: "var(--text-meta)", color: "var(--text-secondary)" }}>
-                {userErrorMessage(error, "Data could not be loaded. Try again.")}
-              </div>
-            ) : null}
           </div>
         </div>
       </div>
@@ -530,6 +526,7 @@ export function MobilePerformanceView({ performance }: { performance: ReturnType
   if (view.isInsufficient) {
     return (
       <div className="mobile-performance-panel performance-panel" data-testid="performance-panel" data-mobile="true" style={{ gap: 12 }}>
+        <RequestError error={error} fallback="Performance data could not be refreshed. Try again." retainedData={data != null} />
         <div className="section">
           <div className="section-header">
             <div className="section-title">
@@ -602,6 +599,7 @@ export function MobilePerformanceView({ performance }: { performance: ReturnType
 
   return (
     <div className="mobile-performance-panel performance-panel" data-testid="performance-panel" data-mobile="true" style={{ gap: 12 }}>
+        <RequestError error={error} fallback="Performance data could not be refreshed. Try again." retainedData={data != null} />
       <div className="section performance-hero">
         <div className="section-body performance-hero-body" style={{ flexDirection: "column", alignItems: "stretch", padding: 16, gap: 12 }}>
           <div>

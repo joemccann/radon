@@ -1,4 +1,5 @@
 "use client";
+import RequestError from "@/components/RequestError";
 
 import { userErrorMessage } from "@/lib/userError";
 import { useMemo, useState } from "react";
@@ -191,7 +192,7 @@ function BpiReadout({ payload, compact }: { payload: BpiPayload; compact: boolea
 }
 
 export default function BpiPanel() {
-  const { data, loading, error } = useBpi();
+  const { data, loading, error, refresh } = useBpi();
   const { isMobile, hasMounted } = useViewport();
   const compact = hasMounted && isMobile;
 
@@ -232,11 +233,7 @@ export default function BpiPanel() {
 
   if (error && !data) {
     return (
-      <SectionEmptyState
-        icon={Gauge}
-        headline="Bullish percent measurement unavailable"
-        secondary={userErrorMessage(error, "Data could not be loaded. Try again.")}
-      />
+      <><RequestError error={error} /><SectionEmptyState icon={Gauge} headline="Bullish percent measurement" secondary="No current observations to display." action={{ label: "Refresh", onClick: refresh }} /></>
     );
   }
 
@@ -245,6 +242,7 @@ export default function BpiPanel() {
 
   return (
     <>
+      {error && <RequestError error={error} retainedData />}
       <div className="section">
         <div className="section-header">
           <div className="section-title">

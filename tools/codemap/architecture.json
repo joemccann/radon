@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-09-17T19:44:09Z",
-  "node_count": 3384,
-  "edge_count": 7002,
+  "generated_at": "2026-09-17T19:45:58Z",
+  "node_count": 3394,
+  "edge_count": 7076,
   "areas": {
-    "web": 1999,
+    "web": 2009,
     "site": 155,
     "scripts": 1117,
     "cloud": 66,
@@ -20,7 +20,7 @@
     {
       "id": "web/components",
       "area": "web",
-      "count": 254
+      "count": 256
     },
     {
       "id": "web/e2e",
@@ -35,7 +35,7 @@
     {
       "id": "web/lib",
       "area": "web",
-      "count": 396
+      "count": 397
     },
     {
       "id": "web/public",
@@ -50,7 +50,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 924
+      "count": 931
     },
     {
       "id": "site/app",
@@ -357,13 +357,6 @@
       "test": false
     },
     {
-      "id": "web/lib/userError.ts",
-      "area": "web",
-      "in": 55,
-      "out": 0,
-      "test": false
-    },
-    {
       "id": "web/lib/db.ts",
       "area": "web",
       "in": 54,
@@ -399,6 +392,13 @@
       "test": false
     },
     {
+      "id": "web/components/RequestError.tsx",
+      "area": "web",
+      "in": 43,
+      "out": 2,
+      "test": false
+    },
+    {
       "id": "web/lib/dbExecute.ts",
       "area": "web",
       "in": 40,
@@ -409,6 +409,20 @@
       "id": "web/components/SpectralLoader.tsx",
       "area": "web",
       "in": 44,
+      "out": 0,
+      "test": false
+    },
+    {
+      "id": "web/components/ErrorToast.tsx",
+      "area": "web",
+      "in": 41,
+      "out": 1,
+      "test": false
+    },
+    {
+      "id": "web/lib/userError.ts",
+      "area": "web",
+      "in": 41,
       "out": 0,
       "test": false
     },
@@ -508,20 +522,6 @@
       "area": "scripts",
       "in": 21,
       "out": 11,
-      "test": false
-    },
-    {
-      "id": "web/lib/serviceHealthWindows.ts",
-      "area": "web",
-      "in": 31,
-      "out": 0,
-      "test": false
-    },
-    {
-      "id": "scripts/clients/uw_client.py",
-      "area": "scripts",
-      "in": 29,
-      "out": 2,
       "test": false
     }
   ],
