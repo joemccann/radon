@@ -291,7 +291,7 @@ describe("CashFlowsSection sync lozenge", () => {
 
     render(<CashFlowsSection />);
     const lozenge = screen.getByTestId("cash-flows-sync-lozenge");
-    expect(lozenge.textContent).toMatch(/timed out/i);
+    expect(lozenge.textContent).toMatch(/took too long/i);
     expect(lozenge.textContent).not.toMatch(/throttled/i);
     expect(lozenge.getAttribute("data-state")).toBe("fault");
     expect(lozenge.className).toContain("cash-flows-sync-lozenge--fault");

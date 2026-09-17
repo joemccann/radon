@@ -6,6 +6,7 @@ import InfoTooltip from "./InfoTooltip";
 import ScannerInstrumentShell from "./ScannerInstrumentShell";
 import ScannerTickerSearch from "./ScannerTickerSearch";
 import SectionEmptyState from "./SectionEmptyState";
+import RequestError from "./RequestError";
 import SortTh from "./SortTh";
 import TickerLink from "./TickerLink";
 import { useSort } from "@/lib/useSort";
@@ -18,6 +19,7 @@ type VolSkewMrScannerProps = {
   loading?: boolean;
   scanning?: boolean;
   error?: string | null;
+  onRetry?: () => void;
   lastSync?: string | null;
   onScan?: () => void;
   onTickerScan?: (tickers: string[]) => void;
@@ -144,6 +146,7 @@ export default function VolSkewMrScanner({
   loading = false,
   scanning = false,
   error = null,
+  onRetry,
   lastSync = null,
   onScan,
   onTickerScan,
@@ -199,15 +202,12 @@ export default function VolSkewMrScanner({
       className="strength-confirmation"
       testId="vol-skew-mr-section"
     >
-      {loading ? (
+      {error && <div className="section-body"><RequestError error={error} onRetry={scanning ? undefined : onRetry} retainedData={rows.length > 0} /></div>}
+      {loading && rows.length === 0 ? (
         <div className="section-body">
           <div className="snapshot-card__empty">Measuring spot extension, IV path, and skew...</div>
         </div>
-      ) : error ? (
-        <div className="section-body">
-          <div className="alert-item bearish">{error}</div>
-        </div>
-      ) : rows.length === 0 ? (
+      ) : error && rows.length === 0 ? null : rows.length === 0 ? (
         <div className="section-body">
           <SectionEmptyState
             icon={Activity}

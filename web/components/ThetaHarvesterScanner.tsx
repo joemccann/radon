@@ -7,6 +7,7 @@ import { Loader2, Search, Sparkles } from "lucide-react";
 import InfoTooltip from "./InfoTooltip";
 import ScannerInstrumentShell from "./ScannerInstrumentShell";
 import SectionEmptyState from "./SectionEmptyState";
+import RequestError from "./RequestError";
 import { useWatchlist } from "@/lib/useWatchlist";
 import { ProposalCard } from "@/components/agent";
 import { buildScannerProposal } from "@/lib/agent/scannerProposal";
@@ -25,6 +26,7 @@ type ThetaHarvesterScannerProps = {
   loading?: boolean;
   scanning?: boolean;
   error?: string | null;
+  onRetry?: () => void;
   lastSync?: string | null;
   onScan?: (params: ThetaScanParams) => void;
   onTickerScan?: (ticker: string) => void;
@@ -346,6 +348,7 @@ export default function ThetaHarvesterScanner({
   loading = false,
   scanning = false,
   error = null,
+  onRetry,
   lastSync = null,
   onScan,
   onTickerScan,
@@ -583,15 +586,12 @@ export default function ThetaHarvesterScanner({
           onDismiss={() => setDismissedProposal(proposal.ticker)}
         />
       ) : null}
-      {loading ? (
+      {error && <div className="section-body"><RequestError error={error} onRetry={scanning ? undefined : onRetry} retainedData={rows.length > 0} /></div>}
+      {loading && rows.length === 0 ? (
         <div className="section-body">
           <div className="snapshot-card__empty">Sampling theta surface...</div>
         </div>
-      ) : error ? (
-        <div className="section-body">
-          <div className="alert-item bearish">{error}</div>
-        </div>
-      ) : rows.length === 0 ? (
+      ) : error && rows.length === 0 ? null : rows.length === 0 ? (
         <div className="section-body">
           <SectionEmptyState
             icon={Sparkles}

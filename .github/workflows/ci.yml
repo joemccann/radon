@@ -835,7 +835,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: vol-skew-missing-screenshots
-          path: web/test-results/**/vol-skew-missing-*.png
+          path: |
+            web/test-results/**/vol-skew-missing-*.png
+            web/test-results/**/vol-skew-safe-error-*.png
           retention-days: 7
       - name: Upload AI industry screenshots
         if: always()

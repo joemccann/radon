@@ -145,3 +145,25 @@ describe("VolSkewMrScanner", () => {
   expect(screen.getByRole("status").textContent).toContain("Skew history unavailable for 1 of 1 names");
   expect(screen.getAllByText(/Insufficient history/).length).toBeGreaterThan(0);
  });
+
+describe("safe scan failures", () => {
+  it.each([
+    JSON.stringify({ scan_succeeded: false, error: "Radon API 502: Subprocess capacity exhausted", results: [] }),
+    "<html><body>502 Bad Gateway nginx</body></html>",
+    "Traceback: internal service failure /srv/radon/scanner.py",
+  ])("keeps prior observations and renders a safe retry banner", (error) => {
+    const retry = vi.fn();
+    render(<VolSkewMrScanner data={data} error={error} onRetry={retry} />);
+    expect(screen.getByRole("alert").textContent).not.toContain(error);
+    expect(screen.getByRole("alert").textContent).not.toMatch(/Subprocess|Traceback|nginx|scan_succeeded|\/srv/);
+    expect(screen.getByTestId("vol-skew-mr-row-AAPL")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /retry|try again/i }));
+    expect(retry).toHaveBeenCalledOnce();
+  });
+
+  it("does not imply an empty successful scan when the initial request failed", () => {
+    render(<VolSkewMrScanner data={null} error="Radon API 502: Subprocess capacity exhausted" />);
+    expect(screen.getByRole("alert")).toBeTruthy();
+    expect(screen.queryByText("No vol/skew MR readings")).toBeNull();
+  });
+});

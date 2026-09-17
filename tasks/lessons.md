@@ -1057,3 +1057,6 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 ## 2026-09-17 - Nightly evidence is not a deliverable
 - A nightly audit may complete successfully without a commit or PR. Report no-op results and checkpoints through the rolling issue and runner state; never create empty commits to satisfy phase completion.
 - Gate PR creation on the net substantive base-to-head diff, excluding audit/task bookkeeping and generated timestamp churn. Commit counts and nonempty diffs alone do not prove a useful change. Apply the policy to every scheduled publisher and provider prompt.
+
+## 2026-09-17 - Error bodies are not UI copy
+- Never render response.text(), JSON envelopes, stack traces, or raw infrastructure exceptions as user-facing errors. Route failures through the established error pattern with safe copy and recovery, retaining prior data and financial rejection semantics. Audit shared consumers whenever a page leaks a raw error.

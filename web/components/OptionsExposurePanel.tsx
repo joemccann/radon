@@ -1,5 +1,6 @@
 "use client";
 
+import { userErrorMessage } from "@/lib/userError";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 
 import {
@@ -196,7 +197,7 @@ export default function OptionsExposurePanel({ symbol }: OptionsExposurePanelPro
     );
   }
   if (error && !data) {
-    return <MeasurementState kind="error" message={error} onRetry={() => void refresh()} />;
+    return <MeasurementState kind="error" message={userErrorMessage(error, "Options exposure could not be loaded. Try again.")} onRetry={() => void refresh()} />;
   }
   // A failed refresh BEHIND a loaded payload used to be dropped entirely, so
   // the prior exposure ladder stayed on screen with no fault indicator at all.
@@ -261,7 +262,7 @@ export default function OptionsExposurePanel({ symbol }: OptionsExposurePanelPro
         </div>
       </header>
       {exportError ? (
-        <div className={styles.exportError} role="alert">{exportError}</div>
+        <div className={styles.exportError} role="alert">{userErrorMessage(exportError, "The export could not be prepared. Try again.")}</div>
       ) : null}
       {data.spot === null ? (
         <p className={styles.measurementNotice} role="status">

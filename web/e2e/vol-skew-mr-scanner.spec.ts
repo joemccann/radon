@@ -125,3 +125,31 @@ for (const width of [390, 1440]) {
     await page.screenshot({ path: testInfo.outputPath(`vol-skew-missing-${width}.png`) });
   });
 }
+
+for (const width of [390, 1440]) {
+  test(`failed scan retains snapshot and retries explicit tickers at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 1000 });
+    await stubApis(page);
+    const requests: unknown[] = [];
+    await page.route("**/api/scanner/vol-skew-mr/scan", async route => {
+      requests.push(route.request().postDataJSON());
+      await route.fulfill(requests.length === 1
+        ? { status: 502, json: { scan_time: "", scan_succeeded: false, results: [], error: "Radon API 502: Subprocess capacity exhausted" } }
+        : { status: 200, json: payload });
+    });
+    await page.goto("/scanner?mode=vol-skew-mr");
+    const section = page.getByTestId("vol-skew-mr-section");
+    const input = section.getByRole("textbox");
+    await input.fill("AAPL, NVDA");
+    await input.press("Enter");
+    const alert = section.getByRole("alert");
+    await expect(alert).toBeVisible();
+    await expect(alert).not.toContainText("Subprocess");
+    await expect(alert).not.toContainText("scan_succeeded");
+    await expect(section).toContainText("TOP MR");
+    await page.screenshot({ path: testInfo.outputPath(`vol-skew-safe-error-${width}.png`) });
+    await alert.getByRole("button", { name: /retry|try again/i }).click();
+    await expect(alert).toHaveCount(0);
+    expect(requests).toEqual([{ tickers: ["AAPL", "NVDA"] }, { tickers: ["AAPL", "NVDA"] }]);
+  });
+}

@@ -1,5 +1,6 @@
 "use client";
 
+import { userErrorMessage } from "@/lib/userError";
 import { Download, Share2, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useDialogChrome } from "@/lib/useDialogChrome";
@@ -82,7 +83,7 @@ export default function ShareReportModal({
       const data = await res.json() as ShareResponse;
 
       if (!res.ok) {
-        setShareError(data?.error ?? "Share generation failed");
+        setShareError(userErrorMessage(data?.error, "The share image could not be prepared. Try again."));
         return;
       }
 
@@ -111,7 +112,7 @@ export default function ShareReportModal({
       });
       setModalOpen(true);
     } catch (err) {
-      setShareError(err instanceof Error ? err.message : "Unknown error");
+      setShareError(userErrorMessage(err, "Unknown error"));
     } finally {
       setSharing(false);
     }
