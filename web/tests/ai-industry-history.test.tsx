@@ -7,6 +7,7 @@ import type { AiHistoryPoint } from "@/lib/aiInfrastructure";
 import CriHistoryChart from "@/components/CriHistoryChart";
 import BrushMinimap from "@/components/BrushMinimap";
 import AiIndustryHistoryChart from "@/components/AiIndustryHistoryChart";
+import { chartSeriesColor } from "@/lib/chartSystem";
 const point = (date: string, value = 10): AiHistoryPoint => ({ date, value, label: "Routed tokens", unit: "tokens", series_id: "tokens:v1:fixed", source_id: "publisher" });
 beforeEach(() => {
   vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
@@ -37,6 +38,11 @@ describe("AI observation history integrity", () => {
     expect(aiHistoryGapMs(sparse, "daily")).toBe(1.8 * 86_400_000);
     expect(aiPeriodicBars([point("2026-03-31"), point("2026-06-30")], "filing")).toBe(true);
   });
+  it("uses repeated sampled intervals without hiding longer missing periods", () => {
+    const sampled = [1, 8, 15, 22, 43, 50].map(day => point(new Date(Date.UTC(2026, 0, day)).toISOString()));
+    expect(aiHistoryGapMs(sampled, "daily")).toBe(7 * 86_400_000 * 1.8);
+    expect(aiHistoryGapMs([1, 2, 3, 10, 11].map(day => point(`2026-01-${String(day).padStart(2, "0")}`)), "daily")).toBe(1.8 * 86_400_000);
+  });
   it("shows a single observation honestly without chart or brush", () => {
     render(<AiIndustryHistoryChart points={[point("2026-01-01")]} />);
     expect(screen.getByText(/A trend needs at least two comparable dates/)).toBeTruthy();
@@ -45,9 +51,37 @@ describe("AI observation history integrity", () => {
 });
 
 describe("shared Regime renderer for AI series", () => {
+  it("draws a continuous line through sampled daily-source history", () => {
+    // Compact snapshots retain evenly sampled observations, not every collected day.
+    const history = Array.from({ length: 120 }, (_, i) => point(new Date(Date.UTC(2025, 0, 1 + i * 5)).toISOString(), 10 + i));
+    const { container } = render(<AiIndustryHistoryChart points={history} cadence="daily" />);
+    const paths = container.querySelectorAll(`path[stroke="${chartSeriesColor("primary")}"][stroke-width="2"]`);
+    expect(paths).toHaveLength(1);
+    expect(paths[0].getAttribute("d")).toMatch(/^M.+[CL]/);
+    expect(container.querySelectorAll(".dot-value")).toHaveLength(0);
+    expect(container.querySelectorAll(".history-bar")).toHaveLength(0);
+  });
+  it("keeps missing sampled periods disconnected in the rendered line", () => {
+    const history = [1, 8, 15, 22, 43, 50].map((day, i) => point(new Date(Date.UTC(2026, 0, day)).toISOString(), 10 + i));
+    const { container } = render(<AiIndustryHistoryChart points={history} cadence="daily" />);
+    const paths = container.querySelectorAll(`path[stroke="${chartSeriesColor("primary")}"][stroke-width="2"]`);
+    expect(paths).toHaveLength(2);
+    for (const path of paths) expect(path.getAttribute("d")).toMatch(/^M.+[CL]/);
+    expect(container.querySelectorAll(".dot-value")).toHaveLength(0);
+  });
+  it("preserves an isolated observation between disconnected line segments", () => {
+    const history = [1, 8, 15, 36, 57, 64, 71].map((day, i) => point(new Date(Date.UTC(2026, 0, day)).toISOString(), 10 + i));
+    const { container } = render(<AiIndustryHistoryChart points={history} cadence="daily" />);
+    const paths = container.querySelectorAll(`path[stroke="${chartSeriesColor("primary")}"][stroke-width="2"]`);
+    expect(paths).toHaveLength(2);
+    const markers = container.querySelectorAll(".dot-value");
+    expect(markers).toHaveLength(1);
+    expect((markers[0] as SVGCircleElement & { __data__: AiHistoryPoint }).__data__).toEqual(history[3]);
+  });
   it("renders one genuine legend/axis and permits keyboard observation inspection", () => {
     const { container } = render(<CriHistoryChart history={[point("2026-01-01", 10), point("2026-01-02", 12)]} series={[{ key: "value", label: "Tokens", color: "green", axis: "left" }]} title="Usage" />);
     expect(container.querySelectorAll(".chart-legend-item")).toHaveLength(1);
+    expect(container.querySelectorAll(".dot-value")).toHaveLength(2);
     const slider = screen.getByRole("slider", { name: "Inspect Usage history" });
     fireEvent.keyDown(slider, { key: "Home" });
     expect(slider.getAttribute("aria-valuetext")).toContain("2026-01-01: Tokens 10.00");

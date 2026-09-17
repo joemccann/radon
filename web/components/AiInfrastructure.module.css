@@ -95,3 +95,13 @@
 .workspace a, .drawer a { text-underline-offset: .2em; text-decoration-thickness: from-font; text-decoration-skip-ink: auto; }
 @media(max-width:900px) { .stageCards { grid-template-columns: repeat(2,minmax(0,1fr)); }.stageCards button { padding: 16px; }.measureGrid { column-gap: 24px; } }
 @media(max-width:640px) { .measureGrid, .interpretation { grid-template-columns: 1fr; }.interpretation { gap: 12px; }.stageCards { gap: 8px; }.stageCards button strong { font-size: 18px; }.stageCards button { padding: 12px; }.capability > span:last-child { flex-basis: 100%; }.search, .search input { width: 100%; }.search input, .seriesSelect select { font-size: 16px; }.measure summary { min-height: 68px; }.guideGroup { padding-block: 24px; }.selectedMeasure .heading { flex-wrap: wrap; }.measureMeta { max-inline-size: 42%; }.sourceLabel { grid-template-columns: 1fr; }.sourceState { text-align: start; } }
+
+/* Observation cards preserve a stable reading surface; only the info control acts. */
+.metrics { gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); }
+.observationCard { min-width: 0; padding: 16px; border: 1px solid var(--line-grid); border-radius: 8px; background: var(--bg-panel); transition: background-color 160ms ease-out, border-color 160ms ease-out; }
+.observationCard:focus-within { background: var(--bg-panel-raised); border-color: var(--signal-core-text); }
+.observationHeading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; min-height: 44px; }
+.observationHeading > span:first-child { padding-block: 10px; overflow-wrap: anywhere; }
+.metrics .observationMeta { margin: 8px 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.6; }
+@media (hover: hover) { .observationCard:hover { background: var(--bg-panel-raised); border-color: color-mix(in srgb, var(--signal-core-text) 45%, var(--line-grid)); } }
+@media (prefers-reduced-motion: reduce) { .observationCard { transition: none; } }

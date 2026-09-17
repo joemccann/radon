@@ -130,16 +130,26 @@ test("New conversation clears the transcript and draft before the next request",
 
 test("keyboard focus remains in the dialog and Escape returns it to the opener", async ({ page }) => {
   await installFixtures(page);
+  await page.route("**/api/assistant", route => route.fulfill({
+    status: 200,
+    contentType: "text/event-stream",
+    body: 'event: start\ndata: {}\n\nevent: error\ndata: {"error":"provider internal unsupported_parameter"}\n\n',
+  }));
   await page.goto("/alerts");
   const opener = page.locator("a:visible").first();
   await opener.focus();
   const dialog = await openChat(page);
+  const composer = dialog.getByRole("textbox", { name: "Ask Radon" });
+  await composer.fill("Explain the latest flow evidence");
+  await composer.press("Enter");
+  const recoveryToast = page.locator("[data-toast-viewport]").getByRole("alert").filter({ hasText: SAFE_ERROR });
+  await expect(recoveryToast).toBeVisible();
+  await expect(dialog.getByTestId("chat-messages")).toHaveAttribute("aria-busy", "false");
   const controls = dialog.locator("button:visible:not([disabled]), textarea:visible, select:visible, a[href]:visible");
   const first = controls.first();
   const last = controls.last();
-  // The modal owns global recovery toasts too: they follow its controls in
-  // the keyboard cycle, rather than becoming unreachable outside the trap.
-  await expect(page.getByTestId("live-data-degraded")).toBeVisible();
+  // An explicitly failed assistant turn supplies the recovery toast, independent
+  // of ambient websocket health. Portal controls remain in the modal's cycle.
   const toastControls = page.locator("[data-toast-viewport] button:visible:not([disabled])");
   await last.focus();
   await page.keyboard.press("Tab");

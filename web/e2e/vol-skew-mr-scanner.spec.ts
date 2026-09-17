@@ -141,15 +141,19 @@ test("desktop header bubbles explain readings without sorting the table", async 
   ] as const) {
     const trigger = section.getByTestId(`vol-skew-mr-${id}-tooltip`);
     const content = section.getByTestId(`vol-skew-mr-${id}-tooltip-content`);
-    await expect(trigger).toHaveAttribute("aria-label", `${label} details`);
-    await trigger.focus();
+    const button = trigger.getByRole("button", { name: `${label} details` });
+    await button.focus();
     await expect(content).toBeVisible();
     await expect(content).toContainText(explanation);
-    await trigger.press("Enter");
-    await expect(tickerHeader).toHaveAttribute("aria-sort", "descending");
-    await trigger.getByRole("button").click();
+    await button.press("Enter");
     await expect(content).toHaveCount(0);
-    await trigger.focus();
+    await expect(tickerHeader).toHaveAttribute("aria-sort", "descending");
+    await button.press("Space");
+    await expect(content).toBeVisible();
+    await button.press("Escape");
+    await expect(content).toHaveCount(0);
+    await tickerHeader.focus();
+    await button.focus();
     await expect(content).toBeVisible();
     expect(await rows.evaluateAll(elements => elements.map(element => element.getAttribute("data-testid")))).toEqual(rowOrder);
     await expect(tickerHeader).toHaveAttribute("aria-sort", "descending");
