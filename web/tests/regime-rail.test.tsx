@@ -41,11 +41,11 @@ describe("REGIME_RAIL_GROUPS — grouped registry covers every tab exactly once"
     ]);
   });
 
-  it("flattens to all 31 regime tabs with no duplicates", () => {
-    expect(REGIME_TABS).toHaveLength(31);
-    expect(new Set(REGIME_TABS).size).toBe(31);
+  it("flattens to all 30 regime tabs with no duplicates", () => {
+    expect(REGIME_TABS).toHaveLength(30);
+    expect(new Set(REGIME_TABS).size).toBe(30);
     expect([...REGIME_TABS].sort()).toEqual(
-      ["cri", "vcg", "gex", "grg", "breadth", "ma-ratio", "trin", "divyield", "hyad", "hhlev", "bpi", "margin", "credit", "iei-hyg", "straddle", "cor", "streaks", "vixcor", "vixts", "dispersion", "ivrank", "iv-spread", "skew", "skew2d", "curve", "calm-streak", "cot", "ats", "short", "llm", "backtest"].sort(),
+      ["cri", "vcg", "gex", "grg", "breadth", "ma-ratio", "trin", "divyield", "hyad", "hhlev", "bpi", "margin", "credit", "iei-hyg", "straddle", "cor", "streaks", "vixcor", "vixts", "dispersion", "ivrank", "iv-spread", "skew", "skew2d", "curve", "calm-streak", "cot", "ats", "short", "backtest"].sort(),
     );
   });
 
@@ -78,7 +78,7 @@ describe("REGIME_RAIL_GROUPS — grouped registry covers every tab exactly once"
     expect(groupOf.bpi).toBe("Breadth & sentiment");
     expect(groupOf.cor).toBe("Breadth & sentiment");
     expect(groupOf.streaks).toBe("Breadth & sentiment");
-    expect(groupOf.llm).toBe("Models");
+    expect(groupOf.llm).toBeUndefined();
     expect(groupOf.backtest).toBe("Models");
   });
 
@@ -172,7 +172,7 @@ describe("RegimeRail — grouped rail rendering + navigation", () => {
     for (const g of REGIME_RAIL_GROUPS) {
       expect(within(container).getByText(g.label)).toBeTruthy();
     }
-    expect(container.querySelectorAll("[data-tab]")).toHaveLength(31);
+    expect(container.querySelectorAll("[data-tab]")).toHaveLength(30);
   });
 
   it("marks the active tab with the active class and aria-current", () => {

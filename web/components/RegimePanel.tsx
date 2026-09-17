@@ -363,7 +363,7 @@ export default function RegimePanel({
 
   const tabBar = compact ? (
     <div className="m-regime-tabs" role="tablist" aria-label="Regime tabs">
-      {(["cri", "vcg", "gex", "grg", "breadth", "ma-ratio", "trin", "divyield", "hyad", "bpi", "margin", "hhlev", "credit", "iei-hyg", "straddle", "cor", "streaks", "vixcor", "vixts", "dispersion", "ivrank", "iv-spread", "skew", "skew2d", "curve", "calm-streak", "cot", "ats", "short", "llm", "backtest"] as RegimeTab[]).map((t) => (
+      {(["cri", "vcg", "gex", "grg", "breadth", "ma-ratio", "trin", "divyield", "hyad", "bpi", "margin", "hhlev", "credit", "iei-hyg", "straddle", "cor", "streaks", "vixcor", "vixts", "dispersion", "ivrank", "iv-spread", "skew", "skew2d", "curve", "calm-streak", "cot", "ats", "short", "backtest"] as RegimeTab[]).map((t) => (
         <button
           key={t}
           type="button"

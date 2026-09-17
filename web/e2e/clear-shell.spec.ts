@@ -11,8 +11,9 @@ for (const width of [360, 390, 768, 1024, 1440]) {
     const mobile = width <= 640;
     const navigation = page.getByRole("navigation", { name: mobile ? "Primary mobile navigation" : "Primary navigation", exact: true });
     await expect(navigation).toBeVisible();
-    await expect(navigation.getByRole("link")).toHaveCount(4);
-    for (const item of clearPrimaryNavigation) {
+    const primaryItems = mobile ? clearPrimaryNavigation.filter((item) => item.label !== "AI industry") : clearPrimaryNavigation;
+    await expect(navigation.getByRole("link")).toHaveCount(mobile ? 4 : 5);
+    for (const item of primaryItems) {
       const link = navigation.getByRole("link", { name: item.label, exact: true });
       await expect(link).toHaveAttribute("href", item.href);
     }
@@ -66,13 +67,13 @@ for (const width of [360, 390, 768, 1024, 1440]) {
     await page.goBack();
     await expect(page).toHaveURL(/\/dashboard$/);
 
-    for (const item of clearPrimaryNavigation.filter((item) => item.label !== "Portfolio")) {
+    for (const item of primaryItems.filter((item) => item.label !== "Portfolio")) {
       await navigation.getByRole("link", { name: item.label, exact: true }).click();
       await expect(page).toHaveURL(new RegExp(`${item.href}$`));
       await expect(navigation.getByRole("link", { name: item.label, exact: true })).toHaveAttribute("aria-current", "page");
       await expect(page.locator(".clear-workstation")).toBeVisible();
     }
     await page.goBack();
-    await expect(page).toHaveURL(/\/regime\/cri$/);
+    await expect(page).toHaveURL(mobile ? /\/regime\/cri$/ : /\/portfolio$/);
   });
 }

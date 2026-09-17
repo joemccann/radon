@@ -12,6 +12,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, cleanup } from "@testing-library/react";
 
+vi.mock("@/components/AiIndustryHistoryChart", () => ({ default: ({ points, cadence, sourceLabel }: { points: unknown[]; cadence: string; sourceLabel: string }) => <div data-testid="shared-ai-chart" data-points={JSON.stringify(points)} data-cadence={cadence}>{sourceLabel}</div> }));
+
 afterEach(() => {
   cleanup();
 });
@@ -75,9 +77,12 @@ describe("LlmTokenIndexCard", () => {
     // 5d window: (1.20 - 1.00) / 1.00 = +20.0%
     expect(screen.getByTestId("llm-token-index-window-change").textContent).toContain("+20.0%");
     expect(screen.getByTestId("llm-token-index-chart")).toBeTruthy();
-    expect(screen.getByRole("img", { name: "Legacy inference price basket, normalized index" })).toBeTruthy();
+    expect(screen.getByTestId("shared-ai-chart").getAttribute("data-cadence")).toBe("daily");
+    const plotted = JSON.parse(screen.getByTestId("shared-ai-chart").getAttribute("data-points")!);
+    expect(plotted.map((point: { value: number }) => point.value)).toEqual([1, 1.05, 1.1, 1.15, 1.2]);
+    expect(plotted[0].unit).toBe("index (first observation = 1)");
     expect(screen.getByTestId("llm-token-index-window-change").style.color).toBe("var(--text-secondary)");
-    expect(screen.getByTestId("llm-token-index-chart").querySelectorAll("polyline")).toHaveLength(1);
+    expect(screen.getByTestId("llm-token-index-chart").querySelector("svg")).toBeNull();
   });
 
   it("surfaces an error message when the route fails", async () => {
@@ -126,4 +131,14 @@ describe("LlmTokenIndexCard", () => {
       expect(style).not.toMatch(/#[0-9a-fA-F]{3,8}/);
     }
   });
+});
+
+
+it("separates legacy methodology versions and rejects invalid observations", async () => {
+  const { legacyIndexHistory } = await import("@/components/LlmTokenIndexCard");
+  const row = { date: "2026-05-19", index_value: 1.2, raw_avg_usd: 18, methodology_version: 1 };
+  const groups = legacyIndexHistory([row, { ...row, date: "2026-05-15", index_value: 1 }, { ...row, methodology_version: 2 }, { ...row, index_value: NaN }, { ...row, date: "invalid" }]);
+  expect(groups).toHaveLength(2);
+  expect(groups[0].map(point => point.date)).toEqual(["2026-05-15", "2026-05-19"]);
+  expect(groups[0][0].series_id).not.toBe(groups[1][0].series_id);
 });

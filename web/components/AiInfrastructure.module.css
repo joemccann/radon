@@ -40,3 +40,58 @@
 @media(max-width:640px) { .heading { flex-wrap: wrap; gap: 10px; }.evidenceBar { grid-template-columns: 1fr; gap: 16px; padding: 18px; }.evidenceBar dl { border-top: 1px solid var(--line-grid); padding-top: 12px; }.tabs { gap: 0; }.tabs button { min-width: 0; flex: 1; padding-inline: 8px; }.paneIntro h2 { font-size: 20px; }.metrics { grid-template-columns: 1fr; gap: 16px; }.metrics dd { font-size: 24px; }.indicatorFooter { align-items: flex-start; flex-wrap: wrap; }.chartDates { flex-wrap: wrap; }.drawerBody { padding: 20px; } }
 
 .seriesSelect { display: grid; gap: 6px; color: var(--text-muted); font-size: 12px; margin-top: 16px; max-width: 520px; }.seriesSelect select { width: 100%; min-height: 44px; font: 14px var(--font-sans); color: var(--text-primary); background: var(--bg-panel); border: 1px solid var(--line-grid); border-radius: 6px; padding: 8px; }
+
+/* Value-chain reading hierarchy, shared Clear surfaces and Regime chart framing. */
+.workspace { --ai-type-body: 16px; --ai-type-ui: 14px; --ai-type-meta: 12px; font-synthesis: none; }
+.workspace :is(h1,h2,h3,h4) { text-wrap: balance; line-height: 1.15; }
+.workspace p { text-wrap: pretty; overflow-wrap: break-word; }
+.snapshotMeta { display: flex; flex-wrap: wrap; gap: 8px 24px; color: var(--text-muted); font-size: var(--ai-type-meta); font-variant-numeric: tabular-nums; margin-block: 12px 28px; }
+.stageCards { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 12px; }
+.stageCards button { display: grid; gap: 10px; padding: 20px; text-align: start; align-content: start; border-radius: 8px; background: var(--bg-panel); }
+.stageCards button strong { font-size: 20px; font-weight: 600; }
+.stageCards button > span:last-child { color: var(--text-muted); font-size: var(--ai-type-ui); line-height: 1.5; }
+.stageCards button[aria-selected=true] { border-color: var(--signal-core-text); background: var(--bg-subtle); }
+.capability { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-block: 16px 10px; color: var(--text-muted); font-size: var(--ai-type-meta); }
+.capability button[aria-pressed=true] { border-color: var(--signal-core-text); color: var(--signal-core-text); }
+.paneIntro { padding-block: 24px 12px; }
+.paneIntro h2 { margin-block-start: 8px; font-size: clamp(22px,2.5vw,28px); }
+.paneIntro p, .reading { max-inline-size: 62ch; font-size: var(--ai-type-body); line-height: 1.6; }
+.selectedMeasure { padding-block: 28px; }
+.selectedMeasure h3 { font-size: 20px; }
+.interpretation { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 32px; margin-block: 28px; }
+.interpretation h4, .explanation h4 { font-size: var(--ai-type-ui); font-weight: 600; margin-block: 24px 8px; }
+.interpretation p, .explanation p { font-size: var(--ai-type-body); line-height: 1.6; max-inline-size: 62ch; margin-block: 0 18px; }
+.interpretation h4 { margin-block-start: 0; }
+.observations { border-block: 1px solid var(--line-grid); padding-block: 10px; }
+.observations summary, .researchState summary { cursor: pointer; padding-block: 10px; min-height: 44px; }
+.guide { border-block-start: 1px solid var(--line-grid); margin-block: 28px; }
+.guideGroup { padding-block: 32px; border-block-end: 1px solid var(--line-grid); }
+.guideGroup > h3 { margin-block: 8px 24px; font-size: 22px; }
+.measureGrid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); column-gap: 36px; align-items: start; }
+.measure { min-width: 0; border-block-end: 1px solid var(--line-grid); }
+.measure summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; list-style: none; cursor: pointer; min-height: 76px; padding-block: 20px; font-size: var(--ai-type-body); font-weight: 600; }
+.measure summary::-webkit-details-marker { display: none; }
+.measureMeta { display: flex; align-items: center; gap: 12px; color: var(--text-muted); font-size: var(--ai-type-meta); font-weight: 400; text-align: end; }
+.expand { font-size: 20px; }
+.measure[open] .expand { transform: rotate(45deg); }
+.explanation { padding-block: 4px 28px; }
+.explanation .measureDefinition { color: var(--text-primary); }
+.explanation .note { font-size: var(--ai-type-ui); }
+.explanationActions { display: flex; flex-wrap: wrap; gap: 12px; }
+.explanationActions button:last-child { border-color: transparent; color: var(--signal-core-text); }
+.sourceLabels { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,240px),1fr)); }
+.sourceLabel { min-width: 0; overflow-wrap: anywhere; }
+.sourceLabel > a { font-size: var(--ai-type-ui); }
+.sourceLabel small { line-height: 1.6; }
+.marketHandoff { padding-block: 28px; border-block-end: 1px solid var(--line-grid); margin-block-end: 32px; }
+.marketHandoff h2 { margin-block-start: 8px; }
+.coverage h2 { font-size: 22px; }
+.coverageGrid { margin-block-start: 16px; }
+.search { display: grid; gap: 6px; font-size: var(--ai-type-meta); color: var(--text-muted); }
+.search input { width: 260px; min-height: 44px; padding: 10px 12px; border-radius: 6px; border: 1px solid var(--line-grid); background: var(--bg-panel); color: var(--text-primary); font: var(--ai-type-ui) var(--font-sans); }
+.researchState { color: var(--text-muted); font-size: var(--ai-type-ui); border-block: 1px solid var(--line-grid); }
+.researchState p { max-inline-size: 62ch; }
+.workspace :is(select,input):focus-visible { outline: 2px solid var(--signal-core-text); outline-offset: 3px; }
+.workspace a, .drawer a { text-underline-offset: .2em; text-decoration-thickness: from-font; text-decoration-skip-ink: auto; }
+@media(max-width:900px) { .stageCards { grid-template-columns: repeat(2,minmax(0,1fr)); }.stageCards button { padding: 16px; }.measureGrid { column-gap: 24px; } }
+@media(max-width:640px) { .measureGrid, .interpretation { grid-template-columns: 1fr; }.interpretation { gap: 12px; }.stageCards { gap: 8px; }.stageCards button strong { font-size: 18px; }.stageCards button { padding: 12px; }.capability > span:last-child { flex-basis: 100%; }.search, .search input { width: 100%; }.search input, .seriesSelect select { font-size: 16px; }.measure summary { min-height: 68px; }.guideGroup { padding-block: 24px; }.selectedMeasure .heading { flex-wrap: wrap; }.measureMeta { max-inline-size: 42%; }.sourceLabel { grid-template-columns: 1fr; }.sourceState { text-align: start; } }
