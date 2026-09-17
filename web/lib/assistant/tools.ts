@@ -36,6 +36,7 @@ import {
   round2,
   type RealizedJournalRow,
 } from "@/lib/journal/realizedPnl";
+import { runWithDemoDbPrincipal } from "@/lib/demo/demoDbIsolation";
 import { toEtDay } from "@/lib/journal/rangePnl";
 import { fetchPortfolioStockBasis } from "@/lib/portfolio/stockBasisDb";
 import { compactExpiry, type JournalTradePayload } from "@/lib/blotter/fromJournal";
@@ -942,6 +943,21 @@ export async function executeTool(
   input: Record<string, unknown>,
   principal: AssistantPrincipal,
   budget: AssistantTurnBudget = createAssistantTurnBudget(),
+): Promise<ToolResult> {
+  // F20260917-C08: demo principals execute inside the demo DB-isolation
+  // scope, so any direct-Turso tool (journal/portfolio reads via dbExecute)
+  // is refused against a prod-marked DB at the shared chokepoint.
+  if (principal?.kind === "demo") {
+    return runWithDemoDbPrincipal(() => executeToolUnscoped(name, input, principal, budget));
+  }
+  return executeToolUnscoped(name, input, principal, budget);
+}
+
+async function executeToolUnscoped(
+  name: string,
+  input: Record<string, unknown>,
+  principal: AssistantPrincipal,
+  budget: AssistantTurnBudget,
 ): Promise<ToolResult> {
   if (!principal?.userId) {
     return { ok: false, error: "Verified principal required." };
