@@ -683,6 +683,7 @@ class TestSecurityRemediationSchedules:
         assert "StateDirectory=" in raw
 
     def test_cta_timeout_covers_retry_envelope(self, unit):
+        # 2 * FETCH_TIMEOUT_S(720) + 120s backoff = 1560; 240s cleanup slack.
         assert int(unit("radon-cta-sync.service")["Service"]["timeoutstartsec"]) >= 1800
 
     def test_cta_sync_documents_vision_cascade_order(self, services_dir):

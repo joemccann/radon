@@ -43,8 +43,23 @@ def test_classify_timeout():
     assert "Timeout" in message
 
 
+def test_classify_subprocess_timeout_expired():
+    stderr = (
+        "Command '['/home/radon/radon/.venv/bin/python3.13', "
+        "'/home/radon/radon/scripts/fetch_menthorq_cta.py', '--json', "
+        "'--date', '2026-09-17']' timed out after 300 seconds"
+    )
+    error_type, message = classify_sync_error(stderr)
+    assert error_type == "timeout"
+    assert "timed out" in message.lower()
+
+
 def test_retry_backoffs_for_retryable_error():
     assert retry_backoffs_for_error("auth_rejected") == [0, 120, 600]
+
+
+def test_retry_backoffs_for_timeout_fit_unit_start():
+    assert retry_backoffs_for_error("timeout") == [0, 120]
 
 
 def test_retry_backoffs_for_non_retryable_error():
