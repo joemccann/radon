@@ -213,7 +213,8 @@ for (const width of [390, 1440]) {
     await expect(alert).not.toContainText("Subprocess");
     await expect(alert).not.toContainText("scan_succeeded");
     await expect(section).toContainText("TOP MR");
-    await page.screenshot({ path: testInfo.outputPath(`vol-skew-safe-error-${width}.png`) });
+    await expect(alert).toHaveCSS("opacity", "1");
+    await page.screenshot({ path: testInfo.outputPath(`vol-skew-safe-error-${width}.png`), animations: "disabled" });
     await alert.getByRole("button", { name: /retry|try again/i }).click();
     await expect(alert).toHaveCount(0);
     expect(requests).toEqual([{ tickers: ["AAPL", "NVDA"] }, { tickers: ["AAPL", "NVDA"] }]);

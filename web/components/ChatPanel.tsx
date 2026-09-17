@@ -360,19 +360,21 @@ export default function ChatPanel({
         setEvidence((current) => ({ ...current, [assistantId]: { tools: turn.toolEvents, model: turn.model, failed: turn.failed } }));
         setTurnTools(turn.toolEvents);
         setTurnModel(turn.model);
-        setStatus("streaming");
-        await streamMessage(assistantId, turn.failed ? "" : turn.content, setMessages, {
-          signal: controller.signal,
-        });
-        // F7: never auto-execute. A destructive order proposal is surfaced as
-        // a confirm card the operator must explicitly accept.
-        if (controller.signal.aborted) return;
+        // Failed turns belong only in the toast. Passing an empty string to
+        // streamMessage would synthesize its PI-command empty-output fallback.
         if (turn.failed) {
           setLastError(userErrorMessage(turn.content, assistantErrorMessage()));
           setConsecutiveFailures((n) => n + 1);
           setStatus("error");
           return;
         }
+        setStatus("streaming");
+        await streamMessage(assistantId, turn.content, setMessages, {
+          signal: controller.signal,
+        });
+        // F7: never auto-execute. A destructive order proposal is surfaced as
+        // a confirm card the operator must explicitly accept.
+        if (controller.signal.aborted) return;
         if (turn.proposal) {
           setProposal(turn.proposal);
         }
