@@ -2373,7 +2373,7 @@ function JournalSections() {
     try {
       await syncWithIB();
     } catch (e) {
-      setSyncError(e instanceof Error ? e.message : "Sync failed");
+      setSyncError(userErrorMessage(e, "The journal could not be synced. Please try again."));
     }
   }, [syncWithIB]);
 

@@ -121,8 +121,8 @@ function WriterRow({ row }: { row: ServiceHealthRow }) {
         </div>
       </td>
       <td className="admin-unit-activity">{relAge(lastRun)}</td>
-      <td className="admin-unit-desc" title={row.last_error ? userErrorMessage(row.last_error, "Writer update failed. Review service logs for details.") : undefined}>
-        {row.last_error ? userErrorMessage(row.last_error, "Writer update failed. Review service logs for details.") : "--"}
+      <td className="admin-unit-desc" title={row.last_error ? userErrorMessage(row.state === "ok" ? humanizeDetail(row.last_error) : row.last_error, "Writer update failed. Review service logs for details.") : undefined}>
+        {row.last_error ? userErrorMessage(row.state === "ok" ? humanizeDetail(row.last_error) : row.last_error, "Writer update failed. Review service logs for details.") : "--"}
       </td>
     </tr>
   );
