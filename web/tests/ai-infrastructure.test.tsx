@@ -70,7 +70,7 @@ describe("AI industry value-chain presentation", () => {
   });
   it("filters coverage without dropping unknown publishers", () => {
     render(<AiInfrastructureView data={aiFixture} error={null} loading={false} refresh={() => {}} />);
-    fireEvent.change(screen.getByRole("searchbox", { name: "Find a source" }), { target: { value: "fixture" } });
+    fireEvent.change(screen.getByRole("searchbox", { name: "Find a source" }), { target: { value: "Fixture publisher" } });
     const board = screen.getByTestId("ai-source-coverage");
     expect(board.querySelector('[data-testid="ai-coverage-fixture"]')).toBeTruthy();
     expect(board.querySelector('[data-testid="ai-coverage-ramp"]')).toBeNull();

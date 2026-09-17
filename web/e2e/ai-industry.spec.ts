@@ -116,10 +116,10 @@ test.describe("AI industry value chain", () => {
     await expect(coverage.getByTestId("ai-coverage-ramp")).toHaveCount(0);
     await coverage.getByRole("searchbox").fill("not-a-publisher");
     await expect(coverage).toContainText("No sources match your search.");
-    await page.getByLabel("Measure", { exact: true }).selectOption("D3");
+    await page.getByRole("combobox", { name: "Measure", exact: true }).selectOption("D3");
     await expect(page.getByRole("article", { name: "Gateway mix evidence" })).toContainText("No comparable history is available. Missing observations are not zero.");
     await page.getByRole("tab", { name: /Buildout/ }).click();
-    await page.getByLabel("Measure", { exact: true }).selectOption("P1");
+    await page.getByRole("combobox", { name: "Measure", exact: true }).selectOption("P1");
     await expect(page.getByRole("article", { name: "Power demand context evidence" }).getByText("stale", { exact: true })).toBeVisible();
     await page.route("**/api/ai-cycle", route => route.fulfill({ status: 503, json: { detail: "Unavailable" } }));
     await page.getByRole("button", { name: "Refresh snapshot" }).click();
@@ -165,7 +165,10 @@ test.describe("AI industry value chain", () => {
       await page.getByTestId("ai-indicator-C1").locator("summary").click();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       const path = testInfo.outputPath(`ai-industry-${theme}-${mobile ? "mobile" : "desktop"}.png`);
-      await page.screenshot({ path, fullPage: true });
+      await page.screenshot({ path, fullPage: false });
+      const chartPath = testInfo.outputPath(`ai-industry-chart-${theme}-${mobile ? "mobile" : "desktop"}.png`);
+      await page.getByTestId("ai-industry-history-chart").screenshot({ path: chartPath });
+      await testInfo.attach("Shared Regime chart", { path: chartPath, contentType: "image/png" });
       await testInfo.attach("AI industry visual evidence", { path, contentType: "image/png" });
       await page.getByRole("article", { name: "GPU rental prices evidence" }).getByRole("button", { name: "Sources and method: Matched GPU asking prices" }).click();
       await expect(page.getByRole("dialog")).toBeVisible();

@@ -57,6 +57,13 @@ describe("shared Regime renderer for AI series", () => {
     const { container } = render(<CriHistoryChart history={[point("2026-01-01"), point("2026-01-02", 11), point("2026-01-10", 12), point("2026-01-11", 13)]} series={[{ key: "value", label: "Tokens", color: "green", axis: "left" }]} maxGapMs={2 * 86_400_000} title="Usage" />);
     expect(container.querySelectorAll('path[stroke="green"]')).toHaveLength(2);
   });
+  it("keeps units in inspection while using compact axis labels", () => {
+    const { container } = render(<AiIndustryHistoryChart points={[{ ...point("2026-01-01"), unit: "USD/GPU-hour" }, { ...point("2026-01-02", 12), unit: "USD/GPU-hour" }]} />);
+    expect([...container.querySelectorAll("svg .tick text")].some(tick => tick.textContent?.includes("USD/GPU-hour"))).toBe(false);
+    const slider = screen.getByRole("slider", { name: "Inspect Routed tokens history" });
+    fireEvent.keyDown(slider, { key: "Home" });
+    expect(slider.getAttribute("aria-valuetext")).toContain("USD/GPU-hour");
+  });
   it("retains quarterly bars without adding a second series", () => {
     const { container } = render(<CriHistoryChart history={[point("2026-03-31", 10), point("2026-06-30", 20)]} series={[{ key: "value", label: "Revenue", color: "green", axis: "left", renderAs: "bar" }]} title="Revenue" />);
     const bars = [...container.querySelectorAll(".history-bar")];

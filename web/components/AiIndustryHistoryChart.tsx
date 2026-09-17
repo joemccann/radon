@@ -30,7 +30,7 @@ function History({ points, cadence, sourceLabel }: AiIndustryHistoryChartProps) 
   }, [custom, history, preset, total]);
   const slice = useMemo(() => history.slice(range[0], range[1] + 1), [history, range]);
   const identity = history[0];
-  const definition = useMemo<[ChartSeries<AiHistoryPoint>]>(() => [{ key: "value", label: identity?.label ?? "Observation", color: chartSeriesColor("primary"), axis: "left", format: v => `${aiNumber(v)} ${identity?.unit ?? ""}`, renderAs: aiPeriodicBars(history, cadence) ? "bar" : "line" }], [cadence, history, identity]);
+  const definition = useMemo<[ChartSeries<AiHistoryPoint>]>(() => [{ key: "value", label: identity?.label ?? "Observation", color: chartSeriesColor("primary"), axis: "left", format: v => `${aiNumber(v)} ${identity?.unit ?? ""}`, axisFormat: v => new Intl.NumberFormat("en-US", { notation: "compact", maximumSignificantDigits: 3 }).format(v), renderAs: aiPeriodicBars(history, cadence) ? "bar" : "line" }], [cadence, history, identity]);
   const presets = useMemo(() => aiCalendarPresets(history), [history]);
   const gap = useMemo(() => aiHistoryGapMs(history, cadence), [history, cadence]);
   const values = useMemo(() => history.map(p => p.value), [history]);

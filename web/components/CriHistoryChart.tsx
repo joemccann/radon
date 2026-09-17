@@ -27,6 +27,8 @@ export interface ChartSeries<T = CriHistoryEntry> {
   color: string;
   axis: "left" | "right";
   format?: (v: number) => string;
+  /** Compact tick labels when tooltip values include units. */
+  axisFormat?: (v: number) => string;
   /** Y-scale for this series; log domains clamp to the smallest positive value. */
   scaleType?: "log" | "linear";
   /** Sparse periodic measurements can retain a zero-based bar representation. */
@@ -371,7 +373,7 @@ export default function CriHistoryChart<T extends { date: string }>({
     if (rightSeries) drawLine(rightSeries, yRight);
 
     // Left Y-axis
-    const leftFormat = leftSeries.format ?? defaultFormat;
+    const leftFormat = leftSeries.axisFormat ?? leftSeries.format ?? defaultFormat;
     g.append("g")
       .call(
         d3
@@ -391,7 +393,7 @@ export default function CriHistoryChart<T extends { date: string }>({
 
     // Right Y-axis
     if (rightSeries) {
-    const rightFormat = rightSeries.format ?? defaultFormat;
+    const rightFormat = rightSeries.axisFormat ?? rightSeries.format ?? defaultFormat;
     g.append("g")
       .attr("transform", `translate(${innerW},0)`)
       .call(

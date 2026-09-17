@@ -806,6 +806,7 @@ jobs:
           e2e/newsfeed-research-media.spec.ts
           e2e/newsfeed-sharing.spec.ts
           e2e/ai-industry.spec.ts
+          e2e/clear-shell.spec.ts
           e2e/chat-experience.spec.ts
       - name: Upload historical fill screenshots
         if: always()
