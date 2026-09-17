@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-09-16T23:29:47Z",
-  "node_count": 3350,
-  "edge_count": 6870,
+  "generated_at": "2026-09-17T03:28:23Z",
+  "node_count": 3352,
+  "edge_count": 6871,
   "areas": {
-    "web": 1976,
+    "web": 1978,
     "site": 155,
     "scripts": 1106,
     "cloud": 66,
@@ -25,7 +25,7 @@
     {
       "id": "web/e2e",
       "area": "web",
-      "count": 197
+      "count": 198
     },
     {
       "id": "web",
@@ -50,7 +50,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 912
+      "count": 913
     },
     {
       "id": "site/app",
@@ -385,14 +385,14 @@
       "test": false
     },
     {
-      "id": "web/components/SpectralLoader.tsx",
+      "id": "web/components/InfoTooltip.tsx",
       "area": "web",
-      "in": 44,
+      "in": 45,
       "out": 0,
       "test": false
     },
     {
-      "id": "web/components/InfoTooltip.tsx",
+      "id": "web/components/SpectralLoader.tsx",
       "area": "web",
       "in": 44,
       "out": 0,
