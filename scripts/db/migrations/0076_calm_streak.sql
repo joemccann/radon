@@ -13,4 +13,4 @@ CREATE TABLE IF NOT EXISTS calm_streak_history (
     recorded_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_calm_streak_history_date_desc ON calm_streak_history (date DESC);
-INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (74, datetime('now'));
+INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (76, datetime('now'));
