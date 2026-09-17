@@ -38,6 +38,7 @@ UPSERT_NAMES = [
     "upsert_oi_changes",
     "upsert_theta_harvester_snapshot",
     "upsert_strength_confirmation_snapshot",
+    "upsert_vol_skew_mr_snapshot",
     "upsert_scan_snapshot",
 ]
 
@@ -171,6 +172,17 @@ class TestMirrorScanSnapshot:
             ("upsert_strength_confirmation_snapshot", ("T4", payload))
         ]
         assert writer_calls["health"] == [("strength-confirmation", "ok", {"finished_at": "T4"})]
+
+    def test_vol_skew_mr_mirrors_snapshot_to_turso(self, writer_calls):
+        from db.scan_mirror import mirror_scan_snapshot
+
+        payload = {"scan_time": "T5", "universe": "explicit", "results": []}
+        mirror_scan_snapshot("vol-skew-mr", payload)
+
+        assert writer_calls["upserts"] == [
+            ("upsert_vol_skew_mr_snapshot", ("T5", payload))
+        ]
+        assert writer_calls["health"] == [("vol-skew-mr", "ok", {"finished_at": "T5"})]
 
     def test_unknown_service_is_a_programmer_error(self, writer_calls):
         from db.scan_mirror import mirror_scan_snapshot

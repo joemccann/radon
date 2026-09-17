@@ -4,6 +4,7 @@ import localFont from "next/font/local";
 import Providers from "@/components/Providers";
 import PwaRegister from "@/components/PwaRegister";
 import ThemeBootstrap from "@/components/ThemeBootstrap";
+import { DEFAULT_DOCUMENT_TITLE, TITLE_TEMPLATE } from "@/lib/pageTitle";
 import "./globals.css";
 import "./clear.css";
 
@@ -51,7 +52,10 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "Radon Terminal",
+  title: {
+    default: DEFAULT_DOCUMENT_TITLE,
+    template: TITLE_TEMPLATE,
+  },
   description: "Market structure reconstruction instrument. Surfaces convex opportunities from institutional flow, volatility surfaces, and cross-asset positioning.",
   manifest: "/manifest.webmanifest",
   appleWebApp: {
