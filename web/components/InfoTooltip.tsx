@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 
 /**
  * Inline hover tooltip — renders a small "?" circle that, on hover,
@@ -41,6 +41,8 @@ type InfoTooltipProps = {
   ariaLabel?: string;
   triggerTestId?: string;
   contentTestId?: string;
+  /** Optional typography for prose-heavy explanations on reading surfaces. */
+  prose?: boolean;
 };
 
 function useCoarsePointer() {
@@ -58,7 +60,8 @@ function useCoarsePointer() {
   return isCoarse;
 }
 
-export default function InfoTooltip({ text, ariaLabel, triggerTestId, contentTestId }: InfoTooltipProps) {
+export default function InfoTooltip({ text, ariaLabel, triggerTestId, contentTestId, prose = false }: InfoTooltipProps) {
+  const tooltipId = useId();
   const [rect, setRect] = useState<DOMRect | null>(null);
   const [popupHeight, setPopupHeight] = useState<number | null>(null);
   const ref = useRef<HTMLSpanElement>(null);
@@ -166,14 +169,15 @@ export default function InfoTooltip({ text, ariaLabel, triggerTestId, contentTes
       style={{ display: "inline-flex", alignItems: "center" }}
       onMouseEnter={show}
       onMouseLeave={scheduleHide}
-      onFocus={show}
+      onFocus={() => { if (!isCoarse) show(); }}
+      onKeyDown={event => { if (event.key === "Escape" && isOpen) { event.preventDefault(); event.stopPropagation(); hide(); } }}
       onBlur={scheduleHide}
-      aria-label={ariaLabel}
-      tabIndex={0}
     >
       <button
         type="button"
+        aria-label={ariaLabel ?? "More information"}
         aria-expanded={isOpen}
+        aria-describedby={isOpen ? tooltipId : undefined}
         onClick={(event) => {
           event.stopPropagation();
           toggle();
@@ -217,6 +221,8 @@ export default function InfoTooltip({ text, ariaLabel, triggerTestId, contentTes
       {rect && (
         <span
           ref={popupRef}
+          id={tooltipId}
+          role="tooltip"
           data-testid={contentTestId}
           onMouseEnter={cancelScheduledHide}
           onMouseLeave={scheduleHide}
@@ -232,8 +238,8 @@ export default function InfoTooltip({ text, ariaLabel, triggerTestId, contentTes
             border: "1px solid var(--chart-tooltip-border, var(--border-dim))",
             padding: "8px 10px",
             width: placement?.width ?? TOOLTIP_WIDTH,
-            fontSize: 11,
-            fontFamily: "var(--font-mono)",
+            fontSize: prose ? 12 : 11,
+            fontFamily: prose ? "var(--font-sans)" : "var(--font-mono)",
             color: "var(--text-primary)",
             lineHeight: 1.5,
             zIndex: 9999,

@@ -93,7 +93,9 @@ describe("AI Industry value-chain presentation", () => {
     render(<AiInfrastructureView data={{ ...aiFixture, indicators: [{ ...first, history: [...first.history, ...extra] }] }} error={null} loading={false} refresh={() => {}} />);
     const select = screen.getByRole("combobox", { name: "Observation series" });
     expect(select.querySelectorAll("option")).toHaveLength(2);
-    expect(select.textContent).toContain("requests-v2");
+    expect(select.textContent).toContain("requests");
+    expect(select.textContent).not.toContain("requests-v2");
+    expect([...select.querySelectorAll("option")].map(option => option.value)).toEqual(["0", "1"]);
     expect(select.textContent).toContain("Fixture publisher");
   });
 });

@@ -33,6 +33,8 @@ export interface ChartSeries<T = CriHistoryEntry> {
   scaleType?: "log" | "linear";
   /** Sparse periodic measurements can retain a zero-based bar representation. */
   renderAs?: "line" | "bar";
+  /** Keep connected lines clear while preserving observations isolated by gaps. */
+  pointMarkers?: "all" | "isolated";
 }
 
 interface TooltipState<T> {
@@ -279,9 +281,11 @@ export default function CriHistoryChart<T extends { date: string }>({
         g.append("path").datum(segment).attr("fill", "none").attr("stroke", s.color).attr("stroke-width", 2).attr("d", line);
       }
 
-      // Dots
+      const markerData = s.pointMarkers === "isolated"
+        ? segments.flatMap(segment => segment.length === 1 ? segment : [])
+        : validData;
       g.selectAll(`.dot-${String(s.key)}`)
-        .data(validData)
+        .data(markerData)
         .enter()
         .append("circle")
         .attr("class", `dot-${String(s.key)}`)
