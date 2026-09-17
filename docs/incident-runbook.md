@@ -437,6 +437,52 @@ the unit stays failed.
 
 ---
 
+## cta-sync-fetch-timeout-expired
+
+**`radon-cta-sync.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) when hung Playwright raises `TimeoutExpired`.** Peak:
+2026-09-17 20:18Z, page `1e8d20a132ac2b56c844757d031309ef`. Next timer
+21:32 UTC.
+
+- **Mechanism:** `cta_sync_service.run_cta_sync` isolates
+  `fetch_menthorq_cta.py` in a subprocess (Playwright event-loop
+  isolation). `subprocess.run(..., timeout=300)` raised
+  `TimeoutExpired` uncaught. The retry loop never saw it (`timeout` is
+  retryable). `write_final_status` never ran, so
+  `cta-sync-latest.json` stayed `state=syncing` with
+  `last_attempt_finished_at=null`. `Type=oneshot` has no `Restart=`.
+  Unit `TimeoutStartSec=1800` was raised in CTA-02 because a cold
+  Playwright session takes 8-12 min; the Python timeout stayed 300s.
+  IB unused (`requires_ib: False`). Edge and `:8321/health/lite` stayed
+  up.
+- **Detection:** journal `subprocess.TimeoutExpired: Command '[...
+  fetch_menthorq_cta.py ...]' timed out after 300 seconds` then `CTA
+  sync runtime failed (exit 1)`; ExecMainStart to InactiveEnter is
+  exactly 300s; `systemctl show` → `exit-code` / `0`. Health row
+  `cta-sync` may still be `ok` from the prior skip/success.
+- **Discriminating check:** `TimeoutExpired` / `timed out after Ns` at
+  `cta_sync_service.run_cta_sync` with N matching the fetch timeout
+  (not `TimeoutStartSec`). `vision_cascade_exhausted` is ops_only
+  (whole cascade missed). `Result=signal` is deploy stop-clean. If
+  `/health/lite` is down too → API, stand down.
+- **Remediation (code):** `FETCH_TIMEOUT_S=720` (12 min cold session).
+  Catch `TimeoutExpired`, classify as `timeout`, retry once after 120s
+  (envelope 1560s < 1800s). Persistent hang writes `degraded` and exits
+  1. Do not restart-flap; next timer (21:30 UTC) or one
+  `radon unit restart radon-cta-sync.service` after the fix deploys.
+  Unit is not on `RERUNNABLE_ONESHOT_UNITS`.
+- **Regression:**
+  `test_cta_sync_service.py::TestFetchTimeoutEnvelope`
+  (`test_timeout_expired_retries_then_succeeds`,
+  `test_persistent_timeout_expired_writes_degraded_not_traceback`,
+  `test_service_timeout_covers_retry_envelope`),
+  `test_cta_sync_health.py::test_classify_subprocess_timeout_expired`.
+- **Code:** `scripts/cta_sync_service.py` (`FETCH_TIMEOUT_S`,
+  `TimeoutExpired` handler), `scripts/utils/cta_sync_health.py`
+  (`TIMEOUT_RETRY_BACKOFFS_SECONDS`).
+
+---
+
 ## divyield-yahoo-sweep-timeout
 
 **`radon-divyield.service` oneshot pages P1 `Result=timeout` (`NRestarts=0`)
