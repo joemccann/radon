@@ -326,6 +326,7 @@ def test_same_named_fork_pr_is_not_reused(repo, remote, monkeypatch):
     ("headRefName", "different", "target changed"),
     ("state", "CLOSED", "target changed"),
     ("isCrossRepository", True, "origin repository"),
+    ("url", "https://github.com/example/repo/pull/99", "URL changed"),
 ])
 def test_wrong_or_stale_pr_is_never_reported_published(repo, remote, monkeypatch, field, value, error):
     write(repo, "fix.py")
@@ -363,3 +364,141 @@ def test_cli_from_subdirectory_classifies_repo_relative_paths(repo, monkeypatch,
     monkeypatch.chdir(repo / "web")
     assert subject.main(["check", "--base", "main"]) == 3
     assert json.loads(capsys.readouterr().out)["ignored_paths"] == ["tools/codemap/architecture.json"]
+
+
+@pytest.mark.parametrize("response,error", [
+    ("not json", "Invalid JSON"),
+    ("{}", "repository identity"),
+    ('["unexpected"]', "repository identity"),
+    ('[{"url":"https://github.com/example/repo/pull/42"}]', "repository identity"),
+    ('[{"isCrossRepository":false}]', "no URL"),
+    ('[{"isCrossRepository":false,"url":"one"},{"isCrossRepository":false,"url":"two"}]', "at most one"),
+])
+def test_untrusted_github_listing_never_pushes_or_creates(repo, remote, monkeypatch, response, error):
+    write(repo, "fix.py")
+    commit(repo)
+    calls = mock_gh(monkeypatch, repo)
+    original = subject.run
+    def listing(args, cwd, **kwargs):
+        result = original(args, cwd, **kwargs)
+        return response if args[:3] == ["gh", "pr", "list"] else result
+    monkeypatch.setattr(subject, "run", listing)
+    with pytest.raises(subject.PublishError, match=error):
+        publication(repo)
+    assert not any(cmd[:2] == ["git", "push"] or cmd[:3] == ["gh", "pr", "create"] for cmd in calls)
+
+
+def test_branch_race_never_pushes_unchecked_work(repo, remote, monkeypatch):
+    write(repo, "fix.py")
+    commit(repo)
+    calls = mock_gh(monkeypatch, repo)
+    original = subject.run
+    def racing(args, cwd, **kwargs):
+        result = original(args, cwd, **kwargs)
+        if args[:3] == ["gh", "pr", "list"]:
+            write(repo, "arrived-during-check.py")
+            commit(repo)
+        return result
+    monkeypatch.setattr(subject, "run", racing)
+    with pytest.raises(subject.PublishError, match="Branch changed"):
+        publication(repo)
+    assert not any(cmd[:2] == ["git", "push"] or cmd[:3] == ["gh", "pr", "create"] for cmd in calls)
+
+
+@pytest.mark.parametrize("bad_body", ["missing", "invalid_utf8"])
+def test_unreadable_body_cannot_publish_a_branch(repo, remote, monkeypatch, bad_body):
+    write(repo, "fix.py")
+    commit(repo)
+    calls = mock_gh(monkeypatch, repo)
+    body = repo.parent / "bad-body.md"
+    if bad_body == "invalid_utf8":
+        body.write_bytes(b"\xff")
+    with pytest.raises((subject.PublishError, UnicodeError)):
+        subject.publish(base="main", head="nightly/test", title="Fix", body_file=body, repo=repo)
+    assert not any(cmd[:2] == ["git", "push"] or cmd[0] == "gh" for cmd in calls)
+
+
+def test_main_branch_cannot_be_published_as_its_own_pr(repo, monkeypatch):
+    calls = mock_gh(monkeypatch, repo)
+    with pytest.raises(subject.PublishError, match="must differ"):
+        subject.publish(base="main", head="main", title="Invalid", body_file=repo / "unused", repo=repo)
+    assert not any(cmd[:2] == ["git", "push"] or cmd[0] == "gh" for cmd in calls)
+
+
+@pytest.mark.parametrize("operation,response,error", [
+    ("create", "unexpected output", "pull request URL"),
+    ("view", "[]", "Invalid pull request response"),
+])
+def test_malformed_publication_response_is_not_reported_as_success(repo, remote, monkeypatch, operation, response, error):
+    write(repo, "fix.py")
+    commit(repo)
+    calls = mock_gh(monkeypatch, repo)
+    original = subject.run
+    def malformed(args, cwd, **kwargs):
+        result = original(args, cwd, **kwargs)
+        return response if args[:3] == ["gh", "pr", operation] else result
+    monkeypatch.setattr(subject, "run", malformed)
+    with pytest.raises(subject.PublishError, match=error):
+        publication(repo)
+    assert len([cmd for cmd in calls if cmd[:3] == ["gh", "pr", "create"]]) == 1
+
+
+@pytest.mark.parametrize("path,content,error", [
+    ("tools/codemap/codemap.data.js", "window.OTHER = {};", "wrapper"),
+    ("tools/codemap/architecture.json", "[]", "object"),
+    ("tools/codemap/codemap.json", '{"nodes":[]}', "metadata"),
+])
+def test_malformed_generated_updates_fail_closed(repo, path, content, error):
+    initial = '{"meta":{"generated_at":"old"},"nodes":[]}'
+    if path.endswith(".js"):
+        initial = f"window.CODEMAP = {initial};"
+    write(repo, path, initial)
+    commit(repo)
+    git(repo, "branch", "-f", "main", "HEAD")
+    write(repo, path, content)
+    commit(repo)
+    with pytest.raises(subject.PublishError, match=error):
+        classify(repo)
+
+
+@pytest.mark.parametrize("operation", ["add", "delete", "executable"])
+def test_generated_artifact_presence_and_mode_changes_are_substantive(repo, operation):
+    path = "tools/codemap/architecture.json"
+    write(repo, path, '{"generated_at":"same","node_count":1}')
+    if operation != "add":
+        commit(repo)
+        git(repo, "branch", "-f", "main", "HEAD")
+        if operation == "delete":
+            (repo / path).unlink()
+        else:
+            git(repo, "config", "core.filemode", "true")
+            (repo / path).chmod(0o755)
+    commit(repo)
+    assert classify(repo)["paths"] == [path]
+
+
+@pytest.mark.parametrize("failure", [OSError("missing executable"), subprocess.TimeoutExpired("gh", 120)])
+def test_process_start_and_timeout_fail_closed_without_leaking_upstream_output(repo, monkeypatch, failure):
+    def unavailable(*_args, **_kwargs):
+        raise failure
+    monkeypatch.setattr(subject.subprocess, "run", unavailable)
+    with pytest.raises(subject.PublishError, match="Unable to run gh pr") as caught:
+        subject.run(["gh", "pr", "list"], repo)
+    assert str(caught.value) == f"Unable to run gh pr: {type(failure).__name__}"
+
+
+def test_invalid_cli_arguments_produce_error_json_without_side_effects(monkeypatch, capsys):
+    monkeypatch.setattr(subject, "run", lambda *_a, **_kw: pytest.fail("No command may run for invalid arguments"))
+    assert subject.main(["publish", "--head", "nightly/test"]) == 1
+    assert json.loads(capsys.readouterr().out)["status"] == "error"
+
+
+def test_publish_cli_returns_verified_pr_json(repo, remote, monkeypatch, capsys):
+    write(repo, "fix.py")
+    commit(repo)
+    mock_gh(monkeypatch, repo)
+    body = repo.parent / "body.md"
+    body.write_text("Concrete correction and validation.\n")
+    monkeypatch.chdir(repo)
+    assert subject.main(["publish", "--head", "nightly/test", "--title", "Fix", "--body-file", str(body)]) == 0
+    assert json.loads(capsys.readouterr().out)["pr_url"].endswith("/42")
