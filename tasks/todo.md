@@ -18,6 +18,28 @@ detached-stage termination after seven genuine attempts.
 ## Review
 
 - [x] No new source-actionable P0/P1 finding; P2 REL-257 intentionally excluded.
+# Task: CI performance audit 2026-09-17 [COMPLETE]
+
+Measure organic `main` release-path runs since `8d1d0f52`, verify protected
+workflow/deploy invariants, and publish every evidence-backed candidate.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify dedicated runner rails, branch, lock, GitHub access, and audit delta.
+- T2 depends_on: [T1] - Classify 20+ Actions runs and reconstruct comparable critical paths.
+- T3 depends_on: [T2] - Sweep workflow/cache/image/deploy safety contracts and rank candidates.
+- T4 depends_on: [T3] - Append ledger, publish audit branch/PR, and post rolling issue report.
+
+## Checklist
+
+- [x] T1 Dedicated clone, stale-lock preservation, dated branch, GitHub auth, and `origin/main` verified.
+- [x] T2 Classified 35 Actions runs; reconstructed 26 completed deployment paths and rolling comparable samples.
+- [x] T3 Verified the complete deploy closure, immutable inputs, exact-SHA transfer, and recovery rails; no material safe candidate.
+- [x] T4 Ledger, publication branch, and rolling issue report prepared.
+
+## Review
+
+- [x] The E2E delta is explicitly non-gating; no change can reduce the protected release path.
 # Task: Mixed-age combo Today P&L 2026-09-17 [IMPLEMENTED; PR CI PENDING]
 
 SPY bull put spread: overnight long 740P + same-day short 760P. Today P&L
@@ -7492,6 +7514,15 @@ Review: GitHub red phase9e517457 reproduced lost flow (expected80000,actual0) in
 
 Incident evidence: production disk payload generated2026-09-16T12:31:06.516Z, flex_from_file, nav_as_of2026-09-15, empty_verified flows,185NAV/184subperiods/182returns/two suspect sessions. Retained ledger has actual Jan13 deposit80007.13 and Feb6 transfer655497.16; residual candidates are not deposits. Latest nightly statement coversSep15only and has both flow sections withzeroentries. Initial regression commit9e517457 published inPR468 forGitHub red/green evidence.
 
+## CI performance remediate 2026-09-17
+
+Dependency graph: T1 -> T2 -> T3.
+
+- [x] T1 depends_on: [] Resume `ci-performance/2026-09-17`, acquire the dedicated runner lock, and confirm the audit has no P0/P1 source-actionable CIP finding under `RADON_WEEKEND_REDUCED=1`.
+- [x] T2 depends_on: [T1] Focused protected CI contracts passed (119); detached serial baseline had no DONE sentinel and is not counted as green.
+- [x] T3 depends_on: [T2] Appended the reduced-rung remediation verdict for commit and push.
+
+Review: no eligible P0/P1 source change; no protected CI or deploy rail changed.
 
 ## Testing audit 2026-09-17
 
