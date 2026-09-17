@@ -1,3 +1,4 @@
+# clear-shell.spec.ts is curated in ci.yml for AI industry desktop/mobile navigation verification.
 # research-workbench.spec.ts is curated in ci.yml: source citations, mobile/desktop, exports and safe handoff.
 # REVIEWED 2026-09-15 aaoi-risk-reversal-max-loss.spec.ts - Static locator adaptation to the shared header table; existing order assertions retained. Browser suite remains held out.
 # REVIEWED 2026-09-15 chain-held-leg-prices.spec.ts - Static locator adaptation to the shared header table; existing price assertions retained. Browser suite remains held out.
@@ -60,7 +61,6 @@ clear-metric-accessibility.spec.ts
 clear-overview.spec.ts
 clear-performance.spec.ts
 clear-research.spec.ts
-clear-shell.spec.ts
 clear-workspace-interactions.spec.ts
 cor-tab.spec.ts
 crcl-spread-builder.spec.ts

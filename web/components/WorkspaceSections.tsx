@@ -124,6 +124,7 @@ import CancelOrderDialog from "./CancelOrderDialog";
 import ModifyOrderModal from "./ModifyOrderModal";
 import type { ModifyOrderRequest } from "@/lib/orderModify";
 import RegimePanel from "./RegimePanel";
+import AiInfrastructurePanel from "./AiInfrastructurePanel";
 import CtaPage from "./CtaPage";
 import AdminWorkspace from "./admin/AdminWorkspace";
 import PreferencesSection from "./PreferencesSection";
@@ -4305,6 +4306,8 @@ function WorkspaceSections({ section, portfolio, orders, prices, depths, tape, t
       return <ScannerSections defaultMode="discover" />;
     case "journal":
       return <JournalSections />;
+    case "ai-industry":
+      return <AiInfrastructurePanel />;
     case "regime":
       return <RegimePanel prices={prices ?? {}} marketState={marketState} />;
     case "cta":
