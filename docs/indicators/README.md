@@ -52,3 +52,5 @@ parent, or a spent UW daily cap fails its unit and pages a P1 every run. See
 Every UW-backed indicator shares one daily-cap breaker,
 `scripts/utils/uw_embargo.py`. Give a new writer its own sidecar file through
 `UwEmbargo(service, path_source)`; do not re-implement the reset arithmetic.
+
+The Vol/Skew MR scanner measures 25-delta put-minus-call IV history for one listed expiry nearest 30 DTE. Missing history is shown explicitly and cannot satisfy the skew gate; see [source and comparability rules](vol-skew-mr.md#data-sources-per-ticker).

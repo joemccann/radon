@@ -112,3 +112,16 @@ test.describe("/scanner?mode=vol-skew-mr", () => {
     await expect(chainLink).toHaveAttribute("href", "/AAPL?deck=c&src=vol-skew-mr");
   });
 });
+
+for (const width of [390, 1440]) {
+  test(`missing skew is explained at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 1000 });
+    await stubApis(page);
+    await page.route("**/api/scanner/vol-skew-mr", route => route.fulfill({ json: { ...payload, results: [{ ...payload.results[0], skew_path: "unknown", suggested_structure: null, gates: { technicals: true, iv: true, skew: false } }] } }));
+    await page.goto("/scanner?mode=vol-skew-mr");
+    const section = page.getByTestId("vol-skew-mr-section");
+    await expect(section.getByRole("status")).toContainText("Skew history unavailable for 1 of 1 names");
+    await expect(section.getByText("Insufficient history", { exact: true }).or(section.getByText("IV falling · SKEW Insufficient history")).filter({ visible: true })).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath(`vol-skew-missing-${width}.png`) });
+  });
+}
