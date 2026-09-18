@@ -328,7 +328,9 @@ def _skew_expiry(payload: Any, as_of: date) -> Optional[str]:
     return selected.isoformat() if selected is not None else None
 
 
-def _risk_reversal_sessions(payload: Any, expiry: str, as_of: date) -> List[Tuple[date, float]]:
+def _risk_reversal_sessions(
+    payload: Any, expiry: str, as_of: date, count: int = SKEW_SESSIONS,
+) -> List[Tuple[date, float]]:
     """UW's signed put-minus-call IV difference, in vol points per session.
 
     The historical endpoint's risk_reversal field is decimal IV. Never infer
@@ -350,7 +352,7 @@ def _risk_reversal_sessions(payload: Any, expiry: str, as_of: date) -> List[Tupl
         value = _to_float(row.get("risk_reversal"))
         if value is not None:
             sessions[session] = value * 100
-    return [(session, sessions[session]) for session in sorted(sessions)[-SKEW_SESSIONS:]]
+    return [(session, sessions[session]) for session in sorted(sessions)[-count:]]
 
 
 def _risk_reversal_history(payload: Any, expiry: str, as_of: date) -> List[float]:
@@ -371,7 +373,9 @@ def unavailable_skew(errors: Sequence[str]) -> Dict[str, Any]:
     }
 
 
-def fetch_skew_snapshot(client: Any, ticker: str, as_of: Optional[date] = None) -> Dict[str, Any]:
+def fetch_skew_snapshot(
+    client: Any, ticker: str, as_of: Optional[date] = None, sessions_count: int = SKEW_SESSIONS,
+) -> Dict[str, Any]:
     """Current 25-delta put-minus-call skew for one ticker, with its recent path.
 
     One listed expiry nearest 30 DTE, `SKEW_SESSIONS` most recent sessions in
@@ -405,7 +409,7 @@ def fetch_skew_snapshot(client: Any, ticker: str, as_of: Optional[date] = None) 
         ),
         empty,
     )
-    sessions = _risk_reversal_sessions(history, expiry, as_of)
+    sessions = _risk_reversal_sessions(history, expiry, as_of, sessions_count)
     if len(sessions) < 2:
         errors.append(f"skew_history:insufficient_distinct_sessions:{len(sessions)}")
     values = [value for _, value in sessions]
