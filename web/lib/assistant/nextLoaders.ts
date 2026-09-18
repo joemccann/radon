@@ -76,6 +76,7 @@ export const NEXT_MODULES: Record<string, () => Promise<NextRouteModule>> = {
   "trin": () => import("@/app/api/trin/route") as Promise<NextRouteModule>,
   "vcg": () => import("@/app/api/vcg/route") as Promise<NextRouteModule>,
   "vixcor": () => import("@/app/api/vixcor/route") as Promise<NextRouteModule>,
+  "panic-index": () => import("@/app/api/panic-index/route") as Promise<NextRouteModule>,
   "vixts": () => import("@/app/api/vixts/route") as Promise<NextRouteModule>,
   "vol-cone": () => import("@/app/api/vol-cone/route") as Promise<NextRouteModule>,
   "watchlist": () => import("@/app/api/watchlist/route") as Promise<NextRouteModule>,

@@ -1484,6 +1484,77 @@ def upsert_vixts_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = N
     db.commit()
 
 
+_PANIC_INDEX_INSERT_HEAD = (
+    "INSERT INTO panic_index_history "
+    "(date, vix_close, vix3m_close, vvix_close, skew_close, ts_ratio, "
+    "z_vix, z_vvix, z_ts, z_skew, level, delta_1d, recorded_at) "
+)
+_PANIC_INDEX_ROW_PLACEHOLDER = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+_PANIC_INDEX_ON_CONFLICT = (
+    " ON CONFLICT(date) DO UPDATE SET "
+    "vix_close = excluded.vix_close, vix3m_close = excluded.vix3m_close, "
+    "vvix_close = excluded.vvix_close, skew_close = excluded.skew_close, "
+    "ts_ratio = excluded.ts_ratio, z_vix = excluded.z_vix, "
+    "z_vvix = excluded.z_vvix, z_ts = excluded.z_ts, z_skew = excluded.z_skew, "
+    "level = excluded.level, delta_1d = excluded.delta_1d, "
+    "recorded_at = excluded.recorded_at"
+)
+
+PANIC_INDEX_UPSERT_SQL = (
+    f"{_PANIC_INDEX_INSERT_HEAD}VALUES {_PANIC_INDEX_ROW_PLACEHOLDER}{_PANIC_INDEX_ON_CONFLICT}"
+)
+
+
+def _panic_index_params(row: dict[str, Any], stamp: str) -> tuple:
+    def _opt(key: str) -> Any:
+        value = row.get(key)
+        return None if value is None else float(value)
+
+    return (
+        row["date"],
+        float(row["vix"]),
+        float(row["vix3m"]),
+        float(row["vvix"]),
+        float(row["skew"]),
+        float(row["ts"]),
+        _opt("z_vix"),
+        _opt("z_vvix"),
+        _opt("z_ts"),
+        _opt("z_skew"),
+        _opt("level"),
+        _opt("delta_1d"),
+        stamp,
+    )
+
+
+def upsert_panic_index_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
+    """Panic Proxy — one row per joined session, idempotent on date.
+
+    Chunked multi-row INSERTs (Hrana I/O bounding): Cboe serves full history
+    on every pull, so EVERY changed run passes all ~4,300 joined sessions.
+    Derived z / level / delta may be NULL on the 252-session warm-up.
+    """
+    if not rows:
+        return
+    deduped: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        deduped[str(row.get("date"))] = row
+    ordered = list(deduped.values())
+    stamp = recorded_at or _now_iso()
+    db = get_db()
+    for start in range(0, len(ordered), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
+        chunk = ordered[start:start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
+        placeholders = ", ".join(_PANIC_INDEX_ROW_PLACEHOLDER for _ in chunk)
+        params: list[Any] = []
+        for row in chunk:
+            params.extend(_panic_index_params(row, stamp))
+        db.execute(
+            f"{_PANIC_INDEX_INSERT_HEAD}VALUES {placeholders}{_PANIC_INDEX_ON_CONFLICT}",
+            tuple(params),
+        )
+    db.commit()
+
+
 _DISPERSION_INSERT_HEAD = (
     "INSERT INTO dispersion_history "
     "(date, vix_close, stock_spread, sector_spread, n_stocks, n_sectors, recorded_at, source) "

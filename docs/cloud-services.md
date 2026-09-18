@@ -721,6 +721,25 @@ plausibility guard raises rather than latching `ok` over a truncated or
 implausible series. Installed by the deploy's `install-units` verb from
 `installed-units.sha256`. Spec: [`indicators/vixts.md`](indicators/vixts.md).
 
+### Panic Proxy (`radon-panic-index.timer`)
+
+Twice daily `02:50` and `13:15 UTC` (`RandomizedDelaySec=120`), oneshot
+`scripts/fetch_panic_index.py`, `TimeoutStartSec=300`. Equal-weight mean of
+252-session z-scores of Cboe VIX, VVIX, VIX/VIX3M and SKEW. This is Radon's
+reconstruction of the four inputs Goldman names for its Panic Index; it is
+not the Goldman index and is not scaled to match it. Four Cboe CDN files
+pulled through the shared `CboeClient` with per-file `If-Modified-Since`;
+when all four return 304 the run restates the cached payload and refreshes
+only the snapshot and heartbeat. UW 25d skew is an overlay only. 02:50 sits
+after vixts 02:45; 13:15 is kept pending a three-session VVIX/SKEW append
+measurement (only 2026-09-18 was observable at spec time: VIX/VIX3M 01:51,
+VVIX 12:01, SKEW 21:01, last row still 09/17). Runs every calendar day;
+weekend and holiday runs are 304 heartbeats that keep `panic-index` inside
+its 26h window. Installed by the deploy's `install-units` verb from
+`installed-units.sha256`. Spec:
+[`indicators/panic-index.md`](indicators/panic-index.md). First production
+run after merge must use `--no-alert`.
+
 ### DISPERSION (`radon-dispersion.timer`)
 
 Daily `22:20 UTC` (`RandomizedDelaySec=120`), oneshot `scripts/fetch_dispersion.py`,

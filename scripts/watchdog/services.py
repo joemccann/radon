@@ -243,6 +243,10 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # (weekend/holiday runs are 304 heartbeats). Uniform 26h window mirrors
     # its Cboe siblings. Cboe CDN only — no IB dependency.
     "vixts":            {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+    # panic-index — radon-panic-index.timer, daily 02:50 + 13:15 UTC every
+    # calendar day (Cboe VIX/VIX3M/VVIX/SKEW composite; weekend/holiday runs
+    # are 304 heartbeats). Uniform 26h window mirrors its Cboe siblings.
+    "panic-index":      {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     # dispersion — radon-dispersion.timer, daily 22:20 UTC every calendar day,
     # after the 16:00 ET close year-round (weekend/holiday runs are no-new-
     # session heartbeats). Uniform 26h window matches its daily siblings. IB
@@ -595,6 +599,9 @@ BUCKETS: dict[str, list[str]] = {
         # Daily 02:45 UTC Cboe VIX/VIX3M term-structure pull — hourly check
         # surfaces a missed run within 1h of the 26h window expiring.
         "vixts",
+        # Daily 02:50 + 13:15 UTC Cboe Panic Proxy pull — hourly check
+        # surfaces a missed run within 1h of the 26h window expiring.
+        "panic-index",
         # Daily 22:20 UTC IB daily-bar dispersion sweep (post-close, Yahoo
         # fallback) — hourly check surfaces a missed run within 1h of the 26h
         # window expiring.
