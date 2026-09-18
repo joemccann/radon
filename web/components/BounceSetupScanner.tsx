@@ -8,6 +8,8 @@ import ScannerInstrumentShell from "./ScannerInstrumentShell";
 import SectionEmptyState from "./SectionEmptyState";
 import RequestError from "./RequestError";
 import TickerLink from "./TickerLink";
+import SortTh from "./SortTh";
+import { useSort } from "@/lib/useSort";
 import {
   bounceOrderHref,
   bounceVerdictLabel,
@@ -168,6 +170,27 @@ function BounceDetailChart({ ticker, series }: { ticker: string; series: BounceS
 
 const COLS = 10;
 
+type BounceSortKey =
+  | "ticker" | "verdict" | "stretch_rank" | "rsi" | "ret_20d"
+  | "vol_off_peak" | "skew_ease" | "contract" | "flow";
+
+const VERDICT_ORDER: Record<string, number> = { BOUNCE_SETUP: 0, WATCH: 1, STRETCHED: 2 };
+
+function extractSortValue(row: BounceSetupRow, key: BounceSortKey): string | number | null {
+  switch (key) {
+    case "ticker": return row.ticker;
+    case "verdict": return VERDICT_ORDER[row.verdict] ?? 9;
+    case "stretch_rank": return row.stretch_rank;
+    case "rsi": return row.rsi ?? null;
+    case "ret_20d": return row.ret_20d ?? null;
+    case "vol_off_peak": return row.vol?.off_peak ?? null;
+    case "skew_ease": return row.skew?.ease ?? null;
+    case "contract": return row.contract?.symbol ?? null;
+    case "flow": return row.flow?.signal ?? null;
+    default: return null;
+  }
+}
+
 export default function BounceSetupScanner({
   data,
   loading = false,
@@ -177,7 +200,11 @@ export default function BounceSetupScanner({
   lastSync = null,
   onScan,
 }: BounceSetupScannerProps) {
-  const rows = data?.missing ? [] : [...(data?.results ?? [])].sort((a, b) => a.stretch_rank - b.stretch_rank);
+  const rows = data?.missing ? [] : data?.results ?? [];
+  // Default order is the spec's: verdict first (BOUNCE_SETUP, WATCH,
+  // STRETCHED), then the payload's own stretch order, which useSort keeps
+  // stable within a verdict.
+  const { sorted, sort, toggle } = useSort(rows, extractSortValue, "verdict");
   const [open, setOpen] = useState<string | null>(null);
 
   return (
@@ -232,20 +259,20 @@ export default function BounceSetupScanner({
           <table>
             <thead>
               <tr>
-                <th>Ticker</th>
-                <th>Verdict</th>
-                <th className="right">Stretch rank</th>
-                <th className="right">RSI</th>
-                <th className="right">20d return</th>
-                <th className="right">FS vol off peak</th>
-                <th className="right">Skew off max</th>
-                <th>Contract</th>
-                <th>Flow</th>
+                <SortTh<BounceSortKey> label="Ticker" sortKey="ticker" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                <SortTh<BounceSortKey> label="Verdict" sortKey="verdict" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                <SortTh<BounceSortKey> label="Stretch rank" sortKey="stretch_rank" activeKey={sort.key} direction={sort.direction} onToggle={toggle} className="right" />
+                <SortTh<BounceSortKey> label="RSI" sortKey="rsi" activeKey={sort.key} direction={sort.direction} onToggle={toggle} className="right" />
+                <SortTh<BounceSortKey> label="20d return" sortKey="ret_20d" activeKey={sort.key} direction={sort.direction} onToggle={toggle} className="right" />
+                <SortTh<BounceSortKey> label="FS vol off peak" sortKey="vol_off_peak" activeKey={sort.key} direction={sort.direction} onToggle={toggle} className="right" />
+                <SortTh<BounceSortKey> label="Skew off max" sortKey="skew_ease" activeKey={sort.key} direction={sort.direction} onToggle={toggle} className="right" />
+                <SortTh<BounceSortKey> label="Contract" sortKey="contract" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                <SortTh<BounceSortKey> label="Flow" sortKey="flow" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                 <th>Action</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => {
+              {sorted.map((row) => {
                 const t = row.ticker.toUpperCase();
                 const expanded = open === t;
                 return (
