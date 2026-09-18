@@ -81,6 +81,15 @@ Its Profile group exposes OpenRouter, Artificial Analysis (including the fixed
 model basket), Vast.ai, EIA and the SEC contact user agent. Stored values win
 over `/etc/radon/env` on the collector's next run.
 
+The subscription-token vault reuses this same store rather than adding a second
+crypto system. `scripts/subscription_tokens.py` seals each agent CLI's OAuth
+credential file verbatim under the registry names
+`SUBSCRIPTION_TOKEN_ANTHROPIC`, `SUBSCRIPTION_TOKEN_CODEX`,
+`SUBSCRIPTION_TOKEN_GROK` and `SUBSCRIPTION_TOKEN_GEMINI`, and restores or
+refreshes them on a timer. A store that fails to open is reported as
+`store_unavailable` (exit 78), never as an empty vault. Runbook:
+[`docs/subscription-tokens.md`](subscription-tokens.md).
+
 **An unopenable store is reported, never silently skipped.** A store that fails to open after the preflight used to fall back to the deployed `.env` values without a word, so a rotated credential kept serving the stale one. `bootstrap_exported_names()` now surfaces the failure instead of degrading quietly. The setup flow's two env files (`web/lib/setup/envFiles.ts`) are written as a pair that rolls back, so an interrupted save can no longer leave one file updated and the other stale, and the setup token now expires after `SETUP_TOKEN_TTL_MS` (1h from first use, `web/lib/setup/setupToken.ts`), so an abandoned wizard cannot leave a credential-writing token alive for the process lifetime.
 
 The first container cutover is a one-time migration: before any restart, copy

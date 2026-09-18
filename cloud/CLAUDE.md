@@ -363,8 +363,8 @@ Immutable runners under `~/.radon-deploy-runners/` are extracted `a-w`.
 ## Systemd And Drift
 
 `setup-vps.sh` includes the `radon-aa-frontier-refresh`, `radon-ai-cycle-backfill`,
-`radon-ai-cycle` and `radon-liquidcompute` service/timer pairs in the full-host
-installation inventory.
+`radon-ai-cycle`, `radon-liquidcompute` and `radon-subscription-tokens`
+service/timer pairs in the full-host installation inventory.
 Setup installs those pairs and enables only their timers; existing hosts receive
 them through the hash-pinned `install-units` path. Historical collection resumes
 at 05:30 UTC, the frontier timer updates the fixed Artificial Analysis cohort at
@@ -373,6 +373,10 @@ GPU index ticker runs at 07:30 UTC, each with up to five minutes of jitter. Prov
 entitlements; missing keys leave those measurements unavailable. Collection,
 reviewed disclosures and source limits are documented in
 [`docs/ai-infrastructure-operations.md`](../docs/ai-infrastructure-operations.md).
+`radon-subscription-tokens.timer` runs every 30 minutes UTC (`Persistent=true`)
+and heals the agent-CLI subscription credentials from the encrypted secret
+store; only a revoked refresh token pages an operator. Runbook:
+[`docs/subscription-tokens.md`](../docs/subscription-tokens.md).
 
 
 Canonical unit files are copied root-owned to `/etc/systemd/system`; they are
