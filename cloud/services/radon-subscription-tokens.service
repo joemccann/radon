@@ -1,0 +1,38 @@
+[Unit]
+Description=Radon subscription token vault (seal, refresh, restore agent CLI credentials)
+After=network.target
+StartLimitIntervalSec=1800
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+User=radon
+UMask=0077
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/etc/radon/env
+Environment=RADON_DB_NO_REPLICA=1
+Environment=RADON_SECRET_STORE_PATH=/home/radon/radon/data/secret_store/secrets.db
+LoadCredentialEncrypted=radon-secret-store-key:/etc/credstore.encrypted/radon-secret-store-key
+# The sidecar /var/lib/radon/subscription-tokens/state.json carries the page
+# cooldowns and the consecutive-error streak. Without this the directory is not
+# owned by radon and every run silently loses both.
+StateDirectory=radon
+StateDirectoryMode=0750
+ExecStartPre=/home/radon/radon/.venv/bin/python3.13 /home/radon/radon/scripts/secret_store.py
+ExecStart=/home/radon/radon/.venv/bin/python -m scripts.subscription_tokens --once
+StandardOutput=journal
+StandardError=journal
+# --once exits 1 whenever a provider is needs_reauth or error, which is the
+# steady state this unit exists to report and which the module already pages
+# for at normal priority. Without this the oneshot latches ActiveState=failed on
+# every fire, the watchdog never matches its exit-code latch, and one revoked
+# refresh token becomes an hour-long P1 emergency siren every day. 78
+# (store_unavailable) is deliberately still a failure: that one warrants P1.
+SuccessExitStatus=1
+# Per provider the ceiling is a 60s CLI probe + 20s OIDC discovery + two 63s
+# POST envelopes (form, then the JSON retry): ~206s. Four providers plus paging
+# needs more than 600s once the codex/grok/gemini CLIs are installed.
+TimeoutStartSec=1200
+
+[Install]
+WantedBy=multi-user.target

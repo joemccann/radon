@@ -134,6 +134,8 @@ def _runtime_env(tmp_path: Path, fake_docker: Path | None = None) -> dict[str, s
     state_dir = tmp_path / "state"
     for d in (data_dir, media_dir, state_dir):
         d.mkdir(exist_ok=True)
+    (state_dir / "deploy.lock").touch()
+    (state_dir / "last-green").write_text("b" * 40 + "\n")
     credentials_dir = tmp_path / "credentials"
     credentials_dir.mkdir(exist_ok=True)
     (credentials_dir / "radon-secret-store-key").write_bytes(os.urandom(32))
@@ -256,7 +258,14 @@ def test_pull_pulls_only_app_images(tmp_path: Path) -> None:
 _IMAGE_STORE_DOCKER = """#!/bin/bash
 printf '%s\\n' "$*" >> {log}
 case "$1 $2" in
-  "manifest inspect"|"image inspect") exit 0 ;;
+  "manifest inspect") exit 0 ;;
+  "buildx imagetools") printf '{{"digest":"sha256:%064d"}}\\n' 0 ;;
+  "image inspect")
+    if [[ "$4" == "--format" ]]; then
+      ref="$3"
+      printf '["%s@sha256:%064d"]\\n' "${{ref%:*}}" 0
+    fi
+    ;;
   "ps --format")
     printf '%s\\n' ghcr.io/joemccann/radon-node:${{RADON_STUB_PREVIOUS}} ghcr.io/joemccann/radon-python:${{RADON_STUB_PREVIOUS}}
     ;;
@@ -268,8 +277,8 @@ exit 0
 """
 
 
-def test_pull_with_a_local_release_pair_skips_network_and_prunes_stale_pairs(tmp_path: Path) -> None:
-    """A successful parallel prepull makes deploy's exact-SHA check local."""
+def test_pull_with_matching_digests_skips_layer_pulls_and_prunes_stale_pairs(tmp_path: Path) -> None:
+    """Matching registry digests preserve cached layers and remove only stale releases."""
     target = "a" * 40
     previous = "b" * 40
     stale = "c" * 40
@@ -913,7 +922,9 @@ def test_run_refuses_unknown_unit(tmp_path: Path) -> None:
 def test_runtime_source_never_mentions_docker_sock() -> None:
     text = RUNTIME.read_text(encoding="utf-8")
     assert "docker.sock" not in text
-    assert "flock" not in text
+    # Cleanup alone serializes with deploy; running a service never takes its lock.
+    run_body = text.split("cmd_run()", 1)[1].split("cmd_stop()", 1)[0]
+    assert "flock" not in run_body
     assert "/run/radon-deploy-root.lock" not in text
 
 
@@ -1211,3 +1222,9 @@ def test_api_private_anchor_rejection_cleans_staged_credentials(tmp_path):
     credential_dir = Path(result.proxy_dir) / 'credentials' / 'radon-api.service'
     assert not credential_dir.exists()
     assert not any(line.startswith('run ') for line in result.docker_log.read_text().splitlines())
+
+
+def test_nextjs_runtime_executes_the_baked_key_guard(tmp_path: Path) -> None:
+    result = _run(tmp_path, ["run", "radon-nextjs.service"])
+    assert result.returncode == 0, result.stderr
+    assert _run_line(result).endswith(" /usr/local/bin/next-clerk-guard")

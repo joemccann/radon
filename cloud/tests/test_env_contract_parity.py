@@ -47,6 +47,7 @@ EXEMPT: dict[str, str] = {
     # Optional feature keys: the job degrades in a defined, logged way without
     # them, so requiring them would fail the preflight on a value nothing needs.
     "FRED_API_KEY": "optional; margin-debt normalization views go null and say so",
+    "CEREBRAS_API_KEY": "optional last-rung model ladder key; model_ladder skips the rung when unset (2026-09-18: requiring it blocked every main deploy after the host dropped the failed prepaid key)",
     "FRED_KEY": "legacy alias tried after FRED_API_KEY",
     "ROBINHOOD_MCP_TOKEN": "optional read-only failover; unset (with no refresh) skips Robinhood cleanly to Yahoo",
     "ROBINHOOD_MCP_REFRESH_TOKEN": "bootstrap only; the 0600 token file is the writable refresh store and owns the rotated value",

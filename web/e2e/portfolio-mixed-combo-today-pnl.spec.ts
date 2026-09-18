@@ -152,7 +152,7 @@ async function installMockWebSocket(page: import("@playwright/test").Page) {
 
     const NativeWebSocket = window.WebSocket;
     const RelayAwareWebSocket = function (url: string | URL, protocols?: string | string[]) {
-      return String(url).includes("localhost:8765")
+      return !String(url).includes("/_next/")
         ? (new MockWebSocket(String(url)) as unknown as WebSocket)
         : new NativeWebSocket(url, protocols);
     } as unknown as typeof WebSocket;
@@ -167,6 +167,8 @@ async function installMockWebSocket(page: import("@playwright/test").Page) {
 
 async function setupMocks(page: import("@playwright/test").Page) {
   await page.unrouteAll({ behavior: "ignoreErrors" });
+  await page.route("https://**", (route) => route.abort());
+  await page.route("**/api/**", (route) => route.fulfill({ status: 200, contentType: "application/json", body: "{}" }));
   await freezeToTradingDay(page);
   await installMockWebSocket(page);
 
@@ -219,7 +221,7 @@ async function setupMocks(page: import("@playwright/test").Page) {
 }
 
 test.describe("/portfolio mixed-age combo today pnl", () => {
-  test("does not print the overnight long put's total loss as Today P&L", async ({ page }) => {
+  test("does not print the overnight long put's total loss as Today P&L", async ({ page }, testInfo) => {
     await setupMocks(page);
     await page.goto("/portfolio");
 
@@ -229,10 +231,23 @@ test.describe("/portfolio mixed-age combo today pnl", () => {
     const todayCell = row.getByTestId("position-cell-today-pnl");
     const pnlCell = row.getByTestId("position-cell-pnl");
 
-    // No WS closes: overnight long is unmeasured; session short is MV − EC = −$150.
-    await expect(todayCell).toHaveText("-$150");
+    // No WS closes: an unmeasured overnight leg withholds the position total.
+    await page.screenshot({ path: testInfo.outputPath("mixed-coverage-desktop.png"), fullPage: true });
+    await expect(todayCell).toHaveText("—");
     // Total P&L is still the accumulated long-put loss plus the short's −$150.
     await expect(pnlCell).toHaveText("-$162,085");
     await expect(todayCell).not.toHaveText("-$162,085");
   });
+});
+
+
+test("mobile withholds the mixed-age total with an unmeasured overnight leg", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await setupMocks(page);
+  await page.goto("/portfolio");
+  const card = page.getByTestId("mobile-position-SPY");
+  await expect(card).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("mixed-coverage-mobile.png"), fullPage: true });
+  await expect(card.getByTestId("mobile-position-today")).toContainText("—");
+  await expect(card.getByTestId("mobile-position-today")).not.toContainText("150");
 });

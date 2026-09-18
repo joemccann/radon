@@ -110,4 +110,59 @@ describe("mixed-age combo Today P&L (SPY 740/760)", () => {
     const pos = spyBullPutSpread({ ib_daily_pnl: -275 });
     expect(getTodayPnlDollars(pos, PRICES)).toBe(-275);
   });
+
+  it("withholds the total when the overnight close is unavailable", () => {
+    const prices = { ...PRICES, [LONG_KEY]: { ...PRICES[LONG_KEY], close: null } };
+    expect(getTodayPnlDollars(spyBullPutSpread(), prices)).toBeNull();
+  });
+
+  it.each([0, 1])("withholds the total when leg %i has no usable mark", (index) => {
+    const pos = spyBullPutSpread();
+    pos.legs[index].market_price = null;
+    const prices = { ...PRICES };
+    delete prices[index === 0 ? LONG_KEY : SHORT_KEY];
+    expect(getTodayPnlDollars(pos, prices)).toBeNull();
+  });
+
+  it("withholds the total when the session fill basis is unavailable", () => {
+    const pos = spyBullPutSpread();
+    pos.legs[1].entry_cost = Number.NaN;
+    expect(getTodayPnlDollars(pos, PRICES)).toBeNull();
+  });
+
+  it("withholds the total for a mixed-basis position with no legs", () => {
+    expect(getTodayPnlDollars(spyBullPutSpread({ legs: [] }), PRICES)).toBeNull();
+  });
+
+  it("accepts the IB total even when per-leg baselines are unavailable", () => {
+    expect(getTodayPnlDollars(spyBullPutSpread({ ib_daily_pnl: -275 }), {})).toBe(-275);
+  });
+
+});
+
+// REL-260: a position total requires measurements for every leg.
+describe("mixed-age complete coverage", () => {
+  it("withholds the total when an overnight close is absent", () => {
+    const prices = { ...PRICES, [LONG_KEY]: { ...PRICES[LONG_KEY], close: null } };
+    expect(getTodayPnlDollars(spyBullPutSpread(), prices)).toBeNull();
+  });
+
+  it.each([0, 1])("withholds the total when leg %s has no mark", (index) => {
+    const pos = spyBullPutSpread();
+    pos.legs[index] = { ...pos.legs[index], market_price: null, market_value: null };
+    const prices = { ...PRICES };
+    delete prices[index === 0 ? LONG_KEY : SHORT_KEY];
+    expect(getTodayPnlDollars(pos, prices)).toBeNull();
+  });
+
+  it.each([NaN, Infinity, -Infinity])("withholds nonfinite session basis %s", (basis) => {
+    const pos = spyBullPutSpread();
+    pos.legs[1] = { ...pos.legs[1], entry_cost: basis };
+    expect(getTodayPnlDollars(pos, PRICES)).toBeNull();
+  });
+
+  it.each([NaN, Infinity])("does not treat nonfinite IB aggregate %s as authoritative", (pnl) => {
+    const pos = spyBullPutSpread({ ib_daily_pnl: pnl });
+    expect(getTodayPnlDollars(pos, PRICES)).toBeCloseTo(-550, 6);
+  });
 });

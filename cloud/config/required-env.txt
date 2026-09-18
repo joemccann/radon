@@ -30,7 +30,10 @@ IB_FLEX_NAV_QUERY_ID
 PUSHOVER_USER
 PUSHOVER_TOKEN
 ANTHROPIC_API_KEY
-CEREBRAS_API_KEY
+# CEREBRAS_API_KEY is deliberately NOT required: it is the optional last rung
+# of the model ladder (docs/operations.md), model_ladder skips the rung when
+# it is unset, and the host dropped the key on 2026-09-18 after the prepaid
+# wallet failed billing. Requiring it blocked every main deploy from 283bee39.
 THEMARKETEAR_EMAIL
 THEMARKETEAR_PASSWORD
 RADON_MEDIA_REMOTE
