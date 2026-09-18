@@ -1,12 +1,12 @@
 {
-  "generated_at": "2026-09-18T06:17:07Z",
-  "node_count": 3402,
-  "edge_count": 7090,
+  "generated_at": "2026-09-18T20:26:00Z",
+  "node_count": 3410,
+  "edge_count": 7107,
   "areas": {
-    "web": 2015,
+    "web": 2016,
     "site": 155,
-    "scripts": 1119,
-    "cloud": 66,
+    "scripts": 1124,
+    "cloud": 68,
     "lib": 28,
     "tests": 17,
     "tools": 2
@@ -50,7 +50,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 935
+      "count": 936
     },
     {
       "id": "site/app",
@@ -90,7 +90,7 @@
     {
       "id": "scripts/ai_cycle",
       "area": "scripts",
-      "count": 11
+      "count": 12
     },
     {
       "id": "scripts/alerts",
@@ -195,7 +195,7 @@
     {
       "id": "scripts/tests",
       "area": "scripts",
-      "count": 558
+      "count": 562
     },
     {
       "id": "scripts/trade_blotter",
@@ -220,7 +220,7 @@
     {
       "id": "cloud/tests",
       "area": "cloud",
-      "count": 57
+      "count": 59
     },
     {
       "id": "lib/tools",
@@ -345,7 +345,7 @@
     {
       "id": "web/lib/positionUtils.ts",
       "area": "web",
-      "in": 57,
+      "in": 58,
       "out": 2,
       "test": false
     },
@@ -436,7 +436,7 @@
     {
       "id": "scripts/db/hrana_http.py",
       "area": "scripts",
-      "in": 37,
+      "in": 38,
       "out": 2,
       "test": false
     },
@@ -504,6 +504,13 @@
       "test": false
     },
     {
+      "id": "scripts/perf_twr_builder.py",
+      "area": "scripts",
+      "in": 22,
+      "out": 11,
+      "test": false
+    },
+    {
       "id": "web/components/mobile/MetricCell.tsx",
       "area": "web",
       "in": 32,
@@ -515,13 +522,6 @@
       "area": "site",
       "in": 31,
       "out": 1,
-      "test": false
-    },
-    {
-      "id": "scripts/perf_twr_builder.py",
-      "area": "scripts",
-      "in": 21,
-      "out": 11,
       "test": false
     }
   ],
