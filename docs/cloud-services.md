@@ -557,6 +557,12 @@ Re-check with `turso plan show` after any plan change. Nightly dumps remain mand
 | `radon-db-backup.timer` | **09:00** | Full Turso dump after archive + retention. |
 | `radon-media-backup.timer` | **10:15** | Mirror `media.radon.run` tree (`/home/radon/radon-cloud/media`) → B2 prefix `media/`. Heartbeat: `media-backup`. `TimeoutStartSec=3600`. |
 
+## Subscription tokens (agent CLIs)
+
+`radon-subscription-tokens.timer` fires every 30 minutes (explicit UTC, `Persistent=true`), so a one-hour access token is always refreshed at least once inside its life. The oneshot seals, refreshes and restores the anthropic / codex / grok / gemini credential files through the existing encrypted secret store and heartbeats the `subscription-tokens` row on every run. It pages only when a browser login is the sole remaining move. Runbook and per-provider re-auth commands: [subscription-tokens.md](subscription-tokens.md).
+
+---
+
 ## Disk cleanup (weekly)
 
 2026-08-27: the watchdog `root-disk-usage` check paged P1 at 98% of the 75G

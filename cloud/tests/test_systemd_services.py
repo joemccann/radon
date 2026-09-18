@@ -85,6 +85,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-leap.timer",
     "radon-liquidcompute.service",
     "radon-liquidcompute.timer",
+    "radon-subscription-tokens.service",
+    "radon-subscription-tokens.timer",
     "radon-llm-index.service",
     "radon-llm-index.timer",
     "radon-nextjs-db-watchdog.service",
@@ -249,6 +251,81 @@ class TestAiCycleCredentials:
         assert section["wants"] == "radon-aa-frontier-refresh.service"
         assert "radon-aa-frontier-refresh.service" in section["after"].split()
         assert "requires" not in section
+
+
+class TestSubscriptionTokens:
+    """The agent-CLI subscription token vault (docs/subscription-tokens.md).
+
+    The unit reads and rewrites 0600 OAuth credential files under the radon
+    home and seals them into the encrypted secret store, so its credential
+    plumbing has to match the ai-cycle contract exactly and its UMask has to
+    keep every file it writes private.
+    """
+
+    SERVICE = "radon-subscription-tokens.service"
+    TIMER = "radon-subscription-tokens.timer"
+
+    def test_runs_as_radon_with_private_umask(self, unit):
+        svc = unit(self.SERVICE)["Service"]
+        assert svc["type"] == "oneshot"
+        assert svc["user"] == "radon"
+        assert svc["umask"] == "0077"
+        assert svc["workingdirectory"] == "/home/radon/radon"
+        assert svc["environmentfile"] == ENV_FILE_PATH
+
+    def test_loads_the_encrypted_secret_store(self, unit, services_dir):
+        svc = unit(self.SERVICE)["Service"]
+        assert svc["loadcredentialencrypted"] == (
+            "radon-secret-store-key:"
+            "/etc/credstore.encrypted/radon-secret-store-key"
+        )
+        lines = (services_dir / self.SERVICE).read_text(
+            encoding="utf-8"
+        ).splitlines()
+        assert (
+            "Environment=RADON_SECRET_STORE_PATH="
+            "/home/radon/radon/data/secret_store/secrets.db"
+        ) in lines
+        assert "scripts/secret_store.py" in svc["execstartpre"]
+
+    def test_runs_the_once_mode_within_a_finite_budget(self, unit):
+        svc = unit(self.SERVICE)["Service"]
+        assert svc["execstart"].endswith(
+            "/home/radon/radon/.venv/bin/python -m scripts.subscription_tokens --once"
+        )
+        # A oneshot that outlives its own slot blocks every later refresh.
+        assert int(svc["timeoutstartsec"]) < 1800
+
+    def test_a_needs_reauth_exit_does_not_latch_the_unit_failed(self, unit):
+        # --once exits 1 for the steady state this unit reports (needs_reauth /
+        # error), which the module already pages for at normal priority. Without
+        # SuccessExitStatus the oneshot sits ActiveState=failed, the watchdog's
+        # oneshot exit-code latch never matches because every fire restamps
+        # InactiveEnterTimestamp, and one revoked refresh token becomes an
+        # hour-long P1 siren every day. 78 stays a failure on purpose.
+        svc = unit(self.SERVICE)["Service"]
+        assert svc["successexitstatus"] == "1"
+
+    def test_owns_the_state_directory_its_sidecar_lives_in(self, unit):
+        # The sidecar under /var/lib/radon carries the 12h page cooldowns and
+        # the consecutive-error streak. Without an owned state directory the
+        # write fails and both reset on every run, so a needs_reauth provider
+        # would page every 30 minutes forever.
+        svc = unit(self.SERVICE)["Service"]
+        assert svc["statedirectory"] == "radon"
+        assert svc["statedirectorymode"] == "0750"
+
+    def test_timer_refreshes_twice_an_hour_in_explicit_utc_with_catchup(
+        self, services_dir
+    ):
+        raw = (services_dir / self.TIMER).read_text(encoding="utf-8")
+        calendars = [
+            line for line in raw.splitlines()
+            if line.startswith("OnCalendar=")
+        ]
+        assert calendars == ["OnCalendar=*-*-* *:00,30:00 UTC"]
+        assert all(line.endswith(" UTC") for line in calendars)
+        assert "Persistent=true" in raw
 
 
 class TestAaFrontierRefresh:
