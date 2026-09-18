@@ -111,3 +111,30 @@ describe("mixed-age combo Today P&L (SPY 740/760)", () => {
     expect(getTodayPnlDollars(pos, PRICES)).toBe(-275);
   });
 });
+
+// REL-260: a position total requires measurements for every leg.
+describe("mixed-age complete coverage", () => {
+  it("withholds the total when an overnight close is absent", () => {
+    const prices = { ...PRICES, [LONG_KEY]: { ...PRICES[LONG_KEY], close: null } };
+    expect(getTodayPnlDollars(spyBullPutSpread(), prices)).toBeNull();
+  });
+
+  it.each([0, 1])("withholds the total when leg %s has no mark", (index) => {
+    const pos = spyBullPutSpread();
+    pos.legs[index] = { ...pos.legs[index], market_price: null, market_value: null };
+    const prices = { ...PRICES };
+    delete prices[index === 0 ? LONG_KEY : SHORT_KEY];
+    expect(getTodayPnlDollars(pos, prices)).toBeNull();
+  });
+
+  it.each([NaN, Infinity, -Infinity])("withholds nonfinite session basis %s", (basis) => {
+    const pos = spyBullPutSpread();
+    pos.legs[1] = { ...pos.legs[1], entry_cost: basis };
+    expect(getTodayPnlDollars(pos, PRICES)).toBeNull();
+  });
+
+  it.each([NaN, Infinity])("does not treat nonfinite IB aggregate %s as authoritative", (pnl) => {
+    const pos = spyBullPutSpread({ ib_daily_pnl: pnl });
+    expect(getTodayPnlDollars(pos, PRICES)).toBeCloseTo(-550, 6);
+  });
+});

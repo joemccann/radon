@@ -209,7 +209,7 @@ class TestNodeImage:
         assert "/home/radon/radon/web/.next/cache" in text
         assert "/home/radon/radon/web/public/data" in text
 
-    def test_clerk_public_env_is_required_at_build(self) -> None:
+    def test_clerk_public_env_is_required_at_build(self, tmp_path) -> None:
         text = NODE_DF.read_text(encoding="utf-8")
         assert 'ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=""' not in text
         assert "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY" in text
@@ -217,7 +217,13 @@ class TestNodeImage:
         # Runtime env cannot repair a client bundle baked without the key.
         assert ".next/static" in text
         assert "grep -RF" in text
-        assert "next-clerk-guard" in text
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from test_app_runtime import _run
+        result = _run(tmp_path, ["run", "radon-nextjs.service"])
+        assert result.returncode == 0, result.stderr
+        run_line = next(line for line in result.docker_log.read_text().splitlines() if line.startswith("run "))
+        assert run_line.endswith(" /usr/local/bin/next-clerk-guard")
 
 
 class TestImageSafety:

@@ -1,3 +1,4 @@
+# REVIEWED 2026-09-18 portfolio-mixed-combo-today-pnl.spec.ts - Reviewed mocked desktop/mobile incomplete-coverage cases; 69 related Vitest tests passed. Three installed Chromium launches failed under runner process restrictions; browser and screenshot verification remain BLOCKED, with the exact operator command in RELIABILITY_LOG.md. Held out pending production preflight; no browser pass claimed.
 # Toast error audit 2026-09-17: chat-launcher-focus, flow-analysis-ticker, scanner-ticker-scan and ticker-search-chain now execute in the CI curated suite.
 # REVIEWED 2026-09-17 portfolio-mixed-combo-today-pnl.spec.ts - jsdom PositionTable Today P&L +$1,000 vs P&L +$3,500; Vitest SPY 740/760 screenshot numbers. Browser suite remains held out pending next start preflight.
 # clear-shell.spec.ts is curated in ci.yml for AI Industry desktop/mobile navigation verification.

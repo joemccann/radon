@@ -290,17 +290,19 @@ def _codex_subscription_auth(env: Mapping[str, str]) -> AuthMaterial | None:
     data = _json_load_object(auth_path)
     if not data:
         return None
+    prepaid = _auth_file_api_key(data, env, ("OPENAI_API_KEY",), mechanism="codex_auth.json")
+    if str(data.get("auth_mode", "")).lower() in {"apikey", "api_key"}:
+        return prepaid
     token = _token_from_mapping(
         data,
         ("tokens", "access_token"),
         ("tokens", "accessToken"),
         ("access_token",),
         ("accessToken",),
-        ("OPENAI_API_KEY",),  # some installs mint a subscription-scoped key here
     )
     if token:
         return AuthMaterial(token, "subscription", "codex_auth.json")
-    return None
+    return prepaid
 
 
 def _grok_subscription_auth(env: Mapping[str, str]) -> AuthMaterial | None:
@@ -313,14 +315,24 @@ def _grok_subscription_auth(env: Mapping[str, str]) -> AuthMaterial | None:
         ("access_token",),
         ("accessToken",),
         ("token",),
-        ("api_key",),
-        ("apiKey",),
         ("credentials", "access_token"),
-        ("credentials", "api_key"),
     )
     if token:
         return AuthMaterial(token, "subscription", "grok_auth.json")
-    return None
+    return _auth_file_api_key(
+        data, env, ("api_key",), ("apiKey",), ("credentials", "api_key"),
+        mechanism="grok_auth.json",
+    )
+
+
+def _auth_file_api_key(
+    data: Mapping[str, Any], env: Mapping[str, str], *paths: tuple[str, ...],
+    mechanism: str,
+) -> AuthMaterial | None:
+    if not _allow_prepaid(env):
+        return None
+    token = _token_from_mapping(data, *paths)
+    return AuthMaterial(token, "api_key", mechanism) if token else None
 
 
 def _gemini_subscription_auth(env: Mapping[str, str]) -> AuthMaterial | None:
