@@ -813,6 +813,10 @@ resolve_green_main_sha() {
 
 ground_truth() {
   fetch_origin_with_retry
+  # T-490: a hand-set sparse checkout (`/*` + `!/.codex/`, radon-testing,
+  # 2026-09-08) hid the tracked `.codex/skills/**` render from every audit
+  # while `git status` stayed clean. Ground truth is the WHOLE tree.
+  git sparse-checkout disable 2>/dev/null || true
   git checkout -f --quiet main
   git reset --hard --quiet origin/main
   local green_sha
