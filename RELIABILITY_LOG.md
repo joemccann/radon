@@ -659,3 +659,4 @@ Post-repair focused checks: Python 388 passed; cloud 162 passed, 2 skipped; Vite
 | Task | Status | Commit | Evidence |
 |---|---|---|---|
 | REL-258 / R-679 | SOURCE-DONE; closing gates pending | this commit | RED 4 failed, 46 passed; missing-URL cases RED 3 failed, 11 deselected. GREEN pickup/helper plus existing dedupe group 58 passed. Matching pushed heads retry PR creation, open/terminal PRs are retained, missing URL errors, changed heads and .github paths remain refused. |
+| REL-259 / R-680 | SOURCE-DONE; closing gates pending | this commit | RED 15 failed, 3 passed. GREEN auth-file/model/research/vision group 135 passed; integrated focused Python 388 passed. Auth-file API keys require explicit prepaid opt-in and retain api_key classification; supported OAuth remains subscription. Test auth-file discovery is isolated to explicit temporary fixtures. |

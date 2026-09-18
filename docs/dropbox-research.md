@@ -54,6 +54,13 @@ Knowledge distill (`scripts/knowledge/distill.py` → `complete_text_json`) and 
 
 Hetzner hosts that only mount prepaid Anthropic/XAI/OpenAI keys will skip those rungs and use NVIDIA when keyed — they will not burn prepaid wallets then fall through to Cerebras. Mount subscription tokens for fuller band coverage.
 
+Auth-file API keys obey the same prepaid opt-in as environment keys. Codex
+`OPENAI_API_KEY` and Grok `api_key`, `apiKey`, or `credentials.api_key` are
+classified as `api_key` only with `RADON_LADDER_ALLOW_PREPAID=1`; they do not
+wire a subscription rung by default. Codex `auth_mode=apikey` also prevents
+stale OAuth fields in that file from being selected. Supported OAuth access
+token fields remain subscription credentials.
+
 ### Verified host placement
 
 As of 2026-09-08 the worker runs as `radon-research.service` in the Python app container on 5.78.148.38. That host has `RADON_HOST_ROLE=app` and routes broker access to 10.0.0.4; its legacy Linux and Hetzner hostname remains `ib-gateway`. The service does not run in the broker Gateway container.
