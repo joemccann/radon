@@ -12815,18 +12815,20 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
 
 .chain-anchor-panes .chain-grid {
   table-layout: fixed;
-  min-width: 1120px;
+  min-width: 1156px;
   font-family: var(--font-sans);
   font-variant-numeric: tabular-nums;
 }
 
 .chain-anchor-panes[data-side="calls"] .chain-grid,
 .chain-anchor-panes[data-side="puts"] .chain-grid {
-  min-width: 640px;
+  min-width: 680px;
 }
 
 .chain-anchor-strike-col {
-  width: 84px;
+  /* $12,345.00 at 13px tabular with inline padding; never ellipsis. */
+  width: 7.5rem;
+  min-width: 7.5rem;
 }
 
 .chain-anchor-panes .chain-strike,
@@ -12849,6 +12851,12 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
   text-overflow: ellipsis;
   font-size: var(--text-meta);
   border-bottom: 1px solid var(--line-grid);
+}
+
+.chain-anchor-panes td.chain-strike,
+.chain-anchor-panes th.chain-header-strike {
+  overflow: hidden;
+  text-overflow: clip;
 }
 
 .chain-anchor-panes .chain-header,

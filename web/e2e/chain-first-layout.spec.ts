@@ -1,14 +1,34 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
+
+const WEB_ROOT = fileURLToPath(new URL("..", import.meta.url));
 
 const TICKER = "NVDA";
 const NOW = "2026-09-16T17:00:00.000Z";
 const EXPIRIES = ["20261218", "20270115"];
 const STRIKES = Array.from({ length: 61 }, (_, index) => 70 + index);
+const HIGH_TICKER = "SNDK";
+const HIGH_SPOT = 1737.28;
+const HIGH_STRIKES = Array.from({ length: 29 }, (_, index) => 1670 + index * 5);
 
 test.describe.configure({ timeout: 60_000 });
 
+type ChainFixture = {
+  ticker?: string;
+  name?: string;
+  spot?: number;
+  close?: number;
+  strikes?: number[];
+};
+
 /** Every API and market socket is browser-local; no order can reach a broker. */
-async function installFixtures(page: Page, theme: "light" | "dark") {
+async function installFixtures(page: Page, theme: "light" | "dark", fixture: ChainFixture = {}) {
+  const ticker = fixture.ticker ?? TICKER;
+  const spot = fixture.spot ?? 100;
+  const close = fixture.close ?? (ticker === TICKER ? 99 : spot);
+  const strikes = fixture.strikes ?? STRIKES;
   const placements: string[] = [];
   await page.clock.setFixedTime(new Date(NOW));
   await page.addInitScript((value) => localStorage.setItem("theme", value), theme);
@@ -28,9 +48,9 @@ async function installFixtures(page: Page, theme: "light" | "dark") {
       "/api/ib-status": { connected: true },
       "/api/regime": { score: 15, cri: { score: 15 } },
       "/api/blotter": { closed_trades: [], open_trades: [], summary: { realized_pnl: 0 } },
-      "/api/ticker/info": { uw_info: { name: "NVIDIA" }, stock_state: {}, profile: {}, stats: {} },
-      "/api/options/expirations": { symbol: TICKER, expirations: EXPIRIES },
-      "/api/options/chain": { symbol: TICKER, expiry: url.searchParams.get("expiry"), strikes: STRIKES, exchange: "SMART", multiplier: "100" },
+      "/api/ticker/info": { uw_info: { name: fixture.name ?? "NVIDIA" }, stock_state: {}, profile: {}, stats: {} },
+      "/api/options/expirations": { symbol: ticker, expirations: EXPIRIES },
+      "/api/options/chain": { symbol: ticker, expiry: url.searchParams.get("expiry"), strikes, exchange: "SMART", multiplier: "100" },
       "/api/risk-free-rate": { rate: 0.04 },
       "/api/watchlist": { watchlist: [] },
       "/api/service-health": { services: [] },
@@ -40,19 +60,19 @@ async function installFixtures(page: Page, theme: "light" | "dark") {
   });
   const quote = (symbol: string, price: number) => ({
     symbol, last: price, bid: price - 0.05, ask: price + 0.05,
-    close: symbol === TICKER ? 99 : price, timestamp: NOW, lastIsCalculated: false,
-    volume: 1200, delta: 0.4, impliedVol: 0.45, undPrice: 100,
+    close: symbol === ticker ? close : price, timestamp: NOW, lastIsCalculated: false,
+    volume: 1200, delta: 0.4, impliedVol: 0.45, undPrice: spot,
   });
   await page.routeWebSocket(/(?:localhost|127\.0\.0\.1):(?:18765|8765)|\/ws(?:\?|$)/, (socket) => {
     socket.onMessage((raw) => {
       const message = JSON.parse(raw.toString());
       if (message.action !== "subscribe") return;
-      const updates: Record<string, unknown> = { [TICKER]: quote(TICKER, 100) };
+      const updates: Record<string, unknown> = { [ticker]: quote(ticker, spot) };
       for (const contract of message.contracts ?? []) {
         const key = `${contract.symbol}_${String(contract.expiry).replaceAll("-", "")}_${contract.strike}_${contract.right}`;
         updates[key] = quote(key, 3.5);
       }
-      socket.send(JSON.stringify({ type: "status", ib_connected: true, subscriptions: [TICKER] }));
+      socket.send(JSON.stringify({ type: "status", ib_connected: true, subscriptions: [ticker] }));
       socket.send(JSON.stringify({ type: "batch", updates }));
     });
   });
@@ -94,6 +114,42 @@ async function screenshot(page: Page, testInfo: TestInfo, name: string) {
 async function scrollToBottom(region: Locator) {
   await region.evaluate((element) => { element.scrollTop = element.scrollHeight; });
 }
+
+test("chain-first strike column CSS fits four- and five-digit grouped labels", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 800 });
+  const globals = readFileSync(join(WEB_ROOT, "app/globals.css"), "utf8");
+  const chainFirst = readFileSync(
+    join(WEB_ROOT, "components/ticker-detail/ChainFirst.module.css"),
+    "utf8",
+  ).replace(/:global\(([^)]+)\)/g, "$1");
+  await page.setContent(`<!doctype html><html><head><style>
+html { font-size: 16px; --font-sans: system-ui, sans-serif; --text-meta: 12px; --space-2: 8px; --bg-panel-raised: #111; --line-grid: #222; --radius-lg: 6px; }
+${globals}
+${chainFirst}
+</style></head><body>
+  <div class="chain-first-cockpit">
+    <div class="chainFirst">
+      <div class="chain-grid-wrapper chain-anchor-panes" data-side="calls">
+        <table class="chain-grid">
+          <colgroup><col class="chain-anchor-strike-col" /></colgroup>
+          <tbody>
+            <tr class="chain-row"><td class="chain-cell chain-strike">$1,737.00</td></tr>
+            <tr class="chain-row"><td class="chain-cell chain-strike">$12,345.00</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</body></html>`);
+  const clipped = await page.locator("td.chain-strike").evaluateAll((cells) =>
+    cells.map((cell) => ({
+      text: cell.textContent?.trim() ?? "",
+      clientWidth: Math.round(cell.clientWidth),
+      scrollWidth: Math.round(cell.scrollWidth),
+    })).filter((cell) => cell.scrollWidth > cell.clientWidth + 1),
+  );
+  expect(clipped, `ellipsis on ${JSON.stringify(clipped)}`).toEqual([]);
+});
 
 for (const theme of ["light", "dark"] as const) {
   for (const viewport of [
@@ -198,6 +254,39 @@ for (const theme of ["light", "dark"] as const) {
     await expect(sidebar.getByRole("button", { name: /^Position\b/ })).toHaveAttribute("aria-current", "page");
     await expect(page.locator(".asset-deck.open .asset-deck-hd")).toBeVisible();
     await expect(page.getByTestId("chain-feed-trigger")).toBeVisible();
+  });
+
+  test(`chain-first ${theme}: four-digit strike labels stay fully visible on the calls ladder`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 1440, height: 800 });
+    await installFixtures(page, theme, {
+      ticker: HIGH_TICKER,
+      name: "Sandisk",
+      spot: HIGH_SPOT,
+      close: 1614.5,
+      strikes: HIGH_STRIKES,
+    });
+    await page.goto(`/${HIGH_TICKER}?deck=c&side=calls`);
+    await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+    await expect(page.getByTestId("chain-instrument-sidebar")).toBeVisible();
+    await expect(page.getByTestId("chain-underlying-quote")).toContainText("1,737.28");
+    await expect(page.locator(".chain-first-cockpit")).toBeVisible();
+    const atm = page.locator('.chain-row[data-strike="1735"] .chain-strike');
+    await expect(atm).toHaveText("$1,735.00");
+    const clipped = await page.locator("td.chain-strike").evaluateAll((cells) =>
+      cells
+        .filter((cell) => {
+          const rect = cell.getBoundingClientRect();
+          return rect.height > 0 && rect.width > 0;
+        })
+        .map((cell) => ({
+          text: cell.textContent?.trim() ?? "",
+          clientWidth: Math.round(cell.clientWidth),
+          scrollWidth: Math.round(cell.scrollWidth),
+        }))
+        .filter((cell) => cell.scrollWidth > cell.clientWidth + 1),
+    );
+    expect(clipped, `ellipsis on ${JSON.stringify(clipped)}`).toEqual([]);
+    await screenshot(page, testInfo, `${theme}-four-digit-strikes`);
   });
 
   test(`chain-first ${theme}: mobile retains its ladder, expiry and pending-order controls`, async ({ page }, testInfo) => {
