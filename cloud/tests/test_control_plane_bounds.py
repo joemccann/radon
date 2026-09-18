@@ -255,6 +255,10 @@ EXPECTED_AUTO_SYNC_UNITS = (
     "radon-skew2d.timer",
     "radon-straddle.service",
     "radon-straddle.timer",
+    # 2026-09-18: the Antigravity swap added a PATH line; without CI publish
+    # the unit would drift on every deploy (test_unit_install_acknowledgment).
+    "radon-subscription-tokens.service",
+    "radon-subscription-tokens.timer",
     "radon-trin.service",
     "radon-trin.timer",
     "radon-vcg-refresh.service",

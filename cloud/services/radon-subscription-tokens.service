@@ -12,6 +12,9 @@ WorkingDirectory=/home/radon/radon
 EnvironmentFile=/etc/radon/env
 Environment=RADON_DB_NO_REPLICA=1
 Environment=RADON_SECRET_STORE_PATH=/home/radon/radon/data/secret_store/secrets.db
+# The Antigravity CLI installer places `agy` in ~/.local/bin; the daemon
+# prefers that CLI-native refresh for the gemini provider.
+Environment=PATH=/home/radon/.local/bin:/usr/local/bin:/usr/bin:/bin
 LoadCredentialEncrypted=radon-secret-store-key:/etc/credstore.encrypted/radon-secret-store-key
 # The sidecar /var/lib/radon/subscription-tokens/state.json carries the page
 # cooldowns and the consecutive-error streak. Without this the directory is not
@@ -31,7 +34,7 @@ StandardError=journal
 SuccessExitStatus=1
 # Per provider the ceiling is a 60s CLI probe + 20s OIDC discovery + two 63s
 # POST envelopes (form, then the JSON retry): ~206s. Four providers plus paging
-# needs more than 600s once the codex/grok/gemini CLIs are installed.
+# needs more than 600s once the codex/grok/agy CLIs are installed.
 TimeoutStartSec=1200
 
 [Install]

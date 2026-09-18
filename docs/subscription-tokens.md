@@ -82,25 +82,54 @@ operator's behalf, and Radon stores no account passwords.
 ### anthropic (Claude Code)
 
 ```bash
-ssh radon@ib-gateway 'claude setup-token'
+ssh -t radon@ib-gateway 'claude auth login --claudeai'
 ```
 
 Follow the printed URL in a browser, approve, and paste the code back. This
-writes `~/.claude/.credentials.json`. Seal it afterwards (below).
+writes `~/.claude/.credentials.json` (verified 2026-09-18 on claude 2.1.140;
+`claude setup-token` prints a token and does NOT write the file). Seal it
+afterwards (below).
 
-### codex, grok, gemini
+### codex
 
-The `codex`, `grok` and `gemini` binaries are not installed on the app VPS, and
-installing them is out of scope for this daemon. Log in on a machine where the
-CLI is installed, using that CLI's own interactive login, then copy the
-resulting credential file to the VPS at the path the daemon reads and seal it:
+`codex` is installed on the VPS (2026-09-18, `npm i -g @openai/codex`). Device
+code authorization must be enabled in ChatGPT Security Settings first:
+
+```bash
+ssh -t radon@ib-gateway 'codex login --device-auth'
+```
+
+Open the printed URL, enter the one-time code, wait for `Successfully logged
+in`. This writes `~/.codex/auth.json`.
+
+### gemini (Antigravity CLI)
+
+Google retired the Gemini CLI OAuth client for individuals on 2026-09-18; the
+provider now reads the Antigravity CLI (`agy`) token. `agy` is installed on the
+VPS at `~/.local/bin/agy` via `curl -fsSL https://antigravity.google/cli/install.sh | bash`.
+It has no login subcommand: any first run prints a Google OAuth URL and waits
+60 seconds for the pasted code, so open the URL before running it.
+
+```bash
+ssh -t radon@ib-gateway '~/.local/bin/agy -p ok'
+```
+
+The daemon refreshes through `agy models` when the binary is on PATH (the unit
+sets `PATH=/home/radon/.local/bin:...`), and through Google's token endpoint
+with the CLI's public client id otherwise.
+
+### grok
+
+The `grok` binary is not installed on the app VPS. Log in on a machine where
+it is installed, then copy the credential file to the VPS at the path the
+daemon reads and seal it.
 
 | Provider | Credential file on the VPS | Env override |
 |---|---|---|
 | anthropic | `~/.claude/.credentials.json` | `CLAUDE_CONFIG_DIR` |
 | codex | `~/.codex/auth.json` | `CODEX_HOME` |
 | grok | `~/.grok/auth.json` | none |
-| gemini | `~/.gemini/oauth_creds.json` | none |
+| gemini | `~/.gemini/antigravity-cli/antigravity-oauth-token` | none |
 
 Copy the file with mode 0600 and owner `radon`, then seal. Until a provider has
 ever been logged in on this host it reports `unbootstrapped`, which is the
