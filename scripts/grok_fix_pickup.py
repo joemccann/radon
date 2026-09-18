@@ -100,15 +100,23 @@ class PickupError(RuntimeError):
     """Pickup cannot run at all (bad source, git failure)."""
 
 
-def _already_on_origin(
+def _origin_head(
     repo: Path, name: str, *, origin: str, runner: Runner
-) -> bool:
+) -> str | None:
     proc = _git(
         repo,
         ["ls-remote", "--heads", origin, f"refs/heads/{name}"],
         runner=runner,
     )
-    return getattr(proc, "returncode", 1) == 0 and bool(_stdout(proc))
+    if getattr(proc, "returncode", 1) != 0:
+        raise PickupError(f"cannot inspect origin head for {name}")
+    raw = _stdout(proc)
+    if not raw:
+        return None
+    parts = raw.split()
+    if len(parts) != 2 or parts[1] != f"refs/heads/{name}" or not re.fullmatch(r"[0-9a-f]{40,64}", parts[0]):
+        raise PickupError(f"invalid origin head response for {name}")
+    return parts[0]
 
 
 def refusal_reason(
@@ -149,7 +157,7 @@ def refusal_reason(
 
 
 def _ensure_pr_default(**kwargs) -> dict:
-    return ir_ensure_pr.ensure_pr(**kwargs)
+    return ir_ensure_pr.ensure_pr(include_terminal=True, **kwargs)
 
 
 def pickup_once(
@@ -171,9 +179,7 @@ def pickup_once(
 
     results: list[dict] = []
     for name in list_source_branches(repo_root, source, runner=run):
-        if _already_on_origin(repo_root, name, origin=origin, runner=run):
-            results.append({"branch": name, "action": "already_pushed"})
-            continue
+        origin_head = _origin_head(repo_root, name, origin=origin, runner=run)
 
         local_ref = f"{PICKUP_NAMESPACE}{name}"
         fetched = _git(
@@ -190,31 +196,42 @@ def pickup_once(
             })
             continue
 
+        if origin_head:
+            fetched_head = _git(repo_root, ["rev-parse", local_ref], runner=run)
+            if getattr(fetched_head, "returncode", 1) != 0 or _stdout(fetched_head) != origin_head:
+                results.append({"branch": name, "action": "refused", "reason": "origin head differs from the source head"})
+                continue
+
         reason = refusal_reason(
             repo_root, local_ref, base=base, max_commits=max_commits, runner=run
         )
-        if reason:
+        # A previously pushed branch may now be merged. Preserve its PR's
+        # terminal disposition instead of creating another review request.
+        if reason and not (origin_head and reason == "no commits ahead of the base"):
             results.append({"branch": name, "action": "refused", "reason": reason})
             continue
 
-        pushed = _git(
-            repo_root,
-            ["push", "--quiet", origin, f"{local_ref}:refs/heads/{name}"],
-            runner=run,
-        )
-        if getattr(pushed, "returncode", 1) != 0:
-            results.append({
-                "branch": name,
-                "action": "refused",
-                "reason": f"push failed: {_stdout(pushed)}",
-            })
-            continue
+        if not origin_head:
+            pushed = _git(
+                repo_root,
+                ["push", "--quiet", origin, f"{local_ref}:refs/heads/{name}"],
+                runner=run,
+            )
+            if getattr(pushed, "returncode", 1) != 0:
+                results.append({
+                    "branch": name,
+                    "action": "refused",
+                    "reason": f"push failed: {_stdout(pushed)}",
+                })
+                continue
 
         summary = f"grok incident fix on {name}"
         pr = open_pr(head=name, issue=summary, fix=summary)
+        if not isinstance(pr, dict) or not pr.get("url"):
+            raise PickupError(f"no confirmed PR URL for {name}")
         results.append({
             "branch": name,
-            "action": "picked_up",
+            "action": pr["action"] if pr.get("action") in {"closed", "merged"} else "picked_up",
             "url": (pr or {}).get("url"),
         })
     return results

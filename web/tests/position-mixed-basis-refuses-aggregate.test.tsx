@@ -260,7 +260,7 @@ describe("mixed basis separates capital from measurable leg P&L", () => {
   it("Today P&L for a same-day `mixed` position does not dump overnight P&L into today", () => {
     const sameDay = partiallyRolledVertical("mixed", { entry_date: todayET() });
     // No closes: overnight long is unmeasured; session short is MV − EC = +$1,000.
-    // The session leg alone is not the position total. Lifetime P&L remains +$3,500.
+    // The session leg alone is not the position total.
     expect(getTodayPnlDollars(sameDay, {})).toBeNull();
     const sameDayClean = partiallyRolledVertical("session_fills", { entry_date: todayET() });
     expect(getTodayPnlDollars(sameDayClean, {})).toBe(3500);

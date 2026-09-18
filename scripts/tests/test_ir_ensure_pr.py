@@ -560,3 +560,20 @@ class TestCliAndWrapper:
         assert subprocess.run(
             ["bash", "-n", str(WRAPPER)], check=False
         ).returncode == 0
+
+
+@pytest.mark.parametrize("state", ["CLOSED", "MERGED"])
+def test_pickup_preserves_terminal_pr_disposition(state):
+    run = FakeRunner({
+        ("gh", "auth", "status"): FakeProc(),
+        ("gh", "pr", "list"): FakeProc(stdout=json.dumps([{
+            "number": 12, "url": "https://github.com/x/y/pull/12", "state": state,
+        }])),
+    })
+    result = ir.ensure_pr(head="fix/example", issue="example", fix="example",
+                          runner=run, gh_bin="gh", include_terminal=True)
+    assert result["action"] == state.lower()
+    assert result["url"] == "https://github.com/x/y/pull/12"
+    assert not any(call[:3] == ["gh", "pr", "create"] for call in run.calls)
+    listing = next(call for call in run.calls if call[:3] == ["gh", "pr", "list"])
+    assert listing[listing.index("--state") + 1] == "all"

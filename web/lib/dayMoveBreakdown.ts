@@ -115,7 +115,7 @@ export function computeDayMoveBreakdown(
     // 1. IB per-position daily is authoritative — never gate on live quotes.
     //    Missing bid/ask/last used to drop the row or fall through to prior-
     //    close math and blow up ESTIMATED (LIVE) Day P&L during RTH.
-    if (pos.ib_daily_pnl != null) {
+    if (pos.ib_daily_pnl != null && Number.isFinite(pos.ib_daily_pnl)) {
       total += pos.ib_daily_pnl;
       const labels = quoteLabelsForPosition(pos, prices);
       rows.push({

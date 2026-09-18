@@ -149,7 +149,7 @@ function AccountRow({
    *  Today's P&L breakout further down the page already uses this. */
   /** IB streamed dailyPnL, already gated on a trading day (null otherwise). */
   ibDailyPnl: number | null;
-  todayUnrealized: { pnl: number; positionsWithData: number } | null;
+  todayUnrealized: { pnl: number; positionsWithData: number; totalPositions: number } | null;
   effectiveDayPnl: number | null;
   /** True when the portfolio has at least one open position. */
   hasPositions: boolean;
@@ -167,6 +167,7 @@ function AccountRow({
   const ibDaily = ibDailyPnl;
   const fallback =
     ibDaily == null && todayUnrealized != null && todayUnrealized.positionsWithData > 0
+      && todayUnrealized.positionsWithData === todayUnrealized.totalPositions
       ? todayUnrealized.pnl
       : null;
   const displayValue = effectiveDayPnl;
@@ -195,6 +196,7 @@ function AccountRow({
             : "ESTIMATED";
   }
   else if (hasPositions && !hasPrices) displayLabel = "WAITING FOR IB";
+  else if (hasPositions && hasPrices && getMarketPhaseFromDate() !== "closed") displayLabel = "INCOMPLETE QUOTES";
   else displayLabel = "MARKET CLOSED";
 
   // Day P&L %, shown alongside the notional. Denominator is the prior session's
@@ -693,7 +695,9 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
   // session-filtered client-side day move (spot crypto) may stand in.
   const ibDailyPnl = sessionToday ? acct?.daily_pnl ?? null : null;
   const effectiveDayPnl = ibDailyPnl
-    ?? (hasDaily && todayUnrealized ? todayUnrealized.pnl : null);
+    ?? (hasDaily && todayUnrealized
+      && todayUnrealized.positionsWithData === todayUnrealized.totalPositions
+      ? todayUnrealized.pnl : null);
 
   // Breakdown rows (computed lazily — only used when modals open)
   const unrealizedBreakdownRows = unrealizedModalOpen

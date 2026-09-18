@@ -142,6 +142,11 @@ is dropped by systemd regardless of `NotifyAccess=`, so `Type=notify` +
 
 ## Canonical Host Paths
 
+`radon-nextjs.service` starts `/usr/local/bin/next-clerk-guard` inside its
+container. The guard requires an exact publishable-key token in the baked
+client assets before executing `bun run start`; an environment key that is
+only a prefix of a baked key is rejected.
+
 - Monorepo checkout: `/home/radon/radon`
 - Cloud source: `/home/radon/radon/cloud`
 - Immutable deploy support: `/home/radon/.radon-deploy-runners/<sha>.<run>/cloud`
@@ -358,8 +363,8 @@ Immutable runners under `~/.radon-deploy-runners/` are extracted `a-w`.
 ## Systemd And Drift
 
 `setup-vps.sh` includes the `radon-aa-frontier-refresh`, `radon-ai-cycle-backfill`,
-`radon-ai-cycle` and `radon-liquidcompute` service/timer pairs in the full-host
-installation inventory.
+`radon-ai-cycle`, `radon-liquidcompute` and `radon-subscription-tokens`
+service/timer pairs in the full-host installation inventory.
 Setup installs those pairs and enables only their timers; existing hosts receive
 them through the hash-pinned `install-units` path. Historical collection resumes
 at 05:30 UTC, the frontier timer updates the fixed Artificial Analysis cohort at
@@ -368,6 +373,10 @@ GPU index ticker runs at 07:30 UTC, each with up to five minutes of jitter. Prov
 entitlements; missing keys leave those measurements unavailable. Collection,
 reviewed disclosures and source limits are documented in
 [`docs/ai-infrastructure-operations.md`](../docs/ai-infrastructure-operations.md).
+`radon-subscription-tokens.timer` runs every 30 minutes UTC (`Persistent=true`)
+and heals the agent-CLI subscription credentials from the encrypted secret
+store; only a revoked refresh token pages an operator. Runbook:
+[`docs/subscription-tokens.md`](../docs/subscription-tokens.md).
 
 
 Canonical unit files are copied root-owned to `/etc/systemd/system`; they are
@@ -434,3 +443,5 @@ git diff --check
 Deployment, rollback, locking, bootstrap, and unit-path changes require
 adversarial regression coverage. Tests must use isolated roots and must never
 write host `/etc`, `/usr/local`, `/var/lib`, production data, or real secrets.
+
+Image pre-pull compares each cached release tag with its registry manifest digest before skipping layer downloads. App-image pruning takes the existing deploy lock nonblockingly, preserves the target and durable transition/last-green rollback SHAs plus running images, and skips cleanup when rollback evidence or the running app population is unavailable. Runtime starts still allow the exact local image during registry outages.

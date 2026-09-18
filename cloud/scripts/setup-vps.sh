@@ -57,6 +57,8 @@ readonly SERVICE_FILES=(
   radon-ai-cycle.timer
   radon-liquidcompute.service
   radon-liquidcompute.timer
+  radon-subscription-tokens.service
+  radon-subscription-tokens.timer
   radon-ib-gateway.service
   radon-ib-gateway-preheld-restart.service
   radon-ib-gateway-remote.service

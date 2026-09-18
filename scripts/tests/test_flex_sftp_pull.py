@@ -449,6 +449,7 @@ def test_run_without_ingest_drives_default_ingest(tmp_path, monkeypatch):
     monkeypatch.setattr(flex_delivery_ingest, "claim_flex_delivery", fake_claim)
     # R-436: the applied mark after the writers and the status lookup behind a
     # lost claim are the same seam; the fake above only ever holds applied rows.
+    monkeypatch.setattr(flex_delivery_ingest, "delivery_rows_present", lambda *a: True)
     monkeypatch.setattr(flex_delivery_ingest, "mark_flex_delivery_applied", lambda _d: True)
     monkeypatch.setattr(flex_delivery_ingest, "flex_delivery_status", lambda _d: "applied")
     rehydrated = []
@@ -607,7 +608,7 @@ def _duplicating_ingest():
     def ingest(xml_text, source_path=None, **kwargs):
         outcome = "duplicate" if xml_text in seen else "applied"
         seen.add(xml_text)
-        return {"ok": True, "outcome": outcome}
+        return {"ok": True, "outcome": outcome, "persistence_confirmed": True}
 
     return ingest
 
@@ -687,7 +688,7 @@ def _run_two_statements(tmp_path, monkeypatch, *, get_fail, newest_outcome):
     def ingest(xml_text, source_path="", **k):
         seen.append(Path(source_path).name if source_path else "")
         outcome = newest_outcome if "20260915" in (source_path or "") else "duplicate"
-        return {"ok": True, "outcome": outcome}
+        return {"ok": True, "outcome": outcome, "persistence_confirmed": True}
 
     code = pull.run(
         config=_ssh_config(tmp_path / "ssh_config"),
@@ -738,3 +739,30 @@ def test_sftp_rst_on_the_newest_statement_still_fails_the_oneshot(tmp_path, monk
     assert newest.replace(".pgp", "") not in seen
     assert code == 1, heartbeats
     assert heartbeats[-1][0] == "error"
+
+
+@pytest.mark.parametrize("outcome", ["applied", "duplicate"])
+@pytest.mark.parametrize("missing", [
+    "U4698258.Equity_Summary_in_Base.20260915.20260915.xml.pgp",
+    "U0000001.Trades.20260915.20260915.xml.pgp",
+])
+def test_current_query_cannot_hide_another_query_reset(tmp_path, monkeypatch, outcome, missing):
+    """REL-262: every query/account needs its own successful delivery."""
+    import flex_sftp_pull as pull
+
+    current = "U4698258.Trades.20260915.20260915.xml.pgp"
+    files = {current: _statement_xml(date(2026, 9, 15)), missing: "unavailable"}
+    heartbeats = []
+    monkeypatch.setattr(pull, "_heartbeat", lambda state, error=None: heartbeats.append((state, error)))
+    config = _ssh_config(tmp_path / "ssh_config")
+    for _ in range(2):
+        code = pull.run(
+            config=config, inbox=tmp_path / "inbox",
+            runner=FakeSftp(files, get_fail={missing: _RST_STDERR}),
+            decrypt=lambda data, **k: data.decode(),
+            ingest=lambda *a, **k: {"ok": True, "outcome": outcome, "persistence_confirmed": True},
+            now=_PAGE_NOW,
+        )
+        assert code == 1
+        assert heartbeats[-1][0] == "error"
+        assert pull._delivery_key(missing) in str(heartbeats[-1][1])

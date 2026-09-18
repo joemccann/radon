@@ -35,6 +35,16 @@ from clients.vision_cascade import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _hermetic_auth_home(monkeypatch, tmp_path):
+    # Ladder auth discovery falls back to Path.home(); keep host auth files
+    # (~/.claude, ~/.codex, ~/.grok) out of these hermetic-env tests.
+    monkeypatch.setenv("HOME", str(tmp_path / "hermetic-home"))
+    monkeypatch.setattr(
+        Path, "home", classmethod(lambda cls: tmp_path / "hermetic-home")
+    )
+
+
 ROWS = [{"underlying": "E-Mini S&P 500 Index", "position_today": 0.45}]
 PROMPT = "extract"
 PNG = b"\x89PNG-fake"
