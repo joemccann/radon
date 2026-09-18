@@ -838,7 +838,7 @@ function overnightLegTodayPnl(
   const key = legPriceKey(pos.ticker, pos.expiry, leg);
   const lp = key && prices ? prices[key] : null;
   const close = lp?.close;
-  if (close == null || close <= 0) return null;
+  if (close == null || !Number.isFinite(close) || close <= 0) return null;
   return legDirectionSign(leg) * (current - close) * leg.contracts * getLegMultiplier(leg);
 }
 
@@ -847,14 +847,14 @@ function mixedAgeTodayPnl(
   prices?: Record<string, PriceData>,
 ): number | null {
   // IB reqPnLSingle is per-conId: overnight legs vs close, same-day vs fill.
-  if (pos.ib_daily_pnl != null) return pos.ib_daily_pnl;
+  if (pos.ib_daily_pnl != null && Number.isFinite(pos.ib_daily_pnl)) return pos.ib_daily_pnl;
   let pnl = 0;
   let any = false;
   for (const leg of pos.legs) {
     const part = leg.basis_source === "session_fills"
       ? sessionFillLegTodayPnl(pos, leg, prices)
       : overnightLegTodayPnl(pos, leg, prices);
-    if (part == null) continue;
+    if (part == null || !Number.isFinite(part)) return null;
     pnl += part;
     any = true;
   }

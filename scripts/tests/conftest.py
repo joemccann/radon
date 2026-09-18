@@ -5,6 +5,23 @@ from pathlib import Path
 
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def _isolate_model_ladder_auth_files(tmp_path, monkeypatch):
+    """Credential discovery may read only this test's explicit auth fixtures."""
+    from clients import model_ladder
+
+    for name in ("_json_load_object", "_read_secret_file"):
+        original = getattr(model_ladder, name)
+        empty = None if name == "_json_load_object" else ""
+
+        def isolated(path, _read=original, _empty=empty):
+            if not Path(path).resolve().is_relative_to(tmp_path.resolve()):
+                return _empty
+            return _read(path)
+
+        monkeypatch.setattr(model_ladder, name, isolated)
+
 # Add scripts/ and scripts/trade_blotter/ to sys.path so tests can import modules
 SCRIPTS_DIR = Path(__file__).parent.parent
 sys.path.insert(0, str(SCRIPTS_DIR))

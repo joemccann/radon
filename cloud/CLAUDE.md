@@ -142,6 +142,11 @@ is dropped by systemd regardless of `NotifyAccess=`, so `Type=notify` +
 
 ## Canonical Host Paths
 
+`radon-nextjs.service` starts `/usr/local/bin/next-clerk-guard` inside its
+container. The guard requires an exact publishable-key token in the baked
+client assets before executing `bun run start`; an environment key that is
+only a prefix of a baked key is rejected.
+
 - Monorepo checkout: `/home/radon/radon`
 - Cloud source: `/home/radon/radon/cloud`
 - Immutable deploy support: `/home/radon/.radon-deploy-runners/<sha>.<run>/cloud`
@@ -434,3 +439,5 @@ git diff --check
 Deployment, rollback, locking, bootstrap, and unit-path changes require
 adversarial regression coverage. Tests must use isolated roots and must never
 write host `/etc`, `/usr/local`, `/var/lib`, production data, or real secrets.
+
+Image pre-pull compares each cached release tag with its registry manifest digest before skipping layer downloads. App-image pruning takes the existing deploy lock nonblockingly, preserves the target and durable transition/last-green rollback SHAs plus running images, and skips cleanup when rollback evidence or the running app population is unavailable. Runtime starts still allow the exact local image during registry outages.

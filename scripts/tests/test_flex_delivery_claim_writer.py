@@ -189,6 +189,8 @@ class TestIngestOverTheRealClaim:
         import cash_flow_sync
         import perf_twr_builder
 
+        import flex_delivery_ingest as ingest
+        monkeypatch.setattr(ingest, "delivery_rows_present", lambda *a: True)
         calls: list[str] = []
         monkeypatch.setattr(cash_flow_sync, "main", lambda _a: calls.append("cash") or 0)
         monkeypatch.setattr(
