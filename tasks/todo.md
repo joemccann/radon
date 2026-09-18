@@ -7620,12 +7620,14 @@ Dependency graph: T1 -> T2 -> T3 -> T4 -> T5.
 - [x] T2 depends_on: [T1] Verify primary sources and research longer historical archives; document source-by-source findings.
 - [x] T3 depends_on: [T2] Add failing regressions, correct ingestion/presentation, backfill verified history and resolve empty market context.
 - [x] T4 depends_on: [T3] Run focused/full verification and inspect desktop/mobile screenshots.
-- [ ] T5 depends_on: [T4] Publish PR and verify all applicable checks on its exact head are green.
+- [x] T5 depends_on: [T4] Publish PR #512; registered expected GitHub checks.
+- [ ] T6 depends_on: [T5] Verify all applicable exact-head checks are green; final evidence recorded on PR #512.
 
 Review: audited 16 registered sources, 18 indicators and empty legacy index;
 356,644 baseline vintages / 3,342 comparable series. Production append-only
 backfill: 301 vintages; initial 679,532-byte snapshot at 2026-09-18T05:21:05Z,
 followed by four additional reviewed NVIDIA quarters back to January 2024.
+Final production snapshot: 680,537 bytes at 2026-09-18T05:33:19Z.
 134 focused Python tests including 12 final audit regressions, 515 systemd tests,
 12 Playwright tests, TypeScript and scoped ESLint passed; desktop/mobile visuals
 inspected. Full cloud suite interrupted after 177 passed / 22 skipped; full

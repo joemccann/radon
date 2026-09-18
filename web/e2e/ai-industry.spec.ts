@@ -76,8 +76,10 @@ test.describe("AI Industry value chain", () => {
     await expect(page.getByTestId("ai-industry-history-chart")).toHaveCount(0);
     for (const width of [1440, 390]) {
       await page.setViewportSize({ width, height: 1000 });
+      await page.getByTestId("ai-unchanged-observations").scrollIntoViewIfNeeded();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
       await page.screenshot({ path: testInfo.outputPath(`ai-industry-unchanged-${width}.png`), fullPage: true });
+      await page.getByTestId("ai-unchanged-observations").screenshot({ path: testInfo.outputPath(`ai-industry-unchanged-summary-${width}.png`) });
     }
   });
   test("four stages, separate capability and 17 measurement explanations without empty M1", async ({ page }) => {
