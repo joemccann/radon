@@ -150,6 +150,7 @@ const PINNED: Record<string, PinnedCapability> = {
   "vcg/share": "internal",
   "vcg/share/content": "internal",
   "vixcor": "read",
+  "panic-index": "read",
   "vixts": "read",
   "vol-cone": "read",
   "watchlist": { GET: "read", POST: "mutate.workspace" },
