@@ -6,6 +6,9 @@ from pathlib import Path
 
 import pytest
 
+# T-498: file-backed subscriptions are opt-in synthetic fixtures.
+pytestmark = pytest.mark.usefixtures("isolated_model_credentials")
+
 from clients.model_ladder import (
     MODEL_LADDER_ORDER,
     MODEL_LADDER_TIERS,
