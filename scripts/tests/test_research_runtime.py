@@ -13,6 +13,18 @@ from research.publish import stable_post_id
 from research.state import State
 
 
+@pytest.fixture(autouse=True)
+def _hermetic_auth_home(monkeypatch, tmp_path):
+    # Ladder auth discovery falls back to Path.home(); keep host auth files
+    # (~/.claude, ~/.codex, ~/.grok) out of these hermetic-env tests.
+    monkeypatch.setenv("HOME", str(tmp_path / "hermetic-home"))
+    monkeypatch.setattr(
+        Path, "home", classmethod(lambda cls: tmp_path / "hermetic-home")
+    )
+
+
+
+
 def item():
     return {"title":"New yen demand", "content":"JPM reports new measured demand.", "publisher":"JPMorgan",
             "claim_key":"yen-demand", "document_date":"2026-09-04", "pages":[1], "tags":["JPY"],

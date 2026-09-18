@@ -96,6 +96,7 @@ _OPTIONAL_LADDER_ENV = (
     "GOOGLE_OAUTH_ACCESS_TOKEN",
     "CLAUDE_CONFIG_DIR",
     "CODEX_HOME",
+    "RADON_LADDER_NO_AUTH_FILES",
 )
 
 _CREDIT_MARKERS = (
@@ -217,6 +218,17 @@ def _home_dir(env: Mapping[str, str]) -> Path:
     return Path(raw) if raw else Path.home()
 
 
+def _auth_files_disabled(env: Mapping[str, str]) -> bool:
+    """``RADON_LADDER_NO_AUTH_FILES=1`` makes auth discovery env-var-only.
+
+    Credential-free loops scrub their env, but the implicit ``Path.home()``
+    fallback still discovered host auth files; the flag keeps their children
+    keyless.
+    """
+    raw = (env.get("RADON_LADDER_NO_AUTH_FILES") or "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
 def _read_secret_file(path: Path) -> str:
     try:
         if not path.is_file():
@@ -253,6 +265,8 @@ def _anthropic_subscription_auth(env: Mapping[str, str]) -> AuthMaterial | None:
     token = _env_get(env, *_ANTHROPIC_SUBSCRIPTION_ENV)
     if token:
         return AuthMaterial(token, "subscription", "CLAUDE_CODE_OAUTH_TOKEN")
+    if _auth_files_disabled(env):
+        return None
     file_env = (env.get("CLAUDE_CODE_OAUTH_TOKEN_FILE") or "").strip()
     if file_env:
         token = _read_secret_file(Path(file_env))
@@ -281,6 +295,8 @@ def _anthropic_subscription_auth(env: Mapping[str, str]) -> AuthMaterial | None:
 
 
 def _codex_subscription_auth(env: Mapping[str, str]) -> AuthMaterial | None:
+    if _auth_files_disabled(env):
+        return None
     codex_home = (env.get("CODEX_HOME") or "").strip()
     auth_path = (
         Path(codex_home) / "auth.json"
@@ -306,6 +322,8 @@ def _codex_subscription_auth(env: Mapping[str, str]) -> AuthMaterial | None:
 
 
 def _grok_subscription_auth(env: Mapping[str, str]) -> AuthMaterial | None:
+    if _auth_files_disabled(env):
+        return None
     auth_path = _home_dir(env) / ".grok" / "auth.json"
     data = _json_load_object(auth_path)
     if not data:
