@@ -183,3 +183,118 @@ class TestClassify:
     def test_stretch_boundary_is_inclusive(self):
         assert classify(10.0, self.PASS, self.PASS) == "BOUNCE_SETUP"
         assert classify(10.1, self.PASS, self.PASS) is None
+
+
+# ── Implementation tests (appended): flow join, budget block, build_output ──
+
+import bounce_setup_scanner as bss  # noqa: E402
+
+
+class TestFlowJoin:
+    PAYLOAD = {"top_signals": [
+        {"ticker": "BAC", "signal": "STRONG", "direction": "ACCUMULATION", "score": 72.5},
+        {"ticker": "JPM", "signal": "WEAK", "direction": "distribution", "score": 12},
+        {"ticker": "WFC", "signal": "NONE", "direction": "NEUTRAL", "score": 3},
+    ]}
+
+    def test_accumulation_maps_direction_and_score(self):
+        assert bss.flow_for("bac", self.PAYLOAD) == {"signal": "ACCUMULATION", "score": 72.5}
+
+    def test_other_directions_are_uppercased(self):
+        assert bss.flow_for("JPM", self.PAYLOAD) == {"signal": "DISTRIBUTION", "score": 12.0}
+        assert bss.flow_for("WFC", self.PAYLOAD)["signal"] == "NEUTRAL"
+
+    def test_absent_ticker_or_snapshot_is_null(self):
+        assert bss.flow_for("C", self.PAYLOAD) is None
+        assert bss.flow_for("BAC", None) is None
+
+
+class TestBuildOutput:
+    def test_sorts_by_verdict_then_stretch_and_counts(self):
+        rows = [
+            {"ticker": "A", "verdict": "STRETCHED", "stretch_pctl": 0.1},
+            {"ticker": "B", "verdict": "BOUNCE_SETUP", "stretch_pctl": 3.0},
+            {"ticker": "C", "verdict": "WATCH", "stretch_pctl": 1.0},
+            {"ticker": "D", "verdict": "BOUNCE_SETUP", "stretch_pctl": 0.5},
+        ]
+        out = bss.build_output(
+            rows, as_of="2026-09-18", universe="largecaps",
+            coverage={"tickers": 520, "ranked": 512, "excluded_short_history": 8, "stage2": 30},
+        )
+        assert [r["ticker"] for r in out["results"]] == ["D", "B", "C", "A"]
+        assert out["bounce_count"] == 2
+        assert out["window"] == WINDOW
+        assert out["coverage"] == {"tickers": 520, "ranked": 512, "excluded_short_history": 8, "stage2": 30}
+
+
+def _closes(n, start=100.0, drift=0.1, tail_drop=0.0):
+    import math as _m
+    values = [start + drift * i + 2 * _m.sin(i / 3) for i in range(n)]
+    for k in range(1, WINDOW + 1):
+        values[-k] -= tail_drop * (WINDOW + 1 - k) / WINDOW
+    return values
+
+
+class TestStretchMetrics:
+    def test_needs_272_closes(self):
+        assert bss.stretch_metrics(_closes(271)) is None
+        out = bss.stretch_metrics(_closes(272))
+        assert set(out) == {"rsi", "pct_b", "ret_z", "ret_20d"}
+
+    def test_a_selloff_scores_a_negative_ret_z(self):
+        assert bss.stretch_metrics(_closes(300, tail_drop=20.0))["ret_z"] < -1
+
+
+class TestScanUniverse:
+    def _setup(self, monkeypatch, tmp_path, budget_blocked):
+        universe = [f"T{i:02d}" for i in range(20)]
+        closes = {
+            t: [(date.fromordinal(date(2025, 7, 1).toordinal() + j).isoformat(), v) for j, v in enumerate(_closes(300, tail_drop=(30.0 if t == "T00" else 0.0) + i * 0.01))]
+            for i, t in enumerate(universe)
+        }
+        monkeypatch.setattr(bss, "resolve_tickers", lambda tickers, preset: (universe, "preset:largecaps"))
+        monkeypatch.setattr(bss, "load_closes", lambda tickers, cutoff: closes)
+        monkeypatch.setattr(bss, "should_block_universe_scan", lambda: budget_blocked)
+        monkeypatch.setattr(bss, "_CACHE_PATH", tmp_path / "bounce_setup.json")
+        degraded = []
+        monkeypatch.setattr(bss, "record_scan_degraded", lambda *a, **k: degraded.append(a))
+        return degraded
+
+    def test_budget_block_skips_stage2_and_records_degraded(self, monkeypatch, tmp_path):
+        degraded = self._setup(monkeypatch, tmp_path, budget_blocked=True)
+
+        class NoUW:
+            def __getattr__(self, name):
+                raise AssertionError(f"UW call {name} under budget block")
+
+        out = bss.scan_universe([], client=NoUW())
+        assert out["scan_status"] == bss.SCAN_STATUS_BUDGET_BLOCKED
+        assert out["results"] == []
+        assert degraded and degraded[0][0] == "bounce-setup"
+        assert bss.save_cache(out, tmp_path / "bounce_setup.json") is False
+
+    def test_stage2_only_for_stretched_names_and_joins_flow(self, monkeypatch, tmp_path):
+        self._setup(monkeypatch, tmp_path, budget_blocked=False)
+        monkeypatch.setattr(bss, "load_flow_payload", lambda: {"top_signals": [
+            {"ticker": "T00", "direction": "ACCUMULATION", "score": 80}]})
+        seen = []
+
+        class FakeUW:
+            def get_expiry_breakdown(self, ticker):
+                seen.append(ticker)
+                return {"data": []}
+
+            def get_historical_risk_reversal_skew(self, ticker, **kwargs):
+                return {"data": []}
+
+        out = bss.scan_universe([], client=FakeUW(), now=datetime(2026, 9, 18, 22, 0, tzinfo=timezone.utc))
+        assert out["coverage"]["ranked"] == 20
+        assert out["coverage"]["stage2"] == len(set(seen)) >= 1
+        row = next(r for r in out["results"] if r["ticker"] == "T00")
+        assert row["verdict"] == "STRETCHED"
+        assert row["flow"] == {"signal": "ACCUMULATION", "score": 80.0}
+        assert len(row["series"]) == WINDOW
+        assert row["series"][0]["spot_cum_pct"] == 0.0
+
+
+from datetime import datetime, timezone  # noqa: E402
