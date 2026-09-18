@@ -91,6 +91,8 @@ function prefillLabelForSource(src: string | null | undefined): string {
       return "PREFILLED FROM VOL CONE";
     case "leap":
       return "PREFILLED FROM LEAP SCAN";
+    case "bounce":
+      return "PREFILLED FROM BOUNCE SETUP";
     case "theta":
     case "theta-harvester":
       return "PREFILLED FROM THETA HARVESTER";

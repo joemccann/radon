@@ -375,8 +375,8 @@ reviewed disclosures and source limits are documented in
 [`docs/ai-infrastructure-operations.md`](../docs/ai-infrastructure-operations.md).
 `radon-subscription-tokens.timer` runs every 30 minutes UTC (`Persistent=true`)
 and heals the agent-CLI subscription credentials (claude, codex, grok,
-antigravity) from the encrypted secret store, with a daily keepalive probe; a
-dead grant pages the operator a one-tap login link. Runbook:
+Antigravity `agy`) from the encrypted secret store, with a daily keepalive
+probe; a dead codex or grok grant pages a one-tap login link. Runbook:
 [`docs/subscription-tokens.md`](../docs/subscription-tokens.md).
 
 

@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-09-18T20:26:00Z",
-  "node_count": 3410,
-  "edge_count": 7107,
+  "generated_at": "2026-09-18T21:38:58Z",
+  "node_count": 3424,
+  "edge_count": 7108,
   "areas": {
-    "web": 2016,
+    "web": 2030,
     "site": 155,
     "scripts": 1124,
     "cloud": 68,
@@ -12,6 +12,16 @@
     "tools": 2
   },
   "groups": [
+    {
+      "id": "web/.claude-design",
+      "area": "web",
+      "count": 8
+    },
+    {
+      "id": "web/.codex-design",
+      "area": "web",
+      "count": 6
+    },
     {
       "id": "web/app",
       "area": "web",
@@ -324,7 +334,7 @@
     {
       "id": "scripts/db/client.py",
       "area": "scripts",
-      "in": 72,
+      "in": 73,
       "out": 0,
       "test": false
     },

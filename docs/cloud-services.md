@@ -559,7 +559,7 @@ Re-check with `turso plan show` after any plan change. Nightly dumps remain mand
 
 ## Subscription tokens (agent CLIs)
 
-`radon-subscription-tokens.timer` fires every 30 minutes (explicit UTC, `Persistent=true`), so a one-hour access token is always refreshed at least once inside its life. The oneshot seals, refreshes and restores the anthropic / codex / grok / antigravity credential files through the existing encrypted secret store, proves each login with one real model call a day (the keepalive), and heartbeats the `subscription-tokens` row on every run. When a grant is dead it starts the CLI's own device login and pages the link, so the fix is one tap. Runbook and per-provider re-auth commands: [subscription-tokens.md](subscription-tokens.md).
+`radon-subscription-tokens.timer` fires every 30 minutes (explicit UTC, `Persistent=true`), so a one-hour access token is always refreshed at least once inside its life. The oneshot seals, refreshes and restores the anthropic / codex / grok / gemini (Antigravity `agy`) credential files through the existing encrypted secret store, proves each login with one real model call a day (the keepalive), and heartbeats the `subscription-tokens` row on every run. When a codex or grok grant is dead it starts the CLI's own device login and pages the link, so the fix is one tap; claude and agy page the SSH command. Runbook and per-provider re-auth commands: [subscription-tokens.md](subscription-tokens.md).
 
 ---
 
@@ -679,6 +679,20 @@ observed ~13:02 UTC regeneration) both run; unchanged runs are 304
 heartbeats. Heartbeat `calm-streak`. Installed by the deploy's
 `install-units` verb from `installed-units.sha256`. Spec:
 [`indicators/calm-streak.md`](indicators/calm-streak.md).
+
+### BOUNCE SETUP (`radon-bounce-setup.timer`)
+
+`Mon..Fri 21:10 UTC` (`RandomizedDelaySec=120`, `Persistent=true`), oneshot
+`scripts/bounce_setup_scanner.py --preset largecaps` on the venv python,
+`RADON_UW_CALLER=bounce-setup`, `TimeoutStartSec=900`. Stage 1 ranks the
+universe from Turso `price_history_daily` (no UW calls); stage 2 reads UW
+fixed-strike put vol and 25-delta skew for the 30 most stretched names.
+Writes `data/bounce_setup.json` plus the `scan_snapshots` row for service
+`bounce-setup`. A UW budget block or coverage failure records a degraded
+`bounce-setup` heartbeat and keeps the last good cache. Heartbeat
+`bounce-setup` (74h window: Friday's run covers the weekend). Installed by
+the deploy's `install-units` verb from `installed-units.sha256`. Spec:
+[`bounce-setup.md`](bounce-setup.md).
 
 ### HY AD (`radon-hyad.timer`)
 

@@ -24,10 +24,10 @@ Scope: `radon-subscription-tokens` on the app VPS. Providers required: claude
 - [x] Red tests for every finding
 - [x] A1/A2: static public `client_id` per provider; only a dead grant (`invalid_grant`, 401, codex `token_expired` family) is `needs_reauth`; any other 4xx is `error`
 - [x] A3/A11: codex expiry from the access-token JWT `exp`; stop writing foreign keys
-- [x] A4: `antigravity` provider (CLI-refreshed; no Google client secret in git)
+- [x] A4: Antigravity. Main landed `c9570655` mid-task, repurposing the `gemini` row to read the agy token and refresh via `agy models`; this branch unifies on that row (no second provider on one file) and adds the probe contract, marker (`please sign in`) and classifier to it
 - [x] A5/A6/A7: CLI keepalive probe every 24h (real model call, metered keys scrubbed from the probe env, `~/.local/bin` on the search path); probe is also the CLI-native refresh
 - [x] A8: push-driven login. On `needs_reauth` the daemon starts the CLI's own device login, parses URL + code (host allowlist), sends them as the Pushover page (`url`), waits, re-evaluates, seals. `--reauth PROVIDER` for an operator retry
-- [x] A9/A10: correct claude command; gemini leaves the default set (adapter kept for `--seal/--restore`)
+- [x] A9/A10: claude command is `claude auth login --claudeai`; agy and claude are paste-code logins, so they page the SSH command and only codex + grok get the push login
 - [x] Unit timeout + hash, docs, watchdog parity untouched (same service row)
 - [x] Wire check (2026-09-18, local real binaries, throwaway HOME): all four probes classify `auth_failed`; child env carries no KEY/TOKEN var; codex + grok login prompts parse on the right host and are killed on deadline; no stray processes
 - [ ] Verify: full suite in CI; post-merge `--check --json` on the VPS (the deploy installs the re-hashed unit)
