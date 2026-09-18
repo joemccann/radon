@@ -6,7 +6,7 @@ never from network data.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 
@@ -300,6 +300,103 @@ class TestScanUniverse:
 from datetime import datetime, timezone  # noqa: E402
 
 
+class _ChainClient:
+    """Fake UW client: one monthly expiry, a strike ladder on both rights, and a
+    per-symbol daily IV history. `iv(symbol, i)` returns (iv_decimal, bid, ask)."""
+
+    def __init__(self, dates, iv, strikes=(35.0, 37.5, 40.0, 42.5, 45.0)):
+        self.dates, self.iv, self.strikes = dates, iv, strikes
+        self.called = []
+
+    def get_expiry_breakdown(self, t):
+        return {"data": [{"expiry": "2026-10-16"}]}
+
+    def get_option_contracts(self, t, **kw):
+        rows = []
+        for k in self.strikes:
+            for right in ("P", "C"):
+                rows.append({"option_symbol": f"{t}261016{right}{int(round(k * 1000)):08d}",
+                             "strike": str(k), "expiry": "2026-10-16"})
+        return {"data": rows}
+
+    def get_option_contract_historic(self, symbol):
+        self.called.append(symbol)
+        rows = []
+        for i, d in enumerate(self.dates):
+            iv, bid, ask = self.iv(symbol, i)
+            rows.append({"date": d, "implied_volatility": str(iv), "nbbo_bid": str(bid), "nbbo_ask": str(ask)})
+        return {"chains": rows}
+
+    def get_historical_risk_reversal_skew(self, *a, **k):
+        raise AssertionError("the skew leg must not use UW's risk-reversal history")
+
+
+def _window_dates():
+    return [(date(2026, 8, 3) + timedelta(days=i)).isoformat() for i in range(WINDOW + 1)]
+
+
+def _ranked(ticker="XYZ"):
+    return {"ticker": ticker, "stretch_rank": 1, "stretch_pctl": 0.5, "rsi": 20.0,
+            "pct_b": -0.2, "ret_z": -2.0, "ret_20d": -6.0}
+
+
+class TestFixedStrikeSkew:
+    def test_moneyness_constants(self):
+        import bounce_setup_scanner as mod
+
+        assert mod.SKEW_PUT_MONEYNESS == 0.93
+        assert mod.SKEW_CALL_MONEYNESS == 1.07
+
+    def test_wings_are_fixed_at_window_start_and_skew_is_put_minus_call(self):
+        import bounce_setup_scanner as mod
+
+        dates = _window_dates()
+        n = len(dates)
+
+        def iv(symbol, i):
+            if "P00037500" in symbol:  # put wing: rich early, easing late
+                return (0.34 + 0.002 * i if i < 15 else 0.37 - 0.01 * (i - 14)), 1.00, 1.05
+            if "C00042500" in symbol:  # call wing: flat
+                return 0.25, 0.50, 0.52
+            return 0.28, 1.50, 1.55  # ATM put
+
+        client = _ChainClient(dates, iv)
+        # Window-start close 40.0 -> ATM put 40, put wing nearest 37.2 -> 37.5,
+        # call wing nearest 42.8 -> 42.5.
+        closes = [(d, 40.0 - 0.05 * i) for i, d in enumerate(dates)]
+        row = mod.stage2_row(client, _ranked(), closes, date(2026, 9, 18), None)
+
+        assert row["contract"]["strike"] == 40.0
+        assert row["skew_contracts"]["put"]["strike"] == 37.5
+        assert row["skew_contracts"]["call"]["strike"] == 42.5
+        assert row["skew_contracts"]["put"]["symbol"] == "XYZ261016P00037500"
+        assert row["skew_contracts"]["call"]["symbol"] == "XYZ261016C00042500"
+        window = dates[-WINDOW:]
+        by_date = {p["date"]: p["skew30"] for p in row["series"]}
+        for i, d in enumerate(dates):
+            if d in window:
+                put_iv, _, _ = iv("XYZ261016P00037500", i)
+                assert by_date[d] == pytest.approx((put_iv - 0.25) * 100, abs=1e-3)
+        assert row["skew"]["pass"] is not None
+        assert not any("risk_reversal" in e for e in row["errors"])
+
+    def test_illiquid_wings_disable_only_the_skew_leg(self):
+        import bounce_setup_scanner as mod
+
+        dates = _window_dates()
+
+        def iv(symbol, i):
+            if "P00040000" in symbol:  # ATM stays tradeable
+                return 0.28 + (0.01 * i if i < 12 else 0.12 - 0.01 * (i - 12)), 1.50, 1.55
+            return 0.30, 0.20, 1.20  # wings: spread far above 25% of mid
+
+        row = mod.stage2_row(_ChainClient(dates, iv), _ranked(), [(d, 40.0) for d in dates], date(2026, 9, 18), None)
+        assert row["vol"]["pass"] is not None
+        assert row["skew"]["pass"] is None
+        assert any(e.startswith("illiquid_skew_wings") for e in row["errors"])
+        assert row["verdict"] in {"WATCH", "STRETCHED"}
+
+
 class TestLiquidityGate:
     """Illiquid strikes produce model IVs fit to junk quotes (UDR 37.5P,
     2026-09-15: bid 0.75 / ask 4.50, IV 7.4 vs 29.3 the day before). Such days
@@ -339,8 +436,6 @@ class TestLiquidityGate:
                     for i, d in enumerate(dates)
                 ]}
 
-        skew = {"sessions": [{"date": d, "value": 0.03 - 0.001 * i} for i, d in enumerate(dates)], "errors": []}
-        monkeypatch.setattr(mod, "fetch_skew_snapshot", lambda *a, **k: skew)
         row = mod.stage2_row(
             Client(),
             {"ticker": "UDR", "stretch_rank": 4, "stretch_pctl": 0.6, "rsi": 8.7, "pct_b": -0.3,

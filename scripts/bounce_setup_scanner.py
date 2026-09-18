@@ -3,8 +3,9 @@
 
 Stage 1 ranks the universe by how stretched to the downside each name is,
 from Turso daily closes only (zero UW calls). Stage 2 spends UW calls on the
-top ``STAGE2_TOP_N`` names: one fixed-strike put's implied vol path and the
-30-day 25-delta skew path over the same ``WINDOW`` sessions.
+top ``STAGE2_TOP_N`` names: one fixed-strike ATM put's implied vol path and a
+fixed-strike skew path (OTM put IV minus OTM call IV, same expiry) over the same
+``WINDOW`` sessions, each behind a liquidity gate.
 
 Nominates candidates only. None of its inputs is dark pool or OTC flow, so
 each row carries the flow scanner's latest read for that ticker (Gate 2).
@@ -36,12 +37,10 @@ from utils.scan_health import (
 from utils.uw_budget import should_block_universe_scan
 from vol_skew_mr_scanner import (
     _as_rows,
-    _as_vol_points,
     _parse_option_symbol,
     _to_float,
     _vol_pct,
     bollinger_pct_b,
-    fetch_skew_snapshot,
     rsi,
 )
 
@@ -81,6 +80,13 @@ SLOPE_SESSIONS = 3
 # than 15 such sessions cannot support either leg.
 MAX_REL_SPREAD = 0.25
 MIN_VALID_SESSIONS = 15
+# Skew wings, fixed on window start: the listed put nearest 93% of that close
+# and the call nearest 107%. Skew is put IV minus call IV in vol points on the
+# sessions where both quotes pass the liquidity gate. UW's single-name
+# 25-delta risk-reversal history was rejected: it is quote noise (TDG flips sign
+# most sessions).
+SKEW_PUT_MONEYNESS = 0.93
+SKEW_CALL_MONEYNESS = 1.07
 EXPIRY_DTE_MIN = 30
 EXPIRY_DTE_MAX = 45
 EXPIRY_DTE_FALLBACK_MIN = 21
@@ -290,7 +296,7 @@ def load_flow_payload() -> Optional[Dict[str, Any]]:
     return _read_cache_file(_FLOW_CACHE_PATH)
 
 
-def _put_strikes(payload: Any, expiry: str) -> List[float]:
+def _strikes(payload: Any, expiry: str, want: str) -> List[float]:
     strikes = set()
     for row in _as_rows(payload):
         symbol = str(row.get("option_symbol") or row.get("symbol") or "")
@@ -300,7 +306,7 @@ def _put_strikes(payload: Any, expiry: str) -> List[float]:
         if len(row_expiry) == 8:
             row_expiry = f"{row_expiry[:4]}-{row_expiry[4:6]}-{row_expiry[6:]}"
         strike = _to_float(row.get("strike")) or parsed_strike
-        if right == "P" and strike and row_expiry == expiry:
+        if right == want and strike and row_expiry == expiry:
             strikes.add(float(strike))
     return sorted(strikes)
 
@@ -356,7 +362,9 @@ def stage2_row(
     start_close = window[0][1]
 
     contract = None
+    skew_contracts: Optional[Dict[str, Any]] = None
     fs_by_date: Dict[str, float] = {}
+    skew_by_date: Dict[str, float] = {}
     breakdown = fetch("expiry", lambda: client.get_expiry_breakdown(ticker), {"data": []})
     expiry = pick_expiry(
         [str(row.get("expiry") or row.get("expires") or "") for row in _as_rows(breakdown)], as_of,
@@ -364,33 +372,46 @@ def stage2_row(
     if expiry is None:
         errors.append("expiry:no_monthly")
     else:
-        strikes = _put_strikes(
-            fetch("contracts", lambda: client.get_option_contracts(ticker, expiry=expiry, option_type="put"), {"data": []}),
-            expiry,
-        )
-        strike = select_fixed_strike(start_close, strikes)
-        if strike is None:
+        chain = fetch("contracts", lambda: client.get_option_contracts(ticker, expiry=expiry), {"data": []})
+        puts = _strikes(chain, expiry, "P")
+        calls = _strikes(chain, expiry, "C")
+
+        def history(right: str, strike: float) -> tuple[Dict[str, Any], Dict[str, float]]:
+            symbol = occ_symbol(ticker, expiry, right, strike)
+            ivs = _historic_iv(fetch(f"historic:{symbol}", lambda: client.get_option_contract_historic(symbol), {}))
+            return {"symbol": symbol, "expiry": expiry, "strike": strike}, ivs
+
+        # Every strike is fixed on window start: that is what fixed strike means.
+        atm = select_fixed_strike(start_close, puts)
+        if atm is None:
             errors.append("contracts:no_put_strikes")
         else:
-            symbol = occ_symbol(ticker, expiry, "P", strike)
-            contract = {"symbol": symbol, "expiry": expiry, "strike": strike}
-            fs_by_date = _historic_iv(fetch("historic", lambda: client.get_option_contract_historic(symbol), {}))
+            contract, fs_by_date = history("P", atm)
+
+        put_wing = select_fixed_strike(start_close * SKEW_PUT_MONEYNESS, puts)
+        call_wing = select_fixed_strike(start_close * SKEW_CALL_MONEYNESS, calls)
+        if put_wing is None or call_wing is None:
+            errors.append("contracts:no_skew_wings")
+        else:
+            put_contract, put_iv = history("P", put_wing)
+            call_contract, call_iv = history("C", call_wing)
+            skew_contracts = {"put": put_contract, "call": call_contract}
+            skew_by_date = {d: put_iv[d] - call_iv[d] for d in put_iv if d in call_iv}
 
     fs_series = [fs_by_date[d] for d in dates if d in fs_by_date]
     vol = vol_plateau(fs_series)
-
-    skew_snap = fetch_skew_snapshot(client, ticker, as_of, sessions_count=WINDOW)
-    errors.extend(skew_snap["errors"])
-    skew_dates = [row["date"] for row in skew_snap["sessions"]]
-    skew_values = _as_vol_points([row["value"] for row in skew_snap["sessions"]])
-    skew_by_date = dict(zip(skew_dates, skew_values))
-    skew = skew_easing(skew_values)
-
     valid_sessions = len(fs_series)
     if contract is not None and valid_sessions < MIN_VALID_SESSIONS:
-        # The chain is too thin for either surface reading to mean anything.
         errors.append(f"illiquid_options:{valid_sessions}/{WINDOW}")
         vol = {"runup": None, "off_peak": None, "slope": None, "pass": None}
+
+    skew_values = [skew_by_date[d] for d in dates if d in skew_by_date]
+    skew = skew_easing(skew_values)
+    skew_sessions = len(skew_values)
+    if skew_contracts is None:
+        skew = {"ease": None, "slope": None, "pass": None}
+    elif skew_sessions < MIN_VALID_SESSIONS:
+        errors.append(f"illiquid_skew_wings:{skew_sessions}/{WINDOW}")
         skew = {"ease": None, "slope": None, "pass": None}
 
     verdict = classify(float(ranked_row["stretch_pctl"]), vol, skew)
@@ -419,7 +440,9 @@ def stage2_row(
         "vol": {"runup": _r(vol["runup"]), "off_peak": _r(vol["off_peak"], 4), "slope": _r(vol["slope"]), "pass": vol["pass"]},
         "skew": {"ease": _r(skew["ease"], 4), "slope": _r(skew["slope"], 4), "pass": skew["pass"]},
         "series": series,
-        "liquidity": {"valid_sessions": valid_sessions, "min_sessions": MIN_VALID_SESSIONS, "max_rel_spread": MAX_REL_SPREAD},
+        "skew_contracts": skew_contracts,
+        "liquidity": {"valid_sessions": valid_sessions, "skew_sessions": skew_sessions,
+                      "min_sessions": MIN_VALID_SESSIONS, "max_rel_spread": MAX_REL_SPREAD},
         "flow": flow_for(ticker, flow_payload),
         "errors": errors,
     }
