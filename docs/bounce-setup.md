@@ -44,18 +44,26 @@ lowest score = "most stretched to the downside in the universe". Names with fewe
 
 ## Stage 2 — vol and skew legs (top 30 only)
 
-For each stage-2 name (about 4 UW calls each, about 120 per run):
+For each stage-2 name (about 5 UW calls each, about 150 per run):
 
 1. **Expiry**: the monthly (third-Friday) expiry with 30-45 DTE from `as_of`; if none,
    the nearest monthly with DTE >= 21. From `get_expiry_breakdown` (1 call).
-2. **Fixed strike**: from `get_option_contracts(ticker, expiry=…)` (1 call), the listed
-   put strike nearest the close on **window start** (session -20). Tie goes to the
+2. **Fixed strikes**: from one `get_option_contracts(ticker, expiry=…)` call covering both
+   rights, fixed on the close at **window start** (session -20): the ATM put (nearest
+   that close), the skew put wing (nearest 93% of it) and the skew call wing (nearest
+   107% of it). Tie goes to the
    lower strike. The strike never rolls: that is what "fixed strike" means.
 3. **Fixed-strike vol**: `get_option_contract_historic(occ_symbol)` (1 call), daily
    `implied_volatility` in vol points, last `WINDOW` sessions. `fs_iv_change` = each
    session minus the window's first session.
-4. **Skew**: 30-day 25-delta risk reversal, put minus call, daily, reusing
-   `vol_skew_mr_scanner.fetch_skew_snapshot` over `WINDOW` sessions (1 call).
+4. **Skew**: `get_option_contract_historic` on both wings (2 calls); `skew30` = put-wing IV
+   minus call-wing IV in vol points, on sessions where both quotes are tradeable.
+   UW's single-name 25-delta risk-reversal history was rejected after a live check:
+   it is quote noise (TDG 2026-10-16 flips sign most sessions).
+5. **Liquidity gate**: a session counts only when bid > 0 and the NBBO spread is at
+   most 25% of the mid (`MAX_REL_SPREAD`). Fewer than 15 counted sessions
+   (`MIN_VALID_SESSIONS`) makes that leg unavailable (`illiquid_options`,
+   `illiquid_skew_wings`), so the name can reach at most `WATCH` or `STRETCHED`.
 
 OCC symbol: `TICKER + YYMMDD + P + strike*1000 zero-padded to 8`, e.g.
 `BAC261016P00055000`.
