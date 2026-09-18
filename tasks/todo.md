@@ -7691,3 +7691,5 @@ Dependency graph: T1 -> {T2,T3} -> T4.
 Validation: suites run only on GitHub; inspect real stored coverage and screenshot artifacts. Preserve source priority and FINRA history.
 
 Review: credit history has 269 closes from 2025-08-22; existing Cboe history restores 2,173 of 2,174 HYAD dates from 2018-01-22. The equity closure 2025-01-09 stays null. Python joins and browser early-date regressions added; local suites intentionally not run. Exact-head CI and screenshot review pending.
+
+Operational review: repaired the existing Turso snapshot in place, preserving scan_time 2026-09-18T11:01:32+00:00 and all breadth values. Readback confirms SPX 269 -> 2,173 closes, first 2018-01-22, only 2025-01-09 null. Initial GitHub Python/Vitest feature checks pass; corrected docs-owner index and curated-browser ledger contracts. Recurring repair awaits PR deployment.
