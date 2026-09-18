@@ -143,9 +143,14 @@ stack every other unit uses. Adding an env var the newsfeed needs means
 extending the allowlist in `render_env_file`; the contract tests in
 `cloud/tests/test_app_runtime.py` pin both behaviors.
 
-**App startup guard.** The nextjs container starts through
+**App startup and rollback images.** The nextjs container starts through
 `next-clerk-guard`, which requires the runtime Clerk publishable key to match
 an entire key token in the baked client bundle before starting Next.js.
+
+Pre-pull compares registry and local image digests before reusing cached
+release tags. Cleanup preserves the target and durable rollback SHAs, takes
+the existing deploy lock nonblockingly, and skips pruning when rollback
+metadata or the running app population is unavailable.
 
 There is no escrow, and `secrets.db` is
 bound to its key by fingerprint (`key_binding` table): with rows present and

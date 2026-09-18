@@ -2,7 +2,8 @@
 set -euo pipefail
 
 # Root-owned app-plane image runner. systemd ExecStart calls `run <unit>`.
-# Does not take the deploy lifecycle lock. radon is not in group docker.
+# Service starts do not take the deploy lifecycle lock; optional pruning does.
+# radon is not in group docker.
 # Never Gateway, Caddy, health, or the engine socket.
 
 readonly APP_UNITS="radon-api.service radon-nextjs.service radon-relay.service radon-monitor.service radon-newsfeed.service radon-research.service"
@@ -23,6 +24,9 @@ if [[ "${RADON_APP_RUNTIME_TEST_MODE:-0}" == "1" ]]; then
   PYTHON="${RADON_TEST_PYTHON:-$(command -v python3)}"
   GETENT="${RADON_TEST_GETENT:?test getent is required}"
   NOTIFY_PROXY_DIR="${RADON_TEST_NOTIFY_PROXY_DIR:-${STATE_DIR}/notify}"
+  DEPLOY_LOCK_FILE="${RADON_TEST_DEPLOY_LOCK:-${STATE_DIR}/deploy.lock}"
+  GREEN_MARKER_FILE="${RADON_TEST_GREEN_MARKER:-${STATE_DIR}/last-green}"
+  TRANSITION_JOURNAL_FILE="${RADON_TEST_TRANSITION_JOURNAL:-${STATE_DIR}/transition.json}"
 else
   if (( EUID != 0 )); then
     echo "radon-app-runtime must run as root" >&2
@@ -39,6 +43,9 @@ else
   PYTHON=/usr/bin/python3
   GETENT=/usr/bin/getent
   NOTIFY_PROXY_DIR=/run/radon-app-runtime
+  DEPLOY_LOCK_FILE=/home/radon/.radon-deploy.lock
+  GREEN_MARKER_FILE=/home/radon/.radon-last-green-deploy
+  TRANSITION_JOURNAL_FILE=/home/radon/.radon-deploy-transition.json
 fi
 
 readonly SECRET_STORE_CREDENTIAL_NAME=radon-secret-store-key
@@ -178,6 +185,29 @@ image_in_local_store() {
   "$DOCKER" image inspect "$1" >/dev/null 2>&1
 }
 
+# The deploy pre-pull must detect a rebuilt tag even when its old image is local.
+# Runtime starts retain image_available's offline fallback.
+image_matches_registry() {
+  "$PYTHON" - "$DOCKER" "$1" <<'PYCODE'
+import json, re, subprocess, sys
+docker, image = sys.argv[1:]
+def read(args):
+    result = subprocess.run([docker, *args], capture_output=True, text=True,
+                            check=True, timeout=20)
+    return json.loads(result.stdout)
+try:
+    remote = read(["buildx", "imagetools", "inspect", image, "--format", "{{json .Manifest}}"])
+    local = read(["image", "inspect", image, "--format", "{{json .RepoDigests}}"])
+except (OSError, ValueError, subprocess.SubprocessError):
+    sys.exit(1)
+digest = remote.get("digest") if isinstance(remote, dict) else None
+if not isinstance(digest, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+    sys.exit(1)
+expected = image.rsplit(":", 1)[0] + "@" + digest
+sys.exit(0 if isinstance(local, list) and expected in local else 1)
+PYCODE
+}
+
 # A registry probe alone is not a liveness contract. A GHCR 429, an outage or
 # an expired root credential fails BOTH manifest probes under `set -euo
 # pipefail`, resolve_image returns 69 and every ExecStart exits — while the
@@ -240,8 +270,7 @@ refuse_host_plane() {
 # `pull <sha>` is the deploy's pre-teardown step (R-431): it pulls exactly the
 # pair `run` will resolve for that release while the current release still
 # serves, then drops SHA-tagged pairs that are neither the target, the
-# fallback tag, nor in use by a running container (the previous release stays
-# until the deploy after next, so a rollback never pulls). Every deploy since
+# durable rollback SHA, nor in use by a running app container. Every deploy since
 # the drop-ins went live had pulled a 4.8G node image AFTER teardown and
 # failed the ~60s HTTP gate on a container still downloading (2026-08-28
 # 4b332fd8 was the last green deploy; 33265501795 and 33266517375 rolled back
@@ -262,11 +291,13 @@ cmd_pull() {
   node_ref="ghcr.io/joemccann/radon-node:${tag}"
 
   # The gated prepull job and the deploy both call this exact verb. When the
-  # pair is already local, deploy performs only these two fast inspections.
-  # On a miss, pull both independent images concurrently and wait for both.
+  # pair is local and matches registry digests, no layers need pulling.
+  # Missing, changed, or unverified metadata requires a fresh parallel pull.
   if [[ -n "$target" ]] \
     && image_in_local_store "$python_ref" \
-    && image_in_local_store "$node_ref"; then
+    && image_in_local_store "$node_ref" \
+    && image_matches_registry "$python_ref" \
+    && image_matches_registry "$node_ref"; then
     printf 'exact release image pair already local: %s\n' "$tag" >&2
   else
     "$DOCKER" pull "$python_ref" &
@@ -293,18 +324,57 @@ cmd_pull() {
 }
 
 prune_stale_app_images() {
-  local target="$1" in_use image tag repo
-  in_use="$("$DOCKER" ps --format '{{.Image}}' 2>/dev/null || true)"
-  for repo in ghcr.io/joemccann/radon-node ghcr.io/joemccann/radon-python; do
-    while IFS= read -r image; do
-      [[ -n "$image" ]] || continue
-      tag="${image##*:}"
-      [[ "$tag" =~ ^[0-9a-f]{40}$ ]] || continue
-      [[ "$tag" == "$target" ]] && continue
-      grep -qxF -- "$image" <<< "$in_use" && continue
-      "$DOCKER" rmi "$image" >/dev/null 2>&1 || true
-    done < <("$DOCKER" images --format '{{.Repository}}:{{.Tag}}' "$repo" 2>/dev/null || true)
-  done
+  "$PYTHON" - "$DOCKER" "$1" "$DEPLOY_LOCK_FILE" "$GREEN_MARKER_FILE" "$TRANSITION_JOURNAL_FILE" <<'PYCODE'
+import fcntl, json, os, re, stat, subprocess, sys
+from pathlib import Path
+
+docker, target, lock_path, green_path, journal_path = sys.argv[1:]
+def skip(reason):
+    print(f"radon-app-runtime: image prune skipped: {reason}", file=sys.stderr)
+    raise SystemExit(0)
+def command(*args):
+    return subprocess.run([docker, *args], capture_output=True, text=True,
+                          check=True, timeout=20).stdout.splitlines()
+def sha(value):
+    return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{40}", value)
+
+try:
+    # Do not create a root-owned lock that would prevent radon from deploying.
+    fd = os.open(lock_path, os.O_RDWR | os.O_NOFOLLOW)
+    with os.fdopen(fd, "r+") as lock:
+        if not stat.S_ISREG(os.fstat(lock.fileno()).st_mode):
+            skip("deploy lock is not a regular file")
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        protected = {target}
+        journal = Path(journal_path)
+        if journal.exists() or journal.is_symlink():
+            state = json.loads(journal.read_text())
+            if not isinstance(state, dict) or state.get("version") != 1 or not all(
+                sha(state.get(key)) for key in ("requested_sha", "previous_sha")
+            ):
+                skip("invalid transition journal")
+            protected.update((state["requested_sha"], state["previous_sha"]))
+        else:
+            previous = Path(green_path).read_text().splitlines()[0]
+            if not sha(previous):
+                skip("invalid green marker")
+            protected.add(previous)
+        repos = ("ghcr.io/joemccann/radon-node", "ghcr.io/joemccann/radon-python")
+        in_use = {image for image in command("ps", "--format", "{{.Image}}", "--filter", "name=radon-")
+                  if any(image.startswith(repo + ":") or image.startswith(repo + "@") for repo in repos)}
+        if not in_use:
+            skip("no running app containers")
+        stale = []
+        for repo in repos:
+            for image in command("images", "--format", "{{.Repository}}:{{.Tag}}", repo):
+                prefix, separator, tag = image.rpartition(":")
+                if prefix == repo and sha(tag) and tag not in protected and image not in in_use:
+                    stale.append(image)
+        for image in stale:
+            command("rmi", image)
+except (OSError, ValueError, IndexError, subprocess.SubprocessError) as exc:
+    skip(f"deploy lock or rollback state unavailable ({type(exc).__name__})")
+PYCODE
 }
 
 cmd_stop() {

@@ -439,3 +439,5 @@ git diff --check
 Deployment, rollback, locking, bootstrap, and unit-path changes require
 adversarial regression coverage. Tests must use isolated roots and must never
 write host `/etc`, `/usr/local`, `/var/lib`, production data, or real secrets.
+
+Image pre-pull compares each cached release tag with its registry manifest digest before skipping layer downloads. App-image pruning takes the existing deploy lock nonblockingly, preserves the target and durable transition/last-green rollback SHAs plus running images, and skips cleanup when rollback evidence or the running app population is unavailable. Runtime starts still allow the exact local image during registry outages.
