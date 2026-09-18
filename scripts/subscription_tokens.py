@@ -77,7 +77,7 @@ PUSHOVER_MESSAGE_MAX = 1024
 # Daily is far inside all three and costs one one-word reply per subscription.
 KEEPALIVE_INTERVAL = timedelta(hours=24)
 PROBE_PROMPT = "Reply with the single word ok"
-# agy blocks 60s on its own login wait before it reports an auth failure.
+# A logged-out codex retries for ~20s and an agent turn can take a minute.
 PROBE_TIMEOUT_SECONDS = 150
 PROBE_OUTPUT_BYTES = 65536
 # A login no probe has been able to prove for this long stops being called
@@ -353,47 +353,48 @@ def _codex_apply(doc, resp, now):
     return new
 
 
-# -- gemini: ~/.gemini/oauth_creds.json -------------------------------------
+# -- gemini: ~/.gemini/antigravity-cli/antigravity-oauth-token ---------------
+#
+# 2026-09-18: Google retired the Gemini CLI OAuth client for individuals
+# ("This client is no longer supported for Gemini Code Assist for
+# individuals ... migrate to the Antigravity suite"). The Antigravity CLI
+# (`agy`) keeps its Google OAuth grant in a nested `token` object with an
+# RFC 3339 `expiry` at nanosecond precision. `agy models` is a cheap
+# authenticated call that refreshes the file in place, so it is the CLI-native
+# refresh; the token endpoint is the fallback when `agy` is not on PATH.
+
+# Public OAuth client id of the Antigravity CLI (installed-app client, no
+# secret), read off its own login URL. Google's refresh grant requires it.
+ANTIGRAVITY_CLIENT_ID = (
+    "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com"
+)
+
+
+def _gemini_tokens(doc) -> Mapping[str, Any]:
+    tokens = doc.get("token")
+    return tokens if isinstance(tokens, Mapping) else {}
 
 
 def _gemini_expiry(doc):
-    return _parse_epoch_millis(doc.get("expiry_date"))
+    return _parse_rfc3339(_gemini_tokens(doc).get("expiry"))
 
 
 def _gemini_refresh(doc):
-    token = doc.get("refresh_token")
+    token = _gemini_tokens(doc).get("refresh_token")
     return token if isinstance(token, str) and token else None
 
 
 def _gemini_apply(doc, resp, now):
     new = copy.deepcopy(doc)
+    tokens = new.setdefault("token", {})
     if resp.get("access_token"):
-        new["access_token"] = resp["access_token"]
+        tokens["access_token"] = resp["access_token"]
     if resp.get("refresh_token"):
-        new["refresh_token"] = resp["refresh_token"]
-    new["expiry_date"] = int(_expires_at(now, resp).timestamp() * 1000)
+        tokens["refresh_token"] = resp["refresh_token"]
+    if resp.get("id_token"):
+        new["id_token"] = resp["id_token"]
+    tokens["expiry"] = _iso_z(_expires_at(now, resp))
     return new
-
-
-# -- antigravity: ~/.gemini/antigravity-cli/antigravity-oauth-token ----------
-
-
-def _antigravity_token(doc) -> Mapping[str, Any]:
-    token = doc.get("token")
-    return token if isinstance(token, Mapping) else {}
-
-
-def _antigravity_expiry(doc):
-    return _parse_rfc3339(_antigravity_token(doc).get("expiry"))
-
-
-def _antigravity_refresh(doc):
-    token = _antigravity_token(doc).get("refresh_token")
-    return token if isinstance(token, str) and token else None
-
-
-def _never_applied(_doc, _resp, _now):
-    raise RuntimeError("this provider is refreshed by its own CLI only")
 
 
 def _no_issuer(_doc):
@@ -418,7 +419,7 @@ class Provider:
     read_issuer: Callable[[Mapping[str, Any]], Optional[tuple]]
     apply: Callable[[Mapping[str, Any], Mapping[str, Any], datetime], dict]
     cli_binary: Optional[str]
-    # The cheapest real model call. No vendor ships a "refresh" subcommand, but
+    # The cheapest real authenticated call. No vendor ships a "refresh" subcommand, but
     # every CLI refreshes its own file on use, so this one command is the
     # CLI-native refresh, the liveness proof and the keepalive.
     probe_args: tuple
@@ -429,9 +430,6 @@ class Provider:
     # Public OAuth client id for the refresh grant (docs/oauth-subscription-auth.md).
     # The three endpoints that take one answer 400 invalid_request without it.
     client_id: Optional[str] = None
-    # False when nothing but the provider's own CLI reads the access token: an
-    # expired one is then normal, and the refresh token is what is kept alive.
-    refresh_on_expiry: bool = True
     # A login the CLI can finish with no input on its stdin: it prints a link,
     # the operator approves it in any browser, the CLI writes the file. None
     # for a paste-the-code-back login, which no push can complete.
@@ -492,7 +490,7 @@ PROVIDERS: dict[str, Provider] = {
         # `claude setup-token` only PRINTS a token; this is the command that
         # writes .credentials.json. It wants the code pasted back, so there is
         # no push login for claude.
-        reauth_command="ssh -t radon@ib-gateway 'claude auth login'",
+        reauth_command="ssh -t radon@ib-gateway 'claude auth login --claudeai'",
         client_id="9d1c250a-e61b-44d9-88ed-5944d1962f5e",
     ),
     "codex": Provider(
@@ -541,49 +539,27 @@ PROVIDERS: dict[str, Provider] = {
     "gemini": Provider(
         name="gemini",
         dir_env=None,
-        default_subdir=".gemini",
-        filename="oauth_creds.json",
+        default_subdir=".gemini/antigravity-cli",
+        filename="antigravity-oauth-token",
         # Google's published OAuth 2.0 token endpoint.
         token_url="https://oauth2.googleapis.com/token",
         read_expiry=_gemini_expiry,
         read_refresh=_gemini_refresh,
         read_issuer=_no_issuer,
         apply=_gemini_apply,
-        cli_binary="gemini",
-        probe_args=("-p", PROBE_PROMPT),
-        auth_failure_markers=("please set an auth method",),
-        reauth_command="gemini CLI absent on the VPS: log in elsewhere, copy oauth_creds.json, see docs/subscription-tokens.md",
-    ),
-    "antigravity": Provider(
-        name="antigravity",
-        dir_env=None,
-        default_subdir=".gemini/antigravity-cli",
-        filename="antigravity-oauth-token",
-        # A Google installed-app refresh grant needs the client SECRET, which
-        # must never be in this public repo. agy refreshes its own file on use,
-        # so the probe is the whole refresh path.
-        token_url=None,
-        read_expiry=_antigravity_expiry,
-        read_refresh=_antigravity_refresh,
-        read_issuer=_no_issuer,
-        apply=_never_applied,
         cli_binary="agy",
-        probe_args=("-p", PROBE_PROMPT, "--output-format", "json", "--print-timeout", "90s"),
-        auth_failure_markers=("authentication required", "authentication failed"),
-        reauth_command="ssh -t radon@ib-gateway '~/.local/bin/agy'",
-        refresh_on_expiry=False,
-        # An unauthenticated agy prints a Google consent link and waits 60s for
-        # the hosted callback, so the probe doubles as the login.
-        login_args=("-p", PROBE_PROMPT, "--output-format", "json", "--print-timeout", "90s"),
-        login_hosts=("accounts.google.com",),
+        # Not a model call: `agy models` is a sub-second authenticated request
+        # that rewrites the token file, so it refreshes and proves the grant.
+        probe_args=("models",),
+        auth_failure_markers=(
+            "please sign in",  # `agy models`
+            "authentication required",  # `agy -p`
+            "authentication failed",
+        ),
+        client_id=ANTIGRAVITY_CLIENT_ID,
+        reauth_command="ssh -t radon@ib-gateway '~/.local/bin/agy -p ok' then open the printed URL and paste the code within 60s, see docs/subscription-tokens.md",
     ),
 }
-
-# gemini stays addressable (--seal/--restore) but leaves the scheduled set: its
-# file has no consumer (model_ladder reads env tokens for that rung), the Gemini
-# CLI subscription login was folded into Antigravity, and without a client
-# secret it could only ever page.
-DEFAULT_PROVIDER_NAMES = ("anthropic", "codex", "grok", "antigravity")
 
 
 # ---------------------------------------------------------------------------
@@ -1274,9 +1250,7 @@ def _read_doc(path: Path) -> tuple[Optional[str], Optional[dict]]:
 
 def _is_usable(run: _Run, provider: Provider, doc: Mapping[str, Any]) -> bool:
     expiry = provider.read_expiry(doc)
-    if expiry is not None and (expiry - run.now).total_seconds() > EXPIRY_SKEW_SECONDS:
-        return True
-    return not provider.refresh_on_expiry and provider.read_refresh(doc) is not None
+    return expiry is not None and (expiry - run.now).total_seconds() > EXPIRY_SKEW_SECONDS
 
 
 def _error_code(resp: HttpResponse) -> Optional[str]:
@@ -1724,7 +1698,7 @@ def _run_locked(
     json_output: bool,
     force: bool,
 ) -> dict:
-    names = list(provider_names or DEFAULT_PROVIDER_NAMES)
+    names = list(provider_names or PROVIDERS.keys())
     active = _Run(rt, mode, force)
 
     results: list[ProviderResult] = []

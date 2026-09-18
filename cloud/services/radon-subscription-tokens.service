@@ -12,6 +12,10 @@ WorkingDirectory=/home/radon/radon
 EnvironmentFile=/etc/radon/env
 Environment=RADON_DB_NO_REPLICA=1
 Environment=RADON_SECRET_STORE_PATH=/home/radon/radon/data/secret_store/secrets.db
+# The Antigravity and Grok installers place `agy` and `grok` in ~/.local/bin;
+# the daemon prefers each CLI-native refresh. (The module also searches that
+# directory itself, so a manual run outside this unit finds them too.)
+Environment=PATH=/home/radon/.local/bin:/usr/local/bin:/usr/bin:/bin
 LoadCredentialEncrypted=radon-secret-store-key:/etc/credstore.encrypted/radon-secret-store-key
 # The sidecar /var/lib/radon/subscription-tokens/state.json carries the page
 # cooldowns and the consecutive-error streak. Without this the directory is not

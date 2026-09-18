@@ -2,7 +2,7 @@
 
 Four agent CLIs authenticate against the operator's subscriptions rather than
 metered API keys: Claude Code (anthropic), OpenAI Codex, xAI Grok and Google
-Antigravity (`agy`). Each keeps an OAuth credential file in the `radon` home
+Antigravity (`agy`, managed under the provider row `gemini`). Each keeps an OAuth credential file in the `radon` home
 directory on the app VPS. `scripts/clients/model_ladder.py` reads the anthropic,
 codex and grok files directly, so a deleted or expired file silently demotes the
 whole subscription band to prepaid keys.
@@ -24,21 +24,16 @@ Protocol background for the OAuth flows: see
 Every row was verified against the real binary on the VPS, run against a
 throwaway home so no live credential was touched.
 
-| Provider | Credential file | Expiry read from | Refresh path | Keepalive probe | Re-auth |
+| Provider row | Credential file | Expiry read from | Refresh path | Keepalive probe | Re-auth |
 |---|---|---|---|---|---|
-| anthropic | `~/.claude/.credentials.json` (`CLAUDE_CONFIG_DIR`) | `claudeAiOauth.expiresAt` | `claude -p`, then token endpoint with the public client id | `claude -p ... --max-turns 1` | paste-code: `claude auth login` over SSH |
+| anthropic | `~/.claude/.credentials.json` (`CLAUDE_CONFIG_DIR`) | `claudeAiOauth.expiresAt` | `claude -p`, then token endpoint with the public client id | `claude -p ... --max-turns 1` | paste-code: `claude auth login --claudeai` over SSH |
 | codex | `~/.codex/auth.json` (`CODEX_HOME`) | `exp` claim of the access-token JWT (ten days) | `codex exec`, then token endpoint with the public client id | `codex exec --skip-git-repo-check ...` | **push**: device code |
 | grok | `~/.grok/auth.json` | `expires_at` (earliest entry) | `grok -p`, then OIDC-discovered token endpoint | `grok -p ...` | **push**: device code |
-| antigravity | `~/.gemini/antigravity-cli/antigravity-oauth-token` | `token.expiry` | `agy -p` only | `agy -p ... --output-format json` | **push**: Google consent link (60s window) |
+| gemini (= Antigravity, `agy`) | `~/.gemini/antigravity-cli/antigravity-oauth-token` | `token.expiry` | `agy models`, then Google's token endpoint with the CLI's public client id | `agy models` (authenticated, not a model call) | paste-code: `agy -p ok` over SSH, 60s window |
 
-`grok` and `agy` install to `~/.local/bin`, which systemd's PATH does not carry.
-The daemon searches `~/.local/bin` and `~/.grok/bin` itself.
-
-`gemini` (`~/.gemini/oauth_creds.json`) left the scheduled set on 2026-09-18.
-Nothing reads that file (the ladder's gemini rung reads env tokens), Google
-folded the Gemini CLI subscription login into Antigravity, and a Google
-installed-app refresh grant needs a client secret that must never be in this
-public repo. The adapter stays for `--seal gemini` / `--restore gemini`.
+`grok` and `agy` install to `~/.local/bin`. The unit puts it on `PATH`, and the
+daemon searches `~/.local/bin` and `~/.grok/bin` itself so a manual run finds
+them too.
 
 ---
 
@@ -61,7 +56,8 @@ public repo. The adapter stays for `--seal gemini` / `--restore gemini`.
    `os.replace`, mode 0600) and re-seals it. It never adds a key the vendor did
    not write into the vendor's own file.
 5. **Keepalive.** Once per `KEEPALIVE_INTERVAL` (24h) a credential that looks
-   live is proven with one real model call ("Reply with the single word ok").
+   live is proven with one real call through its own CLI (a one-word model
+   reply; for `agy` the authenticated `agy models`).
    An expiry field in the future says nothing about a revoked grant or a lapsed
    subscription, and an unexercised refresh token is what goes stale: Codex's
    own guidance is a weekly exercise, Google retires a refresh token after six
@@ -86,8 +82,7 @@ Registry names in the vault:
     SUBSCRIPTION_TOKEN_ANTHROPIC
     SUBSCRIPTION_TOKEN_CODEX
     SUBSCRIPTION_TOKEN_GROK
-    SUBSCRIPTION_TOKEN_ANTIGRAVITY
-    SUBSCRIPTION_TOKEN_GEMINI   (legacy, unscheduled)
+    SUBSCRIPTION_TOKEN_GEMINI   (the Antigravity token)
 
 The store validates registry names against `^[A-Z][A-Z0-9_]{0,63}$`, so these
 are upper case.
@@ -100,7 +95,7 @@ Evaluated per provider, every run.
 
 | State | Meaning | Pages |
 |---|---|---|
-| `live` | File present and parses, and either the expiry is comfortably in the future or (antigravity) a refresh token is present and only `agy` reads the access token. Proven by the keepalive probe once a day. | no |
+| `live` | File present, parses, expiry comfortably in the future. Proven by the keepalive probe once a day where the provider's CLI is installed. | no |
 | `refreshed` | Was expiring or expired, the refresh succeeded, the file was rewritten. | no |
 | `restored` | File missing or corrupt, the vault had a copy, it was written back and re-evaluated. | no |
 | `unbootstrapped` | No file and no vault copy. Nobody has ever logged this provider in on this host. Not an error. | no |
@@ -135,25 +130,24 @@ Exit codes: `0` when every provider is `live`, `refreshed`, `restored` or
 
 ## Operator re-auth runbook
 
-### codex, grok, antigravity: tap the link
+### codex, grok: tap the link
 
-When one of these reports `needs_reauth`, the daemon starts the CLI's own login
-on the VPS (`codex login --device-auth`, `grok login --device-auth`, or `agy`),
+When one of these reports `needs_reauth`, the daemon starts the CLI's own device
+login on the VPS (`codex login --device-auth`, `grok login --device-auth`),
 reads the sign-in link and one-time code out of its output, and sends them as
-the Pushover page. Tap the link on any device, sign in, enter the code if one is
-shown. The CLI on the VPS writes its own credential file, the daemon
-re-evaluates the provider, probes it, and seals it. No SSH, no file copy.
+the Pushover page. Tap the link on any device, sign in, enter the code. The CLI
+on the VPS writes its own credential file, the daemon re-evaluates the provider,
+probes it, and seals it. No SSH, no file copy.
 
 - The link is only ever a URL on the provider's own login host
-  (`auth.openai.com`, `accounts.x.ai`, `accounts.google.com`). CLI output is not
-  a trusted source of links for the operator's phone.
+  (`auth.openai.com`, `accounts.x.ai`). CLI output is not a trusted source of
+  links for the operator's phone.
 - One login per timer run, held for at most 10 minutes. The link is sent once
   per 12h page cooldown. Codex and grok codes last about 15 minutes. A second
   dead provider is not paged that run; it gets the login slot on the next one.
-- **Antigravity's window is 60 seconds.** `agy` waits that long for Google's
-  hosted callback. Miss it and retry with `--reauth` (below).
-- Codex device login must be switched on once in ChatGPT security settings
-  (or by the workspace admin).
+- Codex device login must be switched on once in ChatGPT Security Settings
+  (or by the workspace admin). `codex` is installed on the VPS
+  (2026-09-18, `npm i -g @openai/codex`); `grok` is at `~/.local/bin/grok`.
 - A one-time device code is not token material: it is useless without the
   operator's own signed-in approval, and it only ever authorises this VPS.
 
@@ -169,23 +163,38 @@ Every link page also carries the interactive fallback:
 ```bash
 ssh -t radon@ib-gateway 'codex login --device-auth'
 ssh -t radon@ib-gateway '~/.local/bin/grok login --device-auth'
-ssh -t radon@ib-gateway '~/.local/bin/agy'
 ```
 
 ### anthropic (Claude Code): paste-code over SSH
 
 ```bash
-ssh -t radon@ib-gateway 'claude auth login'
+ssh -t radon@ib-gateway 'claude auth login --claudeai'
 ```
 
 Follow the printed URL in a browser, approve, and paste the code back. This
-writes `~/.claude/.credentials.json`. Claude's login wants the code typed back
-into the CLI, which no push can do, so this is the one provider that still needs
-a terminal. With the refresh grant fixed and the daily keepalive it should be
-rare.
+writes `~/.claude/.credentials.json` (verified 2026-09-18 on claude 2.1.140;
+`claude setup-token` prints a one-year token for `CLAUDE_CODE_OAUTH_TOKEN` and
+does NOT write the file). Claude's login wants the code typed back into the
+CLI, which no push can do. With the refresh grant fixed and the daily keepalive
+it should be rare.
 
-`claude setup-token` is **not** this. It prints a one-year token for
-`CLAUDE_CODE_OAUTH_TOKEN` and writes no file.
+### gemini (Antigravity CLI): paste-code over SSH
+
+Google retired the Gemini CLI OAuth client for individuals on 2026-09-18; the
+`gemini` provider row reads the Antigravity CLI (`agy`) token. `agy` is
+installed on the VPS at `~/.local/bin/agy` via
+`curl -fsSL https://antigravity.google/cli/install.sh | bash`.
+It has no login subcommand: any first run prints a Google OAuth URL and waits
+60 seconds for the pasted code, so open the URL before running it.
+
+```bash
+ssh -t radon@ib-gateway '~/.local/bin/agy -p ok'
+```
+
+Like claude, that pasted code is why there is no push login for it. The daemon
+refreshes and proves the grant through `agy models` (a sub-second authenticated
+call, not a model call), and falls back to Google's token endpoint with the
+CLI's public client id when `agy` is not installed.
 
 Until a provider has ever been logged in on this host it reports
 `unbootstrapped`, which is the honest answer and does not page.
@@ -249,9 +258,9 @@ run still ends with a sidecar and a heartbeat.
 
 A refresh token that the provider has revoked, or that has itself expired,
 cannot be recovered by any daemon. OAuth requires an interactive browser login
-to mint a new one. That case is exactly what `needs_reauth` means. For codex,
-grok and antigravity the daemon reduces it to one tap on a page; for claude it
-is one SSH command.
+to mint a new one. That case is exactly what `needs_reauth` means. For codex
+and grok the daemon reduces it to one tap on a page; for claude and agy, whose
+logins want a code pasted back into the CLI, it is one SSH command.
 
 Everything short of that is handled without a human: an expired access token, a
 deleted file, a truncated file, a fresh home directory after host maintenance, a
