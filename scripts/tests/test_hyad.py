@@ -352,6 +352,66 @@ class TestRun:
         assert persist_calls == []
 
 
+class TestSpxHistory:
+    @pytest.fixture()
+    def spx_db(self, monkeypatch):
+        import db.client
+
+        conn = sqlite3.connect(":memory:")
+        conn.executescript(
+            "CREATE TABLE credit_spread_history (date TEXT PRIMARY KEY, spx_close REAL);"
+            "CREATE TABLE calm_streak_history (date TEXT PRIMARY KEY, close REAL);"
+        )
+        monkeypatch.setattr(db.client, "get_db", lambda: conn)
+        yield conn
+        conn.close()
+
+    def test_full_hyad_window_preserves_preferred_closes_and_calendar_gaps(self, spx_db):
+        import fetch_hyad as fh
+
+        # Production credit history begins in August 2025, while HYAD starts
+        # in 2018. Cboe history covers the older sessions; Jan 9, 2025 was
+        # an equity closure and must stay null even when FINRA has breadth.
+        spx_db.executemany(
+            "INSERT INTO calm_streak_history VALUES (?, ?)",
+            [("1985-01-02", 165.37), ("2018-01-22", 2832.97),
+             ("2025-01-08", 5918.25), ("2025-08-22", 6466.90),
+             ("2025-08-25", 6439.32)],
+        )
+        spx_db.executemany(
+            "INSERT INTO credit_spread_history VALUES (?, ?)",
+            [("2025-08-22", 6466.91), ("2025-08-25", None),
+             ("2026-09-17", 7600.0)],
+        )
+        closes = fh._spx_by_date()
+        assert closes == {
+            "2018-01-22": 2832.97,
+            "2025-01-08": 5918.25,
+            "2025-08-22": 6466.91,
+            "2025-08-25": 6439.32,
+            "2026-09-17": 7600.0,
+        }
+        rows = [{"date": day, "advances": 5, "declines": 3,
+                 "unchanged": 2, "total": 10}
+                for day in ["2018-01-22", "2025-01-08", "2025-01-09", "2026-09-17"]]
+        series = build_output(rows=rows, spx_by_date=closes, scan_time=SCAN_TIME)["series"]
+        assert [point["spx_close"] for point in series] == [2832.97, 5918.25, None, 7600.0]
+
+    @pytest.mark.parametrize("count", [0, 4, 5])
+    def test_each_source_is_paginated_without_truncation(self, spx_db, monkeypatch, count):
+        import fetch_hyad as fh
+
+        monkeypatch.setattr(fh, "HISTORY_READ_PAGE_ROWS", 2)
+        expected = {}
+        for table, start in [("calm_streak_history", date(2018, 1, 22)),
+                             ("credit_spread_history", date(2025, 8, 22))]:
+            rows = [((start + timedelta(days=i)).isoformat(), 3000.0 + i)
+                    for i in range(count)]
+            spx_db.executemany(f"INSERT INTO {table} VALUES (?, ?)", rows)
+            expected.update(rows)
+        assert fh._spx_by_date() == expected
+
+
 class TestStorage:
     @pytest.fixture()
     def db(self):

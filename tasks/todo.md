@@ -7681,3 +7681,13 @@ Dependency graph: T1 -> T2 -> T3 -> T4.
 Review (source preservation): seven P1 findings implemented in six root-cause commits; focused checks 388 Python / 162 cloud / 69 Vitest passed, cloud 2 skipped; permanent drills 132 Python / 12 Vitest passed. Four full-cloud failures reproduce unchanged on b33032b4. Final three full-gate runs and durable publication report remain pending.
 
 Reliability closing review 2026-09-18: three full runs each 13505 Python passed / 9742 Vitest passed / 1881 cloud passed, 4 verified baseline failures, 76 cloud skipped; permanent drills 144 passed. REL-260 browser verification remains BLOCKED after three installed-browser launches. Complete inherited acceptance is preserved in the prepared issue #81 report; publication and notification receipts are tracked in durable reliability scratch.
+
+## 2026-09-18 HY A-D S&P 500 history
+- [x] T1 depends_on: [] Trace stored SPX coverage and HYAD snapshot assembly.
+- [x] T2 depends_on: [T1] Repair historical overlay and add regression coverage without inventing observations.
+- [x] T3 depends_on: [T1] Add browser coverage for early-history S&P values.
+- [ ] T4 depends_on: [T2,T3] Publish PR, verify exact-head GitHub checks and browser artifacts, refresh durable data if needed, notify.
+Dependency graph: T1 -> {T2,T3} -> T4.
+Validation: suites run only on GitHub; inspect real stored coverage and screenshot artifacts. Preserve source priority and FINRA history.
+
+Review: credit history has 269 closes from 2025-08-22; existing Cboe history restores 2,173 of 2,174 HYAD dates from 2018-01-22. The equity closure 2025-01-09 stays null. Python joins and browser early-date regressions added; local suites intentionally not run. Exact-head CI and screenshot review pending.
