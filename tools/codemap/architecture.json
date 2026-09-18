@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-09-17T22:25:37Z",
-  "node_count": 3400,
-  "edge_count": 7085,
+  "generated_at": "2026-09-18T06:17:07Z",
+  "node_count": 3402,
+  "edge_count": 7090,
   "areas": {
     "web": 2015,
     "site": 155,
-    "scripts": 1117,
+    "scripts": 1119,
     "cloud": 66,
     "lib": 28,
     "tests": 17,
@@ -85,7 +85,7 @@
     {
       "id": "scripts",
       "area": "scripts",
-      "count": 158
+      "count": 159
     },
     {
       "id": "scripts/ai_cycle",
@@ -195,7 +195,7 @@
     {
       "id": "scripts/tests",
       "area": "scripts",
-      "count": 557
+      "count": 558
     },
     {
       "id": "scripts/trade_blotter",
@@ -273,17 +273,17 @@
       "test": false
     },
     {
+      "id": "scripts/db/writer.py",
+      "area": "scripts",
+      "in": 91,
+      "out": 5,
+      "test": false
+    },
+    {
       "id": "web/components/WorkspaceShell.tsx",
       "area": "web",
       "in": 53,
       "out": 43,
-      "test": false
-    },
-    {
-      "id": "scripts/db/writer.py",
-      "area": "scripts",
-      "in": 90,
-      "out": 5,
       "test": false
     },
     {
@@ -303,7 +303,7 @@
     {
       "id": "scripts/db/__init__.py",
       "area": "scripts",
-      "in": 81,
+      "in": 82,
       "out": 1,
       "test": false
     },

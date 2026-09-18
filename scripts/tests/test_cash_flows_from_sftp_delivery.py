@@ -59,6 +59,8 @@ def claims(monkeypatch):
 
 @pytest.fixture
 def heartbeats(monkeypatch):
+    # This suite isolates health ownership; coverage faults are tested separately.
+    monkeypatch.setattr(ingest, "delivery_rows_present", lambda *a: True)
     from db import writer
 
     rows: list[tuple] = []

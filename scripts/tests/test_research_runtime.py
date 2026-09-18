@@ -6,11 +6,26 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
+# T-498: file-backed subscriptions are opt-in synthetic fixtures.
+pytestmark = pytest.mark.usefixtures("isolated_model_credentials")
 import requests
 
 from research import model, pipeline, seed, worker
 from research.publish import stable_post_id
 from research.state import State
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_auth_home(monkeypatch, tmp_path):
+    # Ladder auth discovery falls back to Path.home(); keep host auth files
+    # (~/.claude, ~/.codex, ~/.grok) out of these hermetic-env tests.
+    monkeypatch.setenv("HOME", str(tmp_path / "hermetic-home"))
+    monkeypatch.setattr(
+        Path, "home", classmethod(lambda cls: tmp_path / "hermetic-home")
+    )
+
+
 
 
 def item():

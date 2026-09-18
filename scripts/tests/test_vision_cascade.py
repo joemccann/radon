@@ -22,6 +22,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+# T-498: file-backed subscriptions are opt-in synthetic fixtures.
+pytestmark = pytest.mark.usefixtures("isolated_model_credentials")
+
 from clients.vision_cascade import (
     VISION_CASCADE_ORDER,
     VISION_CASCADE_TIERS,
@@ -30,6 +33,16 @@ from clients.vision_cascade import (
     extract_via_vision,
     wired_vision_providers,
 )
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_auth_home(monkeypatch, tmp_path):
+    # Ladder auth discovery falls back to Path.home(); keep host auth files
+    # (~/.claude, ~/.codex, ~/.grok) out of these hermetic-env tests.
+    monkeypatch.setenv("HOME", str(tmp_path / "hermetic-home"))
+    monkeypatch.setattr(
+        Path, "home", classmethod(lambda cls: tmp_path / "hermetic-home")
+    )
 
 
 ROWS = [{"underlying": "E-Mini S&P 500 Index", "position_today": 0.45}]

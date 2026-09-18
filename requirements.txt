@@ -9,7 +9,7 @@ uvicorn==0.42.0
 
 # Auth
 PyJWT==2.13.0
-cryptography==46.0.7
+cryptography==50.0.1
 
 # HTTP requests
 requests==2.33.0

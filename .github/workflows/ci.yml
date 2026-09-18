@@ -487,6 +487,10 @@ jobs:
       # Skipped when no demo env is configured on the runner, so this cannot
       # fail a prod-only CI run.
       - name: Demo isolation guard
+        # Security 2026-09-18 (PR #514 follow-up): the demo database secrets
+        # are handed to this step only on a push. A pull_request run never
+        # materialises them, so a PR cannot exercise or leak the demo DB URLs.
+        if: github.event_name == 'push'
         env:
           TURSO_DEMO_DB_URL: ${{ secrets.TURSO_DEMO_DB_URL }}
           TURSO_DB_URL: ${{ secrets.TURSO_DEMO_APP_DB_URL }}

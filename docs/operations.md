@@ -81,6 +81,15 @@ Its Profile group exposes OpenRouter, Artificial Analysis (including the fixed
 model basket), Vast.ai, EIA and the SEC contact user agent. Stored values win
 over `/etc/radon/env` on the collector's next run.
 
+The subscription-token vault reuses this same store rather than adding a second
+crypto system. `scripts/subscription_tokens.py` seals each agent CLI's OAuth
+credential file verbatim under the registry names
+`SUBSCRIPTION_TOKEN_ANTHROPIC`, `SUBSCRIPTION_TOKEN_CODEX`,
+`SUBSCRIPTION_TOKEN_GROK` and `SUBSCRIPTION_TOKEN_GEMINI`, and restores or
+refreshes them on a timer. A store that fails to open is reported as
+`store_unavailable` (exit 78), never as an empty vault. Runbook:
+[`docs/subscription-tokens.md`](subscription-tokens.md).
+
 **An unopenable store is reported, never silently skipped.** A store that fails to open after the preflight used to fall back to the deployed `.env` values without a word, so a rotated credential kept serving the stale one. `bootstrap_exported_names()` now surfaces the failure instead of degrading quietly. The setup flow's two env files (`web/lib/setup/envFiles.ts`) are written as a pair that rolls back, so an interrupted save can no longer leave one file updated and the other stale, and the setup token now expires after `SETUP_TOKEN_TTL_MS` (1h from first use, `web/lib/setup/setupToken.ts`), so an abandoned wizard cannot leave a credential-writing token alive for the process lifetime.
 
 The first container cutover is a one-time migration: before any restart, copy
@@ -142,6 +151,15 @@ container on an isolated bridge network (egress only) instead of the host
 stack every other unit uses. Adding an env var the newsfeed needs means
 extending the allowlist in `render_env_file`; the contract tests in
 `cloud/tests/test_app_runtime.py` pin both behaviors.
+
+**App startup and rollback images.** The nextjs container starts through
+`next-clerk-guard`, which requires the runtime Clerk publishable key to match
+an entire key token in the baked client bundle before starting Next.js.
+
+Pre-pull compares registry and local image digests before reusing cached
+release tags. Cleanup preserves the target and durable rollback SHAs, takes
+the existing deploy lock nonblockingly, and skips pruning when rollback
+metadata or the running app population is unavailable.
 
 There is no escrow, and `secrets.db` is
 bound to its key by fingerprint (`key_binding` table): with rows present and
@@ -271,7 +289,7 @@ Hetzner host systemd is the production surface. Laptop dev uses launchd plists i
 
 **Nightly loops on the Mac mini** (launchd, staggered 10 minutes apart; each cycle runs three phases in order: audit, remediate, deliver). Each runs in its own clone under `~/radon-weekend/` that hard-resets to `origin/main` every phase, uses a per-loop venv (`~/radon-weekend/venv-<loop>`) plus the shared `~/radon-weekend/.env`, and holds a per-clone `.weekend-runner.lock`. A wrapper refuses the clone unless it carries BOTH `.radon-weekend-runner` and that loop's own `.radon-<loop>-runner` marker, so pointing one loop at another's clone is a `REFUSED`, not a cross-run collision. The shared `.env` is not imported wholesale: each wrapper's `_notify_curl` reads only `PUSHOVER_USER` and `PUSHOVER_TOKEN` from it in bash and pages via `/usr/bin/curl` (never python). Model spend rides the claude.ai subscription only: every wrapper unsets each API-key / auth-token / base-URL / Bedrock / Vertex / Foundry / gateway variable the installed Claude Code honors (the list is re-derived against the installed binary, not trusted from a pin: on 2026-09-07 that added `CLAUDE_CODE_API_BASE_URL` and `CLAUDE_CODE_HFI_BEARER_TOKEN` for 2.1.263; on 2026-09-14 the approved pin moved to 2.1.270 and the pass added the gateway token descriptor, host-auth env var and creds file, `ANTHROPIC_UNIX_SOCKET`, `ANTHROPIC_PROFILE` plus its federation ids, and the `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST` flag; on 2026-09-15 the pin moved to 2.1.272 and the pass added no name, with the per-name decision recorded in each wrapper's comment block and the approved tool pins in `docs/security-approved-tools.md`; `CLAUDE_CODE_OAUTH_TOKEN` is deliberately left alone because it is the subscription credential itself) (naming it on stderr and as `ignored=` on the phase-start line, never the value) and runs anyway, scrubs those lines out of a provisioned `web/.env` in place (except the security loop, whose clone is credential-free: any `.env` / `.env.ib-mode` / `web/.env` present there is `REFUSED`, not scrubbed), and `REFUSED`s only what `unset` cannot reach: a `.deepsec/.env*` / `.env.local` key line or a Claude Code settings-level `apiKeyHelper` / `env` reroute. Those file checks (and the security clone's credential-file check) run again at the start of every phase and continuation round, after the reset and before `claude` launches, so a file an in-phase agent plants cannot be inherited by the next phase. The `setup_*` scripts read the clone origin from their own checkout (`git -C "$SRC_REPO"`), never the caller's cwd, and `REFUSE` when that is not a Radon checkout. Never point another job, worktree, or responder at these clones. Per-phase run logs under `$REPO/logs/<loop>` are owner-only (the wrappers create the directory `0700` and the log files `0600`, so agent transcripts are not world-readable), each loop's deliver tooling only resolves and renders PRs whose head lives in this repository, and a ready-to-merge URL is verified against the recorded PR before it is rendered into a notification. The `Fires` column is generated from each plist's `StartCalendarInterval`. Loop semantics live in `.claude/skills/<loop>/SKILL.md`; wrapper mechanics in the wrapper script; state on the rolling GitHub issue carrying the label.
 
-**A phase is OK only on evidence (REL-187 / REL-188).** `ground_truth` resets the clone to the newest `ci.yml` push run that concluded success and that the tip descends from, not the raw tip, so a loop firing minutes after a red push does not spend its cycle on a tree CI already rejected; GitHub unreachable keeps the checked-out tip with a logged warning. In the four fallback loops, an `audit` or `remediate` phase whose agent exits 0 without commit evidence or a valid completed no-op declaration reports `INCOMPLETE` and exits 75 rather than `OK`. A completed audit with no findings, or remediation with no safe source-actionable change, needs a durable checkpoint and report, not an artificial commit. Deliver is keyed on its verdict line instead, since a PR green first time needs no new commit.
+**A phase is OK only on evidence (REL-187 / REL-188).** `ground_truth` resets the clone to the newest `ci.yml` push run that concluded success and that the tip descends from, not the raw tip, so a loop firing minutes after a red push does not spend its cycle on a tree CI already rejected; GitHub unreachable keeps the checked-out tip with a logged warning. `ground_truth` also runs `git sparse-checkout disable` before the checkout (T-490): on 2026-09-08 the testing clone was hand-set to exclude `/.codex/`, so the tracked `.codex/skills/**` render never reached disk while `git status` stayed clean, and `test_portable_prompt_sync.py` failed 21 tests on every audit from 2026-09-17. Ground truth is the whole tracked tree. In the four fallback loops, an `audit` or `remediate` phase whose agent exits 0 without commit evidence or a valid completed no-op declaration reports `INCOMPLETE` and exits 75 rather than `OK`. A completed audit with no findings, or remediation with no safe source-actionable change, needs a durable checkpoint and report, not an artificial commit. Deliver is keyed on its verdict line instead, since a PR green first time needs no new commit.
 
 **A finished no-op is declared, not inferred.** HEAD alone cannot separate the
 stall that check was built for from a phase that ran end to end and honestly

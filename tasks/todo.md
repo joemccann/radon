@@ -1,3 +1,24 @@
+# Task: Four-digit chain strikes [IMPLEMENTED; PR CI PENDING]
+
+SNDK calls ladder clips `$1,737.00` to `$1,70...` because chain-first pins
+`.chain-anchor-strike-col` at 72px and strike cells inherit ellipsis.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red CSS + E2E: 4-digit formatted strike fully visible
+- T2 depends_on: [T1] - Widen strike col; do not ellipsis strike identity
+- T3 depends_on: [T2] - Focused green, PR, CI
+
+## Checklist
+
+- [x] T1 Failing strike-column contract + chain-first four-digit overflow assert
+- [x] T2 CSS width 7.5rem + clip on `td.chain-strike`
+- [ ] T3 PR, CI green
+
+## Review
+
+- [x] Vitest `chain-strike-column.test.ts` 3 passed. Playwright CSS
+      measurement 1 passed (`$1,737.00` and `$12,345.00` unclipped).
 # Task: Reliability remediate 2026-09-17 [DONE]
 
 Reduced-capability rung: remediate P0/P1 only. Today's audit carries one P2
@@ -7635,3 +7656,28 @@ Python run interrupted after 11,427 passed / 19 skipped / 15 unrelated failures
 in model-ladder, research-runtime and vision-cascade tests (local subscription
 discovery). Full Vitest: 979 files / 9,734 tests passed. Exact-head CI recorded
 in PR before handoff.
+
+## Testing remediation 2026-09-18 (reduced P0/P1)
+- [x] T1 depends_on: [] Read rolling issue #83, verify runner markers and branch.
+- [x] T2 depends_on: [T1] T-498: reproduce with synthetic subscription files; isolate three suites; verify both outer environments.
+- [ ] T3 depends_on: [T1] T-496: red/green all-leg P&L measurement and mocked browser display.
+- [x] T4 depends_on: [T2] Run serial full gates three times; preserve terminal results, including red gates.
+- [ ] T4b depends_on: [T1] Finish legacy P0/P1 reconciliation and T-247 remediation.
+- [ ] T5 depends_on: [T4] Persist complete carry-forward issue report and publication classification.
+
+### Testing remediation review (2026-09-18)
+- T-498: 15 red before isolation; 117 green with/without outer canary credentials.
+- T-496: 6 mutation reds; 37 focused greens; final full Vitest 9,739 passed x3.
+- Root pytest: 13,425 passed / 21 T-490 failures x3. Cloud: 1,870 passed / 4 T-488 failures x3. Both failure lists stable.
+- All started stages finished. Browser sandbox refusal and unfinished legacy P0/P1 work keep the phase INCOMPLETE. Complete inventory retained on issue #83; audit cursor unchanged.
+
+## Reliability remediate 2026-09-18 (reduced P0/P1 scope)
+- [x] T1 depends_on: [] Verify runner and read complete issue #81 checkpoint before local ledgers.
+- [x] T2 depends_on: [T1] Restore isolated dependencies and establish full baseline.
+- [x] T3 depends_on: [T2] Red/green REL-258, REL-259, REL-260, REL-262 plus REL-151/152/226; reconcile inherited residuals. REL-260 visual verification BLOCKED after three browser launches.
+- [x] T4 depends_on: [T3] Complete permanent drills and three sequential full gates; prepare complete durable issue report and guarded publication inputs.
+Dependency graph: T1 -> T2 -> T3 -> T4.
+
+Review (source preservation): seven P1 findings implemented in six root-cause commits; focused checks 388 Python / 162 cloud / 69 Vitest passed, cloud 2 skipped; permanent drills 132 Python / 12 Vitest passed. Four full-cloud failures reproduce unchanged on b33032b4. Final three full-gate runs and durable publication report remain pending.
+
+Reliability closing review 2026-09-18: three full runs each 13505 Python passed / 9742 Vitest passed / 1881 cloud passed, 4 verified baseline failures, 76 cloud skipped; permanent drills 144 passed. REL-260 browser verification remains BLOCKED after three installed-browser launches. Complete inherited acceptance is preserved in the prepared issue #81 report; publication and notification receipts are tracked in durable reliability scratch.

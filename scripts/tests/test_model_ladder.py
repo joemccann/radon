@@ -2,8 +2,12 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
+
+# T-498: file-backed subscriptions are opt-in synthetic fixtures.
+pytestmark = pytest.mark.usefixtures("isolated_model_credentials")
 
 from clients.model_ladder import (
     MODEL_LADDER_ORDER,
@@ -17,6 +21,16 @@ from clients.model_ladder import (
     extract_via_vision,
     wired_providers,
 )
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_auth_home(monkeypatch, tmp_path):
+    # Ladder auth discovery falls back to Path.home(); keep host auth files
+    # (~/.claude, ~/.codex, ~/.grok) out of these hermetic-env tests.
+    monkeypatch.setenv("HOME", str(tmp_path / "hermetic-home"))
+    monkeypatch.setattr(
+        Path, "home", classmethod(lambda cls: tmp_path / "hermetic-home")
+    )
 
 
 ROWS = [{"underlying": "E-Mini S&P 500 Index", "position_today": 0.45}]
@@ -776,3 +790,76 @@ class TestNvidiaTextDefault:
             "meta/llama-3.2-90b-vision-instruct",
             "meta/llama-3.2-11b-vision-instruct",
         )
+
+
+class TestNoAuthFilesFlag:
+    """RADON_LADDER_NO_AUTH_FILES=1 disables every file-based auth discovery.
+
+    Credential-free loops pass a scrubbed env, but the implicit Path.home()
+    fallback still discovered host auth files; the flag makes discovery
+    env-var-only so their children stay keyless.
+    """
+
+    def _seeded_home(self, tmp_path):
+        home = tmp_path / "home"
+        (home / ".claude").mkdir(parents=True)
+        (home / ".claude" / ".credentials.json").write_text(
+            json.dumps({"claudeAiOauth": {"accessToken": "claude-file-token"}}),
+            encoding="utf-8",
+        )
+        (home / ".codex").mkdir()
+        (home / ".codex" / "auth.json").write_text(
+            json.dumps({"tokens": {"access_token": "codex-file-token"}}),
+            encoding="utf-8",
+        )
+        (home / ".grok").mkdir()
+        (home / ".grok" / "auth.json").write_text(
+            json.dumps({"access_token": "grok-file-token"}),
+            encoding="utf-8",
+        )
+        return home
+
+    def test_flag_blocks_all_home_auth_file_discovery(self, tmp_path):
+        from clients.model_ladder import _auth_for
+
+        home = self._seeded_home(tmp_path)
+        env = {"HOME": str(home), "RADON_LADDER_NO_AUTH_FILES": "1"}
+        assert _auth_for("anthropic", env) is None
+        assert _auth_for("codex", env) is None
+        assert _auth_for("grok", env) is None
+        assert wired_providers(env) == ()
+
+    def test_flag_blocks_explicit_file_paths_too(self, tmp_path):
+        from clients.model_ladder import _auth_for
+
+        home = self._seeded_home(tmp_path)
+        token_file = tmp_path / "oauth.txt"
+        token_file.write_text("claude-file-oauth", encoding="utf-8")
+        env = {
+            "RADON_LADDER_NO_AUTH_FILES": "1",
+            "CLAUDE_CODE_OAUTH_TOKEN_FILE": str(token_file),
+            "CLAUDE_CONFIG_DIR": str(home / ".claude"),
+            "CODEX_HOME": str(home / ".codex"),
+        }
+        assert _auth_for("anthropic", env) is None
+        assert _auth_for("codex", env) is None
+
+    def test_env_var_tokens_still_wire_under_flag(self, tmp_path):
+        home = self._seeded_home(tmp_path)
+        env = {
+            "HOME": str(home),
+            "RADON_LADDER_NO_AUTH_FILES": "1",
+            "CLAUDE_CODE_OAUTH_TOKEN": "oauth-env",
+            "GEMINI_OAUTH_TOKEN": "gem-oauth",
+        }
+        wired = wired_providers(env)
+        assert "anthropic" in wired
+        assert "gemini" in wired
+
+    def test_without_flag_file_discovery_unchanged(self, tmp_path):
+        from clients.model_ladder import _auth_for
+
+        home = self._seeded_home(tmp_path)
+        auth = _auth_for("grok", {"HOME": str(home)})
+        assert auth is not None
+        assert auth.token == "grok-file-token"

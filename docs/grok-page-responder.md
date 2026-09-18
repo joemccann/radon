@@ -115,6 +115,12 @@ pickup refuses:
 - a branch that does not descend from `origin/main`, or exceeds the commit cap
   (default 20).
 
+A pushed branch remains pending until pickup confirms its PR URL. Later
+runs reconcile the PR without pushing the branch again, reuse an open PR,
+and retain a closed or merged PR's terminal disposition. If the source and
+origin heads differ, pickup refuses the branch instead of overwriting it.
+These checks retain the `.github/` refusal on repeated pickup runs.
+
 Fetching from a hostile repository is a supported git operation, and nothing
 in pickup executes code out of the fetched tree. Regressions:
 `scripts/tests/test_grok_fix_pickup.py`.

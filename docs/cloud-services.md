@@ -557,6 +557,12 @@ Re-check with `turso plan show` after any plan change. Nightly dumps remain mand
 | `radon-db-backup.timer` | **09:00** | Full Turso dump after archive + retention. |
 | `radon-media-backup.timer` | **10:15** | Mirror `media.radon.run` tree (`/home/radon/radon-cloud/media`) → B2 prefix `media/`. Heartbeat: `media-backup`. `TimeoutStartSec=3600`. |
 
+## Subscription tokens (agent CLIs)
+
+`radon-subscription-tokens.timer` fires every 30 minutes (explicit UTC, `Persistent=true`), so a one-hour access token is always refreshed at least once inside its life. The oneshot seals, refreshes and restores the anthropic / codex / grok / gemini credential files through the existing encrypted secret store and heartbeats the `subscription-tokens` row on every run. It pages only when a browser login is the sole remaining move. Runbook and per-provider re-auth commands: [subscription-tokens.md](subscription-tokens.md).
+
+---
+
 ## Disk cleanup (weekly)
 
 2026-08-27: the watchdog `root-disk-usage` check paged P1 at 98% of the 75G
@@ -825,7 +831,7 @@ newest statement period is more than `MAX_DELIVERY_LAG_DAYS` (1) behind the
 last session AND an empty remote is not expected for the date, R-389 + R-448;
 never on `cash-flow-sync`; once any file heartbeats `error`, later `ok`
 heartbeats in the same run are suppressed, so the row reports the batch's
-worst outcome, REL-210). A transient sFTP `get` failure (peer reset, kex drop, connect timeout; `_is_transient_sftp_get`) on an already-processed older file does not fail the oneshot, and a TWR build that returns `degraded` / `unavailable` after the cash-flow persist is not an ingest failure (perf-twr owns that page), page 5a2eb828, 2026-09-16. Stripped env
+worst outcome, REL-210). A transient sFTP `get` failure (peer reset, kex drop, connect timeout; `_is_transient_sftp_get`) is suppressed only when a strictly newer statement from the same account and query was successfully applied or confirmed duplicate in this sweep. Missing or unparseable delivery dates are not suppressed. Failures name the affected query/account keys in the final error heartbeat, including on repeated runs. A TWR build that returns `degraded` / `unavailable` after the cash-flow persist is not an ingest failure (perf-twr owns that page), page 5a2eb828, 2026-09-16. Stripped env
 `/var/lib/radon/flex-secrets/env` (no `TWS_PASSWORD`). Units on
 `auto-sync-units.txt`.
 
@@ -1123,3 +1129,5 @@ aws s3 ls "s3://radon-archive/db_backups/" --endpoint-url "$RADON_ARCHIVE_S3_END
 
 Restore is unchanged: pull the object, then follow the "Restore runbook"
 above against the downloaded `radon-<stamp>.sql.gz`.
+
+A duplicate Flex ingest confirms cash-flow row IDs and NAV dates, or journal execution coverage through bounded read-only Hrana queries before reporting persistence. Missing or unreadable coverage retains the applied claim, returns an error, and requires operator reconciliation; the puller rejects duplicate results without this explicit confirmation. It never automatically replays an applied delivery to repair missing rows.

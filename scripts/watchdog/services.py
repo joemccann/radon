@@ -428,6 +428,14 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # event-odds — laptop launchd 3x weekday, holiday-aware. Windows
     # match catalysts (7h open / 4d closed). Polymarket only — no IB.
     "event-odds": {"open": 7 * _HOUR, "closed": 4 * _DAY, "requires_ib": False},
+    # subscription-tokens — agent-CLI subscription credential vault + refresh
+    # (scripts/subscription_tokens via radon-subscription-tokens.timer, every
+    # 30 min, 24/7). Heartbeats ok/error every run with the worst provider
+    # state. Uniform 3h window: the daily bucket checks hourly, so anything
+    # tighter cannot be observed sooner, and 3h absorbs five missed fires plus
+    # timer jitter before a dead timer is called stale. Provider token
+    # endpoints + the local secret store — no IB dependency.
+    "subscription-tokens": {"open": 3 * _HOUR, "closed": 3 * _HOUR, "requires_ib": False},
     # disk-cleanup — WEEKLY root-filesystem reclaim on the VPS
     # (cloud/scripts/disk_cleanup.py via radon-disk-cleanup.timer, Sun 03:20
     # UTC). Heartbeats ok/error every run. 8-day window uses the
@@ -644,6 +652,9 @@ BUCKETS: dict[str, list[str]] = {
         "db-retention",
         # Nightly media.radon.run tree backup to B2 — 48h window.
         "media-backup",
+        # Subscription-token vault refresh (every 30 min) — hourly check
+        # surfaces a dead timer within 1h of the 3h window expiring.
+        "subscription-tokens",
         # Weekly weekend disk cleanup on the VPS — hourly check surfaces a
         # missed sweep within 1h of the 8-day window expiring.
         "disk-cleanup",
