@@ -122,7 +122,8 @@ archived before insertion; no existing observations were overwritten.
 Initial production cache rebuilt at `2026-09-18T05:21:05.307043Z` (679,532 bytes):
 SEC 5,175 latest observations starting Dec 31 2006; Ramp 152 starting Jan 2023;
 issuer disclosures 14 starting Jan 26 2025. Four further reviewed quarters
-extend hardware history to Jan 28 2024; a second cache rebuild follows.
+extend hardware history to Jan 28 2024. Final cache rebuilt at
+`2026-09-18T05:33:19.959929Z` (680,537 bytes), including all 18 hardware facts.
 UI changes still require PR merge
 and deployment; the backfilled observations already persist independently.
 The reviewed issuer JSON is checked in at
