@@ -125,6 +125,7 @@ CATALOG: dict[CatalogKey, Capability] = {
     ("POST", "/strength-confirmation/scan"): "read.spawn",
     ("POST", "/theta-harvester/scan"): "read.spawn",
     ("POST", "/vol-skew-mr/scan"): "read.spawn",
+    ("POST", "/bounce-setup/scan"): "read.spawn",
     ("GET", "/ticker/ratings"): "read",
     ("POST", "/trading/halt"): "admin",
     ("POST", "/trading/kill"): "admin",
