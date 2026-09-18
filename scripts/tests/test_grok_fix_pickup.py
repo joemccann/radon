@@ -110,15 +110,16 @@ class TestHappyPath:
         assert len(ensure.calls) == 1
         assert ensure.calls[0]["head"] == "fix/relay-restart"
 
-    def test_second_run_is_a_no_op(self, world):
+    def test_second_run_reconciles_the_pr_without_another_push(self, world):
         _vps_branch(world, "fix/relay-restart")
         _run(world)
         ensure = _FakeEnsurePr()
 
         results = _run(world, ensure=ensure)
 
-        assert [r["action"] for r in results] == ["already_pushed"]
-        assert ensure.calls == []
+        assert [r["action"] for r in results] == ["picked_up"]
+        assert len(ensure.calls) == 1
+        assert results[0]["url"] == "https://github.com/x/y/pull/1"
 
 
 class TestRefusals:
@@ -185,3 +186,42 @@ class TestNeverMerges:
             assert not pickup.is_pickup_branch(bad), bad
         assert pickup.is_pickup_branch("fix/relay-restart")
         assert pickup.is_pickup_branch("fix/leap_reports.502")
+
+
+def test_pr_failure_after_push_is_retried_without_new_commit(world):
+    _vps_branch(world, "fix/retry-pr")
+    def unavailable(**kwargs):
+        raise pickup.ir_ensure_pr.IrEnsurePrError("temporary GitHub failure")
+    with pytest.raises(pickup.ir_ensure_pr.IrEnsurePrError):
+        _run(world, ensure=unavailable)
+    before = _git(world["origin"], "rev-parse", "refs/heads/fix/retry-pr").stdout
+    ensure = _FakeEnsurePr()
+    result = _run(world, ensure=ensure)
+    assert len(ensure.calls) == 1
+    assert result[0]["url"] == "https://github.com/x/y/pull/1"
+    assert _git(world["origin"], "rev-parse", "refs/heads/fix/retry-pr").stdout == before
+
+
+def test_changed_origin_head_is_refused_without_push_or_pr(world):
+    _vps_branch(world, "fix/changed")
+    _run(world)
+    _commit(world["vps"], "app.py", "x = 3\n", "new unreviewed head")
+    ensure = _FakeEnsurePr()
+    result = _run(world, ensure=ensure)
+    assert result[0]["action"] == "refused"
+    assert "head" in result[0]["reason"]
+    assert ensure.calls == []
+
+
+@pytest.mark.parametrize("result", [None, {}, {"action": "created"}])
+def test_pickup_requires_a_confirmed_pr_url(world, result):
+    _vps_branch(world, "fix/no-pr-proof")
+    with pytest.raises(pickup.PickupError, match="PR URL"):
+        _run(world, ensure=lambda **kwargs: result)
+
+
+def test_default_pickup_hook_requests_terminal_dispositions(monkeypatch):
+    calls = []
+    monkeypatch.setattr(pickup.ir_ensure_pr, "ensure_pr", lambda **kwargs: calls.append(kwargs) or {"url": "https://github.com/x/y/pull/1"})
+    pickup._ensure_pr_default(head="fix/example")
+    assert calls[0]["include_terminal"] is True

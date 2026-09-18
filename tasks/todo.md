@@ -7613,3 +7613,10 @@ Dependency graph: T1 -> {T2,T3,T3b} -> T4 -> T5.
 - [ ] T5 depends_on: [T4] Verify exact-head checks and screenshots, notify and record results.
 
 Review: descriptive residual-model labels, display-only percentages, eight metric info bubbles and stable hover/focus surfaces. Sampled token histories connect at normal observation intervals and preserve larger gaps. TypeScript and Impeccable detector pass; suites and screenshots run on GitHub only.
+
+## Reliability remediate 2026-09-18 (reduced P0/P1 scope)
+- [x] T1 depends_on: [] Verify runner and read complete issue #81 checkpoint before local ledgers.
+- [x] T2 depends_on: [T1] Restore isolated dependencies and establish full baseline.
+- [ ] T3 depends_on: [T2] Red/green REL-258, REL-259, REL-260, REL-262 in separate commits; reconcile inherited P0/P1 residuals.
+- [ ] T4 depends_on: [T3] Permanent drills and three sequential full gates, durable issue report and guarded publication.
+Dependency graph: T1 -> T2 -> T3 -> T4.
