@@ -221,15 +221,17 @@ describe("PositionTable renders no basis for a `mixed` position", () => {
     expect(cellUnder("Return %")).toBe("N/A");
   });
 
-  it("Today P&L does not reprint total P&L when entry_date is today", () => {
-    render(
-      <PositionTable
-        positions={[partiallyRolledVertical("mixed", { entry_date: todayET() })]}
-        prices={{}}
-      />,
-    );
-    // An unmeasured overnight leg prevents a complete daily total.
+  it("Today P&L is unavailable when an overnight leg is unmeasured", () => {
+    const position = partiallyRolledVertical("mixed", { entry_date: todayET() });
+    const view = render(<PositionTable positions={[position]} prices={{}} />);
+    // T-496: the old +$1,000 assertion pinned a session-leg-only total.
     expect(cellUnder("Today P&L")).toBe("—");
+    expect(cellUnder("P&L")).toBe(BLENDED_PNL);
+
+    view.rerender(
+      <PositionTable positions={[{ ...position, ib_daily_pnl: 1250 }]} prices={{}} />,
+    );
+    expect(cellUnder("Today P&L")).toBe("+$1,250");
     expect(cellUnder("P&L")).toBe(BLENDED_PNL);
   });
 
@@ -258,7 +260,7 @@ describe("mixed basis separates capital from measurable leg P&L", () => {
   it("Today P&L for a same-day `mixed` position does not dump overnight P&L into today", () => {
     const sameDay = partiallyRolledVertical("mixed", { entry_date: todayET() });
     // No closes: overnight long is unmeasured; session short is MV − EC = +$1,000.
-    // Neither the measured subset nor total P&L is a complete daily figure.
+    // The session leg alone is not the position total.
     expect(getTodayPnlDollars(sameDay, {})).toBeNull();
     const sameDayClean = partiallyRolledVertical("session_fills", { entry_date: todayET() });
     expect(getTodayPnlDollars(sameDayClean, {})).toBe(3500);

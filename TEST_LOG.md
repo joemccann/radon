@@ -955,3 +955,51 @@ after its three recorded fixture attempts.
 
 Closing gates: not run. The focused P1 blocker is deterministic, so three
 full-gate runs cannot honestly be claimed.
+
+## Remediation 2026-09-18 (testing/2026-09-18, reduced P0/P1)
+
+| Task | Status | Evidence |
+|---|---|---|
+| T-498 | Focused GREEN; full gates pending | Synthetic outer `.codex/auth.json`: unchanged suites 15 failed / 102 passed. Scoped home/env fixture: same suites 117 passed with outer canary present, 117 passed absent. Real subscription-file precedence tests retained; production code unchanged. Local preservation commit before long gates per unattended phase contract. |
+
+| T-496 | Focused GREEN; browser BLOCKED by sandbox | RED: mixed-age suite 4 failed / 6 passed (missing overnight baseline, either missing leg mark, missing session basis); GREEN: 10 passed including complete -550, IB override and no-leg cases. Real Chromium launch exits SIGTRAP, `bootstrap_check_in: Permission denied (1100)`, before any assertion. Added mocked curated browser case for unavailable row and screenshot capture; not claimed executed. Operator: run `cd web && npx playwright test e2e/portfolio-defined-combo-pnl.spec.ts --project=chromium` on a runner permitting Chromium Mach bootstrap and inspect its screenshot. Local preservation commit before full gates. |
+
+Round 1: root pytest 13,425 passed / 21 failed / 19 skipped (all standing
+T-490); Vitest 9,737 passed / 2 failed. Both Vitest failures were existing
+assertions pinning the T-496 partial sum (+$1,000 with no overnight close).
+Replaced those exact-value bug pins with exact null/unavailable assertions,
+retaining lifetime +$3,500 and adding rendered authoritative IB +$1,250.
+No assertion was loosened or skipped. Subsequent full rounds verify these
+corrected tests; round 1 is not a green final-tree result.
+
+Final verification for 2026-09-18 (all detached stages terminal):
+
+| Gate | Round 1 | Round 2 | Round 3 |
+|---|---|---|---|
+| Root pytest | 13,425 passed / 21 failed / 19 skipped | 13,425 passed / 21 failed / 19 skipped | 13,425 passed / 21 failed / 19 skipped |
+| Vitest | 9,737 passed / 2 failed (old T-496 bug pins, corrected afterward) | 9,739 passed / 979 files | 9,739 passed / 979 files |
+| Cloud | 1,870 passed / 4 failed / 76 skipped | 1,870 passed / 4 failed / 76 skipped | 1,870 passed / 4 failed / 76 skipped |
+
+Additional full Vitest after the correction: 9,739 passed / 979 files; this
+makes three consecutive full Vitest greens on the corrected test assertions.
+Pytest failure lists are identical across all three runs (T-490 portable
+prompt artifacts); cloud failure lists are identical across all three runs
+(T-488 process-tree timeouts). These are red gates, not a passing baseline.
+No gate or timeout threshold was widened.
+
+T-496 final mutation proof: an in-memory transform restoring the skipped-leg
+partial sum produced 6 failed / 26 passed; the unchanged correct source
+passed 37 focused tests across three files. Browser discovery collected both
+curated spec cases; Chromium execution and screenshot verification remain
+blocked by the sandbox. T-498 remains 117 passed with synthetic outer
+subscription credentials present and 117 passed absent.
+
+Phase INCOMPLETE. Reduced scope was P0/P1. T-247 remains verified and
+unimplemented; the complete legacy inventory is retained on issue #83, not
+silently closed or labeled BLOCKED without three attempts. T-496 browser
+acceptance remains operator-only on a Chromium-capable runner. T-488 and
+T-490 retain their prior exact operator actions. No PR/push or live Gateway
+action occurred. All gate sentinels are terminal, post-gate worktree was
+clean, and 21 logs contained zero matches for exported/Pushover credentials.
+Evidence and a verified Git bundle are preserved outside the disposable
+checkout at `.testing-deliver/remediate-2026-09-18/`.

@@ -849,16 +849,16 @@ function mixedAgeTodayPnl(
   // IB reqPnLSingle is per-conId: overnight legs vs close, same-day vs fill.
   if (pos.ib_daily_pnl != null && Number.isFinite(pos.ib_daily_pnl)) return pos.ib_daily_pnl;
   let pnl = 0;
-  let any = false;
+  if (pos.legs.length === 0) return null;
   for (const leg of pos.legs) {
     const part = leg.basis_source === "session_fills"
       ? sessionFillLegTodayPnl(pos, leg, prices)
       : overnightLegTodayPnl(pos, leg, prices);
+    // A partial or non-finite leg sum is not a measurable position-level Today P&L.
     if (part == null || !Number.isFinite(part)) return null;
     pnl += part;
-    any = true;
   }
-  return any ? pnl : null;
+  return pnl;
 }
 
 export function getTodayPnlDollars(pos: PortfolioPosition, prices?: Record<string, PriceData>): number | null {

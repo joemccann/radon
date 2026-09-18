@@ -6,6 +6,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
+# T-498: file-backed subscriptions are opt-in synthetic fixtures.
+pytestmark = pytest.mark.usefixtures("isolated_model_credentials")
 import requests
 
 from research import model, pipeline, seed, worker
