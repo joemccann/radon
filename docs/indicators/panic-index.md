@@ -1,7 +1,7 @@
 # PANIC — Radon Panic Proxy (Goldman S&T "Panic Index" reconstruction)
 
-**Status:** build spec, not built. Implementers follow this literally; open a
-draft PR, never merge it yourself.
+**Status:** shipped (draft PR). Implementers followed this literally; leave
+the PR draft, never merge it yourself.
 Pattern authority: `.claude/skills/new-indicator/SKILL.md`.
 Reference implementation to copy throughout: `scripts/fetch_vixts.py` (multi-file
 Cboe conditional GET, `_write_db` isolation, freshness verdict, `parse_index_csv`)
@@ -122,10 +122,13 @@ in VIX and VIX3M are absent from VVIX or SKEW and are dropped by the inner join
    `_apply_freshness_verdict` from `fetch_vixts.py` unchanged.
 3. **VVIX and SKEW publish later than VIX/VIX3M.** The 02:50 UTC fire will
    often join to the prior session because the two late files have not
-   appended yet, so the timer fires twice (§I). Implementer must observe the
-   actual append time of both files across three sessions (`curl -sI` hourly
-   from 22:00 to 14:00 UTC) and record it in this section before the PR is
-   marked ready; adjust the second `OnCalendar` if 13:15 UTC is too early.
+   appended yet, so the timer fires twice (§I). Measured 2026-09-18 only
+   (three-session hourly watch was not available in this build window):
+   VIX/VIX3M `Last-Modified` 01:51 UTC, VVIX 12:01 UTC, SKEW 21:01 UTC, all
+   four files still ending 09/17 at 21:3x UTC. Second `OnCalendar` left at
+   13:15 UTC as specified. TODO: re-measure append time across three
+   sessions (`curl -sI` hourly 22:00-14:00 UTC) and move 13:15 if the SKEW
+   row still is not present by then.
 4. **Early VVIX rows are implausible** (15.71 on 2006-03-15, several prints
    under 40 in 2006). They predate the 2009-09-18 floor so the join never sees
    them, but the plausibility band in §C.7 still applies to the **latest** row

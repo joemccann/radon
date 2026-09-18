@@ -13,7 +13,7 @@ const regimePages = [
   "ats", "backtest", "bpi", "breadth", "calm-streak", "cor", "cot", "credit", "cri",
   "curve", "dispersion", "divyield", "gex", "grg", "hhlev", "hyad", "iei-hyg",
   "iv-spread", "ivrank", "ma-ratio", "margin", "short", "skew", "skew2d",
-  "straddle", "streaks", "trin", "vcg", "vixcor", "vixts",
+  "straddle", "streaks", "trin", "vcg", "vixcor", "vixts", "panic-index",
 ] as const;
 
 const regimeLoaded: Record<string, string> = {
@@ -26,6 +26,7 @@ const regimeLoaded: Record<string, string> = {
   short: '[data-testid="short-crowding-table"]', skew: '[data-testid="skew-chart-section"]', skew2d: '[data-testid="skew2d-chart-section"]',
   straddle: '[data-testid="straddle-chart-section"]', streaks: '[data-testid="streaks-chart-section"]', trin: '[data-testid="trin-chart-section"]',
   vcg: '[data-testid="vcg-history-chart-section"]', vixcor: '[data-testid="vixcor-chart-section"]', vixts: '[data-testid="vixts-chart-section"]',
+  "panic-index": '[data-testid="panic-index-chart-section"]',
 };
 
 export const CLEAR_ROUTE_CASES: ClearRouteCase[] = [

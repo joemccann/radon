@@ -23,7 +23,7 @@ Owner specs for regime tabs and the cheap-wing scanner. Add a row here when a sp
 | hyad | `/regime/hyad` | `hy-ad` | [hyad.md](hyad.md) |
 | hhlev | `/regime/hhlev` | `hhlev` | [hhlev.md](hhlev.md) |
 | vixts | `/regime/vixts` | `vixts` | [vixts.md](vixts.md) |
-| panic-index | `/regime/panic-index` | `panic-index` | [panic-index.md](panic-index.md) (spec only; not built. Radon proxy of the GS S&T Panic Index, not the GS index) |
+| panic-index | `/regime/panic-index` | `panic-index` | [panic-index.md](panic-index.md) (shipped. Radon proxy of the GS S&T Panic Index, not the GS index) |
 | dispersion | `/regime/dispersion` | `dispersion` | [dispersion.md](dispersion.md) |
 | streaks | `/regime/streaks` | on-demand, no timer | [streaks.md](streaks.md) |
 
