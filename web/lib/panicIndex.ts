@@ -3,8 +3,7 @@
  * series (VIX, VVIX, VIX/VIX3M, SKEW). Display types + formatters only.
  * The UI never recomputes a z-score, the composite, the change, or the rank.
  *
- * Radon reconstruction of the four inputs Goldman names for its Panic Index.
- * Not Goldman's index. Spec: docs/indicators/panic-index.md.
+ * Display types + formatters only. Spec: docs/indicators/panic-index.md.
  */
 
 /* ─── Constants (display copy only) ──────────────────── */

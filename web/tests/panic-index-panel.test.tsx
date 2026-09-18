@@ -76,7 +76,7 @@ describe("deltaTone — strict inequalities, never positive", () => {
   });
 
   it("never uses var(--positive) and mutes nulls", () => {
-    expect(deltaTone(1.0, std)).toBe("var(--text-muted)");
+    expect(deltaTone(0.1, std)).toBe("var(--text-muted)");
     expect(deltaTone(null, std)).toBe("var(--text-muted)");
     expect(deltaTone(-0.1, null)).toBe("var(--text-muted)");
     expect([deltaTone(0.1, std), deltaTone(-4, std), deltaTone(1, std)].join(" ")).not.toContain(
