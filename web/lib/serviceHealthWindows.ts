@@ -374,8 +374,10 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // UW vol/skew surface as strength/leap. On-demand so a quiet day does not
   // page; closed window bridges a weekend like the other UW scanners.
   "vol-skew-mr": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },
-  // ``bounce-setup``: mirrors vol-skew-mr (same UW surface, operator POST).
-  "bounce-setup": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },
+  // ``bounce-setup``: radon-bounce-setup.timer fires Mon-Fri 21:10 UTC, so a
+  // Friday run must still read fresh on Monday evening: 74h, mirrored in
+  // scripts/watchdog/services.py.
+  "bounce-setup": { open: 74 * HOUR, extended: 74 * HOUR, closed: 74 * HOUR, category: "scheduled", requires_ib: false },
   "discover": { open: 4 * DAY, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
   "flow-analysis": { open: 4 * DAY, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
   "analyst-ratings": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },

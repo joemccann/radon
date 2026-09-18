@@ -86,8 +86,9 @@ A leg whose data is unavailable is `null`, never a pass. Rows sort by verdict
 ## Gates
 
 - **Gate 2 (edge)**: each row carries `flow`, joined from the latest flow-scanner
-  snapshot for that ticker (`scan_snapshots` service of `scripts/scanner.py`), or
-  `null`. OPEN TRADE renders only when `verdict == "BOUNCE_SETUP"` and `flow` shows
+  snapshot (Turso `scanner_snapshots`, service `scanner`, falling back to
+  `data/scanner.json`): `top_signals[].direction` upper-cased becomes `flow.signal`,
+  `score` becomes `flow.score`, and a ticker absent from the scan is `null`. OPEN TRADE renders only when `verdict == "BOUNCE_SETUP"` and `flow` shows
   accumulation; otherwise the row reads `NO FLOW EDGE` and links to the ticker page.
 - **Gate 1 (convexity)**: OPEN TRADE opens a defined-risk call spread prefill, the
   same builder `volSkewMrOrderHref` uses. The chain ticket's own risk gate still applies.
