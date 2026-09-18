@@ -3,7 +3,7 @@ import { requireRouteAccess } from "@/lib/routeAccess";
 import { NextResponse } from "next/server";
 import { readFile } from "fs/promises";
 import { join } from "path";
-import { getDb } from "@/lib/db";
+import { dbExecute } from "@/lib/dbExecute";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 
@@ -25,11 +25,14 @@ export async function readBounceCache(): Promise<Record<string, unknown> | null>
 }
 
 async function readBounceFromDb(): Promise<TimestampedRead<Record<string, unknown>> | null> {
-  const result = await getDb().execute({
-    sql: `SELECT scan_time, payload FROM scan_snapshots
-          WHERE service = 'bounce-setup' ORDER BY scan_time DESC LIMIT 1`,
-    args: [],
-  });
+  const result = await dbExecute(
+    {
+      sql: `SELECT scan_time, payload FROM scan_snapshots
+            WHERE service = 'bounce-setup' ORDER BY scan_time DESC LIMIT 1`,
+      args: [],
+    },
+    { label: "bounce-setup" },
+  );
   if (result.rows.length === 0) return null;
   const row = result.rows[0] as unknown as { scan_time: string; payload: string };
   return {
