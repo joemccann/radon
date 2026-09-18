@@ -1,3 +1,24 @@
+# Task: Four-digit chain strikes [IMPLEMENTED; PR CI PENDING]
+
+SNDK calls ladder clips `$1,737.00` to `$1,70...` because chain-first pins
+`.chain-anchor-strike-col` at 72px and strike cells inherit ellipsis.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red CSS + E2E: 4-digit formatted strike fully visible
+- T2 depends_on: [T1] - Widen strike col; do not ellipsis strike identity
+- T3 depends_on: [T2] - Focused green, PR, CI
+
+## Checklist
+
+- [x] T1 Failing strike-column contract + chain-first four-digit overflow assert
+- [x] T2 CSS width 7.5rem + clip on `td.chain-strike`
+- [ ] T3 PR, CI green
+
+## Review
+
+- [x] Vitest `chain-strike-column.test.ts` 3 passed. Playwright CSS
+      measurement 1 passed (`$1,737.00` and `$12,345.00` unclipped).
 # Task: Reliability remediate 2026-09-17 [DONE]
 
 Reduced-capability rung: remediate P0/P1 only. Today's audit carries one P2
