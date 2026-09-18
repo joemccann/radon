@@ -233,7 +233,7 @@ test.describe("/portfolio mixed-age combo today pnl", () => {
 
     // No WS closes: an unmeasured overnight leg withholds the position total.
     await page.screenshot({ path: testInfo.outputPath("mixed-coverage-desktop.png"), fullPage: true });
-    await expect(todayCell).toHaveText("---");
+    await expect(todayCell).toHaveText("—");
     // Total P&L is still the accumulated long-put loss plus the short's −$150.
     await expect(pnlCell).toHaveText("-$162,085");
     await expect(todayCell).not.toHaveText("-$162,085");
