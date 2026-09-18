@@ -503,11 +503,14 @@ func resolveAPIKey(provider: String) async throws -> String {
 
 ## Radon HTTP model ladder (server)
 
-Native Mac OAuth above is the product pattern. On Radon hosts, the shared HTTP ladder in `scripts/clients/model_ladder.py` prefers the same subscription meters for research review and CTA vision:
+Native Mac OAuth above is the product pattern. On Radon hosts, the shared HTTP ladder in `scripts/clients/model_ladder.py` uses the same subscription meters for research review, CTA vision, knowledge distill, and the newsfeed tagger:
 
-- **Anthropic:** `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) or Linux `~/.claude/.credentials.json` — not prepaid `ANTHROPIC_API_KEY` when a subscription token is present.
-- **Codex:** `~/.codex/auth.json` ChatGPT OAuth access token before `OPENAI_API_KEY`.
-- **Grok:** `~/.grok/auth.json` before `XAI_API_KEY`.
-- **Gemini:** `GEMINI_OAUTH_TOKEN` / `GOOGLE_OAUTH_ACCESS_TOKEN` or `GEMINI_API_KEY` / `GOOGLE_API_KEY`.
+- **Anthropic / Grok / Codex / Gemini:** subscription credentials only by default. Prepaid `ANTHROPIC_API_KEY` / `XAI_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` (and aliases) do **not** wire those rungs unless `RADON_LADDER_ALLOW_PREPAID=1`.
+- **Anthropic:** `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) or Linux `~/.claude/.credentials.json`.
+- **Codex:** `~/.codex/auth.json` ChatGPT OAuth access token.
+- **Grok:** `~/.grok/auth.json`.
+- **Gemini:** `GEMINI_OAUTH_TOKEN` / `GOOGLE_OAUTH_ACCESS_TOKEN`.
+- **NVIDIA:** `NVIDIA_API_KEY` is always OK; text default `nvidia/nemotron-3-super-120b-a12b`.
+- **Cerebras:** last rung; leave paused on Hetzner until Joe yes.
 
-Weekend bash wrappers remain the Claude Code CLI sibling (they *unset* prepaid keys so the agent bills claude.ai). See the auth matrix in [Dropbox research](dropbox-research.md#auth-matrix-research--cta).
+Weekend bash wrappers remain the Claude Code CLI sibling (they *unset* prepaid keys so the agent bills claude.ai). See the auth matrix in [Dropbox research](dropbox-research.md#auth-matrix-research--cta--knowledge--newsfeed).

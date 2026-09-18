@@ -1,11 +1,12 @@
 """LLM distillation of knowledge docs into normalized searchable summaries.
 
 Uses the shared model ladder (``clients.model_ladder.complete_text_json``):
-subscription providers, then NVIDIA, then Cerebras last. Distillation is
-best-effort by contract: any failure returns None and never raises. The raw
-content is FTS-searchable regardless, and a stored row without a summary is
-re-attempted on the next ingest run (ingest.py's pre-filter only skips
-unchanged docs that already HAVE one).
+subscription credentials only for Anthropic/Grok/Codex/Gemini (prepaid wallets
+skipped unless ``RADON_LADDER_ALLOW_PREPAID=1``), then NVIDIA, then Cerebras
+last. Distillation is best-effort by contract: any failure returns None and
+never raises. The raw content is FTS-searchable regardless, and a stored row
+without a summary is re-attempted on the next ingest run (ingest.py's
+pre-filter only skips unchanged docs that already HAVE one).
 
 Keys come from process env first, then root .env, then web/.env. Never logged.
 """
