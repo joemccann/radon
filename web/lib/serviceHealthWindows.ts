@@ -615,6 +615,16 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // one missed Sunday surfaces before the second. Docker + local disk only.
   "disk-cleanup": { open: 8 * DAY, extended: 8 * DAY, closed: 8 * DAY, category: "scheduled", requires_ib: false },
 
+  // ``subscription-tokens`` is the agent-CLI subscription credential vault
+  // and autonomous refresh (scripts/subscription_tokens via
+  // radon-subscription-tokens.timer, every 30 min, 24/7). Heartbeats ok or
+  // error on every run, carrying the worst provider state. Uniform 3h window:
+  // the watchdog's daily bucket checks hourly, so a tighter window buys no
+  // earlier detection, and 3h absorbs five missed fires plus timer jitter
+  // before the row is called stale. Provider token endpoints plus the local
+  // encrypted secret store only — no IB dependency.
+  "subscription-tokens": { open: 3 * HOUR, extended: 3 * HOUR, closed: 3 * HOUR, category: "scheduled", requires_ib: false },
+
 };
 
 const DEFAULT_WINDOW: Window = {
