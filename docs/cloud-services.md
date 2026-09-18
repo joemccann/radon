@@ -559,7 +559,7 @@ Re-check with `turso plan show` after any plan change. Nightly dumps remain mand
 
 ## Subscription tokens (agent CLIs)
 
-`radon-subscription-tokens.timer` fires every 30 minutes (explicit UTC, `Persistent=true`), so a one-hour access token is always refreshed at least once inside its life. The oneshot seals, refreshes and restores the anthropic / codex / grok / gemini credential files through the existing encrypted secret store and heartbeats the `subscription-tokens` row on every run. It pages only when a browser login is the sole remaining move. Runbook and per-provider re-auth commands: [subscription-tokens.md](subscription-tokens.md).
+`radon-subscription-tokens.timer` fires every 30 minutes (explicit UTC, `Persistent=true`), so a one-hour access token is always refreshed at least once inside its life. The oneshot seals, refreshes and restores the anthropic / codex / grok / antigravity credential files through the existing encrypted secret store, proves each login with one real model call a day (the keepalive), and heartbeats the `subscription-tokens` row on every run. When a grant is dead it starts the CLI's own device login and pages the link, so the fix is one tap. Runbook and per-provider re-auth commands: [subscription-tokens.md](subscription-tokens.md).
 
 ---
 
