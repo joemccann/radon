@@ -1020,15 +1020,12 @@ describe("vol-cone-intraday freshness window", () => {
 });
 
 describe("bounce-setup freshness window", () => {
-  const MIN = 60_000;
-  const DAY = 24 * 60 * 60_000;
-
-  it("mirrors vol-skew-mr: on-demand, 30m open/extended, 3d closed, requires_ib false", () => {
-    expect(SERVICE_FRESHNESS_WINDOWS["bounce-setup"]).toEqual(SERVICE_FRESHNESS_WINDOWS["vol-skew-mr"]);
-    expect(getServiceCategory("bounce-setup")).toBe("on-demand");
-    expect(getFreshnessWindowMs("bounce-setup", "open")).toBe(30 * MIN);
-    expect(getFreshnessWindowMs("bounce-setup", "extended")).toBe(30 * MIN);
-    expect(getFreshnessWindowMs("bounce-setup", "closed")).toBe(3 * DAY);
+  it("is a scheduled weekday timer window matching scripts/watchdog/services.py", () => {
+    const HOUR = 60 * 60_000;
+    expect(getServiceCategory("bounce-setup")).toBe("scheduled");
+    expect(getFreshnessWindowMs("bounce-setup", "open")).toBe(74 * HOUR);
+    expect(getFreshnessWindowMs("bounce-setup", "extended")).toBe(74 * HOUR);
+    expect(getFreshnessWindowMs("bounce-setup", "closed")).toBe(74 * HOUR);
     expect(requiresIb("bounce-setup")).toBe(false);
   });
 });

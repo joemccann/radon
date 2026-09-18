@@ -298,3 +298,59 @@ class TestScanUniverse:
 
 
 from datetime import datetime, timezone  # noqa: E402
+
+
+class TestLiquidityGate:
+    """Illiquid strikes produce model IVs fit to junk quotes (UDR 37.5P,
+    2026-09-15: bid 0.75 / ask 4.50, IV 7.4 vs 29.3 the day before). Such days
+    must never drive a leg."""
+
+    def test_wide_quote_days_are_dropped(self):
+        from bounce_setup_scanner import MAX_REL_SPREAD, _historic_iv
+
+        assert MAX_REL_SPREAD == 0.25
+        payload = {"chains": [
+            {"date": "2026-09-14", "implied_volatility": "0.29", "nbbo_bid": "2.00", "nbbo_ask": "2.20"},
+            {"date": "2026-09-15", "implied_volatility": "0.07", "nbbo_bid": "0.75", "nbbo_ask": "4.50"},
+            {"date": "2026-09-16", "implied_volatility": "0.25", "nbbo_bid": "0", "nbbo_ask": "0.40"},
+            {"date": "2026-09-17", "implied_volatility": "0.24", "nbbo_bid": "2.40", "nbbo_ask": "2.60"},
+        ]}
+        assert _historic_iv(payload) == {"2026-09-14": pytest.approx(29.0), "2026-09-17": pytest.approx(24.0)}
+
+    def test_too_few_liquid_sessions_make_both_legs_unavailable(self, monkeypatch):
+        import bounce_setup_scanner as mod
+
+        assert mod.MIN_VALID_SESSIONS == 15
+        dates = [f"2026-08-{d:02d}" for d in range(3, 29)][:WINDOW + 1]
+
+        class Client:
+            def get_expiry_breakdown(self, t):
+                return {"data": [{"expiry": "2026-10-16"}]}
+
+            def get_option_contracts(self, t, **kw):
+                return {"data": [{"option_symbol": "UDR261016P00037500", "strike": "37.5", "expiry": "2026-10-16"}]}
+
+            def get_option_contract_historic(self, sym):
+                # Only every fourth session carries a tradeable quote.
+                return {"chains": [
+                    {"date": d, "implied_volatility": "0.25",
+                     "nbbo_bid": "2.00" if i % 4 == 0 else "0.50",
+                     "nbbo_ask": "2.10" if i % 4 == 0 else "4.50"}
+                    for i, d in enumerate(dates)
+                ]}
+
+        skew = {"sessions": [{"date": d, "value": 0.03 - 0.001 * i} for i, d in enumerate(dates)], "errors": []}
+        monkeypatch.setattr(mod, "fetch_skew_snapshot", lambda *a, **k: skew)
+        row = mod.stage2_row(
+            Client(),
+            {"ticker": "UDR", "stretch_rank": 4, "stretch_pctl": 0.6, "rsi": 8.7, "pct_b": -0.3,
+             "ret_z": -2.1, "ret_20d": -8.8},
+            [(d, 40.0 - 0.1 * i) for i, d in enumerate(dates)],
+            date(2026, 9, 18),
+            None,
+        )
+        assert row["verdict"] == "STRETCHED"
+        assert row["vol"]["pass"] is None
+        assert row["skew"]["pass"] is None
+        assert row["liquidity"]["valid_sessions"] < 15
+        assert any(e.startswith("illiquid_options") for e in row["errors"])

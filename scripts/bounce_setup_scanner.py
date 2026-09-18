@@ -74,6 +74,13 @@ IV_RUNUP_MIN = 2.0
 IV_OFF_PEAK_MIN = 0.25
 SKEW_EASE_MIN = 0.3
 SLOPE_SESSIONS = 3
+# Liquidity gate. UW's daily contract IV is a model fit to that day's NBBO, and
+# on an illiquid strike the quote is junk (UDR 37.5P 2026-09-15: 0.75 / 4.50,
+# IV 7.4 against 29.3 the session before). A day counts only when both sides
+# are quoted and the spread is at most 25% of the mid; a window with fewer
+# than 15 such sessions cannot support either leg.
+MAX_REL_SPREAD = 0.25
+MIN_VALID_SESSIONS = 15
 EXPIRY_DTE_MIN = 30
 EXPIRY_DTE_MAX = 45
 EXPIRY_DTE_FALLBACK_MIN = 21
@@ -306,9 +313,18 @@ def _historic_iv(payload: Any) -> Dict[str, float]:
             continue
         day = str(row.get("date") or "")[:10]
         iv = _vol_pct(row.get("implied_volatility"))
-        if day and iv is not None:
+        if day and iv is not None and _quote_is_tradeable(row):
             out[day] = iv
     return out
+
+
+def _quote_is_tradeable(row: Mapping[str, Any]) -> bool:
+    bid = _to_float(row.get("nbbo_bid"))
+    ask = _to_float(row.get("nbbo_ask"))
+    if bid is None or ask is None or bid <= 0 or ask < bid:
+        return False
+    mid = (bid + ask) / 2
+    return (ask - bid) / mid <= MAX_REL_SPREAD
 
 
 def _r(value: Optional[float], digits: int = 2) -> Optional[float]:
@@ -370,6 +386,13 @@ def stage2_row(
     skew_by_date = dict(zip(skew_dates, skew_values))
     skew = skew_easing(skew_values)
 
+    valid_sessions = len(fs_series)
+    if contract is not None and valid_sessions < MIN_VALID_SESSIONS:
+        # The chain is too thin for either surface reading to mean anything.
+        errors.append(f"illiquid_options:{valid_sessions}/{WINDOW}")
+        vol = {"runup": None, "off_peak": None, "slope": None, "pass": None}
+        skew = {"ease": None, "slope": None, "pass": None}
+
     verdict = classify(float(ranked_row["stretch_pctl"]), vol, skew)
     if verdict is None:
         return None
@@ -396,6 +419,7 @@ def stage2_row(
         "vol": {"runup": _r(vol["runup"]), "off_peak": _r(vol["off_peak"], 4), "slope": _r(vol["slope"]), "pass": vol["pass"]},
         "skew": {"ease": _r(skew["ease"], 4), "slope": _r(skew["slope"], 4), "pass": skew["pass"]},
         "series": series,
+        "liquidity": {"valid_sessions": valid_sessions, "min_sessions": MIN_VALID_SESSIONS, "max_rel_spread": MAX_REL_SPREAD},
         "flow": flow_for(ticker, flow_payload),
         "errors": errors,
     }
