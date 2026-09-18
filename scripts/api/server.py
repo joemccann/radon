@@ -4156,6 +4156,78 @@ async def vol_skew_mr_scan(preset: str = "ndx100", limit: int = 0, ticker: str =
         }
 
 
+# ── BOUNCE SETUP scanner (docs/bounce-setup.md) ───────────────────
+
+_bounce_setup_last_scan: float = 0.0
+_bounce_setup_scan_lock: Optional[asyncio.Lock] = None
+BOUNCE_SETUP_COOLDOWN_S = 3600
+
+
+def _bounce_setup_empty(universe: str) -> dict:
+    return {
+        "scan_time": None,
+        "as_of": None,
+        "window": 20,
+        "universe": universe,
+        "coverage": {"tickers": 0, "ranked": 0, "excluded_short_history": 0, "stage2": 0},
+        "bounce_count": 0,
+        "results": [],
+    }
+
+
+@app.post("/bounce-setup/scan")
+async def bounce_setup_scan(preset: str = "largecaps", limit: int = 0, tickers: str = ""):
+    """Run bounce_setup_scanner.py against a preset or explicit tickers.
+
+    Preset scans write data/bounce_setup.json and mirror scan_snapshots
+    service bounce-setup. Ticker scans bypass the cooldown and return the
+    subprocess payload without touching the cache.
+    """
+    global _bounce_setup_last_scan, _bounce_setup_scan_lock
+    preset = preset.strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,32}", preset):
+        raise HTTPException(status_code=400, detail="preset must be 1-32 chars [A-Za-z0-9_-]")
+    requested = _parse_scan_tickers(tickers) if tickers.strip() else []
+    if test_mode:
+        return await demo_scan_response("bounce-setup", _bounce_setup_empty(preset))
+    if _bounce_setup_scan_lock is None:
+        _bounce_setup_scan_lock = asyncio.Lock()
+    is_ticker_scan = bool(requested)
+    cache_path = DATA_DIR / "bounce_setup.json"
+
+    def _cached_for_preset() -> Optional[dict]:
+        cached = _read_cache(cache_path)
+        if isinstance(cached, dict) and str(cached.get("universe") or "").lower() == preset.lower():
+            return cached
+        return None
+
+    if not is_ticker_scan and time.monotonic() - _bounce_setup_last_scan < BOUNCE_SETUP_COOLDOWN_S:
+        cached = _cached_for_preset()
+        if cached:
+            return cached
+    async with _bounce_setup_scan_lock:
+        if not is_ticker_scan and time.monotonic() - _bounce_setup_last_scan < BOUNCE_SETUP_COOLDOWN_S:
+            cached = _cached_for_preset()
+            if cached:
+                return cached
+        args = ["--json"]
+        if is_ticker_scan:
+            args.extend(requested)
+        else:
+            args.extend(["--preset", preset])
+            if limit and limit > 0:
+                args.extend(["--limit", str(limit)])
+        result = await run_script("bounce_setup_scanner.py", args, timeout=600)
+        if not result.ok:
+            raise HTTPException(status_code=502, detail=result.error)
+        payload = result.data if isinstance(result.data, dict) else None
+        scan_status = (payload or {}).get("scan_status")
+        if is_ticker_scan or scan_status:
+            return payload or _bounce_setup_empty("explicit" if is_ticker_scan else preset)
+        _bounce_setup_last_scan = time.monotonic()
+        return _read_cache(cache_path) or payload or _bounce_setup_empty(preset)
+
+
 # ── Market calendar (IBKR-sourced trading schedule) ─────────────────
 
 
