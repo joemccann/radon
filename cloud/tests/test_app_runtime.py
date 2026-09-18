@@ -1211,3 +1211,9 @@ def test_api_private_anchor_rejection_cleans_staged_credentials(tmp_path):
     credential_dir = Path(result.proxy_dir) / 'credentials' / 'radon-api.service'
     assert not credential_dir.exists()
     assert not any(line.startswith('run ') for line in result.docker_log.read_text().splitlines())
+
+
+def test_nextjs_runtime_executes_the_baked_key_guard(tmp_path: Path) -> None:
+    result = _run(tmp_path, ["run", "radon-nextjs.service"])
+    assert result.returncode == 0, result.stderr
+    assert _run_line(result).endswith(" /usr/local/bin/next-clerk-guard")

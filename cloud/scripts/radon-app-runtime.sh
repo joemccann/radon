@@ -648,7 +648,7 @@ cmd_run() {
       set -- "$@" python -m scripts.monitor_daemon.run --daemon
       ;;
     radon-nextjs.service)
-      set -- "$@" bun run start
+      set -- "$@" /usr/local/bin/next-clerk-guard
       ;;
     radon-relay.service)
       set -- "$@" node scripts/ib_realtime_server.js

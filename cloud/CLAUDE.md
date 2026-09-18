@@ -142,6 +142,11 @@ is dropped by systemd regardless of `NotifyAccess=`, so `Type=notify` +
 
 ## Canonical Host Paths
 
+`radon-nextjs.service` starts `/usr/local/bin/next-clerk-guard` inside its
+container. The guard requires an exact publishable-key token in the baked
+client assets before executing `bun run start`; an environment key that is
+only a prefix of a baked key is rejected.
+
 - Monorepo checkout: `/home/radon/radon`
 - Cloud source: `/home/radon/radon/cloud`
 - Immutable deploy support: `/home/radon/.radon-deploy-runners/<sha>.<run>/cloud`
