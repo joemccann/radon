@@ -806,6 +806,7 @@ jobs:
           e2e/mobile-orders-session.spec.ts
           e2e/orders-session-window.spec.ts
           e2e/vixts-tab.spec.ts
+          e2e/hyad-tab.spec.ts
           e2e/research-workbench.spec.ts
           e2e/newsfeed-research-media.spec.ts
           e2e/newsfeed-sharing.spec.ts
@@ -898,6 +899,13 @@ jobs:
         with:
           name: performance-flow-history-screenshots
           path: web/test-results/**/performance-flow-history-*.png
+          retention-days: 7
+      - name: Upload HYAD history screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hyad-history-screenshots
+          path: web/test-results/**/hyad-history-*.png
           retention-days: 7
       - name: Upload traces on failure
         if: failure()
