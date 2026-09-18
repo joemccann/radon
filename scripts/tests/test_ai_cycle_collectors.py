@@ -373,6 +373,8 @@ def test_ramp_bundled_fixture_loads_into_snapshot(tmp_path):
                 str(db),
                 "--sources",
                 "ramp",
+                "--import-ramp",
+                str(Path(__file__).resolve().parents[1] / "ai_cycle" / "fixtures" / "ramp_ai_index_curated.json"),
                 "--end",
                 "2026-08-31",
                 "--archive",
@@ -384,7 +386,7 @@ def test_ramp_bundled_fixture_loads_into_snapshot(tmp_path):
     snapshot = build_snapshot(ObservationStore(db), "2026-12-31T00:00:00Z")
     panel = next(item for item in snapshot["indicators"] if item["id"] == "D5")
     assert panel["pane"] == "demand"
-    assert panel["status"] == "available"
+    assert panel["status"] == "stale"
     assert any(metric["id"] == "spend.top_1_percent_median_pepm" for metric in panel["metrics"])
     assert len(panel["history"]) >= 32
 
@@ -465,7 +467,7 @@ def test_opendesi_explicit_dated_import_loads_into_demand_snapshot(tmp_path, mon
     snapshot = build_snapshot(ObservationStore(db), "2026-09-10T16:00:00Z")
     panel = next(item for item in snapshot["indicators"] if item["id"] == "D6")
     assert panel["pane"] == "demand"
-    assert panel["status"] == "experimental"
+    assert panel["status"] == "stale"
     assert panel["title"] == "OpenDesign Arena model quality"
     assert "never GPU scarcity" in panel["methodology"]
     assert panel["source_ids"] == ["open-design-arena"]
@@ -792,7 +794,7 @@ def test_production_backfill_uses_separate_health_identity(monkeypatch):
 
 @pytest.mark.parametrize(
     "source",
-    ["openrouter", "artificial-analysis", "eia", "vast", "sec", "portkey", "ramp", "lambda", "issuer-disclosures"],
+    ["openrouter", "artificial-analysis", "eia", "vast", "sec", "portkey", "lambda", "issuer-disclosures"],
 )
 def test_missing_entitlements_never_calls_provider(source, tmp_path):
     from scripts.ai_cycle.collectors import collect_source

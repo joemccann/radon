@@ -384,7 +384,7 @@ class TestAiCycleBackfill:
         assert svc["timeoutstartsec"] == "1200"
         assert svc["loadcredentialencrypted"].startswith("radon-secret-store-key:")
         command = svc["execstart"]
-        assert "--backfill --start 2009-01-01" in command
+        assert "--backfill --start 2006-12-31" in command
         assert "--checkpoint /home/radon/.radon/ai-cycle/backfill-checkpoint.json" in command
         assert "--max-requests 400" in command
         assert "scripts/secret_store.py" in svc["execstartpre"]

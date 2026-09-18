@@ -288,10 +288,10 @@ class ObservationStore:
 
     def read_snapshot_observations(self, as_of=None):
         at = utc(as_of)
-        # Publisher floors are explicit: SEC XBRL begins in 2009, while the
+        # SEC XBRL includes comparative periods before the 2009 mandate; the
         # oldest continuous operational series (EIA/NOAA) begins in July 2018.
         # Keep these stable instead of silently moving the chart window forward.
-        cutoff = utc("2009-01-01T00:00:00Z")
+        cutoff = utc("2006-12-31T00:00:00Z")
         daily_cutoff = utc("2018-07-01T00:00:00Z")
         rows, cursor = [], 0
         deadline = time.monotonic() + _SNAPSHOT_READ_DEADLINE_SECONDS
