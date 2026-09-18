@@ -1,4 +1,14 @@
 # Lessons
+## 2026-09-18 — Chain strike identity must never ellipsis
+
+- Four-digit strikes (`$1,737.00`) rendered as `$1,70...` on the
+  chain-first calls ladder. `.chain-cell` ellipsis plus a 72px strike
+  col hid the value.
+- Do not ellipsis the strike column. Size `.chain-anchor-strike-col`
+  for grouped five-digit labels (`$12,345.00`), pin it in
+  `web/tests/chain-strike-column.test.ts`.
+
+
 ## 2026-09-17 — Two 00NN_ migration files silently skip the later table
 
 - `apply_pending_migrations` keys on the integer prefix, not the filename.

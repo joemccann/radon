@@ -77,7 +77,7 @@ _SOURCE_ROWS = [
         "Ramp AI Index",
         "https://ramp.com/data/ai-index",
         "monthly",
-        "Public published research curated from credential-free HTML; Ramp Data API out of scope for v1",
+        "Public publisher HTML tables; attribution to Ramp Economics Lab; historical revisions retained",
     ),
     (
         "open-design-arena",
