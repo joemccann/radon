@@ -258,25 +258,47 @@ def _codex_apply(doc, resp, now):
     return new
 
 
-# -- gemini: ~/.gemini/oauth_creds.json -------------------------------------
+# -- gemini: ~/.gemini/antigravity-cli/antigravity-oauth-token ---------------
+#
+# 2026-09-18: Google retired the Gemini CLI OAuth client for individuals
+# ("This client is no longer supported for Gemini Code Assist for
+# individuals ... migrate to the Antigravity suite"). The Antigravity CLI
+# (`agy`) keeps its Google OAuth grant in a nested `token` object with an
+# RFC 3339 `expiry` at nanosecond precision. `agy models` is a cheap
+# authenticated call that refreshes the file in place, so it is the CLI-native
+# refresh; the token endpoint is the fallback when `agy` is not on PATH.
+
+# Public OAuth client id of the Antigravity CLI (installed-app client, no
+# secret), read off its own login URL. Google's refresh grant requires it.
+ANTIGRAVITY_CLIENT_ID = (
+    "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com"
+)
+
+
+def _gemini_tokens(doc) -> Mapping[str, Any]:
+    tokens = doc.get("token")
+    return tokens if isinstance(tokens, Mapping) else {}
 
 
 def _gemini_expiry(doc):
-    return _parse_epoch_millis(doc.get("expiry_date"))
+    return _parse_rfc3339(_gemini_tokens(doc).get("expiry"))
 
 
 def _gemini_refresh(doc):
-    token = doc.get("refresh_token")
+    token = _gemini_tokens(doc).get("refresh_token")
     return token if isinstance(token, str) and token else None
 
 
 def _gemini_apply(doc, resp, now):
     new = copy.deepcopy(doc)
+    tokens = new.setdefault("token", {})
     if resp.get("access_token"):
-        new["access_token"] = resp["access_token"]
+        tokens["access_token"] = resp["access_token"]
     if resp.get("refresh_token"):
-        new["refresh_token"] = resp["refresh_token"]
-    new["expiry_date"] = int(_expires_at(now, resp).timestamp() * 1000)
+        tokens["refresh_token"] = resp["refresh_token"]
+    if resp.get("id_token"):
+        new["id_token"] = resp["id_token"]
+    tokens["expiry"] = _iso_z(_expires_at(now, resp))
     return new
 
 
@@ -310,6 +332,8 @@ class Provider:
     # Returns a message when the doc is a shape this adapter refuses to refresh
     # in place; the provider then reports needs_reauth instead of half-healing.
     read_blocker: Callable[[Mapping[str, Any]], Optional[str]] = _no_blocker
+    # Fixed public client id for the refresh grant when the doc names none.
+    client_id: Optional[str] = None
 
     @property
     def secret_name(self) -> str:
@@ -331,7 +355,7 @@ class Provider:
         """Form fields for the refresh grant; endpoint resolution is separate."""
         fields = {"grant_type": "refresh_token", "refresh_token": refresh_token}
         issuer = self.read_issuer(doc)
-        client_id = issuer[1] if issuer else None
+        client_id = (issuer[1] if issuer else None) or self.client_id
         if client_id:
             fields["client_id"] = client_id
         return fields
@@ -351,7 +375,7 @@ PROVIDERS: dict[str, Provider] = {
         apply=_anthropic_apply,
         cli_binary="claude",
         cli_refresh_args=None,
-        reauth_command="ssh radon@ib-gateway 'claude setup-token'",
+        reauth_command="ssh -t radon@ib-gateway 'claude auth login --claudeai'",
     ),
     "codex": Provider(
         name="codex",
@@ -386,17 +410,18 @@ PROVIDERS: dict[str, Provider] = {
     "gemini": Provider(
         name="gemini",
         dir_env=None,
-        default_subdir=".gemini",
-        filename="oauth_creds.json",
+        default_subdir=".gemini/antigravity-cli",
+        filename="antigravity-oauth-token",
         # Google's published OAuth 2.0 token endpoint.
         token_url="https://oauth2.googleapis.com/token",
         read_expiry=_gemini_expiry,
         read_refresh=_gemini_refresh,
         read_issuer=_no_issuer,
         apply=_gemini_apply,
-        cli_binary="gemini",
-        cli_refresh_args=None,
-        reauth_command="gemini CLI absent on the VPS: log in elsewhere, copy oauth_creds.json, see docs/subscription-tokens.md",
+        cli_binary="agy",
+        cli_refresh_args=("models",),
+        client_id=ANTIGRAVITY_CLIENT_ID,
+        reauth_command="ssh -t radon@ib-gateway '~/.local/bin/agy -p ok' then open the printed URL and paste the code within 60s, see docs/subscription-tokens.md",
     ),
 }
 

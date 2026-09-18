@@ -120,11 +120,17 @@ def codex_doc(expires: datetime) -> dict:
 
 
 def gemini_doc(expires: datetime) -> dict:
+    # Antigravity CLI (`agy`) 1.2.x: ~/.gemini/antigravity-cli/antigravity-oauth-token.
+    # Google retired the Gemini CLI OAuth client for individuals on 2026-09-18.
     return {
-        "access_token": FAKE_ACCESS,
-        "refresh_token": FAKE_REFRESH,
-        "expiry_date": int(expires.timestamp() * 1000),
-        "token_type": "Bearer",
+        "token": {
+            "access_token": FAKE_ACCESS,
+            "token_type": "Bearer",
+            "refresh_token": FAKE_REFRESH,
+            "expiry": expires.isoformat().replace("+00:00", "Z"),
+        },
+        "auth_method": "consumer",
+        "id_token": "id-fake",
     }
 
 
@@ -196,8 +202,55 @@ def test_provider_paths_honour_env_overrides(tmp_path):
     assert st.PROVIDERS["codex"].path(env) == tmp_path / "cx" / "auth.json"
     assert st.PROVIDERS["grok"].path(env) == tmp_path / ".grok" / "auth.json"
     assert (
-        st.PROVIDERS["gemini"].path(env) == tmp_path / ".gemini" / "oauth_creds.json"
+        st.PROVIDERS["gemini"].path(env)
+        == tmp_path / ".gemini" / "antigravity-cli" / "antigravity-oauth-token"
     )
+
+
+def test_gemini_reads_the_antigravity_token_shape():
+    expires = NOW + timedelta(hours=1)
+    doc = gemini_doc(expires)
+    assert st.PROVIDERS["gemini"].read_expiry(doc) == expires
+    assert st.PROVIDERS["gemini"].read_refresh(doc) == FAKE_REFRESH
+    # agy writes nanosecond precision; the parser must not choke on it.
+    doc["token"]["expiry"] = "2026-09-18T23:05:47.355949945Z"
+    assert st.PROVIDERS["gemini"].read_expiry(doc) == datetime(
+        2026, 9, 18, 23, 5, 47, 355949, tzinfo=timezone.utc
+    )
+
+
+def test_gemini_refresh_is_agy_native_when_installed(tmp_path):
+    http = FakeHttp()  # any HTTP call raises
+    rt = make_runtime(tmp_path, http=http, which=lambda binary: "/home/radon/.local/bin/" + binary)
+    path = write_doc(rt, "gemini", gemini_doc(NOW + timedelta(seconds=60)))
+    seen: list[tuple] = []
+
+    def fake_cli(provider):
+        seen.append((provider.cli_binary, provider.cli_refresh_args))
+        path.write_text(json.dumps(gemini_doc(NOW + timedelta(hours=1))), encoding="utf-8")
+        return True
+
+    rt.run_cli = fake_cli
+    report = st.run("once", ["gemini"], rt)
+    assert report["providers"][0]["state"] == st.REFRESHED
+    assert seen == [("agy", ("models",))]
+    assert http.calls == []
+
+
+def test_gemini_token_endpoint_refresh_names_the_antigravity_client(tmp_path):
+    http = FakeHttp({"https://oauth2.googleapis.com/token": [ok_token_response()]})
+    rt = make_runtime(tmp_path, http=http)
+    path = write_doc(rt, "gemini", gemini_doc(NOW + timedelta(seconds=60)))
+    report = st.run("once", ["gemini"], rt)
+    assert report["providers"][0]["state"] == st.REFRESHED
+    method, url, form = http.calls[-1]
+    assert url == "https://oauth2.googleapis.com/token"
+    assert form["grant_type"] == "refresh_token"
+    assert form["client_id"] == st.ANTIGRAVITY_CLIENT_ID
+    after = json.loads(path.read_text())
+    assert after["token"]["access_token"] == FAKE_NEW_ACCESS
+    assert after["auth_method"] == "consumer"
+    assert st.PROVIDERS["gemini"].read_expiry(after) > NOW + timedelta(minutes=30)
 
 
 def test_grok_token_endpoint_comes_from_oidc_discovery(tmp_path):
