@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { computeScrollAffordance, type ScrollAffordance } from "@/lib/scrollAffordance";
 
-export type ScannerMode = "flow" | "discover" | "theta" | "strength" | "leap" | "garch" | "vol-cone" | "vol-skew-mr";
+export type ScannerMode = "flow" | "discover" | "theta" | "strength" | "leap" | "garch" | "vol-cone" | "vol-skew-mr" | "bounce";
 
 type ScannerTabCounts = Partial<Record<ScannerMode, number>>;
 
@@ -26,6 +26,7 @@ export const SCANNER_MODE_TABS: { mode: ScannerMode; label: string }[] = [
   { mode: "garch", label: "GARCH" },
   { mode: "vol-cone", label: "VOL CONE" },
   { mode: "vol-skew-mr", label: "Vol/Skew MR" },
+  { mode: "bounce", label: "Bounce Setup" },
 ];
 
 export const SCANNER_MODE_COUNT = SCANNER_MODE_TABS.length;
