@@ -16,6 +16,11 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("AI observation history integrity", () => {
+  it("reports unchanged observations without suggesting a measured trend", () => {
+    render(<AiIndustryHistoryChart points={[point("2026-01-01"), point("2026-01-02"), point("2026-01-03")]} cadence="snapshot" />);
+    expect(screen.getByText(/Unchanged across 3 collected observations/)).toBeTruthy();
+    expect(screen.queryByTestId("ai-history-brush")).toBeNull();
+  });
   it("uses calendar months for seven-day-a-week publisher observations", () => {
     const history = Array.from({ length: 90 }, (_, i) => point(new Date(Date.UTC(2026, 0, i + 1)).toISOString()));
     const [start, end] = aiCalendarRange(history, "1m");

@@ -63,11 +63,31 @@ test.describe("AI Industry value chain", () => {
     await page.route("**/api/ai-cycle", route => route.fulfill({ json: snapshot }));
     await page.route("**/api/llm-token-index**", route => route.fulfill({ json: { rows: [], count: 0, days: 180 } }));
   });
-  test("four stages, separate capability and all 18 plain-language measure explanations", async ({ page }) => {
+  test("unchanged source checks are summaries, not artificial trend charts", async ({ page }, testInfo) => {
+    const constant = structuredClone(snapshot);
+    const measure = constant.indicators.find(item => item.id === "D6")!;
+    measure.history = measure.history.map(point => ({ ...point, value: 82.7 }));
+    constant.sources.find(item => item.id === "designarena")!.cadence = "snapshot";
+    await page.route("**/api/ai-cycle", route => route.fulfill({ json: constant }));
+    await ready(page);
+    await page.getByRole("button", { name: "Model capability", exact: true }).click();
+    await expect(page.getByTestId("ai-unchanged-observations")).toContainText("Unchanged across 90 collected observations");
+    await expect(page.getByText("Repeated checks of a published evaluation are not new benchmark runs.")).toBeVisible();
+    await expect(page.getByTestId("ai-industry-history-chart")).toHaveCount(0);
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 1000 });
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      await page.screenshot({ path: testInfo.outputPath(`ai-industry-unchanged-${width}.png`), fullPage: true });
+    }
+  });
+  test("four stages, separate capability and 17 measurement explanations without empty M1", async ({ page }) => {
     await ready(page);
     await expect(page.getByRole("heading", { name: "AI Industry", exact: true })).toBeVisible();
-    await expect(page.getByText("18 measures", { exact: true })).toBeVisible();
-    await expect(page.getByText("16 sources", { exact: true })).toBeVisible();
+    await expect(page.getByText("17 measures", { exact: true })).toBeVisible();
+    await expect(page.getByText("14 sources", { exact: true })).toBeVisible();
+    await expect(page.getByText("What is already priced in?", { exact: true })).toHaveCount(0);
+    await expect(page.getByTestId("ai-coverage-ib")).toHaveCount(0);
+    await expect(page.getByTestId("ai-coverage-uw")).toHaveCount(0);
     const tabs = page.getByRole("tablist", { name: "AI Industry value chain" });
     await expect(tabs.getByRole("tab")).toHaveCount(4);
     for (const stage of ["Adoption", "Compute", "Buildout", "Funding"]) {
@@ -79,6 +99,7 @@ test.describe("AI Industry value chain", () => {
     await page.getByRole("button", { name: "Model capability", exact: true }).click();
     await expect(page.getByRole("region", { name: "Model capability", exact: true })).toBeVisible();
     for (const [id] of measures) {
+      if (id === "M1") continue;
       const explanation = page.getByTestId(`ai-indicator-${id}`);
       await explanation.locator("summary").click();
       await expect(explanation.getByRole("heading", { name: "Why it matters", exact: true })).toBeVisible();
@@ -99,7 +120,7 @@ test.describe("AI Industry value chain", () => {
     await expect(start).toHaveAttribute("aria-valuenow", "0");
     await start.focus(); await page.keyboard.press("ArrowRight");
     await expect(start).toHaveAttribute("aria-valuenow", "1");
-    await expect(chart.getByText("89 of 90 observations", { exact: true })).toBeVisible();
+    await expect(chart.getByText("89 of 90 chart points", { exact: true })).toBeVisible();
     const plot = chart.getByRole("slider", { name: "Inspect Matched GPU asking prices history", exact: true });
     await plot.focus(); await page.keyboard.press("Home");
     await expect(plot).toHaveAttribute("aria-valuenow", "0");
