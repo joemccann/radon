@@ -85,7 +85,8 @@ The subscription-token vault reuses this same store rather than adding a second
 crypto system. `scripts/subscription_tokens.py` seals each agent CLI's OAuth
 credential file verbatim under the registry names
 `SUBSCRIPTION_TOKEN_ANTHROPIC`, `SUBSCRIPTION_TOKEN_CODEX`,
-`SUBSCRIPTION_TOKEN_GROK` and `SUBSCRIPTION_TOKEN_GEMINI`, and restores or
+`SUBSCRIPTION_TOKEN_GROK` and `SUBSCRIPTION_TOKEN_ANTIGRAVITY` (plus the
+unscheduled legacy `SUBSCRIPTION_TOKEN_GEMINI`), and restores or
 refreshes them on a timer. A store that fails to open is reported as
 `store_unavailable` (exit 78), never as an empty vault. Runbook:
 [`docs/subscription-tokens.md`](subscription-tokens.md).
