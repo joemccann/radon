@@ -84,6 +84,8 @@ ALL_KEYS = {
     "GEMINI_API_KEY": "gem-test",
     "NVIDIA_API_KEY": "nvapi-test",
     "CEREBRAS_API_KEY": "csk-test",
+    # Explicit escape hatch so prepaid-path failover tests keep exercising HTTP.
+    "RADON_LADDER_ALLOW_PREPAID": "1",
 }
 
 
@@ -179,7 +181,7 @@ class TestTextJsonPath:
         with pytest.raises(ModelResponseError, match="complete"):
             complete_multimodal_json(
                 "evaluate",
-                env={"ANTHROPIC_API_KEY": "a"},
+                env={"ANTHROPIC_API_KEY": "a", "RADON_LADDER_ALLOW_PREPAID": "1"},
                 post=router,
                 stream_anthropic=False,
             )
@@ -187,10 +189,10 @@ class TestTextJsonPath:
     @pytest.mark.parametrize(
         ("env", "needle", "payload"),
         [
-            ({"ANTHROPIC_API_KEY": "a"}, "api.anthropic.com", {"stop_reason": "end_turn", "content": [{"type": "text", "text": json.dumps(OBJ)}]}),
-            ({"XAI_API_KEY": "x"}, "api.x.ai", {"choices": [{"message": {"content": json.dumps(OBJ)}}]}),
-            ({"OPENAI_API_KEY": "o"}, "api.openai.com", {"choices": [{"message": {"content": json.dumps(OBJ)}}]}),
-            ({"GEMINI_API_KEY": "g"}, "generativelanguage.googleapis.com", {"candidates": [{"content": {"parts": [{"text": json.dumps(OBJ)}]}}]}),
+            ({"ANTHROPIC_API_KEY": "a", "RADON_LADDER_ALLOW_PREPAID": "1"}, "api.anthropic.com", {"stop_reason": "end_turn", "content": [{"type": "text", "text": json.dumps(OBJ)}]}),
+            ({"XAI_API_KEY": "x", "RADON_LADDER_ALLOW_PREPAID": "1"}, "api.x.ai", {"choices": [{"message": {"content": json.dumps(OBJ)}}]}),
+            ({"OPENAI_API_KEY": "o", "RADON_LADDER_ALLOW_PREPAID": "1"}, "api.openai.com", {"choices": [{"message": {"content": json.dumps(OBJ)}}]}),
+            ({"GEMINI_API_KEY": "g", "RADON_LADDER_ALLOW_PREPAID": "1"}, "generativelanguage.googleapis.com", {"candidates": [{"content": {"parts": [{"text": json.dumps(OBJ)}]}}]}),
             ({"NVIDIA_API_KEY": "n"}, "integrate.api.nvidia.com", {"choices": [{"message": {"content": json.dumps(OBJ)}}]}),
             ({"CEREBRAS_API_KEY": "c"}, "api.cerebras.ai", {"choices": [{"message": {"content": json.dumps(OBJ)}}]}),
         ],
@@ -216,7 +218,7 @@ class TestTextJsonPath:
         with pytest.raises(ModelResponseError, match="exceeds limit"):
             complete_multimodal_json(
                 "evaluate",
-                env={"ANTHROPIC_API_KEY": "a"},
+                env={"ANTHROPIC_API_KEY": "a", "RADON_LADDER_ALLOW_PREPAID": "1"},
                 post=lambda *_args, **_kwargs: response,
                 max_response_bytes=32,
             )
@@ -233,7 +235,7 @@ class TestResearchReviewerFailover:
         from types import SimpleNamespace
 
         reviewer = Reviewer(
-            env={"ANTHROPIC_API_KEY": "a", "XAI_API_KEY": "x"},
+            env={"ANTHROPIC_API_KEY": "a", "XAI_API_KEY": "x", "RADON_LADDER_ALLOW_PREPAID": "1"},
             session=SimpleNamespace(post=router),
         )
         assert reviewer.ask("evaluate") == OBJ
@@ -243,7 +245,7 @@ class TestResearchReviewerFailover:
         with pytest.raises(ModelLadderExhausted) as exc:
             complete_multimodal_json(
                 "evaluate",
-                env={"ANTHROPIC_API_KEY": "a"},
+                env={"ANTHROPIC_API_KEY": "a", "RADON_LADDER_ALLOW_PREPAID": "1"},
                 post=router,
                 stream_anthropic=False,
             )
@@ -305,7 +307,7 @@ class TestAnthropicHttpxStream:
 
         monkeypatch.setattr(httpx, "post", guarded_post)
         monkeypatch.setattr(httpx, "Client", Client)
-        reviewer = Reviewer(env={"ANTHROPIC_API_KEY": "a"})
+        reviewer = Reviewer(env={"ANTHROPIC_API_KEY": "a", "RADON_LADDER_ALLOW_PREPAID": "1"})
         assert reviewer.ask("evaluate") == OBJ
         assert post_calls == []
         assert closed == ["response", "client"]
@@ -321,7 +323,7 @@ class TestCodexTokenParam:
 
         result = complete_multimodal_json(
             "evaluate",
-            env={"OPENAI_API_KEY": "sk-openai-test"},
+            env={"OPENAI_API_KEY": "sk-openai-test", "RADON_LADDER_ALLOW_PREPAID": "1"},
             post=post,
             stream_anthropic=False,
         )
@@ -338,7 +340,7 @@ class TestCodexTokenParam:
             return _openai_ok()
 
         result = extract_via_vision(
-            PNG, PROMPT, env={"OPENAI_API_KEY": "sk-openai-test"}, post=post
+            PNG, PROMPT, env={"OPENAI_API_KEY": "sk-openai-test", "RADON_LADDER_ALLOW_PREPAID": "1"}, post=post
         )
         assert result.provider == "codex"
         assert captured[0]["model"] == "gpt-5.5"
@@ -354,7 +356,7 @@ class TestCodexTokenParam:
 
         result = complete_multimodal_json(
             "evaluate",
-            env={"XAI_API_KEY": "xai-test"},
+            env={"XAI_API_KEY": "xai-test", "RADON_LADDER_ALLOW_PREPAID": "1"},
             post=post,
             stream_anthropic=False,
         )
@@ -422,7 +424,11 @@ class TestCompleteTextJson:
         )
         result = complete_text_json(
             "tag this",
-            env={"ANTHROPIC_API_KEY": "a", "XAI_API_KEY": "x"},
+            env={
+                "ANTHROPIC_API_KEY": "a",
+                "XAI_API_KEY": "x",
+                "RADON_LADDER_ALLOW_PREPAID": "1",
+            },
             post=router,
             accept=accept_tags_payload,
         )
@@ -491,7 +497,7 @@ class TestSubscriptionAuthPreference:
         )
         auth = _auth_for(
             "codex",
-            {"CODEX_HOME": str(codex_home), "OPENAI_API_KEY": "sk-openai-prepaid"},
+            {"CODEX_HOME": str(codex_home), "OPENAI_API_KEY": "sk-openai-prepaid", "RADON_LADDER_ALLOW_PREPAID": "1"},
         )
         assert auth is not None
         assert auth.kind == "subscription"
@@ -508,14 +514,20 @@ class TestSubscriptionAuthPreference:
         )
         auth = _auth_for(
             "grok",
-            {"HOME": str(home), "XAI_API_KEY": "xai-prepaid"},
+            {"HOME": str(home), "XAI_API_KEY": "xai-prepaid", "RADON_LADDER_ALLOW_PREPAID": "1"},
         )
         assert auth is not None
         assert auth.kind == "subscription"
         assert auth.token == "grok-sub-token"
 
-    def test_gemini_accepts_google_api_key_alias(self):
-        assert "gemini" in wired_providers({"GOOGLE_API_KEY": "goog-test"})
+    def test_gemini_google_api_key_alias_requires_allow_prepaid(self):
+        assert "gemini" not in wired_providers({"GOOGLE_API_KEY": "goog-test"})
+        assert "gemini" in wired_providers(
+            {"GOOGLE_API_KEY": "goog-test", "RADON_LADDER_ALLOW_PREPAID": "1"}
+        )
+
+    def test_gemini_oauth_wires_without_prepaid(self):
+        assert "gemini" in wired_providers({"GEMINI_OAUTH_TOKEN": "gem-oauth"})
 
     def test_anthropic_subscription_sends_oauth_beta_header(self):
         captured: list[dict] = []
@@ -536,7 +548,8 @@ class TestSubscriptionAuthPreference:
 
 
 class TestPrepaidMissDoesNotExhaustWhenAlternatesExist:
-    def test_anthropic_credit_falls_to_nvidia_when_keyed(self):
+    def test_prepaid_anthropic_skipped_nvidia_wins_by_default(self):
+        """Hetzner prepaid-only: skip sub rungs; do not burn ANTHROPIC_API_KEY."""
         router = _Router(
             {
                 "api.anthropic.com": _credit_low(),
@@ -546,6 +559,26 @@ class TestPrepaidMissDoesNotExhaustWhenAlternatesExist:
         result = complete_multimodal_json(
             "evaluate",
             env={"ANTHROPIC_API_KEY": "sk-ant-empty", "NVIDIA_API_KEY": "nvapi-test"},
+            post=router,
+            stream_anthropic=False,
+        )
+        assert result.provider == "nvidia"
+        assert not any("api.anthropic.com" in url for url in router.calls)
+
+    def test_allow_prepaid_credit_falls_to_nvidia_when_keyed(self):
+        router = _Router(
+            {
+                "api.anthropic.com": _credit_low(),
+                "integrate.api.nvidia.com": _openai_obj_ok(),
+            }
+        )
+        result = complete_multimodal_json(
+            "evaluate",
+            env={
+                "ANTHROPIC_API_KEY": "sk-ant-empty",
+                "NVIDIA_API_KEY": "nvapi-test",
+                "RADON_LADDER_ALLOW_PREPAID": "1",
+            },
             post=router,
             stream_anthropic=False,
         )
@@ -635,3 +668,111 @@ class TestNvidiaVisionDefaultAndFallback:
         assert result.provider == "nvidia"
         assert result.model == "meta/llama-3.2-11b-vision-instruct"
         assert calls[0] == "meta/llama-3.2-90b-vision-instruct"
+
+
+class TestNoPrepaidByDefault:
+    """Subscription rungs must not meter prepaid wallets unless opted in."""
+
+    PREPAID_ONLY = {
+        "ANTHROPIC_API_KEY": "sk-ant-prepaid",
+        "XAI_API_KEY": "xai-prepaid",
+        "OPENAI_API_KEY": "sk-openai-prepaid",
+        "GEMINI_API_KEY": "gem-prepaid",
+        "NVIDIA_API_KEY": "nvapi-test",
+    }
+
+    def test_prepaid_only_does_not_wire_subscription_rungs(self):
+        wired = wired_providers(self.PREPAID_ONLY)
+        assert "anthropic" not in wired
+        assert "grok" not in wired
+        assert "codex" not in wired
+        assert "gemini" not in wired
+        assert "nvidia" in wired
+
+    def test_prepaid_only_text_path_uses_nvidia_without_sub_http(self):
+        router = _Router({"integrate.api.nvidia.com": _openai_obj_ok({"tags": ["A", "B", "C"]})})
+
+        def refuse_sub(url, *, headers=None, json=None, timeout=None, stream=False):
+            for forbidden in (
+                "api.anthropic.com",
+                "api.x.ai",
+                "api.openai.com",
+                "generativelanguage.googleapis.com",
+            ):
+                if forbidden in url:
+                    raise AssertionError(f"prepaid-only must not call {forbidden}")
+            return router(url, headers=headers, json=json, timeout=timeout, stream=stream)
+
+        result = complete_text_json(
+            "tag this",
+            env=self.PREPAID_ONLY,
+            post=refuse_sub,
+            accept=accept_tags_payload,
+        )
+        assert result.provider == "nvidia"
+        assert result.model == "nvidia/nemotron-3-super-120b-a12b"
+        assert any("integrate.api.nvidia.com" in url for url in router.calls)
+
+    def test_allow_prepaid_restores_prepaid_wiring(self):
+        env = {**self.PREPAID_ONLY, "RADON_LADDER_ALLOW_PREPAID": "1"}
+        wired = wired_providers(env)
+        assert "anthropic" in wired
+        assert "grok" in wired
+        assert "codex" in wired
+        assert "gemini" in wired
+
+    def test_subscription_still_preferred_when_present_with_allow_prepaid(self):
+        from clients.model_ladder import _auth_for
+
+        auth = _auth_for(
+            "anthropic",
+            {
+                "CLAUDE_CODE_OAUTH_TOKEN": "oauth-sub-token",
+                "ANTHROPIC_API_KEY": "sk-ant-prepaid",
+                "RADON_LADDER_ALLOW_PREPAID": "1",
+            },
+        )
+        assert auth is not None
+        assert auth.kind == "subscription"
+        assert auth.token == "oauth-sub-token"
+
+
+class TestNvidiaTextDefault:
+    def test_default_text_model_is_nemotron_super_not_stale_llama(self):
+        from clients.model_ladder import _DEFAULT_TEXT_MODELS, _model_for
+
+        assert "llama-3.3-70b" not in _DEFAULT_TEXT_MODELS["nvidia"]
+        assert _model_for("nvidia", {}, kind="text") == (
+            "nvidia/nemotron-3-super-120b-a12b"
+        )
+
+    def test_nvidia_text_model_override_honored(self):
+        from clients.model_ladder import _model_for
+
+        assert (
+            _model_for(
+                "nvidia",
+                {"NVIDIA_TEXT_MODEL": "nvidia/llama-3.1-nemotron-70b-instruct"},
+                kind="text",
+            )
+            == "nvidia/llama-3.1-nemotron-70b-instruct"
+        )
+        assert (
+            _model_for(
+                "nvidia",
+                {"NVIDIA_MODEL": "nvidia/llama-3.1-nemotron-70b-instruct"},
+                kind="text",
+            )
+            == "nvidia/llama-3.1-nemotron-70b-instruct"
+        )
+
+    def test_vision_defaults_unchanged_from_90b(self):
+        from clients.model_ladder import _model_for, _nvidia_vision_models
+
+        assert _model_for("nvidia", {}, kind="vision") == (
+            "meta/llama-3.2-90b-vision-instruct"
+        )
+        assert _nvidia_vision_models({}) == (
+            "meta/llama-3.2-90b-vision-instruct",
+            "meta/llama-3.2-11b-vision-instruct",
+        )

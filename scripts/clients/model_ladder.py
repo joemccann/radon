@@ -4,26 +4,33 @@ Joe's exact order (2026-09-10). Do not leave a band until it is exhausted or
 unavailable:
 
   1. subscription: anthropic -> grok -> cursor -> codex -> gemini
-  2. nvidia (free NIM endpoints)
-  3. cerebras (cheap paid, last)
+  2. nvidia (API key OK)
+  3. cerebras (cheap paid, last; currently paused on Hetzner)
 
-Subscription-tier rungs prefer Joe's consumer subscriptions (Claude Max OAuth,
-Grok device-auth, ChatGPT+Codex OAuth, Gemini sub / API key) over prepaid API
-credit wallets that meter ``credit_balance``. Prepaid ``*_API_KEY`` values remain
-a last-resort fallback when no subscription credential is visible — the weekend
-CLI pattern (unset prepaid, bill claude.ai) is the sibling for Claude Code
-subprocesses; see ``docs/oauth-subscription-auth.md`` and
-``docs/dropbox-research.md``.
+Subscription-tier rungs (Anthropic / Grok / Codex / Gemini) use **subscription
+credentials only** by default — Claude Max OAuth, Grok device-auth,
+ChatGPT+Codex OAuth, Gemini OAuth. Prepaid console wallets
+(``ANTHROPIC_API_KEY``, ``XAI_API_KEY``, ``OPENAI_API_KEY``, ``GEMINI_API_KEY``
+and aliases) are **not** used on the shared ladder unless
+``RADON_LADDER_ALLOW_PREPAID=1``. Without subscription material the rung is
+skipped and the ladder continues to NVIDIA then Cerebras. Knowledge distill
+(``scripts/knowledge/distill.py`` → ``complete_text_json``) and the newsfeed
+tagger (``model_ladder_cli.py``) share this helper — Hetzner hosts that only
+mount prepaid keys will otherwise burn those wallets then fall through to
+Cerebras. Weekend CLI pattern (unset prepaid, bill claude.ai) remains the
+sibling for Claude Code subprocesses; see ``docs/oauth-subscription-auth.md``
+and ``docs/dropbox-research.md``.
 
 Cursor has no vision HTTP path in Radon; it is recorded as unwired and the rest
 of the subscription band still runs. Only a full-cascade miss is an ops_only /
 hard fail — never "top up Anthropic" while another keyed provider remains.
 
 NVIDIA is first-class before Cerebras whenever ``NVIDIA_API_KEY`` is present.
-Default vision model is the largest Llama vision on NIM
-(``meta/llama-3.2-90b-vision-instruct``), with an automatic fallback to
-``meta/llama-3.2-11b-vision-instruct`` on timeout/error. Override with
-``NVIDIA_VISION_MODEL`` (inject via ``/etc/radon/env``; never commit secrets).
+Default **text** model is ``nvidia/nemotron-3-super-120b-a12b`` (catalog-valid;
+override ``NVIDIA_TEXT_MODEL`` / ``NVIDIA_MODEL``). Default **vision** model is
+``meta/llama-3.2-90b-vision-instruct``, with automatic fallback to
+``meta/llama-3.2-11b-vision-instruct`` on timeout/error (override
+``NVIDIA_VISION_MODEL``). Inject keys via ``/etc/radon/env``; never commit secrets.
 """
 from __future__ import annotations
 
@@ -58,8 +65,8 @@ MODEL_LADDER_TIERS = {
     "cerebras": "cerebras",
 }
 
-# Prepaid / console API wallets — wrong meter for subscription-tier rungs when
-# a subscription credential is also present. Kept as last-resort fallback only.
+# Prepaid / console API wallets — wrong meter for subscription-tier rungs.
+# Off by default on the shared ladder; opt in with RADON_LADDER_ALLOW_PREPAID=1.
 _ANTHROPIC_PREPAID_KEYS = ("ANTHROPIC_API_KEY", "CLAUDE_CODE_API_KEY", "CLAUDE_API_KEY")
 _GROK_PREPAID_KEYS = ("XAI_API_KEY", "GROK_API_KEY")
 _CODEX_PREPAID_KEYS = ("OPENAI_API_KEY",)
@@ -73,12 +80,23 @@ _ANTHROPIC_OAUTH_BETA = "oauth-2025-04-20"
 
 _NVIDIA_VISION_DEFAULT = "meta/llama-3.2-90b-vision-instruct"
 _NVIDIA_VISION_FALLBACK = "meta/llama-3.2-11b-vision-instruct"
+# Catalog-valid NIM text default (meta/llama-3.3-70b-instruct → http_410 on Joe's catalog).
+_NVIDIA_TEXT_DEFAULT = "nvidia/nemotron-3-super-120b-a12b"
 
 # Back-compat aliases for cloud/.env.example inventory tests and callers.
 _ANTHROPIC_KEYS = _ANTHROPIC_PREPAID_KEYS + _ANTHROPIC_SUBSCRIPTION_ENV + ("CLAUDE_CODE_OAUTH_TOKEN_FILE",)
 _GROK_KEYS = _GROK_PREPAID_KEYS
 _CODEX_KEYS = _CODEX_PREPAID_KEYS
-_OPTIONAL_LADDER_ENV = ("NVIDIA_VISION_MODEL", "GEMINI_OAUTH_TOKEN", "GOOGLE_OAUTH_ACCESS_TOKEN", "CLAUDE_CONFIG_DIR", "CODEX_HOME")
+_OPTIONAL_LADDER_ENV = (
+    "NVIDIA_VISION_MODEL",
+    "NVIDIA_TEXT_MODEL",
+    "NVIDIA_MODEL",
+    "RADON_LADDER_ALLOW_PREPAID",
+    "GEMINI_OAUTH_TOKEN",
+    "GOOGLE_OAUTH_ACCESS_TOKEN",
+    "CLAUDE_CONFIG_DIR",
+    "CODEX_HOME",
+)
 
 _CREDIT_MARKERS = (
     "credit balance",
@@ -115,7 +133,7 @@ _DEFAULT_TEXT_MODELS = {
     "grok": "grok-4.6",
     "codex": "gpt-5.5",
     "gemini": "gemini-2.5-flash",
-    "nvidia": "meta/llama-3.3-70b-instruct",
+    "nvidia": _NVIDIA_TEXT_DEFAULT,
     "cerebras": "qwen-3.8-27b",
 }
 
@@ -317,45 +335,56 @@ def _gemini_subscription_auth(env: Mapping[str, str]) -> AuthMaterial | None:
     return None
 
 
+def _allow_prepaid(env: Mapping[str, str]) -> bool:
+    """Prepaid wallets for subscription-tier rungs; default OFF.
+
+    Set ``RADON_LADDER_ALLOW_PREPAID=1`` (also ``true`` / ``yes`` / ``on``) to
+    restore the pre-2026-09-18 escape hatch that meters console API credit.
+    """
+    raw = (env.get("RADON_LADDER_ALLOW_PREPAID") or "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _prepaid_auth(
+    env: Mapping[str, str],
+    *key_names: str,
+    mechanism: str,
+) -> AuthMaterial | None:
+    if not _allow_prepaid(env):
+        return None
+    prepaid = _env_get(env, *key_names)
+    if not prepaid:
+        return None
+    mech = mechanism
+    for candidate in key_names:
+        if (env.get(candidate) or "").strip():
+            mech = candidate
+            break
+    return AuthMaterial(prepaid, "api_key", mech)
+
+
 def _auth_for(name: str, env: Mapping[str, str]) -> AuthMaterial | None:
-    """Prefer subscription credentials over prepaid API wallets for sub-tier rungs."""
+    """Subscription credentials only for sub-tier rungs unless allow-prepaid."""
     if name == "anthropic":
         sub = _anthropic_subscription_auth(env)
         if sub is not None:
             return sub
-        prepaid = _env_get(env, *_ANTHROPIC_PREPAID_KEYS)
-        if prepaid:
-            return AuthMaterial(prepaid, "api_key", "ANTHROPIC_API_KEY")
-        return None
+        return _prepaid_auth(env, *_ANTHROPIC_PREPAID_KEYS, mechanism="ANTHROPIC_API_KEY")
     if name == "grok":
         sub = _grok_subscription_auth(env)
         if sub is not None:
             return sub
-        prepaid = _env_get(env, *_GROK_PREPAID_KEYS)
-        if prepaid:
-            return AuthMaterial(prepaid, "api_key", "XAI_API_KEY")
-        return None
+        return _prepaid_auth(env, *_GROK_PREPAID_KEYS, mechanism="XAI_API_KEY")
     if name == "codex":
         sub = _codex_subscription_auth(env)
         if sub is not None:
             return sub
-        prepaid = _env_get(env, *_CODEX_PREPAID_KEYS)
-        if prepaid:
-            return AuthMaterial(prepaid, "api_key", "OPENAI_API_KEY")
-        return None
+        return _prepaid_auth(env, *_CODEX_PREPAID_KEYS, mechanism="OPENAI_API_KEY")
     if name == "gemini":
         sub = _gemini_subscription_auth(env)
         if sub is not None:
             return sub
-        prepaid = _env_get(env, *_GEMINI_KEYS)
-        if prepaid:
-            mech = "GEMINI_API_KEY"
-            for candidate in _GEMINI_KEYS:
-                if (env.get(candidate) or "").strip():
-                    mech = candidate
-                    break
-            return AuthMaterial(prepaid, "api_key", mech)
-        return None
+        return _prepaid_auth(env, *_GEMINI_KEYS, mechanism="GEMINI_API_KEY")
     if name == "nvidia":
         token = _env_get(env, *_NVIDIA_KEYS)
         if token:
@@ -411,7 +440,10 @@ def _model_for(name: str, env: Mapping[str, str], *, kind: str = "vision") -> st
                 default=_NVIDIA_VISION_DEFAULT,
             )
         return _first_env_model(
-            env, "NVIDIA_MODEL", default=defaults["nvidia"]
+            env,
+            "NVIDIA_TEXT_MODEL",
+            "NVIDIA_MODEL",
+            default=_NVIDIA_TEXT_DEFAULT,
         )
     if name == "cerebras":
         return _first_env_model(
