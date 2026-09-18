@@ -308,6 +308,24 @@ def send_direct_page(*, title: str, message: str, tag: str) -> Optional[str]:
     return _post_pushover(payload)
 
 
+def send_signal_push(*, title: str, message: str, url: str, url_title: str) -> Optional[str]:
+    """Priority-0 market-signal push. Returns error string or None."""
+    creds = _pushover_creds()
+    if not creds:
+        return "pushover unconfigured"
+    user, token = creds
+    payload = build_pushover_payload(
+        user=user,
+        token=token,
+        title=title,
+        message=message,
+        severity=None,
+    )
+    payload["url"] = url
+    payload["url_title"] = url_title
+    return _post_pushover(payload)
+
+
 def _emit_pushover(outcome: CheckOutcome) -> ChannelResult:
     """P1 only — emergency priority cuts through iOS DnD and repeats
     until acknowledged. Non-P1 outcomes batch into the daily digest

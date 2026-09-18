@@ -559,6 +559,17 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
     expect(requiresIb("vixts")).toBe(false);
   });
 
+  // ``panic-index`` — radon-panic-index.timer fires 02:50 and 13:15 UTC every
+  // calendar day (weekend and holiday runs are 304 heartbeats). Uniform 26h.
+  it("panic-index is registered as scheduled with a uniform 26h window", () => {
+    expect(SERVICE_FRESHNESS_WINDOWS["panic-index"]).toBeDefined();
+    expect(getServiceCategory("panic-index")).toBe("scheduled");
+    for (const state of ["open", "extended", "closed"] as const) {
+      expect(getFreshnessWindowMs("panic-index", state)).toBe(26 * HOUR);
+    }
+    expect(requiresIb("panic-index")).toBe(false);
+  });
+
   // ``dispersion`` — radon-dispersion.timer fires daily 22:20 UTC every
   // calendar day (weekend and holiday runs are no-new-session heartbeats),
   // so a uniform 26h window matches its vixts sibling. IB daily bars with a
