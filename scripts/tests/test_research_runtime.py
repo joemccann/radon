@@ -60,7 +60,22 @@ def test_model_valid_multimodal_request_is_tool_free_and_bounded(tmp_path):
     ({"stop_reason":"end_turn","content":[{"type":"text"}]},None),
 ])
 def test_model_malformed_response_fails_closed(value,raw,monkeypatch):
-    for key in ("ANTHROPIC_API_KEY", "CLAUDE_CODE_API_KEY", "CLAUDE_API_KEY", "XAI_API_KEY", "GROK_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "NVIDIA_API_KEY", "CEREBRAS_API_KEY"):
+    for key in (
+        "ANTHROPIC_API_KEY",
+        "CLAUDE_CODE_API_KEY",
+        "CLAUDE_API_KEY",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "CLAUDE_CODE_OAUTH_TOKEN_FILE",
+        "XAI_API_KEY",
+        "GROK_API_KEY",
+        "OPENAI_API_KEY",
+        "GEMINI_API_KEY",
+        "GEMINI_OAUTH_TOKEN",
+        "GOOGLE_OAUTH_ACCESS_TOKEN",
+        "NVIDIA_API_KEY",
+        "CEREBRAS_API_KEY",
+        "RADON_LADDER_ALLOW_PREPAID",
+    ):
         monkeypatch.delenv(key, raising=False)
     session,closed,_=session_response(value,raw)
     with pytest.raises(model.ModelError): model.Reviewer("test",session=session).ask("evaluate")
