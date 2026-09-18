@@ -45,6 +45,7 @@ import { useScanner } from "@/lib/useScanner";
 import { useThetaHarvester } from "@/lib/useThetaHarvester";
 import { useStrengthConfirmation } from "@/lib/useStrengthConfirmation";
 import { useVolSkewMr } from "@/lib/useVolSkewMr";
+import { useBounceSetup } from "@/lib/useBounceSetup";
 import { useLeap } from "@/lib/useLeap";
 import { useGarchConvergence } from "@/lib/useGarchConvergence";
 import { useVolCone } from "@/lib/useVolCone";
@@ -142,6 +143,7 @@ import TickerFlowReport from "./flow-analysis/TickerFlowReport";
 import ThetaHarvesterScanner, { type ThetaScanParams } from "./ThetaHarvesterScanner";
 import StrengthConfirmationScanner from "./StrengthConfirmationScanner";
 import VolSkewMrScanner from "./VolSkewMrScanner";
+import BounceSetupScanner from "./BounceSetupScanner";
 import LeapScanner from "./LeapScanner";
 import GarchConvergenceScanner from "./GarchConvergenceScanner";
 import VolConePanel from "./VolConePanel";
@@ -1410,13 +1412,16 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
             ? "vol-cone"
             : queryModeParam === "vol-skew-mr"
               ? "vol-skew-mr"
-              : "flow";
+              : queryModeParam === "bounce"
+                ? "bounce"
+                : "flow";
   const queryMode = defaultMode ?? parsedQueryMode;
   const [mode, setModeState] = useState<ScannerMode>(queryMode);
   const { data, syncing, error, lastSync, syncNow } = useScanner(mode === "flow");
   const theta = useThetaHarvester(mode === "theta");
   const strength = useStrengthConfirmation(mode === "strength");
   const volSkewMr = useVolSkewMr(mode === "vol-skew-mr");
+  const bounce = useBounceSetup(mode === "bounce");
   const leap = useLeap(mode === "leap");
   const garch = useGarchConvergence(mode === "garch");
   const volCone = useVolCone(mode === "vol-cone");
@@ -1429,6 +1434,8 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
   const volSkewMrLastRequest = useRef<[string[] | undefined]>([undefined]);
   const [volSkewMrScanning, setVolSkewMrScanning] = useState(false);
   const [volSkewMrScanError, setVolSkewMrScanError] = useState<string | null>(null);
+  const [bounceScanning, setBounceScanning] = useState(false);
+  const [bounceScanError, setBounceScanError] = useState<string | null>(null);
   const leapLastRequest = useRef<[string[] | undefined]>([undefined]);
   const [leapScanning, setLeapScanning] = useState(false);
   const [leapScanError, setLeapScanError] = useState<string | null>(null);
@@ -1547,6 +1554,32 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
     }
   };
 
+  const runBounceScan = async () => {
+    if (bounceScanning) return;
+    setBounceScanError(null);
+    setBounceScanning(true);
+    try {
+      const res = await fetch("/api/scanner/bounce/scan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+        cache: "no-store",
+      });
+      if (!res.ok) {
+        throw new Error(await readErrorResponse(res, "The scan could not be completed. Please try again."));
+      }
+      const outcome = await res.json();
+      if (outcome?.scan_succeeded === false) {
+        throw new Error(userErrorMessage(outcome.error, "The scan could not be completed. Please try again."));
+      }
+      bounce.syncNow();
+    } catch (err) {
+      setBounceScanError(userErrorMessage(err, "The scan could not be completed. Please try again."));
+    } finally {
+      setBounceScanning(false);
+    }
+  };
+
   const runLeapScan = async (tickers?: string[]) => {
     if (leapScanning) return;
     leapLastRequest.current = [tickers];
@@ -1610,6 +1643,7 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
         theta: theta.data ? theta.data.theta_harvest_count ?? 0 : undefined,
         strength: strength.data ? strength.data.confirmed_strength_count ?? 0 : undefined,
         "vol-skew-mr": volSkewMr.data ? volSkewMr.data.actionable_count ?? 0 : undefined,
+        bounce: bounce.data && !bounce.data.missing ? bounce.data.bounce_count ?? 0 : undefined,
         leap: leap.data ? (leap.data.results ?? []).filter((r) => r.is_mispriced).length : undefined,
         garch: garch.data ? (garch.data.pairs ?? []).filter((p) => p.gates_passed).length : undefined,
         "vol-cone": volCone.data && !volCone.data.missing ? volCone.data.hit_count : undefined,
@@ -1685,6 +1719,23 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
           onRetry={() => { void runVolSkewMrScan(...volSkewMrLastRequest.current); }}
           onScan={() => { void runVolSkewMrScan(); }}
           onTickerScan={(tickers) => { void runVolSkewMrScan(tickers); }}
+        />
+      </div>
+    );
+  }
+
+  if (mode === "bounce") {
+    return (
+      <div className="scanner-page-shell">
+        {modeTabs}
+        <BounceSetupScanner
+          data={bounce.data ?? null}
+          loading={bounce.loading}
+          scanning={bounceScanning}
+          error={bounceScanError || bounce.error}
+          lastSync={bounce.lastSync}
+          onRetry={() => { void runBounceScan(); }}
+          onScan={() => { void runBounceScan(); }}
         />
       </div>
     );
