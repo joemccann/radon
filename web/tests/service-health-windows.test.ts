@@ -1018,3 +1018,17 @@ describe("vol-cone-intraday freshness window", () => {
     expect(requiresIb("vol-cone-intraday")).toBe(false);
   });
 });
+
+describe("bounce-setup freshness window", () => {
+  const MIN = 60_000;
+  const DAY = 24 * 60 * 60_000;
+
+  it("mirrors vol-skew-mr: on-demand, 30m open/extended, 3d closed, requires_ib false", () => {
+    expect(SERVICE_FRESHNESS_WINDOWS["bounce-setup"]).toEqual(SERVICE_FRESHNESS_WINDOWS["vol-skew-mr"]);
+    expect(getServiceCategory("bounce-setup")).toBe("on-demand");
+    expect(getFreshnessWindowMs("bounce-setup", "open")).toBe(30 * MIN);
+    expect(getFreshnessWindowMs("bounce-setup", "extended")).toBe(30 * MIN);
+    expect(getFreshnessWindowMs("bounce-setup", "closed")).toBe(3 * DAY);
+    expect(requiresIb("bounce-setup")).toBe(false);
+  });
+});
