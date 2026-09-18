@@ -189,3 +189,28 @@ def _reset_flex_cash_flow_error_latch():
     if module is not None and hasattr(module, "_CASH_FLOW_ERROR_LATCHED"):
         module._CASH_FLOW_ERROR_LATCHED = False
     yield
+
+
+@pytest.fixture
+def isolated_model_credentials(tmp_path, monkeypatch):
+    """T-498: subscription discovery must never read the operator's home.
+
+    Keep the real file readers and provider selection: subscription tests
+    opt in by writing their own files and passing HOME/CODEX_HOME explicitly.
+    Both defaults matter: env={} falls back to Path.home(), while Reviewer
+    copies os.environ. Environment-only isolation misses the former.
+    """
+    home = tmp_path / "model-home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setenv("HOME", str(home))
+    for key in (
+        "CODEX_HOME", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_OAUTH_TOKEN_FILE",
+        "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "CLAUDE_CODE_API_KEY",
+        "CLAUDE_API_KEY", "XAI_API_KEY", "GROK_API_KEY", "OPENAI_API_KEY",
+        "GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_API_KEY",
+        "GEMINI_OAUTH_TOKEN", "GOOGLE_OAUTH_ACCESS_TOKEN", "NVIDIA_API_KEY",
+        "CEREBRAS_API_KEY", "RADON_LADDER_ALLOW_PREPAID",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    return home

@@ -7613,3 +7613,10 @@ Dependency graph: T1 -> {T2,T3,T3b} -> T4 -> T5.
 - [ ] T5 depends_on: [T4] Verify exact-head checks and screenshots, notify and record results.
 
 Review: descriptive residual-model labels, display-only percentages, eight metric info bubbles and stable hover/focus surfaces. Sampled token histories connect at normal observation intervals and preserve larger gaps. TypeScript and Impeccable detector pass; suites and screenshots run on GitHub only.
+
+## Testing remediation 2026-09-18 (reduced P0/P1)
+- [x] T1 depends_on: [] Read rolling issue #83, verify runner markers and branch.
+- [x] T2 depends_on: [T1] T-498: reproduce with synthetic subscription files; isolate three suites; verify both outer environments.
+- [ ] T3 depends_on: [T1] T-496: red/green all-leg P&L measurement and mocked browser display.
+- [ ] T4 depends_on: [T2, T3] Run serial full gates three times; preserve terminal results and reconcile historical findings.
+- [ ] T5 depends_on: [T4] Persist complete carry-forward issue report and publication classification.

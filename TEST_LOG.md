@@ -955,3 +955,9 @@ after its three recorded fixture attempts.
 
 Closing gates: not run. The focused P1 blocker is deterministic, so three
 full-gate runs cannot honestly be claimed.
+
+## Remediation 2026-09-18 (testing/2026-09-18, reduced P0/P1)
+
+| Task | Status | Evidence |
+|---|---|---|
+| T-498 | Focused GREEN; full gates pending | Synthetic outer `.codex/auth.json`: unchanged suites 15 failed / 102 passed. Scoped home/env fixture: same suites 117 passed with outer canary present, 117 passed absent. Real subscription-file precedence tests retained; production code unchanged. Local preservation commit before long gates per unattended phase contract. |
