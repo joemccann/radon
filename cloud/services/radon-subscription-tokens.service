@@ -1,5 +1,5 @@
 [Unit]
-Description=Radon subscription token vault (seal, refresh, restore agent CLI credentials)
+Description=Radon subscription token vault (seal, refresh, probe, restore, push-login agent CLI credentials)
 After=network.target
 StartLimitIntervalSec=1800
 StartLimitBurst=5
@@ -12,8 +12,9 @@ WorkingDirectory=/home/radon/radon
 EnvironmentFile=/etc/radon/env
 Environment=RADON_DB_NO_REPLICA=1
 Environment=RADON_SECRET_STORE_PATH=/home/radon/radon/data/secret_store/secrets.db
-# The Antigravity CLI installer places `agy` in ~/.local/bin; the daemon
-# prefers that CLI-native refresh for the gemini provider.
+# The Antigravity and Grok installers place `agy` and `grok` in ~/.local/bin;
+# the daemon prefers each CLI-native refresh. (The module also searches that
+# directory itself, so a manual run outside this unit finds them too.)
 Environment=PATH=/home/radon/.local/bin:/usr/local/bin:/usr/bin:/bin
 LoadCredentialEncrypted=radon-secret-store-key:/etc/credstore.encrypted/radon-secret-store-key
 # The sidecar /var/lib/radon/subscription-tokens/state.json carries the page
@@ -32,10 +33,14 @@ StandardError=journal
 # refresh token becomes an hour-long P1 emergency siren every day. 78
 # (store_unavailable) is deliberately still a failure: that one warrants P1.
 SuccessExitStatus=1
-# Per provider the ceiling is a 60s CLI probe + 20s OIDC discovery + two 63s
-# POST envelopes (form, then the JSON retry): ~206s. Four providers plus paging
-# needs more than 600s once the codex/grok/agy CLIs are installed.
-TimeoutStartSec=1200
+# Per provider the ceiling is a 150s CLI probe + 20s OIDC discovery + two 63s
+# POST envelopes (form, then the JSON retry): ~296s, and one push login can
+# hold the run for up to 600s. That sum does not fit a 30min slot, so the module
+# budgets itself: inside RUN_BUDGET_SECONDS (1500s) it starts no probe with
+# under 150s left, no refresh with under 170s left, and clips the login wait to
+# what remains. This kill is the backstop behind that budget, kept under the
+# 30min slot so a hung run cannot block the next refresh.
+TimeoutStartSec=1700
 
 [Install]
 WantedBy=multi-user.target
