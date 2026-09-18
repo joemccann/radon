@@ -1,0 +1,21 @@
+[Unit]
+Description=Radon Panic Proxy - Cboe VIX/VIX3M/VVIX/SKEW composite, 02:50 and 13:15 UTC
+
+[Timer]
+# Two fires per calendar day, calm-streak precedent (02:40 + 14:30). VIX and
+# VIX3M carry the prior session by ~01:51 UTC (vixts research), but VVIX and
+# SKEW were observed re-touched at 12:01 and 21:01 UTC with the row still
+# ending on the prior session as of 2026-09-18 21:3x UTC. 02:50 sits in the
+# free slot after vixts 02:45 and usually joins to the prior-but-one session;
+# 13:15 UTC (before RTH open) is kept as specified. Off-session fires are 304
+# heartbeats that keep service_health inside the 26h window.
+# TODO: replace the 13:15 slot if three-session append timing shows it is
+# too early; only one session was observable during this build (VVIX 12:01
+# UTC / SKEW 21:01 UTC re-touch, no 09/18 row yet).
+OnCalendar=*-*-* 02:50:00 UTC
+OnCalendar=*-*-* 13:15:00 UTC
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target
