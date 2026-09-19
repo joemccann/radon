@@ -78,6 +78,11 @@ def kelly_config() -> dict:
 
     enforce_raw = os.environ.get("RADON_KELLY_ENFORCE_ORDERS", "0")
     enforce_orders = enforce_raw.strip() == "1"
+    # RADON_KELLY_ENFORCE_ORDERS=1 means the order-path guard is active.
+    # Mode defaults to warn so production (=1) does not block without a
+    # second env flip. block remains available via RADON_KELLY_ENFORCE_MODE.
+    mode_raw = (os.environ.get("RADON_KELLY_ENFORCE_MODE") or "warn").strip().lower()
+    enforce_mode = mode_raw if mode_raw in ("warn", "block") else "warn"
 
     return {
         "fraction": fraction,
@@ -86,6 +91,7 @@ def kelly_config() -> dict:
         "max_deployed_pct": max_deployed_pct,
         "drawdown_halt_pct": drawdown_halt_pct,
         "enforce_orders": enforce_orders,
+        "enforce_mode": enforce_mode,
     }
 
 

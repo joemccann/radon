@@ -235,6 +235,7 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
     """
     # Kill switch (REL-004): every placement path funnels through here
     # (/orders/place subprocess) — refuse before touching IB. what_if previews are read-only and stay allowed.
+    kelly_warning = None
     if not what_if:
         from trading_halt import is_trading_halted, get_halt_state
 
@@ -255,14 +256,15 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
         if violation:
             return {"status": "error", "message": violation["message"]}
 
+        from kelly import kelly_config
         from kelly_guard import check_kelly_ticket
 
-        kelly_violation = check_kelly_ticket(params)
-        if kelly_violation:
+        kelly_warning = check_kelly_ticket(params)
+        if kelly_warning and kelly_config()["enforce_mode"] == "block":
             return {
                 "status": "error",
-                "code": kelly_violation["code"],
-                "message": kelly_violation["message"],
+                "code": kelly_warning["code"],
+                "message": kelly_warning["message"],
             }
 
     order_type = params.get("type", "stock")
@@ -671,6 +673,12 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
             result["filled"] = int(filled)
             result["remaining"] = _fill_value(trade.orderStatus.remaining)
             result["avgFillPrice"] = _fill_value(trade.orderStatus.avgFillPrice)
+        if kelly_warning:
+            result["kelly_warning"] = {
+                key: kelly_warning[key]
+                for key in ("code", "message", "loss", "bankroll", "pct")
+                if key in kelly_warning
+            }
         return result
 
     except Exception as e:

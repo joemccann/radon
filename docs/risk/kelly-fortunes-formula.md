@@ -120,7 +120,8 @@ not argued from memory.
 | `KELLY_RESTRUCTURE_PCT` | constant | `0.20` | n/a | `f_full > 0.20` sets `restructure: true` (the `.pi/SYSTEM.md` rule). Recommendation strings (`STRONG` / `MARGINAL` / `WEAK` / `DO NOT BET`) do not change; tests pin them. |
 | `max_deployed_pct` | `RADON_KELLY_MAX_DEPLOYED_PCT` | `0.20` | `[0.05, 0.50]` | Sum of worst-case losses across open defined-risk positions plus the proposed ticket, as a share of bankroll. |
 | `drawdown_halt_pct` | `RADON_KELLY_DRAWDOWN_HALT_PCT` | `0.15` | `[0.05, 0.50]` | Peak-to-trough NAV drawdown at or beyond this returns size `0` with `reason: "DRAWDOWN_HALT"`. NAV history source: `ib_sync.py:_append_nav_snapshot`. |
-| `RADON_KELLY_ENFORCE_ORDERS` | env | `0` (off) | `{0, 1}` | Phase 3 order-path guard, see §C.4. |
+| `RADON_KELLY_ENFORCE_ORDERS` | env | `0` (off) | `{0, 1}` | Phase 3 order-path guard is **active** when `1`. Mode is warn, not block. See §C.4. |
+| `RADON_KELLY_ENFORCE_MODE` | env | `warn` | `{warn, block}` | Order-path only. Default `warn`: log + attach `kelly_warning`, still call IB. `block` restores hard refuse. Invalid values fall back to `warn`. |
 
 Resolution order for env values: process env only, read at call time via a
 small `kelly_config()` helper. Registering `RADON_KELLY_FRACTION` in
@@ -246,34 +247,42 @@ is a placeholder, so:
 - `decision="TRADE"` requires `M5.passed and M6.passed`. No other path sets
   `TRADE`.
 
-### C.4 Order path (phase 3, default off)
+### C.4 Order path (phase 3, default off; warn-only when armed)
 
 `order_limits.py` stays fat-finger only; its docstring is correct and must not
 be widened. A separate guard, `scripts/kelly_guard.py:check_kelly_ticket(params,
 bankroll)`, runs in `ib_place_order.place_order` immediately after
-`check_order_limits` and only when `RADON_KELLY_ENFORCE_ORDERS=1`:
+`check_order_limits` and only when `RADON_KELLY_ENFORCE_ORDERS=1`.
+
+**Warn, not block.** `RADON_KELLY_ENFORCE_ORDERS=1` means the guard is active.
+Default mode is `warn` (`RADON_KELLY_ENFORCE_MODE` unset or `warn`): violations
+log a WARNING (code + message + loss/bankroll/pct when relevant) and attach
+`kelly_warning` on the place_order success JSON. The order still proceeds to
+IB. Fat-finger `order_limits` still refuse. `RADON_KELLY_ENFORCE_MODE=block`
+restores hard refuse (`status: "error"` before IB). Evaluate M6 fail-closed
+for sizing/eval is unchanged.
 
 - Applies to opening orders only. Closing, rolling and reducing orders lower
   risk and are exempt; the classifier reuses the coverage logic behind
   `RADON_MAX_COMBO_LOSS_DOLLARS` (worst-case loss already computed for combos).
 - Bankroll source in a fresh interpreter: `NetLiquidation` from the connected
   `IBClient` account summary, falling back to `data/portfolio.json`
-  `net_liquidation`. If neither is available the guard **refuses** with
-  `code: "KELLY_BANKROLL_UNKNOWN"`; an unknown bankroll is not a pass.
-- Refusal shape matches `check_order_limits`: `{"code": "KELLY_CAP_EXCEEDED",
-  "message": "<max_loss> is <pct>% of bankroll; cap is 2.5%"}`. FastAPI
-  `/orders/place` mirrors it for fast refusal (same pattern as the fat-finger
-  caps). Preserve upstream detail; never collapse to 500.
+  `net_liquidation`. If neither is available the guard **warns** with
+  `code: "KELLY_BANKROLL_UNKNOWN"` and continues; an unknown bankroll is not a
+  silent pass.
+- Warning shape: `{"code": "KELLY_CAP_EXCEEDED", "message": "<max_loss> is
+  <pct>% of bankroll; cap is 2.5%", "loss", "bankroll", "pct"}`. place_order
+  copies it onto `kelly_warning`. Preserve upstream detail; never collapse to
+  500.
 - Stock orders: skip (no defined `max_loss`), log at INFO. Naked short options:
-  refuse with `KELLY_UNDEFINED_RISK` only when the guard is on; Gate 4 remains
+  warn with `KELLY_UNDEFINED_RISK` only when the guard is on; Gate 4 remains
   disabled and this guard does not re-enable it.
 - `web/lib/orderRisk.ts` gets a display-only `bankrollPct` so the ticket shows
   the number the server will check. Display, never enforcement (chokepoint
   rule in `web/CLAUDE.md`).
 
-Enabling this in production is a Joe decision (§F). It changes what the
-placement funnel refuses, so it ships behind the env flag with the flag unset
-on every `radon-*` unit until then.
+`RADON_KELLY_ENFORCE_ORDERS` stays unset on every `radon-*` unit until Joe
+signs (§F). Once `=1`, prod warns and still places unless mode is `block`.
 
 ---
 
@@ -297,7 +306,7 @@ extend `lib/tools/__tests__/schemas.test.ts`, `kelly.test.ts`,
 | D8 | `growth_rate_used > 0` whenever `edge_exists`; `growth_rate_full >= growth_rate_used`; `kelly(1.0, 3.0)["growth_rate_full"] is None`; `kelly(0.6, 2.0, fraction=0.5, p_source="measured")["growth_rate_used"] == pytest.approx(0.75 * g_full, rel=0.05)`. | geometric framing |
 | D9 | `kelly(0.7, 4.0)["restructure"] is True` (`f_full = 0.625`); `kelly(0.55, 1.5)["restructure"] is True` (`f_full = 0.25`); `kelly(0.52, 1.5)["restructure"] is False` (`f_full = 0.20`, boundary is strict). Recommendation strings unchanged for all existing pinned cases. | restructure flag |
 | D10 | `evaluate_ticker("AAPL", bankroll=100_000)` with mocked M1-M4 PASS and no structure: `M5.passed is False`, `M6.passed is False`, `decision == "PENDING"`, exit code `2` (existing test stays green). With `structure={"max_gain": 300, "max_loss": 100, "prob_win": 0.4}`: `M6.passed is True`, `M6.data["contracts"] == 25`, `position_pct == 2.5`, `decision == "TRADE"`. With `prob_win=0.2`: `decision == "NO_TRADE"`, `failing_gate == "RISK"`, `reason == "NO_EDGE"`. With `max_loss=0`: `reason == "UNDEFINED_RISK"`. With `prob_win=0.9, max_gain=1000, max_loss=100` (`f_full = 0.89`): `reason == "RESTRUCTURE"`. `format_report` prints `KELLY SIZING` and the reason for every refusal. | evaluate fails closed without structure + kelly |
-| D11 | `check_kelly_ticket` with env flag unset returns `None` for a 10x oversized ticket (guard is off). With `RADON_KELLY_ENFORCE_ORDERS=1`: opening combo whose worst-case loss is `3%` of bankroll refuses `KELLY_CAP_EXCEEDED`; the same ticket flagged closing passes; unknown bankroll refuses `KELLY_BANKROLL_UNKNOWN`; stock order passes. Wire test in `test_ib_place_order_*`: `place_order` returns the refusal dict before any IB call (mock `IBClient`, assert not called). | order-path guard, tested at the wire |
+| D11 | `check_kelly_ticket` with env flag unset returns `None` for a 10x oversized ticket and emits no WARNING (guard is off). With `RADON_KELLY_ENFORCE_ORDERS=1` (mode default `warn`): opening combo whose worst-case loss is `3%` of bankroll returns `KELLY_CAP_EXCEEDED` with loss/bankroll/pct and logs WARNING; the same ticket flagged closing passes with no warn; unknown bankroll warns `KELLY_BANKROLL_UNKNOWN`; stock order passes. Wire test: `place_order` does **not** return a Kelly error, attaches `kelly_warning`, and the mocked IB `place_order` is called. `RADON_KELLY_ENFORCE_MODE=block` still refuses before IB. | order-path guard, warn-only at the wire |
 | D12 | `lib/tools/__tests__/kelly.test.ts` live subprocess: omitted `fraction` returns `fraction_used 0.5`; `fraction: 0.51` returns `ok: false`; with `RADON_KELLY_FRACTION=0.25` in the child env, `fraction: 0.5` returns `ok: false` with the `estimated` message. `schemas.test.ts`: output with the new optional keys validates; output missing them still validates; the static fixtures' `fraction_used: 0.25` become `0.5`. `site/lib/pages/fractional-kelly-position-sizing.test.ts` and `agent-prompts.test.ts`: every "quarter" becomes "half" and the worked example reads `0.2667 / 2 = 13.3%; the 2.5% cap binds`. | TS/Python/site contract |
 
 Run order: `python3.13 scripts/run_pytest_affected.py --files scripts/kelly.py scripts/evaluate.py -- -q`, then `cd web && npx vitest run lib/tools`, never concurrently on the laptop. Full suites before each commit.
