@@ -806,6 +806,7 @@ jobs:
           e2e/mobile-orders-session.spec.ts
           e2e/orders-session-window.spec.ts
           e2e/vixts-tab.spec.ts
+          e2e/panic-index-tab.spec.ts
           e2e/hyad-tab.spec.ts
           e2e/research-workbench.spec.ts
           e2e/newsfeed-research-media.spec.ts

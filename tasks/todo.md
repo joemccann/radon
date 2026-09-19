@@ -1,3 +1,25 @@
+# Task: Main merge conflict resolution 2026-09-19 [IN PROGRESS]
+
+Resolve `origin/main` into `cursor/panic-index-proxy-plan-e8e5`, keep the panic
+index spec intact, and land a true merge commit with any required conflict
+fixes.
+
+## Dependency graph
+
+- T1 depends_on: [] - Fetch `origin/main` into the shallow clone and start the merge.
+- T2 depends_on: [T1] - Resolve conflicted files with the smallest correct merged result.
+- T3 depends_on: [T2] - Run focused validation and publish the merge commit.
+
+## Checklist
+
+- [x] T1 Fetch `origin/main` and start merge
+- [x] T2 Resolve conflicted files
+- [x] T3 Validate and push
+
+## Review
+
+- [x] Merge commit keeps both parents and only the intended conflict resolutions.
+
 # Task: Four-digit chain strikes [IMPLEMENTED; PR CI PENDING]
 
 SNDK calls ladder clips `$1,737.00` to `$1,70...` because chain-first pins
