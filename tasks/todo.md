@@ -1,4 +1,4 @@
-# Task: Newsfeed SLM tagger v1 build spec [PLAN ONLY]
+# Task: Newsfeed SLM tagger v1 build spec [PLAN ONLY; PR #533 DRAFT, CI GREEN]
 
 Docs-only PR: `docs/ml/newsfeed-slm-tagger.md`, an implementer-grade spec
 for a local LoRA-tuned 1-3B text tagger as a new ladder rung `slm-tagger`
@@ -15,7 +15,7 @@ server, or ladder code in this PR.
 
 - [x] T1 Verified: text tagger runs on every post (`hydrateTagsDual`), target column `tags_text`; taxonomy untracked since f88b413a (212 tags then); no posts corpus or Turso creds on the VM
 - [x] T2 Spec written
-- [ ] T3 PR, CI green
+- [x] T3 PR #533 draft, CI green on d58a0de1 (31 pass, 7 path-skipped); Pushover blocked: no PUSHOVER_USER / PUSHOVER_TOKEN on the cloud VM
 
 ## Review
 
