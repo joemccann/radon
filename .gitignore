@@ -285,3 +285,4 @@ docs/security-audit-*.html
 
 # One-shot security-scan scratch directories (never commit)
 CLAUDE-SECURITY-*/
+data/slm/
