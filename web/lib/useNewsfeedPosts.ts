@@ -12,6 +12,7 @@ import {
 } from "./offline/offlineSignals";
 
 import { parseImageSources, parseResearchSource, type ResearchSource } from "./newsfeedSource";
+import type { PostFeedback } from "./researchFeedback";
 
 const POSTS_ENDPOINT = "/api/newsfeed/posts";
 const POSTS_FALLBACK_ENDPOINT = "/data/posts.json";
@@ -19,6 +20,8 @@ const REFRESH_INTERVAL_MS = 2 * 60 * 1000;
 
 export type MarketEarPost = {
   source?: ResearchSource;
+  /** Operator's latest vote on a research post; only ever present for the operator. */
+  feedback?: PostFeedback;
   id: string;
   title: string;
   content?: string;
