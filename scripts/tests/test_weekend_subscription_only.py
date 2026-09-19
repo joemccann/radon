@@ -574,3 +574,19 @@ class TestTheRailsAreReCheckedBeforeEveryPhase:
         assert proc.returncode == 2, (proc.returncode, out)
         assert "REFUSING" in out, out
         assert KEY not in out, out
+
+
+class TestCredentialFreeLoopsDisableLadderAuthFileDiscovery:
+    """The security loop is credential-free by contract, but the model
+    ladder's default-on auth-file discovery would still read the operator's
+    ~/.claude, ~/.codex, ~/.grok and antigravity grants from any child
+    python. RADON_LADDER_NO_AUTH_FILES=1 must be exported by both security
+    runners so discovery stays env-var-only."""
+
+    @pytest.mark.parametrize(
+        "wrapper",
+        ["scripts/security_nightly.sh", "scripts/security_deepsec_worker.sh"],
+    )
+    def test_security_wrappers_export_the_flag(self, wrapper):
+        text = (REPO / wrapper).read_text(encoding="utf-8")
+        assert "export RADON_LADDER_NO_AUTH_FILES=1" in text
