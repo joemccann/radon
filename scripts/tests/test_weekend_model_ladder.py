@@ -75,6 +75,8 @@ CASUAL_RATE_LIMITS = "the 500 mentioned rate limits in a timeout log"
 # The security wrapper refuses to call a phase OK without this; harmless noise
 # for the other four.
 COMPLETION = "SECURITY-NIGHTLY PHASE COMPLETE: audit"
+# The DeepSec wrapper greps its own prefix; each line is inert for the other.
+COMPLETION_DEEPSEC = "SECURITY-DEEPSEC PHASE COMPLETE: audit"
 
 MARKERS = (
     ".radon-weekend-runner",
@@ -144,6 +146,7 @@ def _stub_bin(
             f"  exit {exhausted_exit}\n"
             "fi\n"
             f'echo "{COMPLETION}"\n'
+            f'echo "{COMPLETION_DEEPSEC}"\n'
             "exit 0\n"
         ),
         "timeout": (
