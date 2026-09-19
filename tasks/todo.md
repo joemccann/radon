@@ -1,3 +1,23 @@
+# Task: Kelly Fortune's Formula spec (2026-09-19) [PLAN PR; NO CODE]
+
+## Dependency graph
+
+- T1 depends_on: [] - Audit `scripts/kelly.py`, TypeBox schema, evaluate M6, order path, prose claims.
+- T2 depends_on: [T1] - Write `docs/risk/kelly-fortunes-formula.md` (gap table, formulas, surfaces, tests, cutover, Joe checklist).
+- T3 depends_on: [T2] - Cross-link: `docs/README.md`, `docs/owners.json` rule `kelly-sizing`, `docs/evaluation.md`, `CLAUDE.md`, `.pi/SYSTEM.md`.
+- T4 depends_on: [T3] - Draft PR, docs contract tests green, exact-head CI green, Pushover.
+
+## Checklist
+
+- [x] T1 Audit
+- [x] T2 Spec
+- [x] T3 Cross-links
+- [ ] T4 Draft PR + CI green
+
+## Review
+
+- Docs only. Default fraction stays 0.25 in code and docs; half Kelly gated on Joe (§F of the spec).
+
 # Task: GEX45 GPU deployment tooling (2026-09-19)
 
 ## Dependency graph

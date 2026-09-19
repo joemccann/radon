@@ -26,6 +26,7 @@ Pipeline for converting a ticker into a trade decision. Stop on failure at any g
 
 6. **Kelly sizing**
    - Enforce 2.5% bankroll cap per position. Hard cap, not advisory.
+   - `evaluate.py` M6 is still a placeholder (`PENDING`, exit 2); the wiring plan and Fortune's Formula gap table are in `docs/risk/kelly-fortunes-formula.md`.
 
 7. **Log**
    - Executed → `data/trade_log.json` (append-only).
