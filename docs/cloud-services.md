@@ -317,6 +317,10 @@ does not mean Turso necessarily failed.
 
 `scripts/host_metrics_sampler.py` (main repo, stdlib-only) runs every minute on the VPS via `radon-host-metrics.timer` (`cloud/services/`) and writes one row per run to the Turso `host_metrics` table (migration 0012): CPU % from a 1s `/proc/stat` delta, memory + swap from `/proc/meminfo`, `load1`, per-`radon-*`-unit ActiveState/NRestarts, and the FastAPI event-loop lag exposed as `loop_lag_ms` on `/health/lite`. Writes ride the bounded hrana path (`scripts/db/hrana_http.py`) with a capped JSONL fallback at `data/host_metrics_fallback.jsonl`; every run heartbeats `service_health[host-metrics]` (10-min freshness window). Retention is 14 days, pruned hourly by the sampler. The `/admin` page renders the latest values + 1h sparkline via `GET /api/admin/host-metrics`.
 
+### TradingView alerts
+
+TradingView alert fires `POST` to `app.radon.run/api/webhooks/tradingview/<TV_WEBHOOK_PATH_TOKEN>`. Caddy admits only TradingView's four sender IPs and caps the body at 16KB. The route checks the path token and the body `secret` (`TV_WEBHOOK_SECRET`) in constant time, then writes the raw body to Turso `tv_alert_events` (migration 0081) before it parses anything. `scripts/tv_alerts_drain.py` runs every 5 minutes via `radon-tv-alerts.timer`. It resolves tickers, marks 5-second exact repeats in `duplicate_of`, sends one normal-priority Pushover digest per cycle (none when there are no new rows), prunes rows older than 180 days, and heartbeats `service_health[tv-alerts-drain]` (20-min window). Both secrets live in `/etc/radon/env`. Spec: [`tradingview-integration.md`](tradingview-integration.md).
+
 ### Bounded vs process-bound Turso writes (R5 partial)
 
 `libsql_experimental` has **no client timeouts** and holds the GIL while blocked. Prefer `scripts/db/hrana_http.py` (real `urllib` socket timeout) for hang-risk writers; leave bulk/oneshot scan writers on sync libsql under process supervision. Full inventory: module docstring of `scripts/db/client.py`.

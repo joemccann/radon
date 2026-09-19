@@ -1,0 +1,28 @@
+[Unit]
+Description=Radon TradingView alert drain (issue #457: webhook inbox -> alerts)
+After=network.target
+# DUR-02 pattern: brake crash loops. 5-minute timer cadence, so 5 starts in
+# 1800s means every run for half an hour failed; systemd then parks the unit
+# as failed instead of restarting forever.
+StartLimitIntervalSec=1800
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+User=radon
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/etc/radon/env
+Environment=RADON_DB_NO_REPLICA=1
+# The drain ships with the MAIN repo (scripts/tv_alerts_drain.py) and lands
+# on the next deploy. Until then this condition skips the run CLEANLY (unit
+# ends inactive, not failed) so the watchdog unit alarm does not page.
+ExecCondition=/usr/bin/test -f /home/radon/radon/scripts/tv_alerts_drain.py
+ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/tv_alerts_drain.py
+StandardOutput=journal
+StandardError=journal
+# Type=oneshot ignores RuntimeMaxSec; TimeoutStartSec is the bound, well
+# inside the 5-minute cadence so a hung drain cannot freeze its timer.
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

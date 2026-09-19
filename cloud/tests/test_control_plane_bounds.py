@@ -261,6 +261,9 @@ EXPECTED_AUTO_SYNC_UNITS = (
     "radon-subscription-tokens.timer",
     "radon-trin.service",
     "radon-trin.timer",
+    # Issue #457: TradingView alert drain (5-minute oneshot).
+    "radon-tv-alerts.service",
+    "radon-tv-alerts.timer",
     "radon-vcg-refresh.service",
     "radon-vcg-refresh.timer",
     "radon-vixcor.service",
