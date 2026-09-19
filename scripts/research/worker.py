@@ -10,7 +10,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from research.dropbox import DropboxClient, DropboxError
-from research.model import classify_error
+from research.model import PROVIDER_PARK_SECS, classify_error, is_provider_outage
 from research.state import State, date_scopes
 from utils.atomic_io import atomic_save
 
@@ -137,7 +137,9 @@ def cycle(root, client, state, pipeline, publisher, publish=False, limit=4):
             processed += 1
         except Exception as error:
             errors.append(classify_error(error))
-            if work['attempts'] >= 5:
+            if is_provider_outage(error):
+                state.park(work['key'], time.time() + PROVIDER_PARK_SECS)
+            elif work['attempts'] >= 5:
                 state.complete(work['key'], {'status': 'held', 'error': classify_error(error)})
             else:
                 delay = max(getattr(error, 'retry_after', 0) or 0, min(3600, 60 * 2 ** work['attempts']))
