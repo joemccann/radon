@@ -23,6 +23,7 @@
   --nf-s2: 8px;
   --nf-s3: 12px;
   --nf-s4: 16px;
+  --dn-pad-x: var(--nf-s3);
   padding: var(--nf-s3) var(--nf-s3) 0;
 }
 
