@@ -126,7 +126,11 @@ value is a regular, non-symlink 32-byte file, stages a copy under
 `/run/radon-app-runtime/credentials/`, and mounts only that directory
 read-only into the API container. The key is never passed through Docker
 arguments or environment values; the staged plaintext is removed by
-`ExecStopPost` after the container stops.
+`ExecStopPost` after the container stops. The wrapper runs the container
+with Podman (`--cgroups=split`, so it lives in the unit's own cgroup) when
+`/usr/bin/podman` exists, and falls back to Docker otherwise or when
+`RADON_CONTAINER_ENGINE=docker`; credential staging is identical on both
+(REL-087).
 
 **Subscription credential binds (2026-09-18).** `radon-app-runtime` also
 binds the operator's CLI subscription grants, each read-only and only when the

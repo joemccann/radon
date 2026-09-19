@@ -14,6 +14,8 @@ readonly MEDIA_DIR_IN_CONTAINER=/var/lib/radon/media
 
 if [[ "${RADON_APP_RUNTIME_TEST_MODE:-0}" == "1" ]]; then
   DOCKER="${RADON_TEST_DOCKER:?test docker is required}"
+  ENGINE="${RADON_TEST_ENGINE:-docker}"
+  LEGACY_DOCKER="${RADON_TEST_LEGACY_DOCKER:-}"
   ID_BIN="${RADON_TEST_ID:?test id is required}"
   ENV_FILE="${RADON_TEST_ENV_FILE:?test env file is required}"
   DATA_DIR="${RADON_TEST_DATA_DIR:?test data dir is required}"
@@ -32,7 +34,27 @@ else
     echo "radon-app-runtime must run as root" >&2
     exit 77
   fi
-  DOCKER=/usr/bin/docker
+  # REL-087 / R-232: Podman is the engine whenever it is installed, because
+  # `--cgroups=split` keeps conmon and the container inside the unit's own
+  # cgroup. Docker stays as the staged-cutover fallback (podman not installed
+  # yet) and the rollback lever (drop-in Environment=RADON_CONTAINER_ENGINE=docker).
+  ENGINE="${RADON_CONTAINER_ENGINE:-}"
+  if [[ -z "$ENGINE" ]]; then
+    if [[ -x /usr/bin/podman ]]; then ENGINE=podman; else ENGINE=docker; fi
+  fi
+  LEGACY_DOCKER=""
+  case "$ENGINE" in
+    podman)
+      DOCKER=/usr/bin/podman
+      # A docker-era container of the same unit must be reaped too.
+      [[ -x /usr/bin/docker ]] && LEGACY_DOCKER=/usr/bin/docker
+      ;;
+    docker) DOCKER=/usr/bin/docker ;;
+    *)
+      echo "radon-app-runtime: RADON_CONTAINER_ENGINE must be podman or docker" >&2
+      exit 64
+      ;;
+  esac
   ID_BIN=/usr/bin/id
   ENV_FILE=/etc/radon/env
   DATA_DIR=/home/radon/radon/data
@@ -188,6 +210,8 @@ image_in_local_store() {
 # The deploy pre-pull must detect a rebuilt tag even when its old image is local.
 # Runtime starts retain image_available's offline fallback.
 image_matches_registry() {
+  # `buildx imagetools` is docker-only; podman re-pulls, which is layer-incremental.
+  [[ "$ENGINE" == podman ]] && return 1
   "$PYTHON" - "$DOCKER" "$1" <<'PYCODE'
 import json, re, subprocess, sys
 docker, image = sys.argv[1:]
@@ -377,6 +401,20 @@ except (OSError, ValueError, IndexError, subprocess.SubprocessError) as exc:
 PYCODE
 }
 
+# `rm -f` by --name, on the active engine and, under podman, on docker too so
+# a docker-era container never shares data/ with its podman successor.
+reap_container() {
+  local unit="$1" engine
+  for engine in "$DOCKER" ${LEGACY_DOCKER:+"$LEGACY_DOCKER"}; do
+    if ! "$engine" rm -f "$unit" >/dev/null 2>&1; then
+      if "$engine" inspect "$unit" >/dev/null 2>&1; then
+        echo "radon-app-runtime: ${engine##*/} rm -f ${unit} failed and the orphan container is still present; refusing to clear its staged credential" >&2
+        exit 75
+      fi
+    fi
+  done
+}
+
 cmd_stop() {
   local unit="${1:-}"
   [[ -n "$unit" ]] || usage
@@ -391,12 +429,7 @@ cmd_stop() {
   # open fails on a missing key instead of a clear name conflict. A non-zero
   # rm for a container that does NOT exist is the ordinary first-start case
   # and stays benign; only a SURVIVING container aborts.
-  if ! "$DOCKER" rm -f "$unit" >/dev/null 2>&1; then
-    if "$DOCKER" inspect "$unit" >/dev/null 2>&1; then
-      echo "radon-app-runtime: docker rm -f ${unit} failed and the orphan container is still present; refusing to clear its staged credential" >&2
-      exit 75
-    fi
-  fi
+  reap_container "$unit"
   cleanup_runtime_credential "$unit"
 }
 
@@ -616,12 +649,7 @@ cmd_run() {
   # open fails on a missing key instead of a clear name conflict. A non-zero
   # rm for a container that does NOT exist is the ordinary first-start case
   # and stays benign; only a SURVIVING container aborts.
-  if ! "$DOCKER" rm -f "$unit" >/dev/null 2>&1; then
-    if "$DOCKER" inspect "$unit" >/dev/null 2>&1; then
-      echo "radon-app-runtime: docker rm -f ${unit} failed and the orphan container is still present; refusing to clear its staged credential" >&2
-      exit 75
-    fi
-  fi
+  reap_container "$unit"
   cleanup_runtime_credential "$unit"
 
   if [[ "$unit" == "radon-api.service" ]]; then
@@ -657,11 +685,21 @@ cmd_run() {
     --cap-drop ALL \
     --security-opt no-new-privileges \
     --cgroupns host \
-    --cgroup-parent=system.slice \
     --env-file "$(render_env_file "$unit")" \
     --env RADON_DB_NO_REPLICA=1 \
     --env PYTHONPATH=/home/radon/radon/scripts \
     -w "$workdir"
+
+  if [[ "$ENGINE" == podman ]]; then
+    # REL-087: conmon and the container join the unit's own cgroup (the unit
+    # delegates it), so KillMode reaches them. Podman must not consume
+    # NOTIFY_SOCKET itself: the notify proxy below stays the one path.
+    set -- "$@" --cgroups=split --sdnotify=ignore
+  else
+    # Docker fallback: its systemd driver accepts a slice, not a unit path,
+    # so the container is outside the unit and only reaping stops it.
+    set -- "$@" --cgroup-parent=system.slice
+  fi
 
   if [[ "$unit" != "radon-research.service" ]]; then
     set -- "$@" \

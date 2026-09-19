@@ -462,7 +462,7 @@ def test_run_allowlisted_unit_uses_host_net_and_radon_user(
     assert "no-new-privileges" in log
     assert "--cgroupns host" in log or "--cgroupns=host" in log
     # Docker's systemd driver accepts a slice only, not a unit path.
-    assert "--cgroup-parent=system.slice --env-file" in log
+    assert "--cgroup-parent=system.slice" in log
     assert f"system.slice/{unit}" not in log
     assert "docker.sock" not in log
     assert "--privileged" not in log
