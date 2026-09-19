@@ -12,14 +12,35 @@ fixes.
 
 ## Checklist
 
-- [ ] T1 Fetch `origin/main` and start merge
-- [ ] T2 Resolve conflicted files
+- [x] T1 Fetch `origin/main` and start merge
+- [x] T2 Resolve conflicted files
 - [ ] T3 Validate and push
 
 ## Review
 
 - [ ] Merge commit keeps both parents and only the intended conflict resolutions.
 
+# Task: Four-digit chain strikes [IMPLEMENTED; PR CI PENDING]
+
+SNDK calls ladder clips `$1,737.00` to `$1,70...` because chain-first pins
+`.chain-anchor-strike-col` at 72px and strike cells inherit ellipsis.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red CSS + E2E: 4-digit formatted strike fully visible
+- T2 depends_on: [T1] - Widen strike col; do not ellipsis strike identity
+- T3 depends_on: [T2] - Focused green, PR, CI
+
+## Checklist
+
+- [x] T1 Failing strike-column contract + chain-first four-digit overflow assert
+- [x] T2 CSS width 7.5rem + clip on `td.chain-strike`
+- [ ] T3 PR, CI green
+
+## Review
+
+- [x] Vitest `chain-strike-column.test.ts` 3 passed. Playwright CSS
+      measurement 1 passed (`$1,737.00` and `$12,345.00` unclipped).
 # Task: Reliability remediate 2026-09-17 [DONE]
 
 Reduced-capability rung: remediate P0/P1 only. Today's audit carries one P2
@@ -7635,6 +7656,28 @@ Dependency graph: T1 -> {T2,T3,T3b} -> T4 -> T5.
 - [ ] T5 depends_on: [T4] Verify exact-head checks and screenshots, notify and record results.
 
 Review: descriptive residual-model labels, display-only percentages, eight metric info bubbles and stable hover/focus surfaces. Sampled token histories connect at normal observation intervals and preserve larger gaps. TypeScript and Impeccable detector pass; suites and screenshots run on GitHub only.
+# AI Industry source and chart audit (2026-09-17)
+
+Dependency graph: T1 -> T2 -> T3 -> T4 -> T5.
+- [x] T1 depends_on: [] Inventory every source, observation, transformation and rendered chart; inspect live coverage.
+- [x] T2 depends_on: [T1] Verify primary sources and research longer historical archives; document source-by-source findings.
+- [x] T3 depends_on: [T2] Add failing regressions, correct ingestion/presentation, backfill verified history and resolve empty market context.
+- [x] T4 depends_on: [T3] Run focused/full verification and inspect desktop/mobile screenshots.
+- [x] T5 depends_on: [T4] Publish PR #512; registered expected GitHub checks.
+- [ ] T6 depends_on: [T5] Verify all applicable exact-head checks are green; final evidence recorded on PR #512.
+
+Review: audited 16 registered sources, 18 indicators and empty legacy index;
+356,644 baseline vintages / 3,342 comparable series. Production append-only
+backfill: 301 vintages; initial 679,532-byte snapshot at 2026-09-18T05:21:05Z,
+followed by four additional reviewed NVIDIA quarters back to January 2024.
+Final production snapshot: 680,537 bytes at 2026-09-18T05:33:19Z.
+134 focused Python tests including 12 final audit regressions, 515 systemd tests,
+12 Playwright tests, TypeScript and scoped ESLint passed; desktop/mobile visuals
+inspected. Full cloud suite interrupted after 177 passed / 22 skipped; full
+Python run interrupted after 11,427 passed / 19 skipped / 15 unrelated failures
+in model-ladder, research-runtime and vision-cascade tests (local subscription
+discovery). Full Vitest: 979 files / 9,734 tests passed. Exact-head CI recorded
+in PR before handoff.
 
 ## Testing remediation 2026-09-18 (reduced P0/P1)
 - [x] T1 depends_on: [] Read rolling issue #83, verify runner markers and branch.
@@ -7660,3 +7703,15 @@ Dependency graph: T1 -> T2 -> T3 -> T4.
 Review (source preservation): seven P1 findings implemented in six root-cause commits; focused checks 388 Python / 162 cloud / 69 Vitest passed, cloud 2 skipped; permanent drills 132 Python / 12 Vitest passed. Four full-cloud failures reproduce unchanged on b33032b4. Final three full-gate runs and durable publication report remain pending.
 
 Reliability closing review 2026-09-18: three full runs each 13505 Python passed / 9742 Vitest passed / 1881 cloud passed, 4 verified baseline failures, 76 cloud skipped; permanent drills 144 passed. REL-260 browser verification remains BLOCKED after three installed-browser launches. Complete inherited acceptance is preserved in the prepared issue #81 report; publication and notification receipts are tracked in durable reliability scratch.
+
+## 2026-09-18 HY A-D S&P 500 history
+- [x] T1 depends_on: [] Trace stored SPX coverage and HYAD snapshot assembly.
+- [x] T2 depends_on: [T1] Repair historical overlay and add regression coverage without inventing observations.
+- [x] T3 depends_on: [T1] Add browser coverage for early-history S&P values.
+- [ ] T4 depends_on: [T2,T3] Publish PR, verify exact-head GitHub checks and browser artifacts, refresh durable data if needed, notify.
+Dependency graph: T1 -> {T2,T3} -> T4.
+Validation: suites run only on GitHub; inspect real stored coverage and screenshot artifacts. Preserve source priority and FINRA history.
+
+Review: credit history has 269 closes from 2025-08-22; existing Cboe history restores 2,173 of 2,174 HYAD dates from 2018-01-22. The equity closure 2025-01-09 stays null. Python joins and browser early-date regressions added; local suites intentionally not run. Exact-head CI and screenshot review pending.
+
+Operational review: repaired the existing Turso snapshot in place, preserving scan_time 2026-09-18T11:01:32+00:00 and all breadth values. Readback confirms SPX 269 -> 2,173 closes, first 2018-01-22, only 2025-01-09 null. Initial GitHub Python/Vitest feature checks pass; corrected docs-owner index and curated-browser ledger contracts. Recurring repair awaits PR deployment.

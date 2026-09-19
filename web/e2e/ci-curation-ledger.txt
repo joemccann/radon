@@ -84,7 +84,6 @@ calm-streak-tab.spec.ts
 fill-toast.spec.ts
 header-fullscreen.spec.ts
 hhlev-tab.spec.ts
-hyad-tab.spec.ts
 ib-mfa-reconnect-alert.spec.ts
 iei-hyg-tab.spec.ts
 internals-market-closed.spec.ts

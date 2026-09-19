@@ -183,6 +183,8 @@ readonly SERVICE_FILES=(
   radon-ma-ratio.timer
   radon-calm-streak.service
   radon-calm-streak.timer
+  radon-bounce-setup.service
+  radon-bounce-setup.timer
   radon-hyad.service
   radon-hyad.timer
   radon-hhlev.service

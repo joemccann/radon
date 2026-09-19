@@ -1029,3 +1029,14 @@ describe("vol-cone-intraday freshness window", () => {
     expect(requiresIb("vol-cone-intraday")).toBe(false);
   });
 });
+
+describe("bounce-setup freshness window", () => {
+  it("is a scheduled weekday timer window matching scripts/watchdog/services.py", () => {
+    const HOUR = 60 * 60_000;
+    expect(getServiceCategory("bounce-setup")).toBe("scheduled");
+    expect(getFreshnessWindowMs("bounce-setup", "open")).toBe(74 * HOUR);
+    expect(getFreshnessWindowMs("bounce-setup", "extended")).toBe(74 * HOUR);
+    expect(getFreshnessWindowMs("bounce-setup", "closed")).toBe(74 * HOUR);
+    expect(requiresIb("bounce-setup")).toBe(false);
+  });
+});

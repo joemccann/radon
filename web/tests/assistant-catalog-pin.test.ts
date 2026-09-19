@@ -129,6 +129,8 @@ const PINNED: Record<string, PinnedCapability> = {
   "scanner/strength/scan": "read.spawn",
   "scanner/vol-skew-mr": "read",
   "scanner/vol-skew-mr/scan": "read.spawn",
+  "scanner/bounce": "read",
+  "scanner/bounce/scan": "read.spawn",
   "scanner/theta": "read",
   "scanner/theta/scan": "read.spawn",
   "service-health": "read",
