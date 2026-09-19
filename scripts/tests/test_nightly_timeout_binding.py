@@ -34,7 +34,7 @@ def test_timeout_bin_falls_back_to_gtimeout(wrapper: str) -> None:
 @pytest.mark.parametrize("wrapper", WRAPPERS)
 def test_missing_timeout_fails_closed_before_lib_only_return(wrapper: str) -> None:
     text = (SCRIPTS / wrapper).read_text(encoding="utf-8")
-    guard = text.find('-z "$TIMEOUT_BIN"')
+    guard = text.find('[[ -n "$TIMEOUT_BIN" ]] ||')
     assert guard != -1, wrapper
     lib_only = text.find('"${1:-}" == "--lock-lib-only"')
     assert guard < lib_only, wrapper
