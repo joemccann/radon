@@ -152,6 +152,56 @@ def contract_fill_fingerprint(payload: dict[str, Any]) -> Optional[tuple]:
     return (contract, date, signed)
 
 
+def flex_aggregate_budget(payload: dict[str, Any]) -> Optional[dict[tuple, float]]:
+    """Per (contract, ET date, sign) quantity a Flex AGGREGATE row accounts for.
+
+    NF-4: ``journal_rehydrate`` collapses several executions into one row
+    (``+``-joined ``ib_exec_id``, or a netted ``CLOSED`` round trip). Such a
+    row is a total, so it can only cover individual fills by quantity, never
+    by the 1:1 fingerprint. Returns None for a row that is not an aggregate.
+    ``fill_breakdown`` (per-date signed totals, written by rehydrate) keys a
+    multi-day bucket on each real fill date; legacy rows fall back to the
+    row's own date.
+    """
+    exec_id = str(payload.get("ib_exec_id") or "")
+    action = str(payload.get("action") or "").strip().upper()
+    if "+" not in exec_id and action != "CLOSED":
+        return None
+    ticker = _normalize_ticker(payload.get("ticker") or payload.get("symbol"))
+    if not ticker:
+        return None
+    contract = _bucket_key(payload) or f"{ticker}|STK"
+    budget: dict[tuple, float] = {}
+
+    def _add(date: Any, signed: float) -> None:
+        day = str(date or "")[:10]
+        if not day or not signed:
+            return
+        key = (contract, day, 1 if signed > 0 else -1)
+        budget[key] = budget.get(key, 0.0) + abs(signed)
+
+    breakdown = payload.get("fill_breakdown")
+    if isinstance(breakdown, list) and breakdown:
+        for item in breakdown:
+            try:
+                _add(item.get("date"), float(item.get("qty") or 0))
+            except (AttributeError, TypeError, ValueError):
+                continue
+        return budget
+
+    try:
+        qty = abs(float(payload.get("contracts") or payload.get("shares") or 0))
+        round_trip = abs(float(payload.get("total_round_trip_quantity") or qty))
+    except (TypeError, ValueError):
+        return budget
+    if action == "CLOSED":
+        _add(payload.get("date"), round_trip)
+        _add(payload.get("date"), -round_trip)
+    else:
+        _add(payload.get("date"), _signed_qty(action, qty))
+    return budget
+
+
 def _exec_id_parts(payload: dict[str, Any]) -> list[str]:
     """The execution ids a journal row accounts for.
 
