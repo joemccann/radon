@@ -110,13 +110,13 @@ Any UI or asset work must comply with Radon brand identity:
 ## Data Source Priority
 
 1. Interactive Brokers.
-2. Unusual Whales.
-3. Cboe official index feeds — COR1M dashboard history, official VIX/VVIX daily closes. Other specialized official feeds (Treasury, FINRA) rank here when a script documents them as the source for that metric.
-4. Robinhood — official trading MCP only (`https://agent.robinhood.com/mcp/trading`), READ-ONLY. Quote/chain failover + retail-crowding overlay; never above IB, UW, or Cboe; execution stays on IB. No dark pool, OTC, sweeps, GEX, or vol surface; options are NBBO/last + prior-close only.
+2. Robinhood — official trading MCP only (`https://agent.robinhood.com/mcp/trading`), READ-ONLY. Primary after IB for commodity price data (daily closes, quotes, chains) so UW calls go to its unique endpoints; retail-crowding overlay; never above IB; execution stays on IB. No dark pool, OTC, sweeps, GEX, or vol surface; options are NBBO/last + prior-close only.
+3. Unusual Whales.
+4. Cboe official index feeds — COR1M dashboard history, official VIX/VVIX daily closes. Other specialized official feeds (Treasury, FINRA) rank here when a script documents them as the source for that metric.
 5. Yahoo Finance — **ABSOLUTE LAST RESORT**. Never make Yahoo the scheduled, primary, or only source for a series IB or UW can serve.
 6. Web scrape / browser after Yahoo; use Exa for research/docs and interactive browser only for JS-rendered pages.
 
-Try IB every cycle. Skip the IB socket only when `/health` `auth_state` is set and not `authenticated`; then UW; then Robinhood (skipped cleanly when no credentials (access or refresh token) are configured; access tokens expire ~3 days, refreshed automatically via the 0600 token file `ROBINHOOD_MCP_TOKEN_FILE`); then Yahoo. 2FA, unattended timers, and "historical needs a gateway" do not skip IB or UW. Specialized official feeds (Cboe, Treasury, FINRA) may sit ahead of Robinhood and Yahoo when a script documents them as the source for that metric — the full order is IB > UW > Cboe > Robinhood > Yahoo.
+Try IB every cycle. Skip the IB socket only when `/health` `auth_state` is set and not `authenticated`; then Robinhood (skipped cleanly when no credentials (access or refresh token) are configured; access tokens expire ~3 days, refreshed automatically via the 0600 token file `ROBINHOOD_MCP_TOKEN_FILE`); then UW; then Yahoo. 2FA, unattended timers, and "historical needs a gateway" do not skip IB or UW. Specialized official feeds (Cboe, Treasury, FINRA) may sit ahead of Yahoo when a script documents them as the source for that metric — the full order is IB > Robinhood > UW > Cboe > Yahoo.
 
 ## Commands
 

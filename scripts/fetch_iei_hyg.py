@@ -9,9 +9,9 @@ extreme. The US Dollar Index is stored as a nullable overlay only.
 
 Sources, in order (never skip ahead):
   1. Interactive Brokers — Stock IEI/HYG on SMART, Index DX (then DXY) on NYBOT
-  2. Unusual Whales — regular-session OHLC for IEI/HYG. DXY is not on UW.
-  3. Robinhood (official trading MCP, read-only) — equity historicals for
+  2. Robinhood (official trading MCP, read-only) — equity historicals for
      IEI/HYG when configured. DXY is not on Robinhood.
+  3. Unusual Whales — regular-session OHLC for IEI/HYG. DXY is not on UW.
   4. Yahoo Finance — ABSOLUTE LAST RESORT: IEI, HYG, DX-Y.NYB
 
 Output is dual-written to Turso iei_hyg_history + data/iei_hyg.json.
@@ -278,7 +278,7 @@ def _robinhood_degradation(sources: dict[str, str]) -> Optional[dict[str, Any]]:
 def fetch_rh_closes(tickers: list[str]) -> dict[str, Closes]:
     """Robinhood daily closes (read-only MCP). DXY is skipped.
 
-    Ranked after IB and UW, before Yahoo. Unconfigured hosts return {}
+    Ranked after IB, before UW and Yahoo. Unconfigured hosts return {}
     without any network I/O so the ladder falls through to Yahoo.
     """
     fetchable = [t for t in tickers if t not in RH_SKIP]
@@ -299,7 +299,7 @@ def fetch_closes(
     fetch_rh: Optional[FetchCloses] = None,
     fetch_yahoo: Optional[FetchCloses] = None,
 ) -> tuple[dict[str, Closes], str, dict[str, str]]:
-    """IB first, then UW for gaps, then Robinhood, then Yahoo.
+    """IB first, then Robinhood for gaps, then UW, then Yahoo.
 
     Returns ``(closes, combined source, per-ticker sources)``. R-190: the
     combined string alone cannot say WHICH leg fell back, so a mixed IB+Yahoo
@@ -309,8 +309,8 @@ def fetch_closes(
     closes: dict[str, Closes] = {}
     sources: dict[str, str] = {}
     _take(fetch_ib or fetch_ib_closes, wanted, "ib", closes, sources)
-    _take(fetch_uw or fetch_uw_closes, wanted, "uw", closes, sources)
     _take(fetch_rh or fetch_rh_closes, wanted, "rh", closes, sources)
+    _take(fetch_uw or fetch_uw_closes, wanted, "uw", closes, sources)
     _take(fetch_yahoo or fetch_yahoo_closes, wanted, "yahoo", closes, sources)
     return closes, combine_source(sources) or NO_SOURCE, dict(sources)
 
