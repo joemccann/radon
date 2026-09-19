@@ -81,6 +81,7 @@ SNAPSHOT_ENDPOINTS = [
     "/theta-harvester/scan",
     "/strength-confirmation/scan",
     "/vol-skew-mr/scan",
+    "/bounce-setup/scan",
     "/leap/scan",
     "/garch-convergence/scan",
     "/vcg/scan",

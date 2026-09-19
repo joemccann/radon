@@ -14,7 +14,7 @@
  * cadence claims).
  */
 import React from "react";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
@@ -228,6 +228,23 @@ describe("HyAdPanel — chart + controls", () => {
   it("renders the brush minimap with the hyad testid prefix", () => {
     renderPanel(hookState({ data: buildData() }));
     expect(screen.getByTestId("hyad-brush")).toBeTruthy();
+  });
+
+  it("preserves early SPX history and leaves genuine missing sessions unavailable", () => {
+    const data = buildData();
+    data.series[0].spx_close = 4700;
+    data.series[1].spx_close = null;
+    renderPanel(hookState({ data }));
+    const chart = screen.getByRole("slider", { name: "Inspect HIGH YIELD BOND CUMULATIVE A-D LINE history" });
+
+    fireEvent.keyDown(chart, { key: "Home" });
+    expect(chart.getAttribute("aria-valuetext")).toBe(`${data.series[0].date}: S&P 500 4700, HY A-D CUM +0`);
+
+    fireEvent.keyDown(chart, { key: "ArrowRight" });
+    expect(chart.getAttribute("aria-valuetext")).toContain(`${data.series[1].date}: S&P 500 ---`);
+
+    fireEvent.keyDown(chart, { key: "End" });
+    expect(chart.getAttribute("aria-valuetext")).toContain(`${DATA_DATE}: S&P 500 ${data.series.at(-1)!.spx_close}`);
   });
 
   it("never emits NaN into chart paths across null MA and null SPX points", () => {

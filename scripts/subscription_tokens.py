@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 """Durable subscription-token vault + autonomous refresh for the agent CLIs.
 
-Claude Code, OpenAI Codex, xAI Grok and Google Gemini authenticate against the
-operator's *subscriptions*, storing an OAuth credential file under the ``radon``
-home. Those files get deleted by host maintenance, expire when nothing exercises
-the CLI, or land half-written. ``scripts/clients/model_ladder.py`` reads them
-directly, so a dead file silently demotes the whole subscription band to metered
-API keys.
+Claude Code, OpenAI Codex, xAI Grok and Google Antigravity authenticate against
+the operator's *subscriptions*, storing an OAuth credential file under the
+``radon`` home. Those files get deleted by host maintenance, expire when nothing
+exercises the CLI, or land half-written. ``scripts/clients/model_ladder.py``
+reads them directly, so a dead file silently demotes the whole subscription band
+to metered API keys.
 
 This module seals each credential file, verbatim, into the EXISTING encrypted
 secret store (``scripts/secret_store.py`` — no second crypto system), refreshes
-expiring tokens autonomously, restores deleted ones from the vault, and pages
-the operator only for the one case no daemon can fix: a revoked or fully expired
-refresh token, which needs a browser login.
+expiring tokens autonomously, restores deleted ones from the vault, proves each
+login with a real model call once a day (which also keeps the grant from going
+stale), and when a grant is truly dead starts the CLI's own login and pages the
+operator the link, so the fix is one tap and not a file copy.
 
 ⛔ No token material is ever logged, raised, written to the sidecar, sent to
 Pushover or recorded in ``service_health``. Use :func:`redact`.
@@ -21,15 +22,21 @@ Pushover or recorded in ``service_health``. Use :func:`redact`.
 from __future__ import annotations
 
 import argparse
+import base64
 import contextlib
 import copy
 import fcntl
 import json
 import logging
 import os
+import queue
+import re
+import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -55,11 +62,68 @@ LOCK_PATH = Path("/run/lock/radon-subscription-tokens.lock")
 EXPIRY_SKEW_SECONDS = 600
 HTTP_TIMEOUT_SECONDS = 20
 HTTP_RETRIES = 2
-CLI_TIMEOUT_SECONDS = 60
+HTTP_USER_AGENT = "radon-subscription-tokens"
 PAGE_COOLDOWN = timedelta(hours=12)
 ERROR_PAGE_AFTER = 3
 PUSHOVER_URL = "https://api.pushover.net/1/messages.json"
 PUSHOVER_TITLE = "radon subscription token"
+# Pushover's documented field limits. A Google consent URL is longer than the
+# url field, so it rides in the message, which clients auto-link.
+PUSHOVER_URL_FIELD_MAX = 512
+PUSHOVER_MESSAGE_MAX = 1024
+
+# Codex's own guidance is a weekly exercise of the login, Google retires a
+# refresh token after six idle months and grok defaults to a 30-day credential.
+# Daily is far inside all three and costs one one-word reply per subscription.
+KEEPALIVE_INTERVAL = timedelta(hours=24)
+PROBE_PROMPT = "Reply with the single word ok"
+# A logged-out codex retries for ~20s and an agent turn can take a minute.
+PROBE_TIMEOUT_SECONDS = 150
+PROBE_OUTPUT_BYTES = 65536
+# A login no probe has been able to prove for this long stops being called
+# live: a vendor that rewords its auth error makes every probe "inconclusive".
+KEEPALIVE_UNPROVEN_LIMIT = timedelta(hours=72)
+# Discovery + the form and JSON POST envelopes; no refresh starts with less.
+REFRESH_BUDGET_SECONDS = 170
+# One login per run, bounded, because it holds the oneshot and the run lock.
+LOGIN_WAIT_SECONDS = 600
+# Too short to read a push and approve it: page the command instead.
+MIN_LOGIN_WAIT_SECONDS = 120
+# The unit kills the oneshot at TimeoutStartSec=1700, under its 30min slot. CLI
+# work is only started while it can finish inside this, so a slow run ends with
+# a sidecar and a heartbeat and never with a SIGKILL.
+RUN_BUDGET_SECONDS = 1500
+# grok and agy install here, which systemd's PATH does not carry.
+LOCAL_BIN_DIRS = (".local/bin", ".grok/bin")
+# Everything a third-party agent CLI may inherit. /etc/radon/env carries metered
+# API keys that OUTRANK the subscription login (so a probe would bill the key
+# and prove nothing about the login) plus every other Radon secret.
+CLI_ENV_ALLOWLIST = (
+    "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL", "TERM", "TMPDIR",
+    "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_RUNTIME_DIR",
+    "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "https_proxy", "http_proxy", "no_proxy",
+    "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS",
+)
+
+PROBE_OK = "ok"
+PROBE_AUTH_FAILED = "auth_failed"
+PROBE_FAILED = "failed"  # inconclusive: a usage cap, an outage, a timeout
+
+# The only refresh responses that mean the grant itself is dead. Anything else
+# in the 4xx range is a request the provider could not parse, which is a bug
+# here and says nothing about the operator's login.
+DEAD_GRANT_CODES = frozenset(
+    {
+        "invalid_grant",
+        "token_expired",
+        "refresh_token_expired",
+        "refresh_token_reused",
+        "refresh_token_invalidated",
+    }
+)
+# The provider refused OUR client id, whatever the status: a retired public
+# client is fixed in this table, never by the operator logging in again.
+CLIENT_REJECTED_CODES = frozenset({"invalid_client", "unauthorized_client"})
 
 # -- states -----------------------------------------------------------------
 LIVE = "live"
@@ -86,6 +150,10 @@ class VaultUnavailable(RuntimeError):
     """
 
 
+class DiscoveryUnavailable(RuntimeError):
+    """OIDC discovery did not answer. An outage, never a reason to log in again."""
+
+
 def redact(value: Any) -> str:
     """The ONLY representation of token material allowed anywhere."""
     text = value if isinstance(value, str) else ""
@@ -110,10 +178,20 @@ def _parse_rfc3339(value: Any) -> Optional[datetime]:
         return None
 
 
+def _parse_epoch_seconds(value: Any) -> Optional[datetime]:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        return datetime.fromtimestamp(value, tz=timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        # An absurd claim is "no expiry known", not a provider stuck in error.
+        return None
+
+
 def _parse_epoch_millis(value: Any) -> Optional[datetime]:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    return datetime.fromtimestamp(value / 1000.0, tz=timezone.utc)
+    return _parse_epoch_seconds(value / 1000.0)
 
 
 def _iso_z(dt: datetime) -> str:
@@ -227,14 +305,29 @@ def _codex_tokens(doc) -> Mapping[str, Any]:
     return tokens if isinstance(tokens, Mapping) else {}
 
 
+def _jwt_expiry(token: Any) -> Optional[datetime]:
+    """The ``exp`` claim, unverified: a scheduling hint, never an auth decision."""
+    if not isinstance(token, str) or token.count(".") != 2:
+        return None
+    payload = token.split(".")[1]
+    try:
+        claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+    except ValueError:
+        return None
+    return _parse_epoch_seconds(claims.get("exp") if isinstance(claims, dict) else None)
+
+
 def _codex_expiry(doc):
     tokens = _codex_tokens(doc)
-    explicit = _parse_rfc3339(tokens.get("expires_at")) or _parse_epoch_millis(
-        tokens.get("expires_at")
+    # codex writes no expiry field; its access token is a JWT that lives ten
+    # days. Guessing last_refresh + 1h refreshed fifty minutes after every login.
+    explicit = (
+        _jwt_expiry(tokens.get("access_token"))
+        or _parse_rfc3339(tokens.get("expires_at"))
+        or _parse_epoch_millis(tokens.get("expires_at"))
     )
     if explicit:
         return explicit
-    # codex records only when it last refreshed; its access token lives an hour.
     last = _parse_rfc3339(doc.get("last_refresh"))
     return last + timedelta(hours=1) if last else None
 
@@ -253,30 +346,54 @@ def _codex_apply(doc, resp, now):
         tokens["refresh_token"] = resp["refresh_token"]
     if resp.get("id_token"):
         tokens["id_token"] = resp["id_token"]
-    tokens["expires_at"] = _iso_z(_expires_at(now, resp))
+    # Only a key codex itself wrote: this is codex's file, parsed by codex.
+    if "expires_at" in tokens:
+        tokens["expires_at"] = _iso_z(_expires_at(now, resp))
     new["last_refresh"] = _iso_z(now)
     return new
 
 
-# -- gemini: ~/.gemini/oauth_creds.json -------------------------------------
+# -- gemini: ~/.gemini/antigravity-cli/antigravity-oauth-token ---------------
+#
+# 2026-09-18: Google retired the Gemini CLI OAuth client for individuals
+# ("This client is no longer supported for Gemini Code Assist for
+# individuals ... migrate to the Antigravity suite"). The Antigravity CLI
+# (`agy`) keeps its Google OAuth grant in a nested `token` object with an
+# RFC 3339 `expiry` at nanosecond precision. `agy models` is a cheap
+# authenticated call that refreshes the file in place, so it is the CLI-native
+# refresh; the token endpoint is the fallback when `agy` is not on PATH.
+
+# Public OAuth client id of the Antigravity CLI (installed-app client, no
+# secret), read off its own login URL. Google's refresh grant requires it.
+ANTIGRAVITY_CLIENT_ID = (
+    "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com"
+)
+
+
+def _gemini_tokens(doc) -> Mapping[str, Any]:
+    tokens = doc.get("token")
+    return tokens if isinstance(tokens, Mapping) else {}
 
 
 def _gemini_expiry(doc):
-    return _parse_epoch_millis(doc.get("expiry_date"))
+    return _parse_rfc3339(_gemini_tokens(doc).get("expiry"))
 
 
 def _gemini_refresh(doc):
-    token = doc.get("refresh_token")
+    token = _gemini_tokens(doc).get("refresh_token")
     return token if isinstance(token, str) and token else None
 
 
 def _gemini_apply(doc, resp, now):
     new = copy.deepcopy(doc)
+    tokens = new.setdefault("token", {})
     if resp.get("access_token"):
-        new["access_token"] = resp["access_token"]
+        tokens["access_token"] = resp["access_token"]
     if resp.get("refresh_token"):
-        new["refresh_token"] = resp["refresh_token"]
-    new["expiry_date"] = int(_expires_at(now, resp).timestamp() * 1000)
+        tokens["refresh_token"] = resp["refresh_token"]
+    if resp.get("id_token"):
+        new["id_token"] = resp["id_token"]
+    tokens["expiry"] = _iso_z(_expires_at(now, resp))
     return new
 
 
@@ -302,11 +419,23 @@ class Provider:
     read_issuer: Callable[[Mapping[str, Any]], Optional[tuple]]
     apply: Callable[[Mapping[str, Any], Mapping[str, Any], datetime], dict]
     cli_binary: Optional[str]
-    # No vendor documents a non-interactive refresh subcommand today, so the
-    # default runner declines. The hook stays so one can be adopted in a
-    # one-line table change when a vendor ships it.
-    cli_refresh_args: Optional[tuple]
+    # The cheapest real authenticated call. No vendor ships a "refresh" subcommand, but
+    # every CLI refreshes its own file on use, so this one command is the
+    # CLI-native refresh, the liveness proof and the keepalive.
+    probe_args: tuple
+    # Lower-cased fragments of what the CLI prints when the LOGIN is the
+    # problem, each captured from the real binary against a throwaway home.
+    auth_failure_markers: tuple
     reauth_command: str
+    # Public OAuth client id for the refresh grant (docs/oauth-subscription-auth.md).
+    # The three endpoints that take one answer 400 invalid_request without it.
+    client_id: Optional[str] = None
+    # A login the CLI can finish with no input on its stdin: it prints a link,
+    # the operator approves it in any browser, the CLI writes the file. None
+    # for a paste-the-code-back login, which no push can complete.
+    login_args: Optional[tuple] = None
+    login_hosts: tuple = ()
+    login_needs_code: bool = False
     # Returns a message when the doc is a shape this adapter refuses to refresh
     # in place; the provider then reports needs_reauth instead of half-healing.
     read_blocker: Callable[[Mapping[str, Any]], Optional[str]] = _no_blocker
@@ -331,7 +460,7 @@ class Provider:
         """Form fields for the refresh grant; endpoint resolution is separate."""
         fields = {"grant_type": "refresh_token", "refresh_token": refresh_token}
         issuer = self.read_issuer(doc)
-        client_id = issuer[1] if issuer else None
+        client_id = (issuer[1] if issuer else None) or self.client_id
         if client_id:
             fields["client_id"] = client_id
         return fields
@@ -350,8 +479,19 @@ PROVIDERS: dict[str, Provider] = {
         read_issuer=_no_issuer,
         apply=_anthropic_apply,
         cli_binary="claude",
-        cli_refresh_args=None,
-        reauth_command="ssh radon@ib-gateway 'claude setup-token'",
+        probe_args=("-p", PROBE_PROMPT, "--max-turns", "1"),
+        auth_failure_markers=(
+            "not logged in",
+            "login expired",
+            "please run /login",
+            "oauth token has expired",
+            "authentication_error",
+        ),
+        # `claude setup-token` only PRINTS a token; this is the command that
+        # writes .credentials.json. It wants the code pasted back, so there is
+        # no push login for claude.
+        reauth_command="ssh -t radon@ib-gateway 'claude auth login --claudeai'",
+        client_id="9d1c250a-e61b-44d9-88ed-5944d1962f5e",
     ),
     "codex": Provider(
         name="codex",
@@ -365,8 +505,18 @@ PROVIDERS: dict[str, Provider] = {
         read_issuer=_no_issuer,
         apply=_codex_apply,
         cli_binary="codex",
-        cli_refresh_args=None,
-        reauth_command="codex CLI absent on the VPS: log in elsewhere, copy auth.json, see docs/subscription-tokens.md",
+        probe_args=("exec", "--skip-git-repo-check", PROBE_PROMPT),
+        auth_failure_markers=(
+            "401 unauthorized",
+            "not logged in",
+            "token_expired",
+            "please try signing in again",
+        ),
+        reauth_command="ssh -t radon@ib-gateway 'codex login --device-auth'",
+        client_id="app_EMoamEEZ73f0CkXaXp7hrann",
+        login_args=("login", "--device-auth"),
+        login_hosts=("auth.openai.com",),
+        login_needs_code=True,  # the device URL is fixed; the code is separate
     ),
     "grok": Provider(
         name="grok",
@@ -380,23 +530,34 @@ PROVIDERS: dict[str, Provider] = {
         apply=_grok_apply,
         read_blocker=_grok_blocker,
         cli_binary="grok",
-        cli_refresh_args=None,
-        reauth_command="grok CLI absent on the VPS: log in elsewhere, copy auth.json, see docs/subscription-tokens.md",
+        probe_args=("-p", PROBE_PROMPT),
+        auth_failure_markers=("not signed in", "grok login"),
+        reauth_command="ssh -t radon@ib-gateway '~/.local/bin/grok login --device-auth'",
+        login_args=("login", "--device-auth"),
+        login_hosts=("accounts.x.ai",),
     ),
     "gemini": Provider(
         name="gemini",
         dir_env=None,
-        default_subdir=".gemini",
-        filename="oauth_creds.json",
+        default_subdir=".gemini/antigravity-cli",
+        filename="antigravity-oauth-token",
         # Google's published OAuth 2.0 token endpoint.
         token_url="https://oauth2.googleapis.com/token",
         read_expiry=_gemini_expiry,
         read_refresh=_gemini_refresh,
         read_issuer=_no_issuer,
         apply=_gemini_apply,
-        cli_binary="gemini",
-        cli_refresh_args=None,
-        reauth_command="gemini CLI absent on the VPS: log in elsewhere, copy oauth_creds.json, see docs/subscription-tokens.md",
+        cli_binary="agy",
+        # Not a model call: `agy models` is a sub-second authenticated request
+        # that rewrites the token file, so it refreshes and proves the grant.
+        probe_args=("models",),
+        auth_failure_markers=(
+            "please sign in",  # `agy models`
+            "authentication required",  # `agy -p`
+            "authentication failed",
+        ),
+        client_id=ANTIGRAVITY_CLIENT_ID,
+        reauth_command="ssh -t radon@ib-gateway '~/.local/bin/agy -p ok' then open the printed URL and paste the code within 60s, see docs/subscription-tokens.md",
     ),
 }
 
@@ -456,7 +617,8 @@ def http_request(
     timeout: int = HTTP_TIMEOUT_SECONDS,
 ) -> HttpResponse:
     data = None
-    headers = {"Accept": "application/json"}
+    # An explicit agent: edge bot filters routinely refuse "Python-urllib".
+    headers = {"Accept": "application/json", "User-Agent": HTTP_USER_AGENT}
     if form is not None:
         data = urllib_parse.urlencode(form).encode("utf-8")
         headers["Content-Type"] = "application/x-www-form-urlencoded"
@@ -506,20 +668,216 @@ def record_heartbeat(service: str, state: str, **kwargs) -> None:
     writer.record_service_health(SERVICE_NAME, state, **kwargs)
 
 
-def default_run_cli(provider: Provider) -> bool:
-    """CLI-native refresh, preferred because the CLI owns its file format."""
-    if not provider.cli_binary or not provider.cli_refresh_args:
-        return False
-    try:
-        completed = subprocess.run(
-            [provider.cli_binary, *provider.cli_refresh_args],
-            capture_output=True,
-            timeout=CLI_TIMEOUT_SECONDS,
-            check=False,
+# ---------------------------------------------------------------------------
+# the provider's own CLI: probe + login
+# ---------------------------------------------------------------------------
+
+
+def _home(env: Mapping[str, str]) -> Path:
+    home = (env.get("HOME") or "").strip()
+    return Path(home) if home else Path.home()
+
+
+def cli_search_path(env: Mapping[str, str]) -> str:
+    local = [str(_home(env) / subdir) for subdir in LOCAL_BIN_DIRS]
+    inherited = (env.get("PATH") or os.defpath).split(os.pathsep)
+    return os.pathsep.join(local + inherited)
+
+
+def cli_env(provider: Provider, env: Mapping[str, str]) -> dict:
+    """The environment a provider CLI runs in: an allowlist, never a scrub."""
+    allowed = CLI_ENV_ALLOWLIST + ((provider.dir_env,) if provider.dir_env else ())
+    child = {key: env[key] for key in allowed if env.get(key)}
+    child["HOME"] = str(_home(env))
+    child["PATH"] = cli_search_path(env)
+    return child
+
+
+@contextlib.contextmanager
+def _provider_cli(
+    provider: Provider,
+    binary: str,
+    args: Sequence[str],
+    env: Mapping[str, str],
+    stdout: Any = subprocess.PIPE,
+):
+    """Run the CLI in its own session and an empty directory; always reap it.
+
+    An agent CLI spawns helpers (node, language servers) and must never start
+    inside the repo. The whole process GROUP is killed on the way out, even when
+    the CLI itself already exited: a helper it left behind would otherwise
+    outlive the run and race the directory cleanup.
+    """
+    with tempfile.TemporaryDirectory(
+        prefix="radon-subscription-cli-", ignore_cleanup_errors=True
+    ) as workdir:
+        proc = subprocess.Popen(
+            [binary, *args],
+            stdin=subprocess.DEVNULL,
+            stdout=stdout,
+            stderr=subprocess.STDOUT,
+            env=cli_env(provider, env),
+            cwd=workdir,
+            start_new_session=True,
         )
-    except (OSError, subprocess.SubprocessError):
+        try:
+            yield proc
+        finally:
+            with contextlib.suppress(OSError):
+                os.killpg(proc.pid, signal.SIGKILL)
+            with contextlib.suppress(OSError, subprocess.SubprocessError):
+                proc.wait(timeout=5)
+
+
+def default_probe(
+    provider: Provider,
+    binary: str,
+    env: Mapping[str, str],
+    timeout: int = PROBE_TIMEOUT_SECONDS,
+) -> str:
+    """One real model call. The output is classified and then discarded."""
+    # Output goes to a file and the wait is on the PROCESS: a helper that keeps
+    # the CLI's stdout open would hold a pipe read until the timeout and turn a
+    # successful call into a failure, and a chatty CLI cannot fill a pipe.
+    try:
+        with tempfile.TemporaryFile() as captured, _provider_cli(
+            provider, binary, provider.probe_args, env, stdout=captured
+        ) as proc:
+            returncode = proc.wait(timeout=timeout)
+            captured.seek(0)
+            output = captured.read(PROBE_OUTPUT_BYTES)
+    except (OSError, subprocess.TimeoutExpired):
+        return PROBE_FAILED
+    if returncode == 0:
+        return PROBE_OK
+    lowered = output.decode("utf-8", "replace").lower()
+    if any(marker in lowered for marker in provider.auth_failure_markers):
+        return PROBE_AUTH_FAILED
+    return PROBE_FAILED
+
+
+@dataclass(frozen=True)
+class LoginPrompt:
+    url: str
+    code: Optional[str]
+
+
+# CSI colour codes and OSC sequences (OSC 8 is how a terminal hyperlink is
+# written, and it carries a second copy of the URL wrapped in escape bytes).
+_ANSI = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;?]*[A-Za-z]")
+# Both must be followed by whitespace: output arrives in arbitrary chunks, and a
+# link or code cut off mid-read must never be the one that gets pushed.
+_URL = re.compile(r"https://[^\s\x00-\x1f\x7f\"'<>]+(?=\s)")
+_SENTENCE_PUNCTUATION = ".,;)]"
+_DEVICE_CODE = re.compile(r"(?<![A-Za-z0-9-])[A-Z0-9]{4}-[A-Z0-9]{4,6}(?=\s)")
+
+
+def parse_login_prompt(provider: Provider, output: str) -> Optional[LoginPrompt]:
+    """The login link a CLI printed, or None until it has printed all of it.
+
+    The link goes to the operator's phone, so only a URL on the provider's own
+    login host is ever returned: CLI output is not a trusted source of links.
+    """
+    text = _ANSI.sub("", output).replace("\r", "")
+    url = next(
+        (
+            candidate
+            for candidate in (
+                found.rstrip(_SENTENCE_PUNCTUATION) for found in _URL.findall(text)
+            )
+            if urllib_parse.urlsplit(candidate).hostname in provider.login_hosts
+        ),
+        None,
+    )
+    if url is None:
+        return None
+    # The code the link itself carries outranks any look-alike in a banner.
+    in_url = urllib_parse.parse_qs(urllib_parse.urlsplit(url).query).get("user_code")
+    match = _DEVICE_CODE.search(text.replace(url, " "))
+    code = in_url[0] if in_url else (match.group(0) if match else None)
+    if provider.login_needs_code and code is None:
+        return None
+    return LoginPrompt(url, code)
+
+
+def _page_body(result: "ProviderResult", prompt: Optional[LoginPrompt]) -> dict:
+    """Pushover message fields. With a prompt, the page IS the login link."""
+    provider = PROVIDERS.get(result.provider)
+    command = provider.reauth_command if provider else ""
+    headline = f"{result.provider}: {result.state}" + (
+        f" ({result.last_error})" if result.last_error else ""
+    )
+    if prompt is None:
+        return {"message": headline + (f"\nRe-auth: {command}" if command else "")}
+    steps = "Tap the link to sign in" + (
+        f", then enter code {prompt.code}." if prompt.code else "."
+    )
+    fallback = f"\nFallback: {command}" if command else ""
+    if len(prompt.url) <= PUSHOVER_URL_FIELD_MAX:
+        return {
+            "message": f"{headline}\n{steps}{fallback}",
+            "url": prompt.url,
+            "url_title": f"Sign in to {result.provider}",
+        }
+    message = f"{steps}\n{prompt.url}"
+    if len(message) > PUSHOVER_MESSAGE_MAX:
+        return _page_body(result, None)
+    for optional in (fallback, f"\n{headline}"):
+        if len(message) + len(optional) <= PUSHOVER_MESSAGE_MAX:
+            message += optional
+    return {"message": message}
+
+
+def _pump_output(stream, chunks: "queue.Queue[Optional[str]]") -> None:
+    # Raw reads, not lines: a CLI that ends its prompt with a spinner and no
+    # newline would otherwise sit unread until the login timed out.
+    with contextlib.suppress(ValueError, OSError):
+        while chunk := os.read(stream.fileno(), 4096):
+            chunks.put(chunk.decode("utf-8", "replace"))
+    chunks.put(None)
+
+
+def default_login(
+    provider: Provider,
+    binary: str,
+    env: Mapping[str, str],
+    on_prompt: Callable[[LoginPrompt], Any],
+    wait_seconds: float,
+) -> bool:
+    """Start the CLI's own login, hand its link to ``on_prompt``, await approval."""
+    if not provider.login_args:
         return False
-    return completed.returncode == 0
+    deadline = time.monotonic() + wait_seconds
+    try:
+        with _provider_cli(provider, binary, provider.login_args, env) as proc:
+            chunks: "queue.Queue[Optional[str]]" = queue.Queue()
+            threading.Thread(
+                target=_pump_output, args=(proc.stdout, chunks), daemon=True
+            ).start()
+            seen, prompted = "", False
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False
+                try:
+                    chunk = chunks.get(timeout=min(remaining, 1.0))
+                except queue.Empty:
+                    continue
+                if chunk is None:
+                    break
+                if prompted:
+                    continue
+                seen += chunk
+                prompt = parse_login_prompt(provider, seen)
+                if prompt is not None:
+                    prompted = True
+                    on_prompt(prompt)
+            try:
+                return proc.wait(timeout=max(deadline - time.monotonic(), 0.1)) == 0
+            except subprocess.TimeoutExpired:
+                return False
+    except OSError:
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -584,18 +942,20 @@ class Runtime:
     http: Callable[..., HttpResponse] = http_request
     now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
     which: Callable[[str], Optional[str]] = None  # type: ignore[assignment]
-    run_cli: Callable[[Provider], bool] = default_run_cli
+    probe: Callable[[Provider, str, Mapping[str, str]], str] = default_probe
+    login: Callable[..., bool] = default_login
     sidecar_path: Path = SIDECAR_PATH
     lock_path: Path = LOCK_PATH
     notify: Callable[[Mapping[str, Any]], Any] = send_pushover
     heartbeat: Callable[..., None] = record_heartbeat
     sleep: Callable[[float], None] = time.sleep
+    monotonic: Callable[[], float] = time.monotonic
 
     def __post_init__(self) -> None:
         if self.which is None:
-            import shutil
-
-            self.which = shutil.which
+            self.which = lambda binary: shutil.which(
+                binary, path=cli_search_path(self.env)
+            )
 
 
 @dataclass
@@ -605,11 +965,22 @@ class ProviderResult:
     expires_at: Optional[str] = None
     last_refresh_at: Optional[str] = None
     last_error: Optional[str] = None
+    last_probe_at: Optional[str] = None
+    probe_inconclusive: bool = False
 
 
 # ---------------------------------------------------------------------------
 # engine
 # ---------------------------------------------------------------------------
+
+
+def _unproven_since(result: ProviderResult, prior: Mapping[str, Any], now: datetime) -> Optional[str]:
+    """When the current streak of inconclusive keepalive probes began."""
+    if result.last_probe_at:
+        return None
+    if result.probe_inconclusive:
+        return prior.get("unproven_since") or now.isoformat()
+    return prior.get("unproven_since")
 
 
 class _Run:
@@ -621,6 +992,12 @@ class _Run:
         self.discovery: dict[str, str] = {}  # process-local, per run
         self.sidecar = self._load_sidecar()
         self.page_failures: list[str] = []
+        self.login_attempted = False
+        self.login_deferred: set[str] = set()
+        self.started = rt.monotonic()
+
+    def seconds_left(self) -> float:
+        return RUN_BUDGET_SECONDS - (self.rt.monotonic() - self.started)
 
     # -- sidecar ---------------------------------------------------------
 
@@ -651,6 +1028,8 @@ class _Run:
                 or prior.get("last_refresh_at"),
                 "consecutive_error_count": errors,
                 "last_error": result.last_error,
+                "last_probe_at": result.last_probe_at or prior.get("last_probe_at"),
+                "unproven_since": _unproven_since(result, prior, self.now),
             }
         self.sidecar["updated_at"] = self.now.isoformat()
         try:
@@ -662,36 +1041,65 @@ class _Run:
         prior = self.sidecar["providers"].get(provider, {})
         return int(prior.get("consecutive_error_count") or 0)
 
+    # -- keepalive -------------------------------------------------------
+
+    def unproven_since(self, provider: str) -> Optional[datetime]:
+        prior = self.sidecar["providers"].get(provider, {})
+        return _parse_rfc3339(prior.get("unproven_since"))
+
+    def is_keepalive_due(self, provider: str) -> bool:
+        prior = self.sidecar["providers"].get(provider, {})
+        last = _parse_rfc3339(prior.get("last_probe_at"))
+        return last is None or self.now - last >= KEEPALIVE_INTERVAL
+
+    def probe(self, provider: Provider) -> Optional[str]:
+        """The probe outcome, or None when no probe could be run at all."""
+        binary = self.rt.which(provider.cli_binary) if provider.cli_binary else None
+        if not binary or self.seconds_left() < PROBE_TIMEOUT_SECONDS:
+            return None
+        try:
+            return self.rt.probe(provider, binary, self.rt.env)
+        except Exception as exc:  # noqa: BLE001 - a probe never fails the run
+            log.warning("%s probe failed: %s", provider.name, type(exc).__name__)
+            return PROBE_FAILED
+
     # -- paging ----------------------------------------------------------
 
-    def maybe_page(self, result: ProviderResult) -> None:
+    def is_page_due(self, result: ProviderResult, ignore_cooldown: bool = False) -> bool:
         if result.state not in (NEEDS_REAUTH, STORE_UNAVAILABLE, ERROR):
-            return
+            return False
         if result.state == ERROR:
             # Streak includes this run only after save_sidecar; add it here.
             if self.error_streak(result.provider) + 1 < ERROR_PAGE_AFTER:
-                return
+                return False
         last = _parse_rfc3339(self.sidecar["pages"].get(result.provider))
-        if last and self.now - last < PAGE_COOLDOWN:
-            return
+        return ignore_cooldown or not (last and self.now - last < PAGE_COOLDOWN)
+
+    def pushover_credentials(self) -> Optional[tuple]:
         user = (self.rt.env.get("PUSHOVER_USER") or "").strip()
         token = (self.rt.env.get("PUSHOVER_TOKEN") or "").strip()
-        if not user or not token:
+        return (user, token) if user and token else None
+
+    def maybe_page(self, result: ProviderResult) -> None:
+        # --check is an observation: it stores no cooldown, so it would re-page
+        # on every poll.
+        if self.mode == "check" or result.provider in self.login_deferred:
+            return
+        if self.is_page_due(result):
+            self.page(result)
+
+    def page(self, result: ProviderResult, prompt: Optional[LoginPrompt] = None) -> None:
+        credentials = self.pushover_credentials()
+        if credentials is None:
             self.page_failures.append("pushover credentials missing")
             return
-        provider = PROVIDERS.get(result.provider)
-        command = provider.reauth_command if provider else ""
-        message = (
-            f"{result.provider}: {result.state}"
-            + (f" ({result.last_error})" if result.last_error else "")
-            + (f"\nRe-auth: {command}" if command else "")
-        )
+        user, token = credentials
         payload = {
             "token": token,
             "user": user,
             "title": PUSHOVER_TITLE,
-            "message": message,
             "priority": 0,
+            **_page_body(result, prompt),
         }
         try:
             self.rt.notify(payload)
@@ -699,6 +1107,37 @@ class _Run:
             self.page_failures.append(f"pushover delivery failed: {type(exc).__name__}")
             return
         self.sidecar["pages"][result.provider] = self.now.isoformat()
+
+    # -- push login ------------------------------------------------------
+
+    def login_binary(self, result: ProviderResult) -> Optional[str]:
+        """The CLI to log in with, when a push login can fix this result."""
+        provider = PROVIDERS.get(result.provider)
+        if result.state != NEEDS_REAUTH or provider is None or not provider.login_args:
+            return None
+        return self.rt.which(provider.cli_binary) if provider.cli_binary else None
+
+    def login_wait(self) -> Optional[float]:
+        """How long a login may hold this run, or None when that is too short."""
+        wait = min(LOGIN_WAIT_SECONDS, self.seconds_left())
+        return wait if wait >= MIN_LOGIN_WAIT_SECONDS else None
+
+    def login_by_push(
+        self, result: ProviderResult, binary: str, on_prompt: Callable[[LoginPrompt], Any]
+    ) -> bool:
+        wait = self.login_wait()
+        if wait is None:
+            return False
+        self.login_attempted = True
+        try:
+            return bool(
+                self.rt.login(
+                    PROVIDERS[result.provider], binary, self.rt.env, on_prompt, wait
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 - a login never fails the run
+            log.warning("%s login failed: %s", result.provider, type(exc).__name__)
+            return False
 
     # -- endpoint resolution --------------------------------------------
 
@@ -720,7 +1159,8 @@ class _Run:
             resp = self.rt.http("GET", url, timeout=HTTP_TIMEOUT_SECONDS)
             endpoint = resp.body.get("token_endpoint") if resp.status == 200 else None
             if not isinstance(endpoint, str) or not endpoint:
-                return None
+                # The issuer being down says nothing about the login.
+                raise DiscoveryUnavailable(f"discovery answered HTTP {resp.status}")
             parsed_endpoint = urllib_parse.urlsplit(endpoint)
             if (
                 parsed_endpoint.scheme != "https"
@@ -740,7 +1180,9 @@ class _Run:
     def post_refresh(self, url: str, fields: dict) -> HttpResponse:
         """Form-encoded first; one JSON retry on 400/415 (providers differ)."""
         resp = self._post_with_backoff(url, form=fields)
-        if resp.status in (400, 415) and resp.body.get("error") != "invalid_grant":
+        # A dead grant is final. Presenting the same refresh token again would
+        # let the second answer decide, and can trip reuse detection.
+        if resp.status in (400, 415) and not _is_dead_grant(resp):
             resp = self._post_with_backoff(url, json_body=fields)
         return resp
 
@@ -806,6 +1248,68 @@ def _read_doc(path: Path) -> tuple[Optional[str], Optional[dict]]:
     return raw, (doc if isinstance(doc, dict) else None)
 
 
+def _is_usable(run: _Run, provider: Provider, doc: Mapping[str, Any]) -> bool:
+    expiry = provider.read_expiry(doc)
+    return expiry is not None and (expiry - run.now).total_seconds() > EXPIRY_SKEW_SECONDS
+
+
+def _error_code(resp: HttpResponse) -> Optional[str]:
+    error = resp.body.get("error")
+    code = error.get("code") if isinstance(error, Mapping) else error
+    return code if isinstance(code, str) else None
+
+
+def _is_dead_grant(resp: HttpResponse) -> bool:
+    code = _error_code(resp)
+    if code in CLIENT_REJECTED_CODES:
+        return False
+    return resp.status == 401 or (resp.status == 400 and code in DEAD_GRANT_CODES)
+
+
+def _keepalive(
+    run: _Run, provider: Provider, path: Path, result: ProviderResult
+) -> ProviderResult:
+    """Prove a credential that LOOKS live with one real call, once a day.
+
+    An expiry field in the future says nothing about a revoked grant or a lapsed
+    subscription, and an unexercised refresh token is what goes stale.
+    """
+    if not run.is_keepalive_due(provider.name):
+        return result
+    outcome = run.probe(provider)
+    if outcome is None:
+        return result
+    if outcome == PROBE_AUTH_FAILED:
+        return ProviderResult(
+            provider.name,
+            NEEDS_REAUTH,
+            expires_at=result.expires_at,
+            last_error="credential looks live but the provider rejected it",
+        )
+    probed_raw, probed_doc = _read_doc(path)
+    if probed_raw is not None and probed_doc is not None:
+        # The CLI may have rotated the refresh token, whether or not the model
+        # call then succeeded; the vault must never be left holding the old one.
+        result.last_error = _seal_guarded(run, provider, probed_raw, probed_doc)
+        probed_expiry = provider.read_expiry(probed_doc)
+        result.expires_at = probed_expiry.isoformat() if probed_expiry else result.expires_at
+    if outcome == PROBE_OK:
+        result.last_probe_at = run.now.isoformat()
+        return result
+    # A usage cap or a vendor outage: not evidence about the login. Left
+    # unstamped so the next run asks again, but not forever.
+    result.probe_inconclusive = True
+    unproven_since = run.unproven_since(provider.name)
+    if unproven_since and run.now - unproven_since >= KEEPALIVE_UNPROVEN_LIMIT:
+        result.state = ERROR
+        result.last_error = "login unproven: every keepalive probe since %s was inconclusive" % (
+            unproven_since.date().isoformat()
+        )
+        return result
+    result.last_error = result.last_error or "keepalive probe inconclusive"
+    return result
+
+
 def _evaluate(run: _Run, provider: Provider) -> ProviderResult:
     rt = run.rt
     path = provider.path(rt.env)
@@ -845,9 +1349,8 @@ def _evaluate(run: _Run, provider: Provider) -> ProviderResult:
 
     expiry = provider.read_expiry(doc)
     expires_at = expiry.isoformat() if expiry else None
-    fresh = expiry is not None and (expiry - run.now).total_seconds() > EXPIRY_SKEW_SECONDS
 
-    if fresh:
+    if _is_usable(run, provider, doc):
         # Seal a live credential too. A freshly logged-in token stays live for
         # its whole first hour, and nothing else would put it in the vault
         # before then, so a wipe inside that window would lose it outright.
@@ -855,9 +1358,10 @@ def _evaluate(run: _Run, provider: Provider) -> ProviderResult:
         if run.mode != "check" and raw is not None:
             seal_error = _seal_guarded(run, provider, raw, doc)
         state = RESTORED if restored else LIVE
-        return ProviderResult(
+        result = ProviderResult(
             provider.name, state, expires_at=expires_at, last_error=seal_error
         )
+        return _keepalive(run, provider, path, result) if run.mode == "once" else result
 
     if run.mode == "check":
         return ProviderResult(
@@ -874,31 +1378,29 @@ def _evaluate(run: _Run, provider: Provider) -> ProviderResult:
             provider.name, NEEDS_REAUTH, expires_at=expires_at, last_error=blocked
         )
 
-    # CLI-native refresh first: the CLI is the authority on its own file.
-    if provider.cli_binary and rt.which(provider.cli_binary):
-        try:
-            ok = rt.run_cli(provider)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("%s CLI refresh failed: %s", provider.name, type(exc).__name__)
-            ok = False
-        if ok:
-            new_raw, new_doc = _read_doc(path)
-            if new_doc is not None:
-                # Continue from what the CLI wrote. Falling through with the
-                # pre-CLI document would os.replace it back over the file and
-                # persist a refresh token the CLI may already have rotated away.
-                raw, doc = new_raw, new_doc
-                new_expiry = provider.read_expiry(new_doc)
-                expires_at = new_expiry.isoformat() if new_expiry else expires_at
-                if new_expiry and (new_expiry - run.now).total_seconds() > EXPIRY_SKEW_SECONDS:
-                    if new_raw is not None:
-                        _seal_guarded(run, provider, new_raw, new_doc)
-                    return ProviderResult(
-                        provider.name,
-                        REFRESHED,
-                        expires_at=new_expiry.isoformat(),
-                        last_refresh_at=run.now.isoformat(),
-                    )
+    # CLI-native refresh first: the CLI is the authority on its own file, and a
+    # real model call refreshes it as a side effect.
+    outcome = run.probe(provider)
+    if outcome is not None:
+        new_raw, new_doc = _read_doc(path)
+        if new_raw is not None and new_doc is not None:
+            # Continue from what the CLI wrote, WHATEVER the probe reported: a
+            # CLI that rotated its refresh token and then hit a usage cap still
+            # rotated it. Falling through with the pre-CLI document would
+            # present a token that no longer exists (reuse detection can revoke
+            # the whole family) and then os.replace it back over the file.
+            raw, doc = new_raw, new_doc
+            _seal_guarded(run, provider, new_raw, new_doc)
+            new_expiry = provider.read_expiry(new_doc)
+            expires_at = new_expiry.isoformat() if new_expiry else expires_at
+            if outcome != PROBE_AUTH_FAILED and _is_usable(run, provider, new_doc):
+                return ProviderResult(
+                    provider.name,
+                    REFRESHED,
+                    expires_at=expires_at,
+                    last_refresh_at=run.now.isoformat(),
+                    last_probe_at=run.now.isoformat() if outcome == PROBE_OK else None,
+                )
 
     refresh_token = provider.read_refresh(doc)
     if not refresh_token:
@@ -909,7 +1411,18 @@ def _evaluate(run: _Run, provider: Provider) -> ProviderResult:
             last_error="no refresh token in credential file",
         )
 
-    endpoint = run.token_endpoint(provider, doc)
+    if run.seconds_left() < REFRESH_BUDGET_SECONDS:
+        return ProviderResult(
+            provider.name, ERROR, expires_at=expires_at,
+            last_error="run budget exhausted before the refresh; next run retries",
+        )
+
+    try:
+        endpoint = run.token_endpoint(provider, doc)
+    except DiscoveryUnavailable as exc:
+        return ProviderResult(
+            provider.name, ERROR, expires_at=expires_at, last_error=str(exc)
+        )
     if not endpoint:
         return ProviderResult(
             provider.name,
@@ -921,7 +1434,7 @@ def _evaluate(run: _Run, provider: Provider) -> ProviderResult:
     fields = provider.token_request(doc, refresh_token)
     resp = run.post_refresh(endpoint, fields)
 
-    if resp.status in (400, 401):
+    if _is_dead_grant(resp):
         return ProviderResult(
             provider.name,
             NEEDS_REAUTH,
@@ -1059,6 +1572,58 @@ def _restore(run: _Run, provider: Provider) -> ProviderResult:
     )
 
 
+def _heal_by_push(run: _Run, result: ProviderResult) -> ProviderResult:
+    """Turn a needs_reauth page into a login link the operator taps once."""
+    binary = run.login_binary(result)
+    if (
+        run.mode != "once"
+        or binary is None
+        or not run.is_page_due(result)
+        or run.pushover_credentials() is None
+    ):
+        return result
+    if run.login_attempted:
+        # Its turn comes next run. A plain page now would stamp the 12h cooldown
+        # and, with a fixed evaluation order, starve it of a link for good.
+        run.login_deferred.add(result.provider)
+        return result
+    is_approved = run.login_by_push(
+        result, binary, lambda prompt: run.page(result, prompt)
+    )
+    return _evaluate(run, PROVIDERS[result.provider]) if is_approved else result
+
+
+def _reauth(run: _Run, provider: Provider) -> ProviderResult:
+    """Operator-started login (a missed link, a first bootstrap). Vault-free.
+
+    It runs from a bare shell, where the store key is unavailable by design, so
+    it only reports the file; the next timer run seals it.
+    """
+    needs_login = ProviderResult(provider.name, NEEDS_REAUTH)
+    binary = run.login_binary(needs_login)
+    if binary is None:
+        return ProviderResult(
+            provider.name, ERROR,
+            last_error=f"no push login for this provider; run: {provider.reauth_command}",
+        )
+
+    def announce(prompt: LoginPrompt) -> None:
+        # stderr: stdout is the report, which --json promises is one document.
+        print(
+            f"{provider.name}: open {prompt.url}" + (f" code {prompt.code}" if prompt.code else ""),
+            file=sys.stderr,
+        )
+        run.page(needs_login, prompt)
+
+    if not run.login_by_push(needs_login, binary, announce):
+        return ProviderResult(provider.name, NEEDS_REAUTH, last_error="login was not approved")
+    _raw, doc = _read_doc(provider.path(run.rt.env))
+    if doc is None or not _is_usable(run, provider, doc):
+        return ProviderResult(provider.name, ERROR, last_error="login finished but wrote no usable credential")
+    expiry = provider.read_expiry(doc)
+    return ProviderResult(provider.name, LIVE, expires_at=expiry.isoformat() if expiry else None)
+
+
 @contextlib.contextmanager
 def run_lock(path: Path):
     """Exclusive, non-blocking. Yields False when another run already holds it.
@@ -1137,7 +1702,7 @@ def _run_locked(
     active = _Run(rt, mode, force)
 
     results: list[ProviderResult] = []
-    if rt.vault is None:
+    if rt.vault is None and mode != "reauth":
         try:
             rt.vault = open_vault(rt.env)
         except VaultUnavailable as exc:
@@ -1150,11 +1715,13 @@ def _run_locked(
             ]
 
     if not results:
-        handler = {"seal": _seal, "restore": _restore}.get(mode, _evaluate)
+        handler = {"seal": _seal, "restore": _restore, "reauth": _reauth}.get(
+            mode, _evaluate
+        )
         for name in names:
             provider = PROVIDERS[name]
             try:
-                results.append(handler(active, provider))
+                results.append(_heal_by_push(active, handler(active, provider)))
             except VaultUnavailable:
                 results.append(
                     ProviderResult(
@@ -1224,6 +1791,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     group.add_argument("--once", action="store_true", help="evaluate + heal, then exit")
     group.add_argument("--seal", metavar="PROVIDER", choices=sorted(PROVIDERS))
     group.add_argument("--restore", metavar="PROVIDER", choices=sorted(PROVIDERS))
+    group.add_argument(
+        "--reauth",
+        metavar="PROVIDER",
+        choices=sorted(PROVIDERS),
+        help="start the provider's push login now, ignoring the page cooldown",
+    )
     parser.add_argument("--json", action="store_true", help="machine-readable report")
     parser.add_argument(
         "--force",
@@ -1237,6 +1810,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         mode, names = "seal", [args.seal]
     elif args.restore:
         mode, names = "restore", [args.restore]
+    elif args.reauth:
+        mode, names = "reauth", [args.reauth]
     else:
         mode, names = ("check" if args.check else "once"), None
     return run(mode, names, None, json_output=args.json, force=args.force)["exit_code"]

@@ -20,7 +20,7 @@ Owner specs for regime tabs and the cheap-wing scanner. Add a row here when a sp
 | divyield | `/regime/divyield` | `div-yield` | [divyield.md](divyield.md) |
 | ma-ratio | `/regime/ma-ratio` | `ma-ratio` | [ma-ratio.md](ma-ratio.md) |
 | calm-streak | `/regime/calm-streak` | `calm-streak` | [calm-streak.md](calm-streak.md) (migration renumbered 0074 to 0076 2026-09-17; `migrate.py` now refuses duplicate version numbers) |
-| hyad | `/regime/hyad` | `hy-ad` | [hyad.md](hyad.md) |
+| hyad | `/regime/hyad` | `hy-ad` | [hyad.md](hyad.md) (SPX history uses stored Cboe closes for dates absent from credit history) |
 | hhlev | `/regime/hhlev` | `hhlev` | [hhlev.md](hhlev.md) |
 | vixts | `/regime/vixts` | `vixts` | [vixts.md](vixts.md) |
 | panic-index | `/regime/panic-index` | `panic-index` | [panic-index.md](panic-index.md) (shipped. Radon proxy of the GS S&T Panic Index, not the GS index) |

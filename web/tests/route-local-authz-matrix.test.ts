@@ -13,7 +13,7 @@ const ROUTES = [
   "orders/cancel", "orders/modify", "orders/place", "orders", "orders/whatif",
   "paper/place", "performance", "pi", "portfolio", "preferences", "previous-close",
   "regime", "scanner", "scanner/strength", "scanner/strength/scan",
-  "scanner/theta", "scanner/theta/scan", "scanner/vol-skew-mr", "scanner/vol-skew-mr/scan",
+  "scanner/theta", "scanner/theta/scan", "scanner/vol-skew-mr", "scanner/vol-skew-mr/scan", "scanner/bounce", "scanner/bounce/scan",
   "short-availability/[ticker]", "streaks",
   "ticker/info", "ticker/news", "ticker/ratings", "ticker/seasonality", "vcg",
   "service-health",
