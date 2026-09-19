@@ -25,7 +25,7 @@ Radon's use of this surface is deliberately narrow:
 
 Token lifecycle — access tokens expire in ~3 days, so REFRESH IS MANDATORY
 in production. Tokens persist in a 0600 JSON file (``ROBINHOOD_MCP_TOKEN_FILE``,
-default ``data/rh_mcp_token.json``, gitignored; ``/etc/radon/rh-mcp.json`` on
+default ``data/rh_mcp_token.json``, gitignored; ``/var/lib/radon/rh-mcp/rh-mcp.json`` on
 the VPS) so the process can write rotated tokens back. Env vars bootstrap the
 file on first use. Refresh runs against the official token endpoint
 (``https://api.robinhood.com/oauth2/token/``, ``grant_type=refresh_token``,
