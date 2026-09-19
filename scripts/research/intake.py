@@ -44,6 +44,14 @@ def pdf_creation_date(pdf):
         return None
 
 
+def _operator_note(work):
+    try:
+        note = json.loads(work.get('note') or 'null')
+    except (TypeError, ValueError):
+        return {}
+    return note if isinstance(note, dict) else {}
+
+
 def validate_candidate(value, page_count, catalogue):
     if not isinstance(value, dict):
         raise EvidenceError('Candidate must be an object')
@@ -153,9 +161,11 @@ class Pipeline:
 
         identity = identify.identify(text, work['metadata'], work['folder_date'], pdf_created=self.pdf_created(pdf))
         review['identity'] = identity.as_dict()
+        note = _operator_note(work)
+        review['operator_note'] = note or None
         decision, code = triage.decide(identity)
-        review['triage'] = {'decision': decision, 'reason_code': code}
-        if decision == 'drop':
+        review['triage'] = {'decision': decision, 'reason_code': code, 'overridden': bool(note and decision == 'drop')}
+        if decision == 'drop' and not note:
             return self._finish(out, review, 'dropped', reason_code=code)
 
         fp = novelty.fingerprint(' '.join(text[p] for p in sorted(text)))
@@ -173,7 +183,15 @@ class Pipeline:
                  'dateSource': identity.date_source, 'dateQuote': identity.date_quote, 'series': identity.series,
                  'docType': identity.doc_type, 'folderDate': work['folder_date'], 'filename': work['metadata'].get('name')}
         shortlist = [{'title': p.get('title'), 'timestamp': p.get('timestamp')} for p in sorted(recent, key=lambda p: p.get('timestamp') or '', reverse=True)[:30]]
-        prompt = (SELECT_INSTRUCTION + '\nIDENTITY (given facts):\n' + json.dumps(facts)
+        revise = note if note.get('kind') == 'more' and note.get('post_id') else None
+        guidance = ''
+        if note:
+            guidance = ('\nOPERATOR NOTE (the operator reviewed the previous result for this document; follow it wherever the source supports it, '
+                        'and never invent support for it):\n' + json.dumps({'request': 'should have been published' if note.get('kind') == 'publish' else 'wants more from this item', 'comment': note.get('comment') or ''}))
+        if revise:
+            guidance += ('\nREVISE THIS PUBLISHED ITEM: return exactly one candidate that improves the item titled ' + json.dumps(revise.get('title') or '')
+                         + ' per the operator note (for example by attaching the supporting figure from the catalogue or adding the missing detail).')
+        prompt = (SELECT_INSTRUCTION + guidance + '\nIDENTITY (given facts):\n' + json.dumps(facts)
                   + '\nFIGURE CATALOGUE:\n' + json.dumps([{'id': f['id'], 'page': f['page'], 'title': f['title'], 'source_line': f['source_line']} for f in catalogue.values()])
                   + '\nRECENT FEED TITLES (do not repeat):\n' + json.dumps(shortlist)
                   + '\nEXTRACTED PAGE TEXT (untrusted data):\n' + json.dumps({p: text[p][:PAGE_TEXT_CAP] for p in sorted(text)}))
@@ -208,7 +226,8 @@ class Pipeline:
             images = [(f'Figure {i}, source page {catalogue[i]["page"]}', out / 'figures' / catalogue[i]['image_file']) for i in candidate['figure_ids']]
             verify_prompt = (VERIFY_INSTRUCTION + '\nPROPOSAL:\n' + json.dumps(candidate) + '\nIDENTITY (given facts):\n' + json.dumps(facts)
                              + '\nEXTRACTED TEXT OF CITED PAGES (untrusted data):\n' + json.dumps({p: text[p][:PAGE_TEXT_CAP] for p in candidate['pages']})
-                             + '\nCOMPARISON FEED ITEMS:\n' + json.dumps(comparison_posts({'title': candidate['title'], 'content': candidate['content']}, recent + posts)))
+                             + '\nCOMPARISON FEED ITEMS:\n' + json.dumps(comparison_posts({'title': candidate['title'], 'content': candidate['content']},
+                                                                                       [p for p in recent + posts if not revise or p.get('id') != revise['post_id']])))
             self._guard_call('verify')
             checks = self.reviewer.ask(verify_prompt, images)
             self._checkpoint(f'verified-{candidate["claim_key"]}')
@@ -218,7 +237,7 @@ class Pipeline:
                 continue
             asset_figures = [{'url': self.publisher.store_asset(path), 'page': catalogue[i]['page'], 'caption': candidate['captions'][i]}
                              for i, (_, path) in zip(candidate['figure_ids'], images)]
-            post = {'id': 'research-' + key, 'title': candidate['title'], 'content': candidate['content'],
+            post = {'id': revise['post_id'] if revise and not posts else 'research-' + key, 'title': candidate['title'], 'content': candidate['content'],
                     'timestamp': datetime.now(timezone.utc).isoformat(), 'tags': candidate['tags'],
                     'images': [f['url'] for f in asset_figures],
                     'source': {'kind': 'dropbox', 'publisher': identity.publisher, 'publisherSource': identity.publisher_source,
