@@ -326,6 +326,19 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
     # market is closed.
     outside_rth = bool(params.get("outsideRth", False))
 
+    if not what_if:
+        # Gate 3 (NF-1): max loss <= 2.5% of a fresh (<=15 min) IB net
+        # liquidation. Close-outs of held positions are exempt.
+        from bankroll_guard import check_bankroll_admission
+
+        bankroll_violation = check_bankroll_admission(params)
+        if bankroll_violation:
+            return {
+                "status": "error",
+                "code": bankroll_violation["code"],
+                "message": bankroll_violation["message"],
+            }
+
     client = IBClient()
     timer = PhaseTimer("ib_place_order")
 
