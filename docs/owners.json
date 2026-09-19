@@ -106,6 +106,7 @@
       "id": "kelly-sizing",
       "globs": [
         "scripts/kelly.py",
+        "scripts/kelly_guard.py",
         "lib/tools/schemas/kelly.ts",
         "lib/tools/wrappers/kelly.ts"
       ],
