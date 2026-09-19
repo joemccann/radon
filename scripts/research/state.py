@@ -72,7 +72,11 @@ class State:
         CREATE TABLE IF NOT EXISTS outbox(
           id TEXT PRIMARY KEY, work_key TEXT NOT NULL, payload TEXT NOT NULL,
           status TEXT NOT NULL DEFAULT 'pending');
+        CREATE TABLE IF NOT EXISTS feedback_handled(id TEXT PRIMARY KEY, handled_at REAL NOT NULL);
         ''')
+        # Operator note carried into the next review of a re-queued document (research.feedback).
+        if 'note' not in {row[1] for row in self.db.execute('PRAGMA table_info(work)')}:
+            self.db.execute('ALTER TABLE work ADD COLUMN note TEXT')
 
         # Dropbox paths are case-insensitive. Collapse old display-case aliases;
         # ambiguous cursors trigger an idempotent relist, preserving folder dates.
@@ -172,7 +176,7 @@ class State:
     def ready(self, limit=20):
         rows = self.db.execute("""SELECT w.*,i.pdf FROM work w JOIN ingestion i ON i.work_key=w.key
             WHERE w.status='pending' AND i.status='ready' AND w.available_at<=?
-            ORDER BY w.attempts>0,w.folder_date DESC,w.rowid DESC LIMIT ?""", (time.time(),limit))
+            ORDER BY w.note IS NULL,w.attempts>0,w.folder_date DESC,w.rowid DESC LIMIT ?""", (time.time(),limit))
         return [{**dict(r), 'metadata':json.loads(r['metadata'])} for r in rows]
 
     def pending(self, limit=20):
@@ -196,7 +200,10 @@ class State:
                 publication_id = payload['id']
                 existing = self.db.execute('SELECT work_key,payload FROM outbox WHERE id=?', (publication_id,)).fetchone()
                 encoded = json.dumps(payload, sort_keys=True)
-                if existing and (existing[0] != key or existing[1] != encoded):
+                if existing and existing[0] == key and existing[1] != encoded:
+                    # The same document re-reviewed (operator "want more"): the revised payload replaces the old one.
+                    self.db.execute("UPDATE outbox SET payload=?,status='pending' WHERE id=?", (encoded, publication_id))
+                elif existing and (existing[0] != key or existing[1] != encoded):
                     previous = self.db.execute('SELECT file_id,rev,status FROM work WHERE key=?', (existing[0],)).fetchone()
                     current = self.db.execute('SELECT file_id,rev FROM work WHERE key=?', (key,)).fetchone()
                     if not (previous and previous['file_id'] == current['file_id']
@@ -206,13 +213,33 @@ class State:
                     self.db.execute("UPDATE outbox SET work_key=?,payload=?,status='pending' WHERE id=?", (key,encoded,publication_id))
                 else:
                     self.db.execute('INSERT OR IGNORE INTO outbox(id,work_key,payload) VALUES(?,?,?)', (publication_id,key,encoded))
-            self.db.execute("UPDATE work SET status='complete',result=?,error=NULL WHERE key=?", (json.dumps(result),key))
+            self.db.execute("UPDATE work SET status='complete',result=?,error=NULL,note=NULL WHERE key=?", (json.dumps(result),key))
 
     def retry(self, key, error, delay=60):
         # Error must be a safe classification, never an HTTP body or credentials.
         safe_error = _persist_error(error) if isinstance(error, BaseException) else 'processing_failed'
         with self.db:
             self.db.execute("UPDATE work SET status='pending',error=?,available_at=? WHERE key=? AND status='processing'", (safe_error,time.time()+max(0,delay),key))
+
+    def feedback_handled(self):
+        return {row[0] for row in self.db.execute('SELECT id FROM feedback_handled')}
+
+    def mark_feedback_handled(self, feedback_id):
+        with self.db:
+            self.db.execute('INSERT OR IGNORE INTO feedback_handled VALUES(?,?)', (feedback_id, time.time()))
+
+    def work_key_for_file(self, file_id):
+        if not file_id:
+            return None
+        row = self.db.execute("""SELECT key FROM work WHERE file_id=? AND status IN ('complete','published')
+            ORDER BY rowid DESC LIMIT 1""", (file_id,)).fetchone()
+        return row[0] if row else None
+
+    def requeue_with_note(self, key, note):
+        # Only finished work is re-queued; a document still in flight keeps its current review.
+        with self.db:
+            return bool(self.db.execute("""UPDATE work SET status='pending',attempts=0,available_at=0,result=NULL,error=NULL,note=?
+                WHERE key=? AND status IN ('complete','published')""", (note, key)).rowcount)
 
     def park(self, key, retry_at):
         # A provider outage is not a document failure: give the attempt back and wait for the provider.
