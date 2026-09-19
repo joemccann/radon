@@ -455,7 +455,9 @@ except FileNotFoundError:
     pass
 inbound = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
 inbound.bind(listen)
-os.chmod(listen, 0o666)
+# NotifyAccess=all makes systemd trust whatever this proxy relays, so the
+# socket is owner-only; start_notify_proxy chowns it to the container uid.
+os.chmod(listen, 0o600)
 outbound = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
 # Exit with the ExecStart process (the docker client, which exec'd over the
 # bash parent), so a stopped unit never leaves a forwarder holding fds.
@@ -484,7 +486,7 @@ PY
 # when its parent changes, and a subshell parent is gone the moment it
 # returns, which left a dead socket behind on the first live probe.
 start_notify_proxy() {
-  local unit="$1" upstream="$2" listen attempt
+  local unit="$1" upstream="$2" ids="$3" listen attempt
   listen="${NOTIFY_PROXY_DIR}/${unit}.sock"
   mkdir -p -m 0755 "$NOTIFY_PROXY_DIR" || {
     echo "radon-app-runtime: notify proxy dir is unavailable: ${NOTIFY_PROXY_DIR}" >&2
@@ -493,7 +495,13 @@ start_notify_proxy() {
   rm -f "$listen"
   "$0" notify-proxy "$listen" "$upstream" &
   for attempt in $(seq 1 50); do
-    [[ -S "$listen" ]] && { NOTIFY_PROXY_SOCKET="$listen"; return 0; }
+    if [[ -S "$listen" ]]; then
+      # The proxy binds the socket 0600 as root; hand it to the container
+      # uid so only that uid can write READY/WATCHDOG datagrams.
+      "$CHOWN" -h "$ids" "$listen" || return 71
+      NOTIFY_PROXY_SOCKET="$listen"
+      return 0
+    fi
     sleep 0.1
   done
   echo "radon-app-runtime: notify proxy for ${unit} did not bind ${listen}" >&2
@@ -764,7 +772,7 @@ cmd_run() {
   fi
 
   if [[ -n "${NOTIFY_SOCKET:-}" && "${NOTIFY_SOCKET}" == /* ]]; then
-    start_notify_proxy "$unit" "$NOTIFY_SOCKET" || exit $?
+    start_notify_proxy "$unit" "$NOTIFY_SOCKET" "$ids" || exit $?
     set -- "$@" --env "NOTIFY_SOCKET=${NOTIFY_PROXY_SOCKET}" --env WATCHDOG_USEC \
       --mount "type=bind,src=${NOTIFY_PROXY_SOCKET},dst=${NOTIFY_PROXY_SOCKET}"
   fi
