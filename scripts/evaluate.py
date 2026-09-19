@@ -472,7 +472,7 @@ def _run_parallel_milestones(
         return ("M1B", fetch_seasonality(ticker))
 
     def _m1c():
-        return ("M1C", fetch_analyst_ratings(ticker, use_cache=True))
+        return ("M1C", fetch_analyst_ratings(ticker, use_cache=True, need_history=True))
 
     def _m2():
         return ("M2", fetch_flow(ticker, lookback_days=flow_days))
