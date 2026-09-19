@@ -229,7 +229,7 @@ class TestRobinhoodRankRule:
         # env file: both operator docs must name it.
         for rel in ("docs/external-services.md", "docs/operations.md"):
             text = (_ROOT / rel).read_text(encoding="utf-8")
-            assert "/etc/radon/rh-mcp.json" in text, rel
+            assert "/var/lib/radon/rh-mcp/rh-mcp.json" in text, rel
         operations = (_ROOT / "docs" / "operations.md").read_text(encoding="utf-8")
         for name in (
             "ROBINHOOD_MCP_TOKEN",

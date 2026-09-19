@@ -684,6 +684,15 @@ cmd_run() {
     if [[ -d "$ib_remote_certs" ]]; then
       set -- "$@" -v "${ib_remote_certs}:${ib_remote_certs}:ro"
     fi
+    # Robinhood read-only MCP token store. Its own dir, never /etc/radon, and
+    # read-write: refresh rotates the token by atomic replace plus a .lock
+    # sidecar, which a single-file bind cannot do. Without it every Robinhood
+    # rung inside the API fell through to UW (2026-09-19).
+    local rh_token_dir="${RADON_RH_TOKEN_DIR:-/var/lib/radon/rh-mcp}"
+    if [[ -d "$rh_token_dir" ]]; then
+      set -- "$@" -v "${rh_token_dir}:${rh_token_dir}" \
+        --env "ROBINHOOD_MCP_TOKEN_FILE=${rh_token_dir}/rh-mcp.json"
+    fi
     local credential_host_dir="${SECRET_STORE_CREDENTIAL_STAGE_ROOT}/${unit}"
     set -- "$@" \
       --group-add "$credential_gid" \
