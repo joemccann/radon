@@ -74,7 +74,7 @@ Read `tools/codemap/architecture.json` before searching for a module or reconstr
 |---|---|
 | 1. Convexity | Gain ≥ 2× loss. Defined-risk only. |
 | 2. Edge | Specific, data-backed dark-pool / OTC signal that hasn't moved price. |
-| 3. Risk | Fractional Kelly. Hard cap 2.5% bankroll / position. |
+| 3. Risk | Half Kelly (0.5) default, 0.25 optional stricter, full Kelly banned. Hard cap 2.5% bankroll / position. |
 | 4. ~~No naked shorts~~ | **DISABLED 2026-04-30.** Logic preserved as `_*Impl`. Re-enable: `docs/naked-short-reenable.md`. |
 
 Any gate fails → stop. Name the gate.

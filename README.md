@@ -40,7 +40,7 @@ Flow signal or nothing. No narrative trades, no chart-pattern trades.
 |------|------|
 | **Convexity** | Potential gain >= 2x potential loss. Defined-risk default. |
 | **Edge** | Specific, data-backed signal that has not fully moved price. |
-| **Risk** | Fractional Kelly, hard cap 2.5% of bankroll per position. |
+| **Risk** | Half Kelly (0.5) default, 0.25 optional stricter, full Kelly banned. Hard cap 2.5% of bankroll per position. |
 
 Any gate fails, no trade. Full rules in [`CLAUDE.md`](CLAUDE.md). Strategy specs in [`docs/strategies.md`](docs/strategies.md).
 
