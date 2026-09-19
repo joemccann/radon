@@ -10,7 +10,9 @@ const KEY_A = "a".repeat(64), KEY_B = "b".repeat(64);
 const items = [
   { workKey: KEY_A, fileName: "jpm_flows___liquidity.pdf", publisher: "J.P. Morgan", series: "jpm flows liquidity", docType: "research", folderDate: "2026-09-17",
     documentDate: "2026-09-16", outcome: "held", reasonCodes: ["NUMBER_NOT_ON_PAGE"],
-    drafts: [{ title: "Tech issuance adds 10-20bp", content: "Draft body", held: "NUMBER_NOT_ON_PAGE", detail: "10-20bp" }] },
+    drafts: [{ title: "Tech issuance adds 10-20bp", content: "Draft body", held: "NUMBER_NOT_ON_PAGE", detail: "10-20bp" }],
+    context: { pageCount: 14, figureCount: 6, dateSource: "text", excerpt: "Flows & Liquidity. How much upward pressure on global bond yields from tech bond issuance?",
+      selectorReason: "One measured finding on tech issuance.", sourceUrl: "/api/newsfeed/research/files/" + "c".repeat(64) + ".pdf" } },
   { workKey: KEY_B, fileName: "gbpusd_en_1666701.pdf", publisher: "UBS", series: "gbpusd", docType: "fx_pair_note", folderDate: "2026-09-17",
     documentDate: "2026-09-17", outcome: "dropped", reasonCodes: ["DOC_TYPE_FX_PAIR_NOTE"], drafts: [] },
 ];
@@ -38,6 +40,20 @@ describe("ResearchHeldReview", () => {
     expect(within(card).getByText("Tech issuance adds 10-20bp")).toBeTruthy();
     expect(within(card).getByText("10-20bp")).toBeTruthy();
     expect(screen.getByText("Document type: FX pair note")).toBeTruthy();
+  });
+
+  it("shows what the document is: report date, size, opening text, the selector's reason and the PDF", async () => {
+    render(<ResearchHeldReview />);
+    const card = (await screen.findByText("jpm_flows___liquidity.pdf")).closest("li") as HTMLElement;
+    expect(within(card).getByText("Report dated 2026-09-16 (from the document text) · 14 pages · 6 charts")).toBeTruthy();
+    expect(within(card).getByText("Flows & Liquidity. How much upward pressure on global bond yields from tech bond issuance?")).toBeTruthy();
+    expect(within(card).getByText("One measured finding on tech issuance.")).toBeTruthy();
+    expect(within(card).getByText("Selector's note:")).toBeTruthy();
+    const link = within(card).getByRole("link", { name: "Open PDF" });
+    expect(link.getAttribute("href")).toBe("/api/newsfeed/research/files/" + "c".repeat(64) + ".pdf");
+    expect(link.getAttribute("target")).toBe("_blank");
+    const bare = screen.getByText("gbpusd_en_1666701.pdf").closest("li") as HTMLElement;
+    expect(within(bare).queryByRole("link", { name: "Open PDF" })).toBeNull();
   });
 
   it("a should-have-published vote posts the work key and removes the card", async () => {

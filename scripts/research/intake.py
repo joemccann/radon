@@ -142,6 +142,9 @@ class Pipeline:
         record = getattr(self.publisher, 'record_outcome', None)
         if record is not None:
             try:
+                if not review.get('posts'):
+                    # A held or dropped document stays openable from the operator's Held review.
+                    review.setdefault('document', {})['source_url'] = self.publisher.store_asset(self._pdf)
                 record(self._work, review)
             except Exception:
                 pass  # The Turso mirror feeds the operator's Held review; review.json stays authoritative.
@@ -157,7 +160,9 @@ class Pipeline:
             raise EvidenceError('PDF exceeds page budget')
         text = {p['page_number']: (out / p['markdown_file']).read_text() for p in evidence['pages']}
         review = {'pipeline': 'v2', 'source_sha256': evidence.get('source_sha256'), 'model': getattr(self.reviewer, 'model', None),
-                  'audit': [], 'posts': []}
+                  'audit': [], 'posts': [],
+                  'document': {'page_count': count, 'excerpt': re.sub(r'\s+', ' ', text.get(1, '')).strip()[:900]}}
+        self._pdf = pdf
 
         identity = identify.identify(text, work['metadata'], work['folder_date'], pdf_created=self.pdf_created(pdf))
         review['identity'] = identity.as_dict()
