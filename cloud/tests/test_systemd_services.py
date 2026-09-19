@@ -75,6 +75,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-mcp.service",
     "radon-host-metrics.service",
     "radon-host-metrics.timer",
+    "radon-tv-alerts.service",
+    "radon-tv-alerts.timer",
     "radon-ib-watchdog.service",
     "radon-ib-watchdog.timer",
     "radon-incident-watchdog.service",
@@ -1579,3 +1581,31 @@ class TestHostedMcp:
         # The venv and checkout it executes live under /home/radon.
         assert svc.get("protecthome") == "read-only"
         assert svc.get("privatetmp") == "yes"
+
+
+class TestTradingViewAlertsDrain:
+    """Issue #457: 5-minute drain of TradingView alerts (docs/tradingview-integration.md)."""
+
+    SCRIPT = "/home/radon/radon/scripts/tv_alerts_drain.py"
+
+    def test_oneshot_runs_the_drain_as_radon(self, unit):
+        u = unit("radon-tv-alerts.service")
+        svc = u["Service"]
+        assert svc["type"] == "oneshot"
+        assert svc["user"] == "radon"
+        assert svc["workingdirectory"] == "/home/radon/radon"
+        assert svc["environmentfile"] == ENV_FILE_PATH
+        assert "RADON_DB_NO_REPLICA=1" in svc["environment"]
+        assert svc["execcondition"] == f"/usr/bin/test -f {self.SCRIPT}"
+        assert svc["execstart"] == f"/home/radon/radon/.venv/bin/python {self.SCRIPT}"
+        assert svc["standardoutput"] == "journal"
+        assert svc["standarderror"] == "journal"
+        assert svc["timeoutstartsec"] == "120"
+        assert "startlimitburst" in u["Unit"]
+        assert "startlimitintervalsec" in u["Unit"]
+
+    def test_timer_every_five_minutes_off_the_herd(self, unit):
+        timer = unit("radon-tv-alerts.timer")["Timer"]
+        assert timer["oncalendar"] == "*:02/5:23"
+        assert timer["persistent"] == "false"
+        assert timer.get("unit", "radon-tv-alerts.service") == "radon-tv-alerts.service"

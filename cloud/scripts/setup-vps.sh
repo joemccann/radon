@@ -114,6 +114,8 @@ readonly SERVICE_FILES=(
   radon-db-retention.timer
   radon-host-metrics.service
   radon-host-metrics.timer
+  radon-tv-alerts.service
+  radon-tv-alerts.timer
   radon-breadth.service
   radon-breadth.timer
   radon-catalysts.service
