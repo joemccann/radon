@@ -56,7 +56,7 @@ def _fake_script_result(ok=True, data=None, error=None, exit_code=0):
 
 
 def test_ticker_ratings_unwraps_array_payload(client):
-    """fetch_analyst_ratings.py --json emits a JSON array. The route
+    """fetch_analyst_ratings_rh.py --json emits a JSON array. The route
     should unwrap the single-ticker case to a dict so the Next.js layer
     can render it directly."""
     fake = _fake_script_result(
@@ -76,7 +76,7 @@ def test_ticker_ratings_unwraps_array_payload(client):
     assert body["consensus"] == "buy"
     # The script gets called with uppercased ticker + --json
     args = run_mock.call_args.args
-    assert args[0] == "fetch_analyst_ratings.py"
+    assert args[0] == "fetch_analyst_ratings_rh.py"
     assert args[1] == ["AMD", "--json"]
 
 
