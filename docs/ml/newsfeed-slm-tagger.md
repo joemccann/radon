@@ -266,6 +266,7 @@ scripts/newsfeed/slm/
   configs/llamafactory-export-v1.yaml
   configs/dataset_info.json
   configs/qwen25-1p5b-qlora-v1.yaml   # mlx-lm Mini alternative only
+  requirements-slm.txt                # trainer pin; never the runtime requirements
 ```
 
 Starting configuration (`configs/llamafactory-qwen25-1p5b-qlora-v1.yaml`), to be tuned only against `valid.jsonl`. Loss is masked (`train_on_prompt: false`). The mlx-lm YAML keeps `mask_prompt: true` for the optional Mini path:

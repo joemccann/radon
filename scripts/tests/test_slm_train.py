@@ -30,6 +30,9 @@ class TestConfig:
         assert "report_to: none" in text
         assert "llamafactory-cli" in sh
         assert 'SLM_TRAINER:-llamafactory' in sh
+        reqs = (REPO / "scripts" / "newsfeed" / "slm" / "requirements-slm.txt").read_text(encoding="utf-8")
+        assert "llamafactory" in reqs
+        assert "Train-only" in reqs
         assert "radon_slm_tagger" in info
         assert info["radon_slm_tagger"]["formatting"] == "sharegpt"
         assert info["radon_slm_tagger"]["columns"]["messages"] == "messages"
