@@ -125,18 +125,6 @@ for SIBLING_REPO in "$WEEKEND_ROOT/radon" "$WEEKEND_ROOT/radon-testing" \
     exit 1
   fi
 done
-# An already-provisioned clone must carry the current config/ and scripts/
-# before the job is installed from it. main is force-reset; any weekend
-# branch and its commits survive.
-git -C "$WEEKEND_REPO" fetch origin --quiet
-git -C "$WEEKEND_REPO" checkout -f --quiet main
-git -C "$WEEKEND_REPO" reset --hard --quiet origin/main
-touch "$WEEKEND_REPO/.radon-weekend-runner"
-# Rail 1: the security marker the wrapper additionally requires. Without
-# it the wrapper refuses, so a stray RADON_WEEKEND_REPO can never run
-# credential-free security work in a sibling loop or operator checkout.
-touch "$WEEKEND_REPO/.radon-security-runner"
-mkdir -p "$WEEKEND_REPO/logs/security-nightly"
 # Dedicated DeepSec clone: its own loop, so its own hard-reset tree. It was
 # a worktree of the security clone until 2026-09-18, and a worktree cannot
 # check out main while the security clone holds it (every pre-reset died
@@ -166,6 +154,18 @@ touch "$DEEPSEC_REPO/.radon-weekend-runner"
 touch "$DEEPSEC_REPO/.radon-security-deepsec-runner"
 touch "$DEEPSEC_REPO/.weekend-keep"
 echo "  rail 5: web/.env and Radon credentials are NOT provisioned into the DeepSec clone either"
+# An already-provisioned clone must carry the current config/ and scripts/
+# before the job is installed from it. main is force-reset; any weekend
+# branch and its commits survive.
+git -C "$WEEKEND_REPO" fetch origin --quiet
+git -C "$WEEKEND_REPO" checkout -f --quiet main
+git -C "$WEEKEND_REPO" reset --hard --quiet origin/main
+touch "$WEEKEND_REPO/.radon-weekend-runner"
+# Rail 1: the security marker the wrapper additionally requires. Without
+# it the wrapper refuses, so a stray RADON_WEEKEND_REPO can never run
+# credential-free security work in a sibling loop or operator checkout.
+touch "$WEEKEND_REPO/.radon-security-runner"
+mkdir -p "$WEEKEND_REPO/logs/security-nightly"
 
 # Rail 5: the security clone receives NO Radon credential. Unlike the other
 # nightly loops, this setup deliberately does NOT provision web/.env (or the
