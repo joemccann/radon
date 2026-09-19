@@ -130,8 +130,13 @@ the completion marker must not be printed while any stage is still in
 flight. `deepsec process` is the long stage of this loop and it runs INSIDE
 the audit phase, under the 8h cap. Launch it DETACHED from the agent harness so a harness
 timeout cannot kill it:
-`nohup env -i <minimal env> bash <stage-script.sh> </dev/null >stage.out
-2>&1 & disown` (macOS has no `setsid`). The stage script pre-writes a
+`nohup env -i PATH="$PATH" HOME="$HOME" USER="$USER" LOGNAME="$LOGNAME"
+LANG="$LANG" TMPDIR="$TMPDIR" DISABLE_AUTOUPDATER=1 bash <stage-script.sh>
+</dev/null >stage.out 2>&1 & disown` (macOS has no `setsid`). Pass `PATH`
+exactly as the wrapper handed it and never rebuild it by hand: on the
+runner `node` lives only under `~/.local/bin`, which the plist PATH
+carries, and a hand-built `/usr/bin:/bin` PATH made every
+`deepsec` invocation exit 127 on 2026-09-19. The stage script pre-writes a
 `name_rc=` placeholder for every planned step BEFORE it runs any of them,
 writes `name_rc=N` as each finishes and a final `DONE` sentinel to a private
 rc file. **An rc file with no `DONE` is a FAILED stage, never a passing
