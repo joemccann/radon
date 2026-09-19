@@ -628,9 +628,27 @@ def test_run_api_mounts_systemd_credential_and_persists_store(tmp_path: Path) ->
     assert stat.S_IMODE((tmp_path / "data" / "secret_store").stat().st_mode) == 0o700
     chowns = (tmp_path / "chown.log").read_text(encoding="utf-8")
     assert f"root:1001 {host_dir} {staged}" in chowns
-    assert f"1000:1000 {tmp_path / 'data' / 'secret_store'}" in chowns
+    # secret_store ownership is applied fd-based in-process (symlink-safe),
+    # so it must never appear in the stubbed chown log.
+    assert str(tmp_path / "data" / "secret_store") not in chowns
     assert "--group-add 1001" in _run_line(result)
     assert "python scripts/secret_store.py && exec uvicorn" in _run_line(result)
+
+
+def test_run_api_refuses_symlinked_secret_store_dir(tmp_path: Path) -> None:
+    target = tmp_path / "elsewhere"
+    target.mkdir()
+    data = tmp_path / "data"
+    data.mkdir(exist_ok=True)
+    (data / "secret_store").symlink_to(target)
+    result = _run(tmp_path, ["run", "radon-api.service"])
+    assert result.returncode == 78, result.stderr
+    assert "secret store" in result.stderr.lower()
+    # The link target must not have been chowned or chmodded.
+    chown_log = tmp_path / "chown.log"
+    if chown_log.exists():
+        assert str(target) not in chown_log.read_text(encoding="utf-8")
+    assert stat.S_IMODE(target.stat().st_mode) != 0o700
 
 
 def test_run_api_refuses_when_credential_group_is_absent(tmp_path: Path) -> None:
@@ -789,8 +807,9 @@ def test_run_api_cleans_staged_credential_on_pre_exec_failure(
     # Provisioning also uses Python now. Fail only the notify proxy so this
     # regression continues to exercise its intended cleanup branch.
     private_anchor = shlex.quote(str(tmp_path / 'state' / 'private'))
+    secret_store = shlex.quote(str(tmp_path / 'data' / 'secret_store'))
     _write_executable(failing_python,
-        f'#!/bin/bash\nif [[ "${{2:-}}" == {private_anchor} ]]; then exec {shlex.quote(sys.executable)} "$@"; fi\nexit 1\n')
+        f'#!/bin/bash\nif [[ "${{2:-}}" == {private_anchor} || "${{2:-}}" == {secret_store} ]]; then exec {shlex.quote(sys.executable)} "$@"; fi\nexit 1\n')
     result = _run(
         tmp_path,
         ["run", "radon-api.service"],
