@@ -255,6 +255,16 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
         if violation:
             return {"status": "error", "message": violation["message"]}
 
+        from kelly_guard import check_kelly_ticket
+
+        kelly_violation = check_kelly_ticket(params)
+        if kelly_violation:
+            return {
+                "status": "error",
+                "code": kelly_violation["code"],
+                "message": kelly_violation["message"],
+            }
+
     order_type = params.get("type", "stock")
     symbol = params["symbol"].upper()
     action = params["action"].upper()
