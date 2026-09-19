@@ -159,8 +159,13 @@ verification, remediation and delivery of its own findings.
 Any other stage expected to exceed a couple of minutes (a full
 pytest/vitest suite, a CI watch) is launched DETACHED from the agent
 harness so a harness timeout cannot kill it:
-`nohup env -i <minimal env> bash <stage-script.sh> </dev/null >stage.out
-2>&1 & disown` (macOS has no `setsid`). The stage script writes per-step
+`nohup env -i PATH="$PATH" HOME="$HOME" USER="$USER" LOGNAME="$LOGNAME"
+LANG="$LANG" TMPDIR="$TMPDIR" DISABLE_AUTOUPDATER=1 bash <stage-script.sh>
+</dev/null >stage.out 2>&1 & disown` (macOS has no `setsid`). Pass `PATH`
+exactly as the wrapper handed it and never rebuild it by hand: on the
+runner `node` lives only under `~/.local/bin`, which the plist PATH
+carries, and a hand-built `/usr/bin:/bin` PATH made every
+`deepsec` invocation exit 127 on 2026-09-19. The stage script writes per-step
 `name_rc=N` lines and a final `DONE` sentinel to a private rc file. The stage
 script pre-writes a `name_rc=` placeholder for every planned step BEFORE it
 runs any of them, so a killed stage is legible step by step rather than as an
