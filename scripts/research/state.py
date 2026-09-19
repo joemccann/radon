@@ -214,6 +214,12 @@ class State:
         with self.db:
             self.db.execute("UPDATE work SET status='pending',error=?,available_at=? WHERE key=? AND status='processing'", (safe_error,time.time()+max(0,delay),key))
 
+    def park(self, key, retry_at):
+        # A provider outage is not a document failure: give the attempt back and wait for the provider.
+        with self.db:
+            self.db.execute("""UPDATE work SET status='pending',attempts=MAX(0,attempts-1),error='provider_outage',available_at=?
+                WHERE key=? AND status='processing'""", (max(time.time(), retry_at), key))
+
     def recover(self):
         with self.db:
             self.db.execute("UPDATE ingestion SET status='pending' WHERE status='parsing'")
