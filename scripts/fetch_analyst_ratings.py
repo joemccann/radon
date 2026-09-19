@@ -2,9 +2,11 @@
 """
 Fetch analyst ratings and rating changes for tickers.
 
-Data Source Priority (IB → UW only — Yahoo/yfinance removed 2026-06-01):
+Data Source Priority (IB → Robinhood → UW — Yahoo/yfinance removed 2026-06-01):
   1. Interactive Brokers (reqFundamentalData 'RESC') - Most reliable, requires subscription
-  2. Unusual Whales (GET /api/screener/analysts) - Aggregated per-firm consensus, targets, history
+  2. Robinhood (read-only MCP get_equity_analyst_ratings) - consensus counts + targets,
+     no per-firm history. Skipped when the caller needs rating-change history.
+  3. Unusual Whales (GET /api/screener/analysts) - Aggregated per-firm consensus, targets, history
 
 When neither yields ratings, serve the last-known cached consensus, else a
 clean "unavailable" state — never the old developer-facing yfinance error.
@@ -286,6 +288,72 @@ def fetch_from_ib(client: IBClient, ticker: str) -> Optional[dict]:
 # Unusual Whales Data Source (Priority 2)
 # =============================================================================
 
+def _to_float(value) -> Optional[float]:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def fetch_from_rh(ticker: str) -> Optional[dict]:
+    """Consensus from Robinhood (read-only MCP). None on miss/unconfigured.
+
+    Carries no upgrade/downgrade history: callers that need it go to UW.
+    """
+    try:
+        from clients.robinhood_client import fetch_robinhood_analyst_ratings
+    except ImportError:
+        return None
+    raw = fetch_robinhood_analyst_ratings(ticker)
+    if not raw:
+        return None
+    try:
+        buy = int(raw.get("num_buy_ratings") or 0)
+        hold = int(raw.get("num_hold_ratings") or 0)
+        sell = int(raw.get("num_sell_ratings") or 0)
+    except (TypeError, ValueError):
+        return None
+    total = buy + hold + sell
+    if total <= 0:
+        return None
+    buy_pct = round(buy / total * 100, 1)
+    target = None
+    mean = _to_float(raw.get("mean_price_target"))
+    if mean is not None:
+        high = _to_float(raw.get("high_price_target"))
+        low = _to_float(raw.get("low_price_target"))
+        target = {
+            "mean": round(mean, 2),
+            "high": round(high, 2) if high is not None else None,
+            "low": round(low, 2) if low is not None else None,
+            "median": None,
+            "count": total,
+        }
+    return {
+        "ticker": ticker.upper(),
+        "fetched_at": datetime.now().isoformat(),
+        "source": "rh",
+        "ratings": {
+            "strong_buy": 0,
+            "buy": buy,
+            "hold": hold,
+            "sell": sell,
+            "strong_sell": 0,
+            "total": total,
+            "buy_pct": buy_pct,
+            "sell_pct": round(sell / total * 100, 1),
+        },
+        "recommendation": "buy" if buy_pct >= 70 else "hold",
+        "target_price": target,
+        "analyst_count": total,
+        "recent_changes": [],
+        "upgrade_downgrade_history": [],
+        "error": None,
+        "from_cache": False,
+    }
+
+
 def fetch_from_uw(ticker: str) -> Optional[dict]:
     """
     Fetch analyst ratings from Unusual Whales screener endpoint.
@@ -432,11 +500,18 @@ def fetch_from_uw(ticker: str) -> Optional[dict]:
 # Main Fetch Function with Priority
 # =============================================================================
 
-def fetch_analyst_ratings(ticker: str, use_cache: bool = True, force_source: str = None, client=None) -> dict:
+def fetch_analyst_ratings(
+    ticker: str,
+    use_cache: bool = True,
+    force_source: str = None,
+    client=None,
+    need_history: bool = False,
+) -> dict:
     """
-    Fetch analyst ratings with data source priority (IB → UW only — no Yahoo):
+    Fetch analyst ratings with data source priority (IB → Robinhood → UW, no Yahoo):
     1. Interactive Brokers (if connected, requires Reuters subscription)
-    2. Unusual Whales (/api/screener/analysts)
+    2. Robinhood consensus — skipped when ``need_history`` (no rating changes)
+    3. Unusual Whales (/api/screener/analysts)
 
     When neither source yields ratings (IB unsubscribed AND UW rate-limited /
     down), fall back to the last-known cached consensus if present, else return
@@ -452,22 +527,39 @@ def fetch_analyst_ratings(ticker: str, use_cache: bool = True, force_source: str
 
     last_error = None
 
-    # Priority 1: IB (unless forced to UW)
-    if force_source != "uw" and client is not None:
+    # Priority 1: IB (unless forced elsewhere)
+    if force_source not in ("uw", "rh") and client is not None:
         result = fetch_from_ib(client, ticker)
         if result and not result.get("error"):
             return result
         if result and result.get("error"):
             last_error = result.get("error")
 
-    # Priority 2: Unusual Whales
+    # Priority 2: Robinhood consensus (spares a UW call)
+    if force_source != "uw" and not need_history:
+        result = fetch_from_rh(ticker)
+        if result:
+            return result
+        if force_source == "rh":
+            return {
+                "ticker": ticker,
+                "fetched_at": datetime.now().isoformat(),
+                "source": "none",
+                "ratings": None,
+                "recommendation": None,
+                "target_price": None,
+                "recent_changes": [],
+                "error": "Analyst ratings unavailable from Robinhood right now.",
+            }
+
+    # Priority 3: Unusual Whales
     result = fetch_from_uw(ticker)
     if result and not result.get("error") and result.get("ratings"):
         return result
     if result and result.get("error"):
         last_error = result.get("error")
 
-    # No Yahoo/yfinance fallback (per data-source policy: IB → UW only). Serve the
+    # No Yahoo/yfinance fallback (per data-source policy: IB → RH → UW only). Serve the
     # last-known cached consensus if we have one, else a clean unavailable state.
     if use_cache:
         stale = get_cached_rating(ticker, allow_stale=True)
@@ -669,7 +761,7 @@ def format_ratings_table(results: list, changes_only: bool = False) -> str:
                     lines.append(f"  {h['date']} {h['firm'][:20]:<20} {arrow} {h.get('from_grade', 'N/A')} → {h.get('to_grade', 'N/A')}")
     
     lines.append("\n" + "="*95)
-    lines.append("Sources: IB = Interactive Brokers, uw = Unusual Whales, © = cached")
+    lines.append("Sources: IB = Interactive Brokers, rh = Robinhood, uw = Unusual Whales, © = cached")
     
     return "\n".join(lines)
 
@@ -715,7 +807,7 @@ def main():
     parser.add_argument("--update-watchlist", action="store_true", help="Update Turso watchlist with ratings")
     parser.add_argument("--json", action="store_true", help="Output raw JSON")
     parser.add_argument("--no-cache", action="store_true", help="Bypass cache and fetch fresh data")
-    parser.add_argument("--source", choices=["ib", "uw"], help="Force specific data source (IB or UW)")
+    parser.add_argument("--source", choices=["ib", "rh", "uw"], help="Force specific data source (IB, RH or UW)")
     parser.add_argument("--port", type=int, default=IB_PORT, help=f"IB Gateway/TWS port (default: {IB_PORT})")
     
     args = parser.parse_args()
@@ -741,15 +833,15 @@ def main():
     ib_connected = False
     ib_port = args.port
 
-    if args.source != "uw":
+    if args.source not in ("uw", "rh"):
         print(f"Attempting IB connection on port {ib_port}...", file=sys.stderr, end=" ")
         client, ib_connected = connect_ib(port=ib_port)
         if ib_connected:
             print("Connected ✓", file=sys.stderr)
         else:
-            print("Not available, falling back to UW", file=sys.stderr)
+            print("Not available, falling back to Robinhood/UW", file=sys.stderr)
     else:
-        print("Using Unusual Whales (forced)", file=sys.stderr)
+        print(f"Using {args.source.upper()} (forced)", file=sys.stderr)
 
     # Fetch ratings
     results = []
@@ -765,6 +857,7 @@ def main():
             use_cache=not args.no_cache,
             force_source=args.source,
             client=client,
+            need_history=args.changes_only,
         )
         results.append(data)
         ratings_dict[ticker] = data
