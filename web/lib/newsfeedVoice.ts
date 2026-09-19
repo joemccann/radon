@@ -28,9 +28,18 @@ function numericClaims(text: string): string[] {
     ?.map(value => value.toLowerCase().replace(/\s/g, "")) ?? [];
 }
 
+function jsonPayload(raw: string): string {
+  const fenced = raw.trim().match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const body = (fenced ? fenced[1] : raw).trim();
+  const start = body.indexOf("{");
+  const end = body.lastIndexOf("}");
+  if (start < 0 || end <= start) throw new Error("Invalid voice output");
+  return body.slice(start, end + 1);
+}
+
 export function parseVoiceCopy(raw: string, source: NewsfeedVoiceInput): NewsfeedVoiceCopy {
   if (raw.length > 20_000) throw new Error("Invalid voice output");
-  const clean = voiceInput(JSON.parse(raw));
+  const clean = voiceInput(JSON.parse(jsonPayload(raw)));
   if (!clean) throw new Error("Invalid voice output");
   const sourceNumbers = new Set(numericClaims(`${source.title}\n${source.content}`));
   if (numericClaims(`${clean.title}\n${clean.content}`).some(value => !sourceNumbers.has(value))) {

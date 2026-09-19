@@ -1,4 +1,13 @@
 # Lessons
+## 2026-09-19 — Next.js is an LLM consumer
+
+- `/api/newsfeed/share` and `/api/assistant` run inside `radon-nextjs`.
+  Binding subscription grant dirs only into Python ladder units
+  (`2aba1229`) 502'd every share rewrite: `Missing Anthropic subscription`.
+- Treat Next.js as an LLM consumer in `radon-app-runtime` binds. Keep
+  the relay unbound. Pin
+  `test_run_nextjs_binds_subscription_credential_dirs_readonly`.
+
 ## 2026-09-18 — Chain strike identity must never ellipsis
 
 - Four-digit strikes (`$1,737.00`) rendered as `$1,70...` on the

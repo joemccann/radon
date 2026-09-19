@@ -5,7 +5,8 @@
  * subscriptions (Claude Max, SuperGrok, ChatGPT via Codex), never a prepaid
  * console key for Anthropic, xAI, OpenAI or Google. The grants live in the
  * CLI credential files that `radon-subscription-tokens` keeps live on the host
- * and `radon-app-runtime` binds read-only into every app container:
+ * and `radon-app-runtime` binds read-only into LLM-consumer containers
+ * (api, newsfeed, research, nextjs; never the relay):
  *
  *   anthropic  ~/.claude/.credentials.json   claudeAiOauth.accessToken
  *   xai        ~/.grok/auth.json             <issuer>::<client>.key
