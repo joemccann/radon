@@ -468,7 +468,7 @@ class TestRegistryIsHonest:
 
     def test_order_limit_bands_stay_within_a_small_multiple_of_the_default(self):
         for pref in app_preferences.registry():
-            if pref.group != "Order Limits":
+            if pref.group != "Order Limits" or pref.value_type == "bool":
                 continue
             assert pref.hard_max <= pref.default * 6, (
                 f"{pref.key} band lets one click widen the cap "
@@ -488,11 +488,13 @@ class TestRegistryIsHonest:
         scripts_dir = Path(__file__).parent.parent
         server_src = (scripts_dir / "api" / "server.py").read_text()
         order_limits_src = (scripts_dir / "order_limits.py").read_text()
+        bankroll_guard_src = (scripts_dir / "bankroll_guard.py").read_text()
         for pref in app_preferences.registry():
             through_registry = (
                 f'get_int("{pref.key}")' in server_src
                 or f'get_float("{pref.key}")' in server_src
                 or f'"{pref.key}"' in order_limits_src
+                or f'"{pref.key}"' in bankroll_guard_src
             )
             assert through_registry, f"{pref.key} has no reader that resolves through app_preferences"
             assert f'_bounded_env_int("{pref.key}"' not in server_src, (
