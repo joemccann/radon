@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -49,6 +52,9 @@ const ENV_KEYS = [
   "OPENAI_MODEL",
   "XAI_API_KEY",
   "GROK_API_KEY",
+  "XAI_OAUTH_TOKEN",
+  "GROK_OAUTH_TOKEN",
+  "GROK_AUTH_FILE",
   "XAI_BASE_URL",
   "GROK_BASE_URL",
   "XAI_MODEL",
@@ -67,6 +73,9 @@ describe("llm provider", () => {
   beforeEach(() => {
     for (const key of ENV_KEYS) saved[key] = process.env[key];
     for (const key of ENV_KEYS) delete process.env[key];
+    // A developer laptop carries a real ~/.grok/auth.json; keep the operator's
+    // subscription grant out of every case that does not opt in.
+    process.env.GROK_AUTH_FILE = path.join(os.tmpdir(), "radon-no-grok-auth.json");
     // The package test runner forces ASSISTANT_MOCK=1 + NODE_ENV=test; opt OUT
     // of mock mode for the fetch-path tests. The mock test re-enables it.
     process.env.ASSISTANT_MOCK = "0";
@@ -390,6 +399,69 @@ describe("llm provider", () => {
     captureFetch(() => jsonResponse({ error: "boom" }, 500));
 
     await expect(chat(SAMPLE_REQUEST)).rejects.toThrow();
+  });
+
+  it("prefers the Grok subscription token in ~/.grok/auth.json over the prepaid xAI key", async () => {
+    // Operator mandate 2026-09-18: prepaid xAI credits must never be the
+    // meter for Grok; the SuperGrok subscription (the OIDC grant the grok CLI
+    // writes and radon-subscription-tokens keeps live) is. api.x.ai accepts
+    // that grant as a Bearer on /v1/chat/completions (verified live: 200).
+    const authFile = path.join(os.tmpdir(), `grok-auth-${process.pid}-${Date.now()}.json`);
+    fs.writeFileSync(authFile, JSON.stringify({
+      "https://auth.x.ai::client": {
+        key: "grok-subscription-token",
+        auth_mode: "oidc",
+        refresh_token: "r",
+        expires_at: new Date(Date.now() + 3_600_000).toISOString(),
+        oidc_issuer: "https://auth.x.ai",
+      },
+    }));
+    process.env.GROK_AUTH_FILE = authFile;
+    process.env.XAI_API_KEY = "prepaid-should-not-be-used";
+    const { calls } = captureFetch(() =>
+      jsonResponse({ choices: [{ message: { role: "assistant", content: "ok" }, finish_reason: "stop" }] }),
+    );
+    try {
+      const result = await chat(SAMPLE_REQUEST);
+      expect(result.provider).toBe("xai");
+      expect(calls[0].url).toContain("api.x.ai");
+      expect(new Headers(calls[0].init.headers).get("authorization")).toBe("Bearer grok-subscription-token");
+    } finally {
+      fs.rmSync(authFile, { force: true });
+    }
+  });
+
+  it("auto-prefers xAI on the subscription token alone, with no prepaid key set", async () => {
+    process.env.XAI_OAUTH_TOKEN = "grok-subscription-token";
+    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+    const { calls } = captureFetch(() =>
+      jsonResponse({ choices: [{ message: { role: "assistant", content: "ok" }, finish_reason: "stop" }] }),
+    );
+    const result = await chat(SAMPLE_REQUEST);
+    expect(result.provider).toBe("xai");
+    expect(new Headers(calls[0].init.headers).get("authorization")).toBe("Bearer grok-subscription-token");
+  });
+
+  it("ignores an expired subscription entry and falls through to the prepaid key", async () => {
+    const authFile = path.join(os.tmpdir(), `grok-auth-expired-${process.pid}-${Date.now()}.json`);
+    fs.writeFileSync(authFile, JSON.stringify({
+      "https://auth.x.ai::client": {
+        key: "stale-subscription-token",
+        auth_mode: "oidc",
+        expires_at: new Date(Date.now() - 60_000).toISOString(),
+      },
+    }));
+    process.env.GROK_AUTH_FILE = authFile;
+    process.env.XAI_API_KEY = "prepaid-key";
+    const { calls } = captureFetch(() =>
+      jsonResponse({ choices: [{ message: { role: "assistant", content: "ok" }, finish_reason: "stop" }] }),
+    );
+    try {
+      await chat(SAMPLE_REQUEST);
+      expect(new Headers(calls[0].init.headers).get("authorization")).toBe("Bearer prepaid-key");
+    } finally {
+      fs.rmSync(authFile, { force: true });
+    }
   });
 
   it("throws when the primary errors and no fallback is configured", async () => {

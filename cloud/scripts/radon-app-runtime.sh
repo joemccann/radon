@@ -645,6 +645,22 @@ cmd_run() {
       -v "${MEDIA_DIR}:${MEDIA_DIR_IN_CONTAINER}" \
       -v "${LEASE_DIR}:/var/lib/radon/ib-lease"
   fi
+
+  # Subscription grants (2026-09-18). The model ladders meter against the
+  # operator's subscriptions, never prepaid keys, and read the CLI credential
+  # files under ~radon (kept live by radon-subscription-tokens on the HOST).
+  # No container could see them, so every container-side rung silently fell
+  # to prepaid credits; when the xAI team ran dry the newsfeed voice rewrite
+  # died. Bind each dir that exists, read-only, and pin HOME so Path.home()
+  # and os.homedir() resolve to the mount. Never the whole home directory.
+  local subscription_home="${RADON_SUBSCRIPTION_HOME:-/home/radon}"
+  local cred_dir
+  for cred_dir in .grok .codex .claude; do
+    if [[ -d "${subscription_home}/${cred_dir}" ]]; then
+      set -- "$@" -v "${subscription_home}/${cred_dir}:/home/radon/${cred_dir}:ro"
+    fi
+  done
+  set -- "$@" --env HOME=/home/radon
   if [[ "$unit" == "radon-research.service" || "$unit" == "radon-api.service" ]]; then
     local research_dir research_mode=ro
     research_dir="$(prepare_research_dir "$ids")" || exit $?
