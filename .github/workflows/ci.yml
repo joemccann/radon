@@ -1148,6 +1148,33 @@ jobs:
             RADON_CONTROL_PLANE_READY="${RADON_CONTROL_PLANE_READY:-/var/lib/radon/control-plane-ready}"
             git -C "$RADON" fetch --prune origin main
 
+            # A green run whose predecessor is still finishing its release must
+            # queue behind it, not fail on the production deploy lock
+            # (2026-09-19: run 35463319654 exited 75 at 19:15:19 while the
+            # previous deploy was in its last minute; a manual re-run shipped
+            # it). deploy.sh itself stays non-blocking; this observer waits a
+            # bounded time for the lock to free, then lets deploy.sh decide.
+            DEPLOY_LOCK_FILE="${RADON_DEPLOY_LOCK_FILE:-${HOME}/.radon-deploy.lock}"
+            DEPLOY_LOCK_WAIT_SECS="${RADON_DEPLOY_LOCK_WAIT_SECS:-480}"
+            wait_for_deploy_lock() {
+              local waited=0
+              while ! flock -n "$DEPLOY_LOCK_FILE" true 2>/dev/null; do
+                if (( waited >= DEPLOY_LOCK_WAIT_SECS )); then
+                  echo "production deploy lock still held after ${waited}s; handing over to deploy.sh" >&2
+                  return 0
+                fi
+                if (( waited == 0 )); then
+                  echo "waiting for the previous release to free the production deploy lock"
+                fi
+                sleep 10
+                waited=$((waited + 10))
+              done
+              if (( waited > 0 )); then
+                echo "production deploy lock freed after ${waited}s"
+              fi
+            }
+            wait_for_deploy_lock
+
             verify_health_status_schema() {
               local attempt body
               for attempt in $(seq 1 15); do
