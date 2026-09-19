@@ -56,6 +56,21 @@ describe("ResearchHeldReview", () => {
     expect(within(bare).queryByRole("link", { name: "Open PDF" })).toBeNull();
   });
 
+  it("renders the excerpt and the draft body as markdown, not raw source", async () => {
+    const markdown = [...items];
+    markdown[0] = { ...items[0], context: { ...items[0].context, excerpt: "### Recommendation Change\n\n|Ticker|Price|\n|---|---|\n|AZN|11,708.00|" },
+      drafts: [{ ...items[0].drafts[0], content: "**Tozo** doubled" }] };
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({ items: markdown, pending: 34 }), { status: 200 }));
+    render(<ResearchHeldReview />);
+    const card = (await screen.findByText("jpm_flows___liquidity.pdf")).closest("li") as HTMLElement;
+    expect(within(card).getByRole("heading", { name: "Recommendation Change" })).toBeTruthy();
+    expect(within(card).getByRole("cell", { name: "11,708.00" })).toBeTruthy();
+    expect(card.textContent).not.toContain("###");
+    expect(card.textContent).not.toContain("|---|");
+    fireEvent.click(within(card).getByText("Tech issuance adds 10-20bp"));
+    expect(within(card).getByText("Tozo").tagName).toBe("STRONG");
+  });
+
   it("a should-have-published vote posts the work key and removes the card", async () => {
     render(<ResearchHeldReview />);
     const card = (await screen.findByText("jpm_flows___liquidity.pdf")).closest("li") as HTMLElement;
