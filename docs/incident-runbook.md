@@ -174,6 +174,46 @@ Incident: 2026-07-08, P1.
 
 ---
 
+## tv-alerts-start-limit-healthy-drain
+
+**`radon-tv-alerts.service` oneshot pages P1 `Result=start-limit-hit`
+(`NRestarts=0`) while every drain that ran exited 0.** Peak: 2026-09-19
+20:05Z, page `8750de94…`. Recurs every ~30 min until Burst is raised.
+
+- **Mechanism:** `radon-tv-alerts.timer` fires every 5 minutes
+  (`OnCalendar=*:02/5:23`). The service copied the DUR-02 brake as
+  `StartLimitBurst=5` / `StartLimitIntervalSec=1800` under the comment
+  that 5 starts in 1800s meant half an hour of failures. systemd
+  StartLimit counts successful Type=oneshot starts. Six healthy fires
+  fit in 1800s, so the 6th is refused (`elapsed > interval` is false at
+  exactly 1800s, so two slots miss). The unit parks `failed` /
+  `start-limit-hit` and does not auto-recover until the window elapses.
+  The drain script is unused in the failure (`processed: 0` on the five
+  successes). IB unused. Edge and `:8321/health/lite` stay up.
+- **Detection:** journal five `[tv-alerts-drain] {"processed": 0, …}`
+  lines then a 10-minute gap; `systemctl show` during the gap →
+  `Result=start-limit-hit` / `NRestarts=0`; next fire 10 min later
+  succeeds and the pattern repeats. Watchdog unit bucket pages P1
+  because start-limit-hit never auto-recovers inside the window.
+- **Discriminating check:** StartLimitBurst <= timer fires in
+  StartLimitIntervalSec (here 5 <= 6). Script exit 0 on every run that
+  was allowed. `Result=signal` is deploy stop-clean. `Result=exit-code`
+  is a real drain failure (Pushover/Turso), a different class. If
+  `/health/lite` is down too → API, stand down.
+- **Remediation (code):** `StartLimitBurst=10` (ib-watchdog /
+  host-metrics / skew). Do not `reset-failed` as the fix; the next
+  timer already unparks when the window elapses, and the 30-min page
+  loop returns until the unit file is installed. After deploy,
+  `install-units` / `sync-scheduled-units` publishes the body.
+- **Regression:**
+  `test_systemd_services.py::TestRepeatingTimerStartLimitHeadroom`
+  (`test_every_repeating_timer_has_start_limit_headroom`,
+  `test_tv_alerts_five_minute_cadence_has_headroom`).
+- **Code:** `cloud/services/radon-tv-alerts.service`
+  (`StartLimitBurst=10`).
+
+---
+
 ## deploy-stop-clean-oneshot-signal
 
 **`Type=oneshot` scan units page P1 `Result=signal` when deploy
