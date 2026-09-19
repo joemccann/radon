@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export type ToastType = "error" | "warning" | "success";
 
@@ -22,6 +22,7 @@ export function useToast() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [exitingIds, setExitingIds] = useState<Set<string>>(new Set());
   const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const exitTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
   // Live toast id per coalescing key. An entry is dropped the moment its toast
   // starts leaving, so the next upsert opens a fresh toast instead of writing
   // into one the operator already dismissed.
@@ -46,7 +47,8 @@ export function useToast() {
   const dismissToast = useCallback((id: string) => {
     forgetKey(id);
     setExitingIds((prev) => new Set(prev).add(id));
-    setTimeout(() => {
+    const exitTimer = setTimeout(() => {
+      exitTimersRef.current.delete(exitTimer);
       setToasts((prev) => prev.filter((t) => t.id !== id));
       setExitingIds((prev) => {
         const n = new Set(prev);
@@ -54,7 +56,21 @@ export function useToast() {
         return n;
       });
     }, EXIT_MS);
+    exitTimersRef.current.add(exitTimer);
   }, [forgetKey]);
+
+  // No timer may outlive the hook: one that fires after unmount sets state on
+  // a dead component, and after a test environment is torn down that throws.
+  useEffect(() => {
+    const timers = timersRef.current;
+    const exitTimers = exitTimersRef.current;
+    return () => {
+      for (const timer of timers.values()) clearTimeout(timer);
+      timers.clear();
+      for (const timer of exitTimers) clearTimeout(timer);
+      exitTimers.clear();
+    };
+  }, []);
 
   const scheduleDismiss = useCallback(
     (id: string, duration: number) => {
