@@ -48,11 +48,13 @@ LOOPS = {
     "ci-performance": ("ci_performance_nightly.sh", "ci-performance", "ci-performance"),
     "documentation": ("documentation_nightly.sh", "documentation-nightly", "documentation-nightly"),
     "security": ("security_nightly.sh", "security-nightly", "security-nightly"),
+    "security-deepsec": ("security_deepsec_nightly.sh", "security-deepsec", "security-deepsec"),
 }
 LOOP_IDS = sorted(LOOPS)
 MARKERS = (
     ".radon-weekend-runner",
     ".radon-security-runner",
+    ".radon-security-deepsec-runner",
     ".radon-reliability-runner",
     ".radon-testing-runner",
     ".radon-ci-performance-runner",
@@ -84,8 +86,8 @@ def _executable(path: Path, content: str) -> None:
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
-def _security_marker() -> str:
-    src = _wrapper("security").read_text(encoding="utf-8")
+def _security_marker(loop: str = "security") -> str:
+    src = _wrapper(loop).read_text(encoding="utf-8")
     return re.search(r'PHASE_COMPLETE_MARKER="([^"]+)"', src).group(1)
 
 
@@ -137,8 +139,8 @@ def _build(
     _executable(bin_dir / "python3", "#!/bin/bash\nexit 0\n")
 
     complete = (
-        f"echo '{_security_marker()} '\"$PHASE\"' run_id=stub'\n"
-        if loop == "security" and emit_marker
+        f"echo '{_security_marker(loop)} '\"$PHASE\"' run_id=stub'\n"
+        if loop in ("security", "security-deepsec") and emit_marker
         else ""
     )
     _executable(
@@ -354,7 +356,7 @@ class TestTheDeliverNotifyLine:
         assert len(comments) == 1, comments
         assert comments[0].startswith("**deliver**"), comments
         assert "**2 PR(s) green, ready to merge: " in comments[0], comments
-        if loop != "security":
+        if loop not in ("security", "security-deepsec"):
             assert f"{URL1} {URL2}**" in comments[0], comments
         # The Pushover carries the URLs for every loop; the security loop
         # redacts URLs only on the public issue.
@@ -453,7 +455,7 @@ class TestTheDeliverNotifyLine:
         result = _run(cfg, "deliver")
         assert result.returncode == 75, _why(result, cfg)
         comment = _comments(cfg)[0]
-        if loop == "security":
+        if loop in ("security", "security-deepsec"):
             # A security stamp with no prior verdict is not a completed
             # deliver (2026-09-13 ordering). Other loops score the missing
             # verdict line itself.

@@ -25,6 +25,7 @@ WRAPPERS = (
     SCRIPTS / "ci_performance_nightly.sh",
     SCRIPTS / "documentation_nightly.sh",
     SCRIPTS / "security_nightly.sh",
+    SCRIPTS / "security_deepsec_nightly.sh",
 )
 
 
