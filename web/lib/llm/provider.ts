@@ -182,7 +182,20 @@ function resolveFallbackProvider(
   primary: Exclude<LlmProviderName, "grok">,
 ): Exclude<LlmProviderName, "grok"> | undefined {
   const configured = envValue("LLM_FALLBACK_PROVIDER") as LlmProviderName | undefined;
-  if (!isKnownProvider(configured)) return undefined;
+  if (!isKnownProvider(configured)) {
+    // xAI is only AUTO-preferred (resolution step 4). When nobody pinned a
+    // provider and nobody configured a fallback, losing xAI (2026-09-18: the
+    // team ran out of credits, 403 on every call) must degrade to the
+    // historical Anthropic default rather than fail every rewrite.
+    if (
+      primary === "xai" &&
+      !envValue("LLM_PROVIDER") &&
+      resolveAnthropicApiKey()
+    ) {
+      return "anthropic";
+    }
+    return undefined;
+  }
   const normalized = normalizeProvider(configured);
   if (normalized === primary) return undefined;
   return normalized;
@@ -617,6 +630,11 @@ export async function chat(request: LlmChatRequest): Promise<LlmChatResponse> {
   } catch (primaryError) {
     const fallback = resolveFallbackProvider(provider);
     if (!fallback) throw primaryError;
+    console.warn(
+      `[llm] ${provider} failed, falling back to ${fallback}: ${
+        primaryError instanceof Error ? primaryError.message.slice(0, 300) : String(primaryError)
+      }`,
+    );
 
     // The fallback provider gets its OWN default model. A per-turn selection
     // is scoped to the provider that owns it, so handing "grok-4.6" to
