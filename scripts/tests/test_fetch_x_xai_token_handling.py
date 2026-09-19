@@ -25,5 +25,5 @@ class TestTokenNeverInArgv:
             fetch_x_xai.xai_search("someaccount", days=1)
 
         assert all("sk-test-sekrit" not in arg for arg in captured["cmd"])
-        assert "@-" in captured["cmd"]
-        assert captured["input"] == "Authorization: Bearer sk-test-sekrit"
+        assert "--config" in captured["cmd"]
+        assert "sk-test-sekrit" in captured["input"]
