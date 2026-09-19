@@ -736,9 +736,11 @@ class TestNightlyLoopIndex:
             )
 
     def test_deepsec_failure_has_a_safe_operator_path(self):
-        """DOC-109: a failed sibling worker is never an in-run repair."""
+        """DOC-109: a failed DeepSec loop is never an in-run repair (it is the
+        sixth loop since 2026-09-18, still operator-bootstrapped)."""
         text = _operations_text()
         assert "A `failed` DeepSec status is operator-only" in text
+        assert "DeepSec itself stays operator-bootstrapped (rail 8)" in text
         assert "`launchctl list | grep radon`" in text
         assert "Do not bootstrap or restart DeepSec from a nightly run." in text
 

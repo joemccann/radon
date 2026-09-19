@@ -321,6 +321,7 @@ LOOPS = {
     "ci-performance": "ci_performance_nightly.sh",
     "documentation": "documentation_nightly.sh",
     "security": "security_nightly.sh",
+    "security-deepsec": "security_deepsec_nightly.sh",
 }
 LOOP_IDS = sorted(LOOPS)
 
@@ -339,7 +340,7 @@ def _stage(tmp_path: Path, loop: str, *, agent_rc: int = 0,
     shutil.copy2(REPO / "scripts" / script, wrapper)
     wrapper.chmod(wrapper.stat().st_mode | stat.S_IXUSR)
     (clone / ".radon-weekend-runner").touch()
-    for marker in (".radon-security-runner", ".radon-reliability-runner",
+    for marker in (".radon-security-runner", ".radon-security-deepsec-runner", ".radon-reliability-runner",
                    ".radon-testing-runner", ".radon-ci-performance-runner",
                    ".radon-documentation-runner"):
         (clone / marker).touch()
@@ -384,7 +385,7 @@ def _stage(tmp_path: Path, loop: str, *, agent_rc: int = 0,
     _executable(curl_stub, "#!/bin/bash\nexit 0\n")
 
     complete_line = ""
-    if loop == "security":
+    if loop in ("security", "security-deepsec"):
         src = (REPO / "scripts" / script).read_text(encoding="utf-8")
         marker = re.search(r'PHASE_COMPLETE_MARKER="([^"]+)"', src).group(1)
         complete_line = f"echo '{marker} stub run_id=stub'\n"

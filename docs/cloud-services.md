@@ -343,7 +343,7 @@ journald on the VPS is on-box only (capped at 1G). A laptop launchd job (`~/Libr
 off. A `code_fix` + AUTOPUSH ships a `fix/**` branch and
 `scripts/ir_ensure_pr.py` opens a PR against `main` (never merges).
 Spec: [`grok-page-responder.md`](grok-page-responder.md).
-Do not install this on any clone under `~/radon-weekend/` (the five nightly loops hard-reset them every phase; table in [`operations.md`](operations.md#background-services)).
+Do not install this on any clone under `~/radon-weekend/` (the six nightly loops hard-reset them every phase; table in [`operations.md`](operations.md#background-services)).
 
 ### Error tracking — Sentry (not wired; recommended next step)
 
@@ -796,9 +796,11 @@ collected by `radon-ai-cycle.timer`.
 
 Daily `03:10 UTC` (`RandomizedDelaySec=300`), oneshot
 `scripts/refresh_model_catalog.py`, `TimeoutStartSec=300`. Picks ONE frontier
-chat model per LLM provider whose API key is present in the unit env
-(`ANTHROPIC_API_KEY` today; `XAI_API_KEY` / `GROK_API_KEY` and `OPENAI_API_KEY`
-light up automatically when added to `/etc/radon/env`) by listing that
+chat model per LLM provider whose subscription grant is present on the host
+(the Claude Max grant in `~/.claude/.credentials.json` and the SuperGrok grant
+in `~/.grok/auth.json`, both kept live by `radon-subscription-tokens`; OpenAI
+only under `RADON_LADDER_ALLOW_PREPAID=1` with `OPENAI_API_KEY`, because the
+ChatGPT grant cannot list models) by listing that
 provider's own models endpoint and applying a deterministic filter, sort, head:
 dated snapshots lose to the undated alias they pin, cheap and preview tiers and
 non-chat modalities are dropped, and versions are compared as floats so

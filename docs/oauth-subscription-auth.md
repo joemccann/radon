@@ -505,11 +505,11 @@ func resolveAPIKey(provider: String) async throws -> String {
 
 Native Mac OAuth above is the product pattern. On Radon hosts, the shared HTTP ladder in `scripts/clients/model_ladder.py` uses the same subscription meters for research review, CTA vision, knowledge distill, and the newsfeed tagger:
 
-- **Anthropic / Grok / Codex / Gemini:** subscription credentials only by default. Prepaid `ANTHROPIC_API_KEY` / `XAI_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` (and aliases) do **not** wire those rungs unless `RADON_LADDER_ALLOW_PREPAID=1`.
-- **Anthropic:** `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) or Linux `~/.claude/.credentials.json`.
-- **Codex:** `~/.codex/auth.json` ChatGPT OAuth access token.
-- **Grok:** `~/.grok/auth.json`.
-- **Gemini:** `GEMINI_OAUTH_TOKEN` / `GOOGLE_OAUTH_ACCESS_TOKEN`.
+- **Anthropic / Grok / Codex / Gemini:** subscription credentials only, never a prepaid fallback (operator mandate 2026-09-18). Prepaid `ANTHROPIC_API_KEY` / `XAI_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` (and aliases) do **not** wire those rungs unless `RADON_LADDER_ALLOW_PREPAID=1`. The same rule and the same file paths apply to the Next.js layer (`web/lib/llm/subscriptionAuth.ts`), the CTA share copy, the X search script, the catalog refresher and the newsfeed vision tagger.
+- **Anthropic:** `CLAUDE_CODE_OAUTH_TOKEN` or Linux `~/.claude/.credentials.json` (`claude auth login --claudeai`). Sent as `Authorization: Bearer` with `anthropic-beta: oauth-2025-04-20`, the `claude-cli` user agent and the Claude Code identity block leading `system`; the Messages API answers a bare 429 without that block and a 401 when the grant is sent as `x-api-key` (verified live 2026-09-18).
+- **Codex:** `~/.codex/auth.json` ChatGPT OAuth access token plus `tokens.account_id`, posted to `chatgpt.com/backend-api/codex/responses` (streaming only, `chatgpt-account-id` header). `api.openai.com` meters the prepaid wallet and rejects the grant ("no credits remaining"); it is used only for a prepaid key under the flag.
+- **Grok:** `~/.grok/auth.json` (entries keyed `<issuer>::<client_id>`, token under `key`, RFC 3339 `expires_at`), accepted by `api.x.ai` as a Bearer.
+- **Gemini:** the Antigravity CLI. Google retired the Gemini CLI OAuth client for individuals on 2026-09-18 and the Antigravity grant lacks the `generativelanguage` scope (403), so the rung shells out to `agy -p ... --output-format json` (`~/.local/bin/agy`, override `ANTIGRAVITY_CLI`) when `~/.gemini/antigravity-cli/antigravity-oauth-token` exists. Text only; image inputs skip the rung. There is no Gemini API key or OAuth-token path at all, under any flag (operator, 2026-09-18: Antigravity only).
 - **NVIDIA:** `NVIDIA_API_KEY` is always OK; text default `nvidia/nemotron-3-super-120b-a12b`.
 - **Cerebras:** last rung; leave paused on Hetzner until Joe yes.
 
