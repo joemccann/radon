@@ -52,6 +52,9 @@ to `~/.radon/secrets.db`; the production container pins
 (`0600`, override `RADON_SECRET_STORE_PATH`). The store never leaves the host —
 deliberately NOT Turso, so plaintext and ciphertext stay on the machine that
 uses them (operator decision 2026-09-01, PR #125; no migration planned).
+`radon-app-runtime` creates the `data/secret_store/` directory without
+following symlinks (`0700`, owned by the app user) and exits 78 if the path
+is a symlink or unusable.
 Before Uvicorn starts, `scripts/secret_store.py` opens the configured store and
 authenticates every encrypted row; a missing, replaced, or malformed key fails
 the unit instead of starting credential-degraded. After that preflight, every
