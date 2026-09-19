@@ -79,6 +79,7 @@ CREATE TABLE IF NOT EXISTS tv_alert_events (
     price REAL, interval TEXT, alert_name TEXT,
     bar_time TEXT, sent_at TEXT,
     parse_error TEXT,
+    duplicate_of INTEGER,
     processed_at TEXT,
     digest_sent_at TEXT
 );
@@ -90,7 +91,8 @@ CREATE INDEX IF NOT EXISTS idx_tv_alert_events_received_desc ON tv_alert_events 
 - **Dedupe is deliberately weak**: only an exact repeat of
   `(alert_name, symbol, interval, bar_time, price)` inside 5s is marked duplicate. A
   genuine second fire in the same bar is indistinguishable from a network echo, and
-  dropping it silently is worse than keeping it.
+  dropping it silently is worse than keeping it. The drain records a repeat in
+  `duplicate_of` (the first fire's id) and leaves it out of the digest.
 - **Retention**: the drain job prunes rows older than 180 days. Do not copy
   `demo_webhook_events`, which has no prune and grows unbounded.
 - Writes go through the `dbExecute` chokepoint
@@ -171,6 +173,44 @@ value containing `$`.
 - Contract test: the route imports nothing from `web/lib/order/**`. **No order
   placement and no broker routing, ever** — enforced in code, not prose.
 - One live smoke alert fired from a chart, end to end, evidence in the PR.
+
+### Operator runbook
+
+**Create an alert** (TradingView web or desktop):
+
+1. Get the URL: `grep TV_WEBHOOK_PATH_TOKEN web/.env` gives
+   `https://app.radon.run/api/webhooks/tradingview/<token>`. Never paste it into an
+   issue, PR or chat.
+2. Open a chart and press `Alt+A` (or the alarm-clock icon).
+3. **Settings**: pick the condition. Choose the trigger frequency deliberately:
+   `Once per bar close` for indicator alerts, `Only once` for a smoke test.
+4. **Message**: paste the template above and replace `…` with the `TV_WEBHOOK_SECRET`
+   value. Keep every placeholder quoted.
+5. **Notifications**: tick **Webhook URL** and paste the URL. Webhooks require 2FA on
+   the TradingView account.
+6. Click **Create**.
+
+**Verify a fire**:
+
+- Row: `SELECT id, received_at, source_ip, symbol, ticker, price, parse_error,
+  duplicate_of, processed_at, digest_sent_at FROM tv_alert_events ORDER BY id DESC LIMIT 5`.
+- Digest: one Pushover titled `TradingView alerts` within 5 minutes of the fire.
+- Drain health: `service_health` row `tv-alerts-drain` (20-minute window), or
+  `journalctl -u radon-tv-alerts.service -n 20` on the VPS.
+
+**Troubleshooting**:
+
+| Symptom | Cause |
+|---|---|
+| TradingView alert log shows a failed webhook, no row | Caddy 403 (sender IP not in the allowlist: TradingView changed IPs) or 401 (wrong path token or body secret) |
+| Row with `parse_error` and NULL symbol | message is not valid JSON, usually an unquoted placeholder |
+| Row with NULL `ticker` | symbol not resolvable (crypto, FX, unknown exchange); counted as unresolved in the digest |
+| Rows with NULL `digest_sent_at` | Pushover credentials missing or the push failed; `tv-alerts-drain` reads `error` |
+| No row, no TradingView error | the alert did not fire; TradingView never retries, so the fire is gone |
+
+**Rotate a secret**: set the env var to `old,new` in `/etc/radon/env` and `web/.env`,
+restart `radon-nextjs.service`, re-point every alert (message secret or URL), then set
+it to `new` alone and restart again. Both values pass during the overlap.
 
 ---
 

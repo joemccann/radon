@@ -87,6 +87,8 @@ radon-subscription-tokens.service
 radon-subscription-tokens.timer
 radon-trin.service
 radon-trin.timer
+radon-tv-alerts.service
+radon-tv-alerts.timer
 radon-vcg-refresh.service
 radon-vcg-refresh.timer
 radon-vixcor.service
