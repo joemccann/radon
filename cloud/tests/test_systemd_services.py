@@ -1492,6 +1492,96 @@ class TestPerMinuteStartLimits:
         assert int(svc["startlimitburst"]) >= 10
 
 
+class TestRepeatingTimerStartLimitHeadroom:
+    """systemd StartLimit counts successful oneshot starts, not just failures.
+
+    2026-09-19 page 8750de94: radon-tv-alerts.timer fires every 5 minutes
+    (OnCalendar=*:02/5:23) while the service had StartLimitBurst=5 per
+    1800s. Six healthy starts fit in 1800s, so the 6th was refused, the
+    unit parked Result=start-limit-hit, and the watchdog paged P1. Journal
+    showed five `processed: 0` successes then two skipped slots, repeating.
+    TestPerMinuteStartLimits only watches a wildcard MINUTE field, so the
+    `/5` calendar slipped through.
+    """
+
+    @staticmethod
+    def _oncalendar_period_seconds(oncalendar: str) -> int | None:
+        tod = next((part for part in oncalendar.split() if ":" in part), None)
+        if tod is None:
+            return None
+        bits = tod.split(":")
+        if len(bits) < 2:
+            return None
+        hour, minute = bits[0], bits[1]
+        if minute == "*":
+            return 60
+        if "/" in minute:
+            try:
+                return int(minute.split("/", 1)[1]) * 60
+            except ValueError:
+                return None
+        if "," in minute:
+            vals = [int(tok) for tok in minute.split(",") if tok.isdigit()]
+            diffs = [b - a for a, b in zip(vals, vals[1:])]
+            if diffs and min(diffs) > 0:
+                return min(diffs) * 60
+            return None
+        if hour in {"*", ""} or ".." in hour:
+            return 3600
+        return None
+
+    def test_every_repeating_timer_has_start_limit_headroom(
+        self, services_dir, all_units
+    ):
+        offenders = []
+        for path in sorted(services_dir.iterdir()):
+            name = path.name
+            if not name.endswith(".timer"):
+                continue
+            schedules = [
+                line.split("=", 1)[1].strip()
+                for line in path.read_text().splitlines()
+                if line.strip().startswith("OnCalendar=")
+            ]
+            periods = [
+                period
+                for schedule in schedules
+                if (period := self._oncalendar_period_seconds(schedule))
+            ]
+            if not periods:
+                continue
+
+            service = all_units.get(name[: -len(".timer")] + ".service")
+            if service is None:
+                continue
+
+            burst = int(service.get("Unit", {}).get("startlimitburst", "5"))
+            interval = int(service.get("Unit", {}).get("startlimitintervalsec", "0"))
+            if interval == 0:
+                continue
+
+            period = min(periods)
+            attempts = interval // period
+            if burst <= attempts:
+                offenders.append(
+                    f"{name}: burst={burst} but the timer attempts ~{attempts} "
+                    f"starts per {interval}s window (period={period}s)"
+                )
+
+        assert offenders == [], "; ".join(offenders)
+
+    def test_tv_alerts_five_minute_cadence_has_headroom(self, unit):
+        """Pin the 2026-09-19 topology: 6 starts / 1800s must not equal Burst=5."""
+        svc = unit("radon-tv-alerts.service")["Unit"]
+        burst = int(svc["startlimitburst"])
+        interval = int(svc["startlimitintervalsec"])
+        attempts = interval // 300
+        assert burst > attempts, (
+            f"radon-tv-alerts.service burst={burst} parks a healthy 5-minute "
+            f"drain after {attempts} starts in {interval}s"
+        )
+
+
 class TestDemoMirrorSchemaGate:
     """2026-08-26 P1: mirror wrote equibles tables the demo DB did not have
     because nothing ran scripts/db/migrations against TURSO_DEMO_*. The unit
