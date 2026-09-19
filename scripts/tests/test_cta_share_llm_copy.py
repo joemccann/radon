@@ -230,3 +230,44 @@ class TestShareCopyWiring:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestAnthropicCallerIsSubscriptionOnly:
+    """Subscriptions only (2026-09-18): the CTA copy caller meters the Claude
+    Max grant through the shared ladder resolver, never the SDK + API key."""
+
+    def test_uses_the_grant_as_a_bearer_with_the_identity_block(self):
+        seen: dict = {}
+
+        class _Resp:
+            status_code = 200
+
+            def json(self):
+                return {"content": [{"type": "text", "text": "SPX copy"}]}
+
+        def post(url, *, headers, json, timeout):
+            seen.update({"url": url, "headers": headers, "json": json})
+            return _Resp()
+
+        text = cta_llm._anthropic_caller(
+            system="You write posts.",
+            user="draft",
+            model="claude-opus-5",
+            env={"CLAUDE_CODE_OAUTH_TOKEN": "sk-ant-oat-test"},
+            post=post,
+        )
+        assert text == "SPX copy"
+        assert seen["url"] == "https://api.anthropic.com/v1/messages"
+        assert seen["headers"]["authorization"] == "Bearer sk-ant-oat-test"
+        assert seen["headers"]["anthropic-beta"] == "oauth-2025-04-20"
+        assert "x-api-key" not in seen["headers"]
+        assert seen["json"]["system"][0]["text"].startswith("You are Claude Code")
+        assert seen["json"]["system"][1] == {"type": "text", "text": "You write posts."}
+
+    def test_a_prepaid_key_alone_is_refused(self):
+        with pytest.raises(RuntimeError, match="subscription"):
+            cta_llm._anthropic_caller(
+                system="s", user="u", model="m",
+                env={"ANTHROPIC_API_KEY": "sk-ant-prepaid"},
+                post=lambda *a, **k: pytest.fail("must not call the API"),
+            )
