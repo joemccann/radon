@@ -32,6 +32,7 @@ export async function POST(request: Request): Promise<Response> {
       system: NEWSFEED_VOICE_SYSTEM,
       messages: [{ role: "user", content: JSON.stringify(input) }],
       maxTokens: 1600,
+      reasoningEffort: "low",
       signal,
     });
     signal.throwIfAborted();

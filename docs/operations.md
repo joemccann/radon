@@ -129,11 +129,12 @@ arguments or environment values; the staged plaintext is removed by
 binds the operator's CLI subscription grants, each read-only and only when the
 directory exists on the host: `/home/radon/.grok`, `/home/radon/.codex` and
 `/home/radon/.claude` land at the same paths inside the containers whose unit
-actually runs a ladder rung (`radon-api`, `radon-newsfeed`, `radon-research`),
-with `HOME=/home/radon` pinned so `Path.home()` and `os.homedir()` resolve to
-them. Never the whole home directory, and never into the internet-facing
-Next.js container or the relay: the dirs carry account-wide refresh tokens
-(2026-09-19). The model ladders (Python
+runs an LLM consumer (`radon-api`, `radon-newsfeed`, `radon-research`,
+`radon-nextjs`), with `HOME=/home/radon` pinned so `Path.home()` and
+`os.homedir()` resolve to them. Next.js hosts `/api/newsfeed/share` and
+`/api/assistant`; excluding it (2026-09-19) 502'd every share rewrite with
+`Missing Anthropic subscription`. Never the whole home directory, and never
+into the relay. The model ladders (Python
 `scripts/clients/model_ladder.py`, Next.js `web/lib/llm/provider.ts`) meter
 against those subscriptions first and treat prepaid `XAI_API_KEY` and friends
 as the fallback; before this bind no container could see the files and every

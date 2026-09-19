@@ -652,14 +652,14 @@ cmd_run() {
   # No container could see them, so every container-side rung silently fell
   # to prepaid credits; when the xAI team ran dry the newsfeed voice rewrite
   # died. Bind each dir that exists, read-only, and pin HOME so Path.home()
-  # and os.homedir() resolve to the mount. Never the whole home directory,
-  # and only into units that actually run a ladder rung: the dirs hold
-  # account-wide refresh tokens, so the internet-facing Next.js container
-  # and the relay must never see them.
+  # and os.homedir() resolve to the mount. Never the whole home directory.
+  # Next.js hosts /api/newsfeed/share and /api/assistant, so it is an LLM
+  # consumer (2026-09-19: excluding it 502'd every share rewrite with
+  # "Missing Anthropic subscription"). Relay still gets no binds.
   local subscription_home="${RADON_SUBSCRIPTION_HOME:-/home/radon}"
   local cred_dir
   case "$unit" in
-    radon-api.service|radon-newsfeed.service|radon-research.service)
+    radon-api.service|radon-newsfeed.service|radon-research.service|radon-nextjs.service)
       for cred_dir in .grok .codex .claude; do
         if [[ -d "${subscription_home}/${cred_dir}" ]]; then
           set -- "$@" -v "${subscription_home}/${cred_dir}:/home/radon/${cred_dir}:ro"
