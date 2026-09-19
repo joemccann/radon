@@ -76,3 +76,11 @@ token fields remain subscription credentials.
 ### Verified host placement
 
 As of 2026-09-08 the worker runs as `radon-research.service` in the Python app container on 5.78.148.38. That host has `RADON_HOST_ROLE=app` and routes broker access to 10.0.0.4; its legacy Linux and Hetzner hostname remains `ib-gateway`. The service does not run in the broker Gateway container.
+
+Subscription Responses streams must carry a `response.completed` event whose
+response status is `completed` before the shared Python ladder or web adapter
+accepts text. EOF, failed/incomplete events and malformed terminal data discard
+partial output, including otherwise valid reviewer JSON. Failure messages omit
+provider payloads; configured provider fallback remains available. Python keeps
+its existing byte limit and response-close guarantee; the web adapter consumes
+the response body before validating completion.

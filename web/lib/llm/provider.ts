@@ -594,17 +594,31 @@ async function callChatGptSubscription(
   let usage: LlmUsage | undefined;
   for (const line of (await response.text()).split("\n")) {
     if (!line.startsWith("data:")) continue;
+    const data = line.slice(5).trim();
+    if (data === "[DONE]") continue;
     let event: { type?: string; delta?: string; response?: { status?: string; usage?: { input_tokens?: number; output_tokens?: number } } };
     try {
-      event = JSON.parse(line.slice(5).trim());
+      event = JSON.parse(data);
     } catch {
-      continue;
+      throw new Error("ChatGPT subscription stream is malformed.");
+    }
+    if (!event || typeof event !== "object" || Array.isArray(event)) {
+      throw new Error("ChatGPT subscription stream is malformed.");
+    }
+    if (["response.failed", "response.incomplete", "response.error", "error"].includes(event.type ?? "")) {
+      throw new Error("ChatGPT subscription stream did not complete successfully.");
     }
     if (event.type === "response.output_text.delta" && typeof event.delta === "string") text += event.delta;
     if (event.type === "response.completed") {
-      stopReason = event.response?.status;
+      if (event.response?.status !== "completed") {
+        throw new Error("ChatGPT subscription stream did not complete successfully.");
+      }
+      stopReason = "completed";
       usage = normalizeUsage(event.response?.usage?.input_tokens, event.response?.usage?.output_tokens);
     }
+  }
+  if (stopReason !== "completed") {
+    throw new Error("ChatGPT subscription stream ended without completion.");
   }
   return { provider: "openai", model, text, stopReason, usage };
 }
