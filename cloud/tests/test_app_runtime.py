@@ -1078,6 +1078,8 @@ def test_run_newsfeed_env_file_carries_only_its_allowlisted_keys(
         "TURSO_DB_URL=libsql://example.turso.io\n"
         "TURSO_AUTH_TOKEN='tok'\n"
         "ANTHROPIC_API_KEY=k1\n"
+        "CLAUDE_CODE_OAUTH_TOKEN=k-cc\n"
+        "RADON_LADDER_ALLOW_PREPAID=0\n"
         "XAI_API_KEY=k-xai\n"
         "OPENAI_API_KEY=k-oai\n"
         "GEMINI_API_KEY=k-gem\n"
@@ -1111,6 +1113,8 @@ def test_run_newsfeed_env_file_carries_only_its_allowlisted_keys(
         "TURSO_DB_URL",
         "TURSO_AUTH_TOKEN",
         "ANTHROPIC_API_KEY",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "RADON_LADDER_ALLOW_PREPAID",
         "XAI_API_KEY",
         "OPENAI_API_KEY",
         "GEMINI_API_KEY",
@@ -1228,3 +1232,76 @@ def test_nextjs_runtime_executes_the_baked_key_guard(tmp_path: Path) -> None:
     result = _run(tmp_path, ["run", "radon-nextjs.service"])
     assert result.returncode == 0, result.stderr
     assert _run_line(result).endswith(" /usr/local/bin/next-clerk-guard")
+
+
+# -- subscription credential binds (2026-09-18) ------------------------------
+#
+# The operator's subscription grants (~/.grok/auth.json, ~/.codex/auth.json,
+# ~/.claude/.credentials.json) are what the model ladders must meter against,
+# never the prepaid API keys. radon-subscription-tokens keeps those files live
+# on the HOST, but no app container could see them, so every container-side
+# ladder rung silently fell back to prepaid keys (the xAI team then ran out of
+# credits and the newsfeed voice rewrite died). Bind each dir read-only when it
+# exists and pin HOME so both Path.home() and os.homedir() land on it.
+
+
+def _subscription_home(tmp_path: Path) -> Path:
+    home = tmp_path / "radon-home"
+    (home / ".grok").mkdir(parents=True)
+    (home / ".grok" / "auth.json").write_text("{}", encoding="utf-8")
+    (home / ".codex").mkdir()
+    return home
+
+
+def test_run_api_binds_subscription_credential_dirs_readonly(tmp_path: Path) -> None:
+    home = _subscription_home(tmp_path)
+    result = _run(
+        tmp_path,
+        ["run", "radon-api.service"],
+        extra_env={"RADON_SUBSCRIPTION_HOME": str(home)},
+    )
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    assert f"{home}/.grok:/home/radon/.grok:ro" in log
+    assert f"{home}/.codex:/home/radon/.codex:ro" in log
+    assert ".claude:" not in log  # absent on this host: not mounted
+    assert "HOME=/home/radon" in log
+
+
+def test_run_nextjs_gets_no_subscription_credential_binds(tmp_path: Path) -> None:
+    # The internet-facing Next.js container has no ladder rung; the operator's
+    # account-wide refresh tokens must never be readable from it.
+    home = _subscription_home(tmp_path)
+    result = _run(
+        tmp_path,
+        ["run", "radon-nextjs.service"],
+        extra_env={"RADON_SUBSCRIPTION_HOME": str(home)},
+    )
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    assert ".grok" not in log and ".codex" not in log and ".claude" not in log
+
+
+def test_run_newsfeed_binds_subscription_credential_dirs_readonly(tmp_path: Path) -> None:
+    home = _subscription_home(tmp_path)
+    result = _run(
+        tmp_path,
+        ["run", "radon-newsfeed.service"],
+        extra_env={"RADON_SUBSCRIPTION_HOME": str(home)},
+    )
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    assert f"{home}/.grok:/home/radon/.grok:ro" in log
+
+
+def test_run_skips_subscription_binds_when_no_dir_exists(tmp_path: Path) -> None:
+    home = tmp_path / "empty-home"
+    home.mkdir()
+    result = _run(
+        tmp_path,
+        ["run", "radon-api.service"],
+        extra_env={"RADON_SUBSCRIPTION_HOME": str(home)},
+    )
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    assert ".grok" not in log and ".codex" not in log and ".claude" not in log

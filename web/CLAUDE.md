@@ -262,6 +262,10 @@ cushion = excess_liquidity / net_liquidation
 
 ---
 
+## LLM auth: subscriptions only (2026-09-18)
+
+`web/lib/llm/subscriptionAuth.ts` is the only credential source for `provider.ts`, `catalog.ts` and every direct Messages-API caller (seasonality vision). Anthropic uses the Claude Max grant (`~/.claude/.credentials.json` / `CLAUDE_CODE_OAUTH_TOKEN`, sent as `Authorization: Bearer` + `anthropic-beta: oauth-2025-04-20` with the Claude Code identity block leading `system`; a bare 429 means that block is missing), xAI the SuperGrok grant (`~/.grok/auth.json` / `XAI_OAUTH_TOKEN`), OpenAI the ChatGPT grant (`~/.codex/auth.json` / `CODEX_OAUTH_TOKEN`, text-only through `chatgpt.com/backend-api/codex/responses`, streaming). A prepaid `ANTHROPIC_API_KEY` / `XAI_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` is read ONLY under `RADON_LADDER_ALLOW_PREPAID=1` and never as a fallback; the correct failure is "Missing <provider> subscription". Tests pin `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and `GROK_AUTH_FILE` to nonexistent paths so a developer laptop's real grants never leak in. Containers see the grants through `radon-app-runtime`'s read-only binds.
+
 ## Auth (Next.js side)
 
 - **Middleware** at `web/middleware.ts` enforces Clerk JWT. Localhost auto-bypass when `NODE_ENV !== "production"`. `RADON_AUTHLESS_TEST=1` for Playwright — but never on a live-Clerk deployment: `assertAuthlessTestFlagAbsentInProduction` (R-666) throws at middleware module load when the flag is set alongside a `pk_live_` Clerk key, failing the deploy at boot.

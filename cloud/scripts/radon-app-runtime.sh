@@ -487,7 +487,7 @@ render_env_file() {
     # sandbox disabled; hand that unit only the keys its own code reads,
     # never the full production secret set.
     if [[ "$unit" == "radon-newsfeed.service" ]]; then
-      grep -E '^(#|$|(NODE_ENV|ANTHROPIC_API_KEY|CLAUDE_CODE_API_KEY|CLAUDE_API_KEY|XAI_API_KEY|GROK_API_KEY|OPENAI_API_KEY|GEMINI_API_KEY|NVIDIA_API_KEY|CEREBRAS_API_KEY|RADON_PYTHON_BIN|TURSO_DB_URL|TURSO_AUTH_TOKEN|PLAYWRIGHT_CHROMIUM_SANDBOX|RADON_DB_NO_REPLICA|RADON_DB_USE_REPLICA|RADON_MEDIA_LOCAL|RADON_MEDIA_REMOTE|RADON_NEWSFEED_[A-Z0-9_]+)=)' \
+      grep -E '^(#|$|(NODE_ENV|ANTHROPIC_API_KEY|CLAUDE_CODE_API_KEY|CLAUDE_API_KEY|CLAUDE_CODE_OAUTH_TOKEN|CLAUDE_CONFIG_DIR|CODEX_HOME|GROK_AUTH_FILE|GEMINI_OAUTH_TOKEN|ANTIGRAVITY_CLI|RADON_LADDER_[A-Z0-9_]+|XAI_API_KEY|GROK_API_KEY|OPENAI_API_KEY|GEMINI_API_KEY|NVIDIA_API_KEY|CEREBRAS_API_KEY|RADON_PYTHON_BIN|TURSO_DB_URL|TURSO_AUTH_TOKEN|PLAYWRIGHT_CHROMIUM_SANDBOX|RADON_DB_NO_REPLICA|RADON_DB_USE_REPLICA|RADON_MEDIA_LOCAL|RADON_MEDIA_REMOTE|RADON_NEWSFEED_[A-Z0-9_]+)=)' \
         "$out" > "${out}.filtered" || true
       mv "${out}.filtered" "$out"
     fi
@@ -645,6 +645,29 @@ cmd_run() {
       -v "${MEDIA_DIR}:${MEDIA_DIR_IN_CONTAINER}" \
       -v "${LEASE_DIR}:/var/lib/radon/ib-lease"
   fi
+
+  # Subscription grants (2026-09-18). The model ladders meter against the
+  # operator's subscriptions, never prepaid keys, and read the CLI credential
+  # files under ~radon (kept live by radon-subscription-tokens on the HOST).
+  # No container could see them, so every container-side rung silently fell
+  # to prepaid credits; when the xAI team ran dry the newsfeed voice rewrite
+  # died. Bind each dir that exists, read-only, and pin HOME so Path.home()
+  # and os.homedir() resolve to the mount. Never the whole home directory,
+  # and only into units that actually run a ladder rung: the dirs hold
+  # account-wide refresh tokens, so the internet-facing Next.js container
+  # and the relay must never see them.
+  local subscription_home="${RADON_SUBSCRIPTION_HOME:-/home/radon}"
+  local cred_dir
+  case "$unit" in
+    radon-api.service|radon-newsfeed.service|radon-research.service)
+      for cred_dir in .grok .codex .claude; do
+        if [[ -d "${subscription_home}/${cred_dir}" ]]; then
+          set -- "$@" -v "${subscription_home}/${cred_dir}:/home/radon/${cred_dir}:ro"
+        fi
+      done
+      ;;
+  esac
+  set -- "$@" --env HOME=/home/radon
   if [[ "$unit" == "radon-research.service" || "$unit" == "radon-api.service" ]]; then
     local research_dir research_mode=ro
     research_dir="$(prepare_research_dir "$ids")" || exit $?

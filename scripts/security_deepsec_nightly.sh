@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
-# Nightly security loop runner — invoked by launchd on the always-on
-# runner (Mac mini). One job fires daily and runs `cycle`: the audit phase,
+# Nightly DeepSec loop runner — invoked by launchd on the always-on
+# runner (Mac mini). One job fires daily and runs `cycle`: the audit phase
+# (DeepSec process / revalidate / export plus independent verification),
 # then the remediate phase, then the deliver phase (push, PR, CI green,
 # operator told what to merge), sequentially, in this loop's own clone.
-# DeepSec is its own nightly loop (security_deepsec_nightly.sh /
-# com.radon.security-deepsec) with the same three phases; this loop
-# neither runs nor harvests it.
+# Derived from security_nightly.sh: same runner lock, caps, dead-man,
+# provider ladder, sanitized reporting and completion contract. The
+# security loop neither runs nor harvests DeepSec any more.
 # Sequencing them inside one clone is what keeps two phases from checking
 # out over each other. Each phase still runs standalone (`audit` /
-# `remediate` / `deliver`). See .claude/skills/security-nightly/.
+# `remediate` / `deliver`). See .claude/skills/security-deepsec/.
 #
-# Runs in its OWN dedicated clone (~/radon-weekend/radon-security), never
+# Runs in its OWN dedicated clone (~/radon-weekend/radon-security-deepsec),
+# never the security loop's (~/radon-weekend/radon-security-deepsec) nor
 # the reliability loop's (~/radon-weekend/radon). Both wrappers hard-reset
 # and clean their clone on every round, so two loops in one working tree
 # destroy each other's checkouts and in-flight work — observed 2026-08-16
@@ -20,9 +22,9 @@
 # is done, so its wall clock is unbounded. (First observed on the testing
 # loop, 2026-08-16.)
 #
-# SECURITY loop specifics (see .claude/skills/security-nightly/SKILL.md):
-#   - canonical clone realpath ~/radon-weekend/radon-security, guarded by
-#     TWO markers (.radon-weekend-runner AND .radon-security-runner) so it
+# DEEPSEC loop specifics (see .claude/skills/security-deepsec/SKILL.md):
+#   - canonical clone realpath ~/radon-weekend/radon-security-deepsec, guarded by
+#     TWO markers (.radon-weekend-runner AND .radon-security-deepsec-runner) so it
 #     can never run in a sibling loop's clone or the operator checkout;
 #   - the clone and this wrapper carry NO Radon .env / broker / deploy
 #     credential (rail 5). launchd hands the job only the plist env, and
@@ -105,7 +107,7 @@ net_bounded() { "$TIMEOUT_BIN" "$NET_TIMEOUT_SECS" "$@"; }
 # no keepalive, and the attempt-count retry below bounds attempts, not time.
 GIT_SSH_BOUNDED="ssh -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3"
 
-# `source security_nightly.sh --lock-lib-only` exposes the helpers above to the
+# `source security_deepsec_nightly.sh --lock-lib-only` exposes the helpers above to the
 # contract tests without running a weekend.
 [[ "${1:-}" == "--lock-lib-only" ]] && return 0 2>/dev/null
 
@@ -118,16 +120,16 @@ GIT_SSH_BOUNDED="ssh -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAli
 # initial parse itself, before main is defined.
 main() {
 
-MODE="${1:?usage: security_nightly.sh audit|remediate|deliver|cycle}"
+MODE="${1:?usage: security_deepsec_nightly.sh audit|remediate|deliver|cycle}"
 [[ "$MODE" == "audit" || "$MODE" == "remediate" || "$MODE" == "deliver" || "$MODE" == "cycle" ]] || {
   echo "unknown mode: $MODE" >&2; exit 2;
 }
 
-REPO="${RADON_WEEKEND_REPO:-$HOME/radon-weekend/radon-security}"
+REPO="${RADON_WEEKEND_REPO:-$HOME/radon-weekend/radon-security-deepsec}"
 WEEKEND_ROOT="$(dirname "$REPO")"
 # Per-loop venv. The legacy $WEEKEND_ROOT/venv is not deleted here
 # (operator follow-up after this ships).
-VENV="$WEEKEND_ROOT/venv-security"
+VENV="$WEEKEND_ROOT/venv-security-deepsec"
 # Snapshot gh and Pushover BEFORE the venv prepend / agent. PATH is
 # $VENV/bin first after this. WEEKEND_ROOT/.env is shared across loops
 # and writable by a skip-permissions agent.
@@ -164,15 +166,15 @@ NOTIFY_PUSHOVER_TOKEN="$(_notify_cred PUSHOVER_TOKEN || true)"
 # must not read the operator's grants (~/.claude, ~/.codex, ~/.grok,
 # antigravity) from any child python. Env-var-only discovery.
 export RADON_LADDER_NO_AUTH_FILES=1
-DEADMAN_TITLE="Nightly security runner"
-DEADMAN_LABEL="security-nightly"
+DEADMAN_TITLE="Nightly DeepSec runner"
+DEADMAN_LABEL="security-deepsec"
 ISSUE_SANITIZE=1
-LOOP_SLUG="security"
+LOOP_SLUG="security-deepsec"
 DEADMAN_CREATE_BODY="Rolling dead-man for the nightly ${LOOP_SLUG} loop. Sanitized status only. Never a route, file, attack, secret, or account. A missing daily comment means the runner did not fire."
 # Branch prefix the skill opens/updates its PR from. Matched on the head
-# ref, not the title: the title is now `Security <date>`, which a
+# ref, not the title: the title is now `DeepSec <date>`, which a
 # hand-written PR could also start with.
-PR_BRANCH_PREFIX="security/"
+PR_BRANCH_PREFIX="security-deepsec/"
 
 resolve_pr_url() {
   # Newest-updated open PR the skill opened for this loop. A gh failure or
@@ -371,10 +373,10 @@ BG_CEILING_MARKER="Background tasks still running after"
 # finished (a clean fail-closed OPERATOR_REQUIRED night included), and an
 # exit-0 round without it is INCOMPLETE — reported as such, exited non-zero,
 # audited SHA untouched, so the next fire resumes the same private run in
-# ~/radon-weekend/.security-nightly-scratch/ instead of calling the night OK.
+# ~/radon-weekend/.security-deepsec-scratch/ instead of calling the night OK.
 # Trailing Done/Next after an honest stamp is not incomplete (2026-09-13
 # deliver, cycle 20260913T000007).
-PHASE_COMPLETE_MARKER="SECURITY-NIGHTLY PHASE COMPLETE:"
+PHASE_COMPLETE_MARKER="SECURITY-DEEPSEC PHASE COMPLETE:"
 
 # Deliver phase (2026-09-02): the skill prints a verdict the wrapper
 # turns into the cycle's final notification — "N PR(s) green, ready to merge:
@@ -596,13 +598,13 @@ cd "$REPO"
 }
 # Rail 1: the security loop refuses unless the SECURITY marker is present too.
 # .radon-weekend-runner alone is every sibling loop's clone; only
-# ~/radon-weekend/radon-security carries .radon-security-runner, so this is
+# ~/radon-weekend/radon-security-deepsec carries .radon-security-deepsec-runner, so this is
 # what stops a stray RADON_WEEKEND_REPO from running credential-free security
 # work — or, worse, scanner egress — inside another loop's or the operator's
 # checkout.
-[[ -f .radon-security-runner ]] || {
-  echo "REFUSING: $REPO is not the dedicated SECURITY runner clone (.radon-security-runner absent)" >&2
-  report "REFUSED" "$REPO lacks the .radon-security-runner marker; the security loop runs only in ~/radon-weekend/radon-security" || true
+[[ -f .radon-security-deepsec-runner ]] || {
+  echo "REFUSING: $REPO is not the dedicated DEEPSEC runner clone (.radon-security-deepsec-runner absent)" >&2
+  report "REFUSED" "$REPO lacks the .radon-security-deepsec-runner marker; the DeepSec loop runs only in ~/radon-weekend/radon-security-deepsec" || true
   exit 2
 }
 
@@ -762,7 +764,7 @@ acquire_runner_lock "$RUNNER_LOCK" || {
 }
 trap 'release_runner_lock "$RUNNER_LOCK"; if [[ -n "${NIGHTLY_PR_GUARD_DIR:-}" ]]; then rm -rf -- "$NIGHTLY_PR_GUARD_DIR"; fi' EXIT
 
-LOG_DIR="$REPO/logs/security-nightly"
+LOG_DIR="$REPO/logs/security-deepsec"
 mkdir -p "$LOG_DIR"
 # Run logs carry agent transcripts; keep them owner-only regardless of
 # the inherited umask. Dir-level clamp so no per-file mode can regress it.
@@ -789,10 +791,11 @@ RC=0
 
 begin_phase() {
   PHASE="$1"
-  # Audit fans out read agents (cap 2h); remediation is the long half (cap
-  # 6h); deliver pushes, opens the PR and waits on CI (cap 3h).
+  # Audit runs DeepSec process / revalidate / export in-session (cap 8h,
+  # the former sibling worker's cap); remediation is capped 6h; deliver
+  # pushes, opens the PR and waits on CI (cap 3h).
   case "$PHASE" in
-    audit) CAP_SECS="${RADON_WEEKEND_AUDIT_CAP_SECS:-7200}" ;;
+    audit) CAP_SECS="${RADON_WEEKEND_AUDIT_CAP_SECS:-28800}" ;;
     deliver) CAP_SECS="${RADON_WEEKEND_DELIVER_CAP_SECS:-10800}" ;;
     *) CAP_SECS="${RADON_WEEKEND_REMEDIATE_CAP_SECS:-21600}" ;;
   esac
@@ -856,7 +859,7 @@ ground_truth() {
     fi
     git reset --hard --quiet "$green_sha"
   fi
-  git clean -fdxq --exclude=.radon-weekend-runner --exclude=.radon-security-runner --exclude=.weekend-runner.lock --exclude=logs/ --exclude=.env --exclude=.env.ib-mode --exclude=web/.env --exclude=node_modules/ --exclude=.next/ --exclude=.deepsec/
+  git clean -fdxq --exclude=.radon-weekend-runner --exclude=.radon-security-deepsec-runner --exclude=.weekend-runner.lock --exclude=logs/ --exclude=.env --exclude=.env.ib-mode --exclude=web/.env --exclude=node_modules/ --exclude=.next/ --exclude=.deepsec/ --exclude=data/radon/
 }
 
 # The agent commits per completed task and the skill resumes from the
@@ -898,8 +901,8 @@ RETRY_PAUSE_SECS=60
 # the same Max login. Pinning the model also takes the operator's global
 # default off the unattended path: an interactive session changing it must not
 # decide what tonight runs on.
-LOOP_SKILL="security-nightly"
-LOOP_LOG_TAG="security-nightly"
+LOOP_SKILL="security-deepsec"
+LOOP_LOG_TAG="security-deepsec"
 PORTABLE_PROMPT_DIR="${RADON_PORTABLE_PROMPT_DIR:-$REPO/.claude/portable-prompts}"
 # `RADON_WEEKEND_MODEL_LADDER` still names claude rungs, for the loops that
 # have them; `RADON_WEEKEND_PROVIDER_LADDER` overrides the whole ladder.
@@ -1284,7 +1287,7 @@ is_transient_network_failure() {
 run_phase() {
   begin_phase "$1"
   trap on_crash ERR
-  echo "[security-nightly] $PHASE start $STAMP repo=$REPO cap=${CAP_SECS}s${BILLING_IGNORED:+ ignored=${BILLING_IGNORED// /,}}" | tee -a "$RUN_LOG"
+  echo "[security-deepsec] $PHASE start $STAMP repo=$REPO cap=${CAP_SECS}s${BILLING_IGNORED:+ ignored=${BILLING_IGNORED// /,}}" | tee -a "$RUN_LOG"
   arm_deliver_record
   # NOT bare. Under `set -Eeuo pipefail` with the ERR trap armed, a failed
   # fetch made on_crash report and then the shell exit anyway — so
@@ -1295,7 +1298,7 @@ run_phase() {
   if ! ground_truth; then
     RC=70
     report "GROUND TRUTH FAILED" "could not refresh the clone (network or git); the phase did not run" || true
-    echo "[security-nightly] $PHASE done rc=$RC" | tee -a "$RUN_LOG"
+    echo "[security-deepsec] $PHASE done rc=$RC" | tee -a "$RUN_LOG"
     return 0
   fi
   install_nightly_pr_guard
@@ -1375,7 +1378,7 @@ run_phase() {
     fi
     [[ $RC -eq 0 || $RC -eq 124 || $attempt -ge $MAX_ATTEMPTS ]] && break
     is_transient_network_failure || break
-    echo "[security-nightly] transient network failure (rc=$RC) — attempt $attempt/$MAX_ATTEMPTS, retrying in ${RETRY_PAUSE_SECS}s" | tee -a "$RUN_LOG"
+    echo "[security-deepsec] transient network failure (rc=$RC) — attempt $attempt/$MAX_ATTEMPTS, retrying in ${RETRY_PAUSE_SECS}s" | tee -a "$RUN_LOG"
     attempt=$((attempt + 1))
     sleep "$RETRY_PAUSE_SECS"
   done
@@ -1449,7 +1452,7 @@ run_phase() {
     *)
       report "$status" "the phase ended with a non-zero status; the audited SHA was NOT advanced" ;;
   esac
-  echo "[security-nightly] $PHASE done rc=$RC" | tee -a "$RUN_LOG"
+  echo "[security-deepsec] $PHASE done rc=$RC" | tee -a "$RUN_LOG"
 }
 
 # Durable per-runner prune of the weekend root, at the END of a cycle so it
@@ -1498,7 +1501,7 @@ if [[ "$MODE" == "cycle" ]]; then
   run_phase deliver
   RC_DELIVER=$RC
   set -e
-  echo "[security-nightly] cycle done audit_rc=$RC_AUDIT remediate_rc=$RC_REMEDIATE deliver_rc=$RC_DELIVER"
+  echo "[security-deepsec] cycle done audit_rc=$RC_AUDIT remediate_rc=$RC_REMEDIATE deliver_rc=$RC_DELIVER"
   prune_weekend_root
   [[ $RC_AUDIT -ne 0 ]] && exit "$RC_AUDIT"
   [[ $RC_REMEDIATE -ne 0 ]] && exit "$RC_REMEDIATE"
