@@ -79,6 +79,7 @@ CREATE TABLE IF NOT EXISTS tv_alert_events (
     price REAL, interval TEXT, alert_name TEXT,
     bar_time TEXT, sent_at TEXT,
     parse_error TEXT,
+    duplicate_of INTEGER,
     processed_at TEXT,
     digest_sent_at TEXT
 );
@@ -90,7 +91,8 @@ CREATE INDEX IF NOT EXISTS idx_tv_alert_events_received_desc ON tv_alert_events 
 - **Dedupe is deliberately weak**: only an exact repeat of
   `(alert_name, symbol, interval, bar_time, price)` inside 5s is marked duplicate. A
   genuine second fire in the same bar is indistinguishable from a network echo, and
-  dropping it silently is worse than keeping it.
+  dropping it silently is worse than keeping it. The drain records a repeat in
+  `duplicate_of` (the first fire's id) and leaves it out of the digest.
 - **Retention**: the drain job prunes rows older than 180 days. Do not copy
   `demo_webhook_events`, which has no prune and grows unbounded.
 - Writes go through the `dbExecute` chokepoint

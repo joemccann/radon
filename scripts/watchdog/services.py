@@ -380,6 +380,11 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # 24/7; uniform 10-min window mirrors web/lib/serviceHealthWindows.ts.
     # Reads /proc + systemctl + /health/lite only — no IB dependency.
     "host-metrics":     {"open": 10 * _MIN, "closed": 10 * _MIN, "requires_ib": False},
+    # tv-alerts-drain — 5-minute TradingView alert digest (scripts/
+    # tv_alerts_drain.py via radon-tv-alerts.timer, 24/7). The heartbeat is
+    # the drain's, not the receiver's: a webhook with no fires is dormant,
+    # not down. 20-min window mirrors web/lib/serviceHealthWindows.ts. No IB.
+    "tv-alerts-drain":  {"open": 20 * _MIN, "closed": 20 * _MIN, "requires_ib": False},
     # radon-research.service is a continuous Dropbox/PDF reviewer.  Systemd
     # remains active while a dependency stalls inside the worker, so its own
     # heartbeat must be checked independently of unit state (REL-251).
@@ -520,6 +525,8 @@ BUCKETS: dict[str, list[str]] = {
         # Minute-cadence host sampler heartbeat — the 10-min staleness
         # window flags a dead sampler within one continuous cycle.
         "host-metrics",
+        # 5-minute TradingView alert digest heartbeat (20-min window).
+        "tv-alerts-drain",
         "dropbox-research",
         # Continuous journal gap SLI (5m) — error when missing_exec_id_count > 0.
         "journal-gap-sli",

@@ -97,7 +97,7 @@ const MIDDLEWARE_PERIMETER_ONLY_ROUTES = [
 const PINNED_ELSEWHERE_ROUTES = [
   "gex/share/content", "internals/share/content", "menthorq/cta/share/content",
   "probe/freshness", "regime/share/content", "share/pnl", "vcg/share/content",
-  "webhooks/clerk",
+  "webhooks/clerk", "webhooks/tradingview/[token]",
 ] as const;
 
 const WEB_ROOT = fileURLToPath(new URL("..", import.meta.url));
