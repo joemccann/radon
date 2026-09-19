@@ -88,7 +88,7 @@ export async function GET(request: Request): Promise<Response> {
       outcome: row.outcome === "dropped" ? "dropped" : "held",
       reasonCodes: parseJson<string[]>(row.reason_codes, []).filter((code) => typeof code === "string"),
       drafts: parseJson<HeldDraft[]>(row.drafts_json, []).filter((draft) => draft && typeof draft === "object").slice(0, 8),
-      // context_json arrives with migration 0081; SELECT o.* keeps this route working on either side of it.
+      // context_json arrives with migration 0082; SELECT o.* keeps this route working on either side of it.
       context: parseContext(row.context_json),
     }));
     return json({ items: dailySample(documents, day), pending: documents.length });
