@@ -540,6 +540,19 @@ class TestFetchClosesCascade:
         assert source == "ib"
         assert rh_calls == []
 
+    def test_robinhood_preempts_uw(self):
+        uw_calls: list = []
+
+        _, _, sources = fetch_closes(
+            fetch_ib=lambda tickers: {},
+            fetch_uw=lambda tickers: uw_calls.append(list(tickers)) or {},
+            fetch_rh=lambda tickers: {t: {"2026-08-21": 1.0} for t in tickers},
+            fetch_yahoo=lambda tickers: {},
+        )
+
+        assert set(sources.values()) == {"rh"}
+        assert uw_calls == [], "a Robinhood hit must not spend a UW call"
+
     def test_unconfigured_robinhood_default_rung_skips_to_yahoo(self, monkeypatch):
         # Spy, not a planted raise: fetch_robinhood_closes swallows every
         # per-symbol exception, so only a zero call count proves no network. T-356.

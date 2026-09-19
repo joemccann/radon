@@ -244,7 +244,7 @@ def get_uw_history(
     uw_client: Optional[UWClient] = None,
     ib: Any = None,
 ) -> List[float]:
-    """Fetch historical daily closes: IB first, UW on miss."""
+    """Fetch historical daily closes: IB first, then Robinhood, UW on miss."""
     try:
         if uw_client is None and ib is None:
             with UWClient() as client:
@@ -282,17 +282,6 @@ def get_yahoo_history(ticker: str, days: int = 400) -> List[float]:
         return []
 
 
-def get_rh_history(ticker: str) -> List[float]:
-    """Robinhood (read-only MCP) daily closes — after IB/UW, before Yahoo.
-
-    Unconfigured hosts return [] without any network I/O.
-    """
-    try:
-        from clients.robinhood_client import fetch_robinhood_closes
-    except ImportError:
-        return []
-    closes = fetch_robinhood_closes([ticker]).get(ticker, {})
-    return [closes[date] for date in sorted(closes)]
 
 
 def get_price_history(
@@ -300,11 +289,8 @@ def get_price_history(
     uw_client: Optional[UWClient] = None,
     ib: Any = None,
 ) -> List[float]:
-    """Fetch daily closes: IB first, UW fallback, Robinhood, then Yahoo last resort."""
+    """Fetch daily closes: IB first, Robinhood, UW fallback, then Yahoo last resort."""
     prices = get_uw_history(ticker, uw_client, ib=ib)
-    if len(prices) >= 60:
-        return prices
-    prices = get_rh_history(ticker)
     if len(prices) >= 60:
         return prices
     return get_yahoo_history(ticker)

@@ -16,7 +16,7 @@ takes in-memory price-series dicts so it is fully testable offline.
 ``load_price_series_for_portfolio`` sources those series Turso-first from
 ``price_history_daily`` (migration 0029, shared with the RV-ratio and BPI
 scans). A held underlying the store cannot cover deeply or recently enough is
-backfilled through the mandated IB -> UW -> Robinhood -> Yahoo ladder and persisted back to
+backfilled through the mandated IB -> Robinhood -> UW -> Yahoo ladder and persisted back to
 Turso, so the next run is a pure read. The legacy
 ``data/price_history_cache/`` request cache remains a last-ditch fallback only:
 its sole writer (``portfolio_performance.py``) is no longer invoked by any
@@ -394,7 +394,7 @@ def load_price_series_for_portfolio(
 
     Turso ``price_history_daily`` is the source of truth. Underlyings it cannot
     cover (too thin, or stale beyond ``STALE_TOLERANCE_DAYS``) go through the
-    bounded IB -> UW -> Robinhood -> Yahoo ladder and are written back to
+    bounded IB -> Robinhood -> UW -> Yahoo ladder and are written back to
     Turso. Anything
     still missing falls back to the legacy on-disk request cache.
     """
@@ -501,7 +501,7 @@ def backfill_price_history(
         _record_backfill_attempt([symbol])
         if not closes:
             print(
-                f"  no daily closes for {symbol} from IB/UW/Robinhood/Yahoo",
+                f"  no daily closes for {symbol} from IB/Robinhood/UW/Yahoo",
                 file=sys.stderr,
             )
             continue
@@ -521,7 +521,7 @@ def backfill_price_history(
 def _fetch_closes_via_ladder(
     symbol: str, deadline: Optional[float] = None, clock=time.monotonic
 ) -> tuple:
-    """Data Source Priority: IB every cycle, then UW, then Robinhood, then Yahoo.
+    """Data Source Priority: IB every cycle, then Robinhood, then UW, then Yahoo.
 
     The deadline is re-checked between rungs so one slow rung cannot spend the
     whole run's budget several times over. An abort returns the
@@ -535,14 +535,14 @@ def _fetch_closes_via_ladder(
             return closes, "ib"
     if deadline is not None and clock() >= deadline:
         return {}, _LADDER_DEADLINE
-    closes = _fetch_uw_closes(symbol)
-    if closes:
-        return closes, "uw"
-    if deadline is not None and clock() >= deadline:
-        return {}, _LADDER_DEADLINE
     closes = _fetch_rh_closes(symbol)
     if closes:
         return closes, "rh"
+    if deadline is not None and clock() >= deadline:
+        return {}, _LADDER_DEADLINE
+    closes = _fetch_uw_closes(symbol)
+    if closes:
+        return closes, "uw"
     if deadline is not None and clock() >= deadline:
         return {}, _LADDER_DEADLINE
     return _fetch_yahoo_closes(symbol), "yahoo"
@@ -612,7 +612,7 @@ def _fetch_uw_closes(symbol: str) -> Dict[str, float]:
 
 
 def _fetch_rh_closes(symbol: str) -> Dict[str, float]:
-    """Robinhood (official trading MCP, read-only) — after IB and UW, before
+    """Robinhood (official trading MCP, read-only) — after IB, before UW and
     Yahoo. Unconfigured hosts return {} without any network I/O."""
     try:
         from clients.robinhood_client import fetch_robinhood_closes

@@ -52,11 +52,11 @@ Pin: fixture last/max ≈ 0.97976 → true at 0.97, false at 0.98.
   1. Interactive Brokers — `Stock('HYG','SMART','USD')`, `Index('SPX','CBOE')`,
      1Y daily TRADES, merge over cache. Skip the socket when
      `/health` `auth_state` is set and not `authenticated` (2FA lock). Fall
-     through to UW/Yahoo. Client IDs `(56, 69)`.
-  2. Unusual Whales — `get_stock_ohlc` for HYG. SPX is an index; UW is skipped.
-  3. Robinhood (read-only trading MCP, when configured) — equity historicals
+     through to Robinhood/UW/Yahoo. Client IDs `(56, 69)`.
+  2. Robinhood (read-only trading MCP, when configured) — equity historicals
      for HYG via `fetch_rh_closes`; SPX is skipped (`RH_SKIP`). Unconfigured
      hosts skip with zero network I/O.
+  3. Unusual Whales — `get_stock_ohlc` for HYG. SPX is an index; UW is skipped.
   4. Yahoo Finance — last resort for remaining gaps. Chart JSON, no API key,
      UA `Mozilla/5.0` (plain `radon/2.0` gets 429, same as the yield-curve
      SPX overlay):

@@ -162,6 +162,11 @@ NOTIFY_PUSHOVER_USER="$(_notify_cred PUSHOVER_USER || true)"
 NOTIFY_PUSHOVER_TOKEN="$(_notify_cred PUSHOVER_TOKEN || true)"
 # Activate the venv so any python3.13 calls inside the agent use it.
 [[ -f "$VENV/bin/activate" ]] && export PATH="$VENV/bin:$PATH"
+
+# Credential-free loop: the model ladder's default-on auth-file discovery
+# must not read the operator's grants (~/.claude, ~/.codex, ~/.grok,
+# antigravity) from any child python. Env-var-only discovery.
+export RADON_LADDER_NO_AUTH_FILES=1
 DEADMAN_TITLE="Nightly DeepSec runner"
 DEADMAN_LABEL="security-deepsec"
 ISSUE_SANITIZE=1
@@ -171,6 +176,57 @@ DEADMAN_CREATE_BODY="Rolling dead-man for the nightly ${LOOP_SLUG} loop. Sanitiz
 # ref, not the title: the title is now `DeepSec <date>`, which a
 # hand-written PR could also start with.
 PR_BRANCH_PREFIX="security-deepsec/"
+
+# Private operator report (2026-09-19). The agent writes a complete,
+# secret-free phase report to $PRIVATE_SCRATCH/latest-report-<phase>.md;
+# the WRAPPER publishes it to the private reports repository with a
+# repo-scoped write deploy key that lives outside the clone (rail 5: the
+# agent never sees the key) and links it from the Pushover page. The
+# public dead-man issue never carries the link or the content (rail 7).
+PRIVATE_SCRATCH="$WEEKEND_ROOT/.security-deepsec-scratch"
+REPORTS_REMOTE="${RADON_SECURITY_REPORTS_REMOTE:-git@github.com:joemccann/radon-security-reports.git}"
+REPORTS_WEB="${RADON_SECURITY_REPORTS_WEB:-https://github.com/joemccann/radon-security-reports/blob/main}"
+REPORTS_KEY="$WEEKEND_ROOT/.security-reports-deploy-key"
+REPORTS_DIR="$WEEKEND_ROOT/.security-reports"
+REPORT_URL=""
+
+_redact_secret_classes() {
+  # Secret literals only. Routes, file:line and findings stay: this text
+  # goes to the PRIVATE repository, not the public issue.
+  /usr/bin/sed -E \
+    -e 's,[Bb]earer [^[:space:]]+,Bearer [REDACTED],g' \
+    -e 's#(^|[^[:alnum:]_])(sk-(ant-)?[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,}|xox[abpors]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})#\1[REDACTED]#g' \
+    -e 's,([A-Za-z0-9_]*(TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|APIKEY|_KEY)[A-Za-z0-9_]*[[:space:]]*[=:][[:space:]]*)[^[:space:]]+,\1[REDACTED],g'
+}
+
+publish_private_report() {
+  # Best-effort and silent to the public: a failure here leaves REPORT_URL
+  # empty and the page says so. Never changes the phase exit code.
+  REPORT_URL=""
+  local src="$PRIVATE_SCRATCH/latest-report-${PHASE:-}.md" day rel dst ssh_cmd
+  [[ -n "${PHASE:-}" && -f "$src" && -f "$REPORTS_KEY" ]] || return 0
+  # Only a report written during THIS phase; a stale one would be re-linked.
+  [[ -n "${PHASE_START_MARK:-}" && "$src" -nt "$PHASE_START_MARK" ]] || return 0
+  day="${STAMP:0:4}-${STAMP:4:2}-${STAMP:6:2}"
+  rel="reports/$LOOP_SLUG/$day/$PHASE.md"
+  ssh_cmd="ssh -i $REPORTS_KEY -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20"
+  if [[ ! -d "$REPORTS_DIR/.git" ]]; then
+    rm -rf -- "$REPORTS_DIR"
+    GIT_SSH_COMMAND="$ssh_cmd" net_bounded git clone --quiet --depth 1 "$REPORTS_REMOTE" "$REPORTS_DIR" >/dev/null 2>&1 || return 0
+  else
+    GIT_SSH_COMMAND="$ssh_cmd" net_bounded git -C "$REPORTS_DIR" fetch --quiet --depth 1 origin main >/dev/null 2>&1 || return 0
+    git -C "$REPORTS_DIR" reset --hard --quiet origin/main >/dev/null 2>&1 || return 0
+  fi
+  dst="$REPORTS_DIR/$rel"
+  mkdir -p "$(dirname "$dst")"
+  _redact_secret_classes < "$src" > "$dst" || return 0
+  git -C "$REPORTS_DIR" add -- "$rel" >/dev/null 2>&1 || return 0
+  git -C "$REPORTS_DIR" -c user.name="radon-$LOOP_SLUG" -c user.email="radon-nightly@users.noreply.github.com" \
+    commit --quiet -m "$LOOP_SLUG $PHASE $STAMP" >/dev/null 2>&1 || return 0
+  GIT_SSH_COMMAND="$ssh_cmd" net_bounded git -C "$REPORTS_DIR" push --quiet origin HEAD:main >/dev/null 2>&1 || return 0
+  REPORT_URL="$REPORTS_WEB/$rel"
+  echo "[weekend] private report published: $rel" | tee -a "${RUN_LOG:-/dev/null}" >/dev/null 2>&1 || true
+}
 
 resolve_pr_url() {
   # Newest-updated open PR the skill opened for this loop. A gh failure or
@@ -186,7 +242,7 @@ resolve_pr_url() {
 }
 
 _notify_curl() {
-  local loop="$1" phase="$2" status="$3" pr_url="$4" detail="$5"
+  local loop="$1" phase="$2" status="$3" pr_url="$4" detail="$5" report_url="${6:-}"
   local user token title message
   user="$NOTIFY_PUSHOVER_USER"
   token="$NOTIFY_PUSHOVER_TOKEN"
@@ -196,12 +252,13 @@ _notify_curl() {
   # PATH is $VENV/bin first. A planted or failing PATH tr under set -e
   # aborts before curl; notify_phase's || true would swallow the page.
   message="$(printf '%s' "$status" | /usr/bin/tr -s '[:space:]' ' ')"
+  [[ -n "$report_url" ]] || detail="$detail (no private report this phase)"
   detail="$(printf '%s' "$detail" | /usr/bin/tr -s '[:space:]' ' ')"
   [[ -n "$detail" ]] && message="${message} ${detail}"
   [[ -n "$pr_url" ]] && message="${message} ${pr_url}"
   message="$(printf '%s' "$message" | /usr/bin/tr -s '[:space:]' ' ')"
   local k v
-  for k in token user title message; do
+  for k in token user title message report_url; do
     v="${!k}"
     v="${v//\\/\\\\}"
     v="${v//\"/\\\"}"
@@ -222,6 +279,10 @@ _notify_curl() {
     printf 'data-urlencode = "title=%s"\n' "$title"
     printf 'data-urlencode = "message=%s"\n' "$message"
     printf 'data-urlencode = "priority=0"\n'
+    if [[ -n "$report_url" ]]; then
+      printf 'data-urlencode = "url=%s"\n' "$report_url"
+      printf 'data-urlencode = "url_title=Open private report"\n'
+    fi
   } | /usr/bin/curl -q --config - >/dev/null 2>&1 || true
 }
 
@@ -234,7 +295,8 @@ notify_phase() {
   # so a 0 exit would skip _notify_curl. Always page with /usr/bin/curl.
   local status="$1" pr_url
   pr_url="$(resolve_pr_url)"
-  _notify_curl "$LOOP_SLUG" "$PHASE" "$status" "$pr_url" "log: ${RUN_LOG##*/}" || true
+  publish_private_report || true
+  _notify_curl "$LOOP_SLUG" "$PHASE" "$status" "$pr_url" "log: ${RUN_LOG##*/}" "$REPORT_URL" || true
 }
 
 _sanitize_issue_text() {
@@ -798,6 +860,11 @@ begin_phase() {
   # One log per phase: the transient-network detector reads $RUN_LOG.
   # Issue comments do not include a run-log tail.
   RUN_LOG="$LOG_DIR/$PHASE-$STAMP.log"
+  # Phase-start timestamp for publish_private_report: only a report written
+  # after this instant belongs to this phase (dotfile: the log rotation's
+  # `ls -1t` never lists it).
+  PHASE_START_MARK="$LOG_DIR/.phase-start-$STAMP"
+  : > "$PHASE_START_MARK"
   RC=0
   # REL-198 (R-533): rung carry across phases is intended; flag carry is
   # not — an audit-phase exhaustion mislabelled a successful remediate.

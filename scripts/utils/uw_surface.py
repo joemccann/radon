@@ -55,7 +55,8 @@ def fetch_daily_closes(
     *,
     min_bars: int = MIN_DAILY_CLOSES,
 ) -> Any:
-    """IB historical daily closes first; UW OHLC only on short/empty/error.
+    """IB historical daily closes first, then Robinhood; UW OHLC only when both
+    are short/empty/error.
 
     Never raises out of the IB path. UW errors (including daily-cap 429)
     propagate to the caller.
@@ -75,9 +76,26 @@ def fetch_daily_closes(
                 return payload
         except Exception:
             pass
+    rh = _fetch_rh_ohlc(symbol)
+    if len(rh["data"]) >= min_bars:
+        return rh
     if uw is not None:
         return uw.get_stock_ohlc(symbol, candle_size="1d")
     return {"data": []}
+
+
+def _fetch_rh_ohlc(symbol: str) -> dict[str, Any]:
+    """Robinhood (read-only MCP) daily closes in the UW OHLC shape.
+
+    Unconfigured hosts return no rows without network I/O; any error is a miss.
+    """
+    try:
+        from clients.robinhood_client import fetch_robinhood_closes
+
+        closes = fetch_robinhood_closes([symbol]).get(symbol, {})
+    except Exception:  # noqa: BLE001 - the ladder falls through to UW
+        return {"data": []}
+    return {"data": [{"date": d, "close": closes[d]} for d in sorted(closes)]}
 
 
 def fetch_surface(client: Any, ticker: str, ib: Any = None) -> dict[str, Any]:

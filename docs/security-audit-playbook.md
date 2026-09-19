@@ -192,6 +192,14 @@ line here whenever you ship a security fix.**
   cannot; the PR helper refuses merge-shaped `gh` invocations by token scan;
   page-derived summaries are flattened before entering PR metadata.
   (`scripts/tests/test_grok_push_guard.py`)
+- **Subscription credentials stop at the trust boundary of what consumes them**
+  — an unpinned third-party agent CLI subprocess gets an explicit env
+  allowlist, never `os.environ` (`subscription_tokens.CLI_ENV_ALLOWLIST`,
+  `model_ladder._ANTIGRAVITY_CLI_ENV_ALLOWLIST`); operator credential dirs
+  bind only into containers whose unit actually runs a ladder rung; secrets
+  never ride a subprocess argv.
+  (`scripts/tests/test_model_ladder.py`, `cloud/tests/test_app_runtime.py`,
+  `scripts/tests/test_fetch_x_xai_token.py`)
 
 ## Triage & patch policy
 
