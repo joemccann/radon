@@ -1,11 +1,12 @@
 [Unit]
 Description=Radon TradingView alert drain (issue #457: webhook inbox -> alerts)
 After=network.target
-# DUR-02 pattern: brake crash loops. 5-minute timer cadence, so 5 starts in
-# 1800s means every run for half an hour failed; systemd then parks the unit
-# as failed instead of restarting forever.
+# DUR-02 pattern: brake crash loops. systemd StartLimit counts successful
+# oneshot starts, so Burst must exceed the 5-minute cadence inside the
+# window (6 starts / 1800s). Burst=10 matches ib-watchdog / host-metrics;
+# Burst=5 parked a healthy drain as start-limit-hit (2026-09-19 page 8750de94).
 StartLimitIntervalSec=1800
-StartLimitBurst=5
+StartLimitBurst=10
 
 [Service]
 Type=oneshot
