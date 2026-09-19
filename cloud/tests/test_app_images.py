@@ -75,6 +75,29 @@ def _dropin_for(unit: str) -> Path:
     return CLOUD_ROOT / "services" / f"{unit}.d" / "runtime-container.conf"
 
 
+class TestImageWorkflowTokenScope:
+    """The PR build path must never hold a token that can write GHCR."""
+
+    WF_DIR = CLOUD_ROOT.parent / ".github" / "workflows"
+
+    def test_reusable_workflow_is_call_only_with_no_own_permissions(self) -> None:
+        text = (self.WF_DIR / "app-images.yml").read_text(encoding="utf-8")
+        assert "workflow_call:" in text
+        assert "pull_request:" not in text
+        assert "packages: write" not in text
+
+    def test_pr_caller_grants_read_only(self) -> None:
+        text = (self.WF_DIR / "app-images-pr.yml").read_text(encoding="utf-8")
+        assert "pull_request:" in text
+        assert "contents: read" in text
+        assert ": write" not in text
+        assert "uses: ./.github/workflows/app-images.yml" in text
+
+    def test_main_push_caller_still_grants_publish(self) -> None:
+        text = (self.WF_DIR / "ci.yml").read_text(encoding="utf-8")
+        assert "packages: write" in text
+
+
 class TestAppDockerfilesExist:
     def test_python_dockerfile_exists(self) -> None:
         assert PYTHON_DF.is_file()

@@ -1006,7 +1006,10 @@ def test_image_workflow_exists_and_is_a_deploy_need() -> None:
     assert "docker/app/Dockerfile.node" in wf
     assert "docker/app/.dockerignore" in wf
     assert "--ignorefile" not in wf
-    assert "packages: write" in wf
+    # The GHCR write grant lives on the ci.yml caller; the reusable workflow
+    # itself carries no permissions so the PR caller's read-only token rules.
+    assert "packages: write" not in wf
+    assert "packages: write" in ci
     assert "environment:" not in wf
     assert "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ vars.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}" in wf
     assert "NEXT_PUBLIC_RADON_API_URL=${{ vars.NEXT_PUBLIC_RADON_API_URL }}" in wf
