@@ -4663,12 +4663,15 @@ td.last-price-cell {
 
 .dashboard-news .dashboard-news__rail {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) max-content max-content;
   column-gap: 16px;
   align-items: baseline;
+  justify-content: stretch;
+  width: calc(100% + 2 * var(--dn-pad-x));
   margin-top: auto;
   margin-inline: calc(-1 * var(--dn-pad-x));
   flex-shrink: 0;
+  min-width: 0;
   min-height: 32px;
   padding: 8px calc(var(--dn-pad-x) + 14px);
   border-top: 1px solid var(--line-grid);
@@ -4681,6 +4684,10 @@ td.last-price-cell {
   display: inline-flex;
   align-items: baseline;
   gap: 6px;
+  min-width: 0;
+}
+
+.dashboard-news .dashboard-news__rail .panel-meta-rail-item[data-k="source"] {
   min-width: 0;
 }
 
@@ -4704,6 +4711,10 @@ td.last-price-cell {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.dashboard-news .dashboard-news__rail .panel-meta-rail-item[data-k="capture.basis"] .v {
+  min-width: 16ch;
 }
 
 .dashboard-news .dashboard-news__rail .panel-meta-rail-item[data-k="last.sample"] .v {
