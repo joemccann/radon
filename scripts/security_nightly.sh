@@ -99,10 +99,7 @@ NET_TIMEOUT_SECS="${RADON_WEEKEND_NET_TIMEOUT_SECS:-120}"
 # Before --lock-lib-only and before the venv PATH prepend. lock-lib-only
 # fetch always calls net_bounded under set -u.
 TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
-if [[ -z "$TIMEOUT_BIN" ]]; then
-  echo "security_nightly: GNU timeout (or gtimeout from coreutils) is required" >&2
-  return 78 2>/dev/null || exit 78
-fi
+[[ -n "$TIMEOUT_BIN" ]] || { echo "security_nightly: GNU timeout (or gtimeout from coreutils) is required" >&2; return 78 2>/dev/null || exit 78; }
 net_bounded() { "$TIMEOUT_BIN" "$NET_TIMEOUT_SECS" "$@"; }
 
 # A VPN flap that establishes TCP and then stalls hangs an ssh transport with
