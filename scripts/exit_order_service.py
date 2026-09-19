@@ -378,7 +378,26 @@ def place_target_order(
     if expiry is None:
         expiry = "20260417"  # Last-resort fallback
         log("WARNING: Could not extract expiry from order data, using hardcoded fallback 20260417", "WARNING")
-    
+
+    # Gate 3 (NF-1), when RADON_BANKROLL_CAP_ENFORCE_ALL_PATHS is On. The
+    # exit SELLs the spread: an exit of a held spread is a close-out.
+    from bankroll_guard import check_if_enforced_on_all_paths
+
+    bankroll_violation = check_if_enforced_on_all_paths({
+        "type": "combo",
+        "symbol": ticker,
+        "action": "SELL",
+        "quantity": contracts,
+        "limitPrice": target_price,
+        "legs": [
+            {"expiry": expiry, "strike": long_leg["strike"], "right": "C", "action": "BUY", "ratio": 1},
+            {"expiry": expiry, "strike": short_leg["strike"], "right": "C", "action": "SELL", "ratio": 1},
+        ],
+    })
+    if bankroll_violation:
+        log(f"Bankroll cap refused the exit order: {bankroll_violation['message']}", "WARNING")
+        return None
+
     try:
         # Qualify contracts
         long_call = Option(ticker, expiry, long_leg["strike"], 'C', 'SMART', currency='USD')
