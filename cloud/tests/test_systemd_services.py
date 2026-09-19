@@ -317,6 +317,19 @@ class TestSubscriptionTokens:
         assert svc["statedirectory"] == "radon"
         assert svc["statedirectorymode"] == "0750"
 
+    def test_sandboxes_the_third_party_cli_runs(self, unit):
+        # The unit executes unpinned third-party CLIs (agy, grok, codex) out
+        # of radon-writable ~/.local/bin with the full production env file
+        # loaded. It cannot use ProtectSystem=strict (it rewrites credential
+        # files across /home/radon), but privilege escalation, setuid
+        # payloads, shared /tmp, and retained capabilities are all closable.
+        svc = unit(self.SERVICE)["Service"]
+        assert svc["nonewprivileges"] == "yes"
+        assert svc["privatetmp"] == "yes"
+        assert svc["restrictsuidsgid"] == "yes"
+        assert svc["protectsystem"] == "full"
+        assert svc["capabilityboundingset"] == ""
+
     def test_timer_refreshes_twice_an_hour_in_explicit_utc_with_catchup(
         self, services_dir
     ):
