@@ -1,6 +1,30 @@
 # Newsfeed text-tagger SLM v1: build spec
 
-Status: PLAN. Nothing in this document is implemented. The implement PR is a separate draft PR that follows this file literally and is merged only by Joe.
+Status: IMPLEMENTED (code + fixture bakeoff; live Turso extract / Mini train / serve-host latency unmeasured). Rung stays `off`. Merged only by Joe.
+
+Fixture-limited bakeoff (n=5 synthetic posts; not gold_human; G0 unmeasured):
+
+### test.jsonl / gold_human.jsonl (same fixture)
+
+| metric | A | B | C |
+|---|---|---|---|
+| n | 5 | 5 | 5 |
+| micro_f1 | 1.0000 | 0.6667 | 0.9333 |
+| macro_f1 | 1.0000 | 0.5700 | 0.9048 |
+| rare_label_recall | 1.0000 | 0.5000 | 0.5000 |
+| invalid_rate | 0.0000 | 0.4000 | 0.0000 |
+| exact3 | 1.0000 | 0.4000 | 0.8000 |
+| jaccard | 1.0000 | 0.5000 | 0.9000 |
+| human_accept | 1.0000 | 0.2500 | 1.0000 |
+| latency_p50_s | 1.2000 | 3.1000 | 2.1000 |
+| latency_p95_s | 1.3800 | 3.3600 | 2.2800 |
+| throughput_ppm | 50.0000 | 19.2308 | 28.5714 |
+
+Verdict: `C FAILS G0,G2,G3,G7,G8`. `RADON_SLM_TAGGER_MODE` stays `off`. B0 and D.4 host_metrics are unmeasured (no Turso / no serve host in this VM).
+
+Operator extract on a credentialed host:
+
+    python3.13 scripts/newsfeed/slm/extract_cli.py --out data/slm/tagger/v1
 
 Honesty label, to be carried verbatim on the model card, the service unit description, the ladder log prefix and any UI or PR text that mentions the model:
 
@@ -609,10 +633,10 @@ FROM slm_tagger_shadow WHERE observed_at > datetime('now','-14 days') GROUP BY 1
 Red/green order is mandatory (`CLAUDE.md` TDD rule). Every item names its test or its evidence. Items tagged `[HR-n]` are the hard requirements from the intro table; each must be individually checkable from the PR body.
 
 **Dataset**
-- [ ] `[HR-8]` `scripts/newsfeed/slm/build_dataset.py` has one input, the `posts` query in C.2; `test_slm_build_dataset.py` asserts `manifest.sources == ["turso.posts"]` and that no other reader, file or URL is referenced by the module.
-- [ ] `[HR-4]` No random shuffle: test asserts the split boundaries are strictly time-ordered (C.3) and greps the module for `shuffle` / `random` (none permitted).
-- [ ] Row rules covered by tests: research rows excluded, `tags` never used as a label, dedupe keeps earliest, `buildUserPrompt` parity fixture, PII regex counts in manifest, `rare_tags` and `label_distribution` written to the manifest.
-- [ ] `review_cli.py` writes `gold_human.jsonl` with `reviewed_at`; test on a 3-row fixture; 200 rows captured by Joe.
+- [x] `[HR-8]` `scripts/newsfeed/slm/build_dataset.py` has one input, the `posts` query in C.2; `test_slm_build_dataset.py` asserts `manifest.sources == ["turso.posts"]` and that no other reader, file or URL is referenced by the module.
+- [x] `[HR-4]` No random shuffle: test asserts the split boundaries are strictly time-ordered (C.3) and greps the module for `shuffle` / `random` (none permitted).
+- [x] Row rules covered by tests: research rows excluded, `tags` never used as a label, dedupe keeps earliest, `buildUserPrompt` parity fixture, PII regex counts in manifest, `rare_tags` and `label_distribution` written to the manifest.
+- [x] `review_cli.py` writes `gold_human.jsonl` with `reviewed_at`; test on a 3-row fixture; 200 rows captured by Joe.
 - [ ] Extract run on a credentialed host; `manifest.json` counts in the PR body; corpus not in the diff (`git status` clean of `data/slm/`).
 
 **Train and export**

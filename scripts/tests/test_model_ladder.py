@@ -863,3 +863,121 @@ class TestNoAuthFilesFlag:
         auth = _auth_for("grok", {"HOME": str(home)})
         assert auth is not None
         assert auth.token == "grok-file-token"
+
+
+class TestSlmTaggerRung:
+    TAXONOMY = ["GAMMA", "SPX", "VOL", "VIX"]
+
+    def _env(self, **extra):
+        return {
+            "RADON_SLM_TAGGER_URL": "http://127.0.0.1:8331",
+            "RADON_SLM_TAGGER_MODE": "primary",
+            "RADON_SLM_TAXONOMY_JSON": json.dumps(self.TAXONOMY),
+            "ANTHROPIC_API_KEY": "a",
+            "RADON_LADDER_ALLOW_PREPAID": "1",
+            **extra,
+        }
+
+    def test_absent_from_order_and_wired_providers(self):
+        assert "slm-tagger" not in MODEL_LADDER_ORDER
+        wired = wired_providers(self._env())
+        assert "slm-tagger" not in wired
+
+    def test_complete_without_providers_never_attempts_slm(self, monkeypatch):
+        from clients import model_ladder as ml
+
+        monkeypatch.setattr(ml, "_slm_health_ok", lambda _url: True)
+        calls = []
+
+        def post(url, **kwargs):
+            calls.append(url)
+            return _anthropic_obj_ok({"tags": ["GAMMA", "SPX", "VOL"]})
+
+        complete_text_json(
+            "Title: x\nBody: y",
+            env=self._env(),
+            post=post,
+            accept=accept_tags_payload,
+        )
+        assert all("8331" not in url for url in calls)
+
+    def test_providers_post_carries_contract(self, monkeypatch):
+        from clients import model_ladder as ml
+        from newsfeed.slm.contract import SLM_SYSTEM
+
+        monkeypatch.setattr(ml, "_slm_health_ok", lambda _url: True)
+        captured = {}
+
+        def post(url, **kwargs):
+            captured["url"] = url
+            captured["body"] = kwargs.get("json")
+            return _openai_obj_ok({"tags": ["GAMMA", "SPX", "VOL"]})
+
+        result = complete_text_json(
+            "Title: x\nBody: y",
+            system="CALLER TAXONOMY PROMPT",
+            env=self._env(),
+            post=post,
+            accept=accept_tags_payload,
+            providers=["slm-tagger"],
+        )
+        assert captured["url"] == "http://127.0.0.1:8331/v1/chat/completions"
+        body = captured["body"]
+        assert body["temperature"] == 0
+        assert body["max_tokens"] == 64
+        assert body["messages"][0]["content"] == SLM_SYSTEM
+        assert body["response_format"]["json_schema"]["schema"]["required"] == ["tags"]
+        assert result.provider == "slm-tagger"
+
+    def test_http_503_falls_through(self, monkeypatch):
+        from clients import model_ladder as ml
+
+        monkeypatch.setattr(ml, "_slm_health_ok", lambda _url: True)
+
+        def post(url, **kwargs):
+            if "8331" in url:
+                return _Resp(503, {"error": "down"})
+            return _anthropic_obj_ok({"tags": ["GAMMA", "SPX", "VOL"]})
+
+        result = complete_text_json(
+            "Title: x\nBody: y",
+            env=self._env(),
+            post=post,
+            accept=accept_tags_payload,
+            providers=["slm-tagger", "anthropic"],
+        )
+        assert result.provider == "anthropic"
+        assert result.attempted == ("slm-tagger:http_503", "anthropic:ok")
+
+    def test_accept_slm_tags_payload_and_fallthrough(self, monkeypatch):
+        from clients.model_ladder import accept_slm_tags_payload
+        from newsfeed.slm.contract import classify_slm_tags
+
+        tax = self.TAXONOMY
+        assert accept_slm_tags_payload({"tags": ["GAMMA", "SPX", "VOL"]}, tax)
+        assert classify_slm_tags({"tags": ["GAMMA", "SPX"]}, tax)[0] == "abstain:count"
+        assert classify_slm_tags({"tags": ["GAMMA", "SPX", "VOL", "VIX"]}, tax)[0] == "abstain:count"
+        assert classify_slm_tags({"tags": []}, tax)[0] == "abstain:empty"
+        assert classify_slm_tags("prose", tax)[0] == "unparseable"
+        assert classify_slm_tags({"tags": ["gamma", "GAMMA", "spx"]}, tax)[0] == "abstain:count"
+        assert classify_slm_tags({"tags": ["GAMMA", "SPX", "NEW"]}, tax)[0] == "abstain:out_of_taxonomy"
+
+        from clients import model_ladder as ml
+
+        monkeypatch.setattr(ml, "_slm_health_ok", lambda _url: True)
+
+        def post(url, **kwargs):
+            if "8331" in url:
+                return _openai_obj_ok({"tags": ["GAMMA", "SPX"]})
+            return _anthropic_obj_ok({"tags": ["GAMMA", "SPX", "VOL"]})
+
+        result = complete_text_json(
+            "Title: x\nBody: y",
+            env=self._env(),
+            post=post,
+            accept=accept_tags_payload,
+            providers=["slm-tagger", "anthropic"],
+        )
+        assert result.provider == "anthropic"
+        assert result.data == {"tags": ["GAMMA", "SPX", "VOL"]}
+        assert result.attempted[0] == "slm-tagger:abstain:count"

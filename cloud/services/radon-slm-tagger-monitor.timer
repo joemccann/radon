@@ -1,0 +1,10 @@
+[Unit]
+Description=Radon SLM tagger monitor - daily 07:10 UTC drift / invalid / label-shift check
+
+[Timer]
+OnCalendar=*-*-* 07:10:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

@@ -1,3 +1,23 @@
+# Task: Newsfeed SLM tagger v1 implement [DRAFT PR; RUNG OFF]
+
+Implement `docs/ml/newsfeed-slm-tagger.md` (HR-1..HR-8). Dataset/eval/train/export/sidecar/ladder hook default off. No prod enable. No merge.
+
+## Dependency graph
+
+- T1 depends_on: [] - SLM package + tests (dataset, eval, monitor, train refusals)
+- T2 depends_on: [T1] - Ladder + CLI hook default off; migration 0077; units; docs
+- T3 depends_on: [T2] - Fixture bakeoff; draft PR; CI; Joe list (hardware, merge, enable)
+
+## Checklist
+
+- [x] T1 Package + unit tests
+- [x] T2 Ladder hook MODE=off; units pinned not-installed; docs
+- [ ] T3 Draft PR + CI
+
+## Review
+
+- Live Turso extract and Mini train are operator commands. Fixture bakeoff verdict is `C FAILS`. Mode stays off.
+
 # Task: Newsfeed SLM tagger v1 build spec [PLAN ONLY; PR #533 DRAFT, CI GREEN]
 
 Docs-only PR: `docs/ml/newsfeed-slm-tagger.md`, an implementer-grade spec
