@@ -15,6 +15,8 @@ from datetime import datetime, timezone
 from research.model import PROVIDER_PARK_SECS, classify_error, is_provider_outage
 from research.state import State
 
+FEEDBACK_POLL_SECS = 60
+
 
 class Backoff:
     """One provider deadline shared by discovery and download processes."""
@@ -159,6 +161,7 @@ def _consumer(root, stop, wake, parsed, backoff, review, publish, client_factory
     from research.worker import heartbeat
     state = State(Path(root) / 'state.sqlite')
     client = pipeline = None
+    next_feedback = 0
     try:
         while not stop.is_set():
             try:
@@ -166,6 +169,11 @@ def _consumer(root, stop, wake, parsed, backoff, review, publish, client_factory
                     if pipeline is None:
                         from research.model import build_pipeline
                         pipeline = pipeline_factory() if pipeline_factory else build_pipeline(root, publisher, extractor=cached_extract)
+                    if time.monotonic() >= next_feedback:
+                        # Operator votes ("should have published", "want more") re-queue their documents with the note.
+                        from research.feedback import apply as apply_feedback
+                        apply_feedback(state)
+                        next_feedback = time.monotonic() + FEEDBACK_POLL_SECS
                     worked = review_one(root, state, pipeline, publisher, publish)
                     event = parsed
                 else:
