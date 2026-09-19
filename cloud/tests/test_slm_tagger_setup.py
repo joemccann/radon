@@ -1,4 +1,7 @@
-"""SLM tagger units install on setup but stay disabled until Joe enables them."""
+"""SLM tagger units install on setup but stay disabled until Joe enables them.
+
+Rung stays off; setup copies units only.
+"""
 from pathlib import Path
 import os
 import re
