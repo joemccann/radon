@@ -191,6 +191,8 @@ readonly SERVICE_FILES=(
   radon-hhlev.timer
   radon-vixts.service
   radon-vixts.timer
+  radon-panic-index.service
+  radon-panic-index.timer
   radon-dispersion.service
   radon-dispersion.timer
   radon-slm-tagger.service

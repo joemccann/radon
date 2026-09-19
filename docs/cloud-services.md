@@ -343,7 +343,7 @@ journald on the VPS is on-box only (capped at 1G). A laptop launchd job (`~/Libr
 off. A `code_fix` + AUTOPUSH ships a `fix/**` branch and
 `scripts/ir_ensure_pr.py` opens a PR against `main` (never merges).
 Spec: [`grok-page-responder.md`](grok-page-responder.md).
-Do not install this on any clone under `~/radon-weekend/` (the five nightly loops hard-reset them every phase; table in [`operations.md`](operations.md#background-services)).
+Do not install this on any clone under `~/radon-weekend/` (the six nightly loops hard-reset them every phase; table in [`operations.md`](operations.md#background-services)).
 
 ### Error tracking — Sentry (not wired; recommended next step)
 
@@ -734,6 +734,25 @@ heartbeats that keep `vixts` inside its 26h window. Single-source, so a
 plausibility guard raises rather than latching `ok` over a truncated or
 implausible series. Installed by the deploy's `install-units` verb from
 `installed-units.sha256`. Spec: [`indicators/vixts.md`](indicators/vixts.md).
+
+### Panic Proxy (`radon-panic-index.timer`)
+
+Twice daily `02:50` and `13:15 UTC` (`RandomizedDelaySec=120`), oneshot
+`scripts/fetch_panic_index.py`, `TimeoutStartSec=300`. Equal-weight mean of
+252-session z-scores of Cboe VIX, VVIX, VIX/VIX3M and SKEW. This is Radon's
+reconstruction of the four inputs Goldman names for its Panic Index; it is
+not the Goldman index and is not scaled to match it. Four Cboe CDN files
+pulled through the shared `CboeClient` with per-file `If-Modified-Since`;
+when all four return 304 the run restates the cached payload and refreshes
+only the snapshot and heartbeat. UW 25d skew is an overlay only. 02:50 sits
+after vixts 02:45; 13:15 is kept pending a three-session VVIX/SKEW append
+measurement (only 2026-09-18 was observable at spec time: VIX/VIX3M 01:51,
+VVIX 12:01, SKEW 21:01, last row still 09/17). Runs every calendar day;
+weekend and holiday runs are 304 heartbeats that keep `panic-index` inside
+its 26h window. Installed by the deploy's `install-units` verb from
+`installed-units.sha256`. Spec:
+[`indicators/panic-index.md`](indicators/panic-index.md). First production
+run after merge must use `--no-alert`.
 
 ### DISPERSION (`radon-dispersion.timer`)
 

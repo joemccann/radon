@@ -95,6 +95,17 @@ _CHATGPT_CODEX_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses"
 # gemini rung shells out to the Antigravity CLI (`agy -p`) instead.
 _ANTIGRAVITY_TOKEN_RELPATH = Path(".gemini") / "antigravity-cli" / "antigravity-oauth-token"
 _ANTIGRAVITY_CLI_TIMEOUT_SECONDS = 120.0
+# Mirrors subscription_tokens.CLI_ENV_ALLOWLIST: everything a third-party
+# agent CLI may inherit, and nothing else. PATH is added because agy invokes
+# helpers; secrets from /etc/radon/env must never cross this boundary.
+_ANTIGRAVITY_CLI_ENV_ALLOWLIST = frozenset(
+    {
+        "PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL", "TERM", "TMPDIR",
+        "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_RUNTIME_DIR",
+        "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "https_proxy", "http_proxy", "no_proxy",
+        "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS",
+    }
+)
 
 _NVIDIA_VISION_DEFAULT = "meta/llama-3.2-90b-vision-instruct"
 _NVIDIA_VISION_FALLBACK = "meta/llama-3.2-11b-vision-instruct"
@@ -1018,13 +1029,22 @@ def _antigravity_complete(
     argv = [cli, "-p", prompt, "--output-format", "json"]
     if model:
         argv += ["--model", model]
+    # agy is an unpinned third-party CLI; services load /etc/radon/env, so a
+    # full os.environ passthrough would hand it every Radon secret. Same
+    # allowlist rationale as subscription_tokens.CLI_ENV_ALLOWLIST.
+    child_env = {
+        k: v
+        for k, v in os.environ.items()
+        if k in _ANTIGRAVITY_CLI_ENV_ALLOWLIST
+    }
+    child_env.update({k: v for k, v in env.items() if isinstance(v, str)})
     try:
         completed = subprocess.run(
             argv,
             capture_output=True,
             text=True,
             timeout=_ANTIGRAVITY_CLI_TIMEOUT_SECONDS,
-            env={**os.environ, **{k: v for k, v in env.items() if isinstance(v, str)}},
+            env=child_env,
             stdin=subprocess.DEVNULL,
             check=False,
         )

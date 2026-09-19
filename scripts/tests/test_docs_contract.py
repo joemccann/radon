@@ -172,14 +172,15 @@ class TestRobinhoodRankRule:
         for rel in _YAHOO_LAST_RESORT_FILES:
             text = (_ROOT / rel).read_text(encoding="utf-8")
             assert "Robinhood" in text, rel
-            assert "IB > UW > Cboe > Robinhood > Yahoo" in text, rel
+            assert "IB > Robinhood > UW > Cboe > Yahoo" in text, rel
 
-    def test_strategies_table_slots_rh_between_cboe_and_yahoo(self):
+    def test_strategies_table_slots_rh_between_ib_and_uw(self):
         text = (_ROOT / "docs" / "strategies.md").read_text(encoding="utf-8")
-        cboe = text.index("| **5th** | Cboe official index feeds")
-        rh = text.index("| **6th** | Robinhood")
+        ib = text.index("| **1st** | Interactive Brokers")
+        rh = text.index("| **2nd** | Robinhood")
+        uw = text.index("| **3rd** | Unusual Whales")
         yahoo = text.index("| **7th ⚠️** | Yahoo Finance")
-        assert cboe < rh < yahoo, "priority table must read Cboe -> Robinhood -> Yahoo"
+        assert ib < rh < uw < yahoo, "priority table must read IB -> Robinhood -> UW -> ... -> Yahoo"
 
     def test_read_only_and_ib_execution_are_stated(self):
         for rel in ("CLAUDE.md", "docs/external-services.md", "docs/strategies.md"):
@@ -205,21 +206,22 @@ class TestRobinhoodRankRule:
             assert name in services, name
         assert "https://agent.robinhood.com/mcp/trading" in services
 
-    def test_numbered_priority_lists_put_cboe_before_rh_before_yahoo(self):
-        # The class of mismatch where RH is numbered directly after UW and
-        # Cboe exists only in prose: the numbered list itself must read
-        # Cboe -> Robinhood -> Yahoo.
+    def test_numbered_priority_lists_put_rh_after_ib_and_before_uw(self):
+        # Robinhood serves commodity price data right after IB so UW calls go
+        # to the endpoints only UW has; Cboe and Yahoo still follow.
         for rel in ("CLAUDE.md", "AGENTS.md", ".pi/AGENTS.md"):
             text = (_ROOT / rel).read_text(encoding="utf-8")
             start = text.index("## Data Source Priority")
             end = text.find("\n## ", start + 1)
             section = text[start:end] if end != -1 else text[start:]
-            cboe = section.index("Cboe official index feeds")
-            rh = section.index("Robinhood")
+            ib = section.index("1. Interactive Brokers")
+            rh = section.index("2. Robinhood")
+            uw = section.index("3. Unusual Whales")
+            cboe = section.index("4. Cboe official index feeds")
             yahoo = section.index("Yahoo Finance — **ABSOLUTE LAST RESORT**")
-            assert cboe < rh < yahoo, (
+            assert ib < rh < uw < cboe < yahoo, (
                 f"{rel}: the numbered priority list must read "
-                "Cboe -> Robinhood -> Yahoo"
+                "IB -> Robinhood -> UW -> Cboe -> Yahoo"
             )
 
     def test_vps_secret_paths_are_pinned(self):
@@ -736,9 +738,11 @@ class TestNightlyLoopIndex:
             )
 
     def test_deepsec_failure_has_a_safe_operator_path(self):
-        """DOC-109: a failed sibling worker is never an in-run repair."""
+        """DOC-109: a failed DeepSec loop is never an in-run repair (it is the
+        sixth loop since 2026-09-18, still operator-bootstrapped)."""
         text = _operations_text()
         assert "A `failed` DeepSec status is operator-only" in text
+        assert "DeepSec itself stays operator-bootstrapped (rail 8)" in text
         assert "`launchctl list | grep radon`" in text
         assert "Do not bootstrap or restart DeepSec from a nightly run." in text
 

@@ -22,6 +22,7 @@ LOOPS = {
     "ci-performance": REPO / "scripts" / "ci_performance_nightly.sh",
     "documentation": REPO / "scripts" / "documentation_nightly.sh",
     "security": REPO / "scripts" / "security_nightly.sh",
+    "security-deepsec": REPO / "scripts" / "security_deepsec_nightly.sh",
 }
 
 # Best first. The top rung is the operator's own default; the next is the same
@@ -49,10 +50,13 @@ CASUAL_RATE_LIMITS = "the 500 mentioned rate limits in a timeout log"
 # The security wrapper refuses to call a phase OK without this; harmless noise
 # for the other four.
 COMPLETION = "SECURITY-NIGHTLY PHASE COMPLETE: audit"
+# The DeepSec wrapper greps its own prefix; each line is inert for the other.
+COMPLETION_DEEPSEC = "SECURITY-DEEPSEC PHASE COMPLETE: audit"
 
 MARKERS = (
     ".radon-weekend-runner",
     ".radon-security-runner",
+    ".radon-security-deepsec-runner",
     ".radon-reliability-runner",
     ".radon-testing-runner",
     ".radon-ci-performance-runner",
@@ -128,6 +132,7 @@ def _stub_bin(
             f"  exit {exhausted_exit}\n"
             "fi\n"
             f'echo "{COMPLETION}"\n'
+            f'echo "{COMPLETION_DEEPSEC}"\n'
             "exit 0\n"
         ),
         "timeout": (
@@ -295,7 +300,7 @@ def _provider_stub(
         "  exit " + str(cap_exit) + "\n"
         "fi\n"
         + "cat <<'RADON_AGENT_EOF'\n"
-        + (COMPLETION if agent_output is None else agent_output)
+        + (COMPLETION + "\n" + COMPLETION_DEEPSEC if agent_output is None else agent_output)
         + "\nRADON_AGENT_EOF\n"
         + "exit 0\n"
     )

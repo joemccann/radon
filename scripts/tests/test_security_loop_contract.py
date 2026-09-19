@@ -402,12 +402,18 @@ class TestTheSetupIsCredentialFree:
             REPO / "config" / "com.radon.security-deepsec.plist",
             clone / "config" / "com.radon.security-deepsec.plist",
         )
-        venv_bin = root / "venv-security" / "bin"
-        venv_bin.mkdir(parents=True)
-        for tool in ("python", "pip"):
-            exe = venv_bin / tool
-            exe.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-            exe.chmod(0o755)
+        # The same setup provisions the DeepSec loop's clone and venv.
+        deepsec = root / "radon-security-deepsec"
+        (deepsec / ".git").mkdir(parents=True)
+        (deepsec / "web").mkdir()
+        (deepsec / "requirements.txt").write_text("", encoding="utf-8")
+        for venv in ("venv-security", "venv-security-deepsec"):
+            venv_bin = root / venv / "bin"
+            venv_bin.mkdir(parents=True)
+            for tool in ("python", "pip"):
+                exe = venv_bin / tool
+                exe.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+                exe.chmod(0o755)
         (root / ".env").write_text("PUSHOVER_USER=dummy\nPUSHOVER_TOKEN=dummy\n", encoding="utf-8")
         (tmp_path / "home").mkdir()
         env = {

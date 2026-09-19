@@ -3,9 +3,9 @@
 # runner (Mac mini). One job fires daily and runs `cycle`: the audit phase,
 # then the remediate phase, then the deliver phase (push, PR, CI green,
 # operator told what to merge), sequentially, in this loop's own clone.
-# DeepSec is a sibling worker (security_deepsec_worker.sh /
-# com.radon.security-deepsec): audit harvests a ready export and must not
-# report TIMEOUT solely because DeepSec is still running.
+# DeepSec is its own nightly loop (security_deepsec_nightly.sh /
+# com.radon.security-deepsec) with the same three phases; this loop
+# neither runs nor harvests it.
 # Sequencing them inside one clone is what keeps two phases from checking
 # out over each other. Each phase still runs standalone (`audit` /
 # `remediate` / `deliver`). See .claude/skills/security-nightly/.
@@ -125,9 +125,6 @@ MODE="${1:?usage: security_nightly.sh audit|remediate|deliver|cycle}"
 
 REPO="${RADON_WEEKEND_REPO:-$HOME/radon-weekend/radon-security}"
 WEEKEND_ROOT="$(dirname "$REPO")"
-# Shared private scratch with the DeepSec sibling worker. Audit harvests
-# whatever export is already ready; DeepSec keeps its own lock and cap.
-SECURITY_SCRATCH="${RADON_WEEKEND_SECURITY_SCRATCH:-$WEEKEND_ROOT/.security-nightly-scratch}"
 # Per-loop venv. The legacy $WEEKEND_ROOT/venv is not deleted here
 # (operator follow-up after this ships).
 VENV="$WEEKEND_ROOT/venv-security"
@@ -162,6 +159,11 @@ NOTIFY_PUSHOVER_USER="$(_notify_cred PUSHOVER_USER || true)"
 NOTIFY_PUSHOVER_TOKEN="$(_notify_cred PUSHOVER_TOKEN || true)"
 # Activate the venv so any python3.13 calls inside the agent use it.
 [[ -f "$VENV/bin/activate" ]] && export PATH="$VENV/bin:$PATH"
+
+# Credential-free loop: the model ladder's default-on auth-file discovery
+# must not read the operator's grants (~/.claude, ~/.codex, ~/.grok,
+# antigravity) from any child python. Env-var-only discovery.
+export RADON_LADDER_NO_AUTH_FILES=1
 DEADMAN_TITLE="Nightly security runner"
 DEADMAN_LABEL="security-nightly"
 ISSUE_SANITIZE=1
@@ -171,6 +173,57 @@ DEADMAN_CREATE_BODY="Rolling dead-man for the nightly ${LOOP_SLUG} loop. Sanitiz
 # ref, not the title: the title is now `Security <date>`, which a
 # hand-written PR could also start with.
 PR_BRANCH_PREFIX="security/"
+
+# Private operator report (2026-09-19). The agent writes a complete,
+# secret-free phase report to $PRIVATE_SCRATCH/latest-report-<phase>.md;
+# the WRAPPER publishes it to the private reports repository with a
+# repo-scoped write deploy key that lives outside the clone (rail 5: the
+# agent never sees the key) and links it from the Pushover page. The
+# public dead-man issue never carries the link or the content (rail 7).
+PRIVATE_SCRATCH="$WEEKEND_ROOT/.security-nightly-scratch"
+REPORTS_REMOTE="${RADON_SECURITY_REPORTS_REMOTE:-git@github.com:joemccann/radon-security-reports.git}"
+REPORTS_WEB="${RADON_SECURITY_REPORTS_WEB:-https://github.com/joemccann/radon-security-reports/blob/main}"
+REPORTS_KEY="$WEEKEND_ROOT/.security-reports-deploy-key"
+REPORTS_DIR="$WEEKEND_ROOT/.security-reports"
+REPORT_URL=""
+
+_redact_secret_classes() {
+  # Secret literals only. Routes, file:line and findings stay: this text
+  # goes to the PRIVATE repository, not the public issue.
+  /usr/bin/sed -E \
+    -e 's,[Bb]earer [^[:space:]]+,Bearer [REDACTED],g' \
+    -e 's#(^|[^[:alnum:]_])(sk-(ant-)?[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,}|xox[abpors]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})#\1[REDACTED]#g' \
+    -e 's,([A-Za-z0-9_]*(TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|APIKEY|_KEY)[A-Za-z0-9_]*[[:space:]]*[=:][[:space:]]*)[^[:space:]]+,\1[REDACTED],g'
+}
+
+publish_private_report() {
+  # Best-effort and silent to the public: a failure here leaves REPORT_URL
+  # empty and the page says so. Never changes the phase exit code.
+  REPORT_URL=""
+  local src="$PRIVATE_SCRATCH/latest-report-${PHASE:-}.md" day rel dst ssh_cmd
+  [[ -n "${PHASE:-}" && -f "$src" && -f "$REPORTS_KEY" ]] || return 0
+  # Only a report written during THIS phase; a stale one would be re-linked.
+  [[ -n "${PHASE_START_MARK:-}" && "$src" -nt "$PHASE_START_MARK" ]] || return 0
+  day="${STAMP:0:4}-${STAMP:4:2}-${STAMP:6:2}"
+  rel="reports/$LOOP_SLUG/$day/$PHASE.md"
+  ssh_cmd="ssh -i $REPORTS_KEY -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20"
+  if [[ ! -d "$REPORTS_DIR/.git" ]]; then
+    rm -rf -- "$REPORTS_DIR"
+    GIT_SSH_COMMAND="$ssh_cmd" net_bounded git clone --quiet --depth 1 "$REPORTS_REMOTE" "$REPORTS_DIR" >/dev/null 2>&1 || return 0
+  else
+    GIT_SSH_COMMAND="$ssh_cmd" net_bounded git -C "$REPORTS_DIR" fetch --quiet --depth 1 origin main >/dev/null 2>&1 || return 0
+    git -C "$REPORTS_DIR" reset --hard --quiet origin/main >/dev/null 2>&1 || return 0
+  fi
+  dst="$REPORTS_DIR/$rel"
+  mkdir -p "$(dirname "$dst")"
+  _redact_secret_classes < "$src" > "$dst" || return 0
+  git -C "$REPORTS_DIR" add -- "$rel" >/dev/null 2>&1 || return 0
+  git -C "$REPORTS_DIR" -c user.name="radon-$LOOP_SLUG" -c user.email="radon-nightly@users.noreply.github.com" \
+    commit --quiet -m "$LOOP_SLUG $PHASE $STAMP" >/dev/null 2>&1 || return 0
+  GIT_SSH_COMMAND="$ssh_cmd" net_bounded git -C "$REPORTS_DIR" push --quiet origin HEAD:main >/dev/null 2>&1 || return 0
+  REPORT_URL="$REPORTS_WEB/$rel"
+  echo "[weekend] private report published: $rel" | tee -a "${RUN_LOG:-/dev/null}" >/dev/null 2>&1 || true
+}
 
 resolve_pr_url() {
   # Newest-updated open PR the skill opened for this loop. A gh failure or
@@ -186,7 +239,7 @@ resolve_pr_url() {
 }
 
 _notify_curl() {
-  local loop="$1" phase="$2" status="$3" pr_url="$4" detail="$5"
+  local loop="$1" phase="$2" status="$3" pr_url="$4" detail="$5" report_url="${6:-}"
   local user token title message
   user="$NOTIFY_PUSHOVER_USER"
   token="$NOTIFY_PUSHOVER_TOKEN"
@@ -196,12 +249,13 @@ _notify_curl() {
   # PATH is $VENV/bin first. A planted or failing PATH tr under set -e
   # aborts before curl; notify_phase's || true would swallow the page.
   message="$(printf '%s' "$status" | /usr/bin/tr -s '[:space:]' ' ')"
+  [[ -n "$report_url" ]] || detail="$detail (no private report this phase)"
   detail="$(printf '%s' "$detail" | /usr/bin/tr -s '[:space:]' ' ')"
   [[ -n "$detail" ]] && message="${message} ${detail}"
   [[ -n "$pr_url" ]] && message="${message} ${pr_url}"
   message="$(printf '%s' "$message" | /usr/bin/tr -s '[:space:]' ' ')"
   local k v
-  for k in token user title message; do
+  for k in token user title message report_url; do
     v="${!k}"
     v="${v//\\/\\\\}"
     v="${v//\"/\\\"}"
@@ -222,6 +276,10 @@ _notify_curl() {
     printf 'data-urlencode = "title=%s"\n' "$title"
     printf 'data-urlencode = "message=%s"\n' "$message"
     printf 'data-urlencode = "priority=0"\n'
+    if [[ -n "$report_url" ]]; then
+      printf 'data-urlencode = "url=%s"\n' "$report_url"
+      printf 'data-urlencode = "url_title=Open private report"\n'
+    fi
   } | /usr/bin/curl -q --config - >/dev/null 2>&1 || true
 }
 
@@ -234,7 +292,8 @@ notify_phase() {
   # so a 0 exit would skip _notify_curl. Always page with /usr/bin/curl.
   local status="$1" pr_url
   pr_url="$(resolve_pr_url)"
-  _notify_curl "$LOOP_SLUG" "$PHASE" "$status" "$pr_url" "log: ${RUN_LOG##*/}" || true
+  publish_private_report || true
+  _notify_curl "$LOOP_SLUG" "$PHASE" "$status" "$pr_url" "log: ${RUN_LOG##*/}" "$REPORT_URL" || true
 }
 
 _sanitize_issue_text() {
@@ -511,33 +570,6 @@ phase_marker_present() {
   phase_marker_in_slice "$slice" "${PHASE:-}"
 }
 
-# origin/main copy, isolated interpreter: same defence as prune / deliver.
-_security_deepsec_py() {
-  [[ -n "${TIMEOUT_BIN:-}" ]] || return 1
-  mkdir -p "$SECURITY_SCRATCH"
-  git -C "$REPO" show origin/main:scripts/security_deepsec.py 2>/dev/null \
-    | "$TIMEOUT_BIN" 30 /usr/bin/python3 -I - "$@"
-}
-
-harvest_deepsec_if_ready() {
-  # Thin handoff. Never fatal: a harvest miss leaves the export for the
-  # next audit/remediate fire. Queue lock lives in security_deepsec.py.
-  [[ "$PHASE" == "audit" || "$PHASE" == "remediate" ]] || return 0
-  _security_deepsec_py harvest --scratch "$SECURITY_SCRATCH" \
-    >> "${RUN_LOG:-/dev/null}" 2>&1 || true
-  return 0
-}
-
-classify_audit_timeout() {
-  local head out
-  head="$(git -C "$REPO" rev-parse HEAD 2>/dev/null || true)"
-  out="$(_security_deepsec_py classify-audit --rc 124 \
-    --scratch "$SECURITY_SCRATCH" --head-sha "$head" \
-    --cap-secs "$CAP_SECS" 2>/dev/null || true)"
-  [[ -n "$out" ]] || return 1
-  printf '%s' "$out"
-}
-
 phase_status() {
   # rc + run log -> the one status string every dead-man channel carries.
   # `mark` is the size of $run_log before THIS round's invocation. RUN_LOG is
@@ -547,17 +579,6 @@ phase_status() {
   # remediations the detector was added to protect. R-426.
   local rc="$1" run_log="$2" mark="${3:-0}"
   if [[ $rc -eq 124 ]]; then
-    # DeepSec is a sibling worker. A 2h audit cap must not mark the night
-    # TIMEOUT solely because DeepSec is still chewing (2026-09-13).
-    if [[ "${PHASE:-}" == "audit" ]]; then
-      local classified status
-      classified="$(classify_audit_timeout || true)"
-      status="${classified%%$'\t'*}"
-      if [[ "$status" == "OK (fast engines complete; DeepSec still running)" ]]; then
-        printf '%s' "$status"
-        return 0
-      fi
-    fi
     printf 'TIMEOUT after %ss' "$CAP_SECS"
   elif [[ $rc -ne 0 ]]; then
     printf 'FAILED (exit %s)' "$rc"
@@ -835,6 +856,11 @@ begin_phase() {
   # One log per phase: the transient-network detector reads $RUN_LOG.
   # Issue comments do not include a run-log tail.
   RUN_LOG="$LOG_DIR/$PHASE-$STAMP.log"
+  # Phase-start timestamp for publish_private_report: only a report written
+  # after this instant belongs to this phase (dotfile: the log rotation's
+  # `ls -1t` never lists it).
+  PHASE_START_MARK="$LOG_DIR/.phase-start-$STAMP"
+  : > "$PHASE_START_MARK"
   RC=0
   # REL-198 (R-533): rung carry across phases is intended; flag carry is
   # not — an audit-phase exhaustion mislabelled a successful remediate.
@@ -1321,7 +1347,6 @@ run_phase() {
   begin_phase "$1"
   trap on_crash ERR
   echo "[security-nightly] $PHASE start $STAMP repo=$REPO cap=${CAP_SECS}s${BILLING_IGNORED:+ ignored=${BILLING_IGNORED// /,}}" | tee -a "$RUN_LOG"
-  harvest_deepsec_if_ready
   arm_deliver_record
   # NOT bare. Under `set -Eeuo pipefail` with the ERR trap armed, a failed
   # fetch made on_crash report and then the shell exit anyway — so
@@ -1427,10 +1452,6 @@ run_phase() {
   # mode-0700 run dir and archive.
   local status
   status="$(phase_status "$RC" "$RUN_LOG" "$ROUND_LOG_MARK")"
-  if [[ "$status" == "OK (fast engines complete; DeepSec still running)" ]]; then
-    RC=0
-  fi
-  harvest_deepsec_if_ready
   # An exhausted ladder is a provider spend stop, which the skill classifies as
   # INCOMPLETE — not failed, and never OK. FAILED is neither OK nor
   # INCOMPLETE*, so it fell to the generic `*)` arm: the one arm that withholds
@@ -1479,8 +1500,6 @@ run_phase() {
       report "$status" "CI could not be made green inside the deliver cap — this phase is INCOMPLETE; the branch and PR number are in the private run-record and the next fire resumes them" ;;
     "INCOMPLETE (exit 0 without the deliver verdict line)")
       report "$status" "the agent exited 0 without declaring the deliver verdict — this phase is INCOMPLETE; the next fire resumes the same private run, branch and PR" ;;
-    "OK (fast engines complete; DeepSec still running)")
-      report "$status" "fast scanners finished. DeepSec is the sibling worker and was left running. Non-DeepSec engines may advance. DeepSec SHA did not." ;;
     OK)
       report "$status" "0 public findings to disclose. The phase completed. Verified findings stay private." ;;
     INCOMPLETE*)
