@@ -534,6 +534,15 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
     expect(requiresIb("model-catalog")).toBe(false);
   });
 
+  it("slm-tagger-monitor is registered as scheduled with a uniform 26h window", () => {
+    expect(SERVICE_FRESHNESS_WINDOWS["slm-tagger-monitor"]).toBeDefined();
+    expect(getServiceCategory("slm-tagger-monitor")).toBe("scheduled");
+    for (const state of ["open", "extended", "closed"] as MarketState[]) {
+      expect(getFreshnessWindowMs("slm-tagger-monitor", state)).toBe(26 * HOUR);
+    }
+    expect(requiresIb("slm-tagger-monitor")).toBe(false);
+  });
+
   it("aa-frontier-basket is monitored on its daily non-IB cadence", () => {
     expect(SERVICE_FRESHNESS_WINDOWS["aa-frontier-basket"]).toBeDefined();
     expect(getServiceCategory("aa-frontier-basket")).toBe("scheduled");

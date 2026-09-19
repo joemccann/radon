@@ -174,6 +174,10 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # GPU index ticker. Uniform 26h window. Public HTTP only, no IB.
     "liquidcompute":    {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     "model-catalog":    {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+    # slm-tagger-monitor — radon-slm-tagger-monitor.timer, daily 07:10 UTC.
+    # No-op when RADON_SLM_TAGGER_MODE is off or shadow. 26h window. No IB.
+    # The sidecar itself has no service_health row (unit watchdog only).
+    "slm-tagger-monitor": {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     # yield-curve — radon-yield-curve.timer, daily 22:30 UTC every calendar
     # day (weekend/holiday runs heartbeat with no new Treasury rows). Uniform
     # 26h window: no weekend/holiday gap to widen for. treasury.gov + Yahoo
@@ -565,6 +569,7 @@ BUCKETS: dict[str, list[str]] = {
         # Daily 03:10 UTC LLM provider frontier model list refresh — hourly
         # check surfaces a missed run within 1h of the 26h window expiring.
         "model-catalog",
+        "slm-tagger-monitor",
         "aa-frontier-basket",
         "ai-cycle-backfill",
         "ai-cycle",
