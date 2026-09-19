@@ -19,3 +19,8 @@
 .ruleButton:hover { background: var(--bg-panel-raised); }
 .ruleButton:disabled { cursor: default; opacity: .5; }
 .ruleButton:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 3px; }
+.excerpt { margin: 0; font-size: 13px; line-height: 1.5; color: var(--text-primary); overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }
+.reason { margin: 0; font-size: 13px; line-height: 1.5; color: var(--text-secondary); overflow-wrap: anywhere; }
+.reasonLabel { font-weight: 600; color: var(--text-primary); }
+.pdf { justify-self: start; display: inline-flex; align-items: center; min-height: 44px; font-size: 12px; color: var(--signal-core-text); }
+.pdf:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 3px; }

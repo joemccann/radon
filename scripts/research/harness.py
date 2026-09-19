@@ -178,15 +178,24 @@ def evaluate(run, corpus, golden, keys=None):
     return _finish(report, golden, produced, dropped_keys)
 
 
-def mirror_outcomes(corpus, record=None):
+def mirror_outcomes(corpus, record=None, store=None):
     """Backfill the Turso outcome mirror for every document that already has a v2 audit."""
     if record is None:
-        from research.publish import record_outcome as record
+        from research.publish import record_outcome as record, store_asset as store
     count = 0
     for doc in corpus.documents():
         review = doc.review()
         if not review or review.get('pipeline') != 'v2':
             continue
+        if 'document' not in review:
+            # Audits written before the context column: rebuild it from the cached extraction.
+            document = {'page_count': doc.page_count, 'excerpt': ' '.join(doc.page_text(1).split())[:900]}
+            if not review.get('posts') and store is not None:
+                try:
+                    document['source_url'] = store(json.loads((doc.evidence_dir / 'evidence.json').read_text())['source_path'])
+                except Exception:
+                    pass
+            review['document'] = document
         record({'key': doc.key, 'folder_date': doc.folder_date, 'metadata': doc.metadata}, review)
         count += 1
     return count
