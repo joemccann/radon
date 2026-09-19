@@ -63,6 +63,8 @@ describe("assistant model selection", () => {
 
   beforeEach(() => {
     vi.resetModules();
+    // Keep a developer laptop's real ~/.grok/auth.json out of provider resolution.
+    process.env.GROK_AUTH_FILE = "/nonexistent/radon-no-grok-auth.json";
     for (const key of ENV_KEYS) saved[key] = process.env[key];
     process.env.ASSISTANT_MOCK = "1";
   });

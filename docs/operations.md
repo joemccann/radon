@@ -124,6 +124,19 @@ read-only into the API container. The key is never passed through Docker
 arguments or environment values; the staged plaintext is removed by
 `ExecStopPost` after the container stops.
 
+**Subscription credential binds (2026-09-18).** `radon-app-runtime` also
+binds the operator's CLI subscription grants, each read-only and only when the
+directory exists on the host: `/home/radon/.grok`, `/home/radon/.codex` and
+`/home/radon/.claude` land at the same paths inside every app container, with
+`HOME=/home/radon` pinned so `Path.home()` and `os.homedir()` resolve to them.
+Never the whole home directory. The model ladders (Python
+`scripts/clients/model_ladder.py`, Next.js `web/lib/llm/provider.ts`) meter
+against those subscriptions first and treat prepaid `XAI_API_KEY` and friends
+as the fallback; before this bind no container could see the files and every
+container-side rung silently ran on prepaid credits, which is how an exhausted
+xAI wallet took down the newsfeed voice rewrite. `radon-subscription-tokens`
+keeps the files live on the host ([subscription-tokens.md](subscription-tokens.md)).
+
 The staged copy is `root:radon-secrets 0040` in a `root:radon-secrets 0050`
 directory, and the container is granted that gid at start with
 `--group-add` (R-619). The API container runs `--user radon`, so a copy owned

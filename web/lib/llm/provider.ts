@@ -11,8 +11,10 @@
  * shapes. A configurable fallback provider is tried when the primary fails.
  * Honors ASSISTANT_MOCK for offline tests.
  *
- * Note: SuperGrok / grok.com consumer subscriptions are not an API. CMD+J
- * uses the xAI Inference API (console.x.ai) with XAI_API_KEY / GROK_API_KEY.
+ * xAI auth is SUBSCRIPTION FIRST (operator mandate 2026-09-18): the OIDC
+ * grant the grok CLI writes to ~/.grok/auth.json (kept live on the host by
+ * radon-subscription-tokens) is accepted by api.x.ai as a Bearer, so prepaid
+ * XAI_API_KEY / GROK_API_KEY credits are only the fallback meter.
  */
 
 import { DEFAULT_MODELS } from "./frontier";
@@ -93,6 +95,9 @@ const KNOWN_PROVIDERS: readonly LlmProviderName[] = [
 
 const ANTHROPIC_ENV_KEYS = ["ANTHROPIC_API_KEY", "CLAUDE_CODE_API_KEY", "CLAUDE_API_KEY"];
 const XAI_ENV_KEYS = ["XAI_API_KEY", "GROK_API_KEY"];
+const XAI_OAUTH_ENV_KEYS = ["XAI_OAUTH_TOKEN", "GROK_OAUTH_TOKEN"];
+/** Re-read ~/.grok/auth.json at most this often; the daemon rewrites it every 30 min. */
+const GROK_AUTH_FILE_TTL_MS = 30_000;
 
 /**
  * The model each provider is called with when nothing else names one: no
@@ -119,12 +124,77 @@ function resolveAnthropicApiKey(): string | undefined {
   return undefined;
 }
 
+/** Prepaid xAI credits: the fallback meter, never the first choice. */
 export function resolveXaiApiKey(): string | undefined {
   for (const key of XAI_ENV_KEYS) {
     const value = envValue(key);
     if (value) return value;
   }
   return undefined;
+}
+
+let grokAuthFileCache: { path: string; readAt: number; token: string | undefined } | undefined;
+
+function grokAuthFilePath(): string | undefined {
+  const explicit = envValue("GROK_AUTH_FILE");
+  if (explicit) return explicit;
+  const home = envValue("HOME");
+  return home ? `${home.replace(/\/$/, "")}/.grok/auth.json` : undefined;
+}
+
+/**
+ * The grok CLI's ~/.grok/auth.json: one entry per `<issuer>::<client_id>`,
+ * each carrying the OIDC access token as `key` and an RFC 3339 `expires_at`.
+ * An expired entry is skipped so a stale file degrades to the prepaid key
+ * instead of a guaranteed 401.
+ */
+function readGrokAuthFileToken(filePath: string): string | undefined {
+  try {
+    // Lazy require keeps this module importable where node:fs is absent
+    // (edge builds never take the branch: no HOME, no GROK_AUTH_FILE).
+    const fs = require("node:fs") as typeof import("node:fs");
+    const parsed: unknown = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    if (!parsed || typeof parsed !== "object") return undefined;
+    for (const entry of Object.values(parsed as Record<string, unknown>)) {
+      if (!entry || typeof entry !== "object") continue;
+      const { key, expires_at: expiresAt } = entry as Record<string, unknown>;
+      if (typeof key !== "string" || !key.trim()) continue;
+      if (typeof expiresAt === "string") {
+        const expiry = Date.parse(expiresAt);
+        if (Number.isFinite(expiry) && expiry <= Date.now()) continue;
+      }
+      return key.trim();
+    }
+  } catch {
+    // Missing, unreadable or malformed file: no subscription token.
+  }
+  return undefined;
+}
+
+/** SuperGrok subscription grant: env override first, then ~/.grok/auth.json. */
+export function resolveXaiSubscriptionToken(): string | undefined {
+  for (const key of XAI_OAUTH_ENV_KEYS) {
+    const value = envValue(key);
+    if (value) return value;
+  }
+  const filePath = grokAuthFilePath();
+  if (!filePath) return undefined;
+  const now = Date.now();
+  if (
+    grokAuthFileCache &&
+    grokAuthFileCache.path === filePath &&
+    now - grokAuthFileCache.readAt < GROK_AUTH_FILE_TTL_MS
+  ) {
+    return grokAuthFileCache.token;
+  }
+  const token = readGrokAuthFileToken(filePath);
+  grokAuthFileCache = { path: filePath, readAt: now, token };
+  return token;
+}
+
+/** Subscription grant when live, else prepaid credits. */
+export function resolveXaiAuth(): string | undefined {
+  return resolveXaiSubscriptionToken() ?? resolveXaiApiKey();
 }
 
 function isKnownProvider(value: string | undefined): value is LlmProviderName {
@@ -156,7 +226,7 @@ export function providerForModel(model: string | undefined): Exclude<LlmProvider
  * 1. Explicit request.provider
  * 2. The provider that owns request.model (a per-turn selection outranks host env)
  * 3. LLM_PROVIDER env
- * 4. Auto-prefer xAI when XAI_API_KEY / GROK_API_KEY is set (CMD+J → Grok)
+ * 4. Auto-prefer xAI when a Grok subscription grant or XAI_API_KEY / GROK_API_KEY is set (CMD+J → Grok)
  * 5. Anthropic fallback
  */
 export function resolveProvider(
@@ -172,7 +242,7 @@ export function resolveProvider(
   if (isKnownProvider(requested)) {
     return normalizeProvider(requested);
   }
-  if (resolveXaiApiKey()) {
+  if (resolveXaiAuth()) {
     return "xai";
   }
   return DEFAULT_PROVIDER === "grok" ? "xai" : DEFAULT_PROVIDER;
@@ -345,7 +415,7 @@ type OpenAiOutboundMessage =
 function openAiConfig(provider: Exclude<LlmProviderName, "grok" | "anthropic" | "gemini">) {
   if (provider === "xai") {
     return {
-      apiKey: resolveXaiApiKey(),
+      apiKey: resolveXaiAuth(),
       baseUrl: envValue("XAI_BASE_URL") || envValue("GROK_BASE_URL") || "https://api.x.ai/v1",
       model: envValue("XAI_MODEL") || envValue("GROK_MODEL") || DEFAULT_MODELS.xai,
       label: "xAI Grok",
@@ -458,8 +528,8 @@ async function callOpenAiCompatible(
   if (!config.apiKey) {
     if (provider === "xai") {
       throw new Error(
-        "Missing xAI API key. Set XAI_API_KEY (or GROK_API_KEY) from https://console.x.ai. " +
-          "A SuperGrok / grok.com subscription alone is not enough for server-side chat.",
+        "Missing xAI auth. Log the grok CLI in (~/.grok/auth.json), set XAI_OAUTH_TOKEN, " +
+          "or set a prepaid XAI_API_KEY / GROK_API_KEY from https://console.x.ai.",
       );
     }
     throw new Error(`Missing ${config.label} API key.`);
