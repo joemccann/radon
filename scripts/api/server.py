@@ -5592,7 +5592,8 @@ async def pi_exec(payload: dict, request: Request):
 async def ticker_ratings(ticker: str):
     """Analyst ratings + targets for a single ticker.
 
-    Thin passthrough to scripts/fetch_analyst_ratings.py with --json. The
+    Thin passthrough to scripts/fetch_analyst_ratings_rh.py (IB -> Robinhood
+    consensus -> UW) with --json. The
     script outputs a JSON array (one entry per ticker requested); for the
     single-ticker case we unwrap and return the first element so the Next.js
     route can render it directly.
@@ -5601,7 +5602,7 @@ async def ticker_ratings(ticker: str):
     if not upper:
         raise HTTPException(status_code=400, detail="ticker is required")
     result = await run_script(
-        "fetch_analyst_ratings.py", [upper, "--json"], timeout=60
+        "fetch_analyst_ratings_rh.py", [upper, "--json"], timeout=60
     )
     if not result.ok:
         raise HTTPException(status_code=502, detail=result.error)
