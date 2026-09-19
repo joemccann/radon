@@ -684,3 +684,39 @@ All three sequential full runs completed on source head be6dafd5. The final stag
 REL-258/259/151/152/226/262 are DONE with these full-run results and their red/green evidence above. REL-260 is source-DONE and BLOCKED for browser/visual acceptance after three installed-browser attempts, with the operator command above. REL-128 existing route proof: six mocked requests produced three scans with same-ticker sharing, different-ticker independence and subsequent rescanning. REL-251–REL-256 prior missing-dependency/missing-sentinel closing blocks are superseded by 144 passing permanent drills and these three completed full runs; no cloud-green claim is made. All inherited P2 and operator/design acceptance remains in the complete issue #81 handoff.
 
 Review: seven verified source-actionable P1 task groups implemented in six substantive commits. No safety assertion, gate, refusal or skip was weakened. Root-only installation and browser verification remain operator actions. Publication and final notification receipts are recorded durably on issue #81 and in the reliability deliver scratch, not inferred from this ledger.
+
+## Remediate 2026-09-19 — reduced P0/P1
+
+Authoritative handoff: issue #81, comment 5742785406; audited-through remains 386a287367a22c4fe280a5863f4e38e7d24f9e7a. Started on that base, then fast-forwarded to d5658e5a before remediation to preserve the upstream writable-lock fix 21a5c90c. RADON_WEEKEND_REDUCED=1; REL-264/266/267 and all inherited P2 acceptance remain open. No live operations.
+
+| Task | Status | Red / green evidence | Implementation |
+|---|---|---|---|
+| REL-263 / R-684 | Source complete; closing gates pending | RED 20 lock cases failed, held-lock control passed; GREEN subscription group 124 passed | Lock setup and non-contention acquisition errors refuse all credential modes with exit 78 and error health; held locks safely skip. Preserves upstream state-directory lock location. |
+
+Baseline on 386a2873 completed with DONE: Python 13999 passed, 1 failed, 19 skipped, 90 deselected; Vitest 9788 passed; cloud 1902 passed, 4 failed, 77 skipped. The Python helper timeout case passed on isolated current-main rerun. The four cloud process-supervision failures match the inherited runner restriction class; raw rc=1 is retained. Long-suite acceptance is still pending; these focused-complete source changes are preserved locally before the closing stage as required by the remediation mandate.
+
+| REL-265 / R-686 | Source complete; closing gates pending | RED Python 19 failed/1 completed control passed; TypeScript 10 failed/1 completed control passed. GREEN Python/reviewer group 161 passed, 23 subtests passed; TypeScript group 78 passed. | Both SSE adapters require successful terminal completion; EOF, malformed terminals and failure/incomplete events discard partial text and valid-looking reviewer JSON. Safe configured fallback and transport closure remain verified. |
+
+### Closing-stage recovery
+
+First closing attempt is rejected: Python 14211 passed, 1 failed, 2 collection errors, 19 skipped. Upstream d5658e5a added eager PDF imports to tests while this runner lacked the already-pinned pypdfium2 5.13.0 and pdf-inspector 1.17.0. Both exact packages were installed into writable scratch and temporarily exposed through workspace import links; no dependency source is committed. The new upstream panic-index live Cboe test counted every future session against a fixed 4016-observation C8 anchor. RED 4017 != 4016; the gate unblock now bounds all four input series through the original 2026-09-17 anchor, preserving every numeric/count/dropped-date assertion. GREEN recovery group: 51 passed. No production code or gate skip changed.
+
+The sandbox denied terminating the detached owned stage; its scheduled steps are awaited. Run 1 is not counted toward closure. After recovery, runs 2 and 3 plus a further complete run must establish the required consecutive series.
+
+### Live smoke-test collection guard
+
+Inspection of the initial suite warnings found scripts/trade_blotter/test_integration.py was collected by the default gate despite explicitly requiring a live IB Gateway. The repository already excludes the integration marker by default, but this module lacked it. Applied that classification without removing or altering any existing smoke-test assertion. New collection-only regression tests prove default selection contains zero live smoke cases and explicit integration opt-in retains all four. RED 2 failed on the untouched module; GREEN 2 passed after classification. No explicit integration test execution was used for this proof. Initial runs are not claimed as isolated closing evidence; final acceptance restarts at run 3 and requires two additional complete runs after the scheduled stage finishes.
+
+### Final closing verification 2026-09-19
+
+REL-263/R-684 and REL-265/R-686 are DONE in this reduced P0/P1 run. The gate repairs are verified. Permanent drills: 107 Python + 12 Vitest = 119 passed. Runs 1/2 are excluded from closing evidence; the final source was unchanged throughout the following three consecutive completed runs.
+
+| Run | Python | Vitest | Cloud (raw rc=1) |
+|---|---|---|---|
+| 3 | 14243 passed, 1 skipped, 39 warnings in 1201.30s (0:20:01) | 9832 passed (9832) | 4 failed, 1909 passed, 77 skipped in 393.35s (0:06:33) |
+| 4 | 14243 passed, 1 skipped, 39 warnings in 1212.46s (0:20:12) | 9832 passed (9832) | 4 failed, 1909 passed, 77 skipped in 396.38s (0:06:36) |
+| 5 | 14243 passed, 1 skipped, 39 warnings in 1405.20s (0:23:25) | 9832 passed (9832) | 4 failed, 1909 passed, 77 skipped in 392.26s (0:06:32) |
+
+All detached stages wrote their completion sentinels. Cloud raw rc=1 is retained: the exact four descendant-cleanup/privileged-timeout failures match the untouched baseline in every run. No cloud-green claim is made. All temporary dependency import links were removed after the final stage; the required persistent runner dependency-install command is carried to the PR and issue.
+
+Review: two eligible P1 findings implemented with failing fault-injection tests first, plus two gate repairs with all original assertions retained. The live Gateway smoke module uses the repository's established explicit integration opt-in; the new proof is collection-only. No Gateway administrative, live-order or trading-halt mutation was issued. All inherited operator/design residuals and excluded P2 acceptance remain in the complete issue #81 checkpoint. Guarded publication, exact-head CI registration and notification receipts are recorded in durable runner scratch and the issue; deliver owns CI completion.
