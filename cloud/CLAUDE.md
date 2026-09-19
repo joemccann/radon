@@ -379,6 +379,11 @@ Antigravity `agy`) from the encrypted secret store, with a daily keepalive
 probe; a dead codex or grok grant pages a one-tap login link. Runbook:
 [`docs/subscription-tokens.md`](../docs/subscription-tokens.md).
 
+`setup-vps.sh` also inventories `radon-slm-tagger.service` plus
+`radon-slm-tagger-monitor.{service,timer}` so a fresh host has the unit files.
+`enable_services` skips all three until Joe enables them after bakeoff `C WINS`.
+`RADON_SLM_TAGGER_MODE` stays `off`. Spec: [`docs/ml/newsfeed-slm-tagger.md`](../docs/ml/newsfeed-slm-tagger.md).
+
 
 Canonical unit files are copied root-owned to `/etc/systemd/system`; they are
 not symlinked from the checkout.
