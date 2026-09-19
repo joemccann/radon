@@ -443,9 +443,11 @@ codebase-scan skill or agents). Claude Security performs nondeterministic
 source review and independently panel-verifies candidates; it does not isolate
 the repository or apply patches. **Install/preflight is one-time operator
 bootstrap** (rail 8): a human installs `claude plugin install
-claude-security@claude-plugins-official --scope user`, records approved
-`claude --version` and `claude plugin list --json` values, and freezes updates
-with `DISABLE_AUTOUPDATER=1` (set in the security plist). If the plugin, the
+claude-security@claude-plugins-official --scope user`. The installed Claude
+Code and plugin versions are NOT pinned (operator decision 2026-09-19: the
+CLI updates faster than a recorded pin can follow, and a version mismatch
+kept blocking the scan stage); record the observed `claude --version` in the
+run-record and proceed. If the plugin, the
 dedicated agent `claude-security:claude-security`, the `Workflow` tool,
 Dynamic Workflows, or `auto`-mode permission is unavailable, the stage is
 `OPERATOR_REQUIRED` — never fall back to `bypassPermissions` or an improvised
@@ -500,7 +502,7 @@ claude --agent claude-security:claude-security --permission-mode auto \
 
 For the budgeted monthly refresh, replace the first sentence with a
 whole-repository medium-effort scan. Treat a missing `Workflow` tool,
-unavailable agent/`auto` mode, interactive question, version mismatch,
+unavailable agent/`auto` mode, interactive question,
 incomplete inventory, timeout, provider budget/spend stop, or missing
 revision stamp as an INCOMPLETE scan; do not downgrade to a weaker mode. Keep the timestamped `CLAUDE-SECURITY-*/`
 Markdown/JSONL/SARIF/revision artifacts private (relocate to the mode-0700 run
