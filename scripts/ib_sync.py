@@ -61,6 +61,7 @@ from clients.ib_client import (
 from clients.ib_timing import PhaseTimer
 from clients.journal_basis import (
     compute_open_basis_and_net_qty_for_tickers,
+    con_id_of,
 )
 from db.client import get_db
 from db.readers import (
@@ -886,6 +887,7 @@ def build_journal_basis_lookup(client: IBClient, db=None) -> dict[str, float]:
 
     tickers = sorted({str(pos.contract.symbol).strip().upper() for pos in option_positions})
     journal_keys: set[str] = set()
+    conid_keys: dict[str, str] = {}
     for pos in option_positions:
         contract = pos.contract
         journal_key = _journal_basis_key(
@@ -896,12 +898,16 @@ def build_journal_basis_lookup(client: IBClient, db=None) -> dict[str, float]:
         )
         if journal_key:
             journal_keys.add(journal_key)
+            con_id = con_id_of({"conId": getattr(contract, "conId", None)})
+            if con_id is not None:
+                conid_keys[con_id] = journal_key
 
     try:
         lookup, net_qty_lookup = compute_open_basis_and_net_qty_for_tickers(
             db,
             tickers=tickers,
             contract_keys=sorted(journal_keys),
+            conid_keys=conid_keys,
         )
     except Exception as exc:
         joined_tickers = ", ".join(tickers)
