@@ -27,7 +27,7 @@ def _iso(dt: datetime) -> str:
 @pytest.fixture
 def env(monkeypatch):
     conn = sqlite3.connect(":memory:")
-    conn.executescript((SCRIPTS / "db" / "migrations" / "0080_tv_alert_events.sql").read_text())
+    conn.executescript((SCRIPTS / "db" / "migrations" / "0081_tv_alert_events.sql").read_text())
     pushes: list[dict] = []
     health: list[tuple] = []
     monkeypatch.setattr(drain, "_query", lambda sql, args=(): conn.execute(sql, args).fetchall())

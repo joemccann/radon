@@ -319,7 +319,7 @@ does not mean Turso necessarily failed.
 
 ### TradingView alerts
 
-TradingView alert fires `POST` to `app.radon.run/api/webhooks/tradingview/<TV_WEBHOOK_PATH_TOKEN>`. Caddy admits only TradingView's four sender IPs and caps the body at 16KB. The route checks the path token and the body `secret` (`TV_WEBHOOK_SECRET`) in constant time, then writes the raw body to Turso `tv_alert_events` (migration 0080) before it parses anything. `scripts/tv_alerts_drain.py` runs every 5 minutes via `radon-tv-alerts.timer`. It resolves tickers, marks 5-second exact repeats in `duplicate_of`, sends one normal-priority Pushover digest per cycle (none when there are no new rows), prunes rows older than 180 days, and heartbeats `service_health[tv-alerts-drain]` (20-min window). Both secrets live in `/etc/radon/env`. Spec: [`tradingview-integration.md`](tradingview-integration.md).
+TradingView alert fires `POST` to `app.radon.run/api/webhooks/tradingview/<TV_WEBHOOK_PATH_TOKEN>`. Caddy admits only TradingView's four sender IPs and caps the body at 16KB. The route checks the path token and the body `secret` (`TV_WEBHOOK_SECRET`) in constant time, then writes the raw body to Turso `tv_alert_events` (migration 0081) before it parses anything. `scripts/tv_alerts_drain.py` runs every 5 minutes via `radon-tv-alerts.timer`. It resolves tickers, marks 5-second exact repeats in `duplicate_of`, sends one normal-priority Pushover digest per cycle (none when there are no new rows), prunes rows older than 180 days, and heartbeats `service_health[tv-alerts-drain]` (20-min window). Both secrets live in `/etc/radon/env`. Spec: [`tradingview-integration.md`](tradingview-integration.md).
 
 ### Bounded vs process-bound Turso writes (R5 partial)
 
