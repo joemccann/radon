@@ -1,0 +1,27 @@
+[Unit]
+Description=Radon private GPU inference
+After=network-online.target docker.service tailscaled.service
+Wants=network-online.target
+Requires=docker.service tailscaled.service
+StartLimitIntervalSec=600
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/sbin/radon-slm-runtime run
+ExecStop=/usr/local/sbin/radon-slm-runtime stop
+Restart=on-failure
+RestartSec=15
+TimeoutStartSec=0
+TimeoutStopSec=90
+UMask=0077
+# This root helper owns Docker; the model container runs as radon, not root.
+NoNewPrivileges=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/radon/slm
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
