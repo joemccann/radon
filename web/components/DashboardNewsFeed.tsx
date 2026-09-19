@@ -18,6 +18,7 @@ import { useBookmarks } from "../lib/useBookmarks";
 import NewsfeedTagBar from "./NewsfeedTagBar";
 import NewsfeedLightbox, { type NewsfeedLightboxFocus } from "./NewsfeedLightbox";
 import NewsfeedShare from "./NewsfeedShare";
+import ResearchFeedback from "./ResearchFeedback";
 import { getImageSource } from "@/lib/newsfeedSource";
 import NewsfeedPostContent from "./NewsfeedPostContent";
 import StarToggle from "./StarToggle";
@@ -165,14 +166,21 @@ export default function DashboardNewsFeed() {
     [toggleBookmark],
   );
 
+  // A saved thumbs-down leaves the feed at once; the server filters it on every later read.
+  const [hiddenPosts, setHiddenPosts] = useState<Set<string>>(new Set());
+  const hidePost = useCallback((postId: string) => {
+    setHiddenPosts((prev) => new Set(prev).add(postId));
+  }, []);
+
   const filteredPosts = useMemo(() => {
-    if (selectedTags.size === 0) return posts;
+    const visible = hiddenPosts.size === 0 ? posts : posts.filter((post) => !hiddenPosts.has(post.id));
+    if (selectedTags.size === 0) return visible;
     const required = Array.from(selectedTags);
-    return posts.filter((post) => {
+    return visible.filter((post) => {
       const postTags = Array.isArray(post.tags) ? post.tags : [];
       return required.every((t) => postTags.includes(t));
     });
-  }, [posts, selectedTags]);
+  }, [posts, selectedTags, hiddenPosts]);
 
   const totalPages = Math.max(1, Math.ceil(filteredPosts.length / PAGE_SIZE));
 
@@ -471,6 +479,7 @@ export default function DashboardNewsFeed() {
                     {` · ${post.source.documentDate} · pp. ${post.source.pages.join(", ")}`}
                     {!firstImage ? " · Text-only source evidence" : ""}
                   </p> : null}
+                  {post.source ? <ResearchFeedback postId={post.id} initial={post.feedback} onHidden={hidePost} /> : null}
                   <NewsfeedShare post={post} imageUrl={firstImage ?? undefined} />
                   <div data-testid="news-feed-footer" className={`news-feed-footer ${styles.footer}`}>
                     <span
