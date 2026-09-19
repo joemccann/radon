@@ -9,6 +9,7 @@ import {
   toOpenAiMessages,
   type LlmChatRequest,
 } from "@/lib/llm/provider";
+import { resetSubscriptionAuthCache } from "@/lib/llm/subscriptionAuth";
 
 type FetchCall = { url: string; init: RequestInit };
 
@@ -55,6 +56,13 @@ const ENV_KEYS = [
   "XAI_OAUTH_TOKEN",
   "GROK_OAUTH_TOKEN",
   "GROK_AUTH_FILE",
+  "CLAUDE_CODE_OAUTH_TOKEN",
+  "CLAUDE_CONFIG_DIR",
+  "CODEX_OAUTH_TOKEN",
+  "CODEX_ACCOUNT_ID",
+  "CODEX_HOME",
+  "RADON_LADDER_ALLOW_PREPAID",
+  "CHATGPT_CODEX_RESPONSES_URL",
   "XAI_BASE_URL",
   "GROK_BASE_URL",
   "XAI_MODEL",
@@ -76,6 +84,9 @@ describe("llm provider", () => {
     // A developer laptop carries a real ~/.grok/auth.json; keep the operator's
     // subscription grant out of every case that does not opt in.
     process.env.GROK_AUTH_FILE = path.join(os.tmpdir(), "radon-no-grok-auth.json");
+    process.env.CLAUDE_CONFIG_DIR = path.join(os.tmpdir(), "radon-no-claude-config");
+    process.env.CODEX_HOME = path.join(os.tmpdir(), "radon-no-codex-home");
+    resetSubscriptionAuthCache();
     // The package test runner forces ASSISTANT_MOCK=1 + NODE_ENV=test; opt OUT
     // of mock mode for the fetch-path tests. The mock test re-enables it.
     process.env.ASSISTANT_MOCK = "0";
@@ -101,8 +112,8 @@ describe("llm provider", () => {
     expect(result.text.length).toBeGreaterThan(0);
   });
 
-  it("auto-selects xAI when XAI_API_KEY is set and LLM_PROVIDER is unset", () => {
-    process.env.XAI_API_KEY = "xai-test";
+  it("auto-selects xAI when a Grok subscription grant is set and LLM_PROVIDER is unset", () => {
+    process.env.XAI_OAUTH_TOKEN = "xai-test";
     expect(resolveProvider({})).toBe("xai");
   });
 
@@ -111,7 +122,7 @@ describe("llm provider", () => {
   });
 
   it("targets xAI chat/completions with Grok model defaults", async () => {
-    process.env.XAI_API_KEY = "xai-test-key";
+    process.env.XAI_OAUTH_TOKEN = "xai-test-key";
     const { calls } = captureFetch(() =>
       jsonResponse({
         model: "grok-4",
@@ -184,7 +195,7 @@ describe("llm provider", () => {
   });
 
   it("defaults to Anthropic with the native message shape when no xAI key", async () => {
-    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat-test";
     const { calls } = captureFetch(() =>
       jsonResponse({
         model: "claude-sonnet-4-5-20250929",
@@ -200,11 +211,17 @@ describe("llm provider", () => {
     const call = calls[0];
     expect(call.url).toContain("api.anthropic.com");
     expect(call.init.signal).toBeInstanceOf(AbortSignal);
-    expect((call.init.headers as Record<string, string>)["x-api-key"]).toBe("sk-ant-test");
+    expect((call.init.headers as Record<string, string>).authorization).toBe("Bearer sk-ant-oat-test");
+    expect((call.init.headers as Record<string, string>)["anthropic-beta"]).toBe("oauth-2025-04-20");
     expect((call.init.headers as Record<string, string>)["anthropic-version"]).toBe("2023-06-01");
 
     const payload = bodyOf(call);
-    expect(payload.system).toBe("You are Radon.");
+    // A Claude Max grant is honoured only for Claude Code traffic: the identity
+    // block leads, the caller's system text follows.
+    expect(payload.system).toEqual([
+      { type: "text", text: "You are Claude Code, Anthropic's official CLI for Claude." },
+      { type: "text", text: "You are Radon." },
+    ]);
     expect(payload.messages).toEqual([{ role: "user", content: "What is flow?" }]);
     expect(payload).toHaveProperty("max_tokens");
     expect(payload.model).toBe("claude-opus-5");
@@ -217,6 +234,7 @@ describe("llm provider", () => {
   it("targets an OpenAI-compatible endpoint with chat/completions shape", async () => {
     process.env.LLM_PROVIDER = "openai";
     process.env.OPENAI_API_KEY = "sk-openai-test";
+    process.env.RADON_LADDER_ALLOW_PREPAID = "1";
     const { calls } = captureFetch(() =>
       jsonResponse({
         model: "gpt-4o",
@@ -247,6 +265,7 @@ describe("llm provider", () => {
   it("honors a custom OpenAI-compatible base URL (Groq/DeepSeek/Ollama)", async () => {
     process.env.LLM_PROVIDER = "openai";
     process.env.OPENAI_API_KEY = "sk-local";
+    process.env.RADON_LADDER_ALLOW_PREPAID = "1";
     process.env.OPENAI_BASE_URL = "http://localhost:11434/v1";
     const { calls } = captureFetch(() =>
       jsonResponse({ choices: [{ message: { content: "ok" } }] }),
@@ -260,6 +279,7 @@ describe("llm provider", () => {
   it("selects Gemini and normalizes its response", async () => {
     process.env.LLM_PROVIDER = "gemini";
     process.env.GEMINI_API_KEY = "g-test";
+    process.env.RADON_LADDER_ALLOW_PREPAID = "1";
     const { calls } = captureFetch(() =>
       jsonResponse({
         candidates: [{ content: { parts: [{ text: "Gemini flow answer." }] }, finishReason: "STOP" }],
@@ -281,7 +301,9 @@ describe("llm provider", () => {
     process.env.LLM_PROVIDER = "gemini";
     process.env.LLM_FALLBACK_PROVIDER = "openai";
     process.env.GEMINI_API_KEY = "g-test";
+    process.env.RADON_LADDER_ALLOW_PREPAID = "1";
     process.env.OPENAI_API_KEY = "sk-test";
+    process.env.RADON_LADDER_ALLOW_PREPAID = "1";
     const { calls } = captureFetch(() =>
       jsonResponse({ choices: [{ message: { content: "fallback" } }] }),
     );
@@ -295,7 +317,8 @@ describe("llm provider", () => {
     process.env.LLM_PROVIDER = "openai";
     process.env.LLM_FALLBACK_PROVIDER = "anthropic";
     process.env.OPENAI_API_KEY = "sk-openai-test";
-    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+    process.env.RADON_LADDER_ALLOW_PREPAID = "1";
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat-test";
 
     const { calls } = captureFetch((call) => {
       if (call.url.includes("/chat/completions")) {
@@ -321,8 +344,8 @@ describe("llm provider", () => {
     // A picked model is scoped to the provider that owns it. Handing "grok-4.6"
     // to Anthropic turns a transient xAI blip into a hard 404 and kills the one
     // rescue path the operator configured.
-    process.env.XAI_API_KEY = "xai-test-key";
-    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+    process.env.XAI_OAUTH_TOKEN = "xai-test-key";
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat-test";
     process.env.LLM_FALLBACK_PROVIDER = "anthropic";
 
     const { calls } = captureFetch((call) => {
@@ -346,7 +369,8 @@ describe("llm provider", () => {
 
   it("does not let an explicit request.provider pin the fallback back onto the failed provider", async () => {
     process.env.OPENAI_API_KEY = "sk-openai-test";
-    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+    process.env.RADON_LADDER_ALLOW_PREPAID = "1";
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat-test";
     process.env.LLM_FALLBACK_PROVIDER = "anthropic";
 
     const { calls } = captureFetch((call) => {
@@ -368,8 +392,8 @@ describe("llm provider", () => {
     // though ANTHROPIC_API_KEY was live on the host. Nothing had set
     // LLM_FALLBACK_PROVIDER, so the historical default provider never got a
     // turn. xAI is only auto-preferred; losing it must degrade, not fail.
-    process.env.XAI_API_KEY = "xai-test-key";
-    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+    process.env.XAI_OAUTH_TOKEN = "xai-test-key";
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat-test";
     delete process.env.LLM_FALLBACK_PROVIDER;
 
     const { calls } = captureFetch((call) => {
@@ -393,8 +417,8 @@ describe("llm provider", () => {
 
   it("does not default a fallback when the primary was chosen explicitly", async () => {
     process.env.LLM_PROVIDER = "xai";
-    process.env.XAI_API_KEY = "xai-test-key";
-    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+    process.env.XAI_OAUTH_TOKEN = "xai-test-key";
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat-test";
     delete process.env.LLM_FALLBACK_PROVIDER;
     captureFetch(() => jsonResponse({ error: "boom" }, 500));
 
@@ -418,6 +442,7 @@ describe("llm provider", () => {
     }));
     process.env.GROK_AUTH_FILE = authFile;
     process.env.XAI_API_KEY = "prepaid-should-not-be-used";
+    process.env.RADON_LADDER_ALLOW_PREPAID = "1";
     const { calls } = captureFetch(() =>
       jsonResponse({ choices: [{ message: { role: "assistant", content: "ok" }, finish_reason: "stop" }] }),
     );
@@ -433,7 +458,7 @@ describe("llm provider", () => {
 
   it("auto-prefers xAI on the subscription token alone, with no prepaid key set", async () => {
     process.env.XAI_OAUTH_TOKEN = "grok-subscription-token";
-    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat-test";
     const { calls } = captureFetch(() =>
       jsonResponse({ choices: [{ message: { role: "assistant", content: "ok" }, finish_reason: "stop" }] }),
     );
@@ -442,7 +467,7 @@ describe("llm provider", () => {
     expect(new Headers(calls[0].init.headers).get("authorization")).toBe("Bearer grok-subscription-token");
   });
 
-  it("ignores an expired subscription entry and falls through to the prepaid key", async () => {
+  it("ignores an expired subscription entry and, only under RADON_LADDER_ALLOW_PREPAID, uses the prepaid key", async () => {
     const authFile = path.join(os.tmpdir(), `grok-auth-expired-${process.pid}-${Date.now()}.json`);
     fs.writeFileSync(authFile, JSON.stringify({
       "https://auth.x.ai::client": {
@@ -453,6 +478,7 @@ describe("llm provider", () => {
     }));
     process.env.GROK_AUTH_FILE = authFile;
     process.env.XAI_API_KEY = "prepaid-key";
+    process.env.RADON_LADDER_ALLOW_PREPAID = "1";
     const { calls } = captureFetch(() =>
       jsonResponse({ choices: [{ message: { role: "assistant", content: "ok" }, finish_reason: "stop" }] }),
     );
@@ -464,16 +490,125 @@ describe("llm provider", () => {
     }
   });
 
+  describe("subscriptions only (operator mandate 2026-09-18)", () => {
+    it("never authenticates Anthropic with a prepaid key alone", async () => {
+      process.env.ANTHROPIC_API_KEY = "sk-ant-prepaid";
+      process.env.LLM_PROVIDER = "anthropic";
+      const { calls } = captureFetch(() => jsonResponse({}));
+      await expect(chat(SAMPLE_REQUEST)).rejects.toThrow(/Missing Anthropic subscription/);
+      expect(calls).toHaveLength(0);
+    });
+
+    it("never selects or authenticates xAI on a prepaid key alone", async () => {
+      process.env.XAI_API_KEY = "xai-prepaid";
+      process.env.CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat-test";
+      expect(resolveProvider({})).toBe("anthropic");
+      process.env.LLM_PROVIDER = "xai";
+      const { calls } = captureFetch(() => jsonResponse({}));
+      await expect(chat(SAMPLE_REQUEST)).rejects.toThrow(/Missing xAI subscription/);
+      expect(calls).toHaveLength(0);
+    });
+
+    it("never authenticates OpenAI with a prepaid key alone", async () => {
+      process.env.OPENAI_API_KEY = "sk-openai-prepaid";
+      process.env.LLM_PROVIDER = "openai";
+      const { calls } = captureFetch(() => jsonResponse({}));
+      await expect(chat(SAMPLE_REQUEST)).rejects.toThrow(/Missing ChatGPT subscription/);
+      expect(calls).toHaveLength(0);
+    });
+
+    it("never authenticates Gemini with a prepaid key alone", async () => {
+      process.env.GEMINI_API_KEY = "g-prepaid";
+      process.env.LLM_PROVIDER = "gemini";
+      const { calls } = captureFetch(() => jsonResponse({}));
+      await expect(chat(SAMPLE_REQUEST)).rejects.toThrow(/RADON_LADDER_ALLOW_PREPAID/);
+      expect(calls).toHaveLength(0);
+    });
+
+    it("reads the Claude Max grant from the credentials file and skips an expired one", async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "radon-claude-cfg-"));
+      process.env.CLAUDE_CONFIG_DIR = dir;
+      process.env.LLM_PROVIDER = "anthropic";
+      const write = (expiresAt: number) =>
+        fs.writeFileSync(
+          path.join(dir, ".credentials.json"),
+          JSON.stringify({ claudeAiOauth: { accessToken: "sk-ant-oat-file", refreshToken: "r", expiresAt, subscriptionType: "max" } }),
+        );
+      try {
+        write(Date.now() - 60_000);
+        resetSubscriptionAuthCache();
+        await expect(chat(SAMPLE_REQUEST)).rejects.toThrow(/Missing Anthropic subscription/);
+        write(Date.now() + 3_600_000);
+        resetSubscriptionAuthCache();
+        const { calls } = captureFetch(() =>
+          jsonResponse({ content: [{ type: "text", text: "ok" }], stop_reason: "end_turn" }),
+        );
+        await chat(SAMPLE_REQUEST);
+        expect((calls[0].init.headers as Record<string, string>).authorization).toBe("Bearer sk-ant-oat-file");
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("serves OpenAI through the ChatGPT codex Responses stream with the account id", async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "radon-codex-home-"));
+      process.env.CODEX_HOME = dir;
+      process.env.LLM_PROVIDER = "openai";
+      fs.writeFileSync(
+        path.join(dir, "auth.json"),
+        JSON.stringify({ auth_mode: "chatgpt", tokens: { access_token: "codex-grant", account_id: "acct-1", refresh_token: "r" } }),
+      );
+      resetSubscriptionAuthCache();
+      const sse = [
+        'data: {"type":"response.created","response":{"id":"r1"}}',
+        'data: {"type":"response.output_text.delta","delta":"Hel"}',
+        'data: {"type":"response.output_text.delta","delta":"lo"}',
+        'data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":3,"output_tokens":2}}}',
+        "",
+      ].join("\n");
+      const { calls } = captureFetch(() => new Response(sse, { status: 200, headers: { "content-type": "text/event-stream" } }));
+      try {
+        const result = await chat(SAMPLE_REQUEST);
+        expect(calls[0].url).toBe("https://chatgpt.com/backend-api/codex/responses");
+        const headers = calls[0].init.headers as Record<string, string>;
+        expect(headers.authorization).toBe("Bearer codex-grant");
+        expect(headers["chatgpt-account-id"]).toBe("acct-1");
+        const payload = bodyOf(calls[0]);
+        expect(payload.stream).toBe(true);
+        expect(payload.instructions).toBe("You are Radon.");
+        expect(result).toMatchObject({ provider: "openai", text: "Hello", stopReason: "completed", usage: { inputTokens: 3, outputTokens: 2 } });
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("refuses a tool turn on the ChatGPT subscription so a tool-capable provider takes it", async () => {
+      process.env.CODEX_OAUTH_TOKEN = "codex-grant";
+      process.env.LLM_PROVIDER = "openai";
+      process.env.LLM_FALLBACK_PROVIDER = "anthropic";
+      process.env.CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat-test";
+      const { calls } = captureFetch(() =>
+        jsonResponse({ content: [{ type: "text", text: "tools ok" }], stop_reason: "end_turn" }),
+      );
+      const result = await chat({ ...SAMPLE_REQUEST, tools: [{ name: "get_flow", input_schema: {} }] });
+      expect(result.provider).toBe("anthropic");
+      expect(result.usedFallback).toBe(true);
+      expect(calls).toHaveLength(1);
+      expect(calls[0].url).toContain("api.anthropic.com");
+    });
+  });
+
   it("throws when the primary errors and no fallback is configured", async () => {
     process.env.LLM_PROVIDER = "openai";
     process.env.OPENAI_API_KEY = "sk-openai-test";
+    process.env.RADON_LADDER_ALLOW_PREPAID = "1";
     captureFetch(() => jsonResponse({ error: "boom" }, 500));
 
     await expect(chat(SAMPLE_REQUEST)).rejects.toThrow();
   });
 
   it("forwards tool_choice, reasoning_effort, and max_tokens on xAI chat completions", async () => {
-    process.env.XAI_API_KEY = "xai-test-key";
+    process.env.XAI_OAUTH_TOKEN = "xai-test-key";
     const { calls } = captureFetch(() =>
       jsonResponse({
         choices: [{ message: { role: "assistant", content: "September P&L." }, finish_reason: "stop" }],
@@ -504,7 +639,7 @@ describe("llm provider", () => {
   });
 
   it("omits reasoning_effort and tool_choice on xAI when the caller did not set them", async () => {
-    process.env.XAI_API_KEY = "xai-test-key";
+    process.env.XAI_OAUTH_TOKEN = "xai-test-key";
     const { calls } = captureFetch(() =>
       jsonResponse({
         choices: [{ message: { role: "assistant", content: "ok" }, finish_reason: "stop" }],
@@ -520,7 +655,7 @@ describe("llm provider", () => {
   });
 
   it("maps tool_choice none onto Anthropic's tool_choice object", async () => {
-    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat-test";
     const { calls } = captureFetch(() =>
       jsonResponse({
         content: [{ type: "text", text: "Done." }],
@@ -540,7 +675,7 @@ describe("llm provider", () => {
   });
 
   it("passes tools to providers that support tool_use and normalizes tool calls", async () => {
-    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat-test";
     const tools = [
       {
         name: "get_flow",
