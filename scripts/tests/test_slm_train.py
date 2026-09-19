@@ -9,14 +9,33 @@ from pathlib import Path
 from newsfeed.slm.contract import SLM_BASE_ID
 
 REPO = Path(__file__).resolve().parents[2]
-YAML = REPO / "scripts" / "newsfeed" / "slm" / "configs" / "qwen25-1p5b-qlora-v1.yaml"
+MLX_YAML = REPO / "scripts" / "newsfeed" / "slm" / "configs" / "qwen25-1p5b-qlora-v1.yaml"
+LF_YAML = REPO / "scripts" / "newsfeed" / "slm" / "configs" / "llamafactory-qwen25-1p5b-qlora-v1.yaml"
+DATASET_INFO = REPO / "scripts" / "newsfeed" / "slm" / "configs" / "dataset_info.json"
 TRAIN = REPO / "scripts" / "newsfeed" / "slm" / "train.sh"
 
 
 class TestConfig:
-    def test_base_is_qwen_1p5b(self):
-        text = YAML.read_text(encoding="utf-8")
+    def test_llamafactory_is_default_and_pins_base(self):
+        text = LF_YAML.read_text(encoding="utf-8")
+        sh = TRAIN.read_text(encoding="utf-8")
+        info = json.loads(DATASET_INFO.read_text(encoding="utf-8"))
         assert SLM_BASE_ID == "Qwen/Qwen2.5-1.5B-Instruct"
+        assert f"model_name_or_path: {SLM_BASE_ID}" in text
+        assert "finetuning_type: lora" in text
+        assert "quantization_bit: 4" in text
+        assert "train_on_prompt: false" in text
+        assert "val_size" not in text
+        assert "shuffle" not in text
+        assert "report_to: none" in text
+        assert "llamafactory-cli" in sh
+        assert 'SLM_TRAINER:-llamafactory' in sh
+        assert "radon_slm_tagger" in info
+        assert info["radon_slm_tagger"]["formatting"] == "sharegpt"
+        assert info["radon_slm_tagger"]["columns"]["messages"] == "messages"
+
+    def test_mlx_alt_still_pins_mask_prompt(self):
+        text = MLX_YAML.read_text(encoding="utf-8")
         assert SLM_BASE_ID in text
         assert "mask_prompt: true" in text
         assert "fine_tune_type: lora" in text
@@ -28,6 +47,7 @@ class TestConfig:
             (REPO / "models" / "slm-tagger" / "v1" / "manifest.json").read_text(encoding="utf-8")
         )
         assert "Radon SLM tagger: internal specialist, not a SotA replacement for open research." in card
+        assert "LLaMA-Factory" in card
         assert manifest["base"] == SLM_BASE_ID
 
 

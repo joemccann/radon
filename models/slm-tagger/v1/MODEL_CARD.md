@@ -5,7 +5,8 @@ Radon SLM tagger: internal specialist, not a SotA replacement for open research.
 ## Base
 
 - `Qwen/Qwen2.5-1.5B-Instruct` (Apache 2.0)
-- Train: mlx-lm QLoRA on the Mac Mini (`scripts/newsfeed/slm/train.sh`)
+- Train (default): LLaMA-Factory QLoRA/LoRA (`scripts/newsfeed/slm/train.sh`, `configs/llamafactory-qwen25-1p5b-qlora-v1.yaml`). Train only; not runtime.
+- Train (optional Mini): `SLM_TRAINER=mlx` + `configs/qwen25-1p5b-qlora-v1.yaml`
 - Serve: llama.cpp `b6504` GGUF Q4_K_M via `radon-slm-tagger.service` on 127.0.0.1:8331
 
 ## Dataset

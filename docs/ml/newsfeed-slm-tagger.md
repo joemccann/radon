@@ -207,7 +207,7 @@ The labels are machine outputs. Before any SLM number is interpreted, the implem
 
 | Host | What is known | Role in v1 |
 |---|---|---|
-| Joe's Mac Mini (`joes-mac-mini` on the tailnet; runs the nightly loops under launchd) | Apple silicon; RAM unknown (open question 1 in `radon-small-model.md`) | **Train** and **export**. mlx-lm LoRA on a 1.5B bf16 base needs about 6 GB; any 16 GB Mini qualifies. Also runs the eval harness against the ladder baseline because it holds subscription credentials. |
+| Joe's Mac Mini (`joes-mac-mini` on the tailnet; runs the nightly loops under launchd) | Apple silicon; RAM unknown (open question 1 in `radon-small-model.md`) | **Train** and **export**. Default trainer is LLaMA-Factory (LoRA on MPS if no CUDA; QLoRA 4-bit via bitsandbytes on CUDA). Optional `SLM_TRAINER=mlx` on a 16 GB Mini. Also runs the eval harness against the ladder baseline because it holds subscription credentials. |
 | Hetzner app host (runs `radon-newsfeed.service`) | `cloud/radon-cloud-deployment-guide.html` names CPX11 (2 vCPU, 2 GB) as the reference size; that guide predates the current unit set and is not to be trusted for sizing. Actual RAM and vCPU must be read from the box (`nproc; free -m`) and from the 14-day `host_metrics` table (`mem_avail_mb` p05). No GPU. | **Serve**, if and only if the memory gate in D.4 passes. The caller (`model_ladder_cli.py`) runs here, so serving here keeps the rung a localhost call with no cross-host dependency. |
 | Rented GPU | none today | Not needed. Named only as the alternative if the Mini is unavailable (D.3). |
 
@@ -238,11 +238,15 @@ Exactly one base ships in v1. Changing it is a version bump (section E), not a c
 
 ### D.3 Train stack
 
-Recommended: **mlx-lm QLoRA on the Mac Mini** (4-bit quantized base, LoRA adapters; `[HR-1]` arm C). Zero spend, no prepaid key anywhere in the loop.
+Default trainer: **[LLaMA-Factory](https://github.com/hiyouga/LlamaFactory)** QLoRA/LoRA on `Qwen/Qwen2.5-1.5B-Instruct` (`[HR-1]` arm C). Train only; inference stays GGUF (llama.cpp) or vLLM/MLX sidecar. Zero spend, no prepaid key anywhere in the loop. `train.sh` refuses any `*_API_KEY`.
 
-QLoRA versus plain LoRA on this hardware, stated honestly: a 1.5B bf16 base trains comfortably in about 6 GB, so QLoRA buys little memory on a 16 GB Mini. It is the default because it is the recipe Joe asked for, it is the recipe that would be used on a rented GPU with Unsloth, and it keeps the training footprint small enough to run beside the nightly loops. The one technical cost is export: an adapter trained against a 4-bit base is fused onto the **bf16** base for GGUF conversion (a fuse from a quantized base does not convert cleanly). That mismatch is measured, not assumed: gate G0 below requires the fused GGUF's eval to match the adapter-on-quantized-base eval within 0.01 micro-F1. If G0 fails, retrain as plain LoRA on the bf16 base (`mlx_lm.lora` without the `-q` base) and record the switch in the model card; the gates in section F are unchanged.
+On CUDA, the committed YAML uses bitsandbytes 4-bit (`quantization_bit: 4`, `quantization_method: bnb`). On the Mac Mini, bitsandbytes QLoRA is not available; run the same LLaMA-Factory recipe as LoRA on MPS (drop the quantization keys for that run) or the optional mlx-lm path (`SLM_TRAINER=mlx`). Do not rent a GPU to manufacture QLoRA.
 
-The task brief named Unsloth or Axolotl. Both are CUDA-first; Axolotl has documented MPS constraints and Unsloth's core library does not train on Apple silicon (`radon-small-model.md` section 2 tooling table). Unsloth is the sanctioned alternative only if Joe would rather rent one GPU hour than use the Mini; that path costs about one to two dollars on a T4/L4 spot instance and is the only case where a cloud key enters the training loop. It is not the recommendation.
+Optional dual-path: **mlx-lm** remains a documented Mini alternative (`configs/qwen25-1p5b-qlora-v1.yaml`). It is not the default and must not delay the bakeoff.
+
+QLoRA versus plain LoRA, stated honestly: a 1.5B bf16 base trains comfortably in about 6 GB, so QLoRA buys little memory on a 16 GB Mini. It is the CUDA recipe. The export cost is the same as before: fuse adapters onto the **bf16** base, then GGUF-quantize. Gate G0 requires the fused GGUF's eval to match the trainer-native eval within 0.01 micro-F1 (`|micro_f1_train - micro_f1_gguf| <= 0.01`). If both the mlx-lm and GGUF paths exist, that is also `|micro_f1_mlx - micro_f1_gguf| <= 0.01`. If G0 fails, retrain as plain LoRA on the bf16 base and record the switch in the model card; the gates in section F are unchanged.
+
+Unsloth and Axolotl stay out. Both are CUDA-first; they are not the recommendation.
 
 Files (implement PR):
 
@@ -250,18 +254,33 @@ Files (implement PR):
 scripts/newsfeed/slm/
   build_dataset.py     C.2 extract, C.3 split, manifest
   review_cli.py        C.4 human-ok capture
-  train.sh             mlx_lm.lora with the YAML below; refuses to run if any *_API_KEY is in env
-  export.sh            mlx_lm.fuse -> convert_hf_to_gguf.py -> llama-quantize; writes manifest.json with sha256s
+  train.sh             llamafactory-cli train (default); SLM_TRAINER=mlx optional; refuses any *_API_KEY
+  export.sh            llamafactory-cli export (or mlx_lm.fuse) -> convert_hf_to_gguf.py -> llama-quantize
   eval.py              section F metrics; reads predictions JSONL, prints one JSON object
   predict_slm.py       held-out posts -> llama-server -> predictions JSONL with latency per row (arms B and C; --arm flag)
   predict_ladder.py    held-out posts -> complete_text_json (subscription only) -> predictions JSONL (arm A)
   bakeoff.py           runs eval.py over A, B, C predictions; prints the F.3 gate table and the HR-1 verdict
   monitor.py           section I.3 post-deploy drift query; one JSON object, exit 3 on threshold breach
   shadow.py            section I shadow-mode row writer (imported by model_ladder_cli.py)
-  configs/qwen25-1p5b-qlora-v1.yaml
+  configs/llamafactory-qwen25-1p5b-qlora-v1.yaml
+  configs/llamafactory-export-v1.yaml
+  configs/dataset_info.json
+  configs/qwen25-1p5b-qlora-v1.yaml   # mlx-lm Mini alternative only
 ```
 
-Starting configuration (`configs/qwen25-1p5b-qlora-v1.yaml`), to be tuned only against `valid.jsonl`:
+Starting configuration (`configs/llamafactory-qwen25-1p5b-qlora-v1.yaml`), to be tuned only against `valid.jsonl`. Loss is masked (`train_on_prompt: false`). The mlx-lm YAML keeps `mask_prompt: true` for the optional Mini path:
+
+```yaml
+# LLaMA-Factory (default). See configs/llamafactory-qwen25-1p5b-qlora-v1.yaml
+model_name_or_path: Qwen/Qwen2.5-1.5B-Instruct
+quantization_bit: 4
+finetuning_type: lora
+train_on_prompt: false
+dataset: radon_slm_tagger
+eval_dataset: radon_slm_tagger_valid   # time split; never val_size
+```
+
+mlx-lm alternative (`configs/qwen25-1p5b-qlora-v1.yaml`):
 
 ```yaml
 # Base for TRAINING is the 4-bit MLX quantization of the bf16 base:
@@ -295,7 +314,7 @@ Stop rule: stop at the checkpoint with the lowest validation loss; if validation
 
 Decoding at serve and eval time: greedy (`temperature 0`), `max_tokens 64`, grammar-constrained to the schema in H.3. Same settings in `predict_slm.py` for arms B and C and in the ladder rung; a mismatch invalidates the eval.
 
-Export parity gate **G0** (`[HR-1]` arm C is the GGUF that will serve, not the adapter on the Mini): run `eval.py` on `valid.jsonl` twice, once with the adapter over the quantized base in MLX, once with the fused Q4_K_M GGUF through `llama-server`. `|micro_f1_mlx - micro_f1_gguf| <= 0.01` and `invalid_rate_gguf <= invalid_rate_mlx + 0.002`. All section F numbers for arm C are then taken from the GGUF path only.
+Export parity gate **G0** (`[HR-1]` arm C is the GGUF that will serve, not the adapter on the Mini): run `eval.py` on `valid.jsonl` twice, once on the trainer-native fused weights (LLaMA-Factory HF merge, or mlx-lm adapter-on-base if `SLM_TRAINER=mlx`), once with the fused Q4_K_M GGUF through `llama-server`. `|micro_f1_train - micro_f1_gguf| <= 0.01` and `invalid_rate_gguf <= invalid_rate_train + 0.002`. If both MLX and GGUF paths exist, also `|micro_f1_mlx - micro_f1_gguf| <= 0.01`. All section F numbers for arm C are then taken from the GGUF path only.
 
 Arm B recipe (prompt-only baseline, same base, no adapter): the bf16 base converted to Q4_K_M with the same `convert_hf_to_gguf.py` and `llama-quantize` steps, served by the same `llama-server` flags, prompted with the **full** production system prompt from `buildSystemPrompt(taxonomy)` (the taxonomy list included, because an un-tuned model has no other way to know the vocabulary) plus the same user prompt, same grammar. Arm B is the honest "did the fine-tune do anything" control; it is also what would ship if C failed but B passed, which the HR-1 rule forbids, so B passing and C failing means no cutover.
 
@@ -311,8 +330,8 @@ The unit is enabled on the Hetzner app host only if, over the trailing 14 days o
 
 | Artifact | Produced by | Approx size | Where it lives |
 |---|---|---|---|
-| `adapter/adapters.safetensors` + `adapter_config.json` | `mlx_lm.lora` | 20 to 60 MB | B2 |
-| `fused/` (bf16 safetensors) | `mlx_lm.fuse` | about 3 GB | Mini only; not uploaded; regenerable from base + adapter |
+| `adapter/adapters.safetensors` + `adapter_config.json` | LLaMA-Factory (default) or `mlx_lm.lora` | 20 to 60 MB | B2 |
+| `fused/` (bf16 safetensors) | `llamafactory-cli export` or `mlx_lm.fuse` | about 3 GB | Mini only; not uploaded; regenerable from base + adapter |
 | `radon-slm-tagger-v1.Q4_K_M.gguf` | `convert_hf_to_gguf.py --outtype f16` then `llama-quantize ... Q4_K_M` | about 1.1 GB | B2; installed to `/var/lib/radon/models/` on the serve host |
 | `radon-slm-tagger-v1.Q8_0.gguf` | same, `Q8_0` | about 1.7 GB | B2; used only if the Q4_K_M build fails G0 export parity or a quality gate while the memory gate still passes |
 | MLX quantized dir (`mlx_lm.convert -q`) | optional | about 1 GB | Mini only, for local eval speed; not a production artifact |
@@ -390,7 +409,7 @@ Hygiene gates (arm C on its own):
 
 | Gate | Rule | Meaning |
 |---|---|---|
-| G0 | export parity (D.3): `|micro_f1_mlx - micro_f1_gguf| <= 0.01` | the GGUF that serves is the model that was evaluated |
+| G0 | export parity (D.3): `|micro_f1_train - micro_f1_gguf| <= 0.01` (and `|micro_f1_mlx - micro_f1_gguf| <= 0.01` if both paths exist) | the GGUF that serves is the model that was evaluated |
 | G1 | `invalid_rate(C) <= 0.005` on test, with `out_of_taxonomy <= 0.003` | grammar plus validator work; the model does not degenerate or invent vocabulary |
 | G5 | `latency_p95_s(C) <= 10` on the serve host and every call under the rung timeout (H.4) | fits inside the per-post budget with room for a fall-through |
 
@@ -640,8 +659,8 @@ Red/green order is mandatory (`CLAUDE.md` TDD rule). Every item names its test o
 - [ ] Extract run on a credentialed host; `manifest.json` counts in the PR body; corpus not in the diff (`git status` clean of `data/slm/`).
 
 **Train and export**
-- [ ] `[HR-2]` `configs/qwen25-1p5b-qlora-v1.yaml` names the 4-bit conversion of `Qwen/Qwen2.5-1.5B-Instruct`; a test pins the base id in the config and in `manifest.json`.
-- [ ] `[HR-5]` `mask_prompt: true` pinned by test; `train.sh` refuses any `*_API_KEY` in env (subprocess test with a fake key) and refuses a data dir whose manifest lists a source other than `turso.posts`.
+- [x] `[HR-2]` `configs/llamafactory-qwen25-1p5b-qlora-v1.yaml` names `Qwen/Qwen2.5-1.5B-Instruct`; mlx-lm YAML remains the Mini alternative; a test pins the base id in both configs and in `manifest.json`.
+- [x] `[HR-5]` LLaMA-Factory `train_on_prompt: false` and mlx `mask_prompt: true` pinned by test; `train.sh` refuses any `*_API_KEY` in env (subprocess test with a fake key) and refuses a data dir whose manifest lists a source other than `turso.posts`.
 - [ ] Training run on the Mini; loss curve numbers in the model card only (`[HR-6]`: not in the gate table).
 - [ ] `export.sh` produces adapter, F16 GGUF, Q4_K_M GGUF; `manifest.json` sha256s match uploaded B2 objects; `models/slm-tagger/v1/MODEL_CARD.md` carries the honesty label verbatim.
 - [ ] G0 export parity measured and in the PR body.

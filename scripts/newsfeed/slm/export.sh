@@ -1,22 +1,42 @@
 #!/usr/bin/env bash
-# mlx_lm.fuse -> convert_hf_to_gguf.py -> llama-quantize. Writes models/slm-tagger/v1/manifest.json.
+# Fuse adapter (LLaMA-Factory default, mlx-lm if SLM_TRAINER=mlx) then GGUF quantize.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 VERSION="${1:-v1}"
+TRAINER="${SLM_TRAINER:-llamafactory}"
 OUT="$ROOT/models/slm-tagger/$VERSION"
 FUSED="$OUT/fused"
 ADAPTER="$OUT/adapter"
 BASE_BF16="${SLM_BASE_BF16:-$OUT/base-bf16}"
 LLAMA_CPP="${LLAMA_CPP_DIR:-$HOME/llama.cpp}"
 PIN_FILE="$ROOT/cloud/config/llama-cpp.pin"
+LF_EXPORT="$ROOT/scripts/newsfeed/slm/configs/llamafactory-export-v1.yaml"
 
 mkdir -p "$OUT"
 
-python3.13 -m mlx_lm fuse \
-  --model "$BASE_BF16" \
-  --adapter-path "$ADAPTER" \
-  --save-path "$FUSED"
+if [ "$TRAINER" = "mlx" ]; then
+  python3.13 -m mlx_lm fuse \
+    --model "$BASE_BF16" \
+    --adapter-path "$ADAPTER" \
+    --save-path "$FUSED"
+elif [ "$TRAINER" = "llamafactory" ]; then
+  if command -v llamafactory-cli >/dev/null 2>&1; then
+    llamafactory-cli export "$LF_EXPORT" \
+      adapter_name_or_path="$ADAPTER" \
+      export_dir="$FUSED"
+  elif python3.13 -c "import llamafactory" >/dev/null 2>&1; then
+    python3.13 -m llamafactory.cli export "$LF_EXPORT" \
+      adapter_name_or_path="$ADAPTER" \
+      export_dir="$FUSED"
+  else
+    echo "LLaMA-Factory is not installed; cannot fuse. Or SLM_TRAINER=mlx." >&2
+    exit 2
+  fi
+else
+  echo "unknown SLM_TRAINER=$TRAINER (use llamafactory or mlx)" >&2
+  exit 2
+fi
 
 CONVERT="$LLAMA_CPP/convert_hf_to_gguf.py"
 QUANTIZE="$LLAMA_CPP/llama-quantize"

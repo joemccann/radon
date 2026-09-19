@@ -72,6 +72,12 @@ class TestSignals:
 
 
 class TestExit:
+    def test_unset_mode_defaults_off_noop(self, monkeypatch, capsys):
+        monkeypatch.delenv("RADON_SLM_TAGGER_MODE", raising=False)
+        code = main([], rows_7d=CLEAN, rows_28d=CLEAN, heartbeat=False)
+        assert code == 0
+        assert '"noop": true' in capsys.readouterr().out
+
     def test_off_is_noop_exit_0(self, monkeypatch, capsys):
         monkeypatch.setenv("RADON_SLM_TAGGER_MODE", "off")
         code = main([], rows_7d=CLEAN, rows_28d=CLEAN, heartbeat=False)

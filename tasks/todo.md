@@ -12,11 +12,12 @@ Implement `docs/ml/newsfeed-slm-tagger.md` (HR-1..HR-8). Dataset/eval/train/expo
 
 - [x] T1 Package + unit tests
 - [x] T2 Ladder hook MODE=off; units pinned not-installed; docs
-- [ ] T3 Draft PR + CI
+- [ ] T3 Draft PR + CI (LLaMA-Factory default trainer folded in)
 
 ## Review
 
 - Live Turso extract and Mini train are operator commands. Fixture bakeoff verdict is `C FAILS`. Mode stays off.
+- Train default is LLaMA-Factory; mlx-lm is `SLM_TRAINER=mlx` only.
 
 # Task: Newsfeed SLM tagger v1 build spec [PLAN ONLY; PR #533 DRAFT, CI GREEN]
 

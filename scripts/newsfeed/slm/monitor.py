@@ -180,7 +180,7 @@ def main(
     parser.add_argument("--manifest", default="data/slm/tagger/v1/manifest.json")
     parser.add_argument("--shadow-jaccard-mean", type=float, default=None)
     args = parser.parse_args(argv)
-    mode = normalise_mode(os.environ.get("RADON_SLM_TAGGER_MODE"))
+    mode = normalise_mode(os.environ.get("RADON_SLM_TAGGER_MODE", "off"))
     if mode in {SLM_MODE_OFF, SLM_MODE_SHADOW}:
         payload = {"honesty": HONESTY_LABEL, "mode": mode, "noop": True}
         json.dump(payload, sys.stdout, indent=2, sort_keys=True)
