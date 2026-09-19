@@ -192,7 +192,8 @@ class Pipeline:
                 continue
             seen.add(key)
             captions = [candidate['captions'][i] for i in candidate['figure_ids']]
-            grounded = ground.ground([candidate['title'], candidate['content'], *captions], text, candidate['pages'])
+            grounded = ground.ground([candidate['title'], candidate['content'], *captions], text, candidate['pages'],
+                                     known={'date': identity.date, 'date_page': identity.date_page})
             if not grounded['passed']:
                 review['audit'].append({'held': 'NUMBER_NOT_ON_PAGE', 'claim_key': candidate['claim_key'],
                                         'missing': [t for t in grounded['tokens'] if t['page'] is None]})
