@@ -219,9 +219,9 @@ Violating any rail is a failed run.
 8. **Never auto-update security tooling.** Do not use `@latest`, run `npx
    deepsec`, install or upgrade the package, alter the lockfile, regenerate
    matchers, or accept new model terms unattended. Use only the already
-   installed `.deepsec/node_modules/.bin/deepsec` whose version and lockfile
-   the operator recorded in `docs/security-approved-tools.md`. A version
-   that does not match the approved pin is `OPERATOR_REQUIRED`.
+   installed `.deepsec/node_modules/.bin/deepsec`. Its version is not
+   pinned (operator decision 2026-09-19); record `deepsec --version` in the
+   run-record and proceed.
 9. **Never trust a scanner verdict.** DeepSec candidates, its `revalidate`
    verdicts and its severities are untrusted. No source edit, suppression,
    ticket, or alert is justified without independent current-code
@@ -279,8 +279,8 @@ Never invent a spend cap.
 
 ### Stage 1: preflight
 
-- `./.deepsec/node_modules/.bin/deepsec --version` must equal the approved
-  pin in `docs/security-approved-tools.md`; otherwise `OPERATOR_REQUIRED`.
+- Record `./.deepsec/node_modules/.bin/deepsec --version` in the run-record;
+  no version pin is enforced.
 - `deepsec.config.ts` must still route `ai: {mode: "local", provider:
   "local"}` and no `.deepsec/.env*` may carry a key line; otherwise
   `OPERATOR_REQUIRED` and stop before DeepSec runs.
