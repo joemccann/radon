@@ -1253,11 +1253,11 @@ def _subscription_home(tmp_path: Path) -> Path:
     return home
 
 
-def test_run_nextjs_binds_subscription_credential_dirs_readonly(tmp_path: Path) -> None:
+def test_run_api_binds_subscription_credential_dirs_readonly(tmp_path: Path) -> None:
     home = _subscription_home(tmp_path)
     result = _run(
         tmp_path,
-        ["run", "radon-nextjs.service"],
+        ["run", "radon-api.service"],
         extra_env={"RADON_SUBSCRIPTION_HOME": str(home)},
     )
     assert result.returncode == 0, result.stderr
@@ -1266,6 +1266,20 @@ def test_run_nextjs_binds_subscription_credential_dirs_readonly(tmp_path: Path) 
     assert f"{home}/.codex:/home/radon/.codex:ro" in log
     assert ".claude:" not in log  # absent on this host: not mounted
     assert "HOME=/home/radon" in log
+
+
+def test_run_nextjs_gets_no_subscription_credential_binds(tmp_path: Path) -> None:
+    # The internet-facing Next.js container has no ladder rung; the operator's
+    # account-wide refresh tokens must never be readable from it.
+    home = _subscription_home(tmp_path)
+    result = _run(
+        tmp_path,
+        ["run", "radon-nextjs.service"],
+        extra_env={"RADON_SUBSCRIPTION_HOME": str(home)},
+    )
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    assert ".grok" not in log and ".codex" not in log and ".claude" not in log
 
 
 def test_run_newsfeed_binds_subscription_credential_dirs_readonly(tmp_path: Path) -> None:
@@ -1285,7 +1299,7 @@ def test_run_skips_subscription_binds_when_no_dir_exists(tmp_path: Path) -> None
     home.mkdir()
     result = _run(
         tmp_path,
-        ["run", "radon-nextjs.service"],
+        ["run", "radon-api.service"],
         extra_env={"RADON_SUBSCRIPTION_HOME": str(home)},
     )
     assert result.returncode == 0, result.stderr
