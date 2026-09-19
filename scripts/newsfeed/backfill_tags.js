@@ -94,7 +94,7 @@ async function main() {
   }
 
   if (!textTagger && !visionTagger) {
-    throw new Error("no taggers available — set a model-ladder key (ANTHROPIC_API_KEY first, CEREBRAS_API_KEY last) and/or ANTHROPIC_API_KEY for vision");
+    throw new Error("no taggers available: log a subscription CLI in (claude, codex, grok, agy; see docs/subscription-tokens.md) or set NVIDIA_API_KEY / CEREBRAS_API_KEY for the text ladder");
   }
 
   console.log(`[backfill] taggers: text=${textTagger ? "ON" : "off"} vision=${visionTagger ? "ON" : "off"}`);
