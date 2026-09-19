@@ -803,6 +803,41 @@ Next section; the deliver record and run-record carrying the branch, PR
 number and CI outcome; and the verdict line printed before the completion
 marker. CI still red or pending at the cap is INCOMPLETE, never OK.
 
+## Private operator report (every phase)
+
+The operator does not read runner logs. Before printing the completion
+marker of EVERY phase (audit, remediate, deliver, including a clean
+`OPERATOR_REQUIRED` or zero-finding night), write one complete Markdown
+report to `~/radon-weekend/.security-nightly-scratch/latest-report-<phase>.md`
+(write to a temp file in the same directory, then `mv` it into place; mode
+0600). The wrapper, not you, publishes it to the PRIVATE repository
+`joemccann/radon-security-reports` at `reports/security/<YYYY-MM-DD>/<phase>.md`
+with a write-only deploy key you never see, and links it from the Pushover
+page. Never push to that repository yourself, never put the report in the
+public repository, a PR, a commit, or the rolling issue, and never link it
+from a public surface.
+
+The report is for a reader who was not there. Sections, in this order:
+
+1. `# security <phase> <run-id>` with `HEAD_SHA`, `LAST_AUDITED_SHA`, the
+   range, start/end times and the terminal `status:`.
+2. **Stages**: one line per stage with its outcome (`complete`,
+   `OPERATOR_REQUIRED <why>`, `BLOCKED <why>`, `INCOMPLETE <what remains>`).
+3. **Findings**: a table with private id, severity, disposition
+   (`verified` / `REJECTED <reason>` / `duplicate of`), exact `file:line`,
+   one-sentence description, and the proof or refutation. Include every
+   candidate the engines produced this phase, not only survivors.
+4. **Fixes** (remediate/deliver): finding id, commit SHA, branch, regression
+   test path, gate results (counts), PR URL and CI state.
+5. **Operator actions**: every `OPERATOR_REQUIRED` / `BLOCKED` item as an
+   exact command or decision, and every P0/P1 awaiting a `released:` line.
+6. **Resume state**: what the next fire will pick up.
+
+Complete beats short: routes, file:line, attack preconditions and scanner
+verdicts belong here. Secret LITERALS never do (rail 6): name the variable
+or secret class and location only. The wrapper additionally redacts known
+secret shapes, which is a backstop, not permission.
+
 ## Private reporting and notifications
 
 The private run record contains: run ID, immutable SHAs, range, trigger, mode,
