@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SPEC = importlib.util.spec_from_file_location("nightly_pr_guard", ROOT / "scripts/nightly_pr_guard.py")
 mod = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(mod)
-WRAPPERS = ("reliability_weekend", "testing_weekend", "ci_performance_nightly", "documentation_nightly", "security_nightly")
+WRAPPERS = ("reliability_weekend", "testing_weekend", "ci_performance_nightly", "documentation_nightly", "security_nightly", "security_deepsec_nightly")
 
 
 @pytest.mark.parametrize("args", [

@@ -1,6 +1,6 @@
 ---
 name: security-nightly
-description: Nightly security auditor and authorized local penetration tester - daily audit that scans the source delta since the last audited SHA with pinned deterministic tools plus harvest of whatever Vercel DeepSec sibling export is already ready and the official Claude Security plugin, independently verifies every candidate against current code, then remediates every independently verified source-actionable finding with a durable regression, then a deliver phase that pushes P2/P3 (and operator-released P0/P1) fixes as one sanitized PR, gets CI green and tells the operator what to merge. DeepSec is a sibling worker (scripts/security_deepsec_worker.sh, own launchd/cap/dead-man), not a second remediate/deliver loop. Runs unattended and CREDENTIAL-FREE in ~/radon-weekend/radon-security via scripts/security_nightly.sh, one daily cycle at 00:40 local (audit, remediate, then deliver); invoke as /security-nightly audit, /security-nightly remediate or /security-nightly deliver. Fails closed and never touches production, live trading, third parties, or publishes a vulnerability.
+description: Nightly security auditor and authorized local penetration tester - daily audit that scans the source delta since the last audited SHA with pinned deterministic tools and the official Claude Security plugin, independently verifies every candidate against current code, then remediates every independently verified source-actionable finding with a durable regression, then a deliver phase that pushes P2/P3 (and operator-released P0/P1) fixes as one sanitized PR, gets CI green and tells the operator what to merge. Vercel DeepSec is its own nightly loop (/security-deepsec, scripts/security_deepsec_nightly.sh) and is neither run nor harvested here. Runs unattended and CREDENTIAL-FREE in ~/radon-weekend/radon-security via scripts/security_nightly.sh, one daily cycle at 00:40 local (audit, remediate, then deliver); invoke as /security-nightly audit, /security-nightly remediate or /security-nightly deliver. Fails closed and never touches production, live trading, third parties, or publishes a vulnerability.
 ---
 
 # Nightly Security Auditor and Authorized Penetration Tester
@@ -18,10 +18,11 @@ source-actionable risk, and convert every valid fix into a durable regression.
 The first argument is the mode: `audit`, `remediate` or `deliver`. The
 launchd job fires daily at 00:40 local and runs `audit`, then `remediate`,
 then `deliver` in this loop's dedicated clone. The loop never merges.
-DeepSec is a sibling worker (`com.radon.security-deepsec`) with its own
-lock, cap, and dead-man; audit harvests whatever verified export is already
-ready and does not wait for DeepSec to finish. Claude Security still runs
-inside the audit phase. A budgeted full-repository refresh runs on the first
+DeepSec is its own loop (`com.radon.security-deepsec`,
+`scripts/security_deepsec_nightly.sh`, skill `security-deepsec`) with the
+same three phases, its own clone, lock, cap, dead-man and PR branch; this
+loop neither runs nor consumes it. Claude Security still runs inside the
+audit phase. A budgeted full-repository refresh runs on the first
 Sunday of each month and after a material auth, order, topology, workflow,
 dependency, or threat-model change.
 
@@ -69,11 +70,11 @@ attack path, exploit, secret, account, or log pointer) plus a Pushover page.
 You never author that comment: do not run `gh issue comment`, `gh issue
 create`, or `gh issue edit`. Wrapper-only. It does NOT scrub the environment
 for you and it does NOT
-provide the private archive or DeepSec/Claude-Security tooling.
+provide the private archive or Claude-Security tooling.
 
 **Fail closed is the default, not an error.** Most of the pipeline below is
-gated on operator bootstrap that has not happened yet (DeepSec pinned
-workspace + lockfile, the official Claude Security plugin, the canonical
+gated on operator bootstrap that has not happened yet (the official Claude
+Security plugin, the canonical
 private archive `radon-cloud:security-archive`, a dedicated sanitized dead-man
 credential). When a prerequisite is missing, ambiguous, or unverifiable,
 record `OPERATOR_REQUIRED` or `BLOCKED` with the exact operator action, run
@@ -149,12 +150,11 @@ on a background task" is an INCOMPLETE phase, never a completed one, and
 the completion marker must not be printed while any stage is still in
 flight (see §Completion marker, INCOMPLETE, and resume above; this is the
 same rule, extended to every long-running stage this phase started, such as
-the full pytest suite, not DeepSec, which is a sibling worker).
+the full pytest suite).
 
-DeepSec is not an in-session wait. The sibling worker owns process,
-revalidate, and export; this audit harvests a ready export and continues.
-Do not start DeepSec inside the 2h audit cap, and do not hold the
-completion marker for a DeepSec pid that is still chewing.
+DeepSec is not a stage of this loop. Do not start `deepsec process` inside
+the 2h audit cap; the DeepSec loop owns process, revalidate, export,
+verification, remediation and delivery of its own findings.
 
 Any other stage expected to exceed a couple of minutes (a full
 pytest/vitest suite, a CI watch) is launched DETACHED from the agent
@@ -228,7 +228,6 @@ This prompt authorizes only:
   and test inspection in the dedicated security clone;
 - deterministic static analysis and advisory checks using already installed,
   pinned tools;
-- DeepSec source review using its locked local package;
 - Claude Security scan-only review using the installed official plugin;
 - bounded, non-destructive tests against loopback-only Radon processes using
   fake credentials, fake upstreams, synthetic identities, disposable files,
@@ -336,6 +335,20 @@ Before every run:
    trap. A timeout or spend stop is incomplete, not a clean scan. Preserve
    private resumable state and do not advance the audited SHA.
 
+**Subscription only.** Claude Security and `claude -p` prefer an Anthropic
+API key over the machine's claude.ai login whenever one is visible. This loop
+bills the operator's subscription only: never provision `ANTHROPIC_API_KEY` /
+`ANTHROPIC_AUTH_TOKEN` / `CLAUDE_CODE_API_KEY` / `CLAUDE_API_KEY` / Bedrock /
+Vertex reroutes into the launch environment or any env file the clone reads,
+and treat this stderr line as a FAILED stage, not a warning: "claude.ai
+connectors are disabled because ANTHROPIC_API_KEY or another auth source is
+set and takes precedence over your claude.ai login". The wrapper ignores any
+of those variables in the launch environment (names it on stderr, unsets it,
+runs on the subscription), scrubs reroute lines out of a provisioned
+`web/.env`, and refuses only a key file or a Claude Code settings-level
+`apiKeyHelper` / `env` reroute that `unset` cannot reach. A stage that reports
+API-key auth therefore means the wrapper was bypassed.
+
 ## Ground truth and change selection
 
 Use `docs/security-audit-playbook.md` as the canonical Radon threat and
@@ -411,87 +424,16 @@ version, vulnerable feature, runtime/development exposure, existing
 mitigation, and upstream fix are established. Never blind-bump a framework or
 transitive dependency from a scanner score.
 
-### Stage 3: harvest the DeepSec sibling (do not wait)
+### Stage 3: DeepSec (owned by the DeepSec loop)
 
-DeepSec is a sibling worker (`scripts/security_deepsec_worker.sh`, launchd
-`com.radon.security-deepsec`, dead-man label `security-deepsec`), not a stage
-you run inside this 2h audit cap. The wrapper already harvests a ready
-export into the shared private queue at audit/remediate start. In this
-stage, record the sibling's public status (`still running` / `failed` /
-`export ready` / `harvested`), write `fast_engines: complete` and the
-`fast-engines.complete` marker after Stages 1-2 finish, and fold any
-already-harvested verified findings into this run's private record. Do not
-start `deepsec process`. Do not wait on a DeepSec pid. Do not hold the
-completion marker because DeepSec is still chewing. Advance last-audited
-SHAs for the fast engines independently; leave the DeepSec engine SHA
-untouched until harvest records it.
-
-Use only the unscoped npm package `deepsec` from `vercel-labs/deepsec`. It is
-an AI source-code reviewer with privileged shell capability, not a DAST tool
-or a substitute for penetration testing. **Initialization and upgrades are not
-part of the unattended run** (rail 8). At this prompt's creation the official
-package was `deepsec@2.3.8` while Radon's ignored workspace pinned `2.3.4`, and
-that workspace lacks a pnpm lockfile: until a human reviews and records the npm
-lock and installed-package integrity, DeepSec is `OPERATOR_REQUIRED` on the
-sibling worker, not a reason to stall this audit.
-
-DeepSec drives Claude through the Claude Agent SDK, and both it and `claude -p`
-prefer an Anthropic API key over the machine's claude.ai login whenever one is
-visible. This loop bills the operator's subscription only. Keep the model route
-at `ai: {mode: "local", provider: "local"}` in `deepsec.config.ts`, never
-provision `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` / `CLAUDE_CODE_API_KEY`
-/ `CLAUDE_API_KEY` / Bedrock / Vertex reroutes into `.deepsec/.env*` or the
-launch environment, and treat this stderr line as a FAILED stage, not a
-warning: "claude.ai connectors are disabled because ANTHROPIC_API_KEY or
-another auth source is set and takes precedence over your claude.ai login".
-The wrapper ignores any of those variables in the launch environment (names
-it on stderr, unsets it, runs on the subscription), scrubs reroute lines out
-of a provisioned `web/.env`, and refuses only a key file or a Claude Code
-settings-level `apiKeyHelper` / `env` reroute that `unset` cannot reach. A
-stage that reports API-key auth therefore means the wrapper was bypassed.
-
-The sibling worker, not this audit phase, invokes the already installed
-binary from the DeepSec worktree (never install during the nightly run).
-Its command shape, kept here so the contracts stay in one place:
-
-```sh
-umask 077
-./node_modules/.bin/deepsec --version >"$PRIVATE_RUN_DIR/deepsec-version.log" 2>&1
-set +e
-./node_modules/.bin/deepsec process --project-id radon \
-  --diff "$LAST_AUDITED_SHA..$HEAD_SHA" --concurrency 2 \
-  --comment-out "$PRIVATE_RUN_DIR/deepsec-findings.md" \
-  >"$PRIVATE_RUN_DIR/deepsec-process.log" 2>&1
-DEEPSEC_RC=$?
-set -e
-case "$DEEPSEC_RC" in 0|1) ;; *) exit "$DEEPSEC_RC" ;; esac
-./node_modules/.bin/deepsec revalidate --project-id radon --min-severity MEDIUM --concurrency 2 \
-  >"$PRIVATE_RUN_DIR/deepsec-revalidate.log" 2>&1
-./node_modules/.bin/deepsec export --project-id radon --format json --since "$RUN_STARTED_AT" \
-  --out "$PRIVATE_RUN_DIR/deepsec-current-run-findings.json" >"$PRIVATE_RUN_DIR/deepsec-export.log" 2>&1
-./node_modules/.bin/deepsec export --project-id radon --format json --min-severity MEDIUM \
-  --only-true-positive --since "$RUN_STARTED_AT" \
-  --out "$PRIVATE_RUN_DIR/deepsec-verified-findings.json" >>"$PRIVATE_RUN_DIR/deepsec-export.log" 2>&1
-```
-
-`RUN_STARTED_AT` is an ISO timestamp recorded before DeepSec starts. Preserve
-the associated private run state so every current-run finding is accounted for,
-including findings that do not survive MEDIUM+ revalidation.
-
-Interpret direct-diff exit codes correctly: `0` = completed, no net-new
-finding; `1` = completed and found at least one net-new finding (NOT a crash);
-any other nonzero = runtime/config failure — preserve resumable state and do
-NOT advance the DeepSec audited SHA. `process` has no per-command cost/duration
-cap: enforce the outer deadline and provider spend limit; `--limit N` bounds
-files while `--batch-size` does not cap total files/cost/duration. A monthly or
-threat-model-triggered full refresh runs `scan`, then repeated bounded
-`process --reinvestigate <wave-marker> --limit N` passes with one newly
-recorded wave marker, then `revalidate MEDIUM`. Reuse the marker while resuming
-the same refresh; increment only for a genuinely new refresh. Never run an
-uncontrolled whole-repository AI pass. Maintain precise project matchers for
-uncovered entry points only after human review; broad/unbounded noisy globs,
-silent exclusions, and auto-generated suppression are defects. Preserve
-DeepSec's incremental data in the clone but never commit or publish it.
+Vercel DeepSec runs in its own nightly loop (`/security-deepsec`, wrapper
+`scripts/security_deepsec_nightly.sh`, clone
+`~/radon-weekend/radon-security-deepsec`, dead-man label `security-deepsec`,
+branch `security-deepsec/<YYYY-MM-DD>`). It runs `deepsec process`,
+`revalidate` and `export`, verifies, remediates and delivers its own
+findings under the same rails as this skill. This audit does not start,
+wait on, read, or harvest it, and never advances a DeepSec audited SHA.
+Record only `deepsec: owned by security-deepsec loop` in the run-record.
 
 ### Stage 4: Anthropic Claude Security
 
@@ -706,8 +648,7 @@ branch the deliver phase pushes.
 4. Run focused tests, the relevant security contracts, gitleaks, type/static
    checks, build gates, and then every full project suite required for the
    touched languages before committing.
-5. Rerun the repository-native focused workflow, DeepSec diff and MEDIUM+
-   revalidation, Claude Security scan-changes, and the local reproduction
+5. Rerun the repository-native focused workflow, Claude Security scan-changes, and the local reproduction
    against the exact fixed SHA. A scanner disagreement requires source
    adjudication; it is not silently ignored.
 6. Add a durable invariant to `docs/security-audit-playbook.md` only when it
@@ -832,9 +773,7 @@ artifact). P0/P1 stay private until the operator coordinates disclosure.
 
 A completed audit requires: exact source range and threat-model delta recorded
 privately; secret preflight complete before any model received source;
-deterministic controls complete or explicitly marked incomplete; DeepSec
-sibling recorded as still running, failed, export ready, or harvested (a
-still-running sibling does not make this audit INCOMPLETE); Claude Security completed
+deterministic controls complete or explicitly marked incomplete; Claude Security completed
 the same immutable scope/effort with a valid revision stamp (or
 `OPERATOR_REQUIRED`); applicable bounded local active tests completed against
 synthetic fixtures; every candidate independently verified or rejected,
@@ -886,11 +825,9 @@ only; a missing daily comment means the runner did not fire) and does not
 edit the issue body after that. Run history stays in comments.
 
 Operators read two dead-men. `security-nightly` is this loop
-(audit/remediate/deliver). `security-deepsec` is the sibling worker:
-still running, failed, export ready, or harvested. A quiet DeepSec issue
-plus a live `~/radon-weekend/.security-deepsec.lock` means still running,
-not failed. Neither comment may name a route, file, attack, secret, or
-account.
+(audit/remediate/deliver). `security-deepsec` is the DeepSec loop's, with
+the same PHASE STAMP status shape. Neither comment may name a route, file,
+attack, secret, or account.
 
 The wrapper keeps it sanitized: no routes, file attack paths, exploits,
 secrets, or account identifiers. Put raw findings only in the private
@@ -915,9 +852,7 @@ job; send a source tree containing a possible secret to a model; use
 verification into a live curl/port scan/console action; publish a red
 regression that teaches exploitation before the fix is coordinated; advance the
 audited SHA after a timeout/incomplete inventory/failed archive/runtime error
-(DeepSec still running is not that timeout, and must not freeze non-DeepSec
-engine SHAs); wait in-session for the DeepSec sibling; open a second
-DeepSec remediate/deliver loop;
+; run, wait on, or consume the DeepSec loop's engine from this loop;
 invent a Claude Security spend cap ($25 or any other number) when
 `claude auth status` cannot prove the auth method; print the phase-completion
 marker while work is parked in a background task or a suite is still running

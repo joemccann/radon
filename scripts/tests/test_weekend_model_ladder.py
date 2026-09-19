@@ -47,6 +47,7 @@ LOOPS = {
     "ci-performance": REPO / "scripts" / "ci_performance_nightly.sh",
     "documentation": REPO / "scripts" / "documentation_nightly.sh",
     "security": REPO / "scripts" / "security_nightly.sh",
+    "security-deepsec": REPO / "scripts" / "security_deepsec_nightly.sh",
 }
 
 # Best first. The top rung is the operator's own default; the next is the same
@@ -78,6 +79,7 @@ COMPLETION = "SECURITY-NIGHTLY PHASE COMPLETE: audit"
 MARKERS = (
     ".radon-weekend-runner",
     ".radon-security-runner",
+    ".radon-security-deepsec-runner",
     ".radon-reliability-runner",
     ".radon-testing-runner",
     ".radon-ci-performance-runner",
@@ -90,7 +92,7 @@ MARKERS = (
 # loop — and run codex, then grok, then NVIDIA, then Cerebras. Their ladder
 # behaviour is asserted in test_provider_failover.py; what stays here is the
 # claude-rung behaviour, against the loop that still has claude rungs.
-CLAUDE_LOOPS = ["security"]
+CLAUDE_LOOPS = ["security", "security-deepsec"]
 
 
 def _clone(tmp_path: Path, wrapper: Path) -> Path:
