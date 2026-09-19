@@ -33,13 +33,14 @@ LOOPS = {
     "ci-performance": REPO / "scripts" / "ci_performance_nightly.sh",
     "documentation": REPO / "scripts" / "documentation_nightly.sh",
     "security": REPO / "scripts" / "security_nightly.sh",
+    "security-deepsec": REPO / "scripts" / "security_deepsec_nightly.sh",
 }
-CREDENTIAL_LOOPS = sorted(loop for loop in LOOPS if loop != "security")
+CREDENTIAL_LOOPS = sorted(loop for loop in LOOPS if loop not in ("security", "security-deepsec"))
 
 # Every var the installed CLI (2.1.272, re-derived 2026-09-15) honors as an
 # off-subscription route: `strings` on the binary, filtered to key / token /
-# base-url / creds-file / USE_* names, then read in context. Approved pins:
-# docs/security-approved-tools.md.
+# base-url / creds-file / USE_* names, then read in context. Versions are
+# not pinned (2026-09-19); re-derive when the installed CLI changes.
 BILLING_REROUTE_KEYS = (
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_AUTH_TOKEN",
@@ -89,10 +90,13 @@ FALSY_FLAG_VALUES = ("0", "false", "no")
 
 KEY = "sk-ant-api03-CONTRACT-TEST-NOT-A-REAL-KEY"
 COMPLETION = "SECURITY-NIGHTLY PHASE COMPLETE: audit"
+# The DeepSec wrapper greps its own prefix; the other line is inert noise.
+COMPLETION_DEEPSEC = "SECURITY-DEEPSEC PHASE COMPLETE: audit"
 
 MARKERS = (
     ".radon-weekend-runner",
     ".radon-security-runner",
+    ".radon-security-deepsec-runner",
     ".radon-reliability-runner",
     ".radon-testing-runner",
     ".radon-ci-performance-runner",
@@ -132,6 +136,7 @@ def _stub_bin(tmp_path: Path, env_dump: Path, gh_log: Path) -> Path:
             "#!/bin/sh\n"
             f"env > '{env_dump}'\n"
             f'echo "{COMPLETION}"\n'
+            f'echo "{COMPLETION_DEEPSEC}"\n'
             "exit 0\n"
         ),
         "timeout": (
@@ -231,13 +236,6 @@ class TestTheWrapperNamesEveryBillingReroute:
                 f"{loop}: {var} is not in the reroute list; Claude Code "
                 "2.1.270 prefers it over the claude.ai login"
             )
-
-    def test_the_comment_block_names_the_approved_pin(self, loop):
-        body = LOOPS[loop].read_text(encoding="utf-8")
-        assert "2026-09-14 (2.1.270" in body, (
-            f"{loop}: the reroute comment block must record the re-derivation "
-            "date and the approved Claude Code pin"
-        )
 
     def test_the_wrapper_unsets_from_the_lists(self, loop):
         body = LOOPS[loop].read_text(encoding="utf-8")
@@ -561,6 +559,7 @@ class TestTheRailsAreReCheckedBeforeEveryPhase:
             f'printf "%s\\n" "$*" >> "{calls}"\n'
             f"{plant}\n"
             f'echo "{COMPLETION}"\n'
+            f'echo "{COMPLETION_DEEPSEC}"\n'
             "exit 0\n"
         )
         proc, _, _ = _audit(tmp_path, loop, mode="cycle", claude_stub=stub)
@@ -585,7 +584,7 @@ class TestCredentialFreeLoopsDisableLadderAuthFileDiscovery:
 
     @pytest.mark.parametrize(
         "wrapper",
-        ["scripts/security_nightly.sh", "scripts/security_deepsec_worker.sh"],
+        ["scripts/security_nightly.sh", "scripts/security_deepsec_nightly.sh"],
     )
     def test_security_wrappers_export_the_flag(self, wrapper):
         text = (REPO / wrapper).read_text(encoding="utf-8")
