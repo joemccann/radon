@@ -12,7 +12,7 @@ import threading
 from research.dropbox import DropboxClient, DropboxError, content_hash
 from utils.atomic_io import atomic_save
 from datetime import datetime, timezone
-from research.model import classify_error
+from research.model import PROVIDER_PARK_SECS, classify_error, is_provider_outage
 from research.state import State
 
 
@@ -140,7 +140,9 @@ def review_one(root, state, pipeline, publisher, publish):
         stage_health(root, 'review', 'error', error)
         if not state.is_processing(work['key']):
             return True
-        if work['attempts'] >= 5:
+        if is_provider_outage(error):
+            state.park(work['key'], time.time() + PROVIDER_PARK_SECS)
+        elif work['attempts'] >= 5:
             state.complete(work['key'], {'status': 'held', 'error': classify_error(error)})
         else:
             state.retry(work['key'], error, delay=min(3600, 60 * 2 ** work['attempts']))
@@ -162,8 +164,8 @@ def _consumer(root, stop, wake, parsed, backoff, review, publish, client_factory
             try:
                 if review:
                     if pipeline is None:
-                        from research.model import Reviewer
-                        pipeline = pipeline_factory() if pipeline_factory else Pipeline(root, Reviewer(), publisher, extractor=cached_extract)
+                        from research.model import build_pipeline
+                        pipeline = pipeline_factory() if pipeline_factory else build_pipeline(root, publisher, extractor=cached_extract)
                     worked = review_one(root, state, pipeline, publisher, publish)
                     event = parsed
                 else:
