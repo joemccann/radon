@@ -114,7 +114,7 @@ describe("llm provider image blocks", () => {
   it("maps the image block to an image_url part on the xAI path", async () => {
     const { chat } = await import("@/lib/llm/provider");
     process.env.LLM_PROVIDER = "xai";
-    process.env.XAI_API_KEY = "xai-test";
+    process.env.XAI_OAUTH_TOKEN = "xai-test";
     const { calls } = captureFetch(() =>
       jsonResponse({ model: "grok-4", choices: [{ message: { content: "ok" } }] }),
     );
