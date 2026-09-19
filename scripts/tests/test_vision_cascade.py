@@ -165,12 +165,34 @@ def _http_401():
     return _Resp(401, {"error": {"message": "invalid api key"}})
 
 
+class _SseResp:
+    """chatgpt.com's codex Responses endpoint streams; the ladder folds the SSE."""
+
+    def __init__(self, rows=None, status_code: int = 200):
+        self.status_code = status_code
+        text = json.dumps(rows or ROWS).replace("\\", "\\\\").replace('"', '\\"')
+        self._chunks = [
+            f'data: {{"type":"response.output_text.delta","delta":"{text}"}}\n\n'.encode(),
+            b'data: {"type":"response.completed","response":{"status":"completed"}}\n\n',
+        ]
+
+    def iter_content(self, _chunk_size):
+        return iter(self._chunks)
+
+    def close(self):
+        pass
+
+
+def _chatgpt_ok(rows=None):
+    return _SseResp(rows)
+
+
 class _Router:
     def __init__(self, routes: dict):
         self.routes = routes
         self.calls: list[str] = []
 
-    def __call__(self, url, *, headers=None, json=None, timeout=None):
+    def __call__(self, url, *, headers=None, json=None, timeout=None, stream=False):
         self.calls.append(url)
         for needle, resp in self.routes.items():
             if needle in url:
@@ -304,7 +326,7 @@ class TestCreditFallthrough:
             {
                 "api.anthropic.com": _credit_low(),
                 "api.x.ai": _http_401(),
-                "api.openai.com": _http_401(),
+                "chatgpt.com": _http_401(),
                 "generativelanguage.googleapis.com": _http_401(),
                 "integrate.api.nvidia.com": _openai_ok(),
                 "api.cerebras.ai": _openai_ok([{"underlying": "CEREBRAS_SHOULD_WAIT"}]),
@@ -314,7 +336,9 @@ class TestCreditFallthrough:
             PNG, PROMPT, env=_subscription_env(tmp_path), post=router
         )
         assert result.provider == "nvidia"
-        assert any("api.openai.com" in u for u in router.calls)
+        # The ChatGPT grant goes to chatgpt.com, never api.openai.com (prepaid meter).
+        assert any("chatgpt.com/backend-api/codex/responses" in u for u in router.calls)
+        assert not any("api.openai.com" in u for u in router.calls)
         assert any("generativelanguage.googleapis.com" in u for u in router.calls)
         assert not any("cerebras" in u for u in router.calls)
 
@@ -369,11 +393,12 @@ class TestCreditFallthrough:
             json.dumps({"tokens": {"access_token": "codex-sub"}}),
             encoding="utf-8",
         )
-        router = _Router({"api.openai.com": _openai_ok()})
+        router = _Router({"chatgpt.com": _chatgpt_ok(), "api.openai.com": _http_401()})
         result = extract_via_vision(
             PNG, PROMPT, env={"CODEX_HOME": str(codex_home)}, post=router
         )
         assert result.provider == "codex"
+        assert not any("api.openai.com" in u for u in router.calls)
 
     def test_codex_prepaid_openai_key_skipped_without_allow(self):
         router = _Router({"api.openai.com": _openai_ok()})
