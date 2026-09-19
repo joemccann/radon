@@ -126,3 +126,12 @@ def test_cli_prints_baseline_json(corpus_root, capsys):
     harness.main(["--root", str(root), "--labels", str(labels), "--baseline"])
     out = json.loads(capsys.readouterr().out)
     assert out["mode"] == "v1-baseline" and out["docs"] == 3
+
+
+def test_mirror_outcomes_backfills_only_v2_audits(corpus_root):
+    root, _ = corpus_root
+    review = root / "evidence" / ("m" * 64) / "review.json"
+    review.write_text(json.dumps({"pipeline": "v2", "outcome": "reviewed", "identity": {"publisher": "J.P. Morgan"}, "audit": [], "posts": []}))
+    seen = []
+    assert harness.mirror_outcomes(harness.Corpus(root), record=lambda work, r: seen.append((work["key"], work["metadata"]["name"], r["pipeline"]))) == 1
+    assert seen == [("m" * 64, "morning meeting.pdf", "v2")]

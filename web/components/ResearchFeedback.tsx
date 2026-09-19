@@ -5,10 +5,20 @@ import { ThumbsDown, ThumbsUp } from "lucide-react";
 import { FEEDBACK_REASONS, MAX_FEEDBACK_COMMENT, REASONS_FOR_VOTE, type FeedbackReason, type PostFeedback } from "@/lib/researchFeedback";
 import styles from "./ResearchFeedback.module.css";
 
-type Props = { postId: string; initial?: PostFeedback; onHidden: (postId: string) => void };
+type Props = {
+  /** A published research post. */
+  postId?: string;
+  /** A held or dropped document: up means "should have published", down confirms the hold. No reason chips. */
+  workKey?: string;
+  initial?: PostFeedback;
+  /** Post: fired after a saved thumbs-down. Held document: fired after any saved vote. */
+  onHidden: (id: string) => void;
+};
 
-/** Operator ground truth for research feed items: a vote, reason chips and an optional comment, sent only on Save. */
-export default function ResearchFeedback({ postId, initial, onHidden }: Props) {
+/** Operator ground truth for research items: a vote, reason chips and an optional comment, sent only on Save. */
+export default function ResearchFeedback({ postId, workKey, initial, onHidden }: Props) {
+  const held = workKey !== undefined;
+  const target = (held ? workKey : postId) as string;
   const [saved, setSaved] = useState<PostFeedback | undefined>(initial);
   const [draft, setDraft] = useState<"up" | "down" | null>(null);
   const [reasons, setReasons] = useState<FeedbackReason[]>([]);
@@ -34,7 +44,7 @@ export default function ResearchFeedback({ postId, initial, onHidden }: Props) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
-        body: JSON.stringify({ postId, vote: draft, reasons, comment: comment.trim() }),
+        body: JSON.stringify({ ...(held ? { workKey } : { postId }), vote: draft, reasons, comment: comment.trim() }),
       });
       if (!response.ok) {
         const body = await response.json().catch(() => null) as { error?: string } | null;
@@ -42,30 +52,30 @@ export default function ResearchFeedback({ postId, initial, onHidden }: Props) {
       }
       setSaved({ vote: draft, reasons, comment: comment.trim() });
       setMessage("Saved");
-      if (draft === "down") onHidden(postId);
+      if (held || draft === "down") onHidden(target);
       else setDraft(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not save feedback.");
     } finally {
       setBusy(false);
     }
-  }, [busy, comment, draft, onHidden, postId, reasons]);
+  }, [busy, comment, draft, held, onHidden, postId, reasons, target, workKey]);
 
   return <div className={styles.root} data-research-feedback onKeyDown={event => {
     if (event.key === "ArrowLeft" || event.key === "ArrowRight") event.stopPropagation();
   }} onTouchStart={event => event.stopPropagation()} onTouchEnd={event => event.stopPropagation()}>
     <div className={styles.votes}>
-      <button type="button" className={styles.vote} aria-label="Thumbs up" aria-pressed={(draft ?? saved?.vote) === "up"} onClick={() => open("up")}>
-        <ThumbsUp size={15} aria-hidden />
+      <button type="button" className={styles.vote} aria-label={held ? "Should have published" : "Thumbs up"} aria-pressed={(draft ?? saved?.vote) === "up"} onClick={() => open("up")}>
+        <ThumbsUp size={15} aria-hidden />{held ? <span>Should have published</span> : null}
       </button>
-      <button type="button" className={styles.vote} aria-label="Thumbs down" aria-pressed={(draft ?? saved?.vote) === "down"} onClick={() => open("down")}>
-        <ThumbsDown size={15} aria-hidden />
+      <button type="button" className={styles.vote} aria-label={held ? "Correct to hold" : "Thumbs down"} aria-pressed={(draft ?? saved?.vote) === "down"} onClick={() => open("down")}>
+        <ThumbsDown size={15} aria-hidden />{held ? <span>Correct to hold</span> : null}
       </button>
       <span role="status" className={styles.status}>{message}</span>
     </div>
     {draft ? <section className={styles.panel} aria-label={draft === "up" ? "Thumbs up feedback" : "Thumbs down feedback"}>
-      <div className={styles.chips}>
-        {REASONS_FOR_VOTE[draft].map(reason => (
+      <div className={styles.chips} hidden={held}>
+        {(held ? [] : REASONS_FOR_VOTE[draft]).map(reason => (
           <button key={reason} type="button" className={styles.chip} aria-pressed={reasons.includes(reason)}
             onClick={() => setReasons(current => current.includes(reason) ? current.filter(r => r !== reason) : [...current, reason])}>
             {FEEDBACK_REASONS[reason]}
@@ -74,10 +84,12 @@ export default function ResearchFeedback({ postId, initial, onHidden }: Props) {
       </div>
       <label className={styles.label} htmlFor={commentId}>Comment (optional)</label>
       <textarea id={commentId} value={comment} maxLength={MAX_FEEDBACK_COMMENT} onChange={event => setComment(event.target.value)}
-        placeholder={draft === "up" ? "What made this useful, or what is missing (a chart, more detail)" : "Why this should not have been published"} />
+        placeholder={held
+          ? (draft === "up" ? "What the item should have said, or where the number is in the PDF" : "Why this document does not belong in the feed")
+          : (draft === "up" ? "What made this useful, or what is missing (a chart, more detail)" : "Why this should not have been published")} />
       <div className={styles.actions}>
         <button type="button" className={styles.save} disabled={busy} onClick={save}>Save feedback</button>
-        {draft === "down" ? <span className={styles.note}>Saving hides this item from your feed.</span> : null}
+        {!held && draft === "down" ? <span className={styles.note}>Saving hides this item from your feed.</span> : null}
       </div>
     </section> : null}
     {error ? <ErrorToast message={error} onRetry={busy ? undefined : () => { void save(); }} /> : null}
