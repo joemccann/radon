@@ -65,6 +65,11 @@ LOOPS = {
         "security-nightly",
         "com.radon.security-daily.plist",
     ),
+    "security-deepsec": (
+        "security_deepsec_nightly.sh",
+        "security-deepsec",
+        "com.radon.security-deepsec.plist",
+    ),
 }
 LOOP_IDS = sorted(LOOPS)
 
@@ -119,7 +124,7 @@ def _build(
     if marker:
         (clone / ".radon-weekend-runner").touch()
         # REL-180 (R-504): every wrapper requires its OWN loop marker as well.
-        for loop_marker in (".radon-security-runner", ".radon-reliability-runner", ".radon-testing-runner",
+        for loop_marker in (".radon-security-runner", ".radon-security-deepsec-runner", ".radon-reliability-runner", ".radon-testing-runner",
                             ".radon-ci-performance-runner", ".radon-documentation-runner"):
             (clone / loop_marker).touch()
 
@@ -185,7 +190,7 @@ def _build(
     # the marker the way a phase that actually finished would. The other
     # loops' wrappers do not grep for it and the extra line is inert there.
     complete_line = ""
-    if loop == "security":
+    if loop in ("security", "security-deepsec"):
         src = (REPO / "scripts" / script).read_text(encoding="utf-8")
         marker = re.search(r'PHASE_COMPLETE_MARKER="([^"]+)"', src).group(1)
         complete_line = f"echo '{marker} stub run_id=stub'\n"
