@@ -24,11 +24,11 @@ TOKEN_RE = re.compile('|'.join([
     r'(?P<figure>\b(?:Chart|Exhibit|Figure|Fig\.?|Table|Panel)\s?\d+[A-Za-z]?\b)',
     r'(?P<tenor>\b\d{1,2}[sS]\d{1,2}[sS]\b|\b\d{1,2}[yY]\d{1,2}[yY]\b|\b\d{1,3}[YyM]\b)',
     r'(?P<yearrange>\b(?:19|20)\d\d[-–](?:(?:19|20)\d\d|\d\d)[A-Z]?\b)',
-    rf'(?P<number>(?P<cur>{_CURRENCY})?(?:(?<![A-Za-z])(?P<sign>[+\-−]))?(?P<v1>{_NUM})(?:(?:-|\s-\s|\s?to\s?)(?P<v2>{_NUM}))?(?P<unit>\s?(?:{_UNITS})(?![A-Za-z]))?)',
+    rf'(?P<number>(?P<cur>{_CURRENCY})?(?:(?<![A-Za-z])(?P<sign>[+\-−]))?(?P<v1>{_NUM})(?:(?P<u1>\s?(?:{_UNITS})(?![A-Za-z]))-(?P<v2>{_NUM})|(?:-|\s-\s|\s?to\s?)(?P<v2b>{_NUM}))?(?P<unit>\s?(?:{_UNITS})(?![A-Za-z]))?)',
 ]), re.I)
 # Page-side number scan: plain numbers everywhere, including inside dates and periods, so a bare
 # year or day in the copy can still be grounded.
-NUMBER_RE = re.compile(rf'(?P<cur>{_CURRENCY})?(?:(?<![A-Za-z])(?P<sign>[+\-−]))?(?P<v1>{_NUM})(?:(?:-|\s-\s|\s?to\s?)(?P<v2>{_NUM}))?(?P<unit>\s?(?:{_UNITS})(?![A-Za-z]))?', re.I)
+NUMBER_RE = re.compile(rf'(?P<cur>{_CURRENCY})?(?:(?<![A-Za-z])(?P<sign>[+\-−]))?(?P<v1>{_NUM})(?:(?P<u1>\s?(?:{_UNITS})(?![A-Za-z]))-(?P<v2>{_NUM})|(?:-|\s-\s|\s?to\s?)(?P<v2b>{_NUM}))?(?P<unit>\s?(?:{_UNITS})(?![A-Za-z]))?', re.I)
 _PERIOD = re.compile(r'^(?:(?P<q1>[1-4])Q|Q(?P<q2>[1-4])|(?P<h1>[12])H|H(?P<h2>[12])|(?P<fy>FY|CY))\s?-?\'?(?P<y>(?:20)?\d\d)?(?:-(?:20)?(?P<y2>\d\d))?(?P<e>[A-Z])?$', re.I)
 
 
@@ -112,11 +112,11 @@ def _date_key(text):
 
 
 def _tenor_pattern(token):
-    match = re.fullmatch(r'(\d{1,3})([YyM])', token)
+    match = re.fullmatch(r'(\d{1,3})([YyMD])', token)
     if not match:
         return r'\s*'.join(re.escape(part) for part in token.lower().split())
     value, kind = match.group(1), match.group(2).lower()
-    words = 'y|yr|yrs|year|years' if kind == 'y' else 'm|mo|month|months'
+    words = {'y': 'y|yr|yrs|year|years', 'm': 'm|mo|month|months', 'd': 'd|day|days|dma'}[kind]
     return rf'{value}\s?-?\s?(?:{words})'
 
 
@@ -139,10 +139,10 @@ def numeric_tokens(text):
             out.append(Token(raw, kind))
             continue
         try:
-            values = tuple(Decimal(match.group(v).replace(',', '')) for v in ('v1', 'v2') if match.group(v))
+            values = tuple(Decimal(match.group(v).replace(',', '')) for v in ('v1', 'v2', 'v2b') if match.group(v))
         except InvalidOperation:
             continue
-        out.append(Token(raw, 'number', values, match.group('sign') or '', _unit(match.group('unit')), _currency(match.group('cur'))))
+        out.append(Token(raw, 'number', values, match.group('sign') or '', _unit(match.group('unit') or match.group('u1')), _currency(match.group('cur'))))
     return out
 
 
@@ -150,10 +150,10 @@ def _page_numbers(page_text):
     out = []
     for match in NUMBER_RE.finditer(page_text):
         try:
-            values = tuple(Decimal(match.group(v).replace(',', '')) for v in ('v1', 'v2') if match.group(v))
+            values = tuple(Decimal(match.group(v).replace(',', '')) for v in ('v1', 'v2', 'v2b') if match.group(v))
         except InvalidOperation:
             continue
-        out.append((Token(match.group(0), 'number', values, match.group('sign') or '', _unit(match.group('unit')), _currency(match.group('cur'))), match.start()))
+        out.append((Token(match.group(0), 'number', values, match.group('sign') or '', _unit(match.group('unit') or match.group('u1')), _currency(match.group('cur'))), match.start()))
     return out
 
 
@@ -161,9 +161,10 @@ def _number_found(token, page_tokens, page_text):
     for value in token.values:
         hit = False
         for other, position in page_tokens:
-            if value not in other.values:
+            scaled = token.unit == 'k' and not other.unit and value * 1000 in other.values      # 379k against 379,000
+            if value not in other.values and not scaled:
                 continue
-            if token.unit and other.unit != token.unit:
+            if token.unit and other.unit != token.unit and not scaled:
                 if other.unit or not _unit_in_context(page_text, position, token.unit):
                     continue
             if token.currency and other.currency and other.currency != token.currency:
@@ -178,8 +179,11 @@ def _number_found(token, page_tokens, page_text):
     return True
 
 
-def ground(copy_fields, page_text, cited_pages):
-    """copy_fields: strings (title, body, captions). Returns {'passed': bool, 'tokens': [...]}."""
+def ground(copy_fields, page_text, cited_pages, known=None):
+    """copy_fields: strings (title, body, captions). known: facts established by identify
+    ({'date': ISO, 'date_page': n}); the copy may restate them without citing their page.
+    Returns {'passed': bool, 'tokens': [...]}."""
+    known = known or {}
     pages = {p: normalize(page_text.get(p, '')) for p in cited_pages}
     page_numbers = {p: _page_numbers(text) for p, text in pages.items()}
     page_lower = {p: text.lower() for p, text in pages.items()}
@@ -195,11 +199,14 @@ def ground(copy_fields, page_text, cited_pages):
             for p in cited_pages:
                 if token.kind == 'number':
                     found = _number_found(token, page_numbers[p], pages[p])
-                    if not found and token.unit in ('year', 'month') and len(token.values) == 1 and not token.currency:
-                        # "10-year" in the copy grounds on a "10Y" tenor on the page.
+                    if not found and token.unit in ('year', 'month', 'day') and len(token.values) == 1 and not token.currency:
+                        # "10-year" grounds on a "10Y" tenor; "200-day" on "200 DMA".
                         found = re.search(rf'(?<![\w]){_tenor_pattern(f"{token.values[0]}{token.unit[0].upper()}")}(?![\w])', page_lower[p]) is not None
                 elif token.kind == 'date':
                     found = _date_key(token.token) in page_dates[p]
+                    if not found and known.get('date') and _date_key(token.token) == known['date']:
+                        token.page = known.get('date_page') or p
+                        break
                 elif token.kind == 'period':
                     key_ = _period_key(token.token)
                     found = key_ in page_periods[p]
