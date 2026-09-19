@@ -563,7 +563,7 @@ New optional variables, all added to `cloud/.env.example` and to `_OPTIONAL_LADD
 
 ## I. Shadow-mode metrics, cutover checklist, post-deploy monitor
 
-### I.1 Shadow table (migration `0077_slm_tagger_shadow.sql`)
+### I.1 Shadow table (migration `0078_slm_tagger_shadow.sql`)
 
 ```sql
 CREATE TABLE IF NOT EXISTS slm_tagger_shadow (
@@ -684,7 +684,7 @@ Red/green order is mandatory (`CLAUDE.md` TDD rule). Every item names its test o
 - [ ] Node untouched; `web/tests/newsfeed-tagger.test.ts` and `newsfeed-vision-tagger.test.ts` green unchanged.
 
 **Shadow and monitor**
-- [ ] Migration `0077_slm_tagger_shadow.sql` with the I.1 columns; `migrate.py` accepts it; retention list updated; row verified in Turso from the serve host in `shadow` mode (one real post) before the PR leaves draft.
+- [ ] Migration `0078_slm_tagger_shadow.sql` with the I.1 columns; `migrate.py` accepts it; retention list updated; row verified in Turso from the serve host in `shadow` mode (one real post) before the PR leaves draft.
 - [ ] `[HR-7]` `monitor.py` unit-tested on fixtures for each I.3 signal and threshold (exit 0 / exit 3); `radon-slm-tagger-monitor.{service,timer}` committed, pinned in the unit manifest, rows added to `docs/operations.md` and `docs/cloud-services.md` (`ops-timers` owners rule); no-op verified when mode is `off`.
 
 **Docs**
