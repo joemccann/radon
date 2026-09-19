@@ -19,6 +19,28 @@
 - Docs only. Default fraction stays 0.25 in code and docs; half Kelly gated on Joe (§F of the spec).
 - Docs contract suite 95 passed locally; branch base is `49a23af0`, `origin/main` moved to `fea1759f` with no workflow or Kelly-surface changes.
 
+# Task: Newsfeed share 502 (2026-09-19)
+
+Production POST /api/newsfeed/share 502s with "Voice rewrite unavailable".
+Journal: Missing Anthropic subscription. Next.js has no subscription binds.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red: nextjs must bind grant dirs; relay must not
+- T2 depends_on: [T1] - Bind nextjs; keep relay excluded; low-reasoning share; fence-strip voice JSON
+- T3 depends_on: [T2] - Focused green, PR, CI
+
+## Checklist
+
+- [x] T1 Failing bind + share-call-shape tests
+- [x] T2 Runtime allowlist + share route + parseVoiceCopy
+- [ ] T3 PR, CI green
+
+## Review
+
+- Live: 2026-09-19 16:09:36Z radon-nextjs `[newsfeed/share] voice rewrite failed: Error: Missing Anthropic subscription`.
+- 2aba1229 excluded nextjs from grant mounts. Share and assistant run in Next.js.
+
 # Task: GEX45 GPU deployment tooling (2026-09-19)
 
 ## Dependency graph
