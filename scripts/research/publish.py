@@ -125,7 +125,12 @@ def outcome_row(work: dict, review: dict) -> dict:
         drafts.append({"title": str(candidate.get("title") or "")[:300], "content": str(candidate.get("content") or "").strip()[:600],
                        "held": entry["held"], "detail": (missing or str(verdict.get("reason") or entry.get("error") or ""))[:400]})
     metadata = work.get("metadata") or {}
-    return {"work_key": work["key"], "file_id": metadata.get("id") or "", "file_name": metadata.get("name") or "",
+    document = review.get("document") or {}
+    context = {"pageCount": document.get("page_count"), "figureCount": len(review.get("figures") or []),
+               "dateSource": identity.get("date_source") or "", "excerpt": str(document.get("excerpt") or "")[:900],
+               "selectorReason": str(((review.get("selection") or {}).get("reason")) or "")[:600],
+               "sourceUrl": document.get("source_url") or ""}
+    return {"context_json": json.dumps(context), "work_key": work["key"], "file_id": metadata.get("id") or "", "file_name": metadata.get("name") or "",
             "publisher": identity.get("publisher") or "unknown", "series": identity.get("series") or "",
             "doc_type": identity.get("doc_type") or "", "folder_date": work.get("folder_date") or "",
             "document_date": identity.get("date") or "", "outcome": outcome, "reason_codes": json.dumps(codes),
@@ -133,7 +138,7 @@ def outcome_row(work: dict, review: dict) -> dict:
 
 
 _OUTCOME_COLUMNS = ("work_key", "file_id", "file_name", "publisher", "series", "doc_type", "folder_date", "document_date",
-                    "outcome", "reason_codes", "drafts_json", "posts", "pipeline")
+                    "outcome", "reason_codes", "drafts_json", "posts", "pipeline", "context_json")
 
 
 def record_outcome(work: dict, review: dict) -> None:

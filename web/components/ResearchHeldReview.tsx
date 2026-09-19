@@ -7,6 +7,16 @@ import ResearchFeedback from "./ResearchFeedback";
 import ResearchRuleProposals from "./ResearchRuleProposals";
 import styles from "./ResearchHeldReview.module.css";
 
+const DATE_SOURCES: Record<string, string> = { text: "from the document text", pdf: "from the PDF metadata", dropbox: "from the Dropbox upload time", folder: "from the folder date" };
+
+function describeDocument(item: HeldDocument): string {
+  const parts = [];
+  if (item.documentDate) parts.push(`Report dated ${item.documentDate}${DATE_SOURCES[item.context?.dateSource ?? ""] ? ` (${DATE_SOURCES[item.context.dateSource]})` : ""}`);
+  if (item.context?.pageCount) parts.push(`${item.context.pageCount} ${item.context.pageCount === 1 ? "page" : "pages"}`);
+  if (item.context?.figureCount) parts.push(`${item.context.figureCount} ${item.context.figureCount === 1 ? "chart" : "charts"}`);
+  return parts.join(" · ");
+}
+
 /** A small daily sample of documents the intake held or dropped, so the operator can label what it got wrong. */
 export default function ResearchHeldReview() {
   const [items, setItems] = useState<HeldDocument[] | null>(null);
@@ -48,6 +58,10 @@ export default function ResearchHeldReview() {
         {items.map(item => <li key={item.workKey} className={styles.item}>
           <p className={styles.meta}>{`${item.publisher} · ${item.folderDate} · ${item.outcome === "dropped" ? "Dropped before review" : "Held"}`}</p>
           <h4 className={styles.file}>{item.fileName}</h4>
+          <p className={styles.meta}>{describeDocument(item)}</p>
+          {item.context?.excerpt ? <p className={styles.excerpt}>{item.context.excerpt}</p> : null}
+          {item.context?.selectorReason ? <p className={styles.reason}><span className={styles.reasonLabel}>{item.drafts.length ? "Selector's note: " : "Why nothing was taken: "}</span>{item.context.selectorReason}</p> : null}
+          {item.context?.sourceUrl ? <a className={styles.pdf} href={item.context.sourceUrl} target="_blank" rel="noopener noreferrer">Open PDF</a> : null}
           <ul className={styles.codes} aria-label="Reasons">
             {item.reasonCodes.map(code => <li key={code} className={styles.code}>{reasonCodeLabel(code)}</li>)}
           </ul>

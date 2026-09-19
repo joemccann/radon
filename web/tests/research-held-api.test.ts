@@ -37,6 +37,7 @@ beforeEach(async () => {
   await exec(BASE_SQL);
   await exec(migration("0078_research_feedback.sql"));
   await exec(migration("0079_research_outcomes.sql"));
+  await exec(migration("0081_research_outcomes_context.sql"));
   (await import("../lib/db")).__setDbForTests(db);
 });
 
@@ -74,6 +75,20 @@ describe("GET /api/newsfeed/research/held", () => {
     const item = body.items.find((i) => i.fileName === "a.pdf")!;
     expect(item).toMatchObject({ workKey: wk("a"), publisher: "Goldman Sachs", outcome: "held", reasonCodes: ["NUMBER_NOT_ON_PAGE"], folderDate: "2026-09-17" });
     expect(item.drafts).toEqual([{ title: "Draft a", content: "Body", held: "NUMBER_NOT_ON_PAGE", detail: "$47bn" }]);
+  });
+
+  it("returns the document context so a hold with no drafts can still be judged", async () => {
+    await outcome("w", "held", ["NO_CANDIDATES"]);
+    const context = { pageCount: 9, figureCount: 2, dateSource: "text", excerpt: "The Daily Froth: A Brief History of the End of the World.",
+      selectorReason: "Historical essay; no measured market finding.", sourceUrl: "/api/newsfeed/research/files/" + "c".repeat(64) + ".pdf" };
+    await db.execute({ sql: "UPDATE research_outcomes SET context_json = ? WHERE work_key = ?", args: [JSON.stringify(context), wk("w")] });
+    expect((await held()).body.items[0].context).toEqual(context);
+  });
+
+  it("never serves a source link that is not an authenticated research PDF", async () => {
+    await outcome("x", "held", ["NO_CANDIDATES"]);
+    await db.execute({ sql: "UPDATE research_outcomes SET context_json = ? WHERE work_key = ?", args: [JSON.stringify({ sourceUrl: "https://evil.example/x.pdf", excerpt: 7 }), wk("x")] });
+    expect((await held()).body.items[0].context).toEqual({ pageCount: null, figureCount: 0, dateSource: "", excerpt: "", selectorReason: "", sourceUrl: "" });
   });
 
   it("samples at most 10 a day, stratified across reason codes, stable within the day", async () => {
