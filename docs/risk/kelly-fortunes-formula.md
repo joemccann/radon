@@ -1,6 +1,7 @@
 # Kelly sizing: Fortune's Formula alignment spec
 
-Status: **PLAN**. Docs only. No live risk parameter changes in this PR.
+Status: **PLAN**. Docs only. No live risk parameter changes in this PR
+([#552](https://github.com/joemccann/radon/pull/552), draft, human merge).
 Owner doc for `scripts/kelly.py`, `lib/tools/schemas/kelly.ts`,
 `lib/tools/wrappers/kelly.ts` (see `docs/owners.json` rule `kelly-sizing`).
 

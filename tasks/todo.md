@@ -12,11 +12,12 @@
 - [x] T1 Audit
 - [x] T2 Spec
 - [x] T3 Cross-links
-- [ ] T4 Draft PR + CI green
+- [ ] T4 Draft PR https://github.com/joemccann/radon/pull/552 opened; CI green pending
 
 ## Review
 
 - Docs only. Default fraction stays 0.25 in code and docs; half Kelly gated on Joe (§F of the spec).
+- Docs contract suite 95 passed locally; branch base is `49a23af0`, `origin/main` moved to `fea1759f` with no workflow or Kelly-surface changes.
 
 # Task: GEX45 GPU deployment tooling (2026-09-19)
 
