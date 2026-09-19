@@ -353,6 +353,45 @@ describe("llm provider", () => {
     expect(result.usedFallback).toBe(true);
   });
 
+  it("falls back to Anthropic by default when auto-preferred xAI fails and an Anthropic key exists", async () => {
+    // 2026-09-18: the xAI team ran out of credits (403 permission-denied) and
+    // every newsfeed voice rewrite surfaced "Voice rewrite unavailable" even
+    // though ANTHROPIC_API_KEY was live on the host. Nothing had set
+    // LLM_FALLBACK_PROVIDER, so the historical default provider never got a
+    // turn. xAI is only auto-preferred; losing it must degrade, not fail.
+    process.env.XAI_API_KEY = "xai-test-key";
+    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+    delete process.env.LLM_FALLBACK_PROVIDER;
+
+    const { calls } = captureFetch((call) => {
+      if (call.url.includes("/chat/completions")) {
+        return jsonResponse({ code: "permission-denied", error: "used all available credits" }, 403);
+      }
+      return jsonResponse({
+        content: [{ type: "text", text: "Anthropic rescued." }],
+        stop_reason: "end_turn",
+      });
+    });
+
+    const result = await chat(SAMPLE_REQUEST);
+
+    expect(calls).toHaveLength(2);
+    expect(calls[0].url).toContain("/chat/completions");
+    expect(calls[1].url).toContain("api.anthropic.com");
+    expect(result.provider).toBe("anthropic");
+    expect(result.usedFallback).toBe(true);
+  });
+
+  it("does not default a fallback when the primary was chosen explicitly", async () => {
+    process.env.LLM_PROVIDER = "xai";
+    process.env.XAI_API_KEY = "xai-test-key";
+    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+    delete process.env.LLM_FALLBACK_PROVIDER;
+    captureFetch(() => jsonResponse({ error: "boom" }, 500));
+
+    await expect(chat(SAMPLE_REQUEST)).rejects.toThrow();
+  });
+
   it("throws when the primary errors and no fallback is configured", async () => {
     process.env.LLM_PROVIDER = "openai";
     process.env.OPENAI_API_KEY = "sk-openai-test";
