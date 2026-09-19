@@ -85,6 +85,8 @@ check "caddy (cloud/tests edge)" command -v caddy
 # (fail-closed), never an install trigger.
 advise "DeepSec workspace (.deepsec pinned, OPERATOR-bootstrapped)" \
   test -x "$DEEPSEC_REPO/.deepsec/node_modules/.bin/deepsec"
+advise "private reports deploy key (~/radon-weekend/.security-reports-deploy-key, OPERATOR-provisioned)" \
+  test -f "$WEEKEND_ROOT/.security-reports-deploy-key"
 advise "Claude Security plugin (official, OPERATOR-installed)" \
   bash -c 'claude plugin list --json 2>/dev/null | grep -q claude-security'
 # Operator policy 2026-08-31: the Claude Security spend cap is derived at run
