@@ -161,6 +161,29 @@ def order_max_loss(params: dict) -> Optional[float]:
     return None
 
 
+ENFORCE_ALL_PATHS_PREF = "RADON_BANKROLL_CAP_ENFORCE_ALL_PATHS"
+
+
+def check_if_enforced_on_all_paths(params: dict) -> Optional[dict[str, Any]]:
+    """Gate 3 for placers outside ib_place_order (ib_execute, exit service).
+
+    Operator preference, default Off (bypass). These processes are not
+    spawned by radon-api (no env overlay) and the exit service is long-lived,
+    so re-read the store per placement; a dead store keeps the last known
+    value, else env/default.
+    """
+    try:
+        import app_preferences
+    except ImportError:
+        from scripts import app_preferences
+
+    if app_preferences._db_enabled():
+        app_preferences.refresh_snapshot()
+    if not app_preferences.get_bool(ENFORCE_ALL_PATHS_PREF):
+        return None
+    return check_bankroll_admission(params)
+
+
 def check_bankroll_admission(
     params: dict,
     *,
