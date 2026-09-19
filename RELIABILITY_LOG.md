@@ -702,3 +702,21 @@ Baseline on 386a2873 completed with DONE: Python 13999 passed, 1 failed, 19 skip
 First closing attempt is rejected: Python 14211 passed, 1 failed, 2 collection errors, 19 skipped. Upstream d5658e5a added eager PDF imports to tests while this runner lacked the already-pinned pypdfium2 5.13.0 and pdf-inspector 1.17.0. Both exact packages were installed into writable scratch and temporarily exposed through workspace import links; no dependency source is committed. The new upstream panic-index live Cboe test counted every future session against a fixed 4016-observation C8 anchor. RED 4017 != 4016; the gate unblock now bounds all four input series through the original 2026-09-17 anchor, preserving every numeric/count/dropped-date assertion. GREEN recovery group: 51 passed. No production code or gate skip changed.
 
 The sandbox denied terminating the detached owned stage; its scheduled steps are awaited. Run 1 is not counted toward closure. After recovery, runs 2 and 3 plus a further complete run must establish the required consecutive series.
+
+### Live smoke-test collection guard
+
+Inspection of the initial suite warnings found scripts/trade_blotter/test_integration.py was collected by the default gate despite explicitly requiring a live IB Gateway. The repository already excludes the integration marker by default, but this module lacked it. Applied that classification without removing or altering any existing smoke-test assertion. New collection-only regression tests prove default selection contains zero live smoke cases and explicit integration opt-in retains all four. RED 2 failed on the untouched module; GREEN 2 passed after classification. No explicit integration test execution was used for this proof. Initial runs are not claimed as isolated closing evidence; final acceptance restarts at run 3 and requires two additional complete runs after the scheduled stage finishes.
+
+### Final closing verification 2026-09-19
+
+REL-263/R-684 and REL-265/R-686 are DONE in this reduced P0/P1 run. The gate repairs are verified. Permanent drills: 107 Python + 12 Vitest = 119 passed. Runs 1/2 are excluded from closing evidence; the final source was unchanged throughout the following three consecutive completed runs.
+
+| Run | Python | Vitest | Cloud (raw rc=1) |
+|---|---|---|---|
+| 3 | 14243 passed, 1 skipped, 39 warnings in 1201.30s (0:20:01) | 9832 passed (9832) | 4 failed, 1909 passed, 77 skipped in 393.35s (0:06:33) |
+| 4 | 14243 passed, 1 skipped, 39 warnings in 1212.46s (0:20:12) | 9832 passed (9832) | 4 failed, 1909 passed, 77 skipped in 396.38s (0:06:36) |
+| 5 | 14243 passed, 1 skipped, 39 warnings in 1405.20s (0:23:25) | 9832 passed (9832) | 4 failed, 1909 passed, 77 skipped in 392.26s (0:06:32) |
+
+All detached stages wrote their completion sentinels. Cloud raw rc=1 is retained: the exact four descendant-cleanup/privileged-timeout failures match the untouched baseline in every run. No cloud-green claim is made. All temporary dependency import links were removed after the final stage; the required persistent runner dependency-install command is carried to the PR and issue.
+
+Review: two eligible P1 findings implemented with failing fault-injection tests first, plus two gate repairs with all original assertions retained. The live Gateway smoke module uses the repository's established explicit integration opt-in; the new proof is collection-only. No Gateway administrative, live-order or trading-halt mutation was issued. All inherited operator/design residuals and excluded P2 acceptance remain in the complete issue #81 checkpoint. Guarded publication, exact-head CI registration and notification receipts are recorded in durable runner scratch and the issue; deliver owns CI completion.
