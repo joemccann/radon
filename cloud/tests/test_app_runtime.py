@@ -566,6 +566,23 @@ def test_run_refuses_to_start_when_the_notify_proxy_cannot_bind(tmp_path: Path) 
     assert not [line for line in log.splitlines() if line.startswith("run ")], log
 
 
+def test_notify_proxy_socket_is_chowned_to_the_container_uid(tmp_path: Path) -> None:
+    """The 0600 socket is only usable by the container once start_notify_proxy
+    hands ownership to the radon uid the container runs as."""
+    d = Path(tempfile.mkdtemp(prefix="rdn", dir="/tmp"))
+    upstream = d / "u"
+    upstream.write_bytes(b"")
+    result = _run(
+        tmp_path,
+        ["run", "radon-relay.service"],
+        extra_env={"NOTIFY_SOCKET": str(upstream)},
+    )
+    assert result.returncode == 0, result.stderr
+    listen = Path(_proxy_dir_from(result)) / "radon-relay.service.sock"
+    chowns = (tmp_path / "chown.log").read_text(encoding="utf-8")
+    assert f"-h 1000:1000 {listen}" in chowns
+
+
 def test_notify_proxy_relays_ready_and_watchdog_datagrams() -> None:
     d = Path(tempfile.mkdtemp(prefix="rdn", dir="/tmp"))
     upstream_path = d / "u"
@@ -583,7 +600,10 @@ def test_notify_proxy_relays_ready_and_watchdog_datagrams() -> None:
         while not listen_path.exists() and time.monotonic() < deadline:
             time.sleep(0.02)
         assert listen_path.exists(), proc.stderr.read() if proc.poll() is not None else "no socket"
-        assert stat.S_IMODE(listen_path.stat().st_mode) == 0o666
+        # NotifyAccess=all trusts every datagram the proxy relays, so the
+        # socket must never be world-writable: only its owner (chowned to the
+        # container uid by start_notify_proxy) may write READY/WATCHDOG.
+        assert stat.S_IMODE(listen_path.stat().st_mode) == 0o600
         client = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
         client.sendto(b"READY=1\n", str(listen_path))
         client.sendto(b"WATCHDOG=1\n", str(listen_path))
@@ -986,7 +1006,10 @@ def test_image_workflow_exists_and_is_a_deploy_need() -> None:
     assert "docker/app/Dockerfile.node" in wf
     assert "docker/app/.dockerignore" in wf
     assert "--ignorefile" not in wf
-    assert "packages: write" in wf
+    # The GHCR write grant lives on the ci.yml caller; the reusable workflow
+    # itself carries no permissions so the PR caller's read-only token rules.
+    assert "packages: write" not in wf
+    assert "packages: write" in ci
     assert "environment:" not in wf
     assert "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ vars.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}" in wf
     assert "NEXT_PUBLIC_RADON_API_URL=${{ vars.NEXT_PUBLIC_RADON_API_URL }}" in wf

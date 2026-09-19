@@ -87,7 +87,8 @@ release_runner_lock() {
 NET_TIMEOUT_SECS="${RADON_WEEKEND_NET_TIMEOUT_SECS:-120}"
 # Before --lock-lib-only and before the venv PATH prepend. lock-lib-only
 # fetch always calls net_bounded under set -u.
-TIMEOUT_BIN="$(command -v timeout || true)"
+TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
+[[ -n "$TIMEOUT_BIN" ]] || { echo "ci_performance_nightly: GNU timeout (or gtimeout from coreutils) is required" >&2; return 78 2>/dev/null || exit 78; }
 net_bounded() { "$TIMEOUT_BIN" "$NET_TIMEOUT_SECS" "$@"; }
 
 # A VPN flap that establishes TCP and then stalls hangs an ssh transport with
@@ -1073,12 +1074,17 @@ install_nightly_pr_guard() {
   if [[ -z "${NIGHTLY_PR_GUARD_DIR:-}" ]]; then
     NIGHTLY_PR_GUARD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/radon-${LOOP_SLUG}-pr-guard.XXXXXX")" || return 1
   fi
-  export RADON_NIGHTLY_REAL_GH="$GH_BIN"
-  export RADON_NIGHTLY_GUARD_REPO="$REPO"
-  export RADON_NIGHTLY_GUARD_PYTHON="$(command -v python3.13 || command -v python3)"
-  cat > "$NIGHTLY_PR_GUARD_DIR/gh" <<'GUARD'
-#!/bin/bash
-set -euo pipefail
+  # Bake the paths into the shim instead of exporting them into the agent
+  # environment: an exported variable invites the agent to point the guard
+  # somewhere else, a literal baked into the 700 shim does not.
+  local guard_python
+  guard_python="$(command -v python3.13 || command -v python3)"
+  {
+    printf '#!/bin/bash\nset -euo pipefail\n'
+    printf 'export RADON_NIGHTLY_REAL_GH=%q\n' "$GH_BIN"
+    printf 'export RADON_NIGHTLY_GUARD_REPO=%q\n' "$REPO"
+    printf 'export RADON_NIGHTLY_GUARD_PYTHON=%q\n' "$guard_python"
+    cat <<'GUARD'
 case " $* " in
   *" pr create "*|*" api "*)
     guard_dir="$(mktemp -d "${TMPDIR:-/tmp}/radon-pr-check.XXXXXX")"
@@ -1092,6 +1098,7 @@ case " $* " in
   *) exec "$RADON_NIGHTLY_REAL_GH" "$@" ;;
 esac
 GUARD
+  } > "$NIGHTLY_PR_GUARD_DIR/gh"
   chmod 700 "$NIGHTLY_PR_GUARD_DIR/gh"
 }
 
