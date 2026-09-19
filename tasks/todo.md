@@ -1,3 +1,25 @@
+# Task: Main merge conflict resolution 2026-09-19 [IN PROGRESS]
+
+Resolve `origin/main` into `cursor/panic-index-proxy-plan-e8e5`, keep the panic
+index spec intact, and land a true merge commit with any required conflict
+fixes.
+
+## Dependency graph
+
+- T1 depends_on: [] - Fetch `origin/main` into the shallow clone and start the merge.
+- T2 depends_on: [T1] - Resolve conflicted files with the smallest correct merged result.
+- T3 depends_on: [T2] - Run focused validation and publish the merge commit.
+
+## Checklist
+
+- [ ] T1 Fetch `origin/main` and start merge
+- [ ] T2 Resolve conflicted files
+- [ ] T3 Validate and push
+
+## Review
+
+- [ ] Merge commit keeps both parents and only the intended conflict resolutions.
+
 # Task: Reliability remediate 2026-09-17 [DONE]
 
 Reduced-capability rung: remediate P0/P1 only. Today's audit carries one P2
