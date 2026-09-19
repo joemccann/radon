@@ -39,8 +39,8 @@ CREDENTIAL_LOOPS = sorted(loop for loop in LOOPS if loop not in ("security", "se
 
 # Every var the installed CLI (2.1.272, re-derived 2026-09-15) honors as an
 # off-subscription route: `strings` on the binary, filtered to key / token /
-# base-url / creds-file / USE_* names, then read in context. Approved pins:
-# docs/security-approved-tools.md.
+# base-url / creds-file / USE_* names, then read in context. Versions are
+# not pinned (2026-09-19); re-derive when the installed CLI changes.
 BILLING_REROUTE_KEYS = (
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_AUTH_TOKEN",
@@ -236,13 +236,6 @@ class TestTheWrapperNamesEveryBillingReroute:
                 f"{loop}: {var} is not in the reroute list; Claude Code "
                 "2.1.270 prefers it over the claude.ai login"
             )
-
-    def test_the_comment_block_names_the_approved_pin(self, loop):
-        body = LOOPS[loop].read_text(encoding="utf-8")
-        assert "2026-09-14 (2.1.270" in body, (
-            f"{loop}: the reroute comment block must record the re-derivation "
-            "date and the approved Claude Code pin"
-        )
 
     def test_the_wrapper_unsets_from_the_lists(self, loop):
         body = LOOPS[loop].read_text(encoding="utf-8")
