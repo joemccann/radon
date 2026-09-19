@@ -6,13 +6,12 @@ name: App-plane images
 # Main CI calls this workflow and gates deploy on the exact SHA pair. Pull
 # requests invoke it directly as a build-only image contract.
 
+# workflow_call only: the token here is always the CALLER's grant. ci.yml
+# grants packages:write for the main-push publish; app-images-pr.yml grants
+# contents:read only, so the pull_request build path never holds a token
+# that can write GHCR.
 on:
   workflow_call:
-  pull_request:
-
-permissions:
-  contents: read
-  packages: write
 
 concurrency:
   group: app-images-${{ github.ref }}

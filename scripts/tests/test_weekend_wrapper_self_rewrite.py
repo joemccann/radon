@@ -484,7 +484,12 @@ def test_two_instances_in_one_clone_do_not_both_run(tmp_path: Path, loop: str) -
 # --------------------------------------------------------------------------
 ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=\S*$")
 GUARD = '[[ "${1:-}" == "--lock-lib-only" ]] && return 0 2>/dev/null'
-TIMEOUT_SNAP = 'TIMEOUT_BIN="$(command -v timeout || true)"'
+TIMEOUT_SNAP = 'TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"'
+# The fail-closed guard is builtins only (no fork): echo/return/exit.
+TIMEOUT_GUARD_RE = re.compile(
+    r'^\[\[ -n "\$TIMEOUT_BIN" \]\] \|\| \{ echo "[^`$]*" >&2; '
+    r"return 78 2>/dev/null \|\| exit 78; \}$"
+)
 
 
 def _prologue_top_level(src: str) -> list[str]:
@@ -556,6 +561,8 @@ class TestTheRunBodyIsParsedBeforeItRuns:
         src = (REPO / "scripts" / LOOPS[loop][0]).read_text(encoding="utf-8")
         for line in _prologue_top_level(src):
             if line in ("set -Eeuo pipefail", GUARD, TIMEOUT_SNAP):
+                continue
+            if TIMEOUT_GUARD_RE.match(line):
                 continue
             assert ASSIGNMENT.match(line) or re.match(r'^[A-Za-z_][A-Za-z0-9_]*="[^`]*"$', line), (
                 f"unexpected top-level statement before main(): {line!r}"

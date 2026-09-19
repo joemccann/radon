@@ -417,9 +417,33 @@ class TestDirectoryOwnership:
         assert 'install -d -m 1770 "$dir"' in body
         assert '-o radon -g radon "$dir"' not in body
 
-    def test_media_dir_link_is_refused_before_install_d(self) -> None:
+    def test_media_dir_is_created_without_following_a_planted_link(self) -> None:
+        # /var/lib/radon is radon-owned, so a check-then-install pair leaves a
+        # window to swap a link in between. mkdir never follows a link in the
+        # final component: create first, refuse anything that is not a real
+        # directory, then chown without dereferencing.
         body = _function_body(SETUP.read_text(encoding="utf-8"), "create_etc_radon_dir")
-        assert body.index('-L "$media"') < body.index("install -d -m 1770")
+        assert 'mkdir -m 0750 "$media"' in body
+        assert body.index('mkdir -m 0750 "$media"') < body.index('-L "$media"')
+        assert 'chown --no-dereference radon:radon "$media"' in body
+        assert 'install -d' not in body.split('-L "$media"')[1]
+
+    def test_secret_store_key_is_32_raw_bytes(self) -> None:
+        # The store requires a 32-byte raw key; a base64 pass encrypts 45
+        # bytes of text and a fresh host's radon-api cannot open the store.
+        body = _function_body(
+            SETUP.read_text(encoding="utf-8"), "provision_secret_store_credential"
+        )
+        assert "head -c 32 /dev/urandom" in body
+        assert "base64" not in body
+
+    def test_github_host_key_is_pinned_not_keyscanned(self) -> None:
+        script = SETUP.read_text(encoding="utf-8")
+        assert "ssh-keyscan" not in script
+        assert (
+            "github.com ssh-ed25519 "
+            "AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"
+        ) in script
 
     def test_ssh_paths_refuse_links_before_root_writes(self) -> None:
         body = _function_body(SETUP.read_text(encoding="utf-8"), "preflight_checks")
