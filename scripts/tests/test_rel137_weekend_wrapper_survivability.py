@@ -34,12 +34,14 @@ TESTING = REPO / "scripts" / "testing_weekend.sh"
 CI_PERFORMANCE = REPO / "scripts" / "ci_performance_nightly.sh"
 DOCUMENTATION = REPO / "scripts" / "documentation_nightly.sh"
 SECURITY = REPO / "scripts" / "security_nightly.sh"
+SECURITY_DEEPSEC = REPO / "scripts" / "security_deepsec_nightly.sh"
 LOOPS = {
     "reliability": RELIABILITY,
     "testing": TESTING,
     "ci-performance": CI_PERFORMANCE,
     "documentation": DOCUMENTATION,
     "security": SECURITY,
+    "security-deepsec": SECURITY_DEEPSEC,
 }
 BASH = shutil.which("bash") or "/bin/bash"
 
@@ -56,7 +58,7 @@ def _runner_clone(tmp_path: Path, name: str) -> Path:
     (repo / "scripts").mkdir(parents=True)
     (repo / ".radon-weekend-runner").write_text("", encoding="utf-8")
     # REL-180 (R-504): every wrapper requires its OWN loop marker as well.
-    for marker in (".radon-security-runner", ".radon-reliability-runner", ".radon-testing-runner",
+    for marker in (".radon-security-runner", ".radon-security-deepsec-runner", ".radon-reliability-runner", ".radon-testing-runner",
                    ".radon-ci-performance-runner", ".radon-documentation-runner"):
         (repo / marker).write_text("", encoding="utf-8")
     wrapper_src = LOOPS[name]

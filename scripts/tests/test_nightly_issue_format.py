@@ -33,6 +33,7 @@ WRAPPERS = [
     REPO / "scripts" / "ci_performance_nightly.sh",
     REPO / "scripts" / "documentation_nightly.sh",
     REPO / "scripts" / "security_nightly.sh",
+    REPO / "scripts" / "security_deepsec_nightly.sh",
 ]
 SKILLS = [
     REPO / ".claude" / "skills" / "reliability-weekend" / "SKILL.md",
@@ -437,7 +438,7 @@ class TestWrappersAndSkillsUseTheTemplate:
         assert "gh issue edit" not in body, wrapper.name
         assert 'log: \\`${RUN_LOG##*/}\\` on the runner' not in body, wrapper.name
         assert "on the runner" not in body, wrapper.name
-        if wrapper.name == "security_nightly.sh":
+        if wrapper.name in ("security_nightly.sh", "security_deepsec_nightly.sh"):
             assert "Sanitized status only" in body, wrapper.name
 
     @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
