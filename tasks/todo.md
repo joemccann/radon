@@ -14,11 +14,11 @@ fixes.
 
 - [x] T1 Fetch `origin/main` and start merge
 - [x] T2 Resolve conflicted files
-- [ ] T3 Validate and push
+- [x] T3 Validate and push
 
 ## Review
 
-- [ ] Merge commit keeps both parents and only the intended conflict resolutions.
+- [x] Merge commit keeps both parents and only the intended conflict resolutions.
 
 # Task: Four-digit chain strikes [IMPLEMENTED; PR CI PENDING]
 
