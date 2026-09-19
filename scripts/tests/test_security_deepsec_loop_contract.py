@@ -288,6 +288,12 @@ class TestTheSetupInstallsThisLoop:
         body = _uncommented(SETUP)
         assert "worktree add" not in body, "the DeepSec clone must not be a worktree"
         assert 'git clone "$ORIGIN_URL" "$DEEPSEC_REPO"' in body, body
+        # While the old worktree still holds `main`, the security clone's own
+        # `checkout main` dies with that same fatal, so the conversion must
+        # run BEFORE the setup resets the security clone (Mini, 2026-09-19).
+        convert = body.index('if [[ -f "$DEEPSEC_REPO/.git" ]]; then')
+        sec_checkout = body.index('git -C "$WEEKEND_REPO" checkout -f --quiet main')
+        assert convert < sec_checkout, 'convert the DeepSec worktree before checking out main in the security clone'
 
 
 class TestThePlistRunsTheCycle:
