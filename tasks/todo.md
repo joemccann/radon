@@ -12,7 +12,7 @@ Implement `docs/ml/newsfeed-slm-tagger.md` (HR-1..HR-8). Dataset/eval/train/expo
 
 - [x] T1 Package + unit tests
 - [x] T2 Ladder hook MODE=off; units pinned not-installed; docs
-- [ ] T3 Draft PR + CI (LLaMA-Factory default trainer folded in)
+- [x] T3 Draft PR #535; local SLM/cloud tests green; latest-head Actions not registered (agent token)
 
 ## Review
 

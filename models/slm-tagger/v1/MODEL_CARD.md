@@ -22,7 +22,7 @@ Radon SLM tagger: internal specialist, not a SotA replacement for open research.
 
 ## Prompt contract
 
-`SLM_SYSTEM` in `scripts/newsfeed/slm/contract.py`. Loss masked to the assistant JSON (`mask_prompt: true`).
+`SLM_SYSTEM` in `scripts/newsfeed/slm/contract.py`. Loss masked to the assistant JSON (`train_on_prompt: false` in LLaMA-Factory; `mask_prompt: true` in the mlx-lm alternative).
 
 ## Eval
 
