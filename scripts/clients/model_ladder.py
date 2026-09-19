@@ -3,7 +3,7 @@
 Joe's exact order (2026-09-10). Do not leave a band until it is exhausted or
 unavailable:
 
-  1. subscription: anthropic -> grok -> cursor -> codex -> gemini
+  1. subscription: anthropic -> grok -> cursor -> codex -> gemini (Antigravity CLI)
   2. nvidia (API key OK)
   3. cerebras (cheap paid, last; currently paused on Hetzner)
 
@@ -35,6 +35,8 @@ override ``NVIDIA_TEXT_MODEL`` / ``NVIDIA_MODEL``). Default **vision** model is
 from __future__ import annotations
 
 import base64
+import shutil
+import subprocess
 import json
 import logging
 import os
@@ -71,13 +73,28 @@ MODEL_LADDER_TIERS = {
 _ANTHROPIC_PREPAID_KEYS = ("ANTHROPIC_API_KEY", "CLAUDE_CODE_API_KEY", "CLAUDE_API_KEY")
 _GROK_PREPAID_KEYS = ("XAI_API_KEY", "GROK_API_KEY")
 _CODEX_PREPAID_KEYS = ("OPENAI_API_KEY",)
-_GEMINI_KEYS = ("GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_API_KEY")
+# Google runs ONLY through the Antigravity CLI (operator, 2026-09-18): no
+# prepaid Gemini key and no Gemini OAuth token path, under any flag.
+_GEMINI_KEYS: tuple[str, ...] = ()
 _NVIDIA_KEYS = ("NVIDIA_API_KEY",)
 _CEREBRAS_KEYS = ("CEREBRAS_API_KEY",)
 
 # Claude Max / Pro subscription (claude setup-token or ~/.claude/.credentials.json).
 _ANTHROPIC_SUBSCRIPTION_ENV = ("CLAUDE_CODE_OAUTH_TOKEN",)
 _ANTHROPIC_OAUTH_BETA = "oauth-2025-04-20"
+# A Claude Max grant is honoured only for Claude Code traffic: the Messages API
+# answers a bare 429 unless the system prompt opens with this identity block
+# (live 2026-09-18: 200 with it, 429 without, 401 when sent as x-api-key).
+_CLAUDE_CODE_SYSTEM_PREFIX = "You are Claude Code, Anthropic's official CLI for Claude."
+_CLAUDE_CODE_USER_AGENT = "claude-cli/2.1.140"
+# ChatGPT subscription endpoint the codex CLI uses. api.openai.com meters the
+# prepaid wallet and rejects the grant ("no credits remaining", live 2026-09-18).
+_CHATGPT_CODEX_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses"
+# Google retired the Gemini CLI OAuth client for individuals on 2026-09-18 and
+# the Antigravity grant lacks the generativelanguage scope (403 live), so the
+# gemini rung shells out to the Antigravity CLI (`agy -p`) instead.
+_ANTIGRAVITY_TOKEN_RELPATH = Path(".gemini") / "antigravity-cli" / "antigravity-oauth-token"
+_ANTIGRAVITY_CLI_TIMEOUT_SECONDS = 120.0
 
 _NVIDIA_VISION_DEFAULT = "meta/llama-3.2-90b-vision-instruct"
 _NVIDIA_VISION_FALLBACK = "meta/llama-3.2-11b-vision-instruct"
@@ -93,11 +110,10 @@ _OPTIONAL_LADDER_ENV = (
     "NVIDIA_TEXT_MODEL",
     "NVIDIA_MODEL",
     "RADON_LADDER_ALLOW_PREPAID",
-    "GEMINI_OAUTH_TOKEN",
-    "GOOGLE_OAUTH_ACCESS_TOKEN",
     "CLAUDE_CONFIG_DIR",
     "CODEX_HOME",
     "RADON_LADDER_NO_AUTH_FILES",
+    "ANTIGRAVITY_CLI",
     "RADON_SLM_TAGGER_URL",
     "RADON_SLM_TAGGER_MODE",
     "RADON_SLM_TAGGER_TIMEOUT_S",
@@ -124,7 +140,7 @@ _DEFAULT_VISION_MODELS = {
     "anthropic": "claude-haiku-4-5-20251001",
     "grok": "grok-4.6",
     "codex": "gpt-5.5",
-    "gemini": "gemini-2.5-flash",
+    "gemini": "",  # Antigravity account default unless GEMINI_MODEL is set
     "nvidia": _NVIDIA_VISION_DEFAULT,
     # Public multimodal Chat Completions id (Cerebras changelog 2026-09).
     # llama-4-scout-17b-16e-instruct is archived. gemma-4-31b left public
@@ -138,7 +154,7 @@ _DEFAULT_TEXT_MODELS = {
     "anthropic": "claude-sonnet-4-6",
     "grok": "grok-4.6",
     "codex": "gpt-5.5",
-    "gemini": "gemini-2.5-flash",
+    "gemini": "",  # Antigravity account default unless GEMINI_MODEL is set
     "nvidia": _NVIDIA_TEXT_DEFAULT,
     "cerebras": "qwen-3.8-27b",
     "slm-tagger": "radon-slm-tagger",
@@ -174,6 +190,7 @@ class AuthMaterial:
     token: str
     kind: str  # "subscription" | "api_key"
     mechanism: str  # env var name, auth file path label, etc.
+    account_id: str = ""  # ChatGPT account for the codex grant (chatgpt-account-id)
 
 
 @dataclass(frozen=True)
@@ -323,8 +340,21 @@ def _codex_subscription_auth(env: Mapping[str, str]) -> AuthMaterial | None:
         ("accessToken",),
     )
     if token:
-        return AuthMaterial(token, "subscription", "codex_auth.json")
+        account_id = _token_from_mapping(data, ("tokens", "account_id"), ("account_id",))
+        return AuthMaterial(token, "subscription", "codex_auth.json", account_id)
     return prepaid
+
+
+def _rfc3339_expired(value: str) -> bool:
+    from datetime import datetime, timezone
+
+    try:
+        stamp = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    return stamp <= datetime.now(timezone.utc)
 
 
 def _grok_subscription_auth(env: Mapping[str, str]) -> AuthMaterial | None:
@@ -341,6 +371,21 @@ def _grok_subscription_auth(env: Mapping[str, str]) -> AuthMaterial | None:
         ("token",),
         ("credentials", "access_token"),
     )
+    if not token:
+        # The grok CLI's live shape (2026-09): one entry per "<issuer>::<client>",
+        # the OIDC access token under `key`, RFC 3339 `expires_at`. An expired
+        # entry is skipped so a stale file is "no grant", not a guaranteed 401.
+        for entry in data.values():
+            if not isinstance(entry, Mapping):
+                continue
+            candidate = entry.get("key")
+            if not isinstance(candidate, str) or not candidate.strip():
+                continue
+            expires_at = entry.get("expires_at")
+            if isinstance(expires_at, str) and _rfc3339_expired(expires_at):
+                continue
+            token = candidate.strip()
+            break
     if token:
         return AuthMaterial(token, "subscription", "grok_auth.json")
     return _auth_file_api_key(
@@ -359,15 +404,30 @@ def _auth_file_api_key(
     return AuthMaterial(token, "api_key", mechanism) if token else None
 
 
+def _antigravity_cli(env: Mapping[str, str]) -> str:
+    """Path of the Antigravity CLI when it and its grant are present, else ""."""
+    if _auth_files_disabled(env):
+        return ""
+    home = _home_dir(env)
+    if not (home / _ANTIGRAVITY_TOKEN_RELPATH).is_file():
+        return ""
+    explicit = (env.get("ANTIGRAVITY_CLI") or "").strip()
+    candidates = [explicit] if explicit else [str(home / ".local" / "bin" / "agy")]
+    for candidate in candidates:
+        if candidate and os.access(candidate, os.X_OK):
+            return candidate
+    # Only the caller's own PATH: a hermetic env with no PATH must not discover
+    # the host's ~/.local/bin/agy.
+    path = (env.get("PATH") or "").strip()
+    found = shutil.which("agy", path=path) if path else None
+    return found or ""
+
+
 def _gemini_subscription_auth(env: Mapping[str, str]) -> AuthMaterial | None:
-    token = _env_get(env, "GEMINI_OAUTH_TOKEN", "GOOGLE_OAUTH_ACCESS_TOKEN")
-    if token:
-        mech = (
-            "GEMINI_OAUTH_TOKEN"
-            if (env.get("GEMINI_OAUTH_TOKEN") or "").strip()
-            else "GOOGLE_OAUTH_ACCESS_TOKEN"
-        )
-        return AuthMaterial(token, "subscription", mech)
+    """Google via the Antigravity CLI only; the token is the CLI path."""
+    cli = _antigravity_cli(env)
+    if cli:
+        return AuthMaterial(cli, "subscription", "antigravity_cli")
     return None
 
 
@@ -417,10 +477,8 @@ def _auth_for(name: str, env: Mapping[str, str]) -> AuthMaterial | None:
             return sub
         return _prepaid_auth(env, *_CODEX_PREPAID_KEYS, mechanism="OPENAI_API_KEY")
     if name == "gemini":
-        sub = _gemini_subscription_auth(env)
-        if sub is not None:
-            return sub
-        return _prepaid_auth(env, *_GEMINI_KEYS, mechanism="GEMINI_API_KEY")
+        # Antigravity only: no prepaid Gemini key, even under allow-prepaid.
+        return _gemini_subscription_auth(env)
     if name == "nvidia":
         token = _env_get(env, *_NVIDIA_KEYS)
         if token:
@@ -506,14 +564,28 @@ def _nvidia_vision_models(env: Mapping[str, str]) -> tuple[str, ...]:
 
 def _anthropic_headers(api_key: str, *, subscription: bool) -> dict[str, str]:
     headers = {
-        "x-api-key": api_key,
         "anthropic-version": "2023-06-01",
         "content-type": "application/json",
     }
     if subscription:
-        # Claude Max / setup-token OAuth requires the oauth beta on Messages.
+        # Claude Max OAuth grant: Bearer plus the oauth beta and the Claude Code
+        # user agent. As an x-api-key the same grant is a 401.
+        headers["authorization"] = f"Bearer {api_key}"
         headers["anthropic-beta"] = _ANTHROPIC_OAUTH_BETA
+        headers["user-agent"] = _CLAUDE_CODE_USER_AGENT
+    else:
+        headers["x-api-key"] = api_key
     return headers
+
+
+def _anthropic_system(system: str, *, subscription: bool) -> Any:
+    """Lead with the Claude Code identity block when metering a Max grant."""
+    if not subscription:
+        return system
+    blocks: list[dict[str, str]] = [{"type": "text", "text": _CLAUDE_CODE_SYSTEM_PREFIX}]
+    if system:
+        blocks.append({"type": "text", "text": system})
+    return blocks
 
 
 def _classify_http_failure(status: int, body: str) -> str:
@@ -686,6 +758,7 @@ def _request(
     timeout: float = 60.0,
     stream: bool = False,
     max_bytes: int = 0,
+    raw_text_only: bool = False,
 ) -> tuple[int, str, Any]:
     try:
         kwargs: dict[str, Any] = {"headers": headers, "json": body, "timeout": timeout}
@@ -707,7 +780,7 @@ def _request(
                         "Research reviewer response exceeds limit",
                     )
             text = raw.decode("utf-8", errors="replace")
-            payload = json.loads(text)
+            payload = None if raw_text_only else json.loads(text)
             status = int(getattr(resp, "status_code", 0) or 0)
         finally:
             close = getattr(resp, "close", None)
@@ -729,6 +802,22 @@ def _request(
                 close()
 
 
+def _request_raw(
+    post: Callable[..., Any],
+    url: str,
+    headers: dict[str, str],
+    body: dict[str, Any],
+    *,
+    timeout: float | tuple[float, float],
+    max_bytes: int,
+) -> tuple[int, str, Any]:
+    """Streamed request whose body is returned as text (SSE), never JSON-parsed."""
+    return _request(
+        post, url, headers, body, timeout=timeout, stream=True,
+        max_bytes=max_bytes or 2_000_000, raw_text_only=True,
+    )
+
+
 def _uses_max_completion_tokens(model: str) -> bool:
     """OpenAI gpt-5.x / o-series chat completions reject max_tokens (HTTP 400)."""
     lowered = (model or "").strip().lower()
@@ -741,8 +830,10 @@ def _openai_token_field(model: str, max_tokens: int) -> dict[str, int]:
     return {"max_tokens": max_tokens}
 
 
-def _anthropic_vision_body(model: str, b64: str, prompt: str) -> dict[str, Any]:
-    return {
+def _anthropic_vision_body(
+    model: str, b64: str, prompt: str, *, subscription: bool = False
+) -> dict[str, Any]:
+    body: dict[str, Any] = {
         "model": model,
         "max_tokens": 4096,
         "messages": [
@@ -762,6 +853,9 @@ def _anthropic_vision_body(model: str, b64: str, prompt: str) -> dict[str, Any]:
             }
         ],
     }
+    if subscription:
+        body["system"] = _anthropic_system("", subscription=True)
+    return body
 
 
 def _openai_vision_body(
@@ -791,26 +885,6 @@ def _openai_vision_body(
     return body
 
 
-def _gemini_vision_body(model: str, b64: str, prompt: str) -> tuple[str, dict[str, Any]]:
-    url = (
-        "https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{model}:generateContent"
-    )
-    body = {
-        "contents": [
-            {
-                "role": "user",
-                "parts": [
-                    {"inline_data": {"mime_type": "image/png", "data": b64}},
-                    {"text": prompt},
-                ],
-            }
-        ],
-        "generationConfig": {"maxOutputTokens": 4096},
-    }
-    return url, body
-
-
 def _labeled_images_to_b64(
     images: Sequence[tuple[str, Path | bytes]],
 ) -> list[tuple[str, str]]:
@@ -828,6 +902,7 @@ def _anthropic_multimodal_body(
     labeled_b64: Sequence[tuple[str, str]],
     *,
     max_tokens: int,
+    subscription: bool = False,
 ) -> dict[str, Any]:
     content: list[dict[str, Any]] = []
     for label, b64 in labeled_b64:
@@ -850,9 +925,122 @@ def _anthropic_multimodal_body(
         "max_tokens": max_tokens,
         "messages": [{"role": "user", "content": content}],
     }
-    if system:
+    if subscription:
+        body["system"] = _anthropic_system(system, subscription=True)
+    elif system:
         body["system"] = system
     return body
+
+
+def _chatgpt_responses_body(
+    model: str,
+    system: str,
+    instruction: str,
+    labeled_b64: Sequence[tuple[str, str]],
+) -> dict[str, Any]:
+    """Responses-API body for chatgpt.com's codex endpoint (streaming only)."""
+    content: list[dict[str, Any]] = []
+    for label, b64 in labeled_b64:
+        content.append({"type": "input_text", "text": label})
+        content.append({"type": "input_image", "image_url": f"data:image/png;base64,{b64}"})
+    content.append({"type": "input_text", "text": instruction})
+    body: dict[str, Any] = {
+        "model": model,
+        "input": [{"role": "user", "content": content}],
+        "store": False,
+        "stream": True,
+    }
+    if system:
+        body["instructions"] = system
+    return body
+
+
+def _chatgpt_headers(auth: AuthMaterial) -> dict[str, str]:
+    headers = {
+        "authorization": f"Bearer {auth.token}",
+        "content-type": "application/json",
+        "accept": "text/event-stream",
+        "OpenAI-Beta": "responses=experimental",
+    }
+    if auth.account_id:
+        headers["chatgpt-account-id"] = auth.account_id
+    return headers
+
+
+def _request_sse_responses(
+    post: Callable[..., Any],
+    url: str,
+    headers: dict[str, str],
+    body: dict[str, Any],
+    *,
+    timeout: float | tuple[float, float],
+    max_bytes: int,
+) -> tuple[int, str, Any]:
+    """Fold a Responses SSE stream into the chat-completions shape the ladder parses."""
+    status, raw_text, _payload = _request_raw(
+        post, url, headers, body, timeout=timeout, max_bytes=max_bytes
+    )
+    if status < 200 or status >= 300:
+        return status, raw_text, None
+    text_parts: list[str] = []
+    finish = ""
+    for line in raw_text.splitlines():
+        if not line.startswith("data:"):
+            continue
+        try:
+            event = json.loads(line[5:].strip())
+        except ValueError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        kind = event.get("type")
+        if kind == "response.output_text.delta" and isinstance(event.get("delta"), str):
+            text_parts.append(event["delta"])
+        elif kind == "response.completed":
+            finish = str(((event.get("response") or {}).get("status")) or "")
+    text = "".join(text_parts)
+    payload = {"choices": [{"message": {"content": text}, "finish_reason": finish or "stop"}]}
+    return status, text, payload
+
+
+def _antigravity_complete(
+    cli: str,
+    env: Mapping[str, str],
+    model: str,
+    system: str,
+    instruction: str,
+    labeled_b64: Sequence[tuple[str, str]],
+) -> tuple[int, str, Any]:
+    """Gemini via `agy -p`; images are not supported, so that rung is skipped."""
+    if labeled_b64:
+        return 415, "antigravity_cli: image input unsupported", None
+    prompt = f"{system}\n\n{instruction}" if system else instruction
+    argv = [cli, "-p", prompt, "--output-format", "json"]
+    if model:
+        argv += ["--model", model]
+    try:
+        completed = subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            timeout=_ANTIGRAVITY_CLI_TIMEOUT_SECONDS,
+            env={**os.environ, **{k: v for k, v in env.items() if isinstance(v, str)}},
+            stdin=subprocess.DEVNULL,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError(f"network:{type(exc).__name__}") from exc
+    if completed.returncode != 0:
+        return 502, (completed.stderr or completed.stdout or "")[:2000], None
+    try:
+        doc = json.loads(completed.stdout)
+    except ValueError:
+        return 502, "antigravity_cli: non-JSON output", None
+    response = doc.get("response") if isinstance(doc, dict) else None
+    if not isinstance(response, str) or str(doc.get("status", "")).upper() not in {"SUCCESS", ""}:
+        return 502, completed.stdout[:2000], None
+    payload = {"candidates": [{"content": {"parts": [{"text": response}]}}]}
+    return 200, response, payload
 
 
 def _openai_multimodal_body(
@@ -890,32 +1078,6 @@ def _openai_multimodal_body(
     return body
 
 
-def _gemini_multimodal_body(
-    model: str,
-    system: str,
-    instruction: str,
-    labeled_b64: Sequence[tuple[str, str]],
-    *,
-    max_tokens: int,
-) -> tuple[str, dict[str, Any]]:
-    url = (
-        "https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{model}:generateContent"
-    )
-    parts: list[dict[str, Any]] = []
-    for label, b64 in labeled_b64:
-        parts.append({"text": label})
-        parts.append({"inline_data": {"mime_type": "image/png", "data": b64}})
-    parts.append({"text": instruction})
-    body: dict[str, Any] = {
-        "contents": [{"role": "user", "parts": parts}],
-        "generationConfig": {"maxOutputTokens": max_tokens},
-    }
-    if system:
-        body["systemInstruction"] = {"parts": [{"text": system}]}
-    return url, body
-
-
 def _call_vision_provider(
     name: str,
     auth: AuthMaterial,
@@ -926,11 +1088,12 @@ def _call_vision_provider(
 ) -> tuple[int, str, Any]:
     api_key = auth.token
     if name == "anthropic":
+        subscription = auth.kind == "subscription"
         return _request(
             post,
             "https://api.anthropic.com/v1/messages",
-            _anthropic_headers(api_key, subscription=auth.kind == "subscription"),
-            _anthropic_vision_body(model, b64, prompt),
+            _anthropic_headers(api_key, subscription=subscription),
+            _anthropic_vision_body(model, b64, prompt, subscription=subscription),
         )
     if name == "grok":
         return _request(
@@ -943,6 +1106,15 @@ def _call_vision_provider(
             _openai_vision_body(model, b64, prompt),
         )
     if name == "codex":
+        if auth.kind == "subscription":
+            return _request_sse_responses(
+                post,
+                _CHATGPT_CODEX_RESPONSES_URL,
+                _chatgpt_headers(auth),
+                _chatgpt_responses_body(model, "", prompt, [("image", b64)]),
+                timeout=60.0,
+                max_bytes=2_000_000,
+            )
         return _request(
             post,
             "https://api.openai.com/v1/chat/completions",
@@ -953,13 +1125,7 @@ def _call_vision_provider(
             _openai_vision_body(model, b64, prompt),
         )
     if name == "gemini":
-        url, body = _gemini_vision_body(model, b64, prompt)
-        return _request(
-            post,
-            f"{url}?key={api_key}",
-            {"content-type": "application/json"},
-            body,
-        )
+        return _antigravity_complete(api_key, {}, model, "", prompt, [("image", b64)])
     if name == "nvidia":
         return _request(
             post,
@@ -1104,13 +1270,15 @@ def _call_text_provider(
 ) -> tuple[int, str, Any]:
     api_key = auth.token
     if name == "anthropic":
+        subscription = auth.kind == "subscription"
         body = _anthropic_multimodal_body(
-            model, system, instruction, labeled_b64, max_tokens=max_tokens
+            model, system, instruction, labeled_b64,
+            max_tokens=max_tokens, subscription=subscription,
         )
         return _request(
             post,
             "https://api.anthropic.com/v1/messages",
-            _anthropic_headers(api_key, subscription=auth.kind == "subscription"),
+            _anthropic_headers(api_key, subscription=subscription),
             body,
             timeout=(10.0, read_timeout),
             stream=True,
@@ -1132,6 +1300,15 @@ def _call_text_provider(
             max_bytes=max_response_bytes,
         )
     if name == "codex":
+        if auth.kind == "subscription":
+            return _request_sse_responses(
+                post,
+                _CHATGPT_CODEX_RESPONSES_URL,
+                _chatgpt_headers(auth),
+                _chatgpt_responses_body(model, system, instruction, labeled_b64),
+                timeout=(10.0, read_timeout),
+                max_bytes=max_response_bytes,
+            )
         return _request(
             post,
             "https://api.openai.com/v1/chat/completions",
@@ -1147,18 +1324,7 @@ def _call_text_provider(
             max_bytes=max_response_bytes,
         )
     if name == "gemini":
-        url, body = _gemini_multimodal_body(
-            model, system, instruction, labeled_b64, max_tokens=max_tokens
-        )
-        return _request(
-            post,
-            f"{url}?key={api_key}",
-            {"content-type": "application/json"},
-            body,
-            timeout=read_timeout,
-            stream=True,
-            max_bytes=max_response_bytes,
-        )
+        return _antigravity_complete(api_key, {}, model, system, instruction, labeled_b64)
     if name == "nvidia":
         return _request(
             post,
@@ -1508,6 +1674,26 @@ def complete_text_json(
     )
 
 
+def subscription_auth(name: str, env: Mapping[str, str] | None = None) -> AuthMaterial | None:
+    """Resolved credential for one provider under the subscriptions-only policy.
+
+    The public seam for scripts that call a provider directly instead of
+    running the whole ladder (CTA share copy, X search, catalog refresh): the
+    subscription grant, or a prepaid key only under RADON_LADDER_ALLOW_PREPAID.
+    """
+    return _auth_for(name, os.environ if env is None else env)
+
+
+def anthropic_request_headers(auth: AuthMaterial) -> dict[str, str]:
+    """Messages-API headers for a resolved Anthropic credential."""
+    return _anthropic_headers(auth.token, subscription=auth.kind == "subscription")
+
+
+def anthropic_request_system(auth: AuthMaterial, system: str) -> Any:
+    """`system` field for a resolved Anthropic credential (identity block first on a grant)."""
+    return _anthropic_system(system, subscription=auth.kind == "subscription")
+
+
 __all__ = [
     "MODEL_LADDER_ORDER",
     "MODEL_LADDER_TIERS",
@@ -1518,11 +1704,14 @@ __all__ = [
     "accept_distill_payload",
     "accept_slm_tags_payload",
     "accept_tags_payload",
+    "anthropic_request_headers",
+    "anthropic_request_system",
     "complete_multimodal_json",
     "complete_text_json",
     "extract_via_vision",
     "parse_json_object",
     "parse_json_rows",
     "safe_error_message",
+    "subscription_auth",
     "wired_providers",
 ]

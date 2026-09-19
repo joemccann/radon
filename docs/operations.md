@@ -7,7 +7,8 @@ Live-trading operational concerns: IB Gateway connection modes, background servi
 ### Web app (`web/.env`)
 
 ```bash
-ANTHROPIC_API_KEY=
+# ANTHROPIC_API_KEY is NOT required: subscriptions only (2026-09-18), the
+# Claude Max grant in ~/.claude/.credentials.json is the meter.
 UW_TOKEN=
 EXA_API_KEY=
 CEREBRAS_API_KEY=                       # optional, last-rung model ladder

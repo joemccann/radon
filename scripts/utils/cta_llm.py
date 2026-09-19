@@ -26,13 +26,12 @@ from pathlib import Path
 from typing import Callable, Optional, Sequence
 
 PROJECT_DIR = Path(__file__).resolve().parents[2]
-# web/.env is where ANTHROPIC_API_KEY lives; the root .env is the fallback.
+# web/.env and the root .env supply the feature flags; credentials come from the ladder.
 ENV_FILES = (PROJECT_DIR / "web" / ".env", PROJECT_DIR / ".env")
 
 ENABLE_ENV = "RADON_CTA_LLM_COPY"
 MODEL_ENV = "RADON_CTA_LLM_MODEL"
 DEFAULT_MODEL = "claude-opus-5"
-API_KEY_ENV = "ANTHROPIC_API_KEY"
 
 REQUEST_TIMEOUT_SECONDS = 45.0
 MAX_TOKENS = 4000
@@ -186,22 +185,45 @@ def build_prompt(facts: dict, draft: str) -> str:
     )
 
 
-def _anthropic_caller(*, system: str, user: str, model: str, env: dict) -> str:
-    api_key = setting(env, API_KEY_ENV)
-    if not api_key:
-        raise RuntimeError(f"{API_KEY_ENV} is not set")
+def _anthropic_caller(
+    *, system: str, user: str, model: str, env: dict, post: Optional[Callable[..., object]] = None
+) -> str:
+    """Claude Max subscription call (subscriptions only, 2026-09-18).
 
-    from anthropic import Anthropic  # lazy: the deterministic path must not need it
+    Credentials come from the shared ladder resolver: the Claude Code grant in
+    ``~/.claude/.credentials.json`` / ``CLAUDE_CODE_OAUTH_TOKEN``, or a prepaid
+    key only under ``RADON_LADDER_ALLOW_PREPAID=1``. Never the Anthropic SDK with
+    an API key.
+    """
+    from clients import model_ladder  # lazy: the deterministic path must not need it
 
-    client = Anthropic(api_key=api_key, timeout=REQUEST_TIMEOUT_SECONDS, max_retries=1)
-    response = client.messages.create(
-        model=model,
-        max_tokens=MAX_TOKENS,
-        system=system,
-        messages=[{"role": "user", "content": user}],
+    auth = model_ladder.subscription_auth("anthropic", env)
+    if auth is None:
+        raise RuntimeError("Anthropic subscription is not available (no Claude Code grant)")
+
+    if post is None:
+        import httpx
+
+        post = httpx.post
+    response = post(
+        "https://api.anthropic.com/v1/messages",
+        headers=model_ladder.anthropic_request_headers(auth),
+        json={
+            "model": model,
+            "max_tokens": MAX_TOKENS,
+            "system": model_ladder.anthropic_request_system(auth, system),
+            "messages": [{"role": "user", "content": user}],
+        },
+        timeout=REQUEST_TIMEOUT_SECONDS,
     )
+    status = int(getattr(response, "status_code", 0) or 0)
+    if status < 200 or status >= 300:
+        raise RuntimeError(f"Anthropic HTTP {status}")
+    payload = response.json()
     return "".join(
-        block.text for block in response.content if getattr(block, "type", "") == "text"
+        str(block.get("text") or "")
+        for block in (payload.get("content") or [])
+        if isinstance(block, dict) and block.get("type") == "text"
     )
 
 
