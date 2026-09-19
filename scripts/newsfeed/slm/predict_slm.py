@@ -18,18 +18,26 @@ from newsfeed.slm.contract import (  # noqa: E402
     SLM_DEFAULT_URL,
     SLM_MAX_TOKENS,
     SLM_RESPONSE_FORMAT,
-    SLM_SYSTEM,
     SLM_TAGGER_NAME,
     SLM_TEMPERATURE,
 )
 from newsfeed.slm.eval import load_jsonl  # noqa: E402
 
 
-def user_content(row: dict) -> str:
+def _message(row: dict, role: str) -> str:
     for msg in row.get("messages") or []:
-        if msg.get("role") == "user":
+        if msg.get("role") == role:
             return str(msg.get("content") or "")
-    return str(row.get("user") or "")
+    return ""
+
+
+def user_content(row: dict) -> str:
+    return _message(row, "user") or str(row.get("user") or "")
+
+
+def system_content(row: dict) -> str:
+    """The corpus row carries the live tagger prompt it was labelled under."""
+    return _message(row, "system")
 
 
 def predict_one(url: str, user: str, *, system: str, timeout: float) -> tuple[dict, float]:
@@ -70,15 +78,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--system-file", default="")
     parser.add_argument("--timeout", type=float, default=12)
     args = parser.parse_args(argv)
-    system = SLM_SYSTEM
-    if args.arm == "B" and args.system_file:
-        system = Path(args.system_file).read_text(encoding="utf-8")
+    system_override = Path(args.system_file).read_text(encoding="utf-8") if args.system_file else ""
     rows = load_jsonl(Path(args.gold))
     dest = Path(args.out)
     dest.parent.mkdir(parents=True, exist_ok=True)
     with dest.open("w", encoding="utf-8") as handle:
         for row in rows:
             try:
+                system = system_override or system_content(row)
                 pred, latency = predict_one(args.url, user_content(row), system=system, timeout=args.timeout)
                 record = {"id": row.get("id"), "pred": pred, "latency_s": latency, "arm": args.arm}
             except (urllib.error.URLError, TimeoutError, OSError) as exc:

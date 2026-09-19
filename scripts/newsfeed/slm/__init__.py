@@ -8,9 +8,9 @@ from newsfeed.slm.contract import (
     HONESTY_LABEL,
     SLM_BASE_ID,
     SLM_JSON_SCHEMA,
-    SLM_SYSTEM,
     SLM_TAGGER_NAME,
     SLM_TAGGER_RUNG,
+    tagger_system_prompt,
 )
 
 __all__ = [
@@ -18,7 +18,7 @@ __all__ = [
     "HONESTY_LABEL",
     "SLM_BASE_ID",
     "SLM_JSON_SCHEMA",
-    "SLM_SYSTEM",
     "SLM_TAGGER_NAME",
     "SLM_TAGGER_RUNG",
+    "tagger_system_prompt",
 ]

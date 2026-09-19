@@ -1099,7 +1099,6 @@ class TestSlmTaggerRung:
 
     def test_providers_post_carries_contract(self, monkeypatch):
         from clients import model_ladder as ml
-        from newsfeed.slm.contract import SLM_SYSTEM
 
         monkeypatch.setattr(ml, "_slm_health_ok", lambda _url: True)
         captured = {}
@@ -1121,7 +1120,8 @@ class TestSlmTaggerRung:
         body = captured["body"]
         assert body["temperature"] == 0
         assert body["max_tokens"] == 64
-        assert body["messages"][0]["content"] == SLM_SYSTEM
+        # Trained on the live tagger prompt: the caller's system message is forwarded verbatim.
+        assert body["messages"][0]["content"] == "CALLER TAXONOMY PROMPT"
         assert body["response_format"]["json_schema"]["schema"]["required"] == ["tags"]
         assert result.provider == "slm-tagger"
 

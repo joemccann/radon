@@ -14,7 +14,7 @@ Radon SLM tagger: internal specialist, not a SotA replacement for open research.
 - Sources: `["turso.posts"]` only (HR-8)
 - Operator extract (credentialed host):
 
-      python3.13 scripts/newsfeed/slm/extract_cli.py --out data/slm/tagger/v1
+      python3.13 scripts/slm/export_dataset.py --out data/slm
 
 - Time split (HR-4): test = last 60d, valid = 30d before test, train = older
 - Taxonomy is live Turso `tag_taxonomy` / `data/tag_taxonomy.json`, not weights (HR-5)
@@ -22,7 +22,7 @@ Radon SLM tagger: internal specialist, not a SotA replacement for open research.
 
 ## Prompt contract
 
-`SLM_SYSTEM` in `scripts/newsfeed/slm/contract.py`. Loss masked to the assistant JSON (`train_on_prompt: false` in LLaMA-Factory; `mask_prompt: true` in the mlx-lm alternative).
+The live tagger system prompt (`tagger_system_prompt` in `scripts/newsfeed/slm/contract.py`, byte-identical to `buildSystemPrompt` in `tagger.js`) plus the `buildUserPrompt` user turn; the rung forwards the caller's prompt verbatim. Loss masked to the assistant JSON (`train_on_prompt: false` in LLaMA-Factory; `mask_prompt: true` in the mlx-lm alternative).
 
 ## Eval
 

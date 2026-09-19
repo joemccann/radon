@@ -1204,18 +1204,20 @@ def accept_slm_tags_payload(obj: Any, taxonomy: Sequence[str] | None = None) -> 
 
 def _call_slm_tagger(
     post: Callable[..., Any],
+    system: str,
     instruction: str,
     *,
     env: Mapping[str, str],
     read_timeout: float,
 ) -> tuple[int, str, Any]:
+    """The adapter was trained on the caller's live tagger prompt, so the
+    system message is forwarded verbatim like every other rung."""
     from newsfeed.slm.contract import (
         SLM_CHAT_COMPLETIONS_PATH,
         SLM_DEFAULT_TIMEOUT_S,
         SLM_DEFAULT_URL,
         SLM_MAX_TOKENS,
         SLM_RESPONSE_FORMAT,
-        SLM_SYSTEM,
         SLM_TAGGER_NAME,
         SLM_TEMPERATURE,
         classify_slm_tags,
@@ -1232,7 +1234,7 @@ def _call_slm_tagger(
         "max_tokens": SLM_MAX_TOKENS,
         "response_format": SLM_RESPONSE_FORMAT,
         "messages": [
-            {"role": "system", "content": SLM_SYSTEM},
+            {"role": "system", "content": system},
             {"role": "user", "content": instruction},
         ],
     }
@@ -1363,6 +1365,7 @@ def _call_text_provider(
     if name == "slm-tagger":
         return _call_slm_tagger(
             post,
+            system,
             instruction,
             env=env if env is not None else os.environ,
             read_timeout=read_timeout,

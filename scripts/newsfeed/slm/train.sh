@@ -23,7 +23,7 @@ for var in $(compgen -e || true); do
 done
 
 if [ ! -f "$MANIFEST" ]; then
-  echo "missing $MANIFEST; run extract_cli.py on a credentialed host" >&2
+  echo "missing $MANIFEST; run scripts/slm/export_dataset.py on a credentialed host" >&2
   exit 2
 fi
 

@@ -16,12 +16,55 @@ HONESTY_LABEL = (
     "Radon SLM tagger: internal specialist, not a SotA replacement for open research."
 )
 
-SLM_SYSTEM = (
-    "You tag Market Ear posts for the Radon dashboard. Return exactly 3 "
-    "UPPERCASE tags as JSON: {\"tags\":[\"A\",\"B\",\"C\"]}. Multi-word tags "
-    "are UPPERCASE-KEBAB-CASE. Prefer a specific technical signal, then the "
-    "instrument, then the sector, then the theme. No prose."
+# The SLM is trained on and served with the SAME system prompt the live text
+# tagger sends (``buildSystemPrompt`` in ``scripts/newsfeed/tagger.js``), so
+# the adapter is a drop-in ladder rung. The taxonomy tail is the live snapshot
+# at call time; the corpus bakes the snapshot taken at export. Keep this list
+# byte-identical to tagger.js.
+_TAGGER_SYSTEM_LINES = (
+    "You are a financial-news tagger for an institutional trading dashboard.",
+    "",
+    "Pick EXACTLY 3 tags that best capture the post's core themes.",
+    "",
+    "Priority order — apply each step and stop only when you have 3 tags:",
+    "  1. TECHNICAL SIGNAL named explicitly — when the post calls out a candlestick pattern, indicator, chart pattern, or price-action concept, tag the SPECIFIC name. These are high-information signals; do not skip them.",
+    "       Candlestick patterns: SHOOTING-STAR, HAMMER, INVERSE-HAMMER, HANGING-MAN, DOJI, ENGULFING, MORNING-STAR, EVENING-STAR, HARAMI, MARUBOZU, PIERCING-LINE, DARK-CLOUD-COVER, THREE-WHITE-SOLDIERS, THREE-BLACK-CROWS.",
+    "       Chart patterns: HEAD-SHOULDERS, INVERSE-HEAD-SHOULDERS, DOUBLE-TOP, DOUBLE-BOTTOM, TRIPLE-TOP, TRIPLE-BOTTOM, TRIANGLE, ASCENDING-TRIANGLE, DESCENDING-TRIANGLE, FLAG, PENNANT, WEDGE, CUP-AND-HANDLE, BREAKOUT, BREAKDOWN, GAP, ISLAND-REVERSAL.",
+    "       Indicators: RSI, MACD, MOVING-AVERAGE, GOLDEN-CROSS, DEATH-CROSS, BOLLINGER-BANDS, STOCHASTIC, ADX, ICHIMOKU, FIBONACCI, VWAP, OBV, ATR, PARABOLIC-SAR, KELTNER-CHANNEL.",
+    "       Price-action: SUPPORT, RESISTANCE, TRENDLINE, OVERSOLD, OVERBOUGHT, DIVERGENCE, ELLIOTT-WAVE.",
+    "       (Note: MOMENTUM, TREND, RANGE, PIVOT, MEAN-REVERSION are also legitimate tags — pick them when the post calls them out — but treat them as factor/macro concepts, NOT specifically TA. Tag MOMENTUM for momentum-factor / MoMo-basket posts; tag TREND for CTA/trend-following macro posts.)",
+    "       Use the umbrella TECHNICAL-ANALYSIS only when the post discusses TA generically without naming a specific pattern/indicator.",
+    "  2. INSTRUMENT or PRODUCT named in the post (puts, calls, options, BTC, oil, gold, futures, swaps, ETFs, bonds, SPX, SPY).",
+    "  3. SECTOR or asset class focus (semis, energy, banks, credit, crypto, equities).",
+    "  4. THEME or narrative (positioning, hedging, macro, Fed, inflation, earnings, geopolitics).",
+    "",
+    "Reuse an existing tag when one fits; coin a NEW tag only when nothing in the existing set captures the concept. Do not split a single concept across multiple near-synonyms.",
+    "",
+    "Naming rules — apply STRICTLY so tags merge cleanly across posts:",
+    "  - ALL TAGS ARE UPPERCASE. No exceptions. Examples: BTC, OIL, VOL, PUTS, OPTIONS, POSITIONING, FED, RSI.",
+    "  - Multi-word concepts use UPPERCASE kebab-case: PUT-CALL-RATIO, FUND-FLOWS, SINGLE-STOCK-VOL, DEALER-GAMMA, TAIL-HEDGE, SHOOTING-STAR, HEAD-SHOULDERS.",
+    "  - Allowed characters: A-Z, 0-9, hyphen, ampersand. No spaces, no lowercase, no underscores.",
+    "",
+    "Disambiguation:",
+    "  - VOL vs VIX: VIX only when the VIX index is explicitly named or charted; otherwise VOL.",
+    "  - PUTS vs VOL: if the post is specifically about puts / put-call ratio / put protection, tag PUTS (not VOL).",
+    "  - HEDGING is the action; PUTS/CALLS/OPTIONS are instruments — tag both when relevant.",
+    "  - SKEW is options skew specifically.",
+    "  - GAMMA is dealer-gamma / GEX.",
+    "  - POSITIONING is who is long/short and how exposed.",
+    "  - TECHNICAL SIGNALS: prefer the specific named pattern/indicator (SHOOTING-STAR, RSI, HEAD-SHOULDERS) over generic TECHNICAL-ANALYSIS. A post that names two TA concepts (e.g. shooting star AND inverse hammer) should tag both when slot count allows.",
+    "  - CANDLESTICK is the umbrella; only use it when the post discusses candlestick analysis without naming a specific pattern.",
+    "",
+    'Output FORMAT: STRICT JSON. {"tags": ["...","...","..."]}. Exactly 3. No prose.',
+    "",
 )
+
+
+def tagger_system_prompt(taxonomy: Sequence[str]) -> str:
+    """Byte-identical to ``buildSystemPrompt`` in tagger.js."""
+    existing = ", ".join(taxonomy) if taxonomy else "(none yet)"
+    return "\n".join(_TAGGER_SYSTEM_LINES + (f"Existing tags (reuse when possible): {existing}",))
+
 
 SLM_BASE_ID = "Qwen/Qwen2.5-1.5B-Instruct"
 SLM_TAGGER_RUNG = "slm-tagger"
@@ -77,7 +120,7 @@ _PUNCT_WRAP = re.compile(r"""^[#"'`(\[]+|[.,!?:;"'`)\]]+$""")
 def prompt_contract_sha256() -> str:
     blob = json.dumps(
         {
-            "system": SLM_SYSTEM,
+            "system": tagger_system_prompt([]),
             "schema": SLM_JSON_SCHEMA,
             "body_char_limit": BODY_CHAR_LIMIT,
             "base": SLM_BASE_ID,

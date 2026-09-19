@@ -214,6 +214,7 @@ web/verify-regime-internals.mjs
 !/.claude/skills/ci-performance/
 !/.claude/skills/documentation-nightly/
 !/.claude/skills/security-nightly/
+!/.claude/skills/security-deepsec/
 !/.claude/skills/incident-response/
 !/.claude/skills/long-horizon-jobs/
 !/.claude/skills/reliability-weekend/

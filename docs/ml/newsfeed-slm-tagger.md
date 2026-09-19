@@ -24,7 +24,7 @@ Verdict: `C FAILS G0,G2,G3,G7,G8`. `RADON_SLM_TAGGER_MODE` stays `off`. B0 and D
 
 Operator extract on a credentialed host:
 
-    python3.13 scripts/newsfeed/slm/extract_cli.py --out data/slm/tagger/v1
+    python3.13 scripts/slm/export_dataset.py --out data/slm
 
 Honesty label, to be carried verbatim on the model card, the service unit description, the ladder log prefix and any UI or PR text that mentions the model:
 
@@ -125,9 +125,9 @@ The corpus is not in the repository and cannot be counted from a cloud VM (probe
 
 Turso `posts` is canonical. `web/public/data/posts.json` plus `RADON_NEWSFEED_ARCHIVE_DIR` is the disk fallback and must give the same rows after rollover archives are merged.
 
-`[HR-8]` The training set is drawn from Turso `posts` rows that Radon itself labelled, and from nothing else. No scraped third-party corpus, no public tagging dataset, no synthetic posts generated from outside news, no augmentation by paraphrasing with an API model. `build_dataset.py` has exactly one input (the `posts` query below) and a test asserts the manifest's `sources` field equals `["turso.posts"]`.
+`[HR-8]` The training set is drawn from Turso `posts` rows that Radon itself labelled, and from nothing else. No scraped third-party corpus, no public tagging dataset, no synthetic posts generated from outside news, no augmentation by paraphrasing with an API model. `scripts/slm/export_dataset.py` (the one corpus writer for every SLM task; PR #532) reads the tagger corpus from the `posts` query below and nothing else, and a test asserts the manifest's `sources` field equals `["turso.posts"]`.
 
-### C.2 Extract recipe (`scripts/newsfeed/slm/build_dataset.py`, new)
+### C.2 Extract recipe (`scripts/slm/export_dataset.py`)
 
 Read with an id cursor, never one unbounded SELECT (Hrana rule 1 in `scripts/CLAUDE.md`):
 
@@ -142,7 +142,7 @@ WHERE p.id > ? ORDER BY p.id LIMIT 200;
 Row rules, applied in this order:
 
 1. `is_research = 1` rows are excluded. They are Joe's private research posts (migration 0071), a different distribution and a different provenance. v1 is the Market Ear tagger.
-2. Label = `tags_text` when it is a JSON array of exactly 3 strings that survive `normaliseTags` unchanged. Rows with no `tags_text` are excluded; `tags` is a union with vision tags and parent tags and is not the text tagger's contract. Do not fall back to `tags`.
+2. Label = `tags_text` when it is a JSON array of exactly 3 strings that normalise to 3 distinct tags. When `tags_text` is absent, the merged `tags` stand in only for posts with no images (no vision tagger could have contributed); posts with images and no `tags_text` are excluded.
 3. Input = `Title: {title}\nBody: {content[:1500]}`, byte-identical to `buildUserPrompt` in `tagger.js`. Import the truncation constant rather than re-typing it; pin it with a test.
 4. Deduplicate on `sha256(title + "\n" + content)`. Market Ear re-publishes; keep the earliest `timestamp`.
 5. Drop rows whose body is under 40 characters after whitespace collapse (title-only stubs carry no signal for a text model).
@@ -152,20 +152,20 @@ Output (all under `data/slm/tagger/v1/`, gitignored, never committed, never sync
 
 ```
 data/slm/tagger/v1/
-  train.jsonl      chat format: [{"role":"system","content":SLM_SYSTEM},{"role":"user","content":input},{"role":"assistant","content":"{\"tags\":[...]}"}]
+  train.jsonl      chat format: [{"role":"system","content":tagger_system_prompt(taxonomy)},{"role":"user","content":input},{"role":"assistant","content":"{\"tags\":[...]}"}]
   valid.jsonl
   test.jsonl       time-split held-out (C.3); never read by the trainer
   gold_human.jsonl the 200-post human-ok slice (C.4)
   manifest.json    {rows, split_counts, taxonomy_size, taxonomy_sha256, cutoff_dates, extract_sha256, extracted_at}
 ```
 
-`SLM_SYSTEM` is one fixed string (section H.3). The training pairs use it; the ladder rung sends it. The full taxonomy list is deliberately not in the SLM prompt: the prompt stays short enough for CPU inference, and vocabulary correctness is enforced at serve time by validation against the live taxonomy (H.3), not by the prompt.
+The system prompt is the live tagger prompt (`tagger_system_prompt` in `contract.py`, byte-identical to `buildSystemPrompt` in `tagger.js`, taxonomy tail included). The training pairs bake the taxonomy snapshot at export; the ladder rung forwards the caller's prompt verbatim, so train and serve prompts match by construction. Vocabulary correctness is still enforced at serve time by validation against the live taxonomy (H.3).
 
 `[HR-5]` What the weights are allowed to learn: the mapping from a post's text to three tags, and nothing else. Concretely: loss is masked to the assistant JSON (`mask_prompt: true`), so no post body is ever a training target; there is no unsupervised or continued-pretraining pass over post text; the taxonomy is not a training artifact but a validation input read at call time (Turso `tag_taxonomy` is canonical; `data/tag_taxonomy.json` is its runtime mirror; the snapshot hash used at eval time is recorded in `manifest.json` as `taxonomy_sha256`); the tagging policy (priority order, VOL vs VIX, GAMMA means dealer gamma) lives in `buildSystemPrompt` in `tagger.js` and is what produced the labels. A policy change therefore means relabel with the ladder and retrain, never a prompt patch on the SLM. A new topic in the news is handled by the ladder coining the tag and the taxonomy growing; the SLM abstains on it (H.3) until the next retrain.
 
 ### C.3 Splits: time only (`[HR-4]`)
 
-Random splits leak near-duplicate posts across train and test and flatter the score. A random shuffle is forbidden anywhere in `build_dataset.py`; a test asserts `max(train.timestamp) < min(valid.timestamp) <= max(valid.timestamp) < min(test.timestamp)`. Split on `timestamp`:
+Random splits leak near-duplicate posts across train and test and flatter the score. A random shuffle is forbidden anywhere in `scripts/slm/export_dataset.py`; a test asserts `max(train.timestamp) < min(valid.timestamp) <= max(valid.timestamp) < min(test.timestamp)`. Split on `timestamp`:
 
 | Split | Window | Purpose |
 |---|---|---|
@@ -252,7 +252,6 @@ Files (implement PR):
 
 ```
 scripts/newsfeed/slm/
-  build_dataset.py     C.2 extract, C.3 split, manifest
   review_cli.py        C.4 human-ok capture
   train.sh             llamafactory-cli train (default); SLM_TRAINER=mlx optional; refuses any *_API_KEY
   export.sh            llamafactory-cli export (or mlx_lm.fuse) -> convert_hf_to_gguf.py -> llama-quantize
@@ -374,7 +373,7 @@ models/
 |---|---|---|---|---|
 | A | current ladder tagger (`complete_text_json`, subscription creds only, `RADON_LADDER_ALLOW_PREPAID` unset) | production `buildSystemPrompt(taxonomy)` + user prompt | Mini | **serve host** (the CLI runs there in production; measure from there) |
 | B | prompt-only `Qwen/Qwen2.5-1.5B-Instruct`, Q4_K_M, no adapter | production system prompt (taxonomy included) + user prompt, grammar on | Mini or serve host (identical weights) | **serve host** |
-| C | QLoRA-tuned 1.5B, fused Q4_K_M GGUF (after G0) | `SLM_SYSTEM` + user prompt, grammar on | Mini or serve host | **serve host** |
+| C | QLoRA-tuned 1.5B, fused Q4_K_M GGUF (after G0) | live tagger prompt + user prompt, grammar on | Mini or serve host | **serve host** |
 
 Baselines that frame the table, measured first:
 
@@ -498,7 +497,7 @@ Two files change. Nothing in Node changes.
 1. `scripts/clients/model_ladder.py`
    - Add provider name `"slm-tagger"` with tier `"local"`. It is **not** added to `MODEL_LADDER_ORDER` and **not** returned by `wired_providers()` by default, so every existing caller's `attempted` tuple and every existing test stay byte-identical.
    - `_auth_for("slm-tagger", env)` returns `AuthMaterial(token="", kind="local", mechanism="RADON_SLM_TAGGER_URL")` when `RADON_SLM_TAGGER_URL` is set, else `None`.
-   - `_call_text_provider` gains a branch that POSTs to `f"{url}/v1/chat/completions"` with the OpenAI body, `model: "radon-slm-tagger"`, `temperature: 0`, `max_tokens: 64`, `response_format` = the H.3 schema, `timeout = RADON_SLM_TAGGER_TIMEOUT_S`. It sends `SLM_SYSTEM` as the system message, **replacing** the caller's taxonomy-bearing system prompt for this rung only; the user message is passed through unchanged.
+   - `_call_text_provider` gains a branch that POSTs to `f"{url}/v1/chat/completions"` with the OpenAI body, `model: "radon-slm-tagger"`, `temperature: 0`, `max_tokens: 64`, `response_format` = the H.3 schema, `timeout = RADON_SLM_TAGGER_TIMEOUT_S`. The caller's system prompt and user message are both passed through unchanged; the adapter was trained on that exact prompt.
    - `complete_text_json` gains a keyword `providers: Sequence[str] | None = None` that is forwarded to `_run_ladder` (which already accepts it). Default `None` keeps today's order.
 2. `scripts/clients/model_ladder_cli.py`
    - When `req["accept"] == "tags"` (the newsfeed contract; `accept_distill_payload` callers never hit this branch) and `RADON_SLM_TAGGER_MODE` is `shadow`, `prefer` or `primary`, build the provider order per H.2 and pass `providers=` to `complete_text_json`. `off` or unset: identical to today.
@@ -653,7 +652,7 @@ FROM slm_tagger_shadow WHERE observed_at > datetime('now','-14 days') GROUP BY 1
 Red/green order is mandatory (`CLAUDE.md` TDD rule). Every item names its test or its evidence. Items tagged `[HR-n]` are the hard requirements from the intro table; each must be individually checkable from the PR body.
 
 **Dataset**
-- [x] `[HR-8]` `scripts/newsfeed/slm/build_dataset.py` has one input, the `posts` query in C.2; `test_slm_build_dataset.py` asserts `manifest.sources == ["turso.posts"]` and that no other reader, file or URL is referenced by the module.
+- [x] `[HR-8]` `scripts/slm/export_dataset.py` reads the tagger corpus from the `posts` query in C.2 only; `test_slm_export_dataset.py` asserts `manifest.sources == ["turso.posts"]`.
 - [x] `[HR-4]` No random shuffle: test asserts the split boundaries are strictly time-ordered (C.3) and greps the module for `shuffle` / `random` (none permitted).
 - [x] Row rules covered by tests: research rows excluded, `tags` never used as a label, dedupe keeps earliest, `buildUserPrompt` parity fixture, PII regex counts in manifest, `rare_tags` and `label_distribution` written to the manifest.
 - [x] `review_cli.py` writes `gold_human.jsonl` with `reviewed_at`; test on a 3-row fixture; 200 rows captured by Joe.
@@ -678,7 +677,7 @@ Red/green order is mandatory (`CLAUDE.md` TDD rule). Every item names its test o
 - [ ] Unit-watchdog coverage confirmed by name (`radon-slm-tagger.service` appears in the `systemctl show 'radon-*'` probe on the host); no `service_health` row for the sidecar itself.
 
 **Ladder and constrained output**
-- [ ] `test_model_ladder.py`: `slm-tagger` absent from `MODEL_LADDER_ORDER` and `wired_providers()`; `complete_text_json` without `providers=` never attempts it even with URL and `primary` set; with `providers=` and a stubbed `post`, the OpenAI body carries `SLM_SYSTEM`, the schema, `temperature 0`, `max_tokens 64`, and the full URL string `http://127.0.0.1:8331/v1/chat/completions`; a 503 falls through to `anthropic` and `attempted` reads `("slm-tagger:http_503", "anthropic:ok")`.
+- [ ] `test_model_ladder.py`: `slm-tagger` absent from `MODEL_LADDER_ORDER` and `wired_providers()`; `complete_text_json` without `providers=` never attempts it even with URL and `primary` set; with `providers=` and a stubbed `post`, the OpenAI body carries the caller's system prompt verbatim, the schema, `temperature 0`, `max_tokens 64`, and the full URL string `http://127.0.0.1:8331/v1/chat/completions`; a 503 falls through to `anthropic` and `attempted` reads `("slm-tagger:http_503", "anthropic:ok")`.
 - [ ] `[HR-3]` `accept_slm_tags_payload` tests: 3 valid in-taxonomy tags pass; 2 tags, 4 tags, empty list, prose, lowercase-only-after-normalise duplicates, and one out-of-taxonomy tag each produce the named `abstain:*` or `unparseable` code and fall through; the fall-through result is the ladder's, never a partial SLM list. A wire test asserts Node receives exactly the same `{ok, data, provider, model}` shape it receives today.
 - [ ] `test_model_ladder_cli.py`: each mode's provider order; `off` and unset are byte-identical to today's request; `accept == "distill"` never gets the rung in any mode; shadow row written with the right `slm_status` on success, timeout, unavailable and each abstention; 1-in-20 ladder sampling in `prefer`/`primary` sets `ladder_sampled = 1`.
 - [ ] `cloud/.env.example` and `_OPTIONAL_LADDER_ENV` list the four new variables; `required-env.txt` unchanged; `cloud/tests/test_env_example.py` green.
