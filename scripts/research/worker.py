@@ -194,9 +194,8 @@ def main():
         finally:
             state.close()
         return
-    from research.model import Reviewer
-    from research.pipeline import Pipeline
-    pipeline = Pipeline(root, Reviewer(), publisher)
+    from research.model import build_pipeline
+    pipeline = build_pipeline(root, publisher)
     client = DropboxClient.from_env().connect()
     exit_status = 0
     while not stopping:

@@ -164,8 +164,8 @@ def _consumer(root, stop, wake, parsed, backoff, review, publish, client_factory
             try:
                 if review:
                     if pipeline is None:
-                        from research.model import Reviewer
-                        pipeline = pipeline_factory() if pipeline_factory else Pipeline(root, Reviewer(), publisher, extractor=cached_extract)
+                        from research.model import build_pipeline
+                        pipeline = pipeline_factory() if pipeline_factory else build_pipeline(root, publisher, extractor=cached_extract)
                     worked = review_one(root, state, pipeline, publisher, publish)
                     event = parsed
                 else:
