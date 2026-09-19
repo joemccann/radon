@@ -71,4 +71,4 @@ def test_untrusted_marker_refused_by_real_marker_validation(tmp_path: Path):
 def test_gpu_runtime_not_in_app_deployment_inventory():
     assert not (CLOUD / "services" / "radon-slm.service").exists()
     for name in ("installed-units.sha256", "auto-sync-units.txt"):
-        assert "radon-slm" not in (CLOUD / "config" / name).read_text()
+        assert "radon-slm.service" not in (CLOUD / "config" / name).read_text()

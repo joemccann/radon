@@ -18,4 +18,4 @@ CREATE TABLE IF NOT EXISTS slm_tagger_shadow (
   PRIMARY KEY (post_id, observed_at)
 );
 CREATE INDEX IF NOT EXISTS idx_slm_shadow_observed ON slm_tagger_shadow(observed_at DESC);
-INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (77, datetime('now'));
+INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (78, datetime('now'));
