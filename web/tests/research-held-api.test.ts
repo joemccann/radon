@@ -37,7 +37,7 @@ beforeEach(async () => {
   await exec(BASE_SQL);
   await exec(migration("0078_research_feedback.sql"));
   await exec(migration("0079_research_outcomes.sql"));
-  await exec(migration("0081_research_outcomes_context.sql"));
+  await exec(migration("0082_research_outcomes_context.sql"));
   (await import("../lib/db")).__setDbForTests(db);
 });
 
