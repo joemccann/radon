@@ -811,6 +811,7 @@ jobs:
           e2e/research-workbench.spec.ts
           e2e/newsfeed-research-media.spec.ts
           e2e/newsfeed-sharing.spec.ts
+          e2e/research-feedback.spec.ts
           e2e/vol-skew-mr-scanner.spec.ts
           e2e/ai-industry.spec.ts
           e2e/clear-shell.spec.ts
