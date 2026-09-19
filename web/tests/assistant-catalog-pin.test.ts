@@ -102,6 +102,7 @@ const PINNED: Record<string, PinnedCapability> = {
   "newsfeed/research/files/[asset]": "internal",
   "newsfeed/research/feedback": "internal",
   "newsfeed/research/held": "internal",
+  "newsfeed/research/rules": { GET: "internal", POST: "internal" },
   "options/chain": "read",
   "options/expirations": "read",
   "options/exposure": "read",
