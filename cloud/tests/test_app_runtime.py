@@ -1242,7 +1242,9 @@ def test_nextjs_runtime_executes_the_baked_key_guard(tmp_path: Path) -> None:
 # on the HOST, but no app container could see them, so every container-side
 # ladder rung silently fell back to prepaid keys (the xAI team then ran out of
 # credits and the newsfeed voice rewrite died). Bind each dir read-only when it
-# exists and pin HOME so both Path.home() and os.homedir() land on it.
+# exists and pin HOME so both Path.home() and os.homedir() land on it. Next.js
+# hosts /api/newsfeed/share and /api/assistant, so it is an LLM consumer too.
+# Relay still gets no binds.
 
 
 def _subscription_home(tmp_path: Path) -> Path:
@@ -1268,13 +1270,27 @@ def test_run_api_binds_subscription_credential_dirs_readonly(tmp_path: Path) -> 
     assert "HOME=/home/radon" in log
 
 
-def test_run_nextjs_gets_no_subscription_credential_binds(tmp_path: Path) -> None:
-    # The internet-facing Next.js container has no ladder rung; the operator's
-    # account-wide refresh tokens must never be readable from it.
+def test_run_nextjs_binds_subscription_credential_dirs_readonly(tmp_path: Path) -> None:
+    # 2026-09-19: excluding nextjs produced POST /api/newsfeed/share 502
+    # "Missing Anthropic subscription" while api/newsfeed had the grants.
     home = _subscription_home(tmp_path)
     result = _run(
         tmp_path,
         ["run", "radon-nextjs.service"],
+        extra_env={"RADON_SUBSCRIPTION_HOME": str(home)},
+    )
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    assert f"{home}/.grok:/home/radon/.grok:ro" in log
+    assert f"{home}/.codex:/home/radon/.codex:ro" in log
+    assert "HOME=/home/radon" in log
+
+
+def test_run_relay_gets_no_subscription_credential_binds(tmp_path: Path) -> None:
+    home = _subscription_home(tmp_path)
+    result = _run(
+        tmp_path,
+        ["run", "radon-relay.service"],
         extra_env={"RADON_SUBSCRIPTION_HOME": str(home)},
     )
     assert result.returncode == 0, result.stderr

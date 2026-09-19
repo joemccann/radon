@@ -28,6 +28,7 @@ describe("POST newsfeed/share", () => {
     expect(guard).toHaveBeenCalledWith(expect.any(Request), expect.objectContaining({ operatorOnly: true, durableRateTier: "D", rate: expect.objectContaining({ limit: 10 }) }));
     expect(chat.mock.calls[0][0].messages[0].content).not.toMatch(/zerohedge/i);
     expect(chat.mock.calls[0][0].signal).toBeInstanceOf(AbortSignal);
+    expect(chat.mock.calls[0][0].reasoningEffort).toBe("low");
   });
   it("does not expose provider errors", async () => {
     chat.mockRejectedValue(new Error("secret upstream response"));
