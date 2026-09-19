@@ -684,3 +684,13 @@ All three sequential full runs completed on source head be6dafd5. The final stag
 REL-258/259/151/152/226/262 are DONE with these full-run results and their red/green evidence above. REL-260 is source-DONE and BLOCKED for browser/visual acceptance after three installed-browser attempts, with the operator command above. REL-128 existing route proof: six mocked requests produced three scans with same-ticker sharing, different-ticker independence and subsequent rescanning. REL-251–REL-256 prior missing-dependency/missing-sentinel closing blocks are superseded by 144 passing permanent drills and these three completed full runs; no cloud-green claim is made. All inherited P2 and operator/design acceptance remains in the complete issue #81 handoff.
 
 Review: seven verified source-actionable P1 task groups implemented in six substantive commits. No safety assertion, gate, refusal or skip was weakened. Root-only installation and browser verification remain operator actions. Publication and final notification receipts are recorded durably on issue #81 and in the reliability deliver scratch, not inferred from this ledger.
+
+## Remediate 2026-09-19 — reduced P0/P1
+
+Authoritative handoff: issue #81, comment 5742785406; audited-through remains 386a287367a22c4fe280a5863f4e38e7d24f9e7a. Started on that base, then fast-forwarded to d5658e5a before remediation to preserve the upstream writable-lock fix 21a5c90c. RADON_WEEKEND_REDUCED=1; REL-264/266/267 and all inherited P2 acceptance remain open. No live operations.
+
+| Task | Status | Red / green evidence | Implementation |
+|---|---|---|---|
+| REL-263 / R-684 | Source complete; closing gates pending | RED 20 lock cases failed, held-lock control passed; GREEN subscription group 124 passed | Lock setup and non-contention acquisition errors refuse all credential modes with exit 78 and error health; held locks safely skip. Preserves upstream state-directory lock location. |
+
+Baseline on 386a2873 completed with DONE: Python 13999 passed, 1 failed, 19 skipped, 90 deselected; Vitest 9788 passed; cloud 1902 passed, 4 failed, 77 skipped. The Python helper timeout case passed on isolated current-main rerun. The four cloud process-supervision failures match the inherited runner restriction class; raw rc=1 is retained. Long-suite acceptance is still pending; these focused-complete source changes are preserved locally before the closing stage as required by the remediation mandate.

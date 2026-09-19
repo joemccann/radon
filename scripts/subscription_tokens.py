@@ -25,6 +25,7 @@ import argparse
 import base64
 import contextlib
 import copy
+import errno
 import fcntl
 import json
 import logging
@@ -1627,6 +1628,10 @@ def _reauth(run: _Run, provider: Provider) -> ProviderResult:
     return ProviderResult(provider.name, LIVE, expires_at=expiry.isoformat() if expiry else None)
 
 
+class RunLockUnavailable(RuntimeError):
+    """Serialization could not be established; no credential work is safe."""
+
+
 @contextlib.contextmanager
 def run_lock(path: Path):
     """Exclusive, non-blocking. Yields False when another run already holds it.
@@ -1640,13 +1645,13 @@ def run_lock(path: Path):
         path.parent.mkdir(parents=True, exist_ok=True)
         fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o600)
     except OSError as exc:
-        log.warning("run lock unavailable (%s); continuing", type(exc).__name__)
-        yield True
-        return
+        raise RunLockUnavailable("subscription refresh lock unavailable") from exc
     try:
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
+        except OSError as exc:
+            if exc.errno not in (errno.EACCES, errno.EAGAIN):
+                raise RunLockUnavailable("subscription refresh lock unavailable") from exc
             yield False
             return
         yield True
@@ -1675,23 +1680,45 @@ def run(
     force: bool = False,
 ) -> dict:
     rt = runtime or Runtime()
-    with run_lock(rt.lock_path) as acquired:
-        if not acquired:
-            report = {
-                "service": SERVICE_NAME,
-                "mode": mode,
-                "generated_at": rt.now().isoformat(),
-                "providers": [],
-                "page_failures": [],
-                "skipped": "another run holds the lock",
-                "exit_code": EXIT_OK,
-            }
-            if json_output:
-                print(json.dumps(report, indent=2, sort_keys=True))
-            else:
-                print("skipped: another run holds the lock")
-            return report
-        return _run_locked(mode, provider_names, rt, json_output, force)
+    try:
+        with run_lock(rt.lock_path) as acquired:
+            if not acquired:
+                report = {
+                    "service": SERVICE_NAME,
+                    "mode": mode,
+                    "generated_at": rt.now().isoformat(),
+                    "providers": [],
+                    "page_failures": [],
+                    "skipped": "another run holds the lock",
+                    "exit_code": EXIT_OK,
+                }
+                if json_output:
+                    print(json.dumps(report, indent=2, sort_keys=True))
+                else:
+                    print("skipped: another run holds the lock")
+                return report
+            return _run_locked(mode, provider_names, rt, json_output, force)
+    except RunLockUnavailable:
+        message = "subscription refresh lock unavailable"
+        log.error(message)
+        report = {
+            "service": SERVICE_NAME,
+            "mode": mode,
+            "generated_at": rt.now().isoformat(),
+            "providers": [],
+            "page_failures": [],
+            "error": message,
+            "exit_code": EXIT_CONFIG,
+        }
+        try:
+            rt.heartbeat(SERVICE_NAME, "error", finished_at=report["generated_at"], error={"message": message})
+        except Exception as exc:  # same best-effort health transport as a normal run
+            log.warning("service_health write failed: %s", type(exc).__name__)
+        if json_output:
+            print(json.dumps(report, indent=2, sort_keys=True))
+        else:
+            print(message)
+        return report
 
 
 def _run_locked(

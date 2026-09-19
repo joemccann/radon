@@ -235,9 +235,14 @@ or does not parse, and exits 1 saying so. That is the case where you have just
 re-authenticated: seal the new file instead. Only pass `--force` when you mean
 to discard the on-disk credential and install the vault copy over it.
 
-Every mode takes an exclusive lock on `/run/lock/radon-subscription-tokens.lock`,
+Every mode takes an exclusive lock on `/var/lib/radon/subscription-tokens/run.lock`,
 so a manual command that lands while the 30-minute timer is running prints
 `skipped: another run holds the lock` and exits 0. Re-run it.
+The service's existing `StateDirectory=radon` provisions the writable parent.
+Lock setup or acquisition errors other than contention refuse all credential
+work, report an error heartbeat, and exit 78. Repair state-directory ownership
+or filesystem availability before rerunning; no refresh, seal, restore or login
+is attempted without serialization.
 
 Report without changing anything, in either human or machine form. `--check`
 never refreshes, probes, logs in or pages:
