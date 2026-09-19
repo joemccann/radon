@@ -12,7 +12,9 @@
 - [x] T1 Audit
 - [x] T2 Spec
 - [x] T3 Cross-links
-- [ ] T4 Draft PR https://github.com/joemccann/radon/pull/552 opened; CI green pending
+- [x] T4 Draft PR https://github.com/joemccann/radon/pull/552 opened; CI green on b832ccfd
+- [x] T5 CoS confirmation absorbed: implement at 0.25, must-ship = full-Kelly ban + scalar cap parity + M6 fail-closed; 0.5 bump and prod gate enable held for Joe
+- [ ] T6 Pushover `radon PR green` (blocked: PUSHOVER_USER / PUSHOVER_TOKEN absent in this VM)
 
 ## Review
 

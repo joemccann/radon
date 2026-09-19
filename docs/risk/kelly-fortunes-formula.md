@@ -16,6 +16,17 @@ build from it without re-auditing the repo.
 > (`0.5`) is specified below as a config-gated alternate, never a silent flip.
 > See §F.
 
+### CoS confirmation (2026-09-19)
+
+- Plan approved to proceed to implement at default fraction `0.25` (the
+  existing code default). No plan-PR code change.
+- **Must-ship in the implement PR** (see §F "Must-ship"): (1) ban full Kelly,
+  (2) unify the 2.5% cap on the scalar `kelly()` path for parity with
+  `kelly_size_batch()`, (3) `evaluate.py` M6 fails closed.
+- **Held for Joe's explicit sign-off:** any bump to `0.5`, and enabling any
+  new production gate (`RADON_KELLY_ENFORCE_ORDERS=1`, preference
+  registration). Implement PRs ship these dark.
+
 ---
 
 ## 0. Verified current state (audited 2026-09-19, `main` @ `49a23af0`)
@@ -286,7 +297,8 @@ Run order: `python3.13 scripts/run_pytest_affected.py --files scripts/kelly.py s
 ## E. Cutover
 
 1. **This PR (docs).** Spec, index row, owners rule, cross-links. No code.
-2. **Implement PR 1: library + schema parity.** `kelly.py` constants,
+2. **Implement PR 1: library + schema parity** (carries must-ship items 1 and
+   2; CoS-approved to start at `0.25`). `kelly.py` constants,
    `kelly_config()`, `kelly(bankroll=...)`, growth, haircut (`0.0`), restructure
    flag, batch validation, full-Kelly ban, `p_source`. TypeBox, wrapper,
    `pi-tools` import. Tests D1-D5, D7-D9, D12. `RADON_KELLY_FRACTION` unset in
@@ -295,7 +307,8 @@ Run order: `python3.13 scripts/run_pytest_affected.py --files scripts/kelly.py s
    the only behavior change is that `fraction > 0.5` and `fraction > 0.25 with
    estimated p` are now refused. Confirm with a before/after run of the three
    existing test files.
-3. **Implement PR 2: `kelly_ticket`, `portfolio_capacity`, M6.** Tests D6, D10.
+3. **Implement PR 2: `kelly_ticket`, `portfolio_capacity`, M6** (must-ship
+   item 3). Tests D6, D10.
    `evaluate.py --structure` flag. Decision `TRADE` becomes reachable for the
    first time; document in `docs/evaluation.md` that M5 still needs a real
    structure source.
@@ -320,6 +333,20 @@ unset flags reproduce today's numbers exactly.
 
 ## F. Done-when and Joe approval checklist
 
+### Must-ship (CoS-confirmed 2026-09-19, blocks implement PR merge)
+
+- [ ] **Ban full Kelly.** `KELLY_MAX_FRACTION = 0.5` enforced at `kelly()`,
+      `kelly_size_batch()`, CLI `--fraction`, TypeBox `KellyInput`, wrapper,
+      `pi-tools.ts`. Tests D1, D2, D12.
+- [ ] **Unify the 2.5% cap on scalar `kelly()`.** `kelly(bankroll=...)` returns
+      `use_size` capped by `KELLY_MAX_PCT`; CLI and TypeBox consume it verbatim;
+      one `0.025` constant. Tests D3, D4.
+- [ ] **`evaluate.py` M6 fails closed.** No `structure` or no Kelly pass means
+      `PENDING`/`NO_TRADE`, never `TRADE`; `failing_gate="RISK"` with a
+      `reason`. Test D10.
+- [ ] Default fraction in code, env drop-ins and docs is still `0.25` on the
+      PR head (`rg -n "RADON_KELLY_FRACTION" cloud/ config/` returns nothing).
+
 ### Done-when: implement PRs
 
 - [ ] Every D-row above exists as a named test, was red on `main` before the
@@ -336,6 +363,9 @@ unset flags reproduce today's numbers exactly.
 - [ ] CI green on the exact head; `radon PR green` Pushover sent.
 
 ### Joe approval checklist (blocking, in this order)
+
+CoS has confirmed the plan and the `0.25` default. The items below still need
+Joe's explicit signature; nothing here is implied by the CoS confirmation.
 
 - [ ] **Fraction: quarter (`0.25`, current) or half (`0.5`)?** Default stays
       `0.25` in code regardless; half is an env/preference value. No PR flips
