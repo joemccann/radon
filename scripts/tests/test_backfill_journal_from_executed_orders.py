@@ -970,3 +970,109 @@ class TestExactIdSkipSpendsTheFingerprintClaim:
 
         assert [a["status"] for a in actions] == ["skipped"]
         assert len(_journal_rows(conn)) == 1
+
+
+def _ewy_fill(exec_id: str, qty: float, when: str) -> dict:
+    fill = dict(EWY_EXEC_PAYLOAD)
+    fill["execId"] = exec_id
+    fill["quantity"] = qty
+    fill["time"] = when
+    return fill
+
+
+def _flex_aggregate_ewy_row(ib_exec_id: str, contracts: int, **extra) -> dict:
+    row = _flex_rehydrated_ewy_row()
+    row["ib_exec_id"] = ib_exec_id
+    row["contracts"] = contracts
+    row.update(extra)
+    return row
+
+
+class TestFlexAggregateReconcilesOnly:
+    """NF-4: a Flex bucket aggregating several fills under one composite id
+    is a TOTAL, not a fill. The individual executed_orders fills it covers
+    must not be journaled again beside it (that doubles net qty and basis);
+    fills beyond its total are genuine gaps and still land."""
+
+    def _run(self, monkeypatch, journal: dict, fills: list[dict]):
+        conn = _fresh_db()
+        _patch_db(conn, monkeypatch)
+        monkeypatch.setenv("RADON_DB_TEST_WRITE_OK", "1")
+        _insert_journal(conn, journal["ib_exec_id"], journal, journal["date"])
+        for fill in fills:
+            _insert_executed_order(conn, fill["execId"], fill, fill["time"])
+        mod = _import_backfill()
+        actions = mod.backfill(conn, exec_ids=[f["execId"] for f in fills], dry_run=False)
+        return conn, actions
+
+    def test_individual_fills_inside_a_same_day_aggregate_are_not_reinserted(self, monkeypatch):
+        conn, actions = self._run(
+            monkeypatch,
+            _flex_aggregate_ewy_row("7412330991+7412330995", 10),
+            [
+                _ewy_fill("000205d2.6a26a327.01.01", 6.0, "2026-06-08T14:02:11+00:00"),
+                _ewy_fill("000205d2.6a26a999.01.01", 4.0, "2026-06-08T18:31:44+00:00"),
+            ],
+        )
+        assert [a["status"] for a in actions] == ["skipped", "skipped"], actions
+        assert len(_journal_rows(conn)) == 1
+
+    def test_a_fill_beyond_the_aggregate_total_still_lands(self, monkeypatch):
+        conn, actions = self._run(
+            monkeypatch,
+            _flex_aggregate_ewy_row("7412330991+7412330995", 10),
+            [
+                _ewy_fill("000205d2.6a26a327.01.01", 6.0, "2026-06-08T14:02:11+00:00"),
+                _ewy_fill("000205d2.6a26a999.01.01", 4.0, "2026-06-08T18:31:44+00:00"),
+                _ewy_fill("000205d2.6a26aaaa.01.01", 3.0, "2026-06-08T19:00:00+00:00"),
+            ],
+        )
+        assert [a["status"] for a in actions] == ["skipped", "skipped", "inserted_from_eo"]
+        assert len(_journal_rows(conn)) == 2
+
+    def test_multi_day_aggregate_covers_each_day_from_its_breakdown(self, monkeypatch):
+        conn, actions = self._run(
+            monkeypatch,
+            _flex_aggregate_ewy_row(
+                "7412330991+7412339999", 10,
+                fill_breakdown=[
+                    {"date": "2026-06-08", "qty": -6},
+                    {"date": "2026-06-09", "qty": -4},
+                ],
+            ),
+            [
+                _ewy_fill("000205d2.6a26a327.01.01", 6.0, "2026-06-08T14:02:11+00:00"),
+                _ewy_fill("000205d2.6a27b111.01.01", 4.0, "2026-06-09T15:00:00+00:00"),
+            ],
+        )
+        assert [a["status"] for a in actions] == ["skipped", "skipped"], actions
+        assert len(_journal_rows(conn)) == 1
+
+    def test_closed_round_trip_aggregate_covers_both_sides(self, monkeypatch):
+        buy = _ewy_fill("000205d2.6a26a327.01.01", 5.0, "2026-06-08T14:02:11+00:00")
+        buy["side"] = "BOT"
+        sell = _ewy_fill("000205d2.6a26a999.01.01", 5.0, "2026-06-08T18:31:44+00:00")
+        conn, actions = self._run(
+            monkeypatch,
+            _flex_aggregate_ewy_row(
+                "7412330991+7412330995", 5, action="CLOSED", total_round_trip_quantity=5,
+            ),
+            [buy, sell],
+        )
+        assert [a["status"] for a in actions] == ["skipped", "skipped"], actions
+        assert len(_journal_rows(conn)) == 1
+
+    def test_duplicate_exec_id_correction_in_one_batch_lands_once(self, monkeypatch):
+        conn = _fresh_db()
+        _patch_db(conn, monkeypatch)
+        monkeypatch.setenv("RADON_DB_TEST_WRITE_OK", "1")
+        fill = _ewy_fill("000205d2.6a26a327.01.01", 6.0, "2026-06-08T14:02:11+00:00")
+        correction = _ewy_fill("000205d2.6a26a327.01.02", 6.0, "2026-06-08T14:02:11+00:00")
+        _insert_executed_order(conn, fill["execId"], fill, fill["time"])
+        _insert_executed_order(conn, correction["execId"], correction, correction["time"])
+        mod = _import_backfill()
+        actions = mod.backfill(
+            conn, exec_ids=[fill["execId"], correction["execId"]], dry_run=False
+        )
+        assert sorted(a["status"] for a in actions) == ["inserted_from_eo", "skipped"]
+        assert len(_journal_rows(conn)) == 1

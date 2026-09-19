@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import sys
 from collections import defaultdict
@@ -63,6 +64,13 @@ except ImportError:
     pass
 
 from utils.exec_ids import exec_id_root  # noqa: E402 — needs the sys.path above
+from clients.journal_basis import _bucket_key, _signed_qty  # noqa: E402
+
+log = logging.getLogger(__name__)
+
+# Gross notional tolerance when a Flex total is reconciled against the sum of
+# the individual fills covering it (float rounding on per-fill prices).
+AGGREGATE_NOTIONAL_TOLERANCE = 0.01
 
 
 # ---------------------------------------------------------------------------
@@ -472,6 +480,17 @@ def _bucket_to_entry(
     else:
         entry["shares"] = abs_qty
 
+    # NF-4: per-day signed totals, so the executed_orders backfill can
+    # reconcile each real fill date against this aggregate by quantity.
+    per_day: Dict[str, Decimal] = {}
+    for exec_obj in bucket["executions"]:
+        signed = exec_obj.quantity if exec_obj.side.value == "BOT" else -exec_obj.quantity
+        day = exec_obj.time.strftime("%Y-%m-%d")
+        per_day[day] = per_day.get(day, Decimal(0)) + signed
+    entry["fill_breakdown"] = [
+        {"date": day, "qty": int(qty)} for day, qty in sorted(per_day.items()) if qty != 0
+    ]
+
     codes = bucket.get("codes")
     if codes:
         # IB Flex `notes`: A=assigned, Ex=exercised, Ep=expired. Lets the
@@ -577,6 +596,98 @@ def _is_duplicate(
 # ---------------------------------------------------------------------------
 
 
+def _is_individual_fill_row(trade: Dict[str, Any]) -> bool:
+    """A row journaled from ONE IB execution (dotted IB API execId).
+
+    Flex rows carry numeric ``tradeID``s or ``+``-joined composites, and the
+    expiry sweep writes ``ep-`` ids; neither is an individual fill.
+    """
+    exec_id = str(trade.get("ib_exec_id") or "").strip()
+    return bool(exec_id) and "+" not in exec_id and "." in exec_id and not exec_id.startswith("ep-")
+
+
+def _fill_contract(ticker: Any, strike: Any, right: Any, expiry: Any) -> Optional[str]:
+    symbol = str(ticker or "").strip().upper()
+    if not symbol:
+        return None
+    return _bucket_key(
+        {"ticker": symbol, "strike": strike, "right": right, "expiry": expiry}
+    ) or f"{symbol}|STK"
+
+
+def _individual_fill_totals(trades: List[Dict[str, Any]]) -> Dict[Tuple[str, str], Dict[str, float]]:
+    """(contract, date) → signed qty and gross notional of individual fills."""
+    totals: Dict[Tuple[str, str], Dict[str, float]] = {}
+    for trade in trades:
+        if not _is_individual_fill_row(trade):
+            continue
+        contract = _fill_contract(trade.get("ticker"), trade.get("strike"),
+                                  trade.get("right"), trade.get("expiry"))
+        day = str(trade.get("date") or "")[:10]
+        try:
+            qty = abs(float(trade.get("contracts") or trade.get("shares") or 0))
+            price = float(trade.get("fill_price") or 0)
+        except (TypeError, ValueError):
+            continue
+        signed = _signed_qty(trade.get("action"), qty)
+        if contract is None or not day or not signed:
+            continue
+        bucket = totals.setdefault((contract, day), {"qty": 0.0, "notional": 0.0})
+        bucket["qty"] += signed
+        bucket["notional"] += qty * price
+    return totals
+
+
+def _reconcile_against_individual_fills(
+    executions: List[Any],
+    trades: List[Dict[str, Any]],
+) -> Tuple[List[Any], int, List[Dict[str, Any]]]:
+    """Drop Flex executions whose (contract, day) individual fills already cover.
+
+    NF-4 policy: individual IB executions are canonical. A Flex aggregate only
+    reconciles their totals; it never books a row beside them. A (contract,
+    day) whose Flex qty or gross notional disagrees with the covering fills is
+    flagged (logged + returned), not booked. Returns (uncovered executions,
+    covered group count, disagreements).
+    """
+    totals = _individual_fill_totals(trades)
+    if not totals:
+        return executions, 0, []
+    groups: Dict[Tuple[str, str], List[Any]] = defaultdict(list)
+    uncovered: List[Any] = []
+    for exec_obj in executions:
+        contract = _fill_contract(exec_obj.symbol, exec_obj.strike, exec_obj.right, exec_obj.expiry)
+        key = (contract, exec_obj.time.strftime("%Y-%m-%d"))
+        if contract is not None and key in totals:
+            groups[key].append(exec_obj)
+        else:
+            uncovered.append(exec_obj)
+
+    disagreements: List[Dict[str, Any]] = []
+    for (contract, day), group in sorted(groups.items()):
+        flex_qty = sum(
+            float(e.quantity) if e.side.value == "BOT" else -float(e.quantity) for e in group
+        )
+        flex_notional = sum(float(e.quantity * e.price) for e in group)
+        fills = totals[(contract, day)]
+        if (
+            abs(flex_qty - fills["qty"]) > 1e-9
+            or abs(flex_notional - fills["notional"]) > AGGREGATE_NOTIONAL_TOLERANCE
+        ):
+            flag = {
+                "contract": contract,
+                "date": day,
+                "flex_qty": flex_qty,
+                "fills_qty": fills["qty"],
+                "flex_notional": round(flex_notional, 4),
+                "fills_notional": round(fills["notional"], 4),
+                "flex_exec_ids": sorted(str(e.exec_id) for e in group),
+            }
+            log.warning("journal-rehydrate: Flex aggregate disagrees with individual fills: %s", flag)
+            disagreements.append(flag)
+    return uncovered, len(groups), disagreements
+
+
 def rehydrate_from_executions(
     executions: List[Any],
     existing: Dict[str, Any],
@@ -619,7 +730,12 @@ def rehydrate_from_executions(
     # skipped entries (one per contract bucket, as before the pre-filter).
     skipped = len(_group_executions(known_executions)) if known_executions else 0
 
-    grouped = _group_executions(_drop_superseded_executions(new_executions))
+    new_executions, covered, disagreements = _reconcile_against_individual_fills(
+        _drop_superseded_executions(new_executions), trades
+    )
+    skipped += covered
+
+    grouped = _group_executions(new_executions)
     candidate_entries: List[Dict[str, Any]] = []
     for bucket in grouped.values():
         key = _bucket_contract_key(bucket)
@@ -646,7 +762,12 @@ def rehydrate_from_executions(
 
     latest_date = max((t.get("date") for t in trades if t.get("date")), default=None)
 
-    return {"trades": trades}, imported, skipped, latest_date
+    return (
+        {"trades": trades, "aggregate_disagreements": disagreements},
+        imported,
+        skipped,
+        latest_date,
+    )
 
 
 class _XmlExecutionFetcher:
@@ -734,6 +855,7 @@ def rehydrate(
         existing = {"trades": []}
 
     updated, imported, skipped, latest_date = rehydrate_from_executions(executions, existing)
+    disagreements = updated.get("aggregate_disagreements", [])
 
     if imported > 0:
         # The loop is per-entry with no transaction, so entries written before
@@ -781,6 +903,7 @@ def rehydrate(
         "ok": True,
         "imported": imported,
         "skipped": skipped,
+        "aggregate_disagreements": disagreements,
         "dropped_rows": 0,
         "latest_date": latest_date,
         "executions_seen": len(executions),
