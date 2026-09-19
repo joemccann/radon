@@ -17,7 +17,7 @@ from pathlib import Path
 
 from utils.atomic_io import atomic_save
 from research import figures as figure_detect
-from research import ground, identify, novelty, triage
+from research import ground, identify, learn, novelty, triage
 from research.pipeline import DocumentDeadlineExceeded, EvidenceError, DOCUMENT_BUDGET_SECS, REVIEWER_CALL_TIMEOUT_SECS, comparison_posts
 from research.publish import validate_rendered_copy
 
@@ -163,7 +163,7 @@ class Pipeline:
         review['identity'] = identity.as_dict()
         note = _operator_note(work)
         review['operator_note'] = note or None
-        decision, code = triage.decide(identity)
+        decision, code = triage.decide(identity, rules=learn.load_rules(self.root))
         review['triage'] = {'decision': decision, 'reason_code': code, 'overridden': bool(note and decision == 'drop')}
         if decision == 'drop' and not note:
             return self._finish(out, review, 'dropped', reason_code=code)
@@ -191,6 +191,11 @@ class Pipeline:
         if revise:
             guidance += ('\nREVISE THIS PUBLISHED ITEM: return exactly one candidate that improves the item titled ' + json.dumps(revise.get('title') or '')
                          + ' per the operator note (for example by attaching the supporting figure from the catalogue or adding the missing detail).')
+        preferences = learn.select_examples(learn.load_examples(self.root), facts, ' '.join(text[p] for p in sorted(text)[:2]))
+        if preferences:
+            guidance += ('\nOPERATOR PREFERENCES (past votes on similar items; "wanted" and "should have published" show what belongs in the feed, '
+                         '"not wanted" and "correctly held" show what does not. Weigh them; they never override source fidelity):\n'
+                         + json.dumps([{k: e[k] for k in ('verdict', 'title', 'publisher', 'series', 'docType', 'reasons', 'comment')} for e in preferences]))
         prompt = (SELECT_INSTRUCTION + guidance + '\nIDENTITY (given facts):\n' + json.dumps(facts)
                   + '\nFIGURE CATALOGUE:\n' + json.dumps([{'id': f['id'], 'page': f['page'], 'title': f['title'], 'source_line': f['source_line']} for f in catalogue.values()])
                   + '\nRECENT FEED TITLES (do not repeat):\n' + json.dumps(shortlist)

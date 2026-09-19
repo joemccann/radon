@@ -56,12 +56,18 @@ def actions(rows, handled=frozenset()):
     return sorted(out, key=lambda a: a.id)
 
 
-def apply(state, fetch=fetch_rows):
+def apply(state, fetch=fetch_rows, root=None):
     """Re-queue every newly actionable vote. Returns how many documents were re-queued."""
     try:
         rows = fetch()
     except Exception:
         return 0
+    if root is not None:
+        try:
+            from research import learn
+            learn.sync(root, rows)
+        except Exception:
+            pass  # Examples and proposals are best effort; re-queue actions below must still run.
     requeued = 0
     for action in actions(rows, state.feedback_handled()):
         note = {'kind': action.kind, 'comment': action.note, 'feedback_id': action.id}

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { HeldDocument } from "@/lib/researchFeedback";
 import { reasonCodeLabel } from "@/lib/researchReasonCodes";
 import ResearchFeedback from "./ResearchFeedback";
+import ResearchRuleProposals from "./ResearchRuleProposals";
 import styles from "./ResearchHeldReview.module.css";
 
 /** A small daily sample of documents the intake held or dropped, so the operator can label what it got wrong. */
@@ -38,6 +39,7 @@ export default function ResearchHeldReview() {
   }, []);
 
   return <div className={styles.root}>
+    <ResearchRuleProposals />
     {items === null ? <p className={styles.note} role="status">Loading held research…</p> : null}
     {items && items.length === 0 && !error ? <p className={styles.note}>Nothing held is waiting for review.</p> : null}
     {items && items.length > 0 ? <>
