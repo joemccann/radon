@@ -1,6 +1,9 @@
 """Optional order-path Kelly guard. Off unless RADON_KELLY_ENFORCE_ORDERS=1.
 
-order_limits.py stays fat-finger only. This module does not re-enable Gate 4.
+When armed, violations WARN by default (RADON_KELLY_ENFORCE_MODE=warn).
+Set RADON_KELLY_ENFORCE_MODE=block to restore hard refuse. Evaluate M6
+fail-closed is unchanged. order_limits.py stays fat-finger only. This
+module does not re-enable Gate 4.
 """
 from __future__ import annotations
 
@@ -79,8 +82,29 @@ def _worst_case_loss(params: dict) -> Optional[float]:
     return None
 
 
+def _violation(code: str, message: str, **fields: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {"code": code, "message": message}
+    for key, value in fields.items():
+        if value is not None:
+            payload[key] = value
+    extras = []
+    if "loss" in payload:
+        extras.append(f"loss={payload['loss']:.2f}")
+    if "bankroll" in payload:
+        extras.append(f"bankroll={payload['bankroll']:.2f}")
+    if "pct" in payload:
+        extras.append(f"pct={payload['pct']:.2f}")
+    suffix = f" {' '.join(extras)}" if extras else ""
+    _LOG.warning("kelly_guard: %s %s%s", code, message, suffix)
+    return payload
+
+
 def check_kelly_ticket(params: dict, bankroll: Optional[float] = None) -> Optional[dict[str, Any]]:
-    """Return a refusal dict or None. No-op when the env flag is unset."""
+    """Return a violation dict or None. No-op when the env flag is unset.
+
+    The dict is warning metadata. place_order blocks only when
+    kelly_config()["enforce_mode"] == "block".
+    """
     if not kelly_config()["enforce_orders"]:
         return None
 
@@ -93,34 +117,35 @@ def check_kelly_ticket(params: dict, bankroll: Optional[float] = None) -> Option
 
     resolved = resolve_kelly_bankroll(bankroll)
     if resolved is None:
-        return {
-            "code": "KELLY_BANKROLL_UNKNOWN",
-            "message": "Kelly guard cannot size without a known bankroll",
-        }
+        return _violation(
+            "KELLY_BANKROLL_UNKNOWN",
+            "Kelly guard cannot size without a known bankroll",
+        )
 
     action = str(params.get("action") or "").upper()
     if order_type == "option" and action.startswith("SELL"):
-        return {
-            "code": "KELLY_UNDEFINED_RISK",
-            "message": "naked short option has no max_loss; Kelly guard refuses",
-        }
+        return _violation(
+            "KELLY_UNDEFINED_RISK",
+            "naked short option has no max_loss; Kelly guard undefined risk",
+        )
 
     loss = _worst_case_loss(params)
     if loss is None:
         if order_type == "option":
             return None
-        return {
-            "code": "KELLY_UNDEFINED_RISK",
-            "message": "order max_loss cannot be priced; Kelly guard refuses",
-        }
+        return _violation(
+            "KELLY_UNDEFINED_RISK",
+            "order max_loss cannot be priced; Kelly guard undefined risk",
+        )
 
     cap = resolved * KELLY_MAX_PCT
     pct = (loss / resolved) * 100.0
     if loss > cap + 1e-9:
-        return {
-            "code": "KELLY_CAP_EXCEEDED",
-            "message": (
-                f"{loss:.2f} is {pct:.2f}% of bankroll; cap is 2.5%"
-            ),
-        }
+        return _violation(
+            "KELLY_CAP_EXCEEDED",
+            f"{loss:.2f} is {pct:.2f}% of bankroll; cap is 2.5%",
+            loss=loss,
+            bankroll=resolved,
+            pct=pct,
+        )
     return None
