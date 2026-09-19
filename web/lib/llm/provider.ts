@@ -15,9 +15,8 @@
  * OpenAI calls authenticate with the operator's Claude Max, SuperGrok and
  * ChatGPT grants (lib/llm/subscriptionAuth.ts). A prepaid console key is
  * never a fallback; RADON_LADDER_ALLOW_PREPAID=1 is the only way one is read,
- * matching scripts/clients/model_ladder.py. Gemini has no HTTP subscription
- * path (the Antigravity grant lacks the generativelanguage scope), so it is
- * prepaid-only and therefore off unless that flag is set.
+ * matching scripts/clients/model_ladder.py. Google runs only through the
+ * Antigravity CLI on the ladder, so the gemini provider is never served here.
  */
 
 import { DEFAULT_MODELS } from "./frontier";
@@ -695,66 +694,11 @@ function parseToolArguments(raw: string | undefined): Record<string, unknown> {
 
 // --- Gemini ---------------------------------------------------------------
 
-type GeminiResponse = {
-  candidates?: Array<{
-    content?: { parts?: Array<{ text?: string }> };
-    finishReason?: string;
-  }>;
-  usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
-};
-
-async function callGemini(request: LlmChatRequest): Promise<LlmChatResponse> {
-  if (request.tools?.length) {
-    // Gemini structured tool-turn parity is not implemented here. Throwing is
-    // intentional so the configured tool-capable provider handles the turn.
-    throw new Error("Gemini tool requests require a tool-capable fallback provider.");
-  }
-  const apiKey = allowPrepaid() ? envValue("GEMINI_API_KEY") : undefined;
-  if (!apiKey) {
-    throw new Error(
-      "Gemini has no subscription path here; a prepaid GEMINI_API_KEY is read only under RADON_LADDER_ALLOW_PREPAID=1.",
-    );
-  }
-
-  const base = envValue("GEMINI_BASE_URL") || "https://generativelanguage.googleapis.com/v1beta";
-  const model = request.model || envValue("GEMINI_MODEL") || "gemini-2.5-pro";
-  const url = `${base.replace(/\/$/, "")}/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
-
-  const body: Record<string, unknown> = {
-    contents: request.messages.map((message) => ({
-      role: message.role === "assistant" ? "model" : "user",
-      parts: [{ text: typeof message.content === "string" ? message.content : lastUserContent([message]) }],
-    })),
-    generationConfig: { maxOutputTokens: maxTokensFor(request) },
-  };
-  if (request.system) {
-    body.systemInstruction = { parts: [{ text: request.system }] };
-  }
-
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json" },
-    body: JSON.stringify(body),
-    signal: llmRequestSignal(request),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Gemini request failed (${response.status}): ${await readErrorDetail(response)}`);
-  }
-
-  const data = (await response.json()) as GeminiResponse;
-  const candidate = data.candidates?.[0];
-  const text = (candidate?.content?.parts ?? [])
-    .map((part) => part.text ?? "")
-    .join("");
-
-  return {
-    provider: "gemini",
-    model,
-    text,
-    stopReason: candidate?.finishReason,
-    usage: normalizeUsage(data.usageMetadata?.promptTokenCount, data.usageMetadata?.candidatesTokenCount),
-  };
+async function callGemini(_request: LlmChatRequest): Promise<LlmChatResponse> {
+  // Google runs only through the Antigravity CLI on the server-side ladder
+  // (operator, 2026-09-18). There is no Gemini API key or token path here,
+  // under any flag; a gemini-* selection falls to the configured fallback.
+  throw new Error("Google is served only through the Antigravity CLI on the ladder; not available in the web layer.");
 }
 
 function normalizeUsage(input: number | undefined, output: number | undefined): LlmUsage | undefined {

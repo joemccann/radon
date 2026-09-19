@@ -3,7 +3,7 @@
 Joe's exact order (2026-09-10). Do not leave a band until it is exhausted or
 unavailable:
 
-  1. subscription: anthropic -> grok -> cursor -> codex -> gemini
+  1. subscription: anthropic -> grok -> cursor -> codex -> gemini (Antigravity CLI)
   2. nvidia (API key OK)
   3. cerebras (cheap paid, last; currently paused on Hetzner)
 
@@ -72,7 +72,9 @@ MODEL_LADDER_TIERS = {
 _ANTHROPIC_PREPAID_KEYS = ("ANTHROPIC_API_KEY", "CLAUDE_CODE_API_KEY", "CLAUDE_API_KEY")
 _GROK_PREPAID_KEYS = ("XAI_API_KEY", "GROK_API_KEY")
 _CODEX_PREPAID_KEYS = ("OPENAI_API_KEY",)
-_GEMINI_KEYS = ("GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_API_KEY")
+# Google runs ONLY through the Antigravity CLI (operator, 2026-09-18): no
+# prepaid Gemini key and no Gemini OAuth token path, under any flag.
+_GEMINI_KEYS: tuple[str, ...] = ()
 _NVIDIA_KEYS = ("NVIDIA_API_KEY",)
 _CEREBRAS_KEYS = ("CEREBRAS_API_KEY",)
 
@@ -107,8 +109,6 @@ _OPTIONAL_LADDER_ENV = (
     "NVIDIA_TEXT_MODEL",
     "NVIDIA_MODEL",
     "RADON_LADDER_ALLOW_PREPAID",
-    "GEMINI_OAUTH_TOKEN",
-    "GOOGLE_OAUTH_ACCESS_TOKEN",
     "CLAUDE_CONFIG_DIR",
     "CODEX_HOME",
     "RADON_LADDER_NO_AUTH_FILES",
@@ -135,7 +135,7 @@ _DEFAULT_VISION_MODELS = {
     "anthropic": "claude-haiku-4-5-20251001",
     "grok": "grok-4.6",
     "codex": "gpt-5.5",
-    "gemini": "gemini-2.5-flash",
+    "gemini": "",  # Antigravity account default unless GEMINI_MODEL is set
     "nvidia": _NVIDIA_VISION_DEFAULT,
     # Public multimodal Chat Completions id (Cerebras changelog 2026-09).
     # llama-4-scout-17b-16e-instruct is archived. gemma-4-31b left public
@@ -149,7 +149,7 @@ _DEFAULT_TEXT_MODELS = {
     "anthropic": "claude-sonnet-4-6",
     "grok": "grok-4.6",
     "codex": "gpt-5.5",
-    "gemini": "gemini-2.5-flash",
+    "gemini": "",  # Antigravity account default unless GEMINI_MODEL is set
     "nvidia": _NVIDIA_TEXT_DEFAULT,
     "cerebras": "qwen-3.8-27b",
 }
@@ -418,14 +418,7 @@ def _antigravity_cli(env: Mapping[str, str]) -> str:
 
 
 def _gemini_subscription_auth(env: Mapping[str, str]) -> AuthMaterial | None:
-    token = _env_get(env, "GEMINI_OAUTH_TOKEN", "GOOGLE_OAUTH_ACCESS_TOKEN")
-    if token:
-        mech = (
-            "GEMINI_OAUTH_TOKEN"
-            if (env.get("GEMINI_OAUTH_TOKEN") or "").strip()
-            else "GOOGLE_OAUTH_ACCESS_TOKEN"
-        )
-        return AuthMaterial(token, "subscription", mech)
+    """Google via the Antigravity CLI only; the token is the CLI path."""
     cli = _antigravity_cli(env)
     if cli:
         return AuthMaterial(cli, "subscription", "antigravity_cli")
@@ -478,10 +471,8 @@ def _auth_for(name: str, env: Mapping[str, str]) -> AuthMaterial | None:
             return sub
         return _prepaid_auth(env, *_CODEX_PREPAID_KEYS, mechanism="OPENAI_API_KEY")
     if name == "gemini":
-        sub = _gemini_subscription_auth(env)
-        if sub is not None:
-            return sub
-        return _prepaid_auth(env, *_GEMINI_KEYS, mechanism="GEMINI_API_KEY")
+        # Antigravity only: no prepaid Gemini key, even under allow-prepaid.
+        return _gemini_subscription_auth(env)
     if name == "nvidia":
         token = _env_get(env, *_NVIDIA_KEYS)
         if token:
@@ -881,26 +872,6 @@ def _openai_vision_body(
     return body
 
 
-def _gemini_vision_body(model: str, b64: str, prompt: str) -> tuple[str, dict[str, Any]]:
-    url = (
-        "https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{model}:generateContent"
-    )
-    body = {
-        "contents": [
-            {
-                "role": "user",
-                "parts": [
-                    {"inline_data": {"mime_type": "image/png", "data": b64}},
-                    {"text": prompt},
-                ],
-            }
-        ],
-        "generationConfig": {"maxOutputTokens": 4096},
-    }
-    return url, body
-
-
 def _labeled_images_to_b64(
     images: Sequence[tuple[str, Path | bytes]],
 ) -> list[tuple[str, str]]:
@@ -1094,32 +1065,6 @@ def _openai_multimodal_body(
     return body
 
 
-def _gemini_multimodal_body(
-    model: str,
-    system: str,
-    instruction: str,
-    labeled_b64: Sequence[tuple[str, str]],
-    *,
-    max_tokens: int,
-) -> tuple[str, dict[str, Any]]:
-    url = (
-        "https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{model}:generateContent"
-    )
-    parts: list[dict[str, Any]] = []
-    for label, b64 in labeled_b64:
-        parts.append({"text": label})
-        parts.append({"inline_data": {"mime_type": "image/png", "data": b64}})
-    parts.append({"text": instruction})
-    body: dict[str, Any] = {
-        "contents": [{"role": "user", "parts": parts}],
-        "generationConfig": {"maxOutputTokens": max_tokens},
-    }
-    if system:
-        body["systemInstruction"] = {"parts": [{"text": system}]}
-    return url, body
-
-
 def _call_vision_provider(
     name: str,
     auth: AuthMaterial,
@@ -1167,15 +1112,7 @@ def _call_vision_provider(
             _openai_vision_body(model, b64, prompt),
         )
     if name == "gemini":
-        if auth.mechanism == "antigravity_cli":
-            return _antigravity_complete(api_key, {}, model, "", prompt, [("image", b64)])
-        url, body = _gemini_vision_body(model, b64, prompt)
-        return _request(
-            post,
-            f"{url}?key={api_key}",
-            {"content-type": "application/json"},
-            body,
-        )
+        return _antigravity_complete(api_key, {}, model, "", prompt, [("image", b64)])
     if name == "nvidia":
         return _request(
             post,
@@ -1269,20 +1206,7 @@ def _call_text_provider(
             max_bytes=max_response_bytes,
         )
     if name == "gemini":
-        if auth.mechanism == "antigravity_cli":
-            return _antigravity_complete(api_key, {}, model, system, instruction, labeled_b64)
-        url, body = _gemini_multimodal_body(
-            model, system, instruction, labeled_b64, max_tokens=max_tokens
-        )
-        return _request(
-            post,
-            f"{url}?key={api_key}",
-            {"content-type": "application/json"},
-            body,
-            timeout=read_timeout,
-            stream=True,
-            max_bytes=max_response_bytes,
-        )
+        return _antigravity_complete(api_key, {}, model, system, instruction, labeled_b64)
     if name == "nvidia":
         return _request(
             post,

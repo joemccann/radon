@@ -276,32 +276,18 @@ describe("llm provider", () => {
     expect(calls[0].url).toBe("http://localhost:11434/v1/chat/completions");
   });
 
-  it("selects Gemini and normalizes its response", async () => {
+  it("never serves Gemini here: Google is Antigravity-only on the ladder", async () => {
     process.env.LLM_PROVIDER = "gemini";
     process.env.GEMINI_API_KEY = "g-test";
     process.env.RADON_LADDER_ALLOW_PREPAID = "1";
-    const { calls } = captureFetch(() =>
-      jsonResponse({
-        candidates: [{ content: { parts: [{ text: "Gemini flow answer." }] }, finishReason: "STOP" }],
-        usageMetadata: { promptTokenCount: 4, candidatesTokenCount: 6 },
-      }),
-    );
-
-    const result = await chat(SAMPLE_REQUEST);
-
-    expect(calls).toHaveLength(1);
-    expect(calls[0].url).toContain("generativelanguage.googleapis.com");
-    expect(calls[0].init.signal).toBeInstanceOf(AbortSignal);
-    expect(result.provider).toBe("gemini");
-    expect(result.text).toBe("Gemini flow answer.");
-    expect(result.usage).toEqual({ inputTokens: 4, outputTokens: 6 });
+    const { calls } = captureFetch(() => jsonResponse({}));
+    await expect(chat(SAMPLE_REQUEST)).rejects.toThrow(/Antigravity/);
+    expect(calls).toHaveLength(0);
   });
 
   it("gemini tool request explicitly falls back", async () => {
     process.env.LLM_PROVIDER = "gemini";
     process.env.LLM_FALLBACK_PROVIDER = "openai";
-    process.env.GEMINI_API_KEY = "g-test";
-    process.env.RADON_LADDER_ALLOW_PREPAID = "1";
     process.env.OPENAI_API_KEY = "sk-test";
     process.env.RADON_LADDER_ALLOW_PREPAID = "1";
     const { calls } = captureFetch(() =>
@@ -521,7 +507,7 @@ describe("llm provider", () => {
       process.env.GEMINI_API_KEY = "g-prepaid";
       process.env.LLM_PROVIDER = "gemini";
       const { calls } = captureFetch(() => jsonResponse({}));
-      await expect(chat(SAMPLE_REQUEST)).rejects.toThrow(/RADON_LADDER_ALLOW_PREPAID/);
+      await expect(chat(SAMPLE_REQUEST)).rejects.toThrow(/Antigravity/);
       expect(calls).toHaveLength(0);
     });
 

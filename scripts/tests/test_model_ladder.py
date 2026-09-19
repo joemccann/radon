@@ -207,7 +207,6 @@ class TestTextJsonPath:
             ({"ANTHROPIC_API_KEY": "a", "RADON_LADDER_ALLOW_PREPAID": "1"}, "api.anthropic.com", {"stop_reason": "end_turn", "content": [{"type": "text", "text": json.dumps(OBJ)}]}),
             ({"XAI_API_KEY": "x", "RADON_LADDER_ALLOW_PREPAID": "1"}, "api.x.ai", {"choices": [{"message": {"content": json.dumps(OBJ)}}]}),
             ({"OPENAI_API_KEY": "o", "RADON_LADDER_ALLOW_PREPAID": "1"}, "api.openai.com", {"choices": [{"message": {"content": json.dumps(OBJ)}}]}),
-            ({"GEMINI_API_KEY": "g", "RADON_LADDER_ALLOW_PREPAID": "1"}, "generativelanguage.googleapis.com", {"candidates": [{"content": {"parts": [{"text": json.dumps(OBJ)}]}}]}),
             ({"NVIDIA_API_KEY": "n"}, "integrate.api.nvidia.com", {"choices": [{"message": {"content": json.dumps(OBJ)}}]}),
             ({"CEREBRAS_API_KEY": "c"}, "api.cerebras.ai", {"choices": [{"message": {"content": json.dumps(OBJ)}}]}),
         ],
@@ -535,14 +534,13 @@ class TestSubscriptionAuthPreference:
         assert auth.kind == "subscription"
         assert auth.token == "grok-sub-token"
 
-    def test_gemini_google_api_key_alias_requires_allow_prepaid(self):
+    def test_google_is_antigravity_only_no_key_no_oauth_token_under_any_flag(self):
+        # Operator 2026-09-18: only Antigravity, never Gemini API keys or tokens.
         assert "gemini" not in wired_providers({"GOOGLE_API_KEY": "goog-test"})
-        assert "gemini" in wired_providers(
-            {"GOOGLE_API_KEY": "goog-test", "RADON_LADDER_ALLOW_PREPAID": "1"}
+        assert "gemini" not in wired_providers(
+            {"GEMINI_API_KEY": "g", "GOOGLE_API_KEY": "goog-test", "RADON_LADDER_ALLOW_PREPAID": "1"}
         )
-
-    def test_gemini_oauth_wires_without_prepaid(self):
-        assert "gemini" in wired_providers({"GEMINI_OAUTH_TOKEN": "gem-oauth"})
+        assert "gemini" not in wired_providers({"GEMINI_OAUTH_TOKEN": "gem-oauth"})
 
     def test_anthropic_subscription_sends_oauth_beta_header(self):
         captured: list[dict] = []
@@ -694,7 +692,7 @@ class TestCodexSubscriptionGoesThroughChatGpt:
 class TestGeminiRunsThroughTheAntigravityCli:
     """Google retired the Gemini CLI OAuth client for individuals on 2026-09-18
     and the Antigravity grant lacks the generativelanguage scope (403 live), so
-    the gemini rung shells out to `agy -p` instead of calling HTTP."""
+    the gemini rung shells out to `agy -p` and never calls HTTP."""
 
     def _home(self, tmp_path):
         home = tmp_path / "home"
@@ -933,7 +931,7 @@ class TestNoPrepaidByDefault:
         assert "anthropic" in wired
         assert "grok" in wired
         assert "codex" in wired
-        assert "gemini" in wired
+        assert "gemini" not in wired  # Antigravity only; no prepaid Gemini path exists
 
     def test_subscription_still_preferred_when_present_with_allow_prepaid(self):
         from clients.model_ladder import _auth_for
@@ -1050,11 +1048,9 @@ class TestNoAuthFilesFlag:
             "HOME": str(home),
             "RADON_LADDER_NO_AUTH_FILES": "1",
             "CLAUDE_CODE_OAUTH_TOKEN": "oauth-env",
-            "GEMINI_OAUTH_TOKEN": "gem-oauth",
         }
         wired = wired_providers(env)
         assert "anthropic" in wired
-        assert "gemini" in wired
 
     def test_without_flag_file_discovery_unchanged(self, tmp_path):
         from clients.model_ladder import _auth_for
