@@ -131,9 +131,16 @@ class Pipeline:
     def _finish(self, out, review, outcome, **extra):
         review.update({'outcome': outcome, **extra})
         atomic_save(str(out / 'review.json'), review)
+        record = getattr(self.publisher, 'record_outcome', None)
+        if record is not None:
+            try:
+                record(self._work, review)
+            except Exception:
+                pass  # The Turso mirror feeds the operator's Held review; review.json stays authoritative.
         return review.get('posts', [])
 
     def _process(self, work, pdf, recent, out):
+        self._work = work
         out.mkdir(parents=True, exist_ok=True, mode=0o700)
         evidence = self.extractor(pdf, out)
         self._checkpoint('extracted')

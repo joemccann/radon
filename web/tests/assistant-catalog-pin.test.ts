@@ -101,6 +101,7 @@ const PINNED: Record<string, PinnedCapability> = {
   "newsfeed/share": "internal",
   "newsfeed/research/files/[asset]": "internal",
   "newsfeed/research/feedback": "internal",
+  "newsfeed/research/held": "internal",
   "options/chain": "read",
   "options/expirations": "read",
   "options/exposure": "read",

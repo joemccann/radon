@@ -178,18 +178,36 @@ def evaluate(run, corpus, golden, keys=None):
     return _finish(report, golden, produced, dropped_keys)
 
 
+def mirror_outcomes(corpus, record=None):
+    """Backfill the Turso outcome mirror for every document that already has a v2 audit."""
+    if record is None:
+        from research.publish import record_outcome as record
+    count = 0
+    for doc in corpus.documents():
+        review = doc.review()
+        if not review or review.get('pipeline') != 'v2':
+            continue
+        record({'key': doc.key, 'folder_date': doc.folder_date, 'metadata': doc.metadata}, review)
+        count += 1
+    return count
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', required=True, help='private research directory (state.sqlite + evidence/)')
     parser.add_argument('--labels', help='operator scope labels JSON')
     parser.add_argument('--baseline', action='store_true', help='score the v1 production audits')
+    parser.add_argument('--mirror-outcomes', action='store_true', help='backfill research_outcomes in Turso from v2 review.json audits')
     args = parser.parse_args(argv)
     corpus = Corpus(args.root)
     golden = Golden.load(args.root, args.labels)
     if args.baseline:
         print(json.dumps(baseline_v1(corpus, golden), indent=1))
         return
-    parser.error('choose --baseline (stage runners arrive with each v2 phase)')
+    if args.mirror_outcomes:
+        print(json.dumps({'mirrored': mirror_outcomes(corpus)}))
+        return
+    parser.error('choose --baseline or --mirror-outcomes')
 
 
 if __name__ == '__main__':
