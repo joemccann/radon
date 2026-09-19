@@ -202,7 +202,7 @@ Ladder placement, per the operator review of 2026-09-15:
   (`/screener/analysts`: firm, analyst, upgrade or downgrade, target, timestamp), which
   TradingView has no equivalent for.
 - **TradingView below the official feeds and above Yahoo** for any price series:
-  IB > UW > Cboe/Treasury/FINRA > TradingView > Robinhood > Yahoo.
+  IB > Robinhood > UW > Cboe/Treasury/FINRA > TradingView > Yahoo.
 - **Never** for greeks, implied vol, option chains or open interest, dark pool, sweeps,
   GEX, depth, or execution. TradingView serves none of it, and no Gate 1-3 input may
   come from TradingView.

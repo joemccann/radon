@@ -488,18 +488,31 @@ class TestFetchClosesCascade:
         assert combine_source(sources) == "rh"
         assert yahoo_calls == []
 
-    def test_robinhood_never_preempts_ib_or_uw(self):
+    def test_robinhood_never_preempts_ib(self):
         rh_calls: list = []
 
         closes, sources = fetch_closes(
-            fetch_ib=lambda tickers: {HYG_SYMBOL: HYG_BARS},
-            fetch_uw=lambda tickers: {SPX_SYMBOL: SPX_BARS},
+            fetch_ib=lambda tickers: {HYG_SYMBOL: HYG_BARS, SPX_SYMBOL: SPX_BARS},
+            fetch_uw=lambda tickers: {},
             fetch_rh=lambda tickers: rh_calls.append(list(tickers)) or {},
             fetch_yahoo=lambda tickers: {},
         )
 
-        assert sources == {HYG_SYMBOL: "ib", SPX_SYMBOL: "uw"}
-        assert rh_calls == [], "RH must never be asked when IB/UW served everything"
+        assert sources == {HYG_SYMBOL: "ib", SPX_SYMBOL: "ib"}
+        assert rh_calls == [], "RH must never be asked when IB served everything"
+
+    def test_robinhood_preempts_uw(self):
+        uw_calls: list = []
+
+        closes, sources = fetch_closes(
+            fetch_ib=lambda tickers: {SPX_SYMBOL: SPX_BARS},
+            fetch_uw=lambda tickers: uw_calls.append(list(tickers)) or {},
+            fetch_rh=lambda tickers: {HYG_SYMBOL: HYG_BARS},
+            fetch_yahoo=lambda tickers: {},
+        )
+
+        assert sources == {HYG_SYMBOL: "rh", SPX_SYMBOL: "ib"}
+        assert uw_calls == [], "a Robinhood hit must not spend a UW call"
 
     def test_unconfigured_robinhood_falls_through_to_yahoo(self, monkeypatch):
         """Default RH rung when unconfigured: clean skip, no network.

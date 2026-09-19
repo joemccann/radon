@@ -27,10 +27,10 @@ clients, in repo priority order:
    `duration="10 Y"`, `bar_size="1 day"`, TRADES, RTH, bounded by
    `_bounded_pool_call` (15s). Skipped cleanly when the pool is absent or
    the gateway is unreachable.
-2. **Unusual Whales** — `UWClient.get_stock_ohlc(symbol, candle_size="1d",
-   limit=2500)`; rows parsed by `utils.uw_surface._as_uw_ohlc`.
-3. **Robinhood** — `clients.robinhood_client.fetch_robinhood_closes`
+2. **Robinhood** — `clients.robinhood_client.fetch_robinhood_closes`
    (READ-ONLY MCP; returns `{}` without network when unconfigured).
+3. **Unusual Whales** — `UWClient.get_stock_ohlc(symbol, candle_size="1d",
+   limit=2500)`; rows parsed by `utils.uw_surface._as_uw_ohlc`.
 4. **Yahoo** — ABSOLUTE LAST RESORT; v8 chart API, 20-year lookback,
    parsed by the pure `utils.streaks.parse_yahoo_chart`.
 
@@ -110,7 +110,7 @@ refresh cadence.
 `web/app/api/streaks/route.ts` — GET only, `runtime = "nodejs"`,
 `radonCapability = "read.spawn"`, `requireRouteAccess` with a 20/min rate key,
 `boundedTicker` on `symbol`, per-symbol single-flight map, `radonFetch`
-timeout 60s (IB 15s + UW + Robinhood + Yahoo worst case), 502 + scrubbed
+timeout 60s (IB 15s + Robinhood + UW + Yahoo worst case), 502 + scrubbed
 detail when FastAPI is down. No disk reads, so the disk-route cache
 contract does not apply; the client hook still fetches `cache: "no-store"`.
 
