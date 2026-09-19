@@ -149,7 +149,9 @@ owner bits are empty and only root can grant `radon-secrets`, so the delivery
 channel is one the `radon` account cannot open for itself. `radon` is never a
 member: `setup-vps.sh` creates the system group and refuses to continue if it
 finds the account in it, and `radon-app-runtime` exits 78 before staging
-anything if the group is missing or `radon` has joined it.
+anything if the group is missing or `radon` has joined it. Adding the
+`radon-panic-index` service/timer pair to the setup-vps inventory does not
+change this staging path, the `radon-secrets` group, or docker-group stripping.
 
 `radon` is deliberately NOT in group `docker` (root-equivalent on this
 host): `setup-vps.sh` never adds it and strips a membership left by an
@@ -461,6 +463,7 @@ Do not hand-edit a wrapper while a cycle is running: the shell reads the script 
 | `radon-vol-cone.timer` | Mon-Fri 20:45 UTC | Completed-session cheap-wing cone (16:45 ET, after the close grace). Spec: [`indicators/vol-cone.md`](indicators/vol-cone.md) |
 | `radon-vol-cone-intraday.timer` | Mon-Fri 09:00-16:30 ET every 15 min | Live sample ranked against that stored cone, so the tab is tradeable during the session instead of a day stale. Holds without spending a UW request outside market hours or under a nearly-spent daily budget, and a held pass no longer republishes the shared `vol-cone` snapshot. The 16:45 ET slot is deliberately absent: in EDT it is 20:45 UTC, the EOD writer's own minute (R-128). |
 | `radon-vixcor.timer` | daily 02:35 UTC | VIX x COR3M 20-session correlation, 15 min behind `radon-cor`. Spec: [`indicators/vixcor.md`](indicators/vixcor.md) |
+| `radon-panic-index.timer` | daily 02:50 + 13:15 UTC | Panic Proxy (not Goldman's index): equal-weight mean of 252-session z-scores of Cboe VIX, VVIX, VIX/VIX3M, SKEW. First production run `--no-alert`. Spec: [`indicators/panic-index.md`](indicators/panic-index.md) |
 | `radon-credit-spread.timer` | daily 21:45 UTC | HYG vs SPX credit-equity series. IB first, then UW, then Robinhood (when configured), then Yahoo. Spec: [`indicators/credit.md`](indicators/credit.md). |
 | `radon-iei-hyg.timer` | daily 21:55 UTC | IEI/HYG duration-vs-credit ratio. Spec: [`indicators/iei-hyg.md`](indicators/iei-hyg.md) |
 | `radon-leap.timer` | Mon-Fri 10:00 ET | LEAP IV-mispricing scan via FastAPI. Capacity-shed case: [`incident-runbook.md`](incident-runbook.md) |
