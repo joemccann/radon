@@ -1,3 +1,23 @@
+# Task: Kelly order-path warn-not-block (2026-09-19)
+
+`RADON_KELLY_ENFORCE_ORDERS=1` must WARN, not BLOCK, place_order.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red: oversized ticket + enforce on warns, IB still called
+- T2 depends_on: [T1] - check_kelly_ticket logs WARNING; place_order continues; mode default warn
+- T3 depends_on: [T2] - Docs D11/C.4 warn-only; draft PR; CI green
+
+## Checklist
+
+- [x] T1 Failing warn + wire tests
+- [x] T2 Guard + place_order continue; attach `kelly_warning`
+- [ ] T3 Spec, PR, CI
+
+## Review
+
+- Order path only. Evaluate M6 fail-closed unchanged. Fat-finger `order_limits` still blocks.
+
 # Task: Fortune's Formula Kelly implement (2026-09-19)
 
 Implement locked spec `docs/risk/kelly-fortunes-formula.md`. Draft PR vs main.
