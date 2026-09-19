@@ -1,6 +1,6 @@
 ### LLaMA-Factory QLoRA (train only). Serve stays GGUF / llama.cpp.
 ### HR-2: Qwen/Qwen2.5-1.5B-Instruct only.
-### HR-4: eval_dataset is the time-split valid.jsonl. Never val_size (random).
+### HR-4: eval_dataset is the time-split valid.jsonl. Never a random holdout.
 ### HR-5: train_on_prompt false = loss on assistant JSON only (mask_prompt).
 
 ### model
