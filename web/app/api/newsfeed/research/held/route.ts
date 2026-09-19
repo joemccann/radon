@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { requireRouteAccess } from "@/lib/routeAccess";
 import { dbExecute } from "@/lib/dbExecute";
-import type { HeldDocument, HeldDraft } from "@/lib/researchFeedback";
+import type { HeldContext, HeldDocument, HeldDraft } from "@/lib/researchFeedback";
+import { PRIVATE_RESEARCH_ASSET } from "@/lib/newsfeedSource";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,6 +18,19 @@ function json(body: unknown, status = 200): Response {
 
 function parseJson<T>(value: unknown, fallback: T): T {
   try { return JSON.parse(String(value ?? "")) as T; } catch { return fallback; }
+}
+
+/** Only typed fields leave the mirror, and the PDF link must be an authenticated research asset. */
+function parseContext(value: unknown): HeldContext {
+  const raw = parseJson<Record<string, unknown>>(value, {}) ?? {};
+  const text = (field: unknown, max: number) => typeof field === "string" ? field.slice(0, max) : "";
+  const url = text(raw.sourceUrl, 200);
+  return {
+    pageCount: Number.isInteger(raw.pageCount) ? raw.pageCount as number : null,
+    figureCount: Number.isInteger(raw.figureCount) ? raw.figureCount as number : 0,
+    dateSource: text(raw.dateSource, 20), excerpt: text(raw.excerpt, 900), selectorReason: text(raw.selectorReason, 600),
+    sourceUrl: PRIVATE_RESEARCH_ASSET.test(url) && url.endsWith(".pdf") ? url : "",
+  };
 }
 
 /** Round-robin across the primary reason code so rare hold reasons are always represented; order within a code is
@@ -58,7 +72,7 @@ export async function GET(request: Request): Promise<Response> {
     const day = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date());
     const cutoff = new Date(Date.now() - LOOKBACK_DAYS * 86_400_000).toISOString().slice(0, 10);
     const result = await dbExecute({
-      sql: `SELECT o.work_key, o.file_name, o.publisher, o.series, o.doc_type, o.folder_date, o.document_date, o.outcome, o.reason_codes, o.drafts_json
+      sql: `SELECT o.*
             FROM research_outcomes o
             WHERE o.outcome IN ('held', 'dropped') AND o.folder_date >= ?
               AND NOT EXISTS (
@@ -74,6 +88,8 @@ export async function GET(request: Request): Promise<Response> {
       outcome: row.outcome === "dropped" ? "dropped" : "held",
       reasonCodes: parseJson<string[]>(row.reason_codes, []).filter((code) => typeof code === "string"),
       drafts: parseJson<HeldDraft[]>(row.drafts_json, []).filter((draft) => draft && typeof draft === "object").slice(0, 8),
+      // context_json arrives with migration 0082; SELECT o.* keeps this route working on either side of it.
+      context: parseContext(row.context_json),
     }));
     return json({ items: dailySample(documents, day), pending: documents.length });
   } catch {

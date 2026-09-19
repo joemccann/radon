@@ -27,7 +27,10 @@ export type PostFeedback = { vote: "up" | "down"; reasons: FeedbackReason[]; com
 export type ParsedFeedback = { postId?: string; workKey?: string; vote: FeedbackVote; reasons: FeedbackReason[]; comment: string };
 
 export type HeldDraft = { title: string; content: string; held: string; detail: string };
+/** What the document is, so a hold with no drafts can still be judged. */
+export type HeldContext = { pageCount: number | null; figureCount: number; dateSource: string; excerpt: string; selectorReason: string; sourceUrl: string };
 export type HeldDocument = {
+  context: HeldContext;
   workKey: string; fileName: string; publisher: string; series: string; docType: string; folderDate: string; documentDate: string;
   outcome: "held" | "dropped"; reasonCodes: string[]; drafts: HeldDraft[];
 };

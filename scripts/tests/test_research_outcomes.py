@@ -68,3 +68,27 @@ def test_intake_records_every_outcome_and_survives_a_mirror_failure(tmp_path):
     again["metadata"] = dict(again["metadata"], id="id:three")
     pipe = intake.Pipeline(tmp_path / "second", Reviewer([selection(), verdict()]), publisher, extractor=extractor, figure_catalogue=catalogue, pdf_created=lambda pdf: None)
     assert len(pipe.process(again, tmp_path / "r.pdf", [])) == 1, "the mirror is telemetry; it never fails a document"
+
+
+def test_outcome_row_carries_enough_context_to_judge_a_document_with_no_drafts():
+    context = json.loads(publish.outcome_row(work(), review(
+        audit=[], selection={"candidates": [], "reason": "Historical essay on doomsday predictions; no measured market finding."},
+        figures=[{"id": "f1"}, {"id": "f2"}],
+        document={"page_count": 9, "excerpt": "The Daily Froth: A Brief History of the End of the World. History offers some reassurance.", "source_url": "/api/newsfeed/research/files/" + "c" * 64 + ".pdf"},
+    ))["context_json"])
+    assert context == {"pageCount": 9, "figureCount": 2, "dateSource": "text",
+                       "excerpt": "The Daily Froth: A Brief History of the End of the World. History offers some reassurance.",
+                       "selectorReason": "Historical essay on doomsday predictions; no measured market finding.",
+                       "sourceUrl": "/api/newsfeed/research/files/" + "c" * 64 + ".pdf"}
+
+
+def test_intake_records_the_opening_text_and_a_pdf_link_for_a_document_that_publishes_nothing(tmp_path):
+    seen = []
+    publisher = SimpleNamespace(store_asset=lambda p: "/api/newsfeed/research/files/" + "c" * 64 + "." + str(p).rsplit(".", 1)[-1],
+                                record_outcome=lambda w, r: seen.append(r))
+    pipe = intake.Pipeline(tmp_path, Reviewer([{"candidates": [], "reason": "no measured finding"}]), publisher, extractor=extractor, figure_catalogue=catalogue, pdf_created=lambda pdf: None)
+    pdf = tmp_path / "r.pdf"; pdf.write_bytes(b"%PDF-1.4")
+    assert pipe.process(work(), pdf, []) == []
+    document = seen[0]["document"]
+    assert document["page_count"] == 2 and document["excerpt"].startswith("## Economics Research ## 16 September 2026")
+    assert len(document["excerpt"]) <= 900 and document["source_url"].endswith(".pdf")
