@@ -183,7 +183,7 @@ The labels are machine outputs. Before any SLM number is interpreted, the implem
 
 | Host | What is known | Role in v1 |
 |---|---|---|
-| Joe's Mac Mini (`joes-mac-mini` on the tailnet; runs the nightly loops under launchd) | Apple silicon; RAM unknown (open question 1 in `radon-small-model.md`) | **Train** and **export**. mlx-lm LoRA on a 1.5B bf16 base needs about 6 GB; any 16 GB Mini qualifies. Also runs the eval harness against the ladder baseline because it holds subscription credentials. |
+| Joe's Mac Mini (`joes-mac-mini` on the tailnet; runs the nightly loops under launchd) | Apple silicon; RAM unknown (open question 1 in `radon-small-model.md`) | **Train** and **export**. LLaMA-Factory bf16 LoRA on a 1.5B base over PyTorch MPS needs about 6 to 8 GB; any 16 GB Mini qualifies. Also runs the eval harness against the ladder baseline because it holds subscription credentials. |
 | Hetzner app host (runs `radon-newsfeed.service`) | `cloud/radon-cloud-deployment-guide.html` names CPX11 (2 vCPU, 2 GB) as the reference size; that guide predates the current unit set and is not to be trusted for sizing. Actual RAM and vCPU must be read from the box (`nproc; free -m`) and from the 14-day `host_metrics` table (`mem_avail_mb` p05). No GPU. | **Serve**, if and only if the memory gate in D.4 passes. The caller (`model_ladder_cli.py`) runs here, so serving here keeps the rung a localhost call with no cross-host dependency. |
 | Rented GPU | none today | Not needed. Named only as the alternative if the Mini is unavailable (D.3). |
 
@@ -202,7 +202,7 @@ Why this and not the others in the 1 to 3B class:
 
 | Candidate | Licence | Fit | Verdict |
 |---|---|---|---|
-| Qwen2.5-1.5B-Instruct | Apache 2.0 | Mature paths in mlx-lm (`mlx_lm.convert -q`, `mlx_lm.lora`, `mlx_lm.fuse`) and llama.cpp (`convert_hf_to_gguf.py`, `llama-server` with json_schema grammars); 1.5B is the largest size whose Q4_K_M (about 1.1 GB file, about 1.5 GB resident at 2k context) can plausibly share a small VPS; strong instruction following for its size | **v1 base, arms B and C** |
+| Qwen2.5-1.5B-Instruct | Apache 2.0 | Native LLaMA-Factory template (`qwen`), mlx-lm alternative, and mature llama.cpp paths (`convert_hf_to_gguf.py`, `llama-server` with json_schema grammars); 1.5B is the largest size whose Q4_K_M (about 1.1 GB file, about 1.5 GB resident at 2k context) can plausibly share a small VPS; strong instruction following for its size | **v1 base, arms B and C** |
 | Qwen2.5-3B-Instruct | Apache 2.0 | Same toolchain; about 2 GB resident at Q4_K_M | **Upgrade only on a quality-gate failure** |
 | Qwen2.5-0.5B-Instruct | Apache 2.0 | Half the memory (Q8_0 about 0.6 GB); weaker on rarer tags | **Downgrade only on a memory-gate failure** |
 | Qwen3.5-0.8B / 2B (recommended in `radon-small-model.md`) | Apache 2.0 | Newer; hybrid thinking must be disabled for classification; toolchain support for the newer architecture is a per-version check | Not in v1. Newness is not a reason on its own; a family change is a v2 decision after the 3B upgrade path is exhausted. |
@@ -214,20 +214,26 @@ Exactly one base ships in v1. Changing it is a version bump (section E), not a c
 
 ### D.3 Train stack
 
-Recommended: **mlx-lm QLoRA on the Mac Mini** (4-bit quantized base, LoRA adapters; `[HR-1]` arm C). Zero spend, no prepaid key anywhere in the loop.
+Default train harness: **[LLaMA-Factory](https://github.com/hiyouga/LlamaFactory)** (`llamafactory-cli train`), QLoRA or LoRA on `Qwen/Qwen2.5-1.5B-Instruct` (`[HR-1]` arm C). Train harness only, never runtime: inference stays the GGUF `llama-server` sidecar of section G (vLLM or MLX only as the documented alternatives there), and `RADON_SLM_TAGGER_MODE=off` until the bakeoff reads `C WINS`. Pinned 2026-09-19 (Joe via CoS).
 
-QLoRA versus plain LoRA on this hardware, stated honestly: a 1.5B bf16 base trains comfortably in about 6 GB, so QLoRA buys little memory on a 16 GB Mini. It is the default because it is the recipe Joe asked for, it is the recipe that would be used on a rented GPU with Unsloth, and it keeps the training footprint small enough to run beside the nightly loops. The one technical cost is export: an adapter trained against a 4-bit base is fused onto the **bf16** base for GGUF conversion (a fuse from a quantized base does not convert cleanly). That mismatch is measured, not assumed: gate G0 below requires the fused GGUF's eval to match the adapter-on-quantized-base eval within 0.01 micro-F1. If G0 fails, retrain as plain LoRA on the bf16 base (`mlx_lm.lora` without the `-q` base) and record the switch in the model card; the gates in section F are unchanged.
+Why one harness: LLaMA-Factory runs the same YAML on the Mac Mini (PyTorch MPS) and on a rented GPU (CUDA), supports Qwen2.5 chat templates natively, masks the prompt from the loss by default, and exports a merged HF checkpoint that `convert_hf_to_gguf.py` reads directly. Unsloth and Axolotl are not required and are not referenced further.
 
-The task brief named Unsloth or Axolotl. Both are CUDA-first; Axolotl has documented MPS constraints and Unsloth's core library does not train on Apple silicon (`radon-small-model.md` section 2 tooling table). Unsloth is the sanctioned alternative only if Joe would rather rent one GPU hour than use the Mini; that path costs about one to two dollars on a T4/L4 spot instance and is the only case where a cloud key enters the training loop. It is not the recommendation.
+QLoRA versus LoRA under this harness, stated honestly:
+
+- **On a rented GPU (CUDA):** true QLoRA (`quantization_bit: 4`, bitsandbytes NF4) as in the config below. About one to two dollars for the run on a T4/L4 spot instance; the only case where any cloud credential enters the training loop, and it is a compute key, never a model-API key.
+- **On the Mac Mini (MPS):** bitsandbytes 4-bit is CUDA-only, so the same YAML runs as bf16 LoRA (`quantization_bit` unset). A 1.5B bf16 base with LoRA trains in about 6 to 8 GB; any 16 GB Mini qualifies. Zero spend. This is the default host (D.1), so the default run is LoRA; QLoRA is the GPU form of the same recipe, not a different model.
+- Either way the adapter is merged onto the **bf16** base for export (`llamafactory-cli export` with `export_quantization_bit` unset), because a merge from a 4-bit base does not convert to GGUF cleanly. Gate G0 below measures the adapter-vs-merged-GGUF parity on `valid.jsonl` rather than assuming it. If G0 fails on a QLoRA run, retrain as bf16 LoRA and record the switch in the model card; the gates in section F are unchanged.
+
+mlx-lm (`mlx_lm.lora`, `mlx_lm.fuse`) remains a documented Mac Mini alternative for an operator who wants Apple-native speed; it consumes the same `train.jsonl` chat format and the same rank, layer count, learning rate and iteration budget. It is not the default, and a model trained with it is versioned and gated identically (the model card names the harness).
 
 Files (implement PR):
 
 ```
 scripts/newsfeed/slm/
-  build_dataset.py     C.2 extract, C.3 split, manifest
+  build_dataset.py     C.2 extract, C.3 split, manifest, plus the LLaMA-Factory dataset_info.json entry
   review_cli.py        C.4 human-ok capture
-  train.sh             mlx_lm.lora with the YAML below; refuses to run if any *_API_KEY is in env
-  export.sh            mlx_lm.fuse -> convert_hf_to_gguf.py -> llama-quantize; writes manifest.json with sha256s
+  train.sh             llamafactory-cli train configs/qwen25-1p5b-qlora-v1.yaml; refuses to run if any *_API_KEY is in env
+  export.sh            llamafactory-cli export (merge onto bf16) -> convert_hf_to_gguf.py -> llama-quantize; writes manifest.json with sha256s
   eval.py              section F metrics; reads predictions JSONL, prints one JSON object
   predict_slm.py       held-out posts -> llama-server -> predictions JSONL with latency per row (arms B and C; --arm flag)
   predict_ladder.py    held-out posts -> complete_text_json (subscription only) -> predictions JSONL (arm A)
@@ -235,43 +241,82 @@ scripts/newsfeed/slm/
   monitor.py           section I.3 post-deploy drift query; one JSON object, exit 3 on threshold breach
   shadow.py            section I shadow-mode row writer (imported by model_ladder_cli.py)
   configs/qwen25-1p5b-qlora-v1.yaml
+  configs/export-v1.yaml
 ```
 
-Starting configuration (`configs/qwen25-1p5b-qlora-v1.yaml`), to be tuned only against `valid.jsonl`:
+Starting configuration (`configs/qwen25-1p5b-qlora-v1.yaml`, LLaMA-Factory schema), to be tuned only against `valid.jsonl`:
 
 ```yaml
-# Base for TRAINING is the 4-bit MLX quantization of the bf16 base:
-#   mlx_lm.convert --hf-path Qwen/Qwen2.5-1.5B-Instruct -q --q-bits 4 --mlx-path models/slm-tagger/v1/base-q4
-# Base for EXPORT is the bf16 original (E.1); the adapter is fused onto it and G0 checks the parity.
-model: models/slm-tagger/v1/base-q4
-train: true
-fine_tune_type: lora                      # QLoRA = LoRA adapters over the quantized base above
-data: data/slm/tagger/v1
-adapter_path: models/slm-tagger/v1/adapter   # local only; gitignored (section E)
-num_layers: 16
-lora_parameters:
-  rank: 16
-  scale: 20.0
-  dropout: 0.05
-  keys: [self_attn.q_proj, self_attn.k_proj, self_attn.v_proj, self_attn.o_proj,
-         mlp.gate_proj, mlp.up_proj, mlp.down_proj]
-batch_size: 8
-iters: 1200                 # about 2.5 to 3 epochs at 2,500 to 3,000 train rows
+### model
+model_name_or_path: Qwen/Qwen2.5-1.5B-Instruct   # bf16 base; [HR-2]
+trust_remote_code: false
+# quantization_bit: 4                            # QLoRA (bitsandbytes NF4): CUDA hosts only. Leave unset on the Mac Mini (MPS) for bf16 LoRA.
+
+### method
+stage: sft
+do_train: true
+finetuning_type: lora
+lora_rank: 16
+lora_alpha: 32
+lora_dropout: 0.05
+lora_target: q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj
+
+### dataset
+dataset: radon_slm_tagger_v1_train         # dataset_info.json -> data/slm/tagger/v1/train.jsonl, formatting: sharegpt (messages)
+eval_dataset: radon_slm_tagger_v1_valid
+template: qwen
+cutoff_len: 1024                            # system + 1500-char body + answer fits with margin
+train_on_prompt: false                      # [HR-5] loss on the assistant JSON only
+mask_history: false
+preprocessing_num_workers: 4
+
+### output
+output_dir: models/slm-tagger/v1/adapter    # local only; gitignored (section E)
+logging_steps: 10
+save_steps: 200
+plot_loss: true
+overwrite_output_dir: false
+report_to: none
+
+### train
+per_device_train_batch_size: 4
+gradient_accumulation_steps: 2              # effective batch 8
 learning_rate: 1.0e-4
-max_seq_length: 1024        # system + 1500-char body + answer fits with margin
-mask_prompt: true           # loss on the assistant JSON only
-steps_per_eval: 100
-val_batches: 50
-save_every: 200
-grad_checkpoint: false      # set true on a 16 GB Mini if memory is tight
+num_train_epochs: 3.0                       # about 1,000 to 1,200 optimizer steps at 2,500 to 3,000 train rows
+lr_scheduler_type: cosine
+warmup_ratio: 0.05
+bf16: true
+gradient_checkpointing: false               # true on a 16 GB Mini if memory is tight
 seed: 20260919
+
+### eval
+per_device_eval_batch_size: 8
+eval_strategy: steps
+eval_steps: 100
+load_best_model_at_end: true
+metric_for_best_model: eval_loss
 ```
+
+Export configuration (`configs/export-v1.yaml`):
+
+```yaml
+model_name_or_path: Qwen/Qwen2.5-1.5B-Instruct
+adapter_name_or_path: models/slm-tagger/v1/adapter
+template: qwen
+finetuning_type: lora
+export_dir: models/slm-tagger/v1/fused      # bf16 merged safetensors; convert_hf_to_gguf.py reads this
+export_size: 2
+export_legacy_format: false
+# export_quantization_bit is deliberately unset: quantization happens in llama-quantize (E.1).
+```
+
+`build_dataset.py` writes the `dataset_info.json` entry alongside the JSONL (`formatting: sharegpt`, `columns: {messages: messages}`, `tags: {role_tag: role, content_tag: content, user_tag: user, assistant_tag: assistant, system_tag: system}`), so the same `train.jsonl` feeds LLaMA-Factory and, unchanged, mlx-lm. The LLaMA-Factory release is pinned by the implement PR in `requirements-slm.txt` (a separate file; the trainer's PyTorch stack is not added to the runtime `requirements.txt`) and recorded in the model card.
 
 Stop rule: stop at the checkpoint with the lowest validation loss; if validation loss has not improved for 300 iterations, stop early. Expected wall clock on an M-series Mini: under one hour. Record the final train/valid loss, iteration and wall clock in the model card. `[HR-6]` Loss is a training-time stop signal and a model-card fact; it is not an acceptance gate and is never quoted as evidence of quality. Checkpoint selection between candidates uses `valid.jsonl` micro-F1 from `eval.py`, not loss.
 
 Decoding at serve and eval time: greedy (`temperature 0`), `max_tokens 64`, grammar-constrained to the schema in H.3. Same settings in `predict_slm.py` for arms B and C and in the ladder rung; a mismatch invalidates the eval.
 
-Export parity gate **G0** (`[HR-1]` arm C is the GGUF that will serve, not the adapter on the Mini): run `eval.py` on `valid.jsonl` twice, once with the adapter over the quantized base in MLX, once with the fused Q4_K_M GGUF through `llama-server`. `|micro_f1_mlx - micro_f1_gguf| <= 0.01` and `invalid_rate_gguf <= invalid_rate_mlx + 0.002`. All section F numbers for arm C are then taken from the GGUF path only.
+Export parity gate **G0** (`[HR-1]` arm C is the GGUF that will serve, not the adapter on the Mini): run `eval.py` on `valid.jsonl` twice, once with the adapter over the training base through the trainer's own inference (`llamafactory-cli chat` / `api`, or `mlx_lm.generate` for an mlx-lm run), once with the merged Q4_K_M GGUF through `llama-server`. `|micro_f1_adapter - micro_f1_gguf| <= 0.01` and `invalid_rate_gguf <= invalid_rate_adapter + 0.002`. All section F numbers for arm C are then taken from the GGUF path only.
 
 Arm B recipe (prompt-only baseline, same base, no adapter): the bf16 base converted to Q4_K_M with the same `convert_hf_to_gguf.py` and `llama-quantize` steps, served by the same `llama-server` flags, prompted with the **full** production system prompt from `buildSystemPrompt(taxonomy)` (the taxonomy list included, because an un-tuned model has no other way to know the vocabulary) plus the same user prompt, same grammar. Arm B is the honest "did the fine-tune do anything" control; it is also what would ship if C failed but B passed, which the HR-1 rule forbids, so B passing and C failing means no cutover.
 
@@ -287,11 +332,11 @@ The unit is enabled on the Hetzner app host only if, over the trailing 14 days o
 
 | Artifact | Produced by | Approx size | Where it lives |
 |---|---|---|---|
-| `adapter/adapters.safetensors` + `adapter_config.json` | `mlx_lm.lora` | 20 to 60 MB | B2 |
-| `fused/` (bf16 safetensors) | `mlx_lm.fuse` | about 3 GB | Mini only; not uploaded; regenerable from base + adapter |
+| `adapter/` (PEFT `adapter_model.safetensors` + `adapter_config.json`) | `llamafactory-cli train` | 20 to 60 MB | B2 |
+| `fused/` (bf16 merged safetensors) | `llamafactory-cli export` | about 3 GB | Mini only; not uploaded; regenerable from base + adapter |
 | `radon-slm-tagger-v1.Q4_K_M.gguf` | `convert_hf_to_gguf.py --outtype f16` then `llama-quantize ... Q4_K_M` | about 1.1 GB | B2; installed to `/var/lib/radon/models/` on the serve host |
 | `radon-slm-tagger-v1.Q8_0.gguf` | same, `Q8_0` | about 1.7 GB | B2; used only if the Q4_K_M build fails G0 export parity or a quality gate while the memory gate still passes |
-| MLX quantized dir (`mlx_lm.convert -q`) | optional | about 1 GB | Mini only, for local eval speed; not a production artifact |
+| MLX quantized dir (`mlx_lm.convert -q`) | optional, mlx-lm alternative only | about 1 GB | Mini only, for local eval speed; not a production artifact |
 | `MODEL_CARD.md` | hand-written from template | text | **git** |
 | `manifest.json` | `export.sh` | text | **git** |
 
@@ -366,7 +411,7 @@ Hygiene gates (arm C on its own):
 
 | Gate | Rule | Meaning |
 |---|---|---|
-| G0 | export parity (D.3): `|micro_f1_mlx - micro_f1_gguf| <= 0.01` | the GGUF that serves is the model that was evaluated |
+| G0 | export parity (D.3): `|micro_f1_adapter - micro_f1_gguf| <= 0.01` | the GGUF that serves is the model that was evaluated |
 | G1 | `invalid_rate(C) <= 0.005` on test, with `out_of_taxonomy <= 0.003` | grammar plus validator work; the model does not degenerate or invent vocabulary |
 | G5 | `latency_p95_s(C) <= 10` on the serve host and every call under the rung timeout (H.4) | fits inside the per-post budget with room for a fall-through |
 
@@ -616,10 +661,10 @@ Red/green order is mandatory (`CLAUDE.md` TDD rule). Every item names its test o
 - [ ] Extract run on a credentialed host; `manifest.json` counts in the PR body; corpus not in the diff (`git status` clean of `data/slm/`).
 
 **Train and export**
-- [ ] `[HR-2]` `configs/qwen25-1p5b-qlora-v1.yaml` names the 4-bit conversion of `Qwen/Qwen2.5-1.5B-Instruct`; a test pins the base id in the config and in `manifest.json`.
-- [ ] `[HR-5]` `mask_prompt: true` pinned by test; `train.sh` refuses any `*_API_KEY` in env (subprocess test with a fake key) and refuses a data dir whose manifest lists a source other than `turso.posts`.
-- [ ] Training run on the Mini; loss curve numbers in the model card only (`[HR-6]`: not in the gate table).
-- [ ] `export.sh` produces adapter, F16 GGUF, Q4_K_M GGUF; `manifest.json` sha256s match uploaded B2 objects; `models/slm-tagger/v1/MODEL_CARD.md` carries the honesty label verbatim.
+- [ ] `[HR-2]` `configs/qwen25-1p5b-qlora-v1.yaml` (LLaMA-Factory schema) names `Qwen/Qwen2.5-1.5B-Instruct` as `model_name_or_path`; a test pins the base id in the config, in `configs/export-v1.yaml` and in `manifest.json`; the model card names the harness and its pinned release (`requirements-slm.txt`).
+- [ ] `[HR-5]` `train_on_prompt: false` pinned by test (and `mask_prompt: true` for an mlx-lm run); `train.sh` refuses any `*_API_KEY` in env (subprocess test with a fake key) and refuses a data dir whose manifest lists a source other than `turso.posts`.
+- [ ] Training run via `train.sh` (LLaMA-Factory) on the Mini or a rented GPU; host, harness, LoRA-vs-QLoRA and loss curve numbers in the model card only (`[HR-6]`: not in the gate table).
+- [ ] `export.sh` produces adapter, merged bf16 checkpoint, F16 GGUF, Q4_K_M GGUF; `manifest.json` sha256s match uploaded B2 objects; `models/slm-tagger/v1/MODEL_CARD.md` carries the honesty label verbatim.
 - [ ] G0 export parity measured and in the PR body.
 
 **Bakeoff and eval**
@@ -654,7 +699,7 @@ Red/green order is mandatory (`CLAUDE.md` TDD rule). Every item names its test o
 
 | # | Decision | Default proposal if Joe says "your call" | Blocks |
 |---|---|---|---|
-| 1 | Use the Mac Mini for about one hour of training plus the arm A, B, C eval runs (arm A spends roughly 1,400 subscription calls across test and gold, zero prepaid); confirm its RAM | yes; 16 GB is enough for the 1.5B QLoRA path | D.3, F.1 |
+| 1 | Use the Mac Mini for about one hour of training plus the arm A, B, C eval runs (arm A spends roughly 1,400 subscription calls across test and gold, zero prepaid); confirm its RAM | yes; 16 GB is enough for the 1.5B LoRA run under LLaMA-Factory on MPS (QLoRA form needs a CUDA host) | D.3, F.1 |
 | 2 | Read `nproc`, `free -m` and 14-day `host_metrics` on the Hetzner app host and, if the D.4 gate fails, choose: upsize the host (monthly spend), fall back to 0.5B, or keep the rung `off` | fall back to 0.5B before spending | D.4, G.2 |
 | 3 | One hour labelling 200 posts through `review_cli.py` | required; the HR-1 win is judged on this slice | C.4, G2, G6 |
 | 4 | Weights storage: prefix under the existing B2 archive bucket (no new secret) or a new private bucket (new `RADON_MODELS_S3_*` secrets) | existing bucket, new prefix | E.2 |
