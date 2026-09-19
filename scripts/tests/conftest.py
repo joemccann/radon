@@ -7,6 +7,22 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def _stub_bankroll_snapshot(monkeypatch):
+    """NF-1: the placement funnel's Gate 3 check reads Turso.
+
+    Order-path tests exercise their own concern, so the gate admits by
+    default. test_bankroll_admission.py restores the real check.
+    """
+    try:
+        import bankroll_guard
+    except Exception:
+        yield
+        return
+    monkeypatch.setattr(bankroll_guard, "check_bankroll_admission", lambda *a, **k: None)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _isolate_model_ladder_auth_files(tmp_path, monkeypatch):
     """Credential discovery may read only this test's explicit auth fixtures."""
     from clients import model_ladder
