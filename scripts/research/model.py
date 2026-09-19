@@ -61,6 +61,21 @@ class Reviewer:
         return result.data
 
 
+# Subscription quotas refill on rolling windows; parked work waits this long before its next try.
+PROVIDER_PARK_SECS = 15 * 60
+
+_OUTAGE_MARKERS = ("ladder exhausted", "quota", "rate limit", "rate_limit", "http_429", "http_5",
+                   "overloaded", "capacity", "timeout", "timed out", "unavailable")
+
+
+def is_provider_outage(error: Exception) -> bool:
+    """True when the failure is the provider's, not the document's; such work is parked, never held."""
+    if not isinstance(error, ModelError):
+        return False
+    message = str(error).lower()
+    return any(marker in message for marker in _OUTAGE_MARKERS)
+
+
 def classify_error(error: Exception) -> str:
     """Safe error string for queue persistence and health reporting."""
     if isinstance(error, ModelError):
