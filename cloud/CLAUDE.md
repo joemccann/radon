@@ -378,6 +378,10 @@ and heals the agent-CLI subscription credentials (claude, codex, grok,
 Antigravity `agy`) from the encrypted secret store, with a daily keepalive
 probe; a dead codex or grok grant pages a one-tap login link. Runbook:
 [`docs/subscription-tokens.md`](../docs/subscription-tokens.md).
+`radon-tv-alerts.timer` runs every 5 minutes, 24/7 (`Persistent=false`), and
+drains TradingView webhook rows into one digest Pushover per cycle. Caddy bounds
+`/api/webhooks/tradingview/*` to TradingView's four sender IPs and a 16KB body.
+Spec: [`docs/tradingview-integration.md`](../docs/tradingview-integration.md).
 
 
 Canonical unit files are copied root-owned to `/etc/systemd/system`; they are

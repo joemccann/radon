@@ -745,3 +745,45 @@ class TestRestartWindowMechanism:
                     stop_serving(server)
                 caddy.terminate()
                 caddy.wait(timeout=10)
+
+
+# --------------------------------------------------------------------------
+# Issue #457: TradingView webhook ingress edge (docs/tradingview-integration.md)
+# --------------------------------------------------------------------------
+TV_MATCHER = "/api/webhooks/tradingview/*"
+TV_SENDER_IPS = {"52.89.214.238", "34.212.75.30", "54.218.53.128", "52.32.178.7"}
+
+
+class TestTradingViewWebhookEdge:
+    def _block(self, caddy_dir):
+        return handle_block(read_caddyfile(caddy_dir), TV_MATCHER)
+
+    def test_allowlists_exactly_the_four_tradingview_sender_ips(self, caddy_dir):
+        block = self._block(caddy_dir)
+        matcher = re.search(r"@(\w+)\s+not\s+remote_ip\s+([^\n]+)", block)
+        assert matcher, "need a `@name not remote_ip ...` matcher in the TV handle"
+        assert set(matcher.group(2).split()) == TV_SENDER_IPS
+        assert re.search(r"respond\s+@" + matcher.group(1) + r"\s+403", block), (
+            "non-TradingView senders must get 403 inside the webhook handle"
+        )
+
+    def test_caps_the_body_at_16kb(self, caddy_dir):
+        block = self._block(caddy_dir)
+        assert re.search(r"request_body\s*\{[^}]*max_size\s+16KB", block)
+
+    def test_proxies_to_the_nextjs_upstream(self, caddy_dir):
+        block = self._block(caddy_dir)
+        assert re.search(r"reverse_proxy\s+" + re.escape(APP_UPSTREAM) + r"\b", block)
+        assert IB_UPSTREAM not in block
+        assert re.search(r"dial_timeout\s+5s", block)
+        assert re.search(r"response_header_timeout\s+30s", block)
+
+    def test_has_no_retry_loop(self, caddy_dir):
+        """POST with no idempotency key: a replay would double-log an alert."""
+        assert "lb_try_duration" not in self._block(caddy_dir)
+
+    def test_sits_before_the_catch_all(self, caddy_dir):
+        active = strip_comments(read_caddyfile(caddy_dir))
+        tv = active.index("handle " + TV_MATCHER)
+        catch_all = re.search(r"(?m)^\s*handle\s*\{", active).start()
+        assert tv < catch_all
