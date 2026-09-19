@@ -1693,3 +1693,10 @@ def test_reauth_mode_names_the_command_for_a_paste_code_provider(tmp_path):
 
     assert report["providers"][0]["state"] == st.ERROR
     assert "claude auth login" in report["providers"][0]["last_error"]
+
+
+def test_lock_lives_in_the_radon_owned_state_dir_not_world_writable_run_lock():
+    # /run/lock is 1777: any local user could pre-hold LOCK_EX and turn every
+    # timer fire into a silent exit-0 skip. The lock belongs beside the
+    # sidecar, inside the unit's own StateDirectory.
+    assert st.LOCK_PATH.parent == st.SIDECAR_PATH.parent
