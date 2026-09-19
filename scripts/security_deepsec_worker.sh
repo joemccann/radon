@@ -6,6 +6,11 @@
 # one remediate/deliver loop. Never remediate. Never deliver. Never merge.
 set -Eeuo pipefail
 
+# Credential-free loop: the model ladder's default-on auth-file discovery
+# must not read the operator's grants (~/.claude, ~/.codex, ~/.grok,
+# antigravity) from any child python. Env-var-only discovery.
+export RADON_LADDER_NO_AUTH_FILES=1
+
 MODE="${1:?usage: security_deepsec_worker.sh run|status|harvest}"
 [[ "$MODE" == "run" || "$MODE" == "status" || "$MODE" == "harvest" ]] || {
   echo "unknown mode: $MODE" >&2; exit 2;

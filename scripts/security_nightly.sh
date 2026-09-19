@@ -162,6 +162,11 @@ NOTIFY_PUSHOVER_USER="$(_notify_cred PUSHOVER_USER || true)"
 NOTIFY_PUSHOVER_TOKEN="$(_notify_cred PUSHOVER_TOKEN || true)"
 # Activate the venv so any python3.13 calls inside the agent use it.
 [[ -f "$VENV/bin/activate" ]] && export PATH="$VENV/bin:$PATH"
+
+# Credential-free loop: the model ladder's default-on auth-file discovery
+# must not read the operator's grants (~/.claude, ~/.codex, ~/.grok,
+# antigravity) from any child python. Env-var-only discovery.
+export RADON_LADDER_NO_AUTH_FILES=1
 DEADMAN_TITLE="Nightly security runner"
 DEADMAN_LABEL="security-nightly"
 ISSUE_SANITIZE=1
