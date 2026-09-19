@@ -17,6 +17,7 @@ describe("tool wrapper domain guards", () => {
     { prob: 1.1, odds: 2 },
     { prob: 0.6, odds: 0 },
     { prob: 0.6, odds: 2, fraction: 0 },
+    { prob: 0.6, odds: 2, fraction: 0.51 },
     { prob: 0.6, odds: 2, bankroll: -1 },
   ])("rejects invalid Kelly input before spawning %#", async (input) => {
     await expect(kelly(input)).rejects.toThrow(RangeError);

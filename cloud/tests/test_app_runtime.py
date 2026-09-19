@@ -628,9 +628,27 @@ def test_run_api_mounts_systemd_credential_and_persists_store(tmp_path: Path) ->
     assert stat.S_IMODE((tmp_path / "data" / "secret_store").stat().st_mode) == 0o700
     chowns = (tmp_path / "chown.log").read_text(encoding="utf-8")
     assert f"root:1001 {host_dir} {staged}" in chowns
-    assert f"1000:1000 {tmp_path / 'data' / 'secret_store'}" in chowns
+    # secret_store ownership is applied fd-based in-process (symlink-safe),
+    # so it must never appear in the stubbed chown log.
+    assert str(tmp_path / "data" / "secret_store") not in chowns
     assert "--group-add 1001" in _run_line(result)
     assert "python scripts/secret_store.py && exec uvicorn" in _run_line(result)
+
+
+def test_run_api_refuses_symlinked_secret_store_dir(tmp_path: Path) -> None:
+    target = tmp_path / "elsewhere"
+    target.mkdir()
+    data = tmp_path / "data"
+    data.mkdir(exist_ok=True)
+    (data / "secret_store").symlink_to(target)
+    result = _run(tmp_path, ["run", "radon-api.service"])
+    assert result.returncode == 78, result.stderr
+    assert "secret store" in result.stderr.lower()
+    # The link target must not have been chowned or chmodded.
+    chown_log = tmp_path / "chown.log"
+    if chown_log.exists():
+        assert str(target) not in chown_log.read_text(encoding="utf-8")
+    assert stat.S_IMODE(target.stat().st_mode) != 0o700
 
 
 def test_run_api_refuses_when_credential_group_is_absent(tmp_path: Path) -> None:
@@ -789,8 +807,9 @@ def test_run_api_cleans_staged_credential_on_pre_exec_failure(
     # Provisioning also uses Python now. Fail only the notify proxy so this
     # regression continues to exercise its intended cleanup branch.
     private_anchor = shlex.quote(str(tmp_path / 'state' / 'private'))
+    secret_store = shlex.quote(str(tmp_path / 'data' / 'secret_store'))
     _write_executable(failing_python,
-        f'#!/bin/bash\nif [[ "${{2:-}}" == {private_anchor} ]]; then exec {shlex.quote(sys.executable)} "$@"; fi\nexit 1\n')
+        f'#!/bin/bash\nif [[ "${{2:-}}" == {private_anchor} || "${{2:-}}" == {secret_store} ]]; then exec {shlex.quote(sys.executable)} "$@"; fi\nexit 1\n')
     result = _run(
         tmp_path,
         ["run", "radon-api.service"],
@@ -1321,3 +1340,49 @@ def test_run_skips_subscription_binds_when_no_dir_exists(tmp_path: Path) -> None
     assert result.returncode == 0, result.stderr
     log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
     assert ".grok" not in log and ".codex" not in log and ".claude" not in log
+
+
+def test_run_api_mounts_robinhood_token_dir_rw_and_points_the_client_at_it(
+    tmp_path: Path,
+) -> None:
+    """The containerized API could not see /etc/radon/rh-mcp.json, so every
+    Robinhood rung inside it silently fell through to UW. The token lives in
+    its own dir (never /etc/radon), mounted rw so rotation's atomic replace
+    and the flock sidecar work."""
+    rh_dir = tmp_path / "rh-mcp"
+    rh_dir.mkdir()
+    result = _run(
+        tmp_path,
+        ["run", "radon-api.service"],
+        extra_env={"RADON_RH_TOKEN_DIR": str(rh_dir)},
+    )
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    assert f"-v {rh_dir}:{rh_dir} " in log or log.rstrip().endswith(f"-v {rh_dir}:{rh_dir}"), log
+    assert f"{rh_dir}:{rh_dir}:ro" not in log
+    assert f"ROBINHOOD_MCP_TOKEN_FILE={rh_dir}/rh-mcp.json" in log
+    assert ":/etc/radon " not in log and ":/etc/radon:" not in log
+
+
+def test_run_api_skips_robinhood_token_mount_when_absent(tmp_path: Path) -> None:
+    result = _run(
+        tmp_path,
+        ["run", "radon-api.service"],
+        extra_env={"RADON_RH_TOKEN_DIR": str(tmp_path / "no-rh-mcp")},
+    )
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    assert "rh-mcp" not in log
+
+
+def test_run_newsfeed_does_not_mount_robinhood_token_dir(tmp_path: Path) -> None:
+    rh_dir = tmp_path / "rh-mcp"
+    rh_dir.mkdir()
+    result = _run(
+        tmp_path,
+        ["run", "radon-newsfeed.service"],
+        extra_env={"RADON_RH_TOKEN_DIR": str(rh_dir)},
+    )
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    assert "rh-mcp" not in log

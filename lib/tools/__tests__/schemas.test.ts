@@ -13,7 +13,7 @@ describe("KellyOutput schema", () => {
     const valid = {
       full_kelly_pct: 10.0,
       fractional_kelly_pct: 2.5,
-      fraction_used: 0.25,
+      fraction_used: 0.5,
       edge_exists: true,
       recommendation: "STRONG",
     };
@@ -24,7 +24,7 @@ describe("KellyOutput schema", () => {
     const valid = {
       full_kelly_pct: 10.0,
       fractional_kelly_pct: 2.5,
-      fraction_used: 0.25,
+      fraction_used: 0.5,
       edge_exists: true,
       recommendation: "STRONG",
       dollar_size: 2500,
@@ -38,6 +38,40 @@ describe("KellyOutput schema", () => {
     const invalid = { full_kelly_pct: 10.0 };
     expect(Value.Check(KellyOutput, invalid)).toBe(false);
   });
+
+  it("accepts half-Kelly input and rejects full Kelly", () => {
+    expect(Value.Check(KellyInput, { prob: 0.6, odds: 2, fraction: 0.5 })).toBe(true);
+    expect(Value.Check(KellyInput, { prob: 0.6, odds: 2, fraction: 0.51 })).toBe(false);
+  });
+
+  it("accepts new optional output keys and still accepts output that omits them", () => {
+    const withNew = {
+      full_kelly_pct: 40.0,
+      fractional_kelly_pct: 20.0,
+      fraction_used: 0.5,
+      edge_exists: true,
+      recommendation: "STRONG",
+      p_input: 0.6,
+      p_haircut: 0,
+      p_effective: 0.6,
+      p_source: "estimated",
+      fraction_source: "default",
+      growth_rate_full: 0.1,
+      growth_rate_used: 0.07,
+      restructure: true,
+      capped: true,
+    };
+    const withoutNew = {
+      full_kelly_pct: 40.0,
+      fractional_kelly_pct: 20.0,
+      fraction_used: 0.5,
+      edge_exists: true,
+      recommendation: "STRONG",
+    };
+    expect(Value.Check(KellyOutput, withNew)).toBe(true);
+    expect(Value.Check(KellyOutput, withoutNew)).toBe(true);
+    expect(Value.Check(KellyOutput, { ...withNew, growth_rate_full: null })).toBe(true);
+  });
 });
 
 describe("security-sensitive numeric input schemas", () => {
@@ -48,6 +82,7 @@ describe("security-sensitive numeric input schemas", () => {
     { prob: 0.6, odds: Number.POSITIVE_INFINITY },
     { prob: 0.6, odds: 2, fraction: 0 },
     { prob: 0.6, odds: 2, fraction: 1.01 },
+    { prob: 0.6, odds: 2, fraction: 0.51 },
     { prob: 0.6, odds: 2, bankroll: -1 },
   ])("rejects invalid Kelly domain %#", (input) => {
     expect(Value.Check(KellyInput, input)).toBe(false);
