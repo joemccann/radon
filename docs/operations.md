@@ -38,7 +38,7 @@ deploy preflight refuses without). Production values: `IB_GATEWAY_MODE=cloud`,
 `10.0.0.4` on an app host. Read Flex query ids from the live env, never from a
 doc (root `CLAUDE.md` "Credentials").
 
-**Robinhood token file.** `ROBINHOOD_MCP_TOKEN_FILE` (production `/etc/radon/rh-mcp.json`, `0600`, radon-owned) holds `access_token` / `refresh_token` / `client_id` / `expires_at`; the env vars `ROBINHOOD_MCP_TOKEN`, `ROBINHOOD_MCP_REFRESH_TOKEN`, `ROBINHOOD_MCP_CLIENT_ID` only bootstrap it on first run. The file is rewritten atomically by the client's refresh against `https://api.robinhood.com/oauth2/token/` — it cannot live inside the read-only env file, and it must never be committed. Access tokens expire ~3 days; with no credentials at all every ladder skips Robinhood and falls through to Yahoo.
+**Robinhood token file.** `ROBINHOOD_MCP_TOKEN_FILE` (production `/var/lib/radon/rh-mcp/rh-mcp.json`, `0600`, radon-owned, in a `0700` radon-owned dir that `radon-app-runtime.sh` binds read-write into the radon-api container and points the container's `ROBINHOOD_MCP_TOKEN_FILE` at; host timers and the API share this one store, so the rotating refresh token is never split) holds `access_token` / `refresh_token` / `client_id` / `expires_at`; the env vars `ROBINHOOD_MCP_TOKEN`, `ROBINHOOD_MCP_REFRESH_TOKEN`, `ROBINHOOD_MCP_CLIENT_ID` only bootstrap it on first run. The file is rewritten atomically by the client's refresh against `https://api.robinhood.com/oauth2/token/` — it cannot live inside the read-only env file, and it must never be committed. Access tokens expire ~3 days; with no credentials at all every ladder skips Robinhood and falls through to Yahoo.
 
 `scripts/cta_sync_service.py` and `scripts/run_cta_sync.sh` parse `.env` values literally instead of shell-sourcing them, so unquoted secrets containing shell metacharacters (`$`, backticks, etc.) survive the scheduled CTA path.
 
@@ -53,6 +53,9 @@ to `~/.radon/secrets.db`; the production container pins
 (`0600`, override `RADON_SECRET_STORE_PATH`). The store never leaves the host —
 deliberately NOT Turso, so plaintext and ciphertext stay on the machine that
 uses them (operator decision 2026-09-01, PR #125; no migration planned).
+`radon-app-runtime` creates the `data/secret_store/` directory without
+following symlinks (`0700`, owned by the app user) and exits 78 if the path
+is a symlink or unusable.
 Before Uvicorn starts, `scripts/secret_store.py` opens the configured store and
 authenticates every encrypted row; a missing, replaced, or malformed key fails
 the unit instead of starting credential-degraded. After that preflight, every

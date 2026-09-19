@@ -51,6 +51,7 @@ Archived session artifacts live in [`docs/archive/`](archive/).
 | GARCH convergence | [`docs/strategy-garch-convergence.md`](strategy-garch-convergence.md) |
 | Options structures | [`docs/options-structures.md`](options-structures.md) |
 | Evaluation pipeline | [`docs/evaluation.md`](evaluation.md) |
+| Kelly / Fortune's Formula | [`docs/risk/kelly-fortunes-formula.md`](risk/kelly-fortunes-formula.md) |
 | Unusual Whales API | [`docs/unusual_whales_api.md`](unusual_whales_api.md) |
 
 ## IB and performance

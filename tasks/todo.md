@@ -1,3 +1,26 @@
+# Task: Fortune's Formula Kelly implement (2026-09-19)
+
+Implement locked spec `docs/risk/kelly-fortunes-formula.md`. Draft PR vs main.
+
+## Dependency graph
+
+- T1 depends_on: [] - Library: default 0.5, ban full Kelly, scalar cap, hooks
+- T2 depends_on: [T1] - M6 fail-closed + kelly_guard flag-off
+- T3 depends_on: [T1] - TypeBox/wrapper/pi-tools + half-Kelly prose/site
+- T4 depends_on: [T1, T2, T3] - Focused tests, draft PR vs main, CI
+
+## Checklist
+
+- [x] T1 `scripts/kelly.py` constants, config, ticket, ruin
+- [x] T2 `evaluate.py` M6 + `kelly_guard.py` default off
+- [x] T3 Schema/wrapper + SYSTEM/prompt/site half-Kelly default
+- [ ] T4 Draft PR, CI green, prod enable still waits Joe
+
+## Review
+
+- Default fraction 0.5 (Joe-signed). Full Kelly rejected. Cap 2.5% on scalar.
+- `RADON_KELLY_ENFORCE_ORDERS` unset on every unit.
+
 # Task: Newsfeed share 502 (2026-09-19)
 
 Production POST /api/newsfeed/share 502s with "Voice rewrite unavailable".

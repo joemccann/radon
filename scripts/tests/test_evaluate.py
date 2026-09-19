@@ -223,6 +223,7 @@ from evaluate import (
     MilestoneResult,
     compute_sustained_days,
     determine_edge,
+    evaluate_ticker,
     run_evaluation,
     format_report,
 )
@@ -463,6 +464,115 @@ class TestRunEvaluation:
         assert result.milestones["M6"].passed is False
         from evaluate import _decision_exit_code
         assert _decision_exit_code([result]) == 2
+
+    def test_d10_evaluate_ticker_fail_closed_without_structure(
+        self, ticker_data, flow_data_accumulation, options_data_bullish,
+        oi_data_massive, price_history,
+    ):
+        raw = {
+            "M1": ticker_data,
+            "M1B": {},
+            "M1C": {},
+            "M1D": {},
+            "M2": flow_data_accumulation,
+            "M3": options_data_bullish,
+            "M3B": oi_data_massive,
+            "PRICE": price_history,
+        }
+        with patch("evaluate._run_parallel_milestones", return_value=raw):
+            result = evaluate_ticker("AAPL", bankroll=100_000)
+
+        assert result.milestones["M5"].passed is False
+        assert result.milestones["M6"].passed is False
+        assert result.decision == "PENDING"
+        from evaluate import _decision_exit_code
+        assert _decision_exit_code([result]) == 2
+
+    def test_d10_structure_sizes_trade(
+        self, ticker_data, flow_data_accumulation, options_data_bullish,
+        oi_data_massive, price_history,
+    ):
+        raw = {
+            "M1": ticker_data,
+            "M1B": {},
+            "M1C": {},
+            "M1D": {},
+            "M2": flow_data_accumulation,
+            "M3": options_data_bullish,
+            "M3B": oi_data_massive,
+            "PRICE": price_history,
+        }
+        with patch("evaluate._run_parallel_milestones", return_value=raw), \
+             patch("evaluate._open_max_losses_from_portfolio", return_value=[]):
+            result = evaluate_ticker(
+                "AAPL",
+                bankroll=100_000,
+                structure={"max_gain": 300, "max_loss": 100, "prob_win": 0.4},
+            )
+        assert result.milestones["M6"].passed is True
+        assert result.milestones["M6"].data["contracts"] == 25
+        assert result.milestones["M6"].data["position_pct"] == 2.5
+        assert result.decision == "TRADE"
+
+    def test_d10_no_edge_is_risk_gate(
+        self, ticker_data, flow_data_accumulation, options_data_bullish,
+        oi_data_massive, price_history,
+    ):
+        raw = {
+            "M1": ticker_data,
+            "M1B": {},
+            "M1C": {},
+            "M1D": {},
+            "M2": flow_data_accumulation,
+            "M3": options_data_bullish,
+            "M3B": oi_data_massive,
+            "PRICE": price_history,
+        }
+        with patch("evaluate._run_parallel_milestones", return_value=raw), \
+             patch("evaluate._open_max_losses_from_portfolio", return_value=[]):
+            result = evaluate_ticker(
+                "AAPL",
+                bankroll=100_000,
+                structure={"max_gain": 300, "max_loss": 100, "prob_win": 0.2},
+            )
+        assert result.decision == "NO_TRADE"
+        assert result.failing_gate == "RISK"
+        assert result.milestones["M6"].data["reason"] == "NO_EDGE"
+        report = format_report(result)
+        assert "KELLY SIZING" in report
+        assert "NO_EDGE" in report
+
+    def test_d10_undefined_risk_and_restructure(
+        self, ticker_data, flow_data_accumulation, options_data_bullish,
+        oi_data_massive, price_history,
+    ):
+        raw = {
+            "M1": ticker_data,
+            "M1B": {},
+            "M1C": {},
+            "M1D": {},
+            "M2": flow_data_accumulation,
+            "M3": options_data_bullish,
+            "M3B": oi_data_massive,
+            "PRICE": price_history,
+        }
+        with patch("evaluate._run_parallel_milestones", return_value=raw), \
+             patch("evaluate._open_max_losses_from_portfolio", return_value=[]):
+            undefined = evaluate_ticker(
+                "AAPL",
+                bankroll=100_000,
+                structure={"max_gain": 300, "max_loss": 0, "prob_win": 0.4},
+            )
+            restructure = evaluate_ticker(
+                "AAPL",
+                bankroll=100_000,
+                structure={"max_gain": 1000, "max_loss": 100, "prob_win": 0.9},
+            )
+        assert undefined.milestones["M6"].data["reason"] == "UNDEFINED_RISK"
+        assert "KELLY SIZING" in format_report(undefined)
+        assert restructure.milestones["M6"].data["reason"] == "RESTRUCTURE"
+        assert "KELLY SIZING" in format_report(restructure)
+        assert restructure.failing_gate == "RISK"
 
     @patch("evaluate.fetch_ticker_info")
     @patch("evaluate.fetch_flow")

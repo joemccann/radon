@@ -103,6 +103,16 @@
       "owners": ["docs/scripts-reference.md"]
     },
     {
+      "id": "kelly-sizing",
+      "globs": [
+        "scripts/kelly.py",
+        "lib/tools/schemas/kelly.ts",
+        "lib/tools/wrappers/kelly.ts"
+      ],
+      "owners": ["docs/risk/kelly-fortunes-formula.md"],
+      "note": "Fraction band, 2.5% cap constant, estimated-p rule and M6 wiring are risk contracts; the spec's gap table must move when the code does."
+    },
+    {
       "id": "repo-front-door",
       "globs": [
         "SECURITY.md",
