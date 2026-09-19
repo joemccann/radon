@@ -1,0 +1,3 @@
+# Train-only. Never install into the runtime / production venv.
+# Used by scripts/newsfeed/slm/train.sh on the Mini or a CUDA host.
+llamafactory[torch,metrics]>=0.9.3

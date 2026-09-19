@@ -285,4 +285,9 @@ docs/security-audit-*.html
 
 # One-shot security-scan scratch directories (never commit)
 CLAUDE-SECURITY-*/
+# SLM corpus and weight binaries. Manifests and model cards stay tracked.
 data/slm/
+models/**/*.gguf
+models/**/*.safetensors
+models/**/adapter/
+models/**/fused/

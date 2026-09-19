@@ -1,3 +1,46 @@
+# Task: Newsfeed SLM tagger v1 implement [DRAFT PR; RUNG OFF]
+
+Implement `docs/ml/newsfeed-slm-tagger.md` (HR-1..HR-8). Dataset/eval/train/export/sidecar/ladder hook default off. No prod enable. No merge.
+
+## Dependency graph
+
+- T1 depends_on: [] - SLM package + tests (dataset, eval, monitor, train refusals)
+- T2 depends_on: [T1] - Ladder + CLI hook default off; migration 0077; units; docs
+- T3 depends_on: [T2] - Fixture bakeoff; draft PR; CI; Joe list (hardware, merge, enable)
+
+## Checklist
+
+- [x] T1 Package + unit tests
+- [x] T2 Ladder hook MODE=off; units pinned not-installed; docs
+- [x] T3 Draft PR #535; local SLM/cloud tests green; latest-head Actions not registered (agent token)
+
+## Review
+
+- Live Turso extract and Mini train are operator commands. Fixture bakeoff verdict is `C FAILS`. Mode stays off.
+- Train default is LLaMA-Factory; mlx-lm is `SLM_TRAINER=mlx` only.
+
+# Task: Newsfeed SLM tagger v1 build spec [PLAN ONLY; PR #533 DRAFT, CI GREEN]
+
+Docs-only PR: `docs/ml/newsfeed-slm-tagger.md`, an implementer-grade spec
+for a local LoRA-tuned 1-3B text tagger as a new ladder rung `slm-tagger`
+ahead of paid/subscription rungs, newsfeed text contract only. No trainer,
+server, or ladder code in this PR.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify tagger.js / model_ladder_cli.py / model_ladder.py / backfill / prior research; probe corpus availability on the cloud VM
+- T2 depends_on: [T1] - Write spec sections A-L with one recommended path (base model, train stack, serve stack, host) and explicit eval baselines
+- T3 depends_on: [T2] - README pointer + owners.json rule; docs contract tests green; draft PR; CI green; Pushover
+
+## Checklist
+
+- [x] T1 Verified: text tagger runs on every post (`hydrateTagsDual`), target column `tags_text`; taxonomy untracked since f88b413a (212 tags then); no posts corpus or Turso creds on the VM
+- [x] T2 Spec written
+- [x] T3 PR #533 draft, CI green on d58a0de1 (31 pass, 7 path-skipped); Pushover blocked: no PUSHOVER_USER / PUSHOVER_TOKEN on the cloud VM
+
+## Review
+
+- [x] Reconciled with `docs/research/radon-small-model.md` (thin $ case kept; Phase-1 tagger experiment bounded) and `radon-harness-and-model-roadmap.md` (M1 rung behind the provider layer).
 # Task: Four-digit chain strikes [IMPLEMENTED; PR CI PENDING]
 
 SNDK calls ladder clips `$1,737.00` to `$1,70...` because chain-first pins

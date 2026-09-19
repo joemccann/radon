@@ -773,6 +773,18 @@ but the public homepage loads this ticker; do not scrape `/auth/` or
 `systemctl enable --now radon-liquidcompute.timer`. The same source is also
 collected by `radon-ai-cycle.timer`.
 
+### SLM tagger monitor (`radon-slm-tagger-monitor.timer`)
+
+Daily `07:10 UTC` (`RandomizedDelaySec=300`), oneshot
+`scripts/newsfeed/slm/monitor.py`, `TimeoutStartSec=120`. No-op exit 0 when
+`RADON_SLM_TAGGER_MODE` is `off` or `shadow`. In `prefer` / `primary` it
+reads `slm_tagger_shadow` (7d / 28d), prints one JSON object, writes
+`service_health[slm-tagger-monitor]` (26h scheduled window) and exits 3 on
+an I.3 breach. The llama-server sidecar (`radon-slm-tagger.service`,
+127.0.0.1:8331) has no `service_health` row; the unit watchdog covers
+`failed` / `start-limit-hit`. Spec: [`ml/newsfeed-slm-tagger.md`](ml/newsfeed-slm-tagger.md).
+Rung stays `off` until Joe enables it.
+
 ### Model catalog (`radon-model-catalog.timer`)
 
 Daily `03:10 UTC` (`RandomizedDelaySec=300`), oneshot
