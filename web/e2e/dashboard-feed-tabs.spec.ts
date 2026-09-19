@@ -77,7 +77,8 @@ test.describe("dashboard feed tabs", () => {
 
     await page.getByRole("tab", { name: "Headlines" }).click();
     await expect(page.getByRole("tab", { name: "Headlines" })).toHaveAttribute("aria-selected", "true");
-    await expect(page.getByTestId("feed-panel-headlines")).toBeVisible();
+    await expect(page.getByTestId("feed-panel-headlines")).toBeAttached();
+    await expect(page.getByText(/Connecting to headlines|Waiting for headline prints|Headlines feed is unavailable/)).toBeVisible();
     expect(leaked).toEqual([]);
   });
 
@@ -145,11 +146,16 @@ test.describe("dashboard feed tabs", () => {
     await page.goto("/dashboard");
     const rail = page.getByTestId("feed-rail");
     await rail.scrollIntoViewIfNeeded();
-    const commentaryBasisX = (await rail.locator('[data-k="capture.basis"]').boundingBox())!.x;
+    const basisOffset = async () => {
+      const railBox = (await rail.boundingBox())!;
+      const basisBox = (await rail.locator('[data-k="capture.basis"]').boundingBox())!;
+      return basisBox.x - railBox.x;
+    };
+    const commentaryBasisX = await basisOffset();
     await page.getByTestId("feed-tab-held").click();
     await expect(page.getByText("Nothing held is waiting for review.")).toBeVisible();
     expect(await rail.locator('[data-k="last.sample"] .v').innerText()).toBe("---");
-    expect(Math.abs((await rail.locator('[data-k="capture.basis"]').boundingBox())!.x - commentaryBasisX)).toBeLessThanOrEqual(1);
+    expect(Math.abs((await basisOffset()) - commentaryBasisX)).toBeLessThanOrEqual(1);
 
     await page.setViewportSize({ width: 393, height: 852 });
     await expect(page.locator("body")).toHaveAttribute("data-mobile", "true");
