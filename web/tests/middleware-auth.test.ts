@@ -63,6 +63,10 @@ const REVIEWED_PUBLIC_NON_SHARE_API_ROUTES = [
   // gated — it has no session; it is verified by the svix HMAC signature
   // INSIDE the handler (lib/demo/svixVerify.ts). Reviewed-public deliberately.
   "/api/webhooks/clerk",
+  // TradingView alerts (docs/tradingview-integration.md). No session; the
+  // path token and body secret are checked in constant time INSIDE the
+  // handler, and Caddy bounds it to TradingView's sender IPs + 16KB.
+  "/api/webhooks/tradingview/[token]",
 ] as const;
 
 // Full reviewed public allowlist: share previews + the two above. Bearer-gated
