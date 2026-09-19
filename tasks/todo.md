@@ -1,3 +1,24 @@
+# Task: GEX45 GPU deployment tooling (2026-09-19)
+
+## Dependency graph
+
+- T1 depends_on: [] - Define isolated GPU-host bootstrap/runtime contracts and verify Blackwell-compatible upstream pins.
+- T2 depends_on: [T1] - Implement Ubuntu 24.04 bootstrap, SSH/firewall/Tailscale preparation, and private vLLM service tooling.
+- T3 depends_on: [T1] - Write host-free regression coverage and GPU-host runbook.
+- T4 depends_on: [T2, T3] - Static review, publish PR, repair all exact-head CI failures, and send PR-green notification.
+
+## Checklist
+
+- [x] T1 Contracts and upstream verification.
+- [x] T2 Deployment tooling.
+- [x] T3 Regression coverage and runbook.
+- [ ] T4 Exact-head CI green and notification.
+
+## Review
+
+- Isolated worktree /tmp/radon-slm-gpu-deployment, branch feat/slm-gpu-deployment from origin/main. No production activation, purchases, training, or local test suites.
+- Static verification: Ruff, bash syntax, and diff whitespace checks pass. Live GPU acceptance remains gated on server provisioning.
+
 # Task: Four-digit chain strikes [IMPLEMENTED; PR CI PENDING]
 
 SNDK calls ladder clips `$1,737.00` to `$1,70...` because chain-first pins

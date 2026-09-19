@@ -23,6 +23,8 @@ Archived session artifacts live in [`docs/archive/`](archive/).
 
 ## Operations and cloud
 
+- [Dedicated GPU host deployment](gpu-host-deployment.md): GEX45 bootstrap, private vLLM runtime, commissioning and rollback.
+
 | Topic | Doc |
 |-------|-----|
 | Background services, watchdogs, env | [`docs/operations.md`](operations.md) |
