@@ -186,15 +186,6 @@ export default function ClearOverview({ portfolio, prices = EMPTY_PRICES }: { po
           <p>{exposure.complete ? "Sensitivity to underlying prices, not a repriced stress scenario." : "Current underlying prices and provider Greeks are required for every option leg."}</p>
           <Link href="/regime/cri" className={styles.textLink}>View market risk <ArrowUpRight size={16} aria-hidden="true" /></Link>
         </section>
-        <section className={styles.research} aria-labelledby="clear-research-title">
-          <span className={styles.eyebrow}>Research workspace</span>
-          <h3 id="clear-research-title">Follow the evidence.</h3>
-          <p>Explore ranked structures, institutional flow, and the catalysts behind your next decision.</p>
-          <Link href="/scanner" className={styles.primary}>Explore research <ArrowRight size={17} aria-hidden="true" /></Link>
-          <Link href="/watchlist" className={styles.secondaryAction}>Open your watchlist</Link>
-          <Link href="/ai-industry" className={styles.textLink}>AI Industry evidence <ArrowUpRight size={15} aria-hidden="true" /></Link>
-          <a href="#clear-market-intelligence" className={styles.textLink}>News, signals &amp; catalysts <ArrowRight size={15} aria-hidden="true" /></a>
-        </section>
       </aside>
     </div>
   );
