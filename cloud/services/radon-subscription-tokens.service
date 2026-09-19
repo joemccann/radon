@@ -16,6 +16,15 @@ Environment=RADON_SECRET_STORE_PATH=/home/radon/radon/data/secret_store/secrets.
 # the daemon prefers each CLI-native refresh. (The module also searches that
 # directory itself, so a manual run outside this unit finds them too.)
 Environment=PATH=/home/radon/.local/bin:/usr/local/bin:/usr/bin:/bin
+# The CLIs this unit runs (agy, grok, codex) are unpinned third-party
+# binaries out of radon-writable ~/.local/bin, with the production env file
+# loaded. ProtectSystem=strict is off the table because the unit rewrites
+# credential files across /home/radon; everything else closes.
+NoNewPrivileges=yes
+PrivateTmp=yes
+RestrictSUIDSGID=yes
+ProtectSystem=full
+CapabilityBoundingSet=
 LoadCredentialEncrypted=radon-secret-store-key:/etc/credstore.encrypted/radon-secret-store-key
 # The sidecar /var/lib/radon/subscription-tokens/state.json carries the page
 # cooldowns and the consecutive-error streak. Without this the directory is not

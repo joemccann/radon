@@ -58,7 +58,10 @@ SIDECAR_PATH = Path("/var/lib/radon/subscription-tokens/state.json")
 # R-127: the 30min timer and the runbook's manual --seal/--restore/--once must
 # never refresh the same credential concurrently (a rotated refresh token
 # invalidates the one the other run is presenting).
-LOCK_PATH = Path("/run/lock/radon-subscription-tokens.lock")
+# Kept beside the sidecar in the radon-owned state dir: /run/lock is 1777, so
+# any local user could pre-hold the flock and turn every fire into a silent
+# exit-0 skip.
+LOCK_PATH = SIDECAR_PATH.parent / "run.lock"
 EXPIRY_SKEW_SECONDS = 600
 HTTP_TIMEOUT_SECONDS = 20
 HTTP_RETRIES = 2

@@ -1059,3 +1059,57 @@ class TestNoAuthFilesFlag:
         auth = _auth_for("grok", {"HOME": str(home)})
         assert auth is not None
         assert auth.token == "grok-file-token"
+
+
+class TestAntigravityCliEnvIsolation:
+    """The agy binary is an unpinned third-party CLI in radon-writable
+    ~/.local/bin. Services load /etc/radon/env, so a full-environment
+    passthrough would hand it every Radon secret (Turso, Pushover, metered
+    keys). The subprocess gets only the allowlist, PATH, and the caller's
+    explicit env."""
+
+    def test_subprocess_env_excludes_ambient_secrets(self, monkeypatch):
+        monkeypatch.setenv("TURSO_AUTH_TOKEN", "secret-turso")
+        monkeypatch.setenv("PUSHOVER_TOKEN", "secret-pushover")
+        monkeypatch.setenv("XAI_API_KEY", "secret-xai")
+        seen = {}
+
+        def fake_run(argv, **kwargs):
+            seen.update(kwargs["env"])
+
+            class R:
+                returncode = 0
+                stdout = json.dumps({"response": "ok", "status": "SUCCESS"})
+                stderr = ""
+
+            return R()
+
+        monkeypatch.setattr(model_ladder.subprocess, "run", fake_run)
+        status, text, _ = model_ladder._antigravity_complete(
+            "agy", {}, "gemini-3-pro", "", "hi", []
+        )
+        assert status == 200 and text == "ok"
+        assert "TURSO_AUTH_TOKEN" not in seen
+        assert "PUSHOVER_TOKEN" not in seen
+        assert "XAI_API_KEY" not in seen
+        assert "PATH" in seen
+
+    def test_caller_env_still_reaches_the_cli(self, monkeypatch):
+        seen = {}
+
+        def fake_run(argv, **kwargs):
+            seen.update(kwargs["env"])
+
+            class R:
+                returncode = 0
+                stdout = json.dumps({"response": "ok", "status": "SUCCESS"})
+                stderr = ""
+
+            return R()
+
+        monkeypatch.setattr(model_ladder.subprocess, "run", fake_run)
+        model_ladder._antigravity_complete(
+            "agy", {"HOME": "/tmp/fake-home", "RADON_LADDER_NO_AUTH_FILES": "1"}, "", "", "hi", []
+        )
+        assert seen.get("HOME") == "/tmp/fake-home"
+        assert seen.get("RADON_LADDER_NO_AUTH_FILES") == "1"

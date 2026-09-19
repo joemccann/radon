@@ -23,6 +23,7 @@ Owner specs for regime tabs and the cheap-wing scanner. Add a row here when a sp
 | hyad | `/regime/hyad` | `hy-ad` | [hyad.md](hyad.md) (SPX history uses stored Cboe closes for dates absent from credit history) |
 | hhlev | `/regime/hhlev` | `hhlev` | [hhlev.md](hhlev.md) |
 | vixts | `/regime/vixts` | `vixts` | [vixts.md](vixts.md) |
+| panic-index | `/regime/panic-index` | `panic-index` | [panic-index.md](panic-index.md) (shipped. Radon proxy of the GS S&T Panic Index, not the GS index) |
 | dispersion | `/regime/dispersion` | `dispersion` | [dispersion.md](dispersion.md) |
 | streaks | `/regime/streaks` | on-demand, no timer | [streaks.md](streaks.md) |
 
@@ -39,7 +40,7 @@ builder `PREFILLED FROM VOL CONE` off that `src`. Any other `src` falls back to
 `PREFILLED FROM THETA HARVESTER`, so a new indicator that prefills the builder
 must add its own `src` value rather than reuse one.
 
-A price-series indicator whose every source (IB, UW, Robinhood when configured, Yahoo) fails must re-serve
+A price-series indicator whose every source (IB, Robinhood when configured, UW, Yahoo) fails must re-serve
 its cache as `status: "stale_source"` with an `error` heartbeat, never a fresh `ok`
 over unconfirmed data: the watchdog gates purely on the 26h heartbeat window, so an
 `ok` here pins it open through a permanent outage. Pattern: `fetch_ivrank._serve_cached`,

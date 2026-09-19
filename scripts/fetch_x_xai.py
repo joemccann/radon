@@ -198,25 +198,21 @@ def xai_search(account: str, days: int = 3) -> Dict:
     
     # Use curl for reliable HTTPS - Python's SSL on this machine has issues
     # Note: xAI x_search can take 2-3 minutes for comprehensive account searches
-    # The Authorization header goes in over stdin (-H @-), never argv: argv is
-    # world-readable in the process table for the full 300s request.
+    # The Authorization header goes in via a stdin config file, never argv:
+    # argv is world-readable through ps for the whole 2-3 minute call.
     cmd = [
         "curl", "-s", "-X", "POST",
         f"{XAI_BASE_URL}/responses",
-        "-H", "@-",
+        "--config", "-",
         "-H", "Content-Type: application/json",
         "--max-time", "300",  # 5 minute timeout
         "-d", json.dumps(payload)
     ]
+    curl_config = f'header = "Authorization: Bearer {token}"\n'
 
     try:
-        result = subprocess.run(
-            cmd,
-            input=f"Authorization: Bearer {token}",
-            capture_output=True,
-            text=True,
-            timeout=320,
-        )
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=320,
+                                input=curl_config)
         if result.returncode == 28:  # curl timeout
             raise RuntimeError("API request timed out (300s). The xAI API may be slow for this account.")
         if result.returncode != 0:

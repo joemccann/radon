@@ -12,12 +12,12 @@ Strategy spec: docs/strategies.md (Strategy 6)
 Data sources (priority order):
   1. Interactive Brokers — Index('VIX','CBOE'), Index('VVIX','CBOE'),
      Index('COR1M','CBOE'), Stock('SPY','SMART','USD')
-  2. Unusual Whales — OHLC for SPY only. Does NOT support VIX/VVIX/COR1M.
-  3. Cboe official feeds — COR1M dashboard historical feed plus official
+  2. Robinhood (official trading MCP, read-only) — SPY equity historicals /
+     quotes when configured. Never above IB.
+  3. Unusual Whales — OHLC for SPY only. Does NOT support VIX/VVIX/COR1M.
+  4. Cboe official feeds — COR1M dashboard historical feed plus official
      VIX_History.csv / VVIX_History.csv daily close verification after market
      close + 20 minutes ET.
-  4. Robinhood (official trading MCP, read-only) — SPY equity historicals /
-     quotes when configured. Never above IB, UW or Cboe.
   5. Yahoo Finance — ABSOLUTE LAST RESORT. Only for remaining gaps after
      higher-priority sources fail; COR1M reaches Yahoo only if IB + Cboe fail.
 
@@ -389,7 +389,7 @@ def fetch_cboe_vvix_close(session_date: str) -> Optional[float]:
 
 
 def _fetch_rh(ticker: str) -> List[Tuple[str, float]]:
-    """Robinhood (read-only MCP) daily bars — after IB/UW/Cboe, before Yahoo.
+    """Robinhood (read-only MCP) daily bars — after IB, before UW/Cboe/Yahoo.
 
     Equities/ETFs only (SPY); the index tickers are not on Robinhood equity
     historicals. Unconfigured hosts return [] without any network I/O.
@@ -683,32 +683,9 @@ def fetch_all(tickers: List[str]) -> Tuple[Dict[str, np.ndarray], List[str]]:
                 print(f"  IB: {t} only {len(ib_data[t])} bars (need {MIN_BARS}), trying fallbacks", file=sys.stderr)
             fallback_needed.append(t)
 
-    # Priority 2: Unusual Whales (stocks/ETFs only, not VIX/VVIX)
-    if fallback_needed:
-        print("  Trying Unusual Whales for fallback tickers...", file=sys.stderr)
-        uw_data = _fetch_uw(fallback_needed)
-        still_needed: List[str] = []
-        for t in fallback_needed:
-            if t in uw_data and len(uw_data[t]) >= MIN_BARS:
-                raw[t] = uw_data[t]
-            else:
-                still_needed.append(t)
-        fallback_needed = still_needed
-
-    # Priority 3: official Cboe dashboard history for COR1M
-    if "COR1M" in fallback_needed:
-        print("  Trying CBOE dashboard fallback for COR1M...", file=sys.stderr)
-        cboe_cor1m = _fetch_cboe_cor1m()
-        if len(cboe_cor1m) >= MIN_BARS:
-            raw["COR1M"] = cboe_cor1m
-            print(f"  CBOE: COR1M — {len(cboe_cor1m)} bars", file=sys.stderr)
-        elif cboe_cor1m:
-            print(f"  CBOE: COR1M only {len(cboe_cor1m)} bars (need {MIN_BARS}), trying Yahoo", file=sys.stderr)
-        fallback_needed = [ticker for ticker in fallback_needed if ticker != "COR1M" or "COR1M" not in raw]
-
-    # Priority 4: Robinhood (read-only MCP) for equities/ETFs (SPY). Indices
+    # Priority 2: Robinhood (read-only MCP) for equities/ETFs (SPY). Indices
     # (VIX/VVIX/COR1M) are not on Robinhood equity historicals. Unconfigured
-    # hosts skip cleanly and fall through to Yahoo.
+    # hosts skip cleanly and fall through to UW.
     if fallback_needed:
         rh_eligible = [t for t in fallback_needed if t not in YAHOO_TICKERS]
         if rh_eligible:
@@ -723,11 +700,34 @@ def fetch_all(tickers: List[str]) -> Tuple[Dict[str, np.ndarray], List[str]]:
                         continue
                     if rh_bars:
                         print(
-                            f"  Robinhood: {t} only {len(rh_bars)} bars (need {MIN_BARS}), trying Yahoo",
+                            f"  Robinhood: {t} only {len(rh_bars)} bars (need {MIN_BARS}), trying UW",
                             file=sys.stderr,
                         )
                 still_needed.append(t)
             fallback_needed = still_needed
+
+    # Priority 3: Unusual Whales (stocks/ETFs only, not VIX/VVIX)
+    if fallback_needed:
+        print("  Trying Unusual Whales for fallback tickers...", file=sys.stderr)
+        uw_data = _fetch_uw(fallback_needed)
+        still_needed: List[str] = []
+        for t in fallback_needed:
+            if t in uw_data and len(uw_data[t]) >= MIN_BARS:
+                raw[t] = uw_data[t]
+            else:
+                still_needed.append(t)
+        fallback_needed = still_needed
+
+    # Priority 4: official Cboe dashboard history for COR1M
+    if "COR1M" in fallback_needed:
+        print("  Trying CBOE dashboard fallback for COR1M...", file=sys.stderr)
+        cboe_cor1m = _fetch_cboe_cor1m()
+        if len(cboe_cor1m) >= MIN_BARS:
+            raw["COR1M"] = cboe_cor1m
+            print(f"  CBOE: COR1M — {len(cboe_cor1m)} bars", file=sys.stderr)
+        elif cboe_cor1m:
+            print(f"  CBOE: COR1M only {len(cboe_cor1m)} bars (need {MIN_BARS}), trying Yahoo", file=sys.stderr)
+        fallback_needed = [ticker for ticker in fallback_needed if ticker != "COR1M" or "COR1M" not in raw]
 
     # Priority 5 (LAST RESORT): Yahoo Finance
     for t in fallback_needed:
