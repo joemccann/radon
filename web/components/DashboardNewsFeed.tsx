@@ -19,6 +19,7 @@ import NewsfeedTagBar from "./NewsfeedTagBar";
 import NewsfeedLightbox, { type NewsfeedLightboxFocus } from "./NewsfeedLightbox";
 import NewsfeedShare from "./NewsfeedShare";
 import ResearchFeedback from "./ResearchFeedback";
+import ResearchHeldReview from "./ResearchHeldReview";
 import { getImageSource } from "@/lib/newsfeedSource";
 import NewsfeedPostContent from "./NewsfeedPostContent";
 import StarToggle from "./StarToggle";
@@ -102,7 +103,7 @@ function PaginationBar({
 export default function DashboardNewsFeed() {
   const { posts, loading, refreshing, error, lastUpdated, refresh } = useNewsfeedPosts();
   const { items: headlines, status: headlinesStatus } = useHeadlines();
-  const [feedTab, setFeedTab] = useState<"commentary" | "headlines">("commentary");
+  const [feedTab, setFeedTab] = useState<"commentary" | "headlines" | "held">("commentary");
   const [currentPage, setCurrentPage] = useState(1);
   const [lightboxFocus, setLightboxFocus] = useState<NewsfeedLightboxFocus | null>(null);
   const sectionRef = useRef<HTMLElement>(null);
@@ -257,17 +258,20 @@ export default function DashboardNewsFeed() {
   }, [safePage, totalPages, scrollToTop]);
 
   const commentaryOpen = feedTab === "commentary";
+  const heldOpen = feedTab === "held";
+  // Research provenance only reaches the operator, so its presence is the operator signal for the Held review tab.
+  const showHeldTab = posts.some((post) => post.source);
   // R-463: the footer's freshness fields belong to the OPEN tab. Under
   // Headlines they read the selected transport's status and newest print time,
   // not the commentary scraper's.
   const newestHeadlineMs = newestHeadlineTime(headlines);
-  const sampleAt = commentaryOpen ? (lastUpdated ? new Date(lastUpdated) : null) : (newestHeadlineMs == null ? null : new Date(newestHeadlineMs));
+  const sampleAt = commentaryOpen ? (lastUpdated ? new Date(lastUpdated) : null) : heldOpen ? null : (newestHeadlineMs == null ? null : new Date(newestHeadlineMs));
   const lastSample = sampleAt
     ? sampleAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })
     : "---";
   const captureBasis = commentaryOpen
     ? (error ? "fault" : loading ? "awaiting" : "scraper")
-    : (headlinesStatus === "down"
+    : heldOpen ? "operator review" : (headlinesStatus === "down"
       ? "fault"
       : headlinesStatus === "connecting"
         ? "awaiting"
@@ -276,7 +280,7 @@ export default function DashboardNewsFeed() {
           : "hub");
   const live = commentaryOpen
     ? !loading && !error && posts.length > 0
-    : headlinesStatus === "live";
+    : !heldOpen && headlinesStatus === "live";
 
   const paginationBar = showPagination ? (
     <PaginationBar
@@ -337,13 +341,27 @@ export default function DashboardNewsFeed() {
           role="tab"
           id="feed-tab-headlines"
           data-testid="feed-tab-headlines"
-          aria-selected={!commentaryOpen}
+          aria-selected={feedTab === "headlines"}
           aria-controls="feed-panel-headlines"
-          className={`feed-tabs__tab${!commentaryOpen ? " feed-tabs__tab--on" : ""}`}
+          className={`feed-tabs__tab${feedTab === "headlines" ? " feed-tabs__tab--on" : ""}`}
           onClick={() => setFeedTab("headlines")}
         >
           Headlines
         </button>
+        {showHeldTab ? (
+          <button
+            type="button"
+            role="tab"
+            id="feed-tab-held"
+            data-testid="feed-tab-held"
+            aria-selected={heldOpen}
+            aria-controls="feed-panel-held"
+            className={`feed-tabs__tab${heldOpen ? " feed-tabs__tab--on" : ""}`}
+            onClick={() => setFeedTab("held")}
+          >
+            Held
+          </button>
+        ) : null}
       </div>
       <div className="dashboard-news__body section-body">
         {commentaryOpen ? (
@@ -507,6 +525,10 @@ export default function DashboardNewsFeed() {
           </>
         )}
           </div>
+        ) : heldOpen ? (
+          <div id="feed-panel-held" role="tabpanel" aria-labelledby="feed-tab-held" data-testid="feed-panel-held">
+            <ResearchHeldReview />
+          </div>
         ) : (
           <div
             id="feed-panel-headlines"
@@ -521,7 +543,7 @@ export default function DashboardNewsFeed() {
       <footer className="panel-meta-rail" aria-label="Feed calibration">
         <div className="panel-meta-rail-item">
           <span className="k">source</span>
-          <span className="v">{commentaryOpen ? (posts.some(p => p.source) ? "Market Ear + Research" : "Market Ear") : "Headlines"}</span>
+          <span className="v">{commentaryOpen ? (posts.some(p => p.source) ? "Market Ear + Research" : "Market Ear") : heldOpen ? "Held research" : "Headlines"}</span>
         </div>
         <div className="panel-meta-rail-item">
           <span className="k">capture.basis</span>

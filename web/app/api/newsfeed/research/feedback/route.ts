@@ -37,10 +37,35 @@ export async function POST(request: Request): Promise<Response> {
   if ("invalid" in parsed) return json({ error: `Invalid ${parsed.invalid}.` }, 400);
 
   try {
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    if (parsed.workKey) {
+      // A held or dropped document: thumbs-up means "should have published", thumbs-down confirms the hold.
+      const found = await dbExecute({
+        sql: `SELECT file_id, file_name, publisher, series, doc_type, folder_date, document_date, outcome, reason_codes, pipeline
+              FROM research_outcomes WHERE work_key = ? AND outcome IN ('held', 'dropped')`,
+        args: [parsed.workKey],
+      }, { label: "research-feedback-outcome" });
+      const row = found.rows[0];
+      if (!row) return json({ error: "Held document not found." }, 404);
+      const snapshot = {
+        fileName: String(row.file_name), publisher: String(row.publisher), series: String(row.series), docType: String(row.doc_type),
+        folderDate: String(row.folder_date), documentDate: String(row.document_date), outcome: String(row.outcome),
+        reasonCodes: parseArray(row.reason_codes), pipeline: String(row.pipeline),
+      };
+      await dbExecute({
+        sql: `INSERT INTO research_feedback (id, target, work_key, file_id, vote, reasons, comment, actor, snapshot_json, created_at)
+              VALUES (?, 'held', ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [id, parsed.workKey, String(row.file_id ?? ""), parsed.vote, JSON.stringify(parsed.reasons), parsed.comment,
+          access.principal.userId, JSON.stringify(snapshot), now],
+      }, { label: "research-feedback-write" });
+      return json({ id, workKey: parsed.workKey, vote: parsed.vote });
+    }
+
     const found = await dbExecute({
       sql: `SELECT p.title, p.tags, r.provenance_json FROM posts p
             JOIN research_post_sources r ON r.post_id = p.id WHERE p.id = ?`,
-      args: [parsed.postId],
+      args: [parsed.postId as string],
     }, { label: "research-feedback-post" });
     const row = found.rows[0];
     if (!row) return json({ error: "Research post not found." }, 404);
@@ -54,12 +79,11 @@ export async function POST(request: Request): Promise<Response> {
       documentDate: provenance.documentDate, folderDate: provenance.folderDate, pages: provenance.pages,
       figures: Array.isArray(provenance.figures) ? provenance.figures.length : 0, pipeline: provenance.pipeline ?? "v1",
     };
-    const id = randomUUID();
     await dbExecute({
       sql: `INSERT INTO research_feedback (id, target, post_id, file_id, vote, reasons, comment, actor, snapshot_json, created_at)
             VALUES (?, 'post', ?, ?, ?, ?, ?, ?, ?, ?)`,
-      args: [id, parsed.postId, typeof provenance.fileId === "string" ? provenance.fileId : null, parsed.vote,
-        JSON.stringify(parsed.reasons), parsed.comment, access.principal.userId, JSON.stringify(snapshot), new Date().toISOString()],
+      args: [id, parsed.postId as string, typeof provenance.fileId === "string" ? provenance.fileId : null, parsed.vote,
+        JSON.stringify(parsed.reasons), parsed.comment, access.principal.userId, JSON.stringify(snapshot), now],
     }, { label: "research-feedback-write" });
     // A thumbs-down must leave the feed on the next read, not after the 30s posts cache.
     invalidateCache("newsfeed:posts");
