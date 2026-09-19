@@ -3,6 +3,9 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ResearchHeldReview from "../components/ResearchHeldReview";
 
+// The rules panel has its own wire tests (research-rules-ui.test.tsx); here it would only add a second GET.
+vi.mock("../components/ResearchRuleProposals", () => ({ default: () => null }));
+
 const KEY_A = "a".repeat(64), KEY_B = "b".repeat(64);
 const items = [
   { workKey: KEY_A, fileName: "jpm_flows___liquidity.pdf", publisher: "J.P. Morgan", series: "jpm flows liquidity", docType: "research", folderDate: "2026-09-17",

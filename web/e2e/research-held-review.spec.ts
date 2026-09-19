@@ -19,6 +19,14 @@ for (const width of [1440, 393]) {
     const votes: unknown[] = [];
     await page.route("**/api/newsfeed/posts**", route => route.fulfill({ json: [post] }));
     await page.route("**/api/newsfeed/research/held", route => route.fulfill({ json: { items: held, pending: 34 } }));
+    const decisions: unknown[] = [];
+    await page.route("**/api/newsfeed/research/rules", async route => {
+      if (route.request().method() === "POST") {
+        decisions.push(route.request().postDataJSON());
+        return route.fulfill({ json: { id: "series_deny:ubs cio fx view", status: "approved" } });
+      }
+      return route.fulfill({ json: { proposed: [{ id: "series_deny:ubs cio fx view", kind: "series_deny", key: "ubs cio fx view", downs: 4, ups: 0, evidence: 4 }], approved: [] } });
+    });
     await page.route("**/api/newsfeed/research/feedback", async route => {
       votes.push(route.request().postDataJSON());
       await route.fulfill({ json: { id: "v1", workKey: KEY, vote: "up" } });
@@ -42,6 +50,15 @@ for (const width of [1440, 393]) {
     await expect(panel.getByText("jpm_flows___liquidity.pdf")).toHaveCount(0);
     expect(votes[0]).toEqual({ workKey: KEY, vote: "up", reasons: [], comment: "the range is 10-15bp, it is in the first bullet" });
     await expect(panel.getByText("gbpusd_en_1666701.pdf")).toBeVisible();
+
+    // A proposed triage rule is only a proposal until the operator approves it.
+    const proposal = panel.getByRole("list", { name: "Proposed rules" }).locator("li").first();
+    await expect(proposal.getByText("You rejected 4 of its items and approved none.")).toBeVisible();
+    expect(decisions).toHaveLength(0);
+    await proposal.getByRole("button", { name: "Approve rule" }).click();
+    await expect(panel.getByRole("list", { name: "Active rules" }).getByText("Stop reviewing the series “ubs cio fx view”")).toBeVisible();
+    expect(decisions).toEqual([{ id: "series_deny:ubs cio fx view", decision: "approve" }]);
+    await panel.screenshot({ path: testInfo.outputPath(`held-rules-${width}.png`) });
   });
 }
 
