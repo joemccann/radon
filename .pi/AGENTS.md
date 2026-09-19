@@ -88,7 +88,7 @@ Read `tools/codemap/architecture.json` before searching for a module or reconstr
 - Four gates are sequential:
   1. Convexity: gain >= 2x loss; defined-risk preferred.
   2. Edge: specific data-backed dark-pool / OTC signal that has not moved price.
-  3. Risk: fractional Kelly with hard cap 2.5% bankroll per position.
+  3. Risk: half Kelly (0.5) default, 0.25 optional stricter, full Kelly banned; hard cap 2.5% bankroll per position.
   4. Naked-short gate is disabled as of 2026-04-30; logic remains in `_*Impl`, re-enable only via `docs/naked-short-reenable.md`.
 - If an active gate fails, stop and name the gate. Never rationalize a bad trade.
 - Evaluations must call `python3.13 scripts/evaluate.py [TICKER]`; do not manually call milestone scripts during evaluation.

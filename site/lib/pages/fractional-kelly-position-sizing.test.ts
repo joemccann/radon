@@ -76,12 +76,27 @@ describe("fractional Kelly page content contract", () => {
     const fullKelly = p - (1 - p) / b;
     expect(b).toBe(3);
     expect(fullKelly).toBeCloseTo(0.2667, 4);
-    expect(fullKelly / 4).toBeCloseTo(0.0667, 4);
+    expect(fullKelly / 2).toBeCloseTo(0.1333, 4);
     const corpus = workedExampleRows.map((row) => row.value).join(" ");
     expect(corpus).toContain("3.0");
     expect(corpus).toContain("26.7%");
-    expect(corpus).toContain("6.7%");
+    expect(corpus).toContain("13.3%");
     expect(corpus).toContain("2.5%");
+    expect(corpus).not.toMatch(/quarter/i);
+    expect(workedExampleRows.map((row) => row.step).join(" ")).toContain("Half Kelly");
+  });
+
+  it("treats half Kelly as the default and never quarter as the only default", () => {
+    const corpus = [
+      PAGE_DESCRIPTION,
+      ...workedExampleRows.flatMap((row) => [row.step, row.value]),
+      ...kellySizingFaqEntries.flatMap((entry) => [
+        entry.question,
+        entry.answer,
+      ]),
+    ].join(" ");
+    expect(corpus.toLowerCase()).toMatch(/half[- ]kelly/);
+    expect(corpus.toLowerCase()).not.toContain("quarter");
   });
 
   it("generates FAQPage schema that mirrors the visible entries exactly", () => {
