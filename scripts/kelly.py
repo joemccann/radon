@@ -177,10 +177,10 @@ def _base_result(
 def _apply_bankroll(result: dict, bankroll: float, frac_kelly: float) -> None:
     if not math.isfinite(bankroll) or bankroll <= 0:
         bankroll = 0.0
-    dollar_size = round(bankroll * result["fractional_kelly_pct"] / 100, 2)
+    dollar_size = bankroll * result["fractional_kelly_pct"] / 100.0
     if not result["edge_exists"] or dollar_size < 0:
         dollar_size = 0.0
-    max_per_position = round(bankroll * KELLY_MAX_PCT, 2)
+    max_per_position = bankroll * KELLY_MAX_PCT
     use_size = min(dollar_size, max_per_position)
     result["dollar_size"] = dollar_size
     result["max_per_position"] = max_per_position
@@ -238,7 +238,7 @@ def kelly(
     full_kelly = p_effective - (q / odds)
     frac_kelly = full_kelly * used_fraction
     edge = full_kelly > 0
-    restructure = full_kelly > KELLY_RESTRUCTURE_PCT
+    restructure = round(full_kelly, 4) > KELLY_RESTRUCTURE_PCT
 
     if math.isclose(p_effective, 1.0) and full_kelly >= 1.0:
         growth_full: Optional[float] = None
