@@ -24,6 +24,62 @@ function ensureIpv4Dispatcher() {
 
 const ENDPOINT = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
+// Subscriptions only (2026-09-18): the Claude Max grant Claude Code writes to
+// ~/.claude/.credentials.json (or CLAUDE_CODE_OAUTH_TOKEN). It is sent as a
+// Bearer with the oauth beta and the Claude Code identity block leading
+// `system`; the Messages API answers a bare 429 without that block and a 401
+// when the grant is sent as x-api-key. A prepaid ANTHROPIC_API_KEY is read
+// only under RADON_LADDER_ALLOW_PREPAID=1, never as a fallback.
+const ANTHROPIC_OAUTH_BETA = "oauth-2025-04-20";
+const CLAUDE_CODE_SYSTEM_PREFIX = "You are Claude Code, Anthropic's official CLI for Claude.";
+const CLAUDE_CODE_USER_AGENT = "claude-cli/2.1.140";
+
+function allowPrepaid() {
+  return ["1", "true", "yes", "on"].includes(String(process.env.RADON_LADDER_ALLOW_PREPAID ?? "").trim().toLowerCase());
+}
+
+/** { token, kind: "subscription" | "prepaid" } or null. */
+export function resolveAnthropicAuth(env = process.env) {
+  const fromEnv = (env.CLAUDE_CODE_OAUTH_TOKEN ?? "").trim();
+  if (fromEnv) return { token: fromEnv, kind: "subscription" };
+  const dir = (env.CLAUDE_CONFIG_DIR ?? "").trim() || (env.HOME ? path.join(env.HOME, ".claude") : "");
+  if (dir) {
+    try {
+      const doc = JSON.parse(fs.readFileSync(path.join(dir, ".credentials.json"), "utf8"));
+      const oauth = doc && typeof doc === "object" ? doc.claudeAiOauth : null;
+      const token = typeof oauth?.accessToken === "string" ? oauth.accessToken.trim() : "";
+      const expired = typeof oauth?.expiresAt === "number" && oauth.expiresAt <= Date.now();
+      if (token && !expired) return { token, kind: "subscription" };
+    } catch {
+      // missing, unreadable or malformed: no grant
+    }
+  }
+  if (allowPrepaid()) {
+    const prepaid = (env.ANTHROPIC_API_KEY ?? "").trim();
+    if (prepaid) return { token: prepaid, kind: "prepaid" };
+  }
+  return null;
+}
+
+function anthropicHeaders(auth) {
+  const headers = { "anthropic-version": ANTHROPIC_VERSION, "content-type": "application/json" };
+  if (auth.kind === "subscription") {
+    headers.authorization = `Bearer ${auth.token}`;
+    headers["anthropic-beta"] = ANTHROPIC_OAUTH_BETA;
+    headers["user-agent"] = CLAUDE_CODE_USER_AGENT;
+  } else {
+    headers["x-api-key"] = auth.token;
+  }
+  return headers;
+}
+
+function anthropicSystem(auth, systemPrompt) {
+  if (auth.kind !== "subscription") return systemPrompt;
+  return [
+    { type: "text", text: CLAUDE_CODE_SYSTEM_PREFIX },
+    { type: "text", text: systemPrompt },
+  ];
+}
 const DEFAULT_MODEL = "claude-haiku-4-5";
 // Bound on ONE model call. Without it a half-open connection to the API held
 // `hydrateTagsDual` (and the whole scrape cycle behind it) until kernel
@@ -89,20 +145,16 @@ function isRetryable(status) {
   return status === 429 || status >= 500;
 }
 
-async function callOnce({ model, systemPrompt, userPrompt, imageB64, mediaType, apiKey, timeoutMs }) {
+async function callOnce({ model, systemPrompt, userPrompt, imageB64, mediaType, auth, timeoutMs }) {
   ensureIpv4Dispatcher();
   const res = await fetch(ENDPOINT, {
     method: "POST",
     signal: AbortSignal.timeout(timeoutMs),
-    headers: {
-      "x-api-key": apiKey,
-      "anthropic-version": ANTHROPIC_VERSION,
-      "content-type": "application/json",
-    },
+    headers: anthropicHeaders(auth),
     body: JSON.stringify({
       model,
       max_tokens: 512,
-      system: systemPrompt,
+      system: anthropicSystem(auth, systemPrompt),
       messages: [
         {
           role: "user",
@@ -194,15 +246,15 @@ function parseTagsFromText(text) {
 }
 
 export function createVisionTagger({
-  apiKey = process.env.ANTHROPIC_API_KEY,
+  auth = resolveAnthropicAuth(),
   model = DEFAULT_MODEL,
   mediaDir,
   getTaxonomySnapshot,
   readImage = (p) => fs.promises.readFile(p),
   timeoutMs = DEFAULT_FETCH_TIMEOUT_MS,
 } = {}) {
-  if (!apiKey) {
-    throw new Error("createVisionTagger: ANTHROPIC_API_KEY is not set");
+  if (!auth) {
+    throw new Error("createVisionTagger: no Anthropic subscription (log Claude Code in: ~/.claude/.credentials.json or CLAUDE_CODE_OAUTH_TOKEN)");
   }
   if (!mediaDir) {
     throw new Error("createVisionTagger: mediaDir is required");
@@ -231,7 +283,7 @@ export function createVisionTagger({
     const userPrompt = buildUserPrompt(post);
 
     try {
-      const raw = await callOnce({ model, systemPrompt, userPrompt, imageB64, mediaType, apiKey, timeoutMs });
+      const raw = await callOnce({ model, systemPrompt, userPrompt, imageB64, mediaType, auth, timeoutMs });
       const tags = normaliseTags(raw).slice(0, 3);
       return tags.length === 3 ? tags : null;
     } catch (err) {

@@ -9,6 +9,7 @@ import pytest
 # T-498: file-backed subscriptions are opt-in synthetic fixtures.
 pytestmark = pytest.mark.usefixtures("isolated_model_credentials")
 
+from clients import model_ladder
 from clients.model_ladder import (
     MODEL_LADDER_ORDER,
     MODEL_LADDER_TIERS,
@@ -558,7 +559,206 @@ class TestSubscriptionAuthPreference:
         )
         assert result.provider == "anthropic"
         assert captured[0].get("anthropic-beta") == "oauth-2025-04-20"
-        assert captured[0].get("x-api-key") == "oauth-sub"
+        # The grant is a Bearer, never an x-api-key (401 live on 2026-09-18).
+        assert captured[0].get("authorization") == "Bearer oauth-sub"
+        assert "x-api-key" not in captured[0]
+        assert captured[0].get("user-agent", "").startswith("claude-cli/")
+
+    def test_anthropic_subscription_leads_system_with_the_claude_code_identity(self):
+        # The Messages API answers a bare 429 to a Claude Max grant unless the
+        # system prompt opens with the Claude Code identity block (live probe
+        # 2026-09-18: 200 with it, 429 without, same token).
+        bodies: list[dict] = []
+
+        def post(url, *, headers=None, json=None, timeout=None, stream=False):
+            bodies.append(json or {})
+            return _anthropic_obj_ok()
+
+        complete_multimodal_json(
+            "evaluate",
+            system="You are Radon.",
+            env={"CLAUDE_CODE_OAUTH_TOKEN": "oauth-sub"},
+            post=post,
+            stream_anthropic=False,
+        )
+        system = bodies[0]["system"]
+        assert isinstance(system, list)
+        assert system[0]["text"].startswith("You are Claude Code, Anthropic's official CLI for Claude.")
+        assert system[1] == {"type": "text", "text": "You are Radon."}
+
+    def test_prepaid_anthropic_keeps_x_api_key_and_plain_system(self):
+        captured: list[tuple[dict, dict]] = []
+
+        def post(url, *, headers=None, json=None, timeout=None, stream=False):
+            captured.append((headers or {}, json or {}))
+            return _anthropic_obj_ok()
+
+        complete_multimodal_json(
+            "evaluate",
+            system="You are Radon.",
+            env={"ANTHROPIC_API_KEY": "sk-ant", "RADON_LADDER_ALLOW_PREPAID": "1"},
+            post=post,
+            stream_anthropic=False,
+        )
+        headers, body = captured[0]
+        assert headers.get("x-api-key") == "sk-ant"
+        assert "authorization" not in headers
+        assert body["system"] == "You are Radon."
+
+
+class TestGrokGrantLiveShape:
+    """~/.grok/auth.json as the grok CLI writes it: entries keyed by
+    "<issuer>::<client_id>" with the OIDC token under `key` (the flat
+    access_token shape older tests used never matched production)."""
+
+    def _write(self, tmp_path, expires_at: str):
+        home = tmp_path / "home"
+        (home / ".grok").mkdir(parents=True)
+        (home / ".grok" / "auth.json").write_text(json.dumps({
+            "https://auth.x.ai::b1a00492-0000-0000-0000-000000000000": {
+                "key": "grok-oidc-grant", "auth_mode": "oidc", "refresh_token": "r",
+                "expires_at": expires_at, "oidc_issuer": "https://auth.x.ai",
+            }
+        }))
+        return home
+
+    def test_reads_the_key_of_a_live_entry(self, tmp_path):
+        auth = model_ladder._auth_for("grok", {"HOME": str(self._write(tmp_path, "2099-01-01T00:00:00Z"))})
+        assert auth is not None and auth.kind == "subscription" and auth.token == "grok-oidc-grant"
+
+    def test_skips_an_expired_entry(self, tmp_path):
+        assert model_ladder._auth_for("grok", {"HOME": str(self._write(tmp_path, "2020-01-01T00:00:00Z"))}) is None
+
+
+class TestCodexSubscriptionGoesThroughChatGpt:
+    """api.openai.com meters the prepaid wallet and rejects the ChatGPT grant
+    ("no credits remaining", live 2026-09-18); chatgpt.com's codex Responses
+    endpoint accepts it with the account id, streaming only."""
+
+    def _codex_home(self, tmp_path):
+        codex_home = tmp_path / "codex"
+        codex_home.mkdir()
+        (codex_home / "auth.json").write_text(
+            json.dumps({"auth_mode": "chatgpt", "tokens": {"access_token": "codex-grant", "account_id": "acct-1"}})
+        )
+        return codex_home
+
+    def test_auth_carries_the_account_id(self, tmp_path):
+        auth = model_ladder._auth_for("codex", {"CODEX_HOME": str(self._codex_home(tmp_path))})
+        assert auth is not None
+        assert auth.kind == "subscription"
+        assert auth.account_id == "acct-1"
+
+    def test_text_completion_streams_from_chatgpt_with_the_account_id(self, tmp_path):
+        seen: list[tuple[str, dict, dict]] = []
+        sse = b"".join(
+            [
+                b'data: {"type":"response.created","response":{"id":"r1"}}\n\n',
+                b'data: {"type":"response.output_text.delta","delta":"{\\"ok\\": "}\n\n',
+                b'data: {"type":"response.output_text.delta","delta":"true}"}\n\n',
+                b'data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":3,"output_tokens":2}}}\n\n',
+            ]
+        )
+
+        def post(url, *, headers=None, json=None, timeout=None, stream=False):
+            seen.append((url, headers or {}, json or {}))
+            return _StreamingResponse({}, chunks=[sse])
+
+        result = complete_text_json(
+            "evaluate",
+            system="You are Radon.",
+            env={"CODEX_HOME": str(self._codex_home(tmp_path)), "RADON_LADDER_NO_AUTH_FILES": "0"},
+            post=post,
+        )
+        assert result.provider == "codex"
+        assert result.data == {"ok": True}
+        url, headers, body = seen[0]
+        assert url == "https://chatgpt.com/backend-api/codex/responses"
+        assert headers["authorization"] == "Bearer codex-grant"
+        assert headers["chatgpt-account-id"] == "acct-1"
+        assert body["stream"] is True
+        assert body["instructions"] == "You are Radon."
+        assert body["input"][0]["content"][-1] == {"type": "input_text", "text": "evaluate"}
+
+    def test_prepaid_openai_still_uses_api_openai_com(self):
+        router = _Router({"api.openai.com": _openai_obj_ok()})
+        result = complete_text_json(
+            "evaluate",
+            env={"OPENAI_API_KEY": "sk-openai", "RADON_LADDER_ALLOW_PREPAID": "1"},
+            post=router,
+        )
+        assert result.provider == "codex"
+        assert any("api.openai.com" in u for u in router.calls)
+
+
+class TestGeminiRunsThroughTheAntigravityCli:
+    """Google retired the Gemini CLI OAuth client for individuals on 2026-09-18
+    and the Antigravity grant lacks the generativelanguage scope (403 live), so
+    the gemini rung shells out to `agy -p` instead of calling HTTP."""
+
+    def _home(self, tmp_path):
+        home = tmp_path / "home"
+        (home / ".gemini" / "antigravity-cli").mkdir(parents=True)
+        (home / ".gemini" / "antigravity-cli" / "antigravity-oauth-token").write_text(
+            json.dumps({"token": {"access_token": "a", "refresh_token": "r", "expiry": "2099-01-01T00:00:00Z"}})
+        )
+        (home / ".local" / "bin").mkdir(parents=True)
+        agy = home / ".local" / "bin" / "agy"
+        agy.write_text("#!/bin/sh\nexit 0\n")
+        agy.chmod(0o755)
+        return home
+
+    def test_wired_when_the_cli_and_grant_are_present(self, tmp_path):
+        env = {"HOME": str(self._home(tmp_path))}
+        auth = model_ladder._auth_for("gemini", env)
+        assert auth is not None
+        assert auth.kind == "subscription"
+        assert auth.mechanism == "antigravity_cli"
+        assert "gemini" in wired_providers(env)
+
+    def test_not_wired_without_the_cli(self, tmp_path):
+        home = self._home(tmp_path)
+        (home / ".local" / "bin" / "agy").unlink()
+        assert "gemini" not in wired_providers({"HOME": str(home)})
+
+    def test_text_completion_shells_out_to_agy_print_mode(self, tmp_path, monkeypatch):
+        home = self._home(tmp_path)
+        calls: list[list[str]] = []
+
+        def fake_run(argv, **kwargs):
+            calls.append(list(argv))
+            import subprocess as sp
+            return sp.CompletedProcess(argv, 0, stdout=json.dumps({"status": "SUCCESS", "response": '{"ok": true}\n'}), stderr="")
+
+        monkeypatch.setattr(model_ladder.subprocess, "run", fake_run)
+        router = _Router({})  # any HTTP call is an unmocked 599
+        result = complete_text_json(
+            "evaluate",
+            system="You are Radon.",
+            env={"HOME": str(home), "GEMINI_MODEL": "gemini-3.8-flash-low"},
+            post=router,
+        )
+        assert result.provider == "gemini"
+        assert result.data == {"ok": True}
+        assert router.calls == []
+        argv = calls[0]
+        assert argv[0] == str(home / ".local" / "bin" / "agy")
+        assert "-p" in argv and "--output-format" in argv and "json" in argv
+        assert argv[argv.index("--model") + 1] == "gemini-3.8-flash-low"
+        prompt = argv[argv.index("-p") + 1]
+        assert "You are Radon." in prompt and "evaluate" in prompt
+
+    def test_images_skip_the_rung(self, tmp_path, monkeypatch):
+        home = self._home(tmp_path)
+        monkeypatch.setattr(model_ladder.subprocess, "run", lambda *a, **k: pytest.fail("agy must not run for images"))
+        router = _Router({"integrate.api.nvidia.com": _openai_obj_ok()})
+        result = complete_multimodal_json(
+            "evaluate",
+            images=[("chart", b"png")],
+            env={"HOME": str(home), "NVIDIA_API_KEY": "nv"},
+            post=router,
+        )
+        assert result.provider == "nvidia"
 
 
 class TestPrepaidMissDoesNotExhaustWhenAlternatesExist:

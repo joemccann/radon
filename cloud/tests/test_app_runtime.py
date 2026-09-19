@@ -1078,6 +1078,8 @@ def test_run_newsfeed_env_file_carries_only_its_allowlisted_keys(
         "TURSO_DB_URL=libsql://example.turso.io\n"
         "TURSO_AUTH_TOKEN='tok'\n"
         "ANTHROPIC_API_KEY=k1\n"
+        "CLAUDE_CODE_OAUTH_TOKEN=k-cc\n"
+        "RADON_LADDER_ALLOW_PREPAID=0\n"
         "XAI_API_KEY=k-xai\n"
         "OPENAI_API_KEY=k-oai\n"
         "GEMINI_API_KEY=k-gem\n"
@@ -1111,6 +1113,8 @@ def test_run_newsfeed_env_file_carries_only_its_allowlisted_keys(
         "TURSO_DB_URL",
         "TURSO_AUTH_TOKEN",
         "ANTHROPIC_API_KEY",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "RADON_LADDER_ALLOW_PREPAID",
         "XAI_API_KEY",
         "OPENAI_API_KEY",
         "GEMINI_API_KEY",
