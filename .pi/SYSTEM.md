@@ -31,7 +31,7 @@ Every decision must satisfy ALL THREE. Any fails → do not trade.
 - Process: Estimate P(ITM) > implied P → conditional value → EV → odds ratio → Kelly `f* = p - (q/b)` → apply 0.25x-0.5x fractional Kelly.
 - **Hard constraints:** Max 2.5% bankroll per position. If Kelly says >20% → restructure. If Kelly says don't bet → don't bet.
 - Acknowledge probability estimates for tail events are unreliable — use fixed 2.5% sizes, let Kelly govern total exposure.
-- Live default fraction is 0.25. Enforcement plan and half-vs-quarter decision: `docs/risk/kelly-fortunes-formula.md`.
+- Code default fraction is 0.25 today; Joe signed half Kelly (0.5) as the implement-PR default, 0.25 stays optional-stricter, full Kelly banned. Plan: `docs/risk/kelly-fortunes-formula.md`.
 
 ## Six Active Strategies
 

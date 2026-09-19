@@ -11,21 +11,29 @@ does, what it only claims in prose, and the exact code, schema, test and
 cutover work needed to close the gap. It is written so an implementer can
 build from it without re-auditing the repo.
 
-> ⛔ **Wait for Joe on half vs quarter.** The live default Kelly fraction is
-> `0.25` and stays `0.25` in every PR until Joe records a decision. Half Kelly
-> (`0.5`) is specified below as a config-gated alternate, never a silent flip.
-> See §F.
+> ✅ **Joe signed half Kelly (2026-09-19, via CoS).** The planned default
+> fraction for the implement PR is **`0.5` (half Kelly)**. The code default
+> today is `0.25`; it changes to `0.5` in implement PR 1, not in this plan PR.
+> `0.25` (quarter Kelly) remains a documented stricter optional setting via
+> `RADON_KELLY_FRACTION=0.25`, not the default. Full Kelly (`1.0`) is banned.
 
-### CoS confirmation (2026-09-19)
+### Decision log
 
-- Plan approved to proceed to implement at default fraction `0.25` (the
-  existing code default). No plan-PR code change.
-- **Must-ship in the implement PR** (see §F "Must-ship"): (1) ban full Kelly,
-  (2) unify the 2.5% cap on the scalar `kelly()` path for parity with
-  `kelly_size_batch()`, (3) `evaluate.py` M6 fails closed.
-- **Held for Joe's explicit sign-off:** any bump to `0.5`, and enabling any
-  new production gate (`RADON_KELLY_ENFORCE_ORDERS=1`, preference
-  registration). Implement PRs ship these dark.
+| Date | Who | Decision |
+|---|---|---|
+| 2026-09-19 | CoS | Plan approved; implement at the then-default `0.25`; must-ship = full-Kelly ban, scalar cap parity, M6 fail-closed. |
+| 2026-09-19 | **Joe (via CoS)** | **Override: default fraction = `0.5` (half Kelly)** for the implement PR. `0.25` stays as a stricter option. Estimate / fat-tail / ruin hooks stay in scope. Production gate enable still waits for Joe after the PRs land. |
+
+Still required for the implement PR (see §F "Must-ship"):
+
+1. Ban full Kelly (`fraction=1.0`) at every boundary.
+2. Unify the 2.5% bankroll hard cap on the scalar `kelly()` path (parity with
+   `kelly_size_batch()`).
+3. `evaluate.py` M6 fails closed.
+4. Estimate (`p_source`), fat-tail (`p_haircut`) and ruin
+   (`kelly_ticket` / `portfolio_capacity` / drawdown halt) hooks per §B and §C.
+5. No production gate enabled in the implement PR: `RADON_KELLY_ENFORCE_ORDERS`
+   stays unset on every unit until Joe signs separately.
 
 ---
 
@@ -56,10 +64,10 @@ spec exists to make the prose true.
 | # | Takeaway (Poundstone) | Current | Required | Gap class |
 |---|---|---|---|---|
 | A1 | Edge/odds form `f* = (b*p - q)/b` | Implemented as `p - q/b` in both scalar and batch; tests pin sign and division. | Keep. Add a docstring stating the equivalence so reviewers stop re-deriving it. | Docs |
-| A2 | Estimated `p` means half or quarter Kelly, never full | `fraction` accepts up to `1.0` at library, CLI, TypeBox, wrapper and `pi-tools`. Default `0.25`. Nothing marks `p` as an estimate. | Hard ceiling `KELLY_MAX_FRACTION = 0.5` at every boundary. `p_source` field, default `"estimated"`; estimated `p` may not exceed the configured default fraction (`RADON_KELLY_FRACTION`, `0.25` today). Full Kelly rejected, not clamped. | **Enforcement missing** |
+| A2 | Estimated `p` means half or quarter Kelly, never full | `fraction` accepts up to `1.0` at library, CLI, TypeBox, wrapper and `pi-tools`. Default `0.25`. Nothing marks `p` as an estimate. | Hard ceiling `KELLY_MAX_FRACTION = 0.5` at every boundary. **Default becomes `0.5` (half Kelly, Joe-signed)** via `RADON_KELLY_FRACTION`; `0.25` is the documented stricter option. `p_source` field, default `"estimated"`; estimated `p` may not exceed the configured fraction. Full Kelly rejected, not clamped. | **Enforcement missing** |
 | A3 | Geometric growth framing | Output is `full_kelly_pct` / `fractional_kelly_pct` only; growth appears in the marketing FAQ as prose. | Emit `growth_rate_full` and `growth_rate_used` (expected log growth per bet). Tests assert `g(fraction) > 0` under edge and `g(full) >= g(fraction)`. Recommendation strings unchanged. | Docs + small code |
 | A4 | Ruin / path-to-zero constraint | Single-ticket cap `2.5%` exists in batch + CLI only. No aggregate at-risk limit, no drawdown guard, no ruin statement. | `kelly_ticket()` refuses any ticket whose worst-case loss exceeds `KELLY_MAX_PCT * bankroll`. `portfolio_capacity()` refuses when open worst-case losses plus the proposed one exceed `RADON_KELLY_MAX_DEPLOYED_PCT` of bankroll. Drawdown halt at `RADON_KELLY_DRAWDOWN_HALT_PCT`. Formal ruin bound documented in §B.4. | **Enforcement missing** |
-| A5 | Fat tails: haircut `p` or shrink fraction for model error | The `0.25` fraction is the only model-error shrink. No explicit haircut. | `p_haircut` parameter (`RADON_KELLY_P_HAIRCUT`), `p_effective = max(0, p - p_haircut)`, sized on `p_effective`. Default `0.0` in the implement PR so outputs do not move; recommended `0.05` is a Joe decision. Output reports both `p` and `p_effective`. | **Enforcement missing** |
+| A5 | Fat tails: haircut `p` or shrink fraction for model error | The `0.25` fraction is the only model-error shrink. No explicit haircut. Moving the default to `0.5` halves that shrink, so the haircut hook becomes the explicit model-error lever rather than a nice-to-have. | `p_haircut` parameter (`RADON_KELLY_P_HAIRCUT`), `p_effective = max(0, p - p_haircut)`, sized on `p_effective`. Default `0.0` in the implement PR so outputs do not move; recommended `0.05` is a Joe decision. Output reports both `p` and `p_effective`. | **Enforcement missing** |
 | A6 | Kelly allocates edge; it does not create it | `evaluate.py` M4 edge gate returns before M5/M6 on FAIL. `kelly()` reports `edge_exists` from `f* > 0` alone. | Keep M4 upstream. M6 must never run without an M4 PASS. `kelly()` `edge_exists` stays a math fact; the *trade* edge is M4's. Document the distinction. | Docs (already enforced by control flow) |
 | A7 | Caps, fraction, edge gate, ruin guards in code, not prose | Cap: batch + CLI only. Scalar `kelly()` has no cap (scalar vs batch parity gap). M6 placeholder. Order path Kelly-blind. Exposure prose-only. | Scalar/batch parity: `kelly(bankroll=...)` applies the same cap as batch. M6 wired to `kelly_ticket()`, fails closed. Optional order-path guard behind `RADON_KELLY_ENFORCE_ORDERS` (default off). `.pi/SYSTEM.md` "Kelly > 20% → restructure" becomes a `restructure` flag. | **Enforcement missing** |
 | A8 | Scalar vs batch cap parity (audit finding) | `kelly()` cannot cap because it has no bankroll; `kelly_size_batch()` caps; CLI caps by hand with a literal `0.025`. Three places, one constant. | One `KELLY_MAX_PCT = 0.025` constant. `kelly()` grows `bankroll` and returns `use_size` with the cap applied. CLI and TypeBox consume `kelly()` output verbatim. | **Parity missing** |
@@ -104,7 +112,7 @@ not argued from memory.
 
 | Name (Python) | Env / config | Default | Hard band | Notes |
 |---|---|---|---|---|
-| `fraction` | `RADON_KELLY_FRACTION` | **`0.25` (unchanged)** | `[0.05, 0.5]` | Env outside the band is clamped INTO it and flagged `fraction_source: "env_clamped"`. Explicit call argument outside the band raises `ValueError`. `0.5` is the alternate, gated on Joe. |
+| `fraction` | `RADON_KELLY_FRACTION` | **`0.5` (half Kelly, Joe-signed 2026-09-19; code default today is `0.25`, changes in implement PR 1)** | `[0.05, 0.5]` | Env outside the band is clamped INTO it and flagged `fraction_source: "env_clamped"`. Explicit call argument outside the band raises `ValueError`. `0.25` (quarter Kelly) is the documented stricter optional setting: `RADON_KELLY_FRACTION=0.25`. |
 | `KELLY_MAX_FRACTION` | constant | `0.5` | n/a | Full Kelly ban. Not tunable. |
 | `KELLY_MAX_PCT` | constant | `0.025` | n/a | The 2.5% per-position cap. Not tunable upward, not env-readable. Replaces the two `0.025` literals. |
 | `p_haircut` | `RADON_KELLY_P_HAIRCUT` | `0.0` in implement PR | `[0.0, 0.25]` | Recommended `0.05` after Joe approves. `p_effective = max(0.0, p - p_haircut)`. |
@@ -116,10 +124,12 @@ not argued from memory.
 
 Resolution order for env values: process env only, read at call time via a
 small `kelly_config()` helper. Registering `RADON_KELLY_FRACTION` in
-`app_preferences.REGISTRY` (`group="Risk"`, `risk_gated=True`, `hard_max=0.5`)
-is optional and belongs to the half-Kelly decision, because it is the only way
-a `0.25 -> 0.5` change gets an audit row. Registry rule 6 applies: prove
-`kelly.py` reads the inherited overlay before adding the key.
+`app_preferences.REGISTRY` (`group="Risk"`, `risk_gated=True`, `default=0.5`,
+`hard_max=0.5`) is optional; it is the only way a later `0.5 -> 0.25`
+tightening (or any other change) gets an audit row, and the registry's
+"a stored value can never widen a cap" rule means the DB can only ever tighten
+below `0.5`. Registry rule 6 applies: prove `kelly.py` reads the inherited
+overlay before adding the key.
 
 ### B.4 Ruin / path-to-zero statement
 
@@ -278,7 +288,7 @@ extend `lib/tools/__tests__/schemas.test.ts`, `kelly.test.ts`,
 | ID | Red assertion | Surface |
 |---|---|---|
 | D1 | `kelly(0.6, 2.0, fraction=1.0)` raises `ValueError`; `fraction=0.51` raises; `fraction=0.5, p_source="measured"` succeeds. CLI `--fraction 1.0` exits 2 with argparse error. `Value.Check(KellyInput, {fraction: 0.51})` is `false`; `{fraction: 0.5}` is `true`. Wrapper throws `RangeError` at `0.51`. | full-Kelly ban at every boundary |
-| D2 | `kelly(0.6, 2.0, fraction=0.5)` with default `p_source="estimated"` and env fraction `0.25` raises `ValueError` mentioning `estimated`. With `RADON_KELLY_FRACTION=0.5` set (monkeypatched) it succeeds and `fraction_source == "env"`. `RADON_KELLY_FRACTION=0.9` resolves to `0.5` with `fraction_source == "env_clamped"`. **Existing `test_custom_fraction_exact_double` must change** to pass `p_source="measured"` (or set the env), and the change must be called out in the PR body. | estimated-p forces configured fraction |
+| D2 | `kelly(0.6, 2.0)["fraction_used"] == 0.5` and `fraction_source == "default"` with no env set (new default). With `RADON_KELLY_FRACTION=0.25` (monkeypatched, the stricter option): `kelly(0.6, 2.0)["fraction_used"] == 0.25`, `fraction_source == "env"`, and `kelly(0.6, 2.0, fraction=0.5)` with default `p_source="estimated"` raises `ValueError` mentioning `estimated`; `p_source="measured"` still succeeds at `0.5`. `RADON_KELLY_FRACTION=0.9` resolves to `0.5` with `fraction_source == "env_clamped"`. Existing `test_custom_fraction_exact_double` (`0.5` is 2x `0.25`, both explicit) stays green unchanged. | half-Kelly default; estimated-p forces configured fraction |
 | D3 | `kelly(0.9, 5.0, bankroll=100_000)["use_size"] == 2500.0` and `capped is True`; equals `kelly_size_batch([0.9],[5.0],100_000)[0]`. Property test over 200 random `(p, b, bankroll)` triples: scalar `use_size == batch[0]` to 1e-9. CLI output `use_size <= max_per_position` for every case. `kelly(0.51, 1.02, bankroll=100_000)["capped"] is False`. | cap always applied; scalar/batch parity |
 | D4 | `rg`-based contract test: no file under `scripts/` or `lib/` outside `tests/` passes `max_pct=` to `kelly_size_batch`. The literal `0.025` appears in `scripts/kelly.py` exactly once (the constant). | one cap constant |
 | D5 | `kelly(0.3, 1.0, bankroll=100_000)`: `use_size == 0.0`, `contracts` absent, `recommendation == "DO NOT BET"`. `kelly_ticket(prob_win=0.3, max_gain=100, max_loss=100, bankroll=100_000)["contracts"] == 0`, `reason == "NO_EDGE"`. Batch: `prob_wins=[1.5, -0.1, nan]` all size `0`; `fraction=2.0` raises. | no edge gives zero; batch domain |
@@ -288,7 +298,7 @@ extend `lib/tools/__tests__/schemas.test.ts`, `kelly.test.ts`,
 | D9 | `kelly(0.7, 4.0)["restructure"] is True` (`f_full = 0.625`); `kelly(0.55, 1.5)["restructure"] is True` (`f_full = 0.25`); `kelly(0.52, 1.5)["restructure"] is False` (`f_full = 0.20`, boundary is strict). Recommendation strings unchanged for all existing pinned cases. | restructure flag |
 | D10 | `evaluate_ticker("AAPL", bankroll=100_000)` with mocked M1-M4 PASS and no structure: `M5.passed is False`, `M6.passed is False`, `decision == "PENDING"`, exit code `2` (existing test stays green). With `structure={"max_gain": 300, "max_loss": 100, "prob_win": 0.4}`: `M6.passed is True`, `M6.data["contracts"] == 25`, `position_pct == 2.5`, `decision == "TRADE"`. With `prob_win=0.2`: `decision == "NO_TRADE"`, `failing_gate == "RISK"`, `reason == "NO_EDGE"`. With `max_loss=0`: `reason == "UNDEFINED_RISK"`. With `prob_win=0.9, max_gain=1000, max_loss=100` (`f_full = 0.89`): `reason == "RESTRUCTURE"`. `format_report` prints `KELLY SIZING` and the reason for every refusal. | evaluate fails closed without structure + kelly |
 | D11 | `check_kelly_ticket` with env flag unset returns `None` for a 10x oversized ticket (guard is off). With `RADON_KELLY_ENFORCE_ORDERS=1`: opening combo whose worst-case loss is `3%` of bankroll refuses `KELLY_CAP_EXCEEDED`; the same ticket flagged closing passes; unknown bankroll refuses `KELLY_BANKROLL_UNKNOWN`; stock order passes. Wire test in `test_ib_place_order_*`: `place_order` returns the refusal dict before any IB call (mock `IBClient`, assert not called). | order-path guard, tested at the wire |
-| D12 | `lib/tools/__tests__/kelly.test.ts` live subprocess: `fraction: 0.5` returns `ok: false` with the `estimated` message when env is default; `p_source: "measured"` returns `fraction_used 0.5`. `schemas.test.ts`: output with the new optional keys validates; output missing them still validates. | TS/Python contract |
+| D12 | `lib/tools/__tests__/kelly.test.ts` live subprocess: omitted `fraction` returns `fraction_used 0.5`; `fraction: 0.51` returns `ok: false`; with `RADON_KELLY_FRACTION=0.25` in the child env, `fraction: 0.5` returns `ok: false` with the `estimated` message. `schemas.test.ts`: output with the new optional keys validates; output missing them still validates; the static fixtures' `fraction_used: 0.25` become `0.5`. `site/lib/pages/fractional-kelly-position-sizing.test.ts` and `agent-prompts.test.ts`: every "quarter" becomes "half" and the worked example reads `0.2667 / 2 = 13.3%; the 2.5% cap binds`. | TS/Python/site contract |
 
 Run order: `python3.13 scripts/run_pytest_affected.py --files scripts/kelly.py scripts/evaluate.py -- -q`, then `cd web && npx vitest run lib/tools`, never concurrently on the laptop. Full suites before each commit.
 
@@ -298,15 +308,21 @@ Run order: `python3.13 scripts/run_pytest_affected.py --files scripts/kelly.py s
 
 1. **This PR (docs).** Spec, index row, owners rule, cross-links. No code.
 2. **Implement PR 1: library + schema parity** (carries must-ship items 1 and
-   2; CoS-approved to start at `0.25`). `kelly.py` constants,
+   2 and the Joe-signed `0.5` default). `kelly.py` constants,
    `kelly_config()`, `kelly(bankroll=...)`, growth, haircut (`0.0`), restructure
    flag, batch validation, full-Kelly ban, `p_source`. TypeBox, wrapper,
-   `pi-tools` import. Tests D1-D5, D7-D9, D12. `RADON_KELLY_FRACTION` unset in
-   every environment, so the default resolves to `0.25`. **Output for every
-   call that passes today is numerically identical** except the added keys;
-   the only behavior change is that `fraction > 0.5` and `fraction > 0.25 with
-   estimated p` are now refused. Confirm with a before/after run of the three
-   existing test files.
+   `pi-tools` import. **Code default `fraction` moves `0.25 -> 0.5`** (the
+   `kelly()` signature default, `kelly_size_batch()` default, CLI `--fraction`
+   default, TypeBox description, `pi-tools` description). Tests D1-D5, D7-D9,
+   D12. Behavior change, stated plainly: any caller that omits `fraction` now
+   gets twice the pre-cap `fractional_kelly_pct` and `dollar_size`; `use_size`
+   is unchanged wherever the 2.5% cap already bound (it binds for every
+   `f_full >= 0.05`). Calls that pass `fraction` explicitly are numerically
+   identical except for added keys. `fraction > 0.5` is refused. Site copy
+   (`site/lib/pages/fractional-kelly-position-sizing.ts`, `agent-prompts.ts`)
+   and the marketing FAQ move from "quarter" to "half" in the same PR so the
+   public page never disagrees with the CLI. Confirm with a before/after run
+   of the three existing Python test files and the site tests.
 3. **Implement PR 2: `kelly_ticket`, `portfolio_capacity`, M6** (must-ship
    item 3). Tests D6, D10.
    `evaluate.py --structure` flag. Decision `TRADE` becomes reachable for the
@@ -315,44 +331,58 @@ Run order: `python3.13 scripts/run_pytest_affected.py --files scripts/kelly.py s
 4. **Implement PR 3: order-path guard, flag off.** Tests D11. Deploys with
    `RADON_KELLY_ENFORCE_ORDERS` unset. No production behavior change.
 5. **Joe decisions (any order, each its own tiny PR or drop-in change):**
-   - Fraction: keep `0.25` or set `RADON_KELLY_FRACTION=0.5` in
-     `radon-.service.d/common.conf` and the laptop launchd env. If `0.5`,
-     register the key in `app_preferences.REGISTRY` first so the flip is audited.
+   - Fraction: **signed `0.5` (2026-09-19)**; lands as the code default in PR 1,
+     so no env drop-in is needed. Tightening back to quarter Kelly is
+     `RADON_KELLY_FRACTION=0.25` in `radon-.service.d/common.conf` and the
+     laptop launchd env, or the audited preference row once registered.
    - Haircut: leave `0.0` or set `RADON_KELLY_P_HAIRCUT=0.05`.
    - Order guard: set `RADON_KELLY_ENFORCE_ORDERS=1` on `radon-api` only after
      one week of M6 output matching hand-sized tickets in the journal.
-6. Prose sync after PR 2: `.pi/SYSTEM.md` §3, `docs/prompt.md` constraint 4,
-   `docs/evaluation.md` M6, and the marketing FAQ line "milestone 6 enforces
-   the cap" become true statements; until then they are aspirational and this
-   spec says so.
+6. Prose sync. In PR 1: `.pi/SYSTEM.md` §3 and `docs/prompt.md` constraint 4
+   change from "0.25x-0.5x" to "half Kelly (0.5) default, 0.25 optional
+   stricter setting, full Kelly banned"; `README.md` Risk row and
+   `docs/evaluation.md` M6 follow. After PR 2: the marketing FAQ line
+   "milestone 6 enforces the cap" becomes a true statement; until then it is
+   aspirational and this spec says so.
 
-Rollback for any implement PR: revert the commit; env flags are additive and
-unset flags reproduce today's numbers exactly.
+Rollback for any implement PR: revert the commit. PR 1's revert restores the
+`0.25` default; env flags are additive and unset flags reproduce the numbers of
+whichever code default is deployed.
 
 ---
 
 ## F. Done-when and Joe approval checklist
 
-### Must-ship (CoS-confirmed 2026-09-19, blocks implement PR merge)
+### Must-ship (Joe-signed 2026-09-19 via CoS, blocks implement PR merge)
 
+- [ ] **Default fraction = `0.5` (half Kelly).** `kelly()` /
+      `kelly_size_batch()` / CLI defaults, `kelly_config()` fallback, TypeBox
+      and `pi-tools` descriptions all read `0.5`. `0.25` documented as the
+      stricter optional `RADON_KELLY_FRACTION=0.25`, not the default. Test D2.
 - [ ] **Ban full Kelly.** `KELLY_MAX_FRACTION = 0.5` enforced at `kelly()`,
       `kelly_size_batch()`, CLI `--fraction`, TypeBox `KellyInput`, wrapper,
-      `pi-tools.ts`. Tests D1, D2, D12.
+      `pi-tools.ts`. Tests D1, D12.
 - [ ] **Unify the 2.5% cap on scalar `kelly()`.** `kelly(bankroll=...)` returns
       `use_size` capped by `KELLY_MAX_PCT`; CLI and TypeBox consume it verbatim;
       one `0.025` constant. Tests D3, D4.
 - [ ] **`evaluate.py` M6 fails closed.** No `structure` or no Kelly pass means
       `PENDING`/`NO_TRADE`, never `TRADE`; `failing_gate="RISK"` with a
       `reason`. Test D10.
-- [ ] Default fraction in code, env drop-ins and docs is still `0.25` on the
-      PR head (`rg -n "RADON_KELLY_FRACTION" cloud/ config/` returns nothing).
+- [ ] **Estimate / fat-tail / ruin hooks.** `p_source` (D2), `p_haircut` (D7),
+      `kelly_ticket` + `portfolio_capacity` + drawdown halt (D6). Haircut ships
+      at `0.0`; the guards ship with defaults from §B.3.
+- [ ] **No production gate enabled.** `RADON_KELLY_ENFORCE_ORDERS` unset on
+      every unit (`rg -n "RADON_KELLY_ENFORCE_ORDERS" cloud/ config/` returns
+      nothing). Enabling waits for a separate Joe signature after the PRs land.
 
 ### Done-when: implement PRs
 
 - [ ] Every D-row above exists as a named test, was red on `main` before the
       change, and is green on the PR head.
 - [ ] `python3.13 scripts/kelly.py --prob 0.6 --odds 2 --bankroll 100000`
-      output on `main` and on the PR head differ only by added keys.
+      on the PR head prints `fraction_used: 0.5`, `fractional_kelly_pct: 20.0`,
+      `use_size: 2500.0`, `capped: true`; with `--fraction 0.25` the output
+      matches `main` except for added keys.
 - [ ] `rg -n "0\.025" scripts/kelly.py` returns exactly one line.
 - [ ] `rg -n "maximum: 1" lib/tools/schemas/kelly.ts lib/tools/pi-tools.ts`
       returns nothing for `fraction`.
@@ -362,22 +392,20 @@ unset flags reproduce today's numbers exactly.
       code (the docs contract test enforces it).
 - [ ] CI green on the exact head; `radon PR green` Pushover sent.
 
-### Joe approval checklist (blocking, in this order)
+### Joe approval checklist
 
-CoS has confirmed the plan and the `0.25` default. The items below still need
-Joe's explicit signature; nothing here is implied by the CoS confirmation.
-
-- [ ] **Fraction: quarter (`0.25`, current) or half (`0.5`)?** Default stays
-      `0.25` in code regardless; half is an env/preference value. No PR flips
-      it without this box.
+- [x] **Fraction: half Kelly (`0.5`) is the default.** Signed 2026-09-19 via
+      CoS. `0.25` remains a documented stricter optional setting.
 - [ ] Haircut: leave `0.0` or adopt `0.05` on `p`?
 - [ ] Merge order and timing for implement PRs 1-3 (each is independently
       revertible; PR 2 is the one that changes evaluate's exit code from `2`
       to `0` on a fully specified ticket).
-- [ ] Enable `RADON_KELLY_ENFORCE_ORDERS=1` in production, or leave the order
-      path fat-finger only and rely on M6 plus operator discipline.
+- [ ] **Enable `RADON_KELLY_ENFORCE_ORDERS=1` in production** (after the PRs
+      land; not in the implement PR), or leave the order path fat-finger only
+      and rely on M6 plus operator discipline.
 - [ ] Register `RADON_KELLY_FRACTION` in `app_preferences` (audited, UI) vs
       env-only.
 
-Until the first box is ticked, every artifact in this repo that says
-"0.25x-0.5x" describes the allowed band, and `0.25` is the number that runs.
+Until implement PR 1 merges, `0.25` is the number that runs in code and every
+artifact that says "0.25x-0.5x" describes the allowed band. After PR 1, `0.5`
+runs by default, `0.25` is the opt-in stricter setting, and `1.0` is refused.

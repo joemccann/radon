@@ -26,7 +26,7 @@ Read `tools/codemap/architecture.json` before searching for a module or reconstr
 ## Reference docs — read explicitly when needed
 
 - `docs/evaluation.md` — 7-milestone trade eval pipeline + signal interpretation + intraday dark-pool interpolation
-- `docs/risk/kelly-fortunes-formula.md` — Kelly sizing spec: current vs required gap table, `scripts/kelly.py` API plan, M6 gate, fraction stays 0.25 until Joe picks half vs quarter
+- `docs/risk/kelly-fortunes-formula.md` — Kelly sizing spec: current vs required gap table, `scripts/kelly.py` API plan, M6 gate, Joe-signed default half Kelly (0.5) for the implement PR; code still runs 0.25 until it lands
 - `docs/reports.md` — HTML report templates + P&L card spec
 - `docs/ib-gateway-recovery.md` — 2FA push lock + backoff ladder + watchdog self-heal state machine
 - `docs/options-structures.{json,md}` — structure taxonomy
