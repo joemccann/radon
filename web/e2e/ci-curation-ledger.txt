@@ -1,3 +1,12 @@
+# REVIEWED 2026-09-19 dashboard-feed-tabs.spec.ts - 7/7 Chromium against local
+#   next dev with RADON_AUTHLESS_TEST. Pins feed-rail geometry, R-463 Held
+#   ---, empty-state copy, and after/ shots (desktop dark/light, 1024
+#   truncation, mobile stack). Held out of e2e-financial-smoke pending next
+#   start preflight.
+# REVIEWED 2026-09-19 clear-overview.spec.ts - Research workspace CTA removed:
+#   eyebrow count 0; market-intelligence scroll replaces the deleted News
+#   jump. Positions empty-state Explore research stays. Chromium authless
+#   next dev. Held out pending next start preflight.
 # REVIEWED 2026-09-18 portfolio-mixed-combo-today-pnl.spec.ts - Reviewed mocked desktop/mobile incomplete-coverage cases; 69 related Vitest tests passed. Three installed Chromium launches failed under runner process restrictions; browser and screenshot verification remain BLOCKED, with the exact operator command in RELIABILITY_LOG.md. Held out pending production preflight; no browser pass claimed.
 # Toast error audit 2026-09-17: chat-launcher-focus, flow-analysis-ticker, scanner-ticker-scan and ticker-search-chain now execute in the CI curated suite.
 # REVIEWED 2026-09-17 portfolio-mixed-combo-today-pnl.spec.ts - jsdom PositionTable Today P&L +$1,000 vs P&L +$3,500; Vitest SPY 740/760 screenshot numbers. Browser suite remains held out pending next start preflight.
