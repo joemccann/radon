@@ -19,6 +19,11 @@ const ENV_KEYS = [
   "ASSISTANT_MOCK",
   "NODE_ENV",
   "ANTHROPIC_API_KEY",
+  "CLAUDE_CODE_OAUTH_TOKEN",
+  "CLAUDE_CONFIG_DIR",
+  "CODEX_HOME",
+  "GROK_AUTH_FILE",
+  "XAI_OAUTH_TOKEN",
   "ANTHROPIC_MODEL",
   "XAI_API_KEY",
   "GROK_API_KEY",
@@ -65,6 +70,8 @@ describe("assistant model selection", () => {
     vi.resetModules();
     // Keep a developer laptop's real ~/.grok/auth.json out of provider resolution.
     process.env.GROK_AUTH_FILE = "/nonexistent/radon-no-grok-auth.json";
+    process.env.CLAUDE_CONFIG_DIR = "/nonexistent/radon-no-claude-config";
+    process.env.CODEX_HOME = "/nonexistent/radon-no-codex-home";
     for (const key of ENV_KEYS) saved[key] = process.env[key];
     process.env.ASSISTANT_MOCK = "1";
   });
@@ -148,8 +155,8 @@ describe("assistant model selection", () => {
     expect(request).not.toHaveProperty("model");
   });
 
-  it("routes a grok model to xAI even when ANTHROPIC_API_KEY is the only default", async () => {
-    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+  it("routes a grok model to xAI even when the Anthropic grant is the only default", async () => {
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat-test";
     delete process.env.XAI_API_KEY;
     delete process.env.GROK_API_KEY;
 
@@ -158,9 +165,9 @@ describe("assistant model selection", () => {
     expect(resolveProvider({})).toBe("anthropic");
   });
 
-  it("routes a claude model to Anthropic even when XAI_API_KEY would win", async () => {
-    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
-    process.env.XAI_API_KEY = "xai-test";
+  it("routes a claude model to Anthropic even when the Grok grant would win", async () => {
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat-test";
+    process.env.XAI_OAUTH_TOKEN = "xai-test";
 
     const { resolveProvider } = await import("@/lib/llm/provider");
     expect(resolveProvider({ model: "claude-opus-5" })).toBe("anthropic");
@@ -171,7 +178,7 @@ describe("assistant model selection", () => {
 
   it("a selected model beats LLM_PROVIDER on the host", async () => {
     process.env.LLM_PROVIDER = "anthropic";
-    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat-test";
     delete process.env.XAI_API_KEY;
     delete process.env.GROK_API_KEY;
 
@@ -182,10 +189,10 @@ describe("assistant model selection", () => {
 
   it("sends the requested model on the wire, overriding the env default", async () => {
     process.env.ASSISTANT_MOCK = "0";
-    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat-test";
     process.env.ANTHROPIC_MODEL = "claude-sonnet-5";
     // xAI would otherwise win resolveProvider(); the model id must override it.
-    process.env.XAI_API_KEY = "xai-test";
+    process.env.XAI_OAUTH_TOKEN = "xai-test";
 
     const fetchSpy = vi.fn(
       async () =>
@@ -207,8 +214,8 @@ describe("assistant model selection", () => {
 
   it("sends a grok model to the xAI base url, not Anthropic", async () => {
     process.env.ASSISTANT_MOCK = "0";
-    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
-    process.env.XAI_API_KEY = "xai-test";
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat-test";
+    process.env.XAI_OAUTH_TOKEN = "xai-test";
     process.env.LLM_PROVIDER = "anthropic";
 
     const fetchSpy = vi.fn(
