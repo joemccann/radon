@@ -347,8 +347,26 @@ compose_body_is_valid() {
 stage_from_checkout() {
   local source="$1" target="$2" mode="$3"
   shift 3
-  local staged
+  local staged repo_root source_rel blob_sha work_sha
   require_regular_file "$source" || return 1
+  # R-636 extension: root-installed artifacts come from the committed git
+  # blob at HEAD, never the radon-writable working tree. A working-tree body
+  # that differs from that blob is a stop, not a silent install. Same
+  # provenance shape as the compose install below.
+  if ! repo_root="$(git -C "$(dirname "$source")" rev-parse --show-toplevel 2>/dev/null)"; then
+    log_error "Provenance failed: ${source} is not inside a git checkout"
+    return 1
+  fi
+  source_rel="${source#"${repo_root}"/}"
+  if ! blob_sha="$(git -C "$repo_root" rev-parse "HEAD:${source_rel}" 2>/dev/null)"; then
+    log_error "Provenance failed: ${source_rel} is not committed at HEAD"
+    return 1
+  fi
+  if ! work_sha="$(git -C "$repo_root" hash-object -- "$source")" \
+    || [[ "$work_sha" != "$blob_sha" ]]; then
+    log_error "Provenance failed: ${source} differs from the committed blob"
+    return 1
+  fi
   if [[ -L "$STAGE_DIR" ]]; then
     log_error "Refusing symlinked staging dir ${STAGE_DIR}"
     return 1
@@ -362,7 +380,10 @@ stage_from_checkout() {
     return 1
   fi
   chmod 0600 "$staged"
-  if ! cp -- "$source" "$staged" \
+  # The staged bytes are the committed blob, read from the object store; a
+  # source swapped after the hash check fails the byte comparison instead of
+  # being published.
+  if ! git -C "$repo_root" cat-file blob "$blob_sha" > "$staged" \
     || ! require_regular_file "$source" \
     || ! cmp -s -- "$source" "$staged"; then
     rm -f "$staged"
@@ -1401,13 +1422,32 @@ write_mcp_env() {
   # /etc/radon/mcp.env (Clerk verification inputs, operator allowlist,
   # RADON_MCP_* knobs), never the full secret set. Same key set as
   # deploy.sh:write_mcp_env, which rewrites it on every deploy.
+  local mcp_env_target="${RADON_MCP_ENV_FILE:-/etc/radon/mcp.env}"
   local mcp_env_tmp
   require_regular_file "$ENV_FILE" || return 1
-  mcp_env_tmp="$(mktemp)"
+  # /etc/radon is radon-writable (root:radon 1770), so the destination can be
+  # a radon-planted symlink. Refuse anything present that is not a regular
+  # file, then publish by staging a root-owned sibling in the same directory
+  # and renaming over it, so the write never follows the destination path.
+  if [[ -L "$mcp_env_target" || ( -e "$mcp_env_target" && ! -f "$mcp_env_target" ) ]]; then
+    log_error "Refusing ${mcp_env_target}: not a regular file"
+    return 1
+  fi
+  if ! mcp_env_tmp="$(mktemp "${mcp_env_target}.XXXXXX")" || [[ -z "$mcp_env_tmp" ]]; then
+    log_error "Could not stage ${mcp_env_target}"
+    return 1
+  fi
+  chmod 0600 "$mcp_env_tmp"
   grep -E '^(CLERK_JWKS_URL|CLERK_ISSUER|ALLOWED_USER_IDS|RADON_MCP_[A-Z0-9_]+)=' "$ENV_FILE" > "$mcp_env_tmp" || true
-  install -m 0600 -o radon -g radon "$mcp_env_tmp" /etc/radon/mcp.env
-  rm -f "$mcp_env_tmp"
-  log_success "Hosted MCP env written to /etc/radon/mcp.env"
+  if [[ "${RADON_POLICY_SKIP_CHOWN:-0}" != "1" ]]; then
+    if ! chown radon:radon "$mcp_env_tmp"; then
+      rm -f "$mcp_env_tmp"
+      log_error "Could not chown staged ${mcp_env_target}"
+      return 1
+    fi
+  fi
+  mv -f "$mcp_env_tmp" "$mcp_env_target"
+  log_success "Hosted MCP env written to ${mcp_env_target}"
 }
 
 # -- Main --------------------------------------------------------------------
