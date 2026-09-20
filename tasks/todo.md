@@ -1,3 +1,26 @@
+# Task: PDF chart evidence not text-only (PR #574 plan)
+
+Published research posts that cite PDF pages with charts must carry those
+chart images. Implement P1-P3 from `docs/design-shots/pdf-chart-evidence/PLAN.md`.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests: figures B/C/D/F/rotation/skipped_pages; intake TEXT_ONLY_WITH_FIGURES hold
+- T2 depends_on: [T1] - P1 `figures.py` displayed-frame detect, raster clusters, kind, skipped_pages
+- T3 depends_on: [T1] - P2 intake hold + P3 SELECT sentence + catalogue `kind` + reason-code label + docs
+- T4 depends_on: [T2, T3] - Green focused suites; draft PR; CI
+
+## Checklist
+
+- [x] T1 Failing tests on main
+- [x] T2 figures.py
+- [x] T3 intake / SELECT / web / docs
+- [ ] T4 Draft PR, CI green, no merge
+
+## Review
+
+- Live JPM PDF probes optional if the private research root is absent.
+
 # Task: Newsfeed SLM tagger v1 implement [DRAFT PR; RUNG OFF]
 
 Implement `docs/ml/newsfeed-slm-tagger.md` (HR-1..HR-8). Dataset/eval/train/export/sidecar/ladder hook default off. No prod enable. No merge.

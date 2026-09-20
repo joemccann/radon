@@ -3,6 +3,7 @@ const LABELS: Record<string, string> = {
   NUMBER_NOT_ON_PAGE: "Number not on the cited page",
   VERIFY_FAILED: "Verification failed",
   INVALID_CANDIDATE: "Draft failed validation",
+  TEXT_ONLY_WITH_FIGURES: "Text-only draft while the cited pages have charts",
   NO_CANDIDATES: "Nothing selected",
   DUPLICATE_OF_PUBLISHED: "Duplicate of a published document",
   SERIES_DENYLIST: "Series is on the denylist",
