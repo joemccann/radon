@@ -6,14 +6,14 @@ Separate implement PR from main. No merge.
 ## Dependency graph
 
 - T1 depends_on: [] - Red: CSS + mobile ProfileContent wrap + Keys scroll e2e
-- T2 depends_on: [T1] - `profile-panel-scroll` + profile `.m-segment` overflow-x
+- T2 depends_on: [T1] - CSS-only `.preferences-shell` scroll + profile `.m-segment` overflow-x
 - T3 depends_on: [T2] - Green focused suites; 390x844 proof; draft PR; CI
 
 ## Checklist
 
 - [x] T1 Failing tests
-- [x] T2 Markup + CSS
-- [x] T3 Draft PR #586; Vitest 6/6; Playwright 3/3 at 390x844; CI watch; no merge
+- [x] T2 CSS-only `.preferences-shell` + `.m-segment` overflow; TS wrap reverted
+- [x] T3 PR #586; Vitest + Playwright 390x844; no merge
 
 ## Review
 

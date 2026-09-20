@@ -311,7 +311,7 @@ test.describe("profile operator tabs", () => {
 
     await page.goto("/profile?tab=credentials");
     await expect(page.locator(".profile-surface--mobile")).toBeVisible();
-    await expect(page.getByTestId("profile-panel-scroll")).toBeVisible();
+    await expect(page.locator(".profile-surface--mobile > .preferences-shell")).toBeVisible();
     await expect(page.getByTestId("credentials-panel")).toBeVisible();
 
     const bookmarks = page.locator(".profile-surface--mobile").getByRole("tab", { name: /bookmarks/i });
