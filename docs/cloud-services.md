@@ -37,6 +37,8 @@ THEMARKETEAR_PASSWORD=<…>
 # Optional: RADON_NEWSFEED_HEADLESS=0   # to launch a visible browser for debugging
 ```
 
+In production both keys must also survive `render_env_file`'s newsfeed allowlist in `cloud/scripts/radon-app-runtime.sh`: the container is handed only the keys the scraper's own code reads. Without them the cycle runs on whatever cookie the container started with and dies in pre-cycle with `Missing THEMARKETEAR_EMAIL or THEMARKETEAR_PASSWORD environment variable.` the moment the ~6h re-auth or a paywall-stub detection fires (2026-09-20: the dashboard feed stopped publishing at 14:00 UTC). Pinned by `cloud/tests/test_app_runtime.py::test_run_newsfeed_env_file_carries_the_themarketear_login`.
+
 **Operating procedure:**
 
 1. **Laptop dev stack** — `npm run dev` keeps including the scraper as the 4th child and polls every 120s. No more "must keep Chrome Debug.app open" requirement.

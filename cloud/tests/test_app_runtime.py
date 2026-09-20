@@ -1221,6 +1221,42 @@ def test_run_newsfeed_env_file_carries_only_its_allowlisted_keys(
     assert "TURSO_AUTH_TOKEN=tok" in rendered.splitlines()
 
 
+def test_run_newsfeed_env_file_carries_the_themarketear_login(
+    tmp_path: Path,
+) -> None:
+    """The scraper re-authenticates itself when the session cookie dies.
+
+    `scripts/newsfeed/auth.js` reads THEMARKETEAR_EMAIL / THEMARKETEAR_PASSWORD
+    and throws `Missing THEMARKETEAR_EMAIL or THEMARKETEAR_PASSWORD environment
+    variable.` without them. The allowlist omitted both, so the container ran on
+    the cookie it started with and every cycle after the 2026-09-20 15:11 UTC
+    `paywall stubs detected in 25/25 posts - re-auth scheduled` died in
+    pre-cycle. The dashboard feed stopped at 14:00 UTC that day.
+    """
+    host_env = tmp_path / "secrets.env"
+    host_env.write_text(
+        "NODE_ENV=production\n"
+        "THEMARKETEAR_EMAIL=reader@example.invalid\n"
+        "THEMARKETEAR_PASSWORD='pw-with-$dollar'\n"
+        "CLERK_SECRET_KEY=sk\n",
+        encoding="utf-8",
+    )
+    result = _run(
+        tmp_path, ["run", "radon-newsfeed.service"],
+        extra_env={"RADON_TEST_ENV_FILE": str(host_env)},
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    match = re.search(r"--env-file (\S+)", _run_line(result))
+    assert match, _run_line(result)
+    lines = Path(match.group(1)).read_text(encoding="utf-8").splitlines()
+    assert "THEMARKETEAR_EMAIL=reader@example.invalid" in lines, lines
+    # Quote stripping applies here too, or the password reaches the browser
+    # wrapped in the quotes /etc/radon/env needs for its `$`.
+    assert "THEMARKETEAR_PASSWORD=pw-with-$dollar" in lines, lines
+    keys = {line.split("=", 1)[0] for line in lines if "=" in line}
+    assert "CLERK_SECRET_KEY" not in keys
+
+
 def test_run_non_newsfeed_units_keep_the_full_env_file(tmp_path: Path) -> None:
     host_env = tmp_path / "secrets.env"
     host_env.write_text(
