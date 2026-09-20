@@ -480,15 +480,23 @@ def _bucket_to_entry(
     else:
         entry["shares"] = abs_qty
 
-    # NF-4: per-day signed totals, so the executed_orders backfill can
-    # reconcile each real fill date against this aggregate by quantity.
+    # Retain the legacy net summary alongside gross per-direction coverage.
     per_day: Dict[str, Decimal] = {}
+    per_direction: Dict[tuple[str, int], Decimal] = {}
     for exec_obj in bucket["executions"]:
         signed = exec_obj.quantity if exec_obj.side.value == "BOT" else -exec_obj.quantity
         day = exec_obj.time.strftime("%Y-%m-%d")
         per_day[day] = per_day.get(day, Decimal(0)) + signed
+        direction = (day, 1 if signed > 0 else -1)
+        per_direction[direction] = per_direction.get(direction, Decimal(0)) + signed
     entry["fill_breakdown"] = [
         {"date": day, "qty": int(qty)} for day, qty in sorted(per_day.items()) if qty != 0
+    ]
+
+    # Net daily totals lose round-trip fills; preserve both gross sides for backfill.
+    entry["gross_fill_breakdown"] = [
+        {"date": day, "qty": int(qty)}
+        for (day, _sign), qty in sorted(per_direction.items()) if qty != 0
     ]
 
     codes = bucket.get("codes")
