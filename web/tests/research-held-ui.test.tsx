@@ -113,6 +113,20 @@ describe("ResearchHeldReview", () => {
     expect(JSON.parse(String((fetchMock.mock.calls[1][1] as RequestInit).body))).toEqual({ workKey: KEY_B, vote: "down", reasons: [], comment: "" });
   });
 
+  it("labels TEXT_ONLY_WITH_FIGURES on a Held card", async () => {
+    const held = [{
+      workKey: "d".repeat(64), fileName: "jpm_credit.pdf", publisher: "J.P. Morgan", series: "daily credit",
+      docType: "research", folderDate: "2026-09-10", documentDate: "2026-09-10", outcome: "held",
+      reasonCodes: ["TEXT_ONLY_WITH_FIGURES"],
+      drafts: [{ title: "Hyperscaler HG fundamentals", content: "Draft", held: "TEXT_ONLY_WITH_FIGURES" }],
+      context: { pageCount: 8, figureCount: 4, dateSource: "text", excerpt: "Daily Credit Strategy Update", selectorReason: "measured finding" },
+    }];
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({ items: held, pending: 1 }), { status: 200 }));
+    render(<ResearchHeldReview />);
+    const card = (await screen.findByText("jpm_credit.pdf")).closest("li") as HTMLElement;
+    expect(within(card).getAllByText("Text-only draft while the cited pages have charts").length).toBeGreaterThan(0);
+  });
+
   it("shows an empty state and an error toast", async () => {
     fetchMock.mockImplementationOnce(async () => new Response(JSON.stringify({ items: [], pending: 0 }), { status: 200 }));
     render(<ResearchHeldReview />);

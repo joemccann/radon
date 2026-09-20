@@ -3,7 +3,7 @@
 // Handler order is the design:
 //   1. path token or body secret mismatch -> 401, write nothing
 //   2. body over 16 KiB                   -> 413, write nothing
-//   3. INSERT the raw body (secret redacted) BEFORE any parse
+//   3. INSERT the raw body BEFORE any parse
 //   4. parse; failure leaves parsed columns NULL and records parse_error
 //   5. 200 for everything past step 1: TradingView never retries, so a
 //      4xx/5xx after auth would only hide the loss.
@@ -18,7 +18,7 @@ import { clientIp } from "@/lib/rateLimit";
 import {
   extractBodySecret,
   parseTvAlertBody,
-  redactBodySecret,
+  redactSecret,
   secretMatches,
   TV_WEBHOOK_MAX_BYTES,
 } from "@/lib/tvWebhook";
@@ -57,7 +57,8 @@ export async function POST(
     const inserted = await dbExecute(
       {
         sql: "INSERT INTO tv_alert_events (received_at, source_ip, raw_body) VALUES (?, ?, ?) RETURNING id",
-        args: [new Date().toISOString(), clientIp(request), redactBodySecret(raw)],
+        // Never persist the body secret (CWE-312): redact before the write.
+        args: [new Date().toISOString(), clientIp(request), redactSecret(raw, process.env.TV_WEBHOOK_SECRET)],
       },
       { timeoutMs: INSERT_TIMEOUT_MS, label: "tv-webhook-insert" },
     );

@@ -1,3 +1,26 @@
+# Task: PDF chart evidence not text-only (PR #574 plan)
+
+Published research posts that cite PDF pages with charts must carry those
+chart images. Implement P1-P3 from `docs/design-shots/pdf-chart-evidence/PLAN.md`.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests: figures B/C/D/F/rotation/skipped_pages; intake TEXT_ONLY_WITH_FIGURES hold
+- T2 depends_on: [T1] - P1 `figures.py` displayed-frame detect, raster clusters, kind, skipped_pages
+- T3 depends_on: [T1] - P2 intake hold + P3 SELECT sentence + catalogue `kind` + reason-code label + docs
+- T4 depends_on: [T2, T3] - Green focused suites; draft PR; CI
+
+## Checklist
+
+- [x] T1 Failing tests on main
+- [x] T2 figures.py
+- [x] T3 intake / SELECT / web / docs
+- [ ] T4 Draft PR, CI green, no merge
+
+## Review
+
+- Live JPM PDF probes optional if the private research root is absent.
+
 # Task: Newsfeed SLM tagger v1 implement [DRAFT PR; RUNG OFF]
 
 Implement `docs/ml/newsfeed-slm-tagger.md` (HR-1..HR-8). Dataset/eval/train/export/sidecar/ladder hook default off. No prod enable. No merge.
@@ -7844,3 +7867,13 @@ Validation: suites run only on GitHub; inspect real stored coverage and screensh
 Review: credit history has 269 closes from 2025-08-22; existing Cboe history restores 2,173 of 2,174 HYAD dates from 2018-01-22. The equity closure 2025-01-09 stays null. Python joins and browser early-date regressions added; local suites intentionally not run. Exact-head CI and screenshot review pending.
 
 Operational review: repaired the existing Turso snapshot in place, preserving scan_time 2026-09-18T11:01:32+00:00 and all breadth values. Readback confirms SPX 269 -> 2,173 closes, first 2018-01-22, only 2025-01-09 null. Initial GitHub Python/Vitest feature checks pass; corrected docs-owner index and curated-browser ledger contracts. Recurring repair awaits PR deployment.
+
+## Weekend browser host + stale lock reclaim (plan PR, 2026-09-20)
+- [x] T1 depends_on: [] Read the rails: testing wrapper lock/launch/phase flow, setup script, sibling wrappers, weekend_prune locking_pid, skill + remediate prompt, TEST_LOG T-496, playwright.config.ts.
+- [x] T2 depends_on: [T1] Root-cause the Mach denial (Seatbelt mach-register under codex / Claude sandboxes) and prove the run-server + PW_TEST_CONNECT_WS_ENDPOINT wiring with the runner holding no browser.
+- [x] T3 depends_on: [T1] Design host-only stale-lock reclaim for plain-file locks and dead pids without weakening R-411.
+- [x] T4 depends_on: [T2,T3] Write `tasks/weekend-browser-host-and-lock-reclaim-plan.md` with done-when, files, tests, operator steps; open the draft plan PR.
+- [ ] T5 depends_on: [T4] Implement PR (separate): wrapper browser host, lock helpers x6 (pid+start fingerprint, shared-parent sweep, setup checks; hard DoD L1-L5 per Joe 2026-09-20), skill rails, red/green tests, operations.md owner update.
+Dependency graph: T1 -> {T2,T3} -> T4 -> T5.
+
+Review: plan only, no product code. Mechanism PoC on the branch VM: with the endpoint set and `PLAYWRIGHT_BROWSERS_PATH=/nonexistent` the spec passed against the host run-server (1 passed); without the endpoint the runner tried to launch and failed, which is the sandboxed path being replaced.

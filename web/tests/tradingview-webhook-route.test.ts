@@ -73,7 +73,7 @@ describe("POST /api/webhooks/tradingview/[token]", () => {
       "INSERT INTO tv_alert_events (received_at, source_ip, raw_body) VALUES (?, ?, ?) RETURNING id",
     );
     expect(first.args[1]).toBe("52.89.214.238");
-    expect(first.args[2]).toBe(body.replace(SECRET, "[redacted]"));
+    expect(first.args[2]).toBe(body.split(SECRET).join("[REDACTED]"));
     expect(Number.isNaN(Date.parse(first.args[0]))).toBe(false);
 
     expect(second.sql).toBe(
@@ -86,13 +86,31 @@ describe("POST /api/webhooks/tradingview/[token]", () => {
     ]);
   });
 
-  it("never persists the body secret in parsed columns or raw_body", async () => {
+  it("redacts the body secret from raw_body before insert (JSON field)", async () => {
+    const res = await post(TOKEN, jsonBody());
+    expect(res.status).toBe(200);
+    const [insert] = insertCalls();
+    const stored = String(insert[0].args[2]);
+    expect(stored).not.toContain(SECRET);
+    expect(stored).toContain("[REDACTED]");
+    // Non-secret content survives redaction.
+    expect(stored).toContain("NVDA");
+  });
+
+  it("redacts every occurrence of the secret anywhere in the body, all rotation values", async () => {
+    vi.stubEnv("TV_WEBHOOK_SECRET", `${SECRET},second-secret-zyxwvutsrqponmlkjihgfedcba98`);
+    const body = jsonBody({ alert: `leak ${SECRET} and second-secret-zyxwvutsrqponmlkjihgfedcba98 twice ${SECRET}` });
+    const res = await post(TOKEN, body);
+    expect(res.status).toBe(200);
+    const stored = String(insertCalls()[0][0].args[2]);
+    expect(stored).not.toContain(SECRET);
+    expect(stored).not.toContain("second-secret-zyxwvutsrqponmlkjihgfedcba98");
+    expect(stored.split("[REDACTED]").length - 1).toBe(4);
+  });
+
+  it("never persists the body secret in parsed columns", async () => {
     await post(TOKEN, jsonBody());
-    const insert = mocks.dbExecute.mock.calls[0][0];
     const update = mocks.dbExecute.mock.calls[1][0];
-    // A DB read must not yield a replayable secret (180-day retention).
-    expect(String(insert.args[2])).not.toContain(SECRET);
-    expect(String(insert.args[2])).toContain("[redacted]");
     expect(update.args).not.toContain(SECRET);
   });
 
@@ -127,19 +145,19 @@ describe("POST /api/webhooks/tradingview/[token]", () => {
     expect(mocks.dbExecute).not.toHaveBeenCalled();
   });
 
-  it("text/plain body carrying the secret persists redacted raw and returns 200", async () => {
+  it("text/plain body carrying the secret persists redacted and returns 200", async () => {
     const body = `secret=${SECRET} NVDA crossed 180`;
     const res = await post(TOKEN, body, "text/plain");
     expect(res.status).toBe(200);
     expect(insertCalls()).toHaveLength(1);
-    expect(insertCalls()[0][0].args[2]).toBe("secret=[redacted] NVDA crossed 180");
+    expect(insertCalls()[0][0].args[2]).toBe("secret=[REDACTED] NVDA crossed 180");
   });
 
-  it("malformed JSON with the secret persists raw with parse_error and returns 200", async () => {
+  it("malformed JSON with the secret persists redacted with parse_error and returns 200", async () => {
     const body = `{"secret":"${SECRET}","symbol":"NVDA","price":}`;
     const res = await post(TOKEN, body, "text/plain");
     expect(res.status).toBe(200);
-    expect(insertCalls()[0][0].args[2]).toBe(body.replace(SECRET, "[redacted]"));
+    expect(insertCalls()[0][0].args[2]).toBe('{"secret":"[REDACTED]","symbol":"NVDA","price":}');
     const update = mocks.dbExecute.mock.calls[1][0];
     expect(update.args.slice(0, 7)).toEqual([null, null, null, null, null, null, null]);
     expect(update.args[7]).toMatch(/json/i);
