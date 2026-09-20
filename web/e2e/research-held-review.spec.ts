@@ -10,8 +10,8 @@ const held = [
   { workKey: KEY, fileName: "jpm_flows___liquidity.pdf", publisher: "J.P. Morgan", series: "jpm flows liquidity", docType: "research", folderDate: "2026-09-17",
     documentDate: "2026-09-16", outcome: "held", reasonCodes: ["NUMBER_NOT_ON_PAGE"],
     drafts: [{ title: "Tech bond issuance adds 10-20bp to global yields", content: "J.P. Morgan estimates the $260bn increase in net tech issuance adds 10-20bp.", held: "NUMBER_NOT_ON_PAGE", detail: "10-20bp" }],
-    context: { pageCount: 14, figureCount: 6, dateSource: "text", excerpt: "Flows & Liquidity. How much upward pressure on global bond yields from tech bond issuance? The $260bn increase in net bond issuance by tech companies for 2026 looks manageable.",
-      selectorReason: "One measured finding on tech issuance and global yields.", sourceUrl: "/api/newsfeed/research/files/" + "c".repeat(64) + ".pdf" } },
+    context: { pageCount: 14, figureCount: 6, dateSource: "text", excerpt: "# Market Watch\n\nFlows & Liquidity. How much upward pressure on global bond yields from tech bond issuance? The $260bn increase in net bond issuance by tech companies for 2026 looks manageable.",
+      selectorReason: "One measured finding on tech issuance and global yields. The labor market remains the swing factor through year-end.", sourceUrl: "/api/newsfeed/research/files/" + "c".repeat(64) + ".pdf" } },
   { workKey: "e".repeat(64), fileName: "gbpusd_en_1666701.pdf", publisher: "UBS", series: "gbpusd", docType: "fx_pair_note", folderDate: "2026-09-17",
     documentDate: "2026-09-17", outcome: "dropped", reasonCodes: ["DOC_TYPE_FX_PAIR_NOTE"], drafts: [],
     context: { pageCount: 2, figureCount: 1, dateSource: "text", excerpt: "GBPUSD: Short positions leave room for further covering as carry advantage holds.", selectorReason: "", sourceUrl: "/api/newsfeed/research/files/" + "e".repeat(64) + ".pdf" } },
@@ -50,6 +50,14 @@ for (const width of [1440, 393]) {
     const card = panel.locator("li").filter({ hasText: "jpm_flows___liquidity.pdf" }).first();
     await expect(card.getByLabel("Reasons").getByText("Number not on the cited page")).toBeVisible();
     await expect(card.getByText("Report dated 2026-09-16 (from the document text) · 14 pages · 6 charts")).toBeVisible();
+    await expect(card.getByRole("heading", { name: "Market Watch" })).toHaveCount(0);
+    await expect(card.getByText("Flows & Liquidity. How much upward pressure on global bond yields from tech bond issuance? The $260bn increase in net bond issuance by tech companies for 2026 looks manageable.")).toHaveCount(0);
+    const note = card.getByTestId("held-selector-note");
+    await expect(note).toBeVisible();
+    await expect(note).toContainText("Selector's note:");
+    await expect(note).toContainText("One measured finding on tech issuance and global yields. The labor market remains the swing factor through year-end.");
+    const overflowY = await note.evaluate((el) => getComputedStyle(el).overflowY);
+    expect(overflowY).toBe("auto");
     await expect(card.getByRole("link", { name: "Open PDF" })).toHaveAttribute("href", "/api/newsfeed/research/files/" + "c".repeat(64) + ".pdf");
     await card.locator("summary").click();
     await expect(card.getByText("10-20bp", { exact: true })).toBeVisible();
