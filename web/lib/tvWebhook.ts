@@ -44,6 +44,18 @@ export function extractBodySecret(raw: string): string {
   return match?.[1] ?? "";
 }
 
+/** The raw body minus its authenticating secret, safe to persist. Covers the
+ * same three forms `extractBodySecret` reads, plus any literal repeat of the
+ * extracted value, so a DB read cannot replay a valid alert. */
+export function redactBodySecret(raw: string): string {
+  let redacted = raw
+    .replace(/("secret"\s*:\s*")[^"]*(")/g, "$1[redacted]$2")
+    .replace(/\bsecret=\S+/g, "secret=[redacted]");
+  const secret = extractBodySecret(raw);
+  if (secret) redacted = redacted.split(secret).join("[redacted]");
+  return redacted;
+}
+
 export type TvAlertFields = {
   symbol: string | null;
   exchange: string | null;

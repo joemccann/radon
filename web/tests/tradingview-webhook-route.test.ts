@@ -73,7 +73,7 @@ describe("POST /api/webhooks/tradingview/[token]", () => {
       "INSERT INTO tv_alert_events (received_at, source_ip, raw_body) VALUES (?, ?, ?) RETURNING id",
     );
     expect(first.args[1]).toBe("52.89.214.238");
-    expect(first.args[2]).toBe(body);
+    expect(first.args[2]).toBe(body.replace(SECRET, "[redacted]"));
     expect(Number.isNaN(Date.parse(first.args[0]))).toBe(false);
 
     expect(second.sql).toBe(
@@ -86,9 +86,13 @@ describe("POST /api/webhooks/tradingview/[token]", () => {
     ]);
   });
 
-  it("never persists the body secret in parsed columns", async () => {
+  it("never persists the body secret in parsed columns or raw_body", async () => {
     await post(TOKEN, jsonBody());
+    const insert = mocks.dbExecute.mock.calls[0][0];
     const update = mocks.dbExecute.mock.calls[1][0];
+    // A DB read must not yield a replayable secret (180-day retention).
+    expect(String(insert.args[2])).not.toContain(SECRET);
+    expect(String(insert.args[2])).toContain("[redacted]");
     expect(update.args).not.toContain(SECRET);
   });
 
@@ -123,19 +127,19 @@ describe("POST /api/webhooks/tradingview/[token]", () => {
     expect(mocks.dbExecute).not.toHaveBeenCalled();
   });
 
-  it("text/plain body carrying the secret persists raw and returns 200", async () => {
+  it("text/plain body carrying the secret persists redacted raw and returns 200", async () => {
     const body = `secret=${SECRET} NVDA crossed 180`;
     const res = await post(TOKEN, body, "text/plain");
     expect(res.status).toBe(200);
     expect(insertCalls()).toHaveLength(1);
-    expect(insertCalls()[0][0].args[2]).toBe(body);
+    expect(insertCalls()[0][0].args[2]).toBe("secret=[redacted] NVDA crossed 180");
   });
 
   it("malformed JSON with the secret persists raw with parse_error and returns 200", async () => {
     const body = `{"secret":"${SECRET}","symbol":"NVDA","price":}`;
     const res = await post(TOKEN, body, "text/plain");
     expect(res.status).toBe(200);
-    expect(insertCalls()[0][0].args[2]).toBe(body);
+    expect(insertCalls()[0][0].args[2]).toBe(body.replace(SECRET, "[redacted]"));
     const update = mocks.dbExecute.mock.calls[1][0];
     expect(update.args.slice(0, 7)).toEqual([null, null, null, null, null, null, null]);
     expect(update.args[7]).toMatch(/json/i);
