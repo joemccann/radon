@@ -378,7 +378,11 @@ write_mcp_env
         setup_text = SETUP.read_text(encoding="utf-8")
         setup_body = _body(setup_text, "write_mcp_env")
         assert "/etc/radon/mcp.env" in setup_body
-        assert "-m 0600 -o radon -g radon" in setup_body
+        # Staged 0600, chowned radon:radon, then renamed over a destination
+        # already verified to be a regular file (never through a symlink).
+        assert 'chmod 0600 "$mcp_env_tmp"' in setup_body
+        assert 'chown radon:radon "$mcp_env_tmp"' in setup_body
+        assert 'mv -f "$mcp_env_tmp" "$mcp_env_target"' in setup_body
         deploy_text = DEPLOY.read_text(encoding="utf-8")
         deploy_keys = re.search(r"readonly MCP_ENV_KEYS=('[^']+')", deploy_text)
         assert deploy_keys and deploy_keys.group(1) in setup_body

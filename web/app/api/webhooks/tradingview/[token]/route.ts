@@ -18,6 +18,7 @@ import { clientIp } from "@/lib/rateLimit";
 import {
   extractBodySecret,
   parseTvAlertBody,
+  redactSecret,
   secretMatches,
   TV_WEBHOOK_MAX_BYTES,
 } from "@/lib/tvWebhook";
@@ -56,7 +57,8 @@ export async function POST(
     const inserted = await dbExecute(
       {
         sql: "INSERT INTO tv_alert_events (received_at, source_ip, raw_body) VALUES (?, ?, ?) RETURNING id",
-        args: [new Date().toISOString(), clientIp(request), raw],
+        // Never persist the body secret (CWE-312): redact before the write.
+        args: [new Date().toISOString(), clientIp(request), redactSecret(raw, process.env.TV_WEBHOOK_SECRET)],
       },
       { timeoutMs: INSERT_TIMEOUT_MS, label: "tv-webhook-insert" },
     );

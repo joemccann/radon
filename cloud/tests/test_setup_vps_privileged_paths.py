@@ -109,6 +109,17 @@ def harness(tmp_path: Path) -> dict[str, Path]:
         (cloud / "config" / "sudoers.d" / policy).write_text(f"# {policy}\n")
     (cloud / "config" / "polkit" / "50-radon-services.rules").write_text("// rule\n")
 
+    # Provenance: root only installs bytes committed at HEAD, so the fake
+    # checkout must be a git repository with its artifacts committed.
+    subprocess.run(["git", "init", "-q"], cwd=cloud, check=True, capture_output=True)
+    subprocess.run(["git", "add", "."], cwd=cloud, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "seed"],
+        cwd=cloud,
+        check=True,
+        capture_output=True,
+    )
+
     victim = tmp_path / "root-only"
     victim.write_text("root-only secret\n")
     victim.chmod(0o600)
@@ -189,6 +200,64 @@ class TestEnvFileGuard:
         assert result.returncode == 0, result.stderr
         calls = log.read_text().splitlines()
         assert calls[:2] == [f"chmod 0640 {env}", f"chown root:radon {env}"]
+
+    def test_write_mcp_env_refuses_symlinked_destination(
+        self, harness: dict[str, Path]
+    ) -> None:
+        # /etc/radon is radon-writable (root:radon 1770), so the mcp.env
+        # destination can be a radon-planted symlink; root must never
+        # publish through it.
+        self._env_stubs(harness)
+        env = harness["tmp"] / "env"
+        env.write_text("CLERK_ISSUER=https://clerk.example\nSECRET=1\n")
+        dest_dir = harness["tmp"] / "etc-radon"
+        dest_dir.mkdir()
+        dest = dest_dir / "mcp.env"
+        dest.symlink_to(harness["victim"])
+        result = _run_setup_function(
+            "write_mcp_env",
+            harness["bin"],
+            {
+                **_base_env(harness),
+                "RADON_DEPLOY_ENV_FILE": str(env),
+                "RADON_MCP_ENV_FILE": str(dest),
+            },
+        )
+        assert result.returncode != 0
+        assert REFUSAL in result.stdout + result.stderr
+        assert dest.is_symlink(), "destination link was replaced despite refusal"
+        assert list(dest_dir.glob("mcp.env.*")) == [], "staging leftovers remain"
+        _assert_victim_untouched(harness)
+
+    def test_write_mcp_env_regular_destination_is_written_0600(
+        self, harness: dict[str, Path]
+    ) -> None:
+        self._env_stubs(harness)
+        env = harness["tmp"] / "env"
+        env.write_text(
+            "CLERK_ISSUER=https://clerk.example\n"
+            "RADON_MCP_LIMIT=5\n"
+            "SECRET=never-exported\n"
+        )
+        dest_dir = harness["tmp"] / "etc-radon"
+        dest_dir.mkdir()
+        dest = dest_dir / "mcp.env"
+        result = _run_setup_function(
+            "write_mcp_env",
+            harness["bin"],
+            {
+                **_base_env(harness),
+                "RADON_DEPLOY_ENV_FILE": str(env),
+                "RADON_MCP_ENV_FILE": str(dest),
+            },
+        )
+        assert result.returncode == 0, result.stderr
+        assert not dest.is_symlink()
+        assert dest.read_text() == (
+            "CLERK_ISSUER=https://clerk.example\nRADON_MCP_LIMIT=5\n"
+        )
+        assert _mode(dest) == "0o600"
+        assert list(dest_dir.glob("mcp.env.*")) == [], "staging leftovers remain"
 
     def test_setup_node_regular_file_is_chmod_then_chown(
         self, harness: dict[str, Path]
@@ -407,6 +476,81 @@ exit 0
         assert _stage_leftovers(harness) == []
 
 
+# ── (c2) root installs committed git blobs, not the working tree ──────
+
+
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", *args],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+
+
+def _run_stage(harness: dict[str, Path], source: Path, target: Path):
+    return _run_setup_function(
+        f'stage_from_checkout "{source}" "{target}" 0644',
+        harness["bin"],
+        _base_env(harness),
+    )
+
+
+class TestCheckoutProvenance:
+    """setup-vps.sh runs as root over a radon-writable checkout: the bytes it
+    installs must come from the committed blob at HEAD (the compose R-636
+    shape), never from a working tree the service account can edit."""
+
+    def test_working_tree_edit_diverging_from_head_is_refused(
+        self, harness: dict[str, Path]
+    ) -> None:
+        source = harness["cloud"] / "config" / "sudoers.d" / "radon-ops"
+        source.write_text("# tampered after commit\n")
+        target = harness["tmp"] / "installed"
+        result = _run_stage(harness, source, target)
+        assert result.returncode != 0
+        assert "differs from the committed blob" in result.stdout + result.stderr
+        assert not target.exists()
+        assert _stage_leftovers(harness) == []
+
+    def test_source_absent_from_head_is_refused(
+        self, harness: dict[str, Path]
+    ) -> None:
+        source = harness["cloud"] / "config" / "sudoers.d" / "radon-extra"
+        source.write_text("# never committed\n")
+        target = harness["tmp"] / "installed"
+        result = _run_stage(harness, source, target)
+        assert result.returncode != 0
+        assert "not committed at HEAD" in result.stdout + result.stderr
+        assert not target.exists()
+
+    def test_source_outside_a_git_checkout_is_refused(
+        self, tmp_path: Path, harness: dict[str, Path]
+    ) -> None:
+        loose = Path("/tmp") / f"radon-loose-{os.getpid()}"
+        loose.mkdir(exist_ok=True)
+        try:
+            source = loose / "artifact"
+            source.write_text("outside any checkout\n")
+            target = harness["tmp"] / "installed"
+            result = _run_stage(harness, source, target)
+            assert result.returncode != 0
+            assert "not inside a git checkout" in result.stdout + result.stderr
+            assert not target.exists()
+        finally:
+            shutil.rmtree(loose, ignore_errors=True)
+
+    def test_committed_source_installs_the_blob(
+        self, harness: dict[str, Path]
+    ) -> None:
+        source = harness["cloud"] / "config" / "sudoers.d" / "radon-ops"
+        target = harness["tmp"] / "installed"
+        result = _run_stage(harness, source, target)
+        assert result.returncode == 0, result.stderr
+        assert target.read_text() == source.read_text()
+        assert _stage_leftovers(harness) == []
+
+
 # ── (d) /etc/radon and the radon-replaceable directories ──────────────
 
 
@@ -564,8 +708,16 @@ class TestStaticContract:
         assert 'readonly STAGE_DIR="${RADON_SETUP_STAGE_DIR:-/root/.radon-stage}"' in script
         body = _function_body(script, "stage_from_checkout")
         assert 'install -d -m 0700 "$STAGE_DIR"' in body
-        assert body.index('require_regular_file "$source"') < body.index("cp --")
-        assert body.index("cp --") < body.index("cmp -s")
+        # Provenance: the staged bytes are the committed blob at HEAD, never
+        # a working-tree cp the radon account could have edited.
+        assert "cp --" not in body
+        assert body.index('require_regular_file "$source"') < body.index(
+            'rev-parse "HEAD:${source_rel}"'
+        )
+        assert body.index('rev-parse "HEAD:${source_rel}"') < body.index(
+            'cat-file blob "$blob_sha"'
+        )
+        assert body.index('cat-file blob "$blob_sha"') < body.index("cmp -s")
         assert 'install -m "$mode" "$@" "$staged" "$target"' in body
         # No mapfile / exec {fd} / ${arr[@]} on empty arrays: bash 3.2 runs this.
         assert "mapfile" not in script

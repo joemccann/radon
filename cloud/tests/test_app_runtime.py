@@ -555,10 +555,15 @@ def _proxy_dir_from(result: subprocess.CompletedProcess[str]) -> str:
 
 def test_run_refuses_to_start_when_the_notify_proxy_cannot_bind(tmp_path: Path) -> None:
     missing = "/nonexistent-radon-proxy-dir"
+    # Directory provisioning also uses Python; fail only the notify proxy.
+    failing_python = tmp_path / "failing-python"
+    lease_dir = shlex.quote(str(tmp_path / 'state' / 'ib-lease'))
+    _write_executable(failing_python,
+        f'#!/bin/bash\nif [[ "${{2:-}}" == {lease_dir} ]]; then exec {shlex.quote(sys.executable)} "$@"; fi\nexit 1\n')
     result = _run(
         tmp_path,
         ["run", "radon-relay.service"],
-        extra_env={"RADON_TEST_NOTIFY_PROXY_DIR": missing, "RADON_TEST_PYTHON": "/bin/false"},
+        extra_env={"RADON_TEST_NOTIFY_PROXY_DIR": missing, "RADON_TEST_PYTHON": str(failing_python)},
     )
     assert result.returncode == 71, result.stderr
     assert "notify proxy" in result.stderr
@@ -669,6 +674,35 @@ def test_run_api_refuses_symlinked_secret_store_dir(tmp_path: Path) -> None:
     if chown_log.exists():
         assert str(target) not in chown_log.read_text(encoding="utf-8")
     assert stat.S_IMODE(target.stat().st_mode) != 0o700
+
+
+def test_run_refuses_symlinked_lease_dir(tmp_path: Path) -> None:
+    """The 2FA lease directory gets the same O_NOFOLLOW treatment as the
+    secret store: a pre-planted link at ib-lease must be refused, never
+    followed by the root-privileged ownership pass."""
+    target = tmp_path / "lease-elsewhere"
+    target.mkdir()
+    (tmp_path / "state" / "ib-lease").parent.mkdir(exist_ok=True)
+    (tmp_path / "state" / "ib-lease").symlink_to(target)
+    result = _run(tmp_path, ["run", "radon-monitor.service"])
+    assert result.returncode == 78, result.stderr
+    chown_log = tmp_path / "chown.log"
+    if chown_log.exists():
+        assert str(target) not in chown_log.read_text(encoding="utf-8")
+    assert stat.S_IMODE(target.stat().st_mode) != 0o700
+
+
+def test_run_prepares_lease_dir_symlink_safe(tmp_path: Path) -> None:
+    """Valid path: the lease directory is created 0700 with fd-based
+    ownership, so it never appears in the external chown log."""
+    result = _run(tmp_path, ["run", "radon-monitor.service"])
+    assert result.returncode == 0, result.stderr
+    lease = tmp_path / "state" / "ib-lease"
+    assert lease.is_dir() and not lease.is_symlink()
+    assert stat.S_IMODE(lease.stat().st_mode) == 0o700
+    chown_log = tmp_path / "chown.log"
+    if chown_log.exists():
+        assert str(lease) not in chown_log.read_text(encoding="utf-8")
 
 
 def test_run_api_refuses_when_credential_group_is_absent(tmp_path: Path) -> None:
@@ -828,8 +862,9 @@ def test_run_api_cleans_staged_credential_on_pre_exec_failure(
     # regression continues to exercise its intended cleanup branch.
     private_anchor = shlex.quote(str(tmp_path / 'state' / 'private'))
     secret_store = shlex.quote(str(tmp_path / 'data' / 'secret_store'))
+    lease_dir = shlex.quote(str(tmp_path / 'state' / 'ib-lease'))
     _write_executable(failing_python,
-        f'#!/bin/bash\nif [[ "${{2:-}}" == {private_anchor} || "${{2:-}}" == {secret_store} ]]; then exec {shlex.quote(sys.executable)} "$@"; fi\nexit 1\n')
+        f'#!/bin/bash\nif [[ "${{2:-}}" == {private_anchor} || "${{2:-}}" == {secret_store} || "${{2:-}}" == {lease_dir} ]]; then exec {shlex.quote(sys.executable)} "$@"; fi\nexit 1\n')
     result = _run(
         tmp_path,
         ["run", "radon-api.service"],
@@ -933,7 +968,23 @@ def test_run_newsfeed_mounts_host_playwright_browsers(tmp_path: Path) -> None:
     assert "PLAYWRIGHT_BROWSERS_PATH=/ms-playwright" in log
     assert "--ipc host" in log
     assert "PLAYWRIGHT_CHROMIUM_SANDBOX=0" in log
-    assert f"{tmp_path / 'data' / 'newsfeed-scripts'}:/home/radon/radon/scripts/newsfeed" in log, log
+    assert f"{tmp_path / 'data' / 'newsfeed-scripts'}:/home/radon/radon/scripts/newsfeed:ro" in log, log
+
+
+def test_run_newsfeed_source_overlay_is_read_only(tmp_path: Path) -> None:
+    """The newsfeed drives sandbox-disabled Chromium over third-party pages,
+    so its source overlay bind must be read-only; runtime writes go to the
+    data and media mounts, never into scripts/newsfeed."""
+    result = _run(tmp_path, ["run", "radon-newsfeed.service"])
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    scripts_binds = [
+        arg
+        for arg in log.split()
+        if ":/home/radon/radon/scripts/newsfeed" in arg
+    ]
+    assert scripts_binds, log
+    assert all(bind.endswith(":ro") for bind in scripts_binds), scripts_binds
 
 
 @pytest.mark.parametrize("unit", ("radon-api.service", "radon-monitor.service"))

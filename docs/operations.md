@@ -168,6 +168,16 @@ through the root-owned `radon-docker-gw` shim instead. **Operator (live
 hosts provisioned before this change):** run `sudo gpasswd -d radon docker`,
 then verify with `id -nG radon` (no `docker` in the output).
 
+**Privileged file-op hardening (2026-09-20).** `setup-vps.sh` stages
+root-installed artifacts from committed git blobs (`git cat-file`) rather
+than the working tree, and refuses to publish `mcp.env` through a
+non-regular destination (writes to a temp file, then atomic rename). The
+nightly-loop wrappers refuse symlinks in their privileged file operations
+(log dirs/files, private state) and provision the 2FA lease directory
+through the fd-based `O_NOFOLLOW` helper. Contracts:
+`cloud/tests/test_setup_vps_privileged_paths.py`,
+`scripts/tests/test_wrapper_symlink_refusal.py`.
+
 **Newsfeed least privilege.** `radon-newsfeed.service` runs a
 sandbox-disabled Chromium against third-party web content, so
 `radon-app-runtime` hands it a filtered env file — only the keys the

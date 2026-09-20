@@ -44,6 +44,16 @@ export function extractBodySecret(raw: string): string {
   return match?.[1] ?? "";
 }
 
+/** Replace every occurrence of every configured secret value (comma-separated
+ * rotation pairs included) anywhere in `raw` with `[REDACTED]`, so the secret
+ * is never persisted in tv_alert_events.raw_body (CWE-312). */
+export function redactSecret(raw: string, configured: string | undefined): string {
+  const values = (configured ?? "").split(",").map((v) => v.trim()).filter(Boolean);
+  let out = raw;
+  for (const value of values) out = out.split(value).join("[REDACTED]");
+  return out;
+}
+
 export type TvAlertFields = {
   symbol: string | null;
   exchange: string | null;
