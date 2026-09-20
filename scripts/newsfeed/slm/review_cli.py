@@ -70,7 +70,7 @@ def review_rows(
                     title, _, rest = content.partition("\n")
                     title = title[len("Title: ") :]
                     body = rest[len("Body: ") :] if rest.startswith("Body: ") else rest
-        stdout.write(f"id={row.get('id')}\nTitle: {tty_safe(title)}\nBody: {tty_safe(body[:240])}\nTags: {tags}\n[y/n/c TAG1,TAG2,TAG3]\n")
+        stdout.write(f"id={tty_safe(str(row.get('id')))}\nTitle: {tty_safe(title)}\nBody: {tty_safe(body[:240])}\nTags: {tags}\n[y/n/c TAG1,TAG2,TAG3]\n")
         stdout.flush()
         verdict = parse_review(stdin.readline())
         if verdict is None:

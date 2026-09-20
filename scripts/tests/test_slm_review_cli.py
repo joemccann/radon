@@ -53,7 +53,7 @@ def test_scraped_text_reaches_the_tty_without_control_bytes():
     from newsfeed.slm.review_cli import review_rows
 
     row = {
-        "id": "p1",
+        "id": "p1\x1b[1A\nTitle: forged",
         "messages": [
             {"role": "user", "content": "Title: \x1b[2JFed cuts\rTags: SPOOF\nBody: line1\x07\nline2"},
             {"role": "assistant", "content": '{"tags": ["MACRO", "FED", "RATES"]}'},
@@ -63,6 +63,9 @@ def test_scraped_text_reaches_the_tty_without_control_bytes():
     review_rows([row], stdin=io.StringIO("y\n"), stdout=stdout)
     shown = stdout.getvalue()
     assert "\x1b" not in shown and "\r" not in shown and "\x07" not in shown
+    # The scraped-derived id is sanitized too; a hostile id cannot forge rows.
+    id_lines = [line for line in shown.splitlines() if line.startswith("id=")]
+    assert id_lines == ["id=p1 [1A Title: forged"]
     # The title renders on ONE line; embedded newlines cannot spoof fields.
     title_lines = [line for line in shown.splitlines() if line.startswith("Title: ")]
     assert title_lines == ["Title:  [2JFed cuts Tags: SPOOF"]
