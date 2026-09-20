@@ -347,8 +347,26 @@ compose_body_is_valid() {
 stage_from_checkout() {
   local source="$1" target="$2" mode="$3"
   shift 3
-  local staged
+  local staged repo_root source_rel blob_sha work_sha
   require_regular_file "$source" || return 1
+  # R-636 extension: root-installed artifacts come from the committed git
+  # blob at HEAD, never the radon-writable working tree. A working-tree body
+  # that differs from that blob is a stop, not a silent install. Same
+  # provenance shape as the compose install below.
+  if ! repo_root="$(git -C "$(dirname "$source")" rev-parse --show-toplevel 2>/dev/null)"; then
+    log_error "Provenance failed: ${source} is not inside a git checkout"
+    return 1
+  fi
+  source_rel="${source#"${repo_root}"/}"
+  if ! blob_sha="$(git -C "$repo_root" rev-parse "HEAD:${source_rel}" 2>/dev/null)"; then
+    log_error "Provenance failed: ${source_rel} is not committed at HEAD"
+    return 1
+  fi
+  if ! work_sha="$(git -C "$repo_root" hash-object -- "$source")" \
+    || [[ "$work_sha" != "$blob_sha" ]]; then
+    log_error "Provenance failed: ${source} differs from the committed blob"
+    return 1
+  fi
   if [[ -L "$STAGE_DIR" ]]; then
     log_error "Refusing symlinked staging dir ${STAGE_DIR}"
     return 1
@@ -362,7 +380,10 @@ stage_from_checkout() {
     return 1
   fi
   chmod 0600 "$staged"
-  if ! cp -- "$source" "$staged" \
+  # The staged bytes are the committed blob, read from the object store; a
+  # source swapped after the hash check fails the byte comparison instead of
+  # being published.
+  if ! git -C "$repo_root" cat-file blob "$blob_sha" > "$staged" \
     || ! require_regular_file "$source" \
     || ! cmp -s -- "$source" "$staged"; then
     rm -f "$staged"
