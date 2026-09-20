@@ -116,8 +116,20 @@ def _dedupe_key(row: dict) -> tuple:
     return (row["alert_name"], row["symbol"], row["interval"], row["bar_time"], row["price"])
 
 
+_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+MAX_DIGEST_SYMBOL_CHARS = 32
+MAX_PUSHOVER_MESSAGE_CHARS = 1024  # Pushover rejects longer messages with a 4xx
+
+
+def _digest_symbol(symbol: Optional[str]) -> str:
+    """Webhook-stored symbols are attacker-shaped: strip control bytes and
+    bound length so one row can't spoof digest lines or 4xx the whole push."""
+    cleaned = _CONTROL_RE.sub("", symbol or "").strip()
+    return cleaned[:MAX_DIGEST_SYMBOL_CHARS] if cleaned else "unparsed"
+
+
 def build_digest(rows: list[dict], unresolved: int) -> str:
-    counts = Counter((r["symbol"] or "unparsed") for r in rows)
+    counts = Counter(_digest_symbol(r["symbol"]) for r in rows)
     parts = [f"{sym} x{n}" for sym, n in counts.most_common(MAX_DIGEST_SYMBOLS)]
     rest = len(counts) - MAX_DIGEST_SYMBOLS
     if rest > 0:
@@ -126,7 +138,7 @@ def build_digest(rows: list[dict], unresolved: int) -> str:
     message = f"{len(rows)} TradingView {noun}: {', '.join(parts)}"
     if unresolved:
         message += f" ({unresolved} unresolved)"
-    return message
+    return message[:MAX_PUSHOVER_MESSAGE_CHARS]
 
 
 # ── Cycle ──────────────────────────────────────────────────────────

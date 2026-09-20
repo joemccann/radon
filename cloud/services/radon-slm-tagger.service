@@ -10,7 +10,6 @@ Type=simple
 User=radon
 UMask=0077
 Environment=RADON_SLM_TAGGER_THREADS=1
-EnvironmentFile=/etc/radon/env
 ExecStart=/usr/local/bin/llama-server --model /var/lib/radon/models/current.gguf --alias radon-slm-tagger --host 127.0.0.1 --port 8331 --ctx-size 2048 --parallel 1 --threads ${RADON_SLM_TAGGER_THREADS} --temp 0 --no-webui --log-disable
 Restart=on-failure
 RestartSec=30

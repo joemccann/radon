@@ -458,7 +458,10 @@ StartLimitBurst=5
 Type=simple
 User=radon
 UMask=0077
-EnvironmentFile=/etc/radon/env
+# No EnvironmentFile: llama-server needs only inline values (threads via
+# Environment=); the shared /etc/radon/env would hand a third-party binary
+# the full production credential set.
+Environment=RADON_SLM_TAGGER_THREADS=1
 ExecStart=/usr/local/bin/llama-server \
   --model /var/lib/radon/models/current.gguf \
   --alias radon-slm-tagger \

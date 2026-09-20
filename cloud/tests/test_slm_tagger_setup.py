@@ -40,3 +40,13 @@ def test_setup_vps_inventories_slm_units_and_does_not_enable_them(tmp_path):
     assert "radon-api.service" in calls
     for unit in UNITS:
         assert unit not in calls
+
+
+def test_tagger_sidecar_loads_no_production_env():
+    # llama-server needs only the model path and thread count, both inline
+    # Environment= values; handing it /etc/radon/env would expose the full
+    # production credential set through a third-party binary's process.
+    unit = SETUP.parents[1] / "services" / "radon-slm-tagger.service"
+    text = unit.read_text(encoding="utf-8")
+    assert "EnvironmentFile=" not in text
+    assert "Environment=RADON_SLM_TAGGER_THREADS=" in text
