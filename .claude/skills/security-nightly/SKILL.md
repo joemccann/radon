@@ -255,10 +255,15 @@ Violating any rail is a failed run.
    `.radon-weekend-runner` and `.radon-security-runner` exist at the repository
    root. A generic marker alone is insufficient. Never use the operator clone
    or the reliability, testing, documentation, or CI-performance loop clones.
-2. **Take an exclusive security-loop lock.** Use namespaced scratch and state
-   outside the repository. Never reset, clean, modify, or kill work owned by
-   another process. Serialize CPU-, memory-, and model-heavy work with the
-   shared Mac mini heavy-work semaphore.
+2. **The wrapper owns the runner lock.** `$REPO/.weekend-runner.lock` is the
+   lock; never create, reclaim, move, `kill -0`, or otherwise verify it,
+   and never create or read `~/radon-weekend/.weekend-runner.lock`. A
+   sandboxed `kill -0` returning `Operation not permitted` must not be read as evidence
+   of anything and must not become a `lock-owner-unverified` INCOMPLETE.
+   Use namespaced scratch and state outside the repository. Never reset,
+   clean, modify, or kill work owned by another process. Serialize CPU-,
+   memory-, and model-heavy work with the shared Mac mini heavy-work
+   semaphore.
 3. **Never test production or third parties.** Do not scan, crawl, fuzz, brute
    force, spray, load test, port scan, or exploit `app.radon.run`, a VPS,
    Tailscale peers, IB, Turso, Clerk, Unusual Whales, Vercel, Cloudflare,

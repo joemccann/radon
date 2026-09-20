@@ -69,7 +69,9 @@ class TestGroundTruthFetchRetry:
         text = WRAPPER.read_text(encoding="utf-8")
         snap = 'TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"'
         guard = '[[ "${1:-}" == "--lock-lib-only" ]] && return 0 2>/dev/null'
+        hard = '[[ -n "$TIMEOUT_BIN" ]] ||'
         assert text.index(snap) < text.index(guard)
+        assert text.index(guard) < text.index(hard)
         assert text.count(snap) == 1
 
 

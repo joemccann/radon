@@ -118,9 +118,13 @@ Violating any rail is a failed run.
    repository root. The intended clone
    is `~/radon-weekend/radon-ci-performance`. Never use the operator clone or
    the testing/reliability loop clones.
-2. **Take an exclusive loop lock.** Refuse or exit cleanly if another
-   CI-performance cycle owns the lock. Namespace scratch files and clean them
-   on exit. Do not kill another nightly process to gain benchmark capacity.
+2. **The wrapper owns the runner lock.** `$REPO/.weekend-runner.lock` is the
+   lock; never create, reclaim, move, `kill -0`, or otherwise verify it,
+   and never create or read `~/radon-weekend/.weekend-runner.lock`. A
+   sandboxed `kill -0` returning `Operation not permitted` must not be read as evidence
+   of anything and must not become a `lock-owner-unverified` INCOMPLETE.
+   Namespace scratch files and clean them on exit. Do not kill another
+   nightly process to gain benchmark capacity.
 3. **Never push to `main`.** Work on `ci-performance/<YYYY-MM-DD>` and open or
    update a PR titled `CI Performance <YYYY-MM-DD>: <plain-language issue>`
    via §Pull request output. Human merge remains the only production trigger.

@@ -106,6 +106,41 @@ def _stub_bin(tmp_path: Path) -> Path:
             'if [ "$1" = "-lint" ]; then exit 0; fi\n'
             "echo 0\n"
         ),
+        "timeout": (
+            "#!/bin/sh\n"
+            'while [ $# -gt 0 ]; do\n'
+            '  case "$1" in\n'
+            '    -k|--kill-after) shift 2 ;;\n'
+            '    --foreground|--preserve-status) shift ;;\n'
+            '    [0-9]*) shift; break ;;\n'
+            '    *) shift; break ;;\n'
+            '  esac\n'
+            'done\n'
+            'exec "$@"\n'
+        ),
+        "npm": (
+            "#!/bin/sh\n"
+            'prefix=""\n'
+            'pkg=""\n'
+            'while [ $# -gt 0 ]; do\n'
+            '  case "$1" in\n'
+            '    --prefix) prefix="$2"; shift 2 ;;\n'
+            '    @playwright/test@*) pkg="$1"; shift ;;\n'
+            '    *) shift ;;\n'
+            '  esac\n'
+            'done\n'
+            'if [ -n "$prefix" ]; then\n'
+            '  mkdir -p "$prefix/node_modules/@playwright/test" "$prefix/node_modules/.bin" "$prefix/node_modules/playwright"\n'
+            '  ver="${pkg##*@}"\n'
+            '  [ -n "$ver" ] || ver="1.58.2"\n'
+            '  printf \'{"version":"%s"}\\n\' "$ver" > "$prefix/node_modules/@playwright/test/package.json"\n'
+            '  printf \'%s\\n\' "#!/bin/sh" "echo Listening on ws://127.0.0.1:4711/tok" "sleep 5" > "$prefix/node_modules/.bin/playwright"\n'
+            '  chmod +x "$prefix/node_modules/.bin/playwright"\n'
+            '  printf \'%s\\n\' "module.exports={chromium:{connect:async()=>({newPage:async()=>({setContent:async()=>{}}),close:async()=>{}})}};" > "$prefix/node_modules/playwright/index.js"\n'
+            'fi\n'
+            "exit 0\n"
+        ),
+        "npx": "#!/bin/sh\nexit 0\n",
     }
     for name, body in scripts.items():
         path = bin_dir / name
@@ -125,7 +160,11 @@ def _stage(tmp_path: Path, name: str) -> tuple[Path, Path, dict]:
     # The setup script refuses a source checkout that does not carry its own
     # loop wrapper (it reads the clone origin from there, never the cwd).
     (src / "scripts").mkdir()
-    (src / "scripts" / WRAPPERS[name]).write_text("", encoding="utf-8")
+    shutil.copy2(REPO / "scripts" / WRAPPERS[name], src / "scripts" / WRAPPERS[name])
+    (src / "web" / "package.json").write_text(
+        '{"devDependencies":{"@playwright/test":"^1.58.2"}}\n',
+        encoding="utf-8",
+    )
 
     root = tmp_path / "weekend"
     clone = root / clone_name
@@ -243,6 +282,40 @@ class TestRunnerEnvProvisioning:
             f"{name}: an older source copy overwrote a newer clone copy:\n{out}"
         )
         assert "web/.env" in out.split("[2/4]", 1)[-1], out
+
+
+class TestSetupLockHygiene:
+    def test_case12_dead_shared_parent_is_swept(self, tmp_path):
+        src, clone, env = _stage(tmp_path, "testing")
+        root = Path(env["RADON_WEEKEND_ROOT"])
+        shared = root / ".weekend-runner.lock"
+        shared.write_text("999999\n", encoding="utf-8")
+        proc = _run("testing", env, tmp_path)
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        assert not shared.exists()
+        preserved = list((root / ".stale-locks").glob("shared.weekend-runner.lock.999999.*"))
+        assert preserved, proc.stdout + proc.stderr
+        assert "ok  no shared-parent lock" in proc.stdout
+
+    def test_case12_live_shared_parent_exits_1(self, tmp_path):
+        src, clone, env = _stage(tmp_path, "testing")
+        root = Path(env["RADON_WEEKEND_ROOT"])
+        shared = root / ".weekend-runner.lock"
+        shared.write_text(f"{os.getpid()}\n", encoding="utf-8")
+        proc = _run("testing", env, tmp_path)
+        assert proc.returncode == 1, proc.stdout + proc.stderr
+        assert shared.exists()
+        assert str(os.getpid()) in proc.stdout + proc.stderr
+
+    def test_case12_dead_clone_lock_is_reclaimed(self, tmp_path):
+        src, clone, env = _stage(tmp_path, "testing")
+        lock = clone / ".weekend-runner.lock"
+        lock.mkdir()
+        (lock / "pid").write_text("999999\n", encoding="utf-8")
+        proc = _run("testing", env, tmp_path)
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        assert "moved stale lock" in proc.stdout
+        assert "999999" in proc.stdout
 
 
 def _web_env_loaders() -> list[Path]:

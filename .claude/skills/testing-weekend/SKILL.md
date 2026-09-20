@@ -90,6 +90,19 @@ artificial commit or PR, and follows the no-op contract below.
    and never edit `RELIABILITY_AUDIT.md` / `RELIABILITY_LOG.md`. Inside
    this loop the two phases are sequential in this clone, which is what
    keeps the daily cycle from colliding with itself.
+8. **The wrapper owns the runner lock.** `$REPO/.weekend-runner.lock` is the
+   lock; never create, reclaim, move, `kill -0`, or otherwise verify it,
+   and never create or read `~/radon-weekend/.weekend-runner.lock`. A
+   sandboxed `kill -0` returning `Operation not permitted` must not be read as evidence
+   of anything and must not become a `lock-owner-unverified` INCOMPLETE.
+9. **Do not launch Chromium in the sandbox.** The wrapper exports
+   `PW_TEST_CONNECT_WS_ENDPOINT` when `RADON_WEEKEND_BROWSER_HOST=ready`.
+   A plain `npx playwright test <spec>` then connects to the host browser.
+   When `RADON_WEEKEND_BROWSER_HOST` is not `ready`, do not attempt a local
+   Chromium launch: it dies on `bootstrap_check_in … Permission denied (1100)`
+   and three attempts prove nothing new. Record the UI check as operator-only
+   with the exact action `bash scripts/setup_testing_weekend.sh` and quote
+   the wrapper's `browser-host=` reason.
 
 ## Mode: audit (first phase of the daily cycle)
 
@@ -176,9 +189,11 @@ failed remediate phase.
    from the repo root (`python3.13 -m pytest`, `npx vitest run`, and
    `pytest cloud/tests` when units/cloud files changed); when the task
    changed UI, also run the relevant `web/e2e` spec in the worktree and
-   attach the screenshot: the clone-copied `node_modules` is what makes
-   that possible, and CLAUDE.md does not accept unit-only evidence for
-   UI; (e) append the TEST_LOG.md row with red/green counts; (f) commit
+   attach the screenshot: the wrapper exports `PW_TEST_CONNECT_WS_ENDPOINT`,
+   so a plain `npx playwright test <spec>` connects to the host browser and
+   no browser launch happens in the sandbox; CLAUDE.md does not accept
+   unit-only evidence for UI; (e) append the TEST_LOG.md row with red/green
+   counts; (f) commit
    with the T-### id.
    Source-code fixes are in scope ONLY when a test correctly fails
    against a real defect the audit identified — fix the defect, keep the
@@ -405,6 +420,14 @@ how this loop improves as the codebase grows.
 
 ## Lessons
 
+- **2026-09-20 (remediate):** Chromium cannot launch under the agent CLI
+  Seatbelt (`mach-register` for
+  `org.chromium.Chromium.MachPortRendezvousServer.<pid>` dies
+  `Permission denied (1100)` / SIGTRAP). The wrapper owns
+  `playwright run-server` on the host and exports
+  `PW_TEST_CONNECT_WS_ENDPOINT`. Never reclaim or `kill -0` a runner lock
+  from the sandbox: EPERM is not death. Operator repair is
+  `bash scripts/setup_testing_weekend.sh`.
 - **2026-08-16 (audit):** start by checking the runner clone is CLEAN, before
   anything else. This run opened on orphaned WIP from a prior capped run —
   three modified files plus an untracked test importing a module that does not

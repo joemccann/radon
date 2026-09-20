@@ -174,10 +174,14 @@ Violating any rail is a failed run.
    the repository root. The intended clone
    is `~/radon-weekend/radon-documentation`. Never use the operator clone or
    the reliability, testing, or CI-performance loop clones.
-2. **Take an exclusive loop lock.** The wrapper's `.weekend-runner.lock` is
-   that lock — never take a second one, and never reset, clean, modify, or
-   kill work owned by another nightly process. Use namespaced scratch state
-   outside the repository and clean it on exit.
+2. **The wrapper owns the runner lock.** `$REPO/.weekend-runner.lock` is the
+   lock; never create, reclaim, move, `kill -0`, or otherwise verify it,
+   and never create or read `~/radon-weekend/.weekend-runner.lock`. A
+   sandboxed `kill -0` returning `Operation not permitted` must not be read as evidence
+   of anything and must not become a `lock-owner-unverified` INCOMPLETE.
+   Never reset, clean, modify, or kill work owned by another nightly
+   process. Use namespaced scratch state outside the repository and clean
+   it on exit.
 3. **Never push to `main`.** Actual changes use
    `documentation/<YYYY-MM-DD>` and a PR titled
    `Documentation <YYYY-MM-DD>: <plain-language issue>` via
