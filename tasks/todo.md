@@ -18,6 +18,7 @@ TEXT_ONLY_WITH_FIGURES, triage. Separate implement PR from main. No merge.
 - [x] T3 intake.py + pipeline.py
 - [x] T4 Docs, focused green, draft PR #584; CI green on fa62035d; no merge
 - [x] T5 Joe 2026-09-20: TEXT_ONLY_WITH_FIGURES is one re-SELECT, hold only after miss; amend #584; no merge
+- [ ] T6 Joe 2026-09-20: humanize SELECT title/body rails (prompt-only); fold into #584; no merge
 
 ## Review
 

@@ -256,6 +256,21 @@ def test_select_and_verify_prompts_are_targets_not_hard_length_or_prematched_num
     assert "lists the ones it could not find" in intake.VERIFY_INSTRUCTION
 
 
+def test_select_instruction_humanizes_title_and_body_without_length_holds():
+    text = intake.SELECT_INSTRUCTION
+    assert "the finding in few words" in text
+    assert "no throat-clearing" in text
+    assert "no filler" in text
+    assert "hedging stacks" in text
+    assert "delve" in text
+    assert "landscape" in text
+    assert "it is important to note" in text
+    assert "template bank-speak" in text
+    assert "copied exactly" in text
+    assert "title<=180" not in text
+    assert "asked once" in text
+
+
 def test_long_title_body_and_claim_key_reach_verify(tmp_path, publisher):
     title = "Foreign investors bought $45bn of US equities in July " + ("x" * 160)
     content = selection()["candidates"][0]["content"] + (" more context." * 220)

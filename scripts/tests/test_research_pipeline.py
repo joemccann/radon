@@ -54,6 +54,18 @@ def test_select_schema_is_targets_not_hard_length_or_eight_page_cap():
     assert 'hard maximum300' not in SELECT_SCHEMA
 
 
+def test_select_schema_humanizes_title_and_body_without_length_holds():
+    from research.pipeline import SELECT_SCHEMA
+    assert 'the finding in few words' in SELECT_SCHEMA
+    assert 'no throat-clearing' in SELECT_SCHEMA
+    assert 'no filler' in SELECT_SCHEMA
+    assert 'hedging stacks' in SELECT_SCHEMA
+    assert 'delve' in SELECT_SCHEMA
+    assert 'it is important to note' in SELECT_SCHEMA
+    assert 'template bank-speak' in SELECT_SCHEMA
+    assert 'title<=180' not in SELECT_SCHEMA
+
+
 def test_candidate_preserves_literal_source_quotes_with_em_dashes():
     item = candidate()
     item['date_evidence'] = {'source_quote': 'Report\u2014September 4, 2026'}
