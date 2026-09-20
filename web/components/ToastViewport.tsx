@@ -19,7 +19,7 @@ export default function ToastViewport({ children }: { children: ReactNode }) {
       viewport.style.zIndex = "10002";
       // Keep large failure bursts reachable on narrow screens.
       viewport.style.maxHeight = "var(--toast-viewport-max-height, calc(100dvh - 48px - var(--safe-bottom, 0px)))";
-      viewport.style.maxWidth = "calc(100vw - 40px)";
+      viewport.style.maxWidth = "var(--toast-viewport-max-width, calc(100vw - 40px))";
       viewport.style.overflowY = "auto";
       document.body.appendChild(viewport);
     }

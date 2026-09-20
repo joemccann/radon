@@ -16024,11 +16024,19 @@ body[data-mobile="true"] .toast-stack {
   bottom: calc(1rem + var(--mobile-tab-bar-height) + var(--safe-bottom));
 }
 
-/* Persistent errors must not cover bottom-sheet recovery and order actions. */
+/* Sit above the tab bar so hero metrics stay readable. */
 body[data-mobile="true"] .toast-container {
-  top: calc(var(--mobile-app-bar-height) + var(--safe-top) + 12px);
-  bottom: auto;
+  top: auto;
+  left: 12px;
+  right: 12px;
+  bottom: calc(1rem + var(--mobile-tab-bar-height) + var(--safe-bottom));
+  align-items: stretch;
   --toast-viewport-max-height: 40dvh;
+  --toast-viewport-max-width: none;
+}
+
+body[data-mobile="true"] .toast {
+  max-width: none;
 }
 
 .mobile-shell {
