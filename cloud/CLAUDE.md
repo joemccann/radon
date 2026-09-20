@@ -304,6 +304,10 @@ Setup pins GitHub's published ed25519 SSH host key (no first-contact keyscan),
 provisions the secret-store credential as 32 raw bytes, and prepares the
 radon-replaceable media directory with create-then-verify + `chown
 --no-dereference` rather than a check-then-install pair.
+Setup stages root-installed artifacts from committed git blobs
+(`git cat-file` at the checkout's HEAD), never from working-tree files, and
+publishes `mcp.env` only through a regular-file destination via temp-write +
+atomic rename (contract: `cloud/tests/test_setup_vps_privileged_paths.py`).
 
 ## Privilege Boundary
 
