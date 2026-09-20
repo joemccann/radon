@@ -276,7 +276,7 @@ class TestWeekendBrowserHost:
     @pytest.mark.parametrize("name", sorted(HOST_LOOPS))
     def test_start_browser_host_pins_absolute_tools(self, name):
         text = HOST_LOOPS[name].read_text(encoding="utf-8")
-        start = text[text.index("start_browser_host() {") : text.index("\non_signal()")]
+        start = text[text.index("_browser_host_bin_ok() {") : text.index("\non_signal()")]
         assert "openssl rand" not in start.replace("/usr/bin/openssl rand", "")
         assert "/usr/bin/openssl" in start
         assert "/usr/bin/grep" in start
@@ -326,17 +326,12 @@ class TestWeekendBrowserHost:
         home = tmp_path / "home"
         home.mkdir()
         child_pid = tmp_path / "child.pid"
-        setsid = "/usr/bin/setsid" if os.path.exists("/usr/bin/setsid") else ""
-        spawn = (
-            f'{setsid} /bin/sleep 120 &\n'
-            if setsid
-            else "/bin/sleep 120 &\n"
-        )
         _plant_host(
             home,
             body=(
                 "#!/bin/sh\n"
-                f"{spawn}"
+                "/usr/bin/python3 -c "
+                "'import os; os.setpgrp(); os.execl(\"/bin/sleep\", \"sleep\", \"120\")' &\n"
                 f'echo $! > "{child_pid}"\n'
                 "exit 133\n"
             ),
