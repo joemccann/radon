@@ -179,3 +179,27 @@ def test_missing_pushover_creds_does_not_stamp_digest(env, monkeypatch):
     assert row[1] is None
     assert pushes == []
     assert health[-1][0] == "error"
+
+
+def test_digest_sanitizes_hostile_symbols():
+    from tv_alerts_drain import build_digest
+
+    rows = [
+        {"symbol": "NVDA\n2000 TradingView alerts: FAKE x1"},
+        {"symbol": "\x1b[2J"},
+        {"symbol": "A" * 500},
+    ]
+    message = build_digest(rows, 0)
+    assert "\n" not in message and "\x1b" not in message
+    assert len(message) <= 1024
+    # Each hostile symbol is bounded, not dropped.
+    assert "NVDA2000" in message
+    assert "A" * 32 in message and "A" * 33 not in message
+
+
+def test_digest_is_bounded_to_pushover_limit():
+    from tv_alerts_drain import build_digest
+
+    rows = [{"symbol": f"{'X' * 30}{i:02d}"} for i in range(8)]
+    message = build_digest(rows, 999)
+    assert len(message) <= 1024
