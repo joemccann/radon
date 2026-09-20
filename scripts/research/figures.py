@@ -23,15 +23,51 @@ GAP = 0.012            # cluster join distance, fraction of page
 MIN_AREA = 0.02        # figure must cover at least 2% of the page
 MIN_SIDE = 0.06        # and be at least 6% wide and tall
 MIN_OBJECTS = 3        # a lone rule or logo is not a chart
+MAX_IMAGE_AREA = 0.9   # a page-sized scan or background is not a chart
 TEXT_REACH = 0.03      # tick/legend text within this distance joins the crop
 LINE_REACH = 0.07      # title above / source below within this distance
 MARGIN = 0.006
 SOURCE_RE = re.compile(r'^\s*(?:source|sources|note|notes)\s*[:：]', re.I)
 
 
-def _norm(bounds, width, height):
+class Catalogue(list):
+    """Figure list plus pages the frame guard still skipped."""
+
+    def __init__(self, figures=(), skipped_pages=None):
+        super().__init__(figures)
+        self.skipped_pages = list(skipped_pages or [])
+
+
+def _norm(bounds, frame):
     left, bottom, right, top = bounds
-    return [max(0.0, left / width), max(0.0, 1 - top / height), min(1.0, right / width), min(1.0, 1 - bottom / height)]
+    fl, fb, fr, ft = frame
+    width, height = fr - fl, ft - fb
+    return [max(0.0, (left - fl) / width), max(0.0, 1 - (top - fb) / height),
+            min(1.0, (right - fl) / width), min(1.0, 1 - (bottom - fb) / height)]
+
+
+def _frame(page):
+    bbox = page.get_bbox()
+    if bbox is None or len(bbox) != 4 or not all(math.isfinite(float(v)) for v in bbox):
+        return None, 'invalid_bbox'
+    left, bottom, right, top = (float(v) for v in bbox)
+    if not (right > left and top > bottom):
+        return None, 'invalid_bbox'
+    return (left, bottom, right, top), None
+
+
+def _to_displayed(box, rotation):
+    left, top, right, bottom = box
+    turn = rotation % 360
+    if turn == 0:
+        return box
+    if turn == 90:
+        return [1 - bottom, left, 1 - top, right]
+    if turn == 180:
+        return [1 - right, 1 - bottom, 1 - left, 1 - top]
+    if turn == 270:
+        return [top, 1 - right, bottom, 1 - left]
+    return box
 
 
 def _gap(a, b):
@@ -44,22 +80,22 @@ def _union(a, b):
     return [min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3])]
 
 
-def _cluster(boxes, gap):
-    """Greedy single-link clustering of boxes whose edges lie within gap."""
+def _cluster(items, gap):
+    """Greedy single-link clustering of (box, is_image) whose edges lie within gap."""
     clusters = []
-    for box in boxes:
-        merged = [box, 1]
+    for box, is_image in items:
+        merged = [box, 1, 1 if is_image else 0]
         rest = []
         for cluster in clusters:
             if _gap(cluster[0], merged[0]) <= gap:
-                merged = [_union(cluster[0], merged[0]), cluster[1] + merged[1]]
+                merged = [_union(cluster[0], merged[0]), cluster[1] + merged[1], cluster[2] + merged[2]]
             else:
                 rest.append(cluster)
         clusters = rest + [merged]
     return clusters
 
 
-def _lines(textpage, width, height):
+def _lines(textpage, frame):
     """Text rectangles as normalized boxes with their text, top to bottom."""
     lines = []
     for index in range(min(textpage.count_rects(), 600)):
@@ -68,7 +104,7 @@ def _lines(textpage, width, height):
             continue
         value = textpage.get_text_bounded(left, bottom, right, top).strip()
         if value:
-            lines.append((_norm((left, bottom, right, top), width, height), value))
+            lines.append((_norm((left, bottom, right, top), frame), value))
     return sorted(lines, key=lambda item: item[0][1])
 
 
@@ -100,31 +136,43 @@ def _attach(box, lines, reach):
     return title, source
 
 
-def detect(pdf_path, page_number):
-    """Figures on one page: [{page, bbox, objects, title, source_line}] in reading order."""
+def _kind(count, images):
+    if images <= 0:
+        return 'vector'
+    if images >= count:
+        return 'raster'
+    return 'mixed'
+
+
+def _figures_on_page(pdf_path, page_number):
+    """(figures, skip_reason) for one 1-based page. skip_reason is set only when the frame is unusable."""
     with pdfium.PdfDocument(str(Path(pdf_path).resolve(strict=True))) as document:
         page = document[page_number - 1]
-        width, height = page.get_size()
-        bbox = page.get_bbox()
-        if page.get_rotation() != 0 or any(abs(a - b) > .01 for a, b in zip(bbox, (0, 0, width, height))):
+        frame, reason = _frame(page)
+        if reason:
             page.close()
-            return []          # Only a verified unrotated zero-origin frame maps to render crops.
-        boxes = []
+            return [], reason
+        rotation = page.get_rotation()
+        items = []
         for obj in page.get_objects(filter=DRAWN, max_depth=8):
             try:
-                box = _norm(obj.get_bounds(), width, height)
+                box = _norm(obj.get_bounds(), frame)
             except pdfium.PdfiumError:
                 continue
             if box[2] > box[0] and box[3] > box[1]:
-                boxes.append(box)
+                items.append((box, obj.type == pdfium_c.FPDF_PAGEOBJ_IMAGE))
         textpage = page.get_textpage()
-        lines = _lines(textpage, width, height)
+        lines = _lines(textpage, frame)
         textpage.close()
         page.close()
     found = []
-    for box, count in _cluster(boxes, GAP):
+    for box, count, images in _cluster(items, GAP):
         w, h = box[2] - box[0], box[3] - box[1]
-        if count < MIN_OBJECTS or w * h < MIN_AREA or min(w, h) < MIN_SIDE:
+        if not (count >= MIN_OBJECTS or images >= 1):
+            continue
+        if w * h < MIN_AREA or min(w, h) < MIN_SIDE:
+            continue
+        if images >= 1 and w * h > MAX_IMAGE_AREA:
             continue
         title, source = _attach(box, lines, LINE_REACH)
         crop = _grow_text(box, lines, TEXT_REACH)
@@ -132,9 +180,20 @@ def detect(pdf_path, page_number):
             if hit:
                 crop = _union(crop, hit[1])
         crop = [max(0.0, crop[0] - MARGIN), max(0.0, crop[1] - MARGIN), min(1.0, crop[2] + MARGIN), min(1.0, crop[3] + MARGIN)]
+        crop = _to_displayed(crop, rotation)
+        crop = [max(0.0, crop[0]), max(0.0, crop[1]), min(1.0, crop[2]), min(1.0, crop[3])]
+        if crop[2] <= crop[0] or crop[3] <= crop[1]:
+            continue
         found.append({'page': page_number, 'bbox': [round(v, 4) for v in crop], 'objects': count,
+                      'kind': _kind(count, images),
                       'title': title[2] if title else None, 'source_line': source[2] if source else None})
-    return sorted(found, key=lambda f: (f['bbox'][1], f['bbox'][0]))
+    return sorted(found, key=lambda f: (f['bbox'][1], f['bbox'][0])), None
+
+
+def detect(pdf_path, page_number):
+    """Figures on one page: [{page, bbox, objects, kind, title, source_line}] in reading order."""
+    found, _reason = _figures_on_page(pdf_path, page_number)
+    return found
 
 
 def catalogue(pdf_path, pages, output_dir, dpi=216):
@@ -142,12 +201,15 @@ def catalogue(pdf_path, pages, output_dir, dpi=216):
     from research.pdf import render
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True, mode=0o700)
-    result = []
+    result, skipped = [], []
     for number in pages:
-        for figure in detect(pdf_path, number):
+        found, reason = _figures_on_page(pdf_path, number)
+        if reason:
+            skipped.append({'page': number, 'reason': reason})
+        for figure in found:
             index = len(result) + 1
             target = output / f'f{index}'
             record = render(pdf_path, target, [number], dpi=dpi, crop=figure['bbox'])[0]
             result.append({'id': f'f{index}', **figure, 'image_file': f'f{index}/' + record['image_file'],
                            'width': record['width'], 'height': record['height']})
-    return result
+    return Catalogue(result, skipped_pages=skipped)

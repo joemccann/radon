@@ -150,3 +150,49 @@ def test_text_only_finding_publishes_without_images(tmp_path, publisher):
     reviewer = Reviewer([selection(figure_ids=[], text_only=True, captions={}), verdict()])
     posts = build(tmp_path, reviewer, publisher).process(work(), tmp_path / "r.pdf", [])
     assert len(posts) == 1 and posts[0]["images"] == [] and reviewer.calls[1][2] == ()
+
+
+def catalogue_on(page):
+    def impl(pdf, pages, output_dir, dpi=216):
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "f1.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"crop")
+        return [{"id": "f1", "page": page, "bbox": [0.1, 0.2, 0.9, 0.6], "objects": 12, "kind": "raster",
+                 "title": "Net foreign purchases of US equities",
+                 "source_line": "Source: Treasury, Goldman Sachs Global Investment Research",
+                 "image_file": "f1.png", "width": 800, "height": 400}]
+    return impl
+
+
+def test_text_only_candidate_on_a_page_with_catalogue_figures_is_held(tmp_path, publisher):
+    reviewer = Reviewer([selection(figure_ids=[], text_only=True, captions={}, pages=[1]), verdict()])
+    pipe = intake.Pipeline(tmp_path, reviewer, publisher, extractor=extractor,
+                           figure_catalogue=catalogue_on(1), pdf_created=lambda pdf: None)
+    posts = pipe.process(work(), tmp_path / "r.pdf", [])
+    assert posts == [] and publisher.stored == [] and len(reviewer.calls) == 1
+    review = json.loads((tmp_path / "evidence" / ("k" * 64) / "review.json").read_text())
+    held = [a for a in review["audit"] if a.get("held") == "TEXT_ONLY_WITH_FIGURES"]
+    assert held and held[0]["figures_on_cited_pages"] == ["f1"] and held[0]["claim_key"] == "tic-july-equity-buying"
+
+
+def test_text_only_candidate_on_chart_free_pages_still_publishes(tmp_path, publisher):
+    reviewer = Reviewer([selection(figure_ids=[], text_only=True, captions={}, pages=[1]), verdict()])
+    posts = build(tmp_path, reviewer, publisher).process(work(), tmp_path / "r.pdf", [])
+    assert len(posts) == 1 and posts[0]["images"] == [] and reviewer.calls[1][2] == ()
+
+
+def test_operator_note_requeue_reaches_select_with_figure_guidance(tmp_path, publisher):
+    post_id = "research-" + "1" * 64
+    reviewer = Reviewer([selection(), verdict()])
+    noted = dict(work(), note=json.dumps({"kind": "more", "comment": "add the chart", "post_id": post_id,
+                                          "title": "Foreign investors bought $45bn"}))
+    posts = build(tmp_path, reviewer, publisher).process(noted, tmp_path / "r.pdf", [])
+    assert posts[0]["id"] == post_id
+    assert "REVISE THIS PUBLISHED ITEM" in reviewer.calls[0][1]
+    assert "attaching the supporting figure from the catalogue" in reviewer.calls[0][1]
+
+
+def test_select_instruction_and_catalogue_include_kind_and_text_only_hold_rule(tmp_path, publisher):
+    assert "a text_only candidate that cites a page with catalogue figures is held for operator review" in intake.SELECT_INSTRUCTION
+    reviewer = Reviewer([selection(), verdict()])
+    build(tmp_path, reviewer, publisher).process(work(), tmp_path / "r.pdf", [])
+    assert '"kind"' in reviewer.calls[0][1]

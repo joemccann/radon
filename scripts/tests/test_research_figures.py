@@ -4,20 +4,36 @@ import zlib
 import pytest
 
 from research import figures
+from research import pdf as research_pdf
 
 W, H = 612, 792
+GRAY = bytes([0x20] * 64)
 
 
-def _pdf(content, size=(W, H)):
+def _pdf(content, size=(W, H), origin=(0, 0), extras="", image=None):
     """A one-page PDF with Helvetica and the given content stream (PDF points, origin bottom-left)."""
+    ox, oy = origin
     stream = zlib.compress(content.encode())
+    resources = "/Font << /F1 5 0 R >>"
+    if image is not None:
+        resources += " /XObject << /Im1 6 0 R >>"
+    extra = f" {extras.strip()}" if extras.strip() else ""
     objs = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
         b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-        f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {size[0]} {size[1]}] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>".encode(),
+        (f"<< /Type /Page /Parent 2 0 R /MediaBox [{ox} {oy} {ox + size[0]} {oy + size[1]}] "
+         f"/Contents 4 0 R /Resources << {resources} >>{extra} >>").encode(),
         b"<< /Length " + str(len(stream)).encode() + b" /Filter /FlateDecode >>\nstream\n" + stream + b"\nendstream",
         b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
     ]
+    if image is not None:
+        iw, ih, data = image
+        objs.append(
+            b"<< /Type /XObject /Subtype /Image /Width " + str(iw).encode()
+            + b" /Height " + str(ih).encode()
+            + b" /ColorSpace /DeviceGray /BitsPerComponent 8 /Length "
+            + str(len(data)).encode() + b" >>\nstream\n" + data + b"\nendstream"
+        )
     out, offsets = bytearray(b"%PDF-1.4\n"), []
     for i, body in enumerate(objs, 1):
         offsets.append(len(out))
@@ -31,6 +47,11 @@ def _pdf(content, size=(W, H)):
 
 def text(x, y, s, size=10):
     return f"BT /F1 {size} Tf {x} {y} Td ({s}) Tj ET\n"
+
+
+def image_chart(x0, y0, x1, y1):
+    """One DeviceGray IMAGE XObject stretched into the box (PDF points, origin bottom-left)."""
+    return f"q {x1 - x0} 0 0 {y1 - y0} {x0} {y0} cm /Im1 Do Q\n"
 
 
 def chart(x0, y0, x1, y1):
@@ -111,3 +132,96 @@ def test_catalogue_numbers_figures_across_pages_and_renders_crops(chart_pdf, tmp
     assert [f["id"] for f in catalogue] == ["f1"]
     png = tmp_path / "out" / catalogue[0]["image_file"]
     assert png.is_file() and png.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+RASTER = (
+    text(72, 700, "Exhibit 1: S&P 500 EPS revisions breadth", 12)
+    + image_chart(72, 400, 540, 680)
+    + text(72, 372, "Source: Goldman Sachs Global Investment Research")
+    + text(72, 330, "Body paragraph one about earnings momentum persisting into next quarter.")
+)
+
+
+def _dark_extent(png):
+    from PIL import Image
+    with Image.open(png) as image:
+        gray = image.convert("L")
+        w, h = gray.size
+        pixels = gray.load()
+        xs, ys = [], []
+        for y in range(h):
+            for x in range(w):
+                if pixels[x, y] < 80:
+                    xs.append(x)
+                    ys.append(y)
+    assert xs, "crop has no dark pixels"
+    return min(xs) / w, min(ys) / h, max(xs) / w, max(ys) / h
+
+
+def _assert_chart_fills_crop(pdf_path, bbox, tmp_path, name="crop"):
+    record = research_pdf.render(pdf_path, tmp_path / name, [1], dpi=216, crop=bbox)[0]
+    png = tmp_path / name / record["image_file"]
+    _l, _t, r, b = _dark_extent(png)
+    assert r >= 0.98 and b >= 0.98, (r, b)
+
+
+def test_single_raster_image_chart_is_a_figure(tmp_path):
+    path = tmp_path / "raster.pdf"
+    path.write_bytes(_pdf(RASTER, image=(8, 8, GRAY)))
+    found = figures.detect(path, 1)
+    assert len(found) == 1
+    fig = found[0]
+    assert fig["kind"] == "raster"
+    l, t, r, b = fig["bbox"]
+    assert l <= 72 / W and r >= 540 / W
+    assert t <= (H - 712) / H and b >= (H - 370) / H, "title and Source line are inside the crop"
+    assert b < (H - 330) / H, "body prose stays outside the crop"
+
+
+def test_two_lone_raster_charts_are_two_figures(tmp_path):
+    path = tmp_path / "two-raster.pdf"
+    path.write_bytes(_pdf(image_chart(60, 400, 290, 640) + image_chart(330, 400, 560, 640), image=(8, 8, GRAY)))
+    found = figures.detect(path, 1)
+    assert len(found) == 2
+    assert found[0]["kind"] == found[1]["kind"] == "raster"
+    assert found[0]["bbox"][2] < found[1]["bbox"][0]
+
+
+def test_near_full_page_image_is_not_a_figure(tmp_path):
+    path = tmp_path / "scan.pdf"
+    path.write_bytes(_pdf(image_chart(6, 6, 606, 786), image=(8, 8, GRAY)))
+    assert figures.detect(path, 1) == []
+
+
+def test_offset_mediabox_page_detects_in_displayed_frame(tmp_path):
+    path = tmp_path / "offset.pdf"
+    path.write_bytes(_pdf(PAGE, origin=(10, 10)))
+    found = figures.detect(path, 1)
+    assert len(found) == 1 and found[0]["kind"] == "vector"
+    _assert_chart_fills_crop(path, found[0]["bbox"], tmp_path, "offset")
+
+
+def test_cropbox_inset_page_detects_in_displayed_frame(tmp_path):
+    path = tmp_path / "cropbox.pdf"
+    path.write_bytes(_pdf(PAGE, extras="/CropBox [20 20 592 772]"))
+    found = figures.detect(path, 1)
+    assert len(found) == 1 and found[0]["kind"] == "vector"
+    _assert_chart_fills_crop(path, found[0]["bbox"], tmp_path, "cropbox")
+
+
+def test_rotated_page_crop_lands_on_displayed_chart(tmp_path):
+    path = tmp_path / "rotated.pdf"
+    path.write_bytes(_pdf(PAGE, extras="/Rotate 90"))
+    found = figures.detect(path, 1)
+    assert len(found) == 1 and found[0]["kind"] == "vector"
+    _assert_chart_fills_crop(path, found[0]["bbox"], tmp_path, "rotated")
+
+
+def test_catalogue_reports_skipped_pages(tmp_path, monkeypatch):
+    import pypdfium2
+    path = tmp_path / "chart.pdf"
+    path.write_bytes(_pdf(PAGE))
+    monkeypatch.setattr(pypdfium2.PdfPage, "get_bbox", lambda self: (float("nan"), 0.0, 612.0, 792.0))
+    catalogue = figures.catalogue(path, [1], tmp_path / "out")
+    assert catalogue == []
+    assert catalogue.skipped_pages == [{"page": 1, "reason": "invalid_bbox"}]

@@ -82,6 +82,18 @@ def test_outcome_row_carries_enough_context_to_judge_a_document_with_no_drafts()
                        "sourceUrl": "/api/newsfeed/research/files/" + "c" * 64 + ".pdf"}
 
 
+def test_outcome_row_surfaces_text_only_with_figures_and_figure_count():
+    row = publish.outcome_row(work(), review(
+        audit=[{"held": "TEXT_ONLY_WITH_FIGURES", "claim_key": "tic-july", "figures_on_cited_pages": ["f1"]}],
+        selection={"candidates": [{"claim_key": "tic-july", "title": "Foreign investors bought $45bn", "content": "Body"}],
+                   "reason": "measured flow"},
+        figures=[{"id": "f1"}],
+        posts=[],
+    ))
+    assert json.loads(row["reason_codes"]) == ["TEXT_ONLY_WITH_FIGURES"]
+    assert json.loads(row["context_json"])["figureCount"] > 0
+
+
 def test_intake_records_the_opening_text_and_a_pdf_link_for_a_document_that_publishes_nothing(tmp_path):
     seen = []
     publisher = SimpleNamespace(store_asset=lambda p: "/api/newsfeed/research/files/" + "c" * 64 + "." + str(p).rsplit(".", 1)[-1],
