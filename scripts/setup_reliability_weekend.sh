@@ -250,7 +250,7 @@ _setup_refuse_browser_host_tree() {
 _setup_refuse_browser_host_tree
 mkdir -p "$BROWSER_HOST_DIR"
 refuse_symlink "$BROWSER_HOST_DIR" || exit 1
-PW_SPEC="$(/usr/bin/sed -n 's/.*"@playwright\/test"[[:space:]]*:[[:space:]]*"\^\?\([^"]*\)".*/\1/p' "$SRC_REPO/web/package.json" | /usr/bin/head -n 1)"
+PW_SPEC="$(/usr/bin/sed -n 's/.*"@playwright\/test"[[:space:]]*:[[:space:]]*"[^"0-9]*\([0-9][^"]*\)".*/\1/p' "$SRC_REPO/web/package.json" | /usr/bin/head -n 1)"
 if [[ -z "$PW_SPEC" ]]; then
   echo "  MISSING  @playwright/test pin in $SRC_REPO/web/package.json"
   fail=1
@@ -259,6 +259,19 @@ else
   npx --prefix "$BROWSER_HOST_DIR" playwright install chromium
   echo "  ok  browser host (playwright ${PW_SPEC})"
 fi
+_setup_stop_run_server() {
+  # The run-server can outlive SIGTERM; a bare `wait` then blocks setup
+  # forever and the launchd step below never runs. Escalate after 5s.
+  local pid="$1" i=0
+  kill -TERM "$pid" 2>/dev/null || true
+  while [[ $i -lt 5 ]] && kill -0 "$pid" 2>/dev/null; do
+    sleep 1
+    i=$((i + 1))
+  done
+  kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null
+  wait "$pid" 2>/dev/null || true
+}
+
 _setup_browser_host_smoke() {
   local bin log token pid endpoint i node_bin
   bin="$BROWSER_HOST_DIR/node_modules/.bin/playwright"
@@ -281,14 +294,12 @@ _setup_browser_host_smoke() {
     i=$((i + 1))
   done
   node_bin="$(command -v node 2>/dev/null || true)"
-  if [[ -z "$endpoint" || -z "$node_bin" ]] || ! NODE_PATH="$BROWSER_HOST_DIR/node_modules" E="$endpoint" \
-      "$node_bin" -e 'const {chromium}=require("playwright");(async()=>{const b=await chromium.connect(process.env.E);const p=await b.newPage();await p.setContent("<html></html>");await b.close();})().catch(e=>{console.error(e);process.exit(1);});'; then
-    kill -TERM "$pid" 2>/dev/null || true
-    wait "$pid" 2>/dev/null || true
+  if [[ -z "$endpoint" || -z "$node_bin" ]] || ! PW_MODULE="$BROWSER_HOST_DIR/node_modules/playwright" E="$endpoint" \
+      "$node_bin" -e 'const {chromium}=require(process.env.PW_MODULE);(async()=>{const b=await chromium.connect(process.env.E);const p=await b.newPage();await p.setContent("<html></html>");await b.close();})().catch(e=>{console.error(e);process.exit(1);});'; then
+    _setup_stop_run_server "$pid"
     return 1
   fi
-  kill -TERM "$pid" 2>/dev/null || true
-  wait "$pid" 2>/dev/null || true
+  _setup_stop_run_server "$pid"
   return 0
 }
 if _setup_browser_host_smoke; then
