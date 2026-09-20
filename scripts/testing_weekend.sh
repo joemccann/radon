@@ -230,6 +230,19 @@ GIT_SSH_BOUNDED="ssh -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAli
 
 # `source testing_weekend.sh --lock-lib-only` exposes the helpers above to the
 # contract tests without running a weekend.
+# The sandboxed agent can write anywhere in this clone, so any path this
+# wrapper chmods, rms, or writes through could have been replaced with a
+# symlink pointing outside it. Verify before every privileged file
+# operation and refuse rather than follow. CWE-59.
+refuse_symlink() {
+  local p="${1:-}"
+  if [[ -L "$p" ]]; then
+    echo "REFUSING: $p is a symlink; privileged file operations here do not follow symlinks" >&2
+    return 1
+  fi
+  return 0
+}
+
 [[ "${1:-}" == "--lock-lib-only" ]] && return 0 2>/dev/null
 
 # Bash reads a script LAZILY by byte offset and re-reads it from disk after
@@ -949,6 +962,8 @@ refuse_billing_reroute_files() {
   # only model route in this clone. The security clone refuses the file above.
   if [[ -f web/.env ]] && { grep -qE "$BILLING_REROUTE_KEY_ASSIGN" web/.env || grep -qiE "$BILLING_REROUTE_FLAG_ASSIGN" web/.env; }; then
     echo "IGNORING: web/.env holds billing-reroute credentials; removed from the clone copy, this loop bills the claude.ai subscription only" >&2
+    refuse_symlink web/.env || exit 2
+    rm -f -- web/.env.scrub
     { grep -vE "$BILLING_REROUTE_KEY_ASSIGN" web/.env | grep -viE "$BILLING_REROUTE_FLAG_ASSIGN" || true; } > web/.env.scrub
     cat web/.env.scrub > web/.env
     rm -f web/.env.scrub
@@ -993,6 +1008,7 @@ trap 'stop_browser_host; release_runner_lock "$RUNNER_LOCK"; if [[ -n "${NIGHTLY
 
 LOG_DIR="$REPO/logs/testing-weekend"
 mkdir -p "$LOG_DIR"
+refuse_symlink "$LOG_DIR" || exit 2
 # Run logs carry agent transcripts; keep them owner-only regardless of
 # the inherited umask. Dir-level clamp so no per-file mode can regress it.
 chmod 700 "$LOG_DIR"
@@ -1009,6 +1025,7 @@ chmod 700 "$LOG_DIR"
 ls -1t "$LOG_DIR" 2>/dev/null \
   | { grep -v -e '^launchd-cycle\.log$' -e '^launchd-cycle\.err$' || true; } \
   | tail -n +31 | while IFS= read -r old; do
+  [[ -f "$LOG_DIR/$old" && ! -L "$LOG_DIR/$old" ]] || continue
   rm -f -- "$LOG_DIR/$old"
 done
 

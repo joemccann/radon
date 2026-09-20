@@ -7870,8 +7870,10 @@ Operational review: repaired the existing Turso snapshot in place, preserving sc
 
 ## Weekend browser host + stale lock reclaim (implement PR, 2026-09-20)
 - [x] T1 depends_on: [] Read the rails: testing wrapper lock/launch/phase flow, setup script, sibling wrappers, weekend_prune locking_pid, skill + remediate prompt, TEST_LOG T-496, playwright.config.ts.
-- [x] T2 depends_on: [T1] Root-cause the Mach denial (Seatbelt mach-register under codex / Claude sandboxes) and prove the run-server + PW_TEST_CONNECT_WS_ENDPOINT wiring.
+- [x] T2 depends_on: [T1] Root-cause the Mach denial (Seatbelt mach-register under codex / Claude sandboxes) and prove the run-server + PW_TEST_CONNECT_WS_ENDPOINT wiring with the runner holding no browser.
 - [x] T3 depends_on: [T1] Design host-only stale-lock reclaim for plain-file locks and dead pids without weakening R-411.
 - [x] T4 depends_on: [T2,T3] Write `tasks/weekend-browser-host-and-lock-reclaim-plan.md` (plan PR #576).
-- [x] T5 depends_on: [T4] Implement PR (separate): wrapper browser host, lock helpers x6 (pid+start fingerprint, shared-parent sweep, setup checks; hard DoD L1-L5), skill rails, red/green tests, operations.md owner update.
+- [x] T5 depends_on: [T4] Implement PR (separate): wrapper browser host, lock helpers x6 (pid+start fingerprint, shared-parent sweep, setup checks; hard DoD L1-L5 per Joe 2026-09-20), skill rails, red/green tests, operations.md owner update.
 Dependency graph: T1 -> {T2,T3} -> T4 -> T5.
+
+Review: plan PR #576 was design only. This implement PR adds the host run-server, L1-L5 lock hygiene, skill rails, and regressions.
