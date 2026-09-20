@@ -174,6 +174,46 @@ Incident: 2026-07-08, P1.
 
 ---
 
+## tv-alerts-start-limit-healthy-drain
+
+**`radon-tv-alerts.service` oneshot pages P1 `Result=start-limit-hit`
+(`NRestarts=0`) while every drain that ran exited 0.** Peak: 2026-09-19
+20:05Z, page `8750de94…`. Recurs every ~30 min until Burst is raised.
+
+- **Mechanism:** `radon-tv-alerts.timer` fires every 5 minutes
+  (`OnCalendar=*:02/5:23`). The service copied the DUR-02 brake as
+  `StartLimitBurst=5` / `StartLimitIntervalSec=1800` under the comment
+  that 5 starts in 1800s meant half an hour of failures. systemd
+  StartLimit counts successful Type=oneshot starts. Six healthy fires
+  fit in 1800s, so the 6th is refused (`elapsed > interval` is false at
+  exactly 1800s, so two slots miss). The unit parks `failed` /
+  `start-limit-hit` and does not auto-recover until the window elapses.
+  The drain script is unused in the failure (`processed: 0` on the five
+  successes). IB unused. Edge and `:8321/health/lite` stay up.
+- **Detection:** journal five `[tv-alerts-drain] {"processed": 0, …}`
+  lines then a 10-minute gap; `systemctl show` during the gap →
+  `Result=start-limit-hit` / `NRestarts=0`; next fire 10 min later
+  succeeds and the pattern repeats. Watchdog unit bucket pages P1
+  because start-limit-hit never auto-recovers inside the window.
+- **Discriminating check:** StartLimitBurst <= timer fires in
+  StartLimitIntervalSec (here 5 <= 6). Script exit 0 on every run that
+  was allowed. `Result=signal` is deploy stop-clean. `Result=exit-code`
+  is a real drain failure (Pushover/Turso), a different class. If
+  `/health/lite` is down too → API, stand down.
+- **Remediation (code):** `StartLimitBurst=10` (ib-watchdog /
+  host-metrics / skew). Do not `reset-failed` as the fix; the next
+  timer already unparks when the window elapses, and the 30-min page
+  loop returns until the unit file is installed. After deploy,
+  `install-units` / `sync-scheduled-units` publishes the body.
+- **Regression:**
+  `test_systemd_services.py::TestRepeatingTimerStartLimitHeadroom`
+  (`test_every_repeating_timer_has_start_limit_headroom`,
+  `test_tv_alerts_five_minute_cadence_has_headroom`).
+- **Code:** `cloud/services/radon-tv-alerts.service`
+  (`StartLimitBurst=10`).
+
+---
+
 ## deploy-stop-clean-oneshot-signal
 
 **`Type=oneshot` scan units page P1 `Result=signal` when deploy
@@ -2249,3 +2289,14 @@ silent.
 - **Repair:** reconcile statement-covered flows with verified historical flow coverage alongside the NAV extension. The statement owns its covered interval, including explicit zero-flow corrections. Missing ledger or coverage evidence must still suppress publication; never apply the suggested NAV residual as a deposit.
 - **Recovery:** use the existing no-SendRequest performance rebuild against retained NAV and flow mirrors after checking their coverage. Confirm `n_suspect=0`, correct external-flow totals, full period bounds and non-null TWR in both the disk payload and served snapshot. The nightly ingest repair is still required to prevent recurrence.
 - **Regression:** `scripts/tests/test_flex_from_file.py` covers historical deposits with a short empty-flow statement; browser coverage preserves degraded gating and verifies a corrected payload restores the full-period TWR.
+
+## newsfeed-share-missing-subscription-502
+
+**POST `/api/newsfeed/share` 502s with toast "Voice rewrite unavailable. Showing the original copy."** Peak: 2026-09-19 16:09:36Z.
+
+- **Mechanism:** Next.js `chat()` meters SuperGrok / Claude Max grants from `~/.grok` and `~/.claude`. `2aba1229` stopped binding those dirs into `radon-nextjs` (internet-facing, refresh tokens). Prepaid `ANTHROPIC_API_KEY` / `XAI_API_KEY` in the container env are ignored unless `RADON_LADDER_ALLOW_PREPAID=1`. Auto-prefer then falls through to Anthropic and throws `Missing Anthropic subscription`. The share route maps that to 502. `radon-api` and `radon-newsfeed` still had the mounts.
+- **Discriminating check:** `journalctl -u radon-nextjs` contains `[newsfeed/share] voice rewrite failed: Error: Missing Anthropic subscription`. `docker inspect radon-nextjs.service` has no `/home/radon/.claude` or `.grok` bind. Caddy 502 from `response_header_timeout` is an empty body and takes ~30s; this 502 is immediate JSON.
+- **Remediation (code):** bind `.grok` / `.codex` / `.claude` into `radon-nextjs.service` the same way as api/newsfeed/research. Relay stays unbound. Share calls pass `reasoningEffort: "low"` so grok-4.6 does not spend the 1600-token budget on hidden reasoning. `parseVoiceCopy` accepts fenced JSON.
+- **Regression:** `cloud/tests/test_app_runtime.py::test_run_nextjs_binds_subscription_credential_dirs_readonly`, `test_run_relay_gets_no_subscription_credential_binds`, `web/tests/newsfeed-share-api.test.ts`, `web/tests/newsfeed-voice.test.ts`.
+- **Code:** `cloud/scripts/radon-app-runtime.sh`, `web/app/api/newsfeed/share/route.ts`, `web/lib/newsfeedVoice.ts`.
+- **Host:** next deploy of `radon-app-runtime` then restart `radon-nextjs`. Confirm `docker inspect` shows the three binds and a share rewrite returns 200.

@@ -325,6 +325,17 @@ class TestThePlistRunsTheCycle:
         assert env.get("DISABLE_AUTOUPDATER") == "1"
         assert set(env) <= {"PATH", "HOME", "DISABLE_AUTOUPDATER", "RADON_WEEKEND_REPO"}, env
 
+    def test_the_detached_stage_inherits_the_launchd_path(self):
+        # 2026-09-19 audit: the agent launched the detached deepsec stage with
+        # a hand-built `env -i` PATH, so `node` (only under ~/.local/bin on the
+        # runner, which the plist PATH carries) was missing and every deepsec
+        # call exited 127. Both skills must pass the wrapper's PATH verbatim.
+        assert "__HOME__/.local/bin" in self._job()["EnvironmentVariables"]["PATH"].replace("/tmp/home", "__HOME__")
+        for skill in (SKILL, SECURITY_SKILL):
+            text = " ".join(skill.read_text(encoding="utf-8").split())
+            assert 'nohup env -i PATH="$PATH"' in text, skill
+            assert "<minimal env>" not in text, skill
+
     def test_the_job_fires_daily_in_the_midnight_hour(self):
         job = self._job()
         assert job["StartCalendarInterval"]["Hour"] == 0

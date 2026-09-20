@@ -114,6 +114,8 @@ readonly SERVICE_FILES=(
   radon-db-retention.timer
   radon-host-metrics.service
   radon-host-metrics.timer
+  radon-tv-alerts.service
+  radon-tv-alerts.timer
   radon-breadth.service
   radon-breadth.timer
   radon-catalysts.service
@@ -625,9 +627,11 @@ preflight_checks() {
     exit 0
   fi
 
-  # Accept GitHub host key
+  # Pin GitHub's published ed25519 host key (docs.github.com "GitHub's SSH
+  # key fingerprints") instead of trusting whatever answers first contact.
   if ! sudo -u radon ssh-keygen -F github.com &>/dev/null; then
-    ssh-keyscan -t ed25519 github.com >> /home/radon/.ssh/known_hosts 2>/dev/null
+    printf '%s\n' 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' \
+      >> /home/radon/.ssh/known_hosts
     chown radon:radon /home/radon/.ssh/known_hosts
   fi
 
@@ -679,7 +683,9 @@ provision_secret_store_credential() {
   fi
   local tmp
   tmp="$(mktemp)"
-  head -c 32 /dev/urandom | base64 \
+  # The store is key-bound to 32 RAW bytes; an encoding pass here would
+  # provision key text the store refuses, and radon-api never starts.
+  head -c 32 /dev/urandom \
     | systemd-creds encrypt --name=radon-secret-store-key - "$tmp" || {
       rm -f "$tmp"
       log_error "systemd-creds encrypt failed; radon-api.service would fail on a missing ${key}"
@@ -710,17 +716,21 @@ create_etc_radon_dir() {
   local dir="/etc/radon"
   local media="/var/lib/radon/media"
   # /var/lib/radon is radon-owned (2FA leases), so media/ is radon-replaceable
-  # and install -d would follow a planted link and chown its target.
-  if [[ -L "$media" ]]; then
+  # and a check-then-install pair leaves a window to swap a link in between.
+  # mkdir never follows a link in the final component: create first, refuse
+  # anything that is not a real directory, then chown without dereferencing.
+  if [[ "${RADON_HELPER_SKIP_CHOWN:-0}" == "1" ]]; then
+    install -d -m 1770 "$dir"
+  else
+    install -d -m 1770 -o root -g radon "$dir"
+  fi
+  mkdir -m 0750 "$media" 2>/dev/null || true
+  if [[ -L "$media" || ! -d "$media" ]]; then
     log_error "Refusing ${media}: not a regular file or directory (symlink)"
     return 1
   fi
-  if [[ "${RADON_HELPER_SKIP_CHOWN:-0}" == "1" ]]; then
-    install -d -m 1770 "$dir"
-    install -d -m 0750 "$media"
-  else
-    install -d -m 1770 -o root -g radon "$dir"
-    install -d -m 0750 -o radon -g radon "$media"
+  if [[ "${RADON_HELPER_SKIP_CHOWN:-0}" != "1" ]]; then
+    chown --no-dereference radon:radon "$media"
   fi
 }
 

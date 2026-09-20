@@ -92,6 +92,8 @@ describe("agent prompt payload", () => {
     const kelly = formatAgentPrompt(getCapabilityPrompt("kelly"));
     expect(kelly).toContain("2.5%");
     expect(kelly).toContain("ceiling, not a target");
+    expect(kelly.toLowerCase()).toMatch(/half[- ]kelly/);
+    expect(kelly.toLowerCase()).not.toContain("quarter");
   });
 
   it("points GEX and CRI at existing demo routes and hosted MCP reads", () => {
@@ -142,6 +144,8 @@ describe("developer recipes", () => {
     );
     expect(kelly).toContain("MAX_GAIN");
     expect(kelly).toContain("MAX_LOSS");
+    expect(kelly.toLowerCase()).toMatch(/half[- ]kelly/);
+    expect(kelly.toLowerCase()).not.toContain("quarter");
   });
 });
 

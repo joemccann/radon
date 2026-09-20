@@ -594,7 +594,7 @@ class TestNotifyPhaseIsFenced:
     @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
     def test_gh_and_timeout_are_snapshotted_before_venv_path(self, wrapper: Path):
         body = _uncommented(wrapper)
-        timeout_i = body.index('TIMEOUT_BIN="$(command -v timeout || true)"')
+        timeout_i = body.index('TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"')
         gh_i = body.index('GH_BIN="$(command -v gh || true)"')
         path_i = body.index('export PATH="$VENV/bin:$PATH"')
         guard_i = body.index(

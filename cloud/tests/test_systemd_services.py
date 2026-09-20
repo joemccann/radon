@@ -78,6 +78,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-mcp.service",
     "radon-host-metrics.service",
     "radon-host-metrics.timer",
+    "radon-tv-alerts.service",
+    "radon-tv-alerts.timer",
     "radon-ib-watchdog.service",
     "radon-ib-watchdog.timer",
     "radon-incident-watchdog.service",
@@ -684,6 +686,19 @@ class TestFlowRefresh:
         assert ":00,15,30,45" not in raw
         timer = unit("radon-flow-refresh.timer")["Timer"]
         assert timer.get("persistent") == "false"
+
+
+class TestNoPrivilegedExecPrefixes:
+    def test_no_exec_line_uses_full_privilege_prefix(self, services_dir):
+        # An Exec*=+/! prefix runs the command as full root outside the unit's
+        # sandbox; directory provisioning belongs to StateDirectory= or a
+        # root-side installer that refuses symlinks.
+        import re
+
+        for path in sorted(services_dir.glob("*.service")):
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if re.match(r"^Exec[A-Za-z]+=\s*[+!]", line):
+                    raise AssertionError(f"{path.name}: privileged Exec prefix forbidden: {line}")
 
 
 class TestSecurityRemediationSchedules:
@@ -1317,6 +1332,8 @@ class TestFlexPull:
         hidden = svc.get("inaccessiblepaths", "")
         assert "/etc/radon/env" in hidden
         assert svc.get("protecthome") == "read-only"
+        assert svc.get("statedirectory") == "radon/flex-inbox"
+        assert svc.get("statedirectorymode") == "0700"
         rw = svc.get("readwritepaths", "")
         assert "/var/lib/radon/flex-inbox" in rw
         assert "/var/lib/radon/flex-secrets" in rw
@@ -1479,6 +1496,96 @@ class TestPerMinuteStartLimits:
         assert int(svc["startlimitburst"]) >= 10
 
 
+class TestRepeatingTimerStartLimitHeadroom:
+    """systemd StartLimit counts successful oneshot starts, not just failures.
+
+    2026-09-19 page 8750de94: radon-tv-alerts.timer fires every 5 minutes
+    (OnCalendar=*:02/5:23) while the service had StartLimitBurst=5 per
+    1800s. Six healthy starts fit in 1800s, so the 6th was refused, the
+    unit parked Result=start-limit-hit, and the watchdog paged P1. Journal
+    showed five `processed: 0` successes then two skipped slots, repeating.
+    TestPerMinuteStartLimits only watches a wildcard MINUTE field, so the
+    `/5` calendar slipped through.
+    """
+
+    @staticmethod
+    def _oncalendar_period_seconds(oncalendar: str) -> int | None:
+        tod = next((part for part in oncalendar.split() if ":" in part), None)
+        if tod is None:
+            return None
+        bits = tod.split(":")
+        if len(bits) < 2:
+            return None
+        hour, minute = bits[0], bits[1]
+        if minute == "*":
+            return 60
+        if "/" in minute:
+            try:
+                return int(minute.split("/", 1)[1]) * 60
+            except ValueError:
+                return None
+        if "," in minute:
+            vals = [int(tok) for tok in minute.split(",") if tok.isdigit()]
+            diffs = [b - a for a, b in zip(vals, vals[1:])]
+            if diffs and min(diffs) > 0:
+                return min(diffs) * 60
+            return None
+        if hour in {"*", ""} or ".." in hour:
+            return 3600
+        return None
+
+    def test_every_repeating_timer_has_start_limit_headroom(
+        self, services_dir, all_units
+    ):
+        offenders = []
+        for path in sorted(services_dir.iterdir()):
+            name = path.name
+            if not name.endswith(".timer"):
+                continue
+            schedules = [
+                line.split("=", 1)[1].strip()
+                for line in path.read_text().splitlines()
+                if line.strip().startswith("OnCalendar=")
+            ]
+            periods = [
+                period
+                for schedule in schedules
+                if (period := self._oncalendar_period_seconds(schedule))
+            ]
+            if not periods:
+                continue
+
+            service = all_units.get(name[: -len(".timer")] + ".service")
+            if service is None:
+                continue
+
+            burst = int(service.get("Unit", {}).get("startlimitburst", "5"))
+            interval = int(service.get("Unit", {}).get("startlimitintervalsec", "0"))
+            if interval == 0:
+                continue
+
+            period = min(periods)
+            attempts = interval // period
+            if burst <= attempts:
+                offenders.append(
+                    f"{name}: burst={burst} but the timer attempts ~{attempts} "
+                    f"starts per {interval}s window (period={period}s)"
+                )
+
+        assert offenders == [], "; ".join(offenders)
+
+    def test_tv_alerts_five_minute_cadence_has_headroom(self, unit):
+        """Pin the 2026-09-19 topology: 6 starts / 1800s must not equal Burst=5."""
+        svc = unit("radon-tv-alerts.service")["Unit"]
+        burst = int(svc["startlimitburst"])
+        interval = int(svc["startlimitintervalsec"])
+        attempts = interval // 300
+        assert burst > attempts, (
+            f"radon-tv-alerts.service burst={burst} parks a healthy 5-minute "
+            f"drain after {attempts} starts in {interval}s"
+        )
+
+
 class TestDemoMirrorSchemaGate:
     """2026-08-26 P1: mirror wrote equibles tables the demo DB did not have
     because nothing ran scripts/db/migrations against TURSO_DEMO_*. The unit
@@ -1568,3 +1675,31 @@ class TestHostedMcp:
         # The venv and checkout it executes live under /home/radon.
         assert svc.get("protecthome") == "read-only"
         assert svc.get("privatetmp") == "yes"
+
+
+class TestTradingViewAlertsDrain:
+    """Issue #457: 5-minute drain of TradingView alerts (docs/tradingview-integration.md)."""
+
+    SCRIPT = "/home/radon/radon/scripts/tv_alerts_drain.py"
+
+    def test_oneshot_runs_the_drain_as_radon(self, unit):
+        u = unit("radon-tv-alerts.service")
+        svc = u["Service"]
+        assert svc["type"] == "oneshot"
+        assert svc["user"] == "radon"
+        assert svc["workingdirectory"] == "/home/radon/radon"
+        assert svc["environmentfile"] == ENV_FILE_PATH
+        assert "RADON_DB_NO_REPLICA=1" in svc["environment"]
+        assert svc["execcondition"] == f"/usr/bin/test -f {self.SCRIPT}"
+        assert svc["execstart"] == f"/home/radon/radon/.venv/bin/python {self.SCRIPT}"
+        assert svc["standardoutput"] == "journal"
+        assert svc["standarderror"] == "journal"
+        assert svc["timeoutstartsec"] == "120"
+        assert "startlimitburst" in u["Unit"]
+        assert "startlimitintervalsec" in u["Unit"]
+
+    def test_timer_every_five_minutes_off_the_herd(self, unit):
+        timer = unit("radon-tv-alerts.timer")["Timer"]
+        assert timer["oncalendar"] == "*:02/5:23"
+        assert timer["persistent"] == "false"
+        assert timer.get("unit", "radon-tv-alerts.service") == "radon-tv-alerts.service"

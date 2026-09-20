@@ -994,23 +994,34 @@ def _request_sse_responses(
     if status < 200 or status >= 300:
         return status, raw_text, None
     text_parts: list[str] = []
-    finish = ""
+    completed = False
     for line in raw_text.splitlines():
         if not line.startswith("data:"):
             continue
+        data = line[5:].strip()
+        if data == "[DONE]":
+            continue
         try:
-            event = json.loads(line[5:].strip())
+            event = json.loads(data)
         except ValueError:
-            continue
+            raise RuntimeError("invalid_response_stream") from None
         if not isinstance(event, dict):
-            continue
+            raise RuntimeError("invalid_response_stream")
         kind = event.get("type")
+        if kind in {"response.failed", "response.incomplete", "response.error", "error"}:
+            # Never expose provider error payloads or partial reviewer JSON.
+            raise RuntimeError("incomplete_response_stream")
         if kind == "response.output_text.delta" and isinstance(event.get("delta"), str):
             text_parts.append(event["delta"])
         elif kind == "response.completed":
-            finish = str(((event.get("response") or {}).get("status")) or "")
+            response = event.get("response")
+            if not isinstance(response, dict) or response.get("status") != "completed":
+                raise RuntimeError("incomplete_response_stream")
+            completed = True
+    if not completed:
+        raise RuntimeError("incomplete_response_stream")
     text = "".join(text_parts)
-    payload = {"choices": [{"message": {"content": text}, "finish_reason": finish or "stop"}]}
+    payload = {"choices": [{"message": {"content": text}, "finish_reason": "completed"}]}
     return status, text, payload
 
 

@@ -73,7 +73,10 @@ _SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
-from clients.journal_basis import contract_fill_fingerprint  # noqa: E402
+from clients.journal_basis import (  # noqa: E402
+    contract_fill_fingerprint,
+    flex_aggregate_budget,
+)
 from utils.exec_ids import exec_id_root  # noqa: E402
 
 # ── env load ──────────────────────────────────────────────────────────────────
@@ -143,7 +146,8 @@ class JournalCoverage:
 
     def __init__(self, exec_ids: set[str], roots: set[str],
                  fingerprints: Counter, claimed: Optional[Counter] = None,
-                 exec_fingerprints: Optional[Dict[str, str]] = None):
+                 exec_fingerprints: Optional[Dict[str, str]] = None,
+                 aggregate: Optional[Counter] = None):
         self.exec_ids = exec_ids
         self.roots = roots
         self.fingerprints = fingerprints
@@ -153,6 +157,11 @@ class JournalCoverage:
         # skip happens BEFORE the payload is reconstructed, so this map is
         # how that path spends its claim without a rebuild per row.
         self.exec_fingerprints = exec_fingerprints if exec_fingerprints is not None else {}
+        # NF-4: Flex aggregate rows are TOTALS, not fills. (contract, date,
+        # sign) → contracts the aggregate accounts for; individual fills
+        # inside that total are covered, fills beyond it are real gaps.
+        self.aggregate = aggregate if aggregate is not None else Counter()
+        self.aggregate_claimed: Counter = Counter()
 
     def covers_exec_id(self, exec_id: str) -> bool:
         if exec_id in self.exec_ids:
@@ -164,7 +173,18 @@ class JournalCoverage:
         fingerprint = contract_fill_fingerprint(journal_payload)
         if fingerprint is None:
             return False
-        return self.fingerprints[fingerprint] > self.claimed[fingerprint]
+        if self.fingerprints[fingerprint] > self.claimed[fingerprint]:
+            return True
+        return self._aggregate_left(fingerprint) >= abs(fingerprint[2])
+
+    @staticmethod
+    def _aggregate_key(fingerprint: tuple) -> tuple:
+        contract, date, signed = fingerprint
+        return (contract, str(date)[:10], 1 if signed > 0 else -1)
+
+    def _aggregate_left(self, fingerprint: tuple) -> float:
+        key = self._aggregate_key(fingerprint)
+        return self.aggregate[key] - self.aggregate_claimed[key]
 
     def claim_exec_id(self, exec_id: str) -> None:
         """Spend the journal row an EXACT-id (or root) match consumed.
@@ -186,7 +206,13 @@ class JournalCoverage:
         """Spend the journal row this fill was matched against, so a second
         identical fill is measured against what is left."""
         fingerprint = contract_fill_fingerprint(journal_payload)
-        if fingerprint is not None:
+        if fingerprint is None:
+            return
+        if self.fingerprints[fingerprint] > self.claimed[fingerprint]:
+            self.claimed[fingerprint] += 1
+        elif self._aggregate_left(fingerprint) >= abs(fingerprint[2]):
+            self.aggregate_claimed[self._aggregate_key(fingerprint)] += abs(fingerprint[2])
+        else:
             self.claimed[fingerprint] += 1
 
     def record(self, exec_id: str, journal_payload: Dict[str, Any]) -> None:
@@ -216,6 +242,7 @@ class JournalCoverage:
         self.exec_ids |= other.exec_ids
         self.roots |= other.roots
         self.fingerprints |= other.fingerprints
+        self.aggregate |= other.aggregate
         self.exec_fingerprints.update(other.exec_fingerprints)
 
 
@@ -269,7 +296,14 @@ def _accumulate_payload_coverage(coverage: JournalCoverage, raw: Any) -> None:
     if not isinstance(payload, dict):
         return
 
-    fingerprint = contract_fill_fingerprint(payload)
+    budget = flex_aggregate_budget(payload)
+    if budget is not None:
+        # NF-4: an aggregate covers fills by quantity, never 1:1.
+        for key, qty in budget.items():
+            coverage.aggregate[key] += qty
+        fingerprint = None
+    else:
+        fingerprint = contract_fill_fingerprint(payload)
     if fingerprint is not None:
         coverage.fingerprints[fingerprint] += 1
 

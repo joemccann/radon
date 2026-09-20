@@ -163,12 +163,12 @@ e8a7dca2f2f2c7d1176010a2c4df4e4a60842a6bb1cb34682d2ce9c815c11938  radon-disk-cle
 # radon-*.{service,timer} names only and ignores this line by design); the
 # daily drift audit compares it live as `fleet-dropin`.
 16b56fc5c731cefb4d8184e01c9da042aa1a623b3bd23b6face060e9d0b4df08  radon-.service.d/common.conf
-c9e4ef36521cb7a923853f5478d6c52d7076fdb24876e38f2bab8feb86c05947  radon-api.service.d/runtime-container.conf
-5563ba98cbd9df202cd67647191eafe64676afff1fab97fd0795d4409a5c8c01  radon-monitor.service.d/runtime-container.conf
-c9e4ef36521cb7a923853f5478d6c52d7076fdb24876e38f2bab8feb86c05947  radon-newsfeed.service.d/runtime-container.conf
-c9e4ef36521cb7a923853f5478d6c52d7076fdb24876e38f2bab8feb86c05947  radon-nextjs.service.d/runtime-container.conf
-a6c1c2e92b8438b0e670970549990a10d0113738b748ce8f824bd6b4f4febbc9  radon-relay.service.d/runtime-container.conf
-0eda5bc6fa36409745081d9bb7a0c8798a85ffd382f4f83aac0fb53d9fd14c70  radon-flex-pull.service
+ce87c9455982d50466eb308e4d50c618c735f94dfd8345b2457a2805a1f63c2d  radon-api.service.d/runtime-container.conf
+d83bbe5edb517675531ceb1c426beb8dd5802ad3a6e1612981ac356aaffcf18f  radon-monitor.service.d/runtime-container.conf
+ce87c9455982d50466eb308e4d50c618c735f94dfd8345b2457a2805a1f63c2d  radon-newsfeed.service.d/runtime-container.conf
+ce87c9455982d50466eb308e4d50c618c735f94dfd8345b2457a2805a1f63c2d  radon-nextjs.service.d/runtime-container.conf
+3a8377ed58bcda46ebb2fcb5a4614ca511f16412a9c7b1faa43094bbfae48c24  radon-relay.service.d/runtime-container.conf
+f9f9f921554f50c1d9506f2963f1e2d12bc9e53eef7cd5fcf51ea059e453c6d6  radon-flex-pull.service
 b5532b732c2a1b7347b3ddddcafe5d5b8123ad8671cdfcad9ba3a8176ee88d50  radon-flex-pull.timer
 51edb86e5991cccda21d12dfdff71e9da727652bbd2e34cb0067320a232e65bb  radon-model-catalog.service
 246c4751fd4619f339b6e983be50d4d16b7e09d55e47062d79258e9ebb0100c5  radon-model-catalog.timer
@@ -182,7 +182,7 @@ b5532b732c2a1b7347b3ddddcafe5d5b8123ad8671cdfcad9ba3a8176ee88d50  radon-flex-pul
 # .service (not a timer) it is never `enable --now`ed by the installer.
 6d095d97ff9872e8919aa1aec930ed34a152c8047fd58a5f377f39fef3ef3487  radon-mktnews.service
 95ce54775595eb59246481ec9d53d33e493b832cade7e263b1c120ba108a4e7e  radon-research.service
-b307c773926b5f87fce8cc5187815749e06a8f8781c2681abc142e55f962aad8  radon-research.service.d/runtime-container.conf
+bbd166d354bd82ba3d160ad04f2b087e5a6db745b36e75fd6193ceb193faba22  radon-research.service.d/runtime-container.conf
 4016805f8bd20c5ecf430da4fa6b9ae64268eccecaddec7a73bd2efecaa0abf3  radon-aa-frontier-refresh.service
 a1a1a80a13c500ba96fe56fcf1b25ef2a9a91d4981c9e792c6bd5e5cf44b0719  radon-aa-frontier-refresh.timer
 30226abe14b4b364745b048fd8dd575aaddd59fbda9574111b2ec443e442ef41  radon-ai-cycle.service
@@ -193,6 +193,11 @@ f698339100c7ecba33b98e38da4b6e025f569ebcb4073ad0259b209a1eefa79b  radon-ai-cycle
 3fe30f85fadcfc83c95b409322bcd825d3eded0bda631b92eab064bb22acd5e1  radon-liquidcompute.timer
 4e132916965e079c43cc593098da23e8aafc97319ae975ed008932e5371eb748  radon-subscription-tokens.service
 af52413e90fc3deaeb86227c4d64bc0d00c2cca149efc59490a0d48118eedf8d  radon-subscription-tokens.timer
+<<<<<<< HEAD
 866f6a31dfd0da3158959c9a06e7c2d62870d097ecbb8669a0824695082e2593  radon-slm-tagger.service
 a708b3e967dfa78dbbb6804cff0b089a727d2158f4d9b6c322446ff8b9f3a342  radon-slm-tagger-monitor.service
 d6d4066facda0fe09e4667f54695c8e23c8309ab2503234d6bbeb42f89b279d2  radon-slm-tagger-monitor.timer
+=======
+26e34705d354b3a47146b4b74e0b648eda5075173fcfd38b9d485cfc255943f4  radon-tv-alerts.service
+60d8979766407a98778c22034de0dd9ebc45a3a95326ea0d6459e2f643893821  radon-tv-alerts.timer
+>>>>>>> origin/main

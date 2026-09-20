@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Task: Newsfeed SLM tagger v1 implement [DRAFT PR; RUNG OFF]
 
 Implement `docs/ml/newsfeed-slm-tagger.md` (HR-1..HR-8). Dataset/eval/train/export/sidecar/ladder hook default off. No prod enable. No merge.
@@ -41,6 +42,72 @@ server, or ladder code in this PR.
 ## Review
 
 - [x] Reconciled with `docs/research/radon-small-model.md` (thin $ case kept; Phase-1 tagger experiment bounded) and `radon-harness-and-model-roadmap.md` (M1 rung behind the provider layer).
+=======
+# Task: Kelly order-path warn-not-block (2026-09-19)
+
+`RADON_KELLY_ENFORCE_ORDERS=1` must WARN, not BLOCK, place_order.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red: oversized ticket + enforce on warns, IB still called
+- T2 depends_on: [T1] - check_kelly_ticket logs WARNING; place_order continues; mode default warn
+- T3 depends_on: [T2] - Docs D11/C.4 warn-only; draft PR; CI green
+
+## Checklist
+
+- [x] T1 Failing warn + wire tests
+- [x] T2 Guard + place_order continue; attach `kelly_warning`
+- [ ] T3 Spec, PR, CI
+
+## Review
+
+- Order path only. Evaluate M6 fail-closed unchanged. Fat-finger `order_limits` still blocks.
+
+# Task: Fortune's Formula Kelly implement (2026-09-19)
+
+Implement locked spec `docs/risk/kelly-fortunes-formula.md`. Draft PR vs main.
+
+## Dependency graph
+
+- T1 depends_on: [] - Library: default 0.5, ban full Kelly, scalar cap, hooks
+- T2 depends_on: [T1] - M6 fail-closed + kelly_guard flag-off
+- T3 depends_on: [T1] - TypeBox/wrapper/pi-tools + half-Kelly prose/site
+- T4 depends_on: [T1, T2, T3] - Focused tests, draft PR vs main, CI
+
+## Checklist
+
+- [x] T1 `scripts/kelly.py` constants, config, ticket, ruin
+- [x] T2 `evaluate.py` M6 + `kelly_guard.py` default off
+- [x] T3 Schema/wrapper + SYSTEM/prompt/site half-Kelly default
+- [ ] T4 Draft PR, CI green, prod enable still waits Joe
+
+## Review
+
+- Default fraction 0.5 (Joe-signed). Full Kelly rejected. Cap 2.5% on scalar.
+- `RADON_KELLY_ENFORCE_ORDERS` unset on every unit.
+
+# Task: Newsfeed share 502 (2026-09-19)
+
+Production POST /api/newsfeed/share 502s with "Voice rewrite unavailable".
+Journal: Missing Anthropic subscription. Next.js has no subscription binds.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red: nextjs must bind grant dirs; relay must not
+- T2 depends_on: [T1] - Bind nextjs; keep relay excluded; low-reasoning share; fence-strip voice JSON
+- T3 depends_on: [T2] - Focused green, PR, CI
+
+## Checklist
+
+- [x] T1 Failing bind + share-call-shape tests
+- [x] T2 Runtime allowlist + share route + parseVoiceCopy
+- [ ] T3 PR, CI green
+
+## Review
+
+- Live: 2026-09-19 16:09:36Z radon-nextjs `[newsfeed/share] voice rewrite failed: Error: Missing Anthropic subscription`.
+- 2aba1229 excluded nextjs from grant mounts. Share and assistant run in Next.js.
+>>>>>>> origin/main
 
 # Task: GEX45 GPU deployment tooling (2026-09-19)
 

@@ -11,7 +11,7 @@ The CLI surface area lives behind shell aliases registered in `.pi/`. Run `comma
 | `leap-scan [TICKERS]` | Find LEAP IV mispricing opportunities (scheduled default: largecaps = NDX+SPX) |
 | `garch-convergence [TICKERS]` | Cross-asset implied-versus-realized volatility divergence scan (scheduled default: largecaps = NDX+SPX curated pairs) |
 | `seasonal [TICKERS]` | Monthly seasonality analysis from EquityClock |
-| `analyst-ratings [TICKERS]` | Ratings, price targets, and recent changes |
+| `analyst-ratings [TICKERS]` | Ratings, price targets, and recent changes. `fetch_analyst_ratings_rh.py` (the `/ticker/ratings` route) runs IB, then Robinhood consensus, then UW; `--changes-only` and evaluate go straight to UW for history |
 | `vcg` | VCG-R scan with VIX/VVIX/HYG regression and severity tiers |
 | `gex-scan` | Gamma exposure scan with GEX flip, max magnet, put/call wall, bias |
 | `cri-scan` | Crash Risk Index with CTA exposure model |

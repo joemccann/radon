@@ -1,4 +1,13 @@
 # Lessons
+## 2026-09-19 — Next.js is an LLM consumer
+
+- `/api/newsfeed/share` and `/api/assistant` run inside `radon-nextjs`.
+  Binding subscription grant dirs only into Python ladder units
+  (`2aba1229`) 502'd every share rewrite: `Missing Anthropic subscription`.
+- Treat Next.js as an LLM consumer in `radon-app-runtime` binds. Keep
+  the relay unbound. Pin
+  `test_run_nextjs_binds_subscription_credential_dirs_readonly`.
+
 ## 2026-09-18 — Chain strike identity must never ellipsis
 
 - Four-digit strikes (`$1,737.00`) rendered as `$1,70...` on the
@@ -589,6 +598,7 @@ Session: reliability roadmap (DUR-01..16) + a chain of trade-data bugs (CTA-01, 
 - **The nightly IB Gateway "JVM wedge" was the gateway's OWN auto-restart**, not load: `AUTO_RESTART_TIME` unset → IBC default 11:45 PM session-local = 23:45 UTC (jts.ini TZ Africa/Abidjan), and the watchdog killed it mid-relogin. Pin `AUTO_RESTART_TIME` to a quiet window + give the watchdog a quiet-window so it doesn't classify the scheduled relogin as a hang. NOTE: an invalid IBC time format (`"23:58 ET"`) is silently ignored → falls back to the default. radon-cloud 21d9391.
 - **The gnzsnz IB Gateway image BLANKS `JAVA_TOOL_OPTIONS`** before starting the JVM (verified via `/proc/<pid>/environ`) — GC logging must go in the persistent `Jts/ibgateway/<ver>/ibgateway.vmoptions` file (under `### keep on update`), not the compose env.
 - **Timer-driven oneshots firing faster than every 5 min trip the DUR-02 flap-brake** (`StartLimitBurst=5/IntervalSec=300`) even when every run SUCCEEDS — a 60s oneshot makes exactly 5 starts/300s and parks as `start-limit-hit`. Use `Burst=10` (matches ib-watchdog/portfolio-sync) or `StartLimitIntervalSec=0` (a timer oneshot can't crash-loop). Recover a parked unit with `systemctl reset-failed`. host-metrics hit this because DUR-12 created it after DUR-02's special-casing. The DUR-02 unit-watchdog alert was CORRECT — the unit's brake config was the bug.
+- **A 5-minute timer with Burst=5 / IntervalSec=1800 is the same class.** systemd StartLimit counts successful oneshot starts; 6 fires fit in 1800s so the 6th parks `start-limit-hit` on a healthy drain (tv-alerts 2026-09-19 page 8750de94, five `processed: 0` then two skipped slots). `TestPerMinuteStartLimits` only watches a wildcard MINUTE field, so `*:02/5:23` slipped through. Burst must exceed timer fires in the window; pin it with `TestRepeatingTimerStartLimitHeadroom`.
 - **IPO-day / hard-to-borrow shorts: Reg SHO 203(b) requires a locate that doesn't exist on day one** (unsettled shares, no lendable inventory). "Order Inactive" is IB's received-but-not-working status; the reason arrives as a SEPARATE async errorEvent (201 class). `ib_place_order` broke its confirm-poll before the 201 landed and returned a bare message — grace-wait ~1.5s (driving the event loop via `client.sleep`) for the matching error + fall back to `trade.log` errorCode entries, and log the detail server-side before the 502. c9bc47f.
 - **IB shortability ticks 46 (difficulty) and 89 (shortable_shares) arrive INDEPENDENTLY in a streaming probe and only during market hours** (never snapshot — generic ticks break snapshots). tick 46 is often slower, so derive `shortable=true` from `shortable_shares>0` when difficulty is absent, else a borrowable name (AAPL 190M shares) renders a wrong "NO LOCATE". Off-hours the endpoint correctly returns `missing:true`. a3a9fcf/d74b90e.
 - **CTA share staleness: the generator was pinned to glob-latest `data/menthorq_cache/*.json` with no freshness gate**, so between the 16:00 ET session roll and the 17:30 ET sync the modal rendered yesterday's data. Pick the date-max of {DB row, disk} and flag `data_date < latest_closed_trading_day` with a STALE banner; weekend-aware. ab97253.

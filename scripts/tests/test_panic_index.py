@@ -661,7 +661,12 @@ def test_live_files_reproduce_c8_anchors():
     parsed = {}
     for symbol, column in (("VIX", "CLOSE"), ("VIX3M", "CLOSE"), ("VVIX", "VVIX"), ("SKEW", "SKEW")):
         text, _ = client.fetch_history(symbol)
-        parsed[symbol] = parse_index_csv(text, column)
+        # C8 anchors describe the historical window through September 17.
+        # New CDN sessions must not change its fixed distribution/count proof.
+        parsed[symbol] = [
+            row for row in parse_index_csv(text, column)
+            if row["date"] <= "2026-09-17"
+        ]
     series, dropped, _base = join_series(parsed["VIX"], parsed["VIX3M"], parsed["VVIX"], parsed["SKEW"])
     attach_z_scores(series)
     attach_level(series)

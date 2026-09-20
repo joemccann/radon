@@ -14,6 +14,8 @@ readonly MEDIA_DIR_IN_CONTAINER=/var/lib/radon/media
 
 if [[ "${RADON_APP_RUNTIME_TEST_MODE:-0}" == "1" ]]; then
   DOCKER="${RADON_TEST_DOCKER:?test docker is required}"
+  ENGINE="${RADON_TEST_ENGINE:-docker}"
+  LEGACY_DOCKER="${RADON_TEST_LEGACY_DOCKER:-}"
   ID_BIN="${RADON_TEST_ID:?test id is required}"
   ENV_FILE="${RADON_TEST_ENV_FILE:?test env file is required}"
   DATA_DIR="${RADON_TEST_DATA_DIR:?test data dir is required}"
@@ -32,7 +34,27 @@ else
     echo "radon-app-runtime must run as root" >&2
     exit 77
   fi
-  DOCKER=/usr/bin/docker
+  # REL-087 / R-232: Podman is the engine whenever it is installed, because
+  # `--cgroups=split` keeps conmon and the container inside the unit's own
+  # cgroup. Docker stays as the staged-cutover fallback (podman not installed
+  # yet) and the rollback lever (drop-in Environment=RADON_CONTAINER_ENGINE=docker).
+  ENGINE="${RADON_CONTAINER_ENGINE:-}"
+  if [[ -z "$ENGINE" ]]; then
+    if [[ -x /usr/bin/podman ]]; then ENGINE=podman; else ENGINE=docker; fi
+  fi
+  LEGACY_DOCKER=""
+  case "$ENGINE" in
+    podman)
+      DOCKER=/usr/bin/podman
+      # A docker-era container of the same unit must be reaped too.
+      [[ -x /usr/bin/docker ]] && LEGACY_DOCKER=/usr/bin/docker
+      ;;
+    docker) DOCKER=/usr/bin/docker ;;
+    *)
+      echo "radon-app-runtime: RADON_CONTAINER_ENGINE must be podman or docker" >&2
+      exit 64
+      ;;
+  esac
   ID_BIN=/usr/bin/id
   ENV_FILE=/etc/radon/env
   DATA_DIR=/home/radon/radon/data
@@ -188,6 +210,8 @@ image_in_local_store() {
 # The deploy pre-pull must detect a rebuilt tag even when its old image is local.
 # Runtime starts retain image_available's offline fallback.
 image_matches_registry() {
+  # `buildx imagetools` is docker-only; podman re-pulls, which is layer-incremental.
+  [[ "$ENGINE" == podman ]] && return 1
   "$PYTHON" - "$DOCKER" "$1" <<'PYCODE'
 import json, re, subprocess, sys
 docker, image = sys.argv[1:]
@@ -377,6 +401,20 @@ except (OSError, ValueError, IndexError, subprocess.SubprocessError) as exc:
 PYCODE
 }
 
+# `rm -f` by --name, on the active engine and, under podman, on docker too so
+# a docker-era container never shares data/ with its podman successor.
+reap_container() {
+  local unit="$1" engine
+  for engine in "$DOCKER" ${LEGACY_DOCKER:+"$LEGACY_DOCKER"}; do
+    if ! "$engine" rm -f "$unit" >/dev/null 2>&1; then
+      if "$engine" inspect "$unit" >/dev/null 2>&1; then
+        echo "radon-app-runtime: ${engine##*/} rm -f ${unit} failed and the orphan container is still present; refusing to clear its staged credential" >&2
+        exit 75
+      fi
+    fi
+  done
+}
+
 cmd_stop() {
   local unit="${1:-}"
   [[ -n "$unit" ]] || usage
@@ -391,12 +429,7 @@ cmd_stop() {
   # open fails on a missing key instead of a clear name conflict. A non-zero
   # rm for a container that does NOT exist is the ordinary first-start case
   # and stays benign; only a SURVIVING container aborts.
-  if ! "$DOCKER" rm -f "$unit" >/dev/null 2>&1; then
-    if "$DOCKER" inspect "$unit" >/dev/null 2>&1; then
-      echo "radon-app-runtime: docker rm -f ${unit} failed and the orphan container is still present; refusing to clear its staged credential" >&2
-      exit 75
-    fi
-  fi
+  reap_container "$unit"
   cleanup_runtime_credential "$unit"
 }
 
@@ -422,7 +455,9 @@ except FileNotFoundError:
     pass
 inbound = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
 inbound.bind(listen)
-os.chmod(listen, 0o666)
+# NotifyAccess=all makes systemd trust whatever this proxy relays, so the
+# socket is owner-only; start_notify_proxy chowns it to the container uid.
+os.chmod(listen, 0o600)
 outbound = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
 # Exit with the ExecStart process (the docker client, which exec'd over the
 # bash parent), so a stopped unit never leaves a forwarder holding fds.
@@ -451,7 +486,7 @@ PY
 # when its parent changes, and a subshell parent is gone the moment it
 # returns, which left a dead socket behind on the first live probe.
 start_notify_proxy() {
-  local unit="$1" upstream="$2" listen attempt
+  local unit="$1" upstream="$2" ids="$3" listen attempt
   listen="${NOTIFY_PROXY_DIR}/${unit}.sock"
   mkdir -p -m 0755 "$NOTIFY_PROXY_DIR" || {
     echo "radon-app-runtime: notify proxy dir is unavailable: ${NOTIFY_PROXY_DIR}" >&2
@@ -460,7 +495,13 @@ start_notify_proxy() {
   rm -f "$listen"
   "$0" notify-proxy "$listen" "$upstream" &
   for attempt in $(seq 1 50); do
-    [[ -S "$listen" ]] && { NOTIFY_PROXY_SOCKET="$listen"; return 0; }
+    if [[ -S "$listen" ]]; then
+      # The proxy binds the socket 0600 as root; hand it to the container
+      # uid so only that uid can write READY/WATCHDOG datagrams.
+      "$CHOWN" -h "$ids" "$listen" || return 71
+      NOTIFY_PROXY_SOCKET="$listen"
+      return 0
+    fi
     sleep 0.1
   done
   echo "radon-app-runtime: notify proxy for ${unit} did not bind ${listen}" >&2
@@ -542,6 +583,32 @@ print(child)
 PY_RESEARCH
 }
 
+# DATA_DIR's parent is radon-writable, so root must never follow a link while
+# creating or owning this child: mkdir refuses a symlink final component and
+# the fd-based fchown/fchmod cannot be retargeted between check and use.
+prepare_secret_store_dir() {
+  local ids="$1" dir="$2"
+  "$PYTHON" - "$dir" "$ids" "${RADON_APP_RUNTIME_TEST_MODE:-0}" <<'PY_SECRET_STORE' || exit 78
+import os, sys
+path, ids, test = sys.argv[1], sys.argv[2], sys.argv[3] == '1'
+uid, gid = (os.getuid(), os.getgid()) if test else tuple(int(part) for part in ids.split(':'))
+try:
+    try:
+        os.mkdir(path, 0o700)
+    except FileExistsError:
+        pass
+    fd = os.open(path, os.O_NOFOLLOW | os.O_DIRECTORY | os.O_RDONLY)
+    try:
+        os.fchown(fd, uid, gid)
+        os.fchmod(fd, 0o700)
+    finally:
+        os.close(fd)
+except OSError:
+    print('radon-app-runtime: secret store directory is a symlink or unusable; refusing', file=sys.stderr)
+    raise SystemExit(78)
+PY_SECRET_STORE
+}
+
 cmd_run() {
   local unit="${1:-}"
   local ids image workdir
@@ -590,18 +657,11 @@ cmd_run() {
   # open fails on a missing key instead of a clear name conflict. A non-zero
   # rm for a container that does NOT exist is the ordinary first-start case
   # and stays benign; only a SURVIVING container aborts.
-  if ! "$DOCKER" rm -f "$unit" >/dev/null 2>&1; then
-    if "$DOCKER" inspect "$unit" >/dev/null 2>&1; then
-      echo "radon-app-runtime: docker rm -f ${unit} failed and the orphan container is still present; refusing to clear its staged credential" >&2
-      exit 75
-    fi
-  fi
+  reap_container "$unit"
   cleanup_runtime_credential "$unit"
 
   if [[ "$unit" == "radon-api.service" ]]; then
-    local secret_store_dir="${DATA_DIR}/secret_store"
-    install -d -m 0700 "$secret_store_dir"
-    "$CHOWN" "$ids" "$secret_store_dir"
+    prepare_secret_store_dir "$ids" "${DATA_DIR}/secret_store"
     stage_api_credential "$unit" "$credential_gid"
   fi
 
@@ -633,11 +693,21 @@ cmd_run() {
     --cap-drop ALL \
     --security-opt no-new-privileges \
     --cgroupns host \
-    --cgroup-parent=system.slice \
     --env-file "$(render_env_file "$unit")" \
     --env RADON_DB_NO_REPLICA=1 \
     --env PYTHONPATH=/home/radon/radon/scripts \
     -w "$workdir"
+
+  if [[ "$ENGINE" == podman ]]; then
+    # REL-087: conmon and the container join the unit's own cgroup (the unit
+    # delegates it), so KillMode reaches them. Podman must not consume
+    # NOTIFY_SOCKET itself: the notify proxy below stays the one path.
+    set -- "$@" --cgroups=split --sdnotify=ignore
+  else
+    # Docker fallback: its systemd driver accepts a slice, not a unit path,
+    # so the container is outside the unit and only reaping stops it.
+    set -- "$@" --cgroup-parent=system.slice
+  fi
 
   if [[ "$unit" != "radon-research.service" ]]; then
     set -- "$@" \
@@ -652,14 +722,14 @@ cmd_run() {
   # No container could see them, so every container-side rung silently fell
   # to prepaid credits; when the xAI team ran dry the newsfeed voice rewrite
   # died. Bind each dir that exists, read-only, and pin HOME so Path.home()
-  # and os.homedir() resolve to the mount. Never the whole home directory,
-  # and only into units that actually run a ladder rung: the dirs hold
-  # account-wide refresh tokens, so the internet-facing Next.js container
-  # and the relay must never see them.
+  # and os.homedir() resolve to the mount. Never the whole home directory.
+  # Next.js hosts /api/newsfeed/share and /api/assistant, so it is an LLM
+  # consumer (2026-09-19: excluding it 502'd every share rewrite with
+  # "Missing Anthropic subscription"). Relay still gets no binds.
   local subscription_home="${RADON_SUBSCRIPTION_HOME:-/home/radon}"
   local cred_dir
   case "$unit" in
-    radon-api.service|radon-newsfeed.service|radon-research.service)
+    radon-api.service|radon-newsfeed.service|radon-research.service|radon-nextjs.service)
       for cred_dir in .grok .codex .claude; do
         if [[ -d "${subscription_home}/${cred_dir}" ]]; then
           set -- "$@" -v "${subscription_home}/${cred_dir}:/home/radon/${cred_dir}:ro"
@@ -684,6 +754,15 @@ cmd_run() {
     if [[ -d "$ib_remote_certs" ]]; then
       set -- "$@" -v "${ib_remote_certs}:${ib_remote_certs}:ro"
     fi
+    # Robinhood read-only MCP token store. Its own dir, never /etc/radon, and
+    # read-write: refresh rotates the token by atomic replace plus a .lock
+    # sidecar, which a single-file bind cannot do. Without it every Robinhood
+    # rung inside the API fell through to UW (2026-09-19).
+    local rh_token_dir="${RADON_RH_TOKEN_DIR:-/var/lib/radon/rh-mcp}"
+    if [[ -d "$rh_token_dir" ]]; then
+      set -- "$@" -v "${rh_token_dir}:${rh_token_dir}" \
+        --env "ROBINHOOD_MCP_TOKEN_FILE=${rh_token_dir}/rh-mcp.json"
+    fi
     local credential_host_dir="${SECRET_STORE_CREDENTIAL_STAGE_ROOT}/${unit}"
     set -- "$@" \
       --group-add "$credential_gid" \
@@ -693,7 +772,7 @@ cmd_run() {
   fi
 
   if [[ -n "${NOTIFY_SOCKET:-}" && "${NOTIFY_SOCKET}" == /* ]]; then
-    start_notify_proxy "$unit" "$NOTIFY_SOCKET" || exit $?
+    start_notify_proxy "$unit" "$NOTIFY_SOCKET" "$ids" || exit $?
     set -- "$@" --env "NOTIFY_SOCKET=${NOTIFY_PROXY_SOCKET}" --env WATCHDOG_USEC \
       --mount "type=bind,src=${NOTIFY_PROXY_SOCKET},dst=${NOTIFY_PROXY_SOCKET}"
   fi

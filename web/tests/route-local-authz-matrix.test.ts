@@ -37,6 +37,8 @@ const GUARDED_ADMIN_ACTION_ROUTES = [
   "ib/ws-ticket",
   // Subscription research bytes require the operator allowlist on every read.
   "newsfeed/research/files/[asset]",
+  // Operator ground-truth labels on research items: requireRouteAccess operatorOnly on the only verb.
+  "newsfeed/research/feedback", "newsfeed/research/held", "newsfeed/research/rules",
   // Original-page evidence and account/assistant audit exports are operator-only.
   "research/evidence/[asset]", "research/governance",
   // R-180: this POST SPAWNS garch_convergence.py. Its leap/scan sibling has
@@ -95,7 +97,7 @@ const MIDDLEWARE_PERIMETER_ONLY_ROUTES = [
 const PINNED_ELSEWHERE_ROUTES = [
   "gex/share/content", "internals/share/content", "menthorq/cta/share/content",
   "probe/freshness", "regime/share/content", "share/pnl", "vcg/share/content",
-  "webhooks/clerk",
+  "webhooks/clerk", "webhooks/tradingview/[token]",
 ] as const;
 
 const WEB_ROOT = fileURLToPath(new URL("..", import.meta.url));

@@ -100,6 +100,9 @@ const PINNED: Record<string, PinnedCapability> = {
   "newsfeed/posts": "read",
   "newsfeed/share": "internal",
   "newsfeed/research/files/[asset]": "internal",
+  "newsfeed/research/feedback": "internal",
+  "newsfeed/research/held": "internal",
+  "newsfeed/research/rules": { GET: "internal", POST: "internal" },
   "options/chain": "read",
   "options/expirations": "read",
   "options/exposure": "read",
@@ -158,6 +161,7 @@ const PINNED: Record<string, PinnedCapability> = {
   "watchlist": { GET: "read", POST: "mutate.workspace" },
   "watchlist/[symbol]": "mutate.workspace",
   "webhooks/clerk": "internal",
+  "webhooks/tradingview/[token]": "internal",
   "yield-curve": "read",
   "yield-curve/live": "read",
 };

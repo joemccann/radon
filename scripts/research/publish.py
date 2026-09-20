@@ -105,6 +105,51 @@ def publish(post: dict) -> str:
     return post_id
 
 
+def outcome_row(work: dict, review: dict) -> dict:
+    """One row per reviewed document for the operator's Held review: what happened and why, plus the rejected drafts."""
+    identity = review.get("identity") or {}
+    posts = review.get("posts") or []
+    audit = [entry for entry in review.get("audit") or [] if isinstance(entry, dict) and entry.get("held")]
+    candidates = {c.get("claim_key"): c for c in ((review.get("selection") or {}).get("candidates") or []) if isinstance(c, dict)}
+    if review.get("outcome") == "dropped":
+        outcome, codes = "dropped", [review.get("reason_code") or "DROPPED"]
+    elif posts:
+        outcome, codes = "published", sorted({entry["held"] for entry in audit})
+    else:
+        outcome, codes = "held", sorted({entry["held"] for entry in audit}) or ["NO_CANDIDATES"]
+    drafts = []
+    for entry in audit[:8]:
+        candidate = candidates.get(entry.get("claim_key")) or entry.get("candidate") or {}
+        missing = ", ".join(str(token.get("token")) for token in entry.get("missing") or [] if isinstance(token, dict))
+        verdict = entry.get("verification") if isinstance(entry.get("verification"), dict) else {}
+        drafts.append({"title": str(candidate.get("title") or "")[:300], "content": str(candidate.get("content") or "").strip()[:600],
+                       "held": entry["held"], "detail": (missing or str(verdict.get("reason") or entry.get("error") or ""))[:400]})
+    metadata = work.get("metadata") or {}
+    document = review.get("document") or {}
+    context = {"pageCount": document.get("page_count"), "figureCount": len(review.get("figures") or []),
+               "dateSource": identity.get("date_source") or "", "excerpt": str(document.get("excerpt") or "")[:900],
+               "selectorReason": str(((review.get("selection") or {}).get("reason")) or "")[:600],
+               "sourceUrl": document.get("source_url") or ""}
+    return {"context_json": json.dumps(context), "work_key": work["key"], "file_id": metadata.get("id") or "", "file_name": metadata.get("name") or "",
+            "publisher": identity.get("publisher") or "unknown", "series": identity.get("series") or "",
+            "doc_type": identity.get("doc_type") or "", "folder_date": work.get("folder_date") or "",
+            "document_date": identity.get("date") or "", "outcome": outcome, "reason_codes": json.dumps(codes),
+            "drafts_json": json.dumps(drafts), "posts": len(posts), "pipeline": review.get("pipeline") or "v1"}
+
+
+_OUTCOME_COLUMNS = ("work_key", "file_id", "file_name", "publisher", "series", "doc_type", "folder_date", "document_date",
+                    "outcome", "reason_codes", "drafts_json", "posts", "pipeline", "context_json")
+
+
+def record_outcome(work: dict, review: dict) -> None:
+    row = outcome_row(work, review)
+    updates = ",".join(f"{c}=excluded.{c}" for c in _OUTCOME_COLUMNS[1:])
+    hrana_execute(
+        f"INSERT INTO research_outcomes ({','.join(_OUTCOME_COLUMNS)},updated_at) VALUES ({','.join('?' * len(_OUTCOME_COLUMNS))},?) "
+        f"ON CONFLICT(work_key) DO UPDATE SET {updates},updated_at=excluded.updated_at",
+        (*[row[c] for c in _OUTCOME_COLUMNS], datetime.now(timezone.utc).isoformat()))
+
+
 def recent_posts(days: int = 90) -> list[dict]:
     """Bounded keyset reads; incomplete novelty history is an error, never silence."""
     if type(days) is not int or not 1 <= days <= 90:

@@ -49,6 +49,7 @@ from fetch_options import fetch_options
 from fetch_oi_changes import fetch_ticker_oi_changes, categorize_signal
 from fetch_analyst_ratings import fetch_analyst_ratings
 from fetch_news import fetch_news
+from kelly import kelly_ticket
 
 
 # ---------------------------------------------------------------------------
@@ -472,7 +473,7 @@ def _run_parallel_milestones(
         return ("M1B", fetch_seasonality(ticker))
 
     def _m1c():
-        return ("M1C", fetch_analyst_ratings(ticker, use_cache=True))
+        return ("M1C", fetch_analyst_ratings(ticker, use_cache=True, need_history=True))
 
     def _m2():
         return ("M2", fetch_flow(ticker, lookback_days=flow_days))
@@ -572,11 +573,32 @@ def _fetch_all_prices(tickers: List[str], days: int = 10) -> Dict[str, List[Dict
         return {t: {"error": f"price history fetch failed: {exc}"} for t in tickers}
 
 
+def _open_max_losses_from_portfolio() -> list:
+    path = Path(__file__).resolve().parent.parent / "data" / "portfolio.json"
+    try:
+        payload = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return []
+    losses = []
+    for pos in payload.get("positions") or []:
+        raw = pos.get("max_risk")
+        if raw is None:
+            continue
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            losses.append(value)
+    return losses
+
+
 def run_evaluations(
     tickers: List[str],
     bankroll: float = 1_200_000,
     skip_ib_price: bool = False,
     flow_days: int = 5,
+    structure: Optional[dict] = None,
 ) -> List[EvaluationResult]:
     """Run evaluations for multiple tickers with IB connection pooling.
 
@@ -591,7 +613,7 @@ def run_evaluations(
     """
     if len(tickers) == 1 and not skip_ib_price:
         # Single ticker — standard flow, no batch overhead
-        return [run_evaluation(tickers[0], bankroll=bankroll, flow_days=flow_days)]
+        return [run_evaluation(tickers[0], bankroll=bankroll, flow_days=flow_days, structure=structure)]
 
     # Optionally batch fetch all price data with a single IB connection
     price_cache = {} if skip_ib_price else _fetch_all_prices(tickers)
@@ -599,7 +621,13 @@ def run_evaluations(
     # Process tickers sequentially (each has internal parallelism for UW calls)
     # This avoids 35 concurrent UW requests (5 tickers × 7 milestones)
     results = [
-        run_evaluation(t, bankroll=bankroll, price_history=price_cache.get(t, []), flow_days=flow_days)
+        run_evaluation(
+            t,
+            bankroll=bankroll,
+            price_history=price_cache.get(t, []),
+            flow_days=flow_days,
+            structure=structure,
+        )
         for t in tickers
     ]
     return results
@@ -610,11 +638,38 @@ def _run_single_eval(ticker: str, bankroll: float, price_history: List[Dict], fl
     return run_evaluation(ticker, bankroll=bankroll, price_history=price_history, flow_days=flow_days)
 
 
+def evaluate_ticker(
+    ticker: str,
+    bankroll: float = 1_200_000,
+    price_history: Optional[List[Dict]] = None,
+    flow_days: int = 5,
+    structure: Optional[dict] = None,
+    open_max_losses=None,
+    nav_peak=None,
+    nav_now=None,
+) -> EvaluationResult:
+    """Public 7-milestone evaluation. M5/M6 stay fail-closed without structure."""
+    return run_evaluation(
+        ticker,
+        bankroll=bankroll,
+        price_history=price_history,
+        flow_days=flow_days,
+        structure=structure,
+        open_max_losses=open_max_losses,
+        nav_peak=nav_peak,
+        nav_now=nav_now,
+    )
+
+
 def run_evaluation(
     ticker: str,
     bankroll: float = 1_200_000,
     price_history: Optional[List[Dict]] = None,
     flow_days: int = 5,
+    structure: Optional[dict] = None,
+    open_max_losses=None,
+    nav_peak=None,
+    nav_now=None,
 ) -> EvaluationResult:
     """Run a full 7-milestone evaluation for *ticker*.
 
@@ -771,23 +826,51 @@ def run_evaluation(
         eval_result.failing_gate = "EDGE"
         return eval_result
 
-    # ── M5: Structure Proposal (placeholder — requires IB live quotes) ──
-    # In automated mode, we surface the edge result and let the operator
-    # design the structure interactively.  The structure data is filled in
-    # when the operator confirms.
+    # ── M5: Structure Proposal ───────────────────────────────────────────
+    # Fail-closed: without an operator-supplied structure, M5/M6 stay pending.
+    if structure is None:
+        eval_result.milestones["M5"] = MilestoneResult(
+            name="structure", passed=False,
+            data={"note": "Edge passed — structure design pending operator input"},
+        )
+        eval_result.milestones["M6"] = MilestoneResult(
+            name="kelly_sizing", passed=False,
+            data={"bankroll": bankroll, "note": "Pending structure design"},
+        )
+        eval_result.decision = "PENDING"
+        return eval_result
+
+    m5_data = dict(structure)
     eval_result.milestones["M5"] = MilestoneResult(
-        name="structure", passed=False,
-        data={"note": "Edge passed — structure design pending operator input"},
+        name="structure", passed=True, data=m5_data,
     )
 
-    # ── M6: Kelly Sizing (placeholder) ───────────────────────────────────
+    if open_max_losses is None:
+        open_max_losses = _open_max_losses_from_portfolio()
+    ticket = kelly_ticket(
+        prob_win=float(structure.get("prob_win") or 0),
+        max_gain=float(structure.get("max_gain") or 0),
+        max_loss=float(structure.get("max_loss") or 0),
+        bankroll=bankroll,
+        open_max_losses=open_max_losses,
+        nav_peak=nav_peak,
+        nav_now=nav_now,
+    )
+    m6_pass = bool(
+        ticket.get("edge_exists")
+        and (ticket.get("contracts") or 0) >= 1
+        and ticket.get("reason") is None
+    )
     eval_result.milestones["M6"] = MilestoneResult(
-        name="kelly_sizing", passed=False,
-        data={"bankroll": bankroll, "note": "Pending structure design"},
+        name="kelly_sizing",
+        passed=m6_pass,
+        data={"bankroll": bankroll, **ticket},
     )
-
-    # Decision remains PENDING until operator confirms structure + Kelly
-    eval_result.decision = "PENDING"
+    if eval_result.milestones["M5"].passed and m6_pass:
+        eval_result.decision = "TRADE"
+    else:
+        eval_result.decision = "NO_TRADE"
+        eval_result.failing_gate = "RISK"
     return eval_result
 
 
@@ -928,7 +1011,7 @@ def format_report(result: EvaluationResult) -> str:
 
     # Kelly (M6) if present
     m6 = result.milestones.get("M6")
-    if m6 and m6.data and m6.data.get("total_cost"):
+    if m6 and m6.data and (m6.passed or m6.data.get("reason")):
         lines.append("KELLY SIZING")
         lines.append("-" * 40)
         for k, v in m6.data.items():
@@ -973,7 +1056,16 @@ def main():
                         help="Output raw JSON instead of formatted report")
     parser.add_argument("--fast", action="store_true",
                         help="Skip IB price history (faster, skips signal_priced_in check)")
+    parser.add_argument(
+        "--structure",
+        default=None,
+        help="JSON object with max_gain, max_loss, prob_win for M5/M6",
+    )
     args = parser.parse_args()
+
+    structure = None
+    if args.structure:
+        structure = json.loads(args.structure)
 
     tickers = [t.upper() for t in args.tickers]
     results = run_evaluations(
@@ -981,6 +1073,7 @@ def main():
         bankroll=args.bankroll,
         skip_ib_price=args.fast,
         flow_days=args.days,
+        structure=structure,
     )
 
     if args.json:

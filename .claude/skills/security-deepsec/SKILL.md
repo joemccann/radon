@@ -130,8 +130,13 @@ the completion marker must not be printed while any stage is still in
 flight. `deepsec process` is the long stage of this loop and it runs INSIDE
 the audit phase, under the 8h cap. Launch it DETACHED from the agent harness so a harness
 timeout cannot kill it:
-`nohup env -i <minimal env> bash <stage-script.sh> </dev/null >stage.out
-2>&1 & disown` (macOS has no `setsid`). The stage script pre-writes a
+`nohup env -i PATH="$PATH" HOME="$HOME" USER="$USER" LOGNAME="$LOGNAME"
+LANG="$LANG" TMPDIR="$TMPDIR" DISABLE_AUTOUPDATER=1 bash <stage-script.sh>
+</dev/null >stage.out 2>&1 & disown` (macOS has no `setsid`). Pass `PATH`
+exactly as the wrapper handed it and never rebuild it by hand: on the
+runner `node` lives only under `~/.local/bin`, which the plist PATH
+carries, and a hand-built `/usr/bin:/bin` PATH made every
+`deepsec` invocation exit 127 on 2026-09-19. The stage script pre-writes a
 `name_rc=` placeholder for every planned step BEFORE it runs any of them,
 writes `name_rc=N` as each finishes and a final `DONE` sentinel to a private
 rc file. **An rc file with no `DONE` is a FAILED stage, never a passing
@@ -536,26 +541,24 @@ page. Never push to that repository yourself, never put the report in the
 public repository, a PR, a commit, or the rolling issue, and never link it
 from a public surface.
 
-The report is for a reader who was not there. Sections, in this order:
+The report is for a reader who was not there and reads it on GitHub. Its
+structure and formatting are the contract in `docs/security-report-template.md`:
+copy that template verbatim (Summary table first, then Operator actions,
+Stages, Findings, Rejected, Fixes, Gate results, Resume state) and obey its
+formatting rules. In particular: tabular facts in GFM tables with header and
+separator rows, never `key: value` line dumps or `stage:` lines; raw tool
+output only in trimmed fenced code blocks; identifiers (`DS-…`, short SHAs,
+`path:line`, branches, commands) as code spans; sentence-case headings; no
+emoji; blank lines around every heading, table, list and code block; ISO
+dates and UTC times. A report that pastes the run-record or a scanner's
+own Markdown is a defect.
 
-1. `# security-deepsec <phase> <run-id>` with `HEAD_SHA`, `LAST_AUDITED_SHA`, the
-   range, start/end times and the terminal `status:`.
-2. **Stages**: one line per stage with its outcome (`complete`,
-   `OPERATOR_REQUIRED <why>`, `BLOCKED <why>`, `INCOMPLETE <what remains>`).
-3. **Findings**: a table with private id, severity, disposition
-   (`verified` / `REJECTED <reason>` / `duplicate of`), exact `file:line`,
-   one-sentence description, and the proof or refutation. Include every
-   candidate the engines produced this phase, not only survivors.
-4. **Fixes** (remediate/deliver): finding id, commit SHA, branch, regression
-   test path, gate results (counts), PR URL and CI state.
-5. **Operator actions**: every `OPERATOR_REQUIRED` / `BLOCKED` item as an
-   exact command or decision, and every P0/P1 awaiting a `released:` line.
-6. **Resume state**: what the next fire will pick up.
-
-Complete beats short: routes, file:line, attack preconditions and scanner
-verdicts belong here. Secret LITERALS never do (rail 6): name the variable
-or secret class and location only. The wrapper additionally redacts known
-secret shapes, which is a backstop, not permission.
+Complete beats short: every candidate the engines produced this phase
+appears in Findings or Rejected with its reason; routes, `path:line`,
+attack preconditions and scanner verdicts belong here. Secret LITERALS never
+do (rail 6): name the variable or secret class and location only. The
+wrapper additionally redacts known secret shapes, which is a backstop, not
+permission.
 
 ## Private reporting and notifications
 

@@ -166,9 +166,9 @@ test.describe("AI Industry value chain", () => {
     const mutations: string[] = [];
     page.on("request", request => { if (/\/api\/orders\/(place|cancel|modify)/.test(request.url())) mutations.push(request.url()); });
     await page.goto("/dashboard");
-    const dashboardLink = page.getByTestId("clear-overview").getByRole("link", { name: "AI Industry evidence" });
-    await expect(dashboardLink).toHaveAttribute("href", "/ai-industry");
-    await dashboardLink.click();
+    await expect(page.getByTestId("clear-overview")).toBeVisible();
+    await expect(page.getByTestId("clear-overview").getByRole("link", { name: "AI Industry evidence" })).toHaveCount(0);
+    await page.goto("/ai-industry");
     await expect(page).toHaveURL(/\/ai-industry$/);
     await page.goto("/MSFT?deck=i");
     const handoff = page.getByRole("complementary", { name: "AI Industry research" });

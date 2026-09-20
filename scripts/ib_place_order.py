@@ -235,6 +235,7 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
     """
     # Kill switch (REL-004): every placement path funnels through here
     # (/orders/place subprocess) — refuse before touching IB. what_if previews are read-only and stay allowed.
+    kelly_warning = None
     if not what_if:
         from trading_halt import is_trading_halted, get_halt_state
 
@@ -254,6 +255,17 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
         violation = check_order_limits(params)
         if violation:
             return {"status": "error", "message": violation["message"]}
+
+        from kelly import kelly_config
+        from kelly_guard import check_kelly_ticket
+
+        kelly_warning = check_kelly_ticket(params)
+        if kelly_warning and kelly_config()["enforce_mode"] == "block":
+            return {
+                "status": "error",
+                "code": kelly_warning["code"],
+                "message": kelly_warning["message"],
+            }
 
     order_type = params.get("type", "stock")
     symbol = params["symbol"].upper()
@@ -313,6 +325,19 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
     # only) to preserve existing behavior; the place route sets it True when the
     # market is closed.
     outside_rth = bool(params.get("outsideRth", False))
+
+    if not what_if:
+        # Gate 3 (NF-1): max loss <= 2.5% of a fresh (<=15 min) IB net
+        # liquidation. Close-outs of held positions are exempt.
+        from bankroll_guard import check_bankroll_admission
+
+        bankroll_violation = check_bankroll_admission(params)
+        if bankroll_violation:
+            return {
+                "status": "error",
+                "code": bankroll_violation["code"],
+                "message": bankroll_violation["message"],
+            }
 
     client = IBClient()
     timer = PhaseTimer("ib_place_order")
@@ -661,6 +686,12 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
             result["filled"] = int(filled)
             result["remaining"] = _fill_value(trade.orderStatus.remaining)
             result["avgFillPrice"] = _fill_value(trade.orderStatus.avgFillPrice)
+        if kelly_warning:
+            result["kelly_warning"] = {
+                key: kelly_warning[key]
+                for key in ("code", "message", "loss", "bankroll", "pct")
+                if key in kelly_warning
+            }
         return result
 
     except Exception as e:

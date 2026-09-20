@@ -99,6 +99,19 @@ def _normalize_strike(value: Any) -> Optional[str]:
         return None
 
 
+def con_id_of(source: dict[str, Any]) -> Optional[str]:
+    """IB conId from a contract dict or journal payload, as a canonical string."""
+    for field in ("conId", "con_id", "conid"):
+        value = source.get(field)
+        if value in (None, "", 0, "0"):
+            continue
+        try:
+            return str(int(float(value)))
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
 def _signed_qty(action: Any, qty: float) -> float:
     label = str(action or "").strip().upper()
     if qty <= 0:
@@ -150,6 +163,56 @@ def contract_fill_fingerprint(payload: dict[str, Any]) -> Optional[tuple]:
 
     contract = _bucket_key(payload) or f"{ticker}|STK"
     return (contract, date, signed)
+
+
+def flex_aggregate_budget(payload: dict[str, Any]) -> Optional[dict[tuple, float]]:
+    """Per (contract, ET date, sign) quantity a Flex AGGREGATE row accounts for.
+
+    NF-4: ``journal_rehydrate`` collapses several executions into one row
+    (``+``-joined ``ib_exec_id``, or a netted ``CLOSED`` round trip). Such a
+    row is a total, so it can only cover individual fills by quantity, never
+    by the 1:1 fingerprint. Returns None for a row that is not an aggregate.
+    ``fill_breakdown`` (per-date signed totals, written by rehydrate) keys a
+    multi-day bucket on each real fill date; legacy rows fall back to the
+    row's own date.
+    """
+    exec_id = str(payload.get("ib_exec_id") or "")
+    action = str(payload.get("action") or "").strip().upper()
+    if "+" not in exec_id and action != "CLOSED":
+        return None
+    ticker = _normalize_ticker(payload.get("ticker") or payload.get("symbol"))
+    if not ticker:
+        return None
+    contract = _bucket_key(payload) or f"{ticker}|STK"
+    budget: dict[tuple, float] = {}
+
+    def _add(date: Any, signed: float) -> None:
+        day = str(date or "")[:10]
+        if not day or not signed:
+            return
+        key = (contract, day, 1 if signed > 0 else -1)
+        budget[key] = budget.get(key, 0.0) + abs(signed)
+
+    breakdown = payload.get("fill_breakdown")
+    if isinstance(breakdown, list) and breakdown:
+        for item in breakdown:
+            try:
+                _add(item.get("date"), float(item.get("qty") or 0))
+            except (AttributeError, TypeError, ValueError):
+                continue
+        return budget
+
+    try:
+        qty = abs(float(payload.get("contracts") or payload.get("shares") or 0))
+        round_trip = abs(float(payload.get("total_round_trip_quantity") or qty))
+    except (TypeError, ValueError):
+        return budget
+    if action == "CLOSED":
+        _add(payload.get("date"), round_trip)
+        _add(payload.get("date"), -round_trip)
+    else:
+        _add(payload.get("date"), _signed_qty(action, qty))
+    return budget
 
 
 def _exec_id_parts(payload: dict[str, Any]) -> list[str]:
@@ -293,8 +356,18 @@ def _derive_journal_state_from_rows(
     option_net_keys: Iterable[str] = (),
     stock_net_tickers: Iterable[str] = (),
     before: Optional[str] = None,
+    conid_keys: Optional[dict[str, str]] = None,
 ) -> tuple[dict[str, float], dict[str, float]]:
-    """Pure row processor shared by the single-target and batched readers."""
+    """Pure row processor shared by the single-target and batched readers.
+
+    ``conid_keys`` maps live IB conIds to bucket keys (REL-109): a row carrying
+    a live conId is keyed by it whatever its contract fields say, and a row
+    whose conId is foreign but whose fields name a live key poisons that key's
+    basis, since the journal cannot say which contract the fill belongs to.
+    """
+    live_by_conid = {str(k): v for k, v in (conid_keys or {}).items()}
+    live_keys = set(live_by_conid.values())
+    poisoned: set[str] = set()
     normalized_basis_tickers = {
         _normalize_ticker(ticker) for ticker in basis_tickers if _normalize_ticker(ticker)
     }
@@ -322,6 +395,13 @@ def _derive_journal_state_from_rows(
             continue
 
         key = _bucket_key(payload)
+        con_id = con_id_of(payload) if live_by_conid else None
+        if con_id is not None:
+            if con_id in live_by_conid:
+                key = live_by_conid[con_id]
+            elif key in live_keys:
+                poisoned.add(key)
+                continue
         qty_raw = payload.get("contracts")
         if qty_raw is None:
             qty_raw = payload.get("shares")
@@ -392,7 +472,7 @@ def _derive_journal_state_from_rows(
     open_basis_lookup: dict[str, float] = {}
     for key, bucket in buckets.items():
         net_qty = float(bucket["net_qty"])
-        if net_qty == 0:
+        if net_qty == 0 or key in poisoned:
             continue
 
         if bucket["latest_persisted_open_basis"] is not None:
@@ -422,6 +502,7 @@ def compute_open_basis_and_net_qty_for_tickers(
     *,
     tickers: Iterable[str],
     contract_keys: Iterable[str],
+    conid_keys: Optional[dict[str, str]] = None,
 ) -> tuple[dict[str, float], dict[str, float]]:
     """Read current option tickers once and derive basis plus net quantities."""
     normalized_tickers = tuple(
@@ -433,6 +514,7 @@ def compute_open_basis_and_net_qty_for_tickers(
         rows,
         basis_tickers=normalized_tickers,
         option_net_keys=normalized_contract_keys,
+        conid_keys=conid_keys,
     )
 
 

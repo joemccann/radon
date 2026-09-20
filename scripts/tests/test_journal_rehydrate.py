@@ -1022,3 +1022,118 @@ class TestCorrectionSuffixDedupe:
         assert _is_duplicate(entry, {self.ORIGINAL}, set(), {self.ROOT}) is True
         assert _is_duplicate(entry, {self.ORIGINAL}, set(), set()) is False
         assert _is_duplicate(entry, {self.ORIGINAL}, set()) is False
+
+
+# ---------------------------------------------------------------------------
+# NF-4: individual fills are canonical; Flex aggregates only reconcile totals
+# ---------------------------------------------------------------------------
+
+
+def _individual_row(exec_id: str, qty: int, price: float, day: str = "2026-04-10",
+                    action: str = "BUY_OPTION") -> dict:
+    """What journal_sync writes for ONE IB execution (dotted IB execId)."""
+    return {
+        "id": 1,
+        "date": day,
+        "ticker": "SPY",
+        "structure": "Long Put $500 2026-05-15",
+        "decision": "IB_AUTO_IMPORT",
+        "action": action,
+        "fill_price": price,
+        "contracts": qty,
+        "strike": 500.0,
+        "right": "P",
+        "expiry": "20260515",
+        "ib_exec_id": exec_id,
+    }
+
+
+def _flex_fill(exec_id: str, qty: int, price: float, when: datetime,
+               side: Side = Side.BUY) -> Execution:
+    return _make_execution(
+        exec_id=exec_id, symbol="SPY", sec_type=SecurityType.OPTION, side=side,
+        quantity=qty, price=price, strike=500.0, right="P", expiry="20260515",
+        when=when,
+    )
+
+
+class TestFlexAggregateNeverOverridesIndividualFills:
+    DAY1 = datetime(2026, 4, 10, 10, 0, 0)
+    DAY1_LATE = datetime(2026, 4, 10, 14, 0, 0)
+    DAY2 = datetime(2026, 4, 13, 11, 0, 0)
+
+    def _existing(self) -> dict:
+        return {"trades": [
+            _individual_row("0001aaaa.6a000001.01.01", 3, 1.00),
+            _individual_row("0001aaaa.6a000002.01.01", 2, 1.10),
+        ]}
+
+    def test_covered_day_books_nothing(self):
+        executions = [
+            _flex_fill("9100000001", 3, 1.00, self.DAY1),
+            _flex_fill("9100000002", 2, 1.10, self.DAY1_LATE),
+        ]
+        updated, imported, _skipped, _ = rehydrate_from_executions(executions, self._existing())
+        assert imported == 0
+        assert len(updated["trades"]) == 2
+        assert updated.get("aggregate_disagreements", []) == []
+
+    def test_quantity_disagreement_is_flagged_not_booked(self):
+        executions = [
+            _flex_fill("9100000001", 3, 1.00, self.DAY1),
+            _flex_fill("9100000002", 3, 1.10, self.DAY1_LATE),
+        ]
+        updated, imported, _skipped, _ = rehydrate_from_executions(executions, self._existing())
+        assert imported == 0
+        assert len(updated["trades"]) == 2
+        [flag] = updated["aggregate_disagreements"]
+        assert flag["date"] == "2026-04-10"
+        assert flag["flex_qty"] == 6 and flag["fills_qty"] == 5
+
+    def test_proceeds_disagreement_is_flagged_not_booked(self):
+        executions = [
+            _flex_fill("9100000001", 3, 1.00, self.DAY1),
+            _flex_fill("9100000002", 2, 1.50, self.DAY1_LATE),
+        ]
+        updated, imported, _skipped, _ = rehydrate_from_executions(executions, self._existing())
+        assert imported == 0
+        [flag] = updated["aggregate_disagreements"]
+        assert flag["flex_qty"] == flag["fills_qty"] == 5
+        assert flag["flex_notional"] != flag["fills_notional"]
+
+    def test_uncovered_day_still_imports_only_its_own_fills(self):
+        executions = [
+            _flex_fill("9100000001", 3, 1.00, self.DAY1),
+            _flex_fill("9100000002", 2, 1.10, self.DAY1_LATE),
+            _flex_fill("9100000003", 4, 1.20, self.DAY2),
+        ]
+        updated, imported, _skipped, _ = rehydrate_from_executions(executions, self._existing())
+        assert imported == 1
+        new = updated["trades"][-1]
+        assert new["ib_exec_id"] == "9100000003"
+        assert new["contracts"] == 4
+        assert new["date"] == "2026-04-13"
+
+    def test_imported_aggregate_carries_its_per_day_breakdown(self):
+        executions = [
+            _flex_fill("9100000003", 4, 1.20, self.DAY1),
+            _flex_fill("9100000004", 1, 1.25, self.DAY2),
+        ]
+        updated, imported, _skipped, _ = rehydrate_from_executions(executions, {"trades": []})
+        assert imported == 1
+        assert updated["trades"][-1]["fill_breakdown"] == [
+            {"date": "2026-04-10", "qty": 4},
+            {"date": "2026-04-13", "qty": 1},
+        ]
+
+    def test_rehydrate_surfaces_disagreements_in_its_result(self):
+        executions = [
+            _flex_fill("9100000001", 3, 1.00, self.DAY1),
+            _flex_fill("9100000002", 3, 1.10, self.DAY1_LATE),
+        ]
+        fetcher = MagicMock()
+        fetcher.fetch_executions.return_value = executions
+        result = rehydrate(fetcher=fetcher, existing=self._existing())
+        assert result["ok"] is True
+        assert result["imported"] == 0
+        assert len(result["aggregate_disagreements"]) == 1
