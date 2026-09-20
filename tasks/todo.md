@@ -7849,7 +7849,7 @@ Operational review: repaired the existing Turso snapshot in place, preserving sc
 
 - [x] T1 depends_on: [] - Establish full baseline; reconcile complete issue #81 checkpoint.
 - [x] T2 depends_on: [T1] - REL-268 aggregate close-out quantities, red/green and full gates.
-- [ ] T3 depends_on: [T2] - REL-269 convexity decision gate, red/green and full gates.
+- [x] T3 depends_on: [T2] - REL-269 convexity decision gate, red/green and full gates.
 - [ ] T4 depends_on: [T3] - REL-274 aggregate/individual reconciliation, red/green and full gates.
 - [ ] T5 depends_on: [T4] - Permanent drills, three full gates, durable complete issue report and guarded publication.
 
