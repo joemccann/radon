@@ -7853,6 +7853,8 @@ Operational review: repaired the existing Turso snapshot in place, preserving sc
 - [x] T4 depends_on: [T3] - REL-274 aggregate/individual reconciliation, red/green and full gates.
 - [ ] T5 depends_on: [T4] - Permanent drills, three full gates, durable complete issue report and guarded publication.
 
+- [ ] T6 depends_on: [T2] - Fresh-snapshot SELL-envelope risk follow-up; restart final drills and three full gates.
+
 ## Review
 
 - Pending verification. P2 findings and inherited operator-only acceptance stay open.

@@ -161,34 +161,50 @@ class TestWire:
 
 
 class TestRepeatedContractCloseOut:
-    @pytest.mark.parametrize("envelope,leg_action", [("BUY", "SELL"), ("SELL", "BUY")])
+    @pytest.mark.parametrize("envelope,leg_action,direction,price", [
+        ("BUY", "SELL", "LONG", 1.0), ("SELL", "BUY", "LONG", 1.0),
+        ("BUY", "BUY", "SHORT", 10.0), ("SELL", "SELL", "SHORT", -10.0),
+    ])
     @pytest.mark.parametrize("quantity,ratios", [(10, (1, 1)), (4, (2, 1))])
-    def test_repeated_legs_refuse_before_ib(self, monkeypatch, envelope, leg_action, quantity, ratios):
+    @pytest.mark.parametrize("age_min,code", [(600, "BANKROLL_STALE"), (1, "BANKROLL_CAP_EXCEEDED")])
+    def test_repeated_legs_refuse_before_ib(self, monkeypatch, envelope, leg_action, direction, price, quantity, ratios, age_min, code):
         import ib_place_order
         held = {"ticker": "AAPL", "expiry": "2026-10-16", "legs": [
-            {"type": "Put", "strike": 20, "direction": "LONG", "contracts": 10},
+            {"type": "Put", "strike": 20, "direction": direction, "contracts": 10},
         ]}
         params = {"type": "combo", "symbol": "AAPL", "action": envelope,
-                  "quantity": quantity, "limitPrice": 1.0, "legs": [
+                  "quantity": quantity, "limitPrice": price, "legs": [
             {"expiry": "20261016", "strike": 20, "right": "P", "action": leg_action, "ratio": r}
             for r in ratios
         ]}
-        monkeypatch.setattr(bankroll_guard, "_load_latest_snapshot", lambda: _snapshot(age_min=600, positions=[held]))
+        monkeypatch.setattr(bankroll_guard, "_load_latest_snapshot", lambda: _snapshot(age_min=age_min, positions=[held]))
         monkeypatch.setattr(bankroll_guard, "_utcnow", lambda: NOW)
         monkeypatch.setattr(bankroll_guard, "check_bankroll_admission", check_bankroll_admission)
         client = MagicMock()
         client.return_value.connect.side_effect = RuntimeError("fake transport must not connect")
         monkeypatch.setattr(ib_place_order, "IBClient", client)
         result = ib_place_order.place_order(params)
-        assert result.get("code") == "BANKROLL_STALE", result
+        assert result.get("code") == code, result
         client.assert_not_called()
 
     @pytest.mark.parametrize("quantity,ratios", [(5, (1, 1)), (2, (2, 1))])
-    def test_combined_reduction_admitted(self, quantity, ratios):
+    @pytest.mark.parametrize("direction", ["LONG", "SHORT"])
+    def test_combined_reduction_admitted(self, quantity, ratios, direction):
         params = _vertical(quantity, 10)
-        params["legs"] = [dict(params["legs"][0], action="SELL", ratio=r) for r in ratios]
-        assert _check(params, _snapshot(age_min=600, nlv=None, positions=[HELD_CALL])) is None
+        action = "SELL" if direction == "LONG" else "BUY"
+        params["legs"] = [dict(params["legs"][0], action=action, ratio=r) for r in ratios]
+        held = {**HELD_CALL, "legs": [dict(HELD_CALL["legs"][0], direction=direction)]}
+        assert _check(params, _snapshot(age_min=600, nlv=None, positions=[held])) is None
 
     @pytest.mark.parametrize("value", [float("nan"), float("inf")])
     def test_nonfinite_quantity_is_not_a_close(self, value):
         assert not bankroll_guard.is_close_out(_long_call(value, 1, "SELL"), _snapshot(positions=[HELD_CALL]))
+
+
+@pytest.mark.parametrize("envelope,price", [("BUY", 1.0), ("SELL", -1.0)])
+def test_long_combo_debit_at_bankroll_cap_remains_admitted(envelope, price):
+    params = _vertical(25, 10)
+    params.update(action=envelope, limitPrice=price)
+    action = "BUY" if envelope == "BUY" else "SELL"
+    params["legs"] = [dict(leg, action=action) for leg in params["legs"]]
+    assert _check(params, _snapshot()) is None

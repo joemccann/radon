@@ -739,3 +739,11 @@ REL-269 verification recovery: initial full Vitest had one use-streaks loading-s
 Legacy operator acceptance: historical net-only summaries omit zero-net dates, so even one retained date cannot locate hidden turnover safely. The refusal names the aggregate ID. On the authorized host, run the backfill's default dry-run, rebuild any refused aggregate's gross_fill_breakdown from original Flex executions, and review a metadata-only canonical journal repair before retrying. This run made no live data repair.
 
 Runner dependency action is resolved: pypdfium2 5.13.0 and pdf-inspector 1.17.0 metadata and resolved module files both reside in the shared venv-reliability site-packages, not temporary import links.
+
+### REL-268 fresh-snapshot follow-up (final series restarted)
+
+The stale-bankroll cases proved close-out exemption was removed, but did not exercise the ordinary loss calculation with a fresh snapshot. A final synthetic probe of a SELL envelope with two BUY put legs returned close_out=False, max_loss=0, refusal=None. RED public placement: 2 failed, 30 passed for fresh SELL-envelope ratio/repeated-key cases. GREEN admission/all-path/limits/quadrants: 86 passed after translating SELL BAG legs into their execution directions for the bankroll loss calculation, retaining the original envelope/price for premium signs. The static margin-proxy calculator and operator toggles are unchanged.
+
+The initial closing series is excluded from final-source acceptance after this follow-up. Its third stage is awaited to completion; the required drills and three consecutive full runs restart on the final source. No publication has occurred.
+
+Symmetric follow-up: extending the public-placement matrix to SHORT holdings exposed four additional fresh debit-flip cases (RED 4 failed, 40 passed). The bankroll bound is now also floored by premium paid, so an all-long combination cannot receive zero risk from the static short-leg margin proxy. Both envelope signs and held directions, ratios, true reductions, and long-combo debits exactly at the cap are covered. Final focused admission/all-path/limits/quadrants group: 98 passed. The source fix remains locally preserved pending the replacement full-gate series.
