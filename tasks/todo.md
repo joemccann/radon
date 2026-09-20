@@ -13,7 +13,7 @@ Separate implement PR from main. No merge.
 
 - [x] T1 Failing tests
 - [x] T2 Markup + CSS
-- [ ] T3 Draft PR, CI green, no merge
+- [x] T3 Draft PR #586; Vitest 6/6; Playwright 3/3 at 390x844; CI watch; no merge
 
 ## Review
 

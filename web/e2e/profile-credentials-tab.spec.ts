@@ -298,6 +298,8 @@ test.describe("profile operator tabs", () => {
     await page.screenshot({ path: "test-results/profile-credentials-rejection.png", fullPage: true });
   });
 
+  // 390x844: Joe's phone. Keys must scroll MenthorQ above the tab bar;
+  // the segment must show a full leftmost BOOKMARKS, not an ellipsis clip.
   test("mobile Keys scrolls MenthorQ above the tab bar and BOOKMARKS is unclipped", async ({
     page,
   }) => {
