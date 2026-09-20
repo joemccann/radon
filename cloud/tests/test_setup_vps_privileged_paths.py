@@ -190,6 +190,64 @@ class TestEnvFileGuard:
         calls = log.read_text().splitlines()
         assert calls[:2] == [f"chmod 0640 {env}", f"chown root:radon {env}"]
 
+    def test_write_mcp_env_refuses_symlinked_destination(
+        self, harness: dict[str, Path]
+    ) -> None:
+        # /etc/radon is radon-writable (root:radon 1770), so the mcp.env
+        # destination can be a radon-planted symlink; root must never
+        # publish through it.
+        self._env_stubs(harness)
+        env = harness["tmp"] / "env"
+        env.write_text("CLERK_ISSUER=https://clerk.example\nSECRET=1\n")
+        dest_dir = harness["tmp"] / "etc-radon"
+        dest_dir.mkdir()
+        dest = dest_dir / "mcp.env"
+        dest.symlink_to(harness["victim"])
+        result = _run_setup_function(
+            "write_mcp_env",
+            harness["bin"],
+            {
+                **_base_env(harness),
+                "RADON_DEPLOY_ENV_FILE": str(env),
+                "RADON_MCP_ENV_FILE": str(dest),
+            },
+        )
+        assert result.returncode != 0
+        assert REFUSAL in result.stdout + result.stderr
+        assert dest.is_symlink(), "destination link was replaced despite refusal"
+        assert list(dest_dir.glob("mcp.env.*")) == [], "staging leftovers remain"
+        _assert_victim_untouched(harness)
+
+    def test_write_mcp_env_regular_destination_is_written_0600(
+        self, harness: dict[str, Path]
+    ) -> None:
+        self._env_stubs(harness)
+        env = harness["tmp"] / "env"
+        env.write_text(
+            "CLERK_ISSUER=https://clerk.example\n"
+            "RADON_MCP_LIMIT=5\n"
+            "SECRET=never-exported\n"
+        )
+        dest_dir = harness["tmp"] / "etc-radon"
+        dest_dir.mkdir()
+        dest = dest_dir / "mcp.env"
+        result = _run_setup_function(
+            "write_mcp_env",
+            harness["bin"],
+            {
+                **_base_env(harness),
+                "RADON_DEPLOY_ENV_FILE": str(env),
+                "RADON_MCP_ENV_FILE": str(dest),
+            },
+        )
+        assert result.returncode == 0, result.stderr
+        assert not dest.is_symlink()
+        assert dest.read_text() == (
+            "CLERK_ISSUER=https://clerk.example\nRADON_MCP_LIMIT=5\n"
+        )
+        assert _mode(dest) == "0o600"
+        assert list(dest_dir.glob("mcp.env.*")) == [], "staging leftovers remain"
+
     def test_setup_node_regular_file_is_chmod_then_chown(
         self, harness: dict[str, Path]
     ) -> None:
