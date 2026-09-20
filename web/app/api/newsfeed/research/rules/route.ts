@@ -9,8 +9,16 @@ export const radonCapability = { GET: "internal", POST: "internal" };
 const PROPOSAL_ID = /^(series_deny|publisher_deny|doc_type_drop):.{1,200}$/;
 const DECISIONS = { approve: "approved", reject: "rejected", revoke: "rejected" } as const;
 
+const EMPTY = { proposed: [] as const, approved: [] as const, rejected: [] as const };
+
 function json(body: unknown, status = 200): Response {
   return Response.json(body, { status, headers: { "Cache-Control": "private, no-store" } });
+}
+
+function toRule(row: { id: unknown; kind: unknown; key: unknown; downs: unknown; ups: unknown; evidence_json: unknown; status: unknown }) {
+  let evidence = 0;
+  try { const parsed = JSON.parse(String(row.evidence_json ?? "[]")); evidence = Array.isArray(parsed) ? parsed.length : 0; } catch { /* count stays 0 */ }
+  return { status: String(row.status), rule: { id: String(row.id), kind: String(row.kind), key: String(row.key), downs: Number(row.downs), ups: Number(row.ups), evidence } };
 }
 
 async function tableExists(): Promise<boolean> {
@@ -24,19 +32,20 @@ export async function GET(request: Request): Promise<Response> {
   const access = await requireRouteAccess(request, { operatorOnly: true, rate: { key: "research-rules", limit: 60, windowMs: 60_000 }, durableRateTier: "A" });
   if (!access.ok) return access.response;
   try {
-    if (!(await tableExists())) return json({ proposed: [], approved: [] });
+    if (!(await tableExists())) return json(EMPTY);
     const result = await dbExecute({
       sql: "SELECT id, kind, key, downs, ups, evidence_json, status FROM research_rule_proposals WHERE status IN ('proposed', 'approved') ORDER BY created_at DESC LIMIT 200",
       args: [],
     }, { label: "research-rules" });
-    const rows = result.rows.map((row) => {
-      let evidence = 0;
-      try { const parsed = JSON.parse(String(row.evidence_json ?? "[]")); evidence = Array.isArray(parsed) ? parsed.length : 0; } catch { /* count stays 0 */ }
-      return { status: String(row.status), rule: { id: String(row.id), kind: String(row.kind), key: String(row.key), downs: Number(row.downs), ups: Number(row.ups), evidence } };
-    });
+    const rejectedResult = await dbExecute({
+      sql: "SELECT id, kind, key, downs, ups, evidence_json, status FROM research_rule_proposals WHERE status = 'rejected' ORDER BY decided_at DESC LIMIT 50",
+      args: [],
+    }, { label: "research-rules-rejected" });
+    const rows = result.rows.map(toRule);
     return json({
       proposed: rows.filter((r) => r.status === "proposed").map((r) => r.rule),
       approved: rows.filter((r) => r.status === "approved").map((r) => r.rule),
+      rejected: rejectedResult.rows.map((row) => toRule(row).rule),
     });
   } catch {
     return json({ error: "Rule proposals temporarily unavailable." }, 503);

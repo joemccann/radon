@@ -1,3 +1,25 @@
+# Task: Held tab triage rules history + approved/rejected flip
+
+Implement plan #579 (`tasks/research-rules-history-plan.md`). Joe DoD: durable
+approved/rejected history on Held; flip via existing Approve / Reject|Revoke;
+no edit UI. Separate implement PR from main. No merge.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red: GET `{ proposed, approved, rejected }`, Reject/Revoke stay listed, Approve-from-Rejected wire
+- T2 depends_on: [T1] - `route.ts` rejected query LIMIT 50; `ResearchRuleProposals` third list + `decide()` moves
+- T3 depends_on: [T2] - `docs/dropbox-research.md`; e2e + screenshots; draft PR; CI
+
+## Checklist
+
+- [x] T1 Failing tests on main
+- [x] T2 API + UI
+- [x] T3 Docs, e2e 3/3, screenshots, draft PR #580; CI watch in progress, no merge
+
+## Review
+
+- Plan PR #579 is design only. Do not edit it.
+
 # Task: PDF chart evidence not text-only (PR #574 plan)
 
 Published research posts that cite PDF pages with charts must carry those
