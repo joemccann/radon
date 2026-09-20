@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Task: Newsfeed SLM tagger v1 implement [DRAFT PR; RUNG OFF]
 
 Implement `docs/ml/newsfeed-slm-tagger.md` (HR-1..HR-8). Dataset/eval/train/export/sidecar/ladder hook default off. No prod enable. No merge.
@@ -42,7 +41,6 @@ server, or ladder code in this PR.
 ## Review
 
 - [x] Reconciled with `docs/research/radon-small-model.md` (thin $ case kept; Phase-1 tagger experiment bounded) and `radon-harness-and-model-roadmap.md` (M1 rung behind the provider layer).
-=======
 # Task: Kelly order-path warn-not-block (2026-09-19)
 
 `RADON_KELLY_ENFORCE_ORDERS=1` must WARN, not BLOCK, place_order.
@@ -107,7 +105,6 @@ Journal: Missing Anthropic subscription. Next.js has no subscription binds.
 
 - Live: 2026-09-19 16:09:36Z radon-nextjs `[newsfeed/share] voice rewrite failed: Error: Missing Anthropic subscription`.
 - 2aba1229 excluded nextjs from grant mounts. Share and assistant run in Next.js.
->>>>>>> origin/main
 
 # Task: GEX45 GPU deployment tooling (2026-09-19)
 
