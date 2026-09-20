@@ -149,8 +149,14 @@ export async function GET() {
     const posts = await cachedRead("newsfeed:posts", POSTS_CACHE_TTL_MS, fetchPosts, {
       staleWhileError: true,
     });
+    // The feedback overlay carries operator research-triage votes and
+    // free-text comments; non-operator principals get neither research posts
+    // nor any post's feedback.
     const visible = access.principal.kind === "operator" || access.principal.kind === "test"
-      ? posts : posts.filter(post => !post.id.startsWith("research-") && !post.source);
+      ? posts
+      : posts
+          .filter(post => !post.id.startsWith("research-") && !post.source)
+          .map(post => (post.feedback ? { ...post, feedback: undefined } : post));
     return NextResponse.json(visible, {
       headers: { "cache-control": "private, no-store", "vary": "Cookie, Authorization" },
     });

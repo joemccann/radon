@@ -161,6 +161,30 @@ describe("research post visibility", () => {
 });
 
 
+describe("operator feedback overlay", () => {
+ it("attaches feedback for operators but strips it from non-operator responses", async () => {
+  const base = "/api/newsfeed/research/files/" + "b".repeat(64);
+  const source = {kind:"dropbox",publisher:"Synthetic Bank",url:base+".pdf",documentDate:"2026-09-07",folderDate:"2026-09-07",pages:[1],figures:[],fileId:"id:fb",revision:"r1",contentHash:"b".repeat(64)};
+  await db.execute("CREATE TABLE research_feedback (post_id TEXT, target TEXT, vote TEXT, reasons TEXT, comment TEXT, created_at TEXT)");
+  const insertPost = "INSERT INTO posts (id, title, content, timestamp, images, raw_images, tags, tags_text, tags_vision, created_at, updated_at) VALUES (?, ?, ?, ?, '[]', '[]', '[]', '[]', '[]', ?, ?)";
+  await db.execute({sql:insertPost,args:["regular","Public post",null,"2026-09-07T15:00:00Z","2026-09-07T15:00:00Z","2026-09-07T15:00:00Z"]});
+  await db.execute({sql:insertPost,args:["research-fb","Private research","Evidence","2026-09-07T16:00:00Z","2026-09-07T16:00:00Z","2026-09-07T16:00:00Z"]});
+  await db.execute({sql:"INSERT INTO research_post_sources VALUES (?, ?)",args:["research-fb",JSON.stringify(source)]});
+  await db.execute({sql:"INSERT INTO research_feedback VALUES (?, 'post', 'up', '[]', ?, ?)",args:["regular","private operator triage note","2026-09-07T17:00:00Z"]});
+  const {GET} = await import("../app/api/newsfeed/posts/route");
+  const operatorPosts = await (await GET()).json();
+  const operatorRegular = operatorPosts.find((post: {id:string}) => post.id === "regular");
+  expect(operatorRegular.feedback).toEqual({vote:"up",reasons:[],comment:"private operator triage note"});
+  guard.mockResolvedValue({ok:true,principal:{kind:"demo"}});
+  const demoPosts = await (await GET()).json();
+  const demoRegular = demoPosts.find((post: {id:string}) => post.id === "regular");
+  expect(demoRegular).toBeDefined();
+  expect(demoRegular.feedback).toBeUndefined();
+  expect(JSON.stringify(demoPosts)).not.toContain("triage note");
+ });
+});
+
+
 describe("newsfeed during independent research schema rollout", () => {
   it.each(["operator", "demo"])("serves only the newest 500 legacy rows without the research table for %s", async (kind) => {
     guard.mockResolvedValue({ ok: true, principal: { kind } });
