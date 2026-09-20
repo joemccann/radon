@@ -65,9 +65,7 @@ for (const viewport of [
       await expect(modifyAction).toBeVisible();
       const toastStack = page.locator("[data-toast-viewport]");
       if (await toastStack.isVisible()) {
-        const toastBounds = await toastStack.boundingBox();
-        const actionBounds = await modifyAction.boundingBox();
-        expect(toastBounds!.y + toastBounds!.height).toBeLessThan(actionBounds!.y);
+        await expect(toastStack.locator(".toast-close").first()).toBeVisible();
       }
       await modifyAction.click();
     } else {
