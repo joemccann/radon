@@ -3,13 +3,17 @@
 > **STATUS (2026-09-20): PLAN ONLY.** Design and done-when. No product code in this PR.
 > Requested by Joe 2026-09-20. Implementation lands in a follow-up PR. No merge of this PR
 > until that PR is scoped.
+>
+> **Amended 2026-09-20 ~9:18am PT (Joe):** gate 4 keeps page validation (non-empty list of
+> ints within the PDF page count) and removes only the 8-page ceiling. Gate 5 (unknown figure
+> id) kept as is. Everything else in the brief unchanged.
 
 ## 1. Problem
 
 Operators open the Held tab and see documents held for reasons that have nothing to do with
 whether the finding is true or new: a body over 2500 characters, a claim key over 160, a
-figure caption that is missing or over 300 characters, a cited page number one past the
-document's last page, an em dash the model wrote, and above all `NUMBER_NOT_ON_PAGE`, where the
+figure caption that is missing or over 300 characters, a ninth cited page or an attached
+figure whose page would be the ninth, an em dash the model wrote, and above all `NUMBER_NOT_ON_PAGE`, where the
 code-only number matcher in `research.ground` could not find a token on the cited page text
 even though the VERIFY model call would have judged the same claim against the same pages.
 
@@ -46,8 +50,8 @@ selects `research.intake`; anything else keeps `research.pipeline`), so both val
 | 1 | `content` length `<= 2500` | **Remove.** Keep non-empty string. | intake, pipeline |
 | 2 | `claim_key` length `<= 160` | **Remove.** Keep non-empty string (it is hashed into the post id). | intake, pipeline |
 | 3 | `title` length `<= 180` | **Remove.** Keep non-empty string. | intake, pipeline |
-| 4 | `pages` in `1..page_count`, `<= 8`, figure page over budget | **Soft-clamp + warn.** Never `INVALID_CANDIDATE`. See 3.2. | intake, pipeline |
-| 5 | Unknown `figure_ids` / non-list / `> 6` | **Keep.** | intake (v1: figures list shape, crop geometry) |
+| 4 | `pages` in `1..page_count`, `<= 8`, figure page over budget | **Remove only the 8-page ceiling** (and the v2 `Figure page exceeds the evidence page budget` raise that depends on it). Non-empty list of ints within `1..page_count` stays a hold. See 3.2. | intake, pipeline |
+| 5 | Unknown `figure_ids` / non-list / `> 6` | **Keep as is** (confirmed by Joe). | intake (v1: figures list shape, crop geometry) |
 | 6 | Empty figures without `text_only: true` | **Keep.** | intake, pipeline |
 | 7 | Caption required, `<= 300` | **Remove as hold.** Default when missing; no length cap. See 3.3. | intake, pipeline, publish |
 | 8 | `tags` shape `1..10`, `TAG_RE` | **Keep.** | intake, pipeline |
@@ -63,26 +67,28 @@ outside the per-candidate `try`, pre-existing), v1 `numeric_evidence_passed` /
 `date_evidence_passed` (model-quoted numeric checks, a different mechanism from `ground.py`).
 Flag any of these for a follow-up if the Held tab shows them.
 
-### 3.2 Evidence pages: soft-clamp
+### 3.2 Evidence pages: drop the 8-page ceiling only
 
-Shared behaviour in both validators, one small helper per file (no cross-module import to
-keep v1 and v2 independent):
+Joe's amendment: page validation stays; only the ceiling goes. Smallest change in both
+validators is to delete the `len(pages) > 8` clause and leave the rest of the line as it is:
 
-1. Coerce `pages` to a list (non-list or missing becomes `[]`).
-2. Keep ints only (`type(p) is int`), drop `p < 1` or `p > page_count`, dedupe, preserve order.
-3. Figure pages (v2: `catalogue[i]['page']` for each attached id; v1: `figure['page']`) are
-   always included, appended when missing.
-4. If more than 8 remain, keep every figure page, then fill with cited pages in order until 8.
-5. Record what was dropped: `value['page_warnings'] = ['dropped 9 (page_count 8)', 'trimmed 2 pages to budget']`
-   or similar short strings. The v2 loop copies `page_warnings` into the audit entry so the
-   operator can see it on a published or verified item; never a `held`.
-6. **Residual hard case:** zero pages remain after 1-4 (the model cited nothing usable and
-   attached no figure). Raise `EvidenceError('No usable evidence pages')`. VERIFY has no page
-   text to read otherwise. This is the only page-shaped hold left and it is a shape defect in
-   the same class as 5 and 8. Flagged in section 8 for Joe to confirm.
+- v2 `intake.validate_candidate`: `if not isinstance(pages, list) or not pages or any(type(p) is not int or not 1 <= p <= page_count for p in pages): raise EvidenceError('Invalid evidence pages')`.
+  Empty, non-list, non-int and out-of-range pages still hold as `INVALID_CANDIDATE` (Joe allows
+  soft-clamping out-of-range pages instead; the plan keeps the existing strict check because it
+  is zero new code and the residual hold is a genuine shape defect). The figure-page append
+  stays and loses its `if len(pages) >= 8: raise EvidenceError('Figure page exceeds the evidence page budget')`
+  guard: an attached figure's page is always appended when not cited.
+- v1 `pipeline.validate_candidate`: same one-clause deletion. `Chart must cite an evidence page`
+  stays (page validation, not the ceiling).
+- v1 `_process`: the date-page append `and len(candidate['pages']) < 8` condition is dropped so
+  an explicitly cited date page is always supplied to VERIFY.
+- `MAX_CANDIDATES` / `MAX_CANDIDATES_PER_DOCUMENT = 8` (candidates per document) are unrelated
+  and stay.
+- No `page_warnings`, no clamping helper, no in-place mutation concern.
 
-Clamp must return a new list rather than mutate in place: v1 `prepare_figures` re-validates
-`dict(candidate, figures=[figure])`, which shares the `pages` list with the original.
+Upper bound after the change is the document itself: `page_count <= 100` (`PDF exceeds page budget`)
+and `PAGE_TEXT_CAP = 10_000` per page, so the VERIFY prompt is bounded at roughly 1 MB of page
+text in the worst case. See section 9.
 
 ### 3.3 Captions: default at intake, tolerate at publish
 
@@ -143,11 +149,10 @@ that an operator would want back if VERIFY alone proves too loose. Deleting the 
 ### 3.6 Prompt length strings
 
 - `SELECT_INSTRUCTION`: `Limits: title<=180, content<=2500, claim_key<=160, caption<=300 characters, 1..10 uppercase kebab-case tags, at most 8 pages per item.` becomes
-  `Targets, not gates: title about 180, content about 2500, caption about 300 characters. Hard shape: 1..10 uppercase kebab-case tags, at most 8 pages per item (extra pages are trimmed).`
+  `Targets, not gates: title about 180, content about 2500, caption about 300 characters. Hard shape: 1..10 uppercase kebab-case tags; cite only pages that exist in the document.`
 - `SELECT_SCHEMA`: `Write concise captions under180characters (hard maximum300)` becomes
-  `Write concise captions, about 180 characters`; `Limits: title<=180characters, content<=2500characters, publisher<=120characters, claim_key<=160characters, caption<=300characters.` becomes
-  `Targets, not gates: title about 180, content about 2500, caption about 300 characters; publisher at most 120.`
-  `Maximum8evidencepages and6figures peritem` stays (still shape).
+  `Write concise captions, about 180 characters`; `Limits: title<=180characters, content<=2500characters, publisher<=120characters, claim_key<=160characters, caption<=300characters. Maximum8evidencepages and6figures peritem.` becomes
+  `Targets, not gates: title about 180, content about 2500, caption about 300 characters; publisher at most 120. Maximum 6 figures per item; cite only pages that exist in the document.`
 
 ### 3.7 UI and historical rows
 
@@ -161,8 +166,8 @@ that an operator would want back if VERIFY alone proves too loose. Deleting the 
 
 | File | Change |
 |---|---|
-| `scripts/research/intake.py` | `validate_candidate`: drop length limits on title/content/claim_key; soft-clamp pages with `page_warnings` (3.2); caption default and no cap (3.3). Loop: remove `validate_rendered_copy` import and call, narrow `except`; remove the `NUMBER_NOT_ON_PAGE` branch, add `unmatched` to the audit entry and to the VERIFY prompt (3.4); `VERIFY_INSTRUCTION` and `SELECT_INSTRUCTION` wording (3.4, 3.6). |
-| `scripts/research/pipeline.py` | `validate_candidate`: drop length limits on title/content/claim_key; soft-clamp pages and append figure pages (3.2); caption default and no cap (3.3); remove `validate_rendered_copy` import and call. `SELECT_SCHEMA` wording (3.6). |
+| `scripts/research/intake.py` | `validate_candidate`: drop length limits on title/content/claim_key; delete the `len(pages) > 8` clause and the figure-page budget raise (3.2); caption default and no cap (3.3). Loop: remove `validate_rendered_copy` import and call, narrow `except`; remove the `NUMBER_NOT_ON_PAGE` branch, add `unmatched` to the audit entry and to the VERIFY prompt (3.4); `VERIFY_INSTRUCTION` and `SELECT_INSTRUCTION` wording (3.4, 3.6). |
+| `scripts/research/pipeline.py` | `validate_candidate`: drop length limits on title/content/claim_key; delete the `len(pages) > 8` clause (3.2); caption default and no cap (3.3); remove `validate_rendered_copy` import and call. `_process`: drop the `< 8` condition on the date-page append. `SELECT_SCHEMA` wording (3.6). |
 | `scripts/research/publish.py` | Delete `validate_rendered_copy` and its call; drop unused imports; caption check type-only; title/body non-empty only (3.3, 3.5). |
 | `scripts/research/ground.py` | Docstring first line only. |
 | `scripts/research/policy.md` | Line 9: remove the `Hold noncompliant candidates` clause. |
@@ -183,25 +188,25 @@ Nothing under `web/`, no migration, no `tools/codemap/*`.
   `test_ungrounded_number_reaches_verify_with_unmatched_hint`: two reviewer calls, the second
   prompt contains `TOKENS NOT MATCHED BY CODE` and `$47bn`, the audit entry has
   `unmatched == ['$47bn']` and no `held`, and the post publishes when VERIFY passes.
-- `test_selector_cannot_invent_figures_pages_or_dates`: split. Unknown `f9` still holds
-  `INVALID_CANDIDATE` (gate 5). `pages=[7]` on the 2-page fixture with `f1` on page 1 is
-  clamped to `[1]`, `page_warnings` recorded, VERIFY called.
+- `test_selector_cannot_invent_figures_pages_or_dates`: keep as is. Unknown `f9` (gate 5) and
+  `pages=[7]` on the 2-page fixture (out of range) both still hold `INVALID_CANDIDATE`.
 - New: 3000-character body, 200-character title and 200-character claim_key pass validation and
   reach VERIFY; the post id is still `research-` + sha256 of the full claim key.
 - New: attached figure with no caption publishes with `caption == catalogue title`; attached
   figure with a 400-character caption publishes unchanged.
 - New: an em dash in the title reaches VERIFY (no `INVALID_CANDIDATE`).
-- New: `pages=[]`, `figure_ids=[]`, `text_only=True` holds `INVALID_CANDIDATE` with
-  `No usable evidence pages` (residual, section 3.2 step 6).
-- New: 12 cited pages with figures on pages 11 and 12 trims to 8 with both figure pages kept.
+- New (direct `validate_candidate` calls, `page_count=12`): `pages=list(range(1, 13))` passes;
+  eight cited pages plus an attached figure on page 9 passes with page 9 appended (no
+  `Figure page exceeds the evidence page budget`); `pages=[]`, `pages=[0]`, `pages=[13]`,
+  `pages=[True]` and `pages=[1.0]` still raise `Invalid evidence pages`.
 
 `test_research_pipeline.py`
-- `test_invalid_evidence_cannot_publish`: remove `('pages',[0])`, `('pages',[True])`,
-  `('pages',[])` (clamp then figure page 1 fills in) and `('title','')` stays (non-empty).
-  Add a text-only `pages=[]` case that still raises.
+- `test_invalid_evidence_cannot_publish`: keep every param (`('pages',[0])`, `('pages',[True])`,
+  `('pages',[])`, `('title','')` all still raise). Add `('pages', list(range(1, 10)))` as a
+  **passing** case in a sibling test with `page_count=9`.
 - `test_candidate_holds_authored_em_dashes_before_evidence_review`: delete.
 - `test_candidate_preserves_literal_source_quotes_with_em_dashes`: keep (still true).
-- New: figure on page 2 with `pages=[1]` appends 2 instead of raising `Chart must cite`.
+- New: date-page append on a candidate that already cites 8 pages adds the ninth.
 - New: caption `''` becomes `Chart, page 1`; 400-character caption passes.
 
 `test_research_runtime.py`
@@ -234,18 +239,19 @@ now reach VERIFY.
 | `INVALID_CANDIDATE` / `Invalid title` | | Gone (only empty title holds). |
 | `INVALID_CANDIDATE` / `Invalid content` | | Gone (only empty body holds). |
 | `INVALID_CANDIDATE` / `Invalid claim_key` | | Gone (only empty key holds). |
-| `INVALID_CANDIDATE` / `Invalid evidence pages` | | Gone unless zero usable pages remain. |
-| `INVALID_CANDIDATE` / `Figure page exceeds the evidence page budget` | | Gone (figure pages win the budget). |
+| `INVALID_CANDIDATE` / `Invalid evidence pages` (ninth page) | | Gone for the over-8 case only. Empty, non-int and out-of-range pages still hold under the same text. |
+| `INVALID_CANDIDATE` / `Figure page exceeds the evidence page budget` | | Gone (no budget). |
 | `INVALID_CANDIDATE` / `Invalid captions` | | Gone (non-dict becomes `{}`). |
 | `INVALID_CANDIDATE` / `Every attached figure needs a caption of at most 300 characters` | | Gone (default caption). |
 | `INVALID_CANDIDATE` / `Rendered research copy must not contain em dashes` | | Gone. |
 | `INVALID_CANDIDATE` / `Rendered research copy must attribute the original provider only` | | Gone. |
-| v1 `invalid candidate` / `Chart must cite an evidence page` | | Gone (page appended). |
+| v1 `invalid candidate` / `Invalid evidence pages` (ninth page) | | Gone for the over-8 case only. |
 | v1 `invalid candidate` / `Chart caption must be a nonempty string at most300characters` | | Gone. |
 | (not a Held reason) outbox stuck on `publish()` `ValueError` for caption / em dash / ZeroHedge / title length | | Gone; those raises no longer exist. |
 
-Still visible: `INVALID_CANDIDATE` for `Unknown figure id`, `Missing figures must be explicitly text-only`,
-`Invalid tags`, `No usable evidence pages`; `TEXT_ONLY_WITH_FIGURES`; `VERIFY_FAILED`;
+Still visible: `INVALID_CANDIDATE` for `Unknown figure id`, `Invalid evidence pages` (empty, non-int,
+outside `1..page_count`), `Missing figures must be explicitly text-only`, `Invalid tags`;
+v1 `Chart must cite an evidence page` and crop geometry; `TEXT_ONLY_WITH_FIGURES`; `VERIFY_FAILED`;
 `NO_CANDIDATES`; triage and duplicate drops. Historical rows keep whatever code they were
 written with and the UI labels stay.
 
@@ -253,9 +259,13 @@ written with and the UI labels stay.
 
 - [ ] `intake.validate_candidate` accepts a 3000-character body, 200-character title and
       200-character claim_key; rejects only empty strings for those three.
-- [ ] `intake.validate_candidate` and `pipeline.validate_candidate` clamp out-of-range,
-      non-int, duplicate and over-budget pages, always keep figure pages, return a new list,
-      record `page_warnings`, and raise only when zero usable pages remain.
+- [ ] `intake.validate_candidate` and `pipeline.validate_candidate` accept any number of cited
+      pages (`list(range(1, page_count + 1))` passes) and still raise `Invalid evidence pages`
+      for empty, non-list, non-int or out-of-range pages; `Figure page exceeds the evidence page budget`
+      no longer exists (`rg "evidence page budget" scripts/research` empty); the v1 date-page
+      append has no `< 8` condition.
+- [ ] Gate 5 unchanged: `Unknown figure id` still raises for an id not in the catalogue, a
+      non-list, or more than 6 ids.
 - [ ] Missing or non-string captions default (v2: catalogue title / source line / `Figure, page N`;
       v1: `Chart, page N`); no caption length check anywhere.
 - [ ] `validate_rendered_copy` does not exist in the repo (`rg validate_rendered_copy` returns
@@ -280,9 +290,9 @@ written with and the UI labels stay.
 
 ## 8. Decisions flagged for Joe
 
-1. **Residual page hold** (3.2 step 6): keep `No usable evidence pages` as the one page-shaped
-   `INVALID_CANDIDATE`, or fall back to `[1]` and let VERIFY fail it? Plan keeps the hold;
-   inventing a page is worse than a shape hold.
+1. ~~Residual page hold~~ **Resolved 2026-09-20 ~9:18am PT:** page validation stays (non-empty
+   ints within `1..page_count`); only the 8-page ceiling goes. Plan keeps the existing strict
+   check rather than soft-clamping out-of-range pages (both allowed by Joe; strict is zero new code).
 2. **Grounding advisory vs delete** (3.4): plan keeps `ground.py` and feeds unmatched tokens to
    VERIFY. Say the word and the implement PR deletes the call, the module and
    `test_research_ground.py` instead.
@@ -290,6 +300,7 @@ written with and the UI labels stay.
    title/body". If a sanity ceiling is wanted it must be high enough that intake can never
    exceed it silently (say 20000 / 200000) and it must be tested.
 4. **v1 `publisher <= 120`** stays. Not in the list, never seen as a Held reason.
+5. ~~Unknown figure id~~ **Resolved:** kept as is.
 
 ## 9. Risks and known behaviour
 
@@ -299,7 +310,7 @@ written with and the UI labels stay.
 | Em dashes or `ZeroHedge` reach the feed | Prompt-only rule now. If it happens, the fix is prompt wording or a post-VERIFY rewrite, not a hold. Joe accepted this trade. |
 | Long titles or bodies break the feed card | `posts.title` / `content` are TEXT. Check `DashboardNewsFeed.tsx` for clamping in the implement PR and watch the first published long item; a display cap belongs in `web/`, not in a hold. |
 | Empty caption from an old outbox row renders `publisher · p. 3 · ` | Only for payloads built before the intake default; the outbox drains within one cycle after deploy. |
-| Larger VERIFY prompts (up to 8 pages plus figure pages) | Page budget is unchanged at 8; figure pages already had to fit today. `PAGE_TEXT_CAP` unchanged. |
+| Larger VERIFY prompts with no page ceiling | Bounded by `page_count <= 100` and `PAGE_TEXT_CAP = 10_000` per page (about 1 MB worst case, v1 also attaches one rendered image per cited page). A provider rejection for size surfaces as `ModelError` and parks the item rather than holding it; if that shows up in the first week, the fix is a prompt-size cap in the loop, not a page-count hold. Harness before/after records the cited-page distribution. |
 | `policy_sha256` changes for v1 `review.json` | Informational field; nothing reads it. |
 | Test pollution | Publish tests use the in-memory libsql fixture; deleting the guard tests reduces the matrix, nothing shares state. |
 
@@ -307,9 +318,9 @@ written with and the UI labels stay.
 
 ```
 T1 publish.py: delete validate_rendered_copy, caption type-only, title/body non-empty   depends_on: []
-T2 intake.py: validate_candidate relax + clamp + caption default                          depends_on: [T1]
+T2 intake.py: validate_candidate lengths, 8-page ceiling, caption default                depends_on: [T1]
 T3 intake.py: loop, advisory grounding, VERIFY prompt, SELECT wording                     depends_on: [T2]
-T4 pipeline.py: validate_candidate relax + clamp + caption default, SELECT_SCHEMA         depends_on: [T1]
+T4 pipeline.py: validate_candidate lengths, 8-page ceiling, caption default, SELECT_SCHEMA depends_on: [T1]
 T5 tests red/green (intake, pipeline, runtime, publish, outcomes)                         depends_on: [T1, T2, T3, T4]
 T6 docs/dropbox-research.md, policy.md, ground.py docstring                               depends_on: [T3, T4]
 T7 harness before/after counts in PR body                                                 depends_on: [T5]
