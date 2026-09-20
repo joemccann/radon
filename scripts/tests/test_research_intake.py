@@ -196,6 +196,18 @@ def test_text_only_on_cited_figures_reselect_still_text_only_is_held(tmp_path, p
     assert held and held[0]["reselect"] is True and held[0]["claim_key"] == "tic-july-equity-buying"
 
 
+def test_text_only_on_cited_figures_reselect_bare_candidate_attaches(tmp_path, publisher):
+    first = selection(figure_ids=[], text_only=True, captions={}, pages=[1])
+    reviewer = Reviewer([first, selection()["candidates"][0], verdict()])
+    pipe = intake.Pipeline(tmp_path, reviewer, publisher, extractor=extractor,
+                           figure_catalogue=catalogue_on(1), pdf_created=lambda pdf: None)
+    posts = pipe.process(work(), tmp_path / "r.pdf", [])
+    review = json.loads((tmp_path / "evidence" / ("k" * 64) / "review.json").read_text())
+    assert not any(a.get("held") == "TEXT_ONLY_WITH_FIGURES" for a in review["audit"])
+    assert next(a for a in review["audit"] if a.get("reselect") == "attached")["figure_ids"] == ["f1"]
+    assert len(posts) == 1 and posts[0]["images"]
+
+
 def test_text_only_on_cited_figures_reselect_invalid_figure_is_held(tmp_path, publisher):
     reviewer = Reviewer([
         selection(figure_ids=[], text_only=True, captions={}, pages=[1]),
