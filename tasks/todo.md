@@ -14,7 +14,7 @@ no edit UI. Separate implement PR from main. No merge.
 
 - [x] T1 Failing tests on main
 - [x] T2 API + UI
-- [ ] T3 Docs, e2e, screenshots, draft PR, CI green, no merge
+- [x] T3 Docs, e2e 3/3, screenshots, draft PR #580; CI watch in progress, no merge
 
 ## Review
 
