@@ -824,22 +824,44 @@ _playwright_major_minor() {
 }
 
 _browser_host_bin_ok() {
-  local bin="$1" root dest
+  local bin="$1" root dest phys_root phys_bin cur stop rl
   root="${AGENT_CLI_ROOT}/browser-host"
   [[ -x "$bin" ]] || return 1
-  if refuse_symlink "$bin"; then
-    return 0
+  if [[ -x /usr/bin/readlink ]]; then
+    rl=/usr/bin/readlink
+  elif [[ -x /bin/readlink ]]; then
+    rl=/bin/readlink
+  else
+    rl=""
   fi
-  dest="$(readlink "$bin" 2>/dev/null || true)"
-  [[ -n "$dest" ]] || return 1
-  if [[ "$dest" != /* ]]; then
-    dest="$(cd "$(dirname "$bin")" && pwd)/$dest"
+  cur="$root"
+  stop="$AGENT_CLI_ROOT"
+  while [[ -n "$cur" && "$cur" != "/" ]]; do
+    refuse_symlink "$cur" || {
+      echo "REFUSING: $cur is a symlink; browser-host bin must not follow directory symlinks" >&2
+      return 1
+    }
+    [[ "$cur" == "$stop" ]] && break
+    cur="${cur%/*}"
+    [[ -n "$cur" ]] || break
+  done
+  phys_root="$(cd "$root" && pwd -P)" || return 1
+  if [[ -L "$bin" ]]; then
+    [[ -n "$rl" ]] || return 1
+    dest="$("$rl" "$bin" 2>/dev/null || true)"
+    [[ -n "$dest" ]] || return 1
+    if [[ "$dest" != /* ]]; then
+      dest="$(cd "${bin%/*}" && pwd -P)/$dest"
+    fi
+    dest="$(cd "${dest%/*}" && pwd -P)/${dest##*/}" || return 1
+    phys_bin="$dest"
+  else
+    phys_bin="$(cd "${bin%/*}" && pwd -P)/${bin##*/}" || return 1
   fi
-  dest="$(cd "$(dirname "$dest")" && pwd)/$(basename "$dest")"
-  case "$dest" in
-    "$root"/*) return 0 ;;
+  case "$phys_bin" in
+    "$phys_root"/*) return 0 ;;
   esac
-  echo "REFUSING: $bin symlink escapes $root" >&2
+  echo "REFUSING: $bin physical path escapes $phys_root" >&2
   return 1
 }
 

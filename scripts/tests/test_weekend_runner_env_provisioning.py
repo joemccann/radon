@@ -318,6 +318,39 @@ class TestSetupLockHygiene:
         assert "999999" in proc.stdout
 
 
+class TestSetupBrowserHostSymlinkRefusal:
+    @pytest.mark.parametrize("name", ("testing", "reliability"))
+    def test_symlinked_browser_host_dir_is_refused(self, name, tmp_path):
+        src, clone, env = _stage(tmp_path, name)
+        home = Path(env["HOME"])
+        outside = tmp_path / "outside-browser-host"
+        outside.mkdir()
+        planted = home / ".radon" / "agent-cli"
+        planted.mkdir(parents=True)
+        (planted / "browser-host").symlink_to(outside)
+        proc = _run(name, env, tmp_path)
+        out = proc.stdout + proc.stderr
+        assert proc.returncode != 0, out
+        assert "symlink" in out
+        assert not (outside / "node_modules").exists()
+        assert list(outside.iterdir()) == []
+
+    @pytest.mark.parametrize("name", ("testing", "reliability"))
+    def test_symlinked_agent_cli_parent_is_refused(self, name, tmp_path):
+        src, clone, env = _stage(tmp_path, name)
+        home = Path(env["HOME"])
+        outside = tmp_path / "outside-agent-cli"
+        outside.mkdir()
+        radon = home / ".radon"
+        radon.mkdir()
+        (radon / "agent-cli").symlink_to(outside)
+        proc = _run(name, env, tmp_path)
+        out = proc.stdout + proc.stderr
+        assert proc.returncode != 0, out
+        assert "symlink" in out
+        assert not (outside / "browser-host").exists()
+
+
 def _web_env_loaders() -> list[Path]:
     """Every scripts/**/*.py producer whose import-time load_dotenv reads web/.env."""
     loaders = []
