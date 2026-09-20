@@ -1,3 +1,24 @@
+# Task: Mobile Profile Prefs/Keys scroll + tab strip
+
+Joe phone: Prefs/Keys clipped under the tab bar; BOOKMARKS ellipsized on ~390px.
+Separate implement PR from main. No merge.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red: CSS + mobile ProfileContent wrap + Keys scroll e2e
+- T2 depends_on: [T1] - CSS-only `.preferences-shell` scroll + profile `.m-segment` overflow-x
+- T3 depends_on: [T2] - Green focused suites; 390x844 proof; draft PR; CI
+
+## Checklist
+
+- [x] T1 Failing tests
+- [x] T2 CSS-only `.preferences-shell` + `.m-segment` overflow; TS wrap reverted
+- [x] T3 PR #586; Vitest + Playwright 390x844; no merge
+
+## Review
+
+- Do not wrap Bookmarks/Watchlist; they already scroll via `.profile-list`.
+
 # Task: Held card hides excerpt, shows full Selector note
 
 Joe mobile screenshot: raw `context.excerpt` markdown dump dominates the Held

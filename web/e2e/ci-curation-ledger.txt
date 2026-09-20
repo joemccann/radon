@@ -1,3 +1,7 @@
+# REVIEWED 2026-09-20 profile-credentials-tab.spec.ts - 3/3 Chromium against
+#   isolated next start :3033 with RADON_AUTHLESS_TEST. Pins CSS-only Prefs/Keys
+#   `.preferences-shell` scroll so MenthorQ sits above `mobile-tab-bar`, and
+#   BOOKMARKS unclipped at 390x844. Held out of e2e-financial-smoke.
 # REVIEWED 2026-09-19 dashboard-feed-tabs.spec.ts - 7/7 Chromium against local
 #   next dev with RADON_AUTHLESS_TEST. Pins feed-rail geometry, R-463 Held
 #   ---, empty-state copy, and after/ shots (desktop dark/light, 1024

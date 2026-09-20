@@ -21228,11 +21228,36 @@ body[data-mobile="true"] .content:has(.profile-surface--mobile) {
   flex: 0 0 auto;
 }
 .profile-surface--mobile > .profile-list,
-.profile-surface--mobile > .profile-empty {
+.profile-surface--mobile > .profile-empty,
+.profile-surface--mobile > .preferences-shell {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+}
+/* Four uppercase labels + counts overflow ~390px. Keep full words and
+   scroll the strip instead of shrink-clipping BOOKMARKS. Same recipe as
+   scanner mode tabs: overflow-x + snap, items no-shrink nowrap. */
+.profile-surface--mobile > .m-segment {
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex-wrap: nowrap;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  scroll-snap-type: x proximity;
+}
+.profile-surface--mobile > .m-segment::-webkit-scrollbar {
+  display: none;
+  height: 0;
+}
+.profile-surface--mobile > .m-segment > .m-segment__item {
+  flex: 0 0 auto;
+  min-width: max-content;
+  white-space: nowrap;
+  letter-spacing: 0;
+  scroll-snap-align: start;
 }
 /* The list is now the scroll region, so the CTA no longer needs to stick. */
 .profile-surface--mobile .m-sticky-cta {
