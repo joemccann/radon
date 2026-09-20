@@ -190,6 +190,52 @@ class TestDistill:
         assert "query-secret" not in body
         assert "symbol=SPY" in body
 
+    def test_bare_provider_tokens_are_redacted_before_egress(self):
+        sent = {}
+
+        def complete(instruction, **kwargs):
+            sent["content"] = instruction
+            return _distill_ok()
+
+        distill_mod.distill(
+            "Incident",
+            "Saw ghp_FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE in logs, "
+            "aws key AKIAFAKEFAKEFAKEFAKE, openai sk-proj-FAKEFAKEFAKEFAKEFAKE "
+            "and xai-FAKEFAKEFAKEFAKEFAKEFAKE alongside a routine SPY put.",
+            complete=complete,
+            env={"CLAUDE_CODE_OAUTH_TOKEN": "oauth-a"},
+        )
+
+        body = sent["content"]
+        assert "ghp_FAKE" not in body
+        assert "AKIAFAKE" not in body
+        assert "sk-proj-FAKE" not in body
+        assert "xai-FAKE" not in body
+        assert "routine SPY put" in body
+
+    def test_token_straddling_truncation_boundary_is_fully_redacted(self):
+        sent = {}
+
+        def complete(instruction, **kwargs):
+            sent["content"] = instruction
+            return _distill_ok()
+
+        token = "ghp_FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE"
+        title = "Boundary"
+        prefix_len = len(f"Title: {title}\n\n")
+        # Place the token so it straddles the 6000-char truncation boundary.
+        pad = "x" * (distill_mod.MAX_CONTENT_CHARS - prefix_len - len(token) // 2 - 1) + " "
+        distill_mod.distill(
+            title,
+            pad + token + " trailing",
+            complete=complete,
+            env={"CLAUDE_CODE_OAUTH_TOKEN": "oauth-a"},
+        )
+
+        body = sent["content"]
+        assert "ghp_" not in body
+        assert len(body) <= distill_mod.MAX_CONTENT_CHARS
+
     def test_code_fenced_json_is_parsed(self):
         fenced = f"```json\n{_GOOD_DISTILLATION}\n```"
 
