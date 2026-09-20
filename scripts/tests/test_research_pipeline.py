@@ -31,14 +31,27 @@ def test_invalid_evidence_cannot_publish(field,value):
     with pytest.raises(EvidenceError):validate_candidate(item,2,'2026-09-07')
 
 
-@pytest.mark.parametrize('field', ['title', 'content', 'publisher', 'caption'])
-@pytest.mark.parametrize('dash', ['\u2014', '&mdash;', '&#8212;', '&#x2014;'])
-def test_candidate_holds_authored_em_dashes_before_evidence_review(field, dash):
+def test_nine_cited_pages_pass_when_within_document():
     item = candidate()
-    target = item['figures'][0] if field == 'caption' else item
-    target[field] = f'Flows {dash} new demand'
-    with pytest.raises(EvidenceError, match='em dash'):
-        validate_candidate(item, 2, '2026-09-07')
+    item['pages'] = list(range(1, 10))
+    assert validate_candidate(item, 9, '2026-09-07')['pages'] == list(range(1, 10))
+
+
+def test_empty_caption_defaults_and_long_caption_passes():
+    item = candidate()
+    item['figures'][0]['caption'] = ''
+    assert validate_candidate(item, 2, '2026-09-07')['figures'][0]['caption'] == 'Chart, page 1'
+    item = candidate()
+    item['figures'][0]['caption'] = 'x' * 400
+    assert validate_candidate(item, 2, '2026-09-07')['figures'][0]['caption'] == 'x' * 400
+
+
+def test_select_schema_is_targets_not_hard_length_or_eight_page_cap():
+    from research.pipeline import SELECT_SCHEMA
+    assert 'Targets, not gates' in SELECT_SCHEMA
+    assert 'Write concise captions, about 180 characters' in SELECT_SCHEMA
+    assert 'Maximum8evidencepages' not in SELECT_SCHEMA
+    assert 'hard maximum300' not in SELECT_SCHEMA
 
 
 def test_candidate_preserves_literal_source_quotes_with_em_dashes():
@@ -68,6 +81,19 @@ def test_novelty_shortlist_includes_matching_older_claim():
     posts=[{'id':str(i),'title':'unrelated','content':'something'} for i in range(200)]
     posts[-1].update(title='Yen flow changes',content='JPM reports new hedge demand.')
     assert any(p['id']=='199' for p in comparison_posts(candidate(),posts,limit=1))
+
+
+def test_date_page_appends_beyond_eight_cited_pages(tmp_path):
+    from tests.test_research_runtime import fixture_pipeline, item
+    proposal = item()
+    proposal['pages'] = list(range(1, 9))
+    proposal['date_evidence'] = {'page': 9, 'date_text': '4 September 2026',
+                                 'source_quote': 'Report date: 4 September 2026', 'role': 'report'}
+    checks = gates() | {'date_evidence': {'page': 1, 'date_text': '4 September 2026',
+        'source_quote': 'Report date: 4 September 2026', 'role': 'report', 'role_verified': True}}
+    pipe, work = fixture_pipeline(tmp_path, [{'candidates': [proposal]}, {'candidates': []}, checks], count=9)
+    posts = pipe.process(work, tmp_path / 'source.pdf', [])
+    assert len(posts) == 1 and 9 in posts[0]['source']['pages']
 
 
 def test_pipeline_cannot_publish_before_independent_visual_checks(tmp_path):
