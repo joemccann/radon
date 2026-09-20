@@ -165,15 +165,50 @@ def catalogue_on(page):
     return impl
 
 
-def test_text_only_candidate_on_a_page_with_catalogue_figures_is_held(tmp_path, publisher):
-    reviewer = Reviewer([selection(figure_ids=[], text_only=True, captions={}, pages=[1]), verdict()])
+def test_text_only_on_cited_figures_reselect_attaches_and_continues(tmp_path, publisher):
+    first = selection(figure_ids=[], text_only=True, captions={}, pages=[1])
+    reviewer = Reviewer([first, selection(), verdict()])
     pipe = intake.Pipeline(tmp_path, reviewer, publisher, extractor=extractor,
                            figure_catalogue=catalogue_on(1), pdf_created=lambda pdf: None)
     posts = pipe.process(work(), tmp_path / "r.pdf", [])
-    assert posts == [] and publisher.stored == [] and len(reviewer.calls) == 1
+    assert [c[0] for c in reviewer.calls] == ["text", "text", "multimodal"]
+    assert "RESELECT" in reviewer.calls[1][1] and "f1" in reviewer.calls[1][1]
+    review = json.loads((tmp_path / "evidence" / ("k" * 64) / "review.json").read_text())
+    assert not any(a.get("held") == "TEXT_ONLY_WITH_FIGURES" for a in review["audit"])
+    first_miss = next(a for a in review["audit"] if a.get("text_only_with_figures"))
+    assert first_miss["figures_on_cited_pages"] == ["f1"] and "held" not in first_miss
+    attached = next(a for a in review["audit"] if a.get("reselect") == "attached")
+    assert attached["figure_ids"] == ["f1"]
+    assert len(posts) == 1 and posts[0]["images"]
+
+
+def test_text_only_on_cited_figures_reselect_still_text_only_is_held(tmp_path, publisher):
+    text_only = selection(figure_ids=[], text_only=True, captions={}, pages=[1])
+    reviewer = Reviewer([text_only, text_only])
+    pipe = intake.Pipeline(tmp_path, reviewer, publisher, extractor=extractor,
+                           figure_catalogue=catalogue_on(1), pdf_created=lambda pdf: None)
+    posts = pipe.process(work(), tmp_path / "r.pdf", [])
+    assert posts == [] and publisher.stored == [] and [c[0] for c in reviewer.calls] == ["text", "text"]
+    review = json.loads((tmp_path / "evidence" / ("k" * 64) / "review.json").read_text())
+    first_miss = next(a for a in review["audit"] if a.get("text_only_with_figures") and "held" not in a)
+    assert first_miss["figures_on_cited_pages"] == ["f1"]
+    held = [a for a in review["audit"] if a.get("held") == "TEXT_ONLY_WITH_FIGURES"]
+    assert held and held[0]["reselect"] is True and held[0]["claim_key"] == "tic-july-equity-buying"
+
+
+def test_text_only_on_cited_figures_reselect_invalid_figure_is_held(tmp_path, publisher):
+    reviewer = Reviewer([
+        selection(figure_ids=[], text_only=True, captions={}, pages=[1]),
+        selection(figure_ids=["f9"], pages=[1]),
+    ])
+    pipe = intake.Pipeline(tmp_path, reviewer, publisher, extractor=extractor,
+                           figure_catalogue=catalogue_on(1), pdf_created=lambda pdf: None)
+    posts = pipe.process(work(), tmp_path / "r.pdf", [])
+    assert posts == [] and [c[0] for c in reviewer.calls] == ["text", "text"]
     review = json.loads((tmp_path / "evidence" / ("k" * 64) / "review.json").read_text())
     held = [a for a in review["audit"] if a.get("held") == "TEXT_ONLY_WITH_FIGURES"]
-    assert held and held[0]["figures_on_cited_pages"] == ["f1"] and held[0]["claim_key"] == "tic-july-equity-buying"
+    assert held and held[0]["reselect"] is True
+    assert not any(a.get("held") == "INVALID_CANDIDATE" for a in review["audit"])
 
 
 def test_text_only_candidate_on_chart_free_pages_still_publishes(tmp_path, publisher):
@@ -193,8 +228,9 @@ def test_operator_note_requeue_reaches_select_with_figure_guidance(tmp_path, pub
     assert "attaching the supporting figure from the catalogue" in reviewer.calls[0][1]
 
 
-def test_select_instruction_and_catalogue_include_kind_and_text_only_hold_rule(tmp_path, publisher):
-    assert "a text_only candidate that cites a page with catalogue figures is held for operator review" in intake.SELECT_INSTRUCTION
+def test_select_instruction_and_catalogue_include_kind_and_text_only_reselect_rule(tmp_path, publisher):
+    assert "held for operator review" not in intake.SELECT_INSTRUCTION
+    assert "asked once" in intake.SELECT_INSTRUCTION
     reviewer = Reviewer([selection(), verdict()])
     build(tmp_path, reviewer, publisher).process(work(), tmp_path / "r.pdf", [])
     assert '"kind"' in reviewer.calls[0][1]

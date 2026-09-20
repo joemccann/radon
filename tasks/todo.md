@@ -16,7 +16,8 @@ TEXT_ONLY_WITH_FIGURES, triage. Separate implement PR from main. No merge.
 - [x] T1 Failing tests on main
 - [x] T2 publish.py
 - [x] T3 intake.py + pipeline.py
-- [ ] T4 Docs, focused green, draft PR; no merge
+- [x] T4 Docs, focused green, draft PR #584; CI green on fa62035d; no merge
+- [x] T5 Joe 2026-09-20: TEXT_ONLY_WITH_FIGURES is one re-SELECT, hold only after miss; amend #584; no merge
 
 ## Review
 
