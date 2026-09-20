@@ -1,3 +1,27 @@
+# Task: Relax research PDF hold and invalidation gates
+
+Implement plan #583 (`tasks/research-hold-gates-relax-plan.md`). Joe DoD:
+remove length/8-page/caption/copy/NUMBER_NOT_ON_PAGE holds; keep shape, VERIFY,
+TEXT_ONLY_WITH_FIGURES, triage. Separate implement PR from main. No merge.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests for removed gates (publish, intake, pipeline, runtime, outcomes)
+- T2 depends_on: [T1] - publish.py delete validate_rendered_copy; caption type-only; title/body non-empty
+- T3 depends_on: [T2] - intake + pipeline validators, advisory grounding, prompts
+- T4 depends_on: [T3] - docs/policy/ground; green tests; draft PR; CI; no merge
+
+## Checklist
+
+- [x] T1 Failing tests on main
+- [x] T2 publish.py
+- [x] T3 intake.py + pipeline.py
+- [ ] T4 Docs, focused green, draft PR; no merge
+
+## Review
+
+- Plan PR #583 is design only. Do not edit it.
+
 # Task: Held tab triage rules history + approved/rejected flip
 
 Implement plan #579 (`tasks/research-rules-history-plan.md`). Joe DoD: durable

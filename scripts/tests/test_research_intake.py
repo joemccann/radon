@@ -1,4 +1,5 @@
 """Intake v2 orchestration: code settles identity, figures, duplicates and numbers; the model is asked twice."""
+import hashlib
 import json
 from types import SimpleNamespace
 
@@ -102,14 +103,15 @@ def test_dropped_document_makes_no_model_call(tmp_path, publisher):
     assert review["outcome"] == "dropped" and review["reason_code"] == "DOC_TYPE_FX_PAIR_NOTE"
 
 
-def test_ungrounded_number_is_held_before_verification(tmp_path, publisher):
-    reviewer = Reviewer([selection(title="Foreign investors bought $47bn of US equities in July")])
+def test_ungrounded_number_reaches_verify_with_unmatched_hint(tmp_path, publisher):
+    reviewer = Reviewer([selection(title="Foreign investors bought $47bn of US equities in July"), verdict()])
     posts = build(tmp_path, reviewer, publisher).process(work(), tmp_path / "r.pdf", [])
-    assert posts == [] and len(reviewer.calls) == 1
+    assert len(reviewer.calls) == 2
+    assert "TOKENS NOT MATCHED BY CODE" in reviewer.calls[1][1] and "$47bn" in reviewer.calls[1][1]
     review = json.loads((tmp_path / "evidence" / ("k" * 64) / "review.json").read_text())
-    held = [a for a in review["audit"] if a.get("held") == "NUMBER_NOT_ON_PAGE"]
-    assert held and "$47bn" in json.dumps(held[0])
-    assert publisher.stored == []
+    entry = next(a for a in review["audit"] if a.get("claim_key") == "tic-july-equity-buying")
+    assert entry["unmatched"] == ["$47bn"] and "held" not in entry
+    assert len(posts) == 1 and posts[0]["id"].startswith("research-")
 
 
 def test_verify_gate_failure_holds_and_stores_nothing(tmp_path, publisher):
@@ -196,3 +198,73 @@ def test_select_instruction_and_catalogue_include_kind_and_text_only_hold_rule(t
     reviewer = Reviewer([selection(), verdict()])
     build(tmp_path, reviewer, publisher).process(work(), tmp_path / "r.pdf", [])
     assert '"kind"' in reviewer.calls[0][1]
+
+
+def test_select_and_verify_prompts_are_targets_not_hard_length_or_prematched_numbers():
+    assert "Targets, not gates" in intake.SELECT_INSTRUCTION
+    assert "at most 8 pages" not in intake.SELECT_INSTRUCTION
+    assert "title<=180" not in intake.SELECT_INSTRUCTION
+    assert "The numbers have already been matched" not in intake.VERIFY_INSTRUCTION
+    assert "lists the ones it could not find" in intake.VERIFY_INSTRUCTION
+
+
+def test_long_title_body_and_claim_key_reach_verify(tmp_path, publisher):
+    title = "Foreign investors bought $45bn of US equities in July " + ("x" * 160)
+    content = selection()["candidates"][0]["content"] + (" more context." * 220)
+    claim_key = "tic-july-equity-buying-" + ("k" * 180)
+    assert len(title) >= 200 and len(content) >= 3000 and len(claim_key) >= 200
+    reviewer = Reviewer([selection(title=title, content=content, claim_key=claim_key), verdict()])
+    posts = build(tmp_path, reviewer, publisher).process(work(), tmp_path / "r.pdf", [])
+    assert len(reviewer.calls) == 2 and len(posts) == 1
+    expected = "research-" + hashlib.sha256(("id:one\0" + claim_key.strip().lower()).encode()).hexdigest()
+    assert posts[0]["id"] == expected
+
+
+def test_missing_caption_defaults_to_catalogue_title(tmp_path, publisher):
+    reviewer = Reviewer([selection(captions={}), verdict()])
+    posts = build(tmp_path, reviewer, publisher).process(work(), tmp_path / "r.pdf", [])
+    assert posts[0]["source"]["figures"][0]["caption"] == "Net foreign purchases of US equities"
+
+
+def test_long_caption_publishes_unchanged(tmp_path, publisher):
+    caption = "x" * 400
+    reviewer = Reviewer([selection(captions={"f1": caption}), verdict()])
+    posts = build(tmp_path, reviewer, publisher).process(work(), tmp_path / "r.pdf", [])
+    assert posts[0]["source"]["figures"][0]["caption"] == caption
+
+
+def test_em_dash_title_reaches_verify(tmp_path, publisher):
+    reviewer = Reviewer([selection(title="Foreign investors bought $45bn of US equities in July \u2014 TIC"), verdict()])
+    posts = build(tmp_path, reviewer, publisher).process(work(), tmp_path / "r.pdf", [])
+    review = json.loads((tmp_path / "evidence" / ("k" * 64) / "review.json").read_text())
+    assert len(reviewer.calls) == 2 and len(posts) == 1
+    assert not any(a.get("held") == "INVALID_CANDIDATE" for a in review["audit"])
+
+
+def _candidate(**overrides):
+    item = {"title": "T", "content": "C", "claim_key": "k", "pages": [1], "figure_ids": [],
+            "captions": {}, "tags": ["FLOWS"], "text_only": True}
+    item.update(overrides)
+    return item
+
+
+def test_validate_candidate_drops_length_and_page_ceiling_keeps_shape():
+    from research.pipeline import EvidenceError
+    cat = {"f1": {"id": "f1", "page": 9, "title": "Nine", "source_line": "Source line"}}
+    long = _candidate(title="T" * 200, content="C" * 3000, claim_key="K" * 200, pages=list(range(1, 13)))
+    assert intake.validate_candidate(long, 12, {})["claim_key"] == "K" * 200
+    attached = _candidate(pages=list(range(1, 9)), figure_ids=["f1"], text_only=False, captions={"f1": "ok"})
+    assert 9 in intake.validate_candidate(attached, 12, cat)["pages"]
+    untitled = _candidate(figure_ids=["f1"], text_only=False, captions={})
+    untitled_cat = {"f1": {"id": "f1", "page": 1, "title": "", "source_line": ""}}
+    assert intake.validate_candidate(untitled, 2, untitled_cat)["captions"]["f1"] == "Figure, page 1"
+    for pages in ([], [0], [13], [True], [1.0]):
+        with pytest.raises(EvidenceError, match="Invalid evidence pages"):
+            intake.validate_candidate(_candidate(pages=pages), 12, {})
+    for key in ("title", "content", "claim_key"):
+        with pytest.raises(EvidenceError, match=f"Invalid {key}"):
+            intake.validate_candidate(_candidate(**{key: ""}), 12, {})
+    with pytest.raises(EvidenceError, match="Unknown figure id"):
+        intake.validate_candidate(_candidate(figure_ids=["f9"], text_only=False), 12, cat)
+    with pytest.raises(EvidenceError, match="Unknown figure id"):
+        intake.validate_candidate(_candidate(figure_ids=["f1"] * 7, text_only=False), 12, cat)
