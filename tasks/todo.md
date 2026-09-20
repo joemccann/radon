@@ -1,3 +1,20 @@
+# Task: Held card hides excerpt, shows full Selector note
+
+Joe mobile screenshot: raw `context.excerpt` markdown dump dominates the Held
+review card; `context.selectorReason` dies under the tab bar. UI-only.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests: excerpt not shown; full selector note shown / scrollable
+- T2 depends_on: [T1] - Drop excerpt mount; `.reason` overflow-y auto + max-height
+- T3 depends_on: [T2] - Focused green; draft PR; CI; no merge
+
+## Checklist
+
+- [x] T1 Failing tests on research-held-ui + e2e excerpt visibility
+- [x] T2 ResearchHeldReview.tsx + module CSS
+- [ ] T3 Draft PR; CI green on touched tests; no merge
+
 # Task: Relax research PDF hold and invalidation gates
 
 Implement plan #583 (`tasks/research-hold-gates-relax-plan.md`). Joe DoD:

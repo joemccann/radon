@@ -60,8 +60,7 @@ export default function ResearchHeldReview() {
           <p className={styles.meta}>{`${item.publisher} · ${item.folderDate} · ${item.outcome === "dropped" ? "Dropped before review" : "Held"}`}</p>
           <h4 className={styles.file}>{item.fileName}</h4>
           <p className={styles.meta}>{describeDocument(item)}</p>
-          {item.context?.excerpt ? <div className={styles.excerpt}><MarkdownRenderer content={item.context.excerpt} disableLinks /></div> : null}
-          {item.context?.selectorReason ? <p className={styles.reason}><span className={styles.reasonLabel}>{item.drafts.length ? "Selector's note: " : "Why nothing was taken: "}</span>{item.context.selectorReason}</p> : null}
+          {item.context?.selectorReason ? <p className={styles.reason} data-testid="held-selector-note"><span className={styles.reasonLabel}>{item.drafts.length ? "Selector's note: " : "Why nothing was taken: "}</span>{item.context.selectorReason}</p> : null}
           {item.context?.sourceUrl ? <a className={styles.pdf} href={item.context.sourceUrl} target="_blank" rel="noopener noreferrer">Open PDF</a> : null}
           <ul className={styles.codes} aria-label="Reasons">
             {item.reasonCodes.map(code => <li key={code} className={styles.code}>{reasonCodeLabel(code)}</li>)}
