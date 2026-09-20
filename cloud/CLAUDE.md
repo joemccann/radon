@@ -387,6 +387,11 @@ drains TradingView webhook rows into one digest Pushover per cycle. Caddy bounds
 `/api/webhooks/tradingview/*` to TradingView's four sender IPs and a 16KB body.
 Spec: [`docs/tradingview-integration.md`](../docs/tradingview-integration.md).
 
+`setup-vps.sh` also inventories `radon-slm-tagger.service` plus
+`radon-slm-tagger-monitor.{service,timer}` so a fresh host has the unit files.
+`enable_services` skips all three until Joe enables them after bakeoff `C WINS`.
+`RADON_SLM_TAGGER_MODE` stays `off`. Spec: [`docs/ml/newsfeed-slm-tagger.md`](../docs/ml/newsfeed-slm-tagger.md).
+
 
 Canonical unit files are copied root-owned to `/etc/systemd/system`; they are
 not symlinked from the checkout.

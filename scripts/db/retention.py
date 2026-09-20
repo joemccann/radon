@@ -44,6 +44,7 @@ EQUIBLES_SETTLEMENT_KEEP_DAYS = 730   # ~26 bi-monthly settlements ≈ 1 year
 EQUIBLES_13F_KEEP_DAYS = 1096         # 8-quarter QoQ ownership series
 COT_KEEP_DAYS = 1461                  # percentiles rank against 3y of weeklies
 WATCHDOG_PAGES_KEEP_DAYS = 90         # forensic dispatch trail
+SLM_TAGGER_SHADOW_KEEP_DAYS = 90      # newsfeed SLM shadow provenance (I.1)
 
 # R-120: the five tables migrations 0051-0054 added had NO policy, so the
 # sweep that bounds every other history table skipped them. Each horizon sits
@@ -179,6 +180,7 @@ SNAPSHOT_RETENTION_POLICIES: Sequence[Policy] = (
     # paged_at is a full ISO datetime; against date('now', ...) the boundary
     # day resolves one day late, which a 90-day forensic horizon absorbs.
     KeepDaysPolicy("watchdog_pages", "paged_at", WATCHDOG_PAGES_KEEP_DAYS),
+    KeepDaysPolicy("slm_tagger_shadow", "observed_at", SLM_TAGGER_SHADOW_KEEP_DAYS),
     # R-120: migrations 0051-0054.
     KeepLatestPolicy("credit_spread_history", "date", CREDIT_SPREAD_KEEP_SESSIONS),
     KeepLatestPolicy("ivrank_history", "date", IVRANK_KEEP_SESSIONS),

@@ -250,6 +250,10 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // Homepage-public GPU index ticker. Uniform 26h window. HTTP only, no IB.
   "liquidcompute": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
   "model-catalog": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+  // ``slm-tagger-monitor``: radon-slm-tagger-monitor.timer fires daily 07:10 UTC.
+  // No-op when RADON_SLM_TAGGER_MODE is off or shadow. Uniform 26h window. No IB.
+  // The llama-server sidecar has no service_health row (unit watchdog only).
+  "slm-tagger-monitor": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
   // ``vixts`` — radon-vixts.timer fires daily 02:45 UTC every calendar day,
   // ten minutes behind radon-vixcor so the Cboe CDN hits stay staggered

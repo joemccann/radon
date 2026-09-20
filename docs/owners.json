@@ -48,6 +48,17 @@
       "note": "Who FastAPI trusts without a JWT (loopback, tailnet, the private-net /health probe). Both owners restated the 10.0.0.0/16 scope wrongly after REL-170 (DOC-020/022)."
     },
     {
+      "id": "slm-tagger",
+      "globs": [
+        "scripts/newsfeed/slm/**",
+        "cloud/services/radon-slm-tagger.*",
+        "cloud/scripts/install-slm-model.sh",
+        "models/slm-tagger/**"
+      ],
+      "owners": ["docs/ml/newsfeed-slm-tagger.md"],
+      "note": "Build spec for the local newsfeed text-tagger rung: dataset recipe, prompt contract, gates, modes, cutover. Paths are reserved by the plan PR; the implement PR must land its numbers in the spec."
+    },
+    {
       "id": "ops-timers",
       "globs": ["cloud/services/*.timer"],
       "owners": ["docs/operations.md", "docs/cloud-services.md"]
