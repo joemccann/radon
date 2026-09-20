@@ -159,7 +159,7 @@ def _dark_extent(png):
 
 
 def _assert_chart_fills_crop(pdf_path, bbox, tmp_path, name="crop"):
-    record = research_pdf.render(pdf_path, tmp_path / name, [1], dpi=144, crop=bbox)[0]
+    record = research_pdf.render(pdf_path, tmp_path / name, [1], dpi=216, crop=bbox)[0]
     png = tmp_path / name / record["image_file"]
     _l, _t, r, b = _dark_extent(png)
     assert r >= 0.98 and b >= 0.98, (r, b)
