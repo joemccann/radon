@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,6 +20,16 @@ if str(_SCRIPTS) not in sys.path:
 
 from newsfeed.slm.contract import normalise_tags  # noqa: E402
 from newsfeed.slm.eval import gold_tags, load_jsonl  # noqa: E402
+
+
+# Scraped post text reaches the reviewer's terminal verbatim; C0/C1 control
+# bytes (ANSI escapes, bare newlines) could spoof the review display and bias
+# the promotion gate. Strip them before echoing.
+_TTY_UNSAFE_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+
+def tty_safe(text: str) -> str:
+    return _TTY_UNSAFE_RE.sub(" ", text)
 
 
 def parse_review(line: str) -> tuple[str, list[str] | None] | None:
@@ -59,7 +70,7 @@ def review_rows(
                     title, _, rest = content.partition("\n")
                     title = title[len("Title: ") :]
                     body = rest[len("Body: ") :] if rest.startswith("Body: ") else rest
-        stdout.write(f"id={row.get('id')}\nTitle: {title}\nBody: {body[:240]}\nTags: {tags}\n[y/n/c TAG1,TAG2,TAG3]\n")
+        stdout.write(f"id={row.get('id')}\nTitle: {tty_safe(title)}\nBody: {tty_safe(body[:240])}\nTags: {tags}\n[y/n/c TAG1,TAG2,TAG3]\n")
         stdout.flush()
         verdict = parse_review(stdin.readline())
         if verdict is None:

@@ -45,3 +45,24 @@ def test_three_row_fixture(tmp_path: Path):
     dest = tmp_path / "gold_human.jsonl"
     dest.write_text("".join(json.dumps(r) + "\n" for r in reviewed), encoding="utf-8")
     assert "reviewed_at" in dest.read_text(encoding="utf-8")
+
+
+def test_scraped_text_reaches_the_tty_without_control_bytes():
+    import io
+
+    from newsfeed.slm.review_cli import review_rows
+
+    row = {
+        "id": "p1",
+        "messages": [
+            {"role": "user", "content": "Title: \x1b[2JFed cuts\rTags: SPOOF\nBody: line1\x07\nline2"},
+            {"role": "assistant", "content": '{"tags": ["MACRO", "FED", "RATES"]}'},
+        ],
+    }
+    stdout = io.StringIO()
+    review_rows([row], stdin=io.StringIO("y\n"), stdout=stdout)
+    shown = stdout.getvalue()
+    assert "\x1b" not in shown and "\r" not in shown and "\x07" not in shown
+    # The title renders on ONE line; embedded newlines cannot spoof fields.
+    title_lines = [line for line in shown.splitlines() if line.startswith("Title: ")]
+    assert title_lines == ["Title:  [2JFed cuts Tags: SPOOF"]
