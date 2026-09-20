@@ -287,9 +287,13 @@ export default function ProfileContent({ prices }: { prices?: Record<string, Pri
             onRemove={(symbol) => toggleWatch(symbol)}
           />
         ) : tab === "preferences" && isOperator ? (
-          <PreferencesSection />
+          <div className="profile-panel-scroll" data-testid="profile-panel-scroll">
+            <PreferencesSection />
+          </div>
         ) : tab === "credentials" && isOperator ? (
-          <CredentialsPanel />
+          <div className="profile-panel-scroll" data-testid="profile-panel-scroll">
+            <CredentialsPanel />
+          </div>
         ) : null}
 
         {/* ── Sticky Save Profile button ── */}
