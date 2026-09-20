@@ -48,8 +48,8 @@ describe("toast mobile placement", () => {
     const toast = ruleBlock('body[data-mobile="true"] .toast');
     expect(toast).toMatch(/max-width:\s*none/);
     expect(toast).toMatch(/pointer-events:\s*none/);
-    const close = ruleBlock('body[data-mobile="true"] .toast-close');
-    expect(close).toMatch(/pointer-events:\s*auto/);
+    const actions = ruleBlock('body[data-mobile="true"] .toast button');
+    expect(actions).toMatch(/pointer-events:\s*auto/);
   });
 
   it("viewport max-width is a CSS variable so mobile can go full-bleed", () => {

@@ -26,7 +26,7 @@ const toastCss = [
   ruleBlock(".toast-close"),
   ruleBlock('body[data-mobile="true"] .toast-container'),
   ruleBlock('body[data-mobile="true"] .toast'),
-  ruleBlock('body[data-mobile="true"] .toast-close'),
+  ruleBlock('body[data-mobile="true"] .toast button'),
 ].join("\n");
 
 type Box = { x: number; y: number; width: number; height: number };
@@ -129,5 +129,57 @@ ${toastCss}
 
     await toast.locator(".toast-close").click();
     await expect(page.locator(".toast-container .toast")).toHaveCount(0);
+  });
+
+  test("Try again stays clickable when a table cell sits under the toast", async ({ page }) => {
+    await page.setContent(`<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+:root {
+  --font-mono: ui-monospace, SFMono-Regular, monospace;
+  --border-dim: #2a3a34;
+  --bg-canvas: #0c1210;
+  --bg-panel: #101714;
+  --text-primary: #edf4ef;
+  --text-muted: #8a9a92;
+  --positive: #05AD98;
+  --negative: #e85d4c;
+  --warning: #d4a017;
+  --ease-out: cubic-bezier(0.25, 1, 0.5, 1);
+  --safe-top: 0px;
+  --safe-bottom: 0px;
+  --mobile-app-bar-height: 56px;
+  --mobile-tab-bar-height: 64px;
+}
+html, body { margin: 0; background: var(--bg-canvas); color: var(--text-primary); }
+.underlay {
+  position: fixed; left: 12px; right: 12px;
+  bottom: calc(1rem + var(--mobile-tab-bar-height) + var(--safe-bottom));
+  height: 120px; z-index: 1;
+}
+.btn-secondary { min-height: 44px; min-width: 88px; }
+${toastCss}
+</style>
+</head>
+<body data-mobile="true">
+  <div class="underlay"><span>continue</span></div>
+  <div class="toast-container">
+    <div class="toast toast-error" role="alert">
+      <div class="toast-message">
+        This service is busy
+        <button type="button" class="btn-secondary" id="retry">Try again</button>
+      </div>
+      <button type="button" class="toast-close" aria-label="Dismiss">×</button>
+    </div>
+  </div>
+</body>
+</html>`);
+    await page.locator("#retry").evaluate((el) => {
+      el.addEventListener("click", () => { el.dataset.hit = "1"; });
+    });
+    await page.getByRole("button", { name: /retry|try again/i }).click();
+    await expect(page.locator("#retry")).toHaveAttribute("data-hit", "1");
   });
 });

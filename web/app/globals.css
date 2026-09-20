@@ -16040,7 +16040,7 @@ body[data-mobile="true"] .toast {
   pointer-events: none;
 }
 
-body[data-mobile="true"] .toast-close {
+body[data-mobile="true"] .toast button {
   pointer-events: auto;
 }
 
