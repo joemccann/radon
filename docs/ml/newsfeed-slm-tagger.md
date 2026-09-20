@@ -563,7 +563,7 @@ New optional variables, all added to `cloud/.env.example` and to `_OPTIONAL_LADD
 
 ## I. Shadow-mode metrics, cutover checklist, post-deploy monitor
 
-### I.1 Shadow table (migration `0078_slm_tagger_shadow.sql`)
+### I.1 Shadow table (migration `0083_slm_tagger_shadow.sql`)
 
 ```sql
 CREATE TABLE IF NOT EXISTS slm_tagger_shadow (
@@ -584,7 +584,7 @@ CREATE TABLE IF NOT EXISTS slm_tagger_shadow (
   PRIMARY KEY (post_id, observed_at)
 );
 CREATE INDEX IF NOT EXISTS idx_slm_shadow_observed ON slm_tagger_shadow(observed_at DESC);
-INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (77, datetime('now'));
+INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (83, datetime('now'));
 ```
 
 Written by `shadow.py` from the CLI with a fresh connection per call (Hrana rule 3), one row per post in every mode except `off`, never blocking the returned result (write failure is logged and dropped). Retention: 90 days, pruned by the existing `radon-db-retention.service` (add the table to its list). This table is also the provenance source for C.2 rule 6.
@@ -684,7 +684,7 @@ Red/green order is mandatory (`CLAUDE.md` TDD rule). Every item names its test o
 - [ ] Node untouched; `web/tests/newsfeed-tagger.test.ts` and `newsfeed-vision-tagger.test.ts` green unchanged.
 
 **Shadow and monitor**
-- [ ] Migration `0078_slm_tagger_shadow.sql` with the I.1 columns; `migrate.py` accepts it; retention list updated; row verified in Turso from the serve host in `shadow` mode (one real post) before the PR leaves draft.
+- [ ] Migration `0083_slm_tagger_shadow.sql` with the I.1 columns; `migrate.py` accepts it; retention list updated; row verified in Turso from the serve host in `shadow` mode (one real post) before the PR leaves draft.
 - [ ] `[HR-7]` `monitor.py` unit-tested on fixtures for each I.3 signal and threshold (exit 0 / exit 3); `radon-slm-tagger-monitor.{service,timer}` committed, pinned in the unit manifest, rows added to `docs/operations.md` and `docs/cloud-services.md` (`ops-timers` owners rule); no-op verified when mode is `off`.
 
 **Docs**
