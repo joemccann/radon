@@ -1,3 +1,7 @@
+# REVIEWED 2026-09-20 mobile-toast-placement.spec.ts - CSS-in-page geometry
+#   at 393x852: toast sits above `mobile-tab-bar`, no overlap with Total
+#   account / balance. Vitest `toast-mobile-placement.test.ts` is the CI pin.
+#   Held out of e2e-financial-smoke pending next start preflight.
 # REVIEWED 2026-09-20 profile-credentials-tab.spec.ts - 3/3 Chromium against
 #   isolated next start :3033 with RADON_AUTHLESS_TEST. Pins CSS-only Prefs/Keys
 #   `.preferences-shell` scroll so MenthorQ sits above `mobile-tab-bar`, and
@@ -128,6 +132,7 @@ mobile-shell.spec.ts
 mobile-short-strangle-skew.spec.ts
 mobile-stop-order.spec.ts
 mobile-ticker-search.spec.ts
+mobile-toast-placement.spec.ts
 mobile-vol-cone-table.spec.ts
 modify-combo-order.spec.ts
 modify-order-confirmation.spec.ts
