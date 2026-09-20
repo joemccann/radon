@@ -12,11 +12,11 @@ async function exec(sql: string) {
   for (const stmt of sql.replace(/--.*$/gm, "").split(";").map((s) => s.trim()).filter(Boolean)) await db.execute(stmt);
 }
 
-async function proposal(id: string, status = "proposed") {
+async function proposal(id: string, status = "proposed", decidedAt: string | null = null) {
   const [kind, key] = id.split(":");
   await db.execute({
-    sql: "INSERT INTO research_rule_proposals (id,kind,key,downs,ups,evidence_json,status,created_at) VALUES (?,?,?,?,?,?,?,?)",
-    args: [id, kind, key, 4, 0, JSON.stringify(["s0", "s1", "s2", "h1"]), status, "2026-09-19T12:00:00Z"],
+    sql: "INSERT INTO research_rule_proposals (id,kind,key,downs,ups,evidence_json,status,created_at,decided_at) VALUES (?,?,?,?,?,?,?,?,?)",
+    args: [id, kind, key, 4, 0, JSON.stringify(["s0", "s1", "s2", "h1"]), status, "2026-09-19T12:00:00Z", decidedAt],
   });
 }
 
@@ -37,7 +37,7 @@ afterEach(async () => {
 async function list() {
   const { GET } = await import("../app/api/newsfeed/research/rules/route");
   const response = await GET(new Request("http://localhost/api/newsfeed/research/rules"));
-  return { status: response.status, body: await response.json() as { proposed: Array<Record<string, unknown>>; approved: Array<Record<string, unknown>> } };
+  return { status: response.status, body: await response.json() as { proposed: Array<Record<string, unknown>>; approved: Array<Record<string, unknown>>; rejected: Array<Record<string, unknown>> } };
 }
 
 async function decide(body: unknown) {
@@ -53,14 +53,33 @@ describe("/api/newsfeed/research/rules", () => {
     for (const call of guard.mock.calls) expect(call[1]).toEqual(expect.objectContaining({ operatorOnly: true }));
   });
 
-  it("lists proposed and approved rules with their evidence counts, never rejected ones", async () => {
+  it("lists rejected under rejected, newest decision first", async () => {
     await proposal("series_deny:ubs cio fx view");
     await proposal("doc_type_drop:single_stock", "approved");
-    await proposal("publisher_deny:Maxim Group", "rejected");
+    await proposal("publisher_deny:Older Desk", "rejected", "2026-09-17T12:00:00Z");
+    await proposal("publisher_deny:Maxim Group", "rejected", "2026-09-18T12:00:00Z");
     const { status, body } = await list();
     expect(status).toBe(200);
     expect(body.proposed).toEqual([{ id: "series_deny:ubs cio fx view", kind: "series_deny", key: "ubs cio fx view", downs: 4, ups: 0, evidence: 4 }]);
     expect(body.approved.map((r) => r.id)).toEqual(["doc_type_drop:single_stock"]);
+    expect(body.rejected).toEqual([
+      { id: "publisher_deny:Maxim Group", kind: "publisher_deny", key: "Maxim Group", downs: 4, ups: 0, evidence: 4 },
+      { id: "publisher_deny:Older Desk", kind: "publisher_deny", key: "Older Desk", downs: 4, ups: 0, evidence: 4 },
+    ]);
+  });
+
+  it("caps rejected at 50 so history never starves proposed", async () => {
+    await proposal("series_deny:ubs cio fx view");
+    for (let i = 0; i < 60; i += 1) {
+      const stamp = String(i).padStart(2, "0");
+      await proposal(`publisher_deny:desk-${stamp}`, "rejected", `2026-09-19T12:${stamp}:00Z`);
+    }
+    const { status, body } = await list();
+    expect(status).toBe(200);
+    expect(body.proposed.map((r) => r.id)).toEqual(["series_deny:ubs cio fx view"]);
+    expect(body.rejected).toHaveLength(50);
+    expect(body.rejected[0].id).toBe("publisher_deny:desk-59");
+    expect(body.rejected[49].id).toBe("publisher_deny:desk-10");
   });
 
   it("approve, reject and revoke record who decided and when", async () => {
@@ -73,6 +92,9 @@ describe("/api/newsfeed/research/rules", () => {
     expect((await decide({ id: "series_deny:ubs cio fx view", decision: "revoke" })).status).toBe(200);
     row = (await db.execute("SELECT status FROM research_rule_proposals")).rows[0];
     expect(row.status).toBe("rejected");
+    expect((await decide({ id: "series_deny:ubs cio fx view", decision: "approve" })).status).toBe(200);
+    row = (await db.execute("SELECT status FROM research_rule_proposals")).rows[0];
+    expect(row.status).toBe("approved");
   });
 
   it.each([
@@ -90,6 +112,6 @@ describe("/api/newsfeed/research/rules", () => {
     await db.execute("DROP TABLE research_rule_proposals");
     const { status, body } = await list();
     expect(status).toBe(200);
-    expect(body).toEqual({ proposed: [], approved: [] });
+    expect(body).toEqual({ proposed: [], approved: [], rejected: [] });
   });
 });

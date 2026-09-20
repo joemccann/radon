@@ -16,6 +16,7 @@ function describe(rule: Rule): string {
 export default function ResearchRuleProposals() {
   const [proposed, setProposed] = useState<Rule[]>([]);
   const [approved, setApproved] = useState<Rule[]>([]);
+  const [rejected, setRejected] = useState<Rule[]>([]);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
 
@@ -25,9 +26,10 @@ export default function ResearchRuleProposals() {
       try {
         const response = await fetch("/api/newsfeed/research/rules", { cache: "no-store", signal: controller.signal });
         if (!response.ok) return;   // The Held list reports its own outage; an absent rules list is not an error state.
-        const body = await response.json() as { proposed?: Rule[]; approved?: Rule[] };
+        const body = await response.json() as { proposed?: Rule[]; approved?: Rule[]; rejected?: Rule[] };
         setProposed(Array.isArray(body.proposed) ? body.proposed : []);
         setApproved(Array.isArray(body.approved) ? body.approved : []);
+        setRejected(Array.isArray(body.rejected) ? body.rejected : []);
       } catch { /* aborted or offline: render nothing */ }
     })();
     return () => controller.abort();
@@ -47,7 +49,13 @@ export default function ResearchRuleProposals() {
         throw new Error(body?.error || "Could not save the decision.");
       }
       setProposed(current => current.filter(item => item.id !== rule.id));
-      setApproved(current => decision === "approve" ? [rule, ...current.filter(item => item.id !== rule.id)] : current.filter(item => item.id !== rule.id));
+      if (decision === "approve") {
+        setRejected(current => current.filter(item => item.id !== rule.id));
+        setApproved(current => [rule, ...current.filter(item => item.id !== rule.id)]);
+      } else {
+        setApproved(current => current.filter(item => item.id !== rule.id));
+        setRejected(current => [rule, ...current.filter(item => item.id !== rule.id)]);
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not save the decision.");
     } finally {
@@ -55,7 +63,7 @@ export default function ResearchRuleProposals() {
     }
   }, [busy]);
 
-  if (!proposed.length && !approved.length && !error) return null;
+  if (!proposed.length && !approved.length && !rejected.length && !error) return null;
   return <section className={styles.rules} aria-label="Triage rules">
     {proposed.length ? <>
       <h4 className={styles.rulesTitle}>Proposed rules</h4>
@@ -77,6 +85,18 @@ export default function ResearchRuleProposals() {
           <p className={styles.file}>{describe(rule)}</p>
           <div className={styles.ruleActions}>
             <button type="button" className={styles.ruleButton} disabled={busy === rule.id} onClick={() => decide(rule, "revoke")}>Revoke</button>
+          </div>
+        </li>)}
+      </ul>
+    </> : null}
+    {rejected.length ? <>
+      <h4 className={styles.rulesTitle}>Rejected rules</h4>
+      <ul className={styles.list} aria-label="Rejected rules">
+        {rejected.map(rule => <li key={rule.id} className={styles.item}>
+          <p className={styles.file}>{describe(rule)}</p>
+          <p className={styles.note}>Rejected. Approve to make it active.</p>
+          <div className={styles.ruleActions}>
+            <button type="button" className={styles.ruleButton} disabled={busy === rule.id} onClick={() => decide(rule, "approve")}>Approve rule</button>
           </div>
         </li>)}
       </ul>
