@@ -347,6 +347,87 @@ class TestSharedParentSweepAndLiveRefuse:
         pages = py_log.read_text(encoding="utf-8") if py_log.exists() else ""
         assert "pushover.net" in pages, pages
 
+    @pytest.mark.parametrize("name", sorted(LOOPS))
+    def test_file_shaped_live_clone_lock_pages_pid(self, name, tmp_path):
+        repo = _runner_clone(tmp_path, name)
+        lock = repo / ".weekend-runner.lock"
+        lock.write_text(f"{os.getpid()}\n", encoding="utf-8")
+        bin_dir, gh_log, py_log = _stub_bin(
+            tmp_path,
+            claude_body="#!/bin/sh\nexit 0\n",
+        )
+        proc = subprocess.run(
+            [BASH, str(_cloned_wrapper(repo, name)), "audit"],
+            env={
+                **os.environ,
+                "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+                "RADON_WEEKEND_REPO": str(repo),
+                "RADON_WEEKEND_PROVIDER_LADDER": CLAUDE_RUNG_LADDER,
+                "HOME": str(tmp_path / "home"),
+            },
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert proc.returncode == 3, (proc.stdout, proc.stderr)
+        assert lock.is_file()
+        assert lock.read_text(encoding="utf-8").strip() == str(os.getpid())
+        calls = gh_log.read_text(encoding="utf-8") if gh_log.exists() else ""
+        assert "REFUSED (lock held)" in calls, calls
+        assert str(os.getpid()) in calls, calls
+        assert "pid unknown" not in calls
+        pages = py_log.read_text(encoding="utf-8") if py_log.exists() else ""
+        assert "pushover.net" in pages, pages
+
+    @pytest.mark.parametrize("name", sorted(LOOPS))
+    def test_stale_locks_symlink_is_refused(self, name, tmp_path):
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        stale = tmp_path / ".stale-locks"
+        stale.symlink_to(outside)
+        lock = tmp_path / "lock.d"
+        lock.write_text("999999\n", encoding="utf-8")
+        out = _lib(name, f'acquire_runner_lock "{lock}"; echo RC:$?\n', tmp_path)
+        assert out.returncode != 0
+        assert lock.is_file()
+        assert lock.read_text(encoding="utf-8").strip() == "999999"
+        assert list(outside.iterdir()) == [], list(outside.iterdir())
+        assert "symlink" in out.stderr
+
+    @pytest.mark.parametrize("name", sorted(LOOPS))
+    def test_lock_lib_only_works_without_timeout(self, name, tmp_path):
+        bare = tmp_path / "bare-bin"
+        bare.mkdir()
+        for tool in ("bash", "cat", "ps", "kill", "mkdir", "mv", "rm", "date"):
+            src = shutil.which(tool)
+            if src:
+                (bare / tool).symlink_to(src)
+        env = {**os.environ, "PATH": str(bare)}
+        out = subprocess.run(
+            [
+                BASH,
+                "-c",
+                f"set -Eeuo pipefail; source {LOOPS[name]} --lock-lib-only; "
+                f'acquire_runner_lock "{tmp_path}/fresh.lock"; echo OK',
+            ],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert out.returncode == 0, (out.stdout, out.stderr)
+        assert "OK" in out.stdout
+        assert (tmp_path / "fresh.lock" / "pid").exists()
+
+    def test_lock_helpers_are_byte_identical(self):
+        bodies = [_fn_body(path.read_text(encoding="utf-8"), "acquire_runner_lock") for path in LOOPS.values()]
+        dests = [_fn_body(path.read_text(encoding="utf-8"), "_stale_lock_dest") for path in LOOPS.values()]
+        reads = [_fn_body(path.read_text(encoding="utf-8"), "_read_runner_lock_identity") for path in LOOPS.values()]
+        assert len(set(bodies)) == 1
+        assert len(set(dests)) == 1
+        assert len(set(reads)) == 1
+        assert "refuse_symlink" in dests[0]
+
 
 class TestSkillsNeverTouchTheLock:
     def test_no_skill_tells_an_agent_to_reclaim_or_kill0(self):

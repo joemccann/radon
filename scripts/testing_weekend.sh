@@ -39,6 +39,19 @@ set -Eeuo pipefail
 # work mid-write with both runs reporting success. The plist pre-reset and
 # setup_testing_weekend.sh both stand down on this lock, so it has to exist.
 # mkdir is the atomic primitive here: flock(1) does not exist on macOS.
+# The sandboxed agent can write anywhere in this clone, so any path this
+# wrapper chmods, rms, or writes through could have been replaced with a
+# symlink pointing outside it. Verify before every privileged file
+# operation and refuse rather than follow. CWE-59.
+refuse_symlink() {
+  local p="${1:-}"
+  if [[ -L "$p" ]]; then
+    echo "REFUSING: $p is a symlink; privileged file operations here do not follow symlinks" >&2
+    return 1
+  fi
+  return 0
+}
+
 pid_alive() {
   local pid="$1" start="${2:-}" listed lstart
   case "$pid" in
@@ -77,17 +90,37 @@ _write_runner_lock_files() {
 }
 
 _stale_lock_dest() {
-  local src="$1" tag="$2" root stamp name
+  local src="$1" tag="$2" root stamp name dest_dir
   root="${WEEKEND_ROOT:-$(dirname "$src")}"
   stamp="${STAMP:-$(date +%Y%m%dT%H%M%S)}"
-  mkdir -p "$root/.stale-locks"
+  dest_dir="$root/.stale-locks"
+  refuse_symlink "$dest_dir" || return 1
+  mkdir -p "$dest_dir"
+  refuse_symlink "$dest_dir" || return 1
   if [[ "$(basename "$src")" == ".weekend-runner.lock" && "$(dirname "$src")" == "$root" ]]; then
     name="shared.weekend-runner.lock.${tag}.${stamp}"
   else
     name="$(basename "${REPO:-$(dirname "$src")}").weekend-runner.lock.${tag}.${stamp}"
   fi
-  printf '%s' "$root/.stale-locks/$name"
+  printf '%s' "$dest_dir/$name"
 }
+
+_read_runner_lock_identity() {
+  local path="$1"
+  LOCK_HELD=""
+  LOCK_START=""
+  if [[ -d "$path" ]]; then
+    LOCK_HELD="$(cat "$path/pid" 2>/dev/null || true)"
+    LOCK_START="$(cat "$path/start" 2>/dev/null || true)"
+  elif [[ -f "$path" ]]; then
+    LOCK_HELD="$(cat "$path" 2>/dev/null || true)"
+  fi
+  LOCK_HELD="${LOCK_HELD#"${LOCK_HELD%%[![:space:]]*}"}"
+  LOCK_HELD="${LOCK_HELD%"${LOCK_HELD##*[![:space:]]}"}"
+  LOCK_START="${LOCK_START#"${LOCK_START%%[![:space:]]*}"}"
+  LOCK_START="${LOCK_START%"${LOCK_START##*[![:space:]]}"}"
+}
+
 
 acquire_runner_lock() {
   local dir="$1" held start shape dest
@@ -118,7 +151,7 @@ acquire_runner_lock() {
       return 1
     fi
     echo "[weekend] reclaiming stale runner lock (pid $held, $shape)" >&2
-    dest="$(_stale_lock_dest "$dir" "$held")"
+    dest="$(_stale_lock_dest "$dir" "$held")" || { echo "cannot take runner lock $dir" >&2; return 1; }
     mv -f -- "$dir" "$dest" || { echo "cannot take runner lock $dir" >&2; return 1; }
   elif [[ -f "$dir" ]]; then
     shape=file
@@ -128,13 +161,13 @@ acquire_runner_lock() {
     start=""
     if [[ -z "$held" ]]; then
       echo "[weekend] reclaiming foreign plain-file lock (no pid)" >&2
-      dest="$(_stale_lock_dest "$dir" "nopid")"
+      dest="$(_stale_lock_dest "$dir" "nopid")" || { echo "cannot take runner lock $dir" >&2; return 1; }
       mv -f -- "$dir" "$dest" || { echo "cannot take runner lock $dir" >&2; return 1; }
     else
       case "$held" in
         *[!0-9]*)
           echo "[weekend] reclaiming foreign plain-file lock (no pid)" >&2
-          dest="$(_stale_lock_dest "$dir" "nopid")"
+          dest="$(_stale_lock_dest "$dir" "nopid")" || { echo "cannot take runner lock $dir" >&2; return 1; }
           mv -f -- "$dir" "$dest" || { echo "cannot take runner lock $dir" >&2; return 1; }
           ;;
         *)
@@ -143,7 +176,7 @@ acquire_runner_lock() {
             return 1
           fi
           echo "[weekend] reclaiming stale runner lock (pid $held, $shape)" >&2
-          dest="$(_stale_lock_dest "$dir" "$held")"
+          dest="$(_stale_lock_dest "$dir" "$held")" || { echo "cannot take runner lock $dir" >&2; return 1; }
           mv -f -- "$dir" "$dest" || { echo "cannot take runner lock $dir" >&2; return 1; }
           ;;
       esac
@@ -193,7 +226,7 @@ sweep_shared_parent_lock() {
   start="${start%"${start##*[![:space:]]}"}"
   case "$held" in
     ''|*[!0-9]*)
-      dest="$(_stale_lock_dest "$path" "nopid")"
+      dest="$(_stale_lock_dest "$path" "nopid")" || { echo "[weekend] cannot quarantine $path" >&2; return 0; }
       mv -f -- "$path" "$dest" || true
       FOREIGN_LOCK="removed:nopid"
       echo "[weekend] foreign-lock=$FOREIGN_LOCK" >&2
@@ -205,7 +238,7 @@ sweep_shared_parent_lock() {
     echo "[weekend] foreign-lock=$FOREIGN_LOCK" >&2
     return 0
   fi
-  dest="$(_stale_lock_dest "$path" "$held")"
+  dest="$(_stale_lock_dest "$path" "$held")" || { echo "[weekend] cannot quarantine $path" >&2; return 0; }
   mv -f -- "$path" "$dest" || true
   FOREIGN_LOCK="removed:$held"
   echo "[weekend] foreign-lock=$FOREIGN_LOCK" >&2
@@ -218,10 +251,10 @@ sweep_shared_parent_lock() {
 # while it was trying to report its own death, holding the runner lock and
 # dropping every subsequent daily fire. R-409.
 NET_TIMEOUT_SECS="${RADON_WEEKEND_NET_TIMEOUT_SECS:-120}"
-# Before --lock-lib-only and before the venv PATH prepend. lock-lib-only
-# fetch always calls net_bounded under set -u.
+# TIMEOUT_BIN is resolved here so lock-lib-only fetch tests can call
+# net_bounded. The hard require is after --lock-lib-only.
 TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
-[[ -n "$TIMEOUT_BIN" ]] || { echo "testing_weekend: GNU timeout (or gtimeout from coreutils) is required" >&2; return 78 2>/dev/null || exit 78; }
+# Hard-require stays after --lock-lib-only: setup_* only needs pid_alive/acquire/sweep.
 net_bounded() { "$TIMEOUT_BIN" "$NET_TIMEOUT_SECS" "$@"; }
 
 # A VPN flap that establishes TCP and then stalls hangs an ssh transport with
@@ -230,20 +263,8 @@ GIT_SSH_BOUNDED="ssh -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAli
 
 # `source testing_weekend.sh --lock-lib-only` exposes the helpers above to the
 # contract tests without running a weekend.
-# The sandboxed agent can write anywhere in this clone, so any path this
-# wrapper chmods, rms, or writes through could have been replaced with a
-# symlink pointing outside it. Verify before every privileged file
-# operation and refuse rather than follow. CWE-59.
-refuse_symlink() {
-  local p="${1:-}"
-  if [[ -L "$p" ]]; then
-    echo "REFUSING: $p is a symlink; privileged file operations here do not follow symlinks" >&2
-    return 1
-  fi
-  return 0
-}
-
 [[ "${1:-}" == "--lock-lib-only" ]] && return 0 2>/dev/null
+[[ -n "$TIMEOUT_BIN" ]] || { echo "testing_weekend: GNU timeout (or gtimeout from coreutils) is required" >&2; return 78 2>/dev/null || exit 78; }
 
 # Bash reads a script LAZILY by byte offset and re-reads it from disk after
 # every fork. The agent this wrapper spawns edits files in this clone, this
@@ -692,21 +713,98 @@ kill_round_group() {
 BROWSER_HOST_PID=""
 BROWSER_HOST_STATUS=""
 BROWSER_HOST_ENDPOINT=""
+BROWSER_HOST_TREE=""
+BROWSER_HOST_SID=""
+
+_descendants_of() {
+  local root="$1" out="" pending="$1" next pid ppid line
+  local snap
+  [[ -n "$root" ]] || return 0
+  snap="$(/bin/ps -axo pid=,ppid= 2>/dev/null || true)"
+  while [[ -n "$pending" ]]; do
+    next=""
+    while IFS= read -r line; do
+      line="${line#"${line%%[![:space:]]*}"}"
+      [[ -n "$line" ]] || continue
+      pid="${line%%[[:space:]]*}"
+      ppid="${line#"$pid"}"
+      ppid="${ppid#"${ppid%%[![:space:]]*}"}"
+      ppid="${ppid%%[[:space:]]*}"
+      case " $pending " in
+        *" $ppid "*)
+          case " $out $next $pending " in
+            *" $pid "*) ;;
+            *)
+              next="${next}${next:+ }$pid"
+              out="${out}${out:+ }$pid"
+              ;;
+          esac
+          ;;
+      esac
+    done <<EOF
+$snap
+EOF
+    pending="$next"
+  done
+  printf '%s' "$out"
+}
+
+_pids_in_session() {
+  local sid="$1" pid sess line
+  [[ -n "$sid" ]] || return 0
+  while IFS= read -r line; do
+    line="${line#"${line%%[![:space:]]*}"}"
+    [[ -n "$line" ]] || continue
+    pid="${line%%[[:space:]]*}"
+    sess="${line#"$pid"}"
+    sess="${sess#"${sess%%[![:space:]]*}"}"
+    sess="${sess%%[[:space:]]*}"
+    if [[ "$sess" == "$sid" ]]; then
+      printf '%s ' "$pid"
+    fi
+  done <<EOF
+$(/bin/ps -axo pid=,sid= 2>/dev/null || /bin/ps -axo pid=,sess= 2>/dev/null || true)
+EOF
+}
 
 stop_browser_host() {
   local pid="${BROWSER_HOST_PID:-}"
+  local tree="${BROWSER_HOST_TREE:-}"
+  local sid="${BROWSER_HOST_SID:-}"
   BROWSER_HOST_PID=""
+  BROWSER_HOST_TREE=""
+  BROWSER_HOST_SID=""
   BROWSER_HOST_ENDPOINT=""
   unset PW_TEST_CONNECT_WS_ENDPOINT
-  [[ -n "$pid" ]] || return 0
-  kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
-  local i=0
-  while [[ $i -lt 5 ]] && kill -0 "$pid" 2>/dev/null; do
+  [[ -n "$pid" || -n "$tree" || -n "$sid" ]] || return 0
+  if [[ -n "$pid" ]]; then
+    tree="${tree:+$tree }$(_descendants_of "$pid") $pid"
+    kill -TERM -- "-$pid" 2>/dev/null || true
+  fi
+  if [[ -n "$sid" ]]; then
+    tree="${tree:+$tree }$(_pids_in_session "$sid")"
+  fi
+  if [[ -n "$tree" ]]; then
+    kill -TERM -- $tree 2>/dev/null || true
+  fi
+  local i=0 alive p
+  while [[ $i -lt 5 ]]; do
+    alive=0
+    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then alive=1; fi
+    for p in $tree; do
+      if kill -0 "$p" 2>/dev/null; then alive=1; break; fi
+    done
+    [[ $alive -eq 0 ]] && break
     sleep 1
     i=$((i + 1))
   done
-  kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
-  wait "$pid" 2>/dev/null || true
+  if [[ -n "$pid" ]]; then
+    kill -KILL -- "-$pid" 2>/dev/null || true
+  fi
+  if [[ -n "$tree" ]]; then
+    kill -KILL -- $tree 2>/dev/null || true
+  fi
+  [[ -n "$pid" ]] && wait "$pid" 2>/dev/null || true
 }
 
 _playwright_major_minor() {
@@ -724,14 +822,37 @@ _playwright_major_minor() {
   esac
 }
 
+_browser_host_bin_ok() {
+  local bin="$1" root dest
+  root="${AGENT_CLI_ROOT}/browser-host"
+  [[ -x "$bin" ]] || return 1
+  if refuse_symlink "$bin"; then
+    return 0
+  fi
+  dest="$(readlink "$bin" 2>/dev/null || true)"
+  [[ -n "$dest" ]] || return 1
+  if [[ "$dest" != /* ]]; then
+    dest="$(cd "$(dirname "$bin")" && pwd)/$dest"
+  fi
+  dest="$(cd "$(dirname "$dest")" && pwd)/$(basename "$dest")"
+  case "$dest" in
+    "$root"/*) return 0 ;;
+  esac
+  echo "REFUSING: $bin symlink escapes $root" >&2
+  return 1
+}
+
+
 start_browser_host() {
   local bin ver_host ver_client token log wait_secs i line endpoint node_bin smoke_secs
   BROWSER_HOST_PID=""
   BROWSER_HOST_ENDPOINT=""
   BROWSER_HOST_STATUS=""
+  BROWSER_HOST_TREE=""
+  BROWSER_HOST_SID=""
   unset PW_TEST_CONNECT_WS_ENDPOINT
   bin="${AGENT_CLI_ROOT}/browser-host/node_modules/.bin/playwright"
-  if [[ ! -x "$bin" ]]; then
+  if [[ ! -x "$bin" ]] || ! _browser_host_bin_ok "$bin"; then
     BROWSER_HOST_STATUS="unavailable:not-installed"
     export RADON_WEEKEND_BROWSER_HOST="$BROWSER_HOST_STATUS"
     return 0
@@ -747,22 +868,32 @@ start_browser_host() {
     export RADON_WEEKEND_BROWSER_HOST="$BROWSER_HOST_STATUS"
     return 0
   fi
-  token="$(openssl rand -hex 16 2>/dev/null || echo "tok$$")"
+  token="$(/usr/bin/openssl rand -hex 16 2>/dev/null || echo "tok$$")"
   log="$LOG_DIR/browser-host-$STAMP.log"
   mkdir -p "$LOG_DIR"
-  "$TIMEOUT_BIN" "$CAP_SECS" "$bin" run-server --host 127.0.0.1 --port "${RADON_WEEKEND_BROWSER_HOST_PORT:-0}" --path "/$token" >"$log" 2>&1 &
+  if [[ -x /usr/bin/setsid ]]; then
+    /usr/bin/setsid "$TIMEOUT_BIN" "$CAP_SECS" "$bin" run-server --host 127.0.0.1 --port "${RADON_WEEKEND_BROWSER_HOST_PORT:-0}" --path "/$token" >"$log" 2>&1 &
+  elif [[ -x /usr/bin/python3 ]]; then
+    /usr/bin/python3 -I -c 'import os,sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' \
+      "$TIMEOUT_BIN" "$CAP_SECS" "$bin" run-server --host 127.0.0.1 --port "${RADON_WEEKEND_BROWSER_HOST_PORT:-0}" --path "/$token" >"$log" 2>&1 &
+  else
+    "$TIMEOUT_BIN" "$CAP_SECS" "$bin" run-server --host 127.0.0.1 --port "${RADON_WEEKEND_BROWSER_HOST_PORT:-0}" --path "/$token" >"$log" 2>&1 &
+  fi
   BROWSER_HOST_PID=$!
+  BROWSER_HOST_SID="$BROWSER_HOST_PID"
+  BROWSER_HOST_TREE="$(_descendants_of "$BROWSER_HOST_PID")"
   wait_secs="${RADON_WEEKEND_BROWSER_HOST_WAIT_SECS:-60}"
   i=0
   endpoint=""
   while [[ $i -lt $wait_secs ]]; do
+    BROWSER_HOST_TREE="$(_descendants_of "$BROWSER_HOST_PID") ${BROWSER_HOST_TREE:-}"
     if ! kill -0 "$BROWSER_HOST_PID" 2>/dev/null; then
+      stop_browser_host
       BROWSER_HOST_STATUS="unavailable:exited"
-      BROWSER_HOST_PID=""
       export RADON_WEEKEND_BROWSER_HOST="$BROWSER_HOST_STATUS"
       return 0
     fi
-    line="$(grep -E 'Listening on ws://' "$log" 2>/dev/null | tail -n 1 || true)"
+    line="$(/usr/bin/grep -E 'Listening on ws://' "$log" 2>/dev/null | /usr/bin/tail -n 1 || true)"
     if [[ -n "$line" ]]; then
       endpoint="$(printf '%s' "$line" | /usr/bin/sed -n 's/.*Listening on \(ws:\/\/[^[:space:]]*\).*/\1/p')"
       endpoint="${endpoint%%$'\r'}"
@@ -787,9 +918,12 @@ start_browser_host() {
     return 0
   fi
   BROWSER_HOST_ENDPOINT="$endpoint"
+  # browser-host=ready is host-side smoke only (chromium.connect from this
+  # wrapper). It does not prove a sandboxed agent can connect over loopback WS.
   BROWSER_HOST_STATUS="ready"
   export PW_TEST_CONNECT_WS_ENDPOINT="$endpoint"
   export RADON_WEEKEND_BROWSER_HOST="ready"
+  echo "[weekend] browser-host=ready (host smoke only; sandboxed connect is operator-verify)" >&2
 }
 
 on_signal() {
@@ -989,12 +1123,9 @@ acquire_runner_lock "$RUNNER_LOCK" || {
   echo "REFUSING: another weekend run owns $REPO" >&2
   # Live clone lock: stand down with a named REFUSED + page. A reused pid is
   # caught by the start fingerprint in pid_alive, so this path is a live owner.
-  held="$(cat "$RUNNER_LOCK/pid" 2>/dev/null || true)"
-  start="$(cat "$RUNNER_LOCK/start" 2>/dev/null || true)"
-  held="${held#"${held%%[![:space:]]*}"}"
-  held="${held%"${held##*[![:space:]]}"}"
-  start="${start#"${start%%[![:space:]]*}"}"
-  start="${start%"${start##*[![:space:]]}"}"
+  _read_runner_lock_identity "$RUNNER_LOCK"
+  held="$LOCK_HELD"
+  start="$LOCK_START"
   owner="$(/bin/ps -p "$held" -o user= 2>/dev/null || true)"
   cmd="$(/bin/ps -p "$held" -o command= 2>/dev/null || true)"
   owner="${owner#"${owner%%[![:space:]]*}"}"

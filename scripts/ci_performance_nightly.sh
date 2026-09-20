@@ -44,6 +44,19 @@ set -Eeuo pipefail
 # work mid-write with both runs reporting success. The plist pre-reset and
 # setup_ci_performance_nightly.sh both stand down on this lock, so it has to exist.
 # mkdir is the atomic primitive here: flock(1) does not exist on macOS.
+# The sandboxed agent can write anywhere in this clone, so any path this
+# wrapper chmods, rms, or writes through could have been replaced with a
+# symlink pointing outside it. Verify before every privileged file
+# operation and refuse rather than follow. CWE-59.
+refuse_symlink() {
+  local p="${1:-}"
+  if [[ -L "$p" ]]; then
+    echo "REFUSING: $p is a symlink; privileged file operations here do not follow symlinks" >&2
+    return 1
+  fi
+  return 0
+}
+
 pid_alive() {
   local pid="$1" start="${2:-}" listed lstart
   case "$pid" in
@@ -82,17 +95,37 @@ _write_runner_lock_files() {
 }
 
 _stale_lock_dest() {
-  local src="$1" tag="$2" root stamp name
+  local src="$1" tag="$2" root stamp name dest_dir
   root="${WEEKEND_ROOT:-$(dirname "$src")}"
   stamp="${STAMP:-$(date +%Y%m%dT%H%M%S)}"
-  mkdir -p "$root/.stale-locks"
+  dest_dir="$root/.stale-locks"
+  refuse_symlink "$dest_dir" || return 1
+  mkdir -p "$dest_dir"
+  refuse_symlink "$dest_dir" || return 1
   if [[ "$(basename "$src")" == ".weekend-runner.lock" && "$(dirname "$src")" == "$root" ]]; then
     name="shared.weekend-runner.lock.${tag}.${stamp}"
   else
     name="$(basename "${REPO:-$(dirname "$src")}").weekend-runner.lock.${tag}.${stamp}"
   fi
-  printf '%s' "$root/.stale-locks/$name"
+  printf '%s' "$dest_dir/$name"
 }
+
+_read_runner_lock_identity() {
+  local path="$1"
+  LOCK_HELD=""
+  LOCK_START=""
+  if [[ -d "$path" ]]; then
+    LOCK_HELD="$(cat "$path/pid" 2>/dev/null || true)"
+    LOCK_START="$(cat "$path/start" 2>/dev/null || true)"
+  elif [[ -f "$path" ]]; then
+    LOCK_HELD="$(cat "$path" 2>/dev/null || true)"
+  fi
+  LOCK_HELD="${LOCK_HELD#"${LOCK_HELD%%[![:space:]]*}"}"
+  LOCK_HELD="${LOCK_HELD%"${LOCK_HELD##*[![:space:]]}"}"
+  LOCK_START="${LOCK_START#"${LOCK_START%%[![:space:]]*}"}"
+  LOCK_START="${LOCK_START%"${LOCK_START##*[![:space:]]}"}"
+}
+
 
 acquire_runner_lock() {
   local dir="$1" held start shape dest
@@ -123,7 +156,7 @@ acquire_runner_lock() {
       return 1
     fi
     echo "[weekend] reclaiming stale runner lock (pid $held, $shape)" >&2
-    dest="$(_stale_lock_dest "$dir" "$held")"
+    dest="$(_stale_lock_dest "$dir" "$held")" || { echo "cannot take runner lock $dir" >&2; return 1; }
     mv -f -- "$dir" "$dest" || { echo "cannot take runner lock $dir" >&2; return 1; }
   elif [[ -f "$dir" ]]; then
     shape=file
@@ -133,13 +166,13 @@ acquire_runner_lock() {
     start=""
     if [[ -z "$held" ]]; then
       echo "[weekend] reclaiming foreign plain-file lock (no pid)" >&2
-      dest="$(_stale_lock_dest "$dir" "nopid")"
+      dest="$(_stale_lock_dest "$dir" "nopid")" || { echo "cannot take runner lock $dir" >&2; return 1; }
       mv -f -- "$dir" "$dest" || { echo "cannot take runner lock $dir" >&2; return 1; }
     else
       case "$held" in
         *[!0-9]*)
           echo "[weekend] reclaiming foreign plain-file lock (no pid)" >&2
-          dest="$(_stale_lock_dest "$dir" "nopid")"
+          dest="$(_stale_lock_dest "$dir" "nopid")" || { echo "cannot take runner lock $dir" >&2; return 1; }
           mv -f -- "$dir" "$dest" || { echo "cannot take runner lock $dir" >&2; return 1; }
           ;;
         *)
@@ -148,7 +181,7 @@ acquire_runner_lock() {
             return 1
           fi
           echo "[weekend] reclaiming stale runner lock (pid $held, $shape)" >&2
-          dest="$(_stale_lock_dest "$dir" "$held")"
+          dest="$(_stale_lock_dest "$dir" "$held")" || { echo "cannot take runner lock $dir" >&2; return 1; }
           mv -f -- "$dir" "$dest" || { echo "cannot take runner lock $dir" >&2; return 1; }
           ;;
       esac
@@ -198,7 +231,7 @@ sweep_shared_parent_lock() {
   start="${start%"${start##*[![:space:]]}"}"
   case "$held" in
     ''|*[!0-9]*)
-      dest="$(_stale_lock_dest "$path" "nopid")"
+      dest="$(_stale_lock_dest "$path" "nopid")" || { echo "[weekend] cannot quarantine $path" >&2; return 0; }
       mv -f -- "$path" "$dest" || true
       FOREIGN_LOCK="removed:nopid"
       echo "[weekend] foreign-lock=$FOREIGN_LOCK" >&2
@@ -210,7 +243,7 @@ sweep_shared_parent_lock() {
     echo "[weekend] foreign-lock=$FOREIGN_LOCK" >&2
     return 0
   fi
-  dest="$(_stale_lock_dest "$path" "$held")"
+  dest="$(_stale_lock_dest "$path" "$held")" || { echo "[weekend] cannot quarantine $path" >&2; return 0; }
   mv -f -- "$path" "$dest" || true
   FOREIGN_LOCK="removed:$held"
   echo "[weekend] foreign-lock=$FOREIGN_LOCK" >&2
@@ -223,10 +256,10 @@ sweep_shared_parent_lock() {
 # while it was trying to report its own death, holding the runner lock and
 # dropping every subsequent daily fire. R-409.
 NET_TIMEOUT_SECS="${RADON_WEEKEND_NET_TIMEOUT_SECS:-120}"
-# Before --lock-lib-only and before the venv PATH prepend. lock-lib-only
-# fetch always calls net_bounded under set -u.
+# TIMEOUT_BIN is resolved here so lock-lib-only fetch tests can call
+# net_bounded. The hard require is after --lock-lib-only.
 TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
-[[ -n "$TIMEOUT_BIN" ]] || { echo "ci_performance_nightly: GNU timeout (or gtimeout from coreutils) is required" >&2; return 78 2>/dev/null || exit 78; }
+# Hard-require stays after --lock-lib-only: setup_* only needs pid_alive/acquire/sweep.
 net_bounded() { "$TIMEOUT_BIN" "$NET_TIMEOUT_SECS" "$@"; }
 
 # A VPN flap that establishes TCP and then stalls hangs an ssh transport with
@@ -235,20 +268,8 @@ GIT_SSH_BOUNDED="ssh -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAli
 
 # `source ci_performance_nightly.sh --lock-lib-only` exposes the helpers above to the
 # contract tests without running a weekend.
-# The sandboxed agent can write anywhere in this clone, so any path this
-# wrapper chmods, rms, or writes through could have been replaced with a
-# symlink pointing outside it. Verify before every privileged file
-# operation and refuse rather than follow. CWE-59.
-refuse_symlink() {
-  local p="${1:-}"
-  if [[ -L "$p" ]]; then
-    echo "REFUSING: $p is a symlink; privileged file operations here do not follow symlinks" >&2
-    return 1
-  fi
-  return 0
-}
-
 [[ "${1:-}" == "--lock-lib-only" ]] && return 0 2>/dev/null
+[[ -n "$TIMEOUT_BIN" ]] || { echo "ci_performance_nightly: GNU timeout (or gtimeout from coreutils) is required" >&2; return 78 2>/dev/null || exit 78; }
 
 # Bash reads a script LAZILY by byte offset and re-reads it from disk after
 # every fork. The agent this wrapper spawns edits files in this clone, this
@@ -885,12 +906,9 @@ acquire_runner_lock "$RUNNER_LOCK" || {
   echo "REFUSING: another weekend run owns $REPO" >&2
   # Live clone lock: stand down with a named REFUSED + page. A reused pid is
   # caught by the start fingerprint in pid_alive, so this path is a live owner.
-  held="$(cat "$RUNNER_LOCK/pid" 2>/dev/null || true)"
-  start="$(cat "$RUNNER_LOCK/start" 2>/dev/null || true)"
-  held="${held#"${held%%[![:space:]]*}"}"
-  held="${held%"${held##*[![:space:]]}"}"
-  start="${start#"${start%%[![:space:]]*}"}"
-  start="${start%"${start##*[![:space:]]}"}"
+  _read_runner_lock_identity "$RUNNER_LOCK"
+  held="$LOCK_HELD"
+  start="$LOCK_START"
   owner="$(/bin/ps -p "$held" -o user= 2>/dev/null || true)"
   cmd="$(/bin/ps -p "$held" -o command= 2>/dev/null || true)"
   owner="${owner#"${owner%%[![:space:]]*}"}"
