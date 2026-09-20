@@ -69,7 +69,7 @@ export default function ResearchHeldReview() {
           {item.drafts.map((draft, index) => <details key={index} className={styles.draft}>
             <summary><span>{draft.title || "Untitled draft"}</span></summary>
             <p className={styles.draftReason}>{reasonCodeLabel(draft.held)}{draft.detail ? <>: <span className={styles.detail}>{draft.detail}</span></> : null}</p>
-            {draft.content ? <div className={styles.draftBody}><MarkdownRenderer content={draft.content} /></div> : null}
+            {draft.content ? <div className={styles.draftBody}><MarkdownRenderer content={draft.content} disableLinks /></div> : null}
           </details>)}
           <ResearchFeedback workKey={item.workKey} onHidden={remove} />
         </li>)}

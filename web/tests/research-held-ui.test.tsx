@@ -71,7 +71,7 @@ describe("ResearchHeldReview", () => {
     expect(within(card).getByText("Tozo").tagName).toBe("STRONG");
   });
 
-  it("excerpt links are inert text while draft links stay clickable", async () => {
+  it("excerpt and draft links are inert text", async () => {
     const hostile = [...items];
     hostile[0] = { ...items[0], context: { ...items[0].context, excerpt: "Urgent: [verify your account](https://evil.example/phish)" },
       drafts: [{ ...items[0].drafts[0], content: "[chart source](https://example.com/ok)" }] };
@@ -81,8 +81,11 @@ describe("ResearchHeldReview", () => {
     // Untrusted PDF text must not render a clickable attacker-chosen href.
     expect(within(card).queryByRole("link", { name: "verify your account" })).toBeNull();
     expect(within(card).getByText("verify your account").tagName).toBe("SPAN");
+    // Held drafts are the candidates that FAILED verification: same
+    // untrusted-PDF provenance, so their links are inert too.
     fireEvent.click(within(card).getByText("Tech issuance adds 10-20bp"));
-    expect(within(card).getByRole("link", { name: "chart source" })).toBeTruthy();
+    expect(within(card).queryByRole("link", { name: "chart source" })).toBeNull();
+    expect(within(card).getByText("chart source").tagName).toBe("SPAN");
   });
 
   it("a should-have-published vote posts the work key and removes the card", async () => {
