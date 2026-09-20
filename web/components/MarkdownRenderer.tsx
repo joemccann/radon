@@ -5,9 +5,12 @@ import { normalizeTextLines } from "@/lib/utils";
 type MarkdownRendererProps = {
   content: string;
   preserveWhitespace?: boolean;
+  /** Render anchors as inert text. For untrusted excerpts (scraped PDF text)
+   * where a clickable attacker-chosen href is a phishing surface. */
+  disableLinks?: boolean;
 };
 
-export default function MarkdownRenderer({ content, preserveWhitespace = false }: MarkdownRendererProps) {
+export default function MarkdownRenderer({ content, preserveWhitespace = false, disableLinks = false }: MarkdownRendererProps) {
   const normalized = preserveWhitespace ? content : normalizeTextLines(content);
   // Empty input renders nothing. The decision of what to show for an in-flight
   // or empty assistant turn belongs to ChatPanel (typing indicator), not here —
@@ -40,11 +43,14 @@ export default function MarkdownRenderer({ content, preserveWhitespace = false }
             }
             return <code className="chat-markdown-inline-code">{children}</code>;
           },
-          a: ({ href, children }) => (
-            <a href={href ?? "#"} target="_blank" rel="noopener noreferrer" className="chat-markdown-link">
-              {children}
-            </a>
-          ),
+          a: ({ href, children }) =>
+            disableLinks ? (
+              <span className="chat-markdown-link-disabled">{children}</span>
+            ) : (
+              <a href={href ?? "#"} target="_blank" rel="noopener noreferrer" className="chat-markdown-link">
+                {children}
+              </a>
+            ),
           // Assistant answers can quote untrusted retrieved text (scraped
           // newsfeed bodies), and the same tool loop reads portfolio, P&L and
           // journal state. A markdown image is an outbound GET fired on render

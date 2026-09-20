@@ -71,6 +71,20 @@ describe("ResearchHeldReview", () => {
     expect(within(card).getByText("Tozo").tagName).toBe("STRONG");
   });
 
+  it("excerpt links are inert text while draft links stay clickable", async () => {
+    const hostile = [...items];
+    hostile[0] = { ...items[0], context: { ...items[0].context, excerpt: "Urgent: [verify your account](https://evil.example/phish)" },
+      drafts: [{ ...items[0].drafts[0], content: "[chart source](https://example.com/ok)" }] };
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({ items: hostile, pending: 34 }), { status: 200 }));
+    render(<ResearchHeldReview />);
+    const card = (await screen.findByText("jpm_flows___liquidity.pdf")).closest("li") as HTMLElement;
+    // Untrusted PDF text must not render a clickable attacker-chosen href.
+    expect(within(card).queryByRole("link", { name: "verify your account" })).toBeNull();
+    expect(within(card).getByText("verify your account").tagName).toBe("SPAN");
+    fireEvent.click(within(card).getByText("Tech issuance adds 10-20bp"));
+    expect(within(card).getByRole("link", { name: "chart source" })).toBeTruthy();
+  });
+
   it("a should-have-published vote posts the work key and removes the card", async () => {
     render(<ResearchHeldReview />);
     const card = (await screen.findByText("jpm_flows___liquidity.pdf")).closest("li") as HTMLElement;
