@@ -55,59 +55,6 @@ set -Eeuo pipefail
 # work mid-write with both runs reporting success. The plist pre-reset and
 # setup_security_nightly.sh both stand down on this lock, so it has to exist.
 # mkdir is the atomic primitive here: flock(1) does not exist on macOS.
-acquire_runner_lock() {
-  local dir="$1" held
-  if ! mkdir "$dir" 2>/dev/null; then
-    held="$(cat "$dir/pid" 2>/dev/null || true)"
-    if [[ -z "$held" ]]; then
-      # No pid yet means the winner is between its mkdir and its pid write.
-      # That window used to skip the `kill -0` test entirely — the loser read
-      # an empty pid, called the lock stale, `rm -rf`d it and took it, and two
-      # cycles then ran `git clean -fdxq` in the same clone. Absent evidence is
-      # not evidence of staleness. R-411.
-      echo "weekend runner lock held (pid not yet published): $dir" >&2
-      return 1
-    fi
-    if kill -0 "$held" 2>/dev/null; then
-      echo "weekend runner lock held by pid $held ($dir)" >&2
-      return 1
-    fi
-    echo "[weekend] reclaiming stale runner lock (pid $held)" >&2
-    rm -rf -- "$dir"
-    mkdir "$dir" 2>/dev/null || { echo "cannot take runner lock $dir" >&2; return 1; }
-  fi
-  # Rename the pid in so it is never half-written to a reader. R-411.
-  printf '%s\n' "$$" > "$dir/pid.tmp" && mv -f "$dir/pid.tmp" "$dir/pid"
-  return 0
-}
-
-release_runner_lock() {
-  # ONLY the owner unlocks. Unconditional `rm -rf` meant the first run's EXIT
-  # trap unlocked the SECOND run's tree on its way out. R-411.
-  local dir="${1:-}" held
-  [[ -n "$dir" && -d "$dir" ]] || return 0
-  held="$(cat "$dir/pid" 2>/dev/null || true)"
-  [[ "$held" == "$$" ]] || return 0
-  rm -rf -- "$dir"
-}
-
-# Every network call in this wrapper is bounded, INCLUDING the dead-man channel
-# itself: a hung issue-comment call inside the crash handler wedged the wrapper
-# while it was trying to report its own death, holding the runner lock and
-# dropping every subsequent daily fire. R-409.
-NET_TIMEOUT_SECS="${RADON_WEEKEND_NET_TIMEOUT_SECS:-120}"
-# Before --lock-lib-only and before the venv PATH prepend. lock-lib-only
-# fetch always calls net_bounded under set -u.
-TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
-[[ -n "$TIMEOUT_BIN" ]] || { echo "security_nightly: GNU timeout (or gtimeout from coreutils) is required" >&2; return 78 2>/dev/null || exit 78; }
-net_bounded() { "$TIMEOUT_BIN" "$NET_TIMEOUT_SECS" "$@"; }
-
-# A VPN flap that establishes TCP and then stalls hangs an ssh transport with
-# no keepalive, and the attempt-count retry below bounds attempts, not time.
-GIT_SSH_BOUNDED="ssh -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3"
-
-# `source security_nightly.sh --lock-lib-only` exposes the helpers above to the
-# contract tests without running a weekend.
 # The sandboxed agent can write anywhere in this clone, so any path this
 # wrapper chmods, rms, or writes through could have been replaced with a
 # symlink pointing outside it. Verify before every privileged file
@@ -121,7 +68,219 @@ refuse_symlink() {
   return 0
 }
 
+pid_alive() {
+  local pid="$1" start="${2:-}" listed lstart
+  case "$pid" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  if kill -0 "$pid" 2>/dev/null; then
+    :
+  else
+    listed="$(/bin/ps -p "$pid" -o pid= 2>/dev/null || true)"
+    listed="${listed#"${listed%%[![:space:]]*}"}"
+    listed="${listed%"${listed##*[![:space:]]}"}"
+    if [[ -z "$listed" ]]; then
+      return 1
+    fi
+  fi
+  if [[ -n "$start" ]]; then
+    lstart="$(/bin/ps -p "$pid" -o lstart= 2>/dev/null || true)"
+    lstart="${lstart#"${lstart%%[![:space:]]*}"}"
+    lstart="${lstart%"${lstart##*[![:space:]]}"}"
+    start="${start#"${start%%[![:space:]]*}"}"
+    start="${start%"${start##*[![:space:]]}"}"
+    if [[ -n "$lstart" && "$lstart" != "$start" ]]; then
+      return 1
+    fi
+  fi
+  return 0
+}
+
+_write_runner_lock_files() {
+  local dir="$1" start
+  start="$(/bin/ps -p $$ -o lstart= 2>/dev/null || true)"
+  start="${start#"${start%%[![:space:]]*}"}"
+  start="${start%"${start##*[![:space:]]}"}"
+  printf '%s\n' "$start" > "$dir/start.tmp" && mv -f "$dir/start.tmp" "$dir/start"
+  printf '%s\n' "$$" > "$dir/pid.tmp" && mv -f "$dir/pid.tmp" "$dir/pid"
+}
+
+_stale_lock_dest() {
+  local src="$1" tag="$2" root stamp name dest_dir
+  root="${WEEKEND_ROOT:-$(dirname "$src")}"
+  stamp="${STAMP:-$(date +%Y%m%dT%H%M%S)}"
+  dest_dir="$root/.stale-locks"
+  refuse_symlink "$dest_dir" || return 1
+  mkdir -p "$dest_dir"
+  refuse_symlink "$dest_dir" || return 1
+  if [[ "$(basename "$src")" == ".weekend-runner.lock" && "$(dirname "$src")" == "$root" ]]; then
+    name="shared.weekend-runner.lock.${tag}.${stamp}"
+  else
+    name="$(basename "${REPO:-$(dirname "$src")}").weekend-runner.lock.${tag}.${stamp}"
+  fi
+  printf '%s' "$dest_dir/$name"
+}
+
+_read_runner_lock_identity() {
+  local path="$1"
+  LOCK_HELD=""
+  LOCK_START=""
+  if [[ -d "$path" ]]; then
+    LOCK_HELD="$(cat "$path/pid" 2>/dev/null || true)"
+    LOCK_START="$(cat "$path/start" 2>/dev/null || true)"
+  elif [[ -f "$path" ]]; then
+    LOCK_HELD="$(cat "$path" 2>/dev/null || true)"
+  fi
+  LOCK_HELD="${LOCK_HELD#"${LOCK_HELD%%[![:space:]]*}"}"
+  LOCK_HELD="${LOCK_HELD%"${LOCK_HELD##*[![:space:]]}"}"
+  LOCK_START="${LOCK_START#"${LOCK_START%%[![:space:]]*}"}"
+  LOCK_START="${LOCK_START%"${LOCK_START##*[![:space:]]}"}"
+}
+
+
+acquire_runner_lock() {
+  local dir="$1" held start shape dest
+  if mkdir "$dir" 2>/dev/null; then
+    _write_runner_lock_files "$dir"
+    return 0
+  fi
+  if [[ -d "$dir" ]]; then
+    shape=dir
+    held="$(cat "$dir/pid" 2>/dev/null || true)"
+    start="$(cat "$dir/start" 2>/dev/null || true)"
+    held="${held#"${held%%[![:space:]]*}"}"
+    held="${held%"${held##*[![:space:]]}"}"
+    start="${start#"${start%%[![:space:]]*}"}"
+    start="${start%"${start##*[![:space:]]}"}"
+    if [[ -z "$held" ]]; then
+      echo "weekend runner lock held (pid not yet published): $dir" >&2
+      return 1
+    fi
+    case "$held" in
+      *[!0-9]*)
+        echo "weekend runner lock held (pid not yet published): $dir" >&2
+        return 1
+        ;;
+    esac
+    if pid_alive "$held" "$start"; then
+      echo "weekend runner lock held by pid $held ($dir)" >&2
+      return 1
+    fi
+    echo "[weekend] reclaiming stale runner lock (pid $held, $shape)" >&2
+    dest="$(_stale_lock_dest "$dir" "$held")" || { echo "cannot take runner lock $dir" >&2; return 1; }
+    mv -f -- "$dir" "$dest" || { echo "cannot take runner lock $dir" >&2; return 1; }
+  elif [[ -f "$dir" ]]; then
+    shape=file
+    held="$(cat "$dir" 2>/dev/null || true)"
+    held="${held#"${held%%[![:space:]]*}"}"
+    held="${held%"${held##*[![:space:]]}"}"
+    start=""
+    if [[ -z "$held" ]]; then
+      echo "[weekend] reclaiming foreign plain-file lock (no pid)" >&2
+      dest="$(_stale_lock_dest "$dir" "nopid")" || { echo "cannot take runner lock $dir" >&2; return 1; }
+      mv -f -- "$dir" "$dest" || { echo "cannot take runner lock $dir" >&2; return 1; }
+    else
+      case "$held" in
+        *[!0-9]*)
+          echo "[weekend] reclaiming foreign plain-file lock (no pid)" >&2
+          dest="$(_stale_lock_dest "$dir" "nopid")" || { echo "cannot take runner lock $dir" >&2; return 1; }
+          mv -f -- "$dir" "$dest" || { echo "cannot take runner lock $dir" >&2; return 1; }
+          ;;
+        *)
+          if pid_alive "$held" "$start"; then
+            echo "weekend runner lock held by pid $held ($dir)" >&2
+            return 1
+          fi
+          echo "[weekend] reclaiming stale runner lock (pid $held, $shape)" >&2
+          dest="$(_stale_lock_dest "$dir" "$held")" || { echo "cannot take runner lock $dir" >&2; return 1; }
+          mv -f -- "$dir" "$dest" || { echo "cannot take runner lock $dir" >&2; return 1; }
+          ;;
+      esac
+    fi
+  else
+    echo "cannot take runner lock $dir" >&2
+    return 1
+  fi
+  mkdir "$dir" 2>/dev/null || { echo "cannot take runner lock $dir" >&2; return 1; }
+  _write_runner_lock_files "$dir"
+  return 0
+}
+
+release_runner_lock() {
+  # ONLY the owner unlocks. Unconditional `rm -rf` meant the first run's EXIT
+  # trap unlocked the SECOND run's tree on its way out. R-411.
+  local dir="${1:-}" held
+  [[ -n "$dir" && -d "$dir" ]] || return 0
+  held="$(cat "$dir/pid" 2>/dev/null || true)"
+  held="${held#"${held%%[![:space:]]*}"}"
+  held="${held%"${held##*[![:space:]]}"}"
+  if [[ "$held" != "$$" ]]; then
+    if [[ -n "$held" ]]; then
+      echo "[weekend] runner lock pid was rewritten during the cycle (now $held)" >&2
+    fi
+    return 0
+  fi
+  rm -rf -- "$dir"
+}
+
+sweep_shared_parent_lock() {
+  local path="$1" held start dest
+  FOREIGN_LOCK=""
+  [[ -e "$path" ]] || return 0
+  if [[ -d "$path" ]]; then
+    held="$(cat "$path/pid" 2>/dev/null || true)"
+    start="$(cat "$path/start" 2>/dev/null || true)"
+  elif [[ -f "$path" ]]; then
+    held="$(cat "$path" 2>/dev/null || true)"
+    start=""
+  else
+    return 0
+  fi
+  held="${held#"${held%%[![:space:]]*}"}"
+  held="${held%"${held##*[![:space:]]}"}"
+  start="${start#"${start%%[![:space:]]*}"}"
+  start="${start%"${start##*[![:space:]]}"}"
+  case "$held" in
+    ''|*[!0-9]*)
+      dest="$(_stale_lock_dest "$path" "nopid")" || { echo "[weekend] cannot quarantine $path" >&2; return 0; }
+      mv -f -- "$path" "$dest" || true
+      FOREIGN_LOCK="removed:nopid"
+      echo "[weekend] foreign-lock=$FOREIGN_LOCK" >&2
+      return 0
+      ;;
+  esac
+  if pid_alive "$held" "$start"; then
+    FOREIGN_LOCK="live:$held"
+    echo "[weekend] foreign-lock=$FOREIGN_LOCK" >&2
+    return 0
+  fi
+  dest="$(_stale_lock_dest "$path" "$held")" || { echo "[weekend] cannot quarantine $path" >&2; return 0; }
+  mv -f -- "$path" "$dest" || true
+  FOREIGN_LOCK="removed:$held"
+  echo "[weekend] foreign-lock=$FOREIGN_LOCK" >&2
+  return 0
+}
+
+
+# Every network call in this wrapper is bounded, INCLUDING the dead-man channel
+# itself: a hung issue-comment call inside the crash handler wedged the wrapper
+# while it was trying to report its own death, holding the runner lock and
+# dropping every subsequent daily fire. R-409.
+NET_TIMEOUT_SECS="${RADON_WEEKEND_NET_TIMEOUT_SECS:-120}"
+# TIMEOUT_BIN is resolved here so lock-lib-only fetch tests can call
+# net_bounded. The hard require is after --lock-lib-only.
+TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
+# Hard-require stays after --lock-lib-only: setup_* only needs pid_alive/acquire/sweep.
+net_bounded() { "$TIMEOUT_BIN" "$NET_TIMEOUT_SECS" "$@"; }
+
+# A VPN flap that establishes TCP and then stalls hangs an ssh transport with
+# no keepalive, and the attempt-count retry below bounds attempts, not time.
+GIT_SSH_BOUNDED="ssh -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3"
+
+# `source security_nightly.sh --lock-lib-only` exposes the helpers above to the
+# contract tests without running a weekend.
 [[ "${1:-}" == "--lock-lib-only" ]] && return 0 2>/dev/null
+[[ -n "$TIMEOUT_BIN" ]] || { echo "security_nightly: GNU timeout (or gtimeout from coreutils) is required" >&2; return 78 2>/dev/null || exit 78; }
 
 # Bash reads a script LAZILY by byte offset and re-reads it from disk after
 # every fork. The agent this wrapper spawns edits files in this clone, this
@@ -360,6 +519,9 @@ report() {
   # must not mask the run's own exit code. Third arg 0 suppresses the
   # Pushover.
   local status="$1" detail="$2" push="${3:-1}"
+  if [[ -n "${FOREIGN_LOCK:-}" ]]; then
+    detail="${detail:+$detail }foreign-lock=$FOREIGN_LOCK"
+  fi
   local body
   body="$(_format_issue_body "$PHASE" "$status" "$detail")"
   local issue
@@ -823,14 +985,22 @@ refuse_billing_reroute_files() {
 }
 refuse_billing_reroute_files
 
+sweep_shared_parent_lock "$WEEKEND_ROOT/.weekend-runner.lock"
 RUNNER_LOCK="$REPO/.weekend-runner.lock"
 acquire_runner_lock "$RUNNER_LOCK" || {
   echo "REFUSING: another weekend run owns $REPO" >&2
-  # The expensive instance: acquire_runner_lock only reclaims when
-  # `kill -0 $held` fails, so a recorded pid reused by ANY live unrelated
-  # process makes every subsequent daily fire exit 3 in under a second. That
-  # must page, not vanish. R-239.
-  report "REFUSED (lock held)" "another weekend run owns $REPO (pid $(cat "$RUNNER_LOCK/pid" 2>/dev/null || echo unknown)); if no cycle is running, the recorded pid was reused — remove $RUNNER_LOCK" || true
+  # Live clone lock: stand down with a named REFUSED + page. A reused pid is
+  # caught by the start fingerprint in pid_alive, so this path is a live owner.
+  _read_runner_lock_identity "$RUNNER_LOCK"
+  held="$LOCK_HELD"
+  start="$LOCK_START"
+  owner="$(/bin/ps -p "$held" -o user= 2>/dev/null || true)"
+  cmd="$(/bin/ps -p "$held" -o command= 2>/dev/null || true)"
+  owner="${owner#"${owner%%[![:space:]]*}"}"
+  owner="${owner%"${owner##*[![:space:]]}"}"
+  cmd="${cmd#"${cmd%%[![:space:]]*}"}"
+  cmd="${cmd%"${cmd##*[![:space:]]}"}"
+  report "REFUSED (lock held)" "another weekend run owns $REPO (pid ${held:-unknown}, started ${start:-unknown}, owner ${owner:-unknown}, cmd ${cmd:-unknown}); if no cycle is running, the recorded pid was reused — remove $RUNNER_LOCK" || true
   exit 3
 }
 trap 'release_runner_lock "$RUNNER_LOCK"; if [[ -n "${NIGHTLY_PR_GUARD_DIR:-}" ]]; then rm -rf -- "$NIGHTLY_PR_GUARD_DIR"; fi' EXIT
@@ -1370,7 +1540,7 @@ is_transient_network_failure() {
 run_phase() {
   begin_phase "$1"
   trap on_crash ERR
-  echo "[security-nightly] $PHASE start $STAMP repo=$REPO cap=${CAP_SECS}s${BILLING_IGNORED:+ ignored=${BILLING_IGNORED// /,}}" | tee -a "$RUN_LOG"
+  echo "[security-nightly] $PHASE start $STAMP repo=$REPO cap=${CAP_SECS}s${BILLING_IGNORED:+ ignored=${BILLING_IGNORED// /,}}${FOREIGN_LOCK:+ foreign-lock=$FOREIGN_LOCK}" | tee -a "$RUN_LOG"
   arm_deliver_record
   # NOT bare. Under `set -Eeuo pipefail` with the ERR trap armed, a failed
   # fetch made on_crash report and then the shell exit anyway — so

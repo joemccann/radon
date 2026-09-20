@@ -4,7 +4,8 @@ An empty TIMEOUT_BIN turns `"$TIMEOUT_BIN" <secs> cmd` into an exec of ""
 under set -u/-e, so every net_bounded call and phase launch hard-fails on a
 host where coreutils installs the binary as gtimeout (macOS). The wrapper
 must fall back to gtimeout and fail closed with a named reason when neither
-exists, before --lock-lib-only sourcing returns.
+exists. The hard require stays after --lock-lib-only so setup_* can source
+pid_alive/acquire/sweep on hosts without GNU timeout.
 """
 
 from pathlib import Path
@@ -32,9 +33,10 @@ def test_timeout_bin_falls_back_to_gtimeout(wrapper: str) -> None:
 
 
 @pytest.mark.parametrize("wrapper", WRAPPERS)
-def test_missing_timeout_fails_closed_before_lib_only_return(wrapper: str) -> None:
+def test_missing_timeout_fails_closed_after_lib_only_return(wrapper: str) -> None:
     text = (SCRIPTS / wrapper).read_text(encoding="utf-8")
     guard = text.find('[[ -n "$TIMEOUT_BIN" ]] ||')
     assert guard != -1, wrapper
     lib_only = text.find('"${1:-}" == "--lock-lib-only"')
-    assert guard < lib_only, wrapper
+    assert lib_only != -1, wrapper
+    assert lib_only < guard, wrapper

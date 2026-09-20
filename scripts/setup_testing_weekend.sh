@@ -87,22 +87,74 @@ mkdir -p "$WEEKEND_ROOT"
 if [[ ! -d "$WEEKEND_REPO/.git" ]]; then
   git clone "$ORIGIN_URL" "$WEEKEND_REPO"
 fi
-# A live cycle owns this clone. Unloading the job and hard-resetting the tree
-# under it orphans the agent onto a reset checkout.
-if kill -0 "$(cat "$WEEKEND_REPO/.weekend-runner.lock/pid" 2>/dev/null)" 2>/dev/null; then
-  echo "  a weekend run is in flight in $WEEKEND_REPO; re-run when it finishes"
-  exit 1
-fi
-# The SIBLING loop's clone too. Each loop now has its own venv; the
-# lock stays so a setup does not race a live sibling. R-266.
-for SIBLING_REPO in "$WEEKEND_ROOT/radon" "$WEEKEND_ROOT/radon-ci-performance" \
-  "$WEEKEND_ROOT/radon-documentation" "$WEEKEND_ROOT/radon-security"; do
-  if [[ -d "$SIBLING_REPO" ]] \
-    && kill -0 "$(cat "$SIBLING_REPO/.weekend-runner.lock/pid" 2>/dev/null)" 2>/dev/null; then
-    echo "  a weekend run is in flight in $SIBLING_REPO; re-run when it finishes"
+
+# Host-bash lock hygiene (L1-L2). Source the trusted operator checkout, never
+# the runner clone. Dead clone locks move aside; a live pid stands down with
+# pid/owner/start. Shared-parent FILE/DIR is swept; a live shared-parent
+# refuses setup so unload/reload cannot race an unknown process.
+STAMP="${STAMP:-$(date +%Y%m%dT%H%M%S)}"
+# shellcheck disable=SC1091
+source "$SRC_REPO/scripts/testing_weekend.sh" --lock-lib-only
+
+_setup_refuse_or_reclaim_lock() {
+  local dir="$1" held start dest owner cmd
+  [[ -e "$dir" ]] || return 0
+  if [[ -d "$dir" ]]; then
+    held="$(cat "$dir/pid" 2>/dev/null || true)"
+    start="$(cat "$dir/start" 2>/dev/null || true)"
+  elif [[ -f "$dir" ]]; then
+    held="$(cat "$dir" 2>/dev/null || true)"
+    start=""
+  else
+    return 0
+  fi
+  held="${held#"${held%%[![:space:]]*}"}"
+  held="${held%"${held##*[![:space:]]}"}"
+  start="${start#"${start%%[![:space:]]*}"}"
+  start="${start%"${start##*[![:space:]]}"}"
+  case "$held" in
+    ''|*[!0-9]*)
+      if [[ -d "$dir" ]]; then
+        echo "  runner lock $dir has unpublished pid; re-run when the cycle finishes"
+        exit 1
+      fi
+      dest="$(_stale_lock_dest "$dir" "nopid")"
+      mv -f -- "$dir" "$dest" || true
+      echo "  moved stale lock $dir -> $dest"
+      return 0
+      ;;
+  esac
+  if pid_alive "$held" "$start"; then
+    owner="$(/bin/ps -p "$held" -o user= 2>/dev/null || true)"
+    cmd="$(/bin/ps -p "$held" -o command= 2>/dev/null || true)"
+    owner="${owner#"${owner%%[![:space:]]*}"}"
+    owner="${owner%"${owner##*[![:space:]]}"}"
+    cmd="${cmd#"${cmd%%[![:space:]]*}"}"
+    cmd="${cmd%"${cmd##*[![:space:]]}"}"
+    echo "  a weekend run is in flight in $dir (pid $held, started ${start:-unknown}, owner ${owner:-unknown}, cmd ${cmd:-unknown}); re-run when it finishes"
     exit 1
   fi
+  dest="$(_stale_lock_dest "$dir" "$held")"
+  mv -f -- "$dir" "$dest" || true
+  echo "  moved stale lock $dir (pid $held) -> $dest"
+}
+
+_setup_refuse_or_reclaim_lock "$WEEKEND_REPO/.weekend-runner.lock"
+
+for SIBLING_REPO in "$WEEKEND_ROOT/radon" "$WEEKEND_ROOT/radon-ci-performance" \
+  "$WEEKEND_ROOT/radon-documentation" "$WEEKEND_ROOT/radon-security"; do
+  [[ -d "$SIBLING_REPO" ]] || continue
+  _setup_refuse_or_reclaim_lock "$SIBLING_REPO/.weekend-runner.lock"
 done
+sweep_shared_parent_lock "$WEEKEND_ROOT/.weekend-runner.lock"
+case "${FOREIGN_LOCK:-}" in
+  live:*)
+    echo "  shared-parent lock is live (${FOREIGN_LOCK#live:}); re-run when it finishes"
+    exit 1
+    ;;
+esac
+check "no shared-parent lock" test ! -e "$WEEKEND_ROOT/.weekend-runner.lock"
+
 # An already-provisioned clone must carry the current config/ and scripts/
 # before the job is installed from it. main is force-reset; any weekend
 # branch and its commits survive.
@@ -176,6 +228,59 @@ python3.13 -m venv "$WEEKEND_VENV"
 ( cd "$WEEKEND_REPO" \
   && bun install --frozen-lockfile >/dev/null \
   && cd web && bun install --frozen-lockfile >/dev/null )
+
+
+echo "host Playwright browser (outside Seatbelt)"
+AGENT_CLI_ROOT="${RADON_AGENT_CLI_ROOT:-$HOME/.radon/agent-cli}"
+BROWSER_HOST_DIR="$AGENT_CLI_ROOT/browser-host"
+mkdir -p "$BROWSER_HOST_DIR"
+PW_SPEC="$(/usr/bin/sed -n 's/.*"@playwright\/test"[[:space:]]*:[[:space:]]*"\^\?\([^"]*\)".*/\1/p' "$SRC_REPO/web/package.json" | /usr/bin/head -n 1)"
+if [[ -z "$PW_SPEC" ]]; then
+  echo "  MISSING  @playwright/test pin in $SRC_REPO/web/package.json"
+  fail=1
+else
+  npm install --prefix "$BROWSER_HOST_DIR" "@playwright/test@$PW_SPEC"
+  npx --prefix "$BROWSER_HOST_DIR" playwright install chromium
+  echo "  ok  browser host (playwright ${PW_SPEC})"
+fi
+_setup_browser_host_smoke() {
+  local bin log token pid endpoint i node_bin
+  bin="$BROWSER_HOST_DIR/node_modules/.bin/playwright"
+  [[ -x "$bin" ]] || return 1
+  token="setupsmoke"
+  log="$(mktemp)"
+  "$bin" run-server --host 127.0.0.1 --port 0 --path "/$token" >"$log" 2>&1 &
+  pid=$!
+  i=0
+  endpoint=""
+  while [[ $i -lt 8 ]]; do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      break
+    fi
+    if grep -q 'Listening on ws://' "$log" 2>/dev/null; then
+      endpoint="$(/usr/bin/sed -n 's/.*Listening on \(ws:\/\/[^[:space:]]*\).*/\1/p' "$log" | /usr/bin/head -n 1)"
+      [[ -n "$endpoint" ]] && break
+    fi
+    sleep 1
+    i=$((i + 1))
+  done
+  node_bin="$(command -v node 2>/dev/null || true)"
+  if [[ -z "$endpoint" || -z "$node_bin" ]] || ! NODE_PATH="$BROWSER_HOST_DIR/node_modules" E="$endpoint" \
+      "$node_bin" -e 'const {chromium}=require("playwright");(async()=>{const b=await chromium.connect(process.env.E);const p=await b.newPage();await p.setContent("<html></html>");await b.close();})().catch(e=>{console.error(e);process.exit(1);});'; then
+    kill -TERM "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+    return 1
+  fi
+  kill -TERM "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  return 0
+}
+if _setup_browser_host_smoke; then
+  echo "  ok  playwright run-server (host)"
+else
+  echo "  MISSING  playwright run-server (host) (bootstrap_check_in Permission denied (1100) on host means the mini cannot launch Chromium either)"
+  fail=1
+fi
 
 echo "[4/4] launchd jobs"
 mkdir -p "$LAUNCH_AGENTS"
