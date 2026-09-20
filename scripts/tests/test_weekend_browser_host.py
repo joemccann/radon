@@ -281,6 +281,9 @@ class TestWeekendBrowserHost:
         assert "/usr/bin/openssl" in start
         assert "/usr/bin/grep" in start
         assert "/usr/bin/tail" in start
+        assert "/usr/bin/readlink" in start
+        assert not re.search(r'(?<![/\w])readlink(?! -)', start)
+        assert "pwd -P" in start
         assert "refuse_symlink" in start
         assert "host smoke only" in start
         exited_at = start.index("unavailable:exited")
@@ -380,6 +383,71 @@ class TestWeekendBrowserHost:
         )
         (bin_dir / "node").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         (bin_dir / "node").chmod(0o755)
+        proc = subprocess.run(
+            [BASH, str(_cloned_wrapper(repo, name)), "audit"],
+            env=_env(tmp_path, repo, bin_dir),
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        combined = _combined(proc, repo)
+        assert "unavailable:" in combined, combined
+        dumped = env_dump.read_text(encoding="utf-8") if env_dump.exists() else ""
+        assert "PW_TEST_CONNECT_WS_ENDPOINT=" not in dumped
+
+    @pytest.mark.parametrize("name", sorted(HOST_LOOPS))
+    def test_regular_bin_under_symlinked_browser_host_is_refused(self, name, tmp_path):
+        repo = _runner_clone(tmp_path, name)
+        home = tmp_path / "home"
+        home.mkdir()
+        _plant_host(home)
+        _plant_client(repo)
+        host = home / ".radon" / "agent-cli" / "browser-host"
+        outside = tmp_path / "outside-host"
+        host.rename(outside)
+        host.symlink_to(outside)
+        env_dump = tmp_path / "agent.env"
+        bin_dir, _gh, _py = _stub_bin(
+            tmp_path,
+            claude_body=f"#!/bin/sh\nenv > {env_dump}\nexit 0\n",
+        )
+        (bin_dir / "node").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        (bin_dir / "node").chmod(0o755)
+        proc = subprocess.run(
+            [BASH, str(_cloned_wrapper(repo, name)), "audit"],
+            env=_env(tmp_path, repo, bin_dir),
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        combined = _combined(proc, repo)
+        assert "unavailable:" in combined, combined
+        dumped = env_dump.read_text(encoding="utf-8") if env_dump.exists() else ""
+        assert "PW_TEST_CONNECT_WS_ENDPOINT=" not in dumped
+
+    @pytest.mark.parametrize("name", sorted(HOST_LOOPS))
+    def test_regular_bin_via_symlinked_parent_is_refused(self, name, tmp_path):
+        repo = _runner_clone(tmp_path, name)
+        home = tmp_path / "home"
+        home.mkdir()
+        _plant_host(home)
+        _plant_client(repo)
+        nm = home / ".radon" / "agent-cli" / "browser-host" / "node_modules"
+        outside = tmp_path / "outside-nm"
+        nm.rename(outside)
+        nm.symlink_to(outside)
+        env_dump = tmp_path / "agent.env"
+        bin_dir, _gh, _py = _stub_bin(
+            tmp_path,
+            claude_body=f"#!/bin/sh\nenv > {env_dump}\nexit 0\n",
+        )
+        (bin_dir / "node").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        (bin_dir / "node").chmod(0o755)
+        (bin_dir / "readlink").write_text(
+            "#!/bin/sh\necho /spoofed/in-tree/playwright\n",
+            encoding="utf-8",
+        )
+        (bin_dir / "readlink").chmod(0o755)
         proc = subprocess.run(
             [BASH, str(_cloned_wrapper(repo, name)), "audit"],
             env=_env(tmp_path, repo, bin_dir),

@@ -237,7 +237,19 @@ ln -sfn "$WEEKEND_VENV" "$WEEKEND_REPO/.venv"
 echo "host Playwright browser (outside Seatbelt)"
 AGENT_CLI_ROOT="${RADON_AGENT_CLI_ROOT:-$HOME/.radon/agent-cli}"
 BROWSER_HOST_DIR="$AGENT_CLI_ROOT/browser-host"
+_setup_refuse_browser_host_tree() {
+  local p="$BROWSER_HOST_DIR" stop="${HOME%/}"
+  while [[ -n "$p" && "$p" != "/" && "$p" != "." && "$p" != "$stop" ]]; do
+    refuse_symlink "$p" || {
+      echo "REFUSING: $p is a symlink; browser-host install does not follow directory symlinks" >&2
+      exit 1
+    }
+    p="${p%/*}"
+  done
+}
+_setup_refuse_browser_host_tree
 mkdir -p "$BROWSER_HOST_DIR"
+refuse_symlink "$BROWSER_HOST_DIR" || exit 1
 PW_SPEC="$(/usr/bin/sed -n 's/.*"@playwright\/test"[[:space:]]*:[[:space:]]*"\^\?\([^"]*\)".*/\1/p' "$SRC_REPO/web/package.json" | /usr/bin/head -n 1)"
 if [[ -z "$PW_SPEC" ]]; then
   echo "  MISSING  @playwright/test pin in $SRC_REPO/web/package.json"
