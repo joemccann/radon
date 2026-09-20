@@ -67,10 +67,21 @@ artificial commit or PR, and follows the no-op contract below.
    nonzero, say why) unless BOTH `.radon-weekend-runner` and
    `.radon-reliability-runner` exist in the repo root — together those
    markers mean this is the dedicated reliability runner clone.
-5. **Respect the frozen contracts.** `RELIABILITY_AUDIT.md` finding IDs
+5. **The wrapper owns the runner lock.** `$REPO/.weekend-runner.lock` is the
+   lock; never create, reclaim, move, `kill -0`, or otherwise verify it,
+   and never create or read `~/radon-weekend/.weekend-runner.lock`. A
+   sandboxed `kill -0` returning `Operation not permitted` must not be read as evidence
+   of anything and must not become a `lock-owner-unverified` INCOMPLETE.
+6. **Do not launch Chromium in the sandbox.** The wrapper exports
+   `PW_TEST_CONNECT_WS_ENDPOINT` when `RADON_WEEKEND_BROWSER_HOST=ready`.
+   When that variable is not `ready`, do not attempt a local Chromium
+   launch: it dies on `bootstrap_check_in … Permission denied (1100)`.
+   Record the UI check as operator-only with
+   `bash scripts/setup_reliability_weekend.sh` and quote `browser-host=`.
+7. **Respect the frozen contracts.** `RELIABILITY_AUDIT.md` finding IDs
    (R-###) and backlog IDs (REL-###) continue their numbering; never
    renumber or rewrite prior entries. `RELIABILITY_LOG.md` is append-only.
-6. **Bounded per session, complete overall.** The wrapper enforces a
+8. **Bounded per session, complete overall.** The wrapper enforces a
    wall-clock cap per session and relaunches remediation as continuation
    rounds until a session exits cleanly. Never leave work half-applied;
    commit after every completed substantive task, never mid-task, and publish
@@ -380,6 +391,14 @@ how this loop improves as the codebase grows.
 
 ## Lessons
 
+- 2026-09-20 (remediate, REL-260): Chromium cannot launch under the agent
+  CLI Seatbelt (`mach-register` for
+  `org.chromium.Chromium.MachPortRendezvousServer.<pid>` dies
+  `Permission denied (1100)` / SIGTRAP). The wrapper owns
+  `playwright run-server` on the host and exports
+  `PW_TEST_CONNECT_WS_ENDPOINT`. Never reclaim or `kill -0` a runner lock
+  from the sandbox: EPERM is not death. Operator repair is
+  `bash scripts/setup_reliability_weekend.sh`.
 - 2026-08-09 (bootstrap): control-plane unit edits (`cloud/services/*` in
   the readiness manifest) abort the deploy preflight by design — the PR
   body must tell the operator to run the root

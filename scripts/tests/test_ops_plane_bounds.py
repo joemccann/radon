@@ -264,3 +264,4 @@ class TestWeekendRunnerMutualExclusion:
         )
         assert rc.returncode == 0, rc.stderr
         assert (lock / "pid").exists()
+        assert (lock / "start").exists()

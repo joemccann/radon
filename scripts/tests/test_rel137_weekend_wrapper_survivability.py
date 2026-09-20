@@ -472,6 +472,7 @@ class TestRunnerLockIsRaceFree:
         )
         assert out.returncode == 0, (out.stdout, out.stderr)
         assert out.stdout.strip().isdigit(), out.stdout
+        assert (lock / "start").exists(), "published lock must carry a start fingerprint"
         assert not list(tmp_path.glob("lock.d.*")), "the staging directory leaked"
 
     @pytest.mark.parametrize("name", sorted(LOOPS))

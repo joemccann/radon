@@ -39,29 +39,121 @@ set -Eeuo pipefail
 # work mid-write with both runs reporting success. The plist pre-reset and
 # setup_testing_weekend.sh both stand down on this lock, so it has to exist.
 # mkdir is the atomic primitive here: flock(1) does not exist on macOS.
+pid_alive() {
+  local pid="$1" start="${2:-}" listed lstart
+  case "$pid" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  if kill -0 "$pid" 2>/dev/null; then
+    :
+  else
+    listed="$(/bin/ps -p "$pid" -o pid= 2>/dev/null || true)"
+    listed="${listed#"${listed%%[![:space:]]*}"}"
+    listed="${listed%"${listed##*[![:space:]]}"}"
+    if [[ -z "$listed" ]]; then
+      return 1
+    fi
+  fi
+  if [[ -n "$start" ]]; then
+    lstart="$(/bin/ps -p "$pid" -o lstart= 2>/dev/null || true)"
+    lstart="${lstart#"${lstart%%[![:space:]]*}"}"
+    lstart="${lstart%"${lstart##*[![:space:]]}"}"
+    start="${start#"${start%%[![:space:]]*}"}"
+    start="${start%"${start##*[![:space:]]}"}"
+    if [[ -n "$lstart" && "$lstart" != "$start" ]]; then
+      return 1
+    fi
+  fi
+  return 0
+}
+
+_write_runner_lock_files() {
+  local dir="$1" start
+  start="$(/bin/ps -p $$ -o lstart= 2>/dev/null || true)"
+  start="${start#"${start%%[![:space:]]*}"}"
+  start="${start%"${start##*[![:space:]]}"}"
+  printf '%s\n' "$start" > "$dir/start.tmp" && mv -f "$dir/start.tmp" "$dir/start"
+  printf '%s\n' "$$" > "$dir/pid.tmp" && mv -f "$dir/pid.tmp" "$dir/pid"
+}
+
+_stale_lock_dest() {
+  local src="$1" tag="$2" root stamp name
+  root="${WEEKEND_ROOT:-$(dirname "$src")}"
+  stamp="${STAMP:-$(date +%Y%m%dT%H%M%S)}"
+  mkdir -p "$root/.stale-locks"
+  if [[ "$(basename "$src")" == ".weekend-runner.lock" && "$(dirname "$src")" == "$root" ]]; then
+    name="shared.weekend-runner.lock.${tag}.${stamp}"
+  else
+    name="$(basename "${REPO:-$(dirname "$src")}").weekend-runner.lock.${tag}.${stamp}"
+  fi
+  printf '%s' "$root/.stale-locks/$name"
+}
+
 acquire_runner_lock() {
-  local dir="$1" held
-  if ! mkdir "$dir" 2>/dev/null; then
+  local dir="$1" held start shape dest
+  if mkdir "$dir" 2>/dev/null; then
+    _write_runner_lock_files "$dir"
+    return 0
+  fi
+  if [[ -d "$dir" ]]; then
+    shape=dir
     held="$(cat "$dir/pid" 2>/dev/null || true)"
+    start="$(cat "$dir/start" 2>/dev/null || true)"
+    held="${held#"${held%%[![:space:]]*}"}"
+    held="${held%"${held##*[![:space:]]}"}"
+    start="${start#"${start%%[![:space:]]*}"}"
+    start="${start%"${start##*[![:space:]]}"}"
     if [[ -z "$held" ]]; then
-      # No pid yet means the winner is between its mkdir and its pid write.
-      # That window used to skip the `kill -0` test entirely — the loser read
-      # an empty pid, called the lock stale, `rm -rf`d it and took it, and two
-      # cycles then ran `git clean -fdxq` in the same clone. Absent evidence is
-      # not evidence of staleness. R-411.
       echo "weekend runner lock held (pid not yet published): $dir" >&2
       return 1
     fi
-    if kill -0 "$held" 2>/dev/null; then
+    case "$held" in
+      *[!0-9]*)
+        echo "weekend runner lock held (pid not yet published): $dir" >&2
+        return 1
+        ;;
+    esac
+    if pid_alive "$held" "$start"; then
       echo "weekend runner lock held by pid $held ($dir)" >&2
       return 1
     fi
-    echo "[weekend] reclaiming stale runner lock (pid $held)" >&2
-    rm -rf -- "$dir"
-    mkdir "$dir" 2>/dev/null || { echo "cannot take runner lock $dir" >&2; return 1; }
+    echo "[weekend] reclaiming stale runner lock (pid $held, $shape)" >&2
+    dest="$(_stale_lock_dest "$dir" "$held")"
+    mv -f -- "$dir" "$dest" || { echo "cannot take runner lock $dir" >&2; return 1; }
+  elif [[ -f "$dir" ]]; then
+    shape=file
+    held="$(cat "$dir" 2>/dev/null || true)"
+    held="${held#"${held%%[![:space:]]*}"}"
+    held="${held%"${held##*[![:space:]]}"}"
+    start=""
+    if [[ -z "$held" ]]; then
+      echo "[weekend] reclaiming foreign plain-file lock (no pid)" >&2
+      dest="$(_stale_lock_dest "$dir" "nopid")"
+      mv -f -- "$dir" "$dest" || { echo "cannot take runner lock $dir" >&2; return 1; }
+    else
+      case "$held" in
+        *[!0-9]*)
+          echo "[weekend] reclaiming foreign plain-file lock (no pid)" >&2
+          dest="$(_stale_lock_dest "$dir" "nopid")"
+          mv -f -- "$dir" "$dest" || { echo "cannot take runner lock $dir" >&2; return 1; }
+          ;;
+        *)
+          if pid_alive "$held" "$start"; then
+            echo "weekend runner lock held by pid $held ($dir)" >&2
+            return 1
+          fi
+          echo "[weekend] reclaiming stale runner lock (pid $held, $shape)" >&2
+          dest="$(_stale_lock_dest "$dir" "$held")"
+          mv -f -- "$dir" "$dest" || { echo "cannot take runner lock $dir" >&2; return 1; }
+          ;;
+      esac
+    fi
+  else
+    echo "cannot take runner lock $dir" >&2
+    return 1
   fi
-  # Rename the pid in so it is never half-written to a reader. R-411.
-  printf '%s\n' "$$" > "$dir/pid.tmp" && mv -f "$dir/pid.tmp" "$dir/pid"
+  mkdir "$dir" 2>/dev/null || { echo "cannot take runner lock $dir" >&2; return 1; }
+  _write_runner_lock_files "$dir"
   return 0
 }
 
@@ -71,9 +163,55 @@ release_runner_lock() {
   local dir="${1:-}" held
   [[ -n "$dir" && -d "$dir" ]] || return 0
   held="$(cat "$dir/pid" 2>/dev/null || true)"
-  [[ "$held" == "$$" ]] || return 0
+  held="${held#"${held%%[![:space:]]*}"}"
+  held="${held%"${held##*[![:space:]]}"}"
+  if [[ "$held" != "$$" ]]; then
+    if [[ -n "$held" ]]; then
+      echo "[weekend] runner lock pid was rewritten during the cycle (now $held)" >&2
+    fi
+    return 0
+  fi
   rm -rf -- "$dir"
 }
+
+sweep_shared_parent_lock() {
+  local path="$1" held start dest
+  FOREIGN_LOCK=""
+  [[ -e "$path" ]] || return 0
+  if [[ -d "$path" ]]; then
+    held="$(cat "$path/pid" 2>/dev/null || true)"
+    start="$(cat "$path/start" 2>/dev/null || true)"
+  elif [[ -f "$path" ]]; then
+    held="$(cat "$path" 2>/dev/null || true)"
+    start=""
+  else
+    return 0
+  fi
+  held="${held#"${held%%[![:space:]]*}"}"
+  held="${held%"${held##*[![:space:]]}"}"
+  start="${start#"${start%%[![:space:]]*}"}"
+  start="${start%"${start##*[![:space:]]}"}"
+  case "$held" in
+    ''|*[!0-9]*)
+      dest="$(_stale_lock_dest "$path" "nopid")"
+      mv -f -- "$path" "$dest" || true
+      FOREIGN_LOCK="removed:nopid"
+      echo "[weekend] foreign-lock=$FOREIGN_LOCK" >&2
+      return 0
+      ;;
+  esac
+  if pid_alive "$held" "$start"; then
+    FOREIGN_LOCK="live:$held"
+    echo "[weekend] foreign-lock=$FOREIGN_LOCK" >&2
+    return 0
+  fi
+  dest="$(_stale_lock_dest "$path" "$held")"
+  mv -f -- "$path" "$dest" || true
+  FOREIGN_LOCK="removed:$held"
+  echo "[weekend] foreign-lock=$FOREIGN_LOCK" >&2
+  return 0
+}
+
 
 # Every network call in this wrapper is bounded, INCLUDING the dead-man channel
 # itself: a hung issue-comment call inside the crash handler wedged the wrapper
@@ -268,6 +406,9 @@ report() {
   # must not mask the run's own exit code. Third arg 0 suppresses the
   # Pushover.
   local status="$1" detail="$2" push="${3:-1}"
+  if [[ -n "${FOREIGN_LOCK:-}" ]]; then
+    detail="${detail:+$detail }foreign-lock=$FOREIGN_LOCK"
+  fi
   local body
   body="$(_format_issue_body "$PHASE" "$status" "$detail")"
   local issue
@@ -534,10 +675,115 @@ kill_round_group() {
   ROUND_PID=""
 }
 
+
+BROWSER_HOST_PID=""
+BROWSER_HOST_STATUS=""
+BROWSER_HOST_ENDPOINT=""
+
+stop_browser_host() {
+  local pid="${BROWSER_HOST_PID:-}"
+  BROWSER_HOST_PID=""
+  BROWSER_HOST_ENDPOINT=""
+  unset PW_TEST_CONNECT_WS_ENDPOINT
+  [[ -n "$pid" ]] || return 0
+  kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+  local i=0
+  while [[ $i -lt 5 ]] && kill -0 "$pid" 2>/dev/null; do
+    sleep 1
+    i=$((i + 1))
+  done
+  kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+}
+
+_playwright_major_minor() {
+  local pkg="$1" ver minor
+  [[ -f "$pkg" ]] || return 1
+  ver="$(/usr/bin/sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$pkg" | /usr/bin/head -n 1)"
+  [[ -n "$ver" ]] || return 1
+  case "$ver" in
+    *.*.*)
+      minor="${ver#*.}"
+      printf '%s.%s' "${ver%%.*}" "${minor%%.*}"
+      ;;
+    *.*) printf '%s' "$ver" ;;
+    *) return 1 ;;
+  esac
+}
+
+start_browser_host() {
+  local bin ver_host ver_client token log wait_secs i line endpoint node_bin smoke_secs
+  BROWSER_HOST_PID=""
+  BROWSER_HOST_ENDPOINT=""
+  BROWSER_HOST_STATUS=""
+  unset PW_TEST_CONNECT_WS_ENDPOINT
+  bin="${AGENT_CLI_ROOT}/browser-host/node_modules/.bin/playwright"
+  if [[ ! -x "$bin" ]]; then
+    BROWSER_HOST_STATUS="unavailable:not-installed"
+    export RADON_WEEKEND_BROWSER_HOST="$BROWSER_HOST_STATUS"
+    return 0
+  fi
+  ver_host="$(_playwright_major_minor "$AGENT_CLI_ROOT/browser-host/node_modules/@playwright/test/package.json")" || ver_host=""
+  ver_client="$(_playwright_major_minor "$REPO/web/node_modules/@playwright/test/package.json")" || ver_client=""
+  if [[ -z "$ver_host" || -z "$ver_client" || "$ver_host" != "$ver_client" ]]; then
+    if [[ ! -x "$bin" || ! -f "$AGENT_CLI_ROOT/browser-host/node_modules/@playwright/test/package.json" ]]; then
+      BROWSER_HOST_STATUS="unavailable:not-installed"
+    else
+      BROWSER_HOST_STATUS="unavailable:version-mismatch"
+    fi
+    export RADON_WEEKEND_BROWSER_HOST="$BROWSER_HOST_STATUS"
+    return 0
+  fi
+  token="$(openssl rand -hex 16 2>/dev/null || echo "tok$$")"
+  log="$LOG_DIR/browser-host-$STAMP.log"
+  mkdir -p "$LOG_DIR"
+  "$TIMEOUT_BIN" "$CAP_SECS" "$bin" run-server --host 127.0.0.1 --port "${RADON_WEEKEND_BROWSER_HOST_PORT:-0}" --path "/$token" >"$log" 2>&1 &
+  BROWSER_HOST_PID=$!
+  wait_secs="${RADON_WEEKEND_BROWSER_HOST_WAIT_SECS:-60}"
+  i=0
+  endpoint=""
+  while [[ $i -lt $wait_secs ]]; do
+    if ! kill -0 "$BROWSER_HOST_PID" 2>/dev/null; then
+      BROWSER_HOST_STATUS="unavailable:exited"
+      BROWSER_HOST_PID=""
+      export RADON_WEEKEND_BROWSER_HOST="$BROWSER_HOST_STATUS"
+      return 0
+    fi
+    line="$(grep -E 'Listening on ws://' "$log" 2>/dev/null | tail -n 1 || true)"
+    if [[ -n "$line" ]]; then
+      endpoint="$(printf '%s' "$line" | /usr/bin/sed -n 's/.*Listening on \(ws:\/\/[^[:space:]]*\).*/\1/p')"
+      endpoint="${endpoint%%$'\r'}"
+      [[ -n "$endpoint" ]] && break
+    fi
+    sleep 1
+    i=$((i + 1))
+  done
+  if [[ -z "$endpoint" ]]; then
+    stop_browser_host
+    BROWSER_HOST_STATUS="unavailable:no-endpoint"
+    export RADON_WEEKEND_BROWSER_HOST="$BROWSER_HOST_STATUS"
+    return 0
+  fi
+  node_bin="$(command -v node 2>/dev/null || true)"
+  smoke_secs="${RADON_WEEKEND_BROWSER_HOST_SMOKE_SECS:-60}"
+  if [[ -z "$node_bin" ]] || ! NODE_PATH="$AGENT_CLI_ROOT/browser-host/node_modules" E="$endpoint" "$TIMEOUT_BIN" "$smoke_secs" \
+      "$node_bin" -e 'const {chromium}=require("playwright");(async()=>{const b=await chromium.connect(process.env.E);const p=await b.newPage();await p.setContent("<html></html>");await b.close();})().catch(e=>{console.error(e);process.exit(1);});'; then
+    stop_browser_host
+    BROWSER_HOST_STATUS="unavailable:smoke-failed"
+    export RADON_WEEKEND_BROWSER_HOST="$BROWSER_HOST_STATUS"
+    return 0
+  fi
+  BROWSER_HOST_ENDPOINT="$endpoint"
+  BROWSER_HOST_STATUS="ready"
+  export PW_TEST_CONNECT_WS_ENDPOINT="$endpoint"
+  export RADON_WEEKEND_BROWSER_HOST="ready"
+}
+
 on_signal() {
   local sig="$1"
   trap - INT TERM HUP ERR EXIT
   kill_round_group
+  stop_browser_host
   # REL-199 (R-531): launchd's default ExitTimeOut is ~20s and report()'s gh
   # ladder is up to five 120s-bounded calls — a bootout produced NO page.
   # Release the lock and fire the 10s-bounded Pushover FIRST, log locally,
@@ -722,17 +968,28 @@ refuse_billing_reroute_files() {
 }
 refuse_billing_reroute_files
 
+sweep_shared_parent_lock "$WEEKEND_ROOT/.weekend-runner.lock"
 RUNNER_LOCK="$REPO/.weekend-runner.lock"
 acquire_runner_lock "$RUNNER_LOCK" || {
   echo "REFUSING: another weekend run owns $REPO" >&2
-  # The expensive instance: acquire_runner_lock only reclaims when
-  # `kill -0 $held` fails, so a recorded pid reused by ANY live unrelated
-  # process makes every subsequent daily fire exit 3 in under a second. That
-  # must page, not vanish. R-239.
-  report "REFUSED (lock held)" "another weekend run owns $REPO (pid $(cat "$RUNNER_LOCK/pid" 2>/dev/null || echo unknown)); if no cycle is running, the recorded pid was reused — remove $RUNNER_LOCK" || true
+  # Live clone lock: stand down with a named REFUSED + page. A reused pid is
+  # caught by the start fingerprint in pid_alive, so this path is a live owner.
+  held="$(cat "$RUNNER_LOCK/pid" 2>/dev/null || true)"
+  start="$(cat "$RUNNER_LOCK/start" 2>/dev/null || true)"
+  held="${held#"${held%%[![:space:]]*}"}"
+  held="${held%"${held##*[![:space:]]}"}"
+  start="${start#"${start%%[![:space:]]*}"}"
+  start="${start%"${start##*[![:space:]]}"}"
+  owner="$(/bin/ps -p "$held" -o user= 2>/dev/null || true)"
+  cmd="$(/bin/ps -p "$held" -o command= 2>/dev/null || true)"
+  owner="${owner#"${owner%%[![:space:]]*}"}"
+  owner="${owner%"${owner##*[![:space:]]}"}"
+  cmd="${cmd#"${cmd%%[![:space:]]*}"}"
+  cmd="${cmd%"${cmd##*[![:space:]]}"}"
+  report "REFUSED (lock held)" "another weekend run owns $REPO (pid ${held:-unknown}, started ${start:-unknown}, owner ${owner:-unknown}, cmd ${cmd:-unknown}); if no cycle is running, the recorded pid was reused — remove $RUNNER_LOCK" || true
   exit 3
 }
-trap 'release_runner_lock "$RUNNER_LOCK"; if [[ -n "${NIGHTLY_PR_GUARD_DIR:-}" ]]; then rm -rf -- "$NIGHTLY_PR_GUARD_DIR"; fi' EXIT
+trap 'stop_browser_host; release_runner_lock "$RUNNER_LOCK"; if [[ -n "${NIGHTLY_PR_GUARD_DIR:-}" ]]; then rm -rf -- "$NIGHTLY_PR_GUARD_DIR"; fi' EXIT
 
 LOG_DIR="$REPO/logs/testing-weekend"
 mkdir -p "$LOG_DIR"
@@ -1233,7 +1490,6 @@ is_transient_network_failure() {
 run_phase() {
   begin_phase "$1"
   trap on_crash ERR
-  echo "[testing-weekend] $PHASE start $STAMP repo=$REPO cap=${CAP_SECS}s${BILLING_IGNORED:+ ignored=${BILLING_IGNORED// /,}}" | tee -a "$RUN_LOG"
   arm_deliver_record
   # NOT bare. Under `set -Eeuo pipefail` with the ERR trap armed, a failed
   # fetch made on_crash report and then the shell exit anyway — so
@@ -1252,6 +1508,8 @@ run_phase() {
   # or a settings reroute the reset does not remove; refuse before this
   # phase's `claude` launches.
   refuse_billing_reroute_files
+  start_browser_host
+  echo "[testing-weekend] $PHASE start $STAMP repo=$REPO cap=${CAP_SECS}s${BILLING_IGNORED:+ ignored=${BILLING_IGNORED// /,}}${FOREIGN_LOCK:+ foreign-lock=$FOREIGN_LOCK}${BROWSER_HOST_STATUS:+ browser-host=$BROWSER_HOST_STATUS}" | tee -a "$RUN_LOG"
 
   # Attempt clock is per phase: under cycle the remediate phase must not
   # inherit the audit phase's elapsed seconds and insta-timeout.
@@ -1390,6 +1648,7 @@ run_phase() {
     *)
       report "$status" "" ;;
   esac
+  stop_browser_host
   echo "[testing-weekend] $PHASE done rc=$RC" | tee -a "$RUN_LOG"
 }
 
