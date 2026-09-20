@@ -16037,6 +16037,11 @@ body[data-mobile="true"] .toast-container {
 
 body[data-mobile="true"] .toast {
   max-width: none;
+  pointer-events: none;
+}
+
+body[data-mobile="true"] .toast-close {
+  pointer-events: auto;
 }
 
 .mobile-shell {

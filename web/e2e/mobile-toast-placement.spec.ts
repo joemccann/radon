@@ -26,6 +26,7 @@ const toastCss = [
   ruleBlock(".toast-close"),
   ruleBlock('body[data-mobile="true"] .toast-container'),
   ruleBlock('body[data-mobile="true"] .toast'),
+  ruleBlock('body[data-mobile="true"] .toast-close'),
 ].join("\n");
 
 type Box = { x: number; y: number; width: number; height: number };
