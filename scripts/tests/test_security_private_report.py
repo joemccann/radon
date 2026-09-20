@@ -221,3 +221,15 @@ class TestTheWrapperPublishesTheReportPrivately:
         assert f"{scratch}/latest-report-<phase>.md" in text
         assert "joemccann/radon-security-reports" in text
         assert "Never push to that repository yourself" in text
+
+
+@pytest.mark.parametrize("loop", sorted(LOOPS))
+def test_report_publish_pins_github_host_key(loop):
+    # TOFU (accept-new) on the report push would trust whatever answered
+    # first contact with the deploy key's remote; both wrappers pin GitHub's
+    # published ed25519 host key instead (matching cloud/scripts/setup-vps.sh).
+    text = LOOPS[loop][0].read_text(encoding="utf-8")
+    assert "StrictHostKeyChecking=accept-new" not in text
+    assert "StrictHostKeyChecking=yes" in text
+    assert "UserKnownHostsFile=" in text
+    assert "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" in text

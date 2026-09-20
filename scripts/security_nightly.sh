@@ -379,7 +379,11 @@ publish_private_report() {
   [[ -n "${PHASE_START_MARK:-}" && "$src" -nt "$PHASE_START_MARK" ]] || return 0
   day="${STAMP:0:4}-${STAMP:4:2}-${STAMP:6:2}"
   rel="reports/$LOOP_SLUG/$day/$PHASE.md"
-  ssh_cmd="ssh -i $REPORTS_KEY -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20"
+  # Pin GitHub's published ed25519 host key (docs.github.com "GitHub's SSH
+  # key fingerprints") instead of trusting whatever answers first contact.
+  local pinned_hosts="$PRIVATE_SCRATCH/.github-known-hosts"
+  printf '%s\n' 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' >"$pinned_hosts"
+  ssh_cmd="ssh -i $REPORTS_KEY -o IdentitiesOnly=yes -o UserKnownHostsFile=$pinned_hosts -o StrictHostKeyChecking=yes -o ConnectTimeout=20"
   if [[ ! -d "$REPORTS_DIR/.git" ]]; then
     rm -rf -- "$REPORTS_DIR"
     GIT_SSH_COMMAND="$ssh_cmd" net_bounded git clone --quiet --depth 1 "$REPORTS_REMOTE" "$REPORTS_DIR" >/dev/null 2>&1 || return 0
