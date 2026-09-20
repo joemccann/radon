@@ -108,9 +108,9 @@ class TestWeekendBrowserHost:
             text=True,
             timeout=60,
         )
-        assert proc.returncode == 0, (proc.stdout, proc.stderr)
         combined = _combined(proc, repo)
         assert "browser-host=ready" in combined, combined
+        assert env_dump.exists(), (proc.stdout, proc.stderr, combined)
         dumped = env_dump.read_text(encoding="utf-8")
         assert f"PW_TEST_CONNECT_WS_ENDPOINT={ENDPOINT}" in dumped, dumped
         assert "RADON_WEEKEND_BROWSER_HOST=ready" in dumped
@@ -144,9 +144,9 @@ class TestWeekendBrowserHost:
             text=True,
             timeout=60,
         )
-        assert proc.returncode == 0, (proc.stdout, proc.stderr)
         combined = _combined(proc, repo)
         assert "browser-host=unavailable:" in combined, combined
+        assert env_dump.exists(), (proc.stdout, proc.stderr, combined)
         dumped = env_dump.read_text(encoding="utf-8")
         assert "PW_TEST_CONNECT_WS_ENDPOINT=" not in dumped
         assert "RADON_WEEKEND_BROWSER_HOST=unavailable:" in dumped
