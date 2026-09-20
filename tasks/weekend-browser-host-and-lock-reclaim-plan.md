@@ -5,7 +5,10 @@
 > a claim that the fix exists.
 
 Two operator-verified defects on the Mac mini runner, one root cause each,
-one implement PR (lock reclaim may split off if it slows the browser fix).
+one implement PR. **Both are hard Definition of Done** (Joe, 2026-09-20
+05:11 PT via Chief of Staff): the Chromium host gate AND the five lock-hygiene
+items in §2 must all be met before the implement PR is called complete. Lock
+hygiene is not a follow-up and may not be split off.
 
 ---
 
@@ -246,76 +249,187 @@ with a screenshot path, not a `bootstrap_check_in` line.
   refuses to unlock (`held != $$`) and the next fire reclaims it. Hygiene,
   not a collision, but it is why the skills must stop touching the lock.
 
+### Hard DoD (Joe, 2026-09-20): five lock-hygiene requirements
+
+| # | Requirement | Where it is met |
+|---|---|---|
+| L1 | No orphan shared-parent lock. `~/radon-weekend/.weekend-runner.lock` as a plain FILE is never valid; only per-clone DIRECTORY locks `$REPO/.weekend-runner.lock/pid` are. Setup and wrappers reject/remove it. | `sweep_shared_parent_lock` in every wrapper prologue; `setup_*` scripts; skill rails |
+| L2 | Stale reclaim works outside the sandbox: launchd wrapper / setup reclaim when the pid is verifiably dead (ESRCH), never left to sandboxed agents that see EPERM and refuse forever. | `pid_alive` (host bash) in `acquire_runner_lock`, the sweep, and setup |
+| L3 | Never block sibling loops: a dead or unverifiable lock must not strand ci-performance / documentation across nights. Reclaim-if-dead in bash before phase start; if live, stand down with a clear `REFUSED` + page, never a silent rc=75 forever. | wrapper prologue order + `report "REFUSED (lock held)"` detail names pid, owner, start time, command |
+| L4 | EXIT / crash safety: owner-only release stays (R-411); `kill -9`, `timeout`, launchd stop cannot leave a 16-day corpse. | pid + start-time fingerprint in the lock; launchd-owned reclaim on the next fire of any loop bounds a corpse to one day |
+| L5 | Regression tests or scripted proof for: file-shaped lock at the shared parent; directory lock with dead pid; directory lock with live pid (must not steal). | §Regression proof cases 1, 2, 4, 5, 6, 8, 9 below |
+
 ### Design: reclaim only from a context that can prove death (host bash), never weaken R-411
 
-`acquire_runner_lock "$dir"` (all six wrappers, byte-identical; no shared
+**Lock shape (L1, L4).** A valid lock is `$REPO/.weekend-runner.lock/` holding
+`pid` (integer, unchanged for every existing reader: plist pre-reset guard,
+setup scripts, `weekend_prune.py`, tests) plus a new `start` file: the
+owner's process start time as `/bin/ps -p $$ -o lstart=` prints it. Written
+`start` first, then `pid`, each via `tmp` + `mv -f`, so a reader that sees
+`pid` also sees `start`. A lock with `pid` but no `start` (written by a
+pre-fix wrapper) is read pid-only, so the upgrade needs no manual step.
+
+**`pid_alive pid [start]`** (host bash; `/bin/ps` absolute for the same
+reason the wrapper already hard-codes `/usr/bin/curl` and `/usr/bin/sed`):
+
+```
+kill -0 pid          succeeds                      -> alive          (fast path)
+kill -0 pid          fails, /bin/ps -p pid empty   -> DEAD (ESRCH)   (reclaimable)
+kill -0 pid          fails, /bin/ps -p pid lists it -> alive          (EPERM class: another user or a
+                                                                       sandbox; absent evidence is not staleness)
+alive AND start given AND ps -o lstart= differs    -> DEAD (pid reused by an unrelated process; L4)
+```
+
+The reuse check is what removes the wrapper's own documented failure ("a
+recorded pid reused by ANY live unrelated process makes every subsequent daily
+fire exit 3", `testing_weekend.sh` comment at the `REFUSED (lock held)` site).
+
+**`acquire_runner_lock "$dir"`** (all six wrappers, byte-identical; no shared
 sourced helper, because sourcing a clone file before `ground_truth` executes
 agent-writable code on the host, which is the reason the wrappers are
 single-file today):
 
 ```
+mkdir succeeds -> write start, then pid; done
 mkdir fails ->
-  dir  with pid file : held=$(cat "$dir/pid")            shape=dir     (unchanged)
-  plain file         : held=$(cat "$dir")                shape=file    (new)
-  held empty / non-numeric -> refuse; message names the shape:
-      dir : "held (pid not yet published)"                             (R-411 unchanged)
-      file: "held (plain file, no pid; a wrapper never writes this shape; remove by hand)"
-  pid_alive "$held" -> refuse "held by pid $held"                       (unchanged)
-  else -> "[weekend] reclaiming stale runner lock (pid $held, $shape)"; rm -rf -- "$dir"; mkdir
+  dir  with pid file : held=$(cat "$dir/pid") start=$(cat "$dir/start")  shape=dir   (unchanged read)
+  plain file         : held=$(cat "$dir")                                shape=file  (new)
+  held empty / non-numeric ->
+      dir : refuse "held (pid not yet published)"                                    (R-411 unchanged)
+      file: RECLAIM. A wrapper never writes this shape and there is no mkdir->pid
+            window to protect, so an empty plain file is a foreign artifact, not a
+            racing winner. Logged "reclaiming foreign plain-file lock (no pid)".
+  pid_alive "$held" "$start" -> refuse "held by pid $held"                            (unchanged)
+  else -> "[weekend] reclaiming stale runner lock (pid $held, $shape)"; mv aside; mkdir; write start, pid
 ```
 
-`pid_alive pid`: `kill -0` succeeds -> alive. `kill -0` fails ->
-`/bin/ps -p "$pid" -o pid=` prints the pid -> **alive** (EPERM class: absent
-evidence is not staleness). Prints nothing -> dead. Absolute `/bin/ps` for the
-same reason the wrapper already uses `/usr/bin/curl` and `/usr/bin/sed`.
-Under host bash `ps -p` sees every pid, so a dead pid is provable; a
-sandboxed agent's `kill -0` was never the right probe and the skills say so.
+"mv aside" = `mv -f -- "$dir" "$WEEKEND_ROOT/.stale-locks/$(basename "$REPO").weekend-runner.lock.<held|nopid>.<STAMP>"`
+(preserved, never deleted; forensics for the operator). Live -> the existing
+`report "REFUSED (lock held)"` path (exit 3, dead-man comment, Pushover)
+with the detail extended to `pid <held>, started <start>, owner <ps -o user=>,
+cmd <ps -o command=>` so an operator can tell a live cycle from a reused pid
+at a glance (L3).
 
-Foreign root lock: after taking its own lock, each wrapper calls
-`reclaim_foreign_lock "$WEEKEND_ROOT/.weekend-runner.lock"` (that exact
-path only, never a glob): parse the pid from the file or `pid` child; if
-`pid_alive` -> leave it, log `foreign-lock=held:<pid>`; if dead -> move it
-aside to `$WEEKEND_ROOT/.stale-locks/weekend-runner.lock.<pid>.<STAMP>`
-(preserved, not deleted) and log `foreign-lock=reclaimed:<pid>` on the
-phase-start line. No pid -> leave it, log `foreign-lock=unparseable`. The
-first loop to fire after merge clears the 2026-09-04 file.
+**Shared-parent sweep (L1, L3).** Before `acquire_runner_lock`, every wrapper
+calls `sweep_shared_parent_lock "$WEEKEND_ROOT/.weekend-runner.lock"` (that
+exact path only, never a glob; any shape, file or directory):
 
-Optional, cheap: `release_runner_lock` logs
+```
+absent                                    -> nothing
+no parseable pid (empty, garbage)         -> move aside (never a valid lock; L1)      log foreign-lock=removed:nopid
+pid dead (pid_alive says DEAD)            -> move aside                                log foreign-lock=removed:<pid>
+pid alive                                 -> leave it; log foreign-lock=live:<pid>; include in this
+                                             phase's dead-man detail so it PAGES; proceed (the
+                                             per-clone lock, not this file, gates the run)
+```
+
+A live foreign pid is a process that wrote a lock no wrapper honours; the
+wrapper does not kill it and does not stand down for it (L3: nothing may
+strand a sibling loop), it makes it visible. The first loop to fire after
+merge moves the 2026-09-04 file to
+`~/radon-weekend/.stale-locks/shared.weekend-runner.lock.21108.<STAMP>`.
+
+**Setup scripts (L1, L2).** `setup_testing_weekend.sh` (and the five sibling
+`setup_*`): the in-flight check `kill -0 "$(cat "$WEEKEND_REPO/.weekend-runner.lock/pid")"`
+is replaced by sourcing the wrapper from the operator's own checkout
+(`source "$SRC_REPO/scripts/<wrapper>" --lock-lib-only`, trusted, not the
+runner clone) and calling `pid_alive` on the clone lock and each sibling
+clone lock (dead -> move aside and continue; live -> `exit 1` naming pid,
+owner, start), then `sweep_shared_parent_lock` (dead/no-pid -> moved aside;
+live -> `exit 1` naming the pid, because setup is about to unload and reload
+the job and must not race an unknown live process). Also a new
+`check "no shared-parent lock"` line in the toolchain report.
+
+**Crash safety (L4).** Unchanged: `on_signal` releases on SIGTERM/HUP/INT
+(launchd stop sends SIGTERM first), the EXIT trap releases owner-only. New:
+`kill -9`, `timeout -k`, a reboot mid-cycle leave `pid` + `start`; the next
+fire of the same loop (launchd, host bash, at most 24h later) reclaims on
+ESRCH, and a reused pid is caught by the `start` mismatch. The shared parent
+is swept by whichever loop fires first (six fires per day). Worst case for
+any corpse is therefore one day, not sixteen. `release_runner_lock` also logs
 `[weekend] runner lock pid was rewritten during the cycle (now <held>)` when
-`held != $$`, so an agent that overwrote the lock is visible in the run log.
+`held != $$`, so an agent that overwrote the lock is visible.
+
+**Plist pre-reset guard** (`kill -0 "$(cat "$C/.weekend-runner.lock/pid")"`):
+unchanged. It is a conservative "skip the reset if possibly live" check;
+false-live only delays a reset the wrapper's own `ground_truth` performs
+anyway.
 
 `scripts/weekend_prune.py::locking_pid` needs no change (already
-dir-or-file, EPERM -> alive). Its refusal of a held clone still stands.
+dir-or-file, EPERM -> alive). Its refusal of a held clone still stands; a
+dead per-clone lock is reclaimed by that loop's own next fire, not by prune.
 
 Skills: `.claude/skills/ci-performance/SKILL.md` rail 2 ("Take an exclusive
 loop lock") becomes the documentation-nightly wording: the wrapper's
-`$REPO/.weekend-runner.lock` **is** the lock; never create, reclaim, move or
-verify it, never create `~/radon-weekend/.weekend-runner.lock`; a wrapper is
-running, so the pid in it is the wrapper's. Testing and documentation skills
-get the same sentence where it is missing. Re-render portable prompts.
+`$REPO/.weekend-runner.lock` **is** the lock; never create, reclaim, move,
+`kill -0` or otherwise verify it, never create or read
+`~/radon-weekend/.weekend-runner.lock`; a wrapper is running, so the pid in
+the clone lock is the wrapper's. A sandboxed `kill -0` returning
+`Operation not permitted` is not evidence of anything and must not become a
+`lock-owner-unverified` INCOMPLETE. Testing and documentation skills get the
+same sentence where it is missing. Re-render portable prompts.
 
-### Regression proof (red first)
+### Regression proof (red first; L5)
 
 Extend `test_rel137_weekend_wrapper_survivability.py::TestRunnerLockIsRaceFree`
 and `test_ops_plane_bounds.py::TestWeekendRunnerMutualExclusion`
-(parametrised over all six wrappers, `source … --lock-lib-only`):
+(parametrised over all six wrappers, `source … --lock-lib-only`), plus a
+setup-script case in `test_weekend_runner_env_provisioning.py`:
 
-1. RED at HEAD: plain file at the lock path containing `999999` ->
-   `acquire_runner_lock` returns 1 with "pid not yet published". GREEN:
-   returns 0, lock is now a directory with this process's pid.
-2. Plain file containing `os.getpid()` -> refuse (alive).
-3. Empty plain file -> refuse, message names "plain file, no pid".
-4. Directory with empty `pid` -> refuse "pid not yet published" (R-411 pin,
+1. **L5 file-shaped lock (dead pid).** RED at HEAD: plain file at the lock
+   path containing `999999` -> `acquire_runner_lock` returns 1 with "pid not
+   yet published". GREEN: returns 0, the path is now a directory holding this
+   process's `pid` and `start`, the old file sits under `.stale-locks/` with
+   `999999` intact.
+2. **L5 file-shaped lock (live pid).** Plain file containing `os.getpid()`
+   -> refuse (must not steal).
+3. Empty plain file -> reclaimed, log line names "foreign plain-file lock
+   (no pid)"; the file is preserved under `.stale-locks/`.
+4. **L5 directory lock, dead pid.** Directory with `pid=999999` (no `start`)
+   -> reclaimed (already green today; pinned so the pid-only upgrade path
+   stays honest). With `pid=999999` and any `start` -> reclaimed.
+5. **L5 directory lock, live pid.** Directory with `pid=os.getpid()` and a
+   matching `start` -> refuse; with `pid=os.getpid()` and no `start` ->
+   refuse (must not steal, both shapes).
+6. **L4 pid reuse.** Directory with `pid=os.getpid()` and
+   `start=Thu Jan  1 00:00:00 1970` -> reclaimed (live pid, wrong fingerprint
+   = a different process owns that pid now).
+7. Directory with empty `pid` -> refuse "pid not yet published" (R-411 pin,
    unchanged).
-5. EPERM branch: PATH-independent `/bin/ps` cannot be shimmed, so test the
-   helper with a `kill` function override that returns 1 for a live pid:
-   `pid_alive` must still say alive because `ps -p` lists it.
-6. `reclaim_foreign_lock`: dead-pid file moved to `.stale-locks/…` with
-   contents intact; live-pid file untouched; no-pid file untouched and
-   logged; a second run finds nothing to do.
-7. Contract: the six `acquire_runner_lock` / `pid_alive` /
-   `reclaim_foreign_lock` bodies are byte-identical (drift guard without
-   extraction).
+8. **L2 EPERM is not death.** `kill` overridden as a function returning 1
+   for a live pid: `pid_alive` still says alive because `/bin/ps -p` lists it.
+   `pid_alive 999999` (no such process) says DEAD.
+9. **L1/L3 shared-parent sweep.** `WEEKEND_ROOT/.weekend-runner.lock` as a
+   plain file with `999999` -> moved to
+   `.stale-locks/shared.weekend-runner.lock.999999.<STAMP>`, contents intact,
+   phase-start line carries `foreign-lock=removed:999999`, wrapper proceeds to
+   take its own clone lock. Same file with `os.getpid()` -> left in place,
+   `foreign-lock=live:<pid>`, the phase still runs and the dead-man detail
+   posted to the stub `gh` names the pid. Empty file -> moved aside,
+   `foreign-lock=removed:nopid`. Directory shape with a dead `pid` -> moved
+   aside. A second run with nothing there logs nothing.
+10. **L3 live sibling never silent.** Clone lock held by `os.getpid()` ->
+    exit 3 AND the stub `gh` received a `REFUSED (lock held)` comment whose
+    body names the pid, and the stub `curl` received the Pushover
+    (`test_prologue_page_wire.py` already asserts the page; extend the body
+    assertion).
+11. Race pin unchanged: eight simultaneous acquires, exactly one `WON`.
+12. Setup: `setup_testing_weekend.sh` against a staged `WEEKEND_ROOT` with a
+    dead-pid shared-parent file -> moves it aside and continues; with a
+    live-pid file -> `exit 1` naming the pid; with a dead-pid clone lock ->
+    reclaims and continues (extends the existing in-flight check).
+13. Contract: the six `pid_alive` / `acquire_runner_lock` /
+    `release_runner_lock` / `sweep_shared_parent_lock` bodies are
+    byte-identical across wrappers (drift guard without extraction), and
+    `sweep_shared_parent_lock` is called before `acquire_runner_lock`
+    (ordering pin, same style as `test_ops_plane_bounds.py`'s "lock before
+    reset").
+
+Scripted proof on the mini for the implement PR body: the first post-merge
+fire's phase-start line (`foreign-lock=removed:21108`),
+`ls -l ~/radon-weekend/.stale-locks/`, `cat` of the preserved file showing
+`21108`, and `ls -d ~/radon-weekend/radon-*/.weekend-runner.lock` showing
+only directories with `pid` + `start`.
 
 ---
 
@@ -325,9 +439,10 @@ and `test_ops_plane_bounds.py::TestWeekendRunnerMutualExclusion`
 |---|---|
 | `scripts/testing_weekend.sh` | browser host start/stop/smoke, phase-start field, lock helpers |
 | `scripts/reliability_weekend.sh`, `scripts/ci_performance_nightly.sh`, `scripts/documentation_nightly.sh`, `scripts/security_nightly.sh`, `scripts/security_deepsec_nightly.sh` | lock helpers byte-identical; reliability also gets the browser host (or a stated deferral) |
-| `scripts/setup_testing_weekend.sh` (+ `setup_reliability_weekend.sh` if included) | browser-host provisioning + check |
+| `scripts/setup_testing_weekend.sh` | browser-host provisioning + check; lock checks via `pid_alive` + shared-parent sweep |
+| `scripts/setup_reliability_weekend.sh`, `scripts/setup_ci_performance.sh`, `scripts/setup_documentation_nightly.sh`, `scripts/setup_security_nightly.sh` | lock checks via `pid_alive` + shared-parent sweep (L1, L2); reliability also gets the browser host if included |
 | `.claude/skills/testing-weekend/SKILL.md`, `.claude/skills/ci-performance/SKILL.md`, `.claude/skills/documentation-nightly/SKILL.md` | browser rail, lock rail; then `.claude/portable-prompts/*` and `.codex/skills/*` via `render_loop_prompt.py --write` |
-| `scripts/tests/test_weekend_browser_host.py` (new), `test_rel137_weekend_wrapper_survivability.py`, `test_ops_plane_bounds.py`, `test_weekend_loop_deadman.py` | red/green above |
+| `scripts/tests/test_weekend_browser_host.py` (new), `test_rel137_weekend_wrapper_survivability.py`, `test_ops_plane_bounds.py`, `test_weekend_loop_deadman.py`, `test_prologue_page_wire.py`, `test_weekend_runner_env_provisioning.py` | red/green above (browser cases 1-6, lock cases 1-13) |
 | `docs/operations.md` | owner for `nightly-loops` (`docs/owners.json`): the `browser-host=` / `foreign-lock=` fields, the `~/.radon/agent-cli/browser-host` install, the lock shapes and who may reclaim |
 | `docs/owners.json` | only if a new helper file is added outside the `scripts/*_weekend.sh` / `scripts/*_nightly.sh` globs |
 | `.gitignore` | nothing new expected (`.weekend-runner.lock/` already ignored) |
@@ -338,7 +453,9 @@ Not touched: `web/playwright.config.ts`, any `web/e2e/*.spec.ts`,
 
 ---
 
-## Done-when (checkable, maps to the operator's DoD 1-5)
+## Done-when (checkable; every item is hard DoD for the implement PR)
+
+Browser host gate (operator DoD 1-4):
 
 1. **Root cause in the implement PR body**: Seatbelt `mach-register` denial for
    `org.chromium.Chromium.MachPortRendezvousServer.<pid>` under the agent CLI
@@ -354,11 +471,36 @@ Not touched: `web/playwright.config.ts`, any `web/e2e/*.spec.ts`,
    of claiming BLOCKED.
 4. **Implement PR opened separately**, number reported, with an explicit
    "what Joe runs after merge" section (below).
-5. **Lock reclaim** (same PR or split): tests 1-7 green, case 1 red at the
-   pre-fix SHA; after the first post-merge fire of any loop,
-   `~/radon-weekend/.weekend-runner.lock` is gone and
-   `~/radon-weekend/.stale-locks/weekend-runner.lock.21108.<stamp>` exists;
-   ci-perf / docs pre-flight no longer reports a held or unverifiable lock.
+
+Lock hygiene (Joe's hard DoD L1-L5; same implement PR, not split):
+
+5. **L1 no orphan shared-parent lock.** After the first post-merge fire of
+   any loop, `~/radon-weekend/.weekend-runner.lock` does not exist and
+   `~/radon-weekend/.stale-locks/shared.weekend-runner.lock.21108.<stamp>`
+   holds the preserved file; that fire's phase-start line reads
+   `foreign-lock=removed:21108`. `setup_*` refuses (`exit 1`, pid named) on a
+   live shared-parent lock and removes a dead one. Every lock left on the mini
+   is `radon-*/.weekend-runner.lock/` with `pid` + `start`.
+6. **L2 reclaim outside the sandbox.** Lock regression cases 1, 4, 8 green
+   (dead pid reclaimed by host bash via ESRCH; EPERM stays alive), case 1 red
+   at the pre-fix SHA. No skill or prompt tells an agent to `kill -0`,
+   reclaim or create a runner lock (grep over `.claude/skills/*/SKILL.md`,
+   `.claude/portable-prompts/*`, `.codex/skills/*`).
+7. **L3 never block sibling loops.** Lock case 9 (sweep proceeds past a live
+   foreign file and pages it) and case 10 (a live clone lock exits 3 with a
+   `REFUSED (lock held)` comment naming pid, owner, start, command, plus the
+   Pushover) green. On the mini: ci-performance and documentation post
+   audit-phase dead-man comments on the first night after merge with no
+   `lock-owner-unverified` / `runner-lock-held` INCOMPLETE.
+8. **L4 crash safety.** Lock case 6 green (live reused pid with a stale
+   `start` is reclaimed); `test_rel137_weekend_wrapper_survivability.py`
+   SIGTERM cases still release; a `kill -9` of a smoke run on the mini leaves
+   `pid` + `start` and the next manual fire logs
+   `reclaiming stale runner lock (pid <n>, dir)` and runs.
+9. **L5 proof set.** Cases 1-2 (file-shaped, dead and live), 4 (directory,
+   dead), 5 (directory, live: must not steal) exist as tests parametrised
+   over all six wrappers and are green; the mini scripted-proof block (ls,
+   cat, phase-start line) is pasted in the implement PR body.
 
 Full gates before the implement PR's commits: `python3.13 -m pytest`
 (focused first: `python3.13 scripts/run_pytest_affected.py --files scripts/testing_weekend.sh … -- -q`),
@@ -373,15 +515,18 @@ Full gates before the implement PR's commits: `python3.13 -m pytest`
    `kill -0 $(cat …/pid)` fails):
    `git -C ~/radon-weekend/radon-testing fetch origin && git -C ~/radon-weekend/radon-testing checkout -f main && git -C ~/radon-weekend/radon-testing reset --hard origin/main`
    (git only; never `cp` the wrapper, per its header).
-2. `bash scripts/setup_testing_weekend.sh` from the operator checkout: installs
-   `~/.radon/agent-cli/browser-host/` (Playwright 1.58.x + chromium) and prints
-   `ok  playwright run-server (host)`. The plist is re-installed by the same
-   script unchanged; no `launchctl` action beyond what setup already does.
+2. `bash scripts/setup_testing_weekend.sh` from the operator checkout: sweeps
+   the dead shared-parent lock to `~/radon-weekend/.stale-locks/` (prints the
+   pid it moved), installs `~/.radon/agent-cli/browser-host/` (Playwright
+   1.58.x + chromium) and prints `ok  playwright run-server (host)` and
+   `ok  no shared-parent lock`. The plist is re-installed by the same script
+   unchanged; no `launchctl` action beyond what setup already does.
 3. Optional smoke, still host shell:
    `RADON_WEEKEND_REPO=~/radon-weekend/radon-testing bash ~/radon-weekend/radon-testing/scripts/testing_weekend.sh remediate`
-   and confirm `browser-host=ready` on the phase-start line.
-4. Nothing to do for the root lock: the next fire of any loop moves it to
-   `~/radon-weekend/.stale-locks/`. Delete that directory whenever convenient.
+   and confirm `browser-host=ready` and `foreign-lock=` on the phase-start
+   line.
+4. If step 2 is skipped, the next fire of any loop performs the same sweep.
+   Delete `~/radon-weekend/.stale-locks/` whenever convenient.
 5. If reliability is included: repeat steps 1-2 for `radon-reliability` via
    `setup_reliability_weekend.sh`.
 
@@ -396,3 +541,9 @@ Full gates before the implement PR's commits: `python3.13 -m pytest`
   egress; if not, the same `unavailable:` path applies and the rail holds.
 - `PW_TEST_CONNECT_WS_ENDPOINT` reaches worktree subagents (env inheritance;
   expected yes).
+- `/bin/ps -p <pid> -o lstart=` prints a stable, second-resolution start time
+  on macOS 15 for a process owned by another user (needed for the fingerprint
+  compare; fall back to `-o etime=`-free pid-only if it is empty).
+- bash 3.2 on the mini: no `mapfile`, no `${var,,}`; the helpers must stay
+  POSIX-ish like the rest of the wrapper (the cloud/tests baseline already
+  documents that trap).

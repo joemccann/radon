@@ -7850,7 +7850,7 @@ Operational review: repaired the existing Turso snapshot in place, preserving sc
 - [x] T2 depends_on: [T1] Root-cause the Mach denial (Seatbelt mach-register under codex / Claude sandboxes) and prove the run-server + PW_TEST_CONNECT_WS_ENDPOINT wiring with the runner holding no browser.
 - [x] T3 depends_on: [T1] Design host-only stale-lock reclaim for plain-file locks and dead pids without weakening R-411.
 - [x] T4 depends_on: [T2,T3] Write `tasks/weekend-browser-host-and-lock-reclaim-plan.md` with done-when, files, tests, operator steps; open the draft plan PR.
-- [ ] T5 depends_on: [T4] Implement PR (separate): wrapper browser host, lock helpers x6, setup provisioning, skill rails, red/green tests, operations.md owner update.
+- [ ] T5 depends_on: [T4] Implement PR (separate): wrapper browser host, lock helpers x6 (pid+start fingerprint, shared-parent sweep, setup checks; hard DoD L1-L5 per Joe 2026-09-20), skill rails, red/green tests, operations.md owner update.
 Dependency graph: T1 -> {T2,T3} -> T4 -> T5.
 
 Review: plan only, no product code. Mechanism PoC on the branch VM: with the endpoint set and `PLAYWRIGHT_BROWSERS_PATH=/nonexistent` the spec passed against the host run-server (1 passed); without the endpoint the runner tried to launch and failed, which is the sandboxed path being replaced.
