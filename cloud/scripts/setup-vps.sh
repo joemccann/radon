@@ -197,6 +197,9 @@ readonly SERVICE_FILES=(
   radon-panic-index.timer
   radon-dispersion.service
   radon-dispersion.timer
+  radon-slm-tagger.service
+  radon-slm-tagger-monitor.service
+  radon-slm-tagger-monitor.timer
 )
 
 
@@ -968,6 +971,11 @@ enable_services() {
     # Research requires private runtime credentials and explicit activation.
     [[ "$svc" == "radon-research.service" ]] && continue
     [[ "$svc" == "radon-ib-gateway-preheld-restart.service" ]] && continue
+    # SLM tagger sidecar + monitor stay copied but disabled until Joe enables
+    # after C WINS. No model is installed on a fresh host.
+    [[ "$svc" == "radon-slm-tagger.service" ]] && continue
+    [[ "$svc" == "radon-slm-tagger-monitor.service" ]] && continue
+    [[ "$svc" == "radon-slm-tagger-monitor.timer" ]] && continue
     # Broker-only. Combined/app copy the unit but do not enable it. Certs plus
     # `systemctl enable --now` happen on the broker after the split.
     [[ "$svc" == "radon-ib-gateway-remote.service" ]] && continue

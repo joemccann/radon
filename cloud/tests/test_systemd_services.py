@@ -72,6 +72,9 @@ EXPECTED_SERVICE_FILES = [
     "radon-garch.service",
     "radon-garch.timer",
     "radon-health.service",
+    "radon-slm-tagger.service",
+    "radon-slm-tagger-monitor.service",
+    "radon-slm-tagger-monitor.timer",
     "radon-mcp.service",
     "radon-host-metrics.service",
     "radon-host-metrics.timer",
@@ -164,6 +167,7 @@ LONG_RUNNING_SERVICES = [
     "radon-relay.service",
     "radon-monitor.service",
     "radon-newsfeed.service",
+    "radon-slm-tagger.service",
 ]
 
 IB_GATEWAY_DEPENDENTS = [

@@ -1,0 +1,24 @@
+[Unit]
+Description=Radon SLM tagger: internal specialist, not a SotA replacement for open research (llama-server sidecar, newsfeed text tags only)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=radon
+UMask=0077
+Environment=RADON_SLM_TAGGER_THREADS=1
+EnvironmentFile=/etc/radon/env
+ExecStart=/usr/local/bin/llama-server --model /var/lib/radon/models/current.gguf --alias radon-slm-tagger --host 127.0.0.1 --port 8331 --ctx-size 2048 --parallel 1 --threads ${RADON_SLM_TAGGER_THREADS} --temp 0 --no-webui --log-disable
+Restart=on-failure
+RestartSec=30
+MemoryMax=2400M
+CPUQuota=150%
+Nice=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
