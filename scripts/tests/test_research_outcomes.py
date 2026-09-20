@@ -20,6 +20,17 @@ def review(**overrides):
     return value
 
 
+def test_advisory_grounding_without_held_contributes_no_reason_code():
+    row = publish.outcome_row(work(), review(
+        audit=[{"claim_key": "tic-july", "grounding": [{"token": "$47bn", "page": None}],
+                "unmatched": ["$47bn"]}],
+        posts=[{"id": "research-1"}],
+    ))
+    assert row["outcome"] == "published"
+    assert json.loads(row["reason_codes"]) == []
+    assert json.loads(row["drafts_json"]) == []
+
+
 def test_outcome_row_carries_reason_codes_and_rejected_drafts():
     row = publish.outcome_row(work(), review())
     assert row["work_key"] == "k" * 64 and row["file_id"] == "id:one" and row["file_name"] == "tic data.pdf"

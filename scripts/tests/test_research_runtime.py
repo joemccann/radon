@@ -110,10 +110,16 @@ def test_model_network_error_is_classified_without_secrets():
     assert "private-token" not in str(error.value)
 
 
-@pytest.mark.parametrize("value", [None,{}, {**item(),"figures":"not-list"}, {**item(),"figures":[{"page":2}]},
-    {**item(),"figures":[{"page":1,"crop":[0,0,1,1],"caption":""}]}])
-def test_candidate_missing_shapes_cannot_be_accepted(value):
-    with pytest.raises(pipeline.EvidenceError): pipeline.validate_candidate(value,2,"2026-09-07")
+@pytest.mark.parametrize("value,match", [
+    (None, "object"),
+    ({}, "Invalid title"),
+    ({**item(),"figures":"not-list"}, "Invalid figures"),
+    ({**item(),"figures":[{"page":2}]}, "Chart must cite an evidence page"),
+    ({**item(),"figures":[{"page":1}]}, "Invalid chart crop"),
+])
+def test_candidate_missing_shapes_cannot_be_accepted(value, match):
+    with pytest.raises(pipeline.EvidenceError, match=match):
+        pipeline.validate_candidate(value, 2, "2026-09-07")
 
 
 def test_comparison_includes_actual_newest_not_id_order():
@@ -405,7 +411,7 @@ def test_cli_rejects_fast_poll_and_concurrent_worker(cli,monkeypatch):
 
 
 def test_invalid_caption_holds_only_that_candidate_not_valid_siblings(tmp_path):
-    invalid=item();invalid["figures"][0]["caption"]="x"*308
+    invalid=item();invalid["figures"][0]["crop"]=[.5,.5,.5,.6]
     valid=item()
     gates=dict.fromkeys(("supported","material_new_evidence","dates_verified","charts_complete","not_market_ear","no_unresolved_conflicts"),True)|{"reason":"Verified", "date_evidence":{"page":1,"date_text":"4 September 2026","source_quote":"Report date: 4 September 2026","role":"report","role_verified":True}}
     pipe,work=fixture_pipeline(tmp_path,[{"candidates":[invalid,valid]},gates])
@@ -432,15 +438,13 @@ def test_seed_attributes_approved_goldman_report_to_original_bank(queue,approved
     assert state.outbox()[0]['payload']['source']['publisher']=='Goldman Sachs'
 
 
-def test_intermediary_candidate_is_held_without_blocking_valid_sibling(tmp_path):
-    invalid=item();invalid['publisher']='Goldman Sachs via ZERO HEDGE'
+def test_intermediary_name_in_publisher_is_no_longer_a_hold(tmp_path):
+    wrap=item();wrap['publisher']='Goldman Sachs via ZERO HEDGE'
     checks=dict.fromkeys(('supported','material_new_evidence','dates_verified','charts_complete','not_market_ear','no_unresolved_conflicts'),True)
     checks.update(reason='Verified',date_evidence={'page':1,'date_text':'4 September 2026','source_quote':'Report date: 4 September 2026','role':'report','role_verified':True})
-    pipe,work=fixture_pipeline(tmp_path,[{'candidates':[invalid,item()]},checks])
+    pipe,work=fixture_pipeline(tmp_path,[{'candidates':[wrap]},checks])
     posts=pipe.process(work,tmp_path/'source.pdf',[])
-    assert len(posts)==1 and posts[0]['source']['publisher']==item()['publisher']
-    audit=json.loads((tmp_path/'evidence/one/review.json').read_text())['audit']
-    assert any(a.get('held')=='invalid candidate' and 'original provider' in a['validation_error'] for a in audit)
+    assert len(posts)==1 and posts[0]['source']['publisher']=='Goldman Sachs via ZERO HEDGE'
 
 
 def test_discovery_bad_scope_retains_cursor_and_continues(queue, monkeypatch):

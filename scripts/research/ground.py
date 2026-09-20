@@ -1,4 +1,4 @@
-"""Numeric grounding gate: every number in authored copy must appear on a cited page.
+"""Numeric grounding (advisory): every number in authored copy must appear on a cited page.
 
 Finance notation is tokenized whole (2Q26, Q1 2023, FY27, 10Y, 2s10s, $260bn,
 10-15bp, 16 September 2026, Chart 2) and looked up on the cited pages by

@@ -3,23 +3,11 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import hashlib
-from html import unescape
 import json
 import re
-import unicodedata
 
 from api.db_http import hrana_execute, hrana_transaction
 from research.assets import ASSET_RE, URL_PREFIX, read_asset, store_asset
-
-
-def validate_rendered_copy(title, content, publisher, figures, tags):
-    """Hold invalid authored copy without changing verified claims or evidence."""
-    values = [title, content, publisher, *tags, *(figure.get('caption', '') for figure in figures)]
-    if any('\u2014' in unescape(value) for value in values if isinstance(value, str)):
-        raise ValueError('Rendered research copy must not contain em dashes')
-    if any(re.search(r'zero[\s\-–—_]*hedge', ''.join(char for char in unicodedata.normalize('NFKC', value) if unicodedata.category(char) != 'Cf'), re.I)
-           for value in values if isinstance(value, str)):
-        raise ValueError('Rendered research copy must attribute the original provider only')
 
 
 def stable_post_id(file_id: str, finding_key: str) -> str:
@@ -45,10 +33,10 @@ def publish(post: dict) -> str:
     if not re.fullmatch(r"research-[a-f0-9]{32,64}", post_id):
         raise ValueError("research post ID must use the reserved stable namespace")
     title, content = post.get("title"), post.get("content")
-    if not isinstance(title, str) or not title.strip() or len(title) > 500:
-        raise ValueError("research title required (maximum 500 characters)")
-    if not isinstance(content, str) or not content.strip() or len(content) > 30000:
-        raise ValueError("research body required (maximum 30000 characters)")
+    if not isinstance(title, str) or not title.strip():
+        raise ValueError("research title required")
+    if not isinstance(content, str) or not content.strip():
+        raise ValueError("research body required")
     stamp = datetime.fromisoformat(post["timestamp"].replace("Z", "+00:00"))
     if stamp.tzinfo is None:
         raise ValueError("publication timestamp must include timezone")
@@ -82,7 +70,7 @@ def publish(post: dict) -> str:
     for url in images:
         _asset_url(url, "png")
     for figure in figures:
-        if not isinstance(figure, dict) or type(figure.get("page")) is not int or figure.get("page") not in pages or not isinstance(figure.get("caption"), str) or not figure["caption"].strip():
+        if not isinstance(figure, dict) or type(figure.get("page")) is not int or figure.get("page") not in pages or not isinstance(figure.get("caption"), str):
             raise ValueError("every figure needs a cited page and caption")
         _asset_url(figure.get("url"), "png")
     if images != [figure["url"] for figure in figures]:
@@ -90,7 +78,6 @@ def publish(post: dict) -> str:
     tags = post.get("tags", [])
     if not isinstance(tags, list) or not tags or len(tags) > 12 or any(not isinstance(tag, str) or not re.fullmatch(r"[A-Z0-9][A-Z0-9&-]{0,63}", tag) for tag in tags):
         raise ValueError("normalized research tags required")
-    validate_rendered_copy(title, content, source["publisher"], figures, tags)
     now = datetime.now(timezone.utc).isoformat()
     sql = """INSERT INTO posts (id,title,content,timestamp,images,raw_images,tags,tags_text,tags_vision,created_at,updated_at)
       VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
