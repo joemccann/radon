@@ -968,7 +968,23 @@ def test_run_newsfeed_mounts_host_playwright_browsers(tmp_path: Path) -> None:
     assert "PLAYWRIGHT_BROWSERS_PATH=/ms-playwright" in log
     assert "--ipc host" in log
     assert "PLAYWRIGHT_CHROMIUM_SANDBOX=0" in log
-    assert f"{tmp_path / 'data' / 'newsfeed-scripts'}:/home/radon/radon/scripts/newsfeed" in log, log
+    assert f"{tmp_path / 'data' / 'newsfeed-scripts'}:/home/radon/radon/scripts/newsfeed:ro" in log, log
+
+
+def test_run_newsfeed_source_overlay_is_read_only(tmp_path: Path) -> None:
+    """The newsfeed drives sandbox-disabled Chromium over third-party pages,
+    so its source overlay bind must be read-only; runtime writes go to the
+    data and media mounts, never into scripts/newsfeed."""
+    result = _run(tmp_path, ["run", "radon-newsfeed.service"])
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    scripts_binds = [
+        arg
+        for arg in log.split()
+        if ":/home/radon/radon/scripts/newsfeed" in arg
+    ]
+    assert scripts_binds, log
+    assert all(bind.endswith(":ro") for bind in scripts_binds), scripts_binds
 
 
 @pytest.mark.parametrize("unit", ("radon-api.service", "radon-monitor.service"))

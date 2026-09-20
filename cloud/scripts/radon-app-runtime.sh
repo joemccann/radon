@@ -803,7 +803,7 @@ cmd_run() {
       --env PLAYWRIGHT_CHROMIUM_SANDBOX=0 \
       --env PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
       -v "${newsfeed_browsers}:/ms-playwright" \
-      -v "${newsfeed_scripts}:/home/radon/radon/scripts/newsfeed" \
+      -v "${newsfeed_scripts}:/home/radon/radon/scripts/newsfeed:ro" \
       --env "RADON_NEWSFEED_MEDIA_DIR=${MEDIA_DIR_IN_CONTAINER}" \
       --env "RADON_MEDIA_REMOTE=${MEDIA_DIR_IN_CONTAINER}/"
   fi
