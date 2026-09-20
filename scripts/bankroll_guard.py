@@ -123,14 +123,21 @@ def _order_legs(params: dict) -> Optional[list[tuple[tuple, float]]]:
 
 
 def is_close_out(params: dict, snapshot: Optional[dict]) -> bool:
-    """True when every leg only reduces a held position, never flips it."""
+    """True when the combined delta per contract reduces holdings without a flip."""
     if not isinstance(snapshot, dict):
         return False
     legs = _order_legs(params)
     if not legs:
         return False
     held = _held_quantities(snapshot)
+    changes: dict[tuple, float] = {}
     for key, change in legs:
+        if _finite(change) is None:
+            return False
+        changes[key] = changes.get(key, 0.0) + change
+    for key, change in changes.items():
+        if _finite(change) is None:
+            return False
         position = held.get(key, 0.0)
         if position == 0 or change == 0 or (position > 0) == (change > 0):
             return False

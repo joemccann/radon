@@ -7844,3 +7844,15 @@ Validation: suites run only on GitHub; inspect real stored coverage and screensh
 Review: credit history has 269 closes from 2025-08-22; existing Cboe history restores 2,173 of 2,174 HYAD dates from 2018-01-22. The equity closure 2025-01-09 stays null. Python joins and browser early-date regressions added; local suites intentionally not run. Exact-head CI and screenshot review pending.
 
 Operational review: repaired the existing Turso snapshot in place, preserving scan_time 2026-09-18T11:01:32+00:00 and all breadth values. Readback confirms SPX 269 -> 2,173 closes, first 2018-01-22, only 2025-01-09 null. Initial GitHub Python/Vitest feature checks pass; corrected docs-owner index and curated-browser ledger contracts. Recurring repair awaits PR deployment.
+
+# Reliability remediate 2026-09-20 (reduced P0/P1)
+
+- [x] T1 depends_on: [] - Establish full baseline; reconcile complete issue #81 checkpoint.
+- [x] T2 depends_on: [T1] - REL-268 aggregate close-out quantities, red/green and full gates.
+- [ ] T3 depends_on: [T2] - REL-269 convexity decision gate, red/green and full gates.
+- [ ] T4 depends_on: [T3] - REL-274 aggregate/individual reconciliation, red/green and full gates.
+- [ ] T5 depends_on: [T4] - Permanent drills, three full gates, durable complete issue report and guarded publication.
+
+## Review
+
+- Pending verification. P2 findings and inherited operator-only acceptance stay open.

@@ -720,3 +720,12 @@ REL-263/R-684 and REL-265/R-686 are DONE in this reduced P0/P1 run. The gate rep
 All detached stages wrote their completion sentinels. Cloud raw rc=1 is retained: the exact four descendant-cleanup/privileged-timeout failures match the untouched baseline in every run. No cloud-green claim is made. All temporary dependency import links were removed after the final stage; the required persistent runner dependency-install command is carried to the PR and issue.
 
 Review: two eligible P1 findings implemented with failing fault-injection tests first, plus two gate repairs with all original assertions retained. The live Gateway smoke module uses the repository's established explicit integration opt-in; the new proof is collection-only. No Gateway administrative, live-order or trading-halt mutation was issued. All inherited operator/design residuals and excluded P2 acceptance remain in the complete issue #81 checkpoint. Guarded publication, exact-head CI registration and notification receipts are recorded in durable runner scratch and the issue; deliver owns CI completion.
+
+
+## Remediate 2026-09-20 — reduced P0/P1
+
+Authoritative checkpoint: issue #81 comment 5748350171, audited-through e5674cccafc7f277bee2d84949a08537d6a06934. RADON_WEEKEND_REDUCED=1; every inherited P2 and operator acceptance remains open. Baseline completed with DONE: Python 14534 passed, 1 skipped, 94 deselected; Vitest 9920 passed; cloud 2085 passed, 4 failed, 76 skipped. The four cloud process-supervision/privileged-descendant failures reproduce on untouched e5674ccc, including sandbox refusal of ps. No all-cloud-green claim. The first detached launch exited before producing a completion sentinel; the successful retry retained an attached liveness monitor.
+
+| Task | Status | Red / green evidence | Implementation |
+|---|---|---|---|
+| REL-268 / R-689 | Source complete; final drills/gates pending | RED 5 failed, 23 passed; GREEN admission/enforcement/limits 68 passed. Full Python 14542 passed, 1 skipped; Vitest 9920 passed; cloud 2085 passed, same 4 baseline failures, 76 skipped. All stage result slots completed and DONE present. | Close-out exemption aggregates signed quantity by contract, including ratios and SELL envelopes, before comparing holdings. Nonfinite changes refuse exemption. Public mocked placement proves repeated legs take ordinary bankroll refusal before IB construction; valid combined and distinct-leg reductions remain admitted. |

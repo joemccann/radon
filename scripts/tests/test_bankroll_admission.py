@@ -158,3 +158,37 @@ class TestWire:
         result = ib_place_order.place_order(_long_call(1, 1.0))
         client_cls.return_value.connect.assert_called_once()
         assert result.get("code") != "BANKROLL_STALE"
+
+
+class TestRepeatedContractCloseOut:
+    @pytest.mark.parametrize("envelope,leg_action", [("BUY", "SELL"), ("SELL", "BUY")])
+    @pytest.mark.parametrize("quantity,ratios", [(10, (1, 1)), (4, (2, 1))])
+    def test_repeated_legs_refuse_before_ib(self, monkeypatch, envelope, leg_action, quantity, ratios):
+        import ib_place_order
+        held = {"ticker": "AAPL", "expiry": "2026-10-16", "legs": [
+            {"type": "Put", "strike": 20, "direction": "LONG", "contracts": 10},
+        ]}
+        params = {"type": "combo", "symbol": "AAPL", "action": envelope,
+                  "quantity": quantity, "limitPrice": 1.0, "legs": [
+            {"expiry": "20261016", "strike": 20, "right": "P", "action": leg_action, "ratio": r}
+            for r in ratios
+        ]}
+        monkeypatch.setattr(bankroll_guard, "_load_latest_snapshot", lambda: _snapshot(age_min=600, positions=[held]))
+        monkeypatch.setattr(bankroll_guard, "_utcnow", lambda: NOW)
+        monkeypatch.setattr(bankroll_guard, "check_bankroll_admission", check_bankroll_admission)
+        client = MagicMock()
+        client.return_value.connect.side_effect = RuntimeError("fake transport must not connect")
+        monkeypatch.setattr(ib_place_order, "IBClient", client)
+        result = ib_place_order.place_order(params)
+        assert result.get("code") == "BANKROLL_STALE", result
+        client.assert_not_called()
+
+    @pytest.mark.parametrize("quantity,ratios", [(5, (1, 1)), (2, (2, 1))])
+    def test_combined_reduction_admitted(self, quantity, ratios):
+        params = _vertical(quantity, 10)
+        params["legs"] = [dict(params["legs"][0], action="SELL", ratio=r) for r in ratios]
+        assert _check(params, _snapshot(age_min=600, nlv=None, positions=[HELD_CALL])) is None
+
+    @pytest.mark.parametrize("value", [float("nan"), float("inf")])
+    def test_nonfinite_quantity_is_not_a_close(self, value):
+        assert not bankroll_guard.is_close_out(_long_call(value, 1, "SELL"), _snapshot(positions=[HELD_CALL]))
