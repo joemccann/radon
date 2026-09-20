@@ -281,6 +281,11 @@ export default function DashboardNewsFeed() {
   const live = commentaryOpen
     ? !loading && !error && posts.length > 0
     : !heldOpen && headlinesStatus === "live";
+  const sourceValue = commentaryOpen
+    ? (posts.some((p) => p.source) ? "Market Ear + Research" : "Market Ear")
+    : heldOpen
+      ? "Held research"
+      : "Headlines";
 
   const paginationBar = showPagination ? (
     <PaginationBar
@@ -540,17 +545,21 @@ export default function DashboardNewsFeed() {
           </div>
         )}
       </div>
-      <footer className="panel-meta-rail" aria-label="Feed calibration">
-        <div className="panel-meta-rail-item">
-          <span className="k">source</span>
-          <span className="v">{commentaryOpen ? (posts.some(p => p.source) ? "Market Ear + Research" : "Market Ear") : heldOpen ? "Held research" : "Headlines"}</span>
+      <footer
+        className="panel-meta-rail dashboard-news__rail"
+        aria-label="Feed calibration"
+        data-testid="feed-rail"
+      >
+        <div className="panel-meta-rail-item" data-k="source">
+          <span className="k">Source</span>
+          <span className="v" title={sourceValue}>{sourceValue}</span>
         </div>
-        <div className="panel-meta-rail-item">
-          <span className="k">capture.basis</span>
+        <div className="panel-meta-rail-item" data-k="capture.basis" data-basis={captureBasis}>
+          <span className="k">Capture basis</span>
           <span className="v">{captureBasis}</span>
         </div>
-        <div className="panel-meta-rail-item">
-          <span className="k">last.sample</span>
+        <div className="panel-meta-rail-item" data-k="last.sample">
+          <span className="k">Last sample</span>
           <span className="v">{lastSample}</span>
         </div>
       </footer>
