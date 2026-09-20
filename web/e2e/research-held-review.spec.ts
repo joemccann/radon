@@ -28,7 +28,14 @@ for (const width of [1440, 393]) {
         decisions.push(route.request().postDataJSON());
         return route.fulfill({ json: { id: "series_deny:ubs cio fx view", status: "approved" } });
       }
-      return route.fulfill({ json: { proposed: [{ id: "series_deny:ubs cio fx view", kind: "series_deny", key: "ubs cio fx view", downs: 4, ups: 0, evidence: 4 }], approved: [] } });
+      return route.fulfill({ json: {
+        proposed: [
+          { id: "series_deny:ubs cio fx view", kind: "series_deny", key: "ubs cio fx view", downs: 4, ups: 0, evidence: 4 },
+          { id: "series_deny:leftover series", kind: "series_deny", key: "leftover series", downs: 3, ups: 0, evidence: 3 },
+        ],
+        approved: [],
+        rejected: [{ id: "publisher_deny:Maxim Group", kind: "publisher_deny", key: "Maxim Group", downs: 6, ups: 0, evidence: 6 }],
+      } });
     });
     await page.route("**/api/newsfeed/research/feedback", async route => {
       votes.push(route.request().postDataJSON());
@@ -63,6 +70,19 @@ for (const width of [1440, 393]) {
     await proposal.getByRole("button", { name: "Approve rule" }).click();
     await expect(panel.getByRole("list", { name: "Active rules" }).getByText("Stop reviewing the series “ubs cio fx view”")).toBeVisible();
     expect(decisions).toEqual([{ id: "series_deny:ubs cio fx view", decision: "approve" }]);
+
+    await panel.getByRole("list", { name: "Active rules" }).getByRole("button", { name: "Revoke" }).click();
+    const rejected = panel.getByRole("list", { name: "Rejected rules" });
+    await expect(rejected.getByText("Stop reviewing the series “ubs cio fx view”")).toBeVisible();
+    await rejected.locator("li").filter({ hasText: "ubs cio fx view" }).getByRole("button", { name: "Approve rule" }).click();
+    await expect(panel.getByRole("list", { name: "Active rules" }).getByText("Stop reviewing the series “ubs cio fx view”")).toBeVisible();
+    expect(decisions).toEqual([
+      { id: "series_deny:ubs cio fx view", decision: "approve" },
+      { id: "series_deny:ubs cio fx view", decision: "revoke" },
+      { id: "series_deny:ubs cio fx view", decision: "approve" },
+    ]);
+    await expect(panel.getByRole("list", { name: "Proposed rules" }).getByText("leftover series")).toBeVisible();
+    await expect(rejected.getByText("Maxim Group")).toBeVisible();
     await panel.screenshot({ path: testInfo.outputPath(`held-rules-${width}.png`) });
   });
 }
