@@ -95,8 +95,9 @@ async function fetchPosts() {
       args: [],
     }, options);
   }
-  const posts = result.rows.map((r) => rowToPost(r as unknown as PostRow))
-    .filter(post => !post.id.startsWith("research-") || post.source);
+  const posts: (ReturnType<typeof rowToPost> & { feedback?: PostFeedback })[] =
+    result.rows.map((r) => rowToPost(r as unknown as PostRow))
+      .filter(post => !post.id.startsWith("research-") || post.source);
   // Feedback only exists for research posts; legacy and demo databases never pay for the overlay.
   if (!posts.some(post => post.source)) return posts;
   const feedback = await latestFeedback();
