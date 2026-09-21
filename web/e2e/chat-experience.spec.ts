@@ -288,6 +288,9 @@ for (const theme of ["light", "dark"] as const) {
           send: sr && { x: Math.round(sr.x), y: Math.round(sr.y) },
           vp: vr && { x: Math.round(vr.x), y: Math.round(vr.y), h: Math.round(vr.height) },
           style: cs && `pos=${cs.position} top=${cs.top} bottom=${cs.bottom} pe=${cs.pointerEvents}`,
+          cls: vp?.getAttribute("class"),
+          inline: vp?.getAttribute("style"),
+          mq640: window.matchMedia("(max-width: 640px)").matches,
           w: window.innerWidth,
         };
       })));
