@@ -14,6 +14,22 @@ Sep 18-style gaps: daemon today-only + 2-day `date_scopes` + cursor advance on z
 - [x] T2 Implementation
 - [ ] T3 Draft PR; hold merge
 
+# Task: Held-tab feed rail footer layout
+
+Joe via CoS: CAPTURE BASIS mid-label gap + SOURCE/CAPTURE overlap at ~1024 after PR #573 grid.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red: CSS contract + e2e geometry (nowrap keys, even gaps, no overlap)
+- T2 depends_on: [T1] - Flex + gap chips; drop 16ch / 3-col grid; mobile stack without space-between
+- T3 depends_on: [T2] - Green focused suites; draft PR; CI; no merge
+
+## Checklist
+
+- [x] T1 Failing rail-layout contract
+- [x] T2 `.dashboard-news__rail` flex chips
+- [ ] T3 Draft PR; CI; hold merge for Joe
+
 # Task: Add company icons and fallback icon for processed PDF documents in the live news feed
 
 ## Dependency graph

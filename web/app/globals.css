@@ -4662,11 +4662,11 @@ td.last-price-cell {
 }
 
 .dashboard-news .dashboard-news__rail {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) max-content max-content;
-  column-gap: 16px;
+  display: flex;
+  flex-wrap: nowrap;
   align-items: baseline;
-  justify-content: stretch;
+  justify-content: flex-start;
+  gap: 18px;
   width: calc(100% + 2 * var(--dn-pad-x));
   margin-top: auto;
   margin-inline: calc(-1 * var(--dn-pad-x));
@@ -4683,16 +4683,20 @@ td.last-price-cell {
 .dashboard-news .dashboard-news__rail .panel-meta-rail-item {
   display: inline-flex;
   align-items: baseline;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .dashboard-news .dashboard-news__rail .panel-meta-rail-item[data-k="source"] {
+  flex: 1 1 auto;
   min-width: 0;
 }
 
 .dashboard-news .dashboard-news__rail .panel-meta-rail-item .k {
   flex-shrink: 0;
+  white-space: nowrap;
   font-family: var(--font-mono);
   font-size: var(--text-meta);
   letter-spacing: var(--tracking-meta);
@@ -4713,15 +4717,10 @@ td.last-price-cell {
   white-space: nowrap;
 }
 
-.dashboard-news .dashboard-news__rail .panel-meta-rail-item[data-k="capture.basis"] .v {
-  min-width: 16ch;
-}
-
 .dashboard-news .dashboard-news__rail .panel-meta-rail-item[data-k="last.sample"] .v {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   min-width: 8ch;
-  text-align: right;
 }
 
 .dashboard-news .dashboard-news__rail .panel-meta-rail-item[data-k="capture.basis"][data-basis="scraper"] .v,
@@ -4735,15 +4734,20 @@ td.last-price-cell {
 }
 
 body[data-mobile="true"] .dashboard-news .dashboard-news__rail {
-  grid-template-columns: 1fr;
-  row-gap: 4px;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  gap: 8px;
   padding: 8px var(--dn-pad-x);
   margin-inline: calc(-1 * var(--dn-pad-x));
 }
 
-body[data-mobile="true"] .dashboard-news .dashboard-news__rail .panel-meta-rail-item {
-  display: flex;
-  justify-content: space-between;
+body[data-mobile="true"] .dashboard-news .dashboard-news__rail .panel-meta-rail-item,
+body[data-mobile="true"] .dashboard-news .dashboard-news__rail .panel-meta-rail-item[data-k="source"] {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: auto;
+  max-width: 100%;
 }
 
 .news-feed-actions {
