@@ -23,6 +23,7 @@ import ResearchHeldReview from "./ResearchHeldReview";
 import { getImageSource } from "@/lib/newsfeedSource";
 import NewsfeedPostContent from "./NewsfeedPostContent";
 import StarToggle from "./StarToggle";
+import PublisherLogo from "./PublisherLogo";
 import HeadlinesTape, { newestHeadlineTime } from "./dashboard/HeadlinesTape";
 import { useHeadlines } from "../lib/useHeadlines";
 import styles from "./DashboardNewsFeed.module.css";
@@ -411,6 +412,11 @@ export default function DashboardNewsFeed() {
 
               return (
                 <li key={post.id} data-testid="news-feed-item" className={`news-feed-item ${styles.item}`}>
+                  {post.source ? (
+                    <div className={researchStyles.publisherBadgeWrapper} data-testid="news-feed-publisher-badge">
+                      <PublisherLogo publisher={post.source.publisher} showLabel showType size={16} />
+                    </div>
+                  ) : null}
                   <h3 className={`news-feed-headline ${styles.headline}`}>{post.title}</h3>
                   <div data-testid="news-feed-meta" className={`news-feed-meta ${styles.meta}`}>
                     <span title={absolute}>{absolute}</span>
@@ -498,7 +504,10 @@ export default function DashboardNewsFeed() {
                     </figure>
                   ) : null}
                   {post.source ? <p className={researchStyles.feedSource}>
-                    <a href={post.href} target="_blank" rel="noopener noreferrer">{post.source.publisher} · Source PDF</a>
+                    <a href={post.href} target="_blank" rel="noopener noreferrer" className={researchStyles.feedSourceLink}>
+                      <PublisherLogo publisher={post.source.publisher} size={14} aria-hidden />
+                      <span>{post.source.publisher} · Source PDF</span>
+                    </a>
                     {` · ${post.source.documentDate} · pp. ${post.source.pages.join(", ")}`}
                     {!firstImage ? " · Text-only source evidence" : ""}
                   </p> : null}

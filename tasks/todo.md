@@ -1,3 +1,29 @@
+# Task: Add company icons and fallback icon for processed PDF documents in the live news feed
+
+## Dependency graph
+
+- T1 depends_on: [] - Implement publisher logo mapping and canonical aliases in `web/lib/publisherIcons.ts` with fallback icon support.
+- T2 depends_on: [T1] - Create clean, brand-compliant vector SVGs for major financial institutions and default fallback PDF icon in `web/public/icons/publishers/`.
+- T3 depends_on: [T2] - Implement `<PublisherLogo>` component with error fallback, theme compatibility, and accessible labels.
+- T4 depends_on: [T3] - Integrate publisher logo badge into `DashboardNewsFeed.tsx` (top source badge on research post cards and beside footer PDF link) and `NewsfeedLightbox.tsx`.
+- T5 depends_on: [T4] - Write comprehensive unit tests in Vitest for publisher mapping, component rendering, fallback resolution, and newsfeed display.
+
+## Checklist
+
+- [x] T1 Implement publisher logo resolver and alias mapping (`web/lib/publisherIcons.ts`).
+- [x] T2 Add vector SVGs for major institutions and fallback icon in `web/public/icons/publishers/`.
+- [x] T3 Implement `<PublisherLogo>` component (`web/components/PublisherLogo.tsx`).
+- [x] T4 Integrate publisher logo badge into `DashboardNewsFeed.tsx` and `NewsfeedLightbox.tsx`.
+- [x] T5 Vitest tests for publisher resolver, `PublisherLogo`, and `DashboardNewsFeed` integration.
+
+## Review
+
+- Created `web/lib/publisherIcons.ts` with canonical institution alias resolution (Goldman Sachs, BofA, J.P. Morgan, Morgan Stanley, Deutsche Bank, Citi, UBS, Mizuho, Barclays, Nomura, MUFG, BNP Paribas, Standard Chartered, RBC, Canaccord, BTIG, Apollo, Wells Fargo, Jefferies) and default fallback.
+- Added 20 vector SVGs in `web/public/icons/publishers/` including `default-pdf.svg`.
+- Implemented `<PublisherLogo>` (`web/components/PublisherLogo.tsx`, `web/components/PublisherLogo.module.css`) with graceful SVG fallback, image load error handling, and accessible labels.
+- Integrated publisher logo and badge into `DashboardNewsFeed.tsx` (top research card badge and footer PDF link) and `NewsfeedLightbox.tsx`.
+- Verified with 24 focused new Vitest unit and integration tests (100% green) plus 498/498 passing tests across all 42 newsfeed test suites.
+
 # Task: Mobile Profile Prefs/Keys scroll + tab strip
 
 Joe phone: Prefs/Keys clipped under the tab bar; BOOKMARKS ellipsized on ~390px.
