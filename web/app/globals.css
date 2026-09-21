@@ -16035,6 +16035,14 @@ body[data-mobile="true"] .toast-container {
   --toast-viewport-max-width: none;
 }
 
+/* A modal (chat, bottom sheet, order ticket) owns the bottom of the screen: its
+   primary action lives there, and a toast's dismiss button on top of it makes
+   that action unpressable. While one is open, toasts go back under the app bar. */
+body[data-mobile="true"]:has([role="dialog"][aria-modal="true"]:not([hidden])) .toast-container {
+  top: calc(var(--mobile-app-bar-height) + var(--safe-top) + 12px);
+  bottom: auto;
+}
+
 body[data-mobile="true"] .toast {
   max-width: none;
   pointer-events: none;
