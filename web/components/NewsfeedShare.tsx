@@ -7,6 +7,9 @@ import { Share2 } from "lucide-react";
 import { buildShareCaption, buildXShareUrl, sanitizeShareText, renderShareCard, canvasToPng, canvasToMp4, supportsMp4Export, type SharePost } from "@/lib/newsfeedShare";
 import styles from "./NewsfeedShare.module.css";
 
+const voiceDrafts = new Map<string, { title: string; content: string }>();
+export function resetNewsfeedShareVoiceCache() { voiceDrafts.clear(); }
+
 export default function NewsfeedShare({ post, imageUrl }: { post: SharePost; imageUrl?: string }) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -23,11 +26,12 @@ export default function NewsfeedShare({ post, imageUrl }: { post: SharePost; ima
 
 function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: string; panelId: string }) {
   const id = useId();
-  const [caption, setCaption] = useState(() => buildShareCaption(post, imageUrl));
+  const cached = voiceDrafts.get(post.id);
+  const [caption, setCaption] = useState(() => buildShareCaption(cached ? { ...post, ...cached } : post, imageUrl));
   const original = useRef(post);
   const originalImage = useRef(imageUrl);
-  const [rewrite, setRewrite] = useState<{ title: string; content: string }>();
-  const [rewriting, setRewriting] = useState(true);
+  const [rewrite, setRewrite] = useState<{ title: string; content: string } | undefined>(cached);
+  const [rewriting, setRewriting] = useState(!cached);
   const [voiceError, setVoiceError] = useState("");
   const [voiceAttempt, setVoiceAttempt] = useState(0);
   const sharePost = useMemo(() => rewrite ? { ...post, ...rewrite } : post, [post, rewrite]);
@@ -49,13 +53,23 @@ function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: s
   useEffect(() => {
     const abort = new AbortController();
     let cancelled = false;
+    const hit = voiceAttempt === 0 ? voiceDrafts.get(original.current.id) : undefined;
+    if (hit) {
+      setRewrite(hit);
+      setCaption(buildShareCaption({ ...original.current, ...hit }, originalImage.current));
+      setRewriting(false);
+      return;
+    }
     setRewriting(true);
     setVoiceError("");
     // Defer past StrictMode's setup/cleanup probe to avoid duplicate paid requests.
     const start = setTimeout(() => { void fetch("/api/newsfeed/share", {
       method: "POST", cache: "no-store", signal: AbortSignal.any([abort.signal, AbortSignal.timeout(30_000)]),
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: sanitizeShareText(original.current.title), content: buildShareCaption({ ...original.current, title: "" }, originalImage.current) }),
+      body: JSON.stringify({
+        title: sanitizeShareText(original.current.title),
+        content: sanitizeShareText(original.current.content || ""),
+      }),
     }).then(async response => {
       if (!response.ok) throw new Error("Voice rewrite unavailable. Showing the original copy.");
       const draft: unknown = await response.json();
@@ -66,6 +80,7 @@ function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: s
       }
       if (cancelled) return;
       const next = { title: sanitizeShareText(draft.title), content: sanitizeShareText(draft.content) };
+      voiceDrafts.set(original.current.id, next);
       setRewrite(next);
       setCaption(buildShareCaption({ ...original.current, ...next }, originalImage.current));
     }).catch(() => {
