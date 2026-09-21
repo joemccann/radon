@@ -45,6 +45,7 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 async function openShare() {
   fireEvent.click(screen.getByRole("button", { name: "Share", exact: true }));
   await screen.findByAltText("Portrait share preview: Yen hedge demand");
+  await waitFor(() => expect((screen.getByRole("textbox") as HTMLTextAreaElement).disabled).toBe(false));
 }
 
 describe("news feed sharing", () => {
@@ -97,7 +98,8 @@ describe("news feed sharing", () => {
     expect(compose.getAttribute("target")).toBe("_blank");
     expect((screen.getByRole("button", { name: "Download Story image" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Download Reels / TikTok video" }) as HTMLButtonElement).disabled).toBe(true);
-    expect(engine.renderShareCard).not.toHaveBeenCalled();
+    // The preview renders from the original copy immediately; the rewrite never blocks it.
+    await waitFor(() => expect(engine.renderShareCard).toHaveBeenCalledWith(post, undefined));
     await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
     const signal = vi.mocked(fetch).mock.calls[0][1]?.signal;
     fireEvent.click(screen.getByRole("button", { name: "Share", exact: true }));
@@ -116,7 +118,7 @@ describe("news feed sharing", () => {
     await act(async () => {
       resolveRewrite({ ok: true, json: async () => ({ title: "Hedge demand is back.", content: "Positioning remains neutral." }) } as Response);
     });
-    await waitFor(() => expect(engine.renderShareCard).toHaveBeenCalledOnce());
+    await waitFor(() => expect(engine.renderShareCard).toHaveBeenLastCalledWith(expect.objectContaining({ title: "Hedge demand is back." }), undefined));
     expect(new URL(compose.getAttribute("href")!).searchParams.get("text")).toBe("Hedge demand is back\n\n• Positioning remains neutral");
     expect(compose.getAttribute("aria-disabled")).not.toBe("true");
     expect(screen.getByText("Preparing preview…")).not.toBeNull();
@@ -149,7 +151,7 @@ describe("news feed sharing", () => {
     vi.mocked(fetch).mockRejectedValueOnce(new Error("offline"));
     render(<NewsfeedShare post={post} />);
     await openShare();
-    expect(screen.getByRole("alert").textContent).toContain("Showing the original copy");
+    expect((await screen.findByRole("alert")).textContent).toContain("Showing the original copy");
     expect(screen.getByRole("alert").closest("[data-toast-viewport]")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
@@ -203,9 +205,11 @@ describe("news feed sharing", () => {
   });
 
   it("retries failed chart loading without discarding caption edits", async () => {
-    engine.renderShareCard.mockRejectedValueOnce(new Error("Chart could not be loaded"));
+    // Original-copy render and post-rewrite render both fail; the retry succeeds.
+    engine.renderShareCard.mockRejectedValueOnce(new Error("Chart could not be loaded")).mockRejectedValueOnce(new Error("Chart could not be loaded"));
     render(<NewsfeedShare post={post} imageUrl="/chart-2.png" />);
     fireEvent.click(screen.getByRole("button", { name: "Share", exact: true }));
+    await waitFor(() => expect((screen.getByRole("textbox") as HTMLTextAreaElement).disabled).toBe(false));
     expect((await screen.findByRole("alert")).textContent).toContain("Chart could not be loaded");
     expect(screen.getByRole("alert").closest("[data-toast-viewport]")).toBeTruthy();
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "My edited caption" } });

@@ -235,6 +235,14 @@ describe("PNG export", () => {
 });
 
 // Rendering is tested independently of browser image codecs; E2E validates real pixels.
+describe("caption sentence splitting", () => {
+  it("does not split a bullet at a month abbreviation", async () => {
+    const { assembleShareCaption } = await import("../lib/newsfeedShare");
+    const caption = assembleShareCaption("Muse launch", "Meta launched Muse on Sept. 8 and it rattled the internet sector. EXPE fell 5.4%.");
+    expect(caption).toContain("• Meta launched Muse on Sept. 8 and it rattled the internet sector");
+  });
+});
+
 describe("share card rendering", () => {
   function renderHarness(imageFailure = false) {
     const fillText = vi.fn();
@@ -263,49 +271,46 @@ describe("share card rendering", () => {
     expect(harness.fillText).toHaveBeenCalledWith("RADON", 72, 164);
     expect(harness.fillText.mock.calls.flat().join(" ")).not.toMatch(/market.?ear|zero.?hedge/i);
   });
-  it("removes em dashes from every authored canvas surface, including source and figure caption", async () => {
+  it("removes em dashes from every authored canvas surface", async () => {
     const { renderShareCard } = await import("../lib/newsfeedShare");
     const harness = renderHarness();
-    await renderShareCard({ ...post, title: "Flows — still firm", content: "Demand &mdash; unchanged. Range: 10—20%.", source: {
-      kind: "dropbox", publisher: "Synthetic Bank — Research", documentDate: "2026-09-03", folderDate: "2026-09-07", fileId: "id", revision: "r", contentHash: "h", url: "/private.pdf", pages: [2],
-      figures: [{ url: "/chart.png", page: 2, caption: "Distribution &#8212; August" }],
-    } }, "/chart.png");
+    await renderShareCard({ ...post, title: "Flows — still firm", content: "Demand &mdash; unchanged across desks. Range: 10—20%." }, undefined);
     const text = harness.fillText.mock.calls.map(call => call[0]).join(" ");
     expect(text).not.toMatch(/—|&(?:mdash|#8212|#x2014);/i);
     expect(text).toContain("Flows, still firm");
     expect(text).toContain("10 to 20%");
-    expect(text).toContain("Synthetic Bank, Research");
-    expect(text).toContain("Distribution, August");
   });
   it.each(["The Market Ear", "ZeroHedge"])("excludes %s from every rendered text surface", async publisher => {
     const { renderShareCard } = await import("../lib/newsfeedShare");
     const harness = renderHarness();
-    await renderShareCard({ ...post, title: `Outlook via ${publisher}`, content: `Neutral positioning. Source: ${publisher} https://zerohedge.com/test`, source: { kind: "dropbox", publisher, documentDate: "2026-09-03", folderDate: "2026-09-07", fileId: "id", revision: "r", contentHash: "h", url: "/private.pdf", pages: [2], figures: [{ url: "/chart.png", page: 2, caption: `Distribution via ${publisher}` }] } }, "/chart.png");
+    await renderShareCard({ ...post, title: `Outlook via ${publisher}`, content: `Neutral positioning across the desk. Source: ${publisher} https://zerohedge.com/test`, source: { kind: "dropbox", publisher, documentDate: "2026-09-03", folderDate: "2026-09-07", fileId: "id", revision: "r", contentHash: "h", url: "/private.pdf", pages: [2], figures: [{ url: "/chart.png", page: 2, caption: `Distribution via ${publisher}` }] } }, "/chart.png");
     const text = harness.fillText.mock.calls.map(call => call[0]).join(" ");
     expect(text).not.toMatch(/market[\s-]*ear|zero[\s-]*hedge|Source:/i);
-    expect(text).toContain("Neutral positioning.");
-    expect(text).toContain("Distribution");
+    expect(text).toContain("Neutral positioning across the desk");
   });
-  it("fits the whole chart and labels truncated prose as an excerpt", async () => {
-    const { renderShareCard } = await import("../lib/newsfeedShare");
-    const harness = renderHarness();
-    await renderShareCard({ ...post, content: "Market positioning is near neutral. ".repeat(100) }, "/chart.png");
-    const [, x, , width, height] = harness.drawImage.mock.calls[0];
-    expect(width / height).toBeCloseTo(1.5);
-    expect(x).toBeGreaterThanOrEqual(72);
-    expect(height).toBeLessThanOrEqual(576);
-    expect(harness.fillText).toHaveBeenCalledWith("EXCERPT", 72, 1490);
+  it("renders the X caption copy with today's date and no source, excerpt or figure footer", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-21T15:00:00Z"));
+    try {
+      const { renderShareCard, assembleShareCaption } = await import("../lib/newsfeedShare");
+      const harness = renderHarness();
+      const content = "Market positioning is near neutral across the desk. ".repeat(100);
+      await renderShareCard({ ...post, content, source: { kind: "dropbox", publisher: "JPM", documentDate: "2026-09-03", folderDate: "2026-09-07", fileId: "private-id", revision: "r", contentHash: "h", url: "/private.pdf", pages: [2], figures: [{ url: "/chart.png", page: 2, caption: "USD/JPY put distribution" }] } }, "/chart.png");
+      const text = harness.fillText.mock.calls.map(call => call[0]);
+      expect(text).toContain("SEP 21, 2026");
+      expect(text.join(" ")).not.toMatch(/SEP 3|EXCERPT|Source:|p\. 2|radon\.run|private-id/);
+      const [hook, bullets] = assembleShareCaption(post.title, content).split("\n\n");
+      expect(text).toContain(hook);
+      for (const bullet of bullets.split("\n")) expect(text.join(" ")).toContain(bullet);
+      const [, x, , width, height] = harness.drawImage.mock.calls[0];
+      expect(width / height).toBeCloseTo(1.5);
+      expect(x).toBeGreaterThanOrEqual(72);
+      expect(height).toBeLessThanOrEqual(576);
+    } finally { vi.useRealTimers(); }
   });
   it("fails visibly when the selected chart cannot load", async () => {
     const { renderShareCard } = await import("../lib/newsfeedShare");
     renderHarness(true);
     await expect(renderShareCard(post, "/missing.png")).rejects.toThrow("chart could not be loaded");
-  });
-  it("preserves selected figure publisher, page and caption", async () => {
-    const { renderShareCard } = await import("../lib/newsfeedShare");
-    const harness = renderHarness();
-    await renderShareCard({ ...post, source: { kind: "dropbox", publisher: "JPM", documentDate: "2026-09-03", folderDate: "2026-09-07", fileId: "private-id", revision: "r", contentHash: "h", url: "/private.pdf", pages: [2], figures: [{ url: "/chart.png", page: 2, caption: "USD/JPY put distribution" }] } }, "/chart.png");
-    expect(harness.fillText).toHaveBeenCalledWith("p. 2 · USD/JPY put distribution", 72, 1622);
-    expect(harness.fillText.mock.calls.flat().join(" ")).not.toContain("private-id");
   });
 });
