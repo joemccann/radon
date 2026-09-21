@@ -56,16 +56,42 @@ Radon log **plus a digested Pushover**, never one push per fire; MCP stays read-
 on(POST)
   1. path token or body secret mismatch     -> 401, write nothing      (fail closed)
   2. Content-Length or read length > 16 KiB -> 413, write nothing
-  3. INSERT raw body + received_at + source_ip        <- BEFORE any parse
+  3. redact configured secrets; INSERT sanitized body + received_at + source_ip
   4. parse application/json, else text/plain
        success -> fill symbol, exchange, price, interval, alert_name, bar_time, sent_at
-       failure -> leave parsed columns NULL, keep the raw row
+       failure -> leave parsed columns NULL, keep the sanitized row
   5. return 200                          (never 4xx/5xx past step 1: TradingView never retries)
 ```
 
 No Pushover, no FastAPI call, no symbol resolution inside the handler.
 
 ### Storage
+
+The retained `raw_body` is sanitized, not an exact copy of the original input.
+The [route](../web/app/api/webhooks/tradingview/[token]/route.ts) calls
+[`redactSecret`](../web/lib/tvWebhook.ts) before INSERT; parsed alert fields
+are extracted from the incoming body separately. Do not rely on stored bodies
+for byte-for-byte replay or recovery of the original request.
+
+[Migration 0084](../scripts/db/migrations/0084_redact_tv_alert_raw_body.sql)
+redacts the JSON secret member in older rows and replaces an entire non-JSON
+body when it matches the migration's secret-token patterns. Other JSON fields
+and already-parsed columns survive; replaced text cannot be reconstructed
+from that row. The drain consumes parsed columns, and the existing retention
+window still applies. Migration is not credential rotation and is not proof
+that historical copies outside this table were scrubbed.
+
+Deployment and credential follow-up are operator-only: through the approved
+authenticated database interface, check
+`SELECT version FROM schema_migrations WHERE version = 84`, then verify that
+the migration-required `TV_WEBHOOK_SECRET` rotation was completed. If not,
+follow **Rotate a secret** below, verify every alert uses the replacement,
+and only then remove the old value. Stop if migration or alert coverage cannot
+be established; escalate to the credential operator without a blind rerun or
+restoring an unsanitized body. Keep the overlap until coverage is proven and
+record completion evidence without secret values. Source review cannot
+confirm deployed migration or rotation state.
+
 
 Migration `scripts/db/migrations/00NN_tv_alert_events.sql`:
 
