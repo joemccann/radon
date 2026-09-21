@@ -15,7 +15,7 @@ function json(body: unknown, status = 200): Response {
   return Response.json(body, { status, headers: { "Cache-Control": "private, no-store" } });
 }
 
-function toRule(row: { id: unknown; kind: unknown; key: unknown; downs: unknown; ups: unknown; evidence_json: unknown; status: unknown }) {
+function toRule(row: any) {
   let evidence = 0;
   try { const parsed = JSON.parse(String(row.evidence_json ?? "[]")); evidence = Array.isArray(parsed) ? parsed.length : 0; } catch { /* count stays 0 */ }
   return { status: String(row.status), rule: { id: String(row.id), kind: String(row.kind), key: String(row.key), downs: Number(row.downs), ups: Number(row.ups), evidence } };
