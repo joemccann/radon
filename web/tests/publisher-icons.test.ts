@@ -104,6 +104,70 @@ describe("resolvePublisher", () => {
     expect(resolvePublisher("Apollo")?.id).toBe("apollo");
     expect(resolvePublisher("Wells Fargo")?.id).toBe("wells-fargo");
     expect(resolvePublisher("Jefferies")?.id).toBe("jefferies");
+    expect(resolvePublisher("Raymond James")?.id).toBe("raymond-james");
+    expect(resolvePublisher("Scotiabank")?.id).toBe("scotiabank");
+    expect(resolvePublisher("Pictet")?.id).toBe("pictet");
+    expect(resolvePublisher("SEB")?.id).toBe("seb");
+    expect(resolvePublisher("Banque Syz")?.id).toBe("syz");
+  });
+
+  it("resolves Raymond James and desk variants", () => {
+    expect(resolvePublisher("Raymond James")).toEqual({
+      id: "raymond-james",
+      name: "Raymond James",
+      iconUrl: "/icons/publishers/raymond-james.svg",
+      isFallback: false,
+    });
+    expect(resolvePublisher("Raymond James & Associates")?.id).toBe("raymond-james");
+    expect(resolvePublisher("Raymond James Equity Research")?.id).toBe("raymond-james");
+  });
+
+  it("resolves Scotiabank and desk variants", () => {
+    expect(resolvePublisher("Scotiabank")).toEqual({
+      id: "scotiabank",
+      name: "Scotiabank",
+      iconUrl: "/icons/publishers/scotiabank.svg",
+      isFallback: false,
+    });
+    expect(resolvePublisher("Bank of Nova Scotia")?.id).toBe("scotiabank");
+    expect(resolvePublisher("Scotia Capital")?.id).toBe("scotiabank");
+    expect(resolvePublisher("Scotiabank Global Banking and Markets")?.id).toBe("scotiabank");
+  });
+
+  it("resolves Pictet and desk variants", () => {
+    expect(resolvePublisher("Pictet")).toEqual({
+      id: "pictet",
+      name: "Pictet",
+      iconUrl: "/icons/publishers/pictet.svg",
+      isFallback: false,
+    });
+    expect(resolvePublisher("Banque Pictet")?.id).toBe("pictet");
+    expect(resolvePublisher("Pictet Asset Management")?.id).toBe("pictet");
+    expect(resolvePublisher("Pictet Wealth Management")?.id).toBe("pictet");
+  });
+
+  it("resolves SEB and desk variants", () => {
+    expect(resolvePublisher("SEB")).toEqual({
+      id: "seb",
+      name: "SEB",
+      iconUrl: "/icons/publishers/seb.svg",
+      isFallback: false,
+    });
+    expect(resolvePublisher("Skandinaviska Enskilda Banken")?.id).toBe("seb");
+    expect(resolvePublisher("SEB Equities")?.id).toBe("seb");
+    expect(resolvePublisher("SEB Research")?.id).toBe("seb");
+  });
+
+  it("resolves Banque Syz and variants", () => {
+    expect(resolvePublisher("Banque Syz")).toEqual({
+      id: "syz",
+      name: "Banque Syz",
+      iconUrl: "/icons/publishers/syz.svg",
+      isFallback: false,
+    });
+    expect(resolvePublisher("Syz")?.id).toBe("syz");
+    expect(resolvePublisher("Syz Bank")?.id).toBe("syz");
+    expect(resolvePublisher("Syz Group")?.id).toBe("syz");
   });
 
   it("falls back to default icon for unrecognized, unknown, or empty publishers", () => {
