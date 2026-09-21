@@ -155,7 +155,7 @@ def test_discovery_commits_empty_cursor_and_preserves_date(tmp_path):
     root=tmp_path/'private';root.mkdir(mode=0o700);state=State(root/'state.sqlite')
     client=SimpleNamespace(list_page=lambda scope,cursor=None:{'cursor':'new:'+scope,'entries':[],'has_more':False})
     assert discover(client,state,datetime(2026,9,7,12,tzinfo=timezone.utc))==0
-    assert len(state.scopes())==2 and all(state.cursor(s).startswith('new:') for s in state.scopes())
+    assert len(state.scopes())==7 and all(state.cursor(s).startswith('new:') for s in state.scopes())
     state.close()
 
 
