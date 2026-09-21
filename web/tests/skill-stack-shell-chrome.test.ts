@@ -95,6 +95,7 @@ describe("skill-stack shell chrome", () => {
     expect(nextBlock).toBeGreaterThan(feedRail);
     const chunk = css.slice(feedRail, nextBlock);
     expect(chunk).toContain("display: flex");
+    expect(chunk).toContain("flex: 0 1 auto");
     expect(chunk).toContain("white-space: nowrap");
     expect(chunk).toContain("tabular-nums");
     expect(chunk).toContain("border-radius: 0 0 3px 3px");

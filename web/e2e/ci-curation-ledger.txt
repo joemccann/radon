@@ -6,11 +6,11 @@
 #   isolated next start :3033 with RADON_AUTHLESS_TEST. Pins CSS-only Prefs/Keys
 #   `.preferences-shell` scroll so MenthorQ sits above `mobile-tab-bar`, and
 #   BOOKMARKS unclipped at 390x844. Held out of e2e-financial-smoke.
-# REVIEWED 2026-09-19 dashboard-feed-tabs.spec.ts - 7/7 Chromium against local
-#   next dev with RADON_AUTHLESS_TEST. Pins feed-rail geometry, R-463 Held
-#   ---, empty-state copy, and after/ shots (desktop dark/light, 1024
-#   truncation, mobile stack). Held out of e2e-financial-smoke pending next
-#   start preflight.
+# REVIEWED 2026-09-21 dashboard-feed-tabs.spec.ts - 7/7 Chromium against local
+#   next dev :3000 with RADON_AUTHLESS_TEST. Pins flex-chip rail: nowrap
+#   Capture basis, no SOURCE/CAPTURE overlap, even 18px gaps at 1440/1024,
+#   source shrink-only (not grow), mobile stack. Held out of
+#   e2e-financial-smoke pending next start preflight.
 # REVIEWED 2026-09-19 clear-overview.spec.ts - Research workspace CTA removed:
 #   eyebrow count 0; market-intelligence scroll replaces the deleted News
 #   jump. Positions empty-state Explore research stays. Chromium authless

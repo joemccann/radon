@@ -124,6 +124,8 @@ test.describe("dashboard feed tabs", () => {
       const gap2 = itemBoxes[2].x - (itemBoxes[1].x + itemBoxes[1].width);
       expect(gap1).toBeGreaterThan(0);
       expect(Math.abs(gap1 - gap2)).toBeLessThanOrEqual(2);
+      const sourceValueBox = (await sourceValue.boundingBox())!;
+      expect(itemBoxes[1].x - (sourceValueBox.x + sourceValueBox.width)).toBeLessThanOrEqual(24);
     }
   });
 
@@ -176,6 +178,8 @@ test.describe("dashboard feed tabs", () => {
     const gap1 = itemBoxes[1].x - (itemBoxes[0].x + itemBoxes[0].width);
     const gap2 = itemBoxes[2].x - (itemBoxes[1].x + itemBoxes[1].width);
     expect(Math.abs(gap1 - gap2)).toBeLessThanOrEqual(2);
+    const sourceValueBox = (await rail.locator('[data-k="source"] .v').boundingBox())!;
+    expect(itemBoxes[1].x - (sourceValueBox.x + sourceValueBox.width)).toBeLessThanOrEqual(24);
 
     await page.setViewportSize({ width: 1024, height: 768 });
     await rail.scrollIntoViewIfNeeded();
