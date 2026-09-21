@@ -1,7 +1,28 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildShareCaption, buildXShareUrl, canvasToMp4, canvasToPng, sanitizeShareText, supportsMp4Export, wrapShareText, type SharePost } from "../lib/newsfeedShare";
+import { assembleShareCaption, buildShareCaption, buildXShareUrl, canvasToMp4, canvasToPng, sanitizeShareText, SHARE_CAPTION_SOFT_CAP, supportsMp4Export, wrapShareText, type SharePost } from "../lib/newsfeedShare";
 
 const post: SharePost = { id: "post-123", title: "Yen hedge demand jumps", content: "Positioning is near neutral.", timestamp: "2026-09-07", isoTimestamp: "2026-09-07T18:00:00Z", href: "https://themarketear.com/posts/post-123" };
+const equityIssuance: SharePost = {
+  id: "equity-issuance-252bn",
+  title: "US corporates raised a record $252bn in 2Q; Goldman estimates ~$700bn total equity supply in 2026, significant portion AI-related",
+  content: "US corporates raised a record $252bn in 2Q across IPOs, follow-ons, convertibles, and SPACs, per Goldman's Sarah Herring and Chris Hussey in their September 17, 2026 Midday Market Intelligence. The desk estimates total corporate equity supply will reach ~$700bn in 2026, a significant portion of which is AI-related. The driver here is straightforward: hyperscaler capex has eaten through free cash flow fast enough that companies are turning to public equity markets to fill the gap. This is not just a tech story. The surge in AI infrastructure investment is pulling capital broadly across the equity issuance complex. Goldman references Ben Snider's August 7 note (\"Equity issuance is a headwind but not a gale\") and Richard Ramsden's September 8 note (\"The next phase of capital markets growth and the AI infra impact\") for fuller context. The $700bn figure representing a meaningful supply overhang that competes with existing equity demand, even if the desk characterizes it as a headwind rather than a gale.",
+  timestamp: "2026-09-20T20:06:00Z",
+  isoTimestamp: "2026-09-20T20:06:00Z",
+  href: "https://example.com/equity-issuance",
+  source: {
+    kind: "dropbox", publisher: "Goldman Midday Market Intelligence", documentDate: "2026-09-17",
+    folderDate: "2026-09-20", pages: [1], figures: [], fileId: "id", revision: "r", contentHash: "h", url: "/private.pdf",
+  },
+};
+
+function assertXCaption(caption: string) {
+  const bullets = caption.split("\n").filter(line => line.startsWith("• "));
+  expect(bullets.length).toBeGreaterThanOrEqual(1);
+  expect(bullets.length).toBeLessThanOrEqual(4);
+  expect(caption).toMatch(/\n\n• /);
+  expect(caption).not.toMatch(/—|&(?:mdash|#8212|#x2014);/i);
+  expect(caption.length).toBeLessThanOrEqual(SHARE_CAPTION_SOFT_CAP);
+}
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("social captions", () => {
@@ -26,12 +47,12 @@ describe("social captions", () => {
     const content = `Positioning ${dash} still neutral. Returns: -2.5%.`;
     expect(sanitizeShareText(content)).toBe("Positioning, still neutral. Returns: -2.5%.");
     const caption = buildShareCaption({ ...post, title: `Yen ${dash} the setup`, content });
-    expect(caption).toBe("Yen, the setup\n\nPositioning, still neutral. Returns: -2.5%.");
+    expect(caption).toBe("Yen, the setup\n\n• Positioning, still neutral\n• Returns: -2.5%");
     expect(new URL(buildXShareUrl(content)).searchParams.get("text")).toBe("Positioning, still neutral. Returns: -2.5%.");
   });
   it("removes publisher profile links and handles without orphan URLs", () => {
     const caption = buildShareCaption({ ...post, content: "Neutral positioning. https://x.com/zerohedge/status/123 https://twitter.com/themarketear @ZeroHedge @themarketear" });
-    expect(caption).toBe("Yen hedge demand jumps\n\nNeutral positioning.");
+    expect(caption).toBe("Yen hedge demand jumps\n\n• Neutral positioning");
   });
 
   it.each(["The Market Ear", "themarketear", "ZeroHedge", "ZERO HEDGE", "Zero-Hedge"])("excludes %s from embedded text and edited X captions", publisher => {
@@ -41,7 +62,7 @@ describe("social captions", () => {
   });
   it("omits feed attribution and preserves the full caption through the X intent", () => {
     const caption = buildShareCaption(post);
-    expect(caption).toBe("Yen hedge demand jumps\n\nPositioning is near neutral.");
+    expect(caption).toBe("Yen hedge demand jumps\n\n• Positioning is near neutral");
     const url = new URL(buildXShareUrl(caption));
     expect(url.origin + url.pathname).toBe("https://twitter.com/intent/tweet");
     expect(url.searchParams.get("text")).toBe(caption);
@@ -52,6 +73,7 @@ describe("social captions", () => {
       fileId: "file-private-id", revision: "private-revision", contentHash: "secret", url: "/api/newsfeed/research/files/secret.pdf",
     } };
     const caption = buildShareCaption(privatePost);
+    expect(caption).toBe("Yen hedge demand jumps\n\n• Positioning is near neutral\n\nSource: J.P. Morgan · 2026-09-03");
     expect(caption).toContain("Source: J.P. Morgan");
     expect(caption).not.toMatch(/secret|private|\/api\//);
   });
@@ -60,6 +82,42 @@ describe("social captions", () => {
   });
   it("removes authenticated research paths embedded in post text and strips permalink query secrets", () => {
     expect(buildShareCaption({ ...post, content: "Chart /api/newsfeed/research/files/secret.png", href: `${post.href}?token=secret` })).not.toContain("secret");
+  });
+  it("builds an X-native fallback for the equity-issuance $252bn / $700bn post", () => {
+    const caption = buildShareCaption(equityIssuance);
+    const bullets = caption.split("\n").filter(line => line.startsWith("• "));
+    assertXCaption(caption);
+    expect(caption.split("\n")[0]).toMatch(/\$252bn/i);
+    expect(caption.split("\n")[0]).not.toMatch(/\$700bn/i);
+    expect(caption).toContain("$252bn");
+    expect(caption).toContain("$700bn");
+    expect(bullets.length).toBeGreaterThanOrEqual(2);
+    expect(caption).toMatch(/overhang|headwind|hyperscaler|AI/i);
+    expect(caption).toMatch(/Source: Goldman Midday Market Intelligence · 2026-09-17\s*$/);
+    expect(caption.indexOf("Source:")).toBeGreaterThan(caption.lastIndexOf("• "));
+    expect(caption).not.toContain("Sarah Herring");
+    expect(caption).not.toContain("Richard Ramsden");
+    expect(caption).not.toMatch(/across IPOs/i);
+    expect(new URL(buildXShareUrl(caption)).searchParams.get("text")).toBe(caption);
+  });
+  it("preserves rewritten bullets and keeps source last", () => {
+    const caption = buildShareCaption({
+      ...equityIssuance,
+      title: "US corps raised a record $252bn in 2Q equity supply",
+      content: "• Goldman sees ~$700bn total equity supply in 2026\n• AI infra / hyperscaler capex is a big slice\n• Supply overhang = headwind, not a gale",
+    });
+    expect(caption).toBe(
+      "US corps raised a record $252bn in 2Q equity supply\n\n"
+      + "• Goldman sees ~$700bn total equity supply in 2026\n"
+      + "• AI infra / hyperscaler capex is a big slice\n"
+      + "• Supply overhang = headwind, not a gale\n\n"
+      + "Source: Goldman Midday Market Intelligence · 2026-09-17",
+    );
+    assertXCaption(caption);
+  });
+  it("assembles a voice caption without flattening bullet newlines", () => {
+    const caption = assembleShareCaption("Seasonality", "• 104 to 130\n• Year 3, month +9.");
+    expect(caption).toBe("Seasonality\n\n• 104 to 130\n• Year 3, month +9");
   });
 });
 

@@ -8,21 +8,34 @@ describe("newsfeed voice", () => {
     expect(NEWSFEED_VOICE_SYSTEM).toMatch(/untrusted/i);
     expect(NEWSFEED_VOICE_SYSTEM).toMatch(/holdings/i);
     expect(NEWSFEED_VOICE_SYSTEM).toMatch(/units/i);
+    expect(NEWSFEED_VOICE_SYSTEM).toMatch(/• /);
+    expect(NEWSFEED_VOICE_SYSTEM).toMatch(/280/);
+    expect(NEWSFEED_VOICE_SYSTEM).toMatch(/the finding in few words/);
+    expect(NEWSFEED_VOICE_SYSTEM).toMatch(/no throat-clearing/);
+    expect(NEWSFEED_VOICE_SYSTEM).toMatch(/template bank-speak/);
   });
   it("sanitizes publisher text and computes a caption from validated fields", () => {
     expect(parseVoiceCopy(JSON.stringify({ title: "Seasonality", content: "104 to 130. Year 3, month +9.\nSource: ZeroHedge" }), source))
-      .toEqual({ title: "Seasonality", content: "104 to 130. Year 3, month +9.", caption: "Seasonality\n\n104 to 130. Year 3, month +9." });
+      .toEqual({ title: "Seasonality", content: "104 to 130. Year 3, month +9.", caption: "Seasonality\n\n• 104 to 130\n• Year 3, month +9" });
   });
   it("accepts fenced JSON that grok-4.6 wraps around a valid draft", () => {
     const copy = { title: "Seasonality", content: "104 to 130. Year 3, month +9." };
     expect(parseVoiceCopy("```json\n" + JSON.stringify(copy) + "\n```", source)).toEqual({
       ...copy,
-      caption: "Seasonality\n\n104 to 130. Year 3, month +9.",
+      caption: "Seasonality\n\n• 104 to 130\n• Year 3, month +9",
+    });
+  });
+  it("preserves rewritten X bullets and newlines in the assembled caption", () => {
+    const copy = { title: "US corps raised a record $252bn in 2Q", content: "• Goldman sees ~$700bn total equity supply in 2026\n• AI infra / hyperscaler capex is a big slice" };
+    const evidence = { title: "US corporates raised a record $252bn in 2Q", content: "Goldman sees ~$700bn total equity supply in 2026. AI infra / hyperscaler capex is a big slice." };
+    expect(parseVoiceCopy(JSON.stringify(copy), evidence)).toEqual({
+      ...copy,
+      caption: "US corps raised a record $252bn in 2Q\n\n• Goldman sees ~$700bn total equity supply in 2026\n• AI infra / hyperscaler capex is a big slice",
     });
   });
   it.each(["—", "&mdash;", "&#8212;", "&#x2014;"])("normalizes %s in model output while preserving the evidence", dash => {
     const result = parseVoiceCopy(JSON.stringify({ title: `Seasonality ${dash} the setup`, content: `104 to 130 ${dash} Year 3, month +9.` }), source);
-    expect(result).toEqual({ title: "Seasonality, the setup", content: "104 to 130, Year 3, month +9.", caption: "Seasonality, the setup\n\n104 to 130, Year 3, month +9." });
+    expect(result).toEqual({ title: "Seasonality, the setup", content: "104 to 130, Year 3, month +9.", caption: "Seasonality, the setup\n\n• 104 to 130, Year 3, month +9" });
   });
   it.each(["oops", "null", '[]', '{"title":"","content":"ok"}', '{"title":"ok","content":1}', '{"title":"ok","content":"The Market Ear"}'])
     ("rejects malformed or empty output %s", raw => expect(() => parseVoiceCopy(raw, source)).toThrow());
