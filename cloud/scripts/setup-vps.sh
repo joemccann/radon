@@ -344,6 +344,27 @@ compose_body_is_valid() {
   return 0
 }
 
+# Local HEAD is only as trustworthy as commit access to the checkout, so the
+# committed blob must also be reachable from the deploy remote. Fails closed
+# when the remote ref is missing (never fetched / offline): an unverifiable
+# body is a stop, not an install.
+require_remote_ancestry() {
+  local repo_root="$1" rel="$2" blob_sha="$3" label="$4"
+  local remote_ref="${RADON_PROVENANCE_REMOTE_REF:-origin/main}"
+  if ! git -C "$repo_root" rev-parse --verify --quiet "${remote_ref}^{commit}" >/dev/null 2>&1; then
+    log_error "${label} provenance failed: ${remote_ref} is unavailable (fetch it before provisioning)"
+    return 1
+  fi
+  if [[ "$(git -C "$repo_root" rev-parse --verify --quiet "${remote_ref}:${rel}" 2>/dev/null)" == "$blob_sha" ]]; then
+    return 0
+  fi
+  if git -C "$repo_root" merge-base --is-ancestor HEAD "$remote_ref" 2>/dev/null; then
+    return 0
+  fi
+  log_error "${label} provenance failed: ${rel} is not an ancestor of ${remote_ref}"
+  return 1
+}
+
 stage_from_checkout() {
   local source="$1" target="$2" mode="$3"
   shift 3
@@ -362,6 +383,7 @@ stage_from_checkout() {
     log_error "Provenance failed: ${source_rel} is not committed at HEAD"
     return 1
   fi
+  require_remote_ancestry "$repo_root" "$source_rel" "$blob_sha" "Provenance" || return 1
   if ! work_sha="$(git -C "$repo_root" hash-object -- "$source")" \
     || [[ "$work_sha" != "$blob_sha" ]]; then
     log_error "Provenance failed: ${source} differs from the committed blob"
@@ -1333,6 +1355,7 @@ install_docker_gw() {
     log_error "Compose provenance failed: ${compose_rel} is not committed at HEAD"
     return 1
   fi
+  require_remote_ancestry "$repo_root" "$compose_rel" "$blob_sha" "Compose" || return 1
   if ! work_sha="$(git -C "$repo_root" hash-object -- "$compose_source")" \
     || [[ "$work_sha" != "$blob_sha" ]]; then
     log_error "Compose provenance failed: ${compose_source} differs from the committed blob"

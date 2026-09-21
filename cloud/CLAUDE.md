@@ -86,7 +86,9 @@ since whichever mechanism the current host lacks would abort the promote that
 installs it (`deploy.sh:204-231`, bd7d7e4c). Note the
 narrowing: preflight now renders the INSTALLED compose body, not the incoming
 release's. The incoming body is gated at install time instead, by provenance
-(git blob at the deployed commit) plus `compose_body_is_valid`.
+(git blob at the deployed commit, which must also be reachable from
+`origin/main` - a local-only commit is refused, as is a missing remote ref)
+plus `compose_body_is_valid`.
 
 **`publish-caddy` stages from the trusted tip too.** The edge config decides
 which proxy and fetch-metadata headers survive on the way to the API's
