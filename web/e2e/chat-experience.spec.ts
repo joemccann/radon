@@ -276,24 +276,6 @@ for (const theme of ["light", "dark"] as const) {
       expect(await panel.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
       await page.screenshot({ path: testInfo.outputPath(`chat-experience-${size}-${theme}-welcome.png`) });
       await dialog.getByRole("textbox", { name: "Ask Radon" }).fill("Explain the latest flow evidence");
-      // TEMPORARY diagnostic (remove with the toast fix): CI-only geometry.
-      console.log("DIAG " + size + " " + theme + " " + JSON.stringify(await page.evaluate(() => {
-        const send = document.querySelector('button[aria-label="Send"]') as HTMLElement | null;
-        const vp = document.getElementById("radon-toast-viewport");
-        const cs = vp ? getComputedStyle(vp) : null;
-        const sr = send?.getBoundingClientRect();
-        const vr = vp?.getBoundingClientRect();
-        return {
-          mobile: document.body.dataset.mobile ?? "unset",
-          send: sr && { x: Math.round(sr.x), y: Math.round(sr.y) },
-          vp: vr && { x: Math.round(vr.x), y: Math.round(vr.y), h: Math.round(vr.height) },
-          style: cs && `pos=${cs.position} top=${cs.top} bottom=${cs.bottom} pe=${cs.pointerEvents}`,
-          cls: vp?.getAttribute("class"),
-          inline: vp?.getAttribute("style"),
-          mq640: window.matchMedia("(max-width: 640px)").matches,
-          w: window.innerWidth,
-        };
-      })));
       await dialog.getByRole("button", { name: "Send", exact: true }).click();
       await expect(dialog.getByTestId("chat-message-assistant").last()).toContainText(REPLY);
       await expect(dialog.getByTestId("chat-messages")).toHaveAttribute("aria-busy", "false");
