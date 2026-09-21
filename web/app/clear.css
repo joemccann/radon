@@ -111,6 +111,10 @@
   color: var(--text-on-accent);
 }
 
+.radon-clear .btn-quick {
+  padding-inline: 8px;
+}
+
 .radon-clear :is(.btn-secondary, .btn-quick, .btn-sync) {
   background: var(--bg-panel);
   border-color: var(--line-grid);
