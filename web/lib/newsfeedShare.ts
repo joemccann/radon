@@ -33,11 +33,131 @@ function cleanText(text: string): string {
     .replace(/\s+/g, " ").trim();
 }
 
+export const SHARE_CAPTION_SOFT_CAP = 400;
+const HOOK_MAX = 110;
+const BULLET_MAX = 88;
+const BULLET_PREFIX = /^(?:[•●▪◦]|[-*])\s+/;
+const IMPLICATION = /\b(?:headwind|overhang|not a gale|rather than|this (?:is|means|leaves)|implies?)\b/i;
+const FILLER = /^(?:this is not just a tech story|for fuller context|the driver here is straightforward)[.!]?$/i;
+const THROAT_CLEAR = /^(?:the driver here is straightforward:\s*|the (?:desk|report|note|authors?) (?:estimates?|sees|says|notes|finds|concludes|suggests)(?: that)?\s+)/i;
+const NOTE_REF = /\breferences?\b.+\bnote\b/i;
+
+function stripResearchPaths(text: string): string {
+  return text.replace(/(?:https?:\/\/[^\s]*)?\/api\/newsfeed\/research\/[^\s)]+/gi, "");
+}
+
+function captionLines(text: string): string[] {
+  return sanitizeShareText(stripResearchPaths(text))
+    .split("\n")
+    .map(line => line.replace(/[ \t]+/g, " ").trim())
+    .filter(line => line && !/^source\s*:/i.test(line));
+}
+
+function captionProse(text: string): string {
+  return captionLines(text).join(" ");
+}
+
+function compactPhrase(text: string, max: number): string {
+  const cleaned = text.replace(/\s+/g, " ").trim().replace(/[.;,]+$/, "");
+  const cut = cleaned.length <= max ? cleaned : (() => {
+    const slice = cleaned.slice(0, max);
+    const punct = Math.max(slice.lastIndexOf(";"), slice.lastIndexOf(","));
+    const clause = slice.search(/\s+(?:that|fast enough|even if)\b/);
+    const at = punct >= 32 ? punct : clause >= 32 ? clause : slice.lastIndexOf(" ");
+    return (at > Math.min(32, max >> 1) ? slice.slice(0, at) : slice).trim().replace(/[.;,]+$/, "");
+  })();
+  return cut.replace(/\s+(?:of|are|that|the|a|an|and|to|for|with|from|in)$/i, "").trim();
+}
+
+function leadCap(text: string): string {
+  return text ? text[0].toUpperCase() + text.slice(1) : text;
+}
+
+function splitSentences(text: string): string[] {
+  return text.replace(/\n+/g, " ").split(/(?<=[.!?])\s+(?=[A-Z("'“]|\d|~|\$)/).map(part => part.trim()).filter(Boolean);
+}
+
+function numbersIn(text: string): string[] {
+  return text.match(/[$€£~]?\d[\d,]*(?:\.\d+)?(?:\s?(?:%|bps|bn|tn|mn|[kmbt]\b))?/gi)
+    ?.map(value => value.toLowerCase().replace(/\s/g, "").replace(/^~/, "")) ?? [];
+}
+
+function overlapRatio(left: string, right: string): number {
+  const words = (text: string) => new Set((text.toLowerCase().match(/[a-z0-9$~]+/g) ?? []).filter(word => word.length > 2));
+  const a = words(left);
+  if (!a.size) return 0;
+  const b = words(right);
+  let shared = 0;
+  for (const word of a) if (b.has(word)) shared += 1;
+  return shared / a.size;
+}
+
+function restatesHook(sentence: string, hook: string): boolean {
+  const left = sentence.toLowerCase().replace(/[.;,]+$/, "");
+  const right = hook.toLowerCase().replace(/[.;,]+$/, "");
+  return !right || left.startsWith(right) || right.startsWith(left) || overlapRatio(hook, sentence) >= 0.8;
+}
+
+function hookHeadline(title: string, content: string): string {
+  const titleText = captionProse(title);
+  const raw = titleText || splitSentences(captionProse(content))[0] || "";
+  if (!raw) return "";
+  const clauses = raw.split(/\s*;\s*/).map(part => part.trim()).filter(Boolean);
+  const numbered = clauses.find(clause => /[$€£~]?\d/.test(clause) && clause.length <= HOOK_MAX);
+  return compactPhrase(numbered || clauses[0] || raw, HOOK_MAX);
+}
+
+function asBullet(sentence: string): string {
+  return `• ${leadCap(compactPhrase(sentence.replace(THROAT_CLEAR, "").replace(BULLET_PREFIX, ""), BULLET_MAX))}`;
+}
+
+function extractSharePoints(content: string, hook: string): { bullets: string[]; implication: string } {
+  const lines = captionLines(content);
+  const structured = lines.filter(line => BULLET_PREFIX.test(line)).map(asBullet);
+  if (structured.length) {
+    const rest = lines.filter(line => !BULLET_PREFIX.test(line) && !FILLER.test(line)).join(" ");
+    return { bullets: structured.slice(0, 4), implication: rest && IMPLICATION.test(rest) ? compactPhrase(rest, 72) : "" };
+  }
+  const used = new Set(numbersIn(hook));
+  const sentences = splitSentences(captionProse(content))
+    .map(sentence => sentence.replace(THROAT_CLEAR, "").trim())
+    .filter(sentence => (sentence.length >= 20 || numbersIn(sentence).length > 0) && !FILLER.test(sentence) && !NOTE_REF.test(sentence) && !restatesHook(sentence, hook));
+  const facts: string[] = [];
+  let implication = "";
+  for (const sentence of sentences) {
+    const unused = numbersIn(sentence).some(value => !used.has(value));
+    if (IMPLICATION.test(sentence) && !unused) { if (!implication) implication = compactPhrase(sentence, 72); continue; }
+    if (unused || facts.length < 2) {
+      facts.push(sentence);
+      for (const value of numbersIn(sentence)) used.add(value);
+    }
+    if (facts.length >= 3) break;
+  }
+  if (facts.length < 2) {
+    for (const sentence of sentences) {
+      if (facts.includes(sentence) || compactPhrase(sentence, BULLET_MAX) === implication) continue;
+      facts.push(sentence);
+      if (facts.length >= 2) break;
+    }
+  }
+  return { bullets: facts.slice(0, 4).map(asBullet), implication };
+}
+
+export function assembleShareCaption(title: string, content: string, source = ""): string {
+  const hook = hookHeadline(title, content);
+  const { bullets, implication } = extractSharePoints(content, hook);
+  const sourceLine = sanitizeShareText(source).split("\n").map(line => line.replace(/[ \t]+/g, " ").trim()).filter(Boolean).join(" ");
+  const join = (items: string[], extra = implication) => [hook, items.join("\n"), extra, sourceLine].filter(Boolean).join("\n\n");
+  const items = [...bullets];
+  let caption = join(items);
+  while (caption.length > SHARE_CAPTION_SOFT_CAP && items.length > 2) { items.pop(); caption = join(items); }
+  if (caption.length > SHARE_CAPTION_SOFT_CAP && implication) caption = join(items, "");
+  if (caption.length > SHARE_CAPTION_SOFT_CAP && items.length > 1) { items.pop(); caption = join(items, ""); }
+  return sanitizeShareText(caption);
+}
+
 export function buildShareCaption(post: SharePost, imageUrl = post.images?.[0]): string {
-  const content = cleanText(post.content || "");
-  const source = shareSource(post, imageUrl);
-  return [cleanText(post.title), content, source && !content.endsWith(source) ? source : ""]
-    .filter(Boolean).join("\n\n");
+  return assembleShareCaption(post.title, post.content || "", shareSource(post, imageUrl));
 }
 
 export function buildXShareUrl(caption: string): string {
