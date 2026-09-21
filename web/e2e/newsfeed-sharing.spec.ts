@@ -40,7 +40,7 @@ for (const width of [1440, 393]) {
       content: `${post.content} Source: ZeroHedge https://zerohedge.com/markets/example`,
     };
     const rewritten = { title: "Seasonality — the setup", content: "Positioning &mdash; the tell. Returns: -2.5%." };
-    const rewrittenCaption = "Seasonality, the setup\n\n• Positioning, the tell\n• Returns: -2.5%\n\nSource: Synthetic Bank · 2026-09-07";
+    const rewrittenCaption = "Seasonality, the setup\n\nPositioning, the tell.\n\nReturns: -2.5%.\n\nSource: Synthetic Bank · 2026-09-07";
     let requests = 0;
     let releaseRewrite!: () => void;
     const rewriteReady = new Promise<void>(resolve => { releaseRewrite = resolve; });
@@ -108,7 +108,8 @@ for (const width of [1440, 393]) {
       await expect(panel.getByRole("button", { name: "Download Reels / TikTok video" })).toBeDisabled();
       const fallbackCaption = await caption.inputValue();
       expect(fallbackCaption).toContain("Yen hedge demand, increases");
-      expect(fallbackCaption).toMatch(/\n\n• /);
+      expect(fallbackCaption).not.toMatch(/^[•●▪◦*-]\s/m);
+      expect(fallbackCaption.split("\n\n").length).toBeGreaterThan(1);
       expect(fallbackCaption).toContain("Demand for yen hedges increased");
       expect(fallbackCaption).not.toMatch(excludedPublisher);
       expect(fallbackCaption).not.toMatch(/—|&(?:mdash|#8212|#x2014);/i);
@@ -170,11 +171,11 @@ test("news sharing retains sanitized fallback and retries a failed voice rewrite
   expect(await panel.getByRole("textbox", { name: "Post caption" }).inputValue()).not.toMatch(excludedPublisher);
   await expect(panel.getByRole("button", { name: "Download Story image" })).toBeEnabled();
   await failure.getByRole("button", { name: "Try again" }).click();
-  await expect(panel.getByRole("textbox", { name: "Post caption" })).toHaveValue("Retry succeeds\n\n• Positioning remains the tell");
+  await expect(panel.getByRole("textbox", { name: "Post caption" })).toHaveValue("Retry succeeds\n\nPositioning remains the tell.");
   expect(requests).toBe(2);
 });
 
-test("equity-issuance fallback is hook plus bullets and Compose on X stays usable", async ({ page, context }) => {
+test("equity-issuance fallback is hook plus short paragraphs and Compose on X stays usable", async ({ page, context }) => {
   test.setTimeout(90_000);
   const equity = {
     id: "equity-issuance-252bn",
@@ -205,7 +206,8 @@ test("equity-issuance fallback is hook plus bullets and Compose on X stays usabl
     const caption = await panel.getByRole("textbox", { name: "Post caption" }).inputValue();
     expect(caption.split("\n")[0]).toMatch(/\$252bn/i);
     expect(caption).toContain("$700bn");
-    expect(caption).toMatch(/\n\n• /);
+    expect(caption).not.toMatch(/^[•●▪◦*-]\s/m);
+    expect(caption.split("\n\n").length).toBeGreaterThan(1);
     expect(caption).toMatch(/Source: Goldman Midday Market Intelligence · 2026-09-17\s*$/);
     expect(caption.length).toBeLessThanOrEqual(400);
     expect(caption).not.toContain("Sarah Herring");

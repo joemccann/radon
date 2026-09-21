@@ -24,7 +24,7 @@ describe("POST newsfeed/share", () => {
     const response = await POST(request({ ...input, content: input.content + " Source: ZeroHedge https://zerohedge.com/a" }));
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(await response.json()).toEqual({ title: "Seasonality", content: "104 to 130. That is the historical path.", caption: "Seasonality\n\n• 104 to 130\n• That is the historical path" });
+    expect(await response.json()).toEqual({ title: "Seasonality", content: "104 to 130. That is the historical path.", caption: "Seasonality\n\n104 to 130.\n\nThat is the historical path." });
     expect(guard).toHaveBeenCalledWith(expect.any(Request), expect.objectContaining({ operatorOnly: true, durableRateTier: "D", rate: expect.objectContaining({ limit: 10 }) }));
     expect(chat.mock.calls[0][0].messages[0].content).not.toMatch(/zerohedge/i);
     expect(chat.mock.calls[0][0].signal).toBeInstanceOf(AbortSignal);
