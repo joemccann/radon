@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 import traceback
@@ -841,9 +842,23 @@ def run_evaluation(
         return eval_result
 
     m5_data = dict(structure)
-    eval_result.milestones["M5"] = MilestoneResult(
-        name="structure", passed=True, data=m5_data,
+    try:
+        gain = float(structure.get("max_gain"))
+        loss = float(structure.get("max_loss"))
+    except (TypeError, ValueError, OverflowError):
+        gain = loss = math.nan
+    convex = (
+        math.isfinite(gain) and math.isfinite(loss)
+        and loss > 0 and gain > 0 and gain / loss >= 2
     )
+    eval_result.milestones["M5"] = MilestoneResult(
+        name="structure", passed=convex, data=m5_data,
+        error=None if convex else "CONVEXITY: finite gain must be at least twice positive loss",
+    )
+    if not convex:
+        eval_result.decision = "NO_TRADE"
+        eval_result.failing_gate = "CONVEXITY"
+        return eval_result
 
     if open_max_losses is None:
         open_max_losses = _open_max_losses_from_portfolio()

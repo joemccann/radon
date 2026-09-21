@@ -33,7 +33,7 @@ def _closed_aggregate(date: str, ticker: str, qty: float, exec_ids: list[str]) -
 
 def test_aggregate_beside_individual_fills_is_deleted():
     rows = [
-        _row("agg", _closed_aggregate("2026-08-11", "SPY", 900, ["1", "2"])),
+        _row("agg", _closed_aggregate("2026-08-11", "SPY", 900, ["a.1", "a.2", "a.3"])),
         _row("f1", _fill("2026-08-11", "SPY", "BUY", 600, "a.1")),
         _row("f2", _fill("2026-08-11", "SPY", "BUY", 300, "a.2")),
         _row("f3", _fill("2026-08-12", "SPY", "SELL", 900, "a.3")),
@@ -43,25 +43,17 @@ def test_aggregate_beside_individual_fills_is_deleted():
     assert plan["redate"] == []
 
 
-def test_multiday_aggregate_without_breakdown_is_redated():
-    # The sell leg is fully covered by individual fills across two days; the
-    # buy leg is not journaled individually, so the row survives with a
-    # reconstructed multi-day fill_breakdown instead of being deleted.
+def test_multiday_partial_coverage_is_reported_without_fabricating_dates():
+    # The absent buy executions cannot establish their own dates or identity.
     rows = [
-        _row("agg", _closed_aggregate("2026-08-11", "QQQ", 500, ["1", "2"])),
+        _row("agg", _closed_aggregate("2026-08-11", "QQQ", 500, ["b.1", "b.2", "b.3"])),
         _row("s1", _fill("2026-08-11", "QQQ", "SELL", 200, "b.1")),
         _row("s2", _fill("2026-08-13", "QQQ", "SELL", 300, "b.2")),
     ]
     plan = plan_cleanup(rows)
     assert plan["delete"] == []
-    assert len(plan["redate"]) == 1
-    entry = plan["redate"][0]
-    assert entry["trade_id"] == "agg"
-    assert entry["breakdown"] == [
-        {"date": "2026-08-11", "qty": -200.0},
-        {"date": "2026-08-11", "qty": 500.0},
-        {"date": "2026-08-13", "qty": -300.0},
-    ]
+    assert plan["redate"] == []
+    assert [item["trade_id"] for item in plan["unreconstructable"]] == ["agg"]
 
 
 def test_aggregate_with_only_one_leg_covered_is_not_deleted():
@@ -72,11 +64,12 @@ def test_aggregate_with_only_one_leg_covered_is_not_deleted():
         _row("f1", _fill("2026-08-11", "IWM", "BUY", 100, "c.1")),
     ]
     plan = plan_cleanup(rows)
-    assert plan == {"delete": [], "redate": [], "unreconstructable": []}
+    assert plan["delete"] == plan["redate"] == []
+    assert [item["trade_id"] for item in plan["unreconstructable"]] == ["agg"]
 
 
 def test_aggregate_already_carrying_breakdown_is_untouched():
-    payload = _closed_aggregate("2026-08-11", "SPY", 900, ["1", "2"])
+    payload = _closed_aggregate("2026-08-11", "SPY", 900, ["a.1", "a.2"])
     payload["fill_breakdown"] = [{"date": "2026-08-11", "qty": 900}]
     rows = [
         _row("agg", payload),
@@ -123,25 +116,25 @@ def test_fills_before_the_aggregate_date_are_not_borrowed():
         _row("agg", _closed_aggregate("2026-08-11", "QQQ", 500, ["1", "2"])),
         _row("s0", _fill("2026-08-01", "QQQ", "SELL", 500, "f.0")),
     ]
-    assert plan_cleanup(rows) == {"delete": [], "redate": [], "unreconstructable": []}
+    plan = plan_cleanup(rows)
+    assert plan["delete"] == plan["redate"] == []
+    assert [item["trade_id"] for item in plan["unreconstructable"]] == ["agg"]
 
 
-def test_plan_is_idempotent_after_applying_the_redate():
+def test_plan_is_idempotent_after_applying_a_proven_delete():
     rows = [
-        _row("agg", _closed_aggregate("2026-08-11", "QQQ", 500, ["1", "2"])),
-        _row("s1", _fill("2026-08-11", "QQQ", "SELL", 200, "b.1")),
-        _row("s2", _fill("2026-08-13", "QQQ", "SELL", 300, "b.2")),
+        _row("agg", _closed_aggregate("2026-08-11", "QQQ", 500, ["b.1", "b.2"])),
+        _row("b1", _fill("2026-08-11", "QQQ", "BUY", 500, "b.1")),
+        _row("s2", _fill("2026-08-13", "QQQ", "SELL", 500, "b.2")),
     ]
     plan = plan_cleanup(rows)
-    applied = json.loads(rows[0][1])
-    applied["fill_breakdown"] = plan["redate"][0]["breakdown"]
-    rows[0] = _row("agg", applied)
-    assert plan_cleanup(rows) == {"delete": [], "redate": [], "unreconstructable": []}
+    assert [item["trade_id"] for item in plan["delete"]] == ["agg"]
+    assert plan_cleanup(rows[1:]) == {"delete": [], "redate": [], "unreconstructable": []}
 
 
 def test_render_plan_prints_every_planned_change():
     rows = [
-        _row("agg", _closed_aggregate("2026-08-11", "SPY", 900, ["1", "2"])),
+        _row("agg", _closed_aggregate("2026-08-11", "SPY", 900, ["a.1", "a.2"])),
         _row("f1", _fill("2026-08-11", "SPY", "BUY", 900, "a.1")),
         _row("f2", _fill("2026-08-12", "SPY", "SELL", 900, "a.2")),
     ]

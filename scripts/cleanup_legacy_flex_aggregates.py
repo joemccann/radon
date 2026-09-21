@@ -10,16 +10,16 @@ collapses:
      session. ``journal_basis.flex_aggregate_budget`` falls back to the row's
      own date for such a row, so the aggregate only budgets its FIRST date and
      the fills on every later date are journaled beside it and double-counted.
-     Fix: reconstruct ``fill_breakdown`` from the individual journal fills the
-     aggregate covers, so the budget lands on the right days.
+     Repair requires authoritative constituent executions; partial journal
+     coverage is reported for operator reconciliation without guessing dates.
 
-  B. **Aggregate sitting beside individual fills** — every date/sign the
-     aggregate accounts for is already covered, in full, by individual fill
-     rows. The aggregate is pure duplication. Fix: delete it.
+  B. **Aggregate sitting beside individual fills** — exact, exclusive execution
+     identities, contract, account, date and quantities prove full coverage.
+     Only this proven duplicate can be deleted.
 
-Both are derived from the journal itself; nothing is guessed. An aggregate
-whose covering fills cannot be reconstructed exactly is reported and left
-alone.
+Execution IDs from different writer namespaces, corrections, overlapping
+claims and incomplete histories cannot prove equivalence. They are reported
+and left alone, even when contract and quantity happen to match.
 
 DRY RUN BY DEFAULT. ``--apply`` is destructive and is the operator's step.
 
@@ -30,7 +30,10 @@ DRY RUN BY DEFAULT. ``--apply`` is destructive and is the operator's step.
 from __future__ import annotations
 
 import argparse
+from collections import Counter, defaultdict
+from datetime import date
 import json
+import math
 import sys
 from typing import Any, Iterable, Optional
 
@@ -63,123 +66,88 @@ def is_aggregate(payload: dict[str, Any]) -> bool:
     return "+" in exec_id or action == "CLOSED"
 
 
-def _individual_coverage(rows: Iterable[tuple[str, dict[str, Any]]]) -> dict:
-    """``{contract: {sign: {date: qty}}}`` from individual (non-aggregate) fills."""
-    cover: dict[str, dict[int, dict[str, float]]] = {}
-    for _trade_id, payload in rows:
-        fingerprint = contract_fill_fingerprint(payload)
-        if not fingerprint:
-            continue
-        contract, date, signed = fingerprint
-        day = str(date)[:10]
-        if not day:
-            continue
-        sign = 1 if signed > 0 else -1
-        by_sign = cover.setdefault(contract, {}).setdefault(sign, {})
-        by_sign[day] = by_sign.get(day, 0.0) + abs(signed)
-    return cover
+def _parts(payload: dict[str, Any]) -> list[str]:
+    return [part.strip() for part in str(payload.get("ib_exec_id") or "").split("+")]
 
 
-def _reconstruct_side(
-    coverage: dict[str, float], row_day: str, needed: float
-) -> Optional[dict[str, float]]:
-    """Earliest dates from ``row_day`` on whose totals sum EXACTLY to ``needed``.
-
-    Returns None when no such prefix exists — the aggregate then stays as it is
-    rather than being re-dated on a guess.
-    """
-    if needed <= 0:
-        return None
-    running = 0.0
-    taken: dict[str, float] = {}
-    for day in sorted(d for d in coverage if d >= row_day):
-        taken[day] = coverage[day]
-        running += coverage[day]
-        if abs(running - needed) < 1e-6:
-            return taken
-        if running > needed:
-            return None
-    return None
+def _account(payload: dict[str, Any]) -> tuple:
+    return tuple(payload.get(key) for key in ("account", "account_id", "ib_account"))
 
 
 def plan_cleanup(rows: Iterable[tuple[str, Any]]) -> dict[str, list[dict[str, Any]]]:
-    """Classify every legacy Flex aggregate row.
+    """Delete only aggregates whose exact constituents are exclusively proven.
 
-    ``rows`` are ``(trade_id, payload)`` pairs straight off ``journal``.
-    Returns ``{"delete": [...], "redate": [...], "unreconstructable": [...]}``.
-    Rows outside the two classes never appear in any bucket.
+    Flex tradeIDs and API execIds are different namespaces. Quantity/date
+    similarity is insufficient evidence for a destructive repair. Missing,
+    corrected, duplicated or shared identities require authoritative operator
+    reconciliation; partial coverage never authorizes a metadata rewrite.
     """
     parsed = [(trade_id, _payload(raw)) for trade_id, raw in rows]
     aggregates = [item for item in parsed if is_aggregate(item[1])]
-    individuals = [item for item in parsed if not is_aggregate(item[1])]
-    coverage = _individual_coverage(individuals)
+    individuals: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    claims: Counter = Counter()
+    for _, payload in aggregates:
+        claims.update(set(_parts(payload)))
+    for _, payload in parsed:
+        if not is_aggregate(payload):
+            individuals[str(payload.get("ib_exec_id") or "").strip()].append(payload)
 
     plan: dict[str, list[dict[str, Any]]] = {
-        "delete": [],
-        "redate": [],
-        "unreconstructable": [],
+        "delete": [], "redate": [], "unreconstructable": [],
     }
-
     for trade_id, payload in aggregates:
         if payload.get("fill_breakdown"):
-            continue  # already stamped by rehydrate — idempotent no-op
-        budget = flex_aggregate_budget(payload) or {}
-        if not budget:
             continue
         row_day = str(payload.get("date") or "")[:10]
-        if not row_day:
+        budget = {}
+        parts = _parts(payload)
+        try:
+            date.fromisoformat(row_day)
+            budget = flex_aggregate_budget(payload) or {}
+            if (not budget or not all(parts) or len(parts) != len(set(parts))
+                    or any(claims[part] != 1 or len(individuals[part]) != 1 for part in parts)):
+                raise ValueError("constituent identity is missing, duplicated or shared")
+            expected: Counter = Counter()
+            for (contract, _, sign), qty in budget.items():
+                if not math.isfinite(qty) or qty <= 0:
+                    raise ValueError("invalid aggregate quantity")
+                expected[contract, sign] += qty
+            actual: Counter = Counter()
+            dated: Counter = Counter()
+            for part in parts:
+                individual = individuals[part][0]
+                fingerprint = contract_fill_fingerprint(individual)
+                if not fingerprint or _account(individual) != _account(payload):
+                    raise ValueError("unproven contract or account")
+                contract, raw_day, signed = fingerprint
+                day = date.fromisoformat(str(raw_day)[:10]).isoformat()
+                if not math.isfinite(signed) or signed == 0:
+                    raise ValueError("invalid constituent quantity")
+                sign = 1 if signed > 0 else -1
+                actual[contract, sign] += abs(signed)
+                dated[contract, day, sign] += abs(signed)
+            if (set(actual) != set(expected)
+                    or any(not math.isclose(actual[key], qty, rel_tol=0, abs_tol=1e-6)
+                           for key, qty in expected.items())
+                    or min(day for _, day, _ in dated) != row_day):
+                raise ValueError("constituents disagree with aggregate coverage")
+            if "gross_fill_breakdown" in payload and dated != budget:
+                raise ValueError("constituents disagree with gross dated coverage")
+        except ValueError as exc:
+            plan["unreconstructable"].append({
+                "trade_id": trade_id, "date": row_day,
+                "budget": _budget_repr(budget), "reason": str(exc),
+            })
             continue
 
-        breakdown: list[dict[str, Any]] = []
-        fully_covered = True
-        ambiguous = False
-        for (contract, _day, sign), qty in sorted(budget.items(), key=lambda kv: str(kv[0])):
-            side = {
-                day: day_qty
-                for day, day_qty in coverage.get(contract, {}).get(sign, {}).items()
-                if day >= row_day
-            }
-            if not side:
-                # This leg is not journaled individually at all: keep the
-                # legacy single-date fallback for it and change nothing.
-                fully_covered = False
-                breakdown.append({"date": row_day, "qty": qty * sign})
-                continue
-            taken = _reconstruct_side(side, row_day, qty)
-            if taken is None:
-                # Individual fills exist but do not add up to the aggregate.
-                # Re-dating would be a guess, so the row is reported instead.
-                ambiguous = True
-                break
-            for day, day_qty in sorted(taken.items()):
-                breakdown.append({"date": day, "qty": day_qty * sign})
-        breakdown.sort(key=lambda item: (item["date"], item["qty"]))
-
-        if ambiguous:
-            plan["unreconstructable"].append(
-                {"trade_id": trade_id, "date": row_day, "budget": _budget_repr(budget)}
-            )
-            continue
-
-        days = {item["date"] for item in breakdown}
-        if fully_covered:
-            plan["delete"].append(
-                {
-                    "trade_id": trade_id,
-                    "date": row_day,
-                    "reason": "every date/sign already covered by individual fills",
-                    "breakdown": breakdown,
-                }
-            )
-        elif days - {row_day}:
-            plan["redate"].append(
-                {
-                    "trade_id": trade_id,
-                    "date": row_day,
-                    "reason": "multi-day aggregate missing fill_breakdown",
-                    "breakdown": breakdown,
-                }
-            )
+        plan["delete"].append({
+            "trade_id": trade_id, "date": row_day,
+            "reason": "exclusive exact execution identities and quantities proven",
+            "breakdown": sorted(
+                ({"date": day, "qty": qty * sign} for (_, day, sign), qty in dated.items()),
+                key=lambda item: (item["date"], item["qty"]),
+            ),
+        })
     return plan
 
 
