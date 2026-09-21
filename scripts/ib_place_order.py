@@ -327,11 +327,11 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
     outside_rth = bool(params.get("outsideRth", False))
 
     if not what_if:
-        # Gate 3 (NF-1): max loss <= 2.5% of a fresh (<=15 min) IB net
-        # liquidation. Close-outs of held positions are exempt.
-        from bankroll_guard import check_bankroll_admission
+        # Gate 3 (NF-1), when RADON_BANKROLL_CAP_ENFORCE_ALL_PATHS is On:
+        # max loss <= 2.5% of a fresh (<=15 min) IB net liquidation.
+        from bankroll_guard import check_if_enforced_on_all_paths
 
-        bankroll_violation = check_bankroll_admission(params)
+        bankroll_violation = check_if_enforced_on_all_paths(params)
         if bankroll_violation:
             return {
                 "status": "error",
