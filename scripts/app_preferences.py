@@ -224,9 +224,9 @@ REGISTRY: Tuple[Preference, ...] = (
         hard_max=True,
         unit="",
         description=(
-            "On: the command line placer (ib_execute) and the exit order service "
-            "also refuse opening orders whose max loss exceeds 2.5% of a net "
-            "liquidation synced in the last 15 minutes. Off: they bypass it. "
+            "On: every placer (order ticket, command line, exit order service) "
+            "refuses opening orders whose max loss exceeds 2.5% of a net "
+            "liquidation synced in the last 15 minutes. Off: no placer enforces it. "
             "Closing a held position is always allowed."
         ),
         applies_immediately=True,
