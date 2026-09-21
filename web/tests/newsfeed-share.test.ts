@@ -16,10 +16,11 @@ const equityIssuance: SharePost = {
 };
 
 function assertXCaption(caption: string) {
-  const bullets = caption.split("\n").filter(line => line.startsWith("• "));
-  expect(bullets.length).toBeGreaterThanOrEqual(1);
-  expect(bullets.length).toBeLessThanOrEqual(4);
-  expect(caption).toMatch(/\n\n• /);
+  const body = caption.split("\n\n").slice(1).filter(line => !/^Source: /.test(line));
+  expect(body.length).toBeGreaterThanOrEqual(1);
+  expect(body.length).toBeLessThanOrEqual(3);
+  expect(caption).not.toMatch(/^[•●▪◦*-]\s/m);
+  for (const line of body) expect(line).toMatch(/[.!?%)"'\u201d]$/);
   expect(caption).not.toMatch(/—|&(?:mdash|#8212|#x2014);/i);
   expect(caption.length).toBeLessThanOrEqual(SHARE_CAPTION_SOFT_CAP);
 }
@@ -47,12 +48,12 @@ describe("social captions", () => {
     const content = `Positioning ${dash} still neutral. Returns: -2.5%.`;
     expect(sanitizeShareText(content)).toBe("Positioning, still neutral. Returns: -2.5%.");
     const caption = buildShareCaption({ ...post, title: `Yen ${dash} the setup`, content });
-    expect(caption).toBe("Yen, the setup\n\n• Positioning, still neutral\n• Returns: -2.5%");
+    expect(caption).toBe("Yen, the setup\n\nPositioning, still neutral.\n\nReturns: -2.5%.");
     expect(new URL(buildXShareUrl(content)).searchParams.get("text")).toBe("Positioning, still neutral. Returns: -2.5%.");
   });
   it("removes publisher profile links and handles without orphan URLs", () => {
     const caption = buildShareCaption({ ...post, content: "Neutral positioning. https://x.com/zerohedge/status/123 https://twitter.com/themarketear @ZeroHedge @themarketear" });
-    expect(caption).toBe("Yen hedge demand jumps\n\n• Neutral positioning");
+    expect(caption).toBe("Yen hedge demand jumps\n\nNeutral positioning.");
   });
 
   it.each(["The Market Ear", "themarketear", "ZeroHedge", "ZERO HEDGE", "Zero-Hedge"])("excludes %s from embedded text and edited X captions", publisher => {
@@ -62,7 +63,7 @@ describe("social captions", () => {
   });
   it("omits feed attribution and preserves the full caption through the X intent", () => {
     const caption = buildShareCaption(post);
-    expect(caption).toBe("Yen hedge demand jumps\n\n• Positioning is near neutral");
+    expect(caption).toBe("Yen hedge demand jumps\n\nPositioning is near neutral.");
     const url = new URL(buildXShareUrl(caption));
     expect(url.origin + url.pathname).toBe("https://twitter.com/intent/tweet");
     expect(url.searchParams.get("text")).toBe(caption);
@@ -73,7 +74,7 @@ describe("social captions", () => {
       fileId: "file-private-id", revision: "private-revision", contentHash: "secret", url: "/api/newsfeed/research/files/secret.pdf",
     } };
     const caption = buildShareCaption(privatePost);
-    expect(caption).toBe("Yen hedge demand jumps\n\n• Positioning is near neutral\n\nSource: J.P. Morgan · 2026-09-03");
+    expect(caption).toBe("Yen hedge demand jumps\n\nPositioning is near neutral.\n\nSource: J.P. Morgan · 2026-09-03");
     expect(caption).toContain("Source: J.P. Morgan");
     expect(caption).not.toMatch(/secret|private|\/api\//);
   });
@@ -85,22 +86,20 @@ describe("social captions", () => {
   });
   it("builds an X-native fallback for the equity-issuance $252bn / $700bn post", () => {
     const caption = buildShareCaption(equityIssuance);
-    const bullets = caption.split("\n").filter(line => line.startsWith("• "));
     assertXCaption(caption);
     expect(caption.split("\n")[0]).toMatch(/\$252bn/i);
     expect(caption.split("\n")[0]).not.toMatch(/\$700bn/i);
     expect(caption).toContain("$252bn");
     expect(caption).toContain("$700bn");
-    expect(bullets.length).toBeGreaterThanOrEqual(2);
     expect(caption).toMatch(/overhang|headwind|hyperscaler|AI/i);
     expect(caption).toMatch(/Source: Goldman Midday Market Intelligence · 2026-09-17\s*$/);
-    expect(caption.indexOf("Source:")).toBeGreaterThan(caption.lastIndexOf("• "));
+    expect(caption.split("\n\n").pop()).toMatch(/^Source: /);
     expect(caption).not.toContain("Sarah Herring");
     expect(caption).not.toContain("Richard Ramsden");
     expect(caption).not.toMatch(/across IPOs/i);
     expect(new URL(buildXShareUrl(caption)).searchParams.get("text")).toBe(caption);
   });
-  it("preserves rewritten bullets and keeps source last", () => {
+  it("turns rewritten bullets into sentences and keeps source last", () => {
     const caption = buildShareCaption({
       ...equityIssuance,
       title: "US corps raised a record $252bn in 2Q equity supply",
@@ -108,16 +107,22 @@ describe("social captions", () => {
     });
     expect(caption).toBe(
       "US corps raised a record $252bn in 2Q equity supply\n\n"
-      + "• Goldman sees ~$700bn total equity supply in 2026\n"
-      + "• AI infra / hyperscaler capex is a big slice\n"
-      + "• Supply overhang = headwind, not a gale\n\n"
+      + "Goldman sees ~$700bn total equity supply in 2026.\n\n"
+      + "AI infra / hyperscaler capex is a big slice.\n\n"
+      + "Supply overhang = headwind, not a gale.\n\n"
       + "Source: Goldman Midday Market Intelligence · 2026-09-17",
     );
     assertXCaption(caption);
   });
-  it("assembles a voice caption without flattening bullet newlines", () => {
+  it("assembles a voice caption as blank-line separated sentences", () => {
     const caption = assembleShareCaption("Seasonality", "• 104 to 130\n• Year 3, month +9.");
-    expect(caption).toBe("Seasonality\n\n• 104 to 130\n• Year 3, month +9");
+    expect(caption).toBe("Seasonality\n\n104 to 130.\n\nYear 3, month +9.");
+  });
+  it("drops a line that will not fit rather than cutting a sentence mid word", () => {
+    const quoted = "The Energy Department said the SPR's minimum inventory is determined by \"cavern mechanics\", which the desk says translates to a conservative operational minimum of about 70 million barrels for the reserve overall.";
+    const caption = assembleShareCaption("SPR is down to around 285 million barrels", `The oil buffer is getting thin. ${quoted}`);
+    expect(caption).not.toContain("cavern");
+    expect(caption).toBe("SPR is down to around 285 million barrels\n\nThe oil buffer is getting thin.");
   });
 });
 
@@ -236,10 +241,10 @@ describe("PNG export", () => {
 
 // Rendering is tested independently of browser image codecs; E2E validates real pixels.
 describe("caption sentence splitting", () => {
-  it("does not split a bullet at a month abbreviation", async () => {
+  it("does not split a line at a month abbreviation", async () => {
     const { assembleShareCaption } = await import("../lib/newsfeedShare");
     const caption = assembleShareCaption("Muse launch", "Meta launched Muse on Sept. 8 and it rattled the internet sector. EXPE fell 5.4%.");
-    expect(caption).toContain("• Meta launched Muse on Sept. 8 and it rattled the internet sector");
+    expect(caption).toContain("Meta launched Muse on Sept. 8 and it rattled the internet sector.");
   });
 });
 
