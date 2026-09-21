@@ -281,7 +281,7 @@ def report_health(root, stop):
 
 def poll(root, state, interval, stopping, stop, wake, backoff, healthy,
          client_factory=None, clock=None):
-    from research.worker import discover, heartbeat
+    from research.worker import DiscoveryError, discover, heartbeat
     clock = clock or time.monotonic
     client_factory = client_factory or (lambda: DropboxClient.from_env().connect())
     client, deadline = None, 0
@@ -304,6 +304,11 @@ def poll(root, state, interval, stopping, stop, wake, backoff, healthy,
                 backoff.record(error)
                 stage_health(root, 'discovery', 'error', error)
                 heartbeat(root, 'error', error, stage='discovery', local_only=True)
+                payload = {'stage': 'discovery', 'error': classify_error(error), 'interval': interval}
+                if isinstance(error, DiscoveryError):
+                    payload['discovered'] = error.discovered
+                    payload['discovery_errors'] = error.failures
+                print(json.dumps(payload), flush=True)
             finally:
                 wake.set()
                 health_path = Path(root) / 'health.json'

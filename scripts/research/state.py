@@ -23,15 +23,59 @@ def _persist_error(error: BaseException) -> str:
 
 ROOT = '/joe mccann/current'
 MONTHS = ('January February March April May June July August September October November December').split()
+DEFAULT_LOOKBACK_DAYS = 7
+MAX_LOOKBACK_DAYS = 31
 
 
-def date_scopes(now=None, timezone='America/New_York'):
+def lookback_days(env=None):
+    env = os.environ if env is None else env
+    raw = env.get('RADON_RESEARCH_LOOKBACK_DAYS', str(DEFAULT_LOOKBACK_DAYS))
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_LOOKBACK_DAYS
+    return max(1, min(value, MAX_LOOKBACK_DAYS))
+
+
+def date_scopes(now=None, timezone='America/New_York', days=None):
     now = now or datetime.now(ZoneInfo(timezone))
     if now.tzinfo is None:
         raise ValueError('An aware timestamp is required')
     today = now.astimezone(ZoneInfo(timezone)).date()
+    if days is None:
+        span = lookback_days()
+    else:
+        try:
+            span = int(days)
+        except (TypeError, ValueError):
+            raise ValueError('Lookback days must be an integer') from None
+        if span < 1:
+            raise ValueError('Lookback days must be at least 1')
+        span = min(span, MAX_LOOKBACK_DAYS)
+    dates = [today - timedelta(days=offset) for offset in range(span - 1, -1, -1)]
     return [(f'{d.year}/{MONTHS[d.month-1]}/{MONTHS[d.month-1][:3]} {d.day:02}'.lower(), d.isoformat())
-            for d in (today - timedelta(days=1), today)]
+            for d in dates]
+
+
+def should_persist_cursor(page, *, started, eligible_count):
+    if eligible_count > 0:
+        return True
+    return bool(started) and page.get('has_more') is False
+
+
+def folder_backlog_gap(eligible_count, work_count):
+    try:
+        eligible_count = int(eligible_count)
+        work_count = int(work_count)
+    except (TypeError, ValueError):
+        return None
+    if eligible_count < 0 or work_count < 0:
+        return None
+    if eligible_count > 0 and work_count == 0:
+        return {'type': 'dropbox_work_gap', 'eligible': eligible_count, 'work': work_count}
+    if eligible_count >= 10 and eligible_count >= 2 * work_count:
+        return {'type': 'dropbox_work_gap', 'eligible': eligible_count, 'work': work_count}
+    return None
 
 
 def eligible(entry):
@@ -106,7 +150,16 @@ class State:
         with self.db:
             self.db.execute("UPDATE cursors SET cursor='' WHERE scope=?", (scope.lower(),))
 
-    def ingest_page(self, scope, page, folder_date=None):
+    def work_count(self, scope=None, folder_date=None):
+        if folder_date:
+            row = self.db.execute('SELECT COUNT(*) FROM work WHERE folder_date=?', (folder_date,)).fetchone()
+        elif scope:
+            row = self.db.execute('SELECT COUNT(*) FROM work WHERE scope=?', (scope.lower(),)).fetchone()
+        else:
+            raise ValueError('scope or folder_date required')
+        return int(row[0])
+
+    def ingest_page(self, scope, page, folder_date=None, persist_cursor=None):
         if (not isinstance(scope, str) or scope.startswith('/') or ':' in scope or '\\' in scope
                 or any(p in ('', '.', '..') for p in scope.split('/'))):
             raise ValueError('Invalid scope')
@@ -115,6 +168,7 @@ class State:
         if not isinstance(page.get('cursor'), str) or not page['cursor']:
             raise ValueError('Missing cursor')
         added = 0
+        eligible_count = 0
         with self.db:
             previous = self.db.execute('SELECT folder_date FROM cursors WHERE scope=?', (scope.lower(),)).fetchone()
             folder_date = folder_date or (previous[0] if previous else None)
@@ -132,6 +186,7 @@ class State:
                     continue
                 if not eligible(entry):
                     continue
+                eligible_count += 1
                 if not all(isinstance(entry.get(k), str) and entry[k] for k in ('id','rev','content_hash')):
                     raise ValueError('Incomplete file revision')
                 key = work_key(entry)
@@ -142,7 +197,10 @@ class State:
                 self.db.execute("UPDATE work SET status='superseded' WHERE file_id=? AND rev!=? AND status NOT IN ('published','deleted')", (entry['id'], entry['rev']))
                 added += self.db.execute('''INSERT OR IGNORE INTO work(key,file_id,rev,path,scope,folder_date,metadata)
                   VALUES(?,?,?,?,?,?,?)''', (key,entry['id'],entry['rev'],path,scope,folder_date,json.dumps(entry))).rowcount
-            self.db.execute('INSERT INTO cursors VALUES(?,?,?) ON CONFLICT(scope) DO UPDATE SET cursor=excluded.cursor,folder_date=excluded.folder_date', (scope,page['cursor'],folder_date))
+            if persist_cursor is None:
+                persist_cursor = eligible_count > 0
+            if persist_cursor:
+                self.db.execute('INSERT INTO cursors VALUES(?,?,?) ON CONFLICT(scope) DO UPDATE SET cursor=excluded.cursor,folder_date=excluded.folder_date', (scope,page['cursor'],folder_date))
         return added
 
     def unparsed(self, limit=20):

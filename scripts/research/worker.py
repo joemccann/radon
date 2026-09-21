@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from research.dropbox import DropboxClient, DropboxError
 from research.model import PROVIDER_PARK_SECS, classify_error, is_provider_outage
-from research.state import State, date_scopes
+from research.state import State, date_scopes, eligible, folder_backlog_gap, should_persist_cursor
 from utils.atomic_io import atomic_save
 
 
@@ -48,7 +48,7 @@ def heartbeat(root, state, error=None, stage=None, local_only=False):
 
 def discover(client, state, now=None, current_only=False, on_page=None):
     dates = date_scopes(now)
-    scopes = dict(dates[-1:] if current_only else dates)
+    scopes = dict(dates)
     if not current_only:
         for scope in state.scopes():
             scopes.setdefault(scope, None)
@@ -58,24 +58,41 @@ def discover(client, state, now=None, current_only=False, on_page=None):
     for scope, folder_date in scopes.items():
         try:
             cursor = state.cursor(scope)
+            if state.work_count(scope=scope, folder_date=folder_date) == 0:
+                if cursor:
+                    state.reset_cursor(scope)
+                cursor = None
             reset = False
+            started = cursor is None
+            eligible_seen = 0
             for _ in range(100):
                 try:
                     page = client.list_page(scope, cursor=cursor)
                 except DropboxError as error:
                     if error.status == 409 and cursor and not reset:
                         state.reset_cursor(scope)
-                        cursor, reset = None, True
+                        cursor, reset, started = None, True, True
                         continue
                     if error.status == 409 and not cursor:
                         # Date folder not yet created or previously watched folder removed.
                         break
                     raise
-                added += state.ingest_page(scope, page, folder_date)
+                page_eligible = sum(1 for entry in page['entries'] if eligible(entry))
+                eligible_seen += page_eligible
+                persist = should_persist_cursor(page, started=started, eligible_count=page_eligible)
+                added += state.ingest_page(scope, page, folder_date, persist_cursor=persist)
                 if on_page is not None:
                     on_page()
                 cursor = page['cursor']
                 if not page.get('has_more'):
+                    gap = folder_backlog_gap(eligible_seen, state.work_count(scope=scope, folder_date=folder_date))
+                    if gap:
+                        failure = {'stage': 'discovery', 'type': gap['type'],
+                                   'scope_id': hashlib.sha256(scope.encode()).hexdigest()[:16],
+                                   'eligible': gap['eligible'], 'work': gap['work']}
+                        if folder_date:
+                            failure['folder_date'] = folder_date
+                        failures.append(failure)
                     break
             else:
                 raise RuntimeError('Dropbox pagination limit exceeded')
