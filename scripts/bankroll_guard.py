@@ -123,14 +123,21 @@ def _order_legs(params: dict) -> Optional[list[tuple[tuple, float]]]:
 
 
 def is_close_out(params: dict, snapshot: Optional[dict]) -> bool:
-    """True when every leg only reduces a held position, never flips it."""
+    """True when the combined delta per contract reduces holdings without a flip."""
     if not isinstance(snapshot, dict):
         return False
     legs = _order_legs(params)
     if not legs:
         return False
     held = _held_quantities(snapshot)
+    changes: dict[tuple, float] = {}
     for key, change in legs:
+        if _finite(change) is None:
+            return False
+        changes[key] = changes.get(key, 0.0) + change
+    for key, change in changes.items():
+        if _finite(change) is None:
+            return False
         position = held.get(key, 0.0)
         if position == 0 or change == 0 or (position > 0) == (change > 0):
             return False
@@ -143,7 +150,26 @@ def order_max_loss(params: dict) -> Optional[float]:
     """Defined worst-case loss in dollars; None when undefined or unpriceable."""
     order_type = str(params.get("type") or "stock").lower()
     if order_type == "combo":
-        return combo_max_loss(params)
+        if str(params.get("action") or "").upper().startswith("SELL"):
+            legs = params.get("legs")
+            if not isinstance(legs, list) or any(not isinstance(leg, dict) for leg in legs):
+                return None
+            # A SELL BAG reverses each leg's execution direction. Keep the
+            # envelope and price intact so the premium sign is still correct.
+            params = {**params, "legs": [
+                {**leg, "action": "BUY" if str(leg.get("action") or "").upper().startswith("SELL") else "SELL"}
+                for leg in legs
+            ]}
+        loss = _finite(combo_max_loss(params))
+        quantity = _finite(params.get("quantity"))
+        price = _finite(params.get("limitPrice") or params.get("stopPrice"))
+        if loss is None or quantity is None or price is None or quantity == 0 or price == 0:
+            return None
+        sell = str(params.get("action") or "").upper().startswith("SELL")
+        # The margin proxy can be zero for all-long legs; premium paid is
+        # still exposed even when there is no short-leg assignment risk.
+        debit = abs(quantity * price) * 100.0 if (price > 0) != sell else 0.0
+        return max(loss, debit)
     sell = str(params.get("action") or "").upper().startswith("SELL")
     quantity = abs(_finite(params.get("quantity")) or 0.0)
     price = abs(_finite(params.get("limitPrice")) or _finite(params.get("stopPrice")) or 0.0)
