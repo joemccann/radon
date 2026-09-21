@@ -588,6 +588,15 @@ Staleness windows live in `web/lib/serviceHealthWindows.ts`. Cycle-driven writer
 
 **Throttle backoff.** Only Flex code 1018 is a rate limit; the breaker ladder is 90s -> 5m -> 15m -> 1h. 1001/1009 take the soft lane; 1019 on a poll is not an error. Detail: `scripts/monitor_daemon/CLAUDE.md`.
 
+## Legacy Flex aggregate gross coverage
+
+`scripts/rebuild_flex_gross_breakdown.py` stamps `gross_fill_breakdown` on legacy `+`-joined / `CLOSED` journal rows from saved Flex trade statements (execution level). It never calls the Flex Web Service. A row is stamped only when every tradeID part appears exactly once (after superseded corrections are dropped), no other aggregate claims it, the contract matches and the executions reproduce the row's recorded totals. Everything else is refused with a reason; rows with no part in the files are reported as out of statement period. Dry run by default; `--apply` writes only that field in one transaction, guarded on the unchanged payload, then re-reads every stamped row.
+
+```bash
+python -m scripts.rebuild_flex_gross_breakdown --xml path/to/trades.xml           # dry run
+python -m scripts.rebuild_flex_gross_breakdown --xml path/to/trades.xml --apply   # operator only
+```
+
 ## Deployment
 
 `git push origin main` triggers `.github/workflows/ci.yml`. Superseded test jobs
