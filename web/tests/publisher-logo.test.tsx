@@ -61,6 +61,8 @@ describe("<PublisherLogo />", () => {
 
   it("renders label and type badge when showLabel is true", () => {
     render(<PublisherLogo publisher="Goldman Sachs" showLabel showType />);
+    const badge = screen.getByTestId("publisher-badge");
+    expect(badge).toBeDefined();
     expect(screen.getByText("Goldman Sachs")).toBeDefined();
     expect(screen.getByText("Research")).toBeDefined();
   });
@@ -78,5 +80,17 @@ describe("<PublisherLogo />", () => {
     const img = screen.getByRole("img", { hidden: true });
     expect(img.getAttribute("width")).toBe("24");
     expect(img.getAttribute("height")).toBe("24");
+  });
+
+  it("uses canonical tokens and does not use low-contrast text-base fallback in module CSS", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const css = fs.readFileSync(path.resolve(__dirname, "../components/PublisherLogo.module.css"), "utf8");
+    expect(css).toContain("var(--text-primary)");
+    expect(css).toContain("var(--bg-subtle)");
+    expect(css).toContain("var(--line-grid)");
+    expect(css).toContain("var(--img-outline)");
+    expect(css).not.toContain("--text-base");
+    expect(css).not.toContain("#e2e8f0");
   });
 });
