@@ -41,8 +41,15 @@ export function parseVoiceCopy(raw: string, source: NewsfeedVoiceInput): Newsfee
   if (raw.length > 20_000) throw new Error("Invalid voice output");
   const clean = voiceInput(JSON.parse(jsonPayload(raw)));
   if (!clean) throw new Error("Invalid voice output");
-  const sourceNumbers = new Set(numericClaims(`${source.title}\n${source.content}`));
-  if (numericClaims(`${clean.title}\n${clean.content}`).some(value => !sourceNumbers.has(value))) {
+  // Currency symbols are notation. A unit may attach to a source number that had
+  // none (a range "$30-$50B" rewritten "$30B-$50B"), never replace a source unit.
+  const noCurrency = (value: string) => value.replace(/^[$€£]/, "");
+  const bare = (value: string) => noCurrency(value).replace(/(?:million|billion|trillion|[kmbt])$/, "");
+  const sourceClaims = numericClaims(`${source.title}\n${source.content}`).map(noCurrency);
+  const exact = new Set(sourceClaims);
+  const unitless = new Set(sourceClaims.filter(value => bare(value) === value));
+  if (numericClaims(`${clean.title}\n${clean.content}`).map(noCurrency)
+    .some(value => !exact.has(value) && !unitless.has(bare(value)))) {
     throw new Error("Unsupported numerical claim");
   }
   return { ...clean, caption: assembleShareCaption(clean.title, clean.content) };

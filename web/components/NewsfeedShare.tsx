@@ -96,7 +96,6 @@ function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: s
     setPreview(undefined);
     controller.current?.abort();
     setError("");
-    if (rewriting) return;
     void renderShareCard(sharePost, imageUrl).then(async rendered => {
       const blob = await canvasToPng(rendered);
       if (cancelled) return;
@@ -105,7 +104,7 @@ function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: s
       setPreview(url);
     }).catch(err => { if (!cancelled) setError(userErrorMessage(err, "Could not prepare the image. Retry to export.")); });
     return () => { cancelled = true; if (url) URL.revokeObjectURL(url); };
-  }, [sharePost, imageUrl, attempt, rewriting]);
+  }, [sharePost, imageUrl, attempt]);
 
   async function download(video: boolean) {
     if (!canvas.current || busy || rewriting) return;
