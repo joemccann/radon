@@ -13,6 +13,7 @@ import NewsfeedShare from "./NewsfeedShare";
 import { getImageSource } from "@/lib/newsfeedSource";
 import NewsfeedPostContent from "./NewsfeedPostContent";
 import StarToggle from "@/components/StarToggle";
+import PublisherLogo from "./PublisherLogo";
 
 export type NewsfeedLightboxFocus = {
   post: MarketEarPost & { href: string; isoTimestamp: string };
@@ -217,6 +218,11 @@ export default function NewsfeedLightbox({
 
           <article className="newsfeed-lightbox__copy">
             <header className="newsfeed-lightbox__head">
+              {post.source ? (
+                <div style={{ marginBottom: "8px" }} data-testid="lightbox-publisher-badge">
+                  <PublisherLogo publisher={post.source.publisher} showLabel showType size={16} />
+                </div>
+              ) : null}
               <p className="newsfeed-lightbox__kicker">
                 Live Market Analysis · {relative}
                 {time ? ` at ${time}` : ""}
@@ -243,7 +249,11 @@ export default function NewsfeedLightbox({
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                <LinkIcon size={12} />
+                {post.source ? (
+                  <PublisherLogo publisher={post.source.publisher} size={14} aria-hidden />
+                ) : (
+                  <LinkIcon size={12} />
+                )}
                 <span>{post.source ? "Source PDF" : "Open original"}</span>
               </a>
               <StarToggle
