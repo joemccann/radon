@@ -16031,6 +16031,17 @@ body[data-mobile="true"] .toast-container {
   --toast-viewport-max-height: 40dvh;
 }
 
+/* Same rule for a phone-width window that never mounts the mobile chrome, and
+   so never sets data-mobile: the chat launcher goes full-bleed there and puts
+   Send in the bottom-right corner the stack docks to. */
+@media (max-width: 640px) {
+  .toast-container {
+    top: calc(var(--safe-top, 0px) + 12px);
+    bottom: auto;
+    --toast-viewport-max-height: 40dvh;
+  }
+}
+
 .mobile-shell {
   position: relative;
   min-height: 100dvh;
