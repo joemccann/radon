@@ -7650,6 +7650,7 @@ body[data-mobile="true"] .orders-command-strip__jump:active {
 
 .modify-quick-buttons {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
@@ -7660,7 +7661,8 @@ body[data-mobile="true"] .orders-command-strip__jump:active {
 }
 
 .btn-quick {
-  flex: 1;
+  flex: 1 1 64px;
+  min-width: 0;
   font-family: var(--font-mono);
   font-size: var(--text-meta);
   text-transform: uppercase;
