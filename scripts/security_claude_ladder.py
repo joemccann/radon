@@ -6,7 +6,7 @@ generation, run the prior / second-newest first, then the rest. Anthropic
 keeps shipping top-tier models; a static opus pin goes stale.
 
 Catalog source is the same subscription CLI the wrappers already launch
-(`claude models`). This module never calls api.anthropic.com and unsets
+(`claude models`). This module never calls the Anthropic HTTP API and unsets
 every billing-reroute key before spawning Claude Code.
 
 Order: newest-first as printed by `claude models` (Mini 2026-09-21 listed
