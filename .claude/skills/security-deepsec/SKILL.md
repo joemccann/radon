@@ -52,7 +52,11 @@ completion marker.
 
 ## Runner integration and fail-closed default
 
-The wrapper (`scripts/security_deepsec_nightly.sh`) owns the runner
+The wrapper (`scripts/security_deepsec_nightly.sh`) pins Claude to
+`claude-opus-5` (second-newest as of Mini `claude models` 2026-09-21) with
+`--effort medium`. Fable / `claude-fable-*` / top-tier is out of security
+nightlies so Max quota is not burned first. Do not put fable back via
+`RADON_WEEKEND_MODEL_LADDER`. It owns the runner
 mechanics: it refuses unless BOTH `.radon-weekend-runner` and
 `.radon-security-deepsec-runner` exist (so it can never run in the security
 loop's clone, another loop's clone, or the operator checkout), takes the

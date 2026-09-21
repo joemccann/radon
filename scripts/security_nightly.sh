@@ -1152,12 +1152,22 @@ RETRY_PAUSE_SECS=60
 # the same Max login. Pinning the model also takes the operator's global
 # default off the unattended path: an interactive session changing it must not
 # decide what tonight runs on.
+#
+# 2026-09-21: cycle 20260921 died rc=1 on "You've reached your Fable limit"
+# because the previous default still led with claude-fable-5[1m]. Security
+# nightlies (this loop + security-deepsec) now pin the second-newest Claude
+# with --effort medium. Mini `claude models` that day (Claude Code 2.1.278 /
+# Claude Max): claude-fable-5-1 newest/elite OUT; claude-opus-5 PIN (live id,
+# no [1m] alias in that catalog); claude-sonnet-5 fallback. Wrappers pass
+# --model and --effort medium so Mini ~/.claude/settings.json
+# (`model: claude-fable-5-1`, `effortLevel: low`) cannot win on unattended
+# runs. Do not put fable / claude-fable-* back via RADON_WEEKEND_MODEL_LADDER.
 LOOP_SKILL="security-nightly"
 LOOP_LOG_TAG="security-nightly"
 PORTABLE_PROMPT_DIR="${RADON_PORTABLE_PROMPT_DIR:-$REPO/.claude/portable-prompts}"
 # `RADON_WEEKEND_MODEL_LADDER` still names claude rungs, for the loops that
 # have them; `RADON_WEEKEND_PROVIDER_LADDER` overrides the whole ladder.
-MODEL_LADDER="${RADON_WEEKEND_MODEL_LADDER:-claude-fable-5[1m] claude-opus-5[1m] claude-opus-5 claude-sonnet-5}"
+MODEL_LADDER="${RADON_WEEKEND_MODEL_LADDER:-claude-opus-5 claude-sonnet-5}"
 PROVIDER_LADDER="${RADON_WEEKEND_PROVIDER_LADDER:-}"
 if [[ -z "$PROVIDER_LADDER" ]]; then
   for _m in $MODEL_LADDER; do
@@ -1408,6 +1418,7 @@ launch_round() {
       CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 "$TIMEOUT_BIN" -k "$KILL_AFTER_SECS" "$remain" \
         "$RUNG_BIN" -p "/$LOOP_SKILL $PHASE" \
         ${model_flag[@]+"${model_flag[@]}"} \
+        --effort medium \
         --dangerously-skip-permissions \
         --disallowedTools ScheduleWakeup Monitor CronCreate \
         --output-format text >> "$RUN_LOG" 2>&1 &
