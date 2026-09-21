@@ -114,6 +114,18 @@ test.describe("dashboard feed tabs", () => {
       const sourceX = await textStartX(rail.locator('[data-k="source"] .k'));
       const commentaryX = await textStartX(page.getByTestId("feed-tab-commentary"));
       expect(Math.abs(sourceX - commentaryX)).toBeLessThanOrEqual(1);
+
+      const basisLabel = rail.locator('[data-k="capture.basis"] .k');
+      await expect(basisLabel).toHaveCSS("white-space", "nowrap");
+      expect(await basisLabel.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
+      expect(itemBoxes[0].x + itemBoxes[0].width).toBeLessThanOrEqual(itemBoxes[1].x + 1);
+      expect(itemBoxes[1].x + itemBoxes[1].width).toBeLessThanOrEqual(itemBoxes[2].x + 1);
+      const gap1 = itemBoxes[1].x - (itemBoxes[0].x + itemBoxes[0].width);
+      const gap2 = itemBoxes[2].x - (itemBoxes[1].x + itemBoxes[1].width);
+      expect(gap1).toBeGreaterThan(0);
+      expect(Math.abs(gap1 - gap2)).toBeLessThanOrEqual(2);
+      const sourceValueBox = (await sourceValue.boundingBox())!;
+      expect(itemBoxes[1].x - (sourceValueBox.x + sourceValueBox.width)).toBeLessThanOrEqual(24);
     }
   });
 
@@ -140,22 +152,46 @@ test.describe("dashboard feed tabs", () => {
     expect(Math.abs(itemBoxes[0].y - itemBoxes[2].y)).toBeLessThanOrEqual(1);
   });
 
-  test("Held --- does not shift the basis item, and mobile stacks without overflow", async ({ page }) => {
+  test("Held empty rail keeps Capture basis intact and stacks evenly on mobile", async ({ page }) => {
     await fulfillFeed(page, [{ ...commentaryPost(), source: RESEARCH_SOURCE }]);
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto("/dashboard");
     const rail = page.getByTestId("feed-rail");
     await rail.scrollIntoViewIfNeeded();
-    const basisOffset = async () => {
-      const railBox = (await rail.boundingBox())!;
-      const basisBox = (await rail.locator('[data-k="capture.basis"]').boundingBox())!;
-      return basisBox.x - railBox.x;
-    };
-    const commentaryBasisX = await basisOffset();
     await page.getByTestId("feed-tab-held").click();
     await expect(page.getByText("Nothing held is waiting for review.")).toBeVisible();
     expect(await rail.locator('[data-k="last.sample"] .v').innerText()).toBe("---");
-    expect(Math.abs((await basisOffset()) - commentaryBasisX)).toBeLessThanOrEqual(1);
+
+    const basisLabel = rail.locator('[data-k="capture.basis"] .k');
+    await expect(basisLabel).toHaveText("Capture basis");
+    await expect(basisLabel).toHaveCSS("white-space", "nowrap");
+    expect(await basisLabel.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
+
+    const itemBoxes = await Promise.all(
+      ["source", "capture.basis", "last.sample"].map(async (key) =>
+        (await rail.locator(`[data-k="${key}"]`).boundingBox())!,
+      ),
+    );
+    expect(Math.abs(itemBoxes[0].y - itemBoxes[1].y)).toBeLessThanOrEqual(1);
+    expect(itemBoxes[0].x + itemBoxes[0].width).toBeLessThanOrEqual(itemBoxes[1].x + 1);
+    expect(itemBoxes[1].x + itemBoxes[1].width).toBeLessThanOrEqual(itemBoxes[2].x + 1);
+    const gap1 = itemBoxes[1].x - (itemBoxes[0].x + itemBoxes[0].width);
+    const gap2 = itemBoxes[2].x - (itemBoxes[1].x + itemBoxes[1].width);
+    expect(Math.abs(gap1 - gap2)).toBeLessThanOrEqual(2);
+    const sourceValueBox = (await rail.locator('[data-k="source"] .v').boundingBox())!;
+    expect(itemBoxes[1].x - (sourceValueBox.x + sourceValueBox.width)).toBeLessThanOrEqual(24);
+
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await rail.scrollIntoViewIfNeeded();
+    const midBoxes = await Promise.all(
+      ["source", "capture.basis", "last.sample"].map(async (key) =>
+        (await rail.locator(`[data-k="${key}"]`).boundingBox())!,
+      ),
+    );
+    expect(Math.abs(midBoxes[0].y - midBoxes[1].y)).toBeLessThanOrEqual(1);
+    expect(midBoxes[0].x + midBoxes[0].width).toBeLessThanOrEqual(midBoxes[1].x + 1);
+    expect(midBoxes[1].x + midBoxes[1].width).toBeLessThanOrEqual(midBoxes[2].x + 1);
+    await expect(basisLabel).toHaveCSS("white-space", "nowrap");
 
     await page.setViewportSize({ width: 393, height: 852 });
     await expect(page.locator("body")).toHaveAttribute("data-mobile", "true");
@@ -170,8 +206,12 @@ test.describe("dashboard feed tabs", () => {
     );
     expect(itemYs[1]).toBeGreaterThan(itemYs[0] + 4);
     expect(itemYs[2]).toBeGreaterThan(itemYs[1] + 4);
+    const keyGaps = [itemYs[1] - itemYs[0], itemYs[2] - itemYs[1]];
+    expect(Math.abs(keyGaps[0] - keyGaps[1])).toBeLessThanOrEqual(2);
     const overflow = await page.locator(".dashboard-news").evaluate((el) => el.scrollWidth - el.clientWidth);
     expect(overflow).toBeLessThanOrEqual(1);
+    await expect(basisLabel).toHaveCSS("white-space", "nowrap");
+    expect(await basisLabel.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
   });
 
   for (const theme of ["dark", "light"] as const) {
