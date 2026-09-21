@@ -34,7 +34,7 @@ python3.13 tools/codemap/generate_codemap.py
 # Generated maps belong only to this nightly branch.  Verify the regenerated
 # checkout before deciding whether a refresh PR is needed, so a generator
 # regression cannot silently publish stale or malformed import metadata.
-python3.13 -m pytest scripts/tests/test_codemap.py::TestCommittedArtifacts::test_matches_live_graph -q
+CODEMAP_NIGHTLY=1 python3.13 -m pytest scripts/tests/test_codemap.py::TestCommittedArtifacts::test_matches_live_graph -q
 if git diff --quiet -- "${ARTIFACTS[@]}"; then
   echo "codemap-nightly: fresh at $(git rev-parse --short HEAD)"
   exit 0
