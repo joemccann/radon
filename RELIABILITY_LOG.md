@@ -747,3 +747,11 @@ The stale-bankroll cases proved close-out exemption was removed, but did not exe
 The initial closing series is excluded from final-source acceptance after this follow-up. Its third stage is awaited to completion; the required drills and three consecutive full runs restart on the final source. No publication has occurred.
 
 Symmetric follow-up: extending the public-placement matrix to SHORT holdings exposed four additional fresh debit-flip cases (RED 4 failed, 40 passed). The bankroll bound is now also floored by premium paid, so an all-long combination cannot receive zero risk from the static short-leg margin proxy. Both envelope signs and held directions, ratios, true reductions, and long-combo debits exactly at the cap are covered. Final focused admission/all-path/limits/quadrants group: 98 passed. The source fix remains locally preserved pending the replacement full-gate series.
+
+## Remediation 2026-09-21 — REL-275 (reduced P0/P1)
+
+| Task | Status | Red / green | Evidence and remaining acceptance |
+|---|---|---|---|
+| REL-275 / R-695 | SOURCE-DONE; full closing gates pending | RED 13 failed, 7 passed; GREEN 35 passed | Destructive cleanup requires exact exclusive constituent IDs, contract/account compatibility, finite directional quantities and real matching first date. Shared/partial/corrected/cross-namespace claims are reported without deletion or invented metadata; explicit gross coverage must agree. SQLite apply preserves genuine quantity, basis and realized P&L; exact duplicate and dry-run controls pass. Six old tests asserting quantity-only inference were corrected to preserve their no-loss/idempotency intent. Live cleanup remains operator-only. |
+
+Prior REL-268/269/274 integrated in 5cc39f1c, retaining all four original commits; 143 focused passed. Untouched f3f63775 baseline: Python 14666 passed, 31 failed (runner process/lock supervision under sandbox), 1 skipped, 94 deselected; Vitest 9942 passed. No all-gates-green claim. P2 findings remain outside RADON_WEEKEND_REDUCED=1 scope with complete acceptance in issue #81. Completed source work is committed before long closing verification per the preservation mandate.

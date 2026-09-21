@@ -7980,7 +7980,7 @@ Review: plan PR #576 was design only. This implement PR adds the host run-server
 ## Reliability remediate 2026-09-21 (reduced P0/P1)
 - [x] T1 depends_on: [] Establish full-gate baseline and reconcile authoritative issue #81 handoff.
 - [x] T2 depends_on: [T1] Integrate unpublished REL-268/269/274 commits, preserving source and recorded evidence.
-- [ ] T3 depends_on: [T2] REL-275 fault-injection red/green and surgical identity-bound cleanup.
+- [x] T3 depends_on: [T2] REL-275 fault-injection red/green and surgical identity-bound cleanup.
 - [ ] T4 depends_on: [T3] Permanent drills and three consecutive full gates; review diff and guarded publication.
 - [ ] T5 depends_on: [T4] Persist complete dispositions, acceptance and operator actions on issue #81.
 Dependency graph: T1 -> T2 -> T3 -> T4 -> T5.
