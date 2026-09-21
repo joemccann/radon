@@ -427,8 +427,18 @@ phase may need to commit substantive work to that branch. Arming the deliver rec
 returned `Could not resolve host` (000), so `gh` could not comment on the
 rolling issue, open the PR or read CI and `git push` could not reach origin;
 that is what the "GitHub auth/DNS" messages actually were, not an auth problem.
+A fourth gap surfaced on 2026-09-21: the phase contract keeps report-only
+state in durable runner scratch, also one level above the clone
+(`~/radon-weekend/.documentation-nightly-scratch/`, and `$PRIVATE_SCRATCH` for
+the two security loops). Every write there was denied, so the documentation
+audit ended INCOMPLETE (exit 75, `required durable scratch directory is not
+writable`) on every fire and remediate had no handoff to consume.
 The launcher therefore passes
-`-c sandbox_workspace_write={network_access=true,writable_roots=["$REPO/.git","$WEEKEND_ROOT/.$LOOP_SLUG-deliver"]}`.
+`-c sandbox_workspace_write={network_access=true,writable_roots=["$REPO/.git","$WEEKEND_ROOT/.$LOOP_SLUG-deliver","$WEEKEND_ROOT/.$LOOP_SLUG-nightly-scratch"]}`
+on the fallback loops, and `"$PRIVATE_SCRATCH"` as the third root on security
+and DeepSec. A root that does not exist yet is accepted by codex, so loops
+without a scratch dir carry the same line and `launch_round` stays identical
+within each family. `scripts/tests/test_codex_scratch_writable.py` pins it.
 Each grant is the narrowest that lets a phase meet its own contract;
 `--dangerously-bypass-approvals-and-sandbox` stays off, so the rung keeps a
 bounded grant matching the claude rung's scope rather than exceeding it.
