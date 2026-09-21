@@ -1454,13 +1454,19 @@ launch_round() {
       #                        read CI, and `git push` cannot reach origin.
       #                        Verified: network_access=true -> 200.
       #
+      #   scratch              the phase contract keeps report-only state in
+      #                        durable runner scratch one level ABOVE the clone,
+      #                        so every audit write was denied and the phase
+      #                        ended INCOMPLETE ("required durable scratch
+      #                        directory is not writable") on every fire.
+      #
       # Each grant is the narrowest that lets the phase meet its own contract.
       # The bypass flag stays off, so this remains a bounded grant matching the
       # claude rung's scope rather than exceeding it.
       "$TIMEOUT_BIN" -k "$KILL_AFTER_SECS" "$remain" \
         "$RUNG_BIN" exec ${model_flag[@]+"${model_flag[@]}"} \
         -c model_reasoning_effort="medium" \
-        -c "sandbox_workspace_write={network_access=true,writable_roots=[\"$REPO/.git\",\"$WEEKEND_ROOT/.$LOOP_SLUG-deliver\"]}" \
+        -c "sandbox_workspace_write={network_access=true,writable_roots=[\"$REPO/.git\",\"$WEEKEND_ROOT/.$LOOP_SLUG-deliver\",\"$PRIVATE_SCRATCH\"]}" \
         -C "$REPO" --color never \
         --sandbox workspace-write --skip-git-repo-check \
         - < "$prompt_file" >> "$RUN_LOG" 2>&1 &
