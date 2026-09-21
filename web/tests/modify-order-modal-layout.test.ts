@@ -36,4 +36,16 @@ describe("ModifyOrderModal layout CSS", () => {
     expect(inputRow).toContain("min-width: 0");
     expect(input).toContain("min-width: 0");
   });
+
+  it("lets reference-price buttons shrink and wrap instead of overflowing the panel", async () => {
+    const css = await readSource("../app/globals.css");
+    const clear = await readSource("../app/clear.css");
+    const row = cssBlock(css, ".modify-quick-buttons");
+    const button = cssBlock(css, ".btn-quick");
+    const clearButton = cssBlock(clear, ".radon-clear .btn-quick");
+
+    expect(row).toContain("flex-wrap: wrap");
+    expect(button).toContain("min-width: 0");
+    expect(clearButton).toContain("padding-inline: 8px");
+  });
 });
