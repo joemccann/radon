@@ -159,6 +159,12 @@ const PUBLISHER_RULES: PublisherRule[] = [
     iconUrl: "/icons/publishers/syz.svg",
     pattern: /\b(?:syz|banque\s*syz)\b/i,
   },
+  {
+    id: "unicredit",
+    name: "UniCredit",
+    iconUrl: "/icons/publishers/unicredit.svg",
+    pattern: /\b(?:unicredit|hypovereinsbank)\b/i,
+  },
 ];
 
 /**

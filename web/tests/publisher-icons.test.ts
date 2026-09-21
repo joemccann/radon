@@ -109,6 +109,7 @@ describe("resolvePublisher", () => {
     expect(resolvePublisher("Pictet")?.id).toBe("pictet");
     expect(resolvePublisher("SEB")?.id).toBe("seb");
     expect(resolvePublisher("Banque Syz")?.id).toBe("syz");
+    expect(resolvePublisher("UniCredit")?.id).toBe("unicredit");
   });
 
   it("resolves Raymond James and desk variants", () => {
@@ -168,6 +169,18 @@ describe("resolvePublisher", () => {
     expect(resolvePublisher("Syz")?.id).toBe("syz");
     expect(resolvePublisher("Syz Bank")?.id).toBe("syz");
     expect(resolvePublisher("Syz Group")?.id).toBe("syz");
+  });
+
+  it("resolves UniCredit and desk variants", () => {
+    expect(resolvePublisher("UniCredit")).toEqual({
+      id: "unicredit",
+      name: "UniCredit",
+      iconUrl: "/icons/publishers/unicredit.svg",
+      isFallback: false,
+    });
+    expect(resolvePublisher("UniCredit Research")?.id).toBe("unicredit");
+    expect(resolvePublisher("UniCredit Bank")?.id).toBe("unicredit");
+    expect(resolvePublisher("HypoVereinsbank")?.id).toBe("unicredit");
   });
 
   it("falls back to default icon for unrecognized, unknown, or empty publishers", () => {
