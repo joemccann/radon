@@ -333,6 +333,43 @@ Reported 2026-08-25 as "502 on https://app.radon.run/admin".
 
 ---
 
+## relay-stop-sigterm-holds-the-tier
+
+**The edge 502s for about 90s during a deploy, then the deploy rolls back.**
+Reported 2026-09-21 19:25Z as production network timeouts on `/portfolio`.
+
+- **Mechanism:** `stop-clean` stops every app unit, then waits up to 60s for
+  each to go inactive. `radon-nextjs` and `radon-api` die on SIGTERM in about
+  a second. The relay's SIGINT listener cancelled market data and called
+  `ib.disconnect()` before `process.exit`, so the process stayed in
+  `stop-sigterm`. systemd's default `TimeoutStopSec` is 90s. Journal at
+  19:25:54Z: `unable to signal init: permission denied` (SIGCONT, AppArmor,
+  logged on every deploy, including the ones that stop in the same second),
+  then `State 'stop-sigterm' timed out` and SIGKILL of `node` at 19:27:24Z.
+  The helper aborted at 60s (`timed out waiting for radon-relay.service to
+  become inactive`, exit 71) and restored `761f57c`. Next.js was down
+  19:25:55Z to 19:27:26Z. The browser showed 502s on `/api/portfolio`,
+  `/api/admin/health`, and `/api/risk-free-rate`, plus the Chrome
+  `AbortSignal.timeout` toast. A same-day successful promote
+  (19:16:24Z to 19:18:26Z) held the tier down for two minutes inside
+  `activate_staged_release`; that window is not this case.
+- **Detection:** `journalctl -u radon-relay` shows `stop-sigterm timed out`
+  and `code=killed, status=9/KILL` about 90s after `Stopping`. Next.js
+  `Stopped` is within a second of the same `Stopping` line. Deploy log:
+  `timed out waiting for radon-relay.service to become inactive`.
+- **Discriminating check:** other app units `Stopped` in the same second
+  while the relay does not. A 502 burst that ends when `radon-nextjs`
+  reaches `active` and whose length matches `TimeoutStopSec` is this case.
+  A few-second burst on a relay that `Stopped` immediately is
+  `deploy-restart-window-edge-502`.
+- **Fix:** delete the relay SIGTERM/SIGINT listener so Node's default exit
+  runs. `TimeoutStopSec=10` on `radon-relay.service` SIGKILLs a wedged loop
+  before the 60s deploy wait and inside Caddy's 15s `lb_try_duration`.
+- **Regression:** `scripts/lib/relayStop.test.js`,
+  `cloud/tests/test_relay_container_watchdog.py::test_relay_stop_timeout_is_inside_the_deploy_wait`.
+
+---
+
 ## caddy-health-floor-pages-aggregate-invalid
 
 **Off-box observer pages P1 `aggregate_invalid` while ping and `/sign-in`
