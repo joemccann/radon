@@ -25,11 +25,11 @@ LOOPS = {
     "security-deepsec": REPO / "scripts" / "security_deepsec_nightly.sh",
 }
 
-# Best first. The top rung is the operator's own default; the next is the same
-# family one tier down, which is what 2026-09-01 needed and never got.
+# Security + DeepSec default (2026-09-21). Mini `claude models` that day
+# (Claude Code 2.1.278 / Claude Max): claude-fable-5-1 newest/elite OUT;
+# claude-opus-5 second-newest PIN (live id, no [1m] alias in that catalog);
+# claude-sonnet-5 fallback. Do not put fable / claude-fable-* back.
 LADDER = [
-    "claude-fable-5[1m]",
-    "claude-opus-5[1m]",
     "claude-opus-5",
     "claude-sonnet-5",
 ]

@@ -60,7 +60,11 @@ the security completion marker.
 
 ## Runner integration and fail-closed default
 
-The wrapper (`scripts/security_nightly.sh`) owns the runner mechanics: it
+The wrapper (`scripts/security_nightly.sh`) pins Claude to
+`claude-opus-5` (second-newest as of Mini `claude models` 2026-09-21) with
+`--effort medium`. Fable / `claude-fable-*` / top-tier is out of security
+nightlies so Max quota is not burned first. Do not put fable back via
+`RADON_WEEKEND_MODEL_LADDER`. It owns the runner mechanics: it
 refuses unless BOTH `.radon-weekend-runner` and `.radon-security-runner` exist
 (so it can never run in a sibling loop's clone or the operator checkout), takes
 the exclusive `.weekend-runner.lock`, hard-resets to `origin/main` before each
@@ -505,7 +509,7 @@ fi
 CLAUDE_MODEL_ARG=""
 [ -n "${RADON_WEEKEND_MODEL:-}" ] && CLAUDE_MODEL_ARG="--model $RADON_WEEKEND_MODEL"
 claude --agent claude-security:claude-security --permission-mode auto \
-  --output-format stream-json --verbose $CLAUDE_MODEL_ARG $CLAUDE_BUDGET \
+  --output-format stream-json --verbose $CLAUDE_MODEL_ARG --effort medium $CLAUDE_BUDGET \
   -p "Scan changes with --base $LAST_AUDITED_SHA --effort medium. I understand it may take a while and use a significant number of tokens. Do not suggest patches or modify tracked files. Write only the standard ignored CLAUDE-SECURITY report." \
   >"$PRIVATE_RUN_DIR/claude-stream.jsonl" 2>"$PRIVATE_RUN_DIR/claude-stderr.log"
 ```
