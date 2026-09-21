@@ -2,6 +2,7 @@
 import copy
 import hashlib
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -556,3 +557,57 @@ def test_cli_once_partial_discovery_failure_closes_and_exits_nonzero(cli, monkey
     assert caught.value.code == 1
     assert events[-2:] == ['error', 'close']
     assert json.loads(capsys.readouterr().out) == result
+
+
+def test_discover_does_not_advance_empty_cursor_and_heals_sep18_orphan(tmp_path, monkeypatch):
+    tmp_path.chmod(0o700)
+    state = State(tmp_path / 'state.sqlite')
+    scope = '2026/september/sep 18'
+    pdf = entry() | {'id': 'id:sep18', 'path_lower': f'/joe mccann/current/{scope}/desk.pdf',
+                     'path_display': f'/Joe McCann/Current/2026/September/Sep 18/desk.pdf'}
+    with state.db:
+        state.db.execute('INSERT INTO cursors VALUES(?,?,?)', (scope, 'stale-empty', '2026-09-18'))
+    calls = []
+    def listing(path, cursor=None):
+        calls.append((path, cursor))
+        if cursor == 'stale-empty':
+            return {'cursor': 'advanced-empty', 'entries': [], 'has_more': False}
+        if path == scope:
+            return {'cursor': 'fresh', 'entries': [pdf], 'has_more': False}
+        return {'cursor': 'other', 'entries': [], 'has_more': False}
+    added = worker.discover(SimpleNamespace(list_page=listing), state,
+                            now=datetime(2026,9,21,16,tzinfo=timezone.utc), current_only=True)
+    assert added == 1
+    assert state.cursor(scope) == 'fresh'
+    assert 'advanced-empty' not in {cursor for _, cursor in calls if cursor}
+    assert (scope, None) in calls
+    assert state.work_count(folder_date='2026-09-18') == 1
+    state.close()
+
+
+def test_discover_gap_is_loud_when_eligible_pdfs_have_no_work(tmp_path, monkeypatch):
+    from api import db_http
+    tmp_path.chmod(0o700)
+    state = State(tmp_path / 'state.sqlite')
+    scope = '2026/september/sep 18'
+    pdf = entry() | {'id': 'id:gap', 'path_lower': f'/joe mccann/current/{scope}/desk.pdf',
+                     'path_display': f'/Joe McCann/Current/2026/September/Sep 18/desk.pdf'}
+    monkeypatch.setattr(state, 'ingest_page', lambda *a, **k: 0)
+    def listing(path, cursor=None):
+        if path == scope:
+            return {'cursor': 'seen', 'entries': [pdf], 'has_more': False}
+        return {'cursor': 'other', 'entries': [], 'has_more': False}
+    with pytest.raises(worker.DiscoveryError) as caught:
+        worker.discover(SimpleNamespace(list_page=listing), state,
+                        now=datetime(2026,9,21,16,tzinfo=timezone.utc), current_only=True)
+    gap = next(row for row in caught.value.failures if row['type'] == 'dropbox_work_gap')
+    assert gap['eligible'] == 1 and gap['work'] == 0
+    assert gap['folder_date'] == '2026-09-18'
+    assert 'desk.pdf' not in json.dumps(caught.value.failures)
+    saved = []
+    monkeypatch.setattr(db_http, 'hrana_execute', lambda sql, params: saved.append(params))
+    assert worker.heartbeat(tmp_path, 'error', caught.value)
+    local = json.loads((tmp_path/'health.json').read_text())
+    assert local['state'] == 'error'
+    assert local['last_error']['discovery_errors'][0]['type'] == 'dropbox_work_gap'
+    state.close()

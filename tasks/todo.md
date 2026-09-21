@@ -1,3 +1,19 @@
+# Task: Research Dropbox discovery lookback + empty-cursor footgun
+
+Sep 18-style gaps: daemon today-only + 2-day `date_scopes` + cursor advance on zero eligible work.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests: 7-day lookback, env override, no empty cursor advance, backlog gap helper, daemon current_only window
+- T2 depends_on: [T1] - `date_scopes` lookback, discover/ingest persist rules, health/journal gap, docs
+- T3 depends_on: [T2] - Green focused tests; draft PR; no merge
+
+## Checklist
+
+- [x] T1 Failing tests
+- [x] T2 Implementation
+- [ ] T3 Draft PR; hold merge
+
 # Task: Add company icons and fallback icon for processed PDF documents in the live news feed
 
 ## Dependency graph

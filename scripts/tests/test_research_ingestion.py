@@ -30,10 +30,30 @@ def ingest(state, entries, day='08'):
 
 def test_current_day_poll_rolls_over_without_waiting_for_review(state):
     calls = []
-    client = SimpleNamespace(list_page=lambda scope, cursor: calls.append(scope) or {'cursor':'c', 'entries':[]})
+    client = SimpleNamespace(list_page=lambda scope, cursor: calls.append(scope) or {'cursor':'c', 'entries':[], 'has_more':False})
     discover(client, state, datetime(2026,9,9,3,59,tzinfo=timezone.utc), current_only=True)
+    first = list(calls)
     discover(client, state, datetime(2026,9,9,4,0,tzinfo=timezone.utc), current_only=True)
-    assert calls == ['2026/september/sep 08', '2026/september/sep 09']
+    second = calls[len(first):]
+    assert first[-1] == '2026/september/sep 08' and second[-1] == '2026/september/sep 09'
+    assert '2026/september/sep 09' not in first
+    assert first[0] == '2026/september/sep 02' and second[0] == '2026/september/sep 03'
+    assert len(first) == 7 and len(second) == 7
+
+
+def test_current_only_discover_covers_lookback_including_sep18(state, monkeypatch):
+    monkeypatch.delenv('RADON_RESEARCH_LOOKBACK_DAYS', raising=False)
+    calls = []
+    client = SimpleNamespace(list_page=lambda scope, cursor: calls.append(scope) or {'cursor':'c', 'entries':[], 'has_more':False})
+    discover(client, state, datetime(2026,9,21,16,tzinfo=timezone.utc), current_only=True)
+    assert calls[0] == '2026/september/sep 15'
+    assert '2026/september/sep 18' in calls
+    assert calls[-1] == '2026/september/sep 21'
+    assert len(calls) == 7
+    calls.clear()
+    monkeypatch.setenv('RADON_RESEARCH_LOOKBACK_DAYS', '3')
+    discover(client, state, datetime(2026,9,21,16,tzinfo=timezone.utc), current_only=True)
+    assert calls == ['2026/september/sep 19', '2026/september/sep 20', '2026/september/sep 21']
 
 
 def test_parse_new_arrival_while_previous_review_is_claimed(state, tmp_path):
@@ -107,6 +127,7 @@ def test_poll_respects_fixed_cadence_and_error_backoff(state, tmp_path, monkeypa
     health, calls = [], []
     monkeypatch.setattr(ingestion.time, 'monotonic', lambda: clock.now)
     monkeypatch.setattr(worker, 'heartbeat', lambda root, status, error=None, **kw: health.append(status))
+    monkeypatch.setattr(worker, 'date_scopes', lambda now: [('2026/september/sep 08', '2026-09-08')])
     def listing(scope, cursor):
         calls.append(clock.now)
         if len(calls) == 1:
@@ -191,6 +212,7 @@ def test_spawned_parser_receives_two_polls_during_blocked_review(state, tmp_path
     stop, wake, parsed, entered, release = [context.Event() for _ in range(5)]
     backoff = Backoff(context)
     scope, folder_date = date_scopes()[-1]
+    monkeypatch.setattr(worker, 'date_scopes', lambda now: [(scope, folder_date)])
     def item(name):
         value = entry(name)
         value['path_lower'] = f'/joe mccann/current/{scope}/{name}.pdf'
