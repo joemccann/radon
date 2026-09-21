@@ -89,12 +89,19 @@ describe("skill-stack shell chrome", () => {
 
   it("feed rail polish stays scoped and leaves the shared rail bytes unchanged", () => {
     const css = src("app/globals.css");
-    const feedRail = css.indexOf(".dashboard-news__rail");
+    const feedRail = css.indexOf(".dashboard-news .dashboard-news__rail {");
     expect(feedRail).toBeGreaterThan(0);
-    const chunk = css.slice(feedRail, feedRail + 5000);
-    expect(chunk).toContain("grid-template-columns");
+    const nextBlock = css.indexOf("\n.news-feed-actions {", feedRail);
+    expect(nextBlock).toBeGreaterThan(feedRail);
+    const chunk = css.slice(feedRail, nextBlock);
+    expect(chunk).toContain("display: flex");
+    expect(chunk).toContain("flex: 0 1 auto");
+    expect(chunk).toContain("white-space: nowrap");
     expect(chunk).toContain("tabular-nums");
     expect(chunk).toContain("border-radius: 0 0 3px 3px");
+    expect(chunk).not.toContain("grid-template-columns");
+    expect(chunk).not.toContain("min-width: 16ch");
+    expect(chunk).not.toContain("justify-content: space-between");
 
     const globalStart = css.indexOf("\n.panel-meta-rail {");
     expect(globalStart).toBeGreaterThan(0);
