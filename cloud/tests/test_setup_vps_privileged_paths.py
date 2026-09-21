@@ -119,6 +119,14 @@ def harness(tmp_path: Path) -> dict[str, Path]:
         check=True,
         capture_output=True,
     )
+    # Provenance also requires the blob to be reachable from the deploy
+    # remote, so the fake checkout carries an origin/main matching HEAD.
+    subprocess.run(
+        ["git", "update-ref", "refs/remotes/origin/main", "HEAD"],
+        cwd=cloud,
+        check=True,
+        capture_output=True,
+    )
 
     victim = tmp_path / "root-only"
     victim.write_text("root-only secret\n")
@@ -549,6 +557,49 @@ class TestCheckoutProvenance:
         assert result.returncode == 0, result.stderr
         assert target.read_text() == source.read_text()
         assert _stage_leftovers(harness) == []
+
+
+class TestRemoteAncestryProvenance:
+    """Local HEAD is radon-reachable: an account with commit rights on the
+    checkout can make any body "committed at HEAD". Root only installs blobs
+    that are also reachable from the deploy remote."""
+
+    def test_local_commit_not_on_origin_main_is_refused(
+        self, harness: dict[str, Path]
+    ) -> None:
+        source = harness["cloud"] / "config" / "sudoers.d" / "radon-ops"
+        source.write_text("# committed locally, never pushed\n")
+        _git(harness["cloud"], "add", "config/sudoers.d/radon-ops")
+        _git(harness["cloud"], "commit", "-q", "-m", "local tamper")
+        target = harness["tmp"] / "installed"
+        result = _run_stage(harness, source, target)
+        assert result.returncode != 0
+        assert "not an ancestor of origin/main" in result.stdout + result.stderr
+        assert not target.exists()
+        assert _stage_leftovers(harness) == []
+
+    def test_missing_remote_ref_fails_closed(self, harness: dict[str, Path]) -> None:
+        _git(harness["cloud"], "update-ref", "-d", "refs/remotes/origin/main")
+        source = harness["cloud"] / "config" / "sudoers.d" / "radon-ops"
+        target = harness["tmp"] / "installed"
+        result = _run_stage(harness, source, target)
+        assert result.returncode != 0
+        assert "origin/main is unavailable" in result.stdout + result.stderr
+        assert not target.exists()
+
+    def test_blob_carried_by_origin_main_installs(
+        self, harness: dict[str, Path]
+    ) -> None:
+        # HEAD moved ahead of the remote, but this artifact's blob is the one
+        # origin/main carries, so the install stands.
+        (harness["cloud"] / "unrelated").write_text("later work\n")
+        _git(harness["cloud"], "add", "unrelated")
+        _git(harness["cloud"], "commit", "-q", "-m", "unrelated local work")
+        source = harness["cloud"] / "config" / "sudoers.d" / "radon-ops"
+        target = harness["tmp"] / "installed"
+        result = _run_stage(harness, source, target)
+        assert result.returncode == 0, result.stderr
+        assert target.read_text() == source.read_text()
 
 
 # ── (d) /etc/radon and the radon-replaceable directories ──────────────
