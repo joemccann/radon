@@ -286,3 +286,58 @@ for (const theme of ["light", "dark"] as const) {
     });
   }
 }
+
+/* A toast docked bottom-right sits on top of the narrow-window chat composer.
+   The toast stack is fixed bottom-right with pointer-events:auto at z-index
+   10002; the launcher overlay is z-index 100 and at 393px its panel is
+   full-bleed with Send in that exact corner. CI run 35543083157 timed out
+   clicking Send because the toast's own 12px dismiss icon (`lucide-x`) took
+   every click, and its screenshot shows `Connection lost` drawn across the
+   composer. A thumb hits the same thing.
+
+   `body[data-mobile]` already lifts the stack to the top, but the desktop
+   shell at phone width never sets that flag, so the rule has to be viewport
+   based too. The assertion is geometric, not a click: whether a given toast
+   is tall enough to reach Send depends on how its message wraps, and the
+   invariant is that the stack never reaches the composer at all. */
+test("the toast stack stays clear of the chat composer in a phone-width window", async ({ page }) => {
+  await page.setViewportSize({ width: 393, height: 852 });
+  await installFixtures(page);
+  await page.goto("/alerts");
+  const dialog = await openChat(page);
+
+  await page.evaluate(() => {
+    // The desktop shell at phone width, which is what CI rendered.
+    delete document.body.dataset.mobile;
+    const container = document.createElement("div");
+    container.className = "toast-container";
+    container.style.zIndex = "10002";
+    container.innerHTML =
+      '<div class="toast toast-error" role="alert" aria-atomic="true" data-testid="probe-toast">' +
+      '<span class="toast-message">Connection lost</span>' +
+      '<button class="toast-close" type="button" aria-label="Dismiss">' +
+      '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" class="lucide lucide-x"><path d="M18 6 6 18M6 6l12 12"/></svg>' +
+      "</button></div>";
+    document.body.appendChild(container);
+  });
+
+  const toast = page.getByTestId("probe-toast");
+  await expect(toast).toBeVisible();
+
+  const composer = dialog.locator(".ask-composer");
+  const composerBox = await composer.boundingBox();
+  const toastBox = await toast.boundingBox();
+  expect(composerBox).not.toBeNull();
+  expect(toastBox).not.toBeNull();
+  expect(
+    toastBox!.y + toastBox!.height,
+    "the toast stack must sit entirely above the composer",
+  ).toBeLessThanOrEqual(composerBox!.y);
+
+  await dialog.getByRole("textbox", { name: "Ask Radon" }).fill("Explain the latest flow evidence");
+  await dialog.getByRole("button", { name: "Send", exact: true }).click({ timeout: 5000 });
+
+  await expect(dialog.getByTestId("chat-message-assistant").last()).toContainText(REPLY);
+  // Moving the stack must not mean hiding the failure it reports.
+  await expect(toast).toBeVisible();
+});
