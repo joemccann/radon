@@ -1,79 +1,66 @@
-# Kelly sizing: Fortune's Formula alignment spec
+# Kelly sizing and order admission
 
-Status: **IMPLEMENT**. Code + tests on the implement PR. Production
-`RADON_KELLY_ENFORCE_ORDERS` stays unset until Joe signs separately.
-Plan: [#552](https://github.com/joemccann/radon/pull/552). Owner doc for
-`scripts/kelly.py`, `lib/tools/schemas/kelly.ts`,
-`lib/tools/wrappers/kelly.ts` (see `docs/owners.json` rule `kelly-sizing`).
+This owner serves trading operators choosing risk controls and maintainers
+integrating evaluation or order placement. Source and tests define the exact
+parameters; deployed preferences require operator verification.
 
-Source brief: Poundstone, *Fortune's Formula*, condensed to seven takeaways by
-the CoS (2026-09). This document maps each takeaway to what the repo already
-does, what it only claims in prose, and the exact code, schema, test and
-cutover work needed to close the gap. It is written so an implementer can
-build from it without re-auditing the repo.
+## Implemented controls
 
-> ✅ **Joe signed half Kelly (2026-09-19, via CoS).** The implement default
-> is **`0.5` (half Kelly)**. `0.25` (quarter Kelly) remains a documented
-> stricter optional setting via `RADON_KELLY_FRACTION=0.25`, not the default.
-> Full Kelly (`1.0`) is banned. Production order-path enable still waits Joe.
+[Kelly sizing](../../scripts/kelly.py) uses half Kelly by default, permits a
+stricter quarter-Kelly setting, rejects full Kelly, and applies the same
+position cap to scalar sizing with bankroll and batch sizing. Estimated
+probabilities, probability haircuts, ticket risk, portfolio capacity and
+drawdown checks are implemented there. Kelly allocates a supplied edge; it
+does not establish a trade signal.
 
-### Decision log
+[Evaluation M6](../../scripts/evaluate.py) calls `kelly_ticket` after the
+upstream gates and supplied structure pass. Missing structure leaves M5/M6
+pending; a failed ticket cannot produce a TRADE decision. Passing evaluation
+is not proof that every order placer enforces the same controls.
 
-| Date | Who | Decision |
-|---|---|---|
-| 2026-09-19 | CoS | Plan approved; implement at the then-default `0.25`; must-ship = full-Kelly ban, scalar cap parity, M6 fail-closed. |
-| 2026-09-19 | **Joe (via CoS)** | **Override: default fraction = `0.5` (half Kelly)** for the implement PR. `0.25` stays as a stricter option. Estimate / fat-tail / ruin hooks stay in scope. Production gate enable still waits for Joe after the PRs land. |
+Order admission has two independent controls:
 
-Still required for the implement PR (see §F "Must-ship"):
+- [The Kelly order guard](../../scripts/kelly_guard.py) is enabled by
+  `RADON_KELLY_ENFORCE_ORDERS`. When enabled, its default mode is warning;
+  `RADON_KELLY_ENFORCE_MODE=block` makes a violation refuse the order in
+  `ib_place_order.py`. Its cached bankroll and closing flags are not the
+  fresh-snapshot verification used by the all-placer gate.
+- [The all-placer bankroll gate](../../scripts/bankroll_guard.py), selected
+  by `RADON_BANKROLL_CAP_ENFORCE_ALL_PATHS`, defaults off in
+  [app preferences](../../scripts/app_preferences.py). When enabled it checks
+  opening orders in `ib_place_order.py`, `ib_execute.py` and
+  `exit_order_service.py` against fresh IB net liquidation from the latest
+  portfolio snapshot. Missing, stale or invalid bankroll and unpriceable or
+  over-cap opening risk are refused. A verified close-out is exempt: the
+  snapshot must prove the combined contract deltas reduce held positions
+  without increasing or flipping them. This exception is checked before
+  snapshot freshness; a client closing flag alone does not establish it.
 
-1. Ban full Kelly (`fraction=1.0`) at every boundary.
-2. Unify the 2.5% bankroll hard cap on the scalar `kelly()` path (parity with
-   `kelly_size_batch()`).
-3. `evaluate.py` M6 fails closed.
-4. Estimate (`p_source`), fat-tail (`p_haircut`) and ruin
-   (`kelly_ticket` / `portfolio_capacity` / drawdown halt) hooks per §B and §C.
-5. No production gate enabled in the implement PR: `RADON_KELLY_ENFORCE_ORDERS`
-   stays unset on every unit until Joe signs separately.
+The all-placer gate is independent of Kelly warning/block mode. Turning it
+off does not disable the separate Kelly guard, evaluation checks, trading
+halt or fat-finger limits. Conversely, enabling the Kelly guard does not arm
+the all-placer gate. Source defaults do not establish deployed settings.
 
----
+## Operator enable and recovery
 
-## 0. Verified current state (audited 2026-09-19, `main` @ `49a23af0`)
+Gate changes are operator-only risk-policy decisions. Before enabling either
+control, review its source-backed refusal cases with isolated order fixtures,
+verify portfolio-sync freshness and the effective audited preference, and
+obtain the existing risk-policy approval. Do not place a live probe to test
+admission. For a refusal, identify which guard returned it; restore valid
+portfolio data or correct the ticket rather than disabling a safety control.
+An unavailable snapshot cannot prove a close-out. Escalate unresolved
+position identity or policy questions to the trading operator. Reversal of an
+authorized preference change requires restoring its recorded prior value;
+this documentation does not authorize a policy change or claim deployment.
 
-| Surface | What exists | Evidence |
-|---|---|---|
-| `scripts/kelly.py:kelly()` | `f* = p - q/odds` (algebraically `(b*p - q)/b`), `fraction` default `0.25`, domain guards on `p`, `odds`, `fraction`; `odds <= 0` and `f* <= 0` return `edge_exists: False`, `recommendation: "DO NOT BET"`. **No bankroll, no cap.** Accepts `fraction=1.0` (full Kelly). | `scripts/kelly.py` lines 9-41 |
-| `scripts/kelly.py:kelly_size_batch()` | NumPy path; `max_pct=0.025` hard-caps dollars; `f* <= 0` gives `0`; malformed bankroll gives `0`. **No validation of `fraction` or `prob_wins` domain.** `max_pct` is caller-overridable (tests pass `1.0`). | lines 43-83; `test_kelly_vectorized.py` uses `max_pct=1.0` in 9 cases |
-| CLI (`python3.13 scripts/kelly.py`) | `--fraction` bounded `(0, 1]`; with `--bankroll` emits `dollar_size`, `max_per_position = bankroll * 0.025` (literal), `use_size = min(...)`. | lines 109-122 |
-| TypeBox (`lib/tools/schemas/kelly.ts`) | `fraction: exclusiveMinimum 0, maximum 1` (full Kelly allowed). Output mirrors CLI JSON; no `capped`, `p_effective`, `fraction_source` fields. Wrapper `lib/tools/wrappers/kelly.ts` repeats the same bounds as `RangeError`. `lib/tools/pi-tools.ts:kelly_calc` re-declares the schema inline (third copy of the bounds). | schema lines 5-10; `pi-tools.ts` line 25 |
-| `scripts/evaluate.py` M6 | **Placeholder.** `MilestoneResult(name="kelly_sizing", passed=False, data={"bankroll", "note": "Pending structure design"})`; decision `PENDING`, CLI exit `2`. M5 structure is also a placeholder, so M6 has no `max_loss` / `max_gain` / `prob_win` to consume. `format_report` prints an M6 block only when `data.total_cost` is set. | lines 774-791, 929-935; `test_evaluate.py::test_pending_structure_and_kelly_are_not_passed_or_success_exit` |
-| Order path | `scripts/order_limits.py` is fat-finger only and says so: "not to encode Kelly policy (that stays in the evaluation pipeline)". `ib_place_order.place_order` calls `check_order_limits` and nothing Kelly-shaped. `web/lib/orderRisk.ts` is display, not enforcement. | `order_limits.py` docstring lines 19-22; `ib_place_order.py` line 252 |
-| Portfolio exposure | `ib_sync.py` writes `kelly_optimal: None`, `avg_kelly_optimal: None` ("Needs evaluation"). `portfolio_report.py` averages `trade_log[*].kelly_calculation.actual_size_pct` for a display card. No aggregate exposure or drawdown check anywhere in code. | `ib_sync.py` lines 775, 1806, 2221; `portfolio_report.py` lines 546-579 |
-| Prose | `.pi/SYSTEM.md` §3: "0.25x-0.5x fractional Kelly", "Max 2.5%", "If Kelly says >20% → restructure", "let Kelly govern total exposure". `docs/prompt.md` hard constraints 3-4. `README.md` Risk row. `docs/evaluation.md` M6 "Hard cap, not advisory". Marketing `site/lib/pages/fractional-kelly-position-sizing.ts` FAQ: "milestone 6 enforces the cap before milestone 7 will route an order". | quoted files |
-| Tests | `test_kelly_domain_guards.py` (159 lines), `test_kelly_extended.py` (308), `test_kelly_vectorized.py` (221), `lib/tools/__tests__/kelly.test.ts` (live subprocess, 4 cases), `schemas.test.ts` rejects `fraction: 1.01`. `test_kelly_extended.py::test_custom_fraction_exact_double` asserts `fraction=0.5` is exactly 2x `0.25`. | listed files |
+## Historical design
 
-**Honesty note.** Prose and the marketing page describe an enforced 2.5% cap at
-milestone 6 and a Kelly-governed exposure limit. In code, the cap is enforced
-only inside `kelly_size_batch` and the CLI `--bankroll` branch, and milestone 6
-never runs. Nothing on the order path knows what bankroll is. The rest of this
-spec exists to make the prose true.
-
----
-
-## A. Gap table: current vs required
-
-| # | Takeaway (Poundstone) | Current | Required | Gap class |
-|---|---|---|---|---|
-| A1 | Edge/odds form `f* = (b*p - q)/b` | Implemented as `p - q/b` in both scalar and batch; tests pin sign and division. | Keep. Add a docstring stating the equivalence so reviewers stop re-deriving it. | Docs |
-| A2 | Estimated `p` means half or quarter Kelly, never full | `fraction` accepts up to `1.0` at library, CLI, TypeBox, wrapper and `pi-tools`. Default `0.25`. Nothing marks `p` as an estimate. | Hard ceiling `KELLY_MAX_FRACTION = 0.5` at every boundary. **Default becomes `0.5` (half Kelly, Joe-signed)** via `RADON_KELLY_FRACTION`; `0.25` is the documented stricter option. `p_source` field, default `"estimated"`; estimated `p` may not exceed the configured fraction. Full Kelly rejected, not clamped. | **Enforcement missing** |
-| A3 | Geometric growth framing | Output is `full_kelly_pct` / `fractional_kelly_pct` only; growth appears in the marketing FAQ as prose. | Emit `growth_rate_full` and `growth_rate_used` (expected log growth per bet). Tests assert `g(fraction) > 0` under edge and `g(full) >= g(fraction)`. Recommendation strings unchanged. | Docs + small code |
-| A4 | Ruin / path-to-zero constraint | Single-ticket cap `2.5%` exists in batch + CLI only. No aggregate at-risk limit, no drawdown guard, no ruin statement. | `kelly_ticket()` refuses any ticket whose worst-case loss exceeds `KELLY_MAX_PCT * bankroll`. `portfolio_capacity()` refuses when open worst-case losses plus the proposed one exceed `RADON_KELLY_MAX_DEPLOYED_PCT` of bankroll. Drawdown halt at `RADON_KELLY_DRAWDOWN_HALT_PCT`. Formal ruin bound documented in §B.4. | **Enforcement missing** |
-| A5 | Fat tails: haircut `p` or shrink fraction for model error | The `0.25` fraction is the only model-error shrink. No explicit haircut. Moving the default to `0.5` halves that shrink, so the haircut hook becomes the explicit model-error lever rather than a nice-to-have. | `p_haircut` parameter (`RADON_KELLY_P_HAIRCUT`), `p_effective = max(0, p - p_haircut)`, sized on `p_effective`. Default `0.0` in the implement PR so outputs do not move; recommended `0.05` is a Joe decision. Output reports both `p` and `p_effective`. | **Enforcement missing** |
-| A6 | Kelly allocates edge; it does not create it | `evaluate.py` M4 edge gate returns before M5/M6 on FAIL. `kelly()` reports `edge_exists` from `f* > 0` alone. | Keep M4 upstream. M6 must never run without an M4 PASS. `kelly()` `edge_exists` stays a math fact; the *trade* edge is M4's. Document the distinction. | Docs (already enforced by control flow) |
-| A7 | Caps, fraction, edge gate, ruin guards in code, not prose | Cap: batch + CLI only. Scalar `kelly()` has no cap (scalar vs batch parity gap). M6 placeholder. Order path Kelly-blind. Exposure prose-only. | Scalar/batch parity: `kelly(bankroll=...)` applies the same cap as batch. M6 wired to `kelly_ticket()`, fails closed. Optional order-path guard behind `RADON_KELLY_ENFORCE_ORDERS` (default off). `.pi/SYSTEM.md` "Kelly > 20% → restructure" becomes a `restructure` flag. | **Enforcement missing** |
-| A8 | Scalar vs batch cap parity (audit finding) | `kelly()` cannot cap because it has no bankroll; `kelly_size_batch()` caps; CLI caps by hand with a literal `0.025`. Three places, one constant. | One `KELLY_MAX_PCT = 0.025` constant. `kelly()` grows `bankroll` and returns `use_size` with the cap applied. CLI and TypeBox consume `kelly()` output verbatim. | **Parity missing** |
-| A9 | Batch domain validation | `kelly_size_batch` accepts `fraction=2.0`, `prob_wins=1.5`. | Same guards as scalar: raise `ValueError` on bad `fraction`; `prob_wins` outside `[0, 1]` or non-finite produce `0` size (matches the batch "never NaN, never negative" contract). | **Enforcement missing** |
-
----
+The remaining sections preserve the original Fortune's Formula rationale and
+implementation acceptance design from [PR #552](https://github.com/joemccann/radon/pull/552).
+They are historical, not a pending implementation plan or an operator cutover
+procedure. The implemented controls above and their linked sources supersede
+any proposed defaults, signatures, rollout steps or unchecked tasks below.
 
 ## B. Formulas, parameter names, defaults
 
@@ -410,8 +397,8 @@ whichever code default is deployed.
       revertible; PR 2 is the one that changes evaluate's exit code from `2`
       to `0` on a fully specified ticket).
 - [ ] **Enable `RADON_KELLY_ENFORCE_ORDERS=1` in production** (after the PRs
-      land; not in the implement PR), or leave the order path fat-finger only
-      and rely on M6 plus operator discipline.
+      land; not in the implement PR), or retain its current setting after separately reviewing the
+      all-placer bankroll preference described above.
 - [ ] Register `RADON_KELLY_FRACTION` in `app_preferences` (audited, UI) vs
       env-only.
 
