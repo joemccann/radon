@@ -101,6 +101,16 @@ describe("<PublisherLogo />", () => {
     expect(img.getAttribute("alt")).toBe("UniCredit");
   });
 
+  it("renders Westpac logo for Westpac", () => {
+    render(<PublisherLogo publisher="Westpac" />);
+    const logo = screen.getByTestId("publisher-logo");
+    expect(logo.getAttribute("data-publisher-id")).toBe("westpac");
+    expect(logo.getAttribute("data-is-fallback")).toBe("false");
+    const img = screen.getByRole("img", { hidden: true });
+    expect(img.getAttribute("src")).toBe("/icons/publishers/westpac.svg");
+    expect(img.getAttribute("alt")).toBe("Westpac");
+  });
+
   it("renders default fallback icon for unknown or unmapped publishers", () => {
     render(<PublisherLogo publisher="TS Lombard" />);
     const logo = screen.getByTestId("publisher-logo");
