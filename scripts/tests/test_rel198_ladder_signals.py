@@ -136,7 +136,7 @@ class TestQuoteInACrashIsNotQuota:
             models_log.read_text(encoding="utf-8").splitlines()
             if models_log.exists() else []
         )
-        first_rung = "claude-fable-5[1m]"
+        first_rung = "claude-opus-5"
         assert models == [first_rung], (
             f"a crash quoting the quota pattern walked the ladder: {models!r}\n"
             f"{proc.stdout}{proc.stderr}"
