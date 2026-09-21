@@ -146,6 +146,44 @@ def is_close_out(params: dict, snapshot: Optional[dict]) -> bool:
     return True
 
 
+def _combo_expiry_loss(legs: Any, quantity: float, price: float, sell: bool) -> Optional[float]:
+    """Exact worst case at expiry for single-expiry option combos.
+
+    The payoff is piecewise linear, so its minimum sits at S=0 or a strike
+    unless calls are net short (unbounded). A debit structure therefore risks
+    its premium, not its width. None (fall back to the margin proxy) for
+    stock legs, calendars, or a net short call tail.
+    """
+    if not isinstance(legs, list) or not legs:
+        return None
+    parsed = []
+    for leg in legs:
+        if not isinstance(leg, dict):
+            return None
+        right = _norm_right(leg.get("right"))
+        strike = _finite(leg.get("strike"))
+        ratio = _finite(leg.get("ratio", 1) or 1)
+        if right not in ("C", "P") or strike is None or strike <= 0 or ratio is None or ratio <= 0:
+            return None
+        side = -1.0 if str(leg.get("action") or "").upper().startswith("SELL") else 1.0
+        parsed.append((right, strike, side * ratio, _norm_expiry(leg.get("expiry"))))
+    if len({expiry for *_, expiry in parsed}) != 1:
+        return None
+    if sum(signed for right, _, signed, _ in parsed if right == "C") < 0:
+        return None
+
+    def payoff(spot: float) -> float:
+        return sum(
+            signed * (max(spot - strike, 0.0) if right == "C" else max(strike - spot, 0.0))
+            for right, strike, signed, _ in parsed
+        )
+
+    worst = min(payoff(spot) for spot in [0.0] + [strike for _, strike, _, _ in parsed])
+    is_debit = (price > 0) != sell
+    cost = abs(price) if is_debit else -abs(price)
+    return abs(quantity) * max(cost - worst, 0.0) * 100.0
+
+
 def order_max_loss(params: dict) -> Optional[float]:
     """Defined worst-case loss in dollars; None when undefined or unpriceable."""
     order_type = str(params.get("type") or "stock").lower()
@@ -160,12 +198,17 @@ def order_max_loss(params: dict) -> Optional[float]:
                 {**leg, "action": "BUY" if str(leg.get("action") or "").upper().startswith("SELL") else "SELL"}
                 for leg in legs
             ]}
-        loss = _finite(combo_max_loss(params))
         quantity = _finite(params.get("quantity"))
         price = _finite(params.get("limitPrice") or params.get("stopPrice"))
-        if loss is None or quantity is None or price is None or quantity == 0 or price == 0:
+        if quantity is None or price is None or quantity == 0 or price == 0:
             return None
         sell = str(params.get("action") or "").upper().startswith("SELL")
+        expiry_loss = _combo_expiry_loss(params.get("legs"), quantity, price, sell)
+        if expiry_loss is not None:
+            return expiry_loss
+        loss = _finite(combo_max_loss(params))
+        if loss is None:
+            return None
         # The margin proxy can be zero for all-long legs; premium paid is
         # still exposed even when there is no short-leg assignment risk.
         debit = abs(quantity * price) * 100.0 if (price > 0) != sell else 0.0

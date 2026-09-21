@@ -53,6 +53,15 @@ HELD_CALL = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _enforce_on_place_order():
+    """place_order enforces Gate 3 only when the operator preference is On."""
+    import app_preferences
+    app_preferences.seed_snapshot_for_tests({"RADON_BANKROLL_CAP_ENFORCE_ALL_PATHS": "true"})
+    yield
+    app_preferences.clear_snapshot_for_tests()
+
+
 def _check(params, snapshot):
     return check_bankroll_admission(params, snapshot=snapshot, now=NOW)
 
@@ -93,9 +102,18 @@ class TestAdmission:
         assert "2.5%" in refusal["message"]
 
     def test_combo_over_cap_refuses(self):
-        # 10-wide call vertical at $1 debit: loss/unit = $1000 - 0 credit;
-        # 3 lots = $3,000 > $2,500
-        assert _check(_vertical(3, 10), _snapshot())["code"] == "BANKROLL_CAP_EXCEEDED"
+        # 10-wide call vertical SOLD for a $1 credit: loss/unit = $1000 - $100;
+        # 3 lots = $2,700 > $2,500
+        bear_call = _vertical(3, 10)
+        bear_call["limitPrice"] = -1.0
+        bear_call["legs"] = [
+            {**leg, "action": "SELL" if leg["action"] == "BUY" else "BUY"} for leg in bear_call["legs"]
+        ]
+        assert _check(bear_call, _snapshot())["code"] == "BANKROLL_CAP_EXCEEDED"
+
+    def test_debit_vertical_risks_premium_not_width(self):
+        # Same 10-wide vertical bought for $1: 3 lots risk $300, not $3,000.
+        assert _check(_vertical(3, 10), _snapshot()) is None
 
     def test_undefined_risk_refuses(self):
         refusal = _check(_long_call(1, 1.0, action="SELL"), _snapshot())
