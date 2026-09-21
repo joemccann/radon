@@ -64,6 +64,14 @@ QUOTA_LINE = (
 )
 RATE_LIMIT_LINE = "Request rejected (429)"
 CAPACITY_LINE = "API Error: Repeated 529 Overloaded errors"
+# 2026-09-21: the claude CLI's per-model cap for Fable. It matched no
+# pattern, so security + DeepSec exited 1 on every phase instead of dropping
+# to the next rung.
+MODEL_LIMIT_LINE = (
+    "You've reached your Fable limit. Switch to another model, or manage "
+    "usage credits at claude.ai/settings/usage?from=cc_cli_limit_message, "
+    "to continue."
+)
 # Claude Code tool-skip categories. Official docs say retry the SAME model.
 # Bare `overloaded` / `rate.limit` in is_quota_exhausted treated these as a
 # dead rung and walked the ladder, including on timeout 124 whose log merely
@@ -363,6 +371,17 @@ class TestAnExhaustedQuotaDropsARung:
         )
         assert models[:2] == LADDER[:2], (
             f"{loop}: a 529 overload on {LADDER[0]!r} must drop to "
+            f"{LADDER[1]!r}, not exit 1; models attempted: {models!r}\n"
+            f"{proc.stdout}{proc.stderr}"
+        )
+        assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
+
+    def test_a_model_limit_drops_a_rung_instead_of_exit_1(self, tmp_path, loop):
+        proc, models, _calls = _audit(
+            tmp_path, loop, [LADDER[0]], exhausted_line=MODEL_LIMIT_LINE
+        )
+        assert models[:2] == LADDER[:2], (
+            f"{loop}: a model limit on {LADDER[0]!r} must drop to "
             f"{LADDER[1]!r}, not exit 1; models attempted: {models!r}\n"
             f"{proc.stdout}{proc.stderr}"
         )
