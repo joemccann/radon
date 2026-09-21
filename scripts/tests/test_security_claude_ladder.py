@@ -91,9 +91,10 @@ class TestSafetyAndNoNetwork:
 
     def test_module_never_names_the_anthropic_api_host(self):
         src = HELPER_PY.read_text(encoding="utf-8")
-        assert "api.anthropic.com" not in src
+        assert "https://" not in src
         assert "refresh_model_catalog" not in src
-        assert "claude models" in src
+        assert "DEFAULT_MODELS_CMD" in src
+        assert 'claude models' in src
 
     def test_from_text_does_not_spawn_claude(self, ladder, monkeypatch, tmp_path):
         def boom(*_a, **_k):
