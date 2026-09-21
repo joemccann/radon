@@ -2857,56 +2857,9 @@ staleCheckTimer = setInterval(() => {
   }
 }, STALE_CHECK_INTERVAL_MS);
 
-process.on("SIGINT", () => {
-  if (shuttingDown) process.exit(0);
-  shuttingDown = true;
-  reconnectGate.invalidate();
-  if (statusBroadcastTick) {
-    clearInterval(statusBroadcastTick);
-  }
-  stopBatchFlush();
-  if (pingIntervalTimer) {
-    clearInterval(pingIntervalTimer);
-    pingIntervalTimer = null;
-  }
-  if (staleCheckTimer) {
-    clearInterval(staleCheckTimer);
-    staleCheckTimer = null;
-  }
-  snapshotLimiter.clear();
-  for (const client of clients) {
-    try {
-      client.close();
-    } catch {
-      // Ignore.
-    }
-  }
-  for (const [requestId] of snapshotRequests) {
-    clearSnapshot(requestId);
-  }
-  for (const state of symbolStates.values()) {
-    if (state.tickerId != null) {
-      try {
-        ib.cancelMktData(state.tickerId);
-      } catch {
-        // Ignore.
-      }
-    }
-  }
-  // Flush option close cache before exit
-  persistCloseCache();
-  try {
-    wss.close();
-    ib.disconnect();
-  } catch {
-    // Ignore.
-  }
-  process.exit(0);
-});
-
-process.on("SIGTERM", () => {
-  process.emit("SIGINT");
-});
+// No SIGTERM/SIGINT listener. Node exits immediately on those signals.
+// A listener that cancelled market data and called ib.disconnect() before
+// process.exit held stop-sigterm until TimeoutStopSec (2026-09-21 19:25Z).
 
 httpServer.on("listening", () => {
   console.log(`WebSocket server listening on ${WS_HOST}:${cli.port}`);
