@@ -1,4 +1,6 @@
 /** @vitest-environment jsdom */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import React from "react";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -287,5 +289,21 @@ describe("news feed sharing", () => {
     fireEvent.click(screen.getByRole("button", { name: "Download Story image" }));
     await waitFor(() => expect(engine.canvasToPng).toHaveBeenLastCalledWith(newCanvas));
   });
+});
 
+describe("newsfeed share better-ui layout", () => {
+  const css = readFileSync(join(__dirname, "..", "components", "NewsfeedShare.module.css"), "utf8");
+
+  it("separates the share root with 14px margin to balance article border and footer", () => {
+    expect(css).toMatch(/\.root\s*\{[^}]*margin-top:\s*14px/);
+  });
+
+  it("resets root margin-top on mobile shell where item flex gap provides spacing", () => {
+    expect(css).toMatch(/:global\(body\[data-mobile="true"\]\)\s+\.root\s*\{[^}]*margin-top:\s*0/);
+  });
+
+  it("applies better-ui press scale and transition to interactive buttons", () => {
+    expect(css).toMatch(/transition:\s*var\(--transition-press\)/);
+    expect(css).toMatch(/transform:\s*scale\(var\(--press-scale\)\)/);
+  });
 });
