@@ -50,11 +50,11 @@ LOOPS = {
     "security-deepsec": REPO / "scripts" / "security_deepsec_nightly.sh",
 }
 
-# Best first. The top rung is the operator's own default; the next is the same
-# family one tier down, which is what 2026-09-01 needed and never got.
+# Security + DeepSec default (2026-09-21). Mini `claude models` that day:
+# claude-fable-5-1 newest/elite OUT; claude-opus-5 PIN (live id, no [1m]
+# alias in that catalog); claude-sonnet-5 fallback. Other weekend loops
+# keep their own ladders. Do not put fable / claude-fable-* back.
 LADDER = [
-    "claude-fable-5[1m]",
-    "claude-opus-5[1m]",
     "claude-opus-5",
     "claude-sonnet-5",
 ]
@@ -235,11 +235,21 @@ class TestTheLoopPinsItsModel:
         start = body.index("RADON_WEEKEND_MODEL_LADDER:-")
         default = body[start + len("RADON_WEEKEND_MODEL_LADDER:-"):body.index("}", start)]
         assert default.split() == LADDER, (default.split(), LADDER)
+        assert not any("fable" in rung for rung in default.split()), default
+
+    def test_the_claude_arm_passes_effort_medium(self, loop):
+        body = LOOPS[loop].read_text(encoding="utf-8")
+        arm_start = body.index("    claude)\n", body.index("launch_round() {"))
+        arm = body[arm_start:body.index(";;", arm_start)]
+        assert "--effort medium" in arm, (
+            f"{loop}: Mini ~/.claude/settings.json has effortLevel: low; "
+            f"unattended launches must pin --effort medium: {arm}"
+        )
 
 
 @pytest.mark.parametrize("loop", CLAUDE_LOOPS)
 class TestAnExhaustedQuotaDropsARung:
-    def test_it_drops_to_opus_1m_when_the_default_model_is_out(self, tmp_path, loop):
+    def test_it_drops_to_sonnet_when_opus_is_out(self, tmp_path, loop):
         proc, models, _calls = _audit(tmp_path, loop, [LADDER[0]])
         assert models[:2] == LADDER[:2], (
             f"{loop}: expected a drop to {LADDER[1]!r} after {LADDER[0]!r} "
@@ -248,11 +258,22 @@ class TestAnExhaustedQuotaDropsARung:
         )
         assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
 
-    def test_it_walks_the_whole_ladder(self, tmp_path, loop):
+    def test_it_walks_the_default_ladder(self, tmp_path, loop):
         proc, models, _calls = _audit(tmp_path, loop, LADDER[:-1])
         assert models == LADDER, (models, proc.stdout, proc.stderr)
-        # Four attempts is more than MAX_ATTEMPTS=3: a quota drop is not one of
-        # the three transient-network retries and must not consume one.
+        assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
+
+    def test_it_walks_a_four_rung_override_without_consuming_retries(
+        self, tmp_path, loop
+    ):
+        # Default is two rungs. A 4-rung operator override must still walk
+        # all four: more than MAX_ATTEMPTS=3, so a quota drop is not one of
+        # the three transient-network retries.
+        long = ["stub-a", "stub-b", "stub-c", "stub-d"]
+        proc, models, _calls = _audit(
+            tmp_path, loop, long[:-1], ladder=" ".join(long)
+        )
+        assert models == long, (models, proc.stdout, proc.stderr)
         assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
 
     def test_an_operator_ladder_overrides_the_default(self, tmp_path, loop):
@@ -417,6 +438,12 @@ class TestTheSecurityScanInheritsTheWrappersRung:
         assert f"${assign.group(1)}" in invocation, (
             "the model argument is built but never handed to the scan:\n"
             f"{invocation}"
+        )
+        cli_flags = invocation.split(" -p ", 1)[0]
+        assert "--effort medium" in cli_flags, (
+            "the Stage 4 nested claude inherits ~/.claude/settings.json "
+            "effortLevel: low unless the CLI flag is pinned (the plugin "
+            f"prompt already says --effort medium as scan text):\n{invocation}"
         )
 
 

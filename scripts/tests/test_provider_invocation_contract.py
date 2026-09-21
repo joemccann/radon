@@ -216,11 +216,24 @@ class TestTheClaudeWire:
             assert tool in first.split(), f"{tool} not denied: {first}"
         assert "--dangerously-skip-permissions" in first, first
         assert "--output-format text" in first, first
+        assert "--effort medium" in first, (
+            "Mini ~/.claude/settings.json has effortLevel: low; the wrapper "
+            f"must pin --effort medium so it cannot win: {first}"
+        )
+
+    @pytest.mark.parametrize("phase", ["audit", "remediate", "deliver"])
+    def test_the_deepsec_loop_pins_effort_medium(self, tmp_path, phase):
+        argv = _argv(tmp_path, "security-deepsec", phase=phase)
+        assert argv, "claude was never launched"
+        first = argv[0]
+        assert first.startswith("-p /security-deepsec " + phase), first
+        assert "--effort medium" in first, first
+        assert "--model" in first.split(), first
 
     def test_the_denial_is_in_the_claude_arm_of_every_wrapper(self):
-        """The four fallback loops never take the claude rung, but launch_round
-        is pinned byte-identical across the five, so the arm lives in all of
-        them and must carry the same denial."""
+        """The four fallback loops never take the claude rung. launch_round
+        is identical within each family; the wakeup-tool denial stays on
+        every copy of the claude arm."""
         for name, path in LOOPS.items():
             text = path.read_text(encoding="utf-8")
             arm_start = text.index("    claude)\n", text.index("launch_round() {"))
