@@ -971,3 +971,75 @@ class TestInstallCopyOwedClaims:
         text = (_ROOT / "docs" / "cloud-services.md").read_text(encoding="utf-8")
         assert "unit-mismatch:radon-mcp.service" not in text
         assert "live unit still differs" not in text
+
+
+class TestOperatorSafetyOwners:
+    """DOC-115..119: source-backed operator decisions, not route inventories."""
+
+    def test_hosted_mcp_transport_owner(self):
+        caddy = (_ROOT / "cloud/caddy/Caddyfile").read_text()
+        cloud = (_ROOT / "cloud/CLAUDE.md").read_text()
+        assert "redir https://mcp.radon.run{uri} 308" in caddy
+        assert "`http://mcp.radon.run` until HTTPS ACME" not in cloud
+        assert "../docs/cloud-services.md#hosted-mcp" in cloud
+
+    def test_sizing_is_distinct_from_order_admission(self):
+        doc = (_ROOT / "docs/risk/kelly-fortunes-formula.md").read_text()
+        current = doc.split("## Historical design")[0]
+        assert "RADON_BANKROLL_CAP_ENFORCE_ALL_PATHS" in current
+        assert "defaults off" in current
+        assert "RADON_KELLY_ENFORCE_MODE" in current
+        assert "verified close-out" in current
+        assert "fresh" in current and "warning" in current
+        assert "Still required for the implement PR" not in current
+        rules = {r["id"]: r for r in _load_owners()["rules"]}
+        assert "scripts/bankroll_guard.py" in rules["kelly-sizing"]["globs"]
+        assert "scripts/app_preferences.py" in rules["kelly-sizing"]["globs"]
+        for placer in ("ib_place_order.py", "ib_execute.py", "exit_order_service.py"):
+            assert "check_if_enforced_on_all_paths" in (_ROOT / "scripts" / placer).read_text()
+
+    def test_subscription_recovery_links_opt_in_policy(self):
+        ops = (_ROOT / "docs/operations.md").read_text()
+        binds = ops.split("**Subscription credential binds")[1].split("The staged copy")[0]
+        assert "oauth-subscription-auth.md#radon-http-model-ladder-server" in binds
+        assert "RADON_LADDER_ALLOW_PREPAID" in binds
+        assert "as the fallback" not in binds
+        for path in ("scripts/clients/model_ladder.py", "web/lib/llm/subscriptionAuth.ts"):
+            assert "RADON_LADDER_ALLOW_PREPAID" in (_ROOT / path).read_text()
+
+    def test_tradingview_retention_owner_and_migration(self):
+        import sqlite3
+
+        doc = (_ROOT / "docs/tradingview-integration.md").read_text()
+        assert "sanitized" in doc and "not an exact copy" in doc
+        assert "0084_redact_tv_alert_raw_body.sql" in doc
+        assert "operator-only" in doc and "version = 84" in doc
+        assert "INSERT raw body" not in doc
+        cloud = (_ROOT / "docs/cloud-services.md").read_text()
+        assert "then writes the raw body" not in cloud
+        route = (_ROOT / "web/app/api/webhooks/tradingview/[token]/route.ts").read_text()
+        assert "redactSecret(raw, process.env.TV_WEBHOOK_SECRET)" in route
+        with sqlite3.connect(":memory:") as db:
+            db.executescript("CREATE TABLE tv_alert_events (raw_body TEXT, symbol TEXT);"
+                             "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT);")
+            db.executemany("INSERT INTO tv_alert_events VALUES (?, ?)", [
+                ('{"secret":"fixture-only","symbol":"TEST"}', "TEST"),
+                ('secret=fixture-only invalid json', "TEST"),
+            ])
+            migration = (_ROOT / "scripts/db/migrations/0084_redact_tv_alert_raw_body.sql").read_text()
+            db.executescript(migration)
+            rows = db.execute("SELECT raw_body, symbol FROM tv_alert_events").fetchall()
+            assert all("fixture-only" not in raw and symbol == "TEST" for raw, symbol in rows)
+            assert json.loads(rows[0][0])["symbol"] == "TEST"
+            assert rows[1][0].startswith("[REDACTED PRE-0084")
+            db.executescript(migration)
+            assert db.execute("SELECT raw_body, symbol FROM tv_alert_events").fetchall() == rows
+
+    def test_destructive_flex_cleanup_has_recovery_owner(self):
+        doc = (_ROOT / "docs/cloud-services.md").read_text()
+        section = _section(doc, "Legacy Flex aggregate cleanup")
+        for required in ("cleanup_legacy_flex_aggregates", "--help", "--apply", "dry-run",
+                         "#restore-runbook", "Stop", "execution", "gross", "operator-only"):
+            assert required in section
+        rules = {r["id"]: r for r in _load_owners()["rules"]}
+        assert "scripts/cleanup_legacy_flex_aggregates.py" in rules["flex-pull"]["globs"]
