@@ -55,7 +55,7 @@ describe("news feed sharing", () => {
     vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ title: "Hedge demand is back.", content: "Positioning is neutral. Source: ZeroHedge" }) } as Response);
     render(<NewsfeedShare post={post} />);
     await openShare();
-    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Hedge demand is back\n\n• Positioning is neutral");
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Hedge demand is back\n\nPositioning is neutral.");
     expect(engine.renderShareCard).toHaveBeenCalledWith(expect.objectContaining({ title: "Hedge demand is back.", content: "Positioning is neutral." }), undefined);
     expect(fetch).toHaveBeenCalledWith("/api/newsfeed/share", expect.objectContaining({ method: "POST", cache: "no-store" }));
   });
@@ -76,7 +76,7 @@ describe("news feed sharing", () => {
     await openShare();
     const caption = (screen.getByRole("textbox", { name: "Post caption" }) as HTMLTextAreaElement).value;
     expect(caption).toContain("Hedge demand is back");
-    expect(caption).toContain("• Positioning remains neutral");
+    expect(caption).toContain("Positioning remains neutral.");
     expect(caption).toContain(`Source: ${provider}`);
     expect(caption).not.toContain(otherProvider);
     fireEvent.click(screen.getByRole("button", { name: "Copy caption" }));
@@ -95,7 +95,7 @@ describe("news feed sharing", () => {
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Copy caption" }) as HTMLButtonElement).disabled).toBe(true);
     const compose = screen.getByRole("link", { name: "Compose on X" });
-    expect(new URL(compose.getAttribute("href")!).searchParams.get("text")).toBe("Yen hedge demand\n\n• Hedge demand increased");
+    expect(new URL(compose.getAttribute("href")!).searchParams.get("text")).toBe("Yen hedge demand\n\nHedge demand increased.");
     expect(compose.getAttribute("aria-disabled")).not.toBe("true");
     expect(compose.getAttribute("target")).toBe("_blank");
     expect((screen.getByRole("button", { name: "Download Story image" }) as HTMLButtonElement).disabled).toBe(true);
@@ -121,7 +121,7 @@ describe("news feed sharing", () => {
       resolveRewrite({ ok: true, json: async () => ({ title: "Hedge demand is back.", content: "Positioning remains neutral." }) } as Response);
     });
     await waitFor(() => expect(engine.renderShareCard).toHaveBeenLastCalledWith(expect.objectContaining({ title: "Hedge demand is back." }), undefined));
-    expect(new URL(compose.getAttribute("href")!).searchParams.get("text")).toBe("Hedge demand is back\n\n• Positioning remains neutral");
+    expect(new URL(compose.getAttribute("href")!).searchParams.get("text")).toBe("Hedge demand is back\n\nPositioning remains neutral.");
     expect(compose.getAttribute("aria-disabled")).not.toBe("true");
     expect(screen.getByText("Preparing preview…")).not.toBeNull();
     expect((screen.getByRole("button", { name: "Download Story image" }) as HTMLButtonElement).disabled).toBe(true);
@@ -137,7 +137,8 @@ describe("news feed sharing", () => {
     expect(text).toBe(caption);
     expect(caption.split("\n")[0]).toMatch(/\$252bn/i);
     expect(caption).toContain("$700bn");
-    expect(caption).toMatch(/\n\n• /);
+    expect(caption).not.toMatch(/^[•●▪◦*-]\s/m);
+    expect(caption.split("\n\n").length).toBeGreaterThan(1);
     expect(caption).toMatch(/Source: Goldman Midday Market Intelligence · 2026-09-17\s*$/);
     expect(caption.length).toBeLessThanOrEqual(400);
     expect(compose.getAttribute("aria-disabled")).not.toBe("true");

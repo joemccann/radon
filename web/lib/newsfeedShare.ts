@@ -35,7 +35,8 @@ function cleanText(text: string): string {
 
 export const SHARE_CAPTION_SOFT_CAP = 400;
 const HOOK_MAX = 110;
-const BULLET_MAX = 88;
+// Body lines are whole sentences. A sentence longer than this is dropped, never cut.
+const LINE_MAX = 180;
 const BULLET_PREFIX = /^(?:[•●▪◦]|[-*])\s+/;
 const IMPLICATION = /\b(?:headwind|overhang|not a gale|rather than|this (?:is|means|leaves)|implies?)\b/i;
 const FILLER = /^(?:this is not just a tech story|for fuller context|the driver here is straightforward)[.!]?$/i;
@@ -107,52 +108,60 @@ function hookHeadline(title: string, content: string): string {
   return compactPhrase(numbered || clauses[0] || raw, HOOK_MAX);
 }
 
-function asBullet(sentence: string): string {
-  return `• ${leadCap(compactPhrase(sentence.replace(THROAT_CLEAR, "").replace(BULLET_PREFIX, ""), BULLET_MAX))}`;
+/** A body line is a complete sentence, never a truncated fragment. */
+function asLine(sentence: string): string {
+  const text = leadCap(sentence.replace(THROAT_CLEAR, "").replace(BULLET_PREFIX, "").replace(/\s+/g, " ").trim());
+  if (!text) return "";
+  return /[.!?%)"'\u201d]$/.test(text) ? text : `${text}.`;
 }
 
-function extractSharePoints(content: string, hook: string): { bullets: string[]; implication: string } {
-  const lines = captionLines(content);
-  const structured = lines.filter(line => BULLET_PREFIX.test(line)).map(asBullet);
+function bodyLine(sentence: string): string {
+  const line = asLine(sentence);
+  return line.length <= LINE_MAX ? line : "";
+}
+
+function extractSharePoints(content: string, hook: string): { lines: string[]; implication: string } {
+  const raw = captionLines(content);
+  const structured = raw.filter(line => BULLET_PREFIX.test(line)).map(bodyLine).filter(Boolean);
   if (structured.length) {
-    const rest = lines.filter(line => !BULLET_PREFIX.test(line) && !FILLER.test(line)).join(" ");
-    return { bullets: structured.slice(0, 4), implication: rest && IMPLICATION.test(rest) ? compactPhrase(rest, 72) : "" };
+    const rest = raw.filter(line => !BULLET_PREFIX.test(line) && !FILLER.test(line)).join(" ");
+    return { lines: structured.slice(0, 3), implication: rest && IMPLICATION.test(rest) ? bodyLine(rest) : "" };
   }
   const used = new Set(numbersIn(hook));
   const sentences = splitSentences(captionProse(content))
     .map(sentence => sentence.replace(THROAT_CLEAR, "").trim())
-    .filter(sentence => (sentence.length >= 20 || numbersIn(sentence).length > 0) && !FILLER.test(sentence) && !NOTE_REF.test(sentence) && !restatesHook(sentence, hook));
-  const facts: string[] = [];
+    .filter(sentence => (sentence.length >= 20 || numbersIn(sentence).length > 0) && !FILLER.test(sentence)
+      && !NOTE_REF.test(sentence) && !restatesHook(sentence, hook) && bodyLine(sentence));
+  const picked = new Set<number>();
   let implication = "";
-  for (const sentence of sentences) {
+  // A line earns its place with a number the hook has not already used.
+  sentences.forEach((sentence, index) => {
+    if (picked.size >= 2) return;
     const unused = numbersIn(sentence).some(value => !used.has(value));
-    if (IMPLICATION.test(sentence) && !unused) { if (!implication) implication = compactPhrase(sentence, 72); continue; }
-    if (unused || facts.length < 2) {
-      facts.push(sentence);
-      for (const value of numbersIn(sentence)) used.add(value);
-    }
-    if (facts.length >= 3) break;
-  }
-  if (facts.length < 2) {
-    for (const sentence of sentences) {
-      if (facts.includes(sentence) || compactPhrase(sentence, BULLET_MAX) === implication) continue;
-      facts.push(sentence);
-      if (facts.length >= 2) break;
-    }
-  }
-  return { bullets: facts.slice(0, 4).map(asBullet), implication };
+    if (IMPLICATION.test(sentence) && !unused) { if (!implication) implication = bodyLine(sentence); return; }
+    if (!unused) return;
+    picked.add(index);
+    for (const value of numbersIn(sentence)) used.add(value);
+  });
+  // Short posts still read as prose, so backfill with the leading sentences.
+  sentences.forEach((sentence, index) => {
+    if (picked.size >= 2 || picked.has(index) || bodyLine(sentence) === implication) return;
+    picked.add(index);
+  });
+  const facts = [...picked].sort((a, b) => a - b).map(index => sentences[index]);
+  return { lines: facts.slice(0, 3).map(bodyLine).filter(Boolean), implication };
 }
 
 export function assembleShareCaption(title: string, content: string, source = ""): string {
   const hook = hookHeadline(title, content);
-  const { bullets, implication } = extractSharePoints(content, hook);
+  const { lines, implication } = extractSharePoints(content, hook);
   const sourceLine = sanitizeShareText(source).split("\n").map(line => line.replace(/[ \t]+/g, " ").trim()).filter(Boolean).join(" ");
-  const join = (items: string[], extra = implication) => [hook, items.join("\n"), extra, sourceLine].filter(Boolean).join("\n\n");
-  const items = [...bullets];
+  const join = (items: string[], extra = implication) => [hook, ...items, extra, sourceLine].filter(Boolean).join("\n\n");
+  const items = [...lines];
   let caption = join(items);
-  while (caption.length > SHARE_CAPTION_SOFT_CAP && items.length > 2) { items.pop(); caption = join(items); }
+  // Over the cap, drop a whole line. Never cut a sentence mid-word.
   if (caption.length > SHARE_CAPTION_SOFT_CAP && implication) caption = join(items, "");
-  if (caption.length > SHARE_CAPTION_SOFT_CAP && items.length > 1) { items.pop(); caption = join(items, ""); }
+  while (caption.length > SHARE_CAPTION_SOFT_CAP && items.length > 1) { items.pop(); caption = join(items, ""); }
   return sanitizeShareText(caption);
 }
 
