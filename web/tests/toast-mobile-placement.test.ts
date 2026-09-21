@@ -66,3 +66,15 @@ describe("toast mobile placement", () => {
     expect(ruleBlock(".toast-warning")).toContain("border-left: 3px solid var(--warning)");
   });
 });
+
+describe("toast mobile placement while a modal is open", () => {
+  // Once toasts moved to the bottom, a toast's dismiss button covered the chat composer's Send button
+  // (e2e/chat-experience.spec.ts, mobile). A modal owns the bottom of the screen: its primary action lives there.
+  it("moves toasts back under the app bar while any open modal dialog is on screen", () => {
+    const selector = 'body[data-mobile="true"]:has([role="dialog"][aria-modal="true"]:not([hidden])) .toast-container';
+    const block = ruleBlock(selector);
+    expect(block).toContain("top: calc(var(--mobile-app-bar-height) + var(--safe-top) + 12px)");
+    expect(block).toMatch(/bottom:\s*auto/);
+    expect(css.indexOf(`${selector} {`)).toBeGreaterThan(css.indexOf('body[data-mobile="true"] .toast-container {'));
+  });
+});
