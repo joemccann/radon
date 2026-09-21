@@ -50,10 +50,9 @@ LOOPS = {
     "security-deepsec": REPO / "scripts" / "security_deepsec_nightly.sh",
 }
 
-# Security + DeepSec default (2026-09-21). Mini `claude models` that day:
-# claude-fable-5-1 newest/elite OUT; claude-opus-5 PIN (live id, no [1m]
-# alias in that catalog); claude-sonnet-5 fallback. Other weekend loops
-# keep their own ladders. Do not put fable / claude-fable-* back.
+# Documented SAFETY ladder when catalog discovery fails. Live policy is
+# skip-newest from the Mini catalog (see test_security_claude_ladder.py).
+# Other weekend loops keep their own ladders. Do not put fable back.
 LADDER = [
     "claude-opus-5",
     "claude-sonnet-5",
@@ -104,6 +103,10 @@ def _clone(tmp_path: Path, wrapper: Path) -> Path:
     (repo / "scripts" / wrapper.name).chmod(0o755)
     for helper in ("weekend_notify.py", "weekend_redact.py"):
         (repo / "scripts" / helper).write_text("# stub\n", encoding="utf-8")
+    for helper in ("security_claude_ladder.py", "security_claude_ladder.sh"):
+        src = REPO / "scripts" / helper
+        if src.exists():
+            shutil.copy2(src, repo / "scripts" / helper)
     for marker in MARKERS:
         (repo / marker).write_text("", encoding="utf-8")
     return repo
@@ -134,6 +137,7 @@ def _stub_bin(
         # quota for that model is (or is not) gone.
         "claude": (
             "#!/bin/bash\n"
+            'if [ "$1" = "models" ]; then exit 1; fi\n'
             'model=""\n'
             "while [ $# -gt 0 ]; do\n"
             '  if [ "$1" = "--model" ]; then model="$2"; shift 2; continue; fi\n'
@@ -166,6 +170,20 @@ def _stub_bin(
         exe = bin_dir / name
         exe.write_text(body, encoding="utf-8")
         exe.chmod(0o755)
+    host_py = shutil.which("python3.13")
+    if not host_py:
+        for candidate in (
+            Path("/home/ubuntu/.local/bin/python3.13"),
+            Path("/usr/bin/python3.13"),
+            REPO / ".venv" / "bin" / "python3.13",
+        ):
+            if candidate.exists():
+                host_py = str(candidate)
+                break
+    if host_py:
+        dest = bin_dir / "python3.13"
+        if not dest.exists():
+            dest.symlink_to(host_py)
     return bin_dir
 
 
@@ -175,9 +193,11 @@ def _audit(
     exhausted_models,
     ladder: str | None = None,
     exhausted_line: str = QUOTA_LINE,
+    catalog: str | None = None,
 ):
     return _run(
-        tmp_path, loop, "audit", exhausted_models, ladder, exhausted_line=exhausted_line
+        tmp_path, loop, "audit", exhausted_models, ladder,
+        exhausted_line=exhausted_line, catalog=catalog,
     )
 
 
@@ -189,6 +209,7 @@ def _run(
     ladder: str | None = None,
     exhausted_line: str = QUOTA_LINE,
     exhausted_exit: int = 1,
+    catalog: str | None = None,
 ):
     wrapper = LOOPS[loop]
     models_log = tmp_path / "models.txt"
@@ -207,6 +228,10 @@ def _run(
     }
     if ladder is not None:
         env["RADON_WEEKEND_MODEL_LADDER"] = ladder
+    if catalog is not None:
+        cat = tmp_path / "claude-catalog.txt"
+        cat.write_text(catalog, encoding="utf-8")
+        env["RADON_WEEKEND_CLAUDE_CATALOG"] = str(cat)
     proc = subprocess.run(
         [BASH, str(repo / "scripts" / wrapper.name), phase],
         cwd=repo, env=env, capture_output=True, text=True, timeout=180,
@@ -230,12 +255,35 @@ class TestTheLoopPinsItsModel:
             "on that default kills the loop outright"
         )
 
-    def test_the_default_ladder_is_the_agreed_order(self, loop):
+    def test_the_wrapper_sources_the_shared_skip_newest_helper(self, loop):
         body = LOOPS[loop].read_text(encoding="utf-8")
-        start = body.index("RADON_WEEKEND_MODEL_LADDER:-")
-        default = body[start + len("RADON_WEEKEND_MODEL_LADDER:-"):body.index("}", start)]
-        assert default.split() == LADDER, (default.split(), LADDER)
-        assert not any("fable" in rung for rung in default.split()), default
+        assert ". \"$REPO/scripts/security_claude_ladder.sh\"" in body, (
+            f"{loop}: DeepSec and security must source the same helper, "
+            "not copy a hardcoded MODEL_LADDER"
+        )
+        assert not re.search(
+            r'^MODEL_LADDER="\$\{RADON_WEEKEND_MODEL_LADDER:-claude-',
+            body,
+            re.M,
+        ), f"{loop}: a static MODEL_LADDER default is the pin Joe rejected"
+
+    def test_a_stubbed_catalog_skips_newest_and_does_not_lead_with_fable(
+        self, tmp_path, loop
+    ):
+        # Second-newest is sonnet, not the safety primary opus, so a failed
+        # discovery cannot accidentally satisfy this assertion.
+        catalog = (
+            "claude-fable-5-1\nclaude-sonnet-5\nclaude-haiku-4-5\n"
+        )
+        proc, models, _calls = _audit(tmp_path, loop, [], catalog=catalog)
+        assert models[:1] == ["claude-sonnet-5"], (
+            f"{loop}: primary must be catalog index 1 (newest skipped); "
+            f"got {models!r}\n{proc.stdout}{proc.stderr}"
+        )
+        assert "claude-fable-5-1" not in models, (
+            f"{loop}: newest/fable must not be the default primary: {models!r}"
+        )
+        assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
 
     def test_the_claude_arm_passes_effort_medium(self, loop):
         body = LOOPS[loop].read_text(encoding="utf-8")

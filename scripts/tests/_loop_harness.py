@@ -25,10 +25,9 @@ LOOPS = {
     "security-deepsec": REPO / "scripts" / "security_deepsec_nightly.sh",
 }
 
-# Security + DeepSec default (2026-09-21). Mini `claude models` that day
-# (Claude Code 2.1.278 / Claude Max): claude-fable-5-1 newest/elite OUT;
-# claude-opus-5 second-newest PIN (live id, no [1m] alias in that catalog);
-# claude-sonnet-5 fallback. Do not put fable / claude-fable-* back.
+# Documented SAFETY ladder when catalog discovery fails (helper empty /
+# stub `claude models`). Live policy is skip-newest from the Mini catalog;
+# do not treat these ids as a forever pin. Do not put fable back.
 LADDER = [
     "claude-opus-5",
     "claude-sonnet-5",
@@ -71,6 +70,10 @@ def _clone(tmp_path: Path, wrapper: Path) -> Path:
     (repo / "scripts" / wrapper.name).chmod(0o755)
     for helper in ("weekend_notify.py", "weekend_redact.py"):
         (repo / "scripts" / helper).write_text("# stub\n", encoding="utf-8")
+    for helper in ("security_claude_ladder.py", "security_claude_ladder.sh"):
+        src = REPO / "scripts" / helper
+        if src.exists():
+            shutil.copy2(src, repo / "scripts" / helper)
     for marker in MARKERS:
         (repo / marker).write_text("", encoding="utf-8")
     # The four fallback loops drive codex and grok from a rendered prompt file
@@ -120,6 +123,8 @@ def _stub_bin(
         # quota for that model is (or is not) gone.
         "claude": (
             "#!/bin/bash\n"
+            # Catalog discovery (`claude models`) must not record a launch.
+            'if [ "$1" = "models" ]; then exit 1; fi\n'
             'model=""\n'
             "while [ $# -gt 0 ]; do\n"
             '  if [ "$1" = "--model" ]; then model="$2"; shift 2; continue; fi\n'
@@ -159,6 +164,20 @@ def _stub_bin(
         exe = bin_dir / name
         exe.write_text(body, encoding="utf-8")
         exe.chmod(0o755)
+    host_py = shutil.which("python3.13")
+    if not host_py:
+        for candidate in (
+            Path("/home/ubuntu/.local/bin/python3.13"),
+            Path("/usr/bin/python3.13"),
+            REPO / ".venv" / "bin" / "python3.13",
+        ):
+            if candidate.exists():
+                host_py = str(candidate)
+                break
+    if host_py:
+        dest = bin_dir / "python3.13"
+        if not dest.exists():
+            dest.symlink_to(host_py)
     return bin_dir
 
 
@@ -272,6 +291,7 @@ def _provider_stub(
     """
     return (
         "#!/bin/bash\n"
+        'if [ "$1" = "models" ]; then exit 1; fi\n'
         'self="$(basename "$0")"\n'
         'prov="$self"\n'
         'case "${GROK_HOME:-}" in\n'

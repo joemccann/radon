@@ -60,11 +60,17 @@ the security completion marker.
 
 ## Runner integration and fail-closed default
 
-The wrapper (`scripts/security_nightly.sh`) pins Claude to
-`claude-opus-5` (second-newest as of Mini `claude models` 2026-09-21) with
-`--effort medium`. Fable / `claude-fable-*` / top-tier is out of security
-nightlies so Max quota is not burned first. Do not put fable back via
-`RADON_WEEKEND_MODEL_LADDER`. It owns the runner mechanics: it
+The wrapper (`scripts/security_nightly.sh`) and DeepSec share
+`scripts/security_claude_ladder.sh`. At run time the helper lists the Mini
+Claude Code catalog (`claude models`, subscription CLI only), skips the
+newest generation, and runs the prior / second-newest first, then deeper
+Claude fallbacks. Every Claude launch uses `--effort medium` so Mini
+`~/.claude/settings.json` cannot win with low effort or a fable default.
+`RADON_WEEKEND_MODEL_LADDER` / `RADON_WEEKEND_PROVIDER_LADDER` skip
+discovery when set. If discovery fails (CLI missing, empty list, parse
+error), the helper logs and uses the safety ladder `claude-opus-5` then
+`claude-sonnet-5` (newest / fable excluded). Never silently restore fable.
+It owns the runner mechanics: it
 refuses unless BOTH `.radon-weekend-runner` and `.radon-security-runner` exist
 (so it can never run in a sibling loop's clone or the operator checkout), takes
 the exclusive `.weekend-runner.lock`, hard-resets to `origin/main` before each

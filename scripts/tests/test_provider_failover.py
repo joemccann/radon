@@ -220,17 +220,16 @@ class TestTheOperatorsDecisionNoPinnedModels:
         )
 
     @pytest.mark.parametrize("loop", ["security", "security-deepsec"])
-    def test_the_security_ladder_pins_opus_then_sonnet(self, loop):
+    def test_the_security_ladder_uses_the_shared_skip_newest_helper(self, loop):
         body = _h.LOOPS[loop].read_text(encoding="utf-8")
-        m = re.search(
-            r'^MODEL_LADDER="\$\{RADON_WEEKEND_MODEL_LADDER:-(.+?)\}"$', body, re.M
+        assert ". \"$REPO/scripts/security_claude_ladder.sh\"" in body, (
+            f"{loop}: DeepSec and security must share security_claude_ladder.sh"
         )
-        assert m, f"{loop}: lost its claude model ladder"
-        assert m.group(1).split() == _h.LADDER, (
-            f"{loop}: security nightlies pin claude-opus-5 then "
-            f"claude-sonnet-5; Fable is out: {m.group(1)}"
-        )
-        assert "fable" not in m.group(1), m.group(1)
+        assert not re.search(
+            r'^MODEL_LADDER="\$\{RADON_WEEKEND_MODEL_LADDER:-claude-',
+            body,
+            re.M,
+        ), f"{loop}: a static opus pin is the policy Joe rejected"
 
     @pytest.mark.parametrize("loop", FALLBACK_LOOPS)
     def test_rung_model_is_empty_for_a_bare_rung(self, tmp_path, loop):
