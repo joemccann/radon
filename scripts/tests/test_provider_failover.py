@@ -219,16 +219,18 @@ class TestTheOperatorsDecisionNoPinnedModels:
             f"{loop}: a vendor model id is pinned in the wrapper: {rungs}"
         )
 
-    def test_the_security_ladder_still_names_its_four_claude_models(self):
-        body = _h.LOOPS["security"].read_text(encoding="utf-8")
+    @pytest.mark.parametrize("loop", ["security", "security-deepsec"])
+    def test_the_security_ladder_pins_opus_then_sonnet(self, loop):
+        body = _h.LOOPS[loop].read_text(encoding="utf-8")
         m = re.search(
             r'^MODEL_LADDER="\$\{RADON_WEEKEND_MODEL_LADDER:-(.+?)\}"$', body, re.M
         )
-        assert m, "the security loop lost its claude model ladder"
+        assert m, f"{loop}: lost its claude model ladder"
         assert m.group(1).split() == _h.LADDER, (
-            "the security ladder is a deliberate per-model ladder for a shared "
-            f"account cap: {m.group(1)}"
+            f"{loop}: security nightlies pin claude-opus-5 then "
+            f"claude-sonnet-5; Fable is out: {m.group(1)}"
         )
+        assert "fable" not in m.group(1), m.group(1)
 
     @pytest.mark.parametrize("loop", FALLBACK_LOOPS)
     def test_rung_model_is_empty_for_a_bare_rung(self, tmp_path, loop):
