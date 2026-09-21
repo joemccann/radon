@@ -6,9 +6,14 @@ def ident(doc_type, series_name="x"):
     return identify.Identity("UBS", "folder", "ubs", series_name, "2026-09-17", "text", 1, "17 September 2026", doc_type, "")
 
 
-def test_fx_pair_notes_and_economic_calendars_are_dropped_with_a_reason_code():
+def test_fx_pair_notes_are_dropped_with_a_reason_code():
     assert triage.decide(ident("fx_pair_note")) == ("drop", "DOC_TYPE_FX_PAIR_NOTE")
-    assert triage.decide(ident("calendar")) == ("drop", "DOC_TYPE_CALENDAR")
+
+
+def test_calendars_reach_review_until_the_operator_approves_a_rule():
+    # The operator upvoted "MACRO WEEK AHEAD" (Fed speaker dates) on 2026-09-20, so a calendar is not dropped by code.
+    assert triage.decide(ident("calendar")) == ("review", None)
+    assert triage.decide(ident("calendar"), rules={"doc_type_drop": {"calendar"}}) == ("drop", "RULE_DOC_TYPE")
 
 
 def test_types_that_have_published_are_kept():
