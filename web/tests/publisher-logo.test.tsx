@@ -41,6 +41,66 @@ describe("<PublisherLogo />", () => {
     expect(img.getAttribute("src")).toBe("/icons/publishers/mizuho.svg");
   });
 
+  it("renders Raymond James logo for Raymond James", () => {
+    render(<PublisherLogo publisher="Raymond James" />);
+    const logo = screen.getByTestId("publisher-logo");
+    expect(logo.getAttribute("data-publisher-id")).toBe("raymond-james");
+    expect(logo.getAttribute("data-is-fallback")).toBe("false");
+    const img = screen.getByRole("img", { hidden: true });
+    expect(img.getAttribute("src")).toBe("/icons/publishers/raymond-james.svg");
+    expect(img.getAttribute("alt")).toBe("Raymond James");
+  });
+
+  it("renders Scotiabank logo for Scotiabank", () => {
+    render(<PublisherLogo publisher="Scotiabank" />);
+    const logo = screen.getByTestId("publisher-logo");
+    expect(logo.getAttribute("data-publisher-id")).toBe("scotiabank");
+    expect(logo.getAttribute("data-is-fallback")).toBe("false");
+    const img = screen.getByRole("img", { hidden: true });
+    expect(img.getAttribute("src")).toBe("/icons/publishers/scotiabank.svg");
+    expect(img.getAttribute("alt")).toBe("Scotiabank");
+  });
+
+  it("renders Pictet logo for Pictet", () => {
+    render(<PublisherLogo publisher="Banque Pictet" />);
+    const logo = screen.getByTestId("publisher-logo");
+    expect(logo.getAttribute("data-publisher-id")).toBe("pictet");
+    expect(logo.getAttribute("data-is-fallback")).toBe("false");
+    const img = screen.getByRole("img", { hidden: true });
+    expect(img.getAttribute("src")).toBe("/icons/publishers/pictet.svg");
+    expect(img.getAttribute("alt")).toBe("Pictet");
+  });
+
+  it("renders SEB logo for SEB", () => {
+    render(<PublisherLogo publisher="SEB" />);
+    const logo = screen.getByTestId("publisher-logo");
+    expect(logo.getAttribute("data-publisher-id")).toBe("seb");
+    expect(logo.getAttribute("data-is-fallback")).toBe("false");
+    const img = screen.getByRole("img", { hidden: true });
+    expect(img.getAttribute("src")).toBe("/icons/publishers/seb.svg");
+    expect(img.getAttribute("alt")).toBe("SEB");
+  });
+
+  it("renders Banque Syz logo for Banque Syz", () => {
+    render(<PublisherLogo publisher="Banque Syz" />);
+    const logo = screen.getByTestId("publisher-logo");
+    expect(logo.getAttribute("data-publisher-id")).toBe("syz");
+    expect(logo.getAttribute("data-is-fallback")).toBe("false");
+    const img = screen.getByRole("img", { hidden: true });
+    expect(img.getAttribute("src")).toBe("/icons/publishers/syz.svg");
+    expect(img.getAttribute("alt")).toBe("Banque Syz");
+  });
+
+  it("renders UniCredit logo for UniCredit", () => {
+    render(<PublisherLogo publisher="UniCredit" />);
+    const logo = screen.getByTestId("publisher-logo");
+    expect(logo.getAttribute("data-publisher-id")).toBe("unicredit");
+    expect(logo.getAttribute("data-is-fallback")).toBe("false");
+    const img = screen.getByRole("img", { hidden: true });
+    expect(img.getAttribute("src")).toBe("/icons/publishers/unicredit.svg");
+    expect(img.getAttribute("alt")).toBe("UniCredit");
+  });
+
   it("renders default fallback icon for unknown or unmapped publishers", () => {
     render(<PublisherLogo publisher="TS Lombard" />);
     const logo = screen.getByTestId("publisher-logo");

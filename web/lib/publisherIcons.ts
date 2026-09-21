@@ -129,6 +129,42 @@ const PUBLISHER_RULES: PublisherRule[] = [
     iconUrl: "/icons/publishers/jefferies.svg",
     pattern: /\bjefferies\b/i,
   },
+  {
+    id: "raymond-james",
+    name: "Raymond James",
+    iconUrl: "/icons/publishers/raymond-james.svg",
+    pattern: /\braymond\s*james\b/i,
+  },
+  {
+    id: "scotiabank",
+    name: "Scotiabank",
+    iconUrl: "/icons/publishers/scotiabank.svg",
+    pattern: /\b(?:scotiabank|bank\s*of\s*nova\s*scotia|scotia\s*capital)\b/i,
+  },
+  {
+    id: "pictet",
+    name: "Pictet",
+    iconUrl: "/icons/publishers/pictet.svg",
+    pattern: /\b(?:pictet|banque\s*pictet)\b/i,
+  },
+  {
+    id: "seb",
+    name: "SEB",
+    iconUrl: "/icons/publishers/seb.svg",
+    pattern: /\b(?:seb|skandinaviska\s*enskilda\s*banken)\b/i,
+  },
+  {
+    id: "syz",
+    name: "Banque Syz",
+    iconUrl: "/icons/publishers/syz.svg",
+    pattern: /\b(?:syz|banque\s*syz)\b/i,
+  },
+  {
+    id: "unicredit",
+    name: "UniCredit",
+    iconUrl: "/icons/publishers/unicredit.svg",
+    pattern: /\b(?:unicredit|hypovereinsbank)\b/i,
+  },
 ];
 
 /**
