@@ -1026,6 +1026,9 @@ set -eu
         "RADON_SUDOERS_DIR": str(sudoers_dir),
         "RADON_POLKIT_RULES_DIR": str(polkit_dir),
         "RADON_SETUP_STAGE_DIR": str(tmp_path / "stage"),
+        # This case is about the legacy-privilege upgrade, and it stages from
+        # the real checkout, where CI has no origin/main ref to anchor to.
+        "RADON_PROVENANCE_REMOTE_REF": "HEAD",
         "RADON_VISUDO_BIN": str(visudo),
         "RADON_POLICY_SKIP_CHOWN": "1",
         "RADON_SKIP_POLKIT_RELOAD": "1",

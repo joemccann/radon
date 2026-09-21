@@ -178,6 +178,17 @@ through the fd-based `O_NOFOLLOW` helper. Contracts:
 `cloud/tests/test_setup_vps_privileged_paths.py`,
 `scripts/tests/test_wrapper_symlink_refusal.py`.
 
+**Staging provenance is remote-ancestry (2026-09-20).** A blob committed at
+local `HEAD` proves only that someone with commit access to the checkout put
+it there, so `setup-vps.sh` additionally requires the staged blob to be
+reachable from `origin/main` (the blob `origin/main` carries for that path, or
+a `HEAD` that is an ancestor of it). This covers every `stage_from_checkout`
+artifact and the Gateway compose install. **Operator:** provisioning needs a
+fetched `origin/main` — an absent or stale remote ref fails closed with
+`origin/main is unavailable (fetch it before provisioning)`; run `git fetch
+origin main` in the checkout first. Override the ref with
+`RADON_PROVENANCE_REMOTE_REF` only for a deliberate non-`main` release line.
+
 **Newsfeed least privilege.** `radon-newsfeed.service` runs a
 sandbox-disabled Chromium against third-party web content, so
 `radon-app-runtime` hands it a filtered env file — only the keys the
