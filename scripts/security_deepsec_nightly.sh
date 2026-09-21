@@ -1157,26 +1157,34 @@ RETRY_PAUSE_SECS=60
 # decide what tonight runs on.
 #
 # 2026-09-21: cycle 20260921 died rc=1 on "You've reached your Fable limit"
-# because the previous default still led with claude-fable-5[1m]. Security
-# nightlies (this loop + security-nightly) now pin the second-newest Claude
-# with --effort medium. Mini `claude models` that day (Claude Code 2.1.278 /
-# Claude Max): claude-fable-5-1 newest/elite OUT; claude-opus-5 PIN (live id,
-# no [1m] alias in that catalog); claude-sonnet-5 fallback. Wrappers pass
-# --model and --effort medium so Mini ~/.claude/settings.json
-# (`model: claude-fable-5-1`, `effortLevel: low`) cannot win on unattended
-# runs. Do not put fable / claude-fable-* back via RADON_WEEKEND_MODEL_LADDER.
+# because the previous default still led with claude-fable-5[1m]. A static
+# opus pin goes stale the next Anthropic drop. Security + DeepSec share
+# scripts/security_claude_ladder.sh: list Mini `claude models` (subscription
+# CLI only), skip the newest generation, run the prior model first, then
+# deeper Claude fallbacks. --effort medium on every Claude launch so Mini
+# ~/.claude/settings.json (`model: claude-fable-5-1`, `effortLevel: low`)
+# cannot win. RADON_WEEKEND_MODEL_LADDER / RADON_WEEKEND_PROVIDER_LADDER
+# short-circuit discovery. Discovery failure uses SAFETY opus then sonnet
+# (logged); never silently restore fable.
 LOOP_SKILL="security-deepsec"
 LOOP_LOG_TAG="security-deepsec"
 PORTABLE_PROMPT_DIR="${RADON_PORTABLE_PROMPT_DIR:-$REPO/.claude/portable-prompts}"
-# `RADON_WEEKEND_MODEL_LADDER` still names claude rungs, for the loops that
-# have them; `RADON_WEEKEND_PROVIDER_LADDER` overrides the whole ladder.
-MODEL_LADDER="${RADON_WEEKEND_MODEL_LADDER:-claude-opus-5 claude-sonnet-5}"
-PROVIDER_LADDER="${RADON_WEEKEND_PROVIDER_LADDER:-}"
-if [[ -z "$PROVIDER_LADDER" ]]; then
-  for _m in $MODEL_LADDER; do
-    PROVIDER_LADDER="${PROVIDER_LADDER:+$PROVIDER_LADDER }claude:$_m"
-  done
-  unset _m
+if [[ -r "$REPO/scripts/security_claude_ladder.sh" ]]; then
+  # shellcheck source=security_claude_ladder.sh
+  . "$REPO/scripts/security_claude_ladder.sh"
+else
+  MODEL_LADDER="${RADON_WEEKEND_MODEL_LADDER:-}"
+  PROVIDER_LADDER="${RADON_WEEKEND_PROVIDER_LADDER:-}"
+  if [[ -z "${PROVIDER_LADDER:-}" && -z "${MODEL_LADDER:-}" ]]; then
+    MODEL_LADDER="claude-opus-5 claude-sonnet-5"
+    echo "[${LOOP_LOG_TAG}] claude ladder helper missing; safety $MODEL_LADDER (newest/fable excluded)" >&2
+  fi
+  if [[ -z "${PROVIDER_LADDER:-}" ]]; then
+    for _m in $MODEL_LADDER; do
+      PROVIDER_LADDER="${PROVIDER_LADDER:+$PROVIDER_LADDER }claude:$_m"
+    done
+    unset _m
+  fi
 fi
 
 # --- provider ladder (byte-identical across all five loops) ------------------

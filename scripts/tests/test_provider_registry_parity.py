@@ -122,7 +122,11 @@ def test_the_security_loop_ladder_is_claude_only(loop):
     body = LOOPS[loop].read_text(encoding="utf-8")
     assert "refuse_non_claude_rung" in body
     assert "claude-exclusive" in body
-    m = re.search(r'^MODEL_LADDER="\$\{RADON_WEEKEND_MODEL_LADDER:-(.+?)\}"$', body, re.M)
-    assert m, f"{loop}: lost its claude model ladder"
-    assert m.group(1).split() == _h.LADDER, m.group(1)
-    assert "fable" not in m.group(1), m.group(1)
+    assert ". \"$REPO/scripts/security_claude_ladder.sh\"" in body, (
+        f"{loop}: must source the shared skip-newest helper"
+    )
+    assert not re.search(
+        r'^MODEL_LADDER="\$\{RADON_WEEKEND_MODEL_LADDER:-claude-',
+        body,
+        re.M,
+    ), f"{loop}: static MODEL_LADDER pin leaked back into the wrapper"
