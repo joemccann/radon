@@ -40,6 +40,13 @@ describe("POST newsfeed/share", () => {
     chat.mockResolvedValue({ text: '{"title":"Seasonality","content":"Up 25%."}' });
     expect((await POST(request())).status).toBe(502);
   });
+  it("accepts a reformatted numeric range but still rejects invented values", async () => {
+    const range = { title: "Wolfe sees $30-$50B for Meta", content: "Revenue opportunity from Muse." };
+    chat.mockResolvedValue({ text: '{"title":"Meta: $30B-$50B from Muse","content":"• Revenue opportunity from Muse"}' });
+    expect((await POST(request(range))).status).toBe(200);
+    chat.mockResolvedValue({ text: '{"title":"Meta: $30B-$60B from Muse","content":"• Revenue opportunity from Muse"}' });
+    expect((await POST(request(range))).status).toBe(502);
+  });
   it("reports timeouts safely", async () => {
     chat.mockRejectedValue(new DOMException("timeout", "TimeoutError"));
     expect((await POST(request())).status).toBe(504);

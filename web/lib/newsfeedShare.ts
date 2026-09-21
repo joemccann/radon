@@ -74,7 +74,7 @@ function leadCap(text: string): string {
 }
 
 function splitSentences(text: string): string[] {
-  return text.replace(/\n+/g, " ").split(/(?<=[.!?])\s+(?=[A-Z("'“]|\d|~|\$)/).map(part => part.trim()).filter(Boolean);
+  return text.replace(/\n+/g, " ").split(/(?<!\b(?:Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sept?|Oct|Nov|Dec|No|vs|Mr|Ms|Dr|St)\.)(?<=[.!?])\s+(?=[A-Z("'“]|\d|~|\$)/).map(part => part.trim()).filter(Boolean);
 }
 
 function numbersIn(text: string): string[] {
@@ -238,15 +238,16 @@ export async function renderShareCard(post: SharePost, imageUrl: string | undefi
   ctx.fillStyle = MUTED;
   ctx.font = `22px ${mono}`;
   ctx.fillText("MARKET ANALYSIS", 72, 220);
-  const date = new Date(post.source?.documentDate ? `${post.source.documentDate}T12:00:00Z` : post.isoTimestamp);
-  const dateLabel = Number.isFinite(date.getTime())
-    ? date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }).toUpperCase() : "";
+  // Story cards carry the export date (ET), not the source document date.
+  const dateLabel = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "America/New_York" }).toUpperCase();
   ctx.fillText(dateLabel, 1080 - 72 - ctx.measureText(dateLabel).width, 220);
   ctx.fillStyle = LINE;
   ctx.fillRect(72, 269, 936, 2);
+  // Same copy and layout as the X caption: hook, then bullets and implication.
+  const [hook = post.title, ...paragraphs] = assembleShareCaption(post.title, post.content || "").split("\n\n");
   ctx.fillStyle = INK;
   ctx.font = `600 54px ${sans}`;
-  const title = drawText(ctx, post.title, 72, 312, 900, 65, 4);
+  const title = drawText(ctx, hook, 72, 312, 900, 65, 4);
   let bodyY = title.bottom + 30;
   if (image) {
     // A white chart field preserves the original chart, labels, axes and source.
@@ -262,24 +263,15 @@ export async function renderShareCard(post: SharePost, imageUrl: string | undefi
   }
   ctx.fillStyle = INK;
   ctx.font = `32px ${sans}`;
-  const body = drawText(ctx, post.content || "", 72, bodyY, 900, 45, Math.max(1, Math.floor((1480 - bodyY) / 45)));
-  if (title.truncated || body.truncated) {
-    ctx.fillStyle = MUTED;
-    ctx.font = `22px ${mono}`;
-    ctx.fillText("EXCERPT", 72, 1490);
+  const limit = 1840;
+  for (const [index, paragraph] of paragraphs.entries()) {
+    if (index) bodyY += 22;
+    for (const line of paragraph.split("\n")) {
+      const room = Math.floor((limit - bodyY) / 45);
+      if (room < 1) break;
+      bodyY = drawText(ctx, line, 72, bodyY, 900, 45, room).bottom + 8;
+    }
   }
-  ctx.fillStyle = LINE;
-  ctx.fillRect(72, 1535, 936, 2);
-  ctx.fillStyle = MUTED;
-  ctx.font = `24px ${sans}`;
-  drawText(ctx, shareSource(post, imageUrl), 72, 1554, 900, 30, 2);
-  const figure = post.source?.figures.find(item => item.url === imageUrl);
-  if (figure) {
-    ctx.font = `22px ${sans}`;
-    drawText(ctx, `p. ${figure.page} · ${figure.caption}`, 72, 1622, 900, 28, 2);
-  }
-  ctx.font = `22px ${mono}`;
-  ctx.fillText("radon.run", 72, 1720);
   return canvas;
 }
 
