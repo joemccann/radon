@@ -141,12 +141,13 @@ runs an LLM consumer (`radon-api`, `radon-newsfeed`, `radon-research`,
 `os.homedir()` resolve to them. Next.js hosts `/api/newsfeed/share` and
 `/api/assistant`; excluding it (2026-09-19) 502'd every share rewrite with
 `Missing Anthropic subscription`. Never the whole home directory, and never
-into the relay. The model ladders (Python
-`scripts/clients/model_ladder.py`, Next.js `web/lib/llm/provider.ts`) meter
-against those subscriptions first and treat prepaid `XAI_API_KEY` and friends
-as the fallback; before this bind no container could see the files and every
-container-side rung silently ran on prepaid credits, which is how an exhausted
-xAI wallet took down the newsfeed voice rewrite. `radon-subscription-tokens`
+into the relay. The Python and Next.js model ladders use the
+[subscription-tier billing and recovery policy](oauth-subscription-auth.md#radon-http-model-ladder-server).
+Prepaid fallback for those tiers requires the explicit `RADON_LADDER_ALLOW_PREPAID`
+opt-in; funding a prepaid wallet alone does not recover a missing subscription.
+NVIDIA and Cerebras have separate rung policies in that owner. Check subscription
+availability and the credential binds before changing billing policy.
+`radon-subscription-tokens`
 keeps the files live on the host ([subscription-tokens.md](subscription-tokens.md)).
 
 The staged copy is `root:radon-secrets 0040` in a `root:radon-secrets 0050`

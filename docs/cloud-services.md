@@ -321,7 +321,7 @@ does not mean Turso necessarily failed.
 
 ### TradingView alerts
 
-TradingView alert fires `POST` to `app.radon.run/api/webhooks/tradingview/<TV_WEBHOOK_PATH_TOKEN>`. Caddy admits only TradingView's four sender IPs and caps the body at 16KB. The route checks the path token and the body `secret` (`TV_WEBHOOK_SECRET`) in constant time, then writes the raw body to Turso `tv_alert_events` (migration 0081) before it parses anything. `scripts/tv_alerts_drain.py` runs every 5 minutes via `radon-tv-alerts.timer`. It resolves tickers, marks 5-second exact repeats in `duplicate_of`, sends one normal-priority Pushover digest per cycle (none when there are no new rows), prunes rows older than 180 days, and heartbeats `service_health[tv-alerts-drain]` (20-min window). Both secrets live in `/etc/radon/env`. Spec: [`tradingview-integration.md`](tradingview-integration.md).
+TradingView alert fires `POST` to `app.radon.run/api/webhooks/tradingview/<TV_WEBHOOK_PATH_TOKEN>`. Caddy admits only TradingView's four sender IPs and caps the body at 16KB. The route checks the path token and the body `secret` (`TV_WEBHOOK_SECRET`) in constant time, then persists the alert under the [sanitized-body retention and migration contract](tradingview-integration.md#storage). `scripts/tv_alerts_drain.py` runs every 5 minutes via `radon-tv-alerts.timer`. It resolves tickers, marks 5-second exact repeats in `duplicate_of`, sends one normal-priority Pushover digest per cycle (none when there are no new rows), prunes rows older than 180 days, and heartbeats `service_health[tv-alerts-drain]` (20-min window). Both secrets live in `/etc/radon/env`. Spec: [`tradingview-integration.md`](tradingview-integration.md).
 
 ### Bounded vs process-bound Turso writes (R5 partial)
 
@@ -1184,3 +1184,42 @@ Restore is unchanged: pull the object, then follow the "Restore runbook"
 above against the downloaded `radon-<stamp>.sql.gz`.
 
 A duplicate Flex ingest confirms cash-flow row IDs and NAV dates, or journal execution coverage through bounded read-only Hrana queries before reporting persistence. Missing or unreadable coverage retains the applied claim, returns an error, and requires operator reconciliation; the puller rejects duplicate results without this explicit confirmation. It never automatically replays an applied delivery to repair missing rows.
+
+
+## Legacy Flex aggregate cleanup
+
+For the journal reconciliation operator investigating legacy aggregate rows
+alongside individual fills, use
+[`cleanup_legacy_flex_aggregates.py`](../scripts/cleanup_legacy_flex_aggregates.py)
+only after reviewing authoritative execution history. Contract, account,
+execution identity, date and gross quantity coverage must prove an exclusive
+duplicate; similar quantities across Flex and API execution-ID namespaces do
+not prove equivalence. Partial or ambiguous coverage is left for reconciliation.
+
+This is operator-only database maintenance. Before any production run, confirm
+the target database, arrange a maintenance window without concurrent journal
+writers, retain the affected rows and a fresh backup, and verify that backup
+in scratch using the [restore runbook](#restore-runbook). Stop if a recoverable
+backup or stable input cannot be established.
+
+1. Inspect `python3.13 -m scripts.cleanup_legacy_flex_aggregates --help` locally;
+   help does not connect. Running without `--help` connects to the configured
+   database even though it defaults to dry-run.
+2. The authorized operator runs the dry-run without `--apply` and reviews
+   every proposed deletion against authoritative constituent executions and
+   the backup. Stop on unproven identity, overlapping claims, inconsistent
+   gross coverage or an unexpected target. Escalate unreconstructable rows
+   to journal reconciliation; do not force a metadata repair or replay an
+   already-applied Flex delivery.
+3. Only after approval, the operator may repeat with `--apply`. It recomputes
+   the plan and can delete journal rows; it is not an apply of a saved plan
+   and has no built-in rollback. Keep inputs stable between review and apply.
+4. Compare remaining constituent rows and lot-matched journal basis with the
+   reviewed plan and authoritative history, then repeat the dry-run to check
+   that no approved duplicate remains. On an unexpected result, stop further
+   maintenance and use the restore runbook's scratch comparison and
+   partial-table recovery procedure with the retained rows. Do not overwrite
+   unrelated post-backup activity with a blind full restore.
+
+The cleanup's isolated tests own the exact matching behavior; this sequence
+supplies the backup, stop and recovery decisions that CLI help cannot prove.

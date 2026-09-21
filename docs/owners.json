@@ -98,9 +98,9 @@
     },
     {
       "id": "flex-pull",
-      "globs": ["scripts/flex_sftp_pull.py"],
+      "globs": ["scripts/flex_sftp_pull.py", "scripts/cleanup_legacy_flex_aggregates.py"],
       "owners": ["docs/cloud-services.md"],
-      "note": "When a duplicate-only or empty pull is an error vs expected is the on-call discriminator (DOC-078)."
+      "note": "Duplicate-delivery outcomes and destructive legacy aggregate reconciliation share the Flex recovery owner (DOC-078/119)."
     },
     {
       "id": "factory",
@@ -118,11 +118,13 @@
       "globs": [
         "scripts/kelly.py",
         "scripts/kelly_guard.py",
+        "scripts/bankroll_guard.py",
+        "scripts/app_preferences.py",
         "lib/tools/schemas/kelly.ts",
         "lib/tools/wrappers/kelly.ts"
       ],
       "owners": ["docs/risk/kelly-fortunes-formula.md"],
-      "note": "Fraction band, 2.5% cap constant, estimated-p rule and M6 wiring are risk contracts; the spec's gap table must move when the code does."
+      "note": "Fraction band, 2.5% cap constant, estimated-p rule and M6 wiring are risk contracts; the operator owner must distinguish evaluation, Kelly warnings and independent bankroll admission (DOC-116)."
     },
     {
       "id": "repo-front-door",
