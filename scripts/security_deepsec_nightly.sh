@@ -1332,7 +1332,7 @@ advance_rung() {
 # round's slice only, never the wrapper's own `[loop]` marker lines.
 quota_regex() {
   case "$1" in
-    claude) printf '%s' 'out of usage credits|You.ve hit your (Opus|Sonnet) limit|Request rejected \(429\)|529 Overloaded|experiencing high load' ;;
+    claude) printf '%s' 'out of usage credits|You.ve hit your (Opus|Sonnet) limit|You.ve reached your [A-Za-z]+ limit|Request rejected \(429\)|529 Overloaded|experiencing high load' ;;
     codex) printf '%s' 'You.ve hit your usage limit|usage limited|rate limit reached|429' ;;
     grok | nvidia | cerebras) printf '%s' 'usage limit reached|out of credits|spending limit|usage balance exhausted|429' ;;
     *) printf '%s' 'a\{0\}b' ;;
