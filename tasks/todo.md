@@ -7963,3 +7963,25 @@ Operational review: repaired the existing Turso snapshot in place, preserving sc
 Dependency graph: T1 -> {T2,T3} -> T4 -> T5.
 
 Review: plan PR #576 was design only. This implement PR adds the host run-server, L1-L5 lock hygiene, skill rails, and regressions.
+# Reliability remediate 2026-09-20 (reduced P0/P1)
+
+- [x] T1 depends_on: [] - Establish full baseline; reconcile complete issue #81 checkpoint.
+- [x] T2 depends_on: [T1] - REL-268 aggregate close-out quantities, red/green and full gates.
+- [x] T3 depends_on: [T2] - REL-269 convexity decision gate, red/green and full gates.
+- [x] T4 depends_on: [T3] - REL-274 aggregate/individual reconciliation, red/green and full gates.
+- [ ] T5 depends_on: [T4] - Permanent drills, three full gates, durable complete issue report and guarded publication.
+
+- [ ] T6 depends_on: [T2] - Fresh-snapshot SELL-envelope risk follow-up; restart final drills and three full gates.
+
+## Review
+
+- Pending verification. P2 findings and inherited operator-only acceptance stay open.
+
+## Reliability remediate 2026-09-21 (reduced P0/P1)
+- [x] T1 depends_on: [] Establish full-gate baseline and reconcile authoritative issue #81 handoff.
+- [x] T2 depends_on: [T1] Integrate unpublished REL-268/269/274 commits, preserving source and recorded evidence.
+- [ ] T3 depends_on: [T2] REL-275 fault-injection red/green and surgical identity-bound cleanup.
+- [ ] T4 depends_on: [T3] Permanent drills and three consecutive full gates; review diff and guarded publication.
+- [ ] T5 depends_on: [T4] Persist complete dispositions, acceptance and operator actions on issue #81.
+Dependency graph: T1 -> T2 -> T3 -> T4 -> T5.
+Review: pending. P2 acceptance remains in the authoritative checkpoint, outside reduced scope.

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
+from datetime import date
 from typing import Any, Iterable, Optional
 
 logger = logging.getLogger(__name__)
@@ -172,9 +174,9 @@ def flex_aggregate_budget(payload: dict[str, Any]) -> Optional[dict[tuple, float
     (``+``-joined ``ib_exec_id``, or a netted ``CLOSED`` round trip). Such a
     row is a total, so it can only cover individual fills by quantity, never
     by the 1:1 fingerprint. Returns None for a row that is not an aggregate.
-    ``fill_breakdown`` (per-date signed totals, written by rehydrate) keys a
-    multi-day bucket on each real fill date; legacy rows fall back to the
-    row's own date.
+    ``gross_fill_breakdown`` preserves both sides on each real fill date.
+    Legacy net breakdowns are usable only without hidden gross turnover;
+    otherwise refuse coverage rather than double-book or guess its date.
     """
     exec_id = str(payload.get("ib_exec_id") or "")
     action = str(payload.get("action") or "").strip().upper()
@@ -193,6 +195,22 @@ def flex_aggregate_budget(payload: dict[str, Any]) -> Optional[dict[tuple, float
         key = (contract, day, 1 if signed > 0 else -1)
         budget[key] = budget.get(key, 0.0) + abs(signed)
 
+    gross = payload.get("gross_fill_breakdown")
+    if "gross_fill_breakdown" in payload:
+        invalid = f"Invalid gross fill coverage for Flex aggregate {exec_id}"
+        if not isinstance(gross, list) or not gross:
+            raise ValueError(invalid)
+        for item in gross:
+            try:
+                day = date.fromisoformat(item["date"]).isoformat()
+                signed = float(item["qty"])
+            except (KeyError, TypeError, ValueError, OverflowError):
+                raise ValueError(invalid) from None
+            if not math.isfinite(signed) or signed == 0:
+                raise ValueError(invalid)
+            _add(day, signed)
+        return budget
+
     breakdown = payload.get("fill_breakdown")
     if isinstance(breakdown, list) and breakdown:
         for item in breakdown:
@@ -200,6 +218,13 @@ def flex_aggregate_budget(payload: dict[str, Any]) -> Optional[dict[tuple, float
                 _add(item.get("date"), float(item.get("qty") or 0))
             except (AttributeError, TypeError, ValueError):
                 continue
+        # Old net totals omit zero-net days as well as opposing fills. Even
+        # one retained date cannot locate hidden turnover safely.
+        total = abs(float(payload.get("total_round_trip_quantity") or 0))
+        buys = sum(qty for (_, _, sign), qty in budget.items() if sign > 0)
+        sells = sum(qty for (_, _, sign), qty in budget.items() if sign < 0)
+        if total > max(buys, sells):
+            raise ValueError(f"Legacy Flex aggregate {exec_id} lacks gross fill coverage; restore it from authoritative executions")
         return budget
 
     try:
@@ -211,7 +236,11 @@ def flex_aggregate_budget(payload: dict[str, Any]) -> Optional[dict[tuple, float
         _add(payload.get("date"), round_trip)
         _add(payload.get("date"), -round_trip)
     else:
-        _add(payload.get("date"), _signed_qty(action, qty))
+        signed = _signed_qty(action, qty)
+        if signed and round_trip > qty:
+            raise ValueError(f"Legacy Flex aggregate {exec_id} lacks gross fill coverage; restore it from authoritative executions")
+        else:
+            _add(payload.get("date"), signed)
     return budget
 
 
