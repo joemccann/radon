@@ -130,9 +130,9 @@ for (const width of [1440, 393]) {
       expect(new URL((await compose.getAttribute("href"))!).searchParams.get("text")).toBe(rewrittenCaption);
       const drawn = await page.evaluate(() => (window as unknown as { shareCapture: ShareCapture }).shareCapture.drawn.join(" "));
       expect(drawn).toContain("Seasonality, the setup");
-      // The story card mirrors the X caption (hook + bullets) with today's date and no source footer.
-      expect(drawn).toContain("• Positioning, the tell");
-      expect(drawn).toContain("• Returns: -2.5%");
+      // The story card mirrors the X caption (hook + short paragraphs) with today's date and no source footer.
+      expect(drawn).toContain("Positioning, the tell.");
+      expect(drawn).toContain("Returns: -2.5%.");
       expect(drawn).not.toMatch(/Source:|EXCERPT|SEP 7, 2026/);
       expect(drawn).not.toMatch(/—|&(?:mdash|#8212|#x2014);/i);
       expect(requests).toBe(1);
