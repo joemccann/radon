@@ -1,5 +1,8 @@
 name: Diag PDF feed counts
 on:
+  pull_request:
+    paths:
+      - '.github/workflows/diag-pdf-feed.yml'
   workflow_dispatch: {}
 permissions:
   contents: read
@@ -23,87 +26,52 @@ jobs:
               body = json.dumps({"requests":[{"type":"execute","stmt":{"sql":sql}},{"type":"close"}]}).encode()
               req = urllib.request.Request(url.rstrip("/") + "/v2/pipeline", data=body, method="POST",
                   headers={"Authorization":"Bearer "+token,"Content-Type":"application/json"})
-              with urllib.request.urlopen(req, timeout=30) as resp:
+              with urllib.request.urlopen(req, timeout=60) as resp:
                   data = json.load(resp)
               res = data["results"][0]
               if res.get("type") != "ok":
-                  raise SystemExit(json.dumps(res)[:500])
+                  raise SystemExit(json.dumps(res)[:800])
               cols = [c["name"] for c in res["response"]["result"]["cols"]]
-              rows = []
-              for r in res["response"]["result"]["rows"]:
-                  rows.append([c.get("value") if isinstance(c, dict) else c for c in r])
+              rows = [[(c.get("value") if isinstance(c, dict) else c) for c in r] for r in res["response"]["result"]["rows"]]
               return cols, rows
           out = {}
-          # Process-day cut: America/Los_Angeles day on updated_at (ISO UTC stored)
           for day in ("2026-09-20", "2026-09-21"):
-              sql = f"""
-              SELECT outcome, COUNT(*) AS n
-              FROM research_outcomes
-              WHERE date(updated_at, '-7 hours') = '{day}'
-                 OR (
-                   updated_at >= '{day}T07:00:00.000Z'
-                   AND updated_at < datetime('{day}T07:00:00.000Z', '+1 day')
-                 )
-              GROUP BY outcome
-              ORDER BY outcome
-              """
-              # Prefer explicit PT window: PT midnight = 07:00Z during PDT
+              # PDT = UTC-7 → PT day D starts at D 07:00Z
               sql = f"""
               SELECT outcome, COUNT(*) AS n
               FROM research_outcomes
               WHERE updated_at >= '{day}T07:00:00.000Z'
                 AND updated_at < datetime('{day}T07:00:00.000Z', '+1 day')
-              GROUP BY outcome
-              ORDER BY outcome
+              GROUP BY outcome ORDER BY outcome
               """
               cols, rows = q(sql)
               out[f"outcomes_by_updated_at_pt_{day}"] = {"cols": cols, "rows": rows}
-              sql2 = f"""
-              SELECT outcome, COUNT(*) AS n
-              FROM research_outcomes
-              WHERE folder_date = '{day}'
-              GROUP BY outcome ORDER BY outcome
-              """
-              cols, rows = q(sql2)
+              cols, rows = q(f"SELECT outcome, COUNT(*) AS n FROM research_outcomes WHERE folder_date = '{day}' GROUP BY outcome ORDER BY outcome")
               out[f"outcomes_by_folder_date_{day}"] = {"cols": cols, "rows": rows}
-          # Published research posts visible to feed filter (not thumbs-down)
-          sql = """
+          cols, rows = q("""
           SELECT date(p.timestamp) AS d, COUNT(*) AS n
-          FROM posts p
-          JOIN research_post_sources r ON r.post_id = p.id
-          WHERE p.id GLOB 'research-*'
-            AND p.timestamp >= '2026-09-18T00:00:00.000Z'
+          FROM posts p JOIN research_post_sources r ON r.post_id = p.id
+          WHERE p.id GLOB 'research-*' AND p.timestamp >= '2026-09-15T00:00:00.000Z'
           GROUP BY 1 ORDER BY 1
-          """
-          cols, rows = q(sql)
+          """)
           out["research_posts_by_timestamp_day"] = {"cols": cols, "rows": rows}
-          sql = """
+          cols, rows = q("""
           SELECT p.id, p.title, p.timestamp, p.created_at,
-                 (SELECT f.vote FROM research_feedback f
-                   WHERE f.target='post' AND f.post_id=p.id
-                   ORDER BY f.created_at DESC, f.rowid DESC LIMIT 1) AS latest_vote
-          FROM posts p
-          JOIN research_post_sources r ON r.post_id = p.id
-          WHERE p.timestamp >= '2026-09-20T07:00:00.000Z'
-            AND p.timestamp < '2026-09-22T07:00:00.000Z'
-          ORDER BY p.timestamp DESC
-          LIMIT 50
-          """
-          cols, rows = q(sql)
+                 (SELECT f.vote FROM research_feedback f WHERE f.target='post' AND f.post_id=p.id
+                  ORDER BY f.created_at DESC, f.rowid DESC LIMIT 1) AS latest_vote
+          FROM posts p JOIN research_post_sources r ON r.post_id = p.id
+          WHERE p.timestamp >= '2026-09-20T07:00:00.000Z' AND p.timestamp < '2026-09-22T07:00:00.000Z'
+          ORDER BY p.timestamp DESC LIMIT 50
+          """)
           out["research_posts_sep20_21_pt_window"] = {"cols": cols, "rows": rows}
-          # Discovery proxies: folder_date distribution recent
-          sql = """
-          SELECT folder_date, outcome, COUNT(*) AS n
-          FROM research_outcomes
+          cols, rows = q("""
+          SELECT folder_date, outcome, COUNT(*) AS n FROM research_outcomes
           WHERE folder_date BETWEEN '2026-09-15' AND '2026-09-21'
           GROUP BY 1,2 ORDER BY 1,2
-          """
-          cols, rows = q(sql)
+          """)
           out["outcomes_by_folder_date_sep15_21"] = {"cols": cols, "rows": rows}
-          path = "diag-pdf-feed.json"
-          open(path,"w").write(json.dumps(out, indent=2))
-          print(json.dumps(out, indent=2)[:8000])
-          print("WROTE", path)
+          open("diag-pdf-feed.json","w").write(json.dumps(out, indent=2))
+          print(json.dumps(out, indent=2))
           PY
       - uses: actions/upload-artifact@v4
         with:
