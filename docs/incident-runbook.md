@@ -2136,9 +2136,10 @@ Peak: 2026-09-16 11:35Z, page `5a2eb828…`.
 - **Remediation (code):** activity ingest is `ok` after cash exit 0;
   TWR status is reported, not a delivery failure (REL-220; TWR
   exceptions still release the claim). Transient `sftp_get_failed`
-  (kex RST / connection reset / timed out) after at least one file
-  was processed does not fail the oneshot. Newest-file RST still
-  fails. Do not restart-flap; the 08:30 ET timer retries. After
+  (kex RST / connection reset / timed out) does not fail the oneshot
+  only when a strictly newer statement from the same account and query
+  was applied or confirmed duplicate in this sweep. Newest-file RST still
+  fails. A reset on a different query is not covered by this one. Do not restart-flap; the 08:30 ET timer retries. After
   deploy, `systemctl reset-failed radon-flex-pull.service` if the
   retry has not yet fired.
 - **Regression:**
