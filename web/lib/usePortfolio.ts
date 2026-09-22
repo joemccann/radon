@@ -280,6 +280,7 @@ export function usePortfolio(
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState !== "visible") return;
+      if (Date.now() - lastReadAtRef.current < POLL_INTERVAL_MS) return;
       if (active) scheduleNext(500);
       else void fetchPortfolio();
     };

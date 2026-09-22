@@ -13,9 +13,9 @@ import {
 
 import { parseImageSources, parseResearchSource, type ResearchSource } from "./newsfeedSource";
 import type { PostFeedback } from "./researchFeedback";
+import { isReturnCacheFresh, useReturnCache } from "./returnCache";
 
 const POSTS_ENDPOINT = "/api/newsfeed/posts";
-const POSTS_FALLBACK_ENDPOINT = "/data/posts.json";
 const REFRESH_INTERVAL_MS = 2 * 60 * 1000;
 
 export type MarketEarPost = {
@@ -73,6 +73,7 @@ export function useNewsfeedPosts(): NewsfeedPosts {
   // Mirrors `posts` for the fetch catch: a failed background refresh must
   // hold the last-good list instead of swapping it for an error panel.
   const postsRef = useRef<NormalisedPost[]>([]);
+  const returnCache = useReturnCache();
 
   const loadPosts = useCallback(async ({ signal, mode = "silent" }: FetchOptions = {}) => {
     if (mode === "initial") {
@@ -85,23 +86,14 @@ export function useNewsfeedPosts(): NewsfeedPosts {
 
     let networkResolved = false;
     try {
-      let response = await fetch(POSTS_ENDPOINT, {
+      const response = await fetch(POSTS_ENDPOINT, {
         cache: "no-store",
         signal,
       });
       networkResolved = true;
 
       if (!response.ok) {
-        // Phase 1 dual-write: if the DB-backed route is unavailable
-        // (cold replica, transient sync failure) fall back to the
-        // static JSON file the scraper still writes.
-        response = await fetch(POSTS_FALLBACK_ENDPOINT, {
-          cache: "no-store",
-          signal,
-        });
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
+        throw new Error(`HTTP ${response.status}`);
       }
 
       const meta = readOfflineMeta(response.headers);
@@ -144,7 +136,15 @@ export function useNewsfeedPosts(): NewsfeedPosts {
       postsRef.current = normalised;
       // Offline-served payloads are replays of an older fetch; stamping
       // "now" would claim freshness the data does not have.
-      if (!servedOffline) setLastUpdated(new Date().toISOString());
+      if (!servedOffline) {
+        const stamped = new Date().toISOString();
+        setLastUpdated(stamped);
+        returnCache?.write(POSTS_ENDPOINT, {
+          data: normalised,
+          fetchedAt: Date.now(),
+          lastSync: stamped,
+        });
+      }
       setError(null);
     } catch (err) {
       if (signal?.aborted) return;
@@ -159,21 +159,37 @@ export function useNewsfeedPosts(): NewsfeedPosts {
         setRefreshing(false);
       }
     }
-  }, []);
+  }, [returnCache]);
 
   useEffect(() => {
-    const controller = new AbortController();
-    void loadPosts({ signal: controller.signal, mode: "initial" });
+    const cached = returnCache?.read<NormalisedPost[]>(POSTS_ENDPOINT) ?? null;
+    let controller: AbortController | null = null;
+    if (isReturnCacheFresh(cached, REFRESH_INTERVAL_MS)) {
+      setPosts(cached!.data);
+      postsRef.current = cached!.data;
+      setLastUpdated(cached!.lastSync);
+      setLoading(false);
+      setError(null);
+    } else {
+      if (cached) {
+        setPosts(cached.data);
+        postsRef.current = cached.data;
+        setLastUpdated(cached.lastSync);
+        setLoading(false);
+      }
+      controller = new AbortController();
+      void loadPosts({ signal: controller.signal, mode: cached ? "silent" : "initial" });
+    }
 
     const interval = setInterval(() => {
       void loadPosts();
     }, REFRESH_INTERVAL_MS);
 
     return () => {
-      controller.abort();
+      controller?.abort();
       clearInterval(interval);
     };
-  }, [loadPosts]);
+  }, [loadPosts, returnCache]);
 
   const refresh = useCallback(async () => {
     await loadPosts({ mode: "refresh" });
