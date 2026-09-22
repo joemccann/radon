@@ -87,6 +87,79 @@ def test_nav_only_duplicate_requires_persisted_nav(monkeypatch):
     assert ingest.delivery_rows_present(ingest.ACTIVITY, xml) is False
 
 
+# 2026-09-22 page d3b66eaf: the 08:30 retry failed applied Equity_Summary
+# duplicates. Cash had landed. A suppressed TWR persist writes no series, so
+# the statement NAV dates never reached nav_snapshots. Coverage then failed
+# the oneshot. The retry must insert those missing dates and must not replay
+# the cash writer. An existing date is left alone (DO NOTHING, not DO UPDATE).
+ACTIVITY_NAV_XML = (
+    '<FlexQueryResponse><FlexStatements>'
+    '<FlexStatement accountId="U1" fromDate="20260921" toDate="20260921">'
+    '<EquitySummaryByReportDateInBase accountId="U1" reportDate="20260918" total="1000"/>'
+    '<EquitySummaryByReportDateInBase accountId="U1" reportDate="20260921" total="1100"/>'
+    '<CashTransactions/>'
+    '<Transfers/>'
+    '</FlexStatement></FlexStatements></FlexQueryResponse>'
+)
+
+
+def test_applied_activity_duplicate_inserts_missing_nav_without_reapply(monkeypatch):
+    stored = {'2026-09-21'}
+    inserted = []
+
+    def query(sql, args=(), **_k):
+        if 'nav_snapshots' in sql:
+            asked = list(args)[1:]
+            return [(day,) for day in asked if day in stored]
+        raise AssertionError(sql)
+
+    def execute(sql, args=(), **_k):
+        assert 'ON CONFLICT(account_id, report_date) DO NOTHING' in sql
+        assert 'DO UPDATE' not in sql
+        width = 7
+        for offset in range(0, len(args), width):
+            account_id, report_date, total = args[offset:offset + 3]
+            assert account_id == 'ALL'
+            assert report_date != '2026-09-21'
+            stored.add(report_date)
+            inserted.append((report_date, total))
+
+    monkeypatch.setattr(hrana_http, 'hrana_query', query)
+    monkeypatch.setattr(hrana_http, 'hrana_execute', execute)
+    monkeypatch.setattr(ingest, 'claim_flex_delivery', lambda *a, **k: False)
+    monkeypatch.setattr(ingest, 'flex_delivery_status', lambda _d: 'applied')
+    monkeypatch.setattr(ingest, '_apply_classified', lambda *a: pytest.fail('duplicate reapplied'))
+    monkeypatch.setattr(ingest, '_heartbeat_cash_flow_sync', lambda *a, **k: None)
+    result = ingest.ingest_xml(ACTIVITY_NAV_XML)
+    assert result['ok'] is True
+    assert result['outcome'] == 'duplicate'
+    assert result['persistence_confirmed'] is True
+    assert inserted == [('2026-09-18', 1000.0)]
+
+
+def test_activity_duplicate_does_not_insert_nav_when_cash_is_missing(monkeypatch):
+    xml = (
+        '<FlexQueryResponse><FlexStatements>'
+        '<FlexStatement accountId="U1" fromDate="20260918" toDate="20260918">'
+        '<EquitySummaryByReportDateInBase accountId="U1" reportDate="20260918" total="1000"/>'
+        '<CashTransactions>'
+        '<CashTransaction transactionID="T-missing" type="Deposits/Withdrawals" '
+        'reportDate="20260918" amount="-5" currency="USD"/>'
+        '</CashTransactions>'
+        '<Transfers/>'
+        '</FlexStatement></FlexStatements></FlexQueryResponse>'
+    )
+    monkeypatch.setattr(hrana_http, 'hrana_query', lambda *a, **k: [])
+    monkeypatch.setattr(hrana_http, 'hrana_execute', lambda *a, **k: pytest.fail('nav inserted'))
+    monkeypatch.setattr(ingest, 'claim_flex_delivery', lambda *a, **k: False)
+    monkeypatch.setattr(ingest, 'flex_delivery_status', lambda _d: 'applied')
+    monkeypatch.setattr(ingest, '_apply_classified', lambda *a: pytest.fail('duplicate reapplied'))
+    monkeypatch.setattr(ingest, '_heartbeat_cash_flow_sync', lambda *a, **k: None)
+    result = ingest.ingest_xml(xml)
+    assert result['ok'] is False
+    assert result['outcome'] == 'coverage_unverified'
+
+
 # 2026-09-22 page e1297eea: an applied Trade_History duplicate failed the
 # oneshot because NF-4 books nothing when individual IB fills already match.
 # The Flex tradeIDs are absent on purpose. That is coverage, not a gap.
