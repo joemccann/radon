@@ -22,6 +22,11 @@
 #     installed here (rail 8); this script only checks and reports them.
 set -euo pipefail
 
+# Runner clones' .git is agent-writable; host git here never runs its hooks
+# or fsmonitor (same pin as the loop wrappers and their launchd pre-reset).
+export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null \
+  GIT_CONFIG_KEY_1=core.fsmonitor GIT_CONFIG_VALUE_1=false
+
 WEEKEND_ROOT="${RADON_WEEKEND_ROOT:-$HOME/radon-weekend}"
 WEEKEND_REPO="$WEEKEND_ROOT/radon-security"
 DEEPSEC_REPO="$WEEKEND_ROOT/radon-security-deepsec"

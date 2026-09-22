@@ -60,6 +60,16 @@ def _stub(fake_bin: Path, name: str, log: Path, exit_code: int = 0) -> None:
     )
 
 
+def _gnu_mv(fake_bin: Path) -> bool:
+    """setup-vps.sh targets GNU coreutils; put a GNU mv first on PATH."""
+    for cand in ("mv", "gmv"):
+        found = shutil.which(cand)
+        if found and subprocess.run([found, "--version"], capture_output=True).returncode == 0:
+            (fake_bin / "mv").symlink_to(found)
+            return True
+    pytest.skip("needs GNU mv (coreutils)")
+
+
 def _run_setup_function(
     function: str, fake_bin: Path, extra_env: dict[str, str], cwd: Path | None = None
 ) -> subprocess.CompletedProcess[str]:
@@ -237,6 +247,41 @@ class TestEnvFileGuard:
         assert list(dest_dir.glob("mcp.env.*")) == [], "staging leftovers remain"
         _assert_victim_untouched(harness)
 
+    def test_write_mcp_env_rename_never_lands_in_a_raced_directory_link(
+        self, harness: dict[str, Path]
+    ) -> None:
+        # The destination can be swapped for a link to a directory after the
+        # regular-file check; the rename must replace the link, never move the
+        # staged file into whatever directory it points at.
+        gnu_mv = _gnu_mv(harness["bin"])
+        log = self._env_stubs(harness)
+        env = harness["tmp"] / "env"
+        env.write_text("CLERK_ISSUER=https://clerk.example\n")
+        dest_dir = harness["tmp"] / "etc-radon"
+        dest_dir.mkdir()
+        dest = dest_dir / "mcp.env"
+        trusted = harness["tmp"] / "root-trusted"
+        trusted.mkdir()
+        _write_executable(
+            harness["bin"] / "chown",
+            f"#!/bin/sh\nprintf '%s\\n' \"chown $*\" >> {log!s}\nln -s {trusted!s} {dest!s}\n",
+        )
+        result = _run_setup_function(
+            "write_mcp_env",
+            harness["bin"],
+            {
+                **_base_env(harness),
+                "RADON_POLICY_SKIP_CHOWN": "0",
+                "RADON_DEPLOY_ENV_FILE": str(env),
+                "RADON_MCP_ENV_FILE": str(dest),
+            },
+        )
+        assert gnu_mv
+        assert list(trusted.iterdir()) == [], "staged file landed in the linked directory"
+        assert result.returncode == 0, result.stderr
+        assert not dest.is_symlink() and dest.is_file()
+        assert dest.read_text() == "CLERK_ISSUER=https://clerk.example\n"
+
     def test_write_mcp_env_regular_destination_is_written_0600(
         self, harness: dict[str, Path]
     ) -> None:
@@ -250,6 +295,7 @@ class TestEnvFileGuard:
         dest_dir = harness["tmp"] / "etc-radon"
         dest_dir.mkdir()
         dest = dest_dir / "mcp.env"
+        _gnu_mv(harness["bin"])
         result = _run_setup_function(
             "write_mcp_env",
             harness["bin"],

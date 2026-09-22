@@ -309,7 +309,8 @@ radon-replaceable media directory with create-then-verify + `chown
 Setup stages root-installed artifacts from committed git blobs
 (`git cat-file` at the checkout's HEAD), never from working-tree files, and
 publishes `mcp.env` only through a regular-file destination via temp-write +
-atomic rename (contract: `cloud/tests/test_setup_vps_privileged_paths.py`).
+atomic `mv -T` rename, so a destination swapped after the check is replaced,
+not entered (contract: `cloud/tests/test_setup_vps_privileged_paths.py`).
 `install_caddy` skips reinstall only when the installed dpkg version already
 matches the pinned `CADDY_VERSION`, not merely on `command -v caddy`
 (2026-09-22), so a rerun on a host with a stale Caddy converges it.
