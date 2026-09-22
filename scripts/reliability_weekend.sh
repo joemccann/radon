@@ -867,15 +867,17 @@ _browser_host_bin_ok() {
 
 
 start_browser_host() {
-  local bin ver_host ver_client token log wait_secs i line endpoint node_bin smoke_secs
+  local bin host_root pw_mod ver_host ver_client token log wait_secs i line endpoint node_bin smoke_secs
   BROWSER_HOST_PID=""
   BROWSER_HOST_ENDPOINT=""
   BROWSER_HOST_STATUS=""
   BROWSER_HOST_TREE=""
   BROWSER_HOST_SID=""
   unset PW_TEST_CONNECT_WS_ENDPOINT
-  bin="${AGENT_CLI_ROOT}/browser-host/node_modules/.bin/playwright"
-  if [[ ! -x "$bin" ]] || ! _browser_host_bin_ok "$bin"; then
+  host_root="${AGENT_CLI_ROOT}/browser-host"
+  bin="$host_root/node_modules/.bin/playwright"
+  pw_mod="$host_root/node_modules/playwright"
+  if [[ ! -x "$bin" ]] || ! _browser_host_bin_ok "$bin" || ! _browser_host_bin_ok "$pw_mod"; then
     BROWSER_HOST_STATUS="unavailable:not-installed"
     export RADON_WEEKEND_BROWSER_HOST="$BROWSER_HOST_STATUS"
     return 0
@@ -891,16 +893,36 @@ start_browser_host() {
     export RADON_WEEKEND_BROWSER_HOST="$BROWSER_HOST_STATUS"
     return 0
   fi
-  token="$(/usr/bin/openssl rand -hex 16 2>/dev/null || echo "tok$$")"
+  node_bin="$(command -v node 2>/dev/null || true)"
+  if [[ -z "$node_bin" ]]; then
+    BROWSER_HOST_STATUS="unavailable:no-node"
+    export RADON_WEEKEND_BROWSER_HOST="$BROWSER_HOST_STATUS"
+    return 0
+  fi
+  token="$(/usr/bin/openssl rand -hex 16 2>/dev/null || true)"
+  if [[ ! "$token" =~ ^[0-9a-f]{32}$ ]]; then
+    BROWSER_HOST_STATUS="unavailable:no-token"
+    export RADON_WEEKEND_BROWSER_HOST="$BROWSER_HOST_STATUS"
+    return 0
+  fi
   log="$LOG_DIR/browser-host-$STAMP.log"
   mkdir -p "$LOG_DIR"
+  # The agent holds the endpoint, so it must not choose how the host browser
+  # launches: the Playwright CLI server honours client launch options (args,
+  # proxy, sandbox). launchServer pre-launches one browser with fixed options
+  # and ignores them. Playwright is required by absolute path from a cwd
+  # outside the clone, so the clone's node_modules is never loaded host-side.
+  local launcher='const {chromium}=require(process.env.PW_MODULE);(async()=>{const s=await chromium.launchServer({headless:true,host:"127.0.0.1",port:Number(process.env.PW_PORT)||0,wsPath:"/"+process.env.PW_TOKEN});console.log("Listening on "+s.wsEndpoint());})().catch(e=>{console.error(e);process.exit(1);});'
   if [[ -x /usr/bin/setsid ]]; then
-    /usr/bin/setsid "$TIMEOUT_BIN" "$CAP_SECS" "$bin" run-server --host 127.0.0.1 --port "${RADON_WEEKEND_BROWSER_HOST_PORT:-0}" --path "/$token" >"$log" 2>&1 &
+    (cd "$host_root" && PW_MODULE="$pw_mod" PW_TOKEN="$token" PW_PORT="${RADON_WEEKEND_BROWSER_HOST_PORT:-0}" \
+      exec /usr/bin/setsid "$TIMEOUT_BIN" "$CAP_SECS" "$node_bin" -e "$launcher") >"$log" 2>&1 &
   elif [[ -x /usr/bin/python3 ]]; then
-    /usr/bin/python3 -I -c 'import os,sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' \
-      "$TIMEOUT_BIN" "$CAP_SECS" "$bin" run-server --host 127.0.0.1 --port "${RADON_WEEKEND_BROWSER_HOST_PORT:-0}" --path "/$token" >"$log" 2>&1 &
+    (cd "$host_root" && PW_MODULE="$pw_mod" PW_TOKEN="$token" PW_PORT="${RADON_WEEKEND_BROWSER_HOST_PORT:-0}" \
+      exec /usr/bin/python3 -I -c 'import os,sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' \
+      "$TIMEOUT_BIN" "$CAP_SECS" "$node_bin" -e "$launcher") >"$log" 2>&1 &
   else
-    "$TIMEOUT_BIN" "$CAP_SECS" "$bin" run-server --host 127.0.0.1 --port "${RADON_WEEKEND_BROWSER_HOST_PORT:-0}" --path "/$token" >"$log" 2>&1 &
+    (cd "$host_root" && PW_MODULE="$pw_mod" PW_TOKEN="$token" PW_PORT="${RADON_WEEKEND_BROWSER_HOST_PORT:-0}" \
+      exec "$TIMEOUT_BIN" "$CAP_SECS" "$node_bin" -e "$launcher") >"$log" 2>&1 &
   fi
   BROWSER_HOST_PID=$!
   BROWSER_HOST_SID="$BROWSER_HOST_PID"
@@ -931,10 +953,9 @@ start_browser_host() {
     export RADON_WEEKEND_BROWSER_HOST="$BROWSER_HOST_STATUS"
     return 0
   fi
-  node_bin="$(command -v node 2>/dev/null || true)"
   smoke_secs="${RADON_WEEKEND_BROWSER_HOST_SMOKE_SECS:-60}"
-  if [[ -z "$node_bin" ]] || ! NODE_PATH="$AGENT_CLI_ROOT/browser-host/node_modules" E="$endpoint" "$TIMEOUT_BIN" "$smoke_secs" \
-      "$node_bin" -e 'const {chromium}=require("playwright");(async()=>{const b=await chromium.connect(process.env.E);const p=await b.newPage();await p.setContent("<html></html>");await b.close();})().catch(e=>{console.error(e);process.exit(1);});'; then
+  if ! (cd "$host_root" && PW_MODULE="$pw_mod" E="$endpoint" exec "$TIMEOUT_BIN" "$smoke_secs" \
+      "$node_bin" -e 'const {chromium}=require(process.env.PW_MODULE);(async()=>{const b=await chromium.connect(process.env.E);const p=await b.newPage();await p.setContent("<html></html>");await b.close();})().catch(e=>{console.error(e);process.exit(1);});'); then
     stop_browser_host
     BROWSER_HOST_STATUS="unavailable:smoke-failed"
     export RADON_WEEKEND_BROWSER_HOST="$BROWSER_HOST_STATUS"
