@@ -280,6 +280,12 @@ fetch_origin_with_retry() {
 # initial parse itself, before main is defined.
 main() {
 
+# The sandboxed agent can write this clone's .git (it must, to commit), so
+# no host git command here may run a repository hook or fsmonitor it planted.
+# Exported, so the launchd pre-reset's own pin carries through every helper.
+export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null \
+  GIT_CONFIG_KEY_1=core.fsmonitor GIT_CONFIG_VALUE_1=false
+
 MODE="${1:?usage: reliability_weekend.sh audit|remediate|deliver|cycle}"
 [[ "$MODE" == "audit" || "$MODE" == "remediate" || "$MODE" == "deliver" || "$MODE" == "cycle" ]] || {
   echo "unknown mode: $MODE" >&2; exit 2;
