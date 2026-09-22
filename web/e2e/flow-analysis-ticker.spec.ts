@@ -381,4 +381,91 @@ test.describe("Flow Analysis per-ticker route", () => {
 
     await expect(page.getByTestId("flow-hero-stale")).toContainText(isoDay);
   });
+
+  test("a cached report stays on screen with a live scan indicator until the scan lands", async ({ page }) => {
+    await setupBaseMocks(page);
+    const cached = bullishReport("META", new Date(Date.now() - 3 * 86_400_000).toISOString());
+    let releaseScan: (() => void) | null = null;
+    const scanGate = new Promise<void>((resolve) => {
+      releaseScan = resolve;
+    });
+    await page.route("**/api/flow-analysis/META**", async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(cached),
+        });
+        return;
+      }
+      await scanGate;
+      const landed = bullishReport("META", new Date().toISOString());
+      landed.verdict = { direction: "BEARISH", confidence: 61 };
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(landed),
+      });
+    });
+
+    await page.goto("/flow-analysis/META");
+
+    const progress = page.getByTestId("flow-scan-progress");
+    await expect(progress).toBeVisible();
+    await expect(progress).toContainText(/scan running/i);
+    await expect(progress).toContainText(/cached report/i);
+    await expect(progress).toContainText(/figures update when the scan lands/i);
+    await expect(page.getByTestId("flow-hero-stale")).toBeVisible();
+    const refresh = page.getByLabel("Refresh flow report");
+    await expect(refresh).toHaveAttribute("aria-busy", "true");
+    await expect(refresh.getByTestId("thinking-wait")).toBeVisible();
+    await expect(page.getByTestId("ticker-flow-report")).toContainText(/Bullish/i);
+
+    const aggregate = page.locator(".section", { hasText: "Dark Pool Aggregate" }).first();
+    const progressBox = await progress.boundingBox();
+    const aggregateBox = await aggregate.boundingBox();
+    expect(progressBox!.y).toBeLessThan(aggregateBox!.y);
+
+    releaseScan!();
+    const badge = page.getByTestId("ticker-flow-report").locator(".ticker-flow-badge");
+    await expect(badge).toHaveAttribute("data-direction", "BEARISH");
+    await expect(badge).toContainText("61");
+    await expect(progress).toHaveCount(0);
+    await expect(refresh).toHaveAttribute("aria-busy", "false");
+  });
+
+  test("mobile cached report shows the live scan indicator", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await setupBaseMocks(page);
+    const cached = bullishReport("META", new Date(Date.now() - 3 * 86_400_000).toISOString());
+    let releaseScan: (() => void) | null = null;
+    const scanGate = new Promise<void>((resolve) => {
+      releaseScan = resolve;
+    });
+    await page.route("**/api/flow-analysis/META**", async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(cached),
+        });
+        return;
+      }
+      await scanGate;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(bullishReport("META", new Date().toISOString())),
+      });
+    });
+
+    await page.goto("/flow-analysis/META");
+    const progress = page.getByTestId("flow-scan-progress");
+    await expect(progress).toBeVisible();
+    await expect(progress).toContainText(/cached report/i);
+    await expect(page.getByLabel("Refresh flow report")).toHaveAttribute("aria-busy", "true");
+    await expect(page.getByTestId("ticker-flow-report")).toContainText(/Bullish/i);
+    await expect(page.getByTestId("flow-stale-age")).toHaveCount(0);
+    releaseScan!();
+  });
 });
