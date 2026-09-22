@@ -1183,7 +1183,7 @@ aws s3 ls "s3://radon-archive/db_backups/" --endpoint-url "$RADON_ARCHIVE_S3_END
 Restore is unchanged: pull the object, then follow the "Restore runbook"
 above against the downloaded `radon-<stamp>.sql.gz`.
 
-A duplicate Flex ingest confirms cash-flow row IDs and NAV dates, or journal execution coverage through bounded read-only Hrana queries before reporting persistence. Missing or unreadable coverage retains the applied claim, returns an error, and requires operator reconciliation; the puller rejects duplicate results without this explicit confirmation. It never automatically replays an applied delivery to repair missing rows.
+A duplicate Flex ingest confirms cash-flow row IDs and NAV dates, or journal execution coverage through bounded read-only Hrana queries before reporting persistence. Flex trade IDs that were not stored because individual IB fills already match that contract-day's quantity and gross notional count as covered. A quantity or notional disagreement does not. Missing or unreadable coverage retains the applied claim, returns an error, and requires operator reconciliation; the puller rejects duplicate results without this explicit confirmation. It never automatically replays an applied delivery to repair missing rows.
 
 
 ## Legacy Flex aggregate cleanup
