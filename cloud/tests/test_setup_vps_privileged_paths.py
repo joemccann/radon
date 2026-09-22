@@ -843,6 +843,17 @@ class TestRemoteInstallerPins:
         assert "dl.cloudsmith.io/public/caddy/stable/deb/debian" in body
         assert "signed-by=" in body
 
+    def test_caddy_install_skips_only_when_the_pinned_version_matches(self) -> None:
+        # DS-2026-09-20-08: `command -v caddy` alone skipped reinstall on any
+        # already-present binary, so a rerun never converged a stale Caddy
+        # onto CADDY_VERSION.
+        script = SETUP.read_text(encoding="utf-8")
+        body = _function_body(script, "install_caddy")
+        version_check = body.index('"$installed_version" == "${CADDY_VERSION}"*')
+        skip_log = body.index('already installed -- skipping installation')
+        assert version_check < skip_log
+        assert "dpkg-query" in body
+
 
 # ── playbook invariant ────────────────────────────────────────────────
 
