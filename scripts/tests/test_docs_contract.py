@@ -1035,6 +1035,31 @@ class TestOperatorSafetyOwners:
             db.executescript(migration)
             assert db.execute("SELECT raw_body, symbol FROM tv_alert_events").fetchall() == rows
 
+    def test_tradingview_migration_0085_redacts_nested_secret(self):
+        import sqlite3
+
+        with sqlite3.connect(":memory:") as db:
+            db.executescript("CREATE TABLE tv_alert_events (raw_body TEXT, symbol TEXT);"
+                             "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT);")
+            db.executemany("INSERT INTO tv_alert_events VALUES (?, ?)", [
+                # 0084 only strips a TOP-LEVEL $.secret; this one is nested.
+                ('{"payload":{"secret":"fixture-only"},"symbol":"TEST"}', "TEST"),
+                # A row 0084 already redacted must not be touched again.
+                ('{"secret":"[REDACTED]","symbol":"TEST"}', "TEST"),
+            ])
+            migration_0084 = (_ROOT / "scripts/db/migrations/0084_redact_tv_alert_raw_body.sql").read_text()
+            migration_0085 = (
+                _ROOT / "scripts/db/migrations/0085_redact_tv_alert_raw_body_nested_secret.sql"
+            ).read_text()
+            db.executescript(migration_0084)
+            db.executescript(migration_0085)
+            rows = db.execute("SELECT raw_body, symbol FROM tv_alert_events").fetchall()
+            assert all("fixture-only" not in raw for raw, _symbol in rows)
+            assert rows[0][0].startswith("[REDACTED PRE-0085")
+            assert rows[1][0] == '{"secret":"[REDACTED]","symbol":"TEST"}'
+            db.executescript(migration_0085)
+            assert db.execute("SELECT raw_body, symbol FROM tv_alert_events").fetchall() == rows
+
     def test_destructive_flex_cleanup_has_recovery_owner(self):
         doc = (_ROOT / "docs/cloud-services.md").read_text()
         section = _section(doc, "Legacy Flex aggregate cleanup")
