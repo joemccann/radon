@@ -829,172 +829,12 @@ stop_browser_host() {
   [[ -n "$pid" ]] && wait "$pid" 2>/dev/null || true
 }
 
-_playwright_major_minor() {
-  local pkg="$1" ver minor
-  [[ -f "$pkg" ]] || return 1
-  ver="$(/usr/bin/sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$pkg" | /usr/bin/head -n 1)"
-  [[ -n "$ver" ]] || return 1
-  case "$ver" in
-    *.*.*)
-      minor="${ver#*.}"
-      printf '%s.%s' "${ver%%.*}" "${minor%%.*}"
-      ;;
-    *.*) printf '%s' "$ver" ;;
-    *) return 1 ;;
-  esac
-}
-
-_browser_host_bin_ok() {
-  local bin="$1" root dest phys_root phys_bin cur stop rl
-  root="${AGENT_CLI_ROOT}/browser-host"
-  [[ -x "$bin" ]] || return 1
-  if [[ -x /usr/bin/readlink ]]; then
-    rl=/usr/bin/readlink
-  elif [[ -x /bin/readlink ]]; then
-    rl=/bin/readlink
-  else
-    rl=""
-  fi
-  cur="$root"
-  stop="$AGENT_CLI_ROOT"
-  while [[ -n "$cur" && "$cur" != "/" ]]; do
-    refuse_symlink "$cur" || {
-      echo "REFUSING: $cur is a symlink; browser-host bin must not follow directory symlinks" >&2
-      return 1
-    }
-    [[ "$cur" == "$stop" ]] && break
-    cur="${cur%/*}"
-    [[ -n "$cur" ]] || break
-  done
-  phys_root="$(cd "$root" && pwd -P)" || return 1
-  if [[ -L "$bin" ]]; then
-    [[ -n "$rl" ]] || return 1
-    dest="$("$rl" "$bin" 2>/dev/null || true)"
-    [[ -n "$dest" ]] || return 1
-    if [[ "$dest" != /* ]]; then
-      dest="$(cd "${bin%/*}" && pwd -P)/$dest"
-    fi
-    dest="$(cd "${dest%/*}" && pwd -P)/${dest##*/}" || return 1
-    phys_bin="$dest"
-  else
-    phys_bin="$(cd "${bin%/*}" && pwd -P)/${bin##*/}" || return 1
-  fi
-  case "$phys_bin" in
-    "$phys_root"/*) return 0 ;;
-  esac
-  echo "REFUSING: $bin physical path escapes $phys_root" >&2
-  return 1
-}
-
-
+# Scheduled loops do not offer a host browser protocol to any provider.
+# Unsandboxed providers can run Playwright locally; sandboxed UI checks use CI.
 start_browser_host() {
-  # The endpoint also appears in logs; withholding its environment is insufficient.
-  if [[ "${RUNG_PROVIDER:-}" == "codex" ]]; then
-    stop_browser_host
-    BROWSER_HOST_STATUS="unavailable:codex-rung"
-    export RADON_WEEKEND_BROWSER_HOST="$BROWSER_HOST_STATUS"
-    return 0
-  fi
-  local bin host_root pw_mod ver_host ver_client token log wait_secs i line endpoint node_bin smoke_secs
-  BROWSER_HOST_PID=""
-  BROWSER_HOST_ENDPOINT=""
-  BROWSER_HOST_STATUS=""
-  BROWSER_HOST_TREE=""
-  BROWSER_HOST_SID=""
-  unset PW_TEST_CONNECT_WS_ENDPOINT
-  host_root="${AGENT_CLI_ROOT}/browser-host"
-  bin="$host_root/node_modules/.bin/playwright"
-  pw_mod="$host_root/node_modules/playwright"
-  if [[ ! -x "$bin" ]] || ! _browser_host_bin_ok "$bin" || ! _browser_host_bin_ok "$pw_mod"; then
-    BROWSER_HOST_STATUS="unavailable:not-installed"
-    export RADON_WEEKEND_BROWSER_HOST="$BROWSER_HOST_STATUS"
-    return 0
-  fi
-  ver_host="$(_playwright_major_minor "$AGENT_CLI_ROOT/browser-host/node_modules/@playwright/test/package.json")" || ver_host=""
-  ver_client="$(_playwright_major_minor "$REPO/web/node_modules/@playwright/test/package.json")" || ver_client=""
-  if [[ -z "$ver_host" || -z "$ver_client" || "$ver_host" != "$ver_client" ]]; then
-    if [[ ! -x "$bin" || ! -f "$AGENT_CLI_ROOT/browser-host/node_modules/@playwright/test/package.json" ]]; then
-      BROWSER_HOST_STATUS="unavailable:not-installed"
-    else
-      BROWSER_HOST_STATUS="unavailable:version-mismatch"
-    fi
-    export RADON_WEEKEND_BROWSER_HOST="$BROWSER_HOST_STATUS"
-    return 0
-  fi
-  node_bin="$(command -v node 2>/dev/null || true)"
-  if [[ -z "$node_bin" ]]; then
-    BROWSER_HOST_STATUS="unavailable:no-node"
-    export RADON_WEEKEND_BROWSER_HOST="$BROWSER_HOST_STATUS"
-    return 0
-  fi
-  token="$(/usr/bin/openssl rand -hex 16 2>/dev/null || true)"
-  if [[ ! "$token" =~ ^[0-9a-f]{32}$ ]]; then
-    BROWSER_HOST_STATUS="unavailable:no-token"
-    export RADON_WEEKEND_BROWSER_HOST="$BROWSER_HOST_STATUS"
-    return 0
-  fi
-  log="$LOG_DIR/browser-host-$STAMP.log"
-  mkdir -p "$LOG_DIR"
-  # The agent holds the endpoint, so it must not choose how the host browser
-  # launches: the Playwright CLI server honours client launch options (args,
-  # proxy, sandbox). launchServer pre-launches one browser with fixed options
-  # and ignores them. Playwright is required by absolute path from a cwd
-  # outside the clone, so the clone's node_modules is never loaded host-side.
-  local launcher='const {chromium}=require(process.env.PW_MODULE);(async()=>{const s=await chromium.launchServer({headless:true,host:"127.0.0.1",port:Number(process.env.PW_PORT)||0,wsPath:"/"+process.env.PW_TOKEN});console.log("Listening on "+s.wsEndpoint());})().catch(e=>{console.error(e);process.exit(1);});'
-  if [[ -x /usr/bin/setsid ]]; then
-    (cd "$host_root" && PW_MODULE="$pw_mod" PW_TOKEN="$token" PW_PORT="${RADON_WEEKEND_BROWSER_HOST_PORT:-0}" \
-      exec /usr/bin/setsid "$TIMEOUT_BIN" "$CAP_SECS" "$node_bin" -e "$launcher") >"$log" 2>&1 &
-  elif [[ -x /usr/bin/python3 ]]; then
-    (cd "$host_root" && PW_MODULE="$pw_mod" PW_TOKEN="$token" PW_PORT="${RADON_WEEKEND_BROWSER_HOST_PORT:-0}" \
-      exec /usr/bin/python3 -I -c 'import os,sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' \
-      "$TIMEOUT_BIN" "$CAP_SECS" "$node_bin" -e "$launcher") >"$log" 2>&1 &
-  else
-    (cd "$host_root" && PW_MODULE="$pw_mod" PW_TOKEN="$token" PW_PORT="${RADON_WEEKEND_BROWSER_HOST_PORT:-0}" \
-      exec "$TIMEOUT_BIN" "$CAP_SECS" "$node_bin" -e "$launcher") >"$log" 2>&1 &
-  fi
-  BROWSER_HOST_PID=$!
-  BROWSER_HOST_SID="$BROWSER_HOST_PID"
-  BROWSER_HOST_TREE="$(_descendants_of "$BROWSER_HOST_PID")"
-  wait_secs="${RADON_WEEKEND_BROWSER_HOST_WAIT_SECS:-60}"
-  i=0
-  endpoint=""
-  while [[ $i -lt $wait_secs ]]; do
-    BROWSER_HOST_TREE="$(_descendants_of "$BROWSER_HOST_PID") ${BROWSER_HOST_TREE:-}"
-    if ! kill -0 "$BROWSER_HOST_PID" 2>/dev/null; then
-      stop_browser_host
-      BROWSER_HOST_STATUS="unavailable:exited"
-      export RADON_WEEKEND_BROWSER_HOST="$BROWSER_HOST_STATUS"
-      return 0
-    fi
-    line="$(/usr/bin/grep -E 'Listening on ws://' "$log" 2>/dev/null | /usr/bin/tail -n 1 || true)"
-    if [[ -n "$line" ]]; then
-      endpoint="$(printf '%s' "$line" | /usr/bin/sed -n 's/.*Listening on \(ws:\/\/[^[:space:]]*\).*/\1/p')"
-      endpoint="${endpoint%%$'\r'}"
-      [[ -n "$endpoint" ]] && break
-    fi
-    sleep 1
-    i=$((i + 1))
-  done
-  if [[ -z "$endpoint" ]]; then
-    stop_browser_host
-    BROWSER_HOST_STATUS="unavailable:no-endpoint"
-    export RADON_WEEKEND_BROWSER_HOST="$BROWSER_HOST_STATUS"
-    return 0
-  fi
-  smoke_secs="${RADON_WEEKEND_BROWSER_HOST_SMOKE_SECS:-60}"
-  if ! (cd "$host_root" && PW_MODULE="$pw_mod" E="$endpoint" exec "$TIMEOUT_BIN" "$smoke_secs" \
-      "$node_bin" -e 'const {chromium}=require(process.env.PW_MODULE);(async()=>{const b=await chromium.connect(process.env.E);const p=await b.newPage();await p.setContent("<html></html>");await b.close();})().catch(e=>{console.error(e);process.exit(1);});'); then
-    stop_browser_host
-    BROWSER_HOST_STATUS="unavailable:smoke-failed"
-    export RADON_WEEKEND_BROWSER_HOST="$BROWSER_HOST_STATUS"
-    return 0
-  fi
-  BROWSER_HOST_ENDPOINT="$endpoint"
-  # browser-host=ready is host-side smoke only (chromium.connect from this
-  # wrapper). It does not prove a sandboxed agent can connect over loopback WS.
-  BROWSER_HOST_STATUS="ready"
-  export RADON_WEEKEND_BROWSER_HOST="ready"
-  echo "[weekend] browser-host=ready (host smoke only; sandboxed connect is operator-verify)" >&2
+  stop_browser_host
+  BROWSER_HOST_STATUS="unavailable:disabled"
+  export RADON_WEEKEND_BROWSER_HOST="$BROWSER_HOST_STATUS"
 }
 
 on_signal() {
@@ -1588,20 +1428,8 @@ launch_round() {
   export PATH
   local remain="$1" prompt_file="$PORTABLE_PROMPT_DIR/$LOOP_SKILL.$PHASE.md"
   unset PW_TEST_CONNECT_WS_ENDPOINT
-  case "$RUNG_PROVIDER" in
-    codex)
-      if declare -F start_browser_host >/dev/null; then start_browser_host; fi
-      ;;
-    *)
-      if [[ "${BROWSER_HOST_STATUS:-}" == "unavailable:codex-rung" ]]; then
-        if declare -F start_browser_host >/dev/null; then start_browser_host; fi
-      fi
-      if [[ -n "${BROWSER_HOST_ENDPOINT:-}" && "${BROWSER_HOST_STATUS:-}" == "ready" ]]; then
-        export PW_TEST_CONNECT_WS_ENDPOINT="$BROWSER_HOST_ENDPOINT"
-        export RADON_WEEKEND_BROWSER_HOST="ready"
-      fi
-      ;;
-  esac
+  export RADON_WEEKEND_BROWSER_HOST="unavailable:disabled"
+
   # A bare rung names no model on purpose: the CLI/account default is what runs
   # and the vendor migrates it forward. An empty --model is NOT the same thing,
   # so the flag is omitted entirely. `${a[@]+"${a[@]}"}` because bash 3.2 (the
