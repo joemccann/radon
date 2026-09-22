@@ -107,6 +107,8 @@ def _protected_part(name: str) -> Optional[str]:
         return "protected: deepsec audit state"
     if "scratch" in lowered:
         return "protected: private scratch state"
+    if lowered in (".gitdirs", "gitdirs"):
+        return "protected: host gitdir (runner clone objects live outside the work tree)"
     return None
 
 

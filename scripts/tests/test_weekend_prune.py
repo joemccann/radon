@@ -143,6 +143,7 @@ def _add_worktree(root: Path, name: str, *, pushed: bool, age_days: float = 30.0
         ("radon-security-deepsec", "deepsec"),
         (".security-deepsec.lock", "deepsec"),
         (".security-nightly-scratch", "scratch"),
+        (".gitdirs", "gitdir"),
         ("radon", "loop clone"),
     ],
 )
@@ -507,14 +508,15 @@ def test_the_prune_never_execs_a_python_file_from_the_agent_writable_clone(loop:
     """Rail 5: the clone and the venv are agent-writable after a phase, so the
     prune is piped out of origin/main into an ISOLATED system interpreter.
 
-    This is defence in depth, NOT a trust boundary: refs/remotes/origin/main
-    lives in the same agent-writable $REPO/.git. What it does buy is that a
-    planted WORKING-TREE scripts/weekend_prune.py is never the file that runs,
-    and -I keeps cwd, the clone dir and user site off sys.path so a planted
-    json.py cannot be imported either. The wrapper comment says exactly this.
+    This is defence in depth, NOT a trust boundary: origin/main lives in the
+    host gitdir. What it does buy is that a planted WORKING-TREE
+    scripts/weekend_prune.py is never the file that runs, and -I keeps cwd,
+    the clone dir and user site off sys.path so a planted json.py cannot be
+    imported either. The wrapper comment says exactly this.
     """
     body = (REPO / "scripts" / LOOPS[loop]).read_text(encoding="utf-8")
-    assert 'git -C "$REPO" show origin/main:scripts/weekend_prune.py' in body
+    assert 'show origin/main:scripts/weekend_prune.py' in body
+    assert '--git-dir="$HOST_GITDIR"' in body
     assert "/usr/bin/python3 -I -" in body
     assert 'python3 "$REPO/scripts/weekend_prune.py"' not in body
     assert "python3 $REPO/scripts/weekend_prune.py" not in body
