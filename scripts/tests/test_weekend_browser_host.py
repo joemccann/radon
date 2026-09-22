@@ -613,7 +613,7 @@ def test_browser_lifetime_follows_provider_transition(name, first, tmp_path):
         codex_body += 'exit 0\n'
     codex.write_text(codex_body)
     codex.chmod(0o755)
-    ladder = "claude,codex" if first == "claude" else "codex,claude"
+    ladder = "claude codex" if first == "claude" else "codex claude"
     proc = subprocess.run([BASH, str(_cloned_wrapper(repo, name)), "audit"], env=_env(tmp_path, repo, bin_dir, {"RADON_WEEKEND_PROVIDER_LADDER": ladder, "RADON_WEEKEND_CODEX_BIN": str(codex)}), capture_output=True, text=True, timeout=90)
     combined = _combined(proc, repo)
     assert codex_env.exists() and claude_env.exists(), combined

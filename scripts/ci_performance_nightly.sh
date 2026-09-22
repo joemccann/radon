@@ -1330,11 +1330,12 @@ launch_round() {
   unset PW_TEST_CONNECT_WS_ENDPOINT
   case "$RUNG_PROVIDER" in
     codex)
-      if [[ "${BROWSER_HOST_STATUS:-}" == "ready" ]]; then
-        export RADON_WEEKEND_BROWSER_HOST="unavailable:codex-rung"
-      fi
+      if declare -F start_browser_host >/dev/null; then start_browser_host; fi
       ;;
     *)
+      if [[ "${BROWSER_HOST_STATUS:-}" == "unavailable:codex-rung" ]]; then
+        if declare -F start_browser_host >/dev/null; then start_browser_host; fi
+      fi
       if [[ -n "${BROWSER_HOST_ENDPOINT:-}" && "${BROWSER_HOST_STATUS:-}" == "ready" ]]; then
         export PW_TEST_CONNECT_WS_ENDPOINT="$BROWSER_HOST_ENDPOINT"
         export RADON_WEEKEND_BROWSER_HOST="ready"
