@@ -311,18 +311,27 @@ def ensure_member_history(
 
 
 def install_sigterm_unwind() -> None:
-    """Turn SIGTERM into a SystemExit so context managers unwind.
+    """Exit 143 on SIGTERM without joining chart-fallback workers.
 
-    SIGTERM's default disposition terminates the process without unwinding, so
-    a systemd timeout during the write phase skipped the `service_cycle`
-    `finally` entirely and left no error row — the `Result=timeout,
-    NRestarts=0` shape 26168ed5 set out to eliminate. R-225.
+    SystemExit still runs ``_fetch_members``'s ``shutdown(wait=True)`` and
+    CPython's executor atexit join. A Yahoo worker blocked in DNS (outside
+    the socket timeout) holds the oneshot past TimeoutStopSec. systemd then
+    SIGKILLs and records Result=timeout, which the deploy-collateral
+    classifier does not downgrade (2026-09-22 page 9964f6e0: "received
+    signal 15; unwinding", still alive 90s later). ``os._exit(143)`` skips
+    both joins. systemd records exit-code 143: stop-clean collateral inside
+    a deploy window, and still a P1 when there is no deploy evidence.
     """
+    import os
     import signal
 
     def _unwind(signum, _frame):
-        print(f"  received signal {signum}; unwinding", file=sys.stderr)
-        raise SystemExit(143)
+        print(
+            f"  received signal {signum}; unwinding",
+            file=sys.stderr,
+            flush=True,
+        )
+        os._exit(143)
 
     try:
         signal.signal(signal.SIGTERM, _unwind)
