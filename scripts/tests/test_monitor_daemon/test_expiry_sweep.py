@@ -766,10 +766,9 @@ class TestRoundTripRowsAbsorbTheDuplicateShort:
 
 
 class TestExpiryDateGuardsAreInclusive:
-    def test_a_fill_booked_on_the_expiry_date_guards_the_candidate(self, upserts):
-        """Same-day settlement: a partial close booked exactly on the
-        expiration date leaves a short net, but the contract was demonstrably
-        handled on expiry day — a strict > skipped that guard entirely."""
+    def test_a_partial_close_on_the_expiry_date_sweeps_only_the_residual(self, upserts):
+        """NF-7: the expiry-day BUY_TO_CLOSE 10 is a journaled fill already
+        in the net; the sweep closes only the 15 it did not cover."""
         db = _make_db(
             [
                 _journal_row(
@@ -787,8 +786,8 @@ class TestExpiryDateGuardsAreInclusive:
 
         result = _make_handler(db).execute()
 
-        assert result["closed"] == 0
-        upserts.assert_not_called()
+        assert result["closed"] == 1
+        assert upserts.call_args[0][1]["contracts"] == 15
 
     def test_an_executed_order_on_the_expiry_date_guards_the_candidate(self, upserts):
         db = _make_db(

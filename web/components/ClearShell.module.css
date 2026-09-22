@@ -48,8 +48,7 @@
 .header :global(.header-actions) { grid-row: 1; grid-column: 2; display: flex; gap: 8px; align-items: center; min-width: 0; }
 .header :global(.search-input-wrapper) { width: clamp(160px, 16vw, 234px); min-width: 0; }
 .header :global(.search-input-wrapper input) { min-height: 40px; font-family: var(--font-sans); font-size: 12px; border-radius: 8px; background: var(--bg-panel); border-color: transparent; }
-.header :global(.theme-toggle), .header :global(.fullscreen-toggle), .header :global(.command-palette-trigger) { width: 36px; height: 44px; flex: none; border: 0; border-radius: 6px; color: var(--text-secondary); background: transparent; }
-.header :global(.command-palette-trigger) { font-size: 12px; }
+.header :global(.theme-toggle), .header :global(.fullscreen-toggle) { width: 36px; height: 44px; flex: none; border: 0; border-radius: 6px; color: var(--text-secondary); background: transparent; }
 .header :global(.telemetry-rail) { grid-row: 2; grid-column: 1; flex-wrap: wrap; gap: 10px; min-width: 0; padding: 28px 0 25px; border: 0; }
 .header.compact :global(.telemetry-rail) { padding: 16px 0; }
 .header :global(.rail-section) { flex: 0 0 100%; font: 550 29px/1.2 var(--font-sans); letter-spacing: -.9px; text-transform: none; color: var(--text-primary); margin: 0 0 3px; max-width: none; }
@@ -90,7 +89,10 @@
 }
 
 @media (min-width: 641px) and (max-width: 900px) {
-  .header { grid-template-rows: 72px auto; --clear-shell-gutter: 22px; gap: 0 12px; }
+  .header { grid-template-rows: 72px 52px auto; --clear-shell-gutter: 22px; gap: 0 12px; }
+  .navigationSlot { grid-column: 1 / -1; }
+  .header :global(.header-actions) { grid-row: 2; grid-column: 1 / -1; }
+  .header :global(.telemetry-rail), .contextTools { grid-row: 3; }
   .header::after { top: 71px; }
   .navigation { gap: 12px; }
   .brand { font-size: 24px; gap: 7px; }
@@ -98,8 +100,7 @@
   .primary { gap: 13px; }
   .primaryLink { font-size: 12px; }
   .moreTrigger { font-size: 12px; }
-  .header :global(.search-input-wrapper) { display: none; }
-  .header :global(.command-palette-trigger) { width: 40px; }
+  .header :global(.search-input-wrapper) { flex: 1; width: auto; }
   .menu { position: fixed; top: 70px; left: 22px; right: 22px; width: auto; }
   .header :global(.rail-section) { font-size: 26px; }
   .contextTools { max-width: 270px; }
@@ -107,4 +108,85 @@
 
 @media (max-width: 640px) {
   .header { display: none; }
+}
+
+/* Keep one telemetry subtree: ordinary routes participate in the header grid,
+   while the desktop instrument workspace exposes it through a compact status disclosure. */
+.telemetryPanel { display: contents; }
+.telemetryTrigger { display: none; }
+
+@media (min-width: 1024px) {
+  .workspace:has(:global(.instrument-workspace)) .header {
+    --clear-shell-gutter: 16px;
+    /* Instrument decks own z-index 40; header disclosures must paint above it. */
+    z-index: 41;
+    grid-template-rows: 48px;
+    min-height: 48px;
+    height: 48px;
+    flex-shrink: 0;
+    column-gap: 16px;
+  }
+  .workspace:has(:global(.instrument-workspace)) .header::after { top: 47px; }
+  .workspace:has(:global(.instrument-workspace)) .navigation { gap: 20px; }
+  .workspace:has(:global(.instrument-workspace)) .brand { font-size: 23px; gap: 7px; margin-right: 10px; }
+  .workspace:has(:global(.instrument-workspace)) .brand svg { width: 25px; height: 25px; }
+  .workspace:has(:global(.instrument-workspace)) .primary { gap: 22px; }
+  .workspace:has(:global(.instrument-workspace)) .primaryLink { font-size: 13px; }
+  .workspace:has(:global(.instrument-workspace)) .avatar { width: 30px; height: 30px; }
+  .workspace:has(:global(.instrument-workspace)) .menu { top: 48px; max-height: calc(100dvh - 72px); }
+  .workspace:has(:global(.instrument-workspace)) .header :global(.header-actions) { gap: 4px; }
+  .workspace:has(:global(.instrument-workspace)) .header :global(.search-input-wrapper) { width: clamp(150px, 15vw, 216px); }
+  .workspace:has(:global(.instrument-workspace)) .header :global(.search-input-wrapper input) { min-height: 32px; height: 32px; }
+  .workspace:has(:global(.instrument-workspace)) .telemetryTrigger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 44px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: 6px;
+    color: var(--text-secondary);
+    background: transparent;
+    font: 500 12px var(--font-sans);
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .workspace:has(:global(.instrument-workspace)) .telemetryTrigger:hover,
+  .workspace:has(:global(.instrument-workspace)) .telemetryTrigger[aria-expanded="true"] { background: var(--bg-hover); }
+  .workspace:has(:global(.instrument-workspace)) .telemetryTrigger[data-feed-integrity="warn"] { color: var(--warn-text); }
+  .workspace:has(:global(.instrument-workspace)) .telemetryTrigger[data-feed-integrity="dead"] { color: var(--fault); }
+  .workspace:has(:global(.instrument-workspace)) .telemetryTrigger:focus-visible {
+    outline: 2px solid var(--signal-core);
+    outline-offset: -2px;
+  }
+  .workspace:has(:global(.instrument-workspace)) .telemetryPanel {
+    display: none;
+    position: absolute;
+    top: 48px;
+    right: 16px;
+    z-index: 80;
+    width: min(440px, calc(100vw - 32px));
+    max-height: calc(100dvh - 80px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 18px;
+    border: 1px solid var(--border-dim);
+    border-radius: 8px;
+    background: var(--bg-base);
+  }
+  .workspace:has(:global(.instrument-workspace)) .telemetryPanel[data-open="true"] { display: block; }
+  .workspace:has(:global(.instrument-workspace)) .telemetryPanel :global(.telemetry-rail) { padding: 0; gap: 8px; }
+  .workspace:has(:global(.instrument-workspace)) .telemetryPanel :global(.rail-section) { font-size: 18px; margin-bottom: 4px; }
+  .workspace:has(:global(.instrument-workspace)) .contextTools { margin-top: 16px; justify-content: flex-start; gap: 12px; }
+  .workspace:has(:global(.instrument-workspace)) .contextTools :global(.futures-strip) { flex-wrap: wrap; gap: 10px 16px; border: 0; padding: 0; }
+  .workspace:has(:global(.instrument-workspace)) :global(.content) { padding: 0; min-height: 0; overflow: hidden; scrollbar-gutter: auto; }
+  .workspace:has(:global(.instrument-workspace)) :global(.footer-strip) { height: 28px; min-height: 28px; padding-block: 0; }
+}
+
+@media (min-width: 1024px) and (max-width: 1200px) {
+  .workspace:has(:global(.instrument-workspace)) .navigation { gap: 12px; }
+  .workspace:has(:global(.instrument-workspace)) .primary { gap: 14px; }
+  .workspace:has(:global(.instrument-workspace)) .brand { margin-right: 0; }
+  .workspace:has(:global(.instrument-workspace)) .header :global(.search-input-wrapper) { width: 150px; }
 }

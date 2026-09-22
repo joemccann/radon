@@ -1,7 +1,11 @@
 "use client";
 
+import RequestError from "@/components/RequestError";
+
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Ref, type UIEvent } from "react";
 import { useSearchParams } from "next/navigation";
+import { Crosshair } from "lucide-react";
+import styles from "./ChainFirst.module.css";
 import type { PriceData, OptionContract } from "@/lib/pricesProtocol";
 import { optionKey, normalizeOptionExpiry } from "@/lib/pricesProtocol";
 import type { PortfolioData, PortfolioPosition } from "@/lib/types";
@@ -87,6 +91,8 @@ function prefillLabelForSource(src: string | null | undefined): string {
       return "PREFILLED FROM VOL CONE";
     case "leap":
       return "PREFILLED FROM LEAP SCAN";
+    case "bounce":
+      return "PREFILLED FROM BOUNCE SETUP";
     case "theta":
     case "theta-harvester":
       return "PREFILLED FROM THETA HARVESTER";
@@ -585,6 +591,7 @@ function OrderBuilder({
     }
   }, [
     confirmStep,
+    orderActions,
     ticker,
     legs,
     parsedPrice,
@@ -1241,6 +1248,7 @@ export default function OptionsChainTab({
   // Fetch strikes when expiry changes — check prefetch cache first
   useEffect(() => {
     if (!selectedExpiry) return;
+    setError(null);
 
     // Use cached strikes if available (from background prefetch)
     const cached = getCachedStrikes(selectedExpiry);
@@ -1476,9 +1484,7 @@ export default function OptionsChainTab({
   if (error && expirations.length === 0) {
     return (
       <div style={{ padding: "24px 0", textAlign: "center" }}>
-        <span style={{ fontFamily: "var(--font-mono)", fontSize: "12px", color: "var(--fault)" }}>
-          {error}
-        </span>
+        <RequestError error={error} fallback="The options chain could not be loaded. Try again." />
       </div>
     );
   }
@@ -1486,6 +1492,7 @@ export default function OptionsChainTab({
   if (showMobileChain) {
     return (
       <>
+      <RequestError error={error} fallback="The options chain could not be loaded. Try again." />
       {prefillUnavailable && (
         <div className="chain-prefill-unavailable" role="status" data-testid="prefill-unavailable">
           {prefillUnavailable}
@@ -1523,7 +1530,8 @@ export default function OptionsChainTab({
   }
 
   return (
-    <div className="chain-tab">
+    <div className={`chain-tab ${styles.chainFirst}`}>
+      <RequestError error={error} fallback="The options chain could not be loaded. Try again." />
       {/* Chain column + docked ticket rail. The rail owns the whole deck
           height: the toolbar, chain and hint ride in the left column so the
           ticket starts level with them instead of below a full-width bar. */}
@@ -1537,7 +1545,8 @@ export default function OptionsChainTab({
         </div>
       )}
       {/* Expiry selector */}
-      <div className="chain-expiry-bar">
+      <div className="chain-expiry-bar chain-first-toolbar" data-testid="chain-first-toolbar">
+        <span className={styles.title}>Options chain</span>
         <label
           style={{
             fontFamily: "var(--font-mono)",
@@ -1551,6 +1560,7 @@ export default function OptionsChainTab({
         </label>
         <select
           className="chain-expiry-select"
+          aria-label="Options expiry"
           value={selectedExpiry ?? ""}
           // Browsing expiries must NOT wipe the builder — legs carry their own
           // expiry through to the combo payload (calendars are legitimate).
@@ -1563,12 +1573,13 @@ export default function OptionsChainTab({
             </option>
           ))}
         </select>
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px" }}>
+        <div className="chain-first-toolbar-controls" style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px" }}>
           <div className="chain-side-toggle">
             {(["both", "calls", "puts"] as const).map((val) => (
               <button
                 key={val}
                 className={`chain-side-toggle-btn ${sideFilter === val ? "active" : ""}`}
+                aria-pressed={sideFilter === val}
                 onClick={() => setSideFilter(val)}
               >
                 {val === "both" ? "ALL" : val.toUpperCase()}
@@ -1580,6 +1591,7 @@ export default function OptionsChainTab({
           </label>
           <select
             className="chain-expiry-select"
+            aria-label="Strikes per side"
             value={strikesPerSide}
             onChange={(e) => setStrikesPerSide(Number(e.target.value))}
             style={{ width: "56px" }}
@@ -1591,6 +1603,16 @@ export default function OptionsChainTab({
             <option value={100}>±100</option>
             <option value={ALL_STRIKES}>All</option>
           </select>
+          <button
+            type="button"
+            className={`chain-first-recenter ${styles.recenter}`}
+            onClick={recenter}
+            disabled={currentPrice == null || !Number.isFinite(currentPrice)}
+            aria-label="Recenter chain view"
+          >
+            <Crosshair size={16} aria-hidden="true" />
+            Recenter
+          </button>
         </div>
       </div>
 

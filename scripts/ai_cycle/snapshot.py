@@ -11,7 +11,7 @@ from .shadow import evaluate_shadow
 from .transforms import InsufficientEvidence, complete_daily_windows
 
 API_SNAPSHOT_MAX_BYTES = 900_000
-_MAX_CHART_SERIES = 3
+_MAX_CHART_SERIES = 8
 _MAX_CHART_POINTS = 120
 _MAX_STRIP_METRICS = 8
 
@@ -84,6 +84,11 @@ def build_snapshot(store, as_of=None):
     now = datetime.fromisoformat(as_of.replace("Z", "+00:00"))
     response_issues = set()
     rows = latest_vintages(store.read_snapshot_observations(as_of=as_of), response_issues)
+    # Old hour-start and raw-hour EIA vintages remain in the audit store only.
+    rows = [row for row in rows if row["source_id"] != "eia" or row["methodology_version"] == "eia-daily-hour-ending-v3"]
+    for row in rows:
+        if row["source_id"] == "eia":
+            row["metadata"] = {**row["metadata"], "complete": row["metadata"].get("source_observations") == 24}
     coverage = {}
     for row in rows:
         source = coverage.setdefault(
@@ -126,6 +131,7 @@ def build_snapshot(store, as_of=None):
             metrics.append(
                 {
                     "id": row["series_id"],
+                    "history_series_id": history_series(row),
                     "label": row["metadata"].get("label", row["series_id"]),
                     **{
                         key: row[key]
@@ -150,6 +156,14 @@ def build_snapshot(store, as_of=None):
             )
 
         def metric_priority(metric, indicator_id=id):
+            if indicator_id == "D1":
+                order = ("total_tokens", "mean_7d", "growth_28d", "visible_nonfree_tokens", "other_share", "sum_28d")
+                return (order.index(metric["id"]) if metric["id"] in order else len(order), metric["id"])
+            if indicator_id == "P1":
+                return (0 if metric["id"] == "PJM.DOM.daily-average-load" else 1, metric["id"])
+            if indicator_id == "H1":
+                return (0 if metric["id"] == "NVDA.data_center_revenue" else 1,
+                        -datetime.fromisoformat(metric["period_end"].replace("Z", "+00:00")).timestamp(), metric["id"])
             if indicator_id == "D3":
                 metadata = metric["metadata"]
                 lab_tokens = metadata.get("dataset") == "labs" and metadata.get("metric") in ("tokens", "token")
@@ -177,8 +191,8 @@ def build_snapshot(store, as_of=None):
             for row in newest.values():
                 cadence = SOURCES[row["source_id"]]["cadence"]
                 end = datetime.fromisoformat(row["period_end"].replace("Z", "+00:00"))
-                if cadence in ("daily", "hourly", "live") and now - end > timedelta(
-                    hours=72 if cadence == "daily" else 48
+                if cadence in ("daily", "hourly", "live", "monthly", "snapshot") and now - end > timedelta(
+                    hours=62 * 24 if cadence == "monthly" else 72 if cadence in ("daily", "snapshot") else 48
                 ):
                     state, reason = (
                         "stale",
@@ -208,12 +222,12 @@ def build_snapshot(store, as_of=None):
                 )
             if id == "D4":
                 state, reason = "experimental", "Publisher methodology and traffic independence remain unverified."
-            if id == "D6":
+            if id == "D6" and state == "available":
                 state, reason = (
                     "experimental",
                     "OpenDesign Arena LLM/model-quality stub; design-task scores only, never GPU scarcity.",
                 )
-            if id == "C5":
+            if id == "C5" and state == "available":
                 state, reason = (
                     "experimental",
                     "Liquid Compute public GPU index. Third venue versus the rental book. Methodology opaque until licensed.",
@@ -618,8 +632,13 @@ def weekly_evidence(rows, as_of):
 def _downsample(points, limit):
     if len(points) <= limit:
         return points
+    # Retain global extrema, including isolated spikes; uniform decimation can
+    # turn a changing series into a completely flat line.
     last = len(points) - 1
-    indexes = sorted({round(i * last / (limit - 1)) for i in range(limit)})
+    indexes = {round(i * last / (limit - 3)) for i in range(limit - 2)}
+    indexes.add(min(range(len(points)), key=lambda i: points[i]["value"]))
+    indexes.add(max(range(len(points)), key=lambda i: points[i]["value"]))
+    indexes = sorted(indexes)
     return [points[i] for i in indexes]
 
 
@@ -632,14 +651,29 @@ def compact_snapshot(snapshot, max_bytes=API_SNAPSHOT_MAX_BYTES):
         groups = {}
         for point in indicator.get("history") or []:
             groups.setdefault((point.get("source_id"), point.get("series_id"), point.get("unit")), []).append(point)
-        metric_ids = {metric["id"] for metric in indicator["metrics"]}
+        metric_ids = [
+            (metric["source_id"], metric.get("history_series_id") or ":".join((metric["id"], metric["methodology_version"], metric["cohort_version"])), metric["unit"])
+            for metric in indicator["metrics"]
+        ]
+        def priority(item):
+            source, series, unit = item[0]
+            rank = next((i for i, (s, identity, u) in enumerate(metric_ids)
+                         if s == source and u == unit and (series == identity or series.startswith(identity + ":"))), len(metric_ids))
+            return (rank, -len(item[1]), series or "")
         ranked = sorted(
             groups.items(),
-            key=lambda item: (0 if item[0][1] in metric_ids else 1, -len(item[1]), item[0][1] or ""),
+            key=priority,
         )
         history = []
+        indicator["history_coverage"] = []
+        indicator["history_series_count"] = len(groups)
         for _key, points in ranked[:_MAX_CHART_SERIES]:
-            history.extend(_downsample(sorted(points, key=lambda point: point["date"]), _MAX_CHART_POINTS))
+            points = sorted(points, key=lambda point: point["date"])
+            displayed = _downsample(points, _MAX_CHART_POINTS)
+            history.extend(displayed)
+            indicator["history_coverage"].append(dict(source_id=_key[0], series_id=_key[1], unit=_key[2],
+                observation_count=len(points), displayed_count=len(displayed), observed_from=points[0]["date"],
+                observed_through=points[-1]["date"]))
         indicator["history"] = history
     def encoded():
         return json.dumps(compact, sort_keys=True, separators=(",", ":"), allow_nan=False)
@@ -659,6 +693,12 @@ def compact_snapshot(snapshot, max_bytes=API_SNAPSHOT_MAX_BYTES):
             for _key, points in list(groups.items())[:series_limit]:
                 history.extend(_downsample(sorted(points, key=lambda point: point["date"]), point_limit))
             indicator["history"] = history
+            counts = {}
+            for point in history:
+                key = (point["source_id"], point["series_id"], point["unit"])
+                counts[key] = counts.get(key, 0) + 1
+            indicator["history_coverage"] = [dict(item, displayed_count=counts[(item["source_id"], item["series_id"], item["unit"])])
+                for item in indicator["history_coverage"] if (item["source_id"], item["series_id"], item["unit"]) in counts]
         payload = encoded()
     if len(payload.encode()) > max_bytes:
         raise ValueError("Compact snapshot exceeds API read budget")

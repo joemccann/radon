@@ -39,6 +39,7 @@ def _mkdir_snippet(loop: str) -> str:
     m = re.search(
         r'^LOG_DIR="\$REPO/logs/[^"]+"\n'
         r'mkdir -p "\$LOG_DIR"\n'
+        r'(?:refuse_symlink "\$LOG_DIR" \|\| exit 2\n)?'
         r'(?:#[^\n]*\n)*'
         r'(chmod 700 "\$LOG_DIR"\n)?',
         src,
@@ -62,7 +63,14 @@ def test_the_snippet_actually_yields_a_0700_directory(tmp_path, loop):
     repo = tmp_path / "clone"
     repo.mkdir()
     proc = subprocess.run(
-        [BASH, "-c", f'REPO="{repo}"\numask 022\n{_mkdir_snippet(loop)}'],
+        [
+            BASH,
+            "-c",
+            # refuse_symlink is defined in the wrapper's lib section (CWE-59
+            # hardening); stub its contract for the snippet run.
+            'refuse_symlink() { [[ ! -L "${1:-}" ]]; }\n'
+            f'REPO="{repo}"\numask 022\n{_mkdir_snippet(loop)}',
+        ],
         capture_output=True, text=True, timeout=30, check=False,
     )
     assert proc.returncode == 0, proc.stderr

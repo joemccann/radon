@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { computeScrollAffordance, type ScrollAffordance } from "@/lib/scrollAffordance";
 
-export type ScannerMode = "flow" | "discover" | "theta" | "strength" | "leap" | "garch" | "vol-cone";
+export type ScannerMode = "flow" | "discover" | "theta" | "strength" | "leap" | "garch" | "vol-cone" | "vol-skew-mr" | "bounce";
 
 type ScannerTabCounts = Partial<Record<ScannerMode, number>>;
 
@@ -17,7 +17,7 @@ type ScannerModeTabsProps = {
   counts: ScannerTabCounts;
 };
 
-const TABS: { mode: ScannerMode; label: string }[] = [
+export const SCANNER_MODE_TABS: { mode: ScannerMode; label: string }[] = [
   { mode: "flow", label: "Flow Signals" },
   { mode: "discover", label: "Discover" },
   { mode: "theta", label: "Theta Harvester" },
@@ -25,7 +25,11 @@ const TABS: { mode: ScannerMode; label: string }[] = [
   { mode: "leap", label: "LEAP" },
   { mode: "garch", label: "GARCH" },
   { mode: "vol-cone", label: "VOL CONE" },
+  { mode: "vol-skew-mr", label: "Vol/Skew MR" },
+  { mode: "bounce", label: "Bounce Setup" },
 ];
+
+export const SCANNER_MODE_COUNT = SCANNER_MODE_TABS.length;
 
 const ROVING_KEYS = ["ArrowLeft", "ArrowRight", "Home", "End"];
 
@@ -39,7 +43,7 @@ const ROVING_KEYS = ["ArrowLeft", "ArrowRight", "Home", "End"];
  * visible as such — the strip used to end flush at the viewport edge and
  * read as three-tabs-total. Arrow keys rove focus (WAI-ARIA tabs, manual
  * activation: Enter/Space selects, so arrowing across seven modes does not
- * fire seven scans).
+ * fire eight scans).
  */
 export function ScannerModeTabs({ mode, onModeChange, counts }: ScannerModeTabsProps) {
   const activeRef = useRef<HTMLButtonElement | null>(null);
@@ -110,7 +114,7 @@ export function ScannerModeTabs({ mode, onModeChange, counts }: ScannerModeTabsP
         ref={stripRef}
         onKeyDown={handleKeyDown}
       >
-        {TABS.map((tab) => {
+        {SCANNER_MODE_TABS.map((tab) => {
           const count = counts[tab.mode];
           const isActive = mode === tab.mode;
           return (

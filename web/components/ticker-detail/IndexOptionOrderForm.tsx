@@ -1,5 +1,7 @@
 "use client";
 
+import RequestError from "@/components/RequestError";
+
 import { useEffect, useMemo, useState } from "react";
 import { useIndexOptionsChain } from "@/lib/useIndexOptionsChain";
 import { useTickerDetailOptional } from "@/lib/TickerDetailContext";
@@ -190,7 +192,7 @@ export function IndexOptionOrderForm({ ticker, portfolio }: IndexOptionOrderForm
     return <div className="futures-form-loading">Loading {symbol} options chain…</div>;
   }
   if (initial.error) {
-    return <div className="futures-form-error">Chain error: {initial.error}</div>;
+    return <div className="tab-empty"><RequestError error={initial.error} fallback="The contract chain could not be loaded. Try again." onRetry={() => window.location.reload()} /><button type="button" className="btn-secondary" onClick={() => window.location.reload()}>Reload data</button></div>;
   }
   if (!initial.data || initial.data.expirations.length === 0) {
     return <div className="futures-form-empty">No listed {symbol} options.</div>;

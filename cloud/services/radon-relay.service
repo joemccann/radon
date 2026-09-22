@@ -29,6 +29,10 @@ Environment=RADON_DB_NO_REPLICA=1
 ExecStart=/usr/bin/node scripts/ib_realtime_server.js
 Restart=always
 RestartSec=5
+# Default TimeoutStopSec is 90s. stop-clean fails the deploy at 60s, and
+# nextjs is already stopped while this unit is still in stop-sigterm
+# (2026-09-21 19:25Z). 10s is inside that wait and inside Caddy's 15s retry.
+TimeoutStopSec=10
 
 [Install]
 WantedBy=multi-user.target

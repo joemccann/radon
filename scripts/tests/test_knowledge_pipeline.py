@@ -106,7 +106,7 @@ class TestDistill:
             return _distill_ok()
 
         result = distill_mod.distill(
-            "Relay", "the relay farm-down fix", complete=complete, env={"ANTHROPIC_API_KEY": "a"}
+            "Relay", "the relay farm-down fix", complete=complete, env={"CLAUDE_CODE_OAUTH_TOKEN": "oauth-a"}
         )
 
         assert result == {
@@ -137,7 +137,7 @@ class TestDistill:
             "Relay",
             "the relay farm-down fix",
             env={
-                "ANTHROPIC_API_KEY": "sk-ant-test",
+                "CLAUDE_CODE_OAUTH_TOKEN": "oauth-ant-test",
                 "CEREBRAS_API_KEY": "csk-test",
             },
             post=post,
@@ -158,7 +158,7 @@ class TestDistill:
             "Account U1234567 held libsql://example-test.turso.io token "
             "sk-ant-PLACEHOLDER00 and a NVDA call.",
             complete=complete,
-            env={"ANTHROPIC_API_KEY": "a"},
+            env={"CLAUDE_CODE_OAUTH_TOKEN": "oauth-a"},
         )
 
         body = sent["content"]
@@ -181,7 +181,7 @@ class TestDistill:
             '"client_secret": "super-secret-value"\n'
             "https://provider.invalid/v1?api_key=query-secret&symbol=SPY",
             complete=complete,
-            env={"ANTHROPIC_API_KEY": "a"},
+            env={"CLAUDE_CODE_OAUTH_TOKEN": "oauth-a"},
         )
 
         body = sent["content"]
@@ -189,6 +189,52 @@ class TestDistill:
         assert "super-secret-value" not in body
         assert "query-secret" not in body
         assert "symbol=SPY" in body
+
+    def test_bare_provider_tokens_are_redacted_before_egress(self):
+        sent = {}
+
+        def complete(instruction, **kwargs):
+            sent["content"] = instruction
+            return _distill_ok()
+
+        distill_mod.distill(
+            "Incident",
+            "Saw ghp_FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE in logs, "
+            "aws key AKIAFAKEFAKEFAKEFAKE, openai sk-proj-FAKEFAKEFAKEFAKEFAKE "
+            "and xai-FAKEFAKEFAKEFAKEFAKEFAKE alongside a routine SPY put.",
+            complete=complete,
+            env={"CLAUDE_CODE_OAUTH_TOKEN": "oauth-a"},
+        )
+
+        body = sent["content"]
+        assert "ghp_FAKE" not in body
+        assert "AKIAFAKE" not in body
+        assert "sk-proj-FAKE" not in body
+        assert "xai-FAKE" not in body
+        assert "routine SPY put" in body
+
+    def test_token_straddling_truncation_boundary_is_fully_redacted(self):
+        sent = {}
+
+        def complete(instruction, **kwargs):
+            sent["content"] = instruction
+            return _distill_ok()
+
+        token = "ghp_FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE"
+        title = "Boundary"
+        prefix_len = len(f"Title: {title}\n\n")
+        # Place the token so it straddles the 6000-char truncation boundary.
+        pad = "x" * (distill_mod.MAX_CONTENT_CHARS - prefix_len - len(token) // 2 - 1) + " "
+        distill_mod.distill(
+            title,
+            pad + token + " trailing",
+            complete=complete,
+            env={"CLAUDE_CODE_OAUTH_TOKEN": "oauth-a"},
+        )
+
+        body = sent["content"]
+        assert "ghp_" not in body
+        assert len(body) <= distill_mod.MAX_CONTENT_CHARS
 
     def test_code_fenced_json_is_parsed(self):
         fenced = f"```json\n{_GOOD_DISTILLATION}\n```"
@@ -203,7 +249,7 @@ class TestDistill:
             )
 
         result = distill_mod.distill(
-            "Relay", "content", env={"ANTHROPIC_API_KEY": "a"}, post=post
+            "Relay", "content", env={"CLAUDE_CODE_OAUTH_TOKEN": "oauth-a"}, post=post
         )
         assert result is not None
         assert result["tickers"] == ["SPY"]
@@ -212,9 +258,16 @@ class TestDistill:
         def complete(*_args, **_kwargs):
             raise ModelLadderExhausted("tried=anthropic:http_500")
 
-        assert distill_mod.distill("Relay", "content", complete=complete, env={"ANTHROPIC_API_KEY": "a"}) is None
+        assert distill_mod.distill("Relay", "content", complete=complete, env={"CLAUDE_CODE_OAUTH_TOKEN": "oauth-a"}) is None
 
-    def test_next_provider_wins_after_anthropic_failure(self):
+    def test_next_provider_wins_after_anthropic_failure(self, tmp_path):
+        # Subscription-band failover: Claude OAuth then Grok device-auth (not prepaid XAI).
+        home = tmp_path / "home"
+        (home / ".grok").mkdir(parents=True)
+        (home / ".grok" / "auth.json").write_text(
+            json.dumps({"access_token": "grok-sub-token"}),
+            encoding="utf-8",
+        )
         calls = []
 
         def post(url, **kwargs):
@@ -228,7 +281,10 @@ class TestDistill:
         result = distill_mod.distill(
             "Relay",
             "content",
-            env={"ANTHROPIC_API_KEY": "a", "XAI_API_KEY": "x"},
+            env={
+                "HOME": str(home),
+                "CLAUDE_CODE_OAUTH_TOKEN": "oauth-a",
+            },
             post=post,
         )
         assert result is not None
@@ -247,7 +303,7 @@ class TestDistill:
             )
 
         assert (
-            distill_mod.distill("Relay", "content", env={"ANTHROPIC_API_KEY": "a"}, post=post)
+            distill_mod.distill("Relay", "content", env={"CLAUDE_CODE_OAUTH_TOKEN": "oauth-a"}, post=post)
             is None
         )
 

@@ -186,14 +186,15 @@ def _list_open_pr(
     head: str,
     base: str,
     repo: str,
+    include_terminal: bool = False,
 ) -> dict | None:
     proc = runner([
         binary, "pr", "list",
         "--repo", repo,
         "--head", head,
         "--base", base,
-        "--state", "open",
-        "--json", "number,url,title",
+        "--state", "all" if include_terminal else "open",
+        "--json", "number,url,title,state" if include_terminal else "number,url,title",
     ])
     if getattr(proc, "returncode", 1) != 0:
         _raise_from_gh(proc)
@@ -269,6 +270,7 @@ def ensure_pr(
     runner: Runner | None = None,
     gh_bin: str | None = None,
     which: Callable[[str], str | None] | None = None,
+    include_terminal: bool = False,
 ) -> dict:
     """Create the IR PR if missing. Never merge. Fail closed on gh/PAT."""
     if not is_ir_branch(head):
@@ -280,11 +282,11 @@ def ensure_pr(
     binary = _resolve_gh(gh_bin, which)
     _require_auth(run, binary)
     existing = _list_open_pr(
-        run, binary, head=head, base=base, repo=repo
+        run, binary, head=head, base=base, repo=repo, include_terminal=include_terminal
     )
     if existing:
         return {
-            "action": "exists",
+            "action": existing["state"].lower() if include_terminal and existing.get("state") in {"CLOSED", "MERGED"} else "exists",
             "url": existing["url"],
             "number": existing.get("number"),
             "head": head,

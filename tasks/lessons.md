@@ -1,4 +1,43 @@
 # Lessons
+## 2026-09-19 — Next.js is an LLM consumer
+
+- `/api/newsfeed/share` and `/api/assistant` run inside `radon-nextjs`.
+  Binding subscription grant dirs only into Python ladder units
+  (`2aba1229`) 502'd every share rewrite: `Missing Anthropic subscription`.
+- Treat Next.js as an LLM consumer in `radon-app-runtime` binds. Keep
+  the relay unbound. Pin
+  `test_run_nextjs_binds_subscription_credential_dirs_readonly`.
+
+## 2026-09-18 — Chain strike identity must never ellipsis
+
+- Four-digit strikes (`$1,737.00`) rendered as `$1,70...` on the
+  chain-first calls ladder. `.chain-cell` ellipsis plus a 72px strike
+  col hid the value.
+- Do not ellipsis the strike column. Size `.chain-anchor-strike-col`
+  for grouped five-digit labels (`$12,345.00`), pin it in
+  `web/tests/chain-strike-column.test.ts`.
+
+
+## 2026-09-17 — Two 00NN_ migration files silently skip the later table
+
+- `apply_pending_migrations` keys on the integer prefix, not the filename.
+  A second `0074_*.sql` is skipped once 74 is in `schema_migrations`.
+  radon-calm-streak then died with `no such table: calm_streak_history`
+  while `liquidcompute_index` (the first 74) was already there.
+- Pin unique prefixes in `test_migrate.py`. `_list_migrations` must
+  abort on a collision so ExecStartPre fails closed.
+- Per-indicator tests that apply THEIR file into a fresh sqlite do not
+  catch this. The real migrations directory is the topology.
+- A prior unpushed fix chose 0075; vol-skew-mr later took 75 on main.
+  Recurrence page `b4a46e16` needed 0076. Do not leave migration
+  renumbers on unmerged `fix/**` branches overnight.
+
+## 2026-09-17 — Mixed-age combos are not same-day
+
+- Selling a same-day short against an overnight long (SPY 740P since May, 760P sold today) groups as a bull put spread with `basis_source: mixed` and often `entry_date=today`.
+- The same-day identity Today P&L = MV − EC then prints the overnight leg's entire accumulated loss as today's drawdown.
+- `isSameDay` is false for mixed. Today P&L is per-leg: overnight vs prior close, `session_fills` vs fill. Incomplete blotter + a new-leg fill must not stamp the combo today. OCC journal tickers map to the underlying root.
+
 ## 2026-09-11 — Grok 4.6 P&L turns cannot omit tools or starve max_tokens
 
 - grok-4.6 reasoning_effort defaults to high and cannot be disabled. A 1200 max_tokens budget is eaten by reasoning, so a cap-hit forced-final with tools omitted returns empty text and the canned "Reached the maximum tool-calling rounds" string.
@@ -559,6 +598,7 @@ Session: reliability roadmap (DUR-01..16) + a chain of trade-data bugs (CTA-01, 
 - **The nightly IB Gateway "JVM wedge" was the gateway's OWN auto-restart**, not load: `AUTO_RESTART_TIME` unset → IBC default 11:45 PM session-local = 23:45 UTC (jts.ini TZ Africa/Abidjan), and the watchdog killed it mid-relogin. Pin `AUTO_RESTART_TIME` to a quiet window + give the watchdog a quiet-window so it doesn't classify the scheduled relogin as a hang. NOTE: an invalid IBC time format (`"23:58 ET"`) is silently ignored → falls back to the default. radon-cloud 21d9391.
 - **The gnzsnz IB Gateway image BLANKS `JAVA_TOOL_OPTIONS`** before starting the JVM (verified via `/proc/<pid>/environ`) — GC logging must go in the persistent `Jts/ibgateway/<ver>/ibgateway.vmoptions` file (under `### keep on update`), not the compose env.
 - **Timer-driven oneshots firing faster than every 5 min trip the DUR-02 flap-brake** (`StartLimitBurst=5/IntervalSec=300`) even when every run SUCCEEDS — a 60s oneshot makes exactly 5 starts/300s and parks as `start-limit-hit`. Use `Burst=10` (matches ib-watchdog/portfolio-sync) or `StartLimitIntervalSec=0` (a timer oneshot can't crash-loop). Recover a parked unit with `systemctl reset-failed`. host-metrics hit this because DUR-12 created it after DUR-02's special-casing. The DUR-02 unit-watchdog alert was CORRECT — the unit's brake config was the bug.
+- **A 5-minute timer with Burst=5 / IntervalSec=1800 is the same class.** systemd StartLimit counts successful oneshot starts; 6 fires fit in 1800s so the 6th parks `start-limit-hit` on a healthy drain (tv-alerts 2026-09-19 page 8750de94, five `processed: 0` then two skipped slots). `TestPerMinuteStartLimits` only watches a wildcard MINUTE field, so `*:02/5:23` slipped through. Burst must exceed timer fires in the window; pin it with `TestRepeatingTimerStartLimitHeadroom`.
 - **IPO-day / hard-to-borrow shorts: Reg SHO 203(b) requires a locate that doesn't exist on day one** (unsettled shares, no lendable inventory). "Order Inactive" is IB's received-but-not-working status; the reason arrives as a SEPARATE async errorEvent (201 class). `ib_place_order` broke its confirm-poll before the 201 landed and returned a bare message — grace-wait ~1.5s (driving the event loop via `client.sleep`) for the matching error + fall back to `trade.log` errorCode entries, and log the detail server-side before the 502. c9bc47f.
 - **IB shortability ticks 46 (difficulty) and 89 (shortable_shares) arrive INDEPENDENTLY in a streaming probe and only during market hours** (never snapshot — generic ticks break snapshots). tick 46 is often slower, so derive `shortable=true` from `shortable_shares>0` when difficulty is absent, else a borrowable name (AAPL 190M shares) renders a wrong "NO LOCATE". Off-hours the endpoint correctly returns `missing:true`. a3a9fcf/d74b90e.
 - **CTA share staleness: the generator was pinned to glob-latest `data/menthorq_cache/*.json` with no freshness gate**, so between the 16:00 ET session roll and the 17:30 ET sync the modal rendered yesterday's data. Pick the date-max of {DB row, disk} and flag `data_date < latest_closed_trading_day` with a STALE banner; weekend-aware. ab97253.
@@ -1040,3 +1080,26 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
   the absence of `subprocess capacity exhausted` on the final attempt.
 - Wrapper SCAN_TIMEOUT and each `/flow-tab` `run_script` timeout must
   match; discover at 180 with flow-analysis at 120 pages the oneshot.
+
+## 2026-09-16 - Performance regression reports need source reconciliation
+- When TWR disappears with excluded NAV sessions, trace the actual NAV and external-flow provenance before changing presentation or weakening integrity gates. Verify historical flow coverage survives refreshed statements and mirror selection; retain the reported dates as regression cases.
+
+## 2026-09-17 - AI charts share the Regime renderer
+- Reuse ChartPanel, CriHistoryChart, HistoryRangeChips and BrushMinimap for AI evidence, including legacy charts. Preserve source cadence, units and missing observations while matching the approved Regime composition.
+
+## 2026-09-17 - Nightly evidence is not a deliverable
+- A nightly audit may complete successfully without a commit or PR. Report no-op results and checkpoints through the rolling issue and runner state; never create empty commits to satisfy phase completion.
+- Gate PR creation on the net substantive base-to-head diff, excluding audit/task bookkeeping and generated timestamp churn. Commit counts and nonempty diffs alone do not prove a useful change. Apply the policy to every scheduled publisher and provider prompt.
+
+## 2026-09-17 - Error bodies are not UI copy
+- Never render response.text(), JSON envelopes, stack traces, or raw infrastructure exceptions as user-facing errors. Route failures through the established error pattern with safe copy and recovery, retaining prior data and financial rejection semantics. Audit shared consumers whenever a page leaks a raw error.
+
+## 2026-09-17 — Errors belong in toasts
+- User-facing request, refresh, validation and action failures must use toast presentation, never inline banners. Preserve retry actions and safe broker/service guidance. Audit shared presenters and custom render branches together; explicitly report framework fallback and diagnostic-record exceptions.
+
+## 2026-09-17 — AI Industry capitalization
+- Use “AI Industry” consistently for navigation, headings, page titles, links, prose references and accessible names. Keep regression expectations case-sensitive.
+
+## 2026-09-17 — AI metric labels and history
+- Translate residual categories into the measured population and unit; never expose bare “other”, “other share” or publisher/cohort IDs as selector copy.
+- Verify actual observation spacing before applying chart gap limits: a daily collection schedule does not imply daily points in publisher history. Token histories must render connected lines across normal sampling intervals.

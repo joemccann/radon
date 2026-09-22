@@ -28,7 +28,7 @@ calendar, X watchlist, yield curve, vol cone, skew, straddle, COR.
 `scanner.py`, `discover.py`, `cri_scan.py`, `gex_scan.py`, `vcg_scan.py`,
 `bpi_scan.py`, `breadth_scan.py`, `rv_ratio_scan.py`, `leap_scanner_uw.py`,
 `leap_iv_scanner.py`, `theta_harvester_scanner.py`,
-`strength_confirmation_scanner.py`, `garch_convergence.py`,
+`strength_confirmation_scanner.py`, `vol_skew_mr_scanner.py`, `garch_convergence.py`,
 `flow_analysis.py`.
 
 ## IB / execution

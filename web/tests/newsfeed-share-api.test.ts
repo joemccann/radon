@@ -24,10 +24,11 @@ describe("POST newsfeed/share", () => {
     const response = await POST(request({ ...input, content: input.content + " Source: ZeroHedge https://zerohedge.com/a" }));
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(await response.json()).toEqual({ title: "Seasonality", content: "104 to 130. That is the historical path.", caption: "Seasonality\n\n104 to 130. That is the historical path." });
+    expect(await response.json()).toEqual({ title: "Seasonality", content: "104 to 130. That is the historical path.", caption: "Seasonality\n\n104 to 130.\n\nThat is the historical path." });
     expect(guard).toHaveBeenCalledWith(expect.any(Request), expect.objectContaining({ operatorOnly: true, durableRateTier: "D", rate: expect.objectContaining({ limit: 10 }) }));
     expect(chat.mock.calls[0][0].messages[0].content).not.toMatch(/zerohedge/i);
     expect(chat.mock.calls[0][0].signal).toBeInstanceOf(AbortSignal);
+    expect(chat.mock.calls[0][0].reasoningEffort).toBe("low");
   });
   it("does not expose provider errors", async () => {
     chat.mockRejectedValue(new Error("secret upstream response"));
@@ -38,6 +39,13 @@ describe("POST newsfeed/share", () => {
   it("rejects model hallucinated numbers", async () => {
     chat.mockResolvedValue({ text: '{"title":"Seasonality","content":"Up 25%."}' });
     expect((await POST(request())).status).toBe(502);
+  });
+  it("accepts a reformatted numeric range but still rejects invented values", async () => {
+    const range = { title: "Wolfe sees $30-$50B for Meta", content: "Revenue opportunity from Muse." };
+    chat.mockResolvedValue({ text: '{"title":"Meta: $30B-$50B from Muse","content":"• Revenue opportunity from Muse"}' });
+    expect((await POST(request(range))).status).toBe(200);
+    chat.mockResolvedValue({ text: '{"title":"Meta: $30B-$60B from Muse","content":"• Revenue opportunity from Muse"}' });
+    expect((await POST(request(range))).status).toBe(502);
   });
   it("reports timeouts safely", async () => {
     chat.mockRejectedValue(new DOMException("timeout", "TimeoutError"));

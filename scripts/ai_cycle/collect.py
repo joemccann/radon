@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -40,13 +41,12 @@ SOURCES = (
     "issuer-disclosures",
     "lambda",
 )
-DEFAULT_RAMP_CURATED = Path(__file__).resolve().parent / "fixtures" / "ramp_ai_index_curated.json"
 KEYS = ("OPENROUTER_API_KEY", "ARTIFICIAL_ANALYSIS_API_KEY", "SEC_USER_AGENT", "EIA_API_KEY", "VAST_API_KEY")
 OPERATOR_FIELDS = (*KEYS, "RADON_AI_CYCLE_AA_BASKET")
 HEALTH_SERVICE = "ai-cycle"
 BACKFILL_HEALTH_SERVICE = "ai-cycle-backfill"
 SOURCE_HISTORY_STARTS = {
-    "sec": "2009-01-01",
+    "sec": "2006-12-31",
     "noaa": "2018-07-01",
     "eia": "2019-01-01",
     "openrouter": "2025-01-01",
@@ -133,7 +133,7 @@ def _main(argv=None):
     parser.add_argument("--import-disclosures", help="Verified issuer observations JSON")
     parser.add_argument(
         "--import-ramp",
-        help="Curated Ramp AI Index JSON; defaults to bundled published fixture for source ramp",
+        help="Explicit offline Ramp AI Index import; default fetches live publisher tables",
     )
     opendesi_mode = parser.add_mutually_exclusive_group()
     opendesi_mode.add_argument(
@@ -203,8 +203,6 @@ def _main(argv=None):
         # Preserve their last reviewed status and publication vintage on daily runs.
         if source == "issuer-disclosures" and not args.import_disclosures:
             continue
-        if source == "ramp" and not args.import_ramp and not DEFAULT_RAMP_CURATED.exists():
-            continue
         for first, last in source_windows(source, start, args.end, backfill=args.backfill):
             key = f"{source}:{first}:{last}"
             if key in completed:
@@ -215,8 +213,8 @@ def _main(argv=None):
                     raw = Path(args.import_disclosures).read_bytes()
                     digest = archive_raw(Path(args.archive), raw)
                     rows = parse_disclosures(json.loads(raw), digest, checked)
-                elif source == "ramp":
-                    ramp_path = Path(args.import_ramp or DEFAULT_RAMP_CURATED)
+                elif source == "ramp" and args.import_ramp:
+                    ramp_path = Path(args.import_ramp)
                     raw = ramp_path.read_bytes()
                     digest = archive_raw(Path(args.archive), raw)
                     rows = parse_ramp_curated(json.loads(raw), digest, checked)
@@ -339,14 +337,20 @@ def main(argv=None):
 
 
 def _write_health(backfill, state, started, error):
-    """Keep both literal health identities discoverable by fleet parity checks."""
+    """Best-effort heartbeat. A Turso timeout must not mask collection failure
+    (2026-09-17 07:22Z radon-ai-cycle: archive import timed out, then this
+    write also timed out and became the oneshot's raised error). Matches trin.
+    """
     from scripts.db.hrana_http import write_service_health_http
 
     kwargs = dict(started_at=started, finished_at=now_iso(), error=error, timeout=8)
-    if backfill:
-        write_service_health_http(BACKFILL_HEALTH_SERVICE, state, **kwargs)
-    else:
-        write_service_health_http(HEALTH_SERVICE, state, **kwargs)
+    try:
+        if backfill:
+            write_service_health_http(BACKFILL_HEALTH_SERVICE, state, **kwargs)
+        else:
+            write_service_health_http(HEALTH_SERVICE, state, **kwargs)
+    except Exception as exc:  # noqa: BLE001 — heartbeat is telemetry
+        print(f"[ai-cycle] service_health write failed: {exc}", file=sys.stderr)
 
 
 if __name__ == "__main__":

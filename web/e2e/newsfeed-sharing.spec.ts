@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 
 const base = "/api/newsfeed/research/files/";
@@ -10,6 +10,16 @@ const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="600"><
 
 const excludedPublisher = /(?:the\s*)?market\s*ear|zero[\s-]*hedge/i;
 type ShareCapture = { drawn: string[]; copied: string };
+
+async function dismissNotices(page: Page) {
+  // Persistent toasts are real interactive overlays. Acknowledge them using
+  // their visible controls before continuing into the narrow mobile lightbox.
+  const dismiss = page.locator(".toast-container").getByRole("button", { name: "Dismiss", exact: true });
+  for (let count = 0; count < 16 && await dismiss.count(); count += 1) {
+    await dismiss.first().click();
+  }
+  await expect(dismiss).toHaveCount(0);
+}
 
 test.beforeEach(async ({ page }) => {
   await page.route("**/api/newsfeed/share", async route => {
@@ -30,7 +40,7 @@ for (const width of [1440, 393]) {
       content: `${post.content} Source: ZeroHedge https://zerohedge.com/markets/example`,
     };
     const rewritten = { title: "Seasonality — the setup", content: "Positioning &mdash; the tell. Returns: -2.5%." };
-    const rewrittenCaption = "Seasonality, the setup\n\nPositioning, the tell. Returns: -2.5%.\n\nSource: Synthetic Bank · 2026-09-07";
+    const rewrittenCaption = "Seasonality, the setup\n\nPositioning, the tell.\n\nReturns: -2.5%.\n\nSource: Synthetic Bank · 2026-09-07";
     let requests = 0;
     let releaseRewrite!: () => void;
     const rewriteReady = new Promise<void>(resolve => { releaseRewrite = resolve; });
@@ -98,7 +108,9 @@ for (const width of [1440, 393]) {
       await expect(panel.getByRole("button", { name: "Download Reels / TikTok video" })).toBeDisabled();
       const fallbackCaption = await caption.inputValue();
       expect(fallbackCaption).toContain("Yen hedge demand, increases");
-      expect(fallbackCaption).toContain(post.content);
+      expect(fallbackCaption).not.toMatch(/^[•●▪◦*-]\s/m);
+      expect(fallbackCaption.split("\n\n").length).toBeGreaterThan(1);
+      expect(fallbackCaption).toContain("Demand for yen hedges increased");
       expect(fallbackCaption).not.toMatch(excludedPublisher);
       expect(fallbackCaption).not.toMatch(/—|&(?:mdash|#8212|#x2014);/i);
       await openComposer(fallbackCaption);
@@ -118,8 +130,10 @@ for (const width of [1440, 393]) {
       expect(new URL((await compose.getAttribute("href"))!).searchParams.get("text")).toBe(rewrittenCaption);
       const drawn = await page.evaluate(() => (window as unknown as { shareCapture: ShareCapture }).shareCapture.drawn.join(" "));
       expect(drawn).toContain("Seasonality, the setup");
-      expect(drawn).toContain("Positioning, the tell. Returns: -2.5%.");
-      expect(drawn).toContain("Source: Synthetic Bank · 2026-09-07");
+      // The story card mirrors the X caption (hook + short paragraphs) with today's date and no source footer.
+      expect(drawn).toContain("Positioning, the tell.");
+      expect(drawn).toContain("Returns: -2.5%.");
+      expect(drawn).not.toMatch(/Source:|EXCERPT|SEP 7, 2026/);
       expect(drawn).not.toMatch(/—|&(?:mdash|#8212|#x2014);/i);
       expect(requests).toBe(1);
       await panel.screenshot({ path: testInfo.outputPath("rewritten-share.png") });
@@ -150,13 +164,65 @@ test("news sharing retains sanitized fallback and retries a failed voice rewrite
   const item = page.getByTestId("news-feed-item").filter({ hasText: post.title });
   await item.getByRole("button", { name: "Share", exact: true }).click();
   const panel = item.getByRole("region", { name: "Share news item" });
-  await expect(panel.getByRole("button", { name: "Retry voice rewrite" })).toBeVisible();
+  const failure = page.locator(".toast-container").getByRole("alert").filter({ hasText: "Showing the original copy" });
+  await expect(failure.getByRole("button", { name: "Try again" })).toBeVisible();
+  await expect(panel.getByRole("alert")).toHaveCount(0);
   expect(await panel.getByRole("textbox", { name: "Post caption" }).inputValue()).toContain(post.title);
   expect(await panel.getByRole("textbox", { name: "Post caption" }).inputValue()).not.toMatch(excludedPublisher);
   await expect(panel.getByRole("button", { name: "Download Story image" })).toBeEnabled();
-  await panel.getByRole("button", { name: "Retry voice rewrite" }).click();
+  await failure.getByRole("button", { name: "Try again" }).click();
   await expect(panel.getByRole("textbox", { name: "Post caption" })).toHaveValue("Retry succeeds\n\nPositioning remains the tell.");
   expect(requests).toBe(2);
+});
+
+test("equity-issuance fallback is hook plus short paragraphs and Compose on X stays usable", async ({ page, context }) => {
+  test.setTimeout(90_000);
+  const equity = {
+    id: "equity-issuance-252bn",
+    title: "US corporates raised a record $252bn in 2Q; Goldman estimates ~$700bn total equity supply in 2026, significant portion AI-related",
+    content: "US corporates raised a record $252bn in 2Q across IPOs, follow-ons, convertibles, and SPACs, per Goldman's Sarah Herring and Chris Hussey. The desk estimates total corporate equity supply will reach ~$700bn in 2026, a significant portion of which is AI-related. Hyperscaler capex has eaten through free cash flow. The $700bn figure is a meaningful supply overhang and a headwind rather than a gale.",
+    timestamp: "2026-09-20T20:06:00Z",
+    images: [first],
+    tags: ["EQUITY-ISSUANCE"],
+    source: { ...source, publisher: "Goldman Midday Market Intelligence", documentDate: "2026-09-17" },
+  };
+  let releaseRewrite!: () => void;
+  const rewriteReady = new Promise<void>(resolve => { releaseRewrite = resolve; });
+  await page.route("**/api/newsfeed/share", async route => {
+    await rewriteReady;
+    await route.fulfill({ status: 502, json: { error: "Rewrite unavailable" } });
+  });
+  await context.route(/^https:\/\/(?:twitter|x)\.com\/intent\/tweet\?/, route => route.fulfill({
+    contentType: "text/html", body: "<title>Mock X composer</title><p>Compose draft</p>",
+  }));
+  await page.route("**/api/newsfeed/posts**", route => route.fulfill({ json: [equity] }));
+  await page.route("**/api/newsfeed/research/files/*.png", route => route.fulfill({ contentType: "image/svg+xml", body: svg }));
+  try {
+    await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
+    const item = page.getByTestId("news-feed-item").filter({ hasText: "$252bn" });
+    await item.getByRole("button", { name: "Share", exact: true }).click();
+    const panel = item.getByRole("region", { name: "Share news item" });
+    const compose = panel.getByRole("link", { name: "Compose on X" });
+    const caption = await panel.getByRole("textbox", { name: "Post caption" }).inputValue();
+    expect(caption.split("\n")[0]).toMatch(/\$252bn/i);
+    expect(caption).toContain("$700bn");
+    expect(caption).not.toMatch(/^[•●▪◦*-]\s/m);
+    expect(caption.split("\n\n").length).toBeGreaterThan(1);
+    expect(caption).toMatch(/Source: Goldman Midday Market Intelligence · 2026-09-17\s*$/);
+    expect(caption.length).toBeLessThanOrEqual(400);
+    expect(caption).not.toContain("Sarah Herring");
+    await expect(compose).toBeEnabled();
+    const popupReady = page.waitForEvent("popup");
+    await compose.click();
+    const popup = await popupReady;
+    try {
+      await expect(popup).toHaveTitle("Mock X composer");
+      expect(new URL(popup.url()).searchParams.get("text")).toBe(caption);
+    } finally { await popup.close(); }
+  } finally {
+    releaseRewrite();
+    await page.unrouteAll({ behavior: "wait" });
+  }
 });
 
 for (const width of [1440, 393]) {
@@ -287,6 +353,7 @@ for (const width of [1440, 393]) {
     await item.getByRole("button", { name: "Open chart 2: Weekly distribution" }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog.locator(".newsfeed-lightbox__image")).toHaveAttribute("src", second);
+    await dismissNotices(page);
     await dialog.getByRole("button", { name: "Share", exact: true }).click();
     const lightboxPanel = dialog.getByRole("region", { name: "Share news item" });
     await expect(lightboxPanel.getByRole("img")).toBeVisible({ timeout: 30_000 });

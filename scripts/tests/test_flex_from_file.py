@@ -103,3 +103,228 @@ def test_ingest_does_not_import_gdcdyn():
     source = (SCRIPTS / "flex_delivery_ingest.py").read_text()
     assert "gdcdyn" not in source
     assert "FlexReport(" not in source
+
+
+@pytest.fixture
+def nightly_builder(monkeypatch):
+    """Extending NAV must also retain the observed deposits behind that NAV.
+
+    A short, flow-free statement cannot turn a prior $80k deposit into a
+    return or quarantine the session as an unexplained NAV jump.
+    """
+    import perf_twr_builder as ptb
+
+    xml = """<FlexQueryResponse><FlexStatements>
+      <FlexStatement accountId="U1" fromDate="20260115" toDate="20260116">
+        <CashTransactions /><Transfers />
+      </FlexStatement>
+    </FlexStatements></FlexQueryResponse>"""
+    statement = ptb.NavResolution(
+        {"2026-01-14": 181000.0, "2026-01-15": 182000.0, "2026-01-16": 183000.0},
+        "flex_from_file", (), ptb.FlexDocument("from-file", xml),
+    )
+    monkeypatch.setattr(ptb, "_resolution_from_file", lambda _path: statement)
+    monkeypatch.setattr(ptb, "get_nav_snapshots", lambda **_kw: ptb.NavResolution(
+        {"2026-01-12": 100000.0, "2026-01-13": 180000.0, "2026-01-14": 181000.0}, "turso",
+    ))
+    monkeypatch.setattr(ptb, "load_flows_from_turso", lambda **_kw: {"2026-01-13": 80000.0})
+    monkeypatch.setattr(ptb, "load_flow_coverage_dates", lambda: {"2026-01-13", "2026-01-14"})
+    monkeypatch.setattr(ptb, "load_flows_coverage_state", lambda: ("2026-01-14", True))
+    monkeypatch.setattr(ptb, "flow_divergence_warnings", lambda: [])
+    monkeypatch.setattr(ptb, "load_benchmark_closes", lambda *_a, **_kw: {})
+    monkeypatch.setattr(ptb, "get_risk_free_rate", lambda **_kw: (0.0, ""))
+    monkeypatch.setattr(ptb, "sessions_behind", lambda *_a, **_kw: 0)
+    monkeypatch.setattr(ptb, "fetch_flex_xml", lambda *_a, **_kw: pytest.fail("SendRequest"))
+
+    return ptb
+
+
+def test_nightly_statement_preserves_verified_historical_external_flows(nightly_builder):
+    payload = nightly_builder.build_and_persist(from_file="nightly.xml", persist=False)
+
+    deposit_day = next(row for row in payload["subperiods"] if row["date"] == "2026-01-13")
+    assert deposit_day["c"] == 80000.0
+    assert deposit_day["r"] == 0.0
+    assert payload["counts"]["n_suspect"] == 0
+    assert payload["equity"]["net_external_flows"] == 80000.0
+    assert payload["equity"]["investment_pnl"] == 3000.0
+    assert payload["nav_as_of"] == "2026-01-16"
+
+
+def test_nightly_statement_replaces_overlap_including_verified_zero(nightly_builder, monkeypatch):
+    monkeypatch.setattr(nightly_builder, "load_flows_from_turso", lambda **_kw: {
+        "2026-01-13": 80000.0, "2026-01-15": 25000.0,
+    })
+    payload = nightly_builder.build_and_persist(from_file="nightly.xml", persist=False)
+    assert next(row for row in payload["subperiods"] if row["date"] == "2026-01-15")["c"] == 0.0
+    assert payload["equity"]["net_external_flows"] == 80000.0
+
+
+def test_nightly_statement_corrects_overlap_without_counting_twice(nightly_builder, monkeypatch):
+    ptb = nightly_builder
+    resolution = ptb._resolution_from_file("nightly.xml")
+    xml = resolution.document.xml.replace("<CashTransactions />", """
+      <CashTransactions><CashTransaction type="Deposits/Withdrawals"
+        reportDate="20260115" amount="1000" /></CashTransactions>""")
+    monkeypatch.setattr(ptb, "_resolution_from_file", lambda _path: ptb._replace(
+        resolution, document=ptb.FlexDocument("from-file", xml),
+    ))
+    monkeypatch.setattr(ptb, "load_flows_from_turso", lambda **_kw: {
+        "2026-01-13": 80000.0, "2026-01-15": 2000.0,
+    })
+    payload = ptb.build_and_persist(from_file="nightly.xml", persist=False)
+    assert next(row for row in payload["subperiods"] if row["date"] == "2026-01-15")["c"] == 1000.0
+    assert payload["equity"]["net_external_flows"] == 81000.0
+
+
+def test_suppressed_statement_still_records_nav_points(nightly_builder, monkeypatch):
+    """A flow-coverage failure keeps the curve empty and still mirrors NAV.
+
+    Page d3b66eaf: historical_flow_coverage_unverified suppressed the payload,
+    series stayed empty, and the statement dates never reached nav_snapshots.
+    The applied claim then failed the 08:30 duplicate check.
+    """
+    monkeypatch.setattr(nightly_builder, "load_flow_coverage_dates", lambda: set())
+    payload = nightly_builder.build_and_persist(from_file="nightly.xml", persist=False)
+    rows = nightly_builder._nav_snapshot_rows(payload, "ALL")
+    assert payload["series"] == []
+    assert [(row["report_date"], row["total_net_liq"]) for row in rows] == [
+        ("2026-01-12", 100000.0),
+        ("2026-01-13", 180000.0),
+        ("2026-01-14", 181000.0),
+        ("2026-01-15", 182000.0),
+        ("2026-01-16", 183000.0),
+    ]
+    assert {row["account_id"] for row in rows} == {"ALL"}
+
+
+@pytest.mark.parametrize("covered", [None, set(), {"2026-01-14"}])
+def test_nightly_statement_cannot_invent_historical_zero_flows(nightly_builder, monkeypatch, covered):
+    monkeypatch.setattr(nightly_builder, "load_flow_coverage_dates", lambda: covered)
+    payload = nightly_builder.build_and_persist(from_file="nightly.xml", persist=False)
+    assert payload["flows_status"] == "failed"
+    assert payload["twr"] is None
+    assert payload["nav_as_of"] == "2026-01-16"
+    assert payload["counts"]["n_nav_observations"] == 5
+    assert payload["period_start"] == "2026-01-12"
+    assert payload["equity"]["ending"] == 183000.0
+    assert payload["series"] == []  # Existing failed-flow contract suppresses the curve.
+    assert any(w["context"].get("reason") == "historical_flow_coverage_unverified" for w in payload["warnings"])
+
+
+def test_nightly_statement_cannot_use_unavailable_historical_ledger(nightly_builder, monkeypatch):
+    monkeypatch.setattr(nightly_builder, "load_flows_from_turso", lambda **_kw: None)
+    payload = nightly_builder.build_and_persist(from_file="nightly.xml", persist=False)
+    assert payload["flows_status"] == "failed"
+    assert payload["twr"] is None
+
+
+def test_nightly_statement_can_extend_verified_history_without_deposits(nightly_builder, monkeypatch):
+    ptb = nightly_builder
+    monkeypatch.setattr(ptb, "get_nav_snapshots", lambda **_kw: ptb.NavResolution(
+        {"2026-01-12": 179000.0, "2026-01-13": 180000.0, "2026-01-14": 181000.0}, "turso",
+    ))
+    monkeypatch.setattr(ptb, "load_flows_from_turso", lambda **_kw: {})
+    payload = ptb.build_and_persist(from_file="nightly.xml", persist=False)
+    assert payload["flows_status"] == "empty_verified"
+    assert payload["counts"]["n_suspect"] == 0
+    assert payload["equity"]["net_external_flows"] == 0.0
+
+
+@pytest.mark.parametrize("replacement", ["", 'fromDate="20260117" toDate="20260116"'])
+def test_nightly_statement_requires_valid_declared_coverage(nightly_builder, monkeypatch, replacement):
+    ptb = nightly_builder
+    resolution = ptb._resolution_from_file("nightly.xml")
+    xml = resolution.document.xml.replace('fromDate="20260115" toDate="20260116"', replacement)
+    monkeypatch.setattr(ptb, "_resolution_from_file", lambda _path: ptb._replace(
+        resolution, document=ptb.FlexDocument("from-file", xml),
+    ))
+    payload = ptb.build_and_persist(from_file="nightly.xml", persist=False)
+    assert payload["flows_status"] == "failed"
+    assert payload["twr"] is None
+
+
+def test_historical_coverage_query_distinguishes_unavailable_from_empty(monkeypatch):
+    import perf_twr_builder as ptb
+
+    monkeypatch.setattr(ptb, "_query_turso_strict", lambda _sql: [])
+    assert ptb.load_flow_coverage_dates() == set()
+    monkeypatch.setattr(ptb, "_query_turso_strict", lambda _sql: None)
+    assert ptb.load_flow_coverage_dates() is None
+    monkeypatch.setattr(ptb, "_query_turso_strict", lambda _sql: (_ for _ in ()).throw(RuntimeError("offline")))
+    assert ptb.load_flow_coverage_dates() is None
+
+
+def test_historical_ledger_allows_verified_empty_only_after_successful_query(monkeypatch):
+    import perf_twr_builder as ptb
+
+    monkeypatch.setattr(ptb, "_query_turso", lambda _sql: [])
+    assert ptb.load_flows_from_turso() is None
+    assert ptb.load_flows_from_turso(allow_empty=True) == {}
+    monkeypatch.setattr(ptb, "_query_turso", lambda _sql: None)
+    assert ptb.load_flows_from_turso(allow_empty=True) is None
+
+
+def test_statement_zero_corrections_are_mirrored_but_unverified_zeros_are_not():
+    import perf_twr_builder as ptb
+
+    rows = ptb._external_flow_rows({"subperiods": [
+        {"date": "2026-01-13", "c": 80000.0, "r": 0.0, "cum_r": 0.0},
+        {"date": "2026-01-14", "c": 0.0, "r": 0.01, "cum_r": 0.01},
+        {"date": "2026-01-15", "c": 0.0, "r": None, "cum_r": 0.01},
+        {"date": "2026-01-16", "c": 0.0, "r": 0.01, "cum_r": None},
+    ]}, "ALL")
+    assert [(row["report_date"], row["amount"]) for row in rows] == [
+        ("2026-01-13", 80000.0), ("2026-01-14", 0.0),
+    ]
+
+
+def test_corrected_statement_publishes_zero_for_next_mirror_only_build(nightly_builder, monkeypatch):
+    ptb = nightly_builder
+    monkeypatch.setattr(ptb, "load_flows_from_turso", lambda **_kw: {
+        "2026-01-13": 80000.0, "2026-01-15": 25000.0,
+    })
+    payload = ptb.build_and_persist(from_file="nightly.xml", persist=False)
+    mirrored = {row["report_date"]: row["amount"] for row in ptb._external_flow_rows(payload, "ALL")}
+    assert mirrored["2026-01-15"] == 0.0
+    assert mirrored["2026-01-13"] == 80000.0
+
+
+@pytest.mark.parametrize("case,reason", [
+    ("ambiguous", "statement_flow_coverage_ambiguous"),
+    ("incomplete", "statement_flow_sections_incomplete"),
+    ("outside", "statement_flow_outside_coverage"),
+])
+def test_statement_merge_fails_closed_on_ambiguous_or_partial_evidence(nightly_builder, monkeypatch, case, reason):
+    ptb = nightly_builder
+    resolution = ptb._resolution_from_file("nightly.xml")
+    xml = resolution.document.xml
+    if case == "ambiguous":
+        xml = xml.replace("</FlexStatements>", '''<FlexStatement accountId="U2"
+          fromDate="20260116" toDate="20260116"><CashTransactions /><Transfers />
+          </FlexStatement></FlexStatements>''')
+    else:
+        report_date = "20260113" if case == "outside" else "20260115"
+        xml = xml.replace("<CashTransactions />", f'''<CashTransactions>
+          <CashTransaction type="Deposits/Withdrawals" reportDate="{report_date}" amount="1000" />
+          </CashTransactions>''')
+        if case == "incomplete":
+            xml = xml.replace("<Transfers />", "")
+    monkeypatch.setattr(ptb, "_resolution_from_file", lambda _path: ptb._replace(
+        resolution, document=ptb.FlexDocument("from-file", xml),
+    ))
+    payload = ptb.build_and_persist(from_file="nightly.xml", persist=False)
+    assert payload["twr"] is None
+    assert any(w["context"].get("reason") == reason for w in payload["warnings"])
+
+
+def test_statement_merge_retains_historical_disagreement_gate(nightly_builder, monkeypatch):
+    ptb = nightly_builder
+    monkeypatch.setattr(ptb, "flow_divergence_warnings", lambda: [
+        ptb._warning("FLOWS_SOURCE_DISAGREEMENT", "warn", "Historical mismatch", report_date="2026-01-13"),
+        ptb._warning("FLOWS_SOURCE_DISAGREEMENT", "warn", "Corrected by statement", report_date="2026-01-15"),
+    ])
+    payload = ptb.build_and_persist(from_file="nightly.xml", persist=False)
+    conflicts = [w for w in payload["warnings"] if w["code"] == "FLOWS_SOURCE_DISAGREEMENT"]
+    assert [w["context"]["report_date"] for w in conflicts] == ["2026-01-13"]
+    assert payload["status"] == "stale"

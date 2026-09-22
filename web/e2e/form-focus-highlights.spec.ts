@@ -61,7 +61,13 @@ for (const viewport of [
 
     if (mobile) {
       await page.getByTestId(`mobile-order-single-${ORDER.permId}`).click();
-      await page.getByTestId("mobile-order-action-modify").click();
+      const modifyAction = page.getByTestId("mobile-order-action-modify");
+      await expect(modifyAction).toBeVisible();
+      const toastStack = page.locator("[data-toast-viewport]");
+      if (await toastStack.isVisible()) {
+        await expect(toastStack.locator(".toast-close").first()).toBeVisible();
+      }
+      await modifyAction.click();
     } else {
       const row = page.locator("tbody tr").filter({ hasText: "SNDK" }).first();
       await row.getByRole("button", { name: "MODIFY", exact: true }).click();
@@ -149,7 +155,6 @@ for (const viewport of [
         <div class="modify-price-input-row"><select aria-label="Combo leg action" class="modify-price-input"><option>BUY</option><option>SELL</option></select></div>
         <div class="theta-search"><input aria-label="Theta ticker" class="theta-search__input" value="SNDK"><button type="button" class="theta-search__button">Search</button></div>
         <div class="flow-ticker-input"><div class="flow-ticker-input-row"><span class="flow-ticker-input-icon">$</span><input aria-label="Flow ticker" value="SNDK"></div></div>
-        <div class="command-palette-panel"><div class="command-palette-input-wrap"><input aria-label="Command search" class="command-palette-input" value="SNDK"><span class="command-palette-kbd">ESC</span></div></div>
         <div class="chat-panel"><div class="ask-composer"><div class="ask-composer__field"><textarea aria-label="Assistant message" class="ask-composer__input">Research note</textarea></div><div class="ask-composer__rail"><button type="button" class="ask-composer__attach">Attach</button><span class="ask-composer__spacer"></span><label class="ask-composer__model"><span class="ask-composer__model-label">Model</span><select aria-label="Model"><option>Default model</option></select></label></div></div></div>
       </main></body></html>`,
     }));
@@ -166,7 +171,6 @@ for (const viewport of [
       ["Combo leg action", ".modify-price-input-row", "2px"],
       ["Theta ticker", ".theta-search", "2px"],
       ["Flow ticker", ".flow-ticker-input-row", "2px"],
-      ["Command search", ".command-palette-input-wrap", "-2px"],
       ["Assistant message", ".ask-composer", "2px"],
     ]) {
       const input = page.getByLabel(label, { exact: true });

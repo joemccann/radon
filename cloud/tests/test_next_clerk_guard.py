@@ -61,3 +61,12 @@ def test_baked_key_is_accepted(tmp_path: Path) -> None:
     (static / "chunk.js").write_text(f"clerk:{KEY}:end\n", encoding="utf-8")
     result = _run({"NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY": KEY}, static)
     assert result.returncode == 0, result.stderr
+
+
+def test_a_key_prefix_is_not_the_baked_key(tmp_path: Path) -> None:
+    static = tmp_path / "static"
+    static.mkdir()
+    (static / "chunk.js").write_text(f'key="{KEY}suffix";\n')
+    result = _run({"NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY": KEY}, static)
+    assert result.returncode == 78
+    assert "bundle" in result.stderr.lower()

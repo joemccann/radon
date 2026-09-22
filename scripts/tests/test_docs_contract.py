@@ -172,14 +172,15 @@ class TestRobinhoodRankRule:
         for rel in _YAHOO_LAST_RESORT_FILES:
             text = (_ROOT / rel).read_text(encoding="utf-8")
             assert "Robinhood" in text, rel
-            assert "IB > UW > Cboe > Robinhood > Yahoo" in text, rel
+            assert "IB > Robinhood > UW > Cboe > Yahoo" in text, rel
 
-    def test_strategies_table_slots_rh_between_cboe_and_yahoo(self):
+    def test_strategies_table_slots_rh_between_ib_and_uw(self):
         text = (_ROOT / "docs" / "strategies.md").read_text(encoding="utf-8")
-        cboe = text.index("| **5th** | Cboe official index feeds")
-        rh = text.index("| **6th** | Robinhood")
+        ib = text.index("| **1st** | Interactive Brokers")
+        rh = text.index("| **2nd** | Robinhood")
+        uw = text.index("| **3rd** | Unusual Whales")
         yahoo = text.index("| **7th ⚠️** | Yahoo Finance")
-        assert cboe < rh < yahoo, "priority table must read Cboe -> Robinhood -> Yahoo"
+        assert ib < rh < uw < yahoo, "priority table must read IB -> Robinhood -> UW -> ... -> Yahoo"
 
     def test_read_only_and_ib_execution_are_stated(self):
         for rel in ("CLAUDE.md", "docs/external-services.md", "docs/strategies.md"):
@@ -205,21 +206,22 @@ class TestRobinhoodRankRule:
             assert name in services, name
         assert "https://agent.robinhood.com/mcp/trading" in services
 
-    def test_numbered_priority_lists_put_cboe_before_rh_before_yahoo(self):
-        # The class of mismatch where RH is numbered directly after UW and
-        # Cboe exists only in prose: the numbered list itself must read
-        # Cboe -> Robinhood -> Yahoo.
+    def test_numbered_priority_lists_put_rh_after_ib_and_before_uw(self):
+        # Robinhood serves commodity price data right after IB so UW calls go
+        # to the endpoints only UW has; Cboe and Yahoo still follow.
         for rel in ("CLAUDE.md", "AGENTS.md", ".pi/AGENTS.md"):
             text = (_ROOT / rel).read_text(encoding="utf-8")
             start = text.index("## Data Source Priority")
             end = text.find("\n## ", start + 1)
             section = text[start:end] if end != -1 else text[start:]
-            cboe = section.index("Cboe official index feeds")
-            rh = section.index("Robinhood")
+            ib = section.index("1. Interactive Brokers")
+            rh = section.index("2. Robinhood")
+            uw = section.index("3. Unusual Whales")
+            cboe = section.index("4. Cboe official index feeds")
             yahoo = section.index("Yahoo Finance — **ABSOLUTE LAST RESORT**")
-            assert cboe < rh < yahoo, (
+            assert ib < rh < uw < cboe < yahoo, (
                 f"{rel}: the numbered priority list must read "
-                "Cboe -> Robinhood -> Yahoo"
+                "IB -> Robinhood -> UW -> Cboe -> Yahoo"
             )
 
     def test_vps_secret_paths_are_pinned(self):
@@ -227,7 +229,7 @@ class TestRobinhoodRankRule:
         # env file: both operator docs must name it.
         for rel in ("docs/external-services.md", "docs/operations.md"):
             text = (_ROOT / rel).read_text(encoding="utf-8")
-            assert "/etc/radon/rh-mcp.json" in text, rel
+            assert "/var/lib/radon/rh-mcp/rh-mcp.json" in text, rel
         operations = (_ROOT / "docs" / "operations.md").read_text(encoding="utf-8")
         for name in (
             "ROBINHOOD_MCP_TOKEN",
@@ -736,9 +738,11 @@ class TestNightlyLoopIndex:
             )
 
     def test_deepsec_failure_has_a_safe_operator_path(self):
-        """DOC-109: a failed sibling worker is never an in-run repair."""
+        """DOC-109: a failed DeepSec loop is never an in-run repair (it is the
+        sixth loop since 2026-09-18, still operator-bootstrapped)."""
         text = _operations_text()
         assert "A `failed` DeepSec status is operator-only" in text
+        assert "DeepSec itself stays operator-bootstrapped (rail 8)" in text
         assert "`launchctl list | grep radon`" in text
         assert "Do not bootstrap or restart DeepSec from a nightly run." in text
 
@@ -967,3 +971,124 @@ class TestInstallCopyOwedClaims:
         text = (_ROOT / "docs" / "cloud-services.md").read_text(encoding="utf-8")
         assert "unit-mismatch:radon-mcp.service" not in text
         assert "live unit still differs" not in text
+
+
+class TestOperatorSafetyOwners:
+    """DOC-115..119: source-backed operator decisions, not route inventories."""
+
+    def test_hosted_mcp_transport_owner(self):
+        caddy = (_ROOT / "cloud/caddy/Caddyfile").read_text()
+        cloud = (_ROOT / "cloud/CLAUDE.md").read_text()
+        assert "redir https://mcp.radon.run{uri} 308" in caddy
+        assert "`http://mcp.radon.run` until HTTPS ACME" not in cloud
+        assert "../docs/cloud-services.md#hosted-mcp" in cloud
+
+    def test_sizing_is_distinct_from_order_admission(self):
+        doc = (_ROOT / "docs/risk/kelly-fortunes-formula.md").read_text()
+        current = doc.split("## Historical design")[0]
+        assert "RADON_BANKROLL_CAP_ENFORCE_ALL_PATHS" in current
+        assert "defaults off" in current
+        assert "RADON_KELLY_ENFORCE_MODE" in current
+        assert "verified close-out" in current
+        assert "fresh" in current and "warning" in current
+        assert "Still required for the implement PR" not in current
+        rules = {r["id"]: r for r in _load_owners()["rules"]}
+        assert "scripts/bankroll_guard.py" in rules["kelly-sizing"]["globs"]
+        assert "scripts/app_preferences.py" in rules["kelly-sizing"]["globs"]
+        for placer in ("ib_place_order.py", "ib_execute.py", "exit_order_service.py"):
+            assert "check_if_enforced_on_all_paths" in (_ROOT / "scripts" / placer).read_text()
+
+    def test_subscription_recovery_links_opt_in_policy(self):
+        ops = (_ROOT / "docs/operations.md").read_text()
+        binds = ops.split("**Subscription credential binds")[1].split("The staged copy")[0]
+        assert "oauth-subscription-auth.md#radon-http-model-ladder-server" in binds
+        assert "RADON_LADDER_ALLOW_PREPAID" in binds
+        assert "as the fallback" not in binds
+        for path in ("scripts/clients/model_ladder.py", "web/lib/llm/subscriptionAuth.ts"):
+            assert "RADON_LADDER_ALLOW_PREPAID" in (_ROOT / path).read_text()
+
+    def test_tradingview_retention_owner_and_migration(self):
+        import sqlite3
+
+        doc = (_ROOT / "docs/tradingview-integration.md").read_text()
+        assert "sanitized" in doc and "not an exact copy" in doc
+        assert "0084_redact_tv_alert_raw_body.sql" in doc
+        assert "operator-only" in doc and "version = 84" in doc
+        assert "INSERT raw body" not in doc
+        cloud = (_ROOT / "docs/cloud-services.md").read_text()
+        assert "then writes the raw body" not in cloud
+        route = (_ROOT / "web/app/api/webhooks/tradingview/[token]/route.ts").read_text()
+        assert "redactSecret(raw, process.env.TV_WEBHOOK_SECRET)" in route
+        with sqlite3.connect(":memory:") as db:
+            db.executescript("CREATE TABLE tv_alert_events (raw_body TEXT, symbol TEXT);"
+                             "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT);")
+            db.executemany("INSERT INTO tv_alert_events VALUES (?, ?)", [
+                ('{"secret":"fixture-only","symbol":"TEST"}', "TEST"),
+                ('secret=fixture-only invalid json', "TEST"),
+            ])
+            migration = (_ROOT / "scripts/db/migrations/0084_redact_tv_alert_raw_body.sql").read_text()
+            db.executescript(migration)
+            rows = db.execute("SELECT raw_body, symbol FROM tv_alert_events").fetchall()
+            assert all("fixture-only" not in raw and symbol == "TEST" for raw, symbol in rows)
+            assert json.loads(rows[0][0])["symbol"] == "TEST"
+            assert rows[1][0].startswith("[REDACTED PRE-0084")
+            db.executescript(migration)
+            assert db.execute("SELECT raw_body, symbol FROM tv_alert_events").fetchall() == rows
+
+    def test_tradingview_migration_0085_redacts_nested_secret(self):
+        import sqlite3
+
+        with sqlite3.connect(":memory:") as db:
+            db.executescript("CREATE TABLE tv_alert_events (raw_body TEXT, symbol TEXT);"
+                             "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT);")
+            db.executemany("INSERT INTO tv_alert_events VALUES (?, ?)", [
+                # 0084 only strips a TOP-LEVEL $.secret; this one is nested.
+                ('{"payload":{"secret":"fixture-only"},"symbol":"TEST"}', "TEST"),
+                # A row 0084 already redacted must not be touched again.
+                ('{"secret":"[REDACTED]","symbol":"TEST"}', "TEST"),
+            ])
+            migration_0084 = (_ROOT / "scripts/db/migrations/0084_redact_tv_alert_raw_body.sql").read_text()
+            migration_0085 = (
+                _ROOT / "scripts/db/migrations/0085_redact_tv_alert_raw_body_nested_secret.sql"
+            ).read_text()
+            db.executescript(migration_0084)
+            db.executescript(migration_0085)
+            rows = db.execute("SELECT raw_body, symbol FROM tv_alert_events").fetchall()
+            assert all("fixture-only" not in raw for raw, _symbol in rows)
+            assert rows[0][0].startswith("[REDACTED PRE-0085")
+            assert rows[1][0] == '{"secret":"[REDACTED]","symbol":"TEST"}'
+            db.executescript(migration_0085)
+            assert db.execute("SELECT raw_body, symbol FROM tv_alert_events").fetchall() == rows
+
+    def test_destructive_flex_cleanup_has_recovery_owner(self):
+        doc = (_ROOT / "docs/cloud-services.md").read_text()
+        section = _section(doc, "Legacy Flex aggregate cleanup")
+        for required in ("cleanup_legacy_flex_aggregates", "--help", "--apply", "dry-run",
+                         "#restore-runbook", "Stop", "execution", "gross", "operator-only"):
+            assert required in section
+        rules = {r["id"]: r for r in _load_owners()["rules"]}
+        assert "scripts/cleanup_legacy_flex_aggregates.py" in rules["flex-pull"]["globs"]
+
+
+    def test_flex_gross_rebuild_has_one_recovery_procedure(self):
+        doc = (_ROOT / "docs/cloud-services.md").read_text()
+        section = _section(doc, "Legacy Flex aggregate cleanup")
+        for required in ("rebuild_flex_gross_breakdown", "saved", "execution-level",
+                         "target database", "maintenance window", "concurrent journal",
+                         "affected rows", "backup", "scratch", "#restore-runbook",
+                         "--help", "dry-run", "--apply", "recomputes", "refused",
+                         "out of statement period", "post-commit", "partial-table",
+                         "Stop", "Escalate"):
+            assert required in section, f"Flex recovery owner omits {required}"
+        ops = _section((_ROOT / "docs/operations.md").read_text(),
+                       "Legacy Flex aggregate gross coverage")
+        assert "cloud-services.md#legacy-flex-aggregate-cleanup" in ops
+        assert "--apply" not in ops, "Keep mutation instructions in the recovery owner"
+        rules = {r["id"]: r for r in _load_owners()["rules"]}
+        assert "scripts/rebuild_flex_gross_breakdown.py" in rules["flex-pull"]["globs"]
+        source = (_ROOT / "scripts/rebuild_flex_gross_breakdown.py").read_text()
+        main = source.split("def main(", 1)[1]
+        assert main.index("parser.parse_args") < main.index("db = _connect()")
+        assert main.index("plan = plan_rebuild") < main.index("if not args.apply:")
+        apply = source.split("def _apply(", 1)[1].split("def main(", 1)[0]
+        assert apply.index("db.commit()") < apply.index("verified = 0")
