@@ -83,7 +83,9 @@ def _env(tmp_path: Path, repo: Path, bin_dir: Path, extra: dict | None = None) -
         "RADON_WEEKEND_REPO": str(repo),
         "RADON_WEEKEND_PROVIDER_LADDER": CLAUDE_RUNG_LADDER,
         "RADON_WEEKEND_SKIP_PRUNE": "1",
-        "RADON_WEEKEND_BROWSER_HOST_WAIT_SECS": "3",
+        # Each wait tick shells out to ps; under a loaded xdist run 3 ticks
+        # can pass before a stub that prints at once is read.
+        "RADON_WEEKEND_BROWSER_HOST_WAIT_SECS": "10",
         "RADON_WEEKEND_BROWSER_HOST_SMOKE_SECS": "3",
     }
     if extra:
