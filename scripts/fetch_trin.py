@@ -560,8 +560,8 @@ def _record_health(
     scan_time: str, health_error: Optional[dict[str, Any]] = None,
 ) -> None:
     """Best-effort heartbeat. A Turso timeout must not fail the oneshot
-    (2026-09-15 13:22Z page e7d4d053: HRANA_TIMEOUT_S=4 on this write became
-    Result=exit-code / NRestarts=0 while knowledge ingest held Turso).
+    (page 3b8b2267 / 2026-09-07 and 2026-09-15 13:22Z page e7d4d053:
+    HRANA_TIMEOUT_S=4 on this write became Result=exit-code / NRestarts=0).
     Matches fetch_ivrank / service_cycle: telemetry never masks the cycle.
     """
     try:
