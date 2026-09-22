@@ -158,8 +158,8 @@ def parse_show_output(text: str) -> list[dict]:
 def _is_graceful_sigterm_exit(unit: dict) -> bool:
     """True when a oneshot caught SIGTERM and exited 143.
 
-    Default SIGTERM disposition yields Result=signal. Handlers that unwind
-    via SystemExit(143) (bpi_scan.install_sigterm_unwind) make systemd
+    Default SIGTERM disposition yields Result=signal. Handlers that exit
+    143 (bpi_scan.install_sigterm_unwind uses os._exit) make systemd
     record Result=exit-code instead — still stop-clean collateral when
     the kill sits inside a deploy window (2026-09-01 page e741ed1a).
     """
