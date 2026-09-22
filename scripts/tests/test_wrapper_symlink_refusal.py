@@ -109,3 +109,32 @@ def test_env_scrub_refuses_symlinked_env(loop):
     assert "rm -f -- web/.env.scrub" in src, (
         f"{loop}: scratch scrub path must be unlinked before being written through"
     )
+
+
+PRIVATE_REPORT_LOOPS = {"security": LOOPS["security"], "security-deepsec": LOOPS["security-deepsec"]}
+
+
+@pytest.mark.parametrize("loop", sorted(PRIVATE_REPORT_LOOPS))
+def test_private_report_src_verified_before_read(loop):
+    """$PRIVATE_SCRATCH is agent-writable; a planted symlink at the report
+    path must not be read and redacted into the pushed archive repo."""
+    src = PRIVATE_REPORT_LOOPS[loop].read_text()
+    guard = 'refuse_symlink "$src"'
+    read = '_redact_secret_classes < "$src"'
+    assert guard in src, f"{loop}: report src is read without a symlink refusal"
+    assert src.index(guard) < src.index(read), (
+        f"{loop}: symlink refusal must run before the report src is read"
+    )
+
+
+@pytest.mark.parametrize("loop", sorted(PRIVATE_REPORT_LOOPS))
+def test_private_report_pinned_hosts_verified_before_write(loop):
+    """A planted symlink at the pinned-hosts scratch path must not have the
+    host-key pin written through it."""
+    src = PRIVATE_REPORT_LOOPS[loop].read_text()
+    guard = 'refuse_symlink "$pinned_hosts"'
+    write = 'printf \'%s\\n\' \'github.com ssh-ed25519'
+    assert guard in src, f"{loop}: pinned_hosts is written without a symlink refusal"
+    assert src.index(guard) < src.index(write), (
+        f"{loop}: symlink refusal must run before the pinned_hosts write"
+    )
