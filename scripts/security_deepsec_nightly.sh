@@ -1112,7 +1112,7 @@ FETCH_PAUSE_SECS="${RADON_WEEKEND_FETCH_PAUSE_SECS:-60}"
 fetch_origin_with_retry() {
   local attempt
   for (( attempt = 1; attempt <= FETCH_ATTEMPTS; attempt++ )); do
-    net_bounded git --git-dir="$HOST_GITDIR" --work-tree="$REPO" -c "core.sshCommand=$GIT_SSH_BOUNDED" fetch origin --quiet && return 0
+    net_bounded git ${HOST_GITDIR:+--git-dir="$HOST_GITDIR"} ${REPO:+--work-tree="$REPO"} -c "core.sshCommand=$GIT_SSH_BOUNDED" fetch origin --quiet && return 0
     echo "[weekend] git fetch origin failed — attempt $attempt/$FETCH_ATTEMPTS" >&2
     if (( attempt < FETCH_ATTEMPTS )); then sleep "$FETCH_PAUSE_SECS"; fi
   done
@@ -1423,6 +1423,7 @@ install_nightly_pr_guard() {
     printf '#!/bin/bash\nset -euo pipefail\n'
     printf 'export RADON_NIGHTLY_REAL_GH=%q\n' "$GH_BIN"
     printf 'export RADON_NIGHTLY_GUARD_REPO=%q\n' "$REPO"
+    printf 'export RADON_NIGHTLY_HOST_GITDIR=%q\n' "${HOST_GITDIR:-}"
     printf 'export RADON_NIGHTLY_GUARD_PYTHON=%q\n' "$guard_python"
     cat <<'GUARD'
 case " $* " in
@@ -1430,7 +1431,7 @@ case " $* " in
     guard_dir="$(mktemp -d "${TMPDIR:-/tmp}/radon-pr-check.XXXXXX")"
     trap 'rm -rf -- "$guard_dir"' EXIT
     for helper in nightly_publish.py nightly_pr_guard.py; do
-      git --git-dir="$HOST_GITDIR" --work-tree="$REPO" show "origin/main:scripts/$helper" > "$guard_dir/$helper"
+      git --git-dir="$RADON_NIGHTLY_HOST_GITDIR" --work-tree="$RADON_NIGHTLY_GUARD_REPO" show "origin/main:scripts/$helper" > "$guard_dir/$helper"
       [[ -s "$guard_dir/$helper" ]] || exit 1
     done
     "$RADON_NIGHTLY_GUARD_PYTHON" -I "$guard_dir/nightly_pr_guard.py" "$@"
