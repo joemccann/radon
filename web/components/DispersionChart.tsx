@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import * as d3 from "d3";
 import ChartPanel from "./charts/ChartPanel";
-import { buildCriHistoryXAxisTickValues } from "./CriHistoryChart";
 import { chartSeriesColor } from "@/lib/chartSystem";
+import { buildTimeXAxisTickValues, chartXAxisTickAnchor } from "@/lib/chartXAxis";
 import {
   formatSpreadPct,
   formatVix,
@@ -136,7 +136,7 @@ export default function DispersionChart({ entries }: DispersionChartProps) {
 
     const spanMs = times[times.length - 1] - times[0];
     const tickFormat = spanMs >= MONTH_TICK_SPAN_MS ? formatMonthYear : formatDayMonth;
-    const xTicks = buildCriHistoryXAxisTickValues(
+    const xTicks = buildTimeXAxisTickValues(
       times.map((t) => new Date(t)),
       innerWidth,
     );
@@ -266,12 +266,12 @@ export default function DispersionChart({ entries }: DispersionChartProps) {
                 stroke={CHART_AXIS}
                 strokeWidth={1}
               />
-              {xTicks.map((tick) => (
+              {xTicks.map((tick, index) => (
                 <text
                   key={`x-tick-${tick.getTime()}`}
                   x={x(tick)}
                   y={INNER_HEIGHT + 14}
-                  textAnchor="middle"
+                  textAnchor={chartXAxisTickAnchor(index, xTicks.length)}
                   dominantBaseline="hanging"
                   fontFamily={MONO}
                   fontSize="var(--text-meta)"

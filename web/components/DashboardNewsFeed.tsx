@@ -1,5 +1,7 @@
 "use client";
+import ErrorToast from "@/components/ErrorToast";
 
+import { userErrorMessage } from "@/lib/userError";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
@@ -15,10 +17,17 @@ import { useNewsfeedTagFilter } from "../lib/useNewsfeedTagFilter";
 import { useBookmarks } from "../lib/useBookmarks";
 import NewsfeedTagBar from "./NewsfeedTagBar";
 import NewsfeedLightbox, { type NewsfeedLightboxFocus } from "./NewsfeedLightbox";
+import NewsfeedShare from "./NewsfeedShare";
+import ResearchFeedback from "./ResearchFeedback";
+import ResearchHeldReview from "./ResearchHeldReview";
+import { getImageSource } from "@/lib/newsfeedSource";
+import NewsfeedPostContent from "./NewsfeedPostContent";
 import StarToggle from "./StarToggle";
+import PublisherLogo from "./PublisherLogo";
 import HeadlinesTape, { newestHeadlineTime } from "./dashboard/HeadlinesTape";
 import { useHeadlines } from "../lib/useHeadlines";
 import styles from "./DashboardNewsFeed.module.css";
+import researchStyles from "./NewsfeedResearchMedia.module.css";
 
 /** Chips beyond this count collapse behind a `+N` expander on mobile. */
 const VISIBLE_TAG_LIMIT = 4;
@@ -31,6 +40,7 @@ function buildPostSnapshot(post: NormalisedPost) {
     source: post.href,
     timestamp: post.isoTimestamp,
     image: post.images?.[0] ?? null,
+    thumbnail: post.images?.[0] ?? null,
   };
 }
 
@@ -94,7 +104,7 @@ function PaginationBar({
 export default function DashboardNewsFeed() {
   const { posts, loading, refreshing, error, lastUpdated, refresh } = useNewsfeedPosts();
   const { items: headlines, status: headlinesStatus } = useHeadlines();
-  const [feedTab, setFeedTab] = useState<"commentary" | "headlines">("commentary");
+  const [feedTab, setFeedTab] = useState<"commentary" | "headlines" | "held">("commentary");
   const [currentPage, setCurrentPage] = useState(1);
   const [lightboxFocus, setLightboxFocus] = useState<NewsfeedLightboxFocus | null>(null);
   const sectionRef = useRef<HTMLElement>(null);
@@ -147,8 +157,6 @@ export default function DashboardNewsFeed() {
       setBookmarkBusy((prev) => new Set(prev).add(post.id));
       try {
         await toggleBookmark({ id: post.id, snapshot: buildPostSnapshot(post) });
-      } catch {
-        // hook already rolled back the optimistic state
       } finally {
         setBookmarkBusy((prev) => {
           const next = new Set(prev);
@@ -160,14 +168,21 @@ export default function DashboardNewsFeed() {
     [toggleBookmark],
   );
 
+  // A saved thumbs-down leaves the feed at once; the server filters it on every later read.
+  const [hiddenPosts, setHiddenPosts] = useState<Set<string>>(new Set());
+  const hidePost = useCallback((postId: string) => {
+    setHiddenPosts((prev) => new Set(prev).add(postId));
+  }, []);
+
   const filteredPosts = useMemo(() => {
-    if (selectedTags.size === 0) return posts;
+    const visible = hiddenPosts.size === 0 ? posts : posts.filter((post) => !hiddenPosts.has(post.id));
+    if (selectedTags.size === 0) return visible;
     const required = Array.from(selectedTags);
-    return posts.filter((post) => {
+    return visible.filter((post) => {
       const postTags = Array.isArray(post.tags) ? post.tags : [];
       return required.every((t) => postTags.includes(t));
     });
-  }, [posts, selectedTags]);
+  }, [posts, selectedTags, hiddenPosts]);
 
   const totalPages = Math.max(1, Math.ceil(filteredPosts.length / PAGE_SIZE));
 
@@ -244,17 +259,20 @@ export default function DashboardNewsFeed() {
   }, [safePage, totalPages, scrollToTop]);
 
   const commentaryOpen = feedTab === "commentary";
+  const heldOpen = feedTab === "held";
+  // Research provenance only reaches the operator, so its presence is the operator signal for the Held review tab.
+  const showHeldTab = posts.some((post) => post.source);
   // R-463: the footer's freshness fields belong to the OPEN tab. Under
   // Headlines they read the selected transport's status and newest print time,
   // not the commentary scraper's.
   const newestHeadlineMs = newestHeadlineTime(headlines);
-  const sampleAt = commentaryOpen ? (lastUpdated ? new Date(lastUpdated) : null) : (newestHeadlineMs == null ? null : new Date(newestHeadlineMs));
+  const sampleAt = commentaryOpen ? (lastUpdated ? new Date(lastUpdated) : null) : heldOpen ? null : (newestHeadlineMs == null ? null : new Date(newestHeadlineMs));
   const lastSample = sampleAt
     ? sampleAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })
     : "---";
   const captureBasis = commentaryOpen
     ? (error ? "fault" : loading ? "awaiting" : "scraper")
-    : (headlinesStatus === "down"
+    : heldOpen ? "operator review" : (headlinesStatus === "down"
       ? "fault"
       : headlinesStatus === "connecting"
         ? "awaiting"
@@ -263,7 +281,12 @@ export default function DashboardNewsFeed() {
           : "hub");
   const live = commentaryOpen
     ? !loading && !error && posts.length > 0
-    : headlinesStatus === "live";
+    : !heldOpen && headlinesStatus === "live";
+  const sourceValue = commentaryOpen
+    ? (posts.some((p) => p.source) ? "Market Ear + Research" : "Market Ear")
+    : heldOpen
+      ? "Held research"
+      : "Headlines";
 
   const paginationBar = showPagination ? (
     <PaginationBar
@@ -324,13 +347,27 @@ export default function DashboardNewsFeed() {
           role="tab"
           id="feed-tab-headlines"
           data-testid="feed-tab-headlines"
-          aria-selected={!commentaryOpen}
+          aria-selected={feedTab === "headlines"}
           aria-controls="feed-panel-headlines"
-          className={`feed-tabs__tab${!commentaryOpen ? " feed-tabs__tab--on" : ""}`}
+          className={`feed-tabs__tab${feedTab === "headlines" ? " feed-tabs__tab--on" : ""}`}
           onClick={() => setFeedTab("headlines")}
         >
           Headlines
         </button>
+        {showHeldTab ? (
+          <button
+            type="button"
+            role="tab"
+            id="feed-tab-held"
+            data-testid="feed-tab-held"
+            aria-selected={heldOpen}
+            aria-controls="feed-panel-held"
+            className={`feed-tabs__tab${heldOpen ? " feed-tabs__tab--on" : ""}`}
+            onClick={() => setFeedTab("held")}
+          >
+            Held
+          </button>
+        ) : null}
       </div>
       <div className="dashboard-news__body section-body">
         {commentaryOpen ? (
@@ -346,11 +383,11 @@ export default function DashboardNewsFeed() {
           onClearAll={clearTags}
         />
         {loading ? (
-          <div className="news-feed-empty">Collecting Market Ear posts…</div>
+          <div className="news-feed-empty">Collecting market analysis…</div>
         ) : error ? (
-          <div className="news-feed-error">{error}</div>
+          <ErrorToast message={userErrorMessage(error, 'News could not be loaded. Try again.')} />
         ) : posts.length === 0 ? (
-          <div className="news-feed-empty">No Market Ear posts captured yet. Ensure the scraper is running.</div>
+          <div className="news-feed-empty">No market analysis captured yet.</div>
         ) : items.length === 0 ? (
           <div className="news-feed-empty news-feed-empty-filtered">
             <span>No posts match the selected filter.</span>
@@ -363,6 +400,7 @@ export default function DashboardNewsFeed() {
             <ul className={`news-feed-list ${styles.list}`}>
             {items.map((post) => {
               const firstImage = post.images?.[0] ?? null;
+              const imageSource = getImageSource(post, firstImage);
               const relative = formatRelative(post.isoTimestamp);
               const time = formatTime(post.isoTimestamp);
               const compact = formatCompact(post.isoTimestamp);
@@ -374,6 +412,11 @@ export default function DashboardNewsFeed() {
 
               return (
                 <li key={post.id} data-testid="news-feed-item" className={`news-feed-item ${styles.item}`}>
+                  {post.source ? (
+                    <div className={researchStyles.publisherBadgeWrapper} data-testid="news-feed-publisher-badge">
+                      <PublisherLogo publisher={post.source.publisher} showLabel showType size={16} />
+                    </div>
+                  ) : null}
                   <h3 className={`news-feed-headline ${styles.headline}`}>{post.title}</h3>
                   <div data-testid="news-feed-meta" className={`news-feed-meta ${styles.meta}`}>
                     <span title={absolute}>{absolute}</span>
@@ -418,9 +461,7 @@ export default function DashboardNewsFeed() {
                       ) : null}
                     </div>
                   ) : null}
-                  {post.content ? (
-                    <p className={`news-feed-summary ${styles.summary}`}>{post.content}</p>
-                  ) : null}
+                  <NewsfeedPostContent post={post} className={`news-feed-summary ${styles.summary}`} />
                   {firstImage ? (
                     <figure className={`news-feed-figure ${styles.figure}`}>
                       <button
@@ -438,17 +479,40 @@ export default function DashboardNewsFeed() {
                           height={675}
                           sizes="(max-width: 1440px) 100vw, 60vw"
                           className={`news-feed-image ${styles.image}`}
+                          unoptimized={post.source?.kind === "dropbox"}
                           priority={false}
                         />
                         <span className="news-feed-image-zoom" aria-hidden>
                           ⤢
                         </span>
                       </button>
-                      <figcaption className={`news-feed-figcaption ${styles.figcaption}`}>
-                        <span>Chart · {post.title}</span>
+                      <figcaption className={`news-feed-figcaption ${styles.figcaption}${post.source || imageSource ? ` ${researchStyles.feedCaption}` : ""}`}>
+                        <span>{post.source ? `${post.source.publisher} · p. ${post.source.figures[0]?.page} · ${post.source.figures[0]?.caption}` : imageSource ? `Source: ${imageSource}` : `Chart · ${post.title}`}</span>
                       </figcaption>
+                      {post.source && post.source.figures.length > 1 ? (
+                        <div className={researchStyles.feedThumbnails} aria-label="Additional charts">
+                          {post.source.figures.slice(1).map((figure, index) => (
+                            <button type="button" key={figure.url} className={researchStyles.feedThumbnail}
+                              aria-label={`Open chart ${index + 2}: ${figure.caption}`}
+                              onClick={() => setLightboxFocus({ post, imageUrl: figure.url })}>
+                              <Image src={figure.url} alt={figure.caption} width={240} height={160} unoptimized />
+                              <span>p. {figure.page}</span>
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
                     </figure>
                   ) : null}
+                  {post.source ? <p className={researchStyles.feedSource}>
+                    <a href={post.href} target="_blank" rel="noopener noreferrer" className={researchStyles.feedSourceLink}>
+                      <PublisherLogo publisher={post.source.publisher} size={14} aria-hidden />
+                      <span>{post.source.publisher} · Source PDF</span>
+                    </a>
+                    {` · ${post.source.documentDate} · pp. ${post.source.pages.join(", ")}`}
+                    {!firstImage ? " · Text-only source evidence" : ""}
+                  </p> : null}
+                  {post.source ? <ResearchFeedback postId={post.id} initial={post.feedback} onHidden={hidePost} /> : null}
+                  <NewsfeedShare post={post} imageUrl={firstImage ?? undefined} />
                   <div data-testid="news-feed-footer" className={`news-feed-footer ${styles.footer}`}>
                     <span
                       data-testid="news-feed-timestamp"
@@ -475,6 +539,10 @@ export default function DashboardNewsFeed() {
           </>
         )}
           </div>
+        ) : heldOpen ? (
+          <div id="feed-panel-held" role="tabpanel" aria-labelledby="feed-tab-held" data-testid="feed-panel-held">
+            <ResearchHeldReview />
+          </div>
         ) : (
           <div
             id="feed-panel-headlines"
@@ -486,17 +554,21 @@ export default function DashboardNewsFeed() {
           </div>
         )}
       </div>
-      <footer className="panel-meta-rail" aria-label="Feed calibration">
-        <div className="panel-meta-rail-item">
-          <span className="k">source</span>
-          <span className="v">{commentaryOpen ? "Market Ear" : "Headlines"}</span>
+      <footer
+        className="panel-meta-rail dashboard-news__rail"
+        aria-label="Feed calibration"
+        data-testid="feed-rail"
+      >
+        <div className="panel-meta-rail-item" data-k="source">
+          <span className="k">Source</span>
+          <span className="v" title={sourceValue}>{sourceValue}</span>
         </div>
-        <div className="panel-meta-rail-item">
-          <span className="k">capture.basis</span>
+        <div className="panel-meta-rail-item" data-k="capture.basis" data-basis={captureBasis}>
+          <span className="k">Capture basis</span>
           <span className="v">{captureBasis}</span>
         </div>
-        <div className="panel-meta-rail-item">
-          <span className="k">last.sample</span>
+        <div className="panel-meta-rail-item" data-k="last.sample">
+          <span className="k">Last sample</span>
           <span className="v">{lastSample}</span>
         </div>
       </footer>

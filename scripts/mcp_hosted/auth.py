@@ -158,30 +158,43 @@ def _signing_key_for(token: str):
     kid = pyjwt.get_unverified_header(token).get("kid")
     if _negative_kid_active(kid):
         raise AuthError(401, "invalid token")
+
+    client = _get_jwks_client()
+
+    # RC-A3: a kid the client can already serve needs no live refetch, so it
+    # must not compete for the refresh gate — 4 in-flight slow unknown-kid
+    # lookups used to 503 every caller, cached signing key in hand or not.
+    try:
+        cached_kids = {key.key_id for key in client.get_signing_keys()}
+    except AuthError:
+        raise
+    except Exception as exc:
+        if _is_upstream_outage(exc):
+            raise AuthError(503, "authentication temporarily unavailable") from exc
+        cached_kids = set()
+    if kid in cached_kids:
+        return _resolve_signing_key(client, token, kid)
+
     if not _jwks_gate.acquire(blocking=False):
         raise AuthError(503, "authentication unavailable")
-
     try:
-        client = _get_jwks_client()
-        if kid not in {key.key_id for key in client.get_signing_keys()}:
-            with _jwks_refresh_lock:
-                now = time.monotonic()
-                if now < _jwks_refresh_after.get(kid, 0.0):
-                    raise AuthError(401, "invalid token")
-                _jwks_refresh_after[kid] = now + JWKS_REFRESH_COOLDOWN_SECONDS
-                _jwks_refresh_after.move_to_end(kid)
-                while len(_jwks_refresh_after) > 256:
-                    _jwks_refresh_after.popitem(last=False)
-        try:
-            return client.get_signing_key_from_jwt(token).key
-        except AuthError:
-            raise
-        except Exception as exc:
-            if _is_upstream_outage(exc):
-                raise
-            # A kid the freshly-fetched key set does not contain: a verdict.
-            _remember_negative_kid(kid)
-            raise AuthError(401, "invalid token") from exc
+        with _jwks_refresh_lock:
+            now = time.monotonic()
+            if now < _jwks_refresh_after.get(kid, 0.0):
+                raise AuthError(401, "invalid token")
+            _jwks_refresh_after[kid] = now + JWKS_REFRESH_COOLDOWN_SECONDS
+            _jwks_refresh_after.move_to_end(kid)
+            while len(_jwks_refresh_after) > 256:
+                _jwks_refresh_after.popitem(last=False)
+        return _resolve_signing_key(client, token, kid)
+    finally:
+        _jwks_gate.release()
+
+
+def _resolve_signing_key(client, token: str, kid):
+    """The lookup itself, with the R-606 outage-vs-verdict error mapping."""
+    try:
+        return client.get_signing_key_from_jwt(token).key
     except AuthError:
         raise
     except Exception as exc:
@@ -192,10 +205,9 @@ def _signing_key_for(token: str):
         # upstream outage is not a verdict about this token's signature.
         if _is_upstream_outage(exc):
             raise AuthError(503, "authentication temporarily unavailable") from exc
+        # A kid the freshly-fetched key set does not contain: a verdict.
         _remember_negative_kid(kid)
-        raise
-    finally:
-        _jwks_gate.release()
+        raise AuthError(401, "invalid token") from exc
 
 
 def _get_allowed_users() -> set[str]:

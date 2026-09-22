@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as d3 from "d3";
+import { buildChartXAxisTickIndices, chartXAxisTickAnchor } from "@/lib/chartXAxis";
 
 /**
  * Single-series time-series chart with positive/negative band coloring,
@@ -48,16 +49,6 @@ function formatDateLabel(value: string): string {
   const date = new Date(`${value}T00:00:00`);
   if (Number.isNaN(date.getTime())) return value;
   return DATE_FORMATTER.format(date);
-}
-
-function buildTickIndices(length: number, count: number): number[] {
-  if (length <= count) return Array.from({ length }, (_, i) => i);
-  const step = (length - 1) / (count - 1);
-  const set = new Set<number>();
-  for (let i = 0; i < count; i += 1) set.add(Math.round(step * i));
-  set.add(0);
-  set.add(length - 1);
-  return Array.from(set).sort((a, b) => a - b);
 }
 
 interface HoverState {
@@ -133,8 +124,7 @@ export default function SignalAreaChart({
   }, [points, xScale, yScale]);
 
   const tickIndices = useMemo(() => {
-    const maxTicks = Math.max(4, Math.min(7, Math.floor(innerWidth / 110)));
-    return buildTickIndices(points.length, maxTicks);
+    return buildChartXAxisTickIndices(points.length, innerWidth);
   }, [points.length, innerWidth]);
 
   const latest = points[points.length - 1] ?? null;
@@ -236,7 +226,7 @@ export default function SignalAreaChart({
           )}
 
           {/* X-axis ticks */}
-          {tickIndices.map((i) => (
+          {tickIndices.map((i, tickIndex) => (
             <g key={`x-${i}`}>
               <line
                 x1={xScale(i)}
@@ -248,7 +238,7 @@ export default function SignalAreaChart({
               <text
                 x={xScale(i)}
                 y={innerHeight + 20}
-                textAnchor="middle"
+                textAnchor={chartXAxisTickAnchor(tickIndex, tickIndices.length)}
                 className="regime-relationship-axis-label"
               >
                 {formatDateLabel(points[i]?.date ?? "")}

@@ -1,12 +1,5 @@
-/**
- * @vitest-environment jsdom
- *
- * Composer-only chat surface (2026-08-29, design-lab Variant A): the ⌘J
- * overlay's empty state is the composer alone — no ASK RADON title/copy, no
- * boxed starter-prompt cards, no in-conversation pill row, no launcher header
- * bar. Chrome collapses into the composer rail (chips, model, ESC hint) and
- * Enter sends via a quiet ↵ control instead of an ASK button.
- */
+/** @vitest-environment jsdom */
+// The assistant opens with useful orientation and editable prompt starters.
 
 import React from "react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -27,37 +20,40 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("chat empty state is the composer alone", () => {
-  it("renders no title, copy, starter cards, or pills", () => {
-    const { container } = render(<ChatPanel activeSection="dashboard" />);
-    expect(container.querySelector(".chat-empty-state")).toBeNull();
-    expect(container.querySelector(".chat-empty-card")).toBeNull();
-    expect(container.querySelector(".chat-pills")).toBeNull();
-    expect(screen.queryByText("Ask Radon", { selector: "div" })).toBeNull();
-    expect(screen.getByLabelText("Ask Radon")).toBeTruthy();
+describe("chat welcome and composer", () => {
+  it("names the assistant, current workspace context, and available starting points", () => {
+    render(<ChatPanel activeSection="portfolio" />);
+    expect(screen.getByRole("heading", { name: "Radon AI" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: /What do you want to understand/ })).toBeTruthy();
+    expect(screen.getByText("Positions")).toBeTruthy();
+    expect(screen.getByText("Data retrieved when needed")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Review portfolio risk/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Investigate market flow/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Pressure-test a trade/ })).toBeTruthy();
   });
 
-  it("marks the panel empty so the launcher can size to content", () => {
-    const { container } = render(<ChatPanel activeSection="dashboard" />);
-    const panel = container.querySelector(".chat-panel");
-    expect(panel?.getAttribute("data-empty")).toBe("true");
-  });
-
-  it("submits with a quiet enter control, not an ASK button", () => {
+  it("starter selection creates an editable draft before any assistant request", () => {
     render(<ChatPanel activeSection="dashboard" />);
-    const send = screen.getByLabelText("Send");
-    expect(send.textContent).toBe("↵");
-    expect(screen.queryByText("ASK")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Review portfolio risk/ }));
+    const input = screen.getByLabelText("Ask Radon") as HTMLTextAreaElement;
+    expect(input.value).toContain("Review my current portfolio risk");
+    expect(document.activeElement).toBe(input);
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url) === "/api/assistant")).toBe(false);
   });
 
-  it("rail carries the ESC affordance; the launcher header bar is gone", async () => {
-    render(
-      <ChatLauncher activeSection="dashboard" portfolio={{ positions: [] } as never} />,
-    );
+  it("exposes image attachment and Send actions with real keyboard guidance", () => {
+    render(<ChatPanel activeSection="dashboard" />);
+    expect(screen.getByRole("button", { name: "Attach images" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Send", exact: true })).toBeTruthy();
+    expect(screen.getByText("Enter to send · Shift+Enter for a new line")).toBeTruthy();
+  });
+
+  it("provides discoverable close and reset controls in the launcher", async () => {
+    render(<ChatLauncher activeSection="dashboard" portfolio={null} />);
     fireEvent.keyDown(document, { key: "j", ctrlKey: true });
     await waitFor(() => expect(screen.getByLabelText("Ask Radon")).toBeTruthy());
-    expect(screen.queryByText("Radon Chat")).toBeNull();
-    expect(screen.queryByText("Esc to dismiss")).toBeNull();
-    expect(screen.getByText("ESC DISMISSES")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "New conversation" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Close chat" }));
+    expect(screen.queryByRole("dialog", { name: "Radon chat" })).toBeNull();
   });
 });

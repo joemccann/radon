@@ -491,6 +491,46 @@ def test_a_provider_wipeout_exits_nonzero_and_marks_the_row_error(tmp_path, monk
     assert health[-1]["class"] == "provider_exhausted"
 
 
+def test_unwritable_html_report_still_writes_cache_and_exits_zero(tmp_path, monkeypatch):
+    """Production 2026-09-14: radon-api docker image has root-owned /home/radon/radon
+    and no reports/ dir. FastAPI /leap/scan always passes --json with default
+    --output reports/leap-scan-uw.html. main() mkdir'd reports/ before writing
+    data/leap.json, raised PermissionError, and the route returned 502
+    (`PermissionError: [Errno 13] Permission denied: 'reports'`). Wrapper logged
+    indeterminate 502; leap.json stayed on 2026-09-08. GARCH survived the same
+    host because --json skips its HTML path.
+    """
+    cache = tmp_path / "leap.json"
+    reports = tmp_path / "reports"
+    reports.mkdir()
+    reports.chmod(0o555)
+    monkeypatch.setattr(leap_scanner_uw, "DASHBOARD_CACHE_PATH", cache)
+    monkeypatch.setattr(leap_scanner_uw, "UWClient", lambda: nullcontext(object()))
+    monkeypatch.setattr(leap_scanner_uw, "mirror_scan_snapshot", lambda *a, **k: None)
+    monkeypatch.setattr(
+        leap_scanner_uw,
+        "scan_ticker",
+        lambda ticker, *a, **k: _one_scan_result(ticker),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "leap_scanner_uw.py",
+            "SPY",
+            "--json",
+            "--output",
+            str(reports / "leap-scan-uw.html"),
+        ],
+    )
+
+    assert leap_scanner_uw.main() == 0
+    payload = json.loads(cache.read_text())
+    assert [row["ticker"] for row in payload["results"]] == ["SPY"]
+    assert payload["status"] == "ok"
+    assert not (reports / "leap-scan-uw.html").exists()
+
+
 # ── find_strikes_by_delta ───────────────────────────────────────────
 
 class TestFindStrikesByDelta:

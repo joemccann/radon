@@ -8,7 +8,7 @@
  * and the divergence chip text/tone for each of none/bearish/bullish.
  */
 import React from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { BreadthData, BreadthHistoryEntry, BreadthIntradayPoint } from "@/lib/useBreadth";
@@ -36,6 +36,7 @@ import BreadthPanel, { pearsonCorrelation } from "../components/BreadthPanel";
 afterEach(() => {
   cleanup();
   mockUseBreadth.mockReset();
+  vi.useRealTimers();
 });
 
 function buildHistory(count: number): BreadthHistoryEntry[] {
@@ -244,5 +245,26 @@ describe("BreadthPanel — divergence chip", () => {
     const chip = chipFor("bullish");
     expect(chip.textContent).toBe("BULLISH");
     expect(chip.style.color).toBe("var(--positive)");
+  });
+});
+
+describe("BreadthPanel — freshness rail", () => {
+  it("shows the session date and counts down to the next 5-minute intraday slot", () => {
+    // 15:07:30 UTC on a Wednesday: 2m30s short of radon-breadth.timer's :10
+    // slot. The :15-aligned data_refresh sweep would read 7m 30s and the
+    // :02-offset TRIN sampler 4m 30s, so the number pins this constant.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-26T15:07:30Z"));
+    const data = buildBreadthData({ scan_time: "2026-08-26T15:05:00Z" });
+    data.latest = { ...data.latest!, session_date: "2026-08-26" };
+    renderPanel(hookState({ data }));
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+    const rail = screen.getByTestId("breadth-freshness-rail");
+    expect(rail).toBeTruthy();
+    expect(rail.textContent).toContain("2026-08-26");
+    expect(screen.getByTestId("breadth-freshness-rail-countdown").textContent).toBe("2m 30s");
+    expect(rail.textContent).toContain("Next sample");
   });
 });

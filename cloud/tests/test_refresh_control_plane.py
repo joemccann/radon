@@ -797,3 +797,78 @@ def test_refresh_refuses_a_head_that_is_not_on_main(tmp_path: Path) -> None:
     assert result.returncode == 76, combined
     assert "not reachable from the GitHub main tip" in combined
     assert installed.read_bytes() == before
+
+
+# --- F. T-441: the compose body root executes is gated ON THE REFRESH PATH ---
+#
+# test_rel234_compose_gate.py exercises compose_body_is_valid() as an extracted
+# function; nothing passed a bad body through refresh_install_file itself, so
+# the /etc/radon/ib-gateway-compose.yml case arm could be dropped or reordered
+# without a red. These stage a poisoned body the way a deploy would (committed
+# to main) and require the privileged refresh to refuse it before install.
+
+COMPOSE_SOURCE = "docker-compose.yml"
+
+COMPOSE_BASE = (
+    "services:\n"
+    "  ib-gateway:\n"
+    "    image: ghcr.io/example/ib-gateway@sha256:0000\n"
+    "    container_name: ib-gateway\n"
+)
+
+COMPOSE_REJECTIONS = {
+    "no-services": (
+        "x-fragments:\n  ib-gateway:\n    container_name: ib-gateway\n",
+        "declares no services",
+    ),
+    "unpinned-container-name": (
+        "services:\n  ib-gateway:\n    image: ghcr.io/example/x@sha256:0000\n",
+        "does not pin container_name ib-gateway",
+    ),
+    "privileged": (
+        COMPOSE_BASE + "    privileged: true\n",
+        "requests privileged",
+    ),
+    "privileged-quoted": (
+        COMPOSE_BASE + '    privileged: "true"\n',
+        "requests privileged",
+    ),
+    "privileged-single-quoted": (
+        COMPOSE_BASE + "    privileged: 'true'\n",
+        "requests privileged",
+    ),
+    "host-root-bind": (
+        COMPOSE_BASE + "    volumes:\n      - /:/host\n",
+        "binds an absolute host path",
+    ),
+}
+
+
+def _stage_compose_body(box: Sandbox, body: str) -> None:
+    (box.cloud / COMPOSE_SOURCE).write_text(body, encoding="utf-8")
+    box.commit_sources()
+
+
+@pytest.mark.parametrize("poison", sorted(COMPOSE_REJECTIONS))
+def test_privileged_refresh_refuses_a_poisoned_compose_body(
+    tmp_path: Path, poison: str
+) -> None:
+    box = Sandbox(tmp_path)
+    body, message = COMPOSE_REJECTIONS[poison]
+    _stage_compose_body(box, body)
+
+    combined = _refused_without_install(
+        box, "refresh-control-plane-privileged", "compose validation failed"
+    )
+    assert message in combined
+
+
+def test_privileged_refresh_installs_a_valid_compose_body(tmp_path: Path) -> None:
+    box = Sandbox(tmp_path)
+    box.mutate_source(COMPOSE_SOURCE)
+    expected = (box.cloud / COMPOSE_SOURCE).read_bytes()
+
+    result = box.run("refresh-control-plane-privileged")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert box.installed_path(COMPOSE_SOURCE).read_bytes() == expected

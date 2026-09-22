@@ -1,0 +1,40 @@
+.research :global(.chat-markdown) {
+  gap: 0.75em;
+  white-space: normal;
+}
+
+.research :global(.chat-markdown) p,
+.research :global(.chat-markdown-list-item) {
+  max-inline-size: none;
+  font-size: inherit;
+  line-height: inherit;
+  white-space: normal;
+}
+
+.research :global(.chat-markdown-heading) {
+  font-family: var(--font-sans);
+  font-size: 1.1em;
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.research :global(.chat-markdown-emphasis) {
+  font-style: italic;
+  font-synthesis: style;
+}
+
+.research :global(.chat-markdown-list-unordered) {
+  list-style-type: disc;
+}
+
+.research :global(.chat-markdown-list-ordered) {
+  list-style-type: decimal;
+}
+
+.research :global(.chat-table) th,
+.research :global(.chat-table) td,
+.research :global(.chat-markdown) code {
+  font-size: var(--text-meta);
+}

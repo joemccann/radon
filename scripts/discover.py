@@ -170,18 +170,21 @@ def fetch_darkpool_multi(
 
     def _fetch_day(client, date):
         # Prior (closed) sessions are immutable — serve from the shared on-disk
-        # cache and skip UW. Only today hits the API. (Same P0 reduction as
-        # fetch_flow; discover scans market-wide so this is high-impact.)
-        # Full-day multi-page walk lives in fetch_flow.fetch_darkpool (UW 500 cap).
-        from fetch_flow import fetch_darkpool
+        # cache and skip UW. Scoring walks (2 pages) are stored complete=False
+        # so /flow-analysis cannot treat them as a full day. Only today hits
+        # the API. Full-day walks live in fetch_flow.walk_darkpool.
+        from fetch_flow import walk_darkpool
 
-        trades = get_cached_darkpool(ticker, date)
+        trades = get_cached_darkpool(ticker, date, require_complete=False)
         if trades is None:
-            trades = fetch_darkpool(
+            walk = walk_darkpool(
                 ticker, date=date, _client=client, max_pages=max_pages
             )
+            trades = walk.trades
             if isinstance(trades, list):
-                set_cached_darkpool(ticker, date, trades)
+                set_cached_darkpool(
+                    ticker, date, trades, complete=walk.cacheable
+                )
         if isinstance(trades, list):
             day_analysis = analyze_darkpool_day(trades)
             day_analysis["date"] = date

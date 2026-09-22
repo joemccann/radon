@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Activity } from "lucide-react";
 import BrushMinimap from "./BrushMinimap";
 import CriHistoryChart, { type ChartSeries } from "./CriHistoryChart";
+import FreshnessRail from "./FreshnessRail";
 import HistoryRangeChips from "./HistoryRangeChips";
 import InfoTooltip from "./InfoTooltip";
 import MetricCell from "./mobile/MetricCell";
@@ -11,6 +12,7 @@ import SectionEmptyState from "./SectionEmptyState";
 import SpectralLoader from "./SpectralLoader";
 import { RegimeStrip, RegimeStripCell } from "./RegimeStrip";
 import { chartSeriesColor } from "@/lib/chartSystem";
+import { STRADDLE_REFRESH } from "@/lib/refreshSchedule";
 import {
   defaultPresetForLength,
   presetRange,
@@ -242,6 +244,13 @@ export default function StraddlePanel({
             />
           </RegimeStrip>
         )}
+
+        <FreshnessRail
+          schedule={STRADDLE_REFRESH}
+          asOf={current.date}
+          testId="straddle-freshness-rail"
+          model="session"
+        />
       </div>
 
       {/* ── SPX vs straddle ratio chart ───────────────────── */}

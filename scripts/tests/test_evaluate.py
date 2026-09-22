@@ -223,6 +223,7 @@ from evaluate import (
     MilestoneResult,
     compute_sustained_days,
     determine_edge,
+    evaluate_ticker,
     run_evaluation,
     format_report,
 )
@@ -463,6 +464,117 @@ class TestRunEvaluation:
         assert result.milestones["M6"].passed is False
         from evaluate import _decision_exit_code
         assert _decision_exit_code([result]) == 2
+
+    def test_d10_evaluate_ticker_fail_closed_without_structure(
+        self, ticker_data, flow_data_accumulation, options_data_bullish,
+        oi_data_massive, price_history,
+    ):
+        raw = {
+            "M1": ticker_data,
+            "M1B": {},
+            "M1C": {},
+            "M1D": {},
+            "M2": flow_data_accumulation,
+            "M3": options_data_bullish,
+            "M3B": oi_data_massive,
+            "PRICE": price_history,
+        }
+        with patch("evaluate._run_parallel_milestones", return_value=raw):
+            result = evaluate_ticker("AAPL", bankroll=100_000)
+
+        assert result.milestones["M5"].passed is False
+        assert result.milestones["M6"].passed is False
+        assert result.decision == "PENDING"
+        from evaluate import _decision_exit_code
+        assert _decision_exit_code([result]) == 2
+
+    def test_d10_structure_sizes_trade(
+        self, ticker_data, flow_data_accumulation, options_data_bullish,
+        oi_data_massive, price_history,
+    ):
+        raw = {
+            "M1": ticker_data,
+            "M1B": {},
+            "M1C": {},
+            "M1D": {},
+            "M2": flow_data_accumulation,
+            "M3": options_data_bullish,
+            "M3B": oi_data_massive,
+            "PRICE": price_history,
+        }
+        with patch("evaluate._run_parallel_milestones", return_value=raw), \
+             patch("evaluate._open_max_losses_from_portfolio", return_value=[]):
+            result = evaluate_ticker(
+                "AAPL",
+                bankroll=100_000,
+                structure={"max_gain": 300, "max_loss": 100, "prob_win": 0.4},
+            )
+        assert result.milestones["M6"].passed is True
+        assert result.milestones["M6"].data["contracts"] == 25
+        assert result.milestones["M6"].data["position_pct"] == 2.5
+        assert result.decision == "TRADE"
+
+    def test_d10_no_edge_is_risk_gate(
+        self, ticker_data, flow_data_accumulation, options_data_bullish,
+        oi_data_massive, price_history,
+    ):
+        raw = {
+            "M1": ticker_data,
+            "M1B": {},
+            "M1C": {},
+            "M1D": {},
+            "M2": flow_data_accumulation,
+            "M3": options_data_bullish,
+            "M3B": oi_data_massive,
+            "PRICE": price_history,
+        }
+        with patch("evaluate._run_parallel_milestones", return_value=raw), \
+             patch("evaluate._open_max_losses_from_portfolio", return_value=[]):
+            result = evaluate_ticker(
+                "AAPL",
+                bankroll=100_000,
+                structure={"max_gain": 300, "max_loss": 100, "prob_win": 0.2},
+            )
+        assert result.decision == "NO_TRADE"
+        assert result.failing_gate == "RISK"
+        assert result.milestones["M6"].data["reason"] == "NO_EDGE"
+        report = format_report(result)
+        assert "KELLY SIZING" in report
+        assert "NO_EDGE" in report
+
+    def test_d10_undefined_risk_and_restructure(
+        self, ticker_data, flow_data_accumulation, options_data_bullish,
+        oi_data_massive, price_history,
+    ):
+        raw = {
+            "M1": ticker_data,
+            "M1B": {},
+            "M1C": {},
+            "M1D": {},
+            "M2": flow_data_accumulation,
+            "M3": options_data_bullish,
+            "M3B": oi_data_massive,
+            "PRICE": price_history,
+        }
+        with patch("evaluate._run_parallel_milestones", return_value=raw), \
+             patch("evaluate._open_max_losses_from_portfolio", return_value=[]):
+            undefined = evaluate_ticker(
+                "AAPL",
+                bankroll=100_000,
+                structure={"max_gain": 300, "max_loss": 0, "prob_win": 0.4},
+            )
+            restructure = evaluate_ticker(
+                "AAPL",
+                bankroll=100_000,
+                structure={"max_gain": 1000, "max_loss": 100, "prob_win": 0.9},
+            )
+        assert undefined.decision == "NO_TRADE"
+        assert undefined.failing_gate == "CONVEXITY"
+        assert undefined.milestones["M5"].passed is False
+        assert "M6" not in undefined.milestones
+        assert restructure.milestones["M6"].data["reason"] == "RESTRUCTURE"
+        assert "KELLY SIZING" in format_report(restructure)
+        assert restructure.failing_gate == "RISK"
 
     @patch("evaluate.fetch_ticker_info")
     @patch("evaluate.fetch_flow")
@@ -766,3 +878,41 @@ class TestSeasonality:
         from evaluate import rate_seasonality
         # 60% and 5% exactly → boundary check
         assert rate_seasonality(60, 5.0) in ("FAVORABLE", "NEUTRAL")
+
+
+@pytest.mark.parametrize("gain,loss", [
+    (100, 100), (199.99, 100), (None, 100), (float("nan"), 100),
+    (float("inf"), 100), (300, float("inf")), (300, float("nan")),
+    (300, 0), (300, -100), ("invalid", 100), (300, None),
+])
+def test_rel269_convexity_refuses_before_sizing(
+    ticker_data, flow_data_accumulation, options_data_bullish, oi_data_massive,
+    price_history, gain, loss,
+):
+    raw = {"M1": ticker_data, "M1B": {}, "M1C": {}, "M1D": {},
+           "M2": flow_data_accumulation, "M3": options_data_bullish,
+           "M3B": oi_data_massive, "PRICE": price_history}
+    with patch("evaluate._run_parallel_milestones", return_value=raw), \
+         patch("evaluate._open_max_losses_from_portfolio", return_value=[]), \
+         patch("evaluate.kelly_ticket", wraps=__import__("kelly").kelly_ticket) as sizing:
+        result = evaluate_ticker("AAPL", bankroll=100_000,
+                                structure={"max_gain": gain, "max_loss": loss, "prob_win": .59})
+    assert result.decision == "NO_TRADE"
+    assert result.failing_gate == "CONVEXITY"
+    assert result.milestones["M5"].passed is False
+    sizing.assert_not_called()
+
+
+def test_rel269_exactly_two_to_one_retains_trade(
+    ticker_data, flow_data_accumulation, options_data_bullish, oi_data_massive, price_history,
+):
+    raw = {"M1": ticker_data, "M1B": {}, "M1C": {}, "M1D": {},
+           "M2": flow_data_accumulation, "M3": options_data_bullish,
+           "M3B": oi_data_massive, "PRICE": price_history}
+    with patch("evaluate._run_parallel_milestones", return_value=raw), \
+         patch("evaluate._open_max_losses_from_portfolio", return_value=[]):
+        result = evaluate_ticker("AAPL", bankroll=100_000,
+                                structure={"max_gain": 200, "max_loss": 100, "prob_win": .4})
+    assert result.decision == "TRADE"
+    assert result.milestones["M5"].passed is True
+    assert result.milestones["M6"].passed is True

@@ -20,15 +20,15 @@ export const NAV_LABEL = "Interactive Brokers dark pool terminal";
 export const PAGE_TITLE =
   "Interactive Brokers Dark Pool Terminal | Radon Terminal";
 export const PAGE_DESCRIPTION =
-  "Interactive Brokers dark pool terminal: Unusual Whales prints scored for accumulation, then routed as defined-risk IB combo orders. Free demo.";
+  "Interactive Brokers dark pool terminal: construct the view from Unusual Whales prints, then express it as defined-risk IB combo orders. Free demo.";
 export const PAGE_HEADLINE =
-  "A dark pool terminal is only finished when it routes the order.";
+  "Prints do not matter if the order never leaves the desk.";
 
 // Frozen per-page dates for TechArticle JSON-LD. Update dateModified when the
 // copy meaningfully changes; a request-time stamp gets ignored by Google
 // (same rationale as SITE_CONTENT_LAST_MODIFIED in lib/seo.ts).
 export const PAGE_DATE_PUBLISHED = "2026-07-03";
-export const PAGE_DATE_MODIFIED = "2026-08-23";
+export const PAGE_DATE_MODIFIED = "2026-09-07";
 
 export type IbRole = {
   role: string;
@@ -115,7 +115,7 @@ export const faqEntries: FaqEntry[] = [
   {
     question: "Is Radon a broker?",
     answer:
-      "No. Radon is a market-structure research instrument that runs on Interactive Brokers rails. Orders execute in your own Interactive Brokers account under its permissions and margin rules, and live trading requires a funded account there.",
+      "No. Radon constructs the view and sizes the expression on Interactive Brokers rails. Orders execute in your own Interactive Brokers account under its permissions and margin rules, and live trading requires a funded account there.",
   },
 ];
 

@@ -118,16 +118,23 @@ export function resetCatalogCache(): void {
   unavailable = false;
 }
 
-function fullyDecode(value: string): string {
+// Fail closed: null means the value still decoded after the budget, so a
+// later decode pass could reveal a different path than the one authorized.
+function fullyDecode(value: string): string | null {
   let current = value;
   for (let i = 0; i < 4; i += 1) {
     try {
       const next = decodeURIComponent(current);
-      if (next === current) break;
+      if (next === current) return current;
       current = next;
     } catch {
-      break;
+      return current;
     }
+  }
+  try {
+    if (decodeURIComponent(current) !== current) return null;
+  } catch {
+    return current;
   }
   return current;
 }
@@ -145,6 +152,7 @@ export function normalizePath(raw: string): string {
   if (!withoutQuery.startsWith("/") || withoutQuery.startsWith("//")) return "";
 
   const decoded = fullyDecode(withoutQuery);
+  if (decoded === null) return "";
   if (decoded.includes("://") || decoded.startsWith("//") || decoded.includes("\0")) return "";
 
   const resolved = path.posix.normalize(decoded);

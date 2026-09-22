@@ -75,8 +75,9 @@ export const SECTION_TOOLTIPS: Record<string, string> = {
     "RTH vs EXT chips show whether a working order can fill after 16:00 ET. " +
     "Options and option combos stay RTH-only even with FILL OUTSIDE RTH. " +
     "Stocks and ETFs fill after RTH only when that flag is on. Futures can fill outside equity RTH. " +
-    "Last Price uses a reliable last trade, or a calculated mark prefixed C. A calculated mark is the bid/ask midpoint when a live quote exists, " +
-    "and the previous-session close when it does not, which is marked separately. " +
+    "Last Price uses a reliable last trade, or a calculated mark prefixed C. A calculated mark is the bid/ask midpoint when a live quote exists. " +
+    "Option contracts keep that last trade, or the midpoint of the last bid and offer, and do not substitute the previous-session close. " +
+    "A stock or future with no live quote can fall back to the previous-session close, which is marked separately. " +
     "Combo marks are the signed sum of those resolved leg prices. Orders can be modified " +
     "(price/quantity) or cancelled directly. Status reflects IB order state " +
     "(PreSubmitted, Submitted, Filled, Cancelled).",
@@ -88,7 +89,8 @@ export const SECTION_TOOLTIPS: Record<string, string> = {
 
   "Historical Trades (30 Days)":
     "Trade blotter derived from the Turso journal (live fill writers + rehydrate). " +
-    "Shows cost basis, proceeds, realized P&L, and commission per completed or open trade. " +
+    "Shows recorded quantity-weighted Avg Fill (before commissions), cost basis, proceeds, realized P&L, and commission. " +
+    "Aggregate labels identify collapsed records that may combine buys and sells, not separate entry or exit prices. " +
     "Session fills on Today's Executed may land here after journal_sync / fill_monitor " +
     "with open/close labels; use Refresh to re-pull. Not a live IB session blotter.",
 

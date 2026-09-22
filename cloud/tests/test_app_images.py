@@ -75,6 +75,29 @@ def _dropin_for(unit: str) -> Path:
     return CLOUD_ROOT / "services" / f"{unit}.d" / "runtime-container.conf"
 
 
+class TestImageWorkflowTokenScope:
+    """The PR build path must never hold a token that can write GHCR."""
+
+    WF_DIR = CLOUD_ROOT.parent / ".github" / "workflows"
+
+    def test_reusable_workflow_is_call_only_with_no_own_permissions(self) -> None:
+        text = (self.WF_DIR / "app-images.yml").read_text(encoding="utf-8")
+        assert "workflow_call:" in text
+        assert "pull_request:" not in text
+        assert "packages: write" not in text
+
+    def test_pr_caller_grants_read_only(self) -> None:
+        text = (self.WF_DIR / "app-images-pr.yml").read_text(encoding="utf-8")
+        assert "pull_request:" in text
+        assert "contents: read" in text
+        assert ": write" not in text
+        assert "uses: ./.github/workflows/app-images.yml" in text
+
+    def test_main_push_caller_still_grants_publish(self) -> None:
+        text = (self.WF_DIR / "ci.yml").read_text(encoding="utf-8")
+        assert "packages: write" in text
+
+
 class TestAppDockerfilesExist:
     def test_python_dockerfile_exists(self) -> None:
         assert PYTHON_DF.is_file()
@@ -106,6 +129,18 @@ class TestPythonImage:
         assert "--uid 1000" in text
         assert "chmod 755 /home/radon" in text
 
+    def test_application_code_is_not_writable_by_the_runtime_user(self) -> None:
+        """Code COPYs must stay root-owned; only genuinely writable paths
+        (the radon home itself, created by useradd) belong to the runtime
+        user. A `--chown` on the code COPY or a recursive chown over the
+        home tree hands the import tree to the uid the service runs as."""
+        text = PYTHON_DF.read_text(encoding="utf-8")
+        copy_lines = [line for line in text.splitlines() if line.startswith("COPY ")]
+        assert copy_lines, "expected COPY lines in Dockerfile.python"
+        for line in copy_lines:
+            assert "--chown" not in line, line
+        assert "chown -R radon:radon /home/radon" not in text
+
     def test_pinned_python_playwright_installs_and_launches_headless_chromium(self) -> None:
         text = PYTHON_DF.read_text(encoding="utf-8")
         install = "python -m playwright install --with-deps --only-shell chromium"
@@ -116,10 +151,31 @@ class TestPythonImage:
         assert "npx playwright" not in text
         assert "bun x playwright" not in text
         assert text.index("RUN python -m pip install") < text.index(install)
-        assert text.index(install) < text.index("COPY --chown=radon:radon scripts")
+        assert text.index(install) < text.index("COPY scripts ./scripts")
         assert "sync_playwright" in text
         assert launch in text
         assert text.index("USER radon") < text.index(launch)
+
+    def test_monitor_logs_are_writable_without_owning_application_code(self) -> None:
+        text = PYTHON_DF.read_text(encoding="utf-8")
+        provision = "install -d -o radon -g radon -m 0755 /home/radon/radon/logs"
+        assert provision in text
+        assert text.index(provision) < text.index("USER radon")
+        # Require a real build-time filesystem check under the final runtime uid,
+        # including rotation (which also needs directory write permission).
+        smoke = text.split("# Monitor log permissions smoke", 1)[1]
+        assert text.index("USER radon") < text.index("# Monitor log permissions smoke")
+        for check in (
+            "assert os.geteuid() == 1000",
+            'assert not os.access(".", os.W_OK)',
+            'assert not os.access("scripts", os.W_OK)',
+            'assert not os.access("scripts/monitor_daemon/run.py", os.W_OK)',
+            "log_dir.mkdir(exist_ok=True)",
+            "RotatingFileHandler(",
+            "handler.emit(",
+            "handler.doRollover()",
+        ):
+            assert check in smoke
 
 
 class TestNodeImage:
@@ -176,7 +232,7 @@ class TestNodeImage:
         assert "/home/radon/radon/web/.next/cache" in text
         assert "/home/radon/radon/web/public/data" in text
 
-    def test_clerk_public_env_is_required_at_build(self) -> None:
+    def test_clerk_public_env_is_required_at_build(self, tmp_path) -> None:
         text = NODE_DF.read_text(encoding="utf-8")
         assert 'ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=""' not in text
         assert "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY" in text
@@ -184,7 +240,13 @@ class TestNodeImage:
         # Runtime env cannot repair a client bundle baked without the key.
         assert ".next/static" in text
         assert "grep -RF" in text
-        assert "next-clerk-guard" in text
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from test_app_runtime import _run
+        result = _run(tmp_path, ["run", "radon-nextjs.service"])
+        assert result.returncode == 0, result.stderr
+        run_line = next(line for line in result.docker_log.read_text().splitlines() if line.startswith("run "))
+        assert run_line.endswith(" /usr/local/bin/next-clerk-guard")
 
 
 class TestImageSafety:

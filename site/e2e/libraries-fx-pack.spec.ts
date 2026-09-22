@@ -18,14 +18,14 @@ test.describe("libraries.dev pack C — marketing", () => {
     await page.locator("[data-testid='hero-beam']").screenshot({
       path: `${SHOT_DIR}/site_hero_flow_beam_dark.png`,
     });
-    await page.locator("#convexity").scrollIntoViewIfNeeded();
+    await page.locator("#discipline").scrollIntoViewIfNeeded();
     await expect(page.locator(".gates")).toBeVisible();
-    await page.locator("#convexity").screenshot({
+    await page.locator("#discipline").screenshot({
       path: `${SHOT_DIR}/site_gates_metal_dark.png`,
     });
-    await page.locator("#pipeline").scrollIntoViewIfNeeded();
+    await page.locator("#expression").scrollIntoViewIfNeeded();
     await expect(page.locator(".pipeline")).toBeVisible();
-    await page.locator("#pipeline").screenshot({
+    await page.locator("#expression").screenshot({
       path: `${SHOT_DIR}/site_method_markers_dark.png`,
     });
   });

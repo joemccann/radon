@@ -40,10 +40,10 @@ class _FakeLocator:
     def count(self):
         return 1
 
-    def fill(self, value):
+    def fill(self, value, **_kwargs):
         self._page.filled[self._selector] = value
 
-    def click(self):
+    def click(self, **_kwargs):
         self._page.clicked.append(self._selector)
         self._page.url = self._page.post_submit_url
 
@@ -230,7 +230,7 @@ class TestBootstrapReachesTheDashboard:
         )
         orig_click = _FakeLocator.click
 
-        def _click(self):
+        def _click(self, **_kwargs):
             if self._selector == 'input[name="authorize"]':
                 self._page.clicked.append(self._selector)
                 self._page.url = (

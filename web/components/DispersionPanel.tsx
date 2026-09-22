@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Layers } from "lucide-react";
 import BrushMinimap from "./BrushMinimap";
 import DispersionChart from "./DispersionChart";
+import FreshnessRail from "./FreshnessRail";
 import HistoryRangeChips from "./HistoryRangeChips";
 import InfoTooltip from "./InfoTooltip";
 import MetricCell from "./mobile/MetricCell";
@@ -11,6 +12,7 @@ import SectionEmptyState from "./SectionEmptyState";
 import SpectralLoader from "./SpectralLoader";
 import { RegimeStrip, RegimeStripCell } from "./RegimeStrip";
 import { getFreshnessWindowMs, getMarketStateFromDate } from "@/lib/serviceHealthWindows";
+import { DISPERSION_REFRESH } from "@/lib/refreshSchedule";
 import { presetRange, type RangePresetSlug } from "@/lib/historyRange";
 import {
   COMPRESSED_Z,
@@ -299,6 +301,13 @@ export default function DispersionPanel() {
             />
           </RegimeStrip>
         )}
+
+        <FreshnessRail
+          schedule={DISPERSION_REFRESH}
+          asOf={data.data_date ?? current.date}
+          testId="dispersion-freshness-rail"
+          model="session"
+        />
       </div>
 
       <div className="breadth-history-block" data-testid="dispersion-chart-section">

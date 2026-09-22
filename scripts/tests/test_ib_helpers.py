@@ -506,3 +506,13 @@ class TestResolveMarketPrice:
         price, is_calc = _resolve_market_price(None, None, None)
         assert price is None
         assert is_calc is False
+
+    def test_option_previous_close_is_not_a_mark(self):
+        price, is_calc = _resolve_market_price(None, None, None, 26.70, sec_type="OPT")
+        assert price is None
+        assert is_calc is False
+
+    def test_stock_still_falls_back_to_close(self):
+        price, is_calc = _resolve_market_price(None, None, None, 741.24, sec_type="STK")
+        assert price == 741.24
+        assert is_calc is True

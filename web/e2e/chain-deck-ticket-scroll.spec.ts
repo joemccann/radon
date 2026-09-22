@@ -199,7 +199,7 @@ test.describe("Chain deck ticket scroll", () => {
 
     const deckBody = page.locator(".asset-deck.open .asset-deck-body");
     await deckBody.waitFor({ timeout: 20_000 });
-    await deckBody.locator(".chain-grid").waitFor();
+    await deckBody.locator(".chain-grid").first().waitFor();
 
     // Toolbar rides in the chain column so the ticket starts level with it.
     await expect(deckBody.locator(".chain-rail-main > .chain-expiry-bar")).toHaveCount(1);

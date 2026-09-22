@@ -27,7 +27,9 @@ CATALOG: dict[CatalogKey, Capability] = {
     ("GET", "/admin/services"): "admin",
     ("POST", "/admin/services/{unit}/{action}"): "admin",
     ("POST", "/admin/stack/restart"): "admin",
-    ("GET", "/attribution"): "read",
+    # read.spawn: backed by a subprocess, so MAX_SPAWN_PER_TURN caps
+    # assistant fan-out (same rationale as /streaks/{ticker}).
+    ("GET", "/attribution"): "read.spawn",
     ("GET", "/backtest"): "read",
     ("GET", "/backtest/{strategy}"): "read",
     # refresh spawns a 180s subprocess that persists to Turso: a mutation.
@@ -77,9 +79,12 @@ CATALOG: dict[CatalogKey, Capability] = {
     ("GET", "/knowledge/prior-evals"): "read",
     ("POST", "/knowledge/search"): "read",
     ("POST", "/leap/scan"): "read.spawn",
+    ("GET", "/ai-cycle"): "read",
     ("GET", "/llm-token-index"): "read",
     ("GET", "/market-calendar"): "read",
     ("POST", "/market-calendar/refresh"): "read.spawn",
+    ("GET", "/newsfeed/research/evidence/{asset}"): "read",
+    ("GET", "/newsfeed/research/files/{asset}"): "internal",
     ("GET", "/openapi.json"): "internal",
     ("GET", "/options/chain"): "read",
     ("GET", "/options/expirations"): "read",
@@ -119,6 +124,8 @@ CATALOG: dict[CatalogKey, Capability] = {
     ("GET", "/streaks/{ticker}"): "read.spawn",
     ("POST", "/strength-confirmation/scan"): "read.spawn",
     ("POST", "/theta-harvester/scan"): "read.spawn",
+    ("POST", "/vol-skew-mr/scan"): "read.spawn",
+    ("POST", "/bounce-setup/scan"): "read.spawn",
     ("GET", "/ticker/ratings"): "read",
     ("POST", "/trading/halt"): "admin",
     ("POST", "/trading/kill"): "admin",
@@ -128,7 +135,6 @@ CATALOG: dict[CatalogKey, Capability] = {
     ("POST", "/uw/usage/record"): "internal",
     ("POST", "/vcg/scan"): "read.spawn",
     ("POST", "/vcg/share"): "internal",
-    ("POST", "/workflow/run"): "mutate.trading",
     ("POST", "/ws-ticket"): "internal",
     ("POST", "/ws-ticket/validate"): "internal",
 }

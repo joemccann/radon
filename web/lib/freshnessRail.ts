@@ -12,9 +12,25 @@
 
 import { lastCompletedSessionDate } from "./marketSession";
 import { isUsTradingDay } from "./serviceHealthWindows";
-import { nextRefreshUtc, type UtcSchedule } from "./refreshSchedule";
+import {
+  firesWeekly,
+  nextRefreshUtc,
+  previousRefreshUtc,
+  type RefreshSchedule,
+} from "./refreshSchedule";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * How "behind" is judged.
+ *  - `session`: an EOD or intraday market series; the panel owes the last
+ *    session the exchange printed.
+ *  - `release`: a publisher's own calendar (FINRA monthly margin statistics,
+ *    the Fed's quarterly Z.1). The timer only CHECKS for a new release, and
+ *    that calendar is not in this repo, so the rail counts down to the next
+ *    check and passes no judgment on the held date.
+ */
+export type FreshnessModel = "session" | "release";
 
 export type FreshnessRail = {
   /** When the next scheduled run fires. */
@@ -36,10 +52,6 @@ export type FreshnessRail = {
   /** How long ago that run fired. Zero unless `overdue`. */
   msOverdue: number;
 };
-
-function intervalMs(schedule: UtcSchedule): number {
-  return schedule.cadence === "weekly" ? 7 * DAY_MS : DAY_MS;
-}
 
 /**
  * The timer carries `RandomizedDelaySec=120`, then the job has to actually
@@ -83,38 +95,75 @@ function lastPrintedSessionDate(at: Date): string {
 }
 
 /**
- * @param asOf   the latest session date the panel holds, `YYYY-MM-DD`
- */
-/**
  * The instant of the first scheduled run that should have carried a reading
  * newer than `asOf`. Everything since then is the outage.
+ *
+ * End of the held session's DAY: a session dated D is carried by D's own
+ * evening run, so the first run that owed something newer is the next one.
+ * Anchoring at noon counted D's own run as missing and over-reported by a
+ * full interval.
  */
-function expectedRunFor(schedule: UtcSchedule, asOf: string, lastSampleAt: Date): number {
-  // End of the held session's DAY: a session dated D is carried by D's own
-  // evening run, so the first run that owed something newer is the next one.
-  // Anchoring at noon counted D's own run as missing and over-reported by a
-  // full interval.
+function expectedRunFor(schedule: RefreshSchedule, asOf: string, lastSampleAt: Date): number {
   const asOfMs = Date.parse(`${asOf.slice(0, 10)}T23:59:59Z`);
   if (Number.isNaN(asOfMs)) return lastSampleAt.getTime();
-  const step = intervalMs(schedule);
-  let run = lastSampleAt.getTime();
-  // Walk back while the previous run still post-dates the held session.
-  while (run - step > asOfMs) run -= step;
-  return Math.min(run, lastSampleAt.getTime());
+  return Math.min(nextRefreshUtc(schedule, new Date(asOfMs)).getTime(), lastSampleAt.getTime());
 }
 
+/**
+ * @param asOf   the latest session date the panel holds, `YYYY-MM-DD`
+ */
 export function computeFreshnessRail(
-  schedule: UtcSchedule,
+  schedule: RefreshSchedule,
   asOf: string | null | undefined,
   now: Date = new Date(),
+  model: FreshnessModel = "session",
 ): FreshnessRail {
   const nextSampleAt = nextRefreshUtc(schedule, now);
-  const lastSampleAt = new Date(nextSampleAt.getTime() - intervalMs(schedule));
+  const lastSampleAt = previousRefreshUtc(schedule, now);
+  const intervalMs = nextSampleAt.getTime() - lastSampleAt.getTime();
 
   // A null/empty date is UNKNOWN, not current: the rail used to render the
   // calm state with a ticking countdown over a panel holding no date at all.
   // R-306.
   const unknown = !asOf;
+  const msRemaining = Math.max(0, nextSampleAt.getTime() - now.getTime());
+  const elapsed = now.getTime() - lastSampleAt.getTime();
+
+  if (model === "release") {
+    return {
+      nextSampleAt,
+      lastSampleAt,
+      msRemaining,
+      elapsedFraction: Math.min(1, Math.max(0, elapsed / intervalMs)),
+      behind: false,
+      awaitingSession: null,
+      overdue: false,
+      unknown,
+      msOverdue: 0,
+    };
+  }
+
+  const pastGrace = now.getTime() - lastSampleAt.getTime() > WRITER_GRACE_MS;
+  const lastSampleDate = lastSampleAt.toISOString().slice(0, 10);
+
+  // Weekly writers (ATS / COT) are job-slot freshness, not cash-session EOD.
+  // FINRA's off-exchange file is weeks in arrears, so comparing that week to
+  // lastPrintedSessionDate marked the rail overdue every day.
+  if (firesWeekly(schedule)) {
+    const behind = !unknown && asOf!.slice(0, 10) < lastSampleDate;
+    const overdue = behind && pastGrace;
+    return {
+      nextSampleAt,
+      lastSampleAt,
+      msRemaining,
+      elapsedFraction: overdue ? 1 : Math.min(1, Math.max(0, elapsed / intervalMs)),
+      behind,
+      awaitingSession: null,
+      overdue,
+      unknown,
+      msOverdue: overdue ? Math.max(0, now.getTime() - expectedRunFor(schedule, asOf!, lastSampleAt)) : 0,
+    };
+  }
 
   const latestSession = lastPrintedSessionDate(now);
   const behind = !unknown && asOf! < latestSession;
@@ -124,18 +173,14 @@ export function computeFreshnessRail(
   // instant is the same question, without a second copy of the clock math.
   const ranAfterSessionClosed =
     behind && lastPrintedSessionDate(lastSampleAt) >= latestSession;
-  const pastGrace = now.getTime() - lastSampleAt.getTime() > WRITER_GRACE_MS;
   const overdue = ranAfterSessionClosed && pastGrace;
-
-  const msRemaining = Math.max(0, nextSampleAt.getTime() - now.getTime());
-  const elapsed = now.getTime() - lastSampleAt.getTime();
 
   return {
     nextSampleAt,
     lastSampleAt,
     msRemaining,
     // A late run reads as a full track: the wait is over and the data is not here.
-    elapsedFraction: overdue ? 1 : Math.min(1, Math.max(0, elapsed / intervalMs(schedule))),
+    elapsedFraction: overdue ? 1 : Math.min(1, Math.max(0, elapsed / intervalMs)),
     behind,
     awaitingSession: behind ? latestSession : null,
     overdue,

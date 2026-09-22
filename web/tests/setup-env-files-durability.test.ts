@@ -25,6 +25,19 @@ import {
 const AWKWARD = "RX$ab'cd"; // the documented incident class: special chars
 const noLog = { info: () => {}, error: () => {} };
 
+function loadFixtureEnv(dir: string, keys: readonly string[]): Record<string, string> {
+  const inherited = new Map(keys.map((key) => [key, process.env[key]]));
+  for (const key of keys) delete process.env[key];
+  try {
+    return loadEnvConfig(dir, true, noLog, true).parsedEnv as Record<string, string>;
+  } finally {
+    for (const [key, value] of inherited) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
 async function tmpdir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), "radon-envfiles-"));
 }
@@ -46,10 +59,7 @@ describe("web dialect round-trips through the real @next/env", () => {
     const content = upsertEnvContent("", cases, "next");
     const dir = await tmpdir();
     await fs.writeFile(path.join(dir, ".env"), content);
-    const parsed = loadEnvConfig(dir, true, noLog, true).combinedEnv as Record<
-      string,
-      string
-    >;
+    const parsed = loadFixtureEnv(dir, Object.keys(cases));
     for (const [key, value] of Object.entries(cases)) {
       expect(parsed[key], key).toBe(value);
     }
@@ -197,7 +207,7 @@ describe("REL-218 (R-593): the upsert is quote-continuation aware", () => {
     const next = upsertEnvContent(existing, { UW_TOKEN: "fresh" }, "next");
     await fs.writeFile(target, next);
     const noLog = { info: () => {}, error: () => {} };
-    const parsed = loadEnvConfig(dir, true, noLog, true).combinedEnv as Record<string, string>;
+    const parsed = loadFixtureEnv(dir, ["UW_TOKEN"]);
     expect(parsed.NOTES).toBe("line one\nSENTINEL=not-an-assignment\nline three");
     expect(parsed.UW_TOKEN).toBe("fresh");
     expect(parsed.SENTINEL).toBeUndefined();

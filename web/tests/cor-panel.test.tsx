@@ -12,7 +12,7 @@
  * Spec: docs/indicators/cor.md.
  */
 import React from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
@@ -184,6 +184,7 @@ import CorPanel from "../components/CorPanel";
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   mockUseCor.mockReset();
 });
 
@@ -308,6 +309,32 @@ describe("CorPanel — header strip", () => {
     const regime = screen.getByTestId("cor-regime-value");
     expect(regime.textContent).toContain("COMPRESSED");
     expect(regime.style.color).toBe("var(--warning)");
+  });
+});
+
+describe("CorPanel — freshness rail", () => {
+  it("shows the held session and counts down to the 02:20 UTC slot", () => {
+    // 00:30 UTC on a Thursday: 1h50m short of radon-cor.timer's 02:20 UTC
+    // slot. radon-straddle (02:15) reads 1h 45m, radon-vixcor (02:35) 2h 05m,
+    // so the constant is pinned, not just "some daily timer".
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-27T00:30:00Z"));
+    renderPanel(
+      hookState({
+        data: buildData({
+          scan_time: "2026-08-26T02:20:00Z",
+          current: { ...buildData().current!, date: "2026-08-25" },
+        }),
+      }),
+    );
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+    const rail = screen.getByTestId("cor-freshness-rail");
+    expect(rail).toBeTruthy();
+    expect(rail.textContent).toContain("2026-08-25");
+    expect(screen.getByTestId("cor-freshness-rail-countdown").textContent).toBe("1h 50m");
+    expect(rail.textContent).toContain("Next sample");
   });
 });
 

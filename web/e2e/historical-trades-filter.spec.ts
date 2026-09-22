@@ -165,7 +165,6 @@ async function stubOrdersPage(page: import("@playwright/test").Page) {
   );
 
   await page.route("**/api/blotter", (route) => {
-    const method = route.request().method();
     return route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -195,3 +194,42 @@ test("historical trades table supports client-side filtering", async ({ page }) 
   await expect(page.getByText("TSLA 20260320 250C")).toHaveCount(0);
   await expect(page.getByText("1/3")).toBeVisible();
 });
+
+for (const width of [1280, 393]) {
+  test(`historical fill prices are visible and honest at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 });
+    await stubOrdersPage(page);
+    const data = structuredClone(BLOTTER_MOCK);
+    const trade = data.closed_trades[0];
+    trade.symbol = "VIX";
+    trade.contract_desc = "VIX Closed Call $30 2026-10-20";
+    trade.executions = [
+      { ...trade.executions[0], price: 1.1, quantity: 1 },
+      { ...trade.executions[0], exec_id: "e1-partial", price: 1.3, quantity: 3 },
+    ];
+    data.closed_trades[1].executions = [];
+    await page.route("**/api/blotter", (route) => route.fulfill({
+      json: data,
+    }));
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await page.goto("/orders");
+    const section = page.getByTestId("historical-trades-section");
+    const vix = width > 640
+      ? section.getByRole("row").filter({ hasText: "VIX Closed Call" })
+      : section.getByTestId("mobile-blotter-VIX-0");
+    await expect(vix.getByText("$1.25", { exact: true })).toBeVisible();
+    if (width > 640) {
+      await section.getByRole("columnheader", { name: "Avg Fill" }).click();
+      await expect(section.locator("tbody tr").first()).toContainText("VIX");
+      await section.getByRole("columnheader", { name: "Avg Fill" }).click();
+      await expect(section.locator("tbody tr").first()).toContainText("TSLA");
+      await expect(section.locator("tbody tr").last().getByTestId("historical-fill-price")).toHaveText("---");
+    } else {
+      await expect(section.getByTestId(/^mobile-blotter-MSFT-/).getByTestId("historical-fill-price")).toContainText("---");
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+    expect(errors).toEqual([]);
+    await page.screenshot({ path: testInfo.outputPath(`historical-fill-${width}.png`), fullPage: true, animations: "disabled" });
+  });
+}

@@ -39,11 +39,32 @@ _ORDER_LANE_SCRIPTS = frozenset({
     "ib_execute.py",
 })
 
+# 2026-09-08: the general lane on the 2-vCPU host (3 slots) was pinned by
+# cri/vcg/gex scans on 120-180s budgets plus the 30s-cadence ib_sync /
+# ib_orders runs, and every user-facing chain request (/options/expirations,
+# /index-options/chain) was refused the instant it arrived. Two remedies:
+# batch work — any caller willing to wait longer than LONG_RUNNING_TIMEOUT_S —
+# may not occupy the interactive floor, and interactive callers wait briefly
+# for a slot to free instead of failing fast. Batch callers stay fail-fast:
+# they have caches and the scan-gate backoff.
+RESERVED_INTERACTIVE_SLOTS = max(
+    0, min(int(os.environ.get("RADON_RESERVED_INTERACTIVE_SLOTS", "1")), 8)
+)
+LONG_RUNNING_TIMEOUT_S = 60.0
+SUBPROCESS_ADMISSION_WAIT_S = max(
+    0.0, min(float(os.environ.get("RADON_SUBPROCESS_ADMISSION_WAIT_S", "10")), 60.0)
+)
+_ADMISSION_POLL_S = 0.1
+
 _active_subprocesses = 0
 
 
 def _is_order_lane(script: str) -> bool:
     return Path(script).name in _ORDER_LANE_SCRIPTS
+
+
+def _is_long_running(timeout: float) -> bool:
+    return timeout > LONG_RUNNING_TIMEOUT_S
 
 
 def _general_lane_capacity() -> int:
@@ -52,27 +73,51 @@ def _general_lane_capacity() -> int:
     return max(1, MAX_CONCURRENT_SUBPROCESSES - RESERVED_ORDER_SLOTS)
 
 
-def _lane_capacity(script: str) -> int:
+def _long_running_lane_capacity() -> int:
+    return max(1, _general_lane_capacity() - RESERVED_INTERACTIVE_SLOTS)
+
+
+def _lane_capacity(script: str, timeout: float) -> int:
     if _is_order_lane(script):
         return MAX_CONCURRENT_SUBPROCESSES
+    if _is_long_running(timeout):
+        return _long_running_lane_capacity()
     return _general_lane_capacity()
 
 
-def _claim_subprocess_slot(script: str) -> bool:
+def _admission_wait_s(script: str, timeout: float) -> float:
+    if _is_long_running(timeout):
+        return 0.0
+    return min(SUBPROCESS_ADMISSION_WAIT_S, float(timeout))
+
+
+def _try_claim_subprocess_slot(script: str, timeout: float) -> bool:
     global _active_subprocesses
     # No await between the check and increment: atomic within one event loop.
-    capacity = _lane_capacity(script)
-    if _active_subprocesses >= capacity:
-        logger.warning(
-            "Subprocess capacity exhausted for %s (%d active, lane cap %d, hard cap %d)",
-            script,
-            _active_subprocesses,
-            capacity,
-            MAX_CONCURRENT_SUBPROCESSES,
-        )
+    if _active_subprocesses >= _lane_capacity(script, timeout):
         return False
     _active_subprocesses += 1
     return True
+
+
+async def _acquire_subprocess_slot(script: str, timeout: float) -> bool:
+    """Claim a slot, waiting up to the caller's admission budget for one to free."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + _admission_wait_s(script, timeout)
+    while True:
+        if _try_claim_subprocess_slot(script, timeout):
+            return True
+        if loop.time() >= deadline:
+            logger.warning(
+                "Subprocess capacity exhausted for %s (%d active, lane cap %d, hard cap %d, waited %.1fs)",
+                script,
+                _active_subprocesses,
+                _lane_capacity(script, timeout),
+                MAX_CONCURRENT_SUBPROCESSES,
+                _admission_wait_s(script, timeout),
+            )
+            return False
+        await asyncio.sleep(_ADMISSION_POLL_S)
 
 
 def _release_subprocess_slot() -> None:
@@ -278,7 +323,7 @@ async def run_script(
     script_path = SCRIPTS_DIR / script
     if not script_path.exists():
         return ScriptResult(ok=False, error=f"Script not found: {script}")
-    if not _claim_subprocess_slot(script):
+    if not await _acquire_subprocess_slot(script, timeout):
         return ScriptResult(ok=False, error="Subprocess capacity exhausted")
 
     cmd = [sys.executable, str(script_path)] + (args or [])
@@ -358,7 +403,7 @@ async def run_script_raw(
         return RawScriptResult(
             ok=False, stderr=f"Script not found: {script}", exit_code=None
         )
-    if not _claim_subprocess_slot(script):
+    if not await _acquire_subprocess_slot(script, timeout):
         return RawScriptResult(
             ok=False, stderr="Subprocess capacity exhausted", exit_code=None
         )
@@ -416,7 +461,7 @@ async def run_module(
     For scripts invoked as `python3 -m trade_blotter.flex_query --json`.
     """
     cmd = [sys.executable, "-m", module] + (args or [])
-    if not _claim_subprocess_slot(module):
+    if not await _acquire_subprocess_slot(module, timeout):
         return ScriptResult(ok=False, error="Subprocess capacity exhausted")
 
     proc: Optional[asyncio.subprocess.Process] = None

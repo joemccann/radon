@@ -1,5 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import WorkspaceShell from "@/components/WorkspaceShell";
+import { isTickerRouteSegment } from "@/lib/tickerRoute";
+import { routeMetadata } from "@/lib/pageTitle";
 
 // Static routes that Next.js already handles — defense-in-depth guard
 const RESERVED = new Set([
@@ -9,12 +11,15 @@ const RESERVED = new Set([
   "_next", "favicon",
 ]);
 
-const TICKER_RE = /^[A-Za-z]{1,5}$/;
-
 type Props = {
   params: Promise<{ ticker: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
+
+export async function generateMetadata({ params }: Props) {
+  const { ticker } = await params;
+  return routeMetadata(`/${ticker}`);
+}
 
 export default async function TickerPage({ params, searchParams }: Props) {
   const { ticker: raw } = await params;
@@ -23,8 +28,7 @@ export default async function TickerPage({ params, searchParams }: Props) {
   // Guard reserved paths (static routes already win, but be explicit)
   if (RESERVED.has(raw.toLowerCase())) return notFound();
 
-  // Format validation: 1-5 alpha chars only
-  if (!TICKER_RE.test(raw)) return notFound();
+  if (!isTickerRouteSegment(raw)) return notFound();
 
   // Canonical URL is uppercase — redirect if not
   const upper = raw.toUpperCase();

@@ -1,0 +1,260 @@
+/* Typography and reading rhythm for the instrument workspace. The chain and
+   order ticket retain their purpose-built layouts and financial controls. */
+@media (min-width: 1024px) {
+  :global(.instrument-workspace) .views {
+    --instrument-meta-size: 12px;
+    --instrument-body-size: 14px;
+    --instrument-ui-font: var(--font-sans);
+    font-variant-numeric: tabular-nums;
+  }
+
+  :global(.instrument-workspace) .views :global(.position-tab),
+  :global(.instrument-workspace) .views :global(.ratings-tab),
+  :global(.instrument-workspace) .views :global(.seasonality-tab),
+  :global(.instrument-workspace) .views :global(.company-tab) {
+    min-width: 0;
+    gap: 20px;
+  }
+
+  :global(.instrument-workspace) .views :global(.position-summary-grid),
+  :global(.instrument-workspace) .views :global(.company-stats-grid) {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  :global(.instrument-workspace) .views :global(.company-profile-grid) {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  :global(.instrument-workspace) .views :global(.ratings-targets-grid) {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  :global(.instrument-workspace) .views :global(.pos-stat) {
+    min-width: 0;
+    gap: 8px;
+    padding: 14px;
+    border-color: var(--line-grid);
+    border-radius: var(--radius);
+    background: var(--bg-panel);
+  }
+
+  :global(.instrument-workspace) .views :global(.pos-stat-label) {
+    font: 400 12px/1.4 var(--font-sans);
+    letter-spacing: 0;
+    text-transform: none;
+  }
+
+  :global(.instrument-workspace) .views :global(.pos-stat-value) {
+    font: 600 16px/1.4 var(--font-sans);
+    overflow-wrap: anywhere;
+  }
+
+  :global(.instrument-workspace) .views :global(.pos-legs-title),
+  :global(.instrument-workspace) .views :global(.ratings-targets-title),
+  :global(.instrument-workspace) .views :global(.seasonality-detail-title) {
+    font: 600 14px/1.4 var(--font-sans);
+    color: var(--text-primary);
+    letter-spacing: 0;
+    text-transform: none;
+  }
+
+  :global(.instrument-workspace) .views :global(.pos-legs-toggle) {
+    min-height: 36px;
+    margin-bottom: 8px;
+  }
+
+  :global(.instrument-workspace) .views :global(.pos-legs-table) {
+    border-color: var(--line-grid);
+    border-radius: var(--radius);
+    font-family: var(--font-sans);
+  }
+
+  :global(.instrument-workspace) .views :global(.pos-legs-table th) {
+    padding: 10px 12px;
+    font-size: 12px;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+
+  :global(.instrument-workspace) .views :global(.pos-legs-table td) {
+    height: 42px;
+    padding: 8px 12px;
+    font-size: 14px;
+  }
+
+  :global(.instrument-workspace) .views :global(.position-trade-actions-hint),
+  :global(.instrument-workspace) .views :global(.ratings-count),
+  :global(.instrument-workspace) .views :global(.ratings-pct),
+  :global(.instrument-workspace) .views :global(.ratings-bar-labels),
+  :global(.instrument-workspace) .views :global(.ratings-bar-seg),
+  :global(.instrument-workspace) .views :global(.company-meta),
+  :global(.instrument-workspace) .views :global(.company-show-more),
+  :global(.instrument-workspace) .views :global(.seasonality-stat),
+  :global(.instrument-workspace) .views :global(.seasonality-cell-month),
+  :global(.instrument-workspace) .views :global(.seasonality-cell-winrate),
+  :global(.instrument-workspace) .views :global(.seasonality-cell-nodata-text),
+  :global(.instrument-workspace) .views :global(.seasonality-legend-item),
+  :global(.instrument-workspace) .views :global(.seasonality-table-badge) {
+    font-family: var(--font-sans);
+    font-size: 12px;
+    letter-spacing: 0;
+  }
+
+  :global(.instrument-workspace) .views :global(.company-name) {
+    font-size: 18px;
+  }
+
+  :global(.instrument-workspace) .views :global(.company-description p) {
+    max-width: 88ch;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  :global(.instrument-workspace) .views :global(.company-show-more) {
+    min-height: 32px;
+  }
+
+  :global(.instrument-workspace) .views :global(.seasonality-grid) {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  :global(.instrument-workspace) .views :global(.seasonality-cell) {
+    min-width: 0;
+    gap: 8px;
+    padding: 12px;
+    border-radius: var(--radius);
+  }
+
+  :global(.instrument-workspace) .views :global(.seasonality-cell-month) {
+    padding-right: 20px;
+    flex-wrap: wrap;
+  }
+
+  :global(.instrument-workspace) .views :global(.seasonality-cell-return) {
+    font: 600 16px/1.4 var(--font-sans);
+  }
+
+  :global(.instrument-workspace) .views :global(.seasonality-source-badge),
+  :global(.instrument-workspace) .views :global(.seasonality-now),
+  :global(.instrument-workspace) .views :global(.seasonality-cell-badge) {
+    font: 600 12px/1.2 var(--font-sans);
+    letter-spacing: 0;
+  }
+
+  :global(.instrument-workspace) .views :global(.seasonality-cell-badge) {
+    width: 20px;
+    height: 20px;
+  }
+
+  :global(.instrument-workspace) .views :global(.seasonality-legend) {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 12px 24px;
+  }
+
+  :global(.instrument-workspace) .views :global(.news-item) {
+    display: grid;
+    grid-template-columns: 160px minmax(0, 1fr);
+    align-items: start;
+    gap: 20px;
+    padding: 16px 0;
+    border-color: var(--line-grid);
+  }
+
+  :global(.instrument-workspace) .views :global(.news-item:first-child) {
+    padding-top: 0;
+  }
+
+  :global(.instrument-workspace) .views :global(.news-meta) {
+    margin: 0;
+    gap: 6px;
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  :global(.instrument-workspace) .views :global(.news-date),
+  :global(.instrument-workspace) .views :global(.news-source),
+  :global(.instrument-workspace) .views :global(.news-fallback-notice) {
+    font: 400 12px/1.4 var(--font-sans);
+    letter-spacing: 0;
+    text-transform: none;
+    overflow-wrap: anywhere;
+  }
+
+  :global(.instrument-workspace) .views :global(.news-headline) {
+    font: 500 14px/1.6 var(--font-sans);
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+  }
+
+  :global(.instrument-workspace) .views :global(.news-open-link) {
+    width: 32px;
+    height: 32px;
+    margin: -5px 0 -5px 4px;
+    justify-content: center;
+    border-radius: var(--radius);
+  }
+
+  :global(.instrument-workspace) .views :global(.news-open-link:hover) {
+    background: var(--bg-hover);
+  }
+
+  :global(.instrument-workspace) .views :global(.news-open-link:focus-visible) {
+    outline: 2px solid var(--signal-core);
+    outline-offset: 2px;
+  }
+
+  :global(.instrument-workspace) .views :global(.news-open-link svg) {
+    width: 14px;
+    height: 14px;
+  }
+
+  :global(.instrument-workspace) .views :global(.section) {
+    border-color: var(--line-grid);
+    border-radius: var(--radius);
+    margin-bottom: 16px;
+  }
+
+  :global(.instrument-workspace) .views :global(.section-header) {
+    min-height: 44px;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  :global(.instrument-workspace) .views :global(.section-title) {
+    font: 600 14px/1.4 var(--font-sans);
+    letter-spacing: 0;
+    text-transform: none;
+  }
+
+  :global(.instrument-workspace) .views :global(.regime-strip) {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+
+  :global(.instrument-workspace) .views :global(.regime-strip-cell) {
+    grid-column: auto;
+    padding: 14px;
+  }
+
+  :global(.instrument-workspace) .views :global(.regime-strip-label),
+  :global(.instrument-workspace) .views :global(.regime-strip-sub) {
+    font: 400 12px/1.4 var(--font-sans);
+    letter-spacing: 0;
+  }
+
+  :global(.instrument-workspace) .views :global(.regime-strip-value) {
+    font-family: var(--font-sans);
+  }
+
+  :global(.instrument-workspace) .views :global(.asset-deck-empty),
+  :global(.instrument-workspace) .views :global(.tab-error),
+  :global(.instrument-workspace) .views :global(.tab-loading-text) {
+    font: 400 14px/1.5 var(--font-sans);
+    letter-spacing: 0;
+    text-transform: none;
+  }
+}

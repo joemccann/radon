@@ -1,32 +1,12 @@
 // Content module for /defined-risk-options-structures.
-// The catalog itself is read from docs/options-structures.json (the same
-// file that drives the order-entry guard), so every count on the page is
-// recomputed from the data at build time, never hand-copied. It is loaded
-// with node:fs instead of a static import because turbopack.root is pinned
-// to site/ and refuses module imports from outside it; the page is fully
-// static, so this read happens at build/prerender time only.
+// The catalog itself comes from docs/options-structures.json (the same file
+// that drives the order-entry guard), vendored into lib/generated so it is
+// bundled into the deployed function; docs/ sits outside site/ and is not
+// traced into the Vercel output. lib/generated/options-structures.parity.test.ts
+// fails if the copy drifts from the source.
 
-import { existsSync, readFileSync } from "node:fs";
-import path from "node:path";
+import catalogJson from "../generated/options-structures.json";
 import { SITE_NAME, siteUrl } from "../seo";
-
-function loadCatalogJson(): unknown {
-  // cwd is site/ under `next build`/`next dev`, but the repo root under the
-  // root Vitest run, so both locations are tried.
-  const candidates = [
-    path.join(process.cwd(), "..", "docs", "options-structures.json"),
-    path.join(process.cwd(), "docs", "options-structures.json"),
-  ];
-  const file = candidates.find((candidate) => existsSync(candidate));
-  if (!file) {
-    throw new Error(
-      `options-structures.json not found; looked in: ${candidates.join(", ")}`,
-    );
-  }
-  return JSON.parse(readFileSync(file, "utf8"));
-}
-
-const catalogJson = loadCatalogJson();
 
 export type CatalogLeg = {
   type: string;
@@ -50,7 +30,7 @@ export type CatalogStructure = {
   notes: string | null;
 };
 
-export const catalog = catalogJson as CatalogStructure[];
+export const catalog = catalogJson as unknown as CatalogStructure[];
 
 export const SLUG = "defined-risk-options-structures";
 export const NAV_LABEL = "Structure Catalog";

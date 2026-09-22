@@ -1,5 +1,7 @@
 "use client";
 
+import RequestError from "@/components/RequestError";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ExternalLink, Newspaper } from "lucide-react";
 import SectionEmptyState from "@/components/SectionEmptyState";
@@ -23,6 +25,7 @@ export default function NewsTab({ ticker, active }: NewsTabProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [source, setSource] = useState<string | null>(null);
+  const [retryAttempt, setRetryAttempt] = useState(0);
   const [fetched, setFetched] = useState(false);
   const [resolvedTicker, setResolvedTicker] = useState<string | null>(null);
   const requestGenerationRef = useRef(0);
@@ -61,7 +64,7 @@ export default function NewsTab({ ticker, active }: NewsTabProps) {
     const generation = ++requestGenerationRef.current;
     void fetchNews(controller.signal, generation);
     return () => controller.abort();
-  }, [active, fetchNews]);
+  }, [active, fetchNews, retryAttempt]);
 
   const isCurrentTicker = resolvedTicker === ticker;
 
@@ -74,7 +77,7 @@ export default function NewsTab({ ticker, active }: NewsTabProps) {
   }
 
   if (isCurrentTicker && error) {
-    return <div className="tab-error">{error}</div>;
+    return <div className="tab-empty"><RequestError error={error} fallback="This instrument data could not be loaded. Try again." onRetry={() => setRetryAttempt(attempt => attempt + 1)} /><button type="button" className="btn-secondary" onClick={() => setRetryAttempt(attempt => attempt + 1)}>Reload data</button></div>;
   }
 
   if (isCurrentTicker && fetched && news.length === 0) {
@@ -98,7 +101,7 @@ export default function NewsTab({ ticker, active }: NewsTabProps) {
               {item.created_at ? new Date(item.created_at).toLocaleDateString() : ""}
             </span>
             {item.source && <span className="news-source">{item.source}</span>}
-            {item.is_major && <span className="pill defined" style={{ fontSize: "8px", padding: "1px 4px" }}>MAJOR</span>}
+            {item.is_major && <span className="pill defined" style={{ fontSize: "var(--instrument-meta-size, 8px)", padding: "1px 4px" }}>MAJOR</span>}
           </div>
           <div className="news-headline">
             {item.headline}

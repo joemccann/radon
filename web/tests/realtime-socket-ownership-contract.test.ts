@@ -10,8 +10,9 @@
  * 2026-09-01 mobile page-change lag). Behavior pin:
  * web/tests/realtime-prices-navigation-persistence.test.tsx.
  */
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { dirname, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { cleanup, render } from "@testing-library/react";
@@ -50,17 +51,10 @@ afterEach(() => {
   else process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = ORIGINAL_CLERK_KEY;
 });
 
-// jsdom rewrites import.meta.url to a non-file scheme, so walk up from cwd
-// to the checkout root instead.
-const WEB_ROOT = (() => {
-  let dir = process.cwd();
-  for (let i = 0; i < 6; i += 1) {
-    if (existsSync(join(dir, "web", "components", "Providers.tsx"))) return join(dir, "web");
-    if (existsSync(join(dir, "components", "Providers.tsx"))) return dir;
-    dir = resolve(dir, "..");
-  }
-  throw new Error(`could not locate web/ from ${process.cwd()}`);
-})();
+// Resolve against THIS file, never process.cwd() — the suite must stay green
+// no matter which directory vitest was launched from (T-451). Same pattern as
+// demo-provisioning-resilience.test.ts.
+const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const source = (path: string) => readFileSync(resolve(WEB_ROOT, path), "utf8");
 
 /** Every .ts/.tsx source file under the given web/ subtrees. */

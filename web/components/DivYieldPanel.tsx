@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Percent } from "lucide-react";
 import BrushMinimap from "./BrushMinimap";
 import CriHistoryChart, { type ChartSeries } from "./CriHistoryChart";
+import FreshnessRail from "./FreshnessRail";
 import HistoryRangeChips from "./HistoryRangeChips";
 import InfoTooltip from "./InfoTooltip";
 import MetricCell from "./mobile/MetricCell";
@@ -12,6 +13,7 @@ import SpectralLoader from "./SpectralLoader";
 import { RegimeStrip, RegimeStripCell } from "./RegimeStrip";
 import { chartSeriesColor } from "@/lib/chartSystem";
 import { presetRange, type RangePresetSlug } from "@/lib/historyRange";
+import { DIV_YIELD_REFRESH } from "@/lib/refreshSchedule";
 import {
   divYieldRegimeColor,
   divYieldRegimeLabel,
@@ -196,6 +198,12 @@ export default function DivYieldPanel() {
             />
           </RegimeStrip>
         )}
+
+        <FreshnessRail
+          schedule={DIV_YIELD_REFRESH}
+          asOf={data.data_date}
+          testId="divyield-freshness-rail"
+        />
       </div>
 
       <div className="breadth-history-block" data-testid="divyield-chart-section">

@@ -205,6 +205,26 @@ def test_missing_level_is_explicitly_partial_not_fabricated():
     assert result["complete"] is False
 
 
+def test_live_provider_null_spot_preserves_exposure_without_inventing_price():
+    # 2026-09-09: live SNDK (5413 cells) and SPX (12424 cells) returned
+    # HTTP 200 cubes with spot_price=null while Radon rejected both as 503.
+    exposure = _exposure_payload(ticker="SNDK")
+    exposure["spot_price"] = None
+    levels = {**_levels_payload(), "ticker": "SNDK"}
+    result = MenthorQDashboardClient._normalize("SNDK", "eod", exposure, levels)
+    assert result["spot"] is None
+    assert result["complete"] is False
+    assert result["cells"]["net_gex"] == exposure["cells"]["net_gex"]
+    assert result["source_time"] == exposure["timestamp"]
+
+
+@pytest.mark.parametrize("spot", [0, -1, True, "853.2", float("nan"), float("inf")])
+def test_missing_spot_tolerance_does_not_accept_malformed_prices(spot):
+    exposure = {**_exposure_payload(), "spot_price": spot}
+    with pytest.raises(MenthorQDashboardPayloadError):
+        MenthorQDashboardClient._normalize("MU", "eod", exposure, _levels_payload())
+
+
 def test_expired_explicit_token_fails_before_network_call():
     session = _Session([])
     client = MenthorQDashboardClient(

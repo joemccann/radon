@@ -8,8 +8,11 @@ Credentials (project root .env, loaded via a local fallback loader):
   MENTHORQ_USER  — MenthorQ email/username
   MENTHORQ_PASS  — MenthorQ password
 
-Vision API key (from web/.env or shell):
-  ANTHROPIC_API_KEY / CLAUDE_CODE_API_KEY / CLAUDE_API_KEY
+Vision cascade (credit/billing/quota/hard-fail fallthrough):
+  anthropic -> grok -> cursor (unwired skip) -> codex -> gemini -> nvidia -> cerebras
+  Keys: ANTHROPIC_API_KEY / CLAUDE_CODE_API_KEY / CLAUDE_API_KEY,
+  XAI_API_KEY / GROK_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY,
+  NVIDIA_API_KEY, CEREBRAS_API_KEY.
 
 Usage:
     python3 scripts/fetch_menthorq_cta.py              # Fetch + cache + print summary

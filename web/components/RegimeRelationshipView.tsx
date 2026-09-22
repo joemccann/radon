@@ -11,6 +11,7 @@ import * as d3 from "d3";
 import InfoTooltip from "./InfoTooltip";
 import ChartLegend from "./charts/ChartLegend";
 import ChartPanel from "./charts/ChartPanel";
+import { chartXAxisTickAnchor, resolveChartXAxisTickCount } from "@/lib/chartXAxis";
 import { SECTION_TOOLTIPS } from "@/lib/sectionTooltips";
 import {
   buildRegimeRelationshipEntries,
@@ -85,7 +86,7 @@ export function buildTickIndices(length: number, count = 4): number[] {
 }
 
 export function resolveRelationshipTickCount(innerWidth: number): number {
-  return Math.max(4, Math.min(7, Math.floor(innerWidth / 110)));
+  return resolveChartXAxisTickCount(Number.MAX_SAFE_INTEGER, innerWidth);
 }
 
 export function nearestRegimeScatterIndex(
@@ -687,7 +688,7 @@ export default function RegimeRelationshipView({
                   className="regime-relationship-marker regime-relationship-marker-spread"
                 />
 
-                {spreadTickIndices.map((index) => (
+                {spreadTickIndices.map((index, tickIndex) => (
                   <g key={`spread-x-${visibleEntries[index]?.date}`}>
                     <line
                       x1={spreadXScale(index)}
@@ -699,7 +700,7 @@ export default function RegimeRelationshipView({
                     <text
                       x={spreadXScale(index)}
                       y={innerHeight + 20}
-                      textAnchor="middle"
+                      textAnchor={chartXAxisTickAnchor(tickIndex, spreadTickIndices.length)}
                       className="regime-relationship-axis-label"
                     >
                       {formatDateLabel(visibleEntries[index]?.date ?? "")}
@@ -1180,7 +1181,7 @@ export default function RegimeRelationshipView({
                   </>
                 )}
 
-                {tickIndices.map((index) => (
+                {tickIndices.map((index, tickIndex) => (
                   <g key={`z-x-${entries[index]?.date}`}>
                     <line
                       x1={xScale(index)}
@@ -1192,7 +1193,7 @@ export default function RegimeRelationshipView({
                     <text
                       x={xScale(index)}
                       y={innerHeight + 20}
-                      textAnchor="middle"
+                      textAnchor={chartXAxisTickAnchor(tickIndex, tickIndices.length)}
                       className="regime-relationship-axis-label"
                     >
                       {formatDateLabel(entries[index]?.date ?? "")}

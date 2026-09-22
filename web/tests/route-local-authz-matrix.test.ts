@@ -13,12 +13,13 @@ const ROUTES = [
   "orders/cancel", "orders/modify", "orders/place", "orders", "orders/whatif",
   "paper/place", "performance", "pi", "portfolio", "preferences", "previous-close",
   "regime", "scanner", "scanner/strength", "scanner/strength/scan",
-  "scanner/theta", "scanner/theta/scan", "short-availability/[ticker]", "streaks",
+  "scanner/theta", "scanner/theta/scan", "scanner/vol-skew-mr", "scanner/vol-skew-mr/scan", "scanner/bounce", "scanner/bounce/scan",
+  "short-availability/[ticker]", "streaks",
   "ticker/info", "ticker/news", "ticker/ratings", "ticker/seasonality", "vcg",
-  "workflow/run", "service-health",
+  "service-health",
 ] as const;
 
-const SHARE_ROUTES = ["gex", "internals", "menthorq/cta", "regime", "vcg"] as const;
+const SHARE_ROUTES = ["gex", "internals", "menthorq/cta", "newsfeed", "regime", "vcg"] as const;
 const ADMIN_ROUTES = ["edge-health", "health", "host-metrics", "reliability", "slo"] as const;
 
 // Guarded routes outside the security-report ROUTES list — admin actions and
@@ -34,6 +35,12 @@ const GUARDED_ADMIN_ACTION_ROUTES = [
   // this route was a loopback-trusted deputy (the Next.js server IS loopback
   // to FastAPI's /ws-ticket).
   "ib/ws-ticket",
+  // Subscription research bytes require the operator allowlist on every read.
+  "newsfeed/research/files/[asset]",
+  // Operator ground-truth labels on research items: requireRouteAccess operatorOnly on the only verb.
+  "newsfeed/research/feedback", "newsfeed/research/held", "newsfeed/research/rules",
+  // Original-page evidence and account/assistant audit exports are operator-only.
+  "research/evidence/[asset]", "research/governance",
   // R-180: this POST SPAWNS garch_convergence.py. Its leap/scan sibling has
   // carried the same guard since R-079; the read-only GET stays below.
   "garch-convergence/scan",
@@ -64,10 +71,12 @@ const SETUP_TOKEN_GUARDED_ROUTES = [
 // lands either here or in a guarded list above; the filesystem pin below
 // fails until that decision is made (the publicShareRoutes.ts discipline).
 const MIDDLEWARE_PERIMETER_ONLY_ROUTES = [
+  // AI infrastructure is a cache-only research read, like llm-token-index.
+  "ai-cycle",
   "bookmarks", "bookmarks/[post_id]", "bpi", "catalysts",
   // cor/skew2d/vol-cone/equibles-*: read-only market-data indicators (R-079
   // classification) — same posture as bpi/margin-debt/straddle.
-  "cor", "credit-spread", "dispersion", "divyield", "ma-ratio", "iei-hyg", "trin", "equibles-ats-venue-share", "equibles-cot-positioning",
+  "cor", "credit-spread", "dispersion", "divyield", "ma-ratio", "calm-streak", "iei-hyg", "trin", "equibles-ats-venue-share", "equibles-cot-positioning",
   "equibles-filing-forensics", "equibles-short-crowding",
   "equibles-smart-money-13f",
   "flex-token", "flow-surprise", "futures-quote", "garch-convergence",
@@ -77,8 +86,8 @@ const MIDDLEWARE_PERIMETER_ONLY_ROUTES = [
   // are present in this deployment, never any key material — same posture as
   // its llm-token-index sibling, so the middleware perimeter is the only layer.
   "models", "prices",
-  "risk-free-rate", "skew", "skew2d", "straddle", "vixcor", "vixts",
-  "vol-cone", "watchlist", "watchlist/[symbol]", "workflow", "yield-curve",
+  "risk-free-rate", "skew", "skew2d", "straddle", "vixcor", "vixts", "panic-index",
+  "vol-cone", "watchlist", "watchlist/[symbol]", "yield-curve",
   "yield-curve/live",
 ] as const;
 
@@ -88,7 +97,7 @@ const MIDDLEWARE_PERIMETER_ONLY_ROUTES = [
 const PINNED_ELSEWHERE_ROUTES = [
   "gex/share/content", "internals/share/content", "menthorq/cta/share/content",
   "probe/freshness", "regime/share/content", "share/pnl", "vcg/share/content",
-  "webhooks/clerk",
+  "webhooks/clerk", "webhooks/tradingview/[token]",
 ] as const;
 
 const WEB_ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -175,6 +184,14 @@ describe("security report route-local authorization matrix", () => {
       const text = source(`app/api/admin/${route}/route.ts`);
       expect(text, route).toContain("requireRouteAccess");
       expect(text, route).toContain("operatorOnly: true");
+    }
+  });
+
+  it("keeps research evidence and audit exports operator-only", () => {
+    for (const route of ["research/evidence/[asset]", "research/governance"]) {
+      const text = source(`app/api/${route}/route.ts`);
+      expect(text, route).toMatch(/requireRouteAccess\(request, \{ operatorOnly: true \}\)/);
+      expect(text, route).not.toContain("demoBlockadeRoute: true");
     }
   });
 

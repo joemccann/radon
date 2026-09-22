@@ -11,7 +11,7 @@ describe("RegimeRelationshipView x-axis density", () => {
 
   it("caps the number of ticks so labels stay legible", () => {
     expect(resolveRelationshipTickCount(1200)).toBeLessThanOrEqual(7);
-    expect(resolveRelationshipTickCount(320)).toBeGreaterThanOrEqual(4);
+    expect(resolveRelationshipTickCount(320)).toBe(3);
   });
 
   it("builds first/last inclusive tick indices for the requested density", () => {

@@ -151,7 +151,10 @@ describe("FilingForensicsDossier", () => {
     stubFetch({}, 500);
     await renderDossier();
 
-    await waitFor(() => expect(screen.getByText(/filing forensics unavailable/i)).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Failed to load filing forensics"));
+    expect(screen.getByRole("alert").closest("[data-toast-viewport]")).toBeTruthy();
+    expect(screen.getByRole("status").textContent).not.toContain("Failed to load filing forensics");
+    expect(screen.getByRole("button", { name: "Refresh" })).toBeTruthy();
     expect(screen.getByText(/not as an all clear/i)).toBeTruthy();
   });
 

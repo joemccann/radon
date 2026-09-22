@@ -36,7 +36,7 @@
  * Spec: docs/indicators/vixcor.md sections G.2, G.4, G.5, G.6, G.7.
  */
 import React from "react";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
@@ -227,6 +227,7 @@ import VixCorPanel from "../components/VixCorPanel";
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   mockUseVixcor.mockReset();
 });
 
@@ -483,6 +484,36 @@ describe("VixCorPanel — summary strip", () => {
   it("renders the as-of session from the joined calendar", () => {
     renderPanel(hookState({ data: buildData() }));
     expect(screen.getByTestId("vixcor-strip-asof").textContent).toContain("2026-08-14");
+  });
+});
+
+describe("VixCorPanel — freshness rail", () => {
+  it("shows the as-of session and counts down to the 02:35 UTC slot", () => {
+    // 01:10 UTC on a Thursday: 1h25m short of radon-vixcor.timer's 02:35 UTC
+    // slot. radon-straddle (02:15) reads 1h 05m, radon-cor (02:20) 1h 10m,
+    // radon-vixts (02:45) 1h 35m, so the constant is pinned to this timer.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-27T01:10:00Z"));
+    renderPanel(
+      hookState({
+        data: buildData({
+          scan_time: "2026-08-26T02:35:00Z",
+          as_of: "2026-08-25",
+          parent_as_of: "2026-08-25",
+          vix_as_of: "2026-08-25",
+        }),
+      }),
+    );
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+    const rail = screen.getByTestId("vixcor-freshness-rail");
+    expect(rail).toBeTruthy();
+    expect(rail.textContent).toContain("2026-08-25");
+    expect(screen.getByTestId("vixcor-freshness-rail-countdown").textContent).toBe("1h 25m");
+    expect(rail.textContent).toContain("Next sample");
+    // The strip's own AS OF cell stays: it carries the parent-lag sub-label.
+    expect(screen.getByTestId("vixcor-strip-asof").textContent).toContain("2026-08-25");
   });
 });
 

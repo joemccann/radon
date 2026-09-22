@@ -48,6 +48,17 @@
       "note": "Who FastAPI trusts without a JWT (loopback, tailnet, the private-net /health probe). Both owners restated the 10.0.0.0/16 scope wrongly after REL-170 (DOC-020/022)."
     },
     {
+      "id": "slm-tagger",
+      "globs": [
+        "scripts/newsfeed/slm/**",
+        "cloud/services/radon-slm-tagger.*",
+        "cloud/scripts/install-slm-model.sh",
+        "models/slm-tagger/**"
+      ],
+      "owners": ["docs/ml/newsfeed-slm-tagger.md"],
+      "note": "Build spec for the local newsfeed text-tagger rung: dataset recipe, prompt contract, gates, modes, cutover. Paths are reserved by the plan PR; the implement PR must land its numbers in the spec."
+    },
+    {
       "id": "ops-timers",
       "globs": ["cloud/services/*.timer"],
       "owners": ["docs/operations.md", "docs/cloud-services.md"]
@@ -87,9 +98,9 @@
     },
     {
       "id": "flex-pull",
-      "globs": ["scripts/flex_sftp_pull.py"],
+      "globs": ["scripts/flex_sftp_pull.py", "scripts/cleanup_legacy_flex_aggregates.py", "scripts/rebuild_flex_gross_breakdown.py"],
       "owners": ["docs/cloud-services.md"],
-      "note": "When a duplicate-only or empty pull is an error vs expected is the on-call discriminator (DOC-078)."
+      "note": "Duplicate-delivery outcomes and legacy aggregate cleanup and gross-coverage rebuilding share the Flex recovery owner (DOC-078/119/122)."
     },
     {
       "id": "factory",
@@ -101,6 +112,19 @@
       "id": "cli",
       "globs": [".pi/commands.json"],
       "owners": ["docs/scripts-reference.md"]
+    },
+    {
+      "id": "kelly-sizing",
+      "globs": [
+        "scripts/kelly.py",
+        "scripts/kelly_guard.py",
+        "scripts/bankroll_guard.py",
+        "scripts/app_preferences.py",
+        "lib/tools/schemas/kelly.ts",
+        "lib/tools/wrappers/kelly.ts"
+      ],
+      "owners": ["docs/risk/kelly-fortunes-formula.md"],
+      "note": "Fraction band, 2.5% cap constant, estimated-p rule and M6 wiring are risk contracts; the operator owner must distinguish evaluation, Kelly warnings and independent bankroll admission (DOC-116)."
     },
     {
       "id": "repo-front-door",
@@ -162,6 +186,12 @@
       ],
       "owners": ["docs/cloud-services.md"],
       "note": "Drift-audit scope and allowlist semantics live in the cloud runbook (DOC-090)."
+    },
+    {
+      "id": "iphone-app",
+      "globs": ["docs/mobile/**", "apps/ios/**"],
+      "owners": ["docs/mobile/iphone-app-direction.md"],
+      "note": "iPhone path is foundation-only. Direction doc owns the loop, trading-safety contract, and the apps/ios stub. No Xcode project."
     }
   ]
 }

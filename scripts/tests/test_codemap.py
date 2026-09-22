@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections import Counter
 from pathlib import Path
 
@@ -13,8 +14,8 @@ from tools.codemap.generate_codemap import (
     REPO,
     architecture_from,
     build_graph,
-    collect_files,
     committed_graph_is_fresh,
+    collect_files,
     extract_js_deps,
     extract_py_deps,
     fingerprint,
@@ -82,6 +83,12 @@ class TestCollection:
         assert "web/.claude/worktrees/x.ts" not in files
         assert "tools/codemap/codemap.data.js" not in files
         assert "tools/codemap/generate_codemap.py" in files
+
+    def test_generated_next_types_do_not_change_graph(self, repo: Path) -> None:
+        before = fingerprint(build_graph(repo))
+        _write(repo, "web/next-env.d.ts", 'import "./.next/types/routes.d.ts";\n')
+        _write(repo, "site/next-env.d.ts", 'import "./.next/types/routes.d.ts";\n')
+        assert fingerprint(build_graph(repo)) == before
 
     def test_group_of(self) -> None:
         assert group_of("web/lib/order/index.ts") == "web/lib"
@@ -268,7 +275,29 @@ class TestRefreshGate:
         assert fingerprint(first) == fingerprint(second)
 
 
+class TestNightlyRefresh:
+    def test_verifies_generated_artifacts_before_opening_a_pr(self) -> None:
+        """Nightly ownership must fail closed on an invalid generated graph."""
+        script = (REPO / "scripts/codemap_nightly.sh").read_text(encoding="utf-8")
+        generate = "python3.13 tools/codemap/generate_codemap.py"
+        verify = "CODEMAP_NIGHTLY=1 python3.13 -m pytest scripts/tests/test_codemap.py::TestCommittedArtifacts::test_matches_live_graph -q"
+        assert generate in script
+        assert verify in script
+        assert script.index(generate) < script.index(verify) < script.index("if git diff --quiet")
+
+
 class TestCommittedArtifacts:
+    """The nightly's post-generate gate (scripts/codemap_nightly.sh).
+
+    Committed maps lag main between 02:00 refreshes by design (#423), so
+    this only runs where the wrapper sets CODEMAP_NIGHTLY=1 right after
+    regenerating.
+    """
+
+    @pytest.mark.skipif(
+        os.environ.get("CODEMAP_NIGHTLY") != "1",
+        reason="freshness is only asserted by the codemap nightly",
+    )
     def test_matches_live_graph(self) -> None:
         assert committed_graph_is_fresh(REPO), (
             "tools/codemap is stale; run python3.13 tools/codemap/generate_codemap.py"

@@ -39,7 +39,7 @@ describe("site SEO contract", () => {
       title: SITE_TITLE,
       description: SITE_DESCRIPTION,
     });
-    expect(siteViewport.themeColor).toBe("#0a0f14");
+    expect(siteViewport.themeColor).toBe("#ffffff");
   });
 
   it("spends the title keyword slot on persona queries, not internal jargon", () => {

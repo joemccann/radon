@@ -1,5 +1,7 @@
 "use client";
 
+import RequestError from "@/components/RequestError";
+
 import { useCallback, useEffect, useState } from "react";
 import { Gauge } from "lucide-react";
 import { fmtPrice } from "@/lib/positionUtils";
@@ -160,7 +162,7 @@ export default function RatingsTab({ ticker, active, currentPrice }: RatingsTabP
     return <div className="tab-loading"><div className="tab-loading-text">Loading ratings...</div></div>;
   }
   if (error) {
-    return <div className="tab-error">{error}</div>;
+    return <div className="tab-empty"><RequestError error={error} fallback="This instrument data could not be loaded. Try again." onRetry={() => { void fetchRatings(); }} /><button type="button" className="btn-secondary" onClick={() => { void fetchRatings(); }}>Reload data</button></div>;
   }
   if (!data) {
     return (
@@ -297,7 +299,7 @@ export default function RatingsTab({ ticker, active, currentPrice }: RatingsTabP
 
       {/* Source indicator */}
       {data.source && (
-        <div className="news-fallback-notice">via {data.source === "uw" ? "Unusual Whales" : data.source}</div>
+        <div className="news-fallback-notice">via {data.source === "uw" ? "Unusual Whales" : data.source === "rh" ? "Robinhood" : data.source}</div>
       )}
     </div>
   );

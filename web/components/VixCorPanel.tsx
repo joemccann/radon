@@ -3,6 +3,7 @@
 import { Fragment, useMemo, useState } from "react";
 import { Unlink } from "lucide-react";
 import BrushMinimap from "./BrushMinimap";
+import FreshnessRail from "./FreshnessRail";
 import HistoryRangeChips from "./HistoryRangeChips";
 import InfoTooltip from "./InfoTooltip";
 import MetricCell from "./mobile/MetricCell";
@@ -12,6 +13,7 @@ import VixCorChart from "./VixCorChart";
 import { RegimeStrip, RegimeStripCell } from "./RegimeStrip";
 import { formatCor } from "@/lib/cor";
 import { presetRange, type RangePresetSlug } from "@/lib/historyRange";
+import { VIXCOR_REFRESH } from "@/lib/refreshSchedule";
 import {
   buildVixcorChartRows,
   formatCorr,
@@ -234,6 +236,13 @@ export default function VixCorPanel() {
             </RegimeStrip>
           </div>
         )}
+
+        <FreshnessRail
+          schedule={VIXCOR_REFRESH}
+          asOf={data.as_of ?? current.date}
+          testId="vixcor-freshness-rail"
+          model="session"
+        />
       </div>
 
       {/* ── VIX over the 20-session correlation ───────────── */}

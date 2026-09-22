@@ -214,8 +214,26 @@ def _clean_values(service, body: dict) -> Dict[str, str]:
             raise _bad_request(f"{name} is not a field of {service.id}")
         if not isinstance(value, str) or not value.strip():
             raise _bad_request(f"{name} must be a non-empty string")
-        values[name] = value.strip()
+        cleaned = value.strip()
+        if not _env_exportable(cleaned):
+            # os.environ cannot hold a NUL or a lone surrogate; a value the
+            # export step would raise on must never reach the store (C06).
+            raise _bad_request(
+                f"{name} contains characters that cannot be stored"
+            )
+        values[name] = cleaned
     return values
+
+
+def _env_exportable(value: str) -> bool:
+    """True when os.environ can hold this value (no NUL, UTF-8 encodable)."""
+    if "\x00" in value:
+        return False
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
 
 
 def _merged_values(
@@ -302,7 +320,15 @@ async def put_credentials(service_id: str, request: Request):
         # leave a half-stored, half-exported service (R-539).
         store.set_secrets(submitted, actor=actor)
         for name, value in submitted.items():
-            os.environ[name] = value
+            try:
+                os.environ[name] = value
+            except (ValueError, UnicodeEncodeError) as exc:
+                # Belt-and-suspenders behind _env_exportable: a stored value
+                # the environment refuses must not abort the save (C06).
+                logger.warning(
+                    "credential save: skipping env export of %s: %s", name, exc
+                )
+                continue
             _SESSION_EXPORTED.add(name)
 
     try:
@@ -417,7 +443,18 @@ def bootstrap_exported_names() -> list:
             )
             continue
         if value:
-            os.environ[name] = value
+            try:
+                os.environ[name] = value
+            except (ValueError, UnicodeEncodeError) as exc:
+                # C06: a legacy row the environment refuses (NUL, lone
+                # surrogate) must not abort the lifespan — same skip-and-log
+                # treatment as an undecryptable row.
+                logger.warning(
+                    "credential bootstrap: skipping unexportable row %s: %s",
+                    name,
+                    exc,
+                )
+                continue
             _SESSION_EXPORTED.add(name)
             exported.append(name)
     return exported

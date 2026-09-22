@@ -51,11 +51,11 @@ const PORTFOLIO_MOCK = {
   }],
 };
 
-async function setupMocks(page: Page) {
+async function setupMocks(page: Page, portfolio: unknown = PORTFOLIO_MOCK) {
   await page.route("**/api/portfolio", (route) => route.fulfill({
     status: 200,
     contentType: "application/json",
-    body: JSON.stringify(PORTFOLIO_MOCK),
+    body: JSON.stringify(portfolio),
   }));
   await page.route("**/api/orders", (route) => route.fulfill({
     status: 200,
@@ -96,8 +96,9 @@ test("ARM protected combo is defined risk and shows aggregate P&L", async ({ pag
   await setupMocks(page);
   await page.goto("/portfolio", { waitUntil: "domcontentloaded" });
 
-  const definedSection = page.locator(".section").filter({ hasText: "Defined Risk Positions" });
-  const armRow = definedSection.locator("tr").filter({ hasText: "ARM" });
+  const definedSection = page.getByTestId("defined-risk-section").filter({ hasText: "Defined Risk Positions" });
+  const positionTable = definedSection.getByTestId("position-table");
+  const armRow = positionTable.locator("tr").filter({ hasText: "ARM" });
   await expect(definedSection).toBeVisible();
   await expect(armRow).toHaveCount(1);
   await expect(armRow).toContainText("-$10,803");
@@ -105,11 +106,33 @@ test("ARM protected combo is defined risk and shows aggregate P&L", async ({ pag
   await expect(page.getByText("Undefined Risk Positions")).toHaveCount(0);
 
   await armRow.getByRole("button", { name: "Expand legs for ARM" }).click();
-  await expect(definedSection.locator("tr").filter({ hasText: "SHORT Call $260" })).toContainText("-$600");
-  await expect(definedSection.locator("tr").filter({ hasText: "LONG Call $270" })).toContainText("-$4,855");
-  await expect(definedSection.locator("tr").filter({ hasText: "LONG Put $220" })).toContainText("-$5,348");
+  await expect(positionTable.locator("tr").filter({ hasText: "SHORT Call $260" })).toContainText("-$600");
+  await expect(positionTable.locator("tr").filter({ hasText: "LONG Call $270" })).toContainText("-$4,855");
+  await expect(positionTable.locator("tr").filter({ hasText: "LONG Put $220" })).toContainText("-$5,348");
 
   const screenshotPath = testInfo.outputPath("arm-defined-combo-pnl.png");
   await page.screenshot({ path: screenshotPath, fullPage: true });
   await testInfo.attach("arm-defined-combo-pnl", { path: screenshotPath, contentType: "image/png" });
+});
+
+
+// T-496: a measurable session leg cannot stand in for the entire combo.
+test("mixed-age combo with missing overnight baselines shows unavailable Today P&L", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1800, height: 900 });
+  // Block all unlisted API calls and every socket: no real backend or relay.
+  await page.route("**/api/**", (route) => route.abort());
+  await page.routeWebSocket(/.*/, () => {});
+  const portfolio = structuredClone(PORTFOLIO_MOCK);
+  const position = { ...portfolio.positions[0], ib_daily_pnl: null };
+  await setupMocks(page, { ...portfolio, positions: [position] });
+  await page.goto("/portfolio", { waitUntil: "domcontentloaded" });
+
+  const row = page.getByTestId("position-table").getByRole("row").filter({ hasText: "ARM" });
+  await expect(row).toHaveCount(1);
+  await expect(row.getByTestId("position-cell-today-pnl")).toHaveText("—");
+  // Aggregate lifetime P&L remains measured from all three cached leg marks.
+  await expect(row.getByTestId("position-cell-pnl")).toHaveText("-$10,803");
+  const screenshot = testInfo.outputPath("mixed-age-unavailable-today-pnl.png");
+  await page.screenshot({ path: screenshot, fullPage: true });
+  await testInfo.attach("mixed-age-unavailable-today-pnl", { path: screenshot, contentType: "image/png" });
 });

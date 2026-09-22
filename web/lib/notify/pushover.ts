@@ -4,6 +4,8 @@
 // the request that raised it. Messages carry counts and reasons only — never a
 // user id, email, or any other end-user identifier.
 
+import { scrubSecrets } from "@/lib/apiContracts";
+
 const PUSHOVER_URL = "https://api.pushover.net/1/messages.json";
 
 export async function sendPushover(params: {
@@ -43,7 +45,8 @@ export async function sendPushover(params: {
 export async function notifyDemoProvisioningFailure(reason: string): Promise<void> {
   await sendPushover({
     title: "radon demo provisioning failed",
-    message: `A demo.radon.run signup was not granted a trial: ${reason}`,
+    // RC-B18: the reason is upstream error text and can carry a DB URL/token.
+    message: `A demo.radon.run signup was not granted a trial: ${scrubSecrets(reason).slice(0, 512)}`,
     url: "https://demo.radon.run/sign-up",
     urlTitle: "demo sign-up",
   });

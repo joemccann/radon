@@ -2,7 +2,7 @@ import { requireRouteAccess } from "@/lib/routeAccess";
 
 import { NextResponse } from "next/server";
 import { RadonApiError, radonFetch } from "@/lib/radonApi";
-import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
+import { getRequestId, setNoStoreResponseHeaders, scrubSecrets } from "@/lib/apiContracts";
 
 // Disable Next.js static caching: prior-evals is a live FastAPI proxy.
 // Without this, Next 16 freezes the first response and serves stale data
@@ -52,7 +52,7 @@ export async function GET(request: Request): Promise<Response> {
         requestId,
       );
     }
-    const message = error instanceof Error ? error.message : "Prior evals lookup failed";
+    const message = scrubSecrets(error instanceof Error ? error.message : "Prior evals lookup failed");
     return setNoStoreResponseHeaders(
       NextResponse.json({ error: message }, { status: 502 }),
       requestId,

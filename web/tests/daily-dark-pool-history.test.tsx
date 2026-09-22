@@ -55,10 +55,11 @@ describe("DailyDarkPoolHistory", () => {
     fireEvent.click(toggle);
 
     expect(header?.contains(screen.getByTestId("daily-dp-history-toggle"))).toBe(true);
-    const body = root.querySelector(".section-body");
-    const table = body?.querySelector(".ticker-flow-daily");
+    const wrap = screen.getByTestId("daily-dp-history-table-wrap");
+    const table = wrap.querySelector(".ticker-flow-daily");
     const chart = screen.getByTestId("daily-dp-history-chart");
-    expect(table?.nextElementSibling).toBe(chart);
+    expect(table).toBeTruthy();
+    expect(wrap.nextElementSibling).toBe(chart);
   });
 
   it("renders a chart header with buy-% title and chronological window", () => {
@@ -77,6 +78,14 @@ describe("DailyDarkPoolHistory", () => {
     expect(screen.queryByTestId("daily-dp-history-toggle")).toBeNull();
     expect(screen.getByTestId("daily-dp-history-chart")).toBeTruthy();
     expect(screen.getByTestId("daily-dp-history-chart-header").textContent).toContain("07-18");
+  });
+
+  it("wraps the session table in the shared table-wrap scroll container", () => {
+    render(<DailyDarkPoolHistory daily={makeSessions(3)} />);
+    const wrap = screen.getByTestId("daily-dp-history-table-wrap");
+    expect(wrap.classList.contains("table-wrap")).toBe(true);
+    expect(wrap.querySelector("table.ticker-flow-daily")).toBeTruthy();
+    expect(wrap.getAttribute("role")).toBe("region");
   });
 
   it("renders nothing for empty daily", () => {

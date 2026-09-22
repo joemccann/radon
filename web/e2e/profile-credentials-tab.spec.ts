@@ -12,7 +12,7 @@
 import { test, expect, type Page } from "@playwright/test";
 
 const CREDENTIALS_PAYLOAD = {
-  groups: ["Market Data", "AI Providers"],
+  groups: ["Market Data", "AI Providers", "LLM Regime Sources"],
   services: [
     {
       id: "unusual_whales",
@@ -37,6 +37,29 @@ const CREDENTIALS_PAYLOAD = {
       ],
     },
     {
+      id: "openrouter",
+      label: "OpenRouter",
+      group: "LLM Regime Sources",
+      validator: true,
+      slow: false,
+      note: "",
+      fields: [
+        {
+          name: "OPENROUTER_API_KEY",
+          label: "Data API key",
+          secret: true,
+          placeholder: "sk-or-v1-...",
+          configured: false,
+          hint: "",
+          version: 0,
+          updated_at: null,
+          updated_by: null,
+          env_fallback: false,
+          exported_only: false,
+        },
+      ],
+    },
+    {
       id: "anthropic",
       label: "Anthropic",
       group: "AI Providers",
@@ -49,6 +72,96 @@ const CREDENTIALS_PAYLOAD = {
           label: "API key",
           secret: true,
           placeholder: "sk-ant-...",
+          configured: false,
+          hint: "",
+          version: 0,
+          updated_at: null,
+          updated_by: null,
+          env_fallback: false,
+        },
+      ],
+    },
+    {
+      id: "equibles",
+      label: "Equibles",
+      group: "Market Data",
+      validator: true,
+      slow: false,
+      note: "",
+      fields: [
+        {
+          name: "EQUIBLES_API_KEY",
+          label: "API key",
+          secret: true,
+          placeholder: "",
+          configured: false,
+          hint: "",
+          version: 0,
+          updated_at: null,
+          updated_by: null,
+          env_fallback: false,
+        },
+      ],
+    },
+    {
+      id: "ib_flex",
+      label: "IB Flex",
+      group: "Market Data",
+      validator: false,
+      slow: false,
+      note: "",
+      fields: [
+        {
+          name: "IB_FLEX_TOKEN",
+          label: "Flex token",
+          secret: true,
+          placeholder: "",
+          configured: false,
+          hint: "",
+          version: 0,
+          updated_at: null,
+          updated_by: null,
+          env_fallback: false,
+        },
+        {
+          name: "IB_FLEX_QUERY_ID",
+          label: "Blotter query id",
+          secret: false,
+          placeholder: "",
+          configured: false,
+          hint: "",
+          version: 0,
+          updated_at: null,
+          updated_by: null,
+          env_fallback: false,
+        },
+      ],
+    },
+    {
+      id: "menthorq",
+      label: "MenthorQ",
+      group: "Market Data",
+      validator: true,
+      slow: true,
+      note: "Checked with a real browser login. Expect up to a minute.",
+      fields: [
+        {
+          name: "MENTHORQ_USER",
+          label: "Email / username",
+          secret: false,
+          placeholder: "",
+          configured: false,
+          hint: "",
+          version: 0,
+          updated_at: null,
+          updated_by: null,
+          env_fallback: false,
+        },
+        {
+          name: "MENTHORQ_PASS",
+          label: "Password",
+          secret: true,
+          placeholder: "",
           configured: false,
           hint: "",
           version: 0,
@@ -99,6 +212,8 @@ async function stubProfileApis(page: Page): Promise<void> {
 }
 
 test.describe("profile operator tabs", () => {
+  test.describe.configure({ timeout: 90_000 });
+
   test("preferences fold-in and credentials masked list render", async ({ page }) => {
     await stubProfileApis(page);
     await page.route("**/api/credentials", (route) =>
@@ -116,9 +231,24 @@ test.describe("profile operator tabs", () => {
     await page.getByRole("tab", { name: "Credentials" }).click();
     await expect(page.getByTestId("credentials-panel")).toBeVisible();
     await expect(page.getByTestId("credential-service-unusual-whales")).toBeVisible();
+    await expect(page.getByText("LLM Regime Sources")).toBeVisible();
+    const openRouter = page.getByTestId("credential-service-openrouter");
+    await expect(openRouter).toBeVisible();
     // Masked hint renders; no plaintext anywhere.
     await expect(page.getByTestId("credential-status-UW_TOKEN")).toContainText("cret");
-    await page.screenshot({ path: "test-results/profile-credentials-tab.png", fullPage: true });
+    await openRouter.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: "test-results/profile-credentials-llm-desktop.png" });
+    await page.setViewportSize({ width: 393, height: 852 });
+    await openRouter.scrollIntoViewIfNeeded();
+    const mobileInput = await page.locator("#cred-OPENROUTER_API_KEY").boundingBox();
+    const mobileSave = await page.getByTestId("credential-save-openrouter").boundingBox();
+    expect(mobileInput).not.toBeNull();
+    expect(mobileSave).not.toBeNull();
+    expect(mobileSave!.y).toBeGreaterThan(mobileInput!.y + mobileInput!.height);
+    await expect
+      .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
+      .toBe(true);
+    await page.screenshot({ path: "test-results/profile-credentials-llm-mobile.png" });
   });
 
   test("armed save PUTs the full path and a 422 shows the playful retry line", async ({ page }) => {
@@ -166,5 +296,55 @@ test.describe("profile operator tabs", () => {
     // The rejected draft stays for a retry.
     await expect(page.locator("#cred-ANTHROPIC_API_KEY")).toHaveValue("sk-ant-rejected");
     await page.screenshot({ path: "test-results/profile-credentials-rejection.png", fullPage: true });
+  });
+
+  // 390x844: Joe's phone. Keys must scroll MenthorQ above the tab bar;
+  // the segment must show a full leftmost BOOKMARKS, not an ellipsis clip.
+  test("mobile Keys scrolls MenthorQ above the tab bar and BOOKMARKS is unclipped", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await stubProfileApis(page);
+    await page.route("**/api/credentials", (route) =>
+      route.fulfill({ json: CREDENTIALS_PAYLOAD }),
+    );
+
+    await page.goto("/profile?tab=credentials");
+    await expect(page.locator(".profile-surface--mobile")).toBeVisible();
+    await expect(page.locator(".profile-surface--mobile > .preferences-shell")).toBeVisible();
+    await expect(page.getByTestId("credentials-panel")).toBeVisible();
+
+    const bookmarks = page.locator(".profile-surface--mobile").getByRole("tab", { name: /bookmarks/i });
+    await expect(bookmarks).toBeVisible();
+    const tabMetrics = await bookmarks.evaluate((el) => {
+      const rect = el.getBoundingClientRect();
+      return {
+        text: (el.textContent ?? "").replace(/\s+/g, " ").trim(),
+        scrollWidth: el.scrollWidth,
+        clientWidth: el.clientWidth,
+        left: rect.left,
+        textOverflow: getComputedStyle(el).textOverflow,
+      };
+    });
+    expect(tabMetrics.text.startsWith("Bookmarks")).toBe(true);
+    expect(tabMetrics.scrollWidth).toBeLessThanOrEqual(tabMetrics.clientWidth + 1);
+    expect(tabMetrics.left).toBeGreaterThanOrEqual(0);
+    expect(tabMetrics.textOverflow).not.toBe("ellipsis");
+    await page.screenshot({ path: "test-results/profile-mobile-tabs-bookmarks.png" });
+
+    const menthorq = page.getByTestId("credential-service-menthorq");
+    await menthorq.evaluate((el) => el.scrollIntoView({ block: "end", inline: "nearest" }));
+    await expect(menthorq).toBeVisible();
+    await expect(page.locator("#cred-MENTHORQ_USER")).toBeVisible();
+    await expect(page.locator("#cred-MENTHORQ_PASS")).toBeVisible();
+
+    const mqBox = await menthorq.boundingBox();
+    const tabBar = page.getByTestId("mobile-tab-bar");
+    await expect(tabBar).toBeVisible();
+    const barBox = await tabBar.boundingBox();
+    expect(mqBox).not.toBeNull();
+    expect(barBox).not.toBeNull();
+    expect(mqBox!.y + mqBox!.height).toBeLessThanOrEqual(barBox!.y);
+    await page.screenshot({ path: "test-results/profile-mobile-keys-menthorq.png" });
   });
 });

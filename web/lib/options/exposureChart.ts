@@ -77,7 +77,7 @@ export type ExposureChartModel = {
 
 export type ExposureChartInput = {
   symbol: string;
-  spot: number;
+  spot: number | null;
   sourceTime: string;
   metric: OptionsExposureMetric;
   strikeWindow: OptionsExposureStrikeWindow;
@@ -139,7 +139,7 @@ export function buildExposureChartModel(input: ExposureChartInput): ExposureChar
 
   const levelCount = visibleLevels.length;
   const settingsParts = [
-    strikeWindowLabel(strikeWindow),
+    strikeWindowLabel(spot === null ? "all" : strikeWindow),
     frequency === "eod" ? "EOD" : "Intraday",
     expirationLabel,
     `Levels ${levelCount}/${EXPOSURE_LEVEL_OPTIONS.length}`,
@@ -152,7 +152,7 @@ export function buildExposureChartModel(input: ExposureChartInput): ExposureChar
   return {
     title: symbol.toUpperCase(),
     subtitle: `Options exposure · ${metricLabel}`,
-    spotLabel: `SPOT ${formatStrike(spot)}`,
+    spotLabel: spot === null ? "SPOT UNAVAILABLE" : `SPOT ${formatStrike(spot)}`,
     settingsLine: settingsParts.join("  ·  "),
     valueHeader: metricLabel,
     capturedAt,

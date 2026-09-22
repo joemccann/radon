@@ -1,9 +1,35 @@
 import { defineConfig } from "vitest/config";
 import { resolve } from "path";
+import { resolveMaxWorkers } from "./vitest.workers";
 
 export default defineConfig({
   // Repo root so `web/tests/**` includes match when `npm run test` runs from `web/`.
   root: resolve(__dirname),
+  plugins: [
+    // T-456: `@/*` is app-relative — web/tsconfig maps it to web/*, site/tsconfig
+    // to site/*. The static aliases below only encode the web mapping, so any
+    // site file importing "@/lib/theme" either failed to resolve or silently
+    // picked up web's module. Route `@/` imports whose IMPORTER lives under
+    // site/ to site/* before the web aliases apply.
+    {
+      name: "site-app-alias",
+      enforce: "pre" as const,
+      resolveId(source: string, importer: string | undefined) {
+        if (!importer || !/[\\/]site[\\/]/.test(importer)) return null;
+        // Vite applies `resolve.alias` before any plugin, so by the time this
+        // hook runs "@/lib/theme" has usually already been rewritten to the
+        // absolute web/ path — undo either spelling.
+        const webRoot = `${resolve(__dirname, "web")}/`;
+        let appRelative: string | null = null;
+        if (source.startsWith("@/")) appRelative = source.slice(2);
+        else if (source.startsWith(webRoot)) appRelative = source.slice(webRoot.length);
+        if (appRelative == null) return null;
+        return this.resolve(resolve(__dirname, "site", appRelative), importer, {
+          skipSelf: true,
+        });
+      },
+    },
+  ],
   resolve: {
     alias: {
       "@tools": resolve(__dirname, "lib/tools"),
@@ -26,7 +52,8 @@ export default defineConfig({
     ],
     environment: "node",
     fileParallelism: true,
-    maxWorkers: "100%",
+    // Half the cores locally, all of them on CI (vitest.workers.ts).
+    maxWorkers: resolveMaxWorkers(process.env),
     // Never retry (TEST_AUDIT T-161). A suite-wide retry turns any intermittent
     // failure in an order-safety or money-math file into a green deploy gate,
     // and it suppresses exactly the first-failure signal the repo's "re-run the

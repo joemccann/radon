@@ -18,6 +18,11 @@ class TestIsIndexSymbol:
         for symbol in ["VIX", "VXN", "VVIX", "SPX", "NDX", "RUT", "DJX"]:
             assert is_index_symbol(symbol) is True, f"{symbol} should be an index"
 
+    def test_vix_term_structure_family_on_cboe(self):
+        for symbol in ["VIX1D", "VIX9D", "VIX3M", "VIX6M", "VIX1Y"]:
+            assert is_index_symbol(symbol) is True, f"{symbol} should be an index"
+            assert index_exchange_for(symbol) == "CBOE"
+
     def test_case_insensitive(self):
         assert is_index_symbol("vix") is True
         assert is_index_symbol("Spx") is True

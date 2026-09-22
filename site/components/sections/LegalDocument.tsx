@@ -56,7 +56,7 @@ export function LegalDocument({
   afterIntro,
 }: LegalDocumentProps) {
   return (
-    <div className="min-h-screen bg-canvas font-serif text-[17.5px] leading-[1.62] text-primary">
+    <div className="min-h-screen bg-canvas font-sans text-[16px] leading-[1.55] text-primary">
       <a
         href="#main-content"
         className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[60] focus:rounded focus:bg-accent focus:px-4 focus:py-2 focus:text-canvas focus:outline-none"

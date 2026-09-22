@@ -11,7 +11,8 @@ delete the readiness marker or rename `deploy/` away.
 
 The one thing an app container genuinely needs to WRITE outside `media/` is the
 shared 2FA lease, so the lease moved into its own subdirectory and that
-subdirectory is the only other bind.
+subdirectory is a narrow bind. Private research has its own separate bind:
+worker read-write, API read-only, and absent from other app containers.
 """
 
 from __future__ import annotations
@@ -37,6 +38,7 @@ APP_UNITS = (
     "radon-relay.service",
     "radon-nextjs.service",
     "radon-newsfeed.service",
+    "radon-research.service",
 )
 
 
@@ -94,14 +96,14 @@ def _bind_destinations(argv: list[str]) -> list[str]:
     return destinations
 
 
-def _state_dir_exposures(destinations: list[str]) -> list[str]:
+def _state_dir_exposures(destinations: list[str], allowed=ALLOWED_UNDER_STATE_DIR) -> list[str]:
     """Binds that hand the container the state dir itself, an ancestor of it,
     or anything under it other than the two sanctioned subdirectories."""
     exposed = []
     for destination in destinations:
         path = PurePosixPath(destination)
         binds_state_dir_or_ancestor = path == STATE_DIR or path in STATE_DIR.parents
-        binds_unsanctioned_child = STATE_DIR in path.parents and path not in ALLOWED_UNDER_STATE_DIR
+        binds_unsanctioned_child = STATE_DIR in path.parents and path not in allowed
         if binds_state_dir_or_ancestor or binds_unsanctioned_child:
             exposed.append(destination)
     return exposed
@@ -137,9 +139,14 @@ def test_no_app_unit_binds_the_whole_state_directory(tmp_path_factory) -> None:
         assert result.returncode == 0, result.stderr
         log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
         destinations = _bind_destinations(_docker_run_argv(log))
-        assert _state_dir_exposures(destinations) == [], (unit, destinations)
+        allowed = set(ALLOWED_UNDER_STATE_DIR)
+        if unit in ("radon-api.service", "radon-research.service"):
+            allowed.add(STATE_DIR / "research")
+        if unit == "radon-research.service":
+            allowed = {STATE_DIR / "research"}
+        assert _state_dir_exposures(destinations, allowed) == [], (unit, destinations)
         bound = {PurePosixPath(destination) for destination in destinations}
-        assert ALLOWED_UNDER_STATE_DIR <= bound, (unit, destinations)
+        assert allowed <= bound, (unit, destinations)
 
 
 def test_the_source_carries_no_bare_state_bind() -> None:

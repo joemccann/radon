@@ -345,12 +345,17 @@ def test_timed_out_exit_worker_cannot_overlap_or_duplicate_sell():
     daemon = MonitorDaemon(respect_market_hours=False)
     handler = TimedOutExitHandler()
 
-    first = daemon._run_handler_bounded(handler)
-    assert started.is_set()
-    assert "timed out" in first["error"]
+    try:
+        first = daemon._run_handler_bounded(handler)
+        # A 10ms result deadline can expire before a loaded host schedules the
+        # worker. Establish the overlap precondition explicitly; the assertions
+        # below still require timeout handling and exactly one placement.
+        assert started.wait(timeout=1)
+        assert "timed out" in first["error"]
 
-    second = daemon._run_handler_bounded(handler)
-    assert "still running" in second["error"]
-    time.sleep(0.02)
-    assert placements == ["SELL"]
-    release.set()
+        second = daemon._run_handler_bounded(handler)
+        assert "still running" in second["error"]
+        time.sleep(0.02)
+        assert placements == ["SELL"]
+    finally:
+        release.set()

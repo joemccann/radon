@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Sigma } from "lucide-react";
 import BrushMinimap from "./BrushMinimap";
 import CriHistoryChart, { type ChartSeries } from "./CriHistoryChart";
+import FreshnessRail from "./FreshnessRail";
 import HistoryRangeChips from "./HistoryRangeChips";
 import InfoTooltip from "./InfoTooltip";
 import MetricCell from "./mobile/MetricCell";
@@ -16,6 +17,7 @@ import {
   presetRange,
   type RangePresetSlug,
 } from "@/lib/historyRange";
+import { SKEW_REFRESH } from "@/lib/refreshSchedule";
 import {
   buildSkewChartRows,
   formatIvPct,
@@ -248,6 +250,13 @@ export default function SkewPanel({ marketState }: { marketState?: MarketState }
             />
           </RegimeStrip>
         )}
+
+        <FreshnessRail
+          schedule={SKEW_REFRESH}
+          asOf={current.date}
+          testId="skew-freshness-rail"
+          model="session"
+        />
       </div>
 
       {/* ── Skew change/level chart ───────────────────────── */}

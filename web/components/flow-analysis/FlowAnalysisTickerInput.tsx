@@ -1,4 +1,5 @@
 "use client";
+import ErrorToast from "@/components/ErrorToast";
 
 import { Search } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -61,9 +62,7 @@ export default function FlowAnalysisTickerInput({ initialTicker = "" }: Props) {
           </button>
         </div>
         {error && (
-          <div className="flow-ticker-input-error" role="alert">
-            {error}
-          </div>
+          <ErrorToast message={error} />
         )}
       </form>
     </section>

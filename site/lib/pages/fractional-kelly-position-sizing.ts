@@ -17,20 +17,20 @@ export const PAGE_NAV_LABEL = "Fractional Kelly position sizing";
 export const PAGE_TITLE =
   "Fractional Kelly Sizing for Options | Radon Terminal";
 export const PAGE_DESCRIPTION =
-  "Fractional Kelly sizing for options: signal odds from max gain over max loss, quarter-Kelly, then a hard 2.5% bankroll cap. Free demo.";
-export const PAGE_HEADLINE = "Position size is a policy, not a feeling.";
+  "Fractional Kelly sizing for options: signal odds from max gain over max loss, half-Kelly, then a hard 2.5% bankroll cap. Free demo.";
+export const PAGE_HEADLINE = "Size comes from the structure's odds, then a 2.5% cap.";
 
 // Frozen per-page dates for TechArticle JSON-LD. Update dateModified when the
 // copy meaningfully changes; a request-time stamp gets ignored by Google
 // (same rationale as SITE_CONTENT_LAST_MODIFIED in lib/seo.ts).
 export const PAGE_DATE_PUBLISHED = "2026-07-03";
-export const PAGE_DATE_MODIFIED = "2026-08-23";
+export const PAGE_DATE_MODIFIED = "2026-09-19";
 
 export const pageUrl = `${siteUrl}/${PAGE_SLUG}`;
 
 // Worked example for the sizing plate. Derived at authoring time:
 // b = 1500 / 500 = 3.0; f = 0.45 - (0.55 / 3.0) = 0.45 - 0.1833 = 0.2667;
-// quarter Kelly = 0.2667 / 4 = 6.7%; the 2.5% cap binds.
+// half Kelly = 0.2667 / 2 = 13.3%; the 2.5% cap binds.
 export type WorkedExampleRow = {
   step: string;
   value: string;
@@ -46,8 +46,8 @@ export const workedExampleRows: WorkedExampleRow[] = [
     step: "Full Kelly",
     value: "f = 0.45 - (0.55 / 3.0) = 0.2667 = 26.7%",
   },
-  { step: "Quarter Kelly", value: "0.2667 / 4 = 6.7%" },
-  { step: "Radon cap", value: "min(6.7%, 2.5%) = 2.5% of bankroll · cap binds" },
+  { step: "Half Kelly", value: "0.2667 / 2 = 13.3%" },
+  { step: "Radon cap", value: "min(13.3%, 2.5%) = 2.5% of bankroll · cap binds" },
 ];
 
 export const kellySizingFaqEntries: FaqEntry[] = [
@@ -74,7 +74,7 @@ export const kellySizingFaqEntries: FaqEntry[] = [
   {
     question: "What are signal odds in fractional Kelly sizing?",
     answer:
-      "Signal odds are the payoff ratio b in the Kelly formula: max gain divided by max loss on the chosen defined-risk structure. Radon reads that ratio at the sizing milestone, combines it with the probability assigned to the flow signal, takes a quarter of full Kelly, and then applies the 2.5% bankroll ceiling.",
+      "Signal odds are the payoff ratio b in the Kelly formula: max gain divided by max loss on the chosen defined-risk structure. Radon reads that ratio at the sizing milestone, combines it with the probability assigned to the flow signal, takes half of full Kelly, and then applies the 2.5% bankroll ceiling.",
   },
 ];
 

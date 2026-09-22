@@ -1,5 +1,8 @@
 "use client";
+import ErrorToast from "@/components/ErrorToast";
+import RequestError from "@/components/RequestError";
 
+import { userErrorMessage } from "@/lib/userError";
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, TrendingUp, Zap } from "lucide-react";
 import InfoTooltip from "./InfoTooltip";
@@ -17,6 +20,9 @@ import {
   type RangePresetSlug,
 } from "@/lib/historyRange";
 import type { PriceData } from "@/lib/pricesProtocol";
+import { scanTimeToEtDate } from "@/lib/parseScanTime";
+import { VCG_REFRESH } from "@/lib/refreshSchedule";
+import FreshnessRail from "./FreshnessRail";
 
 type VcgPanelProps = {
   prices: Record<string, PriceData>;
@@ -218,7 +224,7 @@ export default function VcgPanel({ marketState }: VcgPanelProps) {
           </div>
         </div>
         <div className="section-body" style={{ padding: "16px" }}>
-          <div className="alert-item bearish">{error}</div>
+          <RequestError error={error} fallback={'Volatility data could not be loaded. Try again.'} />
         </div>
       </div>
     );
@@ -240,9 +246,7 @@ export default function VcgPanel({ marketState }: VcgPanelProps) {
           </div>
         </div>
         <div className="section-body" style={{ padding: "16px" }}>
-          <div className="alert-item bearish">
-            Vol-credit feed unavailable: the last read reached neither the database nor the on-disk cache, so there is no signal to show.
-          </div>
+          <ErrorToast message="The vol-credit feed could not be loaded. No current signal is available." />
         </div>
       </div>
     );
@@ -251,9 +255,12 @@ export default function VcgPanel({ marketState }: VcgPanelProps) {
   const sig = data.signal;
   const attr = sig.attribution;
   const interpColor = interpretationColor(sig.interpretation);
+  const lastHistoryDate = data.history?.[data.history.length - 1]?.date ?? null;
+  const asOf = scanTimeToEtDate(data.scan_time) ?? lastHistoryDate;
 
   return (
     <>
+      {error && <RequestError error={error} retainedData />}
       {/* ── Signal strip ──────────────────────────────────── */}
       <div className="section">
         <div className="section-header">
@@ -310,6 +317,8 @@ export default function VcgPanel({ marketState }: VcgPanelProps) {
             )}
           </div>
         </div>
+
+        <FreshnessRail schedule={VCG_REFRESH} asOf={asOf} testId="vcg-freshness-rail" />
 
         <div className="metrics-grid">
           <div className="metric-card">

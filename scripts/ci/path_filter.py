@@ -227,6 +227,12 @@ CROSS_TREE_CONTRACTS = (
         tests=("scripts/tests/test_setup_service_id_parity.py",),
     ),
     CrossTreeContract(
+        patterns=("web/lib/setup/envFiles.ts",),
+        tests=(
+            "scripts/tests/test_credentials_registry.py::TestExpectedSurface::test_setup_wizard_web_env_keys_are_a_subset_of_the_registry",
+        ),
+    ),
+    CrossTreeContract(
         patterns=("web/lib/ieiHyg.ts",),
         tests=(
             "scripts/tests/test_silent_degradation_bounds.py::TestIeiHygNeedsAFullWindow::test_the_web_type_knows_the_unknown_state",
@@ -257,35 +263,6 @@ CROSS_TREE_CONTRACTS = (
         tests=(
             "scripts/tests/test_docs_contract.py::TestThinIndex::test_web_readme_does_not_teach_npm",
         ),
-    ),
-    CrossTreeContract(
-        patterns=(
-            "web/*.ts",
-            "web/*.tsx",
-            "web/*.js",
-            "web/*.jsx",
-            "web/*.mjs",
-            "web/*.cjs",
-            "site/*.ts",
-            "site/*.tsx",
-            "site/*.js",
-            "site/*.jsx",
-            "site/*.mjs",
-            "site/*.cjs",
-            "scripts/*.py",
-            "cloud/*.py",
-            "lib/*.ts",
-            "lib/*.js",
-            "lib/*.mjs",
-            "lib/*.cjs",
-            "tests/*.py",
-            "tools/*.py",
-            "tools/*.ts",
-            "tools/*.js",
-            "tools/*.mjs",
-            "tools/*.cjs",
-        ),
-        tests=("scripts/tests/test_codemap.py::TestCommittedArtifacts::test_matches_live_graph",),
     ),
 )
 

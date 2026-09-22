@@ -1,3 +1,5 @@
+import { errorMessageCandidate, isTechnicalError } from "./userError";
+
 export type FormattedOrderError = {
   summary: string;
   details: string[];
@@ -48,16 +50,19 @@ function formatUsdNumber(value: string): string {
 }
 
 export function formatOrderError(message: string | null | undefined): FormattedOrderError {
-  const raw = String(message ?? "").trim();
+  const raw = errorMessageCandidate(message);
   if (!raw) {
     return { summary: "Order placement failed.", details: [] };
   }
 
   const cleaned = stripTransportWrappers(raw);
+  if (isTechnicalError(cleaned.replace(/<E>/g, ""), 5000)) {
+    return { summary: "The order request could not be confirmed. Check order status before trying again.", details: [] };
+  }
   const rejectedReason = stripRejectedPrefix(cleaned);
 
   if (/network error placing order/i.test(cleaned)) {
-    return { summary: "Network error while placing order.", details: [] };
+    return { summary: "Network error while placing order. Check order status before trying again.", details: [] };
   }
 
   if (/^Cancelled$/i.test(rejectedReason)) {
@@ -102,6 +107,10 @@ export function formatOrderError(message: string | null | undefined): FormattedO
       summary: "Order rejected by IB.",
       details: [rejectedReason.endsWith(".") ? rejectedReason : `${rejectedReason}.`],
     };
+  }
+
+  if (/\b(?:HTTP|Radon API)\s+(?:5\d\d|408|429)\b|order failed \((?:5\d\d|408|429)\)|bad gateway|service unavailable|timed?\s*out|timeout|network error/i.test(raw)) {
+    return { summary: "The order request could not be confirmed. Check order status before trying again.", details: [] };
   }
 
   return {

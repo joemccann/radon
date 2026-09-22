@@ -22,7 +22,9 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -64,6 +66,9 @@ POISONS = {
     "user-root": BASE + "    user: root\n",
     "security-opt": BASE + "    security_opt:\n      - seccomp:unconfined\n",
     "privileged": BASE + "    privileged: true\n",
+    # T-441: the unquoted grep let YAML's equally-true quoted forms through.
+    "privileged-quoted": BASE + '    privileged: "true"\n',
+    "privileged-single-quoted": BASE + "    privileged: 'true'\n",
     "commented-container-name": BASE.replace(
         "    container_name: ib-gateway\n", "    # container_name: ib-gateway\n"
     ),
@@ -163,6 +168,8 @@ def provisioned_repo(tmp_path: Path) -> dict[str, Path]:
     _git(repo, "config", "user.name", "t")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "seed")
+    # Provenance requires the blob to be reachable from the deploy remote.
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
     (tmp_path / "sbin").mkdir()  # /usr/local/sbin exists on the host
     return {
         "repo": repo,
@@ -215,8 +222,25 @@ def test_install_docker_gw_validates_even_a_committed_body(provisioned_repo) -> 
     compose.write_text(POISONS["cap-add"], encoding="utf-8")
     _git(provisioned_repo["repo"], "add", "-A")
     _git(provisioned_repo["repo"], "commit", "-qm", "poison")
+    # Published, so only the validator can be what refuses it.
+    _git(provisioned_repo["repo"], "update-ref", "refs/remotes/origin/main", "HEAD")
     result = _run_install_docker_gw(provisioned_repo)
     assert result.returncode != 0
+    assert not provisioned_repo["compose_target"].exists()
+
+
+def test_install_docker_gw_refuses_a_body_absent_from_origin_main(
+    provisioned_repo,
+) -> None:
+    """Commit access to the checkout is not publication: a local-only compose
+    body is refused even though it is committed at HEAD."""
+    compose = provisioned_repo["cloud"] / "docker-compose.yml"
+    compose.write_text(GOOD_BODY + "# local only\n", encoding="utf-8")
+    _git(provisioned_repo["repo"], "add", "-A")
+    _git(provisioned_repo["repo"], "commit", "-qm", "local only")
+    result = _run_install_docker_gw(provisioned_repo)
+    assert result.returncode != 0
+    assert "not an ancestor of origin/main" in result.stdout + result.stderr
     assert not provisioned_repo["compose_target"].exists()
 
 
@@ -300,3 +324,57 @@ def test_shim_refuses_a_group_or_other_writable_env_file(
     result = _shim_run(box, "compose-up")
     assert result.returncode == 78
     assert "writable" in result.stderr
+
+
+@pytest.mark.parametrize("which", sorted(SCRIPTS))
+@pytest.mark.parametrize("case", ["trusted", "privileged", "security-opt"])
+def test_large_compose_body_has_no_pipefail_inversion(which, case, tmp_path):
+    """Early grep/awk exit must neither reject safe bodies nor bypass deny rules.
+
+    Two MiB exceeds normal pipe capacity on Darwin and Linux. On Linux the
+    grep shim additionally shrinks its input pipe to one page before exec,
+    making the CI producer-SIGPIPE condition independent of scheduling/load.
+    Only process-local pipes and temporary artifacts are touched.
+    """
+    real_grep = shutil.which("grep")
+    assert real_grep
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    grep = bindir / "grep"
+    grep.write_text(
+        f"#!{sys.executable}\n"
+        "import fcntl, os, sys\n"
+        "if hasattr(fcntl, 'F_SETPIPE_SZ'):\n"
+        "    try: fcntl.fcntl(0, fcntl.F_SETPIPE_SZ, 4096)\n"
+        "    except OSError: pass\n"
+        f"os.execv({real_grep!r}, [{real_grep!r}, *sys.argv[1:]])\n"
+    )
+    grep.chmod(0o755)
+    padding = "x-padding: " + "a" * (2 * 1024 * 1024) + "\n"
+    if case == "trusted":
+        body, expected = BASE + padding, None
+    elif case == "privileged":
+        # Required positive matches come last so a failure here specifically
+        # exercises the deny predicate, not the earlier services requirement.
+        body, expected = "privileged: 'true'\n" + padding + BASE, "requests privileged"
+    else:
+        body = "security_opt:\n  - seccomp:unconfined\n" + padding + BASE
+        expected = "sets a security_opt beyond no-new-privileges"
+    candidate = tmp_path / "large.yml"
+    candidate.write_text(body)
+    snippet = (
+        "set -uo pipefail\ndocker() { return 1; }\n"
+        + _function_text(SCRIPTS[which])
+        + '\ncompose_body_is_valid "$CANDIDATE" test-large\n'
+    )
+    result = subprocess.run(
+        ["bash", "-c", snippet],
+        env={**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}", "CANDIDATE": str(candidate)},
+        capture_output=True, text=True, timeout=15,
+    )
+    if expected is None:
+        assert result.returncode == 0, result.stderr
+    else:
+        assert result.returncode != 0, f"{which} accepted {case}: {result.stderr}"
+        assert expected in result.stderr
+    assert "Broken pipe" not in result.stderr

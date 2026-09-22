@@ -16,6 +16,7 @@ import StraddlePanel from "./StraddlePanel";
 import CorPanel from "./CorPanel";
 import VixCorPanel from "./VixCorPanel";
 import VixTsPanel from "./VixTsPanel";
+import PanicIndexPanel from "./PanicIndexPanel";
 import DispersionPanel from "./DispersionPanel";
 import IvRankPanel from "./IvRankPanel";
 import IvSpreadPanel from "./IvSpreadPanel";
@@ -27,6 +28,7 @@ import IeiHygPanel from "./IeiHygPanel";
 import TrinPanel from "./TrinPanel";
 import DivYieldPanel from "./DivYieldPanel";
 import MaRatioPanel from "./MaRatioPanel";
+import CalmStreakPanel from "./CalmStreakPanel";
 import HyAdPanel from "./HyAdPanel";
 import HhLevPanel from "./HhLevPanel";
 import EquiblesCotPanel from "./equibles-cot/EquiblesCotPanel";
@@ -34,7 +36,7 @@ import AtsVenueSharePanel from "./equibles-ats-venue-share/AtsVenueSharePanel";
 import EquiblesShortCrowdingPanel from "./equibles/EquiblesShortCrowdingPanel";
 import GammaRotationPanel from "./GammaRotationPanel";
 import StreaksPanel from "./StreaksPanel";
-import LlmTokenIndexCard from "./LlmTokenIndexCard";
+import AiInfrastructurePanel from "./AiInfrastructurePanel";
 import BacktestPanel from "./BacktestPanel";
 import SpectralLoader from "./SpectralLoader";
 import SectionEmptyState from "./SectionEmptyState";
@@ -51,6 +53,8 @@ import {
   resolveRegimeStripLiveState,
 } from "@/lib/regimeLiveStrip";
 import { useRegime } from "@/lib/useRegime";
+import FreshnessRail from "./FreshnessRail";
+import { CRI_REFRESH } from "@/lib/refreshSchedule";
 import { useVcg } from "@/lib/useVcg";
 import { useGex } from "@/lib/useGex";
 import { useDispersion } from "@/lib/useDispersion";
@@ -64,6 +68,7 @@ const MOBILE_TAB_LABEL: Partial<Record<RegimeTab, string>> = {
   skew2d: "SKEW 2D",
   vixcor: "VIX-COR",
   vixts: "VIX TS",
+  "panic-index": "PANIC",
   dispersion: "DISPERSION",
   ivrank: "IV RANK",
   "iv-spread": "IV SPREAD",
@@ -71,6 +76,7 @@ const MOBILE_TAB_LABEL: Partial<Record<RegimeTab, string>> = {
   trin: "TRIN",
   divyield: "DIV YIELD",
   "ma-ratio": "MA RATIO",
+  "calm-streak": "CALM",
   hyad: "HY AD",
   hhlev: "HH LEV",
 };
@@ -79,7 +85,7 @@ const MOBILE_TAB_LABEL: Partial<Record<RegimeTab, string>> = {
 function tabFromPathname(pathname: string | null): RegimeTab {
   if (!pathname) return "cri";
   // Longest prefix first within each family: skew2d before skew, vixcor before cor.
-  const match = pathname.match(/^\/regime\/(cri|vcg|gex|grg|breadth|bpi|ma-ratio|margin|straddle|streaks|vixcor|vixts|dispersion|iv-spread|ivrank|cor|skew2d|skew|curve|credit|iei-hyg|trin|divyield|hyad|hhlev|cot|ats|short|llm|backtest)(?:\/|$)/);
+  const match = pathname.match(/^\/regime\/(cri|vcg|gex|grg|breadth|bpi|ma-ratio|calm-streak|margin|straddle|streaks|vixcor|vixts|panic-index|dispersion|iv-spread|ivrank|cor|skew2d|skew|curve|credit|iei-hyg|trin|divyield|hyad|hhlev|cot|ats|short|llm|backtest)(?:\/|$)/);
   if (match && (REGIME_TABS as readonly string[]).includes(match[1])) {
     return match[1] as RegimeTab;
   }
@@ -359,7 +365,7 @@ export default function RegimePanel({
 
   const tabBar = compact ? (
     <div className="m-regime-tabs" role="tablist" aria-label="Regime tabs">
-      {(["cri", "vcg", "gex", "grg", "breadth", "ma-ratio", "trin", "divyield", "hyad", "bpi", "margin", "hhlev", "credit", "iei-hyg", "straddle", "cor", "streaks", "vixcor", "vixts", "dispersion", "ivrank", "iv-spread", "skew", "skew2d", "curve", "cot", "ats", "short", "llm", "backtest"] as RegimeTab[]).map((t) => (
+      {(["cri", "vcg", "gex", "grg", "breadth", "ma-ratio", "trin", "divyield", "hyad", "bpi", "margin", "hhlev", "credit", "iei-hyg", "straddle", "cor", "streaks", "vixcor", "vixts", "panic-index", "dispersion", "ivrank", "iv-spread", "skew", "skew2d", "curve", "calm-streak", "cot", "ats", "short", "backtest"] as RegimeTab[]).map((t) => (
         <button
           key={t}
           type="button"
@@ -442,6 +448,10 @@ export default function RegimePanel({
     return renderShell(<VixTsPanel />);
   }
 
+  if (activeTab === "panic-index") {
+    return renderShell(<PanicIndexPanel />);
+  }
+
   if (activeTab === "dispersion") {
     return renderShell(<DispersionPanel />);
   }
@@ -482,6 +492,10 @@ export default function RegimePanel({
     return renderShell(<DivYieldPanel />);
   }
 
+  if (activeTab === "calm-streak") {
+    return renderShell(<CalmStreakPanel />);
+  }
+
   if (activeTab === "ma-ratio") {
     return renderShell(<MaRatioPanel />);
   }
@@ -507,7 +521,7 @@ export default function RegimePanel({
   }
 
   if (activeTab === "llm") {
-    return renderShell(<LlmTokenIndexCard />);
+    return renderShell(<AiInfrastructurePanel />);
   }
 
   // While the first payload is being fetched OR an explicit sync is running,
@@ -658,6 +672,8 @@ export default function RegimePanel({
             </div>
           </div>
 
+          <FreshnessRail schedule={CRI_REFRESH} asOf={data?.date ?? null} testId="cri-freshness-rail" />
+
           {/* Component scores 2x2 grid */}
           <div className="m-regime-components-grid">
             <MetricCell
@@ -789,6 +805,8 @@ export default function RegimePanel({
               />
             ) : null}
           </RegimeStrip>
+
+          <FreshnessRail schedule={CRI_REFRESH} asOf={data?.date ?? null} testId="cri-freshness-rail" />
 
           {/* ── Row 3+4: Components + Crash Trigger side by side ── */}
           <div className="regime-detail-grid">

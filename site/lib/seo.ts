@@ -9,13 +9,13 @@ export const DEFAULT_SITE_URL = "https://radon.run";
 export const DEMO_APP_URL = "https://demo.radon.run";
 export const SITE_NAME = "Radon Terminal";
 export const SITE_TITLE =
-  "Radon Terminal | Dark Pool Flow, GEX & Defined-Risk Options";
+  "Radon Terminal | Dark Pool Flow, GEX & Options";
 export const SITE_DESCRIPTION =
-  "Radon scores institutional dark-pool flow from Unusual Whales, maps dealer gamma (GEX), and routes defined-risk options through Interactive Brokers. Free demo.";
+  "Unusual Whales dark-pool prints and GEX construct the lead before the chart moves. Interactive Brokers options express it. Free demo.";
 
 // Frozen content date for sitemap lastmod. Update when the page copy or
 // structure meaningfully changes; a request-time stamp gets ignored by Google.
-export const SITE_CONTENT_LAST_MODIFIED = "2026-08-23";
+export const SITE_CONTENT_LAST_MODIFIED = "2026-09-07";
 export const SITE_KEYWORDS = [
   "Radon Terminal",
   "market structure",
@@ -38,7 +38,7 @@ export const STATUS_PAGE_ROBOTS = {
 } as const;
 export const SOCIAL_IMAGE_PATH = "/og-image.png";
 export const SOCIAL_IMAGE_ALT =
-  "Radon Terminal marketing card: serif headline reading Institutions finish buying before the chart moves, over the editorial research-journal canvas with the radon.run source rail.";
+  "Radon Terminal marketing card: Inter headline reading Institutions finish buying before the chart moves, over the Clear paper canvas used by app.radon.run.";
 export const APPLE_ICON_PATH = "/apple-touch-icon.png";
 export const GITHUB_URL = "https://github.com/joemccann/radon";
 export const X_PROFILE_URL = "https://x.com/joemccann";
@@ -116,8 +116,8 @@ export const siteMetadata: Metadata = {
 export const siteViewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  themeColor: "#0a0f14",
-  colorScheme: "dark",
+  themeColor: "#ffffff",
+  colorScheme: "light dark",
 };
 
 // Site-scoped entities only (WebSite, Organization, SoftwareApplication):
@@ -169,11 +169,12 @@ export const siteStructuredData = [
     description: SITE_DESCRIPTION,
     isAccessibleForFree: true,
     featureList: [
-      "Dark-pool and OTC flow scoring with per-ticker lead windows",
+      "Point-of-view construction from dark-pool flow, news, and scanners",
       "Crash Risk Index (CRI) tail-risk regime model",
       "Dealer gamma exposure (GEX) walls and magnets",
       "Volatility-Credit Gap (VCG-R) panic detection",
       "Gamma Rotation Gap (GRG) sector rotation model",
+      "Optimal expression across options, stock, and futures",
       "Four-gate execution discipline with fractional Kelly sizing",
       "Trade journal with full decision chain and lot-matched P&L",
     ],

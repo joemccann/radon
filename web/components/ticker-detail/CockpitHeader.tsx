@@ -94,7 +94,7 @@ export default function CockpitHeader({
     // card sits directly below a held option, so a HELD chip here is a wasted
     // wrap row (FM-RADON-HELD). FLAT stays when there is no position.
     return (
-      <div className="cockpit-head ckh--mobile">
+      <div className="cockpit-head ckh--mobile" data-testid="cockpit-head">
         <span className="ckh-sym mono">{ticker}</span>
         <StarToggle
           active={isWatched(ticker)}
@@ -149,7 +149,7 @@ export default function CockpitHeader({
   }
 
   return (
-    <div className="cockpit-head">
+    <div className="cockpit-head" data-testid="cockpit-head">
       <span className="ckh-sym mono">{ticker}</span>
       <StarToggle
         active={isWatched(ticker)}

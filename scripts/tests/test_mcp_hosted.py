@@ -665,7 +665,7 @@ class TestUpstreamReadsLeaveTheEventLoop:
             def close(self):
                 pass
 
-        def fake_get(url, headers=None, timeout=None, stream=None):
+        def fake_get(url, headers=None, timeout=None, stream=None, allow_redirects=None):
             seen.append(threading.current_thread())
             return FakeResponse()
 

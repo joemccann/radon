@@ -3,27 +3,19 @@
 // data/tag_taxonomy.json by the caller (scraper or backfill). The existing
 // taxonomy is shown to the model as context to encourage reuse.
 //
-// Provider: Cerebras (free tier, 30 rpm / 1M tok/day).
-//   Primary  : gpt-oss-120b (reasoning model — needs ~800 tok budget for chain-of-thought)
-//   Fallback : qwen-3-235b-a22b-instruct-2507
-// Both verified on the active key via /v1/models.
-//
-// Network: undici defaults to IPv6, but api.cerebras.ai's AAAA route is
-// EHOSTUNREACH from residential IPv6. Force IPv4 globally.
+// Provider: shared model ladder (`scripts/clients/model_ladder.py`) via a
+// thin Python CLI so Node cannot drift from Joe's order:
+//   subscription: anthropic -> grok -> cursor -> codex -> gemini
+//   nvidia (free)
+//   cerebras (cheap paid, last)
+// Soft-fails (returns null) when no keyed provider works.
 
-import { Agent, setGlobalDispatcher } from "undici";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
-let dispatcherConfigured = false;
-function ensureIpv4Dispatcher() {
-  if (dispatcherConfigured) return;
-  setGlobalDispatcher(new Agent({ connect: { family: 4 } }));
-  dispatcherConfigured = true;
-}
-
-const ENDPOINT = "https://api.cerebras.ai/v1/chat/completions";
-const MODELS = ["gpt-oss-120b", "qwen-3-235b-a22b-instruct-2507"];
-// Bound on ONE model call; a timeout is a per-model tagging failure (the
-// fallback model is still tried), never a cycle hang. R-466.
+const LADDER_CLI = fileURLToPath(new URL("../clients/model_ladder_cli.py", import.meta.url));
+// Bound on ONE ladder walk; a timeout is a per-post tagging failure, never a
+// cycle hang. R-466.
 const DEFAULT_FETCH_TIMEOUT_MS = 30_000;
 
 // All tags are uppercase. Multi-word concepts are kebab-cased then uppercased
@@ -111,87 +103,105 @@ function buildUserPrompt(post) {
   return `Title: ${title}\nBody: ${content}`;
 }
 
-function isRetryable(status) {
-  return status === 429 || status >= 500;
+function resolvePythonBin() {
+  const override = process.env.RADON_PYTHON_BIN;
+  if (typeof override === "string" && override.trim()) return override.trim();
+  return "python3.13";
 }
 
-async function callOnce(model, systemPrompt, userPrompt, apiKey, timeoutMs) {
-  ensureIpv4Dispatcher();
-  const res = await fetch(ENDPOINT, {
-    method: "POST",
-    signal: AbortSignal.timeout(timeoutMs),
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-      response_format: { type: "json_object" },
-      // gpt-oss-120b emits chain-of-thought into a separate `reasoning` field
-      // before producing the final JSON in `content`. 800 leaves headroom; the
-      // non-reasoning fallback ignores the extra budget.
+export function completeViaLadder({
+  system,
+  instruction,
+  timeoutMs = DEFAULT_FETCH_TIMEOUT_MS,
+  spawnImpl = spawn,
+  pythonBin = resolvePythonBin(),
+  cliPath = LADDER_CLI,
+} = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawnImpl(pythonBin, [cliPath], {
+      stdio: ["pipe", "pipe", "pipe"],
+      env: process.env,
+    });
+    let stdout = "";
+    let settled = false;
+    const finish = (err, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (err) reject(err);
+      else resolve(value);
+    };
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      finish(new Error("tagger timeout"));
+    }, timeoutMs);
+
+    child.stdout?.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr?.on("data", () => {});
+    child.on("error", (err) => finish(err));
+    child.on("close", () => {
+      try {
+        const parsed = JSON.parse(stdout);
+        if (parsed && parsed.ok && parsed.data) finish(null, parsed.data);
+        else finish(null, null);
+      } catch {
+        finish(null, null);
+      }
+    });
+
+    child.stdin.write(JSON.stringify({
+      system,
+      instruction,
+      accept: "tags",
       max_tokens: 800,
-      temperature: 0.1,
-    }),
+      timeout: Math.max(1, Math.ceil(timeoutMs / 1000)),
+    }));
+    child.stdin.end();
   });
-
-  if (isRetryable(res.status)) {
-    const err = new Error(`tagger ${model} ${res.status}`);
-    err.retryable = true;
-    throw err;
-  }
-  if (!res.ok) {
-    throw new Error(`tagger ${model} ${res.status}`);
-  }
-
-  const json = await res.json();
-  const content = json?.choices?.[0]?.message?.content;
-  if (typeof content !== "string") throw new Error("tagger empty content");
-
-  let parsed;
-  try {
-    parsed = JSON.parse(content);
-  } catch {
-    throw new Error("tagger non-JSON response");
-  }
-  if (!parsed || !Array.isArray(parsed.tags)) throw new Error("tagger missing tags array");
-  return parsed.tags;
 }
 
 export function createTagger({
-  apiKey = process.env.CEREBRAS_API_KEY,
+  completeJson,
   getTaxonomySnapshot,
   timeoutMs = DEFAULT_FETCH_TIMEOUT_MS,
+  spawnImpl,
+  pythonBin,
 } = {}) {
-  if (!apiKey) {
-    throw new Error("createTagger: CEREBRAS_API_KEY is not set");
-  }
   if (typeof getTaxonomySnapshot !== "function") {
     throw new Error("createTagger: getTaxonomySnapshot callback is required");
   }
+  const complete = typeof completeJson === "function"
+    ? completeJson
+    : (args) => completeViaLadder({
+      ...args,
+      timeoutMs: args.timeoutMs ?? timeoutMs,
+      spawnImpl,
+      pythonBin,
+    });
 
   async function tagPost(post) {
-    const taxonomy = await getTaxonomySnapshot();
-    const systemPrompt = buildSystemPrompt(taxonomy);
-    const userPrompt = buildUserPrompt(post);
-
-    for (const model of MODELS) {
-      try {
-        const raw = await callOnce(model, systemPrompt, userPrompt, apiKey, timeoutMs);
-        const tags = normaliseTags(raw).slice(0, 3);
-        if (tags.length === 3) return tags;
-        // <3 valid tags after normalisation — try the next model.
-      } catch (err) {
-        if (!err.retryable) {
-          console.warn(`[tagger] ${model} hard error: ${err.message}`);
-        }
-      }
+    let timer;
+    try {
+      const taxonomy = await getTaxonomySnapshot();
+      const parsed = await new Promise((resolve, reject) => {
+        timer = setTimeout(() => reject(new Error("tagger timeout")), timeoutMs);
+        Promise.resolve(complete({
+          system: buildSystemPrompt(taxonomy),
+          instruction: buildUserPrompt(post),
+          timeoutMs,
+        })).then(resolve, reject);
+      });
+      const tags = normaliseTags(parsed?.tags).slice(0, 3);
+      if (tags.length === 3) return tags;
+      return null;
+    } catch (err) {
+      console.warn(`[tagger] ladder failed: ${err.message}`);
+      return null;
+    } finally {
+      clearTimeout(timer);
     }
-    return null;
   }
 
   return { tagPost };
@@ -201,6 +211,7 @@ export function createTagger({
 export const __normaliseTags = normaliseTags;
 export const __normaliseSingleTag = normaliseSingleTag;
 export const __buildSystemPrompt = buildSystemPrompt;
+export const DEFAULT_TAGGER_TIMEOUT_MS = DEFAULT_FETCH_TIMEOUT_MS;
 
 export async function hydrateTags(posts, tagger, { force = false, throttleMs = 0, onNewTags } = {}) {
   let updated = false;

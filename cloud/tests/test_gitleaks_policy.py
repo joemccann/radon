@@ -61,6 +61,10 @@ GENERIC_API_KEY_BASELINE_COMMITS = {
     # 2026-09-02 (PR #234): hosted-MCP docstring listed env names next to
     # "credentials"; rewritten in the follow-up commit.
     "9db5f7aff4a947c1ee4965b467a79eefe1800ae9",
+    # 2026-09-08 history sweep: PR #125 planning prose in tasks/todo.md
+    # described the secret-store design and trips generic-api-key; the line
+    # no longer exists at HEAD.
+    "b0322b6f2ac3ef3b7310e628a23b67b859168ac5",
 }
 
 

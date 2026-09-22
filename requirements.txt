@@ -8,8 +8,8 @@ fastapi==0.135.2
 uvicorn==0.42.0
 
 # Auth
-PyJWT==2.12.1
-cryptography==46.0.6
+PyJWT==2.13.0
+cryptography==50.0.1
 
 # HTTP requests
 requests==2.33.0
@@ -92,3 +92,8 @@ python-multipart==0.0.32
 referencing==0.37.0
 rpds-py==2026.6.3
 sse-starlette==3.4.5
+
+# Firecrawl local research PDF extraction and original chart rendering
+pdf-inspector==1.17.0
+pypdfium2==5.13.0
+Pillow==12.3.0

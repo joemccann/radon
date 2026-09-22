@@ -179,7 +179,6 @@ vi.mock("@/components/Header", () => ({
 }));
 vi.mock("@/components/dashboard/DashboardSurface", () => ({ default: () => null }));
 vi.mock("@/components/FooterTelemetryStrip", () => ({ default: () => null }));
-vi.mock("@/components/CommandPalette", () => ({ default: () => null }));
 vi.mock("@/components/DemoWelcomeModal", () => ({ default: () => null }));
 vi.mock("@/components/OfflineBanner", () => ({ default: () => null }));
 vi.mock("@/components/mobile/MobileShell", () => ({ default: () => null }));

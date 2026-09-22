@@ -10,6 +10,9 @@ type AppError = Error & { digest?: string };
 export default function GlobalError({ error }: { error: AppError; reset: () => void }) {
   return (
     <html lang="en">
+      <head>
+        <title>Error · Radon</title>
+      </head>
       <body style={{ background: "#0a0f14", color: "#94a3b8", fontFamily: "monospace", margin: 0 }}>
         <div style={{ padding: "48px 24px", textAlign: "center" }}>
           <p style={{ color: "#E85D6C", fontSize: 12, letterSpacing: "0.1em", textTransform: "uppercase" }}>

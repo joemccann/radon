@@ -1,0 +1,2120 @@
+[
+  {
+    "name": "Long Call",
+    "aliases": [
+      "Bullish Call",
+      "ATM Call"
+    ],
+    "category": "single",
+    "legs": [
+      {
+        "type": "call",
+        "action": "BUY",
+        "strike": "ATM",
+        "expiry": "standard"
+      }
+    ],
+    "bias": "bullish",
+    "risk_profile": "defined",
+    "max_gain": "unlimited",
+    "max_loss": "premium paid",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "ALLOW",
+    "guard_reason": "BUY anything \u2192 always allowed",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Simple long option. Maximum loss = initial premium. Undefined upside."
+  },
+  {
+    "name": "Long Put",
+    "aliases": [
+      "Protective Put",
+      "Downside Insurance"
+    ],
+    "category": "single",
+    "legs": [
+      {
+        "type": "put",
+        "action": "BUY",
+        "strike": "ATM",
+        "expiry": "standard"
+      }
+    ],
+    "bias": "bearish",
+    "risk_profile": "defined",
+    "max_gain": "strike - premium",
+    "max_loss": "premium paid",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "ALLOW",
+    "guard_reason": "BUY anything \u2192 always allowed",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Simple long option. Used defensively or as insurance on long stock."
+  },
+  {
+    "name": "Short Call (Naked)",
+    "aliases": [
+      "Uncovered Call",
+      "Naked Short Call"
+    ],
+    "category": "single",
+    "legs": [
+      {
+        "type": "call",
+        "action": "SELL",
+        "strike": "ATM",
+        "expiry": "standard"
+      }
+    ],
+    "bias": "bearish",
+    "risk_profile": "undefined",
+    "max_gain": "premium received",
+    "max_loss": "unlimited",
+    "has_naked_short_call": true,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "BLOCK",
+    "guard_reason": "SELL call without stock coverage \u2192 no long shares to cover",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Unlimited risk. Guard checks countLongShares(). Will block unless 100 shares held per contract."
+  },
+  {
+    "name": "Short Put (Cash-Secured)",
+    "aliases": [
+      "Naked Short Put",
+      "Cash-Secured Put"
+    ],
+    "category": "single",
+    "legs": [
+      {
+        "type": "put",
+        "action": "SELL",
+        "strike": "ATM",
+        "expiry": "standard"
+      }
+    ],
+    "bias": "bullish",
+    "risk_profile": "defined",
+    "max_gain": "premium received",
+    "max_loss": "strike \u00d7 100",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": true,
+    "guard_decision": "ALLOW",
+    "guard_reason": "SELL put \u2192 cash-secured, defined risk",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Collateral requirement = strike \u00d7 100 per contract. Guard treats as always safe because margin/cash covers assignment."
+  },
+  {
+    "name": "Short Stock (Naked)",
+    "aliases": [
+      "Naked Short Stock"
+    ],
+    "category": "single",
+    "legs": [
+      {
+        "type": "stock",
+        "action": "SELL",
+        "strike": null,
+        "expiry": "N/A"
+      }
+    ],
+    "bias": "bearish",
+    "risk_profile": "undefined",
+    "max_gain": "stock price received",
+    "max_loss": "unlimited",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": true,
+    "short_put_only": false,
+    "guard_decision": "BLOCK",
+    "guard_reason": "SELL stock without sufficient long shares held \u2192 no shares to short",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Guard checks countLongShares(). Will block if order.quantity > held shares."
+  },
+  {
+    "name": "Bull Call Spread",
+    "aliases": [
+      "Call Spread",
+      "Long Call Spread"
+    ],
+    "category": "vertical",
+    "legs": [
+      {
+        "type": "call",
+        "action": "BUY",
+        "strike": "lower",
+        "expiry": "same"
+      },
+      {
+        "type": "call",
+        "action": "SELL",
+        "strike": "higher",
+        "expiry": "same"
+      }
+    ],
+    "bias": "bullish",
+    "risk_profile": "defined",
+    "max_gain": "width - debit paid",
+    "max_loss": "debit paid",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "ALLOW",
+    "guard_reason": "Combo with both BUY and SELL legs \u2192 covered by long leg",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Vertical spread. Short call is covered by long call at lower strike."
+  },
+  {
+    "name": "Bear Call Spread",
+    "aliases": [
+      "Short Call Spread"
+    ],
+    "category": "vertical",
+    "legs": [
+      {
+        "type": "call",
+        "action": "SELL",
+        "strike": "higher",
+        "expiry": "same"
+      },
+      {
+        "type": "call",
+        "action": "BUY",
+        "strike": "lower",
+        "expiry": "same"
+      }
+    ],
+    "bias": "bearish",
+    "risk_profile": "defined",
+    "max_gain": "credit received",
+    "max_loss": "width - credit",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "ALLOW",
+    "guard_reason": "Combo with both BUY and SELL legs \u2192 covered by long leg",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Short call covered by long call at lower strike. Hedged short call."
+  },
+  {
+    "name": "Bull Put Spread",
+    "aliases": [
+      "Put Spread",
+      "Short Put Spread"
+    ],
+    "category": "vertical",
+    "legs": [
+      {
+        "type": "put",
+        "action": "SELL",
+        "strike": "higher",
+        "expiry": "same"
+      },
+      {
+        "type": "put",
+        "action": "BUY",
+        "strike": "lower",
+        "expiry": "same"
+      }
+    ],
+    "bias": "bullish",
+    "risk_profile": "defined",
+    "max_gain": "credit received",
+    "max_loss": "width - credit",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "ALLOW",
+    "guard_reason": "Combo with both BUY and SELL legs \u2192 covered by long leg",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Short put hedged by long put at lower strike. Defined risk."
+  },
+  {
+    "name": "Bear Put Spread",
+    "aliases": [
+      "Long Put Spread"
+    ],
+    "category": "vertical",
+    "legs": [
+      {
+        "type": "put",
+        "action": "BUY",
+        "strike": "higher",
+        "expiry": "same"
+      },
+      {
+        "type": "put",
+        "action": "SELL",
+        "strike": "lower",
+        "expiry": "same"
+      }
+    ],
+    "bias": "bearish",
+    "risk_profile": "defined",
+    "max_gain": "credit received",
+    "max_loss": "width - credit",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "ALLOW",
+    "guard_reason": "Combo with both BUY and SELL legs \u2192 covered by long leg",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Long put hedges short put at lower strike. Defined risk."
+  },
+  {
+    "name": "Covered Call",
+    "aliases": [
+      "Buy-Write",
+      "Covered Short Call"
+    ],
+    "category": "covered",
+    "legs": [
+      {
+        "type": "stock",
+        "action": "BUY",
+        "strike": null,
+        "expiry": "N/A"
+      },
+      {
+        "type": "call",
+        "action": "SELL",
+        "strike": "OTM",
+        "expiry": "standard"
+      }
+    ],
+    "bias": "neutral",
+    "risk_profile": "defined",
+    "max_gain": "premium + (strike - stock_price)",
+    "max_loss": "stock_price - premium",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "ALLOW",
+    "guard_reason": "Short call fully covered by long stock at \u2265100 shares per contract",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Requires stock shares \u2265 short call contracts \u00d7 100. Guard checks countLongShares() and countExistingShortCalls(). ib_sync detects via _merge_covered_call_groups()."
+  },
+  {
+    "name": "Married Put (Protective Put)",
+    "aliases": [
+      "Long Stock + Long Put",
+      "Insurance"
+    ],
+    "category": "covered",
+    "legs": [
+      {
+        "type": "stock",
+        "action": "BUY",
+        "strike": null,
+        "expiry": "N/A"
+      },
+      {
+        "type": "put",
+        "action": "BUY",
+        "strike": "ATM or OTM",
+        "expiry": "standard"
+      }
+    ],
+    "bias": "bullish",
+    "risk_profile": "defined",
+    "max_gain": "unlimited",
+    "max_loss": "put premium",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "ALLOW",
+    "guard_reason": "BUY put \u2192 always allowed",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "All-long structure. Downside protected. Max loss = premium paid."
+  },
+  {
+    "name": "Collar (Zero-Cost Collar)",
+    "aliases": [
+      "Protective Collar",
+      "Hedge Wrapper"
+    ],
+    "category": "collar",
+    "legs": [
+      {
+        "type": "stock",
+        "action": "BUY",
+        "strike": null,
+        "expiry": "N/A"
+      },
+      {
+        "type": "put",
+        "action": "BUY",
+        "strike": "lower",
+        "expiry": "same"
+      },
+      {
+        "type": "call",
+        "action": "SELL",
+        "strike": "higher",
+        "expiry": "same"
+      }
+    ],
+    "bias": "neutral",
+    "risk_profile": "defined",
+    "max_gain": "upper_strike - lower_strike - stock_price",
+    "max_loss": "stock_price - lower_strike",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "ALLOW",
+    "guard_reason": "Combo: long stock + long put + short call. Short call hedged by long put.",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Defined risk on both sides. Call is covered by stock + long put hedge. Structured for zero cost typically."
+  },
+  {
+    "name": "Long Straddle",
+    "aliases": [
+      "At-the-Money Straddle",
+      "Volatility Long"
+    ],
+    "category": "straddle",
+    "legs": [
+      {
+        "type": "call",
+        "action": "BUY",
+        "strike": "same",
+        "expiry": "same"
+      },
+      {
+        "type": "put",
+        "action": "BUY",
+        "strike": "same",
+        "expiry": "same"
+      }
+    ],
+    "bias": "volatility_long",
+    "risk_profile": "defined",
+    "max_gain": "unlimited",
+    "max_loss": "premium paid (call + put)",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "ALLOW",
+    "guard_reason": "BUY anything \u2192 always allowed",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "All-long structure. Profits from large move in either direction. Requires volatility expansion."
+  },
+  {
+    "name": "Short Straddle",
+    "aliases": [
+      "Naked Straddle"
+    ],
+    "category": "straddle",
+    "legs": [
+      {
+        "type": "call",
+        "action": "SELL",
+        "strike": "same",
+        "expiry": "same"
+      },
+      {
+        "type": "put",
+        "action": "SELL",
+        "strike": "same",
+        "expiry": "same"
+      }
+    ],
+    "bias": "volatility_short",
+    "risk_profile": "undefined",
+    "max_gain": "premium received",
+    "max_loss": "unlimited",
+    "has_naked_short_call": true,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "BLOCK",
+    "guard_reason": "SELL call without stock coverage \u2192 no long shares to cover",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Undefined risk both directions. Short call not covered by stock. Guard blocks on short call check."
+  },
+  {
+    "name": "Long Strangle",
+    "aliases": [
+      "OTM Straddle",
+      "Wide Strangle"
+    ],
+    "category": "strangle",
+    "legs": [
+      {
+        "type": "call",
+        "action": "BUY",
+        "strike": "OTM",
+        "expiry": "same"
+      },
+      {
+        "type": "put",
+        "action": "BUY",
+        "strike": "OTM",
+        "expiry": "same"
+      }
+    ],
+    "bias": "volatility_long",
+    "risk_profile": "defined",
+    "max_gain": "unlimited",
+    "max_loss": "premium paid (call + put)",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "ALLOW",
+    "guard_reason": "BUY anything \u2192 always allowed",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "All-long structure. Cheaper than straddle but requires larger move. Max loss = premium paid."
+  },
+  {
+    "name": "Short Strangle",
+    "aliases": [
+      "Naked Strangle"
+    ],
+    "category": "strangle",
+    "legs": [
+      {
+        "type": "call",
+        "action": "SELL",
+        "strike": "OTM",
+        "expiry": "same"
+      },
+      {
+        "type": "put",
+        "action": "SELL",
+        "strike": "OTM",
+        "expiry": "same"
+      }
+    ],
+    "bias": "volatility_short",
+    "risk_profile": "undefined",
+    "max_gain": "premium received",
+    "max_loss": "unlimited",
+    "has_naked_short_call": true,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "BLOCK",
+    "guard_reason": "SELL call without stock coverage \u2192 no long shares to cover",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Undefined risk both directions. Cheaper margin than straddle, but guard blocks due to naked call."
+  },
+  {
+    "name": "Long Call Butterfly",
+    "aliases": [
+      "Call Butterfly",
+      "Iron Butterfly (long)"
+    ],
+    "category": "butterfly",
+    "legs": [
+      {
+        "type": "call",
+        "action": "BUY",
+        "strike": "lower",
+        "expiry": "same"
+      },
+      {
+        "type": "call",
+        "action": "SELL",
+        "strike": "middle",
+        "expiry": "same"
+      },
+      {
+        "type": "call",
+        "action": "SELL",
+        "strike": "middle",
+        "expiry": "same"
+      },
+      {
+        "type": "call",
+        "action": "BUY",
+        "strike": "upper",
+        "expiry": "same"
+      }
+    ],
+    "bias": "neutral",
+    "risk_profile": "defined",
+    "max_gain": "middle_strike - lower_strike - debit",
+    "max_loss": "debit paid",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "ALLOW",
+    "guard_reason": "Combo with both BUY and SELL legs \u2192 short calls covered by long calls",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "4-leg structure. Two short calls in middle covered by long calls at extremes. Max profit at middle strike."
+  },
+  {
+    "name": "Iron Butterfly",
+    "aliases": [
+      "Iron Fly",
+      "Short Butterfly"
+    ],
+    "category": "butterfly",
+    "legs": [
+      {
+        "type": "put",
+        "action": "BUY",
+        "strike": "lower",
+        "expiry": "same"
+      },
+      {
+        "type": "put",
+        "action": "SELL",
+        "strike": "middle-lower",
+        "expiry": "same"
+      },
+      {
+        "type": "call",
+        "action": "SELL",
+        "strike": "middle-upper",
+        "expiry": "same"
+      },
+      {
+        "type": "call",
+        "action": "BUY",
+        "strike": "upper",
+        "expiry": "same"
+      }
+    ],
+    "bias": "neutral",
+    "risk_profile": "defined",
+    "max_gain": "credit received",
+    "max_loss": "width - credit",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "ALLOW",
+    "guard_reason": "Combo with both BUY and SELL legs \u2192 defined risk from hedges",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "4-leg spread. Combines bull put + bear call. Short put covered by long put, short call covered by long call."
+  },
+  {
+    "name": "Long Put Butterfly",
+    "aliases": [
+      "Put Butterfly"
+    ],
+    "category": "butterfly",
+    "legs": [
+      {
+        "type": "put",
+        "action": "BUY",
+        "strike": "lower",
+        "expiry": "same"
+      },
+      {
+        "type": "put",
+        "action": "SELL",
+        "strike": "middle",
+        "expiry": "same"
+      },
+      {
+        "type": "put",
+        "action": "SELL",
+        "strike": "middle",
+        "expiry": "same"
+      },
+      {
+        "type": "put",
+        "action": "BUY",
+        "strike": "upper",
+        "expiry": "same"
+      }
+    ],
+    "bias": "neutral",
+    "risk_profile": "defined",
+    "max_gain": "upper_strike - middle_strike - debit",
+    "max_loss": "debit paid",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "ALLOW",
+    "guard_reason": "Combo with both BUY and SELL legs \u2192 covered by long puts",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "4-leg structure. Two short puts covered by long puts at extremes."
+  },
+  {
+    "name": "Long Iron Condor",
+    "aliases": [
+      "Iron Condor",
+      "Short Condor"
+    ],
+    "category": "condor",
+    "legs": [
+      {
+        "type": "put",
+        "action": "BUY",
+        "strike": "lower",
+        "expiry": "same"
+      },
+      {
+        "type": "put",
+        "action": "SELL",
+        "strike": "higher-lower",
+        "expiry": "same"
+      },
+      {
+        "type": "call",
+        "action": "SELL",
+        "strike": "higher-upper",
+        "expiry": "same"
+      },
+      {
+        "type": "call",
+        "action": "BUY",
+        "strike": "upper",
+        "expiry": "same"
+      }
+    ],
+    "bias": "neutral",
+    "risk_profile": "defined",
+    "max_gain": "credit received",
+    "max_loss": "put_width - credit",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "ALLOW",
+    "guard_reason": "Combo with both BUY and SELL legs \u2192 defined risk",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "4-leg spread. Wide collars. Short put covered by long put, short call covered by long call."
+  },
+  {
+    "name": "Long Call Ratio Spread",
+    "aliases": [
+      "1x2 Call Ratio"
+    ],
+    "category": "ratio",
+    "legs": [
+      {
+        "type": "call",
+        "action": "BUY",
+        "strike": "lower",
+        "expiry": "same"
+      },
+      {
+        "type": "call",
+        "action": "SELL",
+        "strike": "higher",
+        "expiry": "same"
+      },
+      {
+        "type": "call",
+        "action": "SELL",
+        "strike": "higher",
+        "expiry": "same"
+      }
+    ],
+    "bias": "bullish",
+    "risk_profile": "undefined",
+    "max_gain": "net credit at upper strike",
+    "max_loss": "unlimited above upper strike + 1",
+    "has_naked_short_call": true,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "BLOCK",
+    "guard_reason": "Ratio: 1 long call vs 2 short calls. Short call not fully covered.",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Ratio spreads have undefined risk. Short call quantity exceeds long call coverage (1 long covers only 1 short)."
+  },
+  {
+    "name": "Long Put Ratio Spread",
+    "aliases": [
+      "1x2 Put Ratio",
+      "Reverse Ratio Put"
+    ],
+    "category": "ratio",
+    "legs": [
+      {
+        "type": "put",
+        "action": "BUY",
+        "strike": "higher",
+        "expiry": "same"
+      },
+      {
+        "type": "put",
+        "action": "SELL",
+        "strike": "lower",
+        "expiry": "same"
+      },
+      {
+        "type": "put",
+        "action": "SELL",
+        "strike": "lower",
+        "expiry": "same"
+      }
+    ],
+    "bias": "bearish",
+    "risk_profile": "undefined",
+    "max_gain": "net credit at lower strike",
+    "max_loss": "unlimited below lower strike - 1",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "BLOCK",
+    "guard_reason": "Ratio: 1 long put vs 2 short puts. Ratio creates undefined risk.",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Ratio spreads expose extra short put(s) beyond the long hedge. Undefined risk below lower strike."
+  },
+  {
+    "name": "Short Call Ratio Backspread",
+    "aliases": [
+      "1x2 Short Call Ratio"
+    ],
+    "category": "ratio",
+    "legs": [
+      {
+        "type": "call",
+        "action": "SELL",
+        "strike": "lower",
+        "expiry": "same"
+      },
+      {
+        "type": "call",
+        "action": "BUY",
+        "strike": "higher",
+        "expiry": "same"
+      },
+      {
+        "type": "call",
+        "action": "BUY",
+        "strike": "higher",
+        "expiry": "same"
+      }
+    ],
+    "bias": "bearish",
+    "risk_profile": "undefined",
+    "max_gain": "unlimited above upper strike",
+    "max_loss": "lower_strike - debit",
+    "has_naked_short_call": true,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "BLOCK",
+    "guard_reason": "SELL call without stock coverage \u2192 naked short call",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "2 long calls do not cover 1 short call at lower strike. Naked short call exposure."
+  },
+  {
+    "name": "Short Put Ratio Backspread",
+    "aliases": [
+      "1x2 Short Put Ratio"
+    ],
+    "category": "ratio",
+    "legs": [
+      {
+        "type": "put",
+        "action": "SELL",
+        "strike": "higher",
+        "expiry": "same"
+      },
+      {
+        "type": "put",
+        "action": "BUY",
+        "strike": "lower",
+        "expiry": "same"
+      },
+      {
+        "type": "put",
+        "action": "BUY",
+        "strike": "lower",
+        "expiry": "same"
+      }
+    ],
+    "bias": "bullish",
+    "risk_profile": "undefined",
+    "max_gain": "unlimited below lower strike",
+    "max_loss": "higher_strike - debit",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "ALLOW",
+    "guard_reason": "SELL put \u2192 cash-secured, defined risk",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Guard allows all SELL puts. However, this ratio backspread has undefined risk above the short strike if assigned (2 long puts don't fully hedge short put assignment)."
+  },
+  {
+    "name": "Synthetic Long Stock",
+    "aliases": [
+      "Long Call + Short Put (same strike)",
+      "Synthetic Equity"
+    ],
+    "category": "synthetic",
+    "legs": [
+      {
+        "type": "call",
+        "action": "BUY",
+        "strike": "same",
+        "expiry": "same"
+      },
+      {
+        "type": "put",
+        "action": "SELL",
+        "strike": "same",
+        "expiry": "same"
+      }
+    ],
+    "bias": "bullish",
+    "risk_profile": "undefined",
+    "max_gain": "unlimited",
+    "max_loss": "strike - premium",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": true,
+    "guard_decision": "ALLOW",
+    "guard_reason": "Combo with both BUY and SELL legs; SELL put is cash-secured",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Synthetically equivalent to long stock. Risk profile = undefined (short put's assignment can exceed premium from long call if stock drops). Guard allows because both legs \u2192 covered."
+  },
+  {
+    "name": "Synthetic Short Stock",
+    "aliases": [
+      "Long Put + Short Call (same strike)",
+      "Synthetic Short"
+    ],
+    "category": "synthetic",
+    "legs": [
+      {
+        "type": "put",
+        "action": "BUY",
+        "strike": "same",
+        "expiry": "same"
+      },
+      {
+        "type": "call",
+        "action": "SELL",
+        "strike": "same",
+        "expiry": "same"
+      }
+    ],
+    "bias": "bearish",
+    "risk_profile": "undefined",
+    "max_gain": "strike - premium",
+    "max_loss": "unlimited",
+    "has_naked_short_call": true,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "BLOCK",
+    "guard_reason": "SELL call without stock coverage \u2192 no long shares to cover",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Synthetically equivalent to short stock. Guard blocks due to naked short call (long put does not cover short call)."
+  },
+  {
+    "name": "Long Risk Reversal",
+    "aliases": [
+      "Long Call + Short Put (different strikes)",
+      "Call Spread Synthetic"
+    ],
+    "category": "synthetic",
+    "legs": [
+      {
+        "type": "call",
+        "action": "BUY",
+        "strike": "higher",
+        "expiry": "same"
+      },
+      {
+        "type": "put",
+        "action": "SELL",
+        "strike": "lower",
+        "expiry": "same"
+      }
+    ],
+    "bias": "bullish",
+    "risk_profile": "undefined",
+    "max_gain": "unlimited",
+    "max_loss": "short_strike - long_strike + net credit",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": true,
+    "guard_decision": "ALLOW",
+    "guard_reason": "SELL put is cash-secured \u2192 ALLOW. BUY call \u2192 ALLOW. No naked short call.",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Bullish skew trade. Short put is cash-secured (defined risk). Guard correctly allows."
+  },
+  {
+    "name": "Short Risk Reversal",
+    "aliases": [
+      "Short Call + Long Put (different strikes)",
+      "Reverse Risk Reversal"
+    ],
+    "category": "synthetic",
+    "legs": [
+      {
+        "type": "call",
+        "action": "SELL",
+        "strike": "lower",
+        "expiry": "same"
+      },
+      {
+        "type": "put",
+        "action": "BUY",
+        "strike": "higher",
+        "expiry": "same"
+      }
+    ],
+    "bias": "bearish",
+    "risk_profile": "undefined",
+    "max_gain": "short_strike - long_strike + net credit",
+    "max_loss": "unlimited",
+    "has_naked_short_call": true,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "BLOCK",
+    "guard_reason": "sellCallRatio=1, buyCallRatio=0, uncoveredRatio=1 \u2192 needs stock coverage. BLOCK if uncovered. Fixed 2026-03-18: combo check now inspects leg types, moved before BUY early-return.",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Synthetic short stock. BUY BAG envelope with legs [SELL C, BUY P]. Guard correctly blocks: SELL C with no matching BUY C \u2192 stock coverage required."
+  },
+  {
+    "name": "Diagonal Call Spread",
+    "aliases": [
+      "Long-dated Buy, Short-dated Sell",
+      "Calendar Call"
+    ],
+    "category": "horizontal",
+    "legs": [
+      {
+        "type": "call",
+        "action": "BUY",
+        "strike": "same/lower",
+        "expiry": "back"
+      },
+      {
+        "type": "call",
+        "action": "SELL",
+        "strike": "same/higher",
+        "expiry": "front"
+      }
+    ],
+    "bias": "bullish",
+    "risk_profile": "defined or undefined",
+    "max_gain": "undefined (variable)",
+    "max_loss": "debit paid if defined, or unlimited if not",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "ALLOW",
+    "guard_reason": "Combo with both BUY and SELL legs \u2192 covered by long leg",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Horizontal spread with different expirations. Short call expires sooner. If structured as long call covers short call, guard allows (BUY + SELL). Risk depends on strike relationship and expiry roll."
+  },
+  {
+    "name": "Diagonal Put Spread",
+    "aliases": [
+      "Long-dated Buy, Short-dated Sell (puts)",
+      "Calendar Put"
+    ],
+    "category": "horizontal",
+    "legs": [
+      {
+        "type": "put",
+        "action": "BUY",
+        "strike": "same/higher",
+        "expiry": "back"
+      },
+      {
+        "type": "put",
+        "action": "SELL",
+        "strike": "same/lower",
+        "expiry": "front"
+      }
+    ],
+    "bias": "bearish",
+    "risk_profile": "defined or undefined",
+    "max_gain": "undefined (variable)",
+    "max_loss": "debit paid if defined, or unlimited if not",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "ALLOW",
+    "guard_reason": "Combo with both BUY and SELL legs",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Horizontal spread (puts). Short put expires sooner; long put is hedge."
+  },
+  {
+    "name": "Calendar Call Spread (Same Strike)",
+    "aliases": [
+      "Call Calendar",
+      "Time Spread"
+    ],
+    "category": "horizontal",
+    "legs": [
+      {
+        "type": "call",
+        "action": "BUY",
+        "strike": "same",
+        "expiry": "back"
+      },
+      {
+        "type": "call",
+        "action": "SELL",
+        "strike": "same",
+        "expiry": "front"
+      }
+    ],
+    "bias": "neutral",
+    "risk_profile": "defined",
+    "max_gain": "short premium",
+    "max_loss": "long premium (debit paid)",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "ALLOW",
+    "guard_reason": "Combo with both BUY and SELL legs \u2192 short call at same strike covered by long call at same strike",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Pure time decay play. Both legs at same strike, different expirations. Short call is hedged 1:1 by long call."
+  },
+  {
+    "name": "Calendar Put Spread (Same Strike)",
+    "aliases": [
+      "Put Calendar"
+    ],
+    "category": "horizontal",
+    "legs": [
+      {
+        "type": "put",
+        "action": "BUY",
+        "strike": "same",
+        "expiry": "back"
+      },
+      {
+        "type": "put",
+        "action": "SELL",
+        "strike": "same",
+        "expiry": "front"
+      }
+    ],
+    "bias": "neutral",
+    "risk_profile": "defined",
+    "max_gain": "short premium",
+    "max_loss": "long premium (debit paid)",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "ALLOW",
+    "guard_reason": "Combo with both BUY and SELL legs",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Time decay play. Short put hedged by long put at same strike."
+  },
+  {
+    "name": "Jade Lizard",
+    "aliases": [
+      "Superior Iron Butterfly"
+    ],
+    "category": "complex",
+    "legs": [
+      {
+        "type": "call",
+        "action": "SELL",
+        "strike": "higher",
+        "expiry": "same"
+      },
+      {
+        "type": "call",
+        "action": "BUY",
+        "strike": "highest",
+        "expiry": "same"
+      },
+      {
+        "type": "put",
+        "action": "SELL",
+        "strike": "lower",
+        "expiry": "same"
+      },
+      {
+        "type": "put",
+        "action": "BUY",
+        "strike": "lowest",
+        "expiry": "same"
+      }
+    ],
+    "bias": "neutral",
+    "risk_profile": "undefined",
+    "max_gain": "credit received",
+    "max_loss": "unlimited",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "ALLOW",
+    "guard_reason": "SELL call offset by BUY call (sellCallRatio==buyCallRatio). SELL put is cash-secured. Guard correctly allows.",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Short put + call spread. The SELL call is covered by the BUY call leg. Short put is cash-secured."
+  },
+  {
+    "name": "Broken Wing Butterfly",
+    "aliases": [
+      "Uneven Butterfly"
+    ],
+    "category": "butterfly",
+    "legs": [
+      {
+        "type": "call",
+        "action": "BUY",
+        "strike": "lower",
+        "expiry": "same"
+      },
+      {
+        "type": "call",
+        "action": "SELL",
+        "strike": "middle",
+        "expiry": "same"
+      },
+      {
+        "type": "call",
+        "action": "SELL",
+        "strike": "middle+X",
+        "expiry": "same"
+      },
+      {
+        "type": "call",
+        "action": "BUY",
+        "strike": "upper",
+        "expiry": "same"
+      }
+    ],
+    "bias": "bullish or bearish",
+    "risk_profile": "defined",
+    "max_gain": "skewed toward profitable side",
+    "max_loss": "narrower than standard butterfly",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "ALLOW",
+    "guard_reason": "Combo with both BUY and SELL legs",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Modified butterfly with uneven wings. Two short calls in middle are covered by long calls at extremes."
+  },
+  {
+    "name": "Double Calendar Spread",
+    "aliases": [
+      "Double Time Spread",
+      "Two-Month Calendar"
+    ],
+    "category": "horizontal",
+    "legs": [
+      {
+        "type": "call",
+        "action": "BUY",
+        "strike": "ATM",
+        "expiry": "back"
+      },
+      {
+        "type": "call",
+        "action": "SELL",
+        "strike": "ATM",
+        "expiry": "mid"
+      },
+      {
+        "type": "call",
+        "action": "SELL",
+        "strike": "ATM",
+        "expiry": "front"
+      }
+    ],
+    "bias": "neutral",
+    "risk_profile": "defined",
+    "max_gain": "both short premiums",
+    "max_loss": "long premium",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "ALLOW",
+    "guard_reason": "Combo with both BUY and SELL legs",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "3-leg calendar. Long call covers 2 short calls at nearer expirations."
+  },
+  {
+    "name": "Skip Strike Butterfly",
+    "aliases": [
+      "Double Width Butterfly"
+    ],
+    "category": "butterfly",
+    "legs": [
+      {
+        "type": "call",
+        "action": "BUY",
+        "strike": "100",
+        "expiry": "same"
+      },
+      {
+        "type": "call",
+        "action": "SELL",
+        "strike": "110",
+        "expiry": "same"
+      },
+      {
+        "type": "call",
+        "action": "SELL",
+        "strike": "120",
+        "expiry": "same"
+      },
+      {
+        "type": "call",
+        "action": "BUY",
+        "strike": "130",
+        "expiry": "same"
+      }
+    ],
+    "bias": "bullish",
+    "risk_profile": "defined",
+    "max_gain": "$5 - debit",
+    "max_loss": "debit paid",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "ALLOW",
+    "guard_reason": "Combo with both BUY and SELL legs",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Butterfly with wider strike gaps. Two short calls spaced $10 apart, covered by long calls at $100 and $130."
+  },
+  {
+    "name": "Christmas Tree (Vertical)",
+    "aliases": [
+      "Tree Spread"
+    ],
+    "category": "complex",
+    "legs": [
+      {
+        "type": "call",
+        "action": "SELL",
+        "strike": "lower",
+        "expiry": "same"
+      },
+      {
+        "type": "call",
+        "action": "BUY",
+        "strike": "middle",
+        "expiry": "same"
+      },
+      {
+        "type": "call",
+        "action": "SELL",
+        "strike": "middle+5",
+        "expiry": "same"
+      },
+      {
+        "type": "call",
+        "action": "SELL",
+        "strike": "upper",
+        "expiry": "same"
+      }
+    ],
+    "bias": "bearish",
+    "risk_profile": "undefined",
+    "max_gain": "net credit",
+    "max_loss": "unlimited above upper strike",
+    "has_naked_short_call": true,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "BLOCK",
+    "guard_reason": "Multiple short calls; only 1 long call \u2192 naked short calls above the long call strike",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "3-wide short call position partially hedged by 1 long call. Naked exposure on extra short calls."
+  },
+  {
+    "name": "All-Long Combo (3+ legs, no shorts)",
+    "aliases": [
+      "Debit Spread Combo",
+      "Multi-leg Long"
+    ],
+    "category": "complex",
+    "legs": [
+      {
+        "type": "call",
+        "action": "BUY",
+        "strike": "100",
+        "expiry": "same"
+      },
+      {
+        "type": "call",
+        "action": "BUY",
+        "strike": "110",
+        "expiry": "same"
+      },
+      {
+        "type": "put",
+        "action": "BUY",
+        "strike": "90",
+        "expiry": "same"
+      }
+    ],
+    "bias": "bullish",
+    "risk_profile": "defined",
+    "max_gain": "unlimited (if calls) or bounded (if mixed)",
+    "max_loss": "total premium paid",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "ALLOW",
+    "guard_reason": "BUY anything \u2192 always allowed",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "ib_sync detects: 'all(l['position'] > 0 for l in opt_legs) and not stk_legs' \u2192 'Long Combo (N legs), defined'. Guard allows per BUY rule."
+  },
+  {
+    "name": "Ratio Call Spread (1x2 Short focused)",
+    "aliases": [
+      "Excess Short Call",
+      "1x2 Short Call Setup"
+    ],
+    "category": "ratio",
+    "legs": [
+      {
+        "type": "call",
+        "action": "BUY",
+        "strike": "100",
+        "expiry": "same"
+      },
+      {
+        "type": "call",
+        "action": "SELL",
+        "strike": "110",
+        "expiry": "same"
+      },
+      {
+        "type": "call",
+        "action": "SELL",
+        "strike": "110",
+        "expiry": "same"
+      }
+    ],
+    "bias": "bullish",
+    "risk_profile": "undefined",
+    "max_gain": "$10 - debit per contract",
+    "max_loss": "unlimited above $120",
+    "has_naked_short_call": true,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "BLOCK",
+    "guard_reason": "1 long call vs 2 short calls. Extra short call is naked (not covered).",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "ib_sync detects as 'Ratio Bull Call Spread (undefined)'. Guard blocks because countExistingShortCalls()+1 > floor(shares/100) when shares=0."
+  },
+  {
+    "name": "Call Spread (Standard 1x1)",
+    "aliases": [
+      "Vertical Call Spread"
+    ],
+    "category": "vertical",
+    "legs": [
+      {
+        "type": "call",
+        "action": "BUY",
+        "strike": "100",
+        "expiry": "same"
+      },
+      {
+        "type": "call",
+        "action": "SELL",
+        "strike": "105",
+        "expiry": "same"
+      }
+    ],
+    "bias": "bullish",
+    "risk_profile": "defined",
+    "max_gain": "$5 - debit",
+    "max_loss": "debit paid",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "ALLOW",
+    "guard_reason": "Combo with both BUY and SELL legs \u2192 short call covered by long call",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Standard vertical. 1:1 ratio. Guard allows."
+  },
+  {
+    "name": "Long Stock (no options)",
+    "aliases": [
+      "Equity Position"
+    ],
+    "category": "single",
+    "legs": [
+      {
+        "type": "stock",
+        "action": "BUY",
+        "strike": null,
+        "expiry": "N/A"
+      }
+    ],
+    "bias": "bullish",
+    "risk_profile": "undefined",
+    "max_gain": "unlimited",
+    "max_loss": "stock price",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "ALLOW",
+    "guard_reason": "BUY anything \u2192 always allowed",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Equity position only. Guard allows because action='BUY'."
+  },
+  {
+    "name": "Covered Put (Stock + Long Put)",
+    "aliases": [
+      "Married Put",
+      "Protective Put"
+    ],
+    "category": "covered",
+    "legs": [
+      {
+        "type": "stock",
+        "action": "BUY",
+        "strike": null,
+        "expiry": "N/A"
+      },
+      {
+        "type": "put",
+        "action": "BUY",
+        "strike": "ATM or OTM",
+        "expiry": "standard"
+      }
+    ],
+    "bias": "bullish",
+    "risk_profile": "defined",
+    "max_gain": "unlimited",
+    "max_loss": "put premium",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "ALLOW",
+    "guard_reason": "BUY anything \u2192 always allowed",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Stock + long put. All-long, defined risk on downside. Guard allows per BUY rule."
+  },
+  {
+    "name": "Partially Covered Call (Excess Short Calls)",
+    "aliases": [
+      "Naked Call + Covered Call",
+      "Tail Risk"
+    ],
+    "category": "covered",
+    "legs": [
+      {
+        "type": "stock",
+        "action": "BUY",
+        "strike": null,
+        "expiry": "N/A"
+      },
+      {
+        "type": "call",
+        "action": "SELL",
+        "strike": "OTM",
+        "expiry": "standard"
+      },
+      {
+        "type": "call",
+        "action": "SELL",
+        "strike": "OTM",
+        "expiry": "standard"
+      }
+    ],
+    "bias": "neutral",
+    "risk_profile": "undefined",
+    "max_gain": "2x premium + (strike - stock_price)",
+    "max_loss": "unlimited above stock_price + width",
+    "has_naked_short_call": true,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "BLOCK",
+    "guard_reason": "2 short calls vs 1x100 shares. Only 1 call is covered.",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Over-sold calls. Guard checks: existingShortCalls + order.quantity > floor(shares/100). Will block if selling the 2nd call."
+  },
+  {
+    "name": "Long Call Spread (Debit)",
+    "aliases": [
+      "Bull Call Spread"
+    ],
+    "category": "vertical",
+    "legs": [
+      {
+        "type": "call",
+        "action": "BUY",
+        "strike": "ATM",
+        "expiry": "same"
+      },
+      {
+        "type": "call",
+        "action": "SELL",
+        "strike": "OTM",
+        "expiry": "same"
+      }
+    ],
+    "bias": "bullish",
+    "risk_profile": "defined",
+    "max_gain": "strike_width - debit",
+    "max_loss": "debit paid",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "ALLOW",
+    "guard_reason": "Combo with both BUY and SELL legs",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Vertical spread, debit paid upfront. Short call limited upside."
+  },
+  {
+    "name": "Short Call Spread (Credit)",
+    "aliases": [
+      "Bear Call Spread"
+    ],
+    "category": "vertical",
+    "legs": [
+      {
+        "type": "call",
+        "action": "SELL",
+        "strike": "ATM",
+        "expiry": "same"
+      },
+      {
+        "type": "call",
+        "action": "BUY",
+        "strike": "OTM",
+        "expiry": "same"
+      }
+    ],
+    "bias": "bearish",
+    "risk_profile": "defined",
+    "max_gain": "credit received",
+    "max_loss": "strike_width - credit",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "ALLOW",
+    "guard_reason": "Combo with both BUY and SELL legs \u2192 short call covered by long call",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Vertical spread, credit received. Short call hedged by long call."
+  },
+  {
+    "name": "Long Put Spread (Debit)",
+    "aliases": [
+      "Bear Put Spread"
+    ],
+    "category": "vertical",
+    "legs": [
+      {
+        "type": "put",
+        "action": "BUY",
+        "strike": "ATM",
+        "expiry": "same"
+      },
+      {
+        "type": "put",
+        "action": "SELL",
+        "strike": "ITM",
+        "expiry": "same"
+      }
+    ],
+    "bias": "bearish",
+    "risk_profile": "defined",
+    "max_gain": "strike_width - debit",
+    "max_loss": "debit paid",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "ALLOW",
+    "guard_reason": "Combo with both BUY and SELL legs",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Vertical spread, debit paid. Short put hedged by long put."
+  },
+  {
+    "name": "Short Put Spread (Credit)",
+    "aliases": [
+      "Bull Put Spread"
+    ],
+    "category": "vertical",
+    "legs": [
+      {
+        "type": "put",
+        "action": "SELL",
+        "strike": "ATM",
+        "expiry": "same"
+      },
+      {
+        "type": "put",
+        "action": "BUY",
+        "strike": "ITM",
+        "expiry": "same"
+      }
+    ],
+    "bias": "bullish",
+    "risk_profile": "defined",
+    "max_gain": "credit received",
+    "max_loss": "strike_width - credit",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "ALLOW",
+    "guard_reason": "Combo with both BUY and SELL legs \u2192 short put hedged by long put",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Vertical spread, credit received. Short put covered by long put."
+  },
+  {
+    "name": "Box Spread (Synthetic Future)",
+    "aliases": [
+      "Long Box",
+      "Risk-Free Arbitrage"
+    ],
+    "category": "complex",
+    "legs": [
+      {
+        "type": "call",
+        "action": "BUY",
+        "strike": "lower",
+        "expiry": "same"
+      },
+      {
+        "type": "call",
+        "action": "SELL",
+        "strike": "higher",
+        "expiry": "same"
+      },
+      {
+        "type": "put",
+        "action": "SELL",
+        "strike": "lower",
+        "expiry": "same"
+      },
+      {
+        "type": "put",
+        "action": "BUY",
+        "strike": "higher",
+        "expiry": "same"
+      }
+    ],
+    "bias": "neutral",
+    "risk_profile": "defined",
+    "max_gain": "strike_width - net debit",
+    "max_loss": "net debit paid",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "ALLOW",
+    "guard_reason": "Combo with both BUY and SELL legs \u2192 all hedged",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "4-leg synthetic future position. Locked-in risk/reward = strike width - net cost. Guard allows due to balanced BUY/SELL."
+  },
+  {
+    "name": "Reverse Conversion",
+    "aliases": [
+      "Reverse Arbitrage",
+      "Synthetic Short + Long Stock"
+    ],
+    "category": "complex",
+    "legs": [
+      {
+        "type": "stock",
+        "action": "BUY",
+        "strike": null,
+        "expiry": "N/A"
+      },
+      {
+        "type": "call",
+        "action": "SELL",
+        "strike": "ATM",
+        "expiry": "standard"
+      },
+      {
+        "type": "put",
+        "action": "BUY",
+        "strike": "ATM",
+        "expiry": "standard"
+      }
+    ],
+    "bias": "neutral",
+    "risk_profile": "defined",
+    "max_gain": "credit from short call - premium for put",
+    "max_loss": "debit for stock - credit from call + premium for put",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "ALLOW",
+    "guard_reason": "Stock + short call (covered by stock) + long put. Combo with BUY and SELL.",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Arbitrage structure. Long stock covers short call. Guard allows due to stock coverage."
+  },
+  {
+    "name": "Conversion (Arbitrage)",
+    "aliases": [
+      "Synthetic Long + Short Stock",
+      "Cash-and-Carry"
+    ],
+    "category": "complex",
+    "legs": [
+      {
+        "type": "stock",
+        "action": "SELL",
+        "strike": null,
+        "expiry": "N/A"
+      },
+      {
+        "type": "call",
+        "action": "BUY",
+        "strike": "ATM",
+        "expiry": "standard"
+      },
+      {
+        "type": "put",
+        "action": "SELL",
+        "strike": "ATM",
+        "expiry": "standard"
+      }
+    ],
+    "bias": "neutral",
+    "risk_profile": "defined",
+    "max_gain": "credit from short put - cost of call",
+    "max_loss": "debit for short stock + cost of call - credit for put",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": true,
+    "short_put_only": true,
+    "guard_decision": "BLOCK",
+    "guard_reason": "SELL stock without sufficient long shares \u2192 naked short stock",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Arbitrage structure. Guard blocks on short stock check (countLongShares()=0)."
+  },
+  {
+    "name": "Ratio Put Spread (1x2 Long focused)",
+    "aliases": [
+      "Excess Long Put Ratio"
+    ],
+    "category": "ratio",
+    "legs": [
+      {
+        "type": "put",
+        "action": "BUY",
+        "strike": "lower",
+        "expiry": "same"
+      },
+      {
+        "type": "put",
+        "action": "BUY",
+        "strike": "lower",
+        "expiry": "same"
+      },
+      {
+        "type": "put",
+        "action": "SELL",
+        "strike": "higher",
+        "expiry": "same"
+      }
+    ],
+    "bias": "bearish",
+    "risk_profile": "defined",
+    "max_gain": "strike_width - debit",
+    "max_loss": "debit paid",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "ALLOW",
+    "guard_reason": "Combo with both BUY and SELL legs",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Ratio with long bias (2 long puts, 1 short put). Guard allows due to BUY + SELL, but this is actually defined-risk if the long puts fully cover the short put."
+  },
+  {
+    "name": "Seagull Spread",
+    "aliases": [
+      "Zero-Cost Collar + extension",
+      "Risk Reversal Call Spread",
+      "Risk Reversal Put Spread (put-side mirror)"
+    ],
+    "category": "complex",
+    "legs": [
+      {
+        "type": "call",
+        "action": "BUY",
+        "strike": "highest",
+        "expiry": "same"
+      },
+      {
+        "type": "call",
+        "action": "SELL",
+        "strike": "middle",
+        "expiry": "same"
+      },
+      {
+        "type": "put",
+        "action": "SELL",
+        "strike": "lowest",
+        "expiry": "same"
+      }
+    ],
+    "bias": "bullish",
+    "risk_profile": "undefined",
+    "max_gain": "middle_strike - lowest_strike - net_cost",
+    "max_loss": "unlimited",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": true,
+    "guard_decision": "ALLOW",
+    "guard_reason": "SELL call offset by BUY call (sellCallRatio==buyCallRatio). SELL put is cash-secured. Guard correctly allows.",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "BUY call + bear call spread + short put. SELL call is covered by BUY call. Short put is cash-secured."
+  },
+  {
+    "name": "Iron Albatross",
+    "aliases": [
+      "Wide Iron Condor"
+    ],
+    "category": "condor",
+    "legs": [
+      {
+        "type": "put",
+        "action": "BUY",
+        "strike": "very_low",
+        "expiry": "same"
+      },
+      {
+        "type": "put",
+        "action": "SELL",
+        "strike": "low",
+        "expiry": "same"
+      },
+      {
+        "type": "call",
+        "action": "SELL",
+        "strike": "high",
+        "expiry": "same"
+      },
+      {
+        "type": "call",
+        "action": "BUY",
+        "strike": "very_high",
+        "expiry": "same"
+      }
+    ],
+    "bias": "neutral",
+    "risk_profile": "defined",
+    "max_gain": "credit received",
+    "max_loss": "put_width - credit",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "ALLOW",
+    "guard_reason": "Combo with both BUY and SELL legs \u2192 defined risk",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Ultra-wide condor. Short put covered by long put, short call covered by long call."
+  },
+  {
+    "name": "Call Debit Spread (Bullish)",
+    "aliases": [
+      "Long Call Spread",
+      "Bull Call Spread"
+    ],
+    "category": "vertical",
+    "legs": [
+      {
+        "type": "call",
+        "action": "BUY",
+        "strike": "ATM",
+        "expiry": "same"
+      },
+      {
+        "type": "call",
+        "action": "SELL",
+        "strike": "OTM",
+        "expiry": "same"
+      }
+    ],
+    "bias": "bullish",
+    "risk_profile": "defined",
+    "max_gain": "width - debit",
+    "max_loss": "debit paid",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "ALLOW",
+    "guard_reason": "Combo with both BUY and SELL legs",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Standard debit spread. Short call covered by long call."
+  },
+  {
+    "name": "Put Debit Spread (Bearish)",
+    "aliases": [
+      "Long Put Spread",
+      "Bear Put Spread"
+    ],
+    "category": "vertical",
+    "legs": [
+      {
+        "type": "put",
+        "action": "BUY",
+        "strike": "ATM",
+        "expiry": "same"
+      },
+      {
+        "type": "put",
+        "action": "SELL",
+        "strike": "ITM",
+        "expiry": "same"
+      }
+    ],
+    "bias": "bearish",
+    "risk_profile": "defined",
+    "max_gain": "width - debit",
+    "max_loss": "debit paid",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "ALLOW",
+    "guard_reason": "Combo with both BUY and SELL legs",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Standard debit spread. Short put covered by long put."
+  },
+  {
+    "name": "Call Credit Spread (Bearish)",
+    "aliases": [
+      "Short Call Spread",
+      "Bear Call Spread"
+    ],
+    "category": "vertical",
+    "legs": [
+      {
+        "type": "call",
+        "action": "SELL",
+        "strike": "ATM",
+        "expiry": "same"
+      },
+      {
+        "type": "call",
+        "action": "BUY",
+        "strike": "OTM",
+        "expiry": "same"
+      }
+    ],
+    "bias": "bearish",
+    "risk_profile": "defined",
+    "max_gain": "credit received",
+    "max_loss": "width - credit",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "ALLOW",
+    "guard_reason": "Combo with both BUY and SELL legs",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Standard credit spread. Short call covered by long call."
+  },
+  {
+    "name": "Put Credit Spread (Bullish)",
+    "aliases": [
+      "Short Put Spread",
+      "Bull Put Spread"
+    ],
+    "category": "vertical",
+    "legs": [
+      {
+        "type": "put",
+        "action": "SELL",
+        "strike": "ATM",
+        "expiry": "same"
+      },
+      {
+        "type": "put",
+        "action": "BUY",
+        "strike": "ITM",
+        "expiry": "same"
+      }
+    ],
+    "bias": "bullish",
+    "risk_profile": "defined",
+    "max_gain": "credit received",
+    "max_loss": "width - credit",
+    "has_naked_short_call": false,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "ALLOW",
+    "guard_reason": "Combo with both BUY and SELL legs",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Standard credit spread. Short put covered by long put."
+  },
+  {
+    "name": "Naked Strangle (Short 1xN Strangle)",
+    "aliases": [
+      "Undefined Strangle"
+    ],
+    "category": "strangle",
+    "legs": [
+      {
+        "type": "call",
+        "action": "SELL",
+        "strike": "OTM_high",
+        "expiry": "same"
+      },
+      {
+        "type": "put",
+        "action": "SELL",
+        "strike": "OTM_low",
+        "expiry": "same"
+      },
+      {
+        "type": "put",
+        "action": "SELL",
+        "strike": "OTM_low",
+        "expiry": "same"
+      }
+    ],
+    "bias": "volatility_short",
+    "risk_profile": "undefined",
+    "max_gain": "premium received",
+    "max_loss": "unlimited",
+    "has_naked_short_call": true,
+    "has_naked_short_stock": false,
+    "short_put_only": false,
+    "guard_decision": "BLOCK",
+    "guard_reason": "SELL call without stock coverage \u2192 no long shares",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Naked short call + extra short put. Guard blocks on short call check."
+  }
+]

@@ -95,7 +95,7 @@ class TestEmbargoIsDistinguishable:
         client = mq.MenthorQDashboardClient(username="u", password="p")
 
         class _Context:
-            def storage_state(self, path):
+            def storage_state(self, path=None):
                 raise OSError("No space left on device")
 
         with pytest.raises(mq.MenthorQDashboardStorageError):
@@ -147,10 +147,10 @@ class TestBootstrapWallTime:
             def count(self):
                 return 1
 
-            def fill(self, _value):
+            def fill(self, _value, **_kwargs):
                 return None
 
-            def click(self):
+            def click(self, **_kwargs):
                 return None
 
         class _Response:

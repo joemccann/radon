@@ -1,5 +1,6 @@
 "use client";
 
+import ResearchTicketContext from "@/components/research/ResearchTicketContext";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Loader2 } from "lucide-react";
 import { useTickerDetailOptional } from "@/lib/TickerDetailContext";
@@ -1141,6 +1142,7 @@ export default function OrderTab({ ticker, position, portfolio, prices, openOrde
       />
 
       <div className="order-tab">
+        <ResearchTicketContext ticker={ticker} />
         {/* NEW ORDER FORM FIRST — always visible above the fold */}
         {/* Indices are not directly tradeable — show a notice and gate
            the form. Phase 2 will add a futures order form for the

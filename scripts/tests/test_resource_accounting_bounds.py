@@ -199,7 +199,7 @@ class TestImageDownloadConcurrency:
 
     def test_the_fan_out_is_not_a_bare_promise_all_over_every_url(self):
         src = (REPO / "scripts" / "newsfeed" / "media.js").read_text()
-        body = src.split("async function download(postId, urls)")[1].split("\n  }")[0]
+        body = src.split("async function download(")[1].split("\n  }")[0]
         assert "urls.map(async" not in body, "still one in-flight request per image"
 
     def test_there_is_a_per_post_image_cap(self):

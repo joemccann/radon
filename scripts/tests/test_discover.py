@@ -260,16 +260,72 @@ def test_fetch_darkpool_multi_caps_scoring_pages():
     mock_client = MagicMock()
     captured = {}
 
-    def _fake_fetch(ticker, date=None, _client=None, max_pages=None):
+    def _fake_walk(ticker, date=None, _client=None, max_pages=None, **_kwargs):
+        from fetch_flow import DarkpoolWalk
         captured["max_pages"] = max_pages
-        return [{"size": 1, "price": 101, "nbbo_bid": 99, "nbbo_ask": 101}]
+        return DarkpoolWalk(
+            [{"size": 1, "price": 101, "nbbo_bid": 99, "nbbo_ask": 101}],
+            True,
+        )
 
     with patch("discover.get_cached_darkpool", return_value=None), \
          patch("discover.set_cached_darkpool"), \
          patch("discover.get_last_n_trading_days", return_value=["2026-08-18"]), \
          patch("discover._is_trading_day", return_value=True), \
-         patch("fetch_flow.fetch_darkpool", side_effect=_fake_fetch):
+         patch("fetch_flow.walk_darkpool", side_effect=_fake_walk):
         fetch_darkpool_multi("AAPL", days=1, _client=mock_client)
 
     assert captured["max_pages"] == DISCOVER_DARKPOOL_MAX_PAGES
     assert DISCOVER_DARKPOOL_MAX_PAGES == 2
+
+
+def test_capped_scoring_walk_is_not_served_as_a_full_day(monkeypatch):
+    """Two full UW pages are a scoring sample, not a closed session.
+
+    Writing them as schema-v2 complete is what froze SNDK 2026-09-04 at
+    976 prints next to 19k-print days on /flow-analysis.
+    """
+    import utils.darkpool_cache as dpc
+    from discover import fetch_darkpool_multi
+    from fetch_flow import DARKPOOL_PAGE_LIMIT
+
+    session_today = "2026-09-10"
+    session_prior = "2026-09-04"
+    monkeypatch.setattr(dpc, "_today_et", lambda: session_today)
+
+    def _trade(i: int, executed_at: str) -> dict:
+        return {
+            "size": 100,
+            "price": 50.0,
+            "premium": 5000,
+            "nbbo_bid": 49.9,
+            "nbbo_ask": 50.1,
+            "executed_at": executed_at,
+            "tracking_id": i,
+        }
+
+    page1 = [
+        _trade(i, f"2026-09-04T16:{59 - (i // 60):02d}:{59 - (i % 60):02d}Z")
+        for i in range(DARKPOOL_PAGE_LIMIT)
+    ]
+    page2 = [
+        _trade(
+            DARKPOOL_PAGE_LIMIT + i,
+            f"2026-09-04T12:{59 - (i // 60):02d}:{59 - (i % 60):02d}Z",
+        )
+        for i in range(DARKPOOL_PAGE_LIMIT)
+    ]
+    mock_client = MagicMock()
+    mock_client.get_darkpool_flow.side_effect = [
+        {"data": page1},
+        {"data": page2},
+    ]
+
+    with patch("discover.get_last_n_trading_days", return_value=[session_prior]), \
+         patch("discover._is_trading_day", return_value=False):
+        fetch_darkpool_multi("SNDK", days=1, _client=mock_client)
+
+    assert dpc.get_cached_darkpool("SNDK", session_prior) is None
+    scoring = dpc.get_cached_darkpool("SNDK", session_prior, require_complete=False)
+    assert scoring is not None
+    assert len(scoring) == 2 * DARKPOOL_PAGE_LIMIT

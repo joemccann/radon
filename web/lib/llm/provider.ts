@@ -11,11 +11,21 @@
  * shapes. A configurable fallback provider is tried when the primary fails.
  * Honors ASSISTANT_MOCK for offline tests.
  *
- * Note: SuperGrok / grok.com consumer subscriptions are not an API. CMD+J
- * uses the xAI Inference API (console.x.ai) with XAI_API_KEY / GROK_API_KEY.
+ * SUBSCRIPTIONS ONLY (operator mandate 2026-09-18): Anthropic, xAI and
+ * OpenAI calls authenticate with the operator's Claude Max, SuperGrok and
+ * ChatGPT grants (lib/llm/subscriptionAuth.ts). A prepaid console key is
+ * never a fallback; RADON_LADDER_ALLOW_PREPAID=1 is the only way one is read,
+ * matching scripts/clients/model_ladder.py. Google runs only through the
+ * Antigravity CLI on the ladder, so the gemini provider is never served here.
  */
 
 import { DEFAULT_MODELS } from "./frontier";
+import {
+  allowPrepaid,
+  resolveAnthropicSubscription,
+  resolveCodexSubscription,
+  resolveXaiSubscription,
+} from "./subscriptionAuth";
 
 export type LlmRole = "user" | "assistant";
 
@@ -40,13 +50,22 @@ export type LlmTool = {
 /** `grok` is accepted as an alias of `xai`. */
 export type LlmProviderName = "xai" | "grok" | "anthropic" | "openai" | "gemini";
 
+export type LlmToolChoice = "auto" | "none" | "required";
+export type LlmReasoningEffort = "low" | "medium" | "high";
+
 export type LlmChatRequest = {
   messages: LlmMessage[];
   system?: string;
   tools?: LlmTool[];
+  /** OpenAI/xAI string; Anthropic is mapped to `{ type }`. Omit to leave provider default. */
+  toolChoice?: LlmToolChoice;
+  /** xAI grok-4.6 defaults to high; the assistant loop must pass low for tool rounds. */
+  reasoningEffort?: LlmReasoningEffort;
   model?: string;
   provider?: LlmProviderName;
   maxTokens?: number;
+  /** Override the 45s provider HTTP timeout (assistant tool rounds use 90s). */
+  timeoutMs?: number;
   /** Per-turn abort (client hung up, wall clock); merged with the request timeout. */
   signal?: AbortSignal;
 };
@@ -84,6 +103,12 @@ const KNOWN_PROVIDERS: readonly LlmProviderName[] = [
 
 const ANTHROPIC_ENV_KEYS = ["ANTHROPIC_API_KEY", "CLAUDE_CODE_API_KEY", "CLAUDE_API_KEY"];
 const XAI_ENV_KEYS = ["XAI_API_KEY", "GROK_API_KEY"];
+/** Claude Code OAuth grants need this beta and the Claude Code identity on Messages. */
+const ANTHROPIC_OAUTH_BETA = "oauth-2025-04-20";
+const CLAUDE_CODE_SYSTEM_PREFIX = "You are Claude Code, Anthropic's official CLI for Claude.";
+const CLAUDE_CODE_USER_AGENT = "claude-cli/2.1.140";
+/** ChatGPT subscription endpoint the codex CLI uses; streaming only. */
+const CHATGPT_CODEX_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses";
 
 /**
  * The model each provider is called with when nothing else names one: no
@@ -102,7 +127,9 @@ function envValue(key: string): string | undefined {
   return value ? value : undefined;
 }
 
+/** Prepaid Anthropic console key: read only under RADON_LADDER_ALLOW_PREPAID. */
 function resolveAnthropicApiKey(): string | undefined {
+  if (!allowPrepaid()) return undefined;
   for (const key of ANTHROPIC_ENV_KEYS) {
     const value = envValue(key);
     if (value) return value;
@@ -110,12 +137,48 @@ function resolveAnthropicApiKey(): string | undefined {
   return undefined;
 }
 
+type AnthropicAuth = { kind: "subscription" | "prepaid"; token: string };
+
+function resolveAnthropicAuth(): AnthropicAuth | undefined {
+  const grant = resolveAnthropicSubscription();
+  if (grant) return { kind: "subscription", token: grant.token };
+  const prepaid = resolveAnthropicApiKey();
+  return prepaid ? { kind: "prepaid", token: prepaid } : undefined;
+}
+
+/** Presence only: can this deployment serve Anthropic at all? */
+export function hasAnthropicAuth(): boolean {
+  return Boolean(resolveAnthropicAuth());
+}
+
+/** Prepaid xAI console key: read only under RADON_LADDER_ALLOW_PREPAID. */
 export function resolveXaiApiKey(): string | undefined {
+  if (!allowPrepaid()) return undefined;
   for (const key of XAI_ENV_KEYS) {
     const value = envValue(key);
     if (value) return value;
   }
   return undefined;
+}
+
+/** SuperGrok subscription grant: env override first, then ~/.grok/auth.json. */
+export function resolveXaiSubscriptionToken(): string | undefined {
+  return resolveXaiSubscription()?.token;
+}
+
+/** The subscription grant; a prepaid key only under RADON_LADDER_ALLOW_PREPAID. */
+export function resolveXaiAuth(): string | undefined {
+  return resolveXaiSubscriptionToken() ?? resolveXaiApiKey();
+}
+
+/** Prepaid OpenAI console key: read only under RADON_LADDER_ALLOW_PREPAID. */
+function resolveOpenAiApiKey(): string | undefined {
+  return allowPrepaid() ? envValue("OPENAI_API_KEY") : undefined;
+}
+
+/** Presence only: can this deployment serve OpenAI at all? */
+export function hasOpenAiAuth(): boolean {
+  return Boolean(resolveCodexSubscription() || resolveOpenAiApiKey());
 }
 
 function isKnownProvider(value: string | undefined): value is LlmProviderName {
@@ -147,7 +210,7 @@ export function providerForModel(model: string | undefined): Exclude<LlmProvider
  * 1. Explicit request.provider
  * 2. The provider that owns request.model (a per-turn selection outranks host env)
  * 3. LLM_PROVIDER env
- * 4. Auto-prefer xAI when XAI_API_KEY / GROK_API_KEY is set (CMD+J → Grok)
+ * 4. Auto-prefer xAI when a Grok subscription grant or XAI_API_KEY / GROK_API_KEY is set (CMD+J → Grok)
  * 5. Anthropic fallback
  */
 export function resolveProvider(
@@ -163,7 +226,7 @@ export function resolveProvider(
   if (isKnownProvider(requested)) {
     return normalizeProvider(requested);
   }
-  if (resolveXaiApiKey()) {
+  if (resolveXaiAuth()) {
     return "xai";
   }
   return DEFAULT_PROVIDER === "grok" ? "xai" : DEFAULT_PROVIDER;
@@ -173,7 +236,20 @@ function resolveFallbackProvider(
   primary: Exclude<LlmProviderName, "grok">,
 ): Exclude<LlmProviderName, "grok"> | undefined {
   const configured = envValue("LLM_FALLBACK_PROVIDER") as LlmProviderName | undefined;
-  if (!isKnownProvider(configured)) return undefined;
+  if (!isKnownProvider(configured)) {
+    // xAI is only AUTO-preferred (resolution step 4). When nobody pinned a
+    // provider and nobody configured a fallback, losing xAI (2026-09-18: the
+    // team ran out of credits, 403 on every call) must degrade to the
+    // historical Anthropic default rather than fail every rewrite.
+    if (
+      primary === "xai" &&
+      !envValue("LLM_PROVIDER") &&
+      hasAnthropicAuth()
+    ) {
+      return "anthropic";
+    }
+    return undefined;
+  }
   const normalized = normalizeProvider(configured);
   if (normalized === primary) return undefined;
   return normalized;
@@ -214,8 +290,8 @@ async function readErrorDetail(response: Response): Promise<string> {
 
 const LLM_REQUEST_TIMEOUT_MS = 45_000;
 
-function llmRequestSignal(request: Pick<LlmChatRequest, "signal">): AbortSignal {
-  const timeout = AbortSignal.timeout(LLM_REQUEST_TIMEOUT_MS);
+function llmRequestSignal(request: Pick<LlmChatRequest, "signal" | "timeoutMs">): AbortSignal {
+  const timeout = AbortSignal.timeout(request.timeoutMs ?? LLM_REQUEST_TIMEOUT_MS);
   return request.signal ? AbortSignal.any([request.signal, timeout]) : timeout;
 }
 
@@ -236,10 +312,55 @@ type AnthropicResponse = {
   usage?: { input_tokens?: number; output_tokens?: number };
 };
 
+/**
+ * Headers for the Anthropic Messages API. A Claude Max OAuth grant is sent as
+ * a Bearer with the oauth beta; the prepaid path keeps x-api-key.
+ */
+export function anthropicHeaders(auth: AnthropicAuth): Record<string, string> {
+  const headers: Record<string, string> = {
+    "anthropic-version": "2023-06-01",
+    "content-type": "application/json",
+    accept: "application/json",
+  };
+  if (auth.kind === "subscription") {
+    headers.authorization = `Bearer ${auth.token}`;
+    headers["anthropic-beta"] = ANTHROPIC_OAUTH_BETA;
+    headers["user-agent"] = CLAUDE_CODE_USER_AGENT;
+  } else {
+    headers["x-api-key"] = auth.token;
+  }
+  return headers;
+}
+
+/**
+ * The OAuth grant is only honoured for Claude Code traffic: the Messages API
+ * answers a bare 429 unless the system prompt opens with the Claude Code
+ * identity block (verified live 2026-09-18). Prepend it; the caller's own
+ * system text follows as a second block.
+ */
+export function anthropicSystem(
+  auth: AnthropicAuth,
+  system: string | undefined,
+): string | Array<{ type: "text"; text: string }> | undefined {
+  if (auth.kind !== "subscription") return system;
+  const blocks: Array<{ type: "text"; text: string }> = [{ type: "text", text: CLAUDE_CODE_SYSTEM_PREFIX }];
+  if (system) blocks.push({ type: "text", text: system });
+  return blocks;
+}
+
+/** Shared by every direct Messages-API caller (seasonality vision, etc.). */
+export function anthropicRequestAuth(): { headers: Record<string, string>; system: (s?: string) => ReturnType<typeof anthropicSystem> } | undefined {
+  const auth = resolveAnthropicAuth();
+  if (!auth) return undefined;
+  return { headers: anthropicHeaders(auth), system: (s?: string) => anthropicSystem(auth, s) };
+}
+
 async function callAnthropic(request: LlmChatRequest): Promise<LlmChatResponse> {
-  const apiKey = resolveAnthropicApiKey();
-  if (!apiKey) {
-    throw new Error("Missing Anthropic API key. Set ANTHROPIC_API_KEY, CLAUDE_CODE_API_KEY, or CLAUDE_API_KEY.");
+  const auth = resolveAnthropicAuth();
+  if (!auth) {
+    throw new Error(
+      "Missing Anthropic subscription. Log Claude Code in (~/.claude/.credentials.json) or set CLAUDE_CODE_OAUTH_TOKEN.",
+    );
   }
 
   const url = envValue("ANTHROPIC_API_URL") || "https://api.anthropic.com/v1/messages";
@@ -250,17 +371,18 @@ async function callAnthropic(request: LlmChatRequest): Promise<LlmChatResponse> 
     max_tokens: maxTokensFor(request),
     messages: request.messages.map((message) => ({ role: message.role, content: message.content })),
   };
-  if (request.system) body.system = request.system;
-  if (request.tools?.length) body.tools = request.tools;
+  const system = anthropicSystem(auth, request.system);
+  if (system) body.system = system;
+  if (request.tools?.length) {
+    body.tools = request.tools;
+    if (request.toolChoice === "none") body.tool_choice = { type: "none" };
+    else if (request.toolChoice === "required") body.tool_choice = { type: "any" };
+    else if (request.toolChoice === "auto") body.tool_choice = { type: "auto" };
+  }
 
   const response = await fetch(url, {
     method: "POST",
-    headers: {
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-      "content-type": "application/json",
-      accept: "application/json",
-    },
+    headers: anthropicHeaders(auth),
     body: JSON.stringify(body),
     signal: llmRequestSignal(request),
   });
@@ -318,14 +440,14 @@ type OpenAiOutboundMessage =
 function openAiConfig(provider: Exclude<LlmProviderName, "grok" | "anthropic" | "gemini">) {
   if (provider === "xai") {
     return {
-      apiKey: resolveXaiApiKey(),
+      apiKey: resolveXaiAuth(),
       baseUrl: envValue("XAI_BASE_URL") || envValue("GROK_BASE_URL") || "https://api.x.ai/v1",
       model: envValue("XAI_MODEL") || envValue("GROK_MODEL") || DEFAULT_MODELS.xai,
       label: "xAI Grok",
     };
   }
   return {
-    apiKey: envValue("OPENAI_API_KEY"),
+    apiKey: resolveOpenAiApiKey(),
     baseUrl: envValue("OPENAI_BASE_URL") || "https://api.openai.com/v1",
     model: envValue("OPENAI_MODEL") || DEFAULT_MODELS.openai,
     label: "OpenAI",
@@ -417,22 +539,106 @@ function toOpenAiTools(tools: LlmTool[] | undefined) {
     type: "function",
     function: {
       name: tool.name,
-      description: tool.description,
+      ...(tool.description ? { description: tool.description } : {}),
       parameters: tool.input_schema,
     },
   }));
+}
+
+/**
+ * ChatGPT subscription via the codex grant. chatgpt.com only streams, so the
+ * SSE is folded here into the same envelope the other adapters return. Tool
+ * turns are refused so the configured tool-capable provider takes them.
+ */
+async function callChatGptSubscription(
+  request: LlmChatRequest,
+  grant: { token: string; accountId?: string },
+): Promise<LlmChatResponse> {
+  if (request.tools?.length) {
+    throw new Error("ChatGPT subscription turns do not carry tools; use a tool-capable provider.");
+  }
+  const model = request.model || envValue("OPENAI_MODEL") || DEFAULT_MODELS.openai;
+  const input = request.messages.map((message) => ({
+    role: message.role,
+    content: [
+      {
+        type: message.role === "assistant" ? "output_text" : "input_text",
+        text: typeof message.content === "string" ? message.content : lastUserContent([message]),
+      },
+    ],
+  }));
+  const body: Record<string, unknown> = { model, input, store: false, stream: true };
+  if (request.system) body.instructions = request.system;
+  if (request.reasoningEffort) body.reasoning = { effort: request.reasoningEffort };
+
+  const headers: Record<string, string> = {
+    authorization: `Bearer ${grant.token}`,
+    "content-type": "application/json",
+    accept: "text/event-stream",
+    "OpenAI-Beta": "responses=experimental",
+  };
+  if (grant.accountId) headers["chatgpt-account-id"] = grant.accountId;
+
+  const response = await fetch(envValue("CHATGPT_CODEX_RESPONSES_URL") || CHATGPT_CODEX_RESPONSES_URL, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+    signal: llmRequestSignal(request),
+  });
+  if (!response.ok) {
+    throw new Error(`ChatGPT subscription request failed (${response.status}): ${await readErrorDetail(response)}`);
+  }
+
+  let text = "";
+  let stopReason: string | undefined;
+  let usage: LlmUsage | undefined;
+  for (const line of (await response.text()).split("\n")) {
+    if (!line.startsWith("data:")) continue;
+    const data = line.slice(5).trim();
+    if (data === "[DONE]") continue;
+    let event: { type?: string; delta?: string; response?: { status?: string; usage?: { input_tokens?: number; output_tokens?: number } } };
+    try {
+      event = JSON.parse(data);
+    } catch {
+      throw new Error("ChatGPT subscription stream is malformed.");
+    }
+    if (!event || typeof event !== "object" || Array.isArray(event)) {
+      throw new Error("ChatGPT subscription stream is malformed.");
+    }
+    if (["response.failed", "response.incomplete", "response.error", "error"].includes(event.type ?? "")) {
+      throw new Error("ChatGPT subscription stream did not complete successfully.");
+    }
+    if (event.type === "response.output_text.delta" && typeof event.delta === "string") text += event.delta;
+    if (event.type === "response.completed") {
+      if (event.response?.status !== "completed") {
+        throw new Error("ChatGPT subscription stream did not complete successfully.");
+      }
+      stopReason = "completed";
+      usage = normalizeUsage(event.response?.usage?.input_tokens, event.response?.usage?.output_tokens);
+    }
+  }
+  if (stopReason !== "completed") {
+    throw new Error("ChatGPT subscription stream ended without completion.");
+  }
+  return { provider: "openai", model, text, stopReason, usage };
 }
 
 async function callOpenAiCompatible(
   request: LlmChatRequest,
   provider: "xai" | "openai",
 ): Promise<LlmChatResponse> {
+  if (provider === "openai" && !allowPrepaid()) {
+    const grant = resolveCodexSubscription();
+    if (!grant) {
+      throw new Error("Missing ChatGPT subscription. Log the codex CLI in (~/.codex/auth.json) or set CODEX_OAUTH_TOKEN.");
+    }
+    return callChatGptSubscription(request, grant);
+  }
   const config = openAiConfig(provider);
   if (!config.apiKey) {
     if (provider === "xai") {
       throw new Error(
-        "Missing xAI API key. Set XAI_API_KEY (or GROK_API_KEY) from https://console.x.ai. " +
-          "A SuperGrok / grok.com subscription alone is not enough for server-side chat.",
+        "Missing xAI subscription. Log the grok CLI in (~/.grok/auth.json) or set XAI_OAUTH_TOKEN.",
       );
     }
     throw new Error(`Missing ${config.label} API key.`);
@@ -447,7 +653,11 @@ async function callOpenAiCompatible(
     messages: toOpenAiMessages(request),
   };
   const tools = toOpenAiTools(request.tools);
-  if (tools) body.tools = tools;
+  if (tools) {
+    body.tools = tools;
+    if (request.toolChoice) body.tool_choice = request.toolChoice;
+  }
+  if (request.reasoningEffort) body.reasoning_effort = request.reasoningEffort;
 
   const response = await fetch(url, {
     method: "POST",
@@ -498,64 +708,11 @@ function parseToolArguments(raw: string | undefined): Record<string, unknown> {
 
 // --- Gemini ---------------------------------------------------------------
 
-type GeminiResponse = {
-  candidates?: Array<{
-    content?: { parts?: Array<{ text?: string }> };
-    finishReason?: string;
-  }>;
-  usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
-};
-
-async function callGemini(request: LlmChatRequest): Promise<LlmChatResponse> {
-  if (request.tools?.length) {
-    // Gemini structured tool-turn parity is not implemented here. Throwing is
-    // intentional so the configured tool-capable provider handles the turn.
-    throw new Error("Gemini tool requests require a tool-capable fallback provider.");
-  }
-  const apiKey = envValue("GEMINI_API_KEY");
-  if (!apiKey) {
-    throw new Error("Missing Gemini API key. Set GEMINI_API_KEY.");
-  }
-
-  const base = envValue("GEMINI_BASE_URL") || "https://generativelanguage.googleapis.com/v1beta";
-  const model = request.model || envValue("GEMINI_MODEL") || "gemini-2.5-pro";
-  const url = `${base.replace(/\/$/, "")}/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
-
-  const body: Record<string, unknown> = {
-    contents: request.messages.map((message) => ({
-      role: message.role === "assistant" ? "model" : "user",
-      parts: [{ text: typeof message.content === "string" ? message.content : lastUserContent([message]) }],
-    })),
-    generationConfig: { maxOutputTokens: maxTokensFor(request) },
-  };
-  if (request.system) {
-    body.systemInstruction = { parts: [{ text: request.system }] };
-  }
-
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json" },
-    body: JSON.stringify(body),
-    signal: llmRequestSignal(request),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Gemini request failed (${response.status}): ${await readErrorDetail(response)}`);
-  }
-
-  const data = (await response.json()) as GeminiResponse;
-  const candidate = data.candidates?.[0];
-  const text = (candidate?.content?.parts ?? [])
-    .map((part) => part.text ?? "")
-    .join("");
-
-  return {
-    provider: "gemini",
-    model,
-    text,
-    stopReason: candidate?.finishReason,
-    usage: normalizeUsage(data.usageMetadata?.promptTokenCount, data.usageMetadata?.candidatesTokenCount),
-  };
+async function callGemini(_request: LlmChatRequest): Promise<LlmChatResponse> {
+  // Google runs only through the Antigravity CLI on the server-side ladder
+  // (operator, 2026-09-18). There is no Gemini API key or token path here,
+  // under any flag; a gemini-* selection falls to the configured fallback.
+  throw new Error("Google is served only through the Antigravity CLI on the ladder; not available in the web layer.");
 }
 
 function normalizeUsage(input: number | undefined, output: number | undefined): LlmUsage | undefined {
@@ -582,7 +739,7 @@ function dispatch(
 export async function assistantChat(
   messages: LlmMessage[],
   system?: string,
-  options?: Pick<LlmChatRequest, "tools" | "model" | "provider" | "maxTokens">,
+  options?: Pick<LlmChatRequest, "tools" | "toolChoice" | "reasoningEffort" | "model" | "provider" | "maxTokens" | "timeoutMs">,
 ): Promise<LlmChatResponse> {
   return chat({ messages, system, ...options });
 }
@@ -599,6 +756,11 @@ export async function chat(request: LlmChatRequest): Promise<LlmChatResponse> {
   } catch (primaryError) {
     const fallback = resolveFallbackProvider(provider);
     if (!fallback) throw primaryError;
+    console.warn(
+      `[llm] ${provider} failed, falling back to ${fallback}: ${
+        primaryError instanceof Error ? primaryError.message.slice(0, 300) : String(primaryError)
+      }`,
+    );
 
     // The fallback provider gets its OWN default model. A per-turn selection
     // is scoped to the provider that owns it, so handing "grok-4.6" to

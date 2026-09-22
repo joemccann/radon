@@ -175,7 +175,7 @@ export const authPage: AgentPage = {
       id: "origins",
       heading: "Three origins",
       paragraphs: [
-        "radon.run is a static research journal. No sign-in, no cookies for accounts, no API keys.",
+        "radon.run is a static marketing site. No sign-in, no cookies for accounts, no API keys.",
         "demo.radon.run is the free trial. Signup is Clerk email verification. The trial lasts three trading days. No Interactive Brokers connection.",
         "app.radon.run is the operator terminal. Access is an allowlisted Clerk session. The operator account has TOTP enrolled. Demo users on the same Clerk instance do not.",
       ],

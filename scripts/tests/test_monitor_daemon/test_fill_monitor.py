@@ -361,6 +361,25 @@ class TestFillMonitorOrdersSnapshotMirror:
 class TestFillMonitorNotifications:
     """Test notification logic."""
 
+    def test_notification_text_is_passed_as_argv_not_script_source(self):
+        """Title and message ride argv; the -e script source is a fixed
+        constant no fill field can reach, so quotes and backslashes in a
+        contract description cannot alter the executed AppleScript."""
+        title = 'Order Fill: A"B\\C'
+        message = 'BUY 1x A"B\\C  260306P00090000 @ $1.00'
+        handler = FillMonitorHandler()
+        with patch.object(fill_monitor_module.subprocess, 'run') as mock_run:
+            handler._send_notification(title, message)
+        assert mock_run.call_count == 1
+        argv = mock_run.call_args[0][0]
+        assert argv[0] == "osascript"
+        assert argv[1] == "-e"
+        script = argv[2]
+        assert title not in script and message not in script
+        assert '"' not in script  # static source: nothing to break out of
+        assert "on run argv" in script
+        assert argv[3:] == [message, title]
+
     def test_sends_notification_on_fill(self):
         """Handler sends macOS notification on fill."""
         with patch('monitor_daemon.handlers.fill_monitor.IBClient') as mock_cls, \

@@ -28,6 +28,19 @@ export function absolutizeMediaUrl(src) {
   return src;
 }
 
+// Keep only supplied credits whose exact image URL survives publication.
+// Normalizing keys alongside images also supports legacy /media/ URLs.
+export function normaliseImageSources(sources, images) {
+  if (!sources || typeof sources !== "object" || Array.isArray(sources)) return {};
+  const wanted = new Set((Array.isArray(images) ? images : []).map(absolutizeMediaUrl));
+  return Object.fromEntries(Object.entries(sources).flatMap(([url, source]) => {
+    const key = absolutizeMediaUrl(url);
+    return wanted.has(key) && typeof source === "string" && source.trim()
+      ? [[key, source.trim()]]
+      : [];
+  }));
+}
+
 // post.rawImages comes verbatim from third-party article markup (extract.js
 // reads every <img> src/data-src). The scraper runs on the production VPS and
 // everything it downloads is rsync'd to the public media host, so an unfiltered
@@ -258,7 +271,7 @@ export function createImageDownloader({ mediaDir, client = defaultClient, getCoo
     }
   }
 
-  async function download(postId, urls) {
+  async function download(postId, urls, { preserveSlots = false } = {}) {
     if (!Array.isArray(urls) || urls.length === 0) return [];
 
     const cookieHeader = await resolveCookieHeader();
@@ -318,7 +331,7 @@ export function createImageDownloader({ mediaDir, client = defaultClient, getCoo
       },
     );
     await Promise.all(workers);
-    return results.filter(Boolean);
+    return preserveSlots ? results : results.filter(Boolean);
   }
 
   return { download };
@@ -341,10 +354,29 @@ export async function hydrateLocalImages(posts, downloader) {
         post.images = [];
         updated = true;
       }
+      if (Object.keys(post.imageSources || {}).length > 0) {
+        post.imageSources = {};
+        updated = true;
+      }
       continue;
     }
 
-    const localImages = await downloader.download(post.id, rawImages);
+    // Preserve failed slots until source URLs have been mapped; filtering
+    // first would attach an earlier failed image's credit to a later chart.
+    const slots = await downloader.download(post.id, rawImages, { preserveSlots: true });
+    const localImages = slots.filter(Boolean);
+    const imageSources = post.rawImageSources === undefined
+      ? normaliseImageSources(post.imageSources, localImages)
+      : Object.fromEntries(slots.flatMap((local, index) => {
+          const source = post.rawImageSources?.[rawImages[index]];
+          return local && typeof source === "string" && source.trim()
+            ? [[local, source.trim()]]
+            : [];
+        }));
+    if (JSON.stringify(imageSources) !== JSON.stringify(post.imageSources || {})) {
+      post.imageSources = imageSources;
+      updated = true;
+    }
     if (JSON.stringify(localImages) !== JSON.stringify(post.images || [])) {
       post.images = localImages;
       updated = true;

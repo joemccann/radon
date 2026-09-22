@@ -26,6 +26,8 @@ Applies under `web/`. Mirrors `web/CLAUDE.md`; prefer the Claude file if it is n
 
 ## UI Verification
 
+- Request, refresh, broker, validation and action errors use `RequestError` / `ErrorToast` (or the shared toast system), never inline banners. Preserve retry and retained-data guidance. Fatal framework fallbacks, financial risk conditions and stored diagnostic records are explicit exceptions; see `docs/reviews/2026-09-17-toast-errors.md`.
+
 - UI changes need focused Vitest plus Playwright E2E when behavior changes.
 - Visually verify rendered UI before done. Use `chrome-cdp` if available; otherwise Playwright screenshots.
 - Do not click live submit/place buttons during UI verification. If unavoidable, qty 1 max, far-away limit, immediate cancel, then verify IB open orders.
@@ -65,7 +67,7 @@ Applies under `web/`. Mirrors `web/CLAUDE.md`; prefer the Claude file if it is n
 - Preserve credit/debit signs end to end. Never `Math.abs()` option values where sign matters.
 - Limit-priced ticket max-gain / max-loss are structural at the limit. Do not subtract quoted half-spread or estimated exit. A short put's max gain is the credit.
 - Daily change percent = Daily P&L / `|yesterday close value|`; never entry cost.
-- Same-day positions use entry-cost baseline: Today P&L = Total P&L = `MV - EC`; ignore `ib_daily_pnl`.
+- Same-day positions use entry-cost baseline: Today P&L = Total P&L = `MV - EC`; ignore `ib_daily_pnl`. Mixed-age combos (`basis_source: mixed`, overnight + session_fills legs) are not same-day: overnight vs close, session vs fill. Without an IB total, every leg must have a usable mark and baseline; otherwise Today P&L is unavailable, never a partial sum.
 - Entry-date fallback: blotter per-contract -> trade_log ticker/structure -> IB fills -> previous portfolio ticker/structure/expiry -> today. Never per-ticker blotter fallback.
 - `PortfolioLeg.avg_cost` is per-contract for options and per-share for stocks. Do not multiply option `avg_cost` by 100 again.
 - Journal lot-matched basis overrides IB's drifting VWAP; raw IB value is diagnostic.
@@ -83,3 +85,13 @@ Applies under `web/`. Mirrors `web/CLAUDE.md`; prefer the Claude file if it is n
 - Dashboard uses the Clear account overview and quiet risk/research rail; the complete newsfeed, scanner, catalysts and engine sections remain below it with existing visibility controls.
 - Mobile shell activates at `<=640px`; PWA service worker must bypass `/api`, `/_next/data`, and `/ws`.
 - The realtime prices socket is owned by `RealtimePricesProvider` in root `Providers`, never by the per-page `WorkspaceShell` (App Router remounts pages on navigation; a shell-owned socket reconnects and re-tickets on every route change). Shells publish subscriptions via `publishSubscriptions`; do not call `usePrices` from page-level components. `TickerSearch` connects on first focus, not on mount. Pins: `web/tests/realtime-socket-ownership-contract.test.ts`, `web/tests/realtime-prices-navigation-persistence.test.tsx`.
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

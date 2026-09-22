@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <rect width="24" height="24" rx="3" fill="#003B70"/>
+  <path d="M7 10C9 7.5 15 7.5 17 10" stroke="#ED1C24" stroke-width="2.2" stroke-linecap="round" fill="none"/>
+  <text x="12" y="17.5" fill="#FFFFFF" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, sans-serif" font-size="8.5" font-weight="700" letter-spacing="-0.3" text-anchor="middle">citi</text>
+</svg>

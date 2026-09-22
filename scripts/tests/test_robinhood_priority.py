@@ -1,8 +1,8 @@
-"""Robinhood rank in every failover ladder: IB > UW > Cboe > Robinhood > Yahoo.
+"""Robinhood rank in every failover ladder: IB > Robinhood > UW > Cboe > Yahoo.
 
-Per-ladder pins that the Robinhood rung sits BELOW IB / UW (and Cboe where a
-Cboe rung exists) and ABOVE Yahoo, and that an unconfigured Robinhood skips
-cleanly to Yahoo. The credit-spread and IEI/HYG cascades carry their own twin
+Per-ladder pins that the Robinhood rung sits BELOW IB and ABOVE UW (so UW
+calls go to the endpoints only UW serves), and that an unconfigured Robinhood
+skips cleanly to the next rung. The credit-spread and IEI/HYG cascades carry their own twin
 tests next to their existing cascade suites.
 """
 from __future__ import annotations
@@ -43,33 +43,39 @@ class TestPortfolioRiskLadder:
         monkeypatch.setattr(portfolio_risk, "_fetch_yahoo_closes", rung("yahoo", yahoo))
         return calls
 
-    def test_rh_sits_between_uw_and_yahoo(self, monkeypatch):
-        calls = self._wire(monkeypatch, rh=BARS)
+    def test_rh_sits_between_ib_and_uw(self, monkeypatch):
+        calls = self._wire(monkeypatch, uw=BARS, rh=BARS)
         closes, source = portfolio_risk._fetch_closes_via_ladder("SPY")
         assert (closes, source) == (BARS, "rh")
-        assert calls == ["ib", "uw", "rh"], "RH must run after IB/UW and preempt Yahoo"
+        assert calls == ["ib", "rh"], "RH must run after IB and preempt UW"
 
-    def test_rh_never_preempts_ib_or_uw(self, monkeypatch):
-        calls = self._wire(monkeypatch, uw=BARS, rh=BARS)
+    def test_rh_never_preempts_ib(self, monkeypatch):
+        calls = self._wire(monkeypatch, ib=BARS, rh=BARS)
+        _, source = portfolio_risk._fetch_closes_via_ladder("SPY")
+        assert source == "ib"
+        assert calls == ["ib"]
+
+    def test_empty_rh_falls_through_to_uw(self, monkeypatch):
+        calls = self._wire(monkeypatch, uw=BARS)
         _, source = portfolio_risk._fetch_closes_via_ladder("SPY")
         assert source == "uw"
-        assert "rh" not in calls
+        assert calls == ["ib", "rh", "uw"]
 
     def test_empty_rh_falls_through_to_yahoo(self, monkeypatch):
         calls = self._wire(monkeypatch, yahoo=BARS)
         closes, source = portfolio_risk._fetch_closes_via_ladder("SPY")
         assert (closes, source) == (BARS, "yahoo")
-        assert calls == ["ib", "uw", "rh", "yahoo"]
+        assert calls == ["ib", "rh", "uw", "yahoo"]
 
-    def test_deadline_between_uw_and_rh_aborts_without_calling_rh(self, monkeypatch):
+    def test_deadline_between_rh_and_uw_aborts_without_calling_uw(self, monkeypatch):
         calls = self._wire(monkeypatch)
-        ticks = iter([0.0, 10.0])  # after-IB check passes, after-UW check trips
+        ticks = iter([0.0, 10.0])  # after-IB check passes, after-RH check trips
 
         closes, source = portfolio_risk._fetch_closes_via_ladder(
             "SPY", deadline=5.0, clock=lambda: next(ticks)
         )
         assert source == portfolio_risk._LADDER_DEADLINE
-        assert "rh" not in calls and "yahoo" not in calls
+        assert calls == ["ib", "rh"]
 
     def test_ladder_rung_count_matches_the_budget_math(self):
         assert portfolio_risk.BACKFILL_LADDER_RUNGS == 4
@@ -116,17 +122,25 @@ class TestRvRatioIncrementalChain:
         assert source == "yahoo"
         assert rh_calls == [], "index symbols must not touch Robinhood"
 
-    def test_uw_hit_never_reaches_rh(self, monkeypatch):
-        rh_calls: list = []
+    def test_rh_hit_never_reaches_uw(self, monkeypatch):
+        uw_calls: list = []
         monkeypatch.setattr(rv_ratio_scan, "_ib_auth_state", lambda: "awaiting_2fa")
-        monkeypatch.setattr(rv_ratio_scan, "_fetch_uw_daily", lambda s: dict(BARS))
         monkeypatch.setattr(
-            rv_ratio_scan, "_fetch_rh_daily", lambda s: rh_calls.append(s) or {}
+            rv_ratio_scan, "_fetch_uw_daily", lambda s: uw_calls.append(s) or {}
         )
+        monkeypatch.setattr(rv_ratio_scan, "_fetch_rh_daily", lambda s: dict(BARS))
+
+        _, source = rv_ratio_scan._fetch_incremental("SPY")
+        assert source == "rh"
+        assert uw_calls == []
+
+    def test_empty_rh_falls_through_to_uw(self, monkeypatch):
+        monkeypatch.setattr(rv_ratio_scan, "_ib_auth_state", lambda: "awaiting_2fa")
+        monkeypatch.setattr(rv_ratio_scan, "_fetch_rh_daily", lambda s: {})
+        monkeypatch.setattr(rv_ratio_scan, "_fetch_uw_daily", lambda s: dict(BARS))
 
         _, source = rv_ratio_scan._fetch_incremental("SPY")
         assert source == "uw"
-        assert rh_calls == []
 
     def test_empty_rh_falls_through_to_yahoo(self, monkeypatch):
         yahoo_calls: list = []
@@ -143,70 +157,75 @@ class TestRvRatioIncrementalChain:
         assert yahoo_calls == ["SPY"], "an empty RH answer must still reach Yahoo"
 
 
-class TestGarchAndLeapPriceHistory:
-    def test_garch_uses_rh_before_yahoo(self, monkeypatch):
-        yahoo_calls: list = []
-        monkeypatch.setattr(garch_convergence, "_fetch_uw_prices", lambda *a, **k: [])
-        monkeypatch.setattr(
-            garch_convergence, "_fetch_rh_prices", lambda t: [100.0] * 90
-        )
-        monkeypatch.setattr(
-            garch_convergence, "_fetch_yahoo_prices",
-            lambda t, days=400: yahoo_calls.append(t) or [],
-        )
+class TestSharedDailyClosesLadder:
+    """garch, leap, vol-skew, theta and strength scanners share
+    utils.uw_surface.fetch_daily_closes: IB -> Robinhood -> UW."""
 
-        prices = garch_convergence._fetch_prices("SPY", uw_client=None)
-        assert len(prices) == 90
-        assert yahoo_calls == []
+    ROWS = 70
 
-    def test_garch_short_rh_series_still_falls_to_yahoo(self, monkeypatch):
+    def _rh(self, monkeypatch, n):
+        calls: list = []
+
+        def fake(symbols):
+            calls.append(list(symbols))
+            return {s: {f"2026-01-{i:03d}": 100.0 + i for i in range(n)} for s in symbols}
+
+        monkeypatch.setattr("clients.robinhood_client.fetch_robinhood_closes", fake)
+        return calls
+
+    def _uw(self):
+        uw = MagicMock(name="UWClient")
+        uw.get_stock_ohlc.return_value = {"data": [{"date": "2026-01-01", "close": 9.0}]}
+        return uw
+
+    def test_rh_hit_skips_uw(self, monkeypatch):
+        from utils.uw_surface import fetch_daily_closes
+
+        rh_calls = self._rh(monkeypatch, self.ROWS)
+        uw = self._uw()
+        ohlc = fetch_daily_closes("spy", ib=None, uw=uw, min_bars=60)
+        assert len(ohlc["data"]) == self.ROWS
+        assert ohlc["data"][0] == {"date": "2026-01-000", "close": 100.0}
+        assert rh_calls == [["SPY"]]
+        uw.get_stock_ohlc.assert_not_called()
+
+    def test_short_rh_falls_through_to_uw(self, monkeypatch):
+        from utils.uw_surface import fetch_daily_closes
+
+        self._rh(monkeypatch, 5)
+        uw = self._uw()
+        ohlc = fetch_daily_closes("SPY", ib=None, uw=uw, min_bars=60)
+        assert ohlc == uw.get_stock_ohlc.return_value
+        uw.get_stock_ohlc.assert_called_once_with("SPY", candle_size="1d")
+
+    def test_rh_error_falls_through_to_uw(self, monkeypatch):
+        from utils.uw_surface import fetch_daily_closes
+
+        def boom(symbols):
+            raise RuntimeError("mcp down")
+
+        monkeypatch.setattr("clients.robinhood_client.fetch_robinhood_closes", boom)
+        uw = self._uw()
+        assert fetch_daily_closes("SPY", uw=uw) == uw.get_stock_ohlc.return_value
+
+    def test_garch_short_history_still_falls_to_yahoo(self, monkeypatch):
         monkeypatch.setattr(garch_convergence, "_fetch_uw_prices", lambda *a, **k: [])
-        monkeypatch.setattr(garch_convergence, "_fetch_rh_prices", lambda t: [100.0] * 5)
         monkeypatch.setattr(
             garch_convergence, "_fetch_yahoo_prices", lambda t, days=400: [99.0] * 90
         )
         assert garch_convergence._fetch_prices("SPY", uw_client=None) == [99.0] * 90
 
-    def test_leap_uses_rh_before_yahoo(self, monkeypatch):
-        yahoo_calls: list = []
+    def test_leap_short_history_still_falls_to_yahoo(self, monkeypatch):
         monkeypatch.setattr(leap_scanner_uw, "get_uw_history", lambda *a, **k: [])
-        monkeypatch.setattr(leap_scanner_uw, "get_rh_history", lambda t: [100.0] * 90)
         monkeypatch.setattr(
-            leap_scanner_uw, "get_yahoo_history",
-            lambda t, days=400: yahoo_calls.append(t) or [],
+            leap_scanner_uw, "get_yahoo_history", lambda t, days=400: [99.0] * 90
         )
-
-        prices = leap_scanner_uw.get_price_history("SPY")
-        assert len(prices) == 90
-        assert yahoo_calls == []
-
-    def test_leap_uw_hit_never_reaches_rh(self, monkeypatch):
-        rh_calls: list = []
-        monkeypatch.setattr(
-            leap_scanner_uw, "get_uw_history", lambda *a, **k: [100.0] * 90
-        )
-        monkeypatch.setattr(
-            leap_scanner_uw, "get_rh_history", lambda t: rh_calls.append(t) or []
-        )
-        leap_scanner_uw.get_price_history("SPY")
-        assert rh_calls == []
-
-    def test_leap_empty_rh_falls_through_to_yahoo(self, monkeypatch):
-        yahoo_calls: list = []
-        monkeypatch.setattr(leap_scanner_uw, "get_uw_history", lambda *a, **k: [])
-        monkeypatch.setattr(leap_scanner_uw, "get_rh_history", lambda t: [])
-        monkeypatch.setattr(
-            leap_scanner_uw, "get_yahoo_history",
-            lambda t, days=400: yahoo_calls.append(t) or [99.0] * 90,
-        )
-
         assert leap_scanner_uw.get_price_history("SPY") == [99.0] * 90
-        assert yahoo_calls == ["SPY"], "an empty RH answer must still reach Yahoo"
 
 
 class TestCriScanRank:
-    """CRI is the ladder where Cboe already outranks Yahoo — Robinhood slots
-    AFTER Cboe and BEFORE Yahoo (IB > UW > Cboe > RH > Yahoo)."""
+    """CRI: Robinhood slots after IB and before UW for SPY; Cboe keeps COR1M
+    (IB > RH > UW > Cboe > Yahoo)."""
 
     def test_current_quote_tries_rh_after_ib_and_before_yahoo(self, monkeypatch):
         yahoo_calls: list = []
@@ -256,6 +275,19 @@ class TestCriScanRank:
         raw, _ = cri_scan.fetch_all(["SPY"])
         assert "SPY" in raw
         assert yahoo_calls == [], "a Robinhood hit for SPY must not reach Yahoo"
+
+    def test_history_rh_hit_for_spy_skips_uw(self, monkeypatch):
+        bars = [
+            (f"2026-{m:02d}-{d:02d}", 100.0) for m in range(1, 13) for d in range(1, 22)
+        ]
+        uw_calls: list = []
+        monkeypatch.setattr(cri_scan, "_fetch_ib", lambda tickers: {})
+        monkeypatch.setattr(cri_scan, "_fetch_uw", lambda tickers: uw_calls.append(tickers) or {})
+        monkeypatch.setattr(cri_scan, "_fetch_rh", lambda t: list(bars))
+
+        raw, _ = cri_scan.fetch_all(["SPY"])
+        assert "SPY" in raw
+        assert uw_calls == [], "a Robinhood hit for SPY must not spend a UW call"
 
     def test_history_fallback_never_asks_rh_for_index_tickers(self, monkeypatch):
         rh_calls: list = []
@@ -311,14 +343,12 @@ class TestWrapperAdaptersExecute:
         monkeypatch.setattr("clients.robinhood_client.fetch_robinhood_closes", fake)
         return calls
 
-    def test_garch_rh_prices_are_date_sorted(self, monkeypatch):
-        calls = self._wire_closes(monkeypatch)
-        assert garch_convergence._fetch_rh_prices("SPY") == [100.0, 101.0]
-        assert calls == [["SPY"]]
+    def test_shared_daily_closes_rh_rows_are_date_sorted(self, monkeypatch):
+        from utils.uw_surface import fetch_daily_closes
 
-    def test_leap_rh_history_is_date_sorted(self, monkeypatch):
         calls = self._wire_closes(monkeypatch)
-        assert leap_scanner_uw.get_rh_history("SPY") == [100.0, 101.0]
+        ohlc = fetch_daily_closes("SPY", min_bars=2)
+        assert [r["close"] for r in ohlc["data"]] == [100.0, 101.0]
         assert calls == [["SPY"]]
 
     def test_cri_rh_bars_are_sorted_date_close_tuples(self, monkeypatch):

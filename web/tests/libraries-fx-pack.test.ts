@@ -1,52 +1,15 @@
 /**
  * @vitest-environment node
  *
- * libraries.dev pack C — brand-safe contracts for thinking-orbs + border-beam.
- * Beams stay off when a gate is idle, cleared, or failed. Orb verbs map to
- * existing wait states only. Forbidden packages stay out of web/package.json.
+ * libraries.dev pack C — package pins for web/package.json.
+ * The beam / orb contracts (gates beam only while evaluating, IB beams only
+ * when connected, orb verbs map to existing waits) are asserted at the
+ * consumer renders in ./libraries-fx-surfaces.test.tsx instead of restating
+ * each predicate entry-for-entry next to its implementation (T-456).
  */
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-
-import {
-  FOUR_GATES,
-  gateBeamActive,
-  ibStatusBeamActive,
-  thinkingOrbState,
-} from "../lib/librariesFx";
-
-describe("thinking-orbs wait mapping", () => {
-  it("maps existing async waits onto distinct orb verbs", () => {
-    expect(thinkingOrbState("flow")).toBe("searching");
-    expect(thinkingOrbState("gex")).toBe("weaving");
-    expect(thinkingOrbState("evaluate")).toBe("solving");
-    expect(thinkingOrbState("agent")).toBe("working");
-    expect(thinkingOrbState("compute")).toBe("composing");
-  });
-});
-
-describe("Gate 01-04 beam contract", () => {
-  it("exposes the four sequential gates", () => {
-    expect(FOUR_GATES.map((gate) => gate.id)).toEqual(["01", "02", "03", "04"]);
-  });
-
-  it("beams only while a gate is evaluating", () => {
-    expect(gateBeamActive("evaluating")).toBe(true);
-    expect(gateBeamActive("idle")).toBe(false);
-    expect(gateBeamActive("cleared")).toBe(false);
-    expect(gateBeamActive("failed")).toBe(false);
-  });
-});
-
-describe("IB status beam", () => {
-  it("beams only the live connected control", () => {
-    expect(ibStatusBeamActive("connected")).toBe(true);
-    expect(ibStatusBeamActive("demo")).toBe(false);
-    expect(ibStatusBeamActive("relay_offline")).toBe(false);
-    expect(ibStatusBeamActive("awaiting_2fa")).toBe(false);
-  });
-});
 
 describe("web package pin", () => {
   const pkg = JSON.parse(

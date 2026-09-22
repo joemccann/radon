@@ -21,6 +21,7 @@ vi.mock("@/lib/routeAccess", () => ({
 const mockRadonFetch = vi.fn();
 vi.mock("@/lib/radonApi", () => ({
   radonFetch: mockRadonFetch,
+  radonFetchResponse: mockRadonFetch,
   RadonApiError: class RadonApiError extends Error {
     constructor(
       readonly status: number,
@@ -80,6 +81,7 @@ const ROUTES: ReadonlyArray<{ path: string; params?: Record<string, string>; ext
   { path: "menthorq/cta" },
   { path: "menthorq/cta/image", ext: "tsx" },
   { path: "newsfeed/posts" },
+  { path: "newsfeed/research/files/[asset]", params: { asset: "a".repeat(64) + ".png" } },
   { path: "options/chain" },
   { path: "options/expirations" },
   { path: "options/exposure" },
@@ -99,6 +101,10 @@ const ROUTES: ReadonlyArray<{ path: string; params?: Record<string, string>; ext
   { path: "scanner" },
   { path: "scanner/strength" },
   { path: "scanner/strength/scan" },
+  { path: "scanner/vol-skew-mr" },
+  { path: "scanner/vol-skew-mr/scan" },
+  { path: "scanner/bounce" },
+  { path: "scanner/bounce/scan" },
   { path: "scanner/theta" },
   { path: "scanner/theta/scan" },
   { path: "short-availability/[ticker]", params: { ticker: "SPY" } },
@@ -107,7 +113,6 @@ const ROUTES: ReadonlyArray<{ path: string; params?: Record<string, string>; ext
   { path: "ticker/ratings" },
   { path: "ticker/seasonality" },
   { path: "vcg" },
-  { path: "workflow/run" },
   { path: "service-health" },
 ];
 

@@ -10,7 +10,7 @@
  * stat strip, the chart title, chips, and a NaN guard on the log SPX axis.
  */
 import React from "react";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
@@ -266,5 +266,34 @@ describe("classifyRegime has no regime without returns", () => {
   it("paints an absent regime as muted, not positive", () => {
     expect(regimeColor(null)).toBe("var(--text-muted)");
     expect(regimeColor("coupled")).toBe("var(--positive)");
+  });
+});
+
+describe("CreditSpreadPanel — freshness rail", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("shows the raw session date and counts down to the 21:45 UTC slot", () => {
+    // 19:30 UTC on a Wednesday: 2h15m short of radon-credit-spread.timer's
+    // daily 21:45 UTC slot. No other schedule constant lands on 2h15m here.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-26T19:30:00Z"));
+    renderPanel(
+      hookState({
+        data: buildData({
+          scan_time: "2026-08-25T21:45:00Z",
+          current: { ...buildData().current!, date: "2026-08-25" },
+        }),
+      }),
+    );
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+    const rail = screen.getByTestId("credit-spread-freshness-rail");
+    expect(rail).toBeTruthy();
+    expect(rail.textContent).toContain("2026-08-25");
+    expect(screen.getByTestId("credit-spread-freshness-rail-countdown").textContent).toBe("2h 15m");
+    expect(rail.textContent).toContain("Next sample");
   });
 });

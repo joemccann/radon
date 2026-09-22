@@ -21,7 +21,7 @@ Sub-directory CLAUDE.md files auto-load when cwd is anywhere under that subtree.
 
 ## Code path map
 
-Read `tools/codemap/architecture.json` before searching for a module or reconstructing imports. Full graph: `tools/codemap/codemap.json` (`meta`, `groups`, `nodes`, `edges`; `edges` are `[src, dst]` indexes into `nodes`). Do not walk the tree to reconstruct imports. Code commits regenerate those files via `python3.13 tools/codemap/pre_commit.py`; CI fails if they are stale (`python3.13 tools/codemap/generate_codemap.py`).
+Read `tools/codemap/architecture.json` before searching for a module or reconstructing imports. Full graph: `tools/codemap/codemap.json` (`meta`, `groups`, `nodes`, `edges`; `edges` are `[src, dst]` indexes into `nodes`). Do not walk the tree to reconstruct imports. A nightly job (`scripts/codemap_nightly.sh`, 02:00 local) regenerates them and merges its own PR; never commit `tools/codemap/*.json` or `codemap.data.js` from a feature branch (it conflicts every open PR).
 
 ## Reference docs — read explicitly when needed
 
@@ -66,7 +66,7 @@ Read `tools/codemap/architecture.json` before searching for a module or reconstr
 4. **API keys** in `.env` files. Never `~/.zshrc` unless fallback.
 5. **No raw hex in UI.** Use brand tokens. 4px max border-radius on panels.
 6. **No em dashes in user-facing copy.**
-7. **Yahoo is last resort.** Never make Yahoo the scheduled, primary, or only source for a series IB or UW can serve. 2FA, unattended timers, and "historical needs a gateway" do not skip IB or UW. Try IB, then UW, then Robinhood (read-only MCP, when configured), then Yahoo.
+7. **Yahoo is last resort.** Never make Yahoo the scheduled, primary, or only source for a series IB or UW can serve. 2FA, unattended timers, and "historical needs a gateway" do not skip IB or UW. Try IB, then Robinhood (read-only MCP, when configured), then UW, then Yahoo.
 
 ## ⛔ Four Gates — Sequential, No Exceptions
 
@@ -74,7 +74,7 @@ Read `tools/codemap/architecture.json` before searching for a module or reconstr
 |---|---|
 | 1. Convexity | Gain ≥ 2× loss. Defined-risk only. |
 | 2. Edge | Specific, data-backed dark-pool / OTC signal that hasn't moved price. |
-| 3. Risk | Fractional Kelly. Hard cap 2.5% bankroll / position. |
+| 3. Risk | Half Kelly (0.5) default, 0.25 optional stricter, full Kelly banned. Hard cap 2.5% bankroll / position. |
 | 4. ~~No naked shorts~~ | **DISABLED 2026-04-30.** Logic preserved as `_*Impl`. Re-enable: `docs/naked-short-reenable.md`. |
 
 Any gate fails → stop. Name the gate.
@@ -85,6 +85,7 @@ Any gate fails → stop. Name the gate.
 - After any UI change, verify live in the browser (Playwright or claude-in-chrome) and capture a screenshot as evidence — do not claim a fix works based on tests alone.
 - If tests pass/fail inconsistently, re-run the suspect test file in isolation before concluding your change caused it; test-ordering pollution and pre-existing flake are common in this repo.
 - Always confirm `pwd` before running vitest/pytest — cwd drift has repeatedly produced bogus failures.
+- **Local suites are worker-budgeted.** `pytest -n auto` resolves to half the cores and an explicit `-n N` above that is clamped to it (root `conftest.py`); vitest runs `maxWorkers: 50%` (`vitest.workers.ts`). CI keeps every core. Never run pytest and vitest at the same time on the laptop. Overrides: `PYTEST_XDIST_AUTO_NUM_WORKERS` (lifts the pytest budget), `VITEST_MAX_WORKERS`.
 - **A gated action is tested at the wire, not at the button.** Any control that fires a network call from behind a guard (a `disabled` prop, an acknowledgement, a confirm step, an `okToSubmit` / `permitted` / `armed` flag) needs a test that clicks it in its ARMED state and asserts the REQUEST — full URL string, method, payload shape — plus a paired assertion that nothing fired while the gate was still closed. Stub `fetch` and render the component that OWNS the fetch, not a presentational child: a test that stops at a `vi.fn()` prop, at `button.disabled === false`, at label text, or at dialog visibility has verified the gate and nothing on the wire. Match the full path (`"/api/admin/services/radon-api.service/stop"`), never `url.includes("/api/…")`, so a wrong unit, action, or endpoint fails. Reference: `web/tests/admin-action-request-assertions.test.tsx`, `web/tests/chain-transmit-gate.test.tsx`.
 - **`react-hooks/exhaustive-deps` is a WARNING here and does not block CI.** Treat a `useCallback` handler whose dep array omits a guard or state value its body reads as a defect to fix on sight — that is exactly how an armed Transmit button shipped closed over a stale acknowledgement and silently sent no order (2026-08-27).
 
@@ -95,13 +96,13 @@ Any gate fails → stop. Name the gate.
 ## Data Source Priority
 
 1. Interactive Brokers (TWS / Gateway) — real-time
-2. Unusual Whales (`$UW_TOKEN`) — dark pool, sweeps, alerts
-3. Cboe official index feeds — COR1M dashboard history, official VIX/VVIX daily closes. Other specialized official feeds (Treasury, FINRA) rank here when a script documents them as the source for that metric.
-4. Robinhood (official trading MCP, READ-ONLY; tokens in the 0600 file `$ROBINHOOD_MCP_TOKEN_FILE`, auto-refreshed — access tokens expire ~3 days) — quote/chain failover + retail-crowding overlay only. Never above IB, UW, or Cboe; execution stays on IB. No dark pool, OTC, sweeps, GEX, or vol surface; options are NBBO/last + prior-close only.
+2. Robinhood (official trading MCP, READ-ONLY; tokens in the 0600 file `$ROBINHOOD_MCP_TOKEN_FILE`, auto-refreshed — access tokens expire ~3 days) — primary after IB for commodity price data (daily closes, quotes, chains) so UW calls go to its unique endpoints; retail-crowding overlay. Never above IB; execution stays on IB. No dark pool, OTC, sweeps, GEX, or vol surface; options are NBBO/last + prior-close only.
+3. Unusual Whales (`$UW_TOKEN`) — dark pool, sweeps, alerts
+4. Cboe official index feeds — COR1M dashboard history, official VIX/VVIX daily closes. Other specialized official feeds (Treasury, FINRA) rank here when a script documents them as the source for that metric.
 5. Yahoo Finance — **ABSOLUTE LAST RESORT**
 6. Web scrape — after Yahoo
 
-Never make Yahoo the scheduled, primary, or only source for a series IB or UW can serve. Try IB every cycle. Skip the IB socket only when `/health` `auth_state` is set and not `authenticated`; then UW; then Robinhood (skipped cleanly when unconfigured); then Yahoo. Specialized official feeds (Cboe, Treasury, FINRA) may sit ahead of Robinhood and Yahoo when a script documents them as the source for that metric — the full order is IB > UW > Cboe > Robinhood > Yahoo. Clients live in `scripts/clients/`.
+Never make Yahoo the scheduled, primary, or only source for a series IB or UW can serve. Try IB every cycle. Skip the IB socket only when `/health` `auth_state` is set and not `authenticated`; then Robinhood (skipped cleanly when unconfigured); then UW; then Yahoo. Specialized official feeds (Cboe, Treasury, FINRA) may sit ahead of Yahoo when a script documents them as the source for that metric — the full order is IB > Robinhood > UW > Cboe > Yahoo. Clients live in `scripts/clients/`.
 
 ## Credentials
 

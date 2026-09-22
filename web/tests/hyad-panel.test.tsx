@@ -14,7 +14,7 @@
  * cadence claims).
  */
 import React from "react";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
@@ -96,6 +96,7 @@ import HyAdPanel from "../components/HyAdPanel";
 afterEach(() => {
   cleanup();
   mockUseHyAd.mockReset();
+  vi.useRealTimers();
 });
 
 // Window-relative dates: the series always ends "yesterday", never a
@@ -229,6 +230,23 @@ describe("HyAdPanel — chart + controls", () => {
     expect(screen.getByTestId("hyad-brush")).toBeTruthy();
   });
 
+  it("preserves early SPX history and leaves genuine missing sessions unavailable", () => {
+    const data = buildData();
+    data.series[0].spx_close = 4700;
+    data.series[1].spx_close = null;
+    renderPanel(hookState({ data }));
+    const chart = screen.getByRole("slider", { name: "Inspect HIGH YIELD BOND CUMULATIVE A-D LINE history" });
+
+    fireEvent.keyDown(chart, { key: "Home" });
+    expect(chart.getAttribute("aria-valuetext")).toBe(`${data.series[0].date}: S&P 500 4700, HY A-D CUM +0`);
+
+    fireEvent.keyDown(chart, { key: "ArrowRight" });
+    expect(chart.getAttribute("aria-valuetext")).toContain(`${data.series[1].date}: S&P 500 ---`);
+
+    fireEvent.keyDown(chart, { key: "End" });
+    expect(chart.getAttribute("aria-valuetext")).toContain(`${DATA_DATE}: S&P 500 ${data.series.at(-1)!.spx_close}`);
+  });
+
   it("never emits NaN into chart paths across null MA and null SPX points", () => {
     const { container } = renderPanel(hookState({ data: buildData() }));
     const paths = Array.from(container.querySelectorAll("path[d]"));
@@ -236,6 +254,32 @@ describe("HyAdPanel — chart + controls", () => {
     for (const path of paths) {
       expect(path.getAttribute("d") ?? "").not.toContain("NaN");
     }
+  });
+});
+
+describe("HyAdPanel — freshness rail", () => {
+  it("shows the payload date and counts down to the Tuesday 11:00 UTC slot", () => {
+    // 09:00 UTC on a Sunday: radon-hyad.timer is Tue..Sat 11:00 UTC, so the
+    // next fire is Tuesday, 50h out. BPI's own Tue..Sat 11:00 line would fire
+    // Monday 21:30 first (36h30m), so this pins the HY_AD constant alone.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-23T09:00:00Z"));
+    renderPanel(
+      hookState({
+        data: buildData({
+          scan_time: "2026-08-23T09:00:00Z",
+          data_date: "2026-08-21",
+          current: { ...buildData().current!, date: "2026-08-21" },
+        }),
+      }),
+    );
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+    expect(screen.getByTestId("hyad-freshness-rail")).toBeTruthy();
+    expect(screen.getByTestId("hyad-freshness-rail").textContent).toContain("2026-08-21");
+    expect(screen.getByTestId("hyad-freshness-rail-countdown").textContent).toBe("50h 00m");
+    expect(screen.getByTestId("hyad-freshness-rail").textContent).toContain("Next sample");
   });
 });
 

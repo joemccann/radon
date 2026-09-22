@@ -119,14 +119,16 @@ describe("AlertsPanel", () => {
     await waitFor(() => expect(screen.getByText(/no alert rules/i)).toBeTruthy());
   });
 
-  it("recovers from a load error via the Retry button", async () => {
+  it("recovers from a load error via the toast retry button", async () => {
     mockFetchSequence([
       () => new Response("boom", { status: 500 }),
       () => new Response(JSON.stringify({ rules: [SAMPLE_RULE] }), { status: 200 }),
     ]);
-    render(<AlertsPanel />);
-    await waitFor(() => expect(screen.getByText(/failed/i)).toBeTruthy());
-    fireEvent.click(screen.getByRole("button", { name: /retry/i }));
+    const { container } = render(<AlertsPanel />);
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/failed/i));
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(screen.getByRole("alert").closest("#radon-toast-viewport")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(screen.getByText("AAPL")).toBeTruthy());
   });
 

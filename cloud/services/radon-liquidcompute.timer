@@ -1,0 +1,11 @@
+[Unit]
+Description=Radon Liquid Compute public GPU index (daily)
+
+[Timer]
+# Homepage ticker asOf is a completed publisher date. Independent of equity hours.
+OnCalendar=*-*-* 07:30:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

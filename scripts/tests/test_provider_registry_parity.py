@@ -34,8 +34,15 @@ SHARED = [
     "advance_rung",
     "quota_regex",
     "session_regex",
+    "rejection_regex",
     "launch_round",
 ]
+# launch_round is identical within each family. Security + DeepSec pin
+# `--effort medium` on the claude arm (2026-09-21 Fable-limit night);
+# the four fallback loops do not take that arm and stay on their copy.
+IDENTICAL_ACROSS_ALL = [n for n in SHARED if n != "launch_round"]
+SECURITY_LOOPS = ("security", "security-deepsec")
+FALLBACK_LOOPS = ("reliability", "testing", "documentation", "ci-performance")
 
 
 def _fn(text: str, name: str) -> str:
@@ -48,13 +55,29 @@ def _fn(text: str, name: str) -> str:
     return m.group(0)
 
 
-@pytest.mark.parametrize("fn", SHARED)
+@pytest.mark.parametrize("fn", IDENTICAL_ACROSS_ALL)
 def test_the_helper_is_byte_identical_across_the_five_wrappers(fn):
     bodies = {n: _fn(p.read_text(encoding="utf-8"), fn) for n, p in LOOPS.items()}
     assert len(set(bodies.values())) == 1, (
         f"{fn}() has drifted between loops: "
         f"{sorted(n for n in bodies)} produced {len(set(bodies.values()))} variants"
     )
+
+
+def test_launch_round_is_identical_within_each_ladder_family():
+    bodies = {n: _fn(p.read_text(encoding="utf-8"), "launch_round") for n, p in LOOPS.items()}
+    security = {bodies[n] for n in SECURITY_LOOPS}
+    fallback = {bodies[n] for n in FALLBACK_LOOPS}
+    assert len(security) == 1, "security launch_round drifted between wrappers"
+    assert len(fallback) == 1, "fallback launch_round drifted between wrappers"
+
+
+@pytest.mark.parametrize("loop", SECURITY_LOOPS)
+def test_security_claude_arm_passes_effort_medium(loop):
+    body = LOOPS[loop].read_text(encoding="utf-8")
+    arm_start = body.index("    claude)\n", body.index("launch_round() {"))
+    arm = body[arm_start:body.index(";;", arm_start)]
+    assert "--effort medium" in arm, arm
 
 
 @pytest.mark.parametrize("loop", sorted(LOOPS))
@@ -94,10 +117,16 @@ def test_the_four_fallback_loops_lead_with_codex_and_never_name_claude():
         )
 
 
-def test_the_security_loop_ladder_is_claude_only():
-    body = LOOPS["security"].read_text(encoding="utf-8")
+@pytest.mark.parametrize("loop", SECURITY_LOOPS)
+def test_the_security_loop_ladder_is_claude_only(loop):
+    body = LOOPS[loop].read_text(encoding="utf-8")
     assert "refuse_non_claude_rung" in body
     assert "claude-exclusive" in body
-    m = re.search(r'^MODEL_LADDER="\$\{RADON_WEEKEND_MODEL_LADDER:-(.+?)\}"$', body, re.M)
-    assert m, "the security loop lost its claude model ladder"
-    assert m.group(1).split() == _h.LADDER, m.group(1)
+    assert ". \"$REPO/scripts/security_claude_ladder.sh\"" in body, (
+        f"{loop}: must source the shared skip-newest helper"
+    )
+    assert not re.search(
+        r'^MODEL_LADDER="\$\{RADON_WEEKEND_MODEL_LADDER:-claude-',
+        body,
+        re.M,
+    ), f"{loop}: static MODEL_LADDER pin leaked back into the wrapper"

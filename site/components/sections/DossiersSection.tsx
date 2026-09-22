@@ -7,19 +7,18 @@ import { clusterPages } from "@/lib/cluster-pages";
 // summary, link). Rows come from the cluster registry in lib/cluster-pages.ts.
 export function DossiersSection() {
   return (
-    <section id="dossiers" className="px-8 py-[clamp(64px,9vw,128px)]">
+    <section id="surfaces" className="px-5 py-[clamp(64px,9vw,128px)] sm:px-8">
       <div className="mx-auto max-w-[1140px]">
-        <SectionHeading no="Index" label="Dossiers · The Method In Depth" />
+        <SectionHeading no="Surfaces" label="Longer notes" />
 
         <RevealOnScroll className="mb-9 max-w-[66ch]">
           <h2 className="editorial-thesis mb-5 text-primary">
-            Every claim above has a longer argument.
+            The long versions live here.
           </h2>
           <p className="text-secondary">
-            Six dossiers extend this page: the terminal on Interactive Brokers
-            rails, the structure catalog, the sizing policy, the data wiring,
-            the working method, and the crash-risk regime model. Each states
-            its own scope and links back here.
+            Six notes: Interactive Brokers rails, the structure catalog, the
+            sizing policy, the data wiring, the working method, and the crash
+            model. Each has its own scope and links back here.
           </p>
         </RevealOnScroll>
 

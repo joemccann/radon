@@ -12,7 +12,7 @@
  * docs/indicators/straddle.md.
  */
 import React from "react";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
@@ -130,6 +130,7 @@ import StraddlePanel from "../components/StraddlePanel";
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   mockUseStraddle.mockReset();
 });
 
@@ -229,6 +230,32 @@ describe("StraddlePanel — header strip", () => {
     renderPanel(hookState({ data: buildData() }));
     const last = screen.getByTestId("straddle-last-value");
     expect(last.style.color).toBe("var(--positive)");
+  });
+});
+
+describe("StraddlePanel — freshness rail", () => {
+  it("shows the held session and counts down to the 02:15 UTC slot", () => {
+    // 23:00 UTC on a Wednesday: 3h15m short of radon-straddle.timer's
+    // 02:15 UTC slot. radon-cor (02:20) reads 3h 20m, radon-vixcor (02:35)
+    // 3h 35m, so the constant is pinned, not just "some daily timer".
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-26T23:00:00Z"));
+    renderPanel(
+      hookState({
+        data: buildData({
+          scan_time: "2026-08-26T02:15:00Z",
+          current: { ...buildData().current!, date: "2026-08-25" },
+        }),
+      }),
+    );
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+    const rail = screen.getByTestId("straddle-freshness-rail");
+    expect(rail).toBeTruthy();
+    expect(rail.textContent).toContain("2026-08-25");
+    expect(screen.getByTestId("straddle-freshness-rail-countdown").textContent).toBe("3h 15m");
+    expect(rail.textContent).toContain("Next sample");
   });
 });
 

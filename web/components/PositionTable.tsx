@@ -542,7 +542,10 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
           </td>
         )}
         {columns.today_pnl && (
-          <td className={`right ${todayPnl != null ? (todayPnl >= 0 ? "positive" : "negative") : ""}`}>
+          <td
+            data-testid="position-cell-today-pnl"
+            className={`right ${todayPnl != null ? (todayPnl >= 0 ? "positive" : "negative") : ""}`}
+          >
             {todayPnl != null ? `${todayPnl >= 0 ? "+" : "-"}${fmtUsd(Math.abs(todayPnl))}` : "—"}
           </td>
         )}

@@ -169,6 +169,8 @@ ARTIFACTS = (
         "/etc/systemd/system/radon-newsfeed.service.d/runtime-container.conf",
         0o644,
     ),
+    Artifact("services/radon-research.service", "/etc/systemd/system/radon-research.service", 0o644),
+    Artifact("services/radon-research.service.d/runtime-container.conf", "/etc/systemd/system/radon-research.service.d/runtime-container.conf", 0o644),
 )
 
 

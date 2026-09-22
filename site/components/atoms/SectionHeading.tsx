@@ -5,11 +5,11 @@ type SectionHeadingProps = {
 
 export function SectionHeading({ no, label }: SectionHeadingProps) {
   return (
-    <div className="reveal mb-9 flex flex-wrap items-baseline gap-[18px]">
-      <span className="font-mono text-[11.5px] uppercase tracking-[0.14em] text-muted">
+    <div className="reveal mb-9 flex flex-wrap items-baseline gap-3">
+      <span className="text-[12px] font-semibold text-signal-deep">
         {no}
       </span>
-      <span className="font-mono text-[11.5px] uppercase tracking-[0.18em] text-signal-deep">
+      <span className="text-[12px] text-muted">
         {label}
       </span>
     </div>

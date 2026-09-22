@@ -11,6 +11,13 @@ describe("isIndexSymbol", () => {
     expect(isIndexSymbol("RUT")).toBe(true);
   });
 
+  it("returns true for the Cboe VIX term-structure family", () => {
+    for (const sym of ["VIX1D", "VIX9D", "VIX3M", "VIX6M", "VIX1Y"]) {
+      expect(isIndexSymbol(sym), sym).toBe(true);
+      expect(indexExchangeFor(sym), sym).toBe("CBOE");
+    }
+  });
+
   it("returns true for case-insensitive matches", () => {
     expect(isIndexSymbol("vix")).toBe(true);
     expect(isIndexSymbol("Spx")).toBe(true);

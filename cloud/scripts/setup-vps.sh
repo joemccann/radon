@@ -49,6 +49,16 @@ readonly CADDY_GPG_FINGERPRINT="65760C51EDEA2017CEA2CA15155B6D79CA56EA34"
 readonly CADDY_VERSION="2.11.4"
 
 readonly SERVICE_FILES=(
+  radon-aa-frontier-refresh.service
+  radon-aa-frontier-refresh.timer
+  radon-ai-cycle-backfill.service
+  radon-ai-cycle-backfill.timer
+  radon-ai-cycle.service
+  radon-ai-cycle.timer
+  radon-liquidcompute.service
+  radon-liquidcompute.timer
+  radon-subscription-tokens.service
+  radon-subscription-tokens.timer
   radon-ib-gateway.service
   radon-ib-gateway-preheld-restart.service
   radon-ib-gateway-remote.service
@@ -59,6 +69,7 @@ readonly SERVICE_FILES=(
   radon-health.service
   radon-mcp.service
   radon-newsfeed.service
+  radon-research.service
   radon-refresh.service
   radon-refresh.timer
   radon-vcg-refresh.service
@@ -103,6 +114,8 @@ readonly SERVICE_FILES=(
   radon-db-retention.timer
   radon-host-metrics.service
   radon-host-metrics.timer
+  radon-tv-alerts.service
+  radon-tv-alerts.timer
   radon-breadth.service
   radon-breadth.timer
   radon-catalysts.service
@@ -170,14 +183,23 @@ readonly SERVICE_FILES=(
   radon-divyield.timer
   radon-ma-ratio.service
   radon-ma-ratio.timer
+  radon-calm-streak.service
+  radon-calm-streak.timer
+  radon-bounce-setup.service
+  radon-bounce-setup.timer
   radon-hyad.service
   radon-hyad.timer
   radon-hhlev.service
   radon-hhlev.timer
   radon-vixts.service
   radon-vixts.timer
+  radon-panic-index.service
+  radon-panic-index.timer
   radon-dispersion.service
   radon-dispersion.timer
+  radon-slm-tagger.service
+  radon-slm-tagger-monitor.service
+  radon-slm-tagger-monitor.timer
 )
 
 
@@ -229,62 +251,64 @@ compose_body_is_valid() {
   # Comments must never satisfy or trip a structural gate.
   body="$(grep -Ev '^[[:space:]]*#' "$candidate")" || body=""
 
-  printf '%s\n' "$body" | grep -Eq '^services:' || {
+  # Early-exiting consumers must not SIGPIPE a producer under pipefail:
+  # a failed producer inverts both required matches and forbidden-match guards.
+  grep -Eq '^services:' <<< "$body" || {
     echo "compose validation failed: ${dest} declares no services" >&2
     return 1
   }
-  printf '%s\n' "$body" | grep -Eq '^[[:space:]]+container_name:[[:space:]]*ib-gateway[[:space:]]*$' || {
+  grep -Eq '^[[:space:]]+container_name:[[:space:]]*ib-gateway[[:space:]]*$' <<< "$body" || {
     echo "compose validation failed: ${dest} does not pin container_name ib-gateway" >&2
     return 1
   }
-  if printf '%s\n' "$body" | grep -Eq '^[[:space:]]*privileged:[[:space:]]*true'; then
+  if grep -Eq "^[[:space:]]*privileged:[[:space:]]*[\"']?true" <<< "$body"; then
     echo "compose validation failed: ${dest} requests privileged" >&2
     return 1
   fi
   # The Gateway body's only volume is the named ib-config volume, so any
   # short-form entry whose source is an absolute host path (quoted or not)
   # is a host mount root must not perform. There is no allowlist.
-  if printf '%s\n' "$body" | grep -Eq "^[[:space:]]*-[[:space:]]*[\"']?/"; then
+  if grep -Eq "^[[:space:]]*-[[:space:]]*[\"']?/" <<< "$body"; then
     echo "compose validation failed: ${dest} binds an absolute host path" >&2
     return 1
   fi
-  if printf '%s\n' "$body" | grep -Eq "type:[[:space:]]*[\"']?bind"; then
+  if grep -Eq "type:[[:space:]]*[\"']?bind" <<< "$body"; then
     echo "compose validation failed: ${dest} declares a long-form bind mount" >&2
     return 1
   fi
-  if printf '%s\n' "$body" | grep -Eq "source:[[:space:]]*[\"']?/"; then
+  if grep -Eq "source:[[:space:]]*[\"']?/" <<< "$body"; then
     echo "compose validation failed: ${dest} declares an absolute long-form source" >&2
     return 1
   fi
-  if printf '%s\n' "$body" | grep -q 'docker\.sock'; then
+  if grep -q 'docker\.sock' <<< "$body"; then
     echo "compose validation failed: ${dest} mounts the docker socket" >&2
     return 1
   fi
   # R-668 (REL-249): every host-namespace join is denied, not only pid — ipc,
   # userns_mode, uts and cgroup widen the container's runtime the same way.
-  if printf '%s\n' "$body" | grep -Eq '^[[:space:]]*(pid|ipc|userns_mode|uts|cgroup):'; then
+  if grep -Eq '^[[:space:]]*(pid|ipc|userns_mode|uts|cgroup):' <<< "$body"; then
     echo "compose validation failed: ${dest} joins a host namespace (pid/ipc/userns_mode/uts/cgroup)" >&2
     return 1
   fi
-  if printf '%s\n' "$body" | grep -Eq "^[[:space:]]*network_mode:[[:space:]]*[\"']?host"; then
+  if grep -Eq "^[[:space:]]*network_mode:[[:space:]]*[\"']?host" <<< "$body"; then
     echo "compose validation failed: ${dest} requests host networking" >&2
     return 1
   fi
-  if printf '%s\n' "$body" | grep -Eq '^[[:space:]]*(cap_add|devices):'; then
+  if grep -Eq '^[[:space:]]*(cap_add|devices):' <<< "$body"; then
     echo "compose validation failed: ${dest} adds capabilities or devices" >&2
     return 1
   fi
-  if printf '%s\n' "$body" | grep -Eq "^[[:space:]]*user:[[:space:]]*[\"']?(root|0)[\"']?[[:space:]]*$"; then
+  if grep -Eq "^[[:space:]]*user:[[:space:]]*[\"']?(root|0)[\"']?[[:space:]]*$" <<< "$body"; then
     echo "compose validation failed: ${dest} runs as root in the container" >&2
     return 1
   fi
   # security_opt may only tighten: block form, no-new-privileges:true entries
   # and nothing else. The inline form is refused outright.
-  if printf '%s\n' "$body" | grep -Eq '^[[:space:]]*security_opt:[[:space:]]*[^[:space:]]'; then
+  if grep -Eq '^[[:space:]]*security_opt:[[:space:]]*[^[:space:]]' <<< "$body"; then
     echo "compose validation failed: ${dest} uses inline security_opt" >&2
     return 1
   fi
-  if ! printf '%s\n' "$body" | awk '
+  if ! awk '
     /^[[:space:]]*security_opt:[[:space:]]*$/ { inso = 1; next }
     inso == 1 && /^[[:space:]]*-[[:space:]]*/ {
       entry = $0
@@ -295,7 +319,7 @@ compose_body_is_valid() {
     }
     inso == 1 { inso = 0 }
     END { exit bad }
-  '; then
+  ' <<< "$body"; then
     echo "compose validation failed: ${dest} sets a security_opt beyond no-new-privileges" >&2
     return 1
   fi
@@ -320,11 +344,51 @@ compose_body_is_valid() {
   return 0
 }
 
+# Local HEAD is only as trustworthy as commit access to the checkout, so the
+# committed blob must also be reachable from the deploy remote. Fails closed
+# when the remote ref is missing (never fetched / offline): an unverifiable
+# body is a stop, not an install.
+require_remote_ancestry() {
+  local repo_root="$1" rel="$2" blob_sha="$3" label="$4"
+  local remote_ref="${RADON_PROVENANCE_REMOTE_REF:-origin/main}"
+  if ! git -C "$repo_root" rev-parse --verify --quiet "${remote_ref}^{commit}" >/dev/null 2>&1; then
+    log_error "${label} provenance failed: ${remote_ref} is unavailable (fetch it before provisioning)"
+    return 1
+  fi
+  if [[ "$(git -C "$repo_root" rev-parse --verify --quiet "${remote_ref}:${rel}" 2>/dev/null)" == "$blob_sha" ]]; then
+    return 0
+  fi
+  if git -C "$repo_root" merge-base --is-ancestor HEAD "$remote_ref" 2>/dev/null; then
+    return 0
+  fi
+  log_error "${label} provenance failed: ${rel} is not an ancestor of ${remote_ref}"
+  return 1
+}
+
 stage_from_checkout() {
   local source="$1" target="$2" mode="$3"
   shift 3
-  local staged
+  local staged repo_root source_rel blob_sha work_sha
   require_regular_file "$source" || return 1
+  # R-636 extension: root-installed artifacts come from the committed git
+  # blob at HEAD, never the radon-writable working tree. A working-tree body
+  # that differs from that blob is a stop, not a silent install. Same
+  # provenance shape as the compose install below.
+  if ! repo_root="$(git -C "$(dirname "$source")" rev-parse --show-toplevel 2>/dev/null)"; then
+    log_error "Provenance failed: ${source} is not inside a git checkout"
+    return 1
+  fi
+  source_rel="${source#"${repo_root}"/}"
+  if ! blob_sha="$(git -C "$repo_root" rev-parse "HEAD:${source_rel}" 2>/dev/null)"; then
+    log_error "Provenance failed: ${source_rel} is not committed at HEAD"
+    return 1
+  fi
+  require_remote_ancestry "$repo_root" "$source_rel" "$blob_sha" "Provenance" || return 1
+  if ! work_sha="$(git -C "$repo_root" hash-object -- "$source")" \
+    || [[ "$work_sha" != "$blob_sha" ]]; then
+    log_error "Provenance failed: ${source} differs from the committed blob"
+    return 1
+  fi
   if [[ -L "$STAGE_DIR" ]]; then
     log_error "Refusing symlinked staging dir ${STAGE_DIR}"
     return 1
@@ -338,7 +402,10 @@ stage_from_checkout() {
     return 1
   fi
   chmod 0600 "$staged"
-  if ! cp -- "$source" "$staged" \
+  # The staged bytes are the committed blob, read from the object store; a
+  # source swapped after the hash check fails the byte comparison instead of
+  # being published.
+  if ! git -C "$repo_root" cat-file blob "$blob_sha" > "$staged" \
     || ! require_regular_file "$source" \
     || ! cmp -s -- "$source" "$staged"; then
     rm -f "$staged"
@@ -603,9 +670,11 @@ preflight_checks() {
     exit 0
   fi
 
-  # Accept GitHub host key
+  # Pin GitHub's published ed25519 host key (docs.github.com "GitHub's SSH
+  # key fingerprints") instead of trusting whatever answers first contact.
   if ! sudo -u radon ssh-keygen -F github.com &>/dev/null; then
-    ssh-keyscan -t ed25519 github.com >> /home/radon/.ssh/known_hosts 2>/dev/null
+    printf '%s\n' 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' \
+      >> /home/radon/.ssh/known_hosts
     chown radon:radon /home/radon/.ssh/known_hosts
   fi
 
@@ -657,7 +726,9 @@ provision_secret_store_credential() {
   fi
   local tmp
   tmp="$(mktemp)"
-  head -c 32 /dev/urandom | base64 \
+  # The store is key-bound to 32 RAW bytes; an encoding pass here would
+  # provision key text the store refuses, and radon-api never starts.
+  head -c 32 /dev/urandom \
     | systemd-creds encrypt --name=radon-secret-store-key - "$tmp" || {
       rm -f "$tmp"
       log_error "systemd-creds encrypt failed; radon-api.service would fail on a missing ${key}"
@@ -688,17 +759,21 @@ create_etc_radon_dir() {
   local dir="/etc/radon"
   local media="/var/lib/radon/media"
   # /var/lib/radon is radon-owned (2FA leases), so media/ is radon-replaceable
-  # and install -d would follow a planted link and chown its target.
-  if [[ -L "$media" ]]; then
+  # and a check-then-install pair leaves a window to swap a link in between.
+  # mkdir never follows a link in the final component: create first, refuse
+  # anything that is not a real directory, then chown without dereferencing.
+  if [[ "${RADON_HELPER_SKIP_CHOWN:-0}" == "1" ]]; then
+    install -d -m 1770 "$dir"
+  else
+    install -d -m 1770 -o root -g radon "$dir"
+  fi
+  mkdir -m 0750 "$media" 2>/dev/null || true
+  if [[ -L "$media" || ! -d "$media" ]]; then
     log_error "Refusing ${media}: not a regular file or directory (symlink)"
     return 1
   fi
-  if [[ "${RADON_HELPER_SKIP_CHOWN:-0}" == "1" ]]; then
-    install -d -m 1770 "$dir"
-    install -d -m 0750 "$media"
-  else
-    install -d -m 1770 -o root -g radon "$dir"
-    install -d -m 0750 -o radon -g radon "$media"
+  if [[ "${RADON_HELPER_SKIP_CHOWN:-0}" != "1" ]]; then
+    chown --no-dereference radon:radon "$media"
   fi
 }
 
@@ -805,8 +880,12 @@ setup_node() {
 # -- Caddy -------------------------------------------------------------------
 
 install_caddy() {
+  local installed_version=""
   if command -v caddy &>/dev/null; then
-    log_warn "Caddy already installed -- skipping installation"
+    installed_version="$(dpkg-query -W -f='${Version}' caddy 2>/dev/null || true)"
+  fi
+  if [[ -n "$installed_version" && "$installed_version" == "${CADDY_VERSION}"* ]]; then
+    log_warn "Caddy ${installed_version} already installed -- skipping installation"
   else
     log_info "Installing Caddy from official repos..."
     apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl
@@ -936,7 +1015,14 @@ enable_services() {
   local timer_owned_services=()
   local base svc
   for svc in "${SERVICE_FILES[@]}"; do
+    # Research requires private runtime credentials and explicit activation.
+    [[ "$svc" == "radon-research.service" ]] && continue
     [[ "$svc" == "radon-ib-gateway-preheld-restart.service" ]] && continue
+    # SLM tagger sidecar + monitor stay copied but disabled until Joe enables
+    # after C WINS. No model is installed on a fresh host.
+    [[ "$svc" == "radon-slm-tagger.service" ]] && continue
+    [[ "$svc" == "radon-slm-tagger-monitor.service" ]] && continue
+    [[ "$svc" == "radon-slm-tagger-monitor.timer" ]] && continue
     # Broker-only. Combined/app copy the unit but do not enable it. Certs plus
     # `systemctl enable --now` happen on the broker after the split.
     [[ "$svc" == "radon-ib-gateway-remote.service" ]] && continue
@@ -1273,6 +1359,7 @@ install_docker_gw() {
     log_error "Compose provenance failed: ${compose_rel} is not committed at HEAD"
     return 1
   fi
+  require_remote_ancestry "$repo_root" "$compose_rel" "$blob_sha" "Compose" || return 1
   if ! work_sha="$(git -C "$repo_root" hash-object -- "$compose_source")" \
     || [[ "$work_sha" != "$blob_sha" ]]; then
     log_error "Compose provenance failed: ${compose_source} differs from the committed blob"
@@ -1362,13 +1449,33 @@ write_mcp_env() {
   # /etc/radon/mcp.env (Clerk verification inputs, operator allowlist,
   # RADON_MCP_* knobs), never the full secret set. Same key set as
   # deploy.sh:write_mcp_env, which rewrites it on every deploy.
+  local mcp_env_target="${RADON_MCP_ENV_FILE:-/etc/radon/mcp.env}"
   local mcp_env_tmp
   require_regular_file "$ENV_FILE" || return 1
-  mcp_env_tmp="$(mktemp)"
+  # /etc/radon is radon-writable (root:radon 1770), so the destination can be
+  # a radon-planted symlink. Refuse anything present that is not a regular
+  # file, then publish by staging a root-owned sibling in the same directory
+  # and renaming over it, so the write never follows the destination path.
+  if [[ -L "$mcp_env_target" || ( -e "$mcp_env_target" && ! -f "$mcp_env_target" ) ]]; then
+    log_error "Refusing ${mcp_env_target}: not a regular file"
+    return 1
+  fi
+  if ! mcp_env_tmp="$(mktemp "${mcp_env_target}.XXXXXX")" || [[ -z "$mcp_env_tmp" ]]; then
+    log_error "Could not stage ${mcp_env_target}"
+    return 1
+  fi
+  chmod 0600 "$mcp_env_tmp"
   grep -E '^(CLERK_JWKS_URL|CLERK_ISSUER|ALLOWED_USER_IDS|RADON_MCP_[A-Z0-9_]+)=' "$ENV_FILE" > "$mcp_env_tmp" || true
-  install -m 0600 -o radon -g radon "$mcp_env_tmp" /etc/radon/mcp.env
-  rm -f "$mcp_env_tmp"
-  log_success "Hosted MCP env written to /etc/radon/mcp.env"
+  if [[ "${RADON_POLICY_SKIP_CHOWN:-0}" != "1" ]]; then
+    if ! chown radon:radon "$mcp_env_tmp"; then
+      rm -f "$mcp_env_tmp"
+      log_error "Could not chown staged ${mcp_env_target}"
+      return 1
+    fi
+  fi
+  # -T: a directory link raced into the destination is replaced, not entered.
+  mv -T -f "$mcp_env_tmp" "$mcp_env_target"
+  log_success "Hosted MCP env written to ${mcp_env_target}"
 }
 
 # -- Main --------------------------------------------------------------------

@@ -61,6 +61,7 @@ export function TimeAndSales({
           return (
             <div
               className={`book-trow${clickable ? " book-row-fill" : ""}`}
+              data-testid="book-tape-row"
               key={`${trade.time}-${trade.price}-${trade.size}-${trade.exchange ?? ""}-${i}`}
               {...(clickable
                 ? {

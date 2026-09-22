@@ -1,5 +1,8 @@
 "use client";
+import RequestError from "@/components/RequestError";
+import ErrorToast from "@/components/ErrorToast";
 
+import { userErrorMessage } from "@/lib/userError";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 
 import {
@@ -95,7 +98,7 @@ function MeasurementState({
   message,
   onRetry,
 }: {
-  kind: "error" | "empty";
+  kind: "empty";
   message: string;
   onRetry?: () => void;
 }) {
@@ -106,8 +109,8 @@ function MeasurementState({
       data-responsive="instrument"
       aria-label="Options exposure"
     >
-      <div className={styles.state} role={kind === "error" ? "alert" : "status"}>
-        <span className={styles.stateLabel}>{kind === "error" ? "MEASUREMENT FAULT" : "OPTIONS / EXPOSURE"}</span>
+      <div className={styles.state} role="status">
+        <span className={styles.stateLabel}>OPTIONS / EXPOSURE</span>
         <p>{message}</p>
         {onRetry ? <button type="button" className={styles.retry} onClick={onRetry}>Retry measurement</button> : null}
       </div>
@@ -196,7 +199,7 @@ export default function OptionsExposurePanel({ symbol }: OptionsExposurePanelPro
     );
   }
   if (error && !data) {
-    return <MeasurementState kind="error" message={error} onRetry={() => void refresh()} />;
+    return <><RequestError error={error} /><MeasurementState kind="empty" message="No current exposure measurements to display." onRetry={() => void refresh()} /></>;
   }
   // A failed refresh BEHIND a loaded payload used to be dropped entirely, so
   // the prior exposure ladder stayed on screen with no fault indicator at all.
@@ -239,15 +242,13 @@ export default function OptionsExposurePanel({ symbol }: OptionsExposurePanelPro
                 failed. Without this it stayed on screen indistinguishable
                 from a live one. R-247. */}
             {refreshFailed ? (
-              <span className={styles.partial} title={refreshFailed} role="status">
-                REFRESH FAILED
-              </span>
+              <RequestError error={refreshFailed} retainedData onRetry={() => void refresh()} />
             ) : null}
           </div>
         </div>
         <div className={styles.telemetry}>
           <time dateTime={data.source_time}>{formatTimestamp(data.source_time)}</time>
-          <span>SPOT {formatStrike(data.spot)}</span>
+          <span>{data.spot === null ? "SPOT UNAVAILABLE" : `SPOT ${formatStrike(data.spot)}`}</span>
           <button
             type="button"
             className={styles.exportButton}
@@ -261,7 +262,12 @@ export default function OptionsExposurePanel({ symbol }: OptionsExposurePanelPro
         </div>
       </header>
       {exportError ? (
-        <div className={styles.exportError} role="alert">{exportError}</div>
+        <ErrorToast message={userErrorMessage(exportError, "The export could not be prepared. Try again.")} />
+      ) : null}
+      {data.spot === null ? (
+        <p className={styles.measurementNotice} role="status">
+          Provider spot price is unavailable. Showing all strikes without a spot marker.
+        </p>
       ) : null}
 
       <div className={styles.controls} data-testid="options-exposure-controls">
@@ -282,7 +288,8 @@ export default function OptionsExposurePanel({ symbol }: OptionsExposurePanelPro
           <span>Strike range</span>
           <select
             aria-label="Strike range"
-            value={String(strikeWindow)}
+            value={data.spot === null ? "all" : String(strikeWindow)}
+            disabled={data.spot === null}
             onChange={(event) => {
               const next = event.target.value;
               setStrikeWindow(next === "all" ? "all" : Number(next) as OptionsExposureStrikeWindow);

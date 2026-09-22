@@ -10,16 +10,21 @@ import json
 import subprocess
 from types import SimpleNamespace
 
+import credential_validators as cv
 import pytest
 import requests
 
-import credential_validators as cv
-
 
 class _Response:
-    def __init__(self, status_code: int, text: str = ""):
+    def __init__(self, status_code: int, text: str = "", payload=None):
         self.status_code = status_code
         self.text = text
+        self._payload = payload
+
+    def json(self):
+        if self._payload is None:
+            raise ValueError("response has no JSON payload")
+        return self._payload
 
 
 @pytest.fixture()
@@ -122,12 +127,51 @@ class TestWireShapes:
         assert call.headers["Authorization"] == "Bearer eq-1"
 
     def test_artificial_analysis_key_header(self, http):
-        cv.validate(
-            "artificial_analysis", {"ARTIFICIAL_ANALYSIS_API_KEY": "aa-1"}
-        )
+        cv.validate("artificial_analysis", {"ARTIFICIAL_ANALYSIS_API_KEY": "aa-1"})
         (call,) = http.calls
         assert call.url == "https://artificialanalysis.ai/api/v2/data/llms/models"
         assert call.headers["x-api-key"] == "aa-1"
+
+    def test_openrouter_data_api_bearer(self, http):
+        cv.validate("openrouter", {"OPENROUTER_API_KEY": "sk-or-v1-1"})
+        (call,) = http.calls
+        assert call.url == "https://openrouter.ai/api/v1/datasets/rankings-daily"
+        assert call.headers["Authorization"] == "Bearer sk-or-v1-1"
+
+    def test_vast_current_user_bearer(self, http):
+        cv.validate("vast", {"VAST_API_KEY": "vast-1"})
+        (call,) = http.calls
+        assert call.url == "https://console.vast.ai/api/v0/users/current/"
+        assert call.headers["Authorization"] == "Bearer vast-1"
+
+    def test_vast_auth_error_404_is_invalid(self, http):
+        http.box["response"] = _Response(
+            404,
+            payload={"success": False, "error": "auth_error", "msg": "Invalid user key"},
+        )
+        result = cv.validate("vast", {"VAST_API_KEY": "vast-bad"})
+        assert result.status == "invalid"
+        assert result.blocks_save is True
+
+    def test_vast_unrelated_404_remains_error(self, http):
+        http.box["response"] = _Response(
+            404,
+            payload={"success": False, "error": "not_found"},
+        )
+        result = cv.validate("vast", {"VAST_API_KEY": "vast-1"})
+        assert result.status == "error"
+        assert result.blocks_save is False
+
+    def test_eia_key_query(self, http):
+        cv.validate("eia", {"EIA_API_KEY": "eia-1"})
+        (call,) = http.calls
+        assert call.url == "https://api.eia.gov/v2/?api_key=eia-1"
+
+    def test_sec_contact_user_agent(self, http):
+        cv.validate("sec", {"SEC_USER_AGENT": "Radon ops@example.com"})
+        (call,) = http.calls
+        assert call.url == "https://data.sec.gov/submissions/CIK0000320193.json"
+        assert call.headers["User-Agent"] == "Radon ops@example.com"
 
     def test_pushover_validate_endpoint(self, http):
         cv.validate("pushover", {"PUSHOVER_USER": "u1", "PUSHOVER_TOKEN": "t1"})
@@ -181,9 +225,7 @@ class TestTursoEgressPin:
         ],
     )
     def test_non_turso_destination_is_refused_without_egress(self, http, url):
-        result = cv.validate(
-            "turso", {"TURSO_DB_URL": url, "TURSO_AUTH_TOKEN": "ts-1"}
-        )
+        result = cv.validate("turso", {"TURSO_DB_URL": url, "TURSO_AUTH_TOKEN": "ts-1"})
         assert result.status == "invalid"
         assert http.calls == []
 
@@ -220,9 +262,7 @@ class TestDispatch:
 
 class TestSlowLoginValidators:
     def _proc(self, stdout="", returncode=0):
-        return subprocess.CompletedProcess(
-            args=[], returncode=returncode, stdout=stdout, stderr=""
-        )
+        return subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout, stderr="")
 
     def test_menthorq_runs_login_subprocess(self, monkeypatch):
         runs = []
@@ -232,9 +272,7 @@ class TestSlowLoginValidators:
             return self._proc(json.dumps({"status": "valid", "message": ""}))
 
         monkeypatch.setattr(cv.subprocess, "run", _run)
-        result = cv.validate(
-            "menthorq", {"MENTHORQ_USER": "u@x.com", "MENTHORQ_PASS": "pw"}
-        )
+        result = cv.validate("menthorq", {"MENTHORQ_USER": "u@x.com", "MENTHORQ_PASS": "pw"})
         assert result.status == "valid"
         (run,) = runs
         assert run.cmd[-1] == "menthorq"
@@ -248,9 +286,7 @@ class TestSlowLoginValidators:
         monkeypatch.setattr(
             cv.subprocess,
             "run",
-            lambda *a, **k: self._proc(
-                json.dumps({"status": "invalid", "message": "still on login"})
-            ),
+            lambda *a, **k: self._proc(json.dumps({"status": "invalid", "message": "still on login"})),
         )
         result = cv.validate(
             "themarketear",
@@ -260,12 +296,8 @@ class TestSlowLoginValidators:
         assert "still on login" in result.message
 
     def test_subprocess_failure_is_error(self, monkeypatch):
-        monkeypatch.setattr(
-            cv.subprocess, "run", lambda *a, **k: self._proc("boom", returncode=1)
-        )
-        result = cv.validate(
-            "menthorq", {"MENTHORQ_USER": "u", "MENTHORQ_PASS": "p"}
-        )
+        monkeypatch.setattr(cv.subprocess, "run", lambda *a, **k: self._proc("boom", returncode=1))
+        result = cv.validate("menthorq", {"MENTHORQ_USER": "u", "MENTHORQ_PASS": "p"})
         assert result.status == "error"
 
     def test_subprocess_timeout_is_error(self, monkeypatch):
@@ -273,18 +305,12 @@ class TestSlowLoginValidators:
             raise subprocess.TimeoutExpired(cmd="x", timeout=1)
 
         monkeypatch.setattr(cv.subprocess, "run", _run)
-        result = cv.validate(
-            "menthorq", {"MENTHORQ_USER": "u", "MENTHORQ_PASS": "p"}
-        )
+        result = cv.validate("menthorq", {"MENTHORQ_USER": "u", "MENTHORQ_PASS": "p"})
         assert result.status == "error"
 
     def test_garbage_stdout_is_error(self, monkeypatch):
-        monkeypatch.setattr(
-            cv.subprocess, "run", lambda *a, **k: self._proc("not json")
-        )
-        result = cv.validate(
-            "menthorq", {"MENTHORQ_USER": "u", "MENTHORQ_PASS": "p"}
-        )
+        monkeypatch.setattr(cv.subprocess, "run", lambda *a, **k: self._proc("not json"))
+        result = cv.validate("menthorq", {"MENTHORQ_USER": "u", "MENTHORQ_PASS": "p"})
         assert result.status == "error"
 
 
@@ -302,9 +328,7 @@ class TestTursoHostPin:
         assert "HTTPS" in result.message
 
     def test_host_mismatch_rejected(self, monkeypatch):
-        monkeypatch.setenv(
-            "TURSO_DB_URL", "libsql://radon-joemccann.aws-us-west-2.turso.io"
-        )
+        monkeypatch.setenv("TURSO_DB_URL", "libsql://radon-joemccann.aws-us-west-2.turso.io")
         result = cv.validate(
             "turso",
             {
@@ -328,9 +352,7 @@ class TestValidatorRedaction:
                 stderr="login failed token=sk-ant-api03-deadbeef",
             ),
         )
-        result = cv.validate(
-            "menthorq", {"MENTHORQ_USER": "u", "MENTHORQ_PASS": "p"}
-        )
+        result = cv.validate("menthorq", {"MENTHORQ_USER": "u", "MENTHORQ_PASS": "p"})
         assert result.status == "error"
         assert "sk-ant-api03-deadbeef" not in result.message
         assert "[redacted-key]" in result.message

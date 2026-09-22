@@ -9,7 +9,7 @@ schema_version 1, section 6).
 Scan math (plan step 3): ``align_sessions``, ``compute_ratio``,
 ``compute_ratio_stats``, ``classify_divergence``, ``build_payload``.
 History layer (step 4): ``ensure_history`` — durable Turso close store,
-Yahoo cold backfill, IB -> UW -> Robinhood -> Yahoo incremental chain, splice
+Yahoo cold backfill, IB -> Robinhood -> UW -> Yahoo incremental chain, splice
 validation. CLI (step 5): ``main`` / ``run_scan`` — exactly one JSON
 document on stdout, progress on stderr.
 """
@@ -206,7 +206,7 @@ def build_payload(
 def ensure_history(symbol: str) -> tuple[dict[str, float], list[str]]:
     """Durable close series for ``symbol``, trailing CLOSES_TARGET sessions.
 
-    Incremental IB -> UW -> Robinhood -> Yahoo refresh first (the recent segment always
+    Incremental IB -> Robinhood -> UW -> Yahoo refresh first (the recent segment always
     goes through the priority chain), then a Yahoo deep backfill when the
     store can plausibly be deepened; both paths are splice-validated with a
     lineage reset on corporate-action mismatch. Only bars up to the last
@@ -315,7 +315,7 @@ def _incremental_refresh(symbol: str, stored: dict[str, float], sources: list[st
 
 
 def _fetch_incremental(symbol: str) -> tuple[dict[str, float], str]:
-    """Priority chain for the trailing segment: IB, then UW, then Robinhood,
+    """Priority chain for the trailing segment: IB, then Robinhood, then UW,
     then Yahoo."""
     auth_state = _ib_auth_state()
     if auth_state and auth_state != "authenticated":
@@ -325,17 +325,17 @@ def _fetch_incremental(symbol: str) -> tuple[dict[str, float], str]:
         if bars:
             return bars, "ib"
     if is_index_symbol(symbol):
-        print(f"  UW skipped: {symbol} is an index symbol", file=sys.stderr)
-    else:
-        bars = _fetch_uw_daily(symbol)
-        if bars:
-            return bars, "uw"
-    if is_index_symbol(symbol):
         print(f"  RH skipped: {symbol} is an index symbol", file=sys.stderr)
     else:
         bars = _fetch_rh_daily(symbol)
         if bars:
             return bars, "rh"
+    if is_index_symbol(symbol):
+        print(f"  UW skipped: {symbol} is an index symbol", file=sys.stderr)
+    else:
+        bars = _fetch_uw_daily(symbol)
+        if bars:
+            return bars, "uw"
     return _fetch_yahoo_daily(symbol, INCREMENTAL_YAHOO_YEARS), "yahoo"
 
 
@@ -407,7 +407,7 @@ def _record_source(sources: list[str], source: str) -> None:
 def _fetch_rh_daily(symbol: str) -> dict[str, float]:
     """Robinhood (official trading MCP, read-only) daily closes.
 
-    Ranked after IB and UW, before Yahoo. Unconfigured hosts return {}
+    Ranked after IB, before UW and Yahoo. Unconfigured hosts return {}
     without any network I/O so the chain falls through to Yahoo.
     """
     try:

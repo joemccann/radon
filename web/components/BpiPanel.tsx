@@ -1,10 +1,13 @@
 "use client";
+import RequestError from "@/components/RequestError";
 
+import { userErrorMessage } from "@/lib/userError";
 import { useMemo, useState } from "react";
 import { Gauge } from "lucide-react";
 
 import BpiChart from "./BpiChart";
 import BrushMinimap from "./BrushMinimap";
+import FreshnessRail from "./FreshnessRail";
 import HistoryRangeChips from "./HistoryRangeChips";
 import InfoTooltip from "./InfoTooltip";
 import MetricCell from "./mobile/MetricCell";
@@ -22,6 +25,7 @@ import {
   type BpiPayload,
   type BpiTone,
 } from "@/lib/bpi";
+import { BPI_REFRESH } from "@/lib/refreshSchedule";
 import { useBpi } from "@/lib/useBpi";
 import {
   defaultPresetForLength,
@@ -188,7 +192,7 @@ function BpiReadout({ payload, compact }: { payload: BpiPayload; compact: boolea
 }
 
 export default function BpiPanel() {
-  const { data, loading, error } = useBpi();
+  const { data, loading, error, refresh } = useBpi();
   const { isMobile, hasMounted } = useViewport();
   const compact = hasMounted && isMobile;
 
@@ -229,11 +233,7 @@ export default function BpiPanel() {
 
   if (error && !data) {
     return (
-      <SectionEmptyState
-        icon={Gauge}
-        headline="Bullish percent measurement unavailable"
-        secondary={error}
-      />
+      <><RequestError error={error} /><SectionEmptyState icon={Gauge} headline="Bullish percent measurement" secondary="No current observations to display." action={{ label: "Refresh", onClick: refresh }} /></>
     );
   }
 
@@ -242,6 +242,7 @@ export default function BpiPanel() {
 
   return (
     <>
+      {error && <RequestError error={error} retainedData />}
       <div className="section">
         <div className="section-header">
           <div className="section-title">
@@ -254,7 +255,14 @@ export default function BpiPanel() {
         <IndexSwitcher active={index} compact={compact} onChange={switchIndex} />
 
         {payload ? (
-          <BpiReadout payload={payload} compact={compact} />
+          <>
+            <BpiReadout payload={payload} compact={compact} />
+            <FreshnessRail
+              schedule={BPI_REFRESH}
+              asOf={payload.as_of_session}
+              testId="bpi-freshness-rail"
+            />
+          </>
         ) : (
           <SectionEmptyState
             icon={Gauge}

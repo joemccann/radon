@@ -105,7 +105,7 @@ class TestUpstreamReadIsStreamed:
             def close(self):
                 seen["closed"] = True
 
-        def fake_get(url, headers=None, timeout=None, stream=None):
+        def fake_get(url, headers=None, timeout=None, stream=None, allow_redirects=None):
             seen["stream"] = stream
             return FakeResp()
 
@@ -130,7 +130,7 @@ class TestUpstreamReadIsStreamed:
         import requests
 
         monkeypatch.setattr(
-            requests, "get", lambda url, headers=None, timeout=None, stream=None: FakeResp()
+            requests, "get", lambda url, headers=None, timeout=None, stream=None, allow_redirects=None: FakeResp()
         )
         result = hosted._http_get("https://app.radon.run/x", {})
         assert result.status == 200

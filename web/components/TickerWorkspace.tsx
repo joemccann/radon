@@ -5,12 +5,13 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { useTickerDetail } from "@/lib/TickerDetailContext";
 import { isDeckKey, legacyTabToDeck, type DeckKey } from "@/lib/legacyTabToDeck";
-import type { DepthBook, Trade } from "@/lib/pricesProtocol";
+import type { DepthBook, PriceData, Trade } from "@/lib/pricesProtocol";
 import TickerDetailContent from "./TickerDetailContent";
 
 type TickerWorkspaceProps = {
   ticker: string;
   theme: "dark" | "light";
+  prices?: Record<string, PriceData>;
   depths?: Record<string, DepthBook>;
   tape?: Record<string, Trade[]>;
 };
@@ -18,6 +19,7 @@ type TickerWorkspaceProps = {
 export default function TickerWorkspace({
   ticker,
   theme,
+  prices: pricesProp,
   depths: depthsProp,
   tape: tapeProp,
 }: TickerWorkspaceProps) {
@@ -35,7 +37,7 @@ export default function TickerWorkspace({
     setDepthSymbols,
   } = useTickerDetail();
 
-  const prices = getPrices();
+  const prices = pricesProp ?? getPrices();
   const fundamentals = getFundamentals();
   const depths = depthsProp ?? getDepths();
   const tape = tapeProp ?? getTape();
@@ -71,7 +73,9 @@ export default function TickerWorkspace({
   //   - activeTab carries the deck key, or "book" when no deck is open.
   //   - onTabChange receives a deck key (or "book"/"company"/"order" for the
   //     always-docked hot-path surfaces) and maps the docked ones back to null.
-  const activeTabValue = activeDeck ?? "book";
+  // Preserve an explicit ticket request for phones, where the ticket is a
+  // local deck rather than the always-visible desktop Act column.
+  const activeTabValue = activeDeck ?? (searchParams.get("tab") === "order" ? "order" : "book");
   const onTabChange = useCallback((value: string) => {
     if (value === "book" || value === "company" || value === "order") {
       setDeck(null);

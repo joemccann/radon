@@ -1,0 +1,6 @@
+{
+  "tailscale_ip": "100.64.0.1",
+  "max_model_len": 4096,
+  "gpu_memory_utilization": 0.70,
+  "adapters": {}
+}

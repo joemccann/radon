@@ -3,8 +3,8 @@ comments, and the five wrappers' wiring into report().
 
 Rule under test: an open PR for this loop means an operator still needs the
 full run history, so nothing is pruned. No open PR (merged, closed, or never
-opened) means there is nothing left to keep, so every existing comment is
-deleted before the next one posts.
+opened) keeps the latest audit checkpoint and detailed/no-op report, plus the
+just-posted wrapper status. Only superseded comments are deleted.
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ WRAPPERS = (
     SCRIPTS / "ci_performance_nightly.sh",
     SCRIPTS / "documentation_nightly.sh",
     SCRIPTS / "security_nightly.sh",
+    SCRIPTS / "security_deepsec_nightly.sh",
 )
 
 
@@ -57,7 +58,7 @@ class TestCli:
     subprocess wiring (argv shape, --jq parsing, DELETE calls) is covered,
     not just the pure decision function."""
 
-    def _fake_gh(self, tmp_path: Path, *, open_refs: list[str], comment_ids: list[str]) -> Path:
+    def _fake_gh(self, tmp_path: Path, *, open_refs: list[str], comment_ids: list[str], bodies: dict[str, str] | None = None) -> Path:
         log = tmp_path / "delete-log.txt"
         script = tmp_path / "fake-gh"
         script.write_text(
@@ -65,6 +66,7 @@ class TestCli:
             "import sys, json\n"
             f"OPEN_REFS = {open_refs!r}\n"
             f"COMMENT_IDS = {comment_ids!r}\n"
+            f"BODIES = {bodies or {}!r}\n"
             f"LOG = {str(log)!r}\n"
             "args = sys.argv[1:]\n"
             "if args[:2] == ['pr', 'list']:\n"
@@ -75,7 +77,7 @@ class TestCli:
             "        f.write(comment_id + '\\n')\n"
             "elif args[:1] == ['api']:\n"
             "    for cid in COMMENT_IDS:\n"
-            "        print(cid)\n"
+            "        print(json.dumps({'id': cid, 'body': BODIES.get(cid, '')}))\n"
             "else:\n"
             "    sys.exit(1)\n",
             encoding="utf-8",
@@ -124,6 +126,21 @@ class TestCli:
         proc = self._run(gh)
         assert proc.returncode == 0, proc.stderr
         assert (tmp_path / "delete-log.txt").read_text().split() == ["7"]
+
+    def test_keeps_latest_checkpoint_and_noop_report_without_a_pr(self, tmp_path):
+        gh = self._fake_gh(
+            tmp_path, open_refs=[], comment_ids=["101", "102", "103", "104", "105"],
+            bodies={
+                "101": "audited-through: aaaaaaa\nNO_SAFE_CHANGE",
+                "102": "audited-through: bbbbbbb\nNO_SAFE_CHANGE",
+                "103": "**audit** completed",
+                "104": "**Issue discovered**\nNo actionable drift.\n**What was done to fix it**\nNothing this run.\n**Next**\nNothing to merge.",
+                "105": "old wrapper status",
+            },
+        )
+        proc = self._run(gh)
+        assert proc.returncode == 0, proc.stderr
+        assert sorted((tmp_path / "delete-log.txt").read_text().split()) == ["101", "103", "105"]
 
     def test_no_comments_to_delete_is_a_clean_no_op(self, tmp_path):
         gh = self._fake_gh(tmp_path, open_refs=[], comment_ids=[])
@@ -205,20 +222,25 @@ class TestFailClosed:
         script.chmod(script.stat().st_mode | stat.S_IEXEC)
         return script
 
-    def _run(self, gh_bin: Path, *, keep: str | None = None):
+    def _run(self, gh_bin: Path, *, keep: str | None = None, timeout: str = "10"):
         argv = [
             sys.executable,
             str(SCRIPTS / "nightly_issue_prune.py"),
             "--gh-bin", str(gh_bin),
             "--issue", "42",
             "--branch-prefix", "reliability/",
-            "--timeout", "10",
+            "--timeout", timeout,
         ]
         if keep is not None:
             argv += ["--keep", keep]
         return subprocess.run(argv, capture_output=True, text=True, timeout=60)
 
     def _listing_fails_gh(self, tmp_path: Path, *, failure: str) -> Path:
+        # T-453: the timeout arm blocks on signal.pause() — held until the
+        # CLI's own subprocess timeout kills it — instead of a real
+        # time.sleep(30) that burned 10s of wall clock per run and let the
+        # outer 60s harness cap raise TimeoutExpired BEFORE the assertions
+        # under contention.
         log = tmp_path / "delete-log.txt"
         return self._gh(
             tmp_path,
@@ -227,7 +249,7 @@ class TestFailClosed:
             "if args[:2] == ['pr', 'list']:\n"
             + (
                 "    sys.exit(1)\n" if failure == "nonzero"
-                else "    import time; time.sleep(30)\n"
+                else "    import signal; signal.pause()\n"
             )
             + "elif args[:1] == ['api'] and args[1:3] == ['-X', 'DELETE']:\n"
             "    open(LOG, 'a').write(args[3].rsplit('/', 1)[-1] + '\\n')\n"
@@ -237,7 +259,13 @@ class TestFailClosed:
 
     @pytest.mark.parametrize("failure", ["nonzero", "timeout"])
     def test_a_failed_pr_listing_deletes_nothing(self, tmp_path, failure):
-        proc = self._run(self._listing_fails_gh(tmp_path, failure=failure))
+        # `--timeout 0` expires against the signal-blocked gh immediately, so
+        # the timeout path exercises the same TimeoutExpired branch in under a
+        # second of wall clock.
+        cli_timeout = "0" if failure == "timeout" else "10"
+        proc = self._run(
+            self._listing_fails_gh(tmp_path, failure=failure), timeout=cli_timeout
+        )
         assert proc.returncode == 0, proc.stderr
         assert not (tmp_path / "delete-log.txt").exists(), proc.stderr
         assert "unknown" in proc.stderr
@@ -260,6 +288,25 @@ class TestFailClosed:
         assert proc.returncode == 0, proc.stderr
         assert not (tmp_path / "delete-log.txt").exists(), proc.stderr
 
+    @pytest.mark.parametrize("payload", ['not-json', '{"id":"1","body":null}', '{"id":"../2","body":"audit"}'])
+    def test_unknown_comment_content_never_deletes_checkpoint_history(self, tmp_path, payload):
+        log = tmp_path / "delete-log.txt"
+        gh = self._gh(
+            tmp_path,
+            f"LOG = {str(log)!r}\n"
+            "args = sys.argv[1:]\n"
+            "if args[:2] == ['pr', 'list']:\n"
+            "    print(json.dumps([]))\n"
+            "elif args[:1] == ['api'] and args[1:3] == ['-X', 'DELETE']:\n"
+            "    open(LOG, 'a').write('unexpected delete')\n"
+            "elif args[:1] == ['api']:\n"
+            f"    print({payload!r})\n",
+        )
+        proc = self._run(gh)
+        assert proc.returncode == 0, proc.stderr
+        assert not log.exists()
+        assert "comment listing unknown" in proc.stderr
+
     def test_the_just_posted_comment_is_kept(self, tmp_path):
         log = tmp_path / "delete-log.txt"
         gh = self._gh(
@@ -271,7 +318,7 @@ class TestFailClosed:
             "elif args[:1] == ['api'] and args[1:3] == ['-X', 'DELETE']:\n"
             "    open(LOG, 'a').write(args[3].rsplit('/', 1)[-1] + '\\n')\n"
             "elif args[:1] == ['api']:\n"
-            "    print('1'); print('2'); print('99')\n",
+            "    for cid in ['1', '2', '99']: print(json.dumps({'id': cid, 'body': ''}))\n",
         )
         proc = self._run(gh, keep="99")
         assert proc.returncode == 0, proc.stderr
@@ -312,3 +359,31 @@ class TestWrapperPostBeforePrune:
         end = text.index("\n}", start)
         body = text[start:end]
         assert "--keep" in body, wrapper.name
+
+
+class TestDurableState:
+    def test_checkpoint_and_latest_report_can_share_one_comment(self):
+        comments = [
+            {"id": "1", "body": "audited-through: aaaaaaa"},
+            {"id": "2", "body": "audited-through: bbbbbbb\nNO_ACTIONABLE_DRIFT"},
+            {"id": "3", "body": "**deliver** 0 PR(s), nothing to merge"},
+        ]
+        assert prune.state_comment_ids(comments) == {"2"}
+
+    def test_creation_order_not_listing_order_controls_authoritative_checkpoint(self):
+        comments = [
+            {"id": "20", "body": "audited-through: bbbbbbb"},
+            {"id": "9", "body": "audited-through: aaaaaaa"},
+        ]
+        assert prune.state_comment_ids(comments) == {"20"}
+
+    def test_quoted_placeholder_is_not_a_verified_checkpoint(self):
+        assert prune.state_comment_ids([
+            {"id": "1", "body": "audited-through: <verified-origin-main-sha>"},
+        ]) == set()
+
+    def test_standalone_noop_report_survives_without_a_repository_log(self):
+        assert prune.state_comment_ids([
+            {"id": "1", "body": "NO_SAFE_CHANGE"},
+            {"id": "2", "body": "NIGHTLY PHASE NO-OP: loop=testing phase=audit no findings"},
+        ]) == {"2"}

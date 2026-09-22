@@ -741,6 +741,35 @@ export function MaRatioFixture() {
   return MA_RATIO_MOCK;
 }
 
+// Source: e2e/calm-streak-tab.spec.ts
+export function CalmStreakFixture() {
+  const DAY_MS = 86_400_000;
+  const SERIES_LENGTH = 240;
+  const isoDaysAgo = (days: number) => new Date(Date.now() - days * DAY_MS).toISOString().slice(0, 10);
+  const DATA_DATE = isoDaysAgo(1);
+  const series = Array.from({ length: SERIES_LENGTH }, (_, i) => ({
+    date: i === SERIES_LENGTH - 1 ? DATA_DATE : isoDaysAgo(SERIES_LENGTH - i),
+    streak: i % 40,
+    close: Number((5000 + i * 11.5).toFixed(2)),
+  }));
+  return {
+    schema_version: 1,
+    scan_time: new Date().toISOString(),
+    data_date: DATA_DATE,
+    source_last_modified: null,
+    source: { name: "cboe", url: "https://cdn.cboe.com/api/global/delayed_quotes/charts/historical/_SPX.json" },
+    threshold_pct: 1,
+    current: { date: DATA_DATE, streak: 28, band_pct: 0.7312, close: 7619.98 },
+    stats: {
+      max: { streak: 64, date: "2017-03-20" },
+      window: { start: "1996-01-01", end: "2016-12-31", streak: 26, date: "2014-06-23" },
+      percentile: 98.9,
+    },
+    series,
+    missing: false,
+  };
+}
+
 // Source: e2e/credit-spread-tab.spec.ts
 export function CreditSpreadFixture() {
   function buildSeries() {

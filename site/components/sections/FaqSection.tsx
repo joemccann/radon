@@ -29,16 +29,14 @@ export function FaqSection() {
   return (
     <section id="faq" className="px-8 py-[clamp(64px,9vw,128px)]">
       <div className="mx-auto max-w-[1140px]">
-        <SectionHeading no="Appendix" label="Questions · Plain Answers" />
+        <SectionHeading no="Appendix" label="Questions" />
 
         <RevealOnScroll className="mb-[42px] max-w-[66ch]">
           <h2 className="editorial-thesis mb-[22px] text-primary">
-            Asked before the demo.
+            Before you open the demo.
           </h2>
           <p className="text-secondary">
-            The questions traders bring to Radon, answered plainly. Data
-            sources, broker requirements, and how this instrument differs from
-            a levels dashboard.
+            Broker, data feed, and how this differs from a levels dashboard.
           </p>
         </RevealOnScroll>
 
