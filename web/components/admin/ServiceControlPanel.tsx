@@ -65,6 +65,7 @@ export default function ServiceControlPanel({
   };
 
   const supported = services?.supported ?? false;
+  const hostRole = services?.host_role;
   const units = (services?.units ?? []).filter((u) => !HIDDEN_FROM_TABLE.has(u.unit));
   const { sorted: sortedUnits, sort, toggle } = useSort<UnitStatus, ServiceSortKey>(units, serviceSortValue);
   const dependents = confirm?.action === "stop" ? unitDependents(confirm.unit) : [];
@@ -122,7 +123,9 @@ export default function ServiceControlPanel({
       <p className="admin-card-subhead">
         {supported
           ? "systemd units on the Hetzner VPS (the radon-* stack). Controls call systemctl via polkit."
-          : "Read-only: this browser is not on the Hetzner VPS, so controls are disabled."}
+          : hostRole === "app"
+            ? "Unit state is from the host health daemon. The API container cannot start, stop, or restart these units."
+            : "Read-only: this browser is not on the Hetzner VPS, so controls are disabled."}
       </p>
 
       <div className="admin-table-scroll">
@@ -141,6 +144,7 @@ export default function ServiceControlPanel({
               key={unit.unit}
               unit={unit}
               supported={supported}
+              hostRole={hostRole}
               pending={pending}
               onRequest={requestAction}
               flashTarget={flashTarget}
@@ -196,12 +200,14 @@ function serviceSortValue(unit: UnitStatus, key: ServiceSortKey): string | numbe
 function ServiceRow({
   unit,
   supported,
+  hostRole,
   pending,
   onRequest,
   flashTarget,
 }: {
   unit: UnitStatus;
   supported: boolean;
+  hostRole?: string;
   pending: PendingAction;
   onRequest: (unit: string, action: ServiceAction) => void;
   flashTarget: FlashTarget | null;
@@ -245,6 +251,7 @@ function ServiceRow({
               action,
               supported,
               pending: isUnitPending && pending?.action === action,
+              hostRole,
             });
             const disabled = reason !== null;
             const inFlight = isUnitPending && pending?.action === action;

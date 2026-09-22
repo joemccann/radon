@@ -230,9 +230,14 @@ describe("unitTone", () => {
   it("activating -> warning", () => {
     expect(unitTone({ ...base, active_state: "activating", sub_state: "start" })).toBe("warning");
   });
-  it("uncontrollable -> neutral regardless of state", () => {
+  it("uncontrollable with a known active state still reports that state", () => {
     expect(
       unitTone({ ...base, can_control: false, active_state: "active", sub_state: "running" }),
+    ).toBe("positive");
+  });
+  it("uncontrollable with no evidence stays neutral", () => {
+    expect(
+      unitTone({ ...base, can_control: false, active_state: "unknown", sub_state: "unknown" }),
     ).toBe("neutral");
   });
 });

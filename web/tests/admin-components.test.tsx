@@ -689,6 +689,36 @@ describe("<ServiceControlPanel />", () => {
     );
     const restartBtn = screen.getByTestId("service-restart-radon-api.service") as HTMLButtonElement;
     expect(restartBtn.disabled).toBe(true);
+    expect(screen.getByText(/not on the Hetzner VPS/)).toBeTruthy();
+  });
+
+  it("app host shows host-health state instead of claiming the browser is off-VPS", () => {
+    render(
+      <ServiceControlPanel
+        services={services({
+          supported: false,
+          host_role: "app",
+          units: [
+            {
+              unit: "radon-api.service",
+              load_state: "host-health",
+              active_state: "active",
+              sub_state: "running",
+              description: "host health daemon",
+              can_control: false,
+            },
+          ],
+        })}
+        loading={false}
+        error={null}
+        onAction={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/cannot start, stop, or restart/)).toBeTruthy();
+    expect(screen.queryByText(/not on the Hetzner VPS/)).toBeNull();
+    expect(screen.getByText("Running")).toBeTruthy();
+    const restartBtn = screen.getByTestId("service-restart-radon-api.service") as HTMLButtonElement;
+    expect(restartBtn.disabled).toBe(true);
   });
 
   it("sorts visible service rows from sortable column headers", () => {
