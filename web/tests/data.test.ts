@@ -201,11 +201,11 @@ describe("navItems", () => {
       "watchlist",
       "flow-analysis",
       "options",
+      "ai-industry",
       "journal",
       "regime",
       "cta",
       "alerts",
-      "workflow",
       "admin",
       "preferences",
     ]);
@@ -218,6 +218,7 @@ describe("navItems", () => {
 
 describe("quickPromptsBySection", () => {
   const allSections: WorkspaceSection[] = [
+    "ai-industry",
     "dashboard",
     "flow-analysis",
     "options",
@@ -232,7 +233,6 @@ describe("quickPromptsBySection", () => {
     "regime",
     "cta",
     "alerts",
-    "workflow",
     "admin",
     "preferences",
     "ticker-detail",
@@ -275,6 +275,7 @@ describe("quickPromptsBySection", () => {
 
 describe("sectionDescription", () => {
   const allSections: WorkspaceSection[] = [
+    "ai-industry",
     "dashboard",
     "flow-analysis",
     "options",
@@ -289,7 +290,6 @@ describe("sectionDescription", () => {
     "regime",
     "cta",
     "alerts",
-    "workflow",
     "admin",
     "preferences",
     "ticker-detail",

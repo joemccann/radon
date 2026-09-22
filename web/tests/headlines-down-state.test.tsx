@@ -116,8 +116,8 @@ describe("HeadlinesTape down state", () => {
 
     render(<HeadlinesTape items={items} status="down" />);
     const banner = screen.getByTestId("headlines-tape-down");
-    expect(banner.textContent).toContain("Headlines feed down");
-    expect(banner.textContent).toContain("12m ago");
+    expect(banner.textContent).toContain("Headlines feed is unavailable");
+    expect(screen.getByRole("status").textContent).toContain("12m ago");
     // The prints stay on screen underneath the banner.
     expect(screen.getAllByTestId("headlines-tape-row")).toHaveLength(2);
   });
@@ -127,12 +127,12 @@ describe("HeadlinesTape down state", () => {
     act(() => {
       vi.advanceTimersByTime(3 * 60_000);
     });
-    expect(screen.getByTestId("headlines-tape-down").textContent).toContain("15m ago");
+    expect(screen.getByRole("status").textContent).toContain("15m ago");
   });
 
   it("says so when no print carries a time", () => {
     render(<HeadlinesTape items={[headline("x", null)]} status="down" />);
-    expect(screen.getByTestId("headlines-tape-down").textContent).toContain("Last print time unknown");
+    expect(screen.getByRole("status").textContent).toContain("Last print time unknown");
   });
 });
 

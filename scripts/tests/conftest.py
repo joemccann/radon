@@ -5,6 +5,39 @@ from pathlib import Path
 
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def _stub_bankroll_snapshot(monkeypatch):
+    """NF-1: the placement funnel's Gate 3 check reads Turso.
+
+    Order-path tests exercise their own concern, so the gate admits by
+    default. test_bankroll_admission.py restores the real check.
+    """
+    try:
+        import bankroll_guard
+    except Exception:
+        yield
+        return
+    monkeypatch.setattr(bankroll_guard, "check_bankroll_admission", lambda *a, **k: None)
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _isolate_model_ladder_auth_files(tmp_path, monkeypatch):
+    """Credential discovery may read only this test's explicit auth fixtures."""
+    from clients import model_ladder
+
+    for name in ("_json_load_object", "_read_secret_file"):
+        original = getattr(model_ladder, name)
+        empty = None if name == "_json_load_object" else ""
+
+        def isolated(path, _read=original, _empty=empty):
+            if not Path(path).resolve().is_relative_to(tmp_path.resolve()):
+                return _empty
+            return _read(path)
+
+        monkeypatch.setattr(model_ladder, name, isolated)
+
 # Add scripts/ and scripts/trade_blotter/ to sys.path so tests can import modules
 SCRIPTS_DIR = Path(__file__).parent.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
@@ -189,3 +222,28 @@ def _reset_flex_cash_flow_error_latch():
     if module is not None and hasattr(module, "_CASH_FLOW_ERROR_LATCHED"):
         module._CASH_FLOW_ERROR_LATCHED = False
     yield
+
+
+@pytest.fixture
+def isolated_model_credentials(tmp_path, monkeypatch):
+    """T-498: subscription discovery must never read the operator's home.
+
+    Keep the real file readers and provider selection: subscription tests
+    opt in by writing their own files and passing HOME/CODEX_HOME explicitly.
+    Both defaults matter: env={} falls back to Path.home(), while Reviewer
+    copies os.environ. Environment-only isolation misses the former.
+    """
+    home = tmp_path / "model-home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setenv("HOME", str(home))
+    for key in (
+        "CODEX_HOME", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_OAUTH_TOKEN_FILE",
+        "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "CLAUDE_CODE_API_KEY",
+        "CLAUDE_API_KEY", "XAI_API_KEY", "GROK_API_KEY", "OPENAI_API_KEY",
+        "GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_API_KEY",
+        "GEMINI_OAUTH_TOKEN", "GOOGLE_OAUTH_ACCESS_TOKEN", "NVIDIA_API_KEY",
+        "CEREBRAS_API_KEY", "RADON_LADDER_ALLOW_PREPAID",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    return home

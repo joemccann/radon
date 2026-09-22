@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { parseImageSources, parseResearchSource } from "@/lib/newsfeedSource";
 import { cachedRead } from "@/lib/dbCache";
 import { dbExecute } from "@/lib/dbExecute";
+import { FEEDBACK_REASONS, type FeedbackReason, type PostFeedback } from "@/lib/researchFeedback";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -94,8 +95,50 @@ async function fetchPosts() {
       args: [],
     }, options);
   }
-  return result.rows.map((r) => rowToPost(r as unknown as PostRow))
-    .filter(post => !post.id.startsWith("research-") || post.source);
+  const posts: (ReturnType<typeof rowToPost> & { feedback?: PostFeedback })[] =
+    result.rows.map((r) => rowToPost(r as unknown as PostRow))
+      .filter(post => !post.id.startsWith("research-") || post.source);
+  // Feedback only exists for research posts; legacy and demo databases never pay for the overlay.
+  if (!posts.some(post => post.source)) return posts;
+  const feedback = await latestFeedback();
+  return posts
+    // The operator's latest thumbs-down retracts a research post; the row itself is untouched.
+    .filter(post => feedback.get(post.id)?.vote !== "down")
+    .map(post => feedback.has(post.id) ? { ...post, feedback: feedback.get(post.id) } : post);
+}
+
+let feedbackTableSeen = false;
+
+/** Latest operator vote per research post. A missing table (unmigrated database) is an empty map, never a feed outage. */
+async function latestFeedback(): Promise<Map<string, PostFeedback>> {
+  const votes = new Map<string, PostFeedback>();
+  try {
+    if (!feedbackTableSeen) {
+      // Probe without raising: a SQL error resets the pooled client, which a missing additive table must not do.
+      const probe = await dbExecute({
+        sql: "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'research_feedback'", args: [],
+      }, { timeoutMs: 3_000, label: "newsfeed-feedback-probe" });
+      if (!probe.rows.length) return votes;
+      feedbackTableSeen = true;
+    }
+    const result = await dbExecute({
+      sql: `SELECT f.post_id, f.vote, f.reasons, f.comment FROM research_feedback f
+            WHERE f.target = 'post' AND f.rowid = (
+              SELECT g.rowid FROM research_feedback g WHERE g.post_id = f.post_id AND g.target = 'post'
+              ORDER BY g.created_at DESC, g.rowid DESC LIMIT 1)`,
+      args: [],
+    }, { timeoutMs: 3_000, label: "newsfeed-feedback" });
+    for (const row of result.rows) {
+      if (row.vote !== "up" && row.vote !== "down") continue;
+      let reasons: FeedbackReason[] = [];
+      try {
+        const parsed = JSON.parse(String(row.reasons ?? "[]"));
+        if (Array.isArray(parsed)) reasons = parsed.filter((r): r is FeedbackReason => typeof r === "string" && r in FEEDBACK_REASONS);
+      } catch { /* keep the vote, drop unreadable reasons */ }
+      votes.set(String(row.post_id), { vote: row.vote, reasons, comment: String(row.comment ?? "") });
+    }
+  } catch { /* feedback is an overlay; the feed must not depend on it */ }
+  return votes;
 }
 
 export const radonCapability = "read";
@@ -107,8 +150,14 @@ export async function GET() {
     const posts = await cachedRead("newsfeed:posts", POSTS_CACHE_TTL_MS, fetchPosts, {
       staleWhileError: true,
     });
+    // The feedback overlay carries operator research-triage votes and
+    // free-text comments; non-operator principals get neither research posts
+    // nor any post's feedback.
     const visible = access.principal.kind === "operator" || access.principal.kind === "test"
-      ? posts : posts.filter(post => !post.id.startsWith("research-") && !post.source);
+      ? posts
+      : posts
+          .filter(post => !post.id.startsWith("research-") && !post.source)
+          .map(post => (post.feedback ? { ...post, feedback: undefined } : post));
     return NextResponse.json(visible, {
       headers: { "cache-control": "private, no-store", "vary": "Cookie, Authorization" },
     });

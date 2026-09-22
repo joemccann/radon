@@ -1,7 +1,7 @@
 import { requireRouteAccess } from "@/lib/routeAccess";
 
 import { NextResponse } from "next/server";
-import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
+import { getRequestId, setNoStoreResponseHeaders, scrubSecrets } from "@/lib/apiContracts";
 import { radonFetch, RadonApiError } from "@/lib/radonApi";
 import { emptyStrengthConfirmationPayload, readStrengthConfirmationCache } from "../route";
 
@@ -71,7 +71,7 @@ export async function POST(request: Request): Promise<Response> {
     } catch {
       // Preserve the upstream failure below.
     }
-    const message = err instanceof Error ? err.message : "Strength confirmation scan failed";
+    const message = scrubSecrets(err instanceof Error ? err.message : "Strength confirmation scan failed");
     return setNoStoreResponseHeaders(
       NextResponse.json({ ...emptyStrengthConfirmationPayload(), scan_succeeded: false, error: message }, { status }),
       requestId,

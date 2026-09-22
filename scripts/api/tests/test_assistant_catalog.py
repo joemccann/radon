@@ -106,6 +106,8 @@ class TestAssistantCatalog:
             "/garch-convergence/scan",
             "/theta-harvester/scan",
             "/strength-confirmation/scan",
+            "/vol-skew-mr/scan",
+            "/bounce-setup/scan",
             "/gamma-rotation/scan",
             "/bpi/scan",
         )

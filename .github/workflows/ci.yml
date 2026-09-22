@@ -487,6 +487,10 @@ jobs:
       # Skipped when no demo env is configured on the runner, so this cannot
       # fail a prod-only CI run.
       - name: Demo isolation guard
+        # Security 2026-09-18 (PR #514 follow-up): the demo database secrets
+        # are handed to this step only on a push. A pull_request run never
+        # materialises them, so a PR cannot exercise or leak the demo DB URLs.
+        if: github.event_name == 'push'
         env:
           TURSO_DEMO_DB_URL: ${{ secrets.TURSO_DEMO_DB_URL }}
           TURSO_DB_URL: ${{ secrets.TURSO_DEMO_APP_DB_URL }}
@@ -783,6 +787,7 @@ jobs:
           e2e/wulf-close-order-naked-short.spec.ts
           e2e/portfolio-defined-combo-pnl.spec.ts
           e2e/portfolio-same-day-combo-pnl.spec.ts
+          e2e/portfolio-mixed-combo-today-pnl.spec.ts
           e2e/portfolio-same-day-equity-pnl.spec.ts
           e2e/stop-order-desktop.spec.ts
           e2e/modify-order-correlation-risk.spec.ts
@@ -794,15 +799,43 @@ jobs:
           e2e/orders-partial-realized-pnl.spec.ts
           e2e/share-pnl-entry-exit.spec.ts
           e2e/chain-deck-ticket-scroll.spec.ts
+          e2e/chain-anchored-scroll.spec.ts
+          e2e/chain-first-layout.spec.ts
+          e2e/instrument-workspace-layout.spec.ts
+          e2e/performance-twr-payload.spec.ts
           e2e/leap-order-prefill.spec.ts
           e2e/mobile-orders-session.spec.ts
           e2e/orders-session-window.spec.ts
           e2e/vixts-tab.spec.ts
+          e2e/panic-index-tab.spec.ts
+          e2e/hyad-tab.spec.ts
           e2e/research-workbench.spec.ts
           e2e/newsfeed-research-media.spec.ts
           e2e/newsfeed-sharing.spec.ts
-          e2e/ai-infrastructure.spec.ts
+          e2e/research-feedback.spec.ts
+          e2e/research-held-review.spec.ts
+          e2e/vol-skew-mr-scanner.spec.ts
+          e2e/ai-industry.spec.ts
+          e2e/clear-shell.spec.ts
           e2e/chat-experience.spec.ts
+          e2e/chat-launcher-focus.spec.ts
+          e2e/flow-analysis-ticker.spec.ts
+          e2e/scanner-ticker-scan.spec.ts
+          e2e/ticker-search-chain.spec.ts
+      - name: Upload mixed-position coverage screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mixed-position-coverage-screenshots
+          path: web/test-results/**/mixed-coverage-*.png
+          retention-days: 7
+      - name: Upload toast error screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: toast-error-screenshots
+          path: web/test-results/**/vol-skew-safe-error-*.png
+          retention-days: 7
       - name: Upload historical fill screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -824,6 +857,23 @@ jobs:
           name: chat-experience-screenshots
           path: web/test-results/**/chat-experience-*.png
           retention-days: 7
+      - name: Upload vol-skew missing history screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: vol-skew-missing-screenshots
+          path: |
+            web/test-results/**/vol-skew-missing-*.png
+            web/test-results/**/vol-skew-safe-error-*.png
+            web/test-results/**/vol-skew-header-*.png
+          retention-days: 7
+      - name: Upload AI industry screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ai-industry-screenshots
+          path: web/test-results/**/ai-industry-*.png
+          retention-days: 7
       - name: Upload research rendering screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -832,6 +882,41 @@ jobs:
           path: |
             web/test-results/**/research-*.png
             web/test-results/**/*share*.png
+          retention-days: 7
+      - name: Upload chain anchor screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: chain-anchor-screenshots
+          path: web/test-results/**/chain-anchor-*.png
+          retention-days: 7
+      - name: Upload chain-first screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: chain-first-screenshots
+          path: web/test-results/**/chain-first-*.png
+          retention-days: 7
+      - name: Upload instrument workspace screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: instrument-workspace-screenshots
+          path: web/test-results/**/instrument-workspace-*.png
+          retention-days: 7
+      - name: Upload performance flow history screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: performance-flow-history-screenshots
+          path: web/test-results/**/performance-flow-history-*.png
+          retention-days: 7
+      - name: Upload HYAD history screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hyad-history-screenshots
+          path: web/test-results/**/hyad-history-*.png
           retention-days: 7
       - name: Upload traces on failure
         if: failure()
@@ -1070,6 +1155,33 @@ jobs:
             RUNNER_INDEX_LOCK="${RUNNER_ROOT}/.index.lock"
             RADON_CONTROL_PLANE_READY="${RADON_CONTROL_PLANE_READY:-/var/lib/radon/control-plane-ready}"
             git -C "$RADON" fetch --prune origin main
+
+            # A green run whose predecessor is still finishing its release must
+            # queue behind it, not fail on the production deploy lock
+            # (2026-09-19: run 35463319654 exited 75 at 19:15:19 while the
+            # previous deploy was in its last minute; a manual re-run shipped
+            # it). deploy.sh itself stays non-blocking; this observer waits a
+            # bounded time for the lock to free, then lets deploy.sh decide.
+            DEPLOY_LOCK_FILE="${RADON_DEPLOY_LOCK_FILE:-${HOME}/.radon-deploy.lock}"
+            DEPLOY_LOCK_WAIT_SECS="${RADON_DEPLOY_LOCK_WAIT_SECS:-480}"
+            wait_for_deploy_lock() {
+              local waited=0
+              while ! flock -n "$DEPLOY_LOCK_FILE" true 2>/dev/null; do
+                if (( waited >= DEPLOY_LOCK_WAIT_SECS )); then
+                  echo "production deploy lock still held after ${waited}s; handing over to deploy.sh" >&2
+                  return 0
+                fi
+                if (( waited == 0 )); then
+                  echo "waiting for the previous release to free the production deploy lock"
+                fi
+                sleep 10
+                waited=$((waited + 10))
+              done
+              if (( waited > 0 )); then
+                echo "production deploy lock freed after ${waited}s"
+              fi
+            }
+            wait_for_deploy_lock
 
             verify_health_status_schema() {
               local attempt body

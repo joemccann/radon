@@ -66,7 +66,7 @@ Read `tools/codemap/architecture.json` before searching for a module or reconstr
 4. **API keys** in `.env` files. Never `~/.zshrc` unless fallback.
 5. **No raw hex in UI.** Use brand tokens. 4px max border-radius on panels.
 6. **No em dashes in user-facing copy.**
-7. **Yahoo is last resort.** Never make Yahoo the scheduled, primary, or only source for a series IB or UW can serve. 2FA, unattended timers, and "historical needs a gateway" do not skip IB or UW. Try IB, then UW, then Robinhood (read-only MCP, when configured), then Yahoo.
+7. **Yahoo is last resort.** Never make Yahoo the scheduled, primary, or only source for a series IB or UW can serve. 2FA, unattended timers, and "historical needs a gateway" do not skip IB or UW. Try IB, then Robinhood (read-only MCP, when configured), then UW, then Yahoo.
 
 ## ⛔ Four Gates — Sequential, No Exceptions
 
@@ -74,7 +74,7 @@ Read `tools/codemap/architecture.json` before searching for a module or reconstr
 |---|---|
 | 1. Convexity | Gain ≥ 2× loss. Defined-risk only. |
 | 2. Edge | Specific, data-backed dark-pool / OTC signal that hasn't moved price. |
-| 3. Risk | Fractional Kelly. Hard cap 2.5% bankroll / position. |
+| 3. Risk | Half Kelly (0.5) default, 0.25 optional stricter, full Kelly banned. Hard cap 2.5% bankroll / position. |
 | 4. ~~No naked shorts~~ | **DISABLED 2026-04-30.** Logic preserved as `_*Impl`. Re-enable: `docs/naked-short-reenable.md`. |
 
 Any gate fails → stop. Name the gate.
@@ -96,13 +96,13 @@ Any gate fails → stop. Name the gate.
 ## Data Source Priority
 
 1. Interactive Brokers (TWS / Gateway) — real-time
-2. Unusual Whales (`$UW_TOKEN`) — dark pool, sweeps, alerts
-3. Cboe official index feeds — COR1M dashboard history, official VIX/VVIX daily closes. Other specialized official feeds (Treasury, FINRA) rank here when a script documents them as the source for that metric.
-4. Robinhood (official trading MCP, READ-ONLY; tokens in the 0600 file `$ROBINHOOD_MCP_TOKEN_FILE`, auto-refreshed — access tokens expire ~3 days) — quote/chain failover + retail-crowding overlay only. Never above IB, UW, or Cboe; execution stays on IB. No dark pool, OTC, sweeps, GEX, or vol surface; options are NBBO/last + prior-close only.
+2. Robinhood (official trading MCP, READ-ONLY; tokens in the 0600 file `$ROBINHOOD_MCP_TOKEN_FILE`, auto-refreshed — access tokens expire ~3 days) — primary after IB for commodity price data (daily closes, quotes, chains) so UW calls go to its unique endpoints; retail-crowding overlay. Never above IB; execution stays on IB. No dark pool, OTC, sweeps, GEX, or vol surface; options are NBBO/last + prior-close only.
+3. Unusual Whales (`$UW_TOKEN`) — dark pool, sweeps, alerts
+4. Cboe official index feeds — COR1M dashboard history, official VIX/VVIX daily closes. Other specialized official feeds (Treasury, FINRA) rank here when a script documents them as the source for that metric.
 5. Yahoo Finance — **ABSOLUTE LAST RESORT**
 6. Web scrape — after Yahoo
 
-Never make Yahoo the scheduled, primary, or only source for a series IB or UW can serve. Try IB every cycle. Skip the IB socket only when `/health` `auth_state` is set and not `authenticated`; then UW; then Robinhood (skipped cleanly when unconfigured); then Yahoo. Specialized official feeds (Cboe, Treasury, FINRA) may sit ahead of Robinhood and Yahoo when a script documents them as the source for that metric — the full order is IB > UW > Cboe > Robinhood > Yahoo. Clients live in `scripts/clients/`.
+Never make Yahoo the scheduled, primary, or only source for a series IB or UW can serve. Try IB every cycle. Skip the IB socket only when `/health` `auth_state` is set and not `authenticated`; then Robinhood (skipped cleanly when unconfigured); then UW; then Yahoo. Specialized official feeds (Cboe, Treasury, FINRA) may sit ahead of Yahoo when a script documents them as the source for that metric — the full order is IB > Robinhood > UW > Cboe > Yahoo. Clients live in `scripts/clients/`.
 
 ## Credentials
 

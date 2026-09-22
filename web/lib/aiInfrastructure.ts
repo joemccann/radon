@@ -6,9 +6,11 @@ export interface AiMetric {
   cohort_version: string; lineage_group: string; raw_hash: string; metadata: Record<string, unknown>;
 }
 export interface AiHistoryPoint { date: string; value: number; unit: string; series_id: string; label: string; source_id: string }
+export interface AiHistoryCoverage { source_id: string; series_id: string; unit: string; observation_count: number; displayed_count: number; observed_from: string; observed_through: string }
 export interface AiIndicator {
   id: string; title: string; pane: AiPane; priority: string; status: string; reason: string;
   methodology: string; tickers: string[]; source_ids: string[]; metrics: AiMetric[]; history: AiHistoryPoint[];
+  history_coverage?: AiHistoryCoverage[]; history_series_count?: number;
 }
 export interface AiSource {
   id: string; name: string; url: string; status: string; reason: string; checked_at: string | null;

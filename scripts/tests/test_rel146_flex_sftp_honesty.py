@@ -172,7 +172,7 @@ class TestOnlyNewStatementsCountAsProgress:
             inbox=inbox,
             runner=FakeSftp({"activity.gpg": b"<FlexQueryResponse/>"}),
             decrypt=lambda data, **k: data.decode(),
-            ingest=lambda xml_text, source_path="", **k: {"ok": True, "outcome": outcome},
+            ingest=lambda xml_text, source_path="", **k: {"ok": True, "outcome": outcome, "persistence_confirmed": True},
             now=now,
         )
         return code, beats
@@ -243,7 +243,7 @@ class TestFreshnessIsPerQueryNotPerDirectory:
     stoppage could never fire the error branch. NF-10: a suppression with no
     dwell bound."""
 
-    def _drive(self, tmp_path, monkeypatch, files, *, now, outcome="duplicate"):
+    def _drive(self, tmp_path, monkeypatch, files, *, now, outcome="duplicate", confirmed=True):
         beats: list[tuple] = []
         monkeypatch.setattr(pull, "_heartbeat", lambda state, error=None: beats.append((state, error)))
         monkeypatch.setattr(pull, "nightly_period_ok", lambda _x: True)
@@ -255,10 +255,20 @@ class TestFreshnessIsPerQueryNotPerDirectory:
             inbox=inbox,
             runner=FakeSftp({name: xml.encode() for name, xml in files.items()}),
             decrypt=lambda data, **k: data.decode(),
-            ingest=lambda xml_text, source_path="", **k: {"ok": True, "outcome": outcome},
+            ingest=lambda xml_text, source_path="", **k: {"ok": True, "outcome": outcome, "persistence_confirmed": confirmed},
             now=now,
         )
         return code, beats
+
+    def test_fresh_duplicate_without_persistence_evidence_pages(self, tmp_path, monkeypatch):
+        now = datetime(2026, 9, 2, 8, 0, tzinfo=pull.ZoneInfo(ZONE))
+        code, beats = self._drive(
+            tmp_path, monkeypatch,
+            {"U123.Equity.20260901.20260901.xml.pgp": self._statement("20260901")},
+            now=now, confirmed=False,
+        )
+        assert code == 1
+        assert beats[-1][0] == "error"
 
     @staticmethod
     def _statement(to_date: str) -> str:
@@ -363,7 +373,7 @@ class TestDeliveryStalenessGate:
             inbox=inbox,
             runner=FakeSftp({"activity.gpg": self._xml(to_date)}),
             decrypt=lambda data, **k: data.decode(),
-            ingest=lambda xml_text, source_path="", **k: {"ok": True, "outcome": "duplicate"},
+            ingest=lambda xml_text, source_path="", **k: {"ok": True, "outcome": "duplicate", "persistence_confirmed": True},
             now=self.NOW,
         )
         return code, beats

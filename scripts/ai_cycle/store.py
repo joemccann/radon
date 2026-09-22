@@ -16,6 +16,7 @@ SCHEMA = (
     "CREATE TABLE IF NOT EXISTS ai_cycle_source_status (id INTEGER PRIMARY KEY AUTOINCREMENT, checked_at TEXT NOT NULL, payload TEXT NOT NULL)",
     "CREATE TABLE IF NOT EXISTS ai_cycle_raw (hash TEXT PRIMARY KEY, payload TEXT NOT NULL)",
     "CREATE TABLE IF NOT EXISTS ai_cycle_api_snapshot (id INTEGER PRIMARY KEY CHECK (id = 1), generated_at TEXT NOT NULL, payload TEXT NOT NULL)",
+    "CREATE TABLE IF NOT EXISTS liquidcompute_index (date TEXT NOT NULL, source TEXT NOT NULL, series_id TEXT NOT NULL, value REAL NOT NULL, unit TEXT NOT NULL, vintage TEXT NOT NULL, label TEXT, fetched_at TEXT NOT NULL, raw_hash TEXT NOT NULL, PRIMARY KEY (source, series_id, date))",
 )
 
 _TRANSIENT_HRANA_MARKERS = (
@@ -110,6 +111,74 @@ class ObservationStore:
             )
         return len(validated)
 
+    def upsert_observations_by_identity(self, rows):
+        """Replace one identity. Used by snapshot tickers that republish asOf."""
+        validated = [validate_observation(row) for row in rows]
+        self.initialize()
+        for row in validated:
+            payload = canonical(row)
+            identity = canonical(
+                [
+                    row[key]
+                    for key in (
+                        "indicator_id",
+                        "series_id",
+                        "source_id",
+                        "period_start",
+                        "period_end",
+                        "methodology_version",
+                        "cohort_version",
+                    )
+                ]
+            )
+            self._execute("DELETE FROM ai_cycle_observations WHERE identity=?", (identity,))
+            self._execute(
+                "INSERT INTO ai_cycle_observations (fingerprint,available_at,period_end,identity,payload) VALUES (?,?,?,?,?)",
+                (digest(payload.encode()), available_at(row), row["period_end"], identity, payload),
+            )
+        return len(validated)
+
+    def upsert_liquidcompute(self, rows):
+        """Idempotent host-tagged ticker rows keyed on (source, series_id, date)."""
+        self.initialize()
+        for row in rows:
+            if row.get("source") != "liquidcompute" or row.get("unit") != "usd_per_gpu_per_hr":
+                raise ValueError("Liquid Compute store rows must stay host-tagged")
+            if row.get("date") != row.get("vintage"):
+                raise ValueError("Liquid Compute date and vintage must both be publisher asOf")
+            self._execute(
+                "INSERT INTO liquidcompute_index (date,source,series_id,value,unit,vintage,label,fetched_at,raw_hash) "
+                "VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(source, series_id, date) DO UPDATE SET "
+                "value=excluded.value, unit=excluded.unit, vintage=excluded.vintage, "
+                "label=excluded.label, fetched_at=excluded.fetched_at, raw_hash=excluded.raw_hash",
+                (
+                    row["date"],
+                    row["source"],
+                    row["series_id"],
+                    float(row["value"]),
+                    row["unit"],
+                    row["vintage"],
+                    row.get("label"),
+                    row["fetched_at"],
+                    row["raw_hash"],
+                ),
+            )
+        return len(rows)
+
+    def read_liquidcompute(self):
+        self.initialize()
+        try:
+            rows = self._query(
+                "SELECT date,source,series_id,value,unit,vintage,label,fetched_at,raw_hash "
+                "FROM liquidcompute_index ORDER BY date, series_id"
+            )
+        except Exception as exc:
+            if "no such table: liquidcompute_index" in str(exc):
+                return []
+            raise
+        keys = ("date", "source", "series_id", "value", "unit", "vintage", "label", "fetched_at", "raw_hash")
+        return [dict(zip(keys, row)) for row in rows]
+
     def archive_raw(self, payload: bytes):
         import base64
         import zlib
@@ -131,13 +200,22 @@ class ObservationStore:
         imported = 0
         if not root.is_dir():
             return 0
+        self.initialize()
+        # Skip hashes already in Turso/SQLite. Re-sending every on-disk payload
+        # via INSERT OR IGNORE still posts the full blob under HRANA_TIMEOUT_S
+        # and failed the 2026-09-17 daily oneshot after ~1117 local files.
+        existing = {row[0] for row in self._query("SELECT hash FROM ai_cycle_raw")}
         for path in root.iterdir():
             if path.suffix != ".json" or path.name.startswith("."):
                 continue
             raw = path.read_bytes()
             if digest(raw) != path.stem:
                 continue
+            if path.stem in existing:
+                imported += 1
+                continue
             self.archive_raw(raw)
+            existing.add(path.stem)
             imported += 1
         return imported
 
@@ -210,10 +288,10 @@ class ObservationStore:
 
     def read_snapshot_observations(self, as_of=None):
         at = utc(as_of)
-        # Publisher floors are explicit: SEC XBRL begins in 2009, while the
+        # SEC XBRL includes comparative periods before the 2009 mandate; the
         # oldest continuous operational series (EIA/NOAA) begins in July 2018.
         # Keep these stable instead of silently moving the chart window forward.
-        cutoff = utc("2009-01-01T00:00:00Z")
+        cutoff = utc("2006-12-31T00:00:00Z")
         daily_cutoff = utc("2018-07-01T00:00:00Z")
         rows, cursor = [], 0
         deadline = time.monotonic() + _SNAPSHOT_READ_DEADLINE_SECONDS

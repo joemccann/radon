@@ -74,23 +74,6 @@ class TestPlacementChokepoint:
         assert result["status"] == "error"
         assert "halt" in result["message"].lower()
 
-    def test_workflow_bridge_refuses_when_halted(self, halt_file):
-        trading_halt.set_halt(reason="kill switch", actor="test")
-        from workflow import nodes
-
-        import ib_place_order
-        with patch.object(ib_place_order, "IBClient", side_effect=AssertionError(
-            "IBClient must not be constructed while trading is halted"
-        )):
-            result = nodes.run_order_placement({
-                "type": "stock",
-                "symbol": "AAPL",
-                "action": "BUY",
-                "quantity": 1,
-                "limitPrice": 200.0,
-            })
-        assert result["status"] == "error"
-
 
 class TestExitOrdersChokepoint:
     def test_exit_orders_skips_cycle_when_halted(self, halt_file):

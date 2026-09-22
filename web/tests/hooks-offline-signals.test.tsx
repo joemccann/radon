@@ -69,7 +69,9 @@ describe("usePortfolio offline signals", () => {
     vi.stubGlobal("fetch", fetchMock);
     const { result } = renderHook(() => usePortfolio(false));
     await waitFor(() => expect(result.current.data).not.toBeNull());
-    // Drive a second read via the visibilitychange refresh path.
+    // A visible tab inside the poll window must not refetch. Age the read
+    // past that window, then drive the failure path.
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 31_000);
     act(() => {
       document.dispatchEvent(new Event("visibilitychange"));
     });

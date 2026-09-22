@@ -130,10 +130,12 @@ describe("chain deck — the ticket scrolls itself, not the container around it"
   });
 
   it("lets the chain table fill the rail rather than a fixed 520px box", () => {
-    const wrapper = ruleBody(".chain-rail .chain-grid-wrapper");
-    expect(wrapper).toMatch(/flex:\s*0 1 auto/);
-    expect(wrapper).toMatch(/min-height:\s*0/);
-    expect(wrapper).toMatch(/max-height:\s*none/);
+    const wrapper = ruleBody(".chain-rail .chain-grid-wrapper.chain-anchor-panes");
+    expect(wrapper).toMatch(/flex:\s*1 1 0/);
+    expect(wrapper).toMatch(/overflow:\s*hidden/);
+    const pane = ruleBody(".chain-anchor-pane");
+    expect(pane).toMatch(/min-height:\s*0/);
+    expect(pane).toMatch(/overflow-y:\s*auto/);
 
     const railBody = ruleBody(".chain-rail");
     expect(railBody).toMatch(/flex:\s*1/);

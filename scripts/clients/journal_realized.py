@@ -17,14 +17,14 @@ Completeness is enforced on TWO axes, and one of them is bounded. A row
 that cannot name its contract, or that names an impossible one (a
 non-positive strike, a right outside ``C``/``P``, an expiry that is not a
 real calendar date), poisons its whole ticker so the contract falls back to
-IB's figure — R-274, extended by R-320. What this module CANNOT detect is a
-contract field corrupted into a different but still-listable contract (a
-strike of 600 where the fill was 60, an expiry shifted to another real
-Wednesday): that row mints a well-formed key, forms its own bucket, and is
-indistinguishable from a legitimate second position held on the same
-ticker. Closing that residue needs an authoritative contract set — IB
-positions or contract details — which this entry point does not receive.
-Callers holding one should cross-check before trusting a figure here.
+IB's figure — R-274, extended by R-320. A field corrupted into a different
+but still-listable contract (strike 600 for 60, an expiry moved to another
+real date) mints a well-formed key that journal rows alone cannot tell from
+a second position, so the overlay checks every leg against IB's own contract
+identities (the executions' conIds and contract fields): a leg that matches
+none does not contribute, and one that leaves inventory IB never reported
+poisons its ticker (REL-109). ``realized_pnl_by_exec_id`` called WITHOUT an
+identity set keeps the journal-only checks and cannot see that case.
 """
 
 from __future__ import annotations
@@ -45,6 +45,7 @@ from .journal_basis import (
     _payload_from_row,
     _row_value,
     _signed_qty,
+    con_id_of,
     contract_fill_fingerprint,
 )
 
@@ -73,18 +74,33 @@ def _is_unusable(key: str, unusable: set[str]) -> bool:
     )
 
 
-def realized_pnl_by_exec_id(rows: Iterable[Any]) -> dict[str, float]:
+def realized_pnl_by_exec_id(
+    rows: Iterable[Any],
+    *,
+    live_keys: Optional[Iterable[str]] = None,
+    conid_keys: Optional[dict[str, str]] = None,
+) -> dict[str, float]:
     """Map each single-execution closing journal row to its realized P&L.
 
     ``rows`` are ``(payload, filled_at, written_at)`` journal rows for any
     number of tickers. Only option rows whose contract key both normalises
     and describes a contract that could exist take part; BAG envelopes
     (``right == "?"``) and stock rows are ignored, and anything else that
-    fails either test poisons its ticker rather than being dropped. See the
-    module header for the residual case this cannot see (R-320).
+    fails either test poisons its ticker rather than being dropped.
+
+    ``live_keys`` / ``conid_keys`` are the AUTHORITATIVE IB contract identity
+    set (bucket keys from IB's own contract fields; IB conId -> key). When
+    given, a row carrying a conId is keyed by it, a row without one only by a
+    key IB names, and a leg matching neither does not contribute: if it leaves
+    an open inventory (a phantom contract IB never reported) or claims a live
+    key under a foreign conId, its whole ticker is poisoned. R-320, REL-109.
     """
+    identity_gate = live_keys is not None or conid_keys is not None
+    authoritative = set(live_keys or ()) | set((conid_keys or {}).values())
+    conids = {str(k): v for k, v in (conid_keys or {}).items()}
     buckets: dict[str, list[dict[str, Any]]] = {}
     unusable: set[str] = set()
+    unmatched: dict[str, dict[str, float]] = {}
     for row in _ordered(rows):
         entry = _journal_entry(row)
         if entry is None:
@@ -92,7 +108,21 @@ def realized_pnl_by_exec_id(rows: Iterable[Any]) -> dict[str, float]:
             if key is not None:
                 unusable.add(key)
             continue
+        if identity_gate:
+            matched = _authoritative_key(_payload_from_row(row), entry["key"], authoritative, conids)
+            if matched is None:
+                _record_unmatched(unmatched, entry)
+                continue
+            entry["key"] = matched
         buckets.setdefault(entry["key"], []).append(entry)
+    for key, by_namespace in unmatched.items():
+        if key in authoritative or any(abs(net) > 1e-9 for net in by_namespace.values()):
+            logger.warning(
+                "journal_realized: %s is not an IB contract identity and leaves "
+                "inventory IB does not hold — journal incomplete, keeping IB realizedPNL",
+                key,
+            )
+            unusable.add(f"{key.split('|')[0]}|{_ANY}")
 
     realized: dict[str, float] = {}
     counted_parts: set[str] = set()
@@ -125,7 +155,42 @@ def journal_realized_pnl_for_fills(
     tickers = sorted({t for t in (_option_fill_ticker(f) for f in fills) if t})
     if not tickers:
         return {}
-    return realized_pnl_by_exec_id(_fetch_journal_rows_for_tickers(db, tickers))
+    live_keys, conid_keys = contract_identities_from_fills(fills)
+    return realized_pnl_by_exec_id(
+        _fetch_journal_rows_for_tickers(db, tickers),
+        live_keys=live_keys,
+        conid_keys=conid_keys,
+    )
+
+
+def contract_identities_from_fills(
+    fills: Sequence[dict[str, Any]],
+) -> tuple[set[str], dict[str, str]]:
+    """IB's own contract identities for the option executions being overlaid.
+
+    Each fill's ``contract`` is IB contract detail (conId plus IB's strike,
+    expiry and right), so it is the authoritative set a journal leg must
+    match. Returns ``(bucket keys, conId -> bucket key)``. REL-109.
+    """
+    keys: set[str] = set()
+    by_conid: dict[str, str] = {}
+    for fill in fills:
+        if not _option_fill_ticker(fill):
+            continue
+        contract = fill.get("contract") or {}
+        key = _bucket_key({
+            "ticker": contract.get("symbol") or fill.get("symbol"),
+            "expiry": contract.get("expiry") or contract.get("lastTradeDateOrContractMonth"),
+            "right": contract.get("right"),
+            "strike": contract.get("strike"),
+        })
+        if key is None:
+            continue
+        keys.add(key)
+        con_id = con_id_of(contract)
+        if con_id is not None:
+            by_conid[con_id] = key
+    return keys, by_conid
 
 
 class _HranaCursor:
@@ -200,6 +265,35 @@ def _option_fill_ticker(fill: dict[str, Any]) -> str:
     if str(contract.get("secType") or "").upper() != "OPT":
         return ""
     return _normalize_ticker(contract.get("symbol") or fill.get("symbol"))
+
+
+def _authoritative_key(
+    payload: dict[str, Any], key: str, authoritative: set[str], conids: dict[str, str]
+) -> Optional[str]:
+    """The IB identity a journal leg maps to, or ``None`` when it maps to none.
+
+    A conId on the row wins over its (possibly corrupted) contract fields; a
+    conId IB did not report is unmatched even if the fields name a live key.
+    Without a conId the normalised key must itself be an IB identity.
+    """
+    con_id = con_id_of(payload)
+    if con_id is not None:
+        return conids.get(con_id)
+    return key if key in authoritative else None
+
+
+def _record_unmatched(
+    unmatched: dict[str, dict[str, float]], entry: dict[str, Any]
+) -> None:
+    """Net signed qty per id namespace for a leg matching no IB identity.
+
+    Per namespace so a flat round trip written by both the realtime daemon
+    and Flex rehydrate still nets to zero in each.
+    """
+    signed = entry["qty"] if entry["is_buy"] else -entry["qty"]
+    by_namespace = unmatched.setdefault(entry["key"], {})
+    for namespace in _id_namespaces(entry["parts"]) or {"api"}:
+        by_namespace[namespace] = by_namespace.get(namespace, 0.0) + signed
 
 
 def _is_nonzero(value: Any) -> bool:

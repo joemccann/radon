@@ -71,9 +71,12 @@ describe("useSyncHook queues a sync requested while a POST is in flight (R-640)"
       useSyncHook<Payload>({ endpoint: "/api/portfolio" }, true),
     );
 
-    // Mount: initial GET read, then the auto first POST (held open).
+    // Mount reads once. The scan POST is explicit (syncNow), never automatic.
+    await waitFor(() => expect(calls).toEqual([{ url: "/api/portfolio", method: "GET" }]));
+    act(() => {
+      result.current.syncNow();
+    });
     await waitFor(() => expect(calls).toHaveLength(2));
-    expect(calls[0]).toEqual({ url: "/api/portfolio", method: "GET" });
     expect(calls[1]).toEqual({ url: "/api/portfolio", method: "POST" });
 
     // Two fill events land while the POST is still in flight.
@@ -103,8 +106,12 @@ describe("useSyncHook queues a sync requested while a POST is in flight (R-640)"
   it("does not fire a follow-up when nothing arrived mid-flight", async () => {
     const { calls, postResolvers } = deferredPostFetch();
 
-    renderHook(() => useSyncHook<Payload>({ endpoint: "/api/portfolio" }, true));
+    const { result } = renderHook(() => useSyncHook<Payload>({ endpoint: "/api/portfolio" }, true));
 
+    await waitFor(() => expect(calls).toEqual([{ url: "/api/portfolio", method: "GET" }]));
+    act(() => {
+      result.current.syncNow();
+    });
     await waitFor(() => expect(calls).toHaveLength(2));
     await act(async () => {
       postResolvers[0]();

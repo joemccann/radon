@@ -33,14 +33,11 @@ describe("provider and subprocess input budgets", () => {
 });
 
 describe("dashboard request ownership", () => {
-  it("keeps portfolio polling in the workspace shell instead of remounting it in the palette", () => {
+  it("keeps portfolio polling owned by the workspace shell", () => {
     const components = fileURLToPath(new URL("../components/", import.meta.url));
-    const palette = readFileSync(`${components}CommandPalette.tsx`, "utf8");
     const shell = readFileSync(`${components}WorkspaceShell.tsx`, "utf8");
 
-    expect(palette).not.toContain('from "@/lib/usePortfolio"');
-    expect(palette).not.toContain("usePortfolio(");
-    expect(shell).toContain("<CommandPalette");
-    expect(shell).toContain("portfolioSymbols={portfolioSymbols}");
+    expect(shell).toContain("usePortfolio(");
+    expect(shell).not.toContain("CommandPalette");
   });
 });

@@ -48,6 +48,7 @@ XAI = json.loads((FIXTURES / "llm_models_xai.json").read_text())["models"]
 
 ALL_KEY_VARS = [
     "ANTHROPIC_API_KEY", "CLAUDE_CODE_API_KEY", "CLAUDE_API_KEY",
+    "CLAUDE_CODE_OAUTH_TOKEN", "RADON_LADDER_ALLOW_PREPAID",
     "OPENAI_API_KEY",
     "XAI_API_KEY", "GROK_API_KEY",
     "ANTHROPIC_MODEL", "OPENAI_MODEL", "XAI_MODEL", "GROK_MODEL",
@@ -55,9 +56,25 @@ ALL_KEY_VARS = [
 
 
 @pytest.fixture()
-def clean_env(monkeypatch):
+def clean_env(monkeypatch, tmp_path):
+    """Hermetic: no prepaid keys, no grants, and a HOME with no CLI credential
+    files, so a developer laptop's real subscriptions never light a provider."""
     for name in ALL_KEY_VARS:
         monkeypatch.delenv(name, raising=False)
+    home = tmp_path / "hermetic-home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(home / "no-claude"))
+    monkeypatch.setenv("CODEX_HOME", str(home / "no-codex"))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+
+    def grok_grant(token: str) -> None:
+        (home / ".grok").mkdir(exist_ok=True)
+        (home / ".grok" / "auth.json").write_text(json.dumps({
+            "https://auth.x.ai::client": {"key": token, "auth_mode": "oidc", "expires_at": "2099-01-01T00:00:00Z"}
+        }))
+
+    monkeypatch.grok_grant = grok_grant  # type: ignore[attr-defined]
     return monkeypatch
 
 
@@ -206,16 +223,31 @@ class TestProviderKeys:
     def test_no_key_means_no_provider(self, clean_env):
         assert [p for p in PROVIDERS if provider_key(p)] == []
 
-    def test_anthropic_key_lights_up_only_anthropic(self, clean_env):
-        clean_env.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    def test_anthropic_grant_lights_up_only_anthropic(self, clean_env):
+        clean_env.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-test")
         assert [p for p in PROVIDERS if provider_key(p)] == ["anthropic"]
 
-    def test_grok_alias_lights_up_xai(self, clean_env):
-        clean_env.setenv("GROK_API_KEY", "xai-test")
+    def test_grok_grant_lights_up_xai(self, clean_env):
+        clean_env.grok_grant("xai-test")
         assert provider_key("xai") == "xai-test"
 
     def test_blank_key_does_not_count(self, clean_env):
         clean_env.setenv("OPENAI_API_KEY", "   ")
+        clean_env.setenv("RADON_LADDER_ALLOW_PREPAID", "1")
+        assert provider_key("openai") is None
+
+    def test_prepaid_keys_alone_light_nothing(self, clean_env):
+        # Subscriptions only (2026-09-18): a console key is not a credential here.
+        clean_env.setenv("ANTHROPIC_API_KEY", "sk-ant-prepaid")
+        clean_env.setenv("XAI_API_KEY", "xai-prepaid")
+        clean_env.setenv("OPENAI_API_KEY", "sk-openai-prepaid")
+        assert [p for p in PROVIDERS if provider_key(p)] == []
+
+    def test_chatgpt_grant_cannot_list_models_so_openai_stays_dark(self, clean_env, tmp_path):
+        codex_home = tmp_path / "codex"
+        codex_home.mkdir()
+        (codex_home / "auth.json").write_text(json.dumps({"tokens": {"access_token": "codex-grant", "account_id": "a"}}))
+        clean_env.setenv("CODEX_HOME", str(codex_home))
         assert provider_key("openai") is None
 
 
@@ -359,7 +391,7 @@ class TestRun:
     ):
         import refresh_model_catalog as mod
 
-        clean_env.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+        clean_env.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-test")
         monkey = clean_env
         monkey.setattr(mod, "fetch_anthropic_models", lambda key: ANTHROPIC)
         monkey.setattr(mod, "fetch_openai_models", lambda key: OPENAI)
@@ -374,9 +406,10 @@ class TestRun:
     def test_every_keyed_provider_is_polled(self, persist_calls, clean_env):
         import refresh_model_catalog as mod
 
-        clean_env.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+        clean_env.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-test")
         clean_env.setenv("OPENAI_API_KEY", "sk-openai-test")
-        clean_env.setenv("XAI_API_KEY", "xai-test")
+        clean_env.setenv("RADON_LADDER_ALLOW_PREPAID", "1")
+        clean_env.grok_grant("xai-test")
         clean_env.setattr(mod, "fetch_anthropic_models", lambda key: ANTHROPIC)
         clean_env.setattr(mod, "fetch_openai_models", lambda key: OPENAI)
         clean_env.setattr(mod, "fetch_xai_models", lambda key: XAI)
@@ -401,8 +434,9 @@ class TestRun:
             "defaultId": "gpt-5.5",
         }))
 
-        clean_env.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+        clean_env.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-test")
         clean_env.setenv("OPENAI_API_KEY", "sk-openai-test")
+        clean_env.setenv("RADON_LADDER_ALLOW_PREPAID", "1")
 
         def rate_limited(key):
             raise RuntimeError("429 rate limited")
@@ -428,7 +462,7 @@ class TestRun:
                         "display_name": "GROK 4.6", "refreshed_at": stale}],
             "defaultId": "grok-4.6",
         }))
-        clean_env.setenv("XAI_API_KEY", "xai-test")
+        clean_env.grok_grant("xai-test")
         clean_env.setattr(mod, "fetch_xai_models", lambda key: [])
 
         payload = mod.run()
@@ -438,7 +472,7 @@ class TestRun:
     def test_override_wins_over_discovery_end_to_end(self, persist_calls, clean_env):
         import refresh_model_catalog as mod
 
-        clean_env.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+        clean_env.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-test")
         clean_env.setenv("ANTHROPIC_MODEL", "claude-opus-4-8")
 
         def must_not_be_called(key):
@@ -456,8 +490,9 @@ class TestRun:
         healthy daily run with today's finished_at."""
         import refresh_model_catalog as mod
 
-        clean_env.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+        clean_env.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-test")
         clean_env.setenv("OPENAI_API_KEY", "sk-openai-test")
+        clean_env.setenv("RADON_LADDER_ALLOW_PREPAID", "1")
 
         def unauthorized(key):
             raise RuntimeError("HTTP Error 401: Unauthorized")
@@ -485,8 +520,9 @@ class TestRun:
                         "display_name": "GPT 5.5", "refreshed_at": stale}],
             "defaultId": "gpt-5.5",
         }))
-        clean_env.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+        clean_env.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-test")
         clean_env.setenv("OPENAI_API_KEY", "sk-openai-test")
+        clean_env.setenv("RADON_LADDER_ALLOW_PREPAID", "1")
 
         def rate_limited(key):
             raise RuntimeError("429 rate limited")
@@ -508,7 +544,7 @@ class TestRun:
         traceback and no row at all, invisible until the 26h window."""
         import refresh_model_catalog as mod
 
-        clean_env.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+        clean_env.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-test")
         clean_env.setattr(mod, "fetch_anthropic_models", lambda key: ANTHROPIC)
 
         def turso_down(rows, refreshed_at=None):
@@ -535,8 +571,9 @@ class TestRun:
         turso_catalog.append({"provider": "openai", "model_id": "gpt-5.5",
                               "display_name": "GPT 5.5", "refreshed_at": stale})
         assert not mod.LLM_MODELS_JSON.exists()
-        clean_env.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+        clean_env.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-test")
         clean_env.setenv("OPENAI_API_KEY", "sk-openai-test")
+        clean_env.setenv("RADON_LADDER_ALLOW_PREPAID", "1")
 
         def rate_limited(key):
             raise RuntimeError("429 rate limited")
@@ -564,6 +601,7 @@ class TestRun:
             "defaultId": "gpt-5.4",
         }))
         clean_env.setenv("OPENAI_API_KEY", "sk-openai-test")
+        clean_env.setenv("RADON_LADDER_ALLOW_PREPAID", "1")
 
         def rate_limited(key):
             raise RuntimeError("429 rate limited")
@@ -588,6 +626,7 @@ class TestRun:
             "defaultId": "gpt-5.5",
         }))
         clean_env.setenv("OPENAI_API_KEY", "sk-openai-test")
+        clean_env.setenv("RADON_LADDER_ALLOW_PREPAID", "1")
 
         def rate_limited(key):
             raise RuntimeError("429 rate limited")
@@ -646,7 +685,7 @@ class TestFetchBounds:
                         "display_name": "CLAUDE OPUS 4 8", "refreshed_at": "stale"}],
             "defaultId": "claude-opus-4-8",
         }))
-        clean_env.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+        clean_env.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-test")
         clean_env.setattr(mod, "PROVIDER_BUDGET_S", 0.1, raising=False)
 
         def slow_drip(key):

@@ -211,7 +211,7 @@ test.describe("Options chain expiry switch", () => {
 
     const detail = page.locator(".ticker-detail-page");
     await detail.waitFor({ timeout: 15_000 });
-    await detail.locator(".chain-grid").waitFor();
+    await detail.locator(".chain-grid").first().waitFor();
 
     const expirySelect = detail.locator("select.chain-expiry-select").first();
     await expect(expirySelect).toHaveValue(NEAR);

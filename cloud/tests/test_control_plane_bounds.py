@@ -233,6 +233,8 @@ EXPECTED_AUTO_SYNC_UNITS = (
     "radon-knowledge.timer",
     "radon-leap.service",
     "radon-leap.timer",
+    "radon-liquidcompute.service",
+    "radon-liquidcompute.timer",
     "radon-margin-debt.service",
     "radon-margin-debt.timer",
     "radon-media-backup.service",
@@ -253,8 +255,15 @@ EXPECTED_AUTO_SYNC_UNITS = (
     "radon-skew2d.timer",
     "radon-straddle.service",
     "radon-straddle.timer",
+    # 2026-09-18: the Antigravity swap added a PATH line; without CI publish
+    # the unit would drift on every deploy (test_unit_install_acknowledgment).
+    "radon-subscription-tokens.service",
+    "radon-subscription-tokens.timer",
     "radon-trin.service",
     "radon-trin.timer",
+    # Issue #457: TradingView alert drain (5-minute oneshot).
+    "radon-tv-alerts.service",
+    "radon-tv-alerts.timer",
     "radon-vcg-refresh.service",
     "radon-vcg-refresh.timer",
     "radon-vixcor.service",

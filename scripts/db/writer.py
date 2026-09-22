@@ -905,6 +905,20 @@ def upsert_strength_confirmation_snapshot(scan_time: str, payload: dict[str, Any
     db.commit()
 
 
+def upsert_vol_skew_mr_snapshot(scan_time: str, payload: dict[str, Any]) -> None:
+    """Mirror the Vol/Skew MR scan into Turso so every host reads the same
+    latest scan (the file cache is host-local; no auto-timer)."""
+    db = get_db()
+    db.execute(
+        """
+        INSERT OR REPLACE INTO vol_skew_mr_snapshots (scan_time, payload)
+        VALUES (?, ?)
+        """,
+        (scan_time, json.dumps(payload)),
+    )
+    db.commit()
+
+
 def upsert_flow_analysis_snapshot(scan_time: str, payload: dict[str, Any]) -> None:
     """Phase 2.2 — flow_analysis.py output (intraday dark-pool interp)."""
     db = get_db()
@@ -1215,6 +1229,47 @@ def upsert_ma_ratio_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] 
     db.commit()
 
 
+def upsert_calm_streak_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
+    """CALM STREAK indicator: one row per SPX session, idempotent on date.
+
+    Chunked multi-row INSERTs (Hrana I/O bounding): a first run backfills
+    ~10.5k sessions from 1985. ``open`` is nullable (Cboe reports 0 pre-1996).
+    """
+    if not rows:
+        return
+    stamp = recorded_at or _now_iso()
+    db = get_db()
+    for start in range(0, len(rows), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
+        chunk = rows[start:start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
+        placeholders = ", ".join("(?, ?, ?, ?, ?, ?, ?, ?)" for _ in chunk)
+        params: list[Any] = []
+        for row in chunk:
+            open_ = row.get("open")
+            params.extend(
+                (
+                    row["date"],
+                    float(open_) if open_ is not None else None,
+                    float(row["high"]),
+                    float(row["low"]),
+                    float(row["close"]),
+                    float(row["band_pct"]),
+                    int(row["streak"]),
+                    stamp,
+                )
+            )
+        db.execute(
+            "INSERT INTO calm_streak_history "
+            "(date, open, high, low, close, band_pct, streak, recorded_at) "
+            f"VALUES {placeholders} "
+            "ON CONFLICT(date) DO UPDATE SET "
+            "open = excluded.open, high = excluded.high, low = excluded.low, "
+            "close = excluded.close, band_pct = excluded.band_pct, "
+            "streak = excluded.streak, recorded_at = excluded.recorded_at",
+            tuple(params),
+        )
+    db.commit()
+
+
 def upsert_hyad_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
     """HYAD indicator — one row per date, idempotent on date.
 
@@ -1424,6 +1479,77 @@ def upsert_vixts_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = N
             params.extend(_vixts_params(row, stamp))
         db.execute(
             f"{_VIXTS_INSERT_HEAD}VALUES {placeholders}{_VIXTS_ON_CONFLICT}",
+            tuple(params),
+        )
+    db.commit()
+
+
+_PANIC_INDEX_INSERT_HEAD = (
+    "INSERT INTO panic_index_history "
+    "(date, vix_close, vix3m_close, vvix_close, skew_close, ts_ratio, "
+    "z_vix, z_vvix, z_ts, z_skew, level, delta_1d, recorded_at) "
+)
+_PANIC_INDEX_ROW_PLACEHOLDER = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+_PANIC_INDEX_ON_CONFLICT = (
+    " ON CONFLICT(date) DO UPDATE SET "
+    "vix_close = excluded.vix_close, vix3m_close = excluded.vix3m_close, "
+    "vvix_close = excluded.vvix_close, skew_close = excluded.skew_close, "
+    "ts_ratio = excluded.ts_ratio, z_vix = excluded.z_vix, "
+    "z_vvix = excluded.z_vvix, z_ts = excluded.z_ts, z_skew = excluded.z_skew, "
+    "level = excluded.level, delta_1d = excluded.delta_1d, "
+    "recorded_at = excluded.recorded_at"
+)
+
+PANIC_INDEX_UPSERT_SQL = (
+    f"{_PANIC_INDEX_INSERT_HEAD}VALUES {_PANIC_INDEX_ROW_PLACEHOLDER}{_PANIC_INDEX_ON_CONFLICT}"
+)
+
+
+def _panic_index_params(row: dict[str, Any], stamp: str) -> tuple:
+    def _opt(key: str) -> Any:
+        value = row.get(key)
+        return None if value is None else float(value)
+
+    return (
+        row["date"],
+        float(row["vix"]),
+        float(row["vix3m"]),
+        float(row["vvix"]),
+        float(row["skew"]),
+        float(row["ts"]),
+        _opt("z_vix"),
+        _opt("z_vvix"),
+        _opt("z_ts"),
+        _opt("z_skew"),
+        _opt("level"),
+        _opt("delta_1d"),
+        stamp,
+    )
+
+
+def upsert_panic_index_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
+    """Panic Proxy — one row per joined session, idempotent on date.
+
+    Chunked multi-row INSERTs (Hrana I/O bounding): Cboe serves full history
+    on every pull, so EVERY changed run passes all ~4,300 joined sessions.
+    Derived z / level / delta may be NULL on the 252-session warm-up.
+    """
+    if not rows:
+        return
+    deduped: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        deduped[str(row.get("date"))] = row
+    ordered = list(deduped.values())
+    stamp = recorded_at or _now_iso()
+    db = get_db()
+    for start in range(0, len(ordered), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
+        chunk = ordered[start:start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
+        placeholders = ", ".join(_PANIC_INDEX_ROW_PLACEHOLDER for _ in chunk)
+        params: list[Any] = []
+        for row in chunk:
+            params.extend(_panic_index_params(row, stamp))
+        db.execute(
+            f"{_PANIC_INDEX_INSERT_HEAD}VALUES {placeholders}{_PANIC_INDEX_ON_CONFLICT}",
             tuple(params),
         )
     db.commit()

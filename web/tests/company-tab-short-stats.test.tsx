@@ -128,7 +128,7 @@ describe("CompanyTab short stats cells", () => {
       expect(statValue(container, "Shortable Shares")).toBe("5.4M"),
     );
     expect(statValue(container, "Borrow Fee")).toBe("---");
-    expect(container.querySelector(".tab-error")).toBeNull();
+    expect(document.querySelector(".toast-error")).toBeNull();
   });
 
   it("renders --- for both short cells on a missing:true payload with no error UI", async () => {
@@ -146,7 +146,7 @@ describe("CompanyTab short stats cells", () => {
     );
     expect(statValue(container, "Shortable Shares")).toBe("---");
     expect(statValue(container, "Borrow Fee")).toBe("---");
-    expect(container.querySelector(".tab-error")).toBeNull();
+    expect(document.querySelector(".toast-error")).toBeNull();
   });
 
   it("renders Public Float from short_float.total_float (850.0M)", async () => {

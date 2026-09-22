@@ -1,7 +1,7 @@
 import { requireRouteAccess } from "@/lib/routeAccess";
 
 import { NextResponse } from "next/server";
-import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
+import { getRequestId, setNoStoreResponseHeaders, scrubSecrets } from "@/lib/apiContracts";
 import { radonFetch, RadonApiError } from "@/lib/radonApi";
 import { OPTION_EXPIRY_PATTERN } from "@/lib/requestBounds";
 
@@ -51,7 +51,7 @@ export async function GET(request: Request): Promise<Response> {
     return setNoStoreResponseHeaders(NextResponse.json(data), requestId);
   } catch (err) {
     const status = err instanceof RadonApiError ? err.status : 502;
-    const message = err instanceof Error ? err.message : "index-options chain fetch failed";
+    const message = scrubSecrets(err instanceof Error ? err.message : "index-options chain fetch failed");
     return setNoStoreResponseHeaders(
       NextResponse.json({ error: message }, { status }),
       requestId,

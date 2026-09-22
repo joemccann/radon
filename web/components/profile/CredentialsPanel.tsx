@@ -1,5 +1,7 @@
 "use client";
 
+import ErrorToast from "@/components/ErrorToast";
+
 /**
  * Operator credentials editor (profile Credentials tab).
  *
@@ -11,6 +13,7 @@
  * login, so their submit shows a scenic-route delay notice while in flight.
  */
 
+import { userErrorMessage } from "@/lib/userError";
 import { useCallback, useEffect, useState } from "react";
 import {
   CredentialsRequestError,
@@ -34,9 +37,7 @@ type ServiceNotice = {
 };
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error && error.message
-    ? error.message
-    : "credentials request failed";
+  return userErrorMessage(error, "Your changes could not be saved. Refresh and try again.");
 }
 
 function serviceSlug(id: string): string {
@@ -189,9 +190,7 @@ export default function CredentialsPanel() {
   if (pageError || !payload) {
     return (
       <div className="preferences-shell" data-testid="credentials-panel">
-        <p className="admin-card-note admin-card-error" role="alert" data-testid="credentials-error">
-          {pageError ?? "credentials request failed"}
-        </p>
+        <ErrorToast message={pageError ?? "credentials request failed"} testId="credentials-error" />
       </div>
     );
   }
@@ -200,6 +199,19 @@ export default function CredentialsPanel() {
 
   return (
     <div className="preferences-shell" data-testid="credentials-panel">
+      {payload.bootstrap_error ? (
+        <section className="admin-card preferences-group" role="status" data-testid="credentials-bootstrap-error">
+          <header className="admin-card-header">
+            <span className="admin-card-title">Encrypted store did not open at boot</span>
+            <span className="preferences-badge preferences-badge--rejected">STORED VALUES INACTIVE</span>
+          </header>
+          <p className="preferences-row__description">
+            Every field below is running on its .env fallback, not on what is stored here. Saving still
+            writes the store; the running process picks stored values up at the next FastAPI restart.
+            Detail: {payload.bootstrap_error}
+          </p>
+        </section>
+      ) : null}
       {groups.map(({ group, services }) => (
         <section className="admin-card preferences-group" key={group}>
           <header className="admin-card-header">
@@ -297,14 +309,10 @@ export default function CredentialsPanel() {
                   </button>
                 </div>
 
-                {notice ? (
+                {notice?.tone === "error" ? <ErrorToast message={notice.text} testId={`credential-notice-${slug}`} /> : notice ? (
                   <p
-                    className={
-                      notice.tone === "error"
-                        ? "admin-card-note admin-card-error"
-                        : "admin-card-note"
-                    }
-                    role={notice.tone === "error" ? "alert" : "status"}
+                    className="admin-card-note"
+                    role="status"
                     data-testid={`credential-notice-${slug}`}
                   >
                     {notice.text}

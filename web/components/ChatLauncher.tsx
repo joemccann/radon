@@ -49,17 +49,19 @@ export default function ChatLauncher({ activeSection, portfolio, prices }: ChatL
         close();
       }
       if (event.key === "Tab" && open) {
-        const controls = Array.from(dialogRef.current?.querySelectorAll<HTMLElement>(
-          'button:not(:disabled), a[href], textarea, select, input:not([type="hidden"]), summary, [tabindex="0"]',
-        ) ?? []).filter((el) => !el.closest('[hidden], [inert]') && el.tabIndex >= 0);
-        const first = controls[0];
-        const last = controls[controls.length - 1];
-        if (!first) { event.preventDefault(); dialogRef.current?.focus(); return; }
-        if (event.shiftKey && (document.activeElement === first || !dialogRef.current?.contains(document.activeElement))) {
-          event.preventDefault(); last.focus();
-        } else if (!event.shiftKey && (document.activeElement === last || !dialogRef.current?.contains(document.activeElement))) {
-          event.preventDefault(); first.focus();
-        }
+        const selector = 'button:not(:disabled), a[href], textarea, select, input:not([type="hidden"]), summary, [tabindex="0"]';
+        const viewport = document.getElementById("radon-toast-viewport");
+        const controls = [
+          ...(dialogRef.current?.querySelectorAll<HTMLElement>(selector) ?? []),
+          ...(viewport?.querySelectorAll<HTMLElement>(selector) ?? []),
+        ].filter((el) => !el.closest('[hidden], [inert]') && el.tabIndex >= 0);
+        event.preventDefault();
+        if (!controls.length) { dialogRef.current?.focus(); return; }
+        const index = controls.indexOf(document.activeElement as HTMLElement);
+        const next = event.shiftKey
+          ? (index <= 0 ? controls.length - 1 : index - 1)
+          : (index + 1) % controls.length;
+        controls[next].focus();
       }
     }
     document.addEventListener("keydown", onKeyDown);
@@ -71,7 +73,7 @@ export default function ChatLauncher({ activeSection, portfolio, prices }: ChatL
     if (!open) return;
     const previousOverflow = document.body.style.overflow;
     const siblings = Array.from(document.body.children).filter(
-      (el): el is HTMLElement => el instanceof HTMLElement && el !== dialogRef.current,
+      (el): el is HTMLElement => el instanceof HTMLElement && el !== dialogRef.current && !el.hasAttribute("data-toast-viewport"),
     );
     const prior = siblings.map((el) => el.inert);
     siblings.forEach((el) => { el.inert = true; });
@@ -87,7 +89,7 @@ export default function ChatLauncher({ activeSection, portfolio, prices }: ChatL
     {shortcutReady ? <span data-testid="chat-launcher-ready" hidden /> : null}
     {loaded ? createPortal(
       <div ref={dialogRef} className="chat-launcher radon-clear" hidden={!open}
-        role="dialog" aria-modal="true" aria-label="Radon chat" tabIndex={-1}>
+        role="dialog" aria-modal="true" aria-label="Radon chat" aria-owns={open ? "radon-toast-viewport" : undefined} tabIndex={-1}>
         <div className="chat-launcher__scrim" onClick={close} aria-hidden="true" />
         <div className="chat-launcher__panel" data-testid="chat-launcher-panel">
           <ChatPanel activeSection={activeSection} portfolio={portfolio} prices={prices}

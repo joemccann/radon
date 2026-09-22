@@ -18,7 +18,6 @@ const SECONDARY_GLYPHS: GlyphDef[] = [
 ];
 
 const ORDER_GLYPH: GlyphDef = { key: "o", label: "Trade" };
-const CMD_GLYPH: GlyphDef = { key: ":", label: "Cmd" };
 const MOBILE_PRIMARY: GlyphDef[] = [
   { key: "c", label: "Chain" },
   { key: "p", label: "Position" },
@@ -38,8 +37,7 @@ type GlyphRailProps = {
   onDeckChange: (deck: DeckKey | null) => void;
   /** Unread-news count for the `n` badge. Omitted/0 renders no badge. */
   newsCount?: number;
-  /** Mobile: surface the order-ticket glyph (the desktop act column is dropped)
-   *  and drop the keyboard-only command palette. */
+  /** Mobile: surface the order-ticket glyph (the desktop act column is dropped). */
   includeOrder?: boolean;
 };
 
@@ -79,7 +77,7 @@ export default function GlyphRail({ activeDeck, onDeckChange, newsCount, include
   };
   const glyphs: GlyphDef[] = includeOrder
     ? MOBILE_PRIMARY
-    : [...SECONDARY_GLYPHS, CMD_GLYPH];
+    : SECONDARY_GLYPHS;
   const secondaryActive = MOBILE_SECONDARY.some((glyph) => glyph.key === activeDeck);
   return (
     <div ref={railRef} className={`glyph-rail ${styles.rail} ${includeOrder ? styles.mobile : ""}`}>

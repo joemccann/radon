@@ -89,7 +89,6 @@ Every row is tested at desktop 1440×1000 and mobile 390×844 with the mode desc
 | `app/journal/page.tsx` | `/journal` | `[data-testid="journal-trade-count"]` |
 | `app/cta/page.tsx` | `/cta` | `[data-testid="vol-targeting-model"]` |
 | `app/alerts/page.tsx` | `/alerts` | `.alerts-rule` |
-| `app/workflow/page.tsx` | `/workflow` | `.react-flow` |
 | `app/preferences/page.tsx` | `/preferences` | `[data-testid="preference-input-RADON_MAX_ORDER_QTY"]`, loaded value `400` |
 | `app/profile/page.tsx` | `/profile` | `.profile-field__input`, loaded value `Sample Operator` |
 | `app/regime/page.tsx` | `/regime` | Loaded CRI chart/table; selected indicator |

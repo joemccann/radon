@@ -91,12 +91,20 @@ def _list_migrations() -> list[tuple[int, str, Path]]:
         sys.stderr.write(f"No migrations directory at {MIGRATIONS_DIR}\n")
         sys.exit(1)
     rows: list[tuple[int, str, Path]] = []
+    seen: dict[int, str] = {}
     pattern = re.compile(r"^(\d+)_.*\.sql$")
     for entry in sorted(MIGRATIONS_DIR.iterdir()):
         match = pattern.match(entry.name)
         if not match:
             continue
-        rows.append((int(match.group(1)), entry.name, entry))
+        version = int(match.group(1))
+        prior = seen.get(version)
+        if prior is not None:
+            raise SystemExit(
+                f"[migrate] duplicate version {version}: {prior} and {entry.name}"
+            )
+        seen[version] = entry.name
+        rows.append((version, entry.name, entry))
     return rows
 
 

@@ -1,5 +1,7 @@
 "use client";
 
+import RequestError from "@/components/RequestError";
+
 import { useMemo } from "react";
 import type { AdminHealthPayload } from "@/lib/adminTypes";
 import {
@@ -54,13 +56,14 @@ export default function IbGatewayCard({ health, loading, error }: IbGatewayCardP
         <header className="admin-card-header">
           <span className="admin-card-title">IB Gateway</span>
         </header>
-        <p className="admin-card-empty admin-card-error">{error}</p>
+        <RequestError error={error} fallback="Gateway status could not be loaded. Try again." />
       </section>
     );
   }
 
   return (
     <section className="admin-card" data-testid="ib-gateway-card">
+      <RequestError error={error} fallback="Gateway status could not be refreshed. Try again." retainedData={health != null} />
       <header className="admin-card-header">
         <span className="admin-card-title">IB Gateway</span>
         <span

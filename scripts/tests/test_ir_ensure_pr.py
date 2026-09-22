@@ -329,11 +329,15 @@ class TestGrokPromptAndPlaybook:
         assert "fix/" in text
         assert "ir_ensure_pr.py" in text
 
-    def test_grok_doc_documents_pat_scopes_and_enablement(self):
+    def test_grok_doc_keeps_the_credential_off_the_vps(self):
+        """Push and merge are the same GitHub permission, so the host running
+        an agent over untrusted page text holds no credential: it commits, and
+        the Mac mini pickup job pushes and opens the PR."""
         text = GROK_DOC.read_text(encoding="utf-8")
-        assert "Contents" in text
-        assert "Pull requests" in text
-        assert "Administration" not in text or "not" in text.lower()
+        assert "no GitHub credential" in text
+        assert "grok_fix_pickup.py" in text
+        assert "GROK_PAGE_AUTOPUSH=0" in text
+        assert ".github/" in text
         assert "ir_ensure_pr.py" in text
         assert "git push origin main" not in text.split("## Path", 1)[1].split(
             "## Install", 1
@@ -374,6 +378,9 @@ class TestGrokCycleEnsuresPr:
         monkeypatch.setattr(responder, "_send_followup", lambda **k: None)
         monkeypatch.setattr(responder, "_heartbeat", lambda *a, **k: None)
         monkeypatch.setattr(responder, "sync_remote_clone", lambda _root: "disabled")
+        monkeypatch.setattr(
+            responder, "install_push_guard", lambda _root: Path("pre-push")
+        )
 
         class _Proc:
             returncode = 0
@@ -421,6 +428,9 @@ class TestGrokCycleEnsuresPr:
         monkeypatch.setattr(responder, "_send_followup", lambda **k: None)
         monkeypatch.setattr(responder, "_heartbeat", lambda *a, **k: None)
         monkeypatch.setattr(responder, "sync_remote_clone", lambda _root: "disabled")
+        monkeypatch.setattr(
+            responder, "install_push_guard", lambda _root: Path("pre-push")
+        )
 
         class _Proc:
             returncode = 0
@@ -461,6 +471,11 @@ class TestGrokCycleEnsuresPr:
         monkeypatch.setattr(responder, "_heartbeat", lambda state, *_: health.append(state))
         monkeypatch.setattr(responder, "_send_followup", lambda **k: None)
         monkeypatch.setattr(responder, "sync_remote_clone", lambda _root: "disabled")
+        # AUTOPUSH installs the pre-push guard before grok; stub it like the
+        # sibling cycle tests so a bare tmp_path does not fail-closed at rc=1.
+        monkeypatch.setattr(
+            responder, "install_push_guard", lambda _root: Path("pre-push")
+        )
 
         class _Proc:
             returncode = 0
@@ -497,6 +512,9 @@ class TestGrokCycleEnsuresPr:
         monkeypatch.setattr(responder, "_send_followup", lambda **k: None)
         monkeypatch.setattr(responder, "_heartbeat", lambda *a, **k: None)
         monkeypatch.setattr(responder, "sync_remote_clone", lambda _root: "disabled")
+        monkeypatch.setattr(
+            responder, "install_push_guard", lambda _root: Path("pre-push")
+        )
 
         class _Proc:
             returncode = 0
@@ -542,3 +560,20 @@ class TestCliAndWrapper:
         assert subprocess.run(
             ["bash", "-n", str(WRAPPER)], check=False
         ).returncode == 0
+
+
+@pytest.mark.parametrize("state", ["CLOSED", "MERGED"])
+def test_pickup_preserves_terminal_pr_disposition(state):
+    run = FakeRunner({
+        ("gh", "auth", "status"): FakeProc(),
+        ("gh", "pr", "list"): FakeProc(stdout=json.dumps([{
+            "number": 12, "url": "https://github.com/x/y/pull/12", "state": state,
+        }])),
+    })
+    result = ir.ensure_pr(head="fix/example", issue="example", fix="example",
+                          runner=run, gh_bin="gh", include_terminal=True)
+    assert result["action"] == state.lower()
+    assert result["url"] == "https://github.com/x/y/pull/12"
+    assert not any(call[:3] == ["gh", "pr", "create"] for call in run.calls)
+    listing = next(call for call in run.calls if call[:3] == ["gh", "pr", "list"])
+    assert listing[listing.index("--state") + 1] == "all"

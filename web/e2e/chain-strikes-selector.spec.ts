@@ -72,7 +72,7 @@ function stubApis(page: import("@playwright/test").Page, overrideChain = CHAIN_D
 
 async function openChain(page: import("@playwright/test").Page) {
   await page.goto("/SPY?tab=chain");
-  await page.locator(".chain-grid").waitFor({ timeout: 12_000 });
+  await page.locator(".chain-grid").first().waitFor({ timeout: 12_000 });
 }
 
 async function countVisibleStrikeRows(page: import("@playwright/test").Page) {

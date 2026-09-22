@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { createRequire } from "node:module";
-import { CorFixture, CreditSpreadFixture, CurveFixture, DivyieldFixture, HhlevFixture, HyadFixture, IeiHygFixture, IvSpreadFixture, IvrankFixture, MaRatioFixture, MarginDebtFixture, Skew2dFixture, SkewFixture, StraddleFixture, StreaksFixture, VixcorFixture, VixtsFixture } from "./clear-indicator-fixtures";
+import { CalmStreakFixture, CorFixture, CreditSpreadFixture, CurveFixture, DivyieldFixture, HhlevFixture, HyadFixture, IeiHygFixture, IvSpreadFixture, IvrankFixture, MaRatioFixture, MarginDebtFixture, Skew2dFixture, SkewFixture, StraddleFixture, StreaksFixture, VixcorFixture, VixtsFixture } from "./clear-indicator-fixtures";
 import { AtsFixture, BreadthFixture, CotFixture, ShortFixture } from "./clear-positioning-fixtures";
 import { CtaFixture, DiscoverFixture, GarchFixture, JournalFixture, LeapFixture, PreferencesFixture, VolConeFixture } from "./clear-workspace-fixtures";
 import { buildDemoOptionChain, buildDemoOptionExpirations, buildDemoOptionsExposure } from "../lib/demo/fixtures/options";
@@ -60,6 +60,7 @@ const fixtures: Record<string, unknown> = {
   "/api/hyad": HyadFixture(),
   "/api/hhlev": HhlevFixture(),
   "/api/ma-ratio": MaRatioFixture(),
+  "/api/calm-streak": CalmStreakFixture(),
   "/api/credit-spread": CreditSpreadFixture(),
   "/api/iei-hyg": IeiHygFixture(),
   "/api/divyield": DivyieldFixture(),
