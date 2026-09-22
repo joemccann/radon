@@ -651,15 +651,25 @@ on the daily 22:40 UTC timer.** Peak: 2026-08-23 23:57Z, page `c52496dd…`.
   `/off-exchange-volume` AAPL 0.94s) but the Tuesday timer is the only
   retry once the oneshot exits 0. Health row is that single cycle, not a
   daily re-fail.
+- **Follow-on (2026-09-22 09:31Z, page `a3d843f9…`):** the sweep budget
+  worked (`wall-clock budget spent (849/2487)` at 09:29:37Z, T+780 from
+  09:16:37Z) and then sync libsql persist was still running at
+  InactiveEnter 09:31:37Z. `Result=timeout`, `NRestarts=0`,
+  `ExecMainStatus=15`, CPU ~20s. `/health/lite` stayed up. JSON cache
+  mtime stayed 2026-09-15 (write never reached). Do not wrap `get_db()`
+  in a thread join: it holds the GIL. Persist is hrana, chunked, and
+  stops at `PERSIST_BUDGET_S=100`. `TimeoutStartSec` stays 900.
 - **Regression:**
   `test_equibles_ats_venue_share.py::TestSweepBudget`
   (`test_tarpitted_equibles_stops_inside_the_wall_clock_budget`,
   `test_tickers_finished_before_the_deadline_are_kept`,
   `test_timeout_on_one_ticker_does_not_budget_skip_the_rest`,
   `test_sweep_budget_fits_inside_unit_start_timeout`),
+  `test_equibles_ats_venue_share.py::TestPersistBudget`,
   `test_systemd_services.py::TestEquiblesAtsScanBudget`.
 - **Code:** `scripts/fetch_equibles_ats_venue_share.py` (`SWEEP_BUDGET_S`,
-  `TICKER_FETCH_BUDGET_S`, `_fetch_ticker_bounded`, `_replace_wedged_client`),
+  `TICKER_FETCH_BUDGET_S`, `PERSIST_BUDGET_S`, `_fetch_ticker_bounded`,
+  `_replace_wedged_client`, `_write_db_cache`),
   `cloud/services/radon-equibles-ats.service` (`TimeoutStartSec=900`).
 
 ---
