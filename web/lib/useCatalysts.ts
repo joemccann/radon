@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { isReturnCacheFresh, useReturnCache } from "./returnCache";
 
 const SYNC_INTERVAL_MS = 10 * 60 * 1000; // producer refreshes intraday; refetch while mounted
 
@@ -42,6 +43,7 @@ export function useCatalysts(active: boolean = true): UseCatalystsReturn {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const returnCache = useReturnCache();
 
   const load = useCallback(async () => {
     try {
@@ -50,12 +52,17 @@ export function useCatalysts(active: boolean = true): UseCatalystsReturn {
       const json = (await res.json()) as CatalystData;
       setData(json);
       setError(null);
+      returnCache?.write("/api/catalysts", {
+        data: json,
+        fetchedAt: Date.now(),
+        lastSync: json.scan_time,
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [returnCache]);
 
   const refresh = useCallback(() => {
     void load();
@@ -63,17 +70,31 @@ export function useCatalysts(active: boolean = true): UseCatalystsReturn {
 
   useEffect(() => {
     if (!active) return;
-    void load();
+    const cached = returnCache?.read<CatalystData>("/api/catalysts") ?? null;
+    if (isReturnCacheFresh(cached, SYNC_INTERVAL_MS)) {
+      setData(cached!.data);
+      setIsLoading(false);
+      setError(null);
+    } else {
+      if (cached) {
+        setData(cached.data);
+        setIsLoading(false);
+      }
+      void load();
+    }
     intervalRef.current = setInterval(() => void load(), SYNC_INTERVAL_MS);
     const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") void load();
+      if (document.visibilityState !== "visible") return;
+      const latest = returnCache?.read<CatalystData>("/api/catalysts") ?? null;
+      if (isReturnCacheFresh(latest, SYNC_INTERVAL_MS)) return;
+      void load();
     };
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [active, load]);
+  }, [active, load, returnCache]);
 
   return { data, isLoading, error, refresh };
 }

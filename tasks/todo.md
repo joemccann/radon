@@ -1,3 +1,21 @@
+# Task: Dashboard return reliability
+
+A page return must be a memory read. No mount-time regime/gex POST, no posts.json fallback, headlines socket and ticket backoff survive the remount.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests: remount within the poll window does not refetch; posts 502 does not call /data/posts.json; ticket abort does not start a second POST; headlines socket stays open when the feed unmounts
+- T2 depends_on: [T1] - Return cache, hasPost false, headlines provider, shared ticket backoff
+- T3 depends_on: [T2] - Failed regime/gex scan with a snapshot returns 200 scan_succeeded false and aborts on disconnect
+- T4 depends_on: [T3] - Focused vitest green. Shell layout persistence is a later PR
+
+## Checklist
+
+- [x] T1 Failing tests
+- [x] T2 Client implementation
+- [x] T3 Scan response
+- [x] T4 Focused vitest green. Shell layout persistence stays a later PR
+
 # Task: Runner trust (R01-A / R02-A)
 
 Operator 2026-09-22: R01-A (no host browser endpoint on the codex write rung), R02-A (host-owned gitdir the agent cannot write).
