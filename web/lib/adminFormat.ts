@@ -93,7 +93,9 @@ export function backoffSummary(backoff: RestartBackoffState | null | undefined):
  * a problem so an operator can spot bad rows immediately.
  */
 export function unitTone(unit: UnitStatus): "positive" | "warning" | "negative" | "neutral" {
-  if (!unit.can_control) return "neutral";
+  if (!unit.can_control && (!unit.active_state || unit.active_state === "unknown")) {
+    return "neutral";
+  }
   if (unit.active_state === "active" && unit.sub_state === "running") return "positive";
   if (unit.active_state === "activating" || unit.active_state === "reloading") return "warning";
   if (unit.active_state === "failed") return "negative";
@@ -229,8 +231,10 @@ export function unitDependents(unit: string): string[] {
  * on screen as a label instead of leaving it implicit in the dot.
  */
 export function unitVerdict(unit: UnitStatus): UnitVerdict {
-  if (!unit.can_control) return { label: "Unknown", tone: "neutral" };
   const active = unit.active_state;
+  if (!unit.can_control && (!active || active === "unknown")) {
+    return { label: "Unknown", tone: "neutral" };
+  }
   const sub = unit.sub_state;
   if (active === "activating" || active === "reloading") return { label: "Starting", tone: "warning" };
   if (active === "deactivating") return { label: "Stopping", tone: "warning" };
@@ -290,8 +294,14 @@ export function serviceControlDisabledReason(opts: {
   action: ServiceAction;
   supported: boolean;
   pending: boolean;
+  hostRole?: string | null;
 }): string | null {
-  if (!opts.supported) return "Read-only: this browser is not on the Hetzner VPS.";
+  if (!opts.supported) {
+    if (opts.hostRole === "app") {
+      return "The API container cannot call systemctl. State is from the host health daemon.";
+    }
+    return "Read-only: this browser is not on the Hetzner VPS.";
+  }
   if (!opts.unit.can_control) return "This unit is not in the controllable allowlist.";
   if (opts.pending) return "Action in flight...";
   if (opts.action === "start" && unitVerdict(opts.unit).label === "Running") return "Already running.";

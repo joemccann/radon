@@ -29,9 +29,11 @@ import type {
 export type LivenessSummary = { ok: number; total: number };
 
 export function livenessSummary(units: UnitStatus[]): LivenessSummary {
-  const controllable = units.filter((u) => u.can_control);
-  const ok = controllable.filter((u) => unitVerdict(u).tone === "positive").length;
-  return { ok, total: controllable.length };
+  const observed = units.filter(
+    (u) => u.can_control || (u.active_state != null && u.active_state !== "unknown"),
+  );
+  const ok = observed.filter((u) => unitVerdict(u).tone === "positive").length;
+  return { ok, total: observed.length };
 }
 
 // Tile 2 — Freshness: service_health rows past their per-writer staleness

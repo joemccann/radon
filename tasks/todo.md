@@ -1,3 +1,19 @@
+# Task: Operator page on the app container
+
+The API image has no systemctl, so /admin marked every app unit Unknown and said the browser was not on the VPS.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests for host-health unit rows and the app-host copy
+- T2 depends_on: [T1] - Read :8330 unit state; show that state when systemctl is absent
+- T3 depends_on: [T2] - Focused pytest + vitest green
+
+## Checklist
+
+- [x] T1 Failing tests
+- [x] T2 Implementation
+- [x] T3 Focused tests green
+
 # Task: Research Dropbox discovery lookback + empty-cursor footgun
 
 Sep 18-style gaps: daemon today-only + 2-day `date_scopes` + cursor advance on zero eligible work.
