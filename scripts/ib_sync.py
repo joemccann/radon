@@ -59,6 +59,14 @@ from clients.ib_client import (
     ticker_has_quote,
 )
 from clients.ib_timing import PhaseTimer
+from option_session_mark import (
+    last_traded_bar_price,
+    load_session_marks,
+    option_mark_key,
+    poll_contract_mark,
+    resolve_polled_mark,
+    save_session_marks,
+)
 from clients.journal_basis import (
     compute_open_basis_and_net_qty_for_tickers,
     con_id_of,
@@ -813,20 +821,100 @@ def _normalize_market_price(raw_price) -> Optional[float]:
     return price
 
 
-def _resolve_market_price(market_price: Optional[float], bid: Optional[float], ask: Optional[float], close: Optional[float] = None) -> Tuple[Optional[float], bool]:
+def _resolve_market_price(
+    market_price: Optional[float],
+    bid: Optional[float],
+    ask: Optional[float],
+    close: Optional[float] = None,
+    *,
+    sec_type: Optional[str] = None,
+    session_mark: Optional[dict] = None,
+) -> Tuple[Optional[float], bool]:
     """Return a usable price and whether it was calculated.
 
-    Fallback chain: marketPrice → midpoint(bid, ask) → close.
-    The close fallback handles degraded gateway states where live/delayed
-    data is unavailable but the previous session's close is still cached.
+    Fallback chain: marketPrice → midpoint(bid, ask) → session last/mid
+    → history (via poll_contract_mark) → close for non-options.
+    Option previous-session CLOSE is never a mark.
     """
-    if market_price is not None:
-        return market_price, False
-    if bid is not None and ask is not None:
-        return round((bid + ask) / 2, 4), True
-    if close is not None:
-        return close, True
-    return None, False
+    return resolve_polled_mark(
+        market_price,
+        bid,
+        ask,
+        close,
+        sec_type=sec_type,
+        session_mark=session_mark,
+        session_is_fresh=True,
+    )
+
+
+def _et_today() -> str:
+    return datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+
+
+def _safe_option_history(client: IBClient, contract, what_to_show: str):
+    try:
+        return client.get_historical_data(
+            contract,
+            duration="1 D",
+            bar_size="1 min",
+            what_to_show=what_to_show,
+            use_rth=True,
+            timeout=5.0,
+        )
+    except Exception as exc:
+        label = getattr(contract, "localSymbol", None) or getattr(contract, "symbol", "?")
+        print(f"  Warning: option {what_to_show} history failed for {label}: {exc}")
+        return None
+
+
+def _option_history_bars(client: IBClient, contract):
+    trade_bars = _safe_option_history(client, contract, "TRADES")
+    if last_traded_bar_price(trade_bars) is not None:
+        return trade_bars, None
+    return trade_bars, _safe_option_history(client, contract, "MIDPOINT")
+
+
+def _stamp_position_price(pos: dict, ticker, session_marks: dict, client: IBClient, today: str) -> bool:
+    """Write marketPrice fields from the live ticker, session cache, or history."""
+    sec_type = pos.get("secType")
+    key = None
+    if str(sec_type or "").upper() == "OPT":
+        key = option_mark_key(
+            pos.get("symbol"),
+            pos.get("expiry"),
+            pos.get("strike"),
+            pos.get("right"),
+        )
+    contract = pos.get("contract")
+
+    def fetch():
+        return _option_history_bars(client, contract)
+
+    price, is_calculated, updated = poll_contract_mark(
+        sec_type=sec_type,
+        market_price=_normalize_market_price(ticker.marketPrice()),
+        bid=_normalize_market_price(ticker.bid),
+        ask=_normalize_market_price(ticker.ask),
+        close=_normalize_market_price(ticker.close),
+        trade=_normalize_market_price(getattr(ticker, "last", None)),
+        session_mark=session_marks.get(key) if key else None,
+        today=today,
+        fetch_history=fetch if key and contract is not None else None,
+    )
+    dirty = False
+    if key and updated is not None:
+        session_marks[key] = updated
+        dirty = True
+    if price is not None:
+        multiplier = 100 if str(sec_type or "").upper() == "OPT" else 1
+        pos["marketPrice"] = price
+        pos["marketValue"] = round(price * abs(pos["position"]) * multiplier, 2)
+        pos["marketPriceIsCalculated"] = is_calculated
+    else:
+        pos["marketPrice"] = None
+        pos["marketValue"] = None
+        pos["marketPriceIsCalculated"] = False
+    return dirty
 
 
 def _journal_basis_key(symbol: str, expiry, right, strike) -> Optional[str]:
@@ -1198,28 +1286,18 @@ def fetch_market_prices(client: IBClient, positions: list) -> list:
         ]
         print(
             f"  Warning: no two-sided quote within 3.0s for {len(missing)} "
-            f"position(s): {missing[:8]} — marked off close"
+            f"position(s): {missing[:8]} — last trade or last bid/offer used if known"
         )
 
-    # Read results and cancel
+    session_marks = load_session_marks()
+    today = _et_today()
+    dirty = False
     for pos, ticker in zip(positions, tickers):
-        market_price = _normalize_market_price(ticker.marketPrice())
-        bid = _normalize_market_price(ticker.bid)
-        ask = _normalize_market_price(ticker.ask)
-        close = _normalize_market_price(ticker.close)
-        price, is_calculated = _resolve_market_price(market_price, bid, ask, close)
-
-        if price is not None:
-            multiplier = 100 if pos['secType'] == 'OPT' else 1
-            pos['marketPrice'] = price
-            pos['marketValue'] = round(price * abs(pos['position']) * multiplier, 2)
-            pos['marketPriceIsCalculated'] = is_calculated
-        else:
-            pos['marketPrice'] = None
-            pos['marketValue'] = None
-            pos['marketPriceIsCalculated'] = False
+        dirty = _stamp_position_price(pos, ticker, session_marks, client, today) or dirty
         client.cancel_market_data(pos['contract'])
         del pos['contract']  # Remove non-serializable contract object
+    if dirty:
+        save_session_marks(session_marks)
 
     return positions
 
@@ -2088,24 +2166,15 @@ def main():
 
             # ── Phase 5: Read all results ──
             # Market prices
+            session_marks = load_session_marks()
+            today = _et_today()
+            dirty = False
             for pos, ticker in zip(positions, tickers):
-                market_price = _normalize_market_price(ticker.marketPrice())
-                bid = _normalize_market_price(ticker.bid)
-                ask = _normalize_market_price(ticker.ask)
-                close = _normalize_market_price(ticker.close)
-                price, is_calculated = _resolve_market_price(market_price, bid, ask, close)
-
-                if price is not None:
-                    multiplier = 100 if pos['secType'] == 'OPT' else 1
-                    pos['marketPrice'] = price
-                    pos['marketValue'] = round(price * abs(pos['position']) * multiplier, 2)
-                    pos['marketPriceIsCalculated'] = is_calculated
-                else:
-                    pos['marketPrice'] = None
-                    pos['marketValue'] = None
-                    pos['marketPriceIsCalculated'] = False
+                dirty = _stamp_position_price(pos, ticker, session_marks, client, today) or dirty
                 client.ib.cancelMktData(pos['contract'])
                 del pos['contract']
+            if dirty:
+                save_session_marks(session_marks)
 
             # Per-position PnL
             def _valid_daily(val):

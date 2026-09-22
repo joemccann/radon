@@ -1,3 +1,17 @@
+# Task: After-hours option last is last trade or last bid/offer, not previous close
+
+## Dependency graph
+
+- T1 depends_on: [] - Adversarial tests: META 665P CLOSE 26.70 vs print 8.10
+- T2 depends_on: [T1] - Retain session last in tick handler, relay cache, sync history, UI
+- T3 depends_on: [T2] - Focused green; draft PR; hold merge
+
+## Checklist
+
+- [x] T1 Tests
+- [x] T2 Implementation
+- [ ] T3 Draft PR; hold merge
+
 # Task: Research Dropbox discovery lookback + empty-cursor footgun
 
 Sep 18-style gaps: daemon today-only + 2-day `date_scopes` + cursor advance on zero eligible work.
