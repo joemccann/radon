@@ -333,3 +333,23 @@ class TestDemoMigrationEnvContract:
         for key in self.KEYS:
             assert key in demo_branch, f"{key} is not what migrate.py --demo reads"
             assert key in self._contract_keys(root)
+
+
+class TestServiceTokenDocumented:
+    """RADON_SERVICE_TOKEN (Next -> FastAPI bearer, web/lib/radonApi.ts) must be
+    documented wherever an operator would look for it. It stays commented out:
+    prod must never set it (see test_env_contract_parity.EXEMPT)."""
+
+    KEY = "RADON_SERVICE_TOKEN"
+
+    def test_documented_in_env_examples_and_runbook(self, root):
+        repo = root.parent
+        for rel in (".env.example", "web/.env.example", "cloud/.env.example", "docs/operations.md"):
+            text = (repo / rel).read_text()
+            assert self.KEY in text, f"{self.KEY} is undocumented in {rel}"
+
+    def test_never_set_in_an_example(self, root):
+        repo = root.parent
+        for rel in (".env.example", "web/.env.example", "cloud/.env.example"):
+            env_vars = parse_env_vars((repo / rel).read_text())
+            assert self.KEY not in env_vars, f"{rel} sets {self.KEY}; prod must leave it unset"
