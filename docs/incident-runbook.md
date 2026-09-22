@@ -2103,6 +2103,8 @@ duplicate.** Peak: 2026-09-22 11:35Z, page `e1297eea…`.
   `outcome=coverage_unverified` on an applied duplicate whose missing
   Flex tradeIDs are covered by individual IB fills (this case).
   `twr_status=degraded` is `flex-pull-twr-degraded-exit`.
+  `classified_as=activity` with `outcome=coverage_unverified` is
+  `flex-pull-activity-nav`.
   `Result=timeout` is `flex-pull-ingest-timeout`. An uncovered exec, or
   a quantity or notional disagreement, stays unverified and is operator
   reconciliation, not this fix. If `/health/lite` is down too → API, stand down.
@@ -2118,6 +2120,51 @@ duplicate.** Peak: 2026-09-22 11:35Z, page `e1297eea…`.
   `test_rel226_delivery_coverage.py::test_trade_duplicate_disagreement_stays_unverified`,
   `test_rel226_delivery_coverage.py::test_trade_duplicate_uncovered_day_stays_unverified`.
 - **Code:** `scripts/flex_delivery_ingest.py` (`delivery_rows_present`).
+
+---
+
+## flex-pull-activity-nav
+
+**`radon-flex-pull.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
+on the Tue..Sat 08:30 ET retry after today's Activity statement was applied.**
+Peak: 2026-09-22 12:35Z, page `d3b66eaf…`.
+
+- **Mechanism:** the 07:30 ET run applied `Equity_Summary_in_Base.20260921`
+  and `20260918` (cash exit 0). The 20260921 build merged stored NAV through
+  2026-09-17 with a statement date outside `FlexStatement` from/to.
+  `_extend_statement_flows` treated that date as historical, found no
+  `twr_subperiods` row, and returned `historical_flow_coverage_unverified`.
+  The suppressed payload keeps `series` empty, so `_nav_snapshot_rows` wrote
+  nothing. `nav_snapshots` stayed at 2026-09-17 while `nav_as_of` was
+  2026-09-21 (`n_nav_observations` 189). Claims were marked `applied`
+  (REL-220). The 08:30 retry's duplicate check required those NAV dates,
+  returned `coverage_unverified` / `classified_as=activity`, and the oneshot
+  exited 1. Span was about 51s, not `TimeoutStartSec`. `:8321/health/lite`
+  stayed up.
+- **Detection:** journal `[flex-pull] … ingest_failed:{… 'outcome':
+  'coverage_unverified', 'classified_as': 'activity' …}` on
+  `Equity_Summary_in_Base` files; `systemctl show` → `exit-code` / `0`;
+  `nav_snapshots` max report_date older than the applied `period_to`.
+- **Discriminating check:** `classified_as=activity` and
+  `outcome=coverage_unverified` on an applied claim whose cash ids are
+  present (or the statement has no cash rows) and whose NAV dates are
+  absent from `nav_snapshots` (this case). `classified_as=trades` is
+  `flex-pull-trade-coverage`. `twr_status=degraded` on the first apply,
+  with no `coverage_unverified`, is `flex-pull-twr-degraded-exit`. A cash
+  id that is actually missing stays unverified and is operator
+  reconciliation, not this fix. If `/health/lite` is down too → API, stand down.
+- **Remediation (code):** a suppressed TWR payload still mirrors
+  `nav_points` into `nav_snapshots`. An applied activity duplicate whose
+  cash ids are present inserts only the missing NAV dates
+  (`ON CONFLICT DO NOTHING`, no cash replay). Do not restart-flap; the
+  next timer retries. After deploy, `systemctl reset-failed
+  radon-flex-pull.service` if that retry has not yet fired.
+- **Regression:**
+  `test_rel226_delivery_coverage.py::test_applied_activity_duplicate_inserts_missing_nav_without_reapply`,
+  `test_rel226_delivery_coverage.py::test_activity_duplicate_does_not_insert_nav_when_cash_is_missing`,
+  `test_flex_from_file.py::test_suppressed_statement_still_records_nav_points`.
+- **Code:** `scripts/flex_delivery_ingest.py` (`_repair_unmirrored_activity_nav`),
+  `scripts/perf_twr_builder.py` (`nav_points`, `_nav_snapshot_rows`).
 
 ---
 

@@ -177,6 +177,27 @@ def test_nightly_statement_corrects_overlap_without_counting_twice(nightly_build
     assert payload["equity"]["net_external_flows"] == 81000.0
 
 
+def test_suppressed_statement_still_records_nav_points(nightly_builder, monkeypatch):
+    """A flow-coverage failure keeps the curve empty and still mirrors NAV.
+
+    Page d3b66eaf: historical_flow_coverage_unverified suppressed the payload,
+    series stayed empty, and the statement dates never reached nav_snapshots.
+    The applied claim then failed the 08:30 duplicate check.
+    """
+    monkeypatch.setattr(nightly_builder, "load_flow_coverage_dates", lambda: set())
+    payload = nightly_builder.build_and_persist(from_file="nightly.xml", persist=False)
+    rows = nightly_builder._nav_snapshot_rows(payload, "ALL")
+    assert payload["series"] == []
+    assert [(row["report_date"], row["total_net_liq"]) for row in rows] == [
+        ("2026-01-12", 100000.0),
+        ("2026-01-13", 180000.0),
+        ("2026-01-14", 181000.0),
+        ("2026-01-15", 182000.0),
+        ("2026-01-16", 183000.0),
+    ]
+    assert {row["account_id"] for row in rows} == {"ALL"}
+
+
 @pytest.mark.parametrize("covered", [None, set(), {"2026-01-14"}])
 def test_nightly_statement_cannot_invent_historical_zero_flows(nightly_builder, monkeypatch, covered):
     monkeypatch.setattr(nightly_builder, "load_flow_coverage_dates", lambda: covered)
