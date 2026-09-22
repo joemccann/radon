@@ -183,7 +183,7 @@ export async function GET(): Promise<Response> {
   });
 }
 
-export async function POST(): Promise<Response> {
+export async function POST(request?: Request): Promise<Response> {
   const access = await requireRouteAccess(undefined, { rate: { key: "gex:route", limit: 20, windowMs: 60_000 }, durableRateTier: "B" });
   if (!access.ok) return access.response;
   if (access.principal.kind === "demo") {
@@ -191,20 +191,24 @@ export async function POST(): Promise<Response> {
     return setNoStoreResponseHeaders(NextResponse.json(buildDemoGexFixture()), requestId);
   }
   try {
-    const rawData = await radonFetch<Record<string, unknown>>("/gex/scan", { method: "POST", timeout: 130_000 });
+    const rawData = await radonFetch<Record<string, unknown>>("/gex/scan", {
+      method: "POST",
+      timeout: 130_000,
+      signal: request?.signal,
+    });
     const data = normalizeGexPayload(rawData);
     return NextResponse.json({ ...data, scan_succeeded: true });
   } catch (err) {
-    // R-643: mirror the theta scan shape — preserve the upstream status and
-    // stamp the failure in the body so useSyncHook consumers see it. A 200 +
-    // X-Sync-Warning header silently masked dead scans.
+    // R-643: the body flag is what useSyncHook reads. A cached snapshot is
+    // 200 so a failed scan does not paint a gateway error in the console.
+    // 4xx still passes through below, and a miss still returns the upstream
+    // status. A disconnected browser aborts via request.signal.
     const status = err instanceof RadonApiError ? err.status : 502;
     if (status >= 500) try {
       const cached = await readCachedGex();
       if (cached) {
         const res = NextResponse.json(
           { ...normalizeGexPayload(cached), is_stale: true, scan_succeeded: false },
-          { status },
         );
         res.headers.set("X-Sync-Warning", "GEX sync failed - serving cached data");
         return res;
