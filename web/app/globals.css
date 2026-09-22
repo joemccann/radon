@@ -18468,6 +18468,66 @@ body[data-mobile="true"] td.right {
   cursor: not-allowed;
 }
 
+.ticker-flow-refresh--busy:disabled {
+  opacity: 1;
+  cursor: progress;
+  color: var(--warn-text);
+  border-color: color-mix(in srgb, var(--warn-text) 45%, transparent);
+}
+
+.ticker-flow-scan-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--warn-text) 34%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--warn) 8%, var(--bg-panel));
+}
+
+.ticker-flow-scan-progress-kicker {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--warn-text);
+}
+
+.ticker-flow-scan-progress-copy p {
+  margin: 4px 0 0;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+.ticker-flow-scan-progress-meter .spectral-loader {
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
+  width: 100%;
+}
+
+.ticker-flow-scan-progress-meter .spectral-loader__label {
+  display: none;
+}
+
+.ticker-flow-scan-progress-meter .spectral-loader__spectrum {
+  width: auto;
+  justify-content: flex-start;
+  gap: 3px;
+}
+
+.ticker-flow-badge-stale-note {
+  margin-top: 6px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--warn-text);
+}
+
 .ticker-flow-badge {
   display: grid;
   grid-template-columns: auto 1fr auto;
