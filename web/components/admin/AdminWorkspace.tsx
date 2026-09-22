@@ -1,5 +1,7 @@
 "use client";
 
+import RequestError from "@/components/RequestError";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   AdminHealthPayload,
@@ -64,6 +66,7 @@ const FLASH_DURATION_MS = 2_000;
  */
 export default function AdminWorkspace() {
   const [health, setHealth] = useState<AdminHealthPayload | null>(null);
+  const [telemetryErrors, setTelemetryErrors] = useState<Record<string, unknown>>({});
   const [healthError, setHealthError] = useState<string | null>(null);
   const [healthLoading, setHealthLoading] = useState(true);
 
@@ -169,9 +172,13 @@ export default function AdminWorkspace() {
     reliabilityInflightRef.current = true;
     try {
       const res = await fetch("/api/admin/reliability", { cache: "no-store" });
-      const data = (await res.json().catch(() => null)) as ReliabilityHistoryPayload | null;
-      if (data && Array.isArray(data.events)) setReliability(data);
-    } catch {
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as ReliabilityHistoryPayload | null;
+      if (!data || !Array.isArray(data.events)) throw new Error("Invalid telemetry response");
+      setReliability(data);
+      setTelemetryErrors(previous => ({ ...previous, "reliability": null }));
+    } catch (error) {
+      setTelemetryErrors(previous => ({ ...previous, "reliability": error }));
       // Keep the last good payload; the tiles degrade to "--" only when
       // nothing has ever loaded.
     } finally {
@@ -188,9 +195,13 @@ export default function AdminWorkspace() {
     hostMetricsInflightRef.current = true;
     try {
       const res = await fetch("/api/admin/host-metrics", { cache: "no-store" });
-      const data = (await res.json().catch(() => null)) as HostMetricsPayload | null;
-      if (data && Array.isArray(data.rows)) setHostMetrics(data);
-    } catch {
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as HostMetricsPayload | null;
+      if (!data || !Array.isArray(data.rows)) throw new Error("Invalid telemetry response");
+      setHostMetrics(data);
+      setTelemetryErrors(previous => ({ ...previous, "host-metrics": null }));
+    } catch (error) {
+      setTelemetryErrors(previous => ({ ...previous, "host-metrics": error }));
       // Keep the last good payload; the tiles flag staleness themselves.
     } finally {
       hostMetricsInflightRef.current = false;
@@ -205,9 +216,13 @@ export default function AdminWorkspace() {
     sloInflightRef.current = true;
     try {
       const res = await fetch("/api/admin/slo", { cache: "no-store" });
-      const data = (await res.json().catch(() => null)) as SloPayload | null;
-      if (data && Array.isArray(data.rows)) setSlo(data);
-    } catch {
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as SloPayload | null;
+      if (!data || !Array.isArray(data.rows)) throw new Error("Invalid telemetry response");
+      setSlo(data);
+      setTelemetryErrors(previous => ({ ...previous, "slo": null }));
+    } catch (error) {
+      setTelemetryErrors(previous => ({ ...previous, "slo": error }));
       // Keep the last good payload; the tiles degrade to "--" only when
       // nothing has ever loaded.
     } finally {
@@ -262,7 +277,9 @@ export default function AdminWorkspace() {
     };
   }, []);
 
+  const [actionError, setActionError] = useState<RestartLogEntry | null>(null);
   const appendLog = useCallback((entry: RestartLogEntry) => {
+    setActionError(entry.ok ? null : entry);
     setLog((prev) => [entry, ...prev].slice(0, 25));
   }, []);
 
@@ -472,6 +489,10 @@ export default function AdminWorkspace() {
   return (
     <div className="admin-shell" data-testid="admin-page">
       <main className="admin-page">
+        {Object.entries(telemetryErrors).map(([source, error]) => (
+          <RequestError key={source} error={error} fallback={`${source} telemetry could not be refreshed. Try again.`} />
+        ))}
+        <RequestError key={actionError?.at} error={actionError?.detail} fallback="The action could not be completed. Review service status and try again." />
         <header className="admin-page-header">
           <h1 className="admin-page-title">Operator</h1>
           <p className="admin-page-subtitle">

@@ -1,4 +1,7 @@
 import { redirect } from "next/navigation";
+import { routeMetadata } from "@/lib/pageTitle";
+
+export const metadata = routeMetadata("/options");
 
 const SYMBOL_RE = /^[A-Za-z][A-Za-z0-9.-]{0,9}$/;
 

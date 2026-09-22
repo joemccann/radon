@@ -97,6 +97,50 @@ function legacyPayloadWithoutSchemaVersion() {
   return rest;
 }
 
+/** Compressed, sanitized full-window NAV sample, not the user's account tape.
+ * The two NAV jumps reproduce the incident; only the independently recorded
+ * deposit/transfer amounts count as flows. The remaining observations keep
+ * the recovered beginning-of-day TWR positive without treating a wire as P&L.
+ */
+function historicalFlowPayload(repaired: boolean) {
+  const dates = ["2025-12-31", "2026-01-12", "2026-01-13", "2026-02-05", "2026-02-06", "2026-09-14", "2026-09-15"];
+  const navs = [200_000, 200_000, 279_074.84, 246_713.5, 972_215.53, 1_030_000, 1_040_000];
+  const verifiedFlows = [0, 0, 80_007.13, 0, 655_497.16, 0, 0];
+  let index = 100;
+  let peak = 100;
+  const series = dates.map((date, i) => {
+    const skipped = !repaired && verifiedFlows[i] !== 0;
+    const flow = repaired ? verifiedFlows[i] : 0;
+    const dailyReturn = i === 0 || skipped ? null : (navs[i] - navs[i - 1] - flow) / (navs[i - 1] + flow);
+    if (dailyReturn !== null) index *= 1 + dailyReturn;
+    peak = Math.max(peak, index);
+    return { date, nav: navs[i], twr_index: index, daily_return: dailyReturn, cum_return: index / 100 - 1, drawdown: index / peak - 1, flow, skipped };
+  });
+  const n = repaired ? 6 : 4;
+  return {
+    ...v2OkPayload(),
+    status: repaired ? "ok" : "degraded",
+    generated_at: "2026-09-16T12:00:00Z",
+    nav_as_of: "2026-09-15",
+    period_start: "2025-12-31",
+    period_end: "2026-09-15",
+    period_label: "Since first NAV",
+    calendar_days: 258,
+    flows_source: repaired ? "flex_cash_transactions+transfers+turso" : "flex_cash_transactions+transfers",
+    counts: { n_nav_observations: 7, n_subperiods: 6, n_returns: n, n_skipped: repaired ? 0 : 2, n_suspect: repaired ? 0 : 2 },
+    twr: { cum_return: repaired ? 0.01566201246168375 : null, annualized: gated(null, 258, 365, "period_lt_1y"), excludes_suspect: !repaired },
+    mwr: { period_return: gated(null, n, 20, "insufficient_n"), annualized: gated(null, 258, 365, "period_lt_1y"), multiple_sign_changes: false },
+    risk: {},
+    equity: { starting: 200_000, ending: 1_040_000, net_external_flows: repaired ? 735_504.29 : 0, investment_pnl: repaired ? 104_495.71 : null },
+    series,
+    subperiods: series.slice(1).map((point, i) => ({ date: point.date, b: navs[i], e: point.nav, c: point.flow, r: point.daily_return, flags: point.skipped ? ["suspect"] : [], skip_reason: point.skipped ? "suspect_no_flow" : null })),
+    warnings: repaired ? [] : [
+      { code: "SUBPERIOD_SUSPECT", severity: "error", message: "2026-01-13 moved +79,074.84 with no recorded external flow; excluded from the chain.", context: { date: "2026-01-13", flow: 0 } },
+      { code: "SUBPERIOD_SUSPECT", severity: "error", message: "2026-02-06 moved +725,502.03 with no recorded external flow; excluded from the chain.", context: { date: "2026-02-06", flow: 0 } },
+    ],
+  };
+}
+
 const PORTFOLIO_EMPTY = {
   bankroll: 100_000,
   peak_value: 100_000,
@@ -165,5 +209,56 @@ test.describe("/performance TWR payload contract", () => {
     await openPerformanceWith(page, legacyPayloadWithoutSchemaVersion());
 
     await expect(page.locator('[data-testid="performance-hero-twr"]')).toHaveText("--");
+  });
+
+  test("restored historical flows recover the full NAV window after refresh without relaxing the missing-flow guard", async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.clock.setFixedTime(new Date("2026-09-16T13:00:00Z"));
+    let repaired = false;
+    let performanceReads = 0;
+    const pageErrors: string[] = [];
+    page.on("pageerror", (error) => pageErrors.push(error.message));
+    // Keep this regression isolated from broker, database and external feeds.
+    await page.route("**/api/**", (route) => {
+      const path = new URL(route.request().url()).pathname;
+      let body: unknown = { error: "Unavailable in isolated performance fixture" };
+      let status = 503;
+      if (path === "/api/performance") {
+        performanceReads += 1;
+        body = historicalFlowPayload(repaired);
+        status = 200;
+      } else if (path === "/api/portfolio") {
+        body = { ...PORTFOLIO_EMPTY, last_sync: "2026-09-16T12:00:00Z" };
+        status = 200;
+      } else if (path === "/api/orders") {
+        body = { open_orders: [], executed_orders: [], open_count: 0, executed_count: 0 };
+        status = 200;
+      }
+      return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
+    });
+    await page.goto("/performance");
+    const hero = page.getByTestId("performance-hero-twr");
+    const banner = page.getByTestId("performance-degraded-banner");
+    await expect(hero).toHaveText("--");
+    await expect(banner).toContainText("2026-01-13 moved +79,074.84 with no recorded external flow");
+    await expect(banner).toContainText("2026-02-06 moved +725,502.03 with no recorded external flow");
+    await expect(page.getByTestId("performance-line-equity")).toHaveAttribute("d", "");
+    await expect(page.getByTestId("performance-period-label")).toContainText("2025-12-31 to 2026-09-15");
+    await page.screenshot({ path: testInfo.outputPath("performance-flow-history-degraded.png"), fullPage: true });
+
+    const readsBefore = performanceReads;
+    repaired = true;
+    await page.reload();
+    await expect.poll(() => performanceReads).toBeGreaterThan(readsBefore);
+    await expect(hero).toHaveText("+1.57%");
+    await expect(banner).toHaveCount(0);
+    await expect(page.getByTestId("performance-stale-banner")).toHaveCount(0);
+    await expect(page.getByTestId("performance-period-label")).toContainText("2025-12-31 to 2026-09-15");
+    await expect(page.getByTestId("performance-hero-subtitle")).toContainText("Ending equity $1,040,000.00 / as of 2026-09-15 / N=6");
+    await expect(page.getByText("External Flows", { exact: true }).locator("..")).toContainText("$735,504.29");
+    await expect(page.getByTestId("performance-line-equity")).toHaveAttribute("d", /M.+L/);
+    await expect(page.getByText(/SUBPERIOD_SUSPECT:/)).toHaveCount(0);
+    expect(pageErrors).toEqual([]);
+    await page.screenshot({ path: testInfo.outputPath("performance-flow-history-repaired.png"), fullPage: true });
   });
 });

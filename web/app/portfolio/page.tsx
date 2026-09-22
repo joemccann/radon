@@ -1,5 +1,8 @@
 import WorkspaceShell from "@/components/WorkspaceShell";
 import { readPortfolioSnapshotSeed } from "@/lib/portfolio/readPortfolioSnapshot.server";
+import { routeMetadata } from "@/lib/pageTitle";
+
+export const metadata = routeMetadata("/portfolio");
 
 export const dynamic = "force-dynamic";
 

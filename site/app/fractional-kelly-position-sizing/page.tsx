@@ -197,7 +197,7 @@ export default function FractionalKellyPositionSizingPage() {
                 <p className="mb-0 mt-[22px] max-w-[58ch] text-[1.02rem] leading-[1.55] text-secondary">
                   Full Kelly at 26.7% of bankroll on a single options spread is
                   the formula operating exactly as designed on an input it
-                  should not trust. Quarter Kelly shades it to 6.7%. The Radon
+                  should not trust. Half Kelly shades it to 13.3%. The Radon
                   cap then binds at 2.5%. Each layer between the raw formula
                   and the routed order exists to absorb the error in p.
                 </p>

@@ -6,8 +6,8 @@
 defaulted True when unset, so a missing or renamed EnvironmentFile yielded
 MAXIMUM autonomy rather than stand-down. The responder invokes
 `grok --always-approve` on a prompt built from watchdog `last_error` text and,
-on a `code_fix` disposition, runs `git push origin main` — which triggers the
-production auto-deploy. Bounds were per-ticket only (3 attempts, one ticket per
+on a `code_fix` disposition, pushes a `fix/*` branch and opens a PR. Bounds
+were per-ticket only (3 attempts, one ticket per
 service/severity/kind/hour), so a weekend of hourly P1s is ~24 independent
 autoship-and-push runs with no global ceiling.
 
@@ -108,6 +108,9 @@ class TestGlobalDailyActionCap:
         monkeypatch.setenv("GROK_PAGE_RESPONDER", "1")
         monkeypatch.setenv("GROK_PAGE_AUTOSHIP", "1")
         monkeypatch.setenv("GROK_PAGE_AUTOPUSH", "1")
+        monkeypatch.setattr(
+            responder, "install_push_guard", lambda _root: Path("pre-push")
+        )
         monkeypatch.setattr(
             pages_mod, "list_actionable_pages", lambda **_: [_page()]
         )

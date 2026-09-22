@@ -75,8 +75,11 @@ label is `MIXED` when either MA is null.
 - **Licensing**: FINRA-published aggregate statistics, same treatment as the shipped
   margin-debt indicator; display cites "Source: FINRA Fixed Income Market Activity".
 - **History**: dataset starts 2018-01-22 (~2,156 trading days per bondType).
-- **SPX overlay**: read `credit_spread_history.spx_close` from Turso (2007+; IB-first
-  writer already live). Never fetch SPX again.
+- **SPX overlay**: read `credit_spread_history.spx_close` from Turso (IB-first), filling
+  missing dates from the official Cboe SPX closes in `calm_streak_history.close`.
+  Credit spread history can cover a shorter window than HYAD; calm streak history
+  starts in 1985 and covers the full 2018+ HYAD window. Retain credit spread closes
+  on overlap. Never fetch SPX again.
 
 ## Backfill (run once with `--backfill`)
 
@@ -96,7 +99,7 @@ Composed-method style, stdlib parsing. Pure functions: `parse_breadth_rows(envel
 - Daily run: fetch a **rolling last-10-calendar-day window** (self-healing across
   bond-market holidays and late finalization) with one request per bondType, merge,
   validate, upsert only changed/new dates, then rebuild the payload series from the
-  full `hyad_history` table joined to `credit_spread_history.spx_close` (paginated
+  full `hyad_history` table joined to the combined SPX history above (paginated
   reads, Hrana-bounded).
 - **Empty-window guard**: a window returning zero CORP rows on a weekday run raises
   (retryable soft failure — do not latch ok, do not persist). Weekend/holiday runs
@@ -147,8 +150,9 @@ sqlite.
 }
 ```
 
-`series` ascending by date; `spx_close` null where `credit_spread_history` has no
-row (pre-2007 never happens here; holidays mismatch is fine).
+`series` ascending by date; `spx_close` is null only where neither SPX history
+has a close. Preserve calendar mismatches (for example, the equity-market closure
+on 2025-01-09); never forward-fill or interpolate them.
 
 ## API — `web/app/api/hyad/route.ts`
 

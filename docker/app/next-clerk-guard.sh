@@ -27,7 +27,8 @@ if [ ! -d "$static" ]; then
   exit 78
 fi
 
-if ! grep -RF -- "$key" "$static" >/dev/null 2>&1; then
+if ! baked_keys="$(LC_ALL=C grep -ERho 'pk_(test|live)_[A-Za-z0-9_+/=-]+' "$static")" \
+  || ! printf '%s\n' "$baked_keys" | grep -Fx -- "$key" >/dev/null 2>&1; then
   echo "next-clerk-guard: publishableKey not in client bundle; image was baked empty" >&2
   exit 78
 fi

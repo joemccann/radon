@@ -1,5 +1,7 @@
 "use client";
 
+import RequestError from "@/components/RequestError";
+
 import { useEffect, useMemo, useState } from "react";
 import { useTickerDetailOptional } from "@/lib/TickerDetailContext";
 import { useFuturesChain, type FuturesChainContract } from "@/lib/useFuturesChain";
@@ -186,7 +188,7 @@ export function FuturesOrderForm({ ticker, portfolio, priceData }: FuturesOrderF
     return <div className="futures-form-loading">Loading {symbol} futures chain…</div>;
   }
   if (error) {
-    return <div className="futures-form-error">Chain error: {error}</div>;
+    return <div className="tab-empty"><RequestError error={error} fallback="The contract chain could not be loaded. Try again." onRetry={() => window.location.reload()} /><button type="button" className="btn-secondary" onClick={() => window.location.reload()}>Reload data</button></div>;
   }
   if (!data || data.contracts.length === 0) {
     return <div className="futures-form-empty">No listed {symbol} futures.</div>;

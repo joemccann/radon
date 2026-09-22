@@ -1,4 +1,5 @@
 "use client";
+import ErrorToast from "@/components/ErrorToast";
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import Link from "next/link";
@@ -7,6 +8,7 @@ import { Loader2, Search, Sparkles } from "lucide-react";
 import InfoTooltip from "./InfoTooltip";
 import ScannerInstrumentShell from "./ScannerInstrumentShell";
 import SectionEmptyState from "./SectionEmptyState";
+import RequestError from "./RequestError";
 import { useWatchlist } from "@/lib/useWatchlist";
 import { ProposalCard } from "@/components/agent";
 import { buildScannerProposal } from "@/lib/agent/scannerProposal";
@@ -25,6 +27,7 @@ type ThetaHarvesterScannerProps = {
   loading?: boolean;
   scanning?: boolean;
   error?: string | null;
+  onRetry?: () => void;
   lastSync?: string | null;
   onScan?: (params: ThetaScanParams) => void;
   onTickerScan?: (ticker: string) => void;
@@ -346,6 +349,7 @@ export default function ThetaHarvesterScanner({
   loading = false,
   scanning = false,
   error = null,
+  onRetry,
   lastSync = null,
   onScan,
   onTickerScan,
@@ -487,7 +491,6 @@ export default function ThetaHarvesterScanner({
             spellCheck={false}
             aria-label="Ticker symbol"
             aria-invalid={tickerError ? "true" : "false"}
-            aria-describedby={tickerError ? "theta-ticker-search-error" : undefined}
           />
           <button
             type="submit"
@@ -498,9 +501,7 @@ export default function ThetaHarvesterScanner({
             Scan
           </button>
           {tickerError && (
-            <span id="theta-ticker-search-error" className="theta-search__error" role="alert">
-              {tickerError}
-            </span>
+            <ErrorToast message={tickerError} />
           )}
         </form>
       )}
@@ -583,15 +584,12 @@ export default function ThetaHarvesterScanner({
           onDismiss={() => setDismissedProposal(proposal.ticker)}
         />
       ) : null}
-      {loading ? (
+      {error && <RequestError error={error} onRetry={scanning ? undefined : onRetry} retainedData={rows.length > 0} />}
+      {loading && rows.length === 0 ? (
         <div className="section-body">
           <div className="snapshot-card__empty">Sampling theta surface...</div>
         </div>
-      ) : error ? (
-        <div className="section-body">
-          <div className="alert-item bearish">{error}</div>
-        </div>
-      ) : rows.length === 0 ? (
+      ) : error && rows.length === 0 ? null : rows.length === 0 ? (
         <div className="section-body">
           <SectionEmptyState
             icon={Sparkles}

@@ -21,6 +21,8 @@ export type PreferenceEntry = {
   unit: string;
   description: string;
   applies_immediately: boolean;
+  /** Server-declared: widening this value can cost money, so the UI confirms first. */
+  risk_gated: boolean;
   source: PreferenceSource;
   db_rejected: boolean;
   updated_at: string | null;

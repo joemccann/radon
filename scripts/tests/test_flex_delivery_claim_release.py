@@ -21,7 +21,7 @@ than one run period) is claimable again; a fresh one is reported as
 from __future__ import annotations
 
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -82,6 +82,7 @@ class FakeClaims:
 
 @pytest.fixture
 def claims(monkeypatch):
+    monkeypatch.setattr(ingest, "delivery_rows_present", lambda *a: True)
     fake = FakeClaims()
     monkeypatch.setattr(ingest, "claim_flex_delivery", fake.claim)
     monkeypatch.setattr(ingest, "release_flex_delivery", fake.release, raising=False)
@@ -376,7 +377,14 @@ class _RecordingDB:
 
 NOW = datetime(2026, 8, 30, 12, 0, 0, tzinfo=ZoneInfo("UTC"))
 NOW_ISO = "2026-08-30T12:00:00Z"
-CUTOFF_ISO = "2026-08-30T11:45:00Z"
+
+
+def _cutoff_iso() -> str:
+    from db import writer
+
+    return (NOW - timedelta(seconds=writer.FLEX_CLAIM_STALE_AFTER_S)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
 
 
 class TestWriterStatementsPinTheClaimStatus:
@@ -411,7 +419,7 @@ class TestWriterStatementsPinTheClaimStatus:
             "activity.xml",
             "in_progress",
             NOW_ISO,
-            CUTOFF_ISO,
+            _cutoff_iso(),
         ), params
 
     def test_claim_loses_when_no_row_was_inserted_or_updated(self, monkeypatch):
@@ -423,11 +431,22 @@ class TestWriterStatementsPinTheClaimStatus:
 
     def test_the_stale_window_is_shorter_than_the_timer_gap(self):
         """07:30 and 08:30 are the closest two runs; a lease older than the
-        window is dead (TimeoutStartSec=120 bounds a run), so the 08:30
-        re-pull re-ingests instead of waiting a day."""
+        window is dead. Must sit above TimeoutStartSec (no live steal) and
+        below the 3600s timer gap so the 08:30 re-pull repairs a 07:30
+        failure instead of waiting a day."""
         from db import writer
 
-        assert 120 < writer.FLEX_CLAIM_STALE_AFTER_S < 3600
+        unit = (
+            Path(__file__).resolve().parents[2]
+            / "cloud"
+            / "services"
+            / "radon-flex-pull.service"
+        )
+        timeout_line = next(
+            ln for ln in unit.read_text().splitlines() if ln.startswith("TimeoutStartSec=")
+        )
+        unit_timeout = int(timeout_line.split("=", 1)[1])
+        assert unit_timeout < writer.FLEX_CLAIM_STALE_AFTER_S < 3600
 
     def test_status_lookup_selects_by_digest(self, monkeypatch):
         from db import writer

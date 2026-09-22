@@ -12,17 +12,29 @@ WorkingDirectory=/home/radon/radon
 # Not /etc/radon/env: that file carries TWS_PASSWORD. Turso + sFTP live here.
 EnvironmentFile=-/var/lib/radon/flex-secrets/env
 Environment=RADON_DB_NO_REPLICA=1
-ExecStartPre=+/usr/bin/install -d -o radon -g radon -m 0700 /var/lib/radon/flex-inbox
+# systemd provisions the inbox symlink-safely as the unit's own user; no
+# full-root ExecStartPre=+ escape from the sandbox.
+StateDirectory=radon/flex-inbox
+StateDirectoryMode=0700
 ExecCondition=/usr/bin/test -f /home/radon/radon/scripts/flex_sftp_pull.py
 ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/flex_sftp_pull.py
 StandardOutput=journal
 StandardError=journal
-TimeoutStartSec=120
+# 2026-09-15: 120s killed a Tue catch-up (24 remote files + two ~60s
+# perf_twr ingests) at Result=timeout / NRestarts=0 with no heartbeat.
+# Script self-limits at SWEEP_BUDGET_S=780; headroom covers one in-flight
+# ingest. Must stay under the 07:30→08:30 ET timer gap (3600s).
+TimeoutStartSec=900
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectHome=read-only
 InaccessiblePaths=-/etc/radon/env -/home/radon/radon-cloud/.env
 ReadWritePaths=/var/lib/radon/flex-inbox /var/lib/radon/flex-secrets /home/radon/radon/data
+# Ingest atomic-writes sibling caches across data/ (performance.json,
+# cash_flows.json, nav caches), so the dir grant is required -- but the
+# journal and portfolio must never be writable from this unit. Deepest
+# path wins, so these file binds override the data/ grant above.
+ReadOnlyPaths=-/home/radon/radon/data/trade_log.json -/home/radon/radon/data/portfolio.json
 
 [Install]
 WantedBy=multi-user.target

@@ -174,6 +174,46 @@ Incident: 2026-07-08, P1.
 
 ---
 
+## tv-alerts-start-limit-healthy-drain
+
+**`radon-tv-alerts.service` oneshot pages P1 `Result=start-limit-hit`
+(`NRestarts=0`) while every drain that ran exited 0.** Peak: 2026-09-19
+20:05Z, page `8750de94…`. Recurs every ~30 min until Burst is raised.
+
+- **Mechanism:** `radon-tv-alerts.timer` fires every 5 minutes
+  (`OnCalendar=*:02/5:23`). The service copied the DUR-02 brake as
+  `StartLimitBurst=5` / `StartLimitIntervalSec=1800` under the comment
+  that 5 starts in 1800s meant half an hour of failures. systemd
+  StartLimit counts successful Type=oneshot starts. Six healthy fires
+  fit in 1800s, so the 6th is refused (`elapsed > interval` is false at
+  exactly 1800s, so two slots miss). The unit parks `failed` /
+  `start-limit-hit` and does not auto-recover until the window elapses.
+  The drain script is unused in the failure (`processed: 0` on the five
+  successes). IB unused. Edge and `:8321/health/lite` stay up.
+- **Detection:** journal five `[tv-alerts-drain] {"processed": 0, …}`
+  lines then a 10-minute gap; `systemctl show` during the gap →
+  `Result=start-limit-hit` / `NRestarts=0`; next fire 10 min later
+  succeeds and the pattern repeats. Watchdog unit bucket pages P1
+  because start-limit-hit never auto-recovers inside the window.
+- **Discriminating check:** StartLimitBurst <= timer fires in
+  StartLimitIntervalSec (here 5 <= 6). Script exit 0 on every run that
+  was allowed. `Result=signal` is deploy stop-clean. `Result=exit-code`
+  is a real drain failure (Pushover/Turso), a different class. If
+  `/health/lite` is down too → API, stand down.
+- **Remediation (code):** `StartLimitBurst=10` (ib-watchdog /
+  host-metrics / skew). Do not `reset-failed` as the fix; the next
+  timer already unparks when the window elapses, and the 30-min page
+  loop returns until the unit file is installed. After deploy,
+  `install-units` / `sync-scheduled-units` publishes the body.
+- **Regression:**
+  `test_systemd_services.py::TestRepeatingTimerStartLimitHeadroom`
+  (`test_every_repeating_timer_has_start_limit_headroom`,
+  `test_tv_alerts_five_minute_cadence_has_headroom`).
+- **Code:** `cloud/services/radon-tv-alerts.service`
+  (`StartLimitBurst=10`).
+
+---
+
 ## deploy-stop-clean-oneshot-signal
 
 **`Type=oneshot` scan units page P1 `Result=signal` when deploy
@@ -227,6 +267,18 @@ Incident: 2026-07-08, P1.
   sight paged P1. Edge and `:8321/health/lite` stayed up. Classifier
   now treats exit-code 143 as graceful-SIGTERM collateral inside a
   deploy window; other exit-codes still stay P1.
+- **2026-09-22 00:05Z:** page `9964f6e0`. Deploy stop-clean SIGTERM'd BPI
+  at 00:00:09Z during SPX chart fallback (NDX already upserted). The
+  handler logged `received signal 15; unwinding` and raised SystemExit,
+  but `ThreadPoolExecutor.shutdown(wait=True)` joined Yahoo workers that
+  did not return. TimeoutStopSec=90s later systemd SIGKILL'd
+  (ExecMainStatus=9, InactiveEnter 00:01:39Z) and recorded
+  `Result=timeout`, which this case does not downgrade. Sibling
+  long-running units restarted in that same minute. Edge stayed up.
+  Next BPI timer was 11:01Z. Handler now `os._exit(143)` so the join
+  cannot outlive the stop timeout. Do not widen the classifier to
+  `Result=timeout`: a real start-budget kill has the same Result and
+  must stay P1.
 - **Discriminating check:** `InactiveEnterTimestamp` before a later
   green-marker mtime (within the 24h oneshot horizon) or within
   60 min after the last green (cancelled stack / not-yet-green);
@@ -235,8 +287,10 @@ Incident: 2026-07-08, P1.
   `Result=exit-code` + `ExecMainStatus=143` is graceful SIGTERM
   unwind (same class as `signal`). A fresh successor journal does
   not override kill-before-green.
-- **Remediation:** classifier only, do not restart. Non-143 exit-code
-  and start-limit-hit stay P1.
+- **Remediation:** classifier downgrades `signal` and exit 143 only.
+  A chart-fallback hang that would have been `Result=timeout` exits
+  143 via `os._exit` before TimeoutStopSec. Do not restart. Non-143
+  exit-code, `Result=timeout`, and start-limit-hit stay P1.
 - **Regression:** `test_units.py::TestDeployCollateralSignalKill`
   (`test_stacked_deploy_signal_kill_34min_before_green_is_p3`,
   `test_signal_kill_after_last_green_during_cancelled_stack_is_p3`,
@@ -244,9 +298,12 @@ Incident: 2026-07-08, P1.
   `test_stacked_successor_green_158min_after_kill_is_p3`,
   `test_latched_kill_before_green_not_repaged_by_successor_inflight_journal`,
   `test_graceful_sigterm_exit_143_before_green_is_p3`,
-  `test_graceful_sigterm_exit_143_without_deploy_evidence_stays_p1`).
+  `test_graceful_sigterm_exit_143_without_deploy_evidence_stays_p1`),
+  `test_bpi_truncated_sweep.py::TestSigtermDuringChartFallbackExits`
+  (`test_sigterm_during_stuck_chart_fetch_exits_143`).
 - **Code:** `scripts/watchdog/units.py` (`DEPLOY_COLLATERAL_WINDOW_SECS=3600`,
-  `KILL_BEFORE_GREEN_FROZEN_CAP_SECS=86400`, `GRACEFUL_SIGTERM_EXIT_STATUS=143`).
+  `KILL_BEFORE_GREEN_FROZEN_CAP_SECS=86400`, `GRACEFUL_SIGTERM_EXIT_STATUS=143`),
+  `scripts/bpi_scan.py` (`install_sigterm_unwind`).
 
 ---
 
@@ -290,6 +347,43 @@ Reported 2026-08-25 as "502 on https://app.radon.run/admin".
   floor) and `::TestRestartWindowMechanism`, which runs a real caddy against a
   dead port and asserts the request is served once the upstream returns
   (`RADON_CADDY_BIN=<path>` to run it; skipped when no binary is present).
+
+---
+
+## relay-stop-sigterm-holds-the-tier
+
+**The edge 502s for about 90s during a deploy, then the deploy rolls back.**
+Reported 2026-09-21 19:25Z as production network timeouts on `/portfolio`.
+
+- **Mechanism:** `stop-clean` stops every app unit, then waits up to 60s for
+  each to go inactive. `radon-nextjs` and `radon-api` die on SIGTERM in about
+  a second. The relay's SIGINT listener cancelled market data and called
+  `ib.disconnect()` before `process.exit`, so the process stayed in
+  `stop-sigterm`. systemd's default `TimeoutStopSec` is 90s. Journal at
+  19:25:54Z: `unable to signal init: permission denied` (SIGCONT, AppArmor,
+  logged on every deploy, including the ones that stop in the same second),
+  then `State 'stop-sigterm' timed out` and SIGKILL of `node` at 19:27:24Z.
+  The helper aborted at 60s (`timed out waiting for radon-relay.service to
+  become inactive`, exit 71) and restored `761f57c`. Next.js was down
+  19:25:55Z to 19:27:26Z. The browser showed 502s on `/api/portfolio`,
+  `/api/admin/health`, and `/api/risk-free-rate`, plus the Chrome
+  `AbortSignal.timeout` toast. A same-day successful promote
+  (19:16:24Z to 19:18:26Z) held the tier down for two minutes inside
+  `activate_staged_release`; that window is not this case.
+- **Detection:** `journalctl -u radon-relay` shows `stop-sigterm timed out`
+  and `code=killed, status=9/KILL` about 90s after `Stopping`. Next.js
+  `Stopped` is within a second of the same `Stopping` line. Deploy log:
+  `timed out waiting for radon-relay.service to become inactive`.
+- **Discriminating check:** other app units `Stopped` in the same second
+  while the relay does not. A 502 burst that ends when `radon-nextjs`
+  reaches `active` and whose length matches `TimeoutStopSec` is this case.
+  A few-second burst on a relay that `Stopped` immediately is
+  `deploy-restart-window-edge-502`.
+- **Fix:** delete the relay SIGTERM/SIGINT listener so Node's default exit
+  runs. `TimeoutStopSec=10` on `radon-relay.service` SIGKILLs a wedged loop
+  before the 60s deploy wait and inside Caddy's 15s `lb_try_duration`.
+- **Regression:** `scripts/lib/relayStop.test.js`,
+  `cloud/tests/test_relay_container_watchdog.py::test_relay_stop_timeout_is_inside_the_deploy_wait`.
 
 ---
 
@@ -437,6 +531,52 @@ the unit stays failed.
 
 ---
 
+## cta-sync-fetch-timeout-expired
+
+**`radon-cta-sync.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) when hung Playwright raises `TimeoutExpired`.** Peak:
+2026-09-17 20:18Z, page `1e8d20a132ac2b56c844757d031309ef`. Next timer
+21:32 UTC.
+
+- **Mechanism:** `cta_sync_service.run_cta_sync` isolates
+  `fetch_menthorq_cta.py` in a subprocess (Playwright event-loop
+  isolation). `subprocess.run(..., timeout=300)` raised
+  `TimeoutExpired` uncaught. The retry loop never saw it (`timeout` is
+  retryable). `write_final_status` never ran, so
+  `cta-sync-latest.json` stayed `state=syncing` with
+  `last_attempt_finished_at=null`. `Type=oneshot` has no `Restart=`.
+  Unit `TimeoutStartSec=1800` was raised in CTA-02 because a cold
+  Playwright session takes 8-12 min; the Python timeout stayed 300s.
+  IB unused (`requires_ib: False`). Edge and `:8321/health/lite` stayed
+  up.
+- **Detection:** journal `subprocess.TimeoutExpired: Command '[...
+  fetch_menthorq_cta.py ...]' timed out after 300 seconds` then `CTA
+  sync runtime failed (exit 1)`; ExecMainStart to InactiveEnter is
+  exactly 300s; `systemctl show` → `exit-code` / `0`. Health row
+  `cta-sync` may still be `ok` from the prior skip/success.
+- **Discriminating check:** `TimeoutExpired` / `timed out after Ns` at
+  `cta_sync_service.run_cta_sync` with N matching the fetch timeout
+  (not `TimeoutStartSec`). `vision_cascade_exhausted` is ops_only
+  (whole cascade missed). `Result=signal` is deploy stop-clean. If
+  `/health/lite` is down too → API, stand down.
+- **Remediation (code):** `FETCH_TIMEOUT_S=720` (12 min cold session).
+  Catch `TimeoutExpired`, classify as `timeout`, retry once after 120s
+  (envelope 1560s < 1800s). Persistent hang writes `degraded` and exits
+  1. Do not restart-flap; next timer (21:30 UTC) or one
+  `radon unit restart radon-cta-sync.service` after the fix deploys.
+  Unit is not on `RERUNNABLE_ONESHOT_UNITS`.
+- **Regression:**
+  `test_cta_sync_service.py::TestFetchTimeoutEnvelope`
+  (`test_timeout_expired_retries_then_succeeds`,
+  `test_persistent_timeout_expired_writes_degraded_not_traceback`,
+  `test_service_timeout_covers_retry_envelope`),
+  `test_cta_sync_health.py::test_classify_subprocess_timeout_expired`.
+- **Code:** `scripts/cta_sync_service.py` (`FETCH_TIMEOUT_S`,
+  `TimeoutExpired` handler), `scripts/utils/cta_sync_health.py`
+  (`TIMEOUT_RETRY_BACKOFFS_SECONDS`).
+
+---
+
 ## divyield-yahoo-sweep-timeout
 
 **`radon-divyield.service` oneshot pages P1 `Result=timeout` (`NRestarts=0`)
@@ -528,15 +668,25 @@ on the daily 22:40 UTC timer.** Peak: 2026-08-23 23:57Z, page `c52496dd…`.
   `/off-exchange-volume` AAPL 0.94s) but the Tuesday timer is the only
   retry once the oneshot exits 0. Health row is that single cycle, not a
   daily re-fail.
+- **Follow-on (2026-09-22 09:31Z, page `a3d843f9…`):** the sweep budget
+  worked (`wall-clock budget spent (849/2487)` at 09:29:37Z, T+780 from
+  09:16:37Z) and then sync libsql persist was still running at
+  InactiveEnter 09:31:37Z. `Result=timeout`, `NRestarts=0`,
+  `ExecMainStatus=15`, CPU ~20s. `/health/lite` stayed up. JSON cache
+  mtime stayed 2026-09-15 (write never reached). Do not wrap `get_db()`
+  in a thread join: it holds the GIL. Persist is hrana, chunked, and
+  stops at `PERSIST_BUDGET_S=100`. `TimeoutStartSec` stays 900.
 - **Regression:**
   `test_equibles_ats_venue_share.py::TestSweepBudget`
   (`test_tarpitted_equibles_stops_inside_the_wall_clock_budget`,
   `test_tickers_finished_before_the_deadline_are_kept`,
   `test_timeout_on_one_ticker_does_not_budget_skip_the_rest`,
   `test_sweep_budget_fits_inside_unit_start_timeout`),
+  `test_equibles_ats_venue_share.py::TestPersistBudget`,
   `test_systemd_services.py::TestEquiblesAtsScanBudget`.
 - **Code:** `scripts/fetch_equibles_ats_venue_share.py` (`SWEEP_BUDGET_S`,
-  `TICKER_FETCH_BUDGET_S`, `_fetch_ticker_bounded`, `_replace_wedged_client`),
+  `TICKER_FETCH_BUDGET_S`, `PERSIST_BUDGET_S`, `_fetch_ticker_bounded`,
+  `_replace_wedged_client`, `_write_db_cache`),
   `cloud/services/radon-equibles-ats.service` (`TimeoutStartSec=900`).
 
 ---
@@ -668,6 +818,44 @@ largecaps scan.** Peak: 2026-08-20 14:15Z, page `99554c7a…`. Recurred
 
 ---
 
+## leap-reports-permission-502
+
+**`radon-leap.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
+after a mid-scan FastAPI 502 whose body is `PermissionError: … 'reports'`.**
+Peak: 2026-09-14 14:02:25Z, page `2ff864f6…`. Same shape 2026-09-11 14:01:33Z.
+
+- **Mechanism:** `/leap/scan` always passes `--json` with default
+  `--output reports/leap-scan-uw.html`. The radon-api image ships
+  `/home/radon/radon` root-owned and no `reports/` dir (only `data/` is the
+  writable bind mount). `main()` wrote the HTML report *before*
+  `data/leap.json`, so `mkdir(reports)` raised `PermissionError` after UW
+  work had already succeeded. FastAPI mapped the traceback to HTTP 502.
+  The wrapper (R-144 / R-221) saw a non-capacity 502, logged
+  `LEAP FastAPI outcome indeterminate (curl=0, http=502)`, refused the
+  direct fallback, and exited 1. `leap-scan` health and `leap.json` stayed
+  on the prior success (2026-09-08). Sibling GARCH in the same minute
+  completed OK because `--json` skips its HTML path.
+- **Detection:** unit journal indeterminate 502 after ~60–120s (not
+  instant); POST `/leap/scan?tickers=SPY` returns
+  `{"detail":"PermissionError: [Errno 13] Permission denied: 'reports'"}`;
+  container `ls` shows no `reports/` under root-owned `/home/radon/radon`;
+  `/health/lite` 200 / authenticated; UW cache writes during the window.
+- **Discriminating check:** 502 body contains `PermissionError` +
+  `reports` (this case). Instant capacity-exhausted body is
+  `leap-capacity-502`. Cache `len(results) > 0` with exit 1 is
+  `leap-partial-ticker-exit-pages-p1`. Zero results with cache preserved
+  is HB-013. If `/health/lite` is down too → API/IB, stand down.
+- **Remediation (code):** write `data/leap.json` + `leap-scan` health
+  first; treat the HTML / sidecar JSON under `--output` as best-effort
+  (`OSError` → stderr warning, exit still 0 when results exist). After
+  deploy, `reset-failed` + start (unit is on `RERUNNABLE_ONESHOT_UNITS`)
+  or wait for the next timer.
+- **Regression:**
+  `test_leap_scanner.py::test_unwritable_html_report_still_writes_cache_and_exits_zero`.
+- **Code:** `scripts/leap_scanner_uw.py` (`main` write order).
+
+---
+
 ## leap-capacity-502
 
 **`radon-leap.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
@@ -693,7 +881,8 @@ on an instant FastAPI 502 capacity shed at the 10:00 ET timer.** Peak:
   not this one. (The 2026-08-27 page predates the retry and shows the
   indeterminate line.)
 - **Discriminating check:** instant 502 with the capacity-exhausted
-  body (this case). A long run that ends
+  body (this case). A ~60–120s run whose 502 body is `PermissionError`
+  on `reports` is `leap-reports-permission-502`. A long run that ends
   `Script leap_scanner_uw.py failed (code 1)` after `SCAN COMPLETE` is
   `leap-partial-ticker-exit-pages-p1`. `Result=signal` is deploy
   stop-clean. If `/health/lite` is down too → API/IB, stand down.
@@ -797,6 +986,87 @@ Incident: 2026-08-15 00:24Z, P1 page `34ab3e3c…`.
   `test_non_transient_source_error_is_not_retried`).
 - **Code:** `scripts/knowledge/ingest.py` (`_is_transient_db_error`,
   `_fresh_db`, `_SOURCE_ATTEMPTS=4`).
+
+---
+
+## ai-cycle-raw-archive-resend-timeout
+
+**`radon-ai-cycle.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
+when daily `import_raw_archive` re-POSTs every on-disk raw blob to Turso.**
+Peak: 2026-09-17 07:22Z, page `1e842638…`. Timer next ~24h.
+
+- **Mechanism:** end of `--record` calls `store.import_raw_archive` over
+  `~/.radon/ai-cycle/raw` (1117 files / ~97MB that day). Each file became an
+  `INSERT OR IGNORE INTO ai_cycle_raw` of the full base64+zlib payload under
+  `HRANA_TIMEOUT_S=4`, even when the hash was already present (1105/1117).
+  One `HranaHttpError: TimeoutError` aborted before `persist_api_snapshot`.
+  Exception-path `_write_health` then also timed out and replaced the raised
+  error via "During handling". Observations for the day had already landed;
+  API snapshot stayed on the earlier backfill stamp. `Type=oneshot` has no
+  `Restart=`. Edge and `:8321/health/lite` stayed up; Python Turso canary
+  81 ms after the page.
+- **Detection:** journal stack at `store.import_raw_archive` /
+  `archive_raw` / `hrana_execute` with `TimeoutError: The read operation
+  timed out`; `systemctl show` → `exit-code` / `0`; ExecMainStart to
+  InactiveEnter minutes (collection + import), not the 1200s start budget;
+  `ai_cycle_observations` for today populated while `ai_cycle_api_snapshot`
+  `generated_at` is still the backfill time.
+- **Discriminating check:** Turso canary `SELECT 1` succeeds; failure is on
+  raw-archive INSERT (or the secondary health write), not provider fetch;
+  `SELECT COUNT(*) FROM ai_cycle_raw` already near on-disk file count.
+  Canary fail too → Turso platform, stand down. `Result=signal` is deploy
+  stop-clean. IB `/health/lite` down → API/IB, stand down.
+- **Remediation (code):** `import_raw_archive` SELECTs existing hashes once
+  and skips them; only missing digests INSERT. `_write_health` is
+  best-effort (log `[ai-cycle] service_health write failed`, do not raise).
+  Do not restart-flap before the skip-existing fix is live — a rerun still
+  re-sends every payload. After deploy, `radon unit restart
+  radon-ai-cycle.service` (or the next 07:15 UTC timer) recovers the
+  snapshot.
+- **Regression:**
+  `test_ai_cycle_core.py::test_import_raw_archive_does_not_resend_existing_payloads`,
+  `test_ai_cycle_collectors.py::test_production_health_write_timeout_does_not_mask_collection_failure`.
+- **Code:** `scripts/ai_cycle/store.py` (`import_raw_archive`),
+  `scripts/ai_cycle/collect.py` (`_write_health`).
+
+---
+
+## trin-health-heartbeat-timeout
+
+**`radon-trin.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
+on a Turso heartbeat timeout while the cycle added no new rows.** Peak:
+2026-09-15 13:22Z, page `e7d4d053…`. Next timer (13:27) succeeded.
+
+- **Mechanism:** pre-RTH 5-minute fire takes the no-new-samples path
+  (`persist_result` line that only heartbeats). `record_service_health`
+  uses bounded Hrana HTTP (`HRANA_TIMEOUT_S=4`). Concurrent
+  `radon-knowledge` ingest (13:21:13–13:23:37) held Turso; the 4s read
+  timed out; `HranaHttpError` was uncaught; `Type=oneshot` has no
+  `Restart=`. Sibling `fetch_ivrank._write_db` and `service_cycle._record`
+  already treat heartbeat as best-effort. Edge and `:8321/health/lite`
+  stayed up; Python Turso canary 78 ms after the page.
+- **Detection:** journal `HranaHttpError: TimeoutError: The read
+  operation timed out` at `fetch_trin.persist_result` /
+  `writer.record_service_health`; `systemctl show` → `exit-code` / `0`;
+  ExecMainStart to InactiveEnter ≈ 4s (the hrana budget, not
+  `TimeoutStartSec=240`); prior cycles that hour logged `no new samples
+  or daily rows` and exited 0.
+- **Discriminating check:** Turso canary `SELECT 1` succeeds from the
+  same host; journal stack is the heartbeat, not sample/daily upsert;
+  sibling oneshots (breadth, skew, knowledge) succeed in the same
+  minute. Canary fail too → Turso platform, stand down. `Result=signal`
+  is deploy stop-clean. IB `/health/lite` down → API/IB, stand down.
+- **Remediation (code):** `_record_health` catches heartbeat failures,
+  logs `[trin] service_health heartbeat failed`, writes the JSON
+  fallback, exits 0. Sample/daily/snapshot upserts still raise. Do not
+  restart-flap; next 5-minute timer recovers the unit. After deploy the
+  same timer is enough.
+- **Regression:**
+  `test_trin_persist_no_rows.py::test_hrana_timeout_on_the_no_new_rows_heartbeat_does_not_fail_the_oneshot`,
+  `test_main_exits_zero_when_the_no_new_rows_heartbeat_times_out`.
+- **Code:** `scripts/fetch_trin.py` (`_record_health`).
+- **Blast radius:** `fetch_hyad.persist_result` still calls
+  `record_service_health` uncaught on the unchanged-day path.
 
 ---
 
@@ -1109,6 +1379,21 @@ Incident: 2026-08-15 00:24Z, P1 page `34ab3e3c…`.
   `test_nextjs_unit_starting_stays_starting`,
   `test_newsfeed_unit_starting_payload_keeps_edge_ok`,
   `test_local_degraded_aggregate_clears_fresh_aggregate_down`.
+- **App-host remote broker down → false `aggregate_down` (2026-09-15,
+  page `3a6de316`):** REL-243 expired the app-role gateway exclusion
+  whenever nested `radon-api:broker` was not up past the 900s dwell,
+  including a true app host whose local unit is `UnitFileState=disabled`
+  `Result=success` (absent since the 2026-08-30 two-host split). Tuesday
+  19:50 ET is still inside the 04:00-20:00 EXT window, so dwell then
+  collapsed the aggregate to `down`. Off-box paged P1 while ping and
+  `/sign-in` stayed 200 and api/relay/nextjs stayed `up`. Nested broker
+  unreachable is already `radon-api:broker` (degraded). Discriminating
+  check: `host_role=app` + local gateway `Result=success` + serving path
+  up + `role_suppression_expired=true` → stay `degraded`, keep
+  `not_applicable`. A local crash (`Result=exit-code`) still expires
+  and pages. Do not restart the disabled app-host unit (2FA).
+  Regression:
+  `test_rel243_role_suppression_precondition.py::test_true_app_host_clean_absent_gateway_stays_degraded_when_broker_is_down`.
 
 ---
 
@@ -1354,6 +1639,52 @@ transient Turso HTTP 502 reading `scan_snapshots`.** Peak: 2026-08-21
 
 ---
 
+## calm-streak-shadowed-migration
+
+**`radon-calm-streak.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) with `no such table: calm_streak_history`.** Peak:
+2026-09-16 14:30Z, page `f6dc051e…`. Recurred 2026-09-17 14:31Z, page
+`b4a46e16…`.
+
+- **Mechanism:** two files shared version 74. `e4c76d9b` applied
+  `0074_liquidcompute_index` at 17:53Z (`schema_migrations` row 74,
+  `liquidcompute_index` present). `52b5c89e` / merge `95fd0430` later
+  added `0074_calm_streak.sql`. `apply_pending_migrations` skips any
+  file whose version is already in `schema_migrations`, so the
+  calm-streak table was never created. The 14:30 UTC oneshot probed
+  max(date) (non-fatal), then `upsert_calm_streak_rows` raised
+  `SQLITE_UNKNOWN: no such table`. `Type=oneshot` has no `Restart=`,
+  `NRestarts=0`. Edge and `:8321/health/lite` stayed up. Re-running
+  `migrate.py` is a no-op (version 74 already recorded). By the
+  2026-09-17 recurrence, `0075_vol_skew_mr_snapshots` had also landed
+  (max=75), so the free version became 76.
+- **Detection:** journal
+  `stored max-date probe non-fatal: ... no such table: calm_streak_history`
+  then `run failed:` same error;
+  `systemctl show` → `exit-code` / `0`.
+- **Discriminating check:** Turso canary `SELECT 1` succeeds;
+  `SELECT MAX(version) FROM schema_migrations` is 74+ with
+  `liquidcompute_index` present and `calm_streak_history` absent; two
+  files `0074_*.sql` in `scripts/db/migrations` on the failing SHA.
+  Canary fail too → Turso platform, stand down. `Result=signal` is
+  deploy stop-clean. If `/health/lite` is down too → API, stand down.
+- **Remediation (code):** give calm-streak the next free version
+  (0076 after vol-skew-mr took 75). `_list_migrations` aborts on a
+  duplicate version prefix so a collision fails ExecStartPre instead
+  of shipping a timer against a missing table. After deploy,
+  `radon-api` ExecStartPre applies 0076. Then
+  `systemctl reset-failed radon-calm-streak.service` and start, or
+  wait for the 02:40 UTC timer. Unit is not on
+  `RERUNNABLE_ONESHOT_UNITS`.
+- **Regression:**
+  `test_migrate.py::TestListMigrations::test_real_migration_version_prefixes_are_unique`,
+  `test_a_second_file_reusing_an_applied_version_aborts_instead_of_skipping`,
+  `test_calm_streak.py::TestStorage::test_migration_registers_version_76_and_reruns`.
+- **Code:** `scripts/db/migrations/0076_calm_streak.sql`,
+  `scripts/db/migrate.py` (`_list_migrations`).
+
+---
+
 ## signals-refresh-capacity-502
 
 **`radon-signals-refresh.service` oneshot pages P1 `Result=exit-code` when
@@ -1432,6 +1763,39 @@ all three flow-tab POSTs hit the FastAPI subprocess slot cap.** Peak:
 - **Host:** CI deploy `install-units` (hash bumped). No control-plane
   bootstrap. `reset-failed` is not required after this SHA: a shed no
   longer enters failed, and a leftover latch is digest-only.
+
+---
+
+## flow-refresh-analysis-timeout
+
+**`radon-flow-refresh.service` oneshot pages P1 `Result=exit-code` when
+`POST /flow-analysis` hits the FastAPI script timeout while scanner and
+discover succeed.** Peak: 2026-09-15 20:00:00Z, page `8e4a8285…`.
+Prior: 2026-09-11 20:00Z (same ~120s kill, no shed).
+
+- **Mechanism:** wrapper `SCAN_TIMEOUT` default is 180s and the unit
+  comment budgets three 180s POSTs inside `TimeoutStartSec=600`.
+  `/discover` already used `timeout=180`, but `/flow-analysis` stayed at
+  `timeout=120`. At the close, after an optional capacity-shed retry
+  (instant 502 + 8s sleep), `flow_analysis.py` ran to the 120s API kill.
+  FastAPI returned HTTP 502 `Script timed out after 120s` (no capacity
+  marker). The wrapper logged
+  `flow-analysis FastAPI outcome indeterminate (curl=0, http=502)` and
+  exited 1. `/health/lite` stayed authenticated; discover still OK.
+- **Discriminating check:** unit journal shows one flow-analysis POST
+  then indeterminate 502 ~120–128s later (optional
+  `FastAPI transient … retry 1/2` first); scanner OK; discover OK or
+  shed; radon-api `Script flow_analysis.py timed out after 120s`; not
+  `Subprocess capacity exhausted` on the final attempt. Deploy
+  stop-clean is `Result=signal`. Pure capacity shed is
+  `flow-refresh-capacity-502`.
+- **Remediation (code):** raise `/flow-analysis` `run_script` timeout to
+  180 so it matches the wrapper SCAN_TIMEOUT default and `/discover`.
+  Keep capacity-shed classification on the body marker; a real timeout
+  still exits 1.
+- **Regression:**
+  `scripts/api/tests/test_flow_tab_cooldown.py::test_flow_analysis_timeout_matches_wrapper_scan_budget`.
+- **Code:** `scripts/api/server.py` (`flow_analysis`).
 
 ---
 
@@ -1691,6 +2055,182 @@ page `c24fb393…`. Equity Summary at 07:30 ET had already ingested.
 
 ---
 
+## flex-pull-ingest-timeout
+
+**`radon-flex-pull.service` oneshot pages P1 `Result=timeout` (`NRestarts=0`)
+on the Tue..Sat 07:30 ET fire.** Peak: 2026-09-15 11:35Z, page `68388b70…`.
+
+- **Mechanism:** IBKR never removes deliveries from `outgoing`, so a morning
+  ls returns the full history (24 `.pgp` files on 2026-09-15: 12 Equity_Summary
+  + 12 Trade_History). The puller walked alphabetical oldest-first, re-pulled
+  duplicates, then ran NEW statement ingest (each `perf_twr` ~60s).
+  `TimeoutStartSec=120` SIGTERM'd mid-second Equity_Summary
+  (11:30:01Z → 11:32:01Z, `ExecMainStatus=15`). `Type=oneshot` has no
+  `Restart=`, so `NRestarts=0`. No `flex-pull` heartbeat (kill sat inside
+  ingest; prior row stayed 2026-09-12). IB unused; `/health/lite` stayed up.
+- **Detection:** `systemctl show radon-flex-pull.service -p
+  Result,NRestarts,ExecMainStartTimestamp,InactiveEnterTimestamp` →
+  `timeout` / `0` / span exactly `TimeoutStartSec`; journal shows
+  `[perf_twr] Wrote` then a second statement-shape WARN with no run-end
+  heartbeat; edge and `:8321/health/lite` up. `service_health.flex-pull`
+  may still be an older `error`/`ok` row.
+- **Discriminating check:** `Result=timeout` with ExecMainStart→Inactive
+  equal to `TimeoutStartSec` and mid-ingest journal (perf_twr / statement
+  shape) with no `[flex-pull]` terminal heartbeat. `Result=signal` is deploy
+  stop-clean (do not raise the budget). sFTP auth/host-key abort is
+  `Result=exit-code` with a health `error` row. If `/health/lite` is down
+  too → API, stand down.
+- **Remediation (code):** wall-clock `SWEEP_BUDGET_S=780` with newest-first
+  ordering so a budget stop still lands today's statement; SIGTERM→SystemExit
+  unwind heartbeats `class=timeout`. `TimeoutStartSec=900` covers the budget
+  plus one in-flight `INGEST_HEADROOM_S=90`. `FLEX_CLAIM_STALE_AFTER_S` raised
+  to 20 min so it stays above the start timeout and below the 07:30→08:30
+  gap. Do not restart-flap the hung run; the 08:30 ET timer retries. After
+  the fix deploys, `systemctl reset-failed radon-flex-pull.service` clears
+  the sticky timeout latch if the retry has not yet fired.
+- **Regression:**
+  `test_flex_pull_ingest_timeout.py::TestSweepBudget`,
+  `test_flex_pull_ingest_timeout.py::TestSigtermHeartbeat`,
+  `test_systemd_services.py::TestFlexPullScanBudget`.
+- **Code:** `scripts/flex_sftp_pull.py` (`SWEEP_BUDGET_S`, `order_for_ingest`,
+  `install_sigterm_unwind`), `cloud/services/radon-flex-pull.service`,
+  `scripts/db/writer.py` (`FLEX_CLAIM_STALE_AFTER_S`).
+
+---
+
+## flex-pull-twr-degraded-exit
+
+**`radon-flex-pull.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
+on the Tue..Sat 07:30 ET fire after today's Activity statement is applied.**
+Peak: 2026-09-16 11:35Z, page `5a2eb828…`.
+
+- **Mechanism:** newest-first ingest of `Equity_Summary_in_Base.20260915`
+  ran `cash_flow_sync --from-file` (exit 0) then
+  `perf_twr_builder.build_and_persist`. TWR persisted and returned
+  `status=degraded`. `ingest_xml` treated any TWR status other than
+  `ok`/`stale` as `ok: False`, released the claim, and
+  `flex_sftp_pull` raised `ingest_failed`. IBKR then RST'd kex on older
+  `outgoing` files (`sftp_get_failed` / `Connection reset by peer`);
+  any file error fails the oneshot. `Type=oneshot` has no `Restart=`,
+  so `NRestarts=0`. `radon-perf-twr` published `status=ok` three
+  minutes later. Edge and `:8321/health/lite` stayed up.
+- **Detection:** journal `[flex-pull] … ingest_failed:{… 'cash_exit': 0,
+  'twr_status': 'degraded' …}` then `sftp_get_failed` /
+  `kex_exchange_identification`; `systemctl show` → `exit-code` / `0`;
+  ExecMainStart→Inactive ~2 min, not `TimeoutStartSec`.
+- **Discriminating check:** `cash_exit=0` with `twr_status=degraded`
+  (this case). `Result=timeout` with no terminal heartbeat is
+  `flex-pull-ingest-timeout`. `ingest_failed` with
+  `outcome=coverage_unverified` and `classified_as=trades` is
+  `flex-pull-trade-coverage`. Host-key / auth abort is still
+  `Result=exit-code` with no ingest. If `/health/lite` is down too →
+  API, stand down.
+- **Remediation (code):** activity ingest is `ok` after cash exit 0;
+  TWR status is reported, not a delivery failure (REL-220; TWR
+  exceptions still release the claim). Transient `sftp_get_failed`
+  (kex RST / connection reset / timed out) after at least one file
+  was processed does not fail the oneshot. Newest-file RST still
+  fails. Do not restart-flap; the 08:30 ET timer retries. After
+  deploy, `systemctl reset-failed radon-flex-pull.service` if the
+  retry has not yet fired.
+- **Regression:**
+  `test_flex_delivery_ingest_atomicity.py::TestActivityShortCircuit::test_degraded_twr_after_cash_success_still_applies_the_claim`,
+  `test_flex_sftp_pull.py::test_historical_sftp_rst_after_newest_ingest_does_not_fail_the_oneshot`,
+  `test_flex_sftp_pull.py::test_historical_sftp_rst_after_duplicate_newest_does_not_fail_the_oneshot`,
+  `test_flex_sftp_pull.py::test_sftp_rst_on_the_newest_statement_still_fails_the_oneshot`.
+- **Code:** `scripts/flex_delivery_ingest.py` (`_apply_classified`),
+  `scripts/flex_sftp_pull.py` (`_is_transient_sftp_get`).
+
+---
+
+## flex-pull-trade-coverage
+
+**`radon-flex-pull.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
+after today's Activity statement is applied, on a historical Trade_History
+duplicate.** Peak: 2026-09-22 11:35Z, page `e1297eea…`.
+
+- **Mechanism:** newest-first applied the 2026-09-21 Equity_Summary
+  (`perf_twr` wrote, cash exit 0). `Trade_History.20260904` was already
+  an applied claim. `delivery_rows_present` required every Flex tradeID
+  in `journal.payload.ib_exec_id`. 106 of 127 matched. The other 21 were
+  absent because rehydrate's individual-fill path books nothing when
+  those fills already match the contract-day quantity and notional, and
+  the claim was still marked applied. `ingest_xml` returned
+  `coverage_unverified`, the puller exited 1, and older files then hit
+  IBKR kex RST. `Type=oneshot` has no `Restart=`, so `NRestarts=0`.
+  Span was about 3 min, not `TimeoutStartSec`. `:8321/health/lite` stayed up.
+- **Detection:** journal `ingest_failed:{… 'outcome': 'coverage_unverified',
+  'classified_as': 'trades' …}` then historical `sftp_get_failed` /
+  `kex_exchange_identification`. `systemctl show` → `exit-code` / `0`.
+- **Discriminating check:** `classified_as=trades` and
+  `outcome=coverage_unverified` on an applied duplicate whose missing
+  Flex tradeIDs are covered by individual IB fills (this case).
+  `twr_status=degraded` is `flex-pull-twr-degraded-exit`.
+  `classified_as=activity` with `outcome=coverage_unverified` is
+  `flex-pull-activity-nav`.
+  `Result=timeout` is `flex-pull-ingest-timeout`. An uncovered exec, or
+  a quantity or notional disagreement, stays unverified and is operator
+  reconciliation, not this fix. If `/health/lite` is down too → API, stand down.
+- **Remediation (code):** after the bounded journal walk exhausts, pending
+  Flex executions are covered when individual-fill reconciliation returns
+  no uncovered executions and no disagreements. Disagreements and truly
+  missing execs still fail the oneshot. Do not replay the delivery. Do not
+  restart-flap; the 08:30 ET timer retries. After deploy,
+  `systemctl reset-failed radon-flex-pull.service` if that retry has not
+  yet fired.
+- **Regression:**
+  `test_rel226_delivery_coverage.py::test_applied_trade_duplicate_covered_by_individual_fills_is_confirmed`,
+  `test_rel226_delivery_coverage.py::test_trade_duplicate_disagreement_stays_unverified`,
+  `test_rel226_delivery_coverage.py::test_trade_duplicate_uncovered_day_stays_unverified`.
+- **Code:** `scripts/flex_delivery_ingest.py` (`delivery_rows_present`).
+
+---
+
+## flex-pull-activity-nav
+
+**`radon-flex-pull.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
+on the Tue..Sat 08:30 ET retry after today's Activity statement was applied.**
+Peak: 2026-09-22 12:35Z, page `d3b66eaf…`.
+
+- **Mechanism:** the 07:30 ET run applied `Equity_Summary_in_Base.20260921`
+  and `20260918` (cash exit 0). The 20260921 build merged stored NAV through
+  2026-09-17 with a statement date outside `FlexStatement` from/to.
+  `_extend_statement_flows` treated that date as historical, found no
+  `twr_subperiods` row, and returned `historical_flow_coverage_unverified`.
+  The suppressed payload keeps `series` empty, so `_nav_snapshot_rows` wrote
+  nothing. `nav_snapshots` stayed at 2026-09-17 while `nav_as_of` was
+  2026-09-21 (`n_nav_observations` 189). Claims were marked `applied`
+  (REL-220). The 08:30 retry's duplicate check required those NAV dates,
+  returned `coverage_unverified` / `classified_as=activity`, and the oneshot
+  exited 1. Span was about 51s, not `TimeoutStartSec`. `:8321/health/lite`
+  stayed up.
+- **Detection:** journal `[flex-pull] … ingest_failed:{… 'outcome':
+  'coverage_unverified', 'classified_as': 'activity' …}` on
+  `Equity_Summary_in_Base` files; `systemctl show` → `exit-code` / `0`;
+  `nav_snapshots` max report_date older than the applied `period_to`.
+- **Discriminating check:** `classified_as=activity` and
+  `outcome=coverage_unverified` on an applied claim whose cash ids are
+  present (or the statement has no cash rows) and whose NAV dates are
+  absent from `nav_snapshots` (this case). `classified_as=trades` is
+  `flex-pull-trade-coverage`. `twr_status=degraded` on the first apply,
+  with no `coverage_unverified`, is `flex-pull-twr-degraded-exit`. A cash
+  id that is actually missing stays unverified and is operator
+  reconciliation, not this fix. If `/health/lite` is down too → API, stand down.
+- **Remediation (code):** a suppressed TWR payload still mirrors
+  `nav_points` into `nav_snapshots`. An applied activity duplicate whose
+  cash ids are present inserts only the missing NAV dates
+  (`ON CONFLICT DO NOTHING`, no cash replay). Do not restart-flap; the
+  next timer retries. After deploy, `systemctl reset-failed
+  radon-flex-pull.service` if that retry has not yet fired.
+- **Regression:**
+  `test_rel226_delivery_coverage.py::test_applied_activity_duplicate_inserts_missing_nav_without_reapply`,
+  `test_rel226_delivery_coverage.py::test_activity_duplicate_does_not_insert_nav_when_cash_is_missing`,
+  `test_flex_from_file.py::test_suppressed_statement_still_records_nav_points`.
+- **Code:** `scripts/flex_delivery_ingest.py` (`_repair_unmirrored_activity_nav`),
+  `scripts/perf_twr_builder.py` (`nav_points`, `_nav_snapshot_rows`).
+
+---
+
 ## flex-1025-lockout
 
 **IBKR Flex code 1025 is a token lockout.** Routine ingest is sFTP
@@ -1889,6 +2429,17 @@ Peak incident: 2026-08-15, operator signed in as joemccann on app.radon.run,
 - **Fix:** `normalizePerformanceData` fills missing arrays and derives NAV equity before either panel reads the payload. Builder now emits the same keys on new writes. Existing Turso rows stay valid through the adapter.
 - **Regression:** `web/tests/performance-panel-twr-payload.test.tsx`, `web/tests/performance-twr.test.ts` normalize case, `web/e2e/performance-twr-payload.spec.ts`, `tests/test_portfolio_performance.py`.
 
+## performance-twr-statement-replaces-history
+
+**`/performance` shows a window of a few days (`Since first NAV <recent date>`, `N=1`).**
+2026-09-15, app.radon.run/performance: `2026-09-11 to 2026-09-14`, every gated metric blank.
+
+- **Mechanism:** `flex_delivery_ingest.py` calls `perf_twr_builder.build_and_persist(from_file=...)` with the nightly sFTP Activity statement, which covers one or a few sessions. The from-file path used that statement as the whole NAV series, so the payload's `period_start` jumped to the statement's first date. The persist guard only refuses an OLDER `nav_as_of`, so the shorter, newer tape overwrote the full one the weekday build had published an hour earlier.
+- **Detection:** `data/performance.json` has `nav_source: flex_from_file` and a recent `period_start`; `radon-flex-pull` journal shows `period_from == period_to` for the source statement while `radon-perf-twr` logged `period=2025-12-31..` earlier the same morning.
+- **Fix:** the from-file build merges the statement over the stored series from `get_nav_snapshots(sendrequest=False)` (statement wins on overlapping dates).
+- **Recovery:** after deploy, the next weekday `radon-perf-twr` run or the next sFTP ingest republishes the full window; no data was lost (Turso `nav_history` / disk cache untouched).
+- **Regression:** `scripts/tests/test_flex_from_file.py::test_twr_from_file_keeps_stored_nav_history`.
+
 ## Grok auto-response on iPhone P1 pages
 
 Canonical: [`grok-page-responder.md`](grok-page-responder.md).
@@ -1899,9 +2450,10 @@ hour). VPS `radon-grok-page-responder.timer` (`scripts/grok_page_responder.py`,
 dedicated clone `/home/radon/radon-page-responder`) claims the row and
 runs headless Grok with this playbook: diagnose, stand down when this
 runbook says so, otherwise TDD and ship. A normal-priority `radon grok:`
-follow-up reports the disposition. After `git push origin main` and a
-green live gate, `deploy_notify.py` sends `radon deploy live`. Neither
-follow-up is P1.
+follow-up reports the disposition. After a `fix/**` push,
+`scripts/ir_ensure_pr.py` opens a PR against `main` (never merges). Joe
+or Mac Mini `gh` merges after CI green. Then a green live gate,
+`deploy_notify.py` sends `radon deploy live`. Neither follow-up is P1.
 
 Laptop launchd is off. Kill switches: `GROK_PAGE_RESPONDER=0`,
 `GROK_PAGE_AUTOSHIP=0` (diagnose only), `GROK_PAGE_AUTOPUSH=0`.
@@ -1917,3 +2469,24 @@ scans `data/incidents_remote/*.diagnosis.md`, pairs each with its
 missing) as a session-start banner plus model context, so the session opens
 ready to address the diagnosis. Resolved incidents never nag. No output = hook
 silent.
+
+## performance-twr-nightly-flow-history
+
+**`/performance` retains the full NAV window but shows `-- TWR`, `INFERRED_FLOW_CANDIDATE`, and `SUBPERIOD_SUSPECT` after nightly Activity ingestion.**
+
+- **Incident:** 2026-09-16, a one-day September 15 statement produced 185 NAV observations, 182 included returns and two suspect sessions. The January 13 and February 6 external flows remained in the verified ledger but were absent from the new payload.
+- **Mechanism:** extending the saved NAV series without extending its corresponding flow history treated the short statement's empty flow section as zero flows for the entire account history.
+- **Repair:** reconcile statement-covered flows with verified historical flow coverage alongside the NAV extension. The statement owns its covered interval, including explicit zero-flow corrections. Missing ledger or coverage evidence must still suppress publication; never apply the suggested NAV residual as a deposit.
+- **Recovery:** use the existing no-SendRequest performance rebuild against retained NAV and flow mirrors after checking their coverage. Confirm `n_suspect=0`, correct external-flow totals, full period bounds and non-null TWR in both the disk payload and served snapshot. The nightly ingest repair is still required to prevent recurrence.
+- **Regression:** `scripts/tests/test_flex_from_file.py` covers historical deposits with a short empty-flow statement; browser coverage preserves degraded gating and verifies a corrected payload restores the full-period TWR.
+
+## newsfeed-share-missing-subscription-502
+
+**POST `/api/newsfeed/share` 502s with toast "Voice rewrite unavailable. Showing the original copy."** Peak: 2026-09-19 16:09:36Z.
+
+- **Mechanism:** Next.js `chat()` meters SuperGrok / Claude Max grants from `~/.grok` and `~/.claude`. `2aba1229` stopped binding those dirs into `radon-nextjs` (internet-facing, refresh tokens). Prepaid `ANTHROPIC_API_KEY` / `XAI_API_KEY` in the container env are ignored unless `RADON_LADDER_ALLOW_PREPAID=1`. Auto-prefer then falls through to Anthropic and throws `Missing Anthropic subscription`. The share route maps that to 502. `radon-api` and `radon-newsfeed` still had the mounts.
+- **Discriminating check:** `journalctl -u radon-nextjs` contains `[newsfeed/share] voice rewrite failed: Error: Missing Anthropic subscription`. `docker inspect radon-nextjs.service` has no `/home/radon/.claude` or `.grok` bind. Caddy 502 from `response_header_timeout` is an empty body and takes ~30s; this 502 is immediate JSON.
+- **Remediation (code):** bind `.grok` / `.codex` / `.claude` into `radon-nextjs.service` the same way as api/newsfeed/research. Relay stays unbound. Share calls pass `reasoningEffort: "low"` so grok-4.6 does not spend the 1600-token budget on hidden reasoning. `parseVoiceCopy` accepts fenced JSON.
+- **Regression:** `cloud/tests/test_app_runtime.py::test_run_nextjs_binds_subscription_credential_dirs_readonly`, `test_run_relay_gets_no_subscription_credential_binds`, `web/tests/newsfeed-share-api.test.ts`, `web/tests/newsfeed-voice.test.ts`.
+- **Code:** `cloud/scripts/radon-app-runtime.sh`, `web/app/api/newsfeed/share/route.ts`, `web/lib/newsfeedVoice.ts`.
+- **Host:** next deploy of `radon-app-runtime` then restart `radon-nextjs`. Confirm `docker inspect` shows the three binds and a share rewrite returns 200.

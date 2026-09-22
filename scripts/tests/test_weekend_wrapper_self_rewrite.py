@@ -65,6 +65,11 @@ LOOPS = {
         "security-nightly",
         "com.radon.security-daily.plist",
     ),
+    "security-deepsec": (
+        "security_deepsec_nightly.sh",
+        "security-deepsec",
+        "com.radon.security-deepsec.plist",
+    ),
 }
 LOOP_IDS = sorted(LOOPS)
 
@@ -119,7 +124,7 @@ def _build(
     if marker:
         (clone / ".radon-weekend-runner").touch()
         # REL-180 (R-504): every wrapper requires its OWN loop marker as well.
-        for loop_marker in (".radon-security-runner", ".radon-reliability-runner", ".radon-testing-runner",
+        for loop_marker in (".radon-security-runner", ".radon-security-deepsec-runner", ".radon-reliability-runner", ".radon-testing-runner",
                             ".radon-ci-performance-runner", ".radon-documentation-runner"):
             (clone / loop_marker).touch()
 
@@ -185,7 +190,7 @@ def _build(
     # the marker the way a phase that actually finished would. The other
     # loops' wrappers do not grep for it and the extra line is inert there.
     complete_line = ""
-    if loop == "security":
+    if loop in ("security", "security-deepsec"):
         src = (REPO / "scripts" / script).read_text(encoding="utf-8")
         marker = re.search(r'PHASE_COMPLETE_MARKER="([^"]+)"', src).group(1)
         complete_line = f"echo '{marker} stub run_id=stub'\n"
@@ -479,7 +484,12 @@ def test_two_instances_in_one_clone_do_not_both_run(tmp_path: Path, loop: str) -
 # --------------------------------------------------------------------------
 ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=\S*$")
 GUARD = '[[ "${1:-}" == "--lock-lib-only" ]] && return 0 2>/dev/null'
-TIMEOUT_SNAP = 'TIMEOUT_BIN="$(command -v timeout || true)"'
+TIMEOUT_SNAP = 'TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"'
+# The fail-closed guard is builtins only (no fork): echo/return/exit.
+TIMEOUT_GUARD_RE = re.compile(
+    r'^\[\[ -n "\$TIMEOUT_BIN" \]\] \|\| \{ echo "[^`$]*" >&2; '
+    r"return 78 2>/dev/null \|\| exit 78; \}$"
+)
 
 
 def _prologue_top_level(src: str) -> list[str]:
@@ -552,6 +562,8 @@ class TestTheRunBodyIsParsedBeforeItRuns:
         for line in _prologue_top_level(src):
             if line in ("set -Eeuo pipefail", GUARD, TIMEOUT_SNAP):
                 continue
+            if TIMEOUT_GUARD_RE.match(line):
+                continue
             assert ASSIGNMENT.match(line) or re.match(r'^[A-Za-z_][A-Za-z0-9_]*="[^`]*"$', line), (
                 f"unexpected top-level statement before main(): {line!r}"
             )
@@ -586,7 +598,7 @@ class TestTheRunnerLockIsTakenOnce:
     def test_no_loop_cleans_away_the_runner_lock(self, loop: str) -> None:
         src = (REPO / "scripts" / LOOPS[loop][0]).read_text(encoding="utf-8")
         for line in src.splitlines():
-            if "git clean" in line and not line.strip().startswith("#"):
+            if " clean -fdxq" in line and not line.strip().startswith("#"):
                 assert "--exclude=.weekend-runner.lock" in line, line
 
     @pytest.mark.parametrize("loop", LOOP_IDS)
@@ -595,11 +607,11 @@ class TestTheRunnerLockIsTakenOnce:
         src = (REPO / "scripts" / LOOPS[loop][0]).read_text(encoding="utf-8")
         cleans = [
             line for line in src.splitlines()
-            if "git clean" in line and not line.strip().startswith("#")
+            if " clean -fdxq" in line and not line.strip().startswith("#")
         ]
         assert cleans, f"{loop} wrapper lost git clean"
         for line in cleans:
-            assert "git clean -fdxq" in line, line
+            assert "clean -fdxq" in line, line
             for kept in (
                 "--exclude=.env",
                 "--exclude=.env.ib-mode",

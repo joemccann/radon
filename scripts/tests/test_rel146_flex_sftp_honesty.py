@@ -11,7 +11,7 @@ R-416: the cutover date is a hardcoded constant with no env override, and
 scheduled runs.
 
 R-417: `_sftp` passes no `timeout=`, so a hung session reaches systemd's
-`TimeoutStartSec=120` SIGKILL and no heartbeat runs at all.
+`TimeoutStartSec` SIGKILL and no heartbeat runs at all.
 
 R-418: ssh_config validation is a raw substring scan. `StrictHostKeyChecking
 off` is not in the reject list, and ssh_config is FIRST-MATCH-WINS, so an `off`
@@ -130,7 +130,17 @@ class TestAHungSessionStillHeartbeats:
 
         pull.list_remote_gpg(config=_write(tmp_path, _config_lines()), runner=_runner)
         assert seen and seen[0].get("timeout"), seen
-        assert seen[0]["timeout"] < 120, "must be well under TimeoutStartSec=120"
+        unit = (
+            Path(__file__).resolve().parents[2]
+            / "cloud"
+            / "services"
+            / "radon-flex-pull.service"
+        )
+        timeout_line = next(
+            ln for ln in unit.read_text().splitlines() if ln.startswith("TimeoutStartSec=")
+        )
+        unit_timeout = int(timeout_line.split("=", 1)[1])
+        assert seen[0]["timeout"] < unit_timeout, "must be well under TimeoutStartSec"
 
     def test_a_timeout_exits_one_with_an_error_row(self, tmp_path, monkeypatch):
         beats: list[tuple] = []
@@ -162,7 +172,7 @@ class TestOnlyNewStatementsCountAsProgress:
             inbox=inbox,
             runner=FakeSftp({"activity.gpg": b"<FlexQueryResponse/>"}),
             decrypt=lambda data, **k: data.decode(),
-            ingest=lambda xml_text, source_path="", **k: {"ok": True, "outcome": outcome},
+            ingest=lambda xml_text, source_path="", **k: {"ok": True, "outcome": outcome, "persistence_confirmed": True},
             now=now,
         )
         return code, beats
@@ -233,7 +243,7 @@ class TestFreshnessIsPerQueryNotPerDirectory:
     stoppage could never fire the error branch. NF-10: a suppression with no
     dwell bound."""
 
-    def _drive(self, tmp_path, monkeypatch, files, *, now, outcome="duplicate"):
+    def _drive(self, tmp_path, monkeypatch, files, *, now, outcome="duplicate", confirmed=True):
         beats: list[tuple] = []
         monkeypatch.setattr(pull, "_heartbeat", lambda state, error=None: beats.append((state, error)))
         monkeypatch.setattr(pull, "nightly_period_ok", lambda _x: True)
@@ -245,10 +255,20 @@ class TestFreshnessIsPerQueryNotPerDirectory:
             inbox=inbox,
             runner=FakeSftp({name: xml.encode() for name, xml in files.items()}),
             decrypt=lambda data, **k: data.decode(),
-            ingest=lambda xml_text, source_path="", **k: {"ok": True, "outcome": outcome},
+            ingest=lambda xml_text, source_path="", **k: {"ok": True, "outcome": outcome, "persistence_confirmed": confirmed},
             now=now,
         )
         return code, beats
+
+    def test_fresh_duplicate_without_persistence_evidence_pages(self, tmp_path, monkeypatch):
+        now = datetime(2026, 9, 2, 8, 0, tzinfo=pull.ZoneInfo(ZONE))
+        code, beats = self._drive(
+            tmp_path, monkeypatch,
+            {"U123.Equity.20260901.20260901.xml.pgp": self._statement("20260901")},
+            now=now, confirmed=False,
+        )
+        assert code == 1
+        assert beats[-1][0] == "error"
 
     @staticmethod
     def _statement(to_date: str) -> str:
@@ -353,7 +373,7 @@ class TestDeliveryStalenessGate:
             inbox=inbox,
             runner=FakeSftp({"activity.gpg": self._xml(to_date)}),
             decrypt=lambda data, **k: data.decode(),
-            ingest=lambda xml_text, source_path="", **k: {"ok": True, "outcome": "duplicate"},
+            ingest=lambda xml_text, source_path="", **k: {"ok": True, "outcome": "duplicate", "persistence_confirmed": True},
             now=self.NOW,
         )
         return code, beats

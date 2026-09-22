@@ -13,6 +13,8 @@
 .feedThumbnail img { width: 100%; height: 72px; object-fit: contain; }
 .feedSource { margin: 4px 0; color: var(--text-muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .feedSource a { color: var(--signal-core-text); }
+.feedSourceLink { display: inline-flex; align-items: center; gap: 6px; vertical-align: middle; }
+.publisherBadgeWrapper { display: flex; align-items: center; margin-bottom: 6px; }
 
 .feedCaption.feedCaption span { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
 

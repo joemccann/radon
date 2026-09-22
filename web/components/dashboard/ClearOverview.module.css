@@ -71,7 +71,7 @@
 .riskTrack span { display: block; height: 100%; background: var(--positive); }
 .riskTrack[data-tone="attention"] span { background: var(--warning); }
 .riskTrack[data-tone="critical"] span { background: var(--negative); }
-.riskDescription, .exposure p, .research p { color: var(--text-muted); font-size: 13px; line-height: 1.65; }
+.riskDescription, .exposure p { color: var(--text-muted); font-size: 13px; line-height: 1.65; }
 .riskDescription { margin: 12px 0 0; }
 .exposure { margin: 16px 0 23px; padding: 24px 0 18px; border-top: 1px solid var(--line-grid); border-bottom: 1px solid var(--line-grid); }
 .exposure h3 { margin: 0 0 18px; font-size: 15px; font-weight: 550; }
@@ -80,15 +80,6 @@
 .exposure dt { color: var(--text-muted); }
 .exposure dd { margin: 0; font-size: 14px; font-variant-numeric: tabular-nums; }
 .exposure p { margin: 18px 0 0; }
-.eyebrow { color: var(--text-muted); font-size: 12px; }
-.research h3 { margin: 15px 0 9px; font-size: 23px; line-height: 1.25; letter-spacing: -0.035em; font-weight: 500; }
-.research p { margin: 0 0 22px; }
-.primary, .secondaryAction { display: flex; align-items: center; justify-content: space-between; min-height: 44px; gap: 8px; padding: 0 14px; border-radius: 6px; font-size: 13px; font-weight: 550; text-decoration: none; }
-.primary { background: var(--signal-core); color: var(--text-on-accent); }
-.primary:hover { background: color-mix(in srgb, var(--signal-core) 85%, var(--text-primary)); }
-.secondaryAction { justify-content: center; margin-top: 9px; border: 1px solid var(--line-grid); color: var(--text-primary); }
-.secondaryAction:hover { background: var(--bg-panel-raised); }
-.research > .textLink { width: 100%; margin-top: 10px; }
 .mobileRisk { display: none; }
 .intelligenceHeading { margin: 38px 0 22px; padding-top: 30px; border-top: 1px solid var(--line-grid); scroll-margin-top: 115px; }
 .intelligenceHeading h2 { margin: 0; font-size: 24px; font-weight: 550; letter-spacing: -0.035em; }
@@ -110,7 +101,6 @@
   .overview { grid-template-columns: 1fr; gap: 32px; }
   .rail { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
   .exposure { border-top: 0; margin: 0; padding-top: 0; border-bottom: 0; }
-  .research { grid-column: 1 / -1; border-top: 1px solid var(--line-grid); padding-top: 23px; }
   .securityMark { display: grid; }
   .balance { font-size: 54px; }
 }
@@ -148,11 +138,9 @@
   .positionPnl { grid-column: 2; grid-row: 1 / 3; }
   .positionPnl small { display: block; margin-top: 6px; }
   .rail { display: block; padding: 24px; }
-  .riskDescription, .exposure p, .research p { font-size: 14px; }
+  .riskDescription, .exposure p { font-size: 14px; }
   .exposure { margin: 22px 0; padding: 24px 0 18px; border-top: 1px solid var(--line-grid); border-bottom: 1px solid var(--line-grid); }
   .exposure dl > div { font-size: 13px; }
-  .research { border-top: 0; padding-top: 0; }
-  .primary, .secondaryAction { min-height: 46px; font-size: 14px; }
 }
 
 @media (max-width: 374px) {

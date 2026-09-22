@@ -2,9 +2,12 @@
 """
 Fetch analyst ratings and rating changes for tickers.
 
-Data Source Priority (IB → UW only — Yahoo/yfinance removed 2026-06-01):
+Data Source Priority (IB → consensus rung → UW — Yahoo/yfinance removed 2026-06-01):
   1. Interactive Brokers (reqFundamentalData 'RESC') - Most reliable, requires subscription
-  2. Unusual Whales (GET /api/screener/analysts) - Aggregated per-firm consensus, targets, history
+  2. Optional consensus rung injected by the CLI entry (fetch_analyst_ratings_rh.py);
+     kept out of this module so gate files importing it stay free of that
+     source. Skipped when the caller needs rating-change history.
+  3. Unusual Whales (GET /api/screener/analysts) - Aggregated per-firm consensus, targets, history
 
 When neither yields ratings, serve the last-known cached consensus, else a
 clean "unavailable" state — never the old developer-facing yfinance error.
@@ -28,7 +31,7 @@ import time
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 import argparse
 import fcntl
 
@@ -432,11 +435,20 @@ def fetch_from_uw(ticker: str) -> Optional[dict]:
 # Main Fetch Function with Priority
 # =============================================================================
 
-def fetch_analyst_ratings(ticker: str, use_cache: bool = True, force_source: str = None, client=None) -> dict:
+def fetch_analyst_ratings(
+    ticker: str,
+    use_cache: bool = True,
+    force_source: str = None,
+    client=None,
+    need_history: bool = False,
+    consensus_rung: Optional[Callable[[str], Optional[dict]]] = None,
+) -> dict:
     """
-    Fetch analyst ratings with data source priority (IB → UW only — no Yahoo):
+    Fetch analyst ratings with data source priority (IB → consensus rung → UW, no Yahoo):
     1. Interactive Brokers (if connected, requires Reuters subscription)
-    2. Unusual Whales (/api/screener/analysts)
+    2. ``consensus_rung`` when given — skipped when ``need_history`` (it carries
+       no rating changes)
+    3. Unusual Whales (/api/screener/analysts)
 
     When neither source yields ratings (IB unsubscribed AND UW rate-limited /
     down), fall back to the last-known cached consensus if present, else return
@@ -452,7 +464,7 @@ def fetch_analyst_ratings(ticker: str, use_cache: bool = True, force_source: str
 
     last_error = None
 
-    # Priority 1: IB (unless forced to UW)
+    # Priority 1: IB (unless forced elsewhere)
     if force_source != "uw" and client is not None:
         result = fetch_from_ib(client, ticker)
         if result and not result.get("error"):
@@ -460,14 +472,20 @@ def fetch_analyst_ratings(ticker: str, use_cache: bool = True, force_source: str
         if result and result.get("error"):
             last_error = result.get("error")
 
-    # Priority 2: Unusual Whales
+    # Priority 2: injected consensus rung (spares a UW call)
+    if consensus_rung is not None and force_source != "uw" and not need_history:
+        result = consensus_rung(ticker)
+        if result:
+            return result
+
+    # Priority 3: Unusual Whales
     result = fetch_from_uw(ticker)
     if result and not result.get("error") and result.get("ratings"):
         return result
     if result and result.get("error"):
         last_error = result.get("error")
 
-    # No Yahoo/yfinance fallback (per data-source policy: IB → UW only). Serve the
+    # No Yahoo/yfinance fallback (per data-source policy: IB → consensus rung → UW only). Serve the
     # last-known cached consensus if we have one, else a clean unavailable state.
     if use_cache:
         stale = get_cached_rating(ticker, allow_stale=True)
@@ -669,7 +687,7 @@ def format_ratings_table(results: list, changes_only: bool = False) -> str:
                     lines.append(f"  {h['date']} {h['firm'][:20]:<20} {arrow} {h.get('from_grade', 'N/A')} → {h.get('to_grade', 'N/A')}")
     
     lines.append("\n" + "="*95)
-    lines.append("Sources: IB = Interactive Brokers, uw = Unusual Whales, © = cached")
+    lines.append("Sources: IB = Interactive Brokers, rh = consensus rung, uw = Unusual Whales, © = cached")
     
     return "\n".join(lines)
 
@@ -705,7 +723,7 @@ def update_watchlist_with_ratings(tickers: list, ratings_data: dict) -> None:
         )
 
 
-def main():
+def main(consensus_rung: Optional[Callable[[str], Optional[dict]]] = None):
     parser = argparse.ArgumentParser(description="Fetch analyst ratings for tickers")
     parser.add_argument("tickers", nargs="*", help="Ticker symbols to check")
     parser.add_argument("--watchlist", action="store_true", help="Check all watchlist tickers")
@@ -747,9 +765,9 @@ def main():
         if ib_connected:
             print("Connected ✓", file=sys.stderr)
         else:
-            print("Not available, falling back to UW", file=sys.stderr)
+            print("Not available, falling back", file=sys.stderr)
     else:
-        print("Using Unusual Whales (forced)", file=sys.stderr)
+        print(f"Using {args.source.upper()} (forced)", file=sys.stderr)
 
     # Fetch ratings
     results = []
@@ -765,6 +783,8 @@ def main():
             use_cache=not args.no_cache,
             force_source=args.source,
             client=client,
+            need_history=args.changes_only,
+            consensus_rung=consensus_rung,
         )
         results.append(data)
         ratings_dict[ticker] = data

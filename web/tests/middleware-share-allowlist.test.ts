@@ -144,6 +144,13 @@ describe("PUBLIC_WEBHOOK_API_ROUTES — explicit signature-gated webhook allowli
     }
   });
 
+  it("a [param] segment matches exactly one segment, nothing broader", () => {
+    expect(isPublicRoute(reqFor("/api/webhooks/tradingview/abc_DEF-123"))).toBe(true);
+    expect(isPublicRoute(reqFor("/api/webhooks/tradingview"))).toBe(false);
+    expect(isPublicRoute(reqFor("/api/webhooks/tradingview/a/b"))).toBe(false);
+    expect(isPublicRoute(reqFor("/api/webhooks/other"))).toBe(false);
+  });
+
   it("allowlist matches the webhook route files on disk exactly", () => {
     const onDisk = collectWebhookRoutesFromFilesystem();
     expect([...PUBLIC_WEBHOOK_API_ROUTES].sort()).toEqual(onDisk);

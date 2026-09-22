@@ -6,6 +6,7 @@ import InfoTooltip from "./InfoTooltip";
 import ScannerInstrumentShell from "./ScannerInstrumentShell";
 import ScannerTickerSearch from "./ScannerTickerSearch";
 import SectionEmptyState from "./SectionEmptyState";
+import RequestError from "./RequestError";
 import { SigMeter } from "./SigMeter";
 import SortTh from "./SortTh";
 import { SERVICE_FRESHNESS_WINDOWS } from "@/lib/serviceHealthWindows";
@@ -21,6 +22,7 @@ type LeapScannerProps = {
   loading?: boolean;
   scanning?: boolean;
   error?: string | null;
+  onRetry?: () => void;
   lastSync?: string | null;
   onScan?: () => void;
   onTickerScan?: (tickers: string[]) => void;
@@ -138,6 +140,7 @@ export default function LeapScanner({
   loading = false,
   scanning = false,
   error = null,
+  onRetry,
   lastSync = null,
   onScan,
   onTickerScan,
@@ -217,9 +220,8 @@ export default function LeapScanner({
       testId="leap-scanner-section"
     >
       <div className="section-body">
-        {error ? (
-          <div className="alert-item bearish">{error}</div>
-        ) : loading && rows.length === 0 ? (
+        {error && <RequestError error={error} onRetry={scanning ? undefined : onRetry} retainedData={rows.length > 0} />}
+        {error && rows.length === 0 ? null : loading && rows.length === 0 ? (
           <div className="report-meta">Sampling…</div>
         ) : rows.length === 0 && data?.universe === "explicit" ? (
           <SectionEmptyState

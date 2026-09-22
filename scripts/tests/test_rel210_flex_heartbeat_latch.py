@@ -25,6 +25,8 @@ ACTIVITY_XML = FIXTURES / "cash_transactions_flex_ytd_detail_sample.xml"
 
 @pytest.fixture(autouse=True)
 def _reset_latch(monkeypatch):
+    # These cases isolate heartbeat ordering; row coverage has its own fault suite.
+    monkeypatch.setattr(ingest, "delivery_rows_present", lambda *a: True)
     monkeypatch.setattr(ingest, "_CASH_FLOW_ERROR_LATCHED", False, raising=False)
 
 

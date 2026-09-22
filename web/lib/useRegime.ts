@@ -111,7 +111,7 @@ export const REGIME_STALE_RETRY_MS = 5000;
 export const REGIME_SYNC_CONFIG = {
   endpoint: "/api/regime",
   interval: 60_000,
-  hasPost: true,
+  hasPost: false,
   extractTimestamp: (d: CriData) => d.scan_time || null,
   shouldRetry: (d: CriData) => needsCurrentEtSessionRetry(d),
   retryIntervalMs: REGIME_STALE_RETRY_MS,

@@ -30,7 +30,7 @@ WEEKLY_LIMIT_LINE = "You've hit your weekly limit · resets Monday"
 # loop — and run codex, then grok, then NVIDIA, then Cerebras. Their ladder
 # behaviour is asserted in test_provider_failover.py; what stays here is the
 # claude-rung behaviour, against the loop that still has claude rungs.
-CLAUDE_LOOPS = ["security"]
+CLAUDE_LOOPS = ["security", "security-deepsec"]
 
 @pytest.mark.parametrize("loop", CLAUDE_LOOPS)
 class TestASharedSessionCapIsIncompleteNotFailed:

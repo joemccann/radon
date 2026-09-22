@@ -73,6 +73,7 @@ describe.each([
   ["trin", "app/regime/trin/page.tsx"],
   ["divyield", "app/regime/divyield/page.tsx"],
   ["ma-ratio", "app/regime/ma-ratio/page.tsx"],
+  ["calm-streak", "app/regime/calm-streak/page.tsx"],
   ["hyad", "app/regime/hyad/page.tsx"],
   ["hhlev", "app/regime/hhlev/page.tsx"],
   ["cot", "app/regime/cot/page.tsx"],
@@ -81,6 +82,7 @@ describe.each([
   ["ivrank", "app/regime/ivrank/page.tsx"],
   ["iv-spread", "app/regime/iv-spread/page.tsx"],
   ["vixts", "app/regime/vixts/page.tsx"],
+  ["panic-index", "app/regime/panic-index/page.tsx"],
   ["dispersion", "app/regime/dispersion/page.tsx"],
   ["streaks", "app/regime/streaks/page.tsx"],
 ])("app/regime/%s/page.tsx exists and mounts WorkspaceShell", (tab, rel) => {
@@ -160,6 +162,9 @@ vi.mock("../components/DivYieldPanel", () => ({
 vi.mock("../components/MaRatioPanel", () => ({
   default: () => <div data-testid="ma-ratio-panel-stub" />,
 }));
+vi.mock("../components/CalmStreakPanel", () => ({
+  default: () => <div data-testid="calm-streak-panel-stub" />,
+}));
 vi.mock("../components/HyAdPanel", () => ({
   default: () => <div data-testid="hyad-panel-stub" />,
 }));
@@ -183,6 +188,9 @@ vi.mock("../components/IvSpreadPanel", () => ({
 }));
 vi.mock("../components/VixTsPanel", () => ({
   default: () => <div data-testid="vixts-panel-stub" />,
+}));
+vi.mock("../components/PanicIndexPanel", () => ({
+  default: () => <div data-testid="panic-index-panel-stub" />,
 }));
 vi.mock("../components/DispersionPanel", () => ({
   default: () => <div data-testid="dispersion-panel-stub" />,
@@ -452,6 +460,20 @@ describe("RegimePanel — tab is URL-driven", () => {
     expect(pushSpy).toHaveBeenCalledWith("/regime/ma-ratio");
   });
 
+  it("renders the CALM STREAK panel when pathname is /regime/calm-streak", () => {
+    mockedPathname = "/regime/calm-streak";
+    const { container } = render(<RegimePanel prices={{}} />);
+    expect(within(container).getByTestId("calm-streak-panel-stub")).toBeTruthy();
+    expect(within(container).queryByTestId("ma-ratio-panel-stub")).toBeNull();
+  });
+
+  it("clicking CALM STREAK tab pushes /regime/calm-streak", () => {
+    mockedPathname = "/regime/cri";
+    const { container } = render(<RegimePanel prices={{}} />);
+    within(container).getByRole("button", { name: /^CALM STREAK$/ }).click();
+    expect(pushSpy).toHaveBeenCalledWith("/regime/calm-streak");
+  });
+
   it("renders the HY AD panel when pathname is /regime/hyad", () => {
     mockedPathname = "/regime/hyad";
     const { container } = render(<RegimePanel prices={{}} />);
@@ -569,6 +591,20 @@ describe("RegimePanel — tab is URL-driven", () => {
     const { container } = render(<RegimePanel prices={{}} />);
     within(container).getByRole("button", { name: /^VIX TS$/ }).click();
     expect(pushSpy).toHaveBeenCalledWith("/regime/vixts");
+  });
+
+  it("renders the Panic Proxy panel when pathname is /regime/panic-index", () => {
+    mockedPathname = "/regime/panic-index";
+    const { container } = render(<RegimePanel prices={{}} />);
+    expect(within(container).getByTestId("panic-index-panel-stub")).toBeTruthy();
+    expect(within(container).queryByTestId("vixts-panel-stub")).toBeNull();
+  });
+
+  it("clicking PANIC tab pushes /regime/panic-index", () => {
+    mockedPathname = "/regime/cri";
+    const { container } = render(<RegimePanel prices={{}} />);
+    within(container).getByRole("button", { name: /^PANIC$/ }).click();
+    expect(pushSpy).toHaveBeenCalledWith("/regime/panic-index");
   });
 
   it("renders the DISPERSION panel when pathname is /regime/dispersion", () => {

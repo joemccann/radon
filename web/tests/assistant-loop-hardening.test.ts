@@ -1,14 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * Loop hardening (2026-07-24 max-rounds incident):
- *   (a) Cap-hit forced final: after MAX_ROUNDS the loop makes ONE tool-less
- *       chat call asking the model to answer with what it has; the canned
+ * Loop hardening (2026-07-24 max-rounds incident + 2026-09-11 Grok empty-final):
+ *   (a) Cap-hit forced final: after MAX_ROUNDS the loop makes ONE chat call
+ *       with tools still present and tool_choice=none so OpenAI-compatible
+ *       providers (xAI Grok 4.6) will actually write text. The canned
  *       "Reached the maximum tool-calling rounds" string survives only when
- *       that final call itself fails.
+ *       that final call itself fails AND no realized-P&L payload was fetched.
  *   (b) Repeated-call short-circuit: an identical tool name+args (stable
  *       stringify, key order irrelevant) returns the prior result with a
  *       nudge instead of re-executing the tool.
+ *   (c) Period P&L prompts prefetch get_realized_pnl and force a text answer.
+ *   (d) An empty Grok completion after a successful P&L fetch still renders
+ *       the dollars instead of the canned cap string.
  */
 
 const CANNED_CAP_MESSAGE = "Reached the maximum tool-calling rounds without a final answer.";
@@ -79,16 +83,23 @@ describe("assistant loop hardening", () => {
       stopReason: "end_turn",
     });
 
-    const result = await runAssistantLoop([{ role: "user", content: "Weekly P&L?" }], "system prompt", PRINCIPAL);
+    const result = await runAssistantLoop([{ role: "user", content: "What is SPY flow?" }], "system prompt", PRINCIPAL);
 
     expect(MAX_ROUNDS).toBe(8);
     expect(chat).toHaveBeenCalledTimes(MAX_ROUNDS + 1);
 
     const finalRequest = chat.mock.calls[MAX_ROUNDS][0] as {
       tools?: unknown;
+      toolChoice?: string;
+      reasoningEffort?: string;
+      maxTokens?: number;
       messages: Array<{ role: string; content: unknown }>;
     };
-    expect(finalRequest.tools).toBeUndefined();
+    expect(finalRequest.tools).toEqual(expect.any(Array));
+    expect((finalRequest.tools as unknown[]).length).toBeGreaterThan(0);
+    expect(finalRequest.toolChoice).toBe("none");
+    expect(finalRequest.reasoningEffort).toBe("low");
+    expect(finalRequest.maxTokens).toBeGreaterThanOrEqual(4096);
     const lastMessage = finalRequest.messages[finalRequest.messages.length - 1];
     expect(lastMessage.role).toBe("user");
     expect(String(lastMessage.content)).toContain("tool-call limit");
@@ -110,12 +121,139 @@ describe("assistant loop hardening", () => {
     }
     chat.mockRejectedValueOnce(new Error("provider down"));
 
-    const result = await runAssistantLoop([{ role: "user", content: "Weekly P&L?" }], "system prompt", PRINCIPAL);
+    const result = await runAssistantLoop([{ role: "user", content: "What is SPY flow?" }], "system prompt", PRINCIPAL);
 
     expect(chat).toHaveBeenCalledTimes(MAX_ROUNDS + 1);
     expect(result.content).toBe(CANNED_CAP_MESSAGE);
     expect(result.outcome).toBe("cap_fallback");
     expect(result.rounds).toBe(MAX_ROUNDS);
+  });
+
+  it("after get_realized_pnl succeeds, an empty Grok completion still reports the dollars", async () => {
+    const pnl = {
+      from: "2026-09-01",
+      to: "2026-09-30",
+      total_realized_pnl: 1234.5,
+      count: 1,
+      round_trips: [{ ticker: "SNDK", closed: "2026-09-04", realized_pnl: 1234.5 }],
+    };
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce({
+        provider: "xai",
+        model: "grok-4.6",
+        text: "",
+        toolCalls: [{
+          id: "tu_1",
+          name: "get_realized_pnl",
+          input: { from: "2026-09-01", to: "2026-09-30" },
+        }],
+        usage: { inputTokens: 10, outputTokens: 5 },
+        stopReason: "tool_calls",
+      })
+      .mockResolvedValueOnce({
+        provider: "xai",
+        model: "grok-4.6",
+        text: "   ",
+        usage: { inputTokens: 10, outputTokens: 5 },
+        stopReason: "stop",
+      });
+    const executeTool = vi.fn(async () => ({ ok: true, data: pnl }));
+    const { runAssistantLoop } = await loadLoop(chat, executeTool);
+
+    const result = await runAssistantLoop(
+      [{ role: "user", content: "What is SPY flow?" }],
+      "system prompt",
+      PRINCIPAL,
+    );
+
+    expect(executeTool).toHaveBeenCalledTimes(1);
+    expect(chat).toHaveBeenCalledTimes(2);
+    const second = chat.mock.calls[1][0] as { toolChoice?: string };
+    expect(second.toolChoice).toBe("none");
+    expect(result.content).toContain("+1234.50");
+    expect(result.content).toContain("SNDK");
+    expect(result.content).not.toBe(CANNED_CAP_MESSAGE);
+    expect(result.outcome).toBe("answered");
+  });
+
+  it("prefetches get_realized_pnl for a September P&L prompt and answers without a catalog walk", async () => {
+    const pnl = {
+      from: "2026-09-01",
+      to: "2026-09-30",
+      total_realized_pnl: 1234.5,
+      count: 1,
+      round_trips: [{ ticker: "SNDK", closed: "2026-09-04", realized_pnl: 1234.5 }],
+    };
+    const chat = vi.fn().mockResolvedValueOnce({
+      provider: "xai",
+      model: "grok-4.6",
+      text: "September realized P&L is +1234.50.",
+      usage: { inputTokens: 10, outputTokens: 5 },
+      stopReason: "stop",
+    });
+    const executeTool = vi.fn(async () => ({ ok: true, data: pnl }));
+    const { runAssistantLoop } = await loadLoop(chat, executeTool);
+
+    const result = await runAssistantLoop(
+      [{ role: "user", content: "analyze all my trades for september 2026 and tell me my P&L" }],
+      "Today is 2026-09-11 (America/New_York).",
+      PRINCIPAL,
+    );
+
+    expect(executeTool).toHaveBeenCalledTimes(1);
+    expect(executeTool).toHaveBeenCalledWith(
+      "get_realized_pnl",
+      { from: "2026-09-01", to: "2026-09-30" },
+      PRINCIPAL,
+      expect.objectContaining({ spawnAttempts: expect.any(Number) }),
+    );
+    expect(chat).toHaveBeenCalledTimes(1);
+    const first = chat.mock.calls[0][0] as {
+      toolChoice?: string;
+      reasoningEffort?: string;
+      tools?: unknown;
+    };
+    expect(first.toolChoice).toBe("none");
+    expect(first.reasoningEffort).toBe("low");
+    expect(first.tools).toEqual(expect.any(Array));
+    expect(result.outcome).toBe("answered");
+    expect(result.content).toContain("1234.50");
+    expect(result.toolEvents).toEqual([
+      expect.objectContaining({ name: "get_realized_pnl", ok: true }),
+    ]);
+  });
+
+  it("synthesizes the P&L table when Grok returns empty text after a successful prefetch", async () => {
+    const pnl = {
+      from: "2026-09-01",
+      to: "2026-09-30",
+      total_realized_pnl: -88.25,
+      count: 1,
+      round_trips: [{ ticker: "ARM", closed: "2026-09-08", realized_pnl: -88.25 }],
+    };
+    const chat = vi.fn().mockResolvedValueOnce({
+      provider: "xai",
+      model: "grok-4.6",
+      text: "",
+      toolCalls: [{ id: "extra", name: "list_apis", input: { q: "pnl" } }],
+      stopReason: "tool_calls",
+    });
+    const executeTool = vi.fn(async () => ({ ok: true, data: pnl }));
+    const { runAssistantLoop } = await loadLoop(chat, executeTool);
+
+    const result = await runAssistantLoop(
+      [{ role: "user", content: "tell me my P&L for september 2026" }],
+      "Today is 2026-09-11 (America/New_York).",
+      PRINCIPAL,
+    );
+
+    expect(executeTool).toHaveBeenCalledTimes(1);
+    expect(result.content).toContain("-88.25");
+    expect(result.content).toContain("ARM");
+    expect(result.content).not.toBe(CANNED_CAP_MESSAGE);
+    expect(result.outcome).toBe("answered");
+    expect(result.toolEvents.every((event) => event.name !== "list_apis")).toBe(true);
   });
 
   it("short-circuits an identical repeated call (key order irrelevant) without re-executing the tool", async () => {
@@ -133,7 +271,7 @@ describe("assistant loop hardening", () => {
 
     const executeTool = okExecuteTool();
     const { runAssistantLoop } = await loadLoop(chat, executeTool);
-    const result = await runAssistantLoop([{ role: "user", content: "Weekly P&L?" }], "system prompt", PRINCIPAL);
+    const result = await runAssistantLoop([{ role: "user", content: "What is SPY flow?" }], "system prompt", PRINCIPAL);
 
     expect(executeTool).toHaveBeenCalledTimes(1);
     expect(result.toolEvents).toHaveLength(2);
@@ -168,7 +306,7 @@ describe("assistant loop hardening", () => {
 
     const executeTool = okExecuteTool();
     const { runAssistantLoop } = await loadLoop(chat, executeTool);
-    const result = await runAssistantLoop([{ role: "user", content: "Weekly P&L?" }], "system prompt", PRINCIPAL);
+    const result = await runAssistantLoop([{ role: "user", content: "What is SPY flow?" }], "system prompt", PRINCIPAL);
 
     expect(executeTool).toHaveBeenCalledTimes(2);
     expect(result.toolEvents.every((event) => event.repeated !== true)).toBe(true);
@@ -223,7 +361,7 @@ describe("assistant loop hardening", () => {
       });
 
     const { runAssistantLoop } = await loadLoop(chat, okExecuteTool());
-    await runAssistantLoop([{ role: "user", content: "Weekly P&L?" }], "system prompt", PRINCIPAL);
+    await runAssistantLoop([{ role: "user", content: "What is SPY flow?" }], "system prompt", PRINCIPAL);
 
     const lines = logSpy.mock.calls.map((call) => String(call[0]));
     expect(lines.some((line) => /^\[assistant\] round=1 .*tools=get_portfolio/.test(line))).toBe(true);

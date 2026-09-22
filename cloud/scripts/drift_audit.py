@@ -34,7 +34,7 @@ Live file -> repo source of truth (install command, for when live is stale):
   /usr/local/sbin/radon-app-runtime <- scripts/radon-app-runtime.sh
   /usr/local/sbin/radon-docker-gw <- scripts/radon-docker-gw.sh
       all three installed by bootstrap-control-plane.sh / refresh-control-plane
-  /etc/radon/ib-gateway-compose.yml <- git blob HEAD:cloud/docker-compose.yml
+  /etc/radon/ib-gateway-compose.yml <- GitHub main-tip blob cloud/docker-compose.yml
       (R-636 provenance: the working tree is radon-writable and is NOT the
       comparison basis; installed by install_docker_gw / refresh-control-plane)
   /etc/sudoers.d/radon* <- config/sudoers.d/*
@@ -83,6 +83,7 @@ import re
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.request
 from collections import Counter
@@ -99,6 +100,11 @@ SUMMARY_CAP = 1500
 DETAIL_CAP = 200
 MAX_DRIFTS_IN_ROW = 10
 SUBPROCESS_TIMEOUT = 10
+# The GitHub main tip is the trusted comparison basis for git: pairs
+# (F20260913-D02); one shallow fetch per run, bounded separately.
+UNIT_REMOTE = "https://github.com/joemccann/radon.git"
+FETCH_TIMEOUT = 120
+_TIP_STORE: dict[str, Path | None] = {}
 TURSO_TIMEOUT = 10
 HEALTH_WRITE_ATTEMPTS = 3
 
@@ -142,9 +148,9 @@ FILE_PAIRS = [
         "scripts/radon-docker-gw.sh",
         "radon-docker-gw",
     ),
-    # R-636: the installed compose body's canonical source is the git blob at
-    # HEAD, never the radon-writable working tree (see the git: dispatch in
-    # _compare_file_pair).
+    # R-636/F20260913-D02: the installed compose body's canonical source is
+    # the git blob at the GitHub main tip, never the radon-writable working
+    # tree or its local history (see the git: dispatch in _compare_file_pair).
     (
         "/etc/radon/ib-gateway-compose.yml",
         "git:docker-compose.yml",
@@ -476,18 +482,58 @@ def _line_delta(repo_text: str, live_text: str) -> str:
     return f"live vs repo: +{added}/-{removed} lines"
 
 
+def _github_tip_store() -> Path | None:
+    """A private throwaway bare store holding the GitHub main tip, or None.
+
+    Fetched once per run into a root-owned temp dir so no radon-writable git
+    config or object store participates in the comparison. Cached, including
+    a failed fetch (retrying inside one audit run buys nothing).
+    """
+    if "store" in _TIP_STORE:
+        return _TIP_STORE["store"]
+    store: Path | None = None
+    try:
+        store = Path(tempfile.mkdtemp(prefix="drift-audit-tip."))
+        # Protocol v1 for the same reason as deploy-root-helper: from this
+        # host an unauthenticated v2 ls-refs POST answers 401.
+        for cmd in (
+            ["git", "init", "-q", "--bare", str(store)],
+            [
+                "git", "--git-dir", str(store), "-c", "protocol.version=1",
+                "-c", "credential.helper=", "fetch", "-q", "--depth", "1",
+                UNIT_REMOTE, "refs/heads/main",
+            ],
+        ):
+            proc = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=FETCH_TIMEOUT
+            )
+            if proc.returncode != 0:
+                store = None
+                break
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        store = None
+    _TIP_STORE["store"] = store
+    return store
+
+
 def _read_repo_blob(relative: str) -> str | None:
-    """Read the canonical artifact from the git blob at HEAD (R-636).
+    """Read the canonical artifact from the GitHub main-tip blob (R-636).
 
     The installed ib-gateway-compose.yml is provisioned from the committed
-    blob, so the working tree -- which the radon account can rewrite -- must
-    never be the comparison basis for it.
+    blob. Neither the working tree nor local git history is the comparison
+    basis: both live in the radon-writable checkout, so a rewritten local
+    HEAD could hide drift from this root audit (F20260913-D02). A failed
+    fetch returns None, which surfaces as repo-missing drift -- visible,
+    never a silent fallback to local history.
     """
+    store = _github_tip_store()
+    if store is None:
+        return None
     try:
         proc = _run(
             [
-                "git", "-c", f"safe.directory={GIT_REPO}", "-C", str(GIT_REPO),
-                "show", f"HEAD:{(REPO.relative_to(GIT_REPO) / relative).as_posix()}",
+                "git", "--git-dir", str(store), "show",
+                f"FETCH_HEAD:{(REPO.relative_to(GIT_REPO) / relative).as_posix()}",
             ]
         )
     except (OSError, subprocess.TimeoutExpired, ValueError):

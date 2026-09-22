@@ -334,7 +334,103 @@ const BLOTTER_WITH_CLOSED_TRADE = {
   open_trades: [],
 };
 
-async function stubOrdersShareApis(page: import("@playwright/test").Page) {
+const SPCX_BULL_CALL_PORTFOLIO = {
+  ...PORTFOLIO_MOCK,
+  position_count: 1,
+  defined_risk_count: 1,
+  positions: [
+    {
+      id: 42,
+      ticker: "SPCX",
+      structure: "Bull Call Spread $155/$170",
+      structure_type: "defined",
+      risk_profile: "defined",
+      expiry: "2026-10-16",
+      contracts: 10,
+      direction: "LONG",
+      entry_cost: 3980,
+      max_risk: 3980,
+      market_value: 5080,
+      legs: [
+        {
+          direction: "LONG",
+          contracts: 10,
+          type: "Call",
+          strike: 155,
+          entry_cost: 4980,
+          avg_cost: 498,
+          market_price: 6.1,
+          market_value: 6100,
+        },
+        {
+          direction: "SHORT",
+          contracts: 10,
+          type: "Call",
+          strike: 170,
+          entry_cost: -1000,
+          avg_cost: 100,
+          market_price: 1.02,
+          market_value: -1020,
+        },
+      ],
+      kelly_optimal: 0.025,
+      target: null,
+      stop: null,
+      entry_date: "2026-09-04",
+    },
+  ],
+};
+
+const SPCX_BULL_CALL_ORDERS = {
+  last_sync: new Date().toISOString(),
+  open_orders: [],
+  executed_orders: [
+    {
+      execId: "spcx-close-long",
+      symbol: "SPCX",
+      contract: { conId: 155001, symbol: "SPCX", secType: "OPT", strike: 155, right: "C", expiry: "2026-10-16" },
+      side: "SLD",
+      quantity: 10,
+      avgPrice: 6.1,
+      commission: -2.5,
+      realizedPNL: 800,
+      time: etTodayAt("18:29:00"),
+      exchange: "SMART",
+    },
+    {
+      execId: "spcx-close-short",
+      symbol: "SPCX",
+      contract: { conId: 170001, symbol: "SPCX", secType: "OPT", strike: 170, right: "C", expiry: "2026-10-16" },
+      side: "BOT",
+      quantity: 10,
+      avgPrice: 1.02,
+      commission: -2.5,
+      realizedPNL: 300,
+      time: etTodayAt("18:29:00"),
+      exchange: "SMART",
+    },
+    {
+      execId: "spcx-close-bag",
+      symbol: "SPCX",
+      contract: { conId: 155170, symbol: "SPCX", secType: "BAG", strike: 0, right: "?", expiry: null },
+      side: "SLD",
+      quantity: 10,
+      avgPrice: 5.08,
+      commission: 0,
+      realizedPNL: null,
+      time: etTodayAt("18:29:00"),
+      exchange: "SMART",
+    },
+  ],
+  open_count: 0,
+  executed_count: 3,
+};
+
+async function stubOrdersShareApis(
+  page: import("@playwright/test").Page,
+  portfolio: typeof PORTFOLIO_MOCK = PORTFOLIO_MOCK,
+  orders: typeof ORDERS_MOCK = ORDERS_MOCK,
+) {
   await page.unrouteAll({ behavior: "ignoreErrors" });
   await page.addInitScript(() => {
     Object.defineProperty(navigator, "clipboard", {
@@ -352,10 +448,10 @@ async function stubOrdersShareApis(page: import("@playwright/test").Page) {
   });
 
   await page.route("**/api/portfolio**", (route) =>
-    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(PORTFOLIO_MOCK) }),
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(portfolio) }),
   );
   await page.route("**/api/orders", (route) =>
-    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(ORDERS_MOCK) }),
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(orders) }),
   );
   await page.route("**/api/blotter", (route) =>
     route.fulfill({
@@ -437,5 +533,29 @@ test.describe("Share PnL signed combo basis", () => {
     expect(params.get("entryPrice")).toBe("-0.75");
     expect(params.get("exitPrice")).toBe("1");
     expect(Number(params.get("pnlPct"))).toBeCloseTo(231.3547, 3);
+  });
+
+  test("portfolio-fallback bull call share entry is the debit paid, not a negative cash-flow", async ({ page }) => {
+    await stubOrdersShareApis(page, SPCX_BULL_CALL_PORTFOLIO, SPCX_BULL_CALL_ORDERS);
+
+    let shareRequestUrl: string | null = null;
+    await page.route("**/api/share/pnl?*", (route) => {
+      shareRequestUrl = route.request().url();
+      return route.fulfill({ status: 200, contentType: "image/png", body: PNG_1X1 });
+    });
+
+    await page.goto("/orders");
+    const shareButton = executedShareButton(page);
+    await expect(shareButton).toBeVisible({ timeout: 15_000 });
+    await shareButton.click();
+    const popover = page.locator(".share-pnl-popover");
+    await expect(popover).toBeVisible();
+    await popover.getByRole("button", { name: /^Copy$/ }).click();
+    await expect.poll(() => shareRequestUrl).not.toBeNull();
+
+    const params = new URL(shareRequestUrl ?? "http://localhost").searchParams;
+    expect(Number(params.get("entryPrice"))).toBeCloseTo(3.98, 2);
+    expect(Number(params.get("entryPrice"))).toBeGreaterThan(0);
+    expect(params.get("exitPrice")).toBe("5.08");
   });
 });

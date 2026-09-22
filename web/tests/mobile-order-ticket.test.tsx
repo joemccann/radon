@@ -375,9 +375,9 @@ describe("MobileOrderTicket — IB error rendering", () => {
 
     // The sheet portals to document.body, so query the document (not the
     // render container).
-    await waitFor(() => expect(document.querySelector(".order-error")).toBeTruthy());
+    await waitFor(() => expect(document.querySelector(".toast-error")).toBeTruthy());
 
-    const errorText = document.querySelector(".order-error")!.textContent ?? "";
+    const errorText = document.querySelector(".toast-error")!.textContent ?? "";
     // formatOrderError strips the "Order rejected by IB:" prefix into the
     // summary and moves the reason into a detail row.
     expect(errorText).toMatch(/Order rejected by IB\./);

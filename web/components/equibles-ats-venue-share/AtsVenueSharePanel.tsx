@@ -1,5 +1,6 @@
 "use client";
 
+import { userErrorMessage } from "@/lib/userError";
 import { Layers } from "lucide-react";
 import InfoTooltip from "../InfoTooltip";
 import SectionEmptyState from "../SectionEmptyState";
@@ -219,7 +220,7 @@ export default function AtsVenueSharePanel() {
 
           {errors.length > 0 && (
             <div style={MONO_FOOTNOTE} data-testid="ats-venue-share-errors">
-              NOT COVERED THIS CYCLE: {errors.map((e) => `${e.ticker} (${e.error})`).join(", ")}
+              NOT COVERED THIS CYCLE: {errors.map((e) => `${e.ticker} (${userErrorMessage(e.error, "Data unavailable")})`).join(", ")}
             </div>
           )}
         </div>

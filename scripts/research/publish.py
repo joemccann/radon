@@ -3,23 +3,11 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import hashlib
-from html import unescape
 import json
 import re
-import unicodedata
 
 from api.db_http import hrana_execute, hrana_transaction
 from research.assets import ASSET_RE, URL_PREFIX, read_asset, store_asset
-
-
-def validate_rendered_copy(title, content, publisher, figures, tags):
-    """Hold invalid authored copy without changing verified claims or evidence."""
-    values = [title, content, publisher, *tags, *(figure.get('caption', '') for figure in figures)]
-    if any('\u2014' in unescape(value) for value in values if isinstance(value, str)):
-        raise ValueError('Rendered research copy must not contain em dashes')
-    if any(re.search(r'zero[\s\-–—_]*hedge', ''.join(char for char in unicodedata.normalize('NFKC', value) if unicodedata.category(char) != 'Cf'), re.I)
-           for value in values if isinstance(value, str)):
-        raise ValueError('Rendered research copy must attribute the original provider only')
 
 
 def stable_post_id(file_id: str, finding_key: str) -> str:
@@ -45,10 +33,10 @@ def publish(post: dict) -> str:
     if not re.fullmatch(r"research-[a-f0-9]{32,64}", post_id):
         raise ValueError("research post ID must use the reserved stable namespace")
     title, content = post.get("title"), post.get("content")
-    if not isinstance(title, str) or not title.strip() or len(title) > 500:
-        raise ValueError("research title required (maximum 500 characters)")
-    if not isinstance(content, str) or not content.strip() or len(content) > 30000:
-        raise ValueError("research body required (maximum 30000 characters)")
+    if not isinstance(title, str) or not title.strip():
+        raise ValueError("research title required")
+    if not isinstance(content, str) or not content.strip():
+        raise ValueError("research body required")
     stamp = datetime.fromisoformat(post["timestamp"].replace("Z", "+00:00"))
     if stamp.tzinfo is None:
         raise ValueError("publication timestamp must include timezone")
@@ -82,7 +70,7 @@ def publish(post: dict) -> str:
     for url in images:
         _asset_url(url, "png")
     for figure in figures:
-        if not isinstance(figure, dict) or type(figure.get("page")) is not int or figure.get("page") not in pages or not isinstance(figure.get("caption"), str) or not figure["caption"].strip():
+        if not isinstance(figure, dict) or type(figure.get("page")) is not int or figure.get("page") not in pages or not isinstance(figure.get("caption"), str):
             raise ValueError("every figure needs a cited page and caption")
         _asset_url(figure.get("url"), "png")
     if images != [figure["url"] for figure in figures]:
@@ -90,7 +78,6 @@ def publish(post: dict) -> str:
     tags = post.get("tags", [])
     if not isinstance(tags, list) or not tags or len(tags) > 12 or any(not isinstance(tag, str) or not re.fullmatch(r"[A-Z0-9][A-Z0-9&-]{0,63}", tag) for tag in tags):
         raise ValueError("normalized research tags required")
-    validate_rendered_copy(title, content, source["publisher"], figures, tags)
     now = datetime.now(timezone.utc).isoformat()
     sql = """INSERT INTO posts (id,title,content,timestamp,images,raw_images,tags,tags_text,tags_vision,created_at,updated_at)
       VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
@@ -103,6 +90,51 @@ def publish(post: dict) -> str:
                         "ON CONFLICT(post_id) DO UPDATE SET provenance_json=excluded.provenance_json",
                         (post_id, json.dumps(source, separators=(",", ":"))))])
     return post_id
+
+
+def outcome_row(work: dict, review: dict) -> dict:
+    """One row per reviewed document for the operator's Held review: what happened and why, plus the rejected drafts."""
+    identity = review.get("identity") or {}
+    posts = review.get("posts") or []
+    audit = [entry for entry in review.get("audit") or [] if isinstance(entry, dict) and entry.get("held")]
+    candidates = {c.get("claim_key"): c for c in ((review.get("selection") or {}).get("candidates") or []) if isinstance(c, dict)}
+    if review.get("outcome") == "dropped":
+        outcome, codes = "dropped", [review.get("reason_code") or "DROPPED"]
+    elif posts:
+        outcome, codes = "published", sorted({entry["held"] for entry in audit})
+    else:
+        outcome, codes = "held", sorted({entry["held"] for entry in audit}) or ["NO_CANDIDATES"]
+    drafts = []
+    for entry in audit[:8]:
+        candidate = candidates.get(entry.get("claim_key")) or entry.get("candidate") or {}
+        missing = ", ".join(str(token.get("token")) for token in entry.get("missing") or [] if isinstance(token, dict))
+        verdict = entry.get("verification") if isinstance(entry.get("verification"), dict) else {}
+        drafts.append({"title": str(candidate.get("title") or "")[:300], "content": str(candidate.get("content") or "").strip()[:600],
+                       "held": entry["held"], "detail": (missing or str(verdict.get("reason") or entry.get("error") or ""))[:400]})
+    metadata = work.get("metadata") or {}
+    document = review.get("document") or {}
+    context = {"pageCount": document.get("page_count"), "figureCount": len(review.get("figures") or []),
+               "dateSource": identity.get("date_source") or "", "excerpt": str(document.get("excerpt") or "")[:900],
+               "selectorReason": str(((review.get("selection") or {}).get("reason")) or "")[:600],
+               "sourceUrl": document.get("source_url") or ""}
+    return {"context_json": json.dumps(context), "work_key": work["key"], "file_id": metadata.get("id") or "", "file_name": metadata.get("name") or "",
+            "publisher": identity.get("publisher") or "unknown", "series": identity.get("series") or "",
+            "doc_type": identity.get("doc_type") or "", "folder_date": work.get("folder_date") or "",
+            "document_date": identity.get("date") or "", "outcome": outcome, "reason_codes": json.dumps(codes),
+            "drafts_json": json.dumps(drafts), "posts": len(posts), "pipeline": review.get("pipeline") or "v1"}
+
+
+_OUTCOME_COLUMNS = ("work_key", "file_id", "file_name", "publisher", "series", "doc_type", "folder_date", "document_date",
+                    "outcome", "reason_codes", "drafts_json", "posts", "pipeline", "context_json")
+
+
+def record_outcome(work: dict, review: dict) -> None:
+    row = outcome_row(work, review)
+    updates = ",".join(f"{c}=excluded.{c}" for c in _OUTCOME_COLUMNS[1:])
+    hrana_execute(
+        f"INSERT INTO research_outcomes ({','.join(_OUTCOME_COLUMNS)},updated_at) VALUES ({','.join('?' * len(_OUTCOME_COLUMNS))},?) "
+        f"ON CONFLICT(work_key) DO UPDATE SET {updates},updated_at=excluded.updated_at",
+        (*[row[c] for c in _OUTCOME_COLUMNS], datetime.now(timezone.utc).isoformat()))
 
 
 def recent_posts(days: int = 90) -> list[dict]:

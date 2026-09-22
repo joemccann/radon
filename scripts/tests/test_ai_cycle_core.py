@@ -59,7 +59,7 @@ def test_invalid_values(value):
 
 def test_store_vintages_and_unknown_publication():
     store = ObservationStore(":memory:")
-    assert len(build_snapshot(store)["indicators"]) == 17
+    assert len(build_snapshot(store)["indicators"]) == 18
     first = observation()
     store.append_observations([first, first])
     revised = {**first, "value": 120, "fetched_at": "2026-08-05T00:00:00Z", "published_at": "2026-08-02T00:00:00Z"}
@@ -848,3 +848,37 @@ def test_raw_archive_import_is_durable_and_idempotent(tmp_path):
     assert store.import_raw_archive(tmp_path) == 1
     assert store._query("SELECT COUNT(*) FROM ai_cycle_raw")[0][0] == 1
     assert store._query("SELECT hash FROM ai_cycle_raw")[0][0] == digest
+
+
+def test_import_raw_archive_does_not_resend_existing_payloads(tmp_path):
+    """Daily oneshot must not re-POST every on-disk raw blob to Turso.
+
+    2026-09-17 07:22Z radon-ai-cycle.service: import_raw_archive walked
+    ~1117 local files (~97MB) and INSERT OR IGNORE'd each full payload
+    under HRANA_TIMEOUT_S=4; a single TimeoutError failed the oneshot
+    (NRestarts=0) after observations had already landed, blocking
+    persist_api_snapshot. Skip hashes already present.
+    """
+    import hashlib
+
+    store = ObservationStore(":memory:")
+    kept = b'{"publisher":"openrouter","rows":[1]}'
+    fresh = b'{"publisher":"openrouter","rows":[2]}'
+    kept_digest = hashlib.sha256(kept).hexdigest()
+    fresh_digest = hashlib.sha256(fresh).hexdigest()
+    (tmp_path / f"{kept_digest}.json").write_bytes(kept)
+    (tmp_path / f"{fresh_digest}.json").write_bytes(fresh)
+    store.archive_raw(kept)
+
+    inserts = []
+    real_execute = store._execute
+
+    def tracking(sql, args=()):
+        if "INSERT OR IGNORE INTO ai_cycle_raw" in sql:
+            inserts.append(args[0])
+        return real_execute(sql, args)
+
+    store._execute = tracking
+    assert store.import_raw_archive(tmp_path) == 2
+    assert inserts == [fresh_digest]
+    assert store._query("SELECT COUNT(*) FROM ai_cycle_raw")[0][0] == 2

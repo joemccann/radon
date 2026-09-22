@@ -171,6 +171,41 @@ REMOTE_VERBS = frozenset({"start", "stop", "restart", "reset-lease", "status"})
 
 
 
+_HOST_UNITS_TTL_S = 2.0
+_host_units_cache: tuple[float, Dict[str, dict]] = (0.0, {})
+_host_units_lock = threading.Lock()
+
+
+def read_host_unit_states() -> Dict[str, dict]:
+    """Unit states from the on-host health daemon.
+
+    The API container has no systemctl. ``radon-health`` on :8330 already
+    polled the host's systemd, and the container shares the host network.
+    A miss returns an empty map so the panel stays on the unsupported row.
+    """
+    global _host_units_cache
+    now = time.monotonic()
+    with _host_units_lock:
+        cached_at, cached = _host_units_cache
+        if cached_at and now - cached_at < _HOST_UNITS_TTL_S:
+            return cached
+    url = os.environ.get("RADON_HEALTH_STATUS_URL", "http://127.0.0.1:8330/status")
+    try:
+        with urllib.request.urlopen(url, timeout=1.0) as resp:
+            payload = json.load(resp)
+    except (OSError, ValueError):
+        payload = None
+    raw = payload.get("units") if isinstance(payload, dict) else None
+    units = {
+        str(name): row
+        for name, row in (raw or {}).items()
+        if isinstance(row, dict)
+    } if isinstance(raw, dict) else {}
+    with _host_units_lock:
+        _host_units_cache = (now, units)
+    return units
+
+
 def is_systemd_available() -> bool:
     """True when this host can run ``systemctl`` against ``radon-*`` units.
 
@@ -386,6 +421,17 @@ async def show_unit(unit: str) -> UnitStatus:
         return status
 
     if not is_systemd_available():
+        observed = read_host_unit_states().get(unit) or {}
+        active = str(observed.get("active_state") or "")
+        if active and active != "unknown":
+            return UnitStatus(
+                unit,
+                load_state="host-health",
+                active_state=active,
+                sub_state=str(observed.get("sub_state") or "unknown"),
+                description="host health daemon",
+                can_control=False,
+            )
         return UnitStatus(
             unit,
             load_state="unsupported",

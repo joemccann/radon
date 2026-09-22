@@ -22,13 +22,13 @@ LOOPS = {
     "ci-performance": REPO / "scripts" / "ci_performance_nightly.sh",
     "documentation": REPO / "scripts" / "documentation_nightly.sh",
     "security": REPO / "scripts" / "security_nightly.sh",
+    "security-deepsec": REPO / "scripts" / "security_deepsec_nightly.sh",
 }
 
-# Best first. The top rung is the operator's own default; the next is the same
-# family one tier down, which is what 2026-09-01 needed and never got.
+# Documented SAFETY ladder when catalog discovery fails (helper empty /
+# stub `claude models`). Live policy is skip-newest from the Mini catalog;
+# do not treat these ids as a forever pin. Do not put fable back.
 LADDER = [
-    "claude-fable-5[1m]",
-    "claude-opus-5[1m]",
     "claude-opus-5",
     "claude-sonnet-5",
 ]
@@ -49,10 +49,13 @@ CASUAL_RATE_LIMITS = "the 500 mentioned rate limits in a timeout log"
 # The security wrapper refuses to call a phase OK without this; harmless noise
 # for the other four.
 COMPLETION = "SECURITY-NIGHTLY PHASE COMPLETE: audit"
+# The DeepSec wrapper greps its own prefix; each line is inert for the other.
+COMPLETION_DEEPSEC = "SECURITY-DEEPSEC PHASE COMPLETE: audit"
 
 MARKERS = (
     ".radon-weekend-runner",
     ".radon-security-runner",
+    ".radon-security-deepsec-runner",
     ".radon-reliability-runner",
     ".radon-testing-runner",
     ".radon-ci-performance-runner",
@@ -67,6 +70,10 @@ def _clone(tmp_path: Path, wrapper: Path) -> Path:
     (repo / "scripts" / wrapper.name).chmod(0o755)
     for helper in ("weekend_notify.py", "weekend_redact.py"):
         (repo / "scripts" / helper).write_text("# stub\n", encoding="utf-8")
+    for helper in ("security_claude_ladder.py", "security_claude_ladder.sh"):
+        src = REPO / "scripts" / helper
+        if src.exists():
+            shutil.copy2(src, repo / "scripts" / helper)
     for marker in MARKERS:
         (repo / marker).write_text("", encoding="utf-8")
     # The four fallback loops drive codex and grok from a rendered prompt file
@@ -116,6 +123,8 @@ def _stub_bin(
         # quota for that model is (or is not) gone.
         "claude": (
             "#!/bin/bash\n"
+            # Catalog discovery (`claude models`) must not record a launch.
+            'if [ "$1" = "models" ]; then exit 1; fi\n'
             'model=""\n'
             "while [ $# -gt 0 ]; do\n"
             '  if [ "$1" = "--model" ]; then model="$2"; shift 2; continue; fi\n'
@@ -128,6 +137,7 @@ def _stub_bin(
             f"  exit {exhausted_exit}\n"
             "fi\n"
             f'echo "{COMPLETION}"\n'
+            f'echo "{COMPLETION_DEEPSEC}"\n'
             "exit 0\n"
         ),
         "timeout": (
@@ -154,6 +164,20 @@ def _stub_bin(
         exe = bin_dir / name
         exe.write_text(body, encoding="utf-8")
         exe.chmod(0o755)
+    host_py = shutil.which("python3.13")
+    if not host_py:
+        for candidate in (
+            Path("/home/ubuntu/.local/bin/python3.13"),
+            Path("/usr/bin/python3.13"),
+            REPO / ".venv" / "bin" / "python3.13",
+        ):
+            if candidate.exists():
+                host_py = str(candidate)
+                break
+    if host_py:
+        dest = bin_dir / "python3.13"
+        if not dest.exists():
+            dest.symlink_to(host_py)
     return bin_dir
 
 
@@ -267,6 +291,7 @@ def _provider_stub(
     """
     return (
         "#!/bin/bash\n"
+        'if [ "$1" = "models" ]; then exit 1; fi\n'
         'self="$(basename "$0")"\n'
         'prov="$self"\n'
         'case "${GROK_HOME:-}" in\n'
@@ -295,7 +320,7 @@ def _provider_stub(
         "  exit " + str(cap_exit) + "\n"
         "fi\n"
         + "cat <<'RADON_AGENT_EOF'\n"
-        + (COMPLETION if agent_output is None else agent_output)
+        + (COMPLETION + "\n" + COMPLETION_DEEPSEC if agent_output is None else agent_output)
         + "\nRADON_AGENT_EOF\n"
         + "exit 0\n"
     )

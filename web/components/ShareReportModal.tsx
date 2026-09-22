@@ -1,5 +1,7 @@
 "use client";
+import ErrorToast from "@/components/ErrorToast";
 
+import { userErrorMessage } from "@/lib/userError";
 import { Download, Share2, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useDialogChrome } from "@/lib/useDialogChrome";
@@ -82,7 +84,7 @@ export default function ShareReportModal({
       const data = await res.json() as ShareResponse;
 
       if (!res.ok) {
-        setShareError(data?.error ?? "Share generation failed");
+        setShareError(userErrorMessage(data?.error, "The share image could not be prepared. Try again."));
         return;
       }
 
@@ -111,7 +113,7 @@ export default function ShareReportModal({
       });
       setModalOpen(true);
     } catch (err) {
-      setShareError(err instanceof Error ? err.message : "Unknown error");
+      setShareError(userErrorMessage(err, "Unknown error"));
     } finally {
       setSharing(false);
     }
@@ -160,20 +162,7 @@ export default function ShareReportModal({
         {sharing ? "Generating…" : buttonLabel}
       </button>
       {shareError && (
-        <div
-          style={{
-            margin: "8px 12px",
-            padding: "7px 10px",
-            border: "1px solid var(--negative)",
-            borderRadius: "3px",
-            background: "color-mix(in srgb, var(--negative) 6%, transparent)",
-            fontFamily: "var(--font-mono, monospace)",
-            fontSize: "var(--text-meta)",
-            color: "var(--negative)",
-          }}
-        >
-          {shareError}
-        </div>
+        <ErrorToast message={shareError} />
       )}
       {dialogOpen && (
         <div
