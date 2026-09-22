@@ -198,6 +198,15 @@ def ingest_xml(
                 "source_path": source_path,
             }
         try:
+            if (
+                status == "applied"
+                and kind == ACTIVITY
+                and not delivery_rows_present(kind, xml_text)
+            ):
+                # Suppressed TWR persist writes no series, so an applied
+                # activity claim can lack its NAV dates. Insert the missing
+                # ones. Cash that is absent stays unverified; do not replay.
+                _repair_unmirrored_activity_nav(xml_text)
             confirmed = status == "applied" and delivery_rows_present(kind, xml_text)
         except Exception as exc:
             # A verification read failure does not authorize replay of the
@@ -241,6 +250,68 @@ def ingest_xml(
     # Only now has every writer committed. R-436.
     mark_flex_delivery_applied(digest)
     return result
+
+
+def _repair_unmirrored_activity_nav(xml_text: str) -> None:
+    """Insert statement NAV dates a suppressed TWR persist did not mirror.
+
+    Cash coverage is the non-idempotent write. When those ids are present and
+    the NAV dates are not, the 08:30 retry failed the oneshot
+    (coverage_unverified, classified_as=activity). Insert the missing dates
+    only. ON CONFLICT DO NOTHING so a later correction already stored under
+    the same key is not overwritten.
+    """
+    from cash_flow_sync import parse_cash_transactions
+    from db.hrana_http import hrana_execute, hrana_query
+    from perf_twr_builder import DEFAULT_ACCOUNT_ID, parse_nav_entries
+
+    deadline = time.monotonic() + 15.0
+
+    def query(sql: str, args: tuple) -> list:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("duplicate coverage verification budget exhausted")
+        return hrana_query(sql, args, timeout=min(4.0, remaining))
+
+    expected = parse_cash_transactions(xml_text)
+    for offset in range(0, len(expected), 100):
+        batch = expected[offset:offset + 100]
+        ids = tuple(row["id"] for row in batch)
+        rows = query(
+            "SELECT id FROM cash_flows WHERE id IN ("
+            + ",".join("?" for _ in ids) + ")",
+            ids,
+        )
+        if not set(ids).issubset({row[0] for row in rows}):
+            return
+    nav = parse_nav_entries(xml_text)
+    dates = list(nav)
+    missing: List[str] = []
+    for offset in range(0, len(dates), 100):
+        batch = dates[offset:offset + 100]
+        rows = query(
+            "SELECT report_date FROM nav_snapshots WHERE account_id = ? "
+            "AND report_date IN (" + ",".join("?" for _ in batch) + ")",
+            (DEFAULT_ACCOUNT_ID, *batch),
+        )
+        found = {row[0] for row in rows}
+        missing.extend(day for day in batch if day not in found)
+    for offset in range(0, len(missing), 100):
+        batch = missing[offset:offset + 100]
+        params: List[Any] = []
+        for day in batch:
+            params.extend((DEFAULT_ACCOUNT_ID, day, float(nav[day])))
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("duplicate coverage verification budget exhausted")
+        hrana_execute(
+            "INSERT INTO nav_snapshots (account_id, report_date, total_net_liq, "
+            "cash, stock, options, accrued_fees) VALUES "
+            + ", ".join("(?, ?, ?, NULL, NULL, NULL, NULL)" for _ in batch)
+            + " ON CONFLICT(account_id, report_date) DO NOTHING",
+            params,
+            timeout=min(4.0, remaining),
+        )
 
 
 def _release_claim(digest: str) -> None:
