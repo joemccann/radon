@@ -1,0 +1,14 @@
+[Unit]
+Description=Radon TradingView alert drain -- every 5 minutes, 24/7
+
+[Timer]
+# :02, :07, :12 ... at :23s -- deliberately off the :00 scheduler herd.
+# AccuracySec=1 pins the offset; the default 1min coalescing window would
+# smear it back. Persistent=false: the next 5-minute run drains whatever a
+# missed one would have, so replaying it is worthless.
+OnCalendar=*:02/5:23
+AccuracySec=1s
+Persistent=false
+
+[Install]
+WantedBy=timers.target

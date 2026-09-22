@@ -33,7 +33,7 @@ COMMIT_EVIDENCE_LOOPS = (
     SCRIPTS / "ci_performance_nightly.sh",
     SCRIPTS / "documentation_nightly.sh",
 )
-ALL_LOOPS = COMMIT_EVIDENCE_LOOPS + (WRAPPER,)
+ALL_LOOPS = COMMIT_EVIDENCE_LOOPS + (WRAPPER, SCRIPTS / "security_deepsec_nightly.sh")
 
 SEP13_DELIVER_LOG = """\
 NIGHTLY DELIVER READY: loop=security prs=1 https://github.com/joemccann/radon/pull/420

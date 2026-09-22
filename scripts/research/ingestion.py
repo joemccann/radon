@@ -12,8 +12,10 @@ import threading
 from research.dropbox import DropboxClient, DropboxError, content_hash
 from utils.atomic_io import atomic_save
 from datetime import datetime, timezone
-from research.model import classify_error
+from research.model import PROVIDER_PARK_SECS, classify_error, is_provider_outage
 from research.state import State
+
+FEEDBACK_POLL_SECS = 60
 
 
 class Backoff:
@@ -140,7 +142,9 @@ def review_one(root, state, pipeline, publisher, publish):
         stage_health(root, 'review', 'error', error)
         if not state.is_processing(work['key']):
             return True
-        if work['attempts'] >= 5:
+        if is_provider_outage(error):
+            state.park(work['key'], time.time() + PROVIDER_PARK_SECS)
+        elif work['attempts'] >= 5:
             state.complete(work['key'], {'status': 'held', 'error': classify_error(error)})
         else:
             state.retry(work['key'], error, delay=min(3600, 60 * 2 ** work['attempts']))
@@ -157,13 +161,19 @@ def _consumer(root, stop, wake, parsed, backoff, review, publish, client_factory
     from research.worker import heartbeat
     state = State(Path(root) / 'state.sqlite')
     client = pipeline = None
+    next_feedback = 0
     try:
         while not stop.is_set():
             try:
                 if review:
                     if pipeline is None:
-                        from research.model import Reviewer
-                        pipeline = pipeline_factory() if pipeline_factory else Pipeline(root, Reviewer(), publisher, extractor=cached_extract)
+                        from research.model import build_pipeline
+                        pipeline = pipeline_factory() if pipeline_factory else build_pipeline(root, publisher, extractor=cached_extract)
+                    if time.monotonic() >= next_feedback:
+                        # Operator votes ("should have published", "want more") re-queue their documents with the note.
+                        from research.feedback import apply as apply_feedback
+                        apply_feedback(state, root=root)
+                        next_feedback = time.monotonic() + FEEDBACK_POLL_SECS
                     worked = review_one(root, state, pipeline, publisher, publish)
                     event = parsed
                 else:
@@ -271,7 +281,7 @@ def report_health(root, stop):
 
 def poll(root, state, interval, stopping, stop, wake, backoff, healthy,
          client_factory=None, clock=None):
-    from research.worker import discover, heartbeat
+    from research.worker import DiscoveryError, discover, heartbeat
     clock = clock or time.monotonic
     client_factory = client_factory or (lambda: DropboxClient.from_env().connect())
     client, deadline = None, 0
@@ -294,6 +304,11 @@ def poll(root, state, interval, stopping, stop, wake, backoff, healthy,
                 backoff.record(error)
                 stage_health(root, 'discovery', 'error', error)
                 heartbeat(root, 'error', error, stage='discovery', local_only=True)
+                payload = {'stage': 'discovery', 'error': classify_error(error), 'interval': interval}
+                if isinstance(error, DiscoveryError):
+                    payload['discovered'] = error.discovered
+                    payload['discovery_errors'] = error.failures
+                print(json.dumps(payload), flush=True)
             finally:
                 wake.set()
                 health_path = Path(root) / 'health.json'

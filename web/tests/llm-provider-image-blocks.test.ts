@@ -44,6 +44,12 @@ const ENV_KEYS = [
   "LLM_FALLBACK_PROVIDER",
   "ANTHROPIC_API_KEY",
   "CLAUDE_CODE_API_KEY",
+  "CLAUDE_CODE_OAUTH_TOKEN",
+  "CLAUDE_CONFIG_DIR",
+  "CODEX_HOME",
+  "GROK_AUTH_FILE",
+  "XAI_OAUTH_TOKEN",
+  "RADON_LADDER_ALLOW_PREPAID",
   "CLAUDE_API_KEY",
   "ANTHROPIC_MODEL",
   "OPENAI_API_KEY",
@@ -60,6 +66,9 @@ describe("llm provider image blocks", () => {
 
   beforeEach(() => {
     for (const key of ENV_KEYS) saved[key] = process.env[key];
+    process.env.CLAUDE_CONFIG_DIR = "/nonexistent/radon-no-claude-config";
+    process.env.CODEX_HOME = "/nonexistent/radon-no-codex-home";
+    process.env.GROK_AUTH_FILE = "/nonexistent/radon-no-grok-auth.json";
     for (const key of ENV_KEYS) delete process.env[key];
     process.env.ASSISTANT_MOCK = "0";
   });
@@ -76,7 +85,7 @@ describe("llm provider image blocks", () => {
   it("forwards the image block to Anthropic unchanged", async () => {
     const { chat } = await import("@/lib/llm/provider");
     process.env.LLM_PROVIDER = "anthropic";
-    process.env.ANTHROPIC_API_KEY = "sk-test";
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat-test";
     const { calls } = captureFetch(() =>
       jsonResponse({ model: "claude-sonnet-4-5-20250929", content: [{ type: "text", text: "ok" }] }),
     );
@@ -105,7 +114,7 @@ describe("llm provider image blocks", () => {
   it("maps the image block to an image_url part on the xAI path", async () => {
     const { chat } = await import("@/lib/llm/provider");
     process.env.LLM_PROVIDER = "xai";
-    process.env.XAI_API_KEY = "xai-test";
+    process.env.XAI_OAUTH_TOKEN = "xai-test";
     const { calls } = captureFetch(() =>
       jsonResponse({ model: "grok-4", choices: [{ message: { content: "ok" } }] }),
     );

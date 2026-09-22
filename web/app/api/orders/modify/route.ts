@@ -1,4 +1,5 @@
 import { requireRouteAccess } from "@/lib/routeAccess";
+import { scrubSecrets } from "@/lib/apiContracts";
 import { NextResponse } from "next/server";
 import { radonFetch } from "@/lib/radonApi";
 import { RadonApiError } from "@/lib/radonApi";
@@ -363,7 +364,7 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
     if (replaceAttempted) {
-      const reason = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+      const reason = scrubSecrets(error instanceof Error ? `${error.name}: ${error.message}` : String(error));
       return NextResponse.json(
         { error: `${REPLACE_INDETERMINATE_MESSAGE} (${reason})` },
         { status: 504 },

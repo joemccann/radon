@@ -1,6 +1,10 @@
+import { pageMetadata } from "@/lib/pageTitle";
+
 // Plain anchor, no next/link — Next.js 16 prerenders /_not-found in a
 // worker without a layout-router context, and Link triggers a useContext
 // invariant during static generation.
+
+export const metadata = pageMetadata("Instrument not found");
 
 export default function TickerNotFound() {
   return (

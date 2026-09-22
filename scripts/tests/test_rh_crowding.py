@@ -335,11 +335,10 @@ def _local_import_closure(roots: list[Path]) -> set[Path]:
 class TestCrowdingCannotTripGates:
     """Belt-and-suspenders pin that the gate chokepoints cannot see rh_crowding.
 
-    Gate 1 lives in scripts/workflow/gates.py (convexity_gate), Gate 2 in
-    scripts/evaluate.py (determine_edge), Gate 3 in scripts/kelly.py +
-    the workflow kelly_gate.
+    Gate 2 lives in scripts/evaluate.py (determine_edge), Gate 3 in
+    scripts/kelly.py.
 
-    Honest scope: the direct grep only reads the three chokepoint files, so a
+    Honest scope: the direct grep only reads the two chokepoint files, so a
     gate importing an intermediary module that reads rh_crowding would slip
     past it — the transitive test below walks the import closure to close
     that hole. Neither proves runtime behavior (a DB query built from string
@@ -347,7 +346,6 @@ class TestCrowdingCannotTripGates:
     """
 
     GATE_FILES = (
-        "workflow/gates.py",
         "kelly.py",
         "evaluate.py",
     )
@@ -388,24 +386,8 @@ class TestCrowdingCannotTripGates:
 
     def test_crowding_script_never_imports_the_gate_chokepoints(self):
         text = (_SCRIPTS_DIR / "fetch_rh_crowding.py").read_text(encoding="utf-8")
-        for forbidden in ("workflow.gates", "from kelly", "import kelly", "evaluate"):
+        for forbidden in ("from kelly", "import kelly", "evaluate"):
             assert forbidden not in text, (
                 f"fetch_rh_crowding.py mentions {forbidden!r} — crowding is a "
                 "descriptive overlay, not a gate input"
             )
-
-    def test_gate_math_is_unchanged_by_crowding_extremes(self):
-        """The gates take only structural/odds inputs; a maximally crowded
-        symbol and an uncrowded one hand them identical arguments."""
-        from workflow.gates import convexity_gate, kelly_gate
-
-        convex = convexity_gate(max_gain=2000.0, max_loss=1000.0)
-        assert convex.passed and convex.detail["ratio"] == pytest.approx(2.0)
-
-        kelly = kelly_gate(prob_win=0.55, odds=2.0)
-        assert kelly.gate == "risk"
-        # No crowding parameter exists to pass — the signature is the contract.
-        import inspect
-        for fn in (convexity_gate, kelly_gate):
-            params = set(inspect.signature(fn).parameters)
-            assert not params & {"crowding", "rh_crowding", "popular_rank", "scan_hits"}

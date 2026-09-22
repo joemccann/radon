@@ -59,6 +59,19 @@ def _dual_write_cta_to_db(target_date: str, payload: dict[str, Any], finished_at
         print(f"[cta-sync] db dual-write non-fatal: {exc}", file=sys.stderr)
 
 
+# Playwright cold session is 8-12 min (CTA-02). Two attempts of this plus
+# the timeout backoff (120s) fit inside TimeoutStartSec=1800 with cleanup slack.
+FETCH_TIMEOUT_S = 720
+
+
+def _subprocess_text(value: str | bytes | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", "replace")
+    return value
+
+
 class CtaSyncLockError(RuntimeError):
     """Raised when a CTA sync lock is already held."""
 
@@ -256,22 +269,37 @@ def run_cta_sync(
                 ]
                 if force:
                     fetch_cmd.append("--force")
-                fetch_result = subprocess.run(
-                    fetch_cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=300,
-                    cwd=str(SCRIPT_DIR.parent),
-                    env={**os.environ, "MENTHORQ_ARTIFACT_DIR": str(attempt_artifact_dir)},
-                )
-                captured_stdout = fetch_result.stdout
-                captured_stderr = fetch_result.stderr
+                fetch_timed_out = False
+                try:
+                    fetch_result = subprocess.run(
+                        fetch_cmd,
+                        capture_output=True,
+                        text=True,
+                        timeout=FETCH_TIMEOUT_S,
+                        cwd=str(SCRIPT_DIR.parent),
+                        env={**os.environ, "MENTHORQ_ARTIFACT_DIR": str(attempt_artifact_dir)},
+                    )
+                    captured_stdout = fetch_result.stdout or ""
+                    captured_stderr = fetch_result.stderr or ""
+                    fetch_returncode = fetch_result.returncode
+                except subprocess.TimeoutExpired as exc:
+                    fetch_timed_out = True
+                    captured_stdout = _subprocess_text(exc.stdout)
+                    captured_stderr = _subprocess_text(exc.stderr) or (
+                        f"fetch_menthorq_cta.py timed out after {FETCH_TIMEOUT_S} seconds\n"
+                    )
+                    fetch_returncode = -1
+                    print(
+                        f"[cta-sync] fetch timed out after {FETCH_TIMEOUT_S}s "
+                        f"(attempt {attempt_count})",
+                        file=sys.stderr,
+                    )
                 if captured_stderr:
                     print(captured_stderr, end="", file=sys.stderr)
 
                 # Parse payload from JSON stdout
                 payload = None
-                if fetch_result.returncode == 0 and captured_stdout.strip():
+                if fetch_returncode == 0 and captured_stdout.strip():
                     try:
                         payload = json.loads(captured_stdout)
                     except json.JSONDecodeError:
@@ -302,6 +330,8 @@ def run_cta_sync(
 
                 error_text = captured_stderr or captured_stdout or reason or "CTA sync returned invalid payload"
                 error_type, error_message = classify_sync_error(error_text)
+                if fetch_timed_out:
+                    error_type = "timeout"
                 backoffs = retry_backoffs_for_error(error_type)
                 if attempt_count >= len(backoffs):
                     break

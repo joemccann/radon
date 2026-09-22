@@ -63,7 +63,7 @@ describe("buildAuthenticatedWebSocketUrl", () => {
     );
 
     expect(url).toBe("wss://app.radon.run/ws?ticket=ticket%20123");
-    expect(mockGetWsTicket).toHaveBeenCalledWith("clerk-token");
+    expect(mockGetWsTicket).toHaveBeenCalledWith("clerk-token", expect.any(AbortSignal));
   });
 
   it("does not open an unauthenticated production socket when no token is available", async () => {

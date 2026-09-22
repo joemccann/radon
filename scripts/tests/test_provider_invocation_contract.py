@@ -120,28 +120,22 @@ class TestTheWrapperSource:
 
 @pytest.mark.parametrize("loop", sorted(LOOPS))
 class TestTheAgentCanReachGit:
-    """Every phase is scored on a COMMIT to the dated branch.
+    """Host git lives outside the clone. Codex must not write that gitdir.
 
-    2026-09-07: codex's own workspace-write policy protects version-control
-    metadata, so every codex phase died with
-
-      fatal: cannot lock ref 'refs/heads/<loop>/<date>': Unable to create
-      '.../.git/refs/heads/....lock': Operation not permitted
-
-    and then scored INCOMPLETE for having no commit — silently, on all four
-    fallback loops, every run. A rung that cannot write .git can never satisfy
-    the contract, so the grant is asserted here rather than discovered at 00:00.
+    2026-09-22 R02-A: a workspace-write grant on `$REPO/.git` let the agent
+    plant exec-capable repo config that host fetch/checkout then honoured.
+    The host gitdir is `$WEEKEND_ROOT/.gitdirs/<loop>.git`. Codex keeps
+    network and deliver/scratch roots; it does not get the gitdir.
     """
 
-    def test_codex_names_the_clone_git_dir_as_a_writable_root(self, loop):
+    def test_codex_cannot_write_host_or_clone_gitdir(self, loop):
         body = LOOPS[loop].read_text(encoding="utf-8")
         start = body.index("launch_round() {")
         fn = body[start : body.index("\n}", start)]
-        assert "sandbox_workspace_write" in fn, (
-            "codex cannot create a branch under the default workspace-write "
-            "policy, so the phase can never commit and is scored INCOMPLETE"
-        )
-        assert "$REPO/.git" in fn, fn
+        assert "sandbox_workspace_write" in fn, fn
+        roots = fn[fn.index("writable_roots=") : fn.index("]", fn.index("writable_roots=")) + 1]
+        assert "$REPO/.git" not in roots, roots
+        assert ".gitdirs" not in roots, roots
 
     def test_codex_can_write_the_deliver_record(self, loop):
         """It lives one level ABOVE the clone, outside the workspace.
@@ -216,11 +210,24 @@ class TestTheClaudeWire:
             assert tool in first.split(), f"{tool} not denied: {first}"
         assert "--dangerously-skip-permissions" in first, first
         assert "--output-format text" in first, first
+        assert "--effort medium" in first, (
+            "Mini ~/.claude/settings.json has effortLevel: low; the wrapper "
+            f"must pin --effort medium so it cannot win: {first}"
+        )
+
+    @pytest.mark.parametrize("phase", ["audit", "remediate", "deliver"])
+    def test_the_deepsec_loop_pins_effort_medium(self, tmp_path, phase):
+        argv = _argv(tmp_path, "security-deepsec", phase=phase)
+        assert argv, "claude was never launched"
+        first = argv[0]
+        assert first.startswith("-p /security-deepsec " + phase), first
+        assert "--effort medium" in first, first
+        assert "--model" in first.split(), first
 
     def test_the_denial_is_in_the_claude_arm_of_every_wrapper(self):
-        """The four fallback loops never take the claude rung, but launch_round
-        is pinned byte-identical across the five, so the arm lives in all of
-        them and must carry the same denial."""
+        """The four fallback loops never take the claude rung. launch_round
+        is identical within each family; the wakeup-tool denial stays on
+        every copy of the claude arm."""
         for name, path in LOOPS.items():
             text = path.read_text(encoding="utf-8")
             arm_start = text.index("    claude)\n", text.index("launch_round() {"))

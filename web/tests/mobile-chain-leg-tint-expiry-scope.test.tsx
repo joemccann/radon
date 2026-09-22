@@ -38,7 +38,7 @@ function leg(expiry: string): OrderLeg {
   };
 }
 
-function renderLadder(legs: OrderLeg[], prices: Record<string, never> = {}) {
+function renderLadder(legs: OrderLeg[], prices: Record<string, never> = {}, sideFilter: "both" | "calls" = "both") {
   Object.defineProperty(Element.prototype, "scrollTo", { configurable: true, value: vi.fn() });
   return render(
     React.createElement(MobileChainLadder, {
@@ -50,7 +50,7 @@ function renderLadder(legs: OrderLeg[], prices: Record<string, never> = {}) {
       atmStrike: 970,
       prices,
       currentPrice: 967.78,
-      sideFilter: "both" as const,
+      sideFilter,
       onSideFilterChange: vi.fn(),
       strikesPerSide: 15,
       onStrikesPerSideChange: vi.fn(),
@@ -87,7 +87,7 @@ describe("Mobile chain ladder leg tint", () => {
         symbol: TICKER,
         avgVolume: 12_345,
       } as never,
-    });
+    }, "calls");
     const cell = screen.getByTestId("mobile-chain-call-970");
     expect(cell.textContent).toContain("AVG VOL 12k");
     expect(cell.textContent).not.toContain("OI 12k");

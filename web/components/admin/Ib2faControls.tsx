@@ -191,9 +191,14 @@ export default function Ib2faControls({
     }
   };
 
+  const authState = health?.ib_gateway?.auth_state;
   const powerStatusLine =
     powerState === "running"
-      ? "Gateway is running. IB data plane live."
+      ? authState === "authenticated"
+        ? "Gateway is running. IB data plane live."
+        : authState === "awaiting_2fa"
+          ? "Gateway is up. Approve the IBKR Mobile push."
+          : "Gateway process is up. IB is not authenticated."
       : powerState === "transitional"
         ? "Gateway is mid-transition."
         : powerState === "unknown"

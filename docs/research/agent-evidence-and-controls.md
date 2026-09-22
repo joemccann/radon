@@ -11,7 +11,8 @@ parser/version, one-based original page numbers, OCR conditions, literal passage
 Markdown tables and line ranges. Passage IDs hash the PDF, page, line range and
 text. Financial signs, units and source wording are preserved. Tables are labeled
 only when the extracted Markdown includes a delimiter row; chart images are not
-silently converted into numeric tables.
+silently converted into numeric tables. Chart crops come from PDFium page
+objects in the displayed frame.
 
 The existing publication pipeline stores the manifest through the private,
 content-addressed research asset store. `source.evidenceUrl` accompanies new

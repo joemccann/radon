@@ -77,7 +77,7 @@ describe("DashboardNewsFeed offline resilience", () => {
       await vi.advanceTimersByTimeAsync(REFRESH_INTERVAL_MS);
     });
 
-    expect(container.querySelector(".news-feed-error")).toBeNull();
+    expect(container.querySelector('[role="alert"]')).toBeNull();
     expect(screen.getByText("Held post survives refresh failure")).toBeTruthy();
   });
 
@@ -90,6 +90,9 @@ describe("DashboardNewsFeed offline resilience", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
     });
-    expect(container.querySelector(".news-feed-error")).not.toBeNull();
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    const notification = screen.getByRole("alert");
+    expect(notification.closest("#radon-toast-viewport")).not.toBeNull();
+    expect(notification.textContent).toContain("Unable to connect. Check your connection and try again.");
   });
 });

@@ -6,6 +6,8 @@ import { TickerDetailProvider } from "@/lib/TickerDetailContext";
 import { ThemeProvider } from "@/lib/ThemeContext";
 import { RealtimeAuthProvider } from "@/lib/RealtimeAuthContext";
 import { RealtimePricesProvider } from "@/lib/RealtimePricesContext";
+import { HeadlinesProvider } from "@/lib/useHeadlines";
+import { ReturnCacheProvider } from "@/lib/returnCache";
 import { OfflineStatusProvider } from "@/lib/offline/OfflineStatusContext";
 import { RouteRefreshProvider } from "@/lib/RouteRefreshContext";
 import ClerkThemeBridge from "@/components/ClerkThemeBridge";
@@ -28,20 +30,24 @@ export default function Providers({
   // exit here once silently dropped the realtime tree (T-389).
   const core = (
     <RealtimeAuthProvider authlessTestBypass={authlessTestBypass}>
-      <OfflineStatusProvider>
-        <RouteRefreshProvider>
-          <IBStatusProvider authlessTestBypass={authlessTestBypass}>
-            {/* Owns the realtime prices socket for the life of the tab.
-                Lives here (not in the per-page WorkspaceShell) so App
-                Router navigations never tear the connection down. */}
-            <RealtimePricesProvider>
-              <OrderActionsProvider>
-                <TickerDetailProvider>{children}</TickerDetailProvider>
-              </OrderActionsProvider>
-            </RealtimePricesProvider>
-          </IBStatusProvider>
-        </RouteRefreshProvider>
-      </OfflineStatusProvider>
+      <ReturnCacheProvider>
+        <HeadlinesProvider>
+          <OfflineStatusProvider>
+            <RouteRefreshProvider>
+              <IBStatusProvider authlessTestBypass={authlessTestBypass}>
+                {/* Owns the realtime prices socket for the life of the tab.
+                    Lives here (not in the per-page WorkspaceShell) so App
+                    Router navigations never tear the connection down. */}
+                <RealtimePricesProvider>
+                  <OrderActionsProvider>
+                    <TickerDetailProvider>{children}</TickerDetailProvider>
+                  </OrderActionsProvider>
+                </RealtimePricesProvider>
+              </IBStatusProvider>
+            </RouteRefreshProvider>
+          </OfflineStatusProvider>
+        </HeadlinesProvider>
+      </ReturnCacheProvider>
     </RealtimeAuthProvider>
   );
   if (!CLERK_CONFIGURED) {

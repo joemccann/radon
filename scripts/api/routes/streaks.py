@@ -1,7 +1,7 @@
 """Consecutive daily gains for one ticker — on-demand daily closes.
 
-Source ladder per repo priority: IB (pool, bounded) -> Unusual Whales ->
-Robinhood (read-only MCP, skipped cleanly when unconfigured) -> Yahoo
+Source ladder per repo priority: IB (pool, bounded) -> Robinhood (read-only
+MCP, skipped cleanly when unconfigured) -> Unusual Whales -> Yahoo
 (ABSOLUTE LAST RESORT). The first source returning >= MIN_ACCEPT_BARS
 closes wins; if none reaches it, the longest non-empty result is used (a
 young listing is short on every source). Winning results cache to
@@ -167,8 +167,8 @@ def _fetch_yahoo_closes(symbol: str) -> dict[str, float]:
 RH_SOURCE = "rh"
 # (label, fetcher NAME): resolved at call time so tests can patch the rungs.
 FALLBACK_LADDER = (
-    ("uw", "_fetch_uw_closes"),
     (RH_SOURCE, "_fetch_rh_closes"),
+    ("uw", "_fetch_uw_closes"),
     ("yahoo", "_fetch_yahoo_closes"),
 )
 
@@ -179,7 +179,7 @@ def _fetch_fallback_closes(
     best_source: Optional[str],
     errors: Optional[list] = None,
 ) -> tuple[dict[str, float], Optional[str]]:
-    """UW -> Robinhood -> Yahoo, keeping the longest short answer as backup.
+    """Robinhood -> UW -> Yahoo, keeping the longest short answer as backup.
 
     REL-177 (R-489): vendor FAILURES are collected into ``errors`` so an
     expired UW token or a throttle embargo stops reading as a bad ticker.

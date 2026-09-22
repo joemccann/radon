@@ -35,33 +35,158 @@ set -Eeuo pipefail
 
 # One writer per runner clone. The daily fire, a hand-run smoke test and the
 # setup script all drive the SAME tree, and every entry point runs
-# `git clean -fdxq`, so a second run would delete the live agent's uncommitted
+# `git --git-dir="$HOST_GITDIR" --work-tree="$REPO" clean -fdxq`, so a second run would delete the live agent's uncommitted
 # work mid-write with both runs reporting success. The plist pre-reset and
 # setup_testing_weekend.sh both stand down on this lock, so it has to exist.
 # mkdir is the atomic primitive here: flock(1) does not exist on macOS.
+# The sandboxed agent can write anywhere in this clone, so any path this
+# wrapper chmods, rms, or writes through could have been replaced with a
+# symlink pointing outside it. Verify before every privileged file
+# operation and refuse rather than follow. CWE-59.
+refuse_symlink() {
+  local p="${1:-}"
+  if [[ -L "$p" ]]; then
+    echo "REFUSING: $p is a symlink; privileged file operations here do not follow symlinks" >&2
+    return 1
+  fi
+  return 0
+}
+
+pid_alive() {
+  local pid="$1" start="${2:-}" listed lstart
+  case "$pid" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  if kill -0 "$pid" 2>/dev/null; then
+    :
+  else
+    listed="$(/bin/ps -p "$pid" -o pid= 2>/dev/null || true)"
+    listed="${listed#"${listed%%[![:space:]]*}"}"
+    listed="${listed%"${listed##*[![:space:]]}"}"
+    if [[ -z "$listed" ]]; then
+      return 1
+    fi
+  fi
+  if [[ -n "$start" ]]; then
+    lstart="$(/bin/ps -p "$pid" -o lstart= 2>/dev/null || true)"
+    lstart="${lstart#"${lstart%%[![:space:]]*}"}"
+    lstart="${lstart%"${lstart##*[![:space:]]}"}"
+    start="${start#"${start%%[![:space:]]*}"}"
+    start="${start%"${start##*[![:space:]]}"}"
+    if [[ -n "$lstart" && "$lstart" != "$start" ]]; then
+      return 1
+    fi
+  fi
+  return 0
+}
+
+_write_runner_lock_files() {
+  local dir="$1" start
+  start="$(/bin/ps -p $$ -o lstart= 2>/dev/null || true)"
+  start="${start#"${start%%[![:space:]]*}"}"
+  start="${start%"${start##*[![:space:]]}"}"
+  printf '%s\n' "$start" > "$dir/start.tmp" && mv -f "$dir/start.tmp" "$dir/start"
+  printf '%s\n' "$$" > "$dir/pid.tmp" && mv -f "$dir/pid.tmp" "$dir/pid"
+}
+
+_stale_lock_dest() {
+  local src="$1" tag="$2" root stamp name dest_dir
+  root="${WEEKEND_ROOT:-$(dirname "$src")}"
+  stamp="${STAMP:-$(date +%Y%m%dT%H%M%S)}"
+  dest_dir="$root/.stale-locks"
+  refuse_symlink "$dest_dir" || return 1
+  mkdir -p "$dest_dir"
+  refuse_symlink "$dest_dir" || return 1
+  if [[ "$(basename "$src")" == ".weekend-runner.lock" && "$(dirname "$src")" == "$root" ]]; then
+    name="shared.weekend-runner.lock.${tag}.${stamp}"
+  else
+    name="$(basename "${REPO:-$(dirname "$src")}").weekend-runner.lock.${tag}.${stamp}"
+  fi
+  printf '%s' "$dest_dir/$name"
+}
+
+_read_runner_lock_identity() {
+  local path="$1"
+  LOCK_HELD=""
+  LOCK_START=""
+  if [[ -d "$path" ]]; then
+    LOCK_HELD="$(cat "$path/pid" 2>/dev/null || true)"
+    LOCK_START="$(cat "$path/start" 2>/dev/null || true)"
+  elif [[ -f "$path" ]]; then
+    LOCK_HELD="$(cat "$path" 2>/dev/null || true)"
+  fi
+  LOCK_HELD="${LOCK_HELD#"${LOCK_HELD%%[![:space:]]*}"}"
+  LOCK_HELD="${LOCK_HELD%"${LOCK_HELD##*[![:space:]]}"}"
+  LOCK_START="${LOCK_START#"${LOCK_START%%[![:space:]]*}"}"
+  LOCK_START="${LOCK_START%"${LOCK_START##*[![:space:]]}"}"
+}
+
+
 acquire_runner_lock() {
-  local dir="$1" held
-  if ! mkdir "$dir" 2>/dev/null; then
+  local dir="$1" held start shape dest
+  if mkdir "$dir" 2>/dev/null; then
+    _write_runner_lock_files "$dir"
+    return 0
+  fi
+  if [[ -d "$dir" ]]; then
+    shape=dir
     held="$(cat "$dir/pid" 2>/dev/null || true)"
+    start="$(cat "$dir/start" 2>/dev/null || true)"
+    held="${held#"${held%%[![:space:]]*}"}"
+    held="${held%"${held##*[![:space:]]}"}"
+    start="${start#"${start%%[![:space:]]*}"}"
+    start="${start%"${start##*[![:space:]]}"}"
     if [[ -z "$held" ]]; then
-      # No pid yet means the winner is between its mkdir and its pid write.
-      # That window used to skip the `kill -0` test entirely — the loser read
-      # an empty pid, called the lock stale, `rm -rf`d it and took it, and two
-      # cycles then ran `git clean -fdxq` in the same clone. Absent evidence is
-      # not evidence of staleness. R-411.
       echo "weekend runner lock held (pid not yet published): $dir" >&2
       return 1
     fi
-    if kill -0 "$held" 2>/dev/null; then
+    case "$held" in
+      *[!0-9]*)
+        echo "weekend runner lock held (pid not yet published): $dir" >&2
+        return 1
+        ;;
+    esac
+    if pid_alive "$held" "$start"; then
       echo "weekend runner lock held by pid $held ($dir)" >&2
       return 1
     fi
-    echo "[weekend] reclaiming stale runner lock (pid $held)" >&2
-    rm -rf -- "$dir"
-    mkdir "$dir" 2>/dev/null || { echo "cannot take runner lock $dir" >&2; return 1; }
+    echo "[weekend] reclaiming stale runner lock (pid $held, $shape)" >&2
+    dest="$(_stale_lock_dest "$dir" "$held")" || { echo "cannot take runner lock $dir" >&2; return 1; }
+    mv -f -- "$dir" "$dest" || { echo "cannot take runner lock $dir" >&2; return 1; }
+  elif [[ -f "$dir" ]]; then
+    shape=file
+    held="$(cat "$dir" 2>/dev/null || true)"
+    held="${held#"${held%%[![:space:]]*}"}"
+    held="${held%"${held##*[![:space:]]}"}"
+    start=""
+    if [[ -z "$held" ]]; then
+      echo "[weekend] reclaiming foreign plain-file lock (no pid)" >&2
+      dest="$(_stale_lock_dest "$dir" "nopid")" || { echo "cannot take runner lock $dir" >&2; return 1; }
+      mv -f -- "$dir" "$dest" || { echo "cannot take runner lock $dir" >&2; return 1; }
+    else
+      case "$held" in
+        *[!0-9]*)
+          echo "[weekend] reclaiming foreign plain-file lock (no pid)" >&2
+          dest="$(_stale_lock_dest "$dir" "nopid")" || { echo "cannot take runner lock $dir" >&2; return 1; }
+          mv -f -- "$dir" "$dest" || { echo "cannot take runner lock $dir" >&2; return 1; }
+          ;;
+        *)
+          if pid_alive "$held" "$start"; then
+            echo "weekend runner lock held by pid $held ($dir)" >&2
+            return 1
+          fi
+          echo "[weekend] reclaiming stale runner lock (pid $held, $shape)" >&2
+          dest="$(_stale_lock_dest "$dir" "$held")" || { echo "cannot take runner lock $dir" >&2; return 1; }
+          mv -f -- "$dir" "$dest" || { echo "cannot take runner lock $dir" >&2; return 1; }
+          ;;
+      esac
+    fi
+  else
+    echo "cannot take runner lock $dir" >&2
+    return 1
   fi
-  # Rename the pid in so it is never half-written to a reader. R-411.
-  printf '%s\n' "$$" > "$dir/pid.tmp" && mv -f "$dir/pid.tmp" "$dir/pid"
+  mkdir "$dir" 2>/dev/null || { echo "cannot take runner lock $dir" >&2; return 1; }
+  _write_runner_lock_files "$dir"
   return 0
 }
 
@@ -71,18 +196,65 @@ release_runner_lock() {
   local dir="${1:-}" held
   [[ -n "$dir" && -d "$dir" ]] || return 0
   held="$(cat "$dir/pid" 2>/dev/null || true)"
-  [[ "$held" == "$$" ]] || return 0
+  held="${held#"${held%%[![:space:]]*}"}"
+  held="${held%"${held##*[![:space:]]}"}"
+  if [[ "$held" != "$$" ]]; then
+    if [[ -n "$held" ]]; then
+      echo "[weekend] runner lock pid was rewritten during the cycle (now $held)" >&2
+    fi
+    return 0
+  fi
   rm -rf -- "$dir"
 }
+
+sweep_shared_parent_lock() {
+  local path="$1" held start dest
+  FOREIGN_LOCK=""
+  [[ -e "$path" ]] || return 0
+  if [[ -d "$path" ]]; then
+    held="$(cat "$path/pid" 2>/dev/null || true)"
+    start="$(cat "$path/start" 2>/dev/null || true)"
+  elif [[ -f "$path" ]]; then
+    held="$(cat "$path" 2>/dev/null || true)"
+    start=""
+  else
+    return 0
+  fi
+  held="${held#"${held%%[![:space:]]*}"}"
+  held="${held%"${held##*[![:space:]]}"}"
+  start="${start#"${start%%[![:space:]]*}"}"
+  start="${start%"${start##*[![:space:]]}"}"
+  case "$held" in
+    ''|*[!0-9]*)
+      dest="$(_stale_lock_dest "$path" "nopid")" || { echo "[weekend] cannot quarantine $path" >&2; return 0; }
+      mv -f -- "$path" "$dest" || true
+      FOREIGN_LOCK="removed:nopid"
+      echo "[weekend] foreign-lock=$FOREIGN_LOCK" >&2
+      return 0
+      ;;
+  esac
+  if pid_alive "$held" "$start"; then
+    FOREIGN_LOCK="live:$held"
+    echo "[weekend] foreign-lock=$FOREIGN_LOCK" >&2
+    return 0
+  fi
+  dest="$(_stale_lock_dest "$path" "$held")" || { echo "[weekend] cannot quarantine $path" >&2; return 0; }
+  mv -f -- "$path" "$dest" || true
+  FOREIGN_LOCK="removed:$held"
+  echo "[weekend] foreign-lock=$FOREIGN_LOCK" >&2
+  return 0
+}
+
 
 # Every network call in this wrapper is bounded, INCLUDING the dead-man channel
 # itself: a hung issue-comment call inside the crash handler wedged the wrapper
 # while it was trying to report its own death, holding the runner lock and
 # dropping every subsequent daily fire. R-409.
 NET_TIMEOUT_SECS="${RADON_WEEKEND_NET_TIMEOUT_SECS:-120}"
-# Before --lock-lib-only and before the venv PATH prepend. lock-lib-only
-# fetch always calls net_bounded under set -u.
-TIMEOUT_BIN="$(command -v timeout || true)"
+# TIMEOUT_BIN is resolved here so lock-lib-only fetch tests can call
+# net_bounded. The hard require is after --lock-lib-only.
+TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
+# Hard-require stays after --lock-lib-only: setup_* only needs pid_alive/acquire/sweep.
 net_bounded() { "$TIMEOUT_BIN" "$NET_TIMEOUT_SECS" "$@"; }
 
 # A VPN flap that establishes TCP and then stalls hangs an ssh transport with
@@ -92,6 +264,7 @@ GIT_SSH_BOUNDED="ssh -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAli
 # `source testing_weekend.sh --lock-lib-only` exposes the helpers above to the
 # contract tests without running a weekend.
 [[ "${1:-}" == "--lock-lib-only" ]] && return 0 2>/dev/null
+[[ -n "$TIMEOUT_BIN" ]] || { echo "testing_weekend: GNU timeout (or gtimeout from coreutils) is required" >&2; return 78 2>/dev/null || exit 78; }
 
 # Bash reads a script LAZILY by byte offset and re-reads it from disk after
 # every fork. The agent this wrapper spawns edits files in this clone, this
@@ -101,6 +274,11 @@ GIT_SSH_BOUNDED="ssh -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAli
 # the call at the bottom must exit on its own line. Residual window: the
 # initial parse itself, before main is defined.
 main() {
+
+# Host git uses $WEEKEND_ROOT/.gitdirs/<loop>.git, not the clone .git.
+# Hooks and fsmonitor stay pinned off for the launchd pre-reset and helpers.
+export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null \
+  GIT_CONFIG_KEY_1=core.fsmonitor GIT_CONFIG_VALUE_1=false
 
 MODE="${1:?usage: testing_weekend.sh audit|remediate|deliver|cycle}"
 [[ "$MODE" == "audit" || "$MODE" == "remediate" || "$MODE" == "deliver" || "$MODE" == "cycle" ]] || {
@@ -147,6 +325,22 @@ DEADMAN_TITLE="Nightly testing runner"
 DEADMAN_LABEL="testing-nightly"
 ISSUE_SANITIZE=0
 LOOP_SLUG="testing"
+
+HOST_GITDIR="$WEEKEND_ROOT/.gitdirs/${LOOP_SLUG}.git"
+# Host git never reads the clone .git. The agent can rewrite a gitfile.
+ensure_host_gitdir() {
+  mkdir -p "$(dirname "$HOST_GITDIR")"
+  chmod 700 "$(dirname "$HOST_GITDIR")" 2>/dev/null || true
+  if [[ -d "$HOST_GITDIR" ]]; then
+    return 0
+  fi
+  if [[ -d "$REPO/.git" ]]; then
+    git -C "$REPO" init --separate-git-dir="$HOST_GITDIR" >/dev/null 2>&1 || true
+    return 0
+  fi
+  git init --separate-git-dir="$HOST_GITDIR" "$REPO" >/dev/null 2>&1 || true
+}
+ensure_host_gitdir
 DEADMAN_CREATE_BODY="Rolling dead-man for the nightly ${LOOP_SLUG} loop. A missing daily comment means the runner did not fire."
 # Branch prefix the skill opens/updates its PR from. Matched on the head
 # ref, not the title: the title is now `Testing <date>`, which a
@@ -267,6 +461,9 @@ report() {
   # must not mask the run's own exit code. Third arg 0 suppresses the
   # Pushover.
   local status="$1" detail="$2" push="${3:-1}"
+  if [[ -n "${FOREIGN_LOCK:-}" ]]; then
+    detail="${detail:+$detail }foreign-lock=$FOREIGN_LOCK"
+  fi
   local body
   body="$(_format_issue_body "$PHASE" "$status" "$detail")"
   local issue
@@ -324,7 +521,7 @@ prune_deadman_comments() {
   if [[ ! "$keep" =~ ^[0-9]+$ ]]; then return 0; fi
   if [[ "${RADON_WEEKEND_SKIP_ISSUE_PRUNE:-0}" == "1" ]]; then return 0; fi
   if [[ -z "${TIMEOUT_BIN:-}" || -z "$GH_BIN" ]]; then return 0; fi
-  git -C "$REPO" show origin/main:scripts/nightly_issue_prune.py 2>/dev/null \
+  git --git-dir="$HOST_GITDIR" --work-tree="$REPO" show origin/main:scripts/nightly_issue_prune.py 2>/dev/null \
     | "$TIMEOUT_BIN" "${RADON_WEEKEND_ISSUE_PRUNE_TIMEOUT_SECS:-30}" \
       /usr/bin/python3 -I - --gh-bin "$GH_BIN" --issue "$issue" \
       --branch-prefix "$PR_BRANCH_PREFIX" ${keep:+--keep "$keep"} >/dev/null 2>&1 || true
@@ -377,7 +574,7 @@ DELIVER_INCOMPLETE_MARKER="NIGHTLY DELIVER INCOMPLETE:"
 arm_deliver_record() {
   [[ "$PHASE" == "deliver" ]] || return 0
   [[ -n "${TIMEOUT_BIN:-}" ]] || return 0
-  git -C "$REPO" show origin/main:scripts/nightly_deliver.py 2>/dev/null \
+  git --git-dir="$HOST_GITDIR" --work-tree="$REPO" show origin/main:scripts/nightly_deliver.py 2>/dev/null \
     | "$TIMEOUT_BIN" 30 /usr/bin/python3 -I - record --loop "$LOOP_SLUG" \
       --branch "${PR_BRANCH_PREFIX}$(date +%F)" --status launched >/dev/null 2>&1 || true
   return 0
@@ -409,7 +606,7 @@ deliver_status() {
   # all. The log grep survives only as the fallback for a record-less run.
   local from_record=""
   if [[ -n "${TIMEOUT_BIN:-}" ]]; then
-    from_record="$(git -C "$REPO" show origin/main:scripts/nightly_deliver.py 2>/dev/null \
+    from_record="$(git --git-dir="$HOST_GITDIR" --work-tree="$REPO" show origin/main:scripts/nightly_deliver.py 2>/dev/null \
       | "$TIMEOUT_BIN" 30 /usr/bin/python3 -I - deliver-status --loop "$LOOP_SLUG" 2>/dev/null || true)"
   fi
   case "$from_record" in
@@ -479,9 +676,9 @@ PHASE_HEAD_BEFORE=""
 PHASE_START_EPOCH=0
 phase_committed() {
   local head epoch
-  head="$(git rev-parse HEAD 2>/dev/null || true)"
+  head="$(git --git-dir="$HOST_GITDIR" --work-tree="$REPO" rev-parse HEAD 2>/dev/null || true)"
   [[ -n "$head" && "$head" != "$PHASE_HEAD_BEFORE" ]] || return 1
-  epoch="$(git log -1 --format=%ct HEAD 2>/dev/null || true)"
+  epoch="$(git --git-dir="$HOST_GITDIR" --work-tree="$REPO" log -1 --format=%ct HEAD 2>/dev/null || true)"
   [[ -n "$epoch" && "$epoch" -ge "$PHASE_START_EPOCH" ]]
 }
 
@@ -528,15 +725,275 @@ kill_round_group() {
   # process-group leader, so the negative pid reaches claude and anything it
   # left behind. --foreground would signal only timeout's direct child, which
   # is the opposite of what reaping orphaned subagents needs — they would keep
-  # writing into the clone while the next round runs `git clean -fdxq`. R-386.
+  # writing into the clone while the next round runs `git --git-dir="$HOST_GITDIR" --work-tree="$REPO" clean -fdxq`. R-386.
   kill -TERM -- "-$ROUND_PID" 2>/dev/null || kill -TERM "$ROUND_PID" 2>/dev/null || true
   ROUND_PID=""
+}
+
+
+BROWSER_HOST_PID=""
+BROWSER_HOST_STATUS=""
+BROWSER_HOST_ENDPOINT=""
+BROWSER_HOST_TREE=""
+BROWSER_HOST_SID=""
+
+_descendants_of() {
+  local root="$1" out="" pending="$1" next pid ppid line
+  local snap
+  [[ -n "$root" ]] || return 0
+  snap="$(/bin/ps -axo pid=,ppid= 2>/dev/null || true)"
+  while [[ -n "$pending" ]]; do
+    next=""
+    while IFS= read -r line; do
+      line="${line#"${line%%[![:space:]]*}"}"
+      [[ -n "$line" ]] || continue
+      pid="${line%%[[:space:]]*}"
+      ppid="${line#"$pid"}"
+      ppid="${ppid#"${ppid%%[![:space:]]*}"}"
+      ppid="${ppid%%[[:space:]]*}"
+      case " $pending " in
+        *" $ppid "*)
+          case " $out $next $pending " in
+            *" $pid "*) ;;
+            *)
+              next="${next}${next:+ }$pid"
+              out="${out}${out:+ }$pid"
+              ;;
+          esac
+          ;;
+      esac
+    done <<EOF
+$snap
+EOF
+    pending="$next"
+  done
+  printf '%s' "$out"
+}
+
+_pids_in_session() {
+  local sid="$1" pid sess line
+  [[ -n "$sid" ]] || return 0
+  while IFS= read -r line; do
+    line="${line#"${line%%[![:space:]]*}"}"
+    [[ -n "$line" ]] || continue
+    pid="${line%%[[:space:]]*}"
+    sess="${line#"$pid"}"
+    sess="${sess#"${sess%%[![:space:]]*}"}"
+    sess="${sess%%[[:space:]]*}"
+    if [[ "$sess" == "$sid" ]]; then
+      printf '%s ' "$pid"
+    fi
+  done <<EOF
+$(/bin/ps -axo pid=,sid= 2>/dev/null || /bin/ps -axo pid=,sess= 2>/dev/null || true)
+EOF
+}
+
+stop_browser_host() {
+  local pid="${BROWSER_HOST_PID:-}"
+  local tree="${BROWSER_HOST_TREE:-}"
+  local sid="${BROWSER_HOST_SID:-}"
+  BROWSER_HOST_PID=""
+  BROWSER_HOST_TREE=""
+  BROWSER_HOST_SID=""
+  BROWSER_HOST_ENDPOINT=""
+  unset PW_TEST_CONNECT_WS_ENDPOINT
+  [[ -n "$pid" || -n "$tree" || -n "$sid" ]] || return 0
+  if [[ -n "$pid" ]]; then
+    tree="${tree:+$tree }$(_descendants_of "$pid") $pid"
+    kill -TERM -- "-$pid" 2>/dev/null || true
+  fi
+  if [[ -n "$sid" ]]; then
+    tree="${tree:+$tree }$(_pids_in_session "$sid")"
+  fi
+  if [[ -n "$tree" ]]; then
+    kill -TERM -- $tree 2>/dev/null || true
+  fi
+  local i=0 alive p
+  while [[ $i -lt 5 ]]; do
+    alive=0
+    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then alive=1; fi
+    for p in $tree; do
+      if kill -0 "$p" 2>/dev/null; then alive=1; break; fi
+    done
+    [[ $alive -eq 0 ]] && break
+    sleep 1
+    i=$((i + 1))
+  done
+  if [[ -n "$pid" ]]; then
+    kill -KILL -- "-$pid" 2>/dev/null || true
+  fi
+  if [[ -n "$tree" ]]; then
+    kill -KILL -- $tree 2>/dev/null || true
+  fi
+  [[ -n "$pid" ]] && wait "$pid" 2>/dev/null || true
+}
+
+_playwright_major_minor() {
+  local pkg="$1" ver minor
+  [[ -f "$pkg" ]] || return 1
+  ver="$(/usr/bin/sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$pkg" | /usr/bin/head -n 1)"
+  [[ -n "$ver" ]] || return 1
+  case "$ver" in
+    *.*.*)
+      minor="${ver#*.}"
+      printf '%s.%s' "${ver%%.*}" "${minor%%.*}"
+      ;;
+    *.*) printf '%s' "$ver" ;;
+    *) return 1 ;;
+  esac
+}
+
+_browser_host_bin_ok() {
+  local bin="$1" root dest phys_root phys_bin cur stop rl
+  root="${AGENT_CLI_ROOT}/browser-host"
+  [[ -x "$bin" ]] || return 1
+  if [[ -x /usr/bin/readlink ]]; then
+    rl=/usr/bin/readlink
+  elif [[ -x /bin/readlink ]]; then
+    rl=/bin/readlink
+  else
+    rl=""
+  fi
+  cur="$root"
+  stop="$AGENT_CLI_ROOT"
+  while [[ -n "$cur" && "$cur" != "/" ]]; do
+    refuse_symlink "$cur" || {
+      echo "REFUSING: $cur is a symlink; browser-host bin must not follow directory symlinks" >&2
+      return 1
+    }
+    [[ "$cur" == "$stop" ]] && break
+    cur="${cur%/*}"
+    [[ -n "$cur" ]] || break
+  done
+  phys_root="$(cd "$root" && pwd -P)" || return 1
+  if [[ -L "$bin" ]]; then
+    [[ -n "$rl" ]] || return 1
+    dest="$("$rl" "$bin" 2>/dev/null || true)"
+    [[ -n "$dest" ]] || return 1
+    if [[ "$dest" != /* ]]; then
+      dest="$(cd "${bin%/*}" && pwd -P)/$dest"
+    fi
+    dest="$(cd "${dest%/*}" && pwd -P)/${dest##*/}" || return 1
+    phys_bin="$dest"
+  else
+    phys_bin="$(cd "${bin%/*}" && pwd -P)/${bin##*/}" || return 1
+  fi
+  case "$phys_bin" in
+    "$phys_root"/*) return 0 ;;
+  esac
+  echo "REFUSING: $bin physical path escapes $phys_root" >&2
+  return 1
+}
+
+
+start_browser_host() {
+  local bin host_root pw_mod ver_host ver_client token log wait_secs i line endpoint node_bin smoke_secs
+  BROWSER_HOST_PID=""
+  BROWSER_HOST_ENDPOINT=""
+  BROWSER_HOST_STATUS=""
+  BROWSER_HOST_TREE=""
+  BROWSER_HOST_SID=""
+  unset PW_TEST_CONNECT_WS_ENDPOINT
+  host_root="${AGENT_CLI_ROOT}/browser-host"
+  bin="$host_root/node_modules/.bin/playwright"
+  pw_mod="$host_root/node_modules/playwright"
+  if [[ ! -x "$bin" ]] || ! _browser_host_bin_ok "$bin" || ! _browser_host_bin_ok "$pw_mod"; then
+    BROWSER_HOST_STATUS="unavailable:not-installed"
+    export RADON_WEEKEND_BROWSER_HOST="$BROWSER_HOST_STATUS"
+    return 0
+  fi
+  ver_host="$(_playwright_major_minor "$AGENT_CLI_ROOT/browser-host/node_modules/@playwright/test/package.json")" || ver_host=""
+  ver_client="$(_playwright_major_minor "$REPO/web/node_modules/@playwright/test/package.json")" || ver_client=""
+  if [[ -z "$ver_host" || -z "$ver_client" || "$ver_host" != "$ver_client" ]]; then
+    if [[ ! -x "$bin" || ! -f "$AGENT_CLI_ROOT/browser-host/node_modules/@playwright/test/package.json" ]]; then
+      BROWSER_HOST_STATUS="unavailable:not-installed"
+    else
+      BROWSER_HOST_STATUS="unavailable:version-mismatch"
+    fi
+    export RADON_WEEKEND_BROWSER_HOST="$BROWSER_HOST_STATUS"
+    return 0
+  fi
+  node_bin="$(command -v node 2>/dev/null || true)"
+  if [[ -z "$node_bin" ]]; then
+    BROWSER_HOST_STATUS="unavailable:no-node"
+    export RADON_WEEKEND_BROWSER_HOST="$BROWSER_HOST_STATUS"
+    return 0
+  fi
+  token="$(/usr/bin/openssl rand -hex 16 2>/dev/null || true)"
+  if [[ ! "$token" =~ ^[0-9a-f]{32}$ ]]; then
+    BROWSER_HOST_STATUS="unavailable:no-token"
+    export RADON_WEEKEND_BROWSER_HOST="$BROWSER_HOST_STATUS"
+    return 0
+  fi
+  log="$LOG_DIR/browser-host-$STAMP.log"
+  mkdir -p "$LOG_DIR"
+  # The agent holds the endpoint, so it must not choose how the host browser
+  # launches: the Playwright CLI server honours client launch options (args,
+  # proxy, sandbox). launchServer pre-launches one browser with fixed options
+  # and ignores them. Playwright is required by absolute path from a cwd
+  # outside the clone, so the clone's node_modules is never loaded host-side.
+  local launcher='const {chromium}=require(process.env.PW_MODULE);(async()=>{const s=await chromium.launchServer({headless:true,host:"127.0.0.1",port:Number(process.env.PW_PORT)||0,wsPath:"/"+process.env.PW_TOKEN});console.log("Listening on "+s.wsEndpoint());})().catch(e=>{console.error(e);process.exit(1);});'
+  if [[ -x /usr/bin/setsid ]]; then
+    (cd "$host_root" && PW_MODULE="$pw_mod" PW_TOKEN="$token" PW_PORT="${RADON_WEEKEND_BROWSER_HOST_PORT:-0}" \
+      exec /usr/bin/setsid "$TIMEOUT_BIN" "$CAP_SECS" "$node_bin" -e "$launcher") >"$log" 2>&1 &
+  elif [[ -x /usr/bin/python3 ]]; then
+    (cd "$host_root" && PW_MODULE="$pw_mod" PW_TOKEN="$token" PW_PORT="${RADON_WEEKEND_BROWSER_HOST_PORT:-0}" \
+      exec /usr/bin/python3 -I -c 'import os,sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' \
+      "$TIMEOUT_BIN" "$CAP_SECS" "$node_bin" -e "$launcher") >"$log" 2>&1 &
+  else
+    (cd "$host_root" && PW_MODULE="$pw_mod" PW_TOKEN="$token" PW_PORT="${RADON_WEEKEND_BROWSER_HOST_PORT:-0}" \
+      exec "$TIMEOUT_BIN" "$CAP_SECS" "$node_bin" -e "$launcher") >"$log" 2>&1 &
+  fi
+  BROWSER_HOST_PID=$!
+  BROWSER_HOST_SID="$BROWSER_HOST_PID"
+  BROWSER_HOST_TREE="$(_descendants_of "$BROWSER_HOST_PID")"
+  wait_secs="${RADON_WEEKEND_BROWSER_HOST_WAIT_SECS:-60}"
+  i=0
+  endpoint=""
+  while [[ $i -lt $wait_secs ]]; do
+    BROWSER_HOST_TREE="$(_descendants_of "$BROWSER_HOST_PID") ${BROWSER_HOST_TREE:-}"
+    if ! kill -0 "$BROWSER_HOST_PID" 2>/dev/null; then
+      stop_browser_host
+      BROWSER_HOST_STATUS="unavailable:exited"
+      export RADON_WEEKEND_BROWSER_HOST="$BROWSER_HOST_STATUS"
+      return 0
+    fi
+    line="$(/usr/bin/grep -E 'Listening on ws://' "$log" 2>/dev/null | /usr/bin/tail -n 1 || true)"
+    if [[ -n "$line" ]]; then
+      endpoint="$(printf '%s' "$line" | /usr/bin/sed -n 's/.*Listening on \(ws:\/\/[^[:space:]]*\).*/\1/p')"
+      endpoint="${endpoint%%$'\r'}"
+      [[ -n "$endpoint" ]] && break
+    fi
+    sleep 1
+    i=$((i + 1))
+  done
+  if [[ -z "$endpoint" ]]; then
+    stop_browser_host
+    BROWSER_HOST_STATUS="unavailable:no-endpoint"
+    export RADON_WEEKEND_BROWSER_HOST="$BROWSER_HOST_STATUS"
+    return 0
+  fi
+  smoke_secs="${RADON_WEEKEND_BROWSER_HOST_SMOKE_SECS:-60}"
+  if ! (cd "$host_root" && PW_MODULE="$pw_mod" E="$endpoint" exec "$TIMEOUT_BIN" "$smoke_secs" \
+      "$node_bin" -e 'const {chromium}=require(process.env.PW_MODULE);(async()=>{const b=await chromium.connect(process.env.E);const p=await b.newPage();await p.setContent("<html></html>");await b.close();})().catch(e=>{console.error(e);process.exit(1);});'); then
+    stop_browser_host
+    BROWSER_HOST_STATUS="unavailable:smoke-failed"
+    export RADON_WEEKEND_BROWSER_HOST="$BROWSER_HOST_STATUS"
+    return 0
+  fi
+  BROWSER_HOST_ENDPOINT="$endpoint"
+  # browser-host=ready is host-side smoke only (chromium.connect from this
+  # wrapper). It does not prove a sandboxed agent can connect over loopback WS.
+  BROWSER_HOST_STATUS="ready"
+  export RADON_WEEKEND_BROWSER_HOST="ready"
+  echo "[weekend] browser-host=ready (host smoke only; sandboxed connect is operator-verify)" >&2
 }
 
 on_signal() {
   local sig="$1"
   trap - INT TERM HUP ERR EXIT
   kill_round_group
+  stop_browser_host
   # REL-199 (R-531): launchd's default ExitTimeOut is ~20s and report()'s gh
   # ladder is up to five 120s-bounded calls — a bootout produced NO page.
   # Release the lock and fire the 10s-bounded Pushover FIRST, log locally,
@@ -599,8 +1056,12 @@ fi
 # scanner reloads itself, or a Claude Code settings file carrying an
 # apiKeyHelper / env reroute. The lists are what `strings` on the installed
 # CLI actually honors; a hand copy of six of them was the old hole.
-# Re-derived against the INSTALLED CLI on 2026-09-14 (2.1.270, the approved
-# pin; see docs/security-approved-tools.md). History: pinned to 2.1.258,
+# Re-derived against the INSTALLED CLI on 2026-09-15 (2.1.272, the approved
+# pin; see docs/security-approved-tools.md). 2.1.272 adds no reroute: its new
+# names (CLAUDE_CODE_ARTIFACT_FD / _PATH_PIN / _QUICKSTART, the
+# _AUTO_MODE_SERVER classifier toggle, _DISABLE_TURN_HANDOFF,
+# _MCP_CONNECTOR_PREWAIT_MS, _SLEEPY_SNOWFLAKE) touch no model auth or
+# billing. Previous pass 2026-09-14 (2.1.270). History: pinned to 2.1.258,
 # re-derived 2026-09-07 against 2.1.263 (added CLAUDE_CODE_API_BASE_URL and
 # CLAUDE_CODE_HFI_BEARER_TOKEN). The 2026-09-14 pass read every new
 # ANTHROPIC_* / CLAUDE_CODE_* / AWS_BEARER_* name in its code context:
@@ -690,6 +1151,18 @@ refuse_billing_reroute_files() {
       exit 2
     fi
   done
+  # `--exclude=.deepsec/` preserves the WHOLE tree recursively, not just its
+  # top level, so a key file at a nested path (.deepsec/<subdir>/.env.local)
+  # survives every git clean unchecked by the flat glob above. Walk the tree.
+  local nested_key_file
+  while IFS= read -r nested_key_file; do
+    [[ -f "$nested_key_file" ]] || continue
+    if grep -qE "$BILLING_REROUTE_KEY_ASSIGN" "$nested_key_file" || grep -qiE "$BILLING_REROUTE_FLAG_ASSIGN" "$nested_key_file"; then
+      echo "REFUSING: $nested_key_file holds billing-reroute credentials; this loop bills the claude.ai subscription only, remove the key line" >&2
+      report "REFUSED" "$nested_key_file holds billing-reroute credentials; the agent would bill metered API usage instead of the claude.ai subscription, remove the key line" || true
+      exit 2
+    fi
+  done < <(find .deepsec -mindepth 2 -type f -name ".env*" 2>/dev/null || true)
 
   # web/.env is provisioned into the Radon-credential clones for the Next dev
   # server and pytest's load_dotenv, and the product copy carries
@@ -698,6 +1171,8 @@ refuse_billing_reroute_files() {
   # only model route in this clone. The security clone refuses the file above.
   if [[ -f web/.env ]] && { grep -qE "$BILLING_REROUTE_KEY_ASSIGN" web/.env || grep -qiE "$BILLING_REROUTE_FLAG_ASSIGN" web/.env; }; then
     echo "IGNORING: web/.env holds billing-reroute credentials; removed from the clone copy, this loop bills the claude.ai subscription only" >&2
+    refuse_symlink web/.env || exit 2
+    rm -f -- web/.env.scrub
     { grep -vE "$BILLING_REROUTE_KEY_ASSIGN" web/.env | grep -viE "$BILLING_REROUTE_FLAG_ASSIGN" || true; } > web/.env.scrub
     cat web/.env.scrub > web/.env
     rm -f web/.env.scrub
@@ -717,20 +1192,29 @@ refuse_billing_reroute_files() {
 }
 refuse_billing_reroute_files
 
+sweep_shared_parent_lock "$WEEKEND_ROOT/.weekend-runner.lock"
 RUNNER_LOCK="$REPO/.weekend-runner.lock"
 acquire_runner_lock "$RUNNER_LOCK" || {
   echo "REFUSING: another weekend run owns $REPO" >&2
-  # The expensive instance: acquire_runner_lock only reclaims when
-  # `kill -0 $held` fails, so a recorded pid reused by ANY live unrelated
-  # process makes every subsequent daily fire exit 3 in under a second. That
-  # must page, not vanish. R-239.
-  report "REFUSED (lock held)" "another weekend run owns $REPO (pid $(cat "$RUNNER_LOCK/pid" 2>/dev/null || echo unknown)); if no cycle is running, the recorded pid was reused — remove $RUNNER_LOCK" || true
+  # Live clone lock: stand down with a named REFUSED + page. A reused pid is
+  # caught by the start fingerprint in pid_alive, so this path is a live owner.
+  _read_runner_lock_identity "$RUNNER_LOCK"
+  held="$LOCK_HELD"
+  start="$LOCK_START"
+  owner="$(/bin/ps -p "$held" -o user= 2>/dev/null || true)"
+  cmd="$(/bin/ps -p "$held" -o command= 2>/dev/null || true)"
+  owner="${owner#"${owner%%[![:space:]]*}"}"
+  owner="${owner%"${owner##*[![:space:]]}"}"
+  cmd="${cmd#"${cmd%%[![:space:]]*}"}"
+  cmd="${cmd%"${cmd##*[![:space:]]}"}"
+  report "REFUSED (lock held)" "another weekend run owns $REPO (pid ${held:-unknown}, started ${start:-unknown}, owner ${owner:-unknown}, cmd ${cmd:-unknown}); if no cycle is running, the recorded pid was reused — remove $RUNNER_LOCK" || true
   exit 3
 }
-trap 'release_runner_lock "$RUNNER_LOCK"' EXIT
+trap 'stop_browser_host; release_runner_lock "$RUNNER_LOCK"; if [[ -n "${NIGHTLY_PR_GUARD_DIR:-}" ]]; then rm -rf -- "$NIGHTLY_PR_GUARD_DIR"; fi' EXIT
 
 LOG_DIR="$REPO/logs/testing-weekend"
 mkdir -p "$LOG_DIR"
+refuse_symlink "$LOG_DIR" || exit 2
 # Run logs carry agent transcripts; keep them owner-only regardless of
 # the inherited umask. Dir-level clamp so no per-file mode can regress it.
 chmod 700 "$LOG_DIR"
@@ -747,6 +1231,7 @@ chmod 700 "$LOG_DIR"
 ls -1t "$LOG_DIR" 2>/dev/null \
   | { grep -v -e '^launchd-cycle\.log$' -e '^launchd-cycle\.err$' || true; } \
   | tail -n +31 | while IFS= read -r old; do
+  [[ -f "$LOG_DIR/$old" && ! -L "$LOG_DIR/$old" ]] || continue
   rm -f -- "$LOG_DIR/$old"
 done
 
@@ -784,7 +1269,7 @@ FETCH_PAUSE_SECS="${RADON_WEEKEND_FETCH_PAUSE_SECS:-60}"
 fetch_origin_with_retry() {
   local attempt
   for (( attempt = 1; attempt <= FETCH_ATTEMPTS; attempt++ )); do
-    net_bounded git -c "core.sshCommand=$GIT_SSH_BOUNDED" fetch origin --quiet && return 0
+    net_bounded git ${HOST_GITDIR:+--git-dir="$HOST_GITDIR"} ${REPO:+--work-tree="$REPO"} -c "core.sshCommand=$GIT_SSH_BOUNDED" fetch origin --quiet && return 0
     echo "[weekend] git fetch origin failed — attempt $attempt/$FETCH_ATTEMPTS" >&2
     if (( attempt < FETCH_ATTEMPTS )); then sleep "$FETCH_PAUSE_SECS"; fi
   done
@@ -800,7 +1285,7 @@ fetch_origin_with_retry() {
 # Isolated origin/main pipe, same defence as prune_deadman_comments.
 resolve_green_main_sha() {
   [[ -n "${TIMEOUT_BIN:-}" && -n "$GH_BIN" ]] || return 0
-  git -C "$REPO" show origin/main:scripts/nightly_green_base.py 2>/dev/null \
+  git --git-dir="$HOST_GITDIR" --work-tree="$REPO" show origin/main:scripts/nightly_green_base.py 2>/dev/null \
     | "$TIMEOUT_BIN" "${RADON_WEEKEND_GREEN_BASE_TIMEOUT_SECS:-60}" \
       /usr/bin/python3 -I - --repo "${RADON_WEEKEND_GH_REPO:-joemccann/radon}" \
       --repo-dir "$REPO" --head origin/main --gh-bin "$GH_BIN" 2>/dev/null || true
@@ -809,17 +1294,21 @@ resolve_green_main_sha() {
 
 ground_truth() {
   fetch_origin_with_retry
-  git checkout -f --quiet main
-  git reset --hard --quiet origin/main
+  # T-490: a hand-set sparse checkout (`/*` + `!/.codex/`, radon-testing,
+  # 2026-09-08) hid the tracked `.codex/skills/**` render from every audit
+  # while `git status` stayed clean. Ground truth is the WHOLE tree.
+  git --git-dir="$HOST_GITDIR" --work-tree="$REPO" sparse-checkout disable 2>/dev/null || true
+  git --git-dir="$HOST_GITDIR" --work-tree="$REPO" checkout -f --quiet main
+  git --git-dir="$HOST_GITDIR" --work-tree="$REPO" reset --hard --quiet origin/main
   local green_sha
   green_sha="$(resolve_green_main_sha)"
-  if [[ -n "$green_sha" ]] && git -C "$REPO" rev-parse --verify --quiet "${green_sha}^{commit}" >/dev/null; then
-    if [[ "$green_sha" != "$(git -C "$REPO" rev-parse origin/main)" ]]; then
+  if [[ -n "$green_sha" ]] && git --git-dir="$HOST_GITDIR" --work-tree="$REPO" rev-parse --verify --quiet "${green_sha}^{commit}" >/dev/null; then
+    if [[ "$green_sha" != "$(git --git-dir="$HOST_GITDIR" --work-tree="$REPO" rev-parse origin/main)" ]]; then
       echo "[weekend] origin/main tip is not CI-green; pinning to $green_sha" | tee -a "${RUN_LOG:-/dev/null}" >/dev/null 2>&1 || true
     fi
-    git reset --hard --quiet "$green_sha"
+    git --git-dir="$HOST_GITDIR" --work-tree="$REPO" reset --hard --quiet "$green_sha"
   fi
-  git clean -fdxq --exclude=.radon-weekend-runner --exclude=.radon-testing-runner --exclude=.weekend-runner.lock --exclude=logs/ --exclude=.env --exclude=.env.ib-mode --exclude=web/.env --exclude=node_modules/ --exclude=.next/ --exclude=.deepsec/
+  git --git-dir="$HOST_GITDIR" --work-tree="$REPO" clean -fdxq --exclude=.radon-weekend-runner --exclude=.radon-testing-runner --exclude=.weekend-runner.lock --exclude=logs/ --exclude=.env --exclude=.env.ib-mode --exclude=web/.env --exclude=node_modules/ --exclude=.next/ --exclude=.deepsec/
 }
 
 # The agent commits per completed task and the skill resumes from the
@@ -1020,7 +1509,7 @@ advance_rung() {
 # round's slice only, never the wrapper's own `[loop]` marker lines.
 quota_regex() {
   case "$1" in
-    claude) printf '%s' 'out of usage credits|You.ve hit your (Opus|Sonnet) limit|Request rejected \(429\)|529 Overloaded|experiencing high load' ;;
+    claude) printf '%s' 'out of usage credits|You.ve hit your (Opus|Sonnet) limit|You.ve reached your [A-Za-z]+ limit|Request rejected \(429\)|529 Overloaded|experiencing high load' ;;
     codex) printf '%s' 'You.ve hit your usage limit|usage limited|rate limit reached|429' ;;
     grok | nvidia | cerebras) printf '%s' 'usage limit reached|out of credits|spending limit|usage balance exhausted|429' ;;
     *) printf '%s' 'a\{0\}b' ;;
@@ -1057,8 +1546,60 @@ rejection_regex() {
 # One launch per rung. Backgrounded and `wait`ed, never foreground: bash defers
 # trap handling until a foreground child exits, and `-k` escalates to SIGKILL so
 # a CLI blocked on a hung child cannot make the cap advisory. R-384, R-386.
+# Install a gh policy shim only in the agent's PATH. Reporting uses the saved
+# GH_BIN directly. Helpers are loaded lazily from origin/main, never the
+# agent-writable checkout; missing helpers fail closed on publication.
+install_nightly_pr_guard() {
+  if [[ -z "${NIGHTLY_PR_GUARD_DIR:-}" ]]; then
+    NIGHTLY_PR_GUARD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/radon-${LOOP_SLUG}-pr-guard.XXXXXX")" || return 1
+  fi
+  # Bake the paths into the shim instead of exporting them into the agent
+  # environment: an exported variable invites the agent to point the guard
+  # somewhere else, a literal baked into the 700 shim does not.
+  local guard_python
+  guard_python="$(command -v python3.13 || command -v python3)"
+  {
+    printf '#!/bin/bash\nset -euo pipefail\n'
+    printf 'export RADON_NIGHTLY_REAL_GH=%q\n' "$GH_BIN"
+    printf 'export RADON_NIGHTLY_GUARD_REPO=%q\n' "$REPO"
+    printf 'export RADON_NIGHTLY_HOST_GITDIR=%q\n' "${HOST_GITDIR:-}"
+    printf 'export RADON_NIGHTLY_GUARD_PYTHON=%q\n' "$guard_python"
+    cat <<'GUARD'
+case " $* " in
+  *" pr create "*|*" api "*)
+    guard_dir="$(mktemp -d "${TMPDIR:-/tmp}/radon-pr-check.XXXXXX")"
+    trap 'rm -rf -- "$guard_dir"' EXIT
+    for helper in nightly_publish.py nightly_pr_guard.py; do
+      git --git-dir="$RADON_NIGHTLY_HOST_GITDIR" --work-tree="$RADON_NIGHTLY_GUARD_REPO" show "origin/main:scripts/$helper" > "$guard_dir/$helper"
+      [[ -s "$guard_dir/$helper" ]] || exit 1
+    done
+    "$RADON_NIGHTLY_GUARD_PYTHON" -I "$guard_dir/nightly_pr_guard.py" "$@"
+    ;;
+  *) exec "$RADON_NIGHTLY_REAL_GH" "$@" ;;
+esac
+GUARD
+  } > "$NIGHTLY_PR_GUARD_DIR/gh"
+  chmod 700 "$NIGHTLY_PR_GUARD_DIR/gh"
+}
+
 launch_round() {
+  local PATH="$NIGHTLY_PR_GUARD_DIR:$PATH"
+  export PATH
   local remain="$1" prompt_file="$PORTABLE_PROMPT_DIR/$LOOP_SKILL.$PHASE.md"
+  unset PW_TEST_CONNECT_WS_ENDPOINT
+  case "$RUNG_PROVIDER" in
+    codex)
+      if [[ "${BROWSER_HOST_STATUS:-}" == "ready" ]]; then
+        export RADON_WEEKEND_BROWSER_HOST="unavailable:codex-rung"
+      fi
+      ;;
+    *)
+      if [[ -n "${BROWSER_HOST_ENDPOINT:-}" && "${BROWSER_HOST_STATUS:-}" == "ready" ]]; then
+        export PW_TEST_CONNECT_WS_ENDPOINT="$BROWSER_HOST_ENDPOINT"
+        export RADON_WEEKEND_BROWSER_HOST="ready"
+      fi
+      ;;
+  esac
   # A bare rung names no model on purpose: the CLI/account default is what runs
   # and the vendor migrates it forward. An empty --model is NOT the same thing,
   # so the flag is omitted entirely. `${a[@]+"${a[@]}"}` because bash 3.2 (the
@@ -1091,11 +1632,8 @@ launch_round() {
       # codex's workspace-write sandbox is narrower than the phase contract in
       # three ways, each of which silently produced an INCOMPLETE on 2026-09-07:
       #
-      #   .git                 protected by default, so `git checkout -b
-      #                        <loop>/<date>` failed with "Unable to create
-      #                        '.../refs/heads/....lock': Operation not
-      #                        permitted" and a phase scored on a COMMIT could
-      #                        never make one.
+      #   .git                 host-owned at $WEEKEND_ROOT/.gitdirs/<loop>.git.
+      #                        Codex does not get a writable gitdir (R02-A).
       #   deliver record       lives one level ABOVE the clone at
       #                        $WEEKEND_ROOT/.<loop>-deliver, so arming it raised
       #                        "PermissionError: [Errno 1] Operation not
@@ -1107,13 +1645,19 @@ launch_round() {
       #                        read CI, and `git push` cannot reach origin.
       #                        Verified: network_access=true -> 200.
       #
+      #   scratch              the phase contract keeps report-only state in
+      #                        durable runner scratch one level ABOVE the clone,
+      #                        so every audit write was denied and the phase
+      #                        ended INCOMPLETE ("required durable scratch
+      #                        directory is not writable") on every fire.
+      #
       # Each grant is the narrowest that lets the phase meet its own contract.
       # The bypass flag stays off, so this remains a bounded grant matching the
       # claude rung's scope rather than exceeding it.
       "$TIMEOUT_BIN" -k "$KILL_AFTER_SECS" "$remain" \
         "$RUNG_BIN" exec ${model_flag[@]+"${model_flag[@]}"} \
         -c model_reasoning_effort="medium" \
-        -c "sandbox_workspace_write={network_access=true,writable_roots=[\"$REPO/.git\",\"$WEEKEND_ROOT/.$LOOP_SLUG-deliver\"]}" \
+        -c "sandbox_workspace_write={network_access=true,writable_roots=[\"$WEEKEND_ROOT/.$LOOP_SLUG-deliver\",\"$WEEKEND_ROOT/.$LOOP_SLUG-nightly-scratch\"]}" \
         -C "$REPO" --color never \
         --sandbox workspace-write --skip-git-repo-check \
         - < "$prompt_file" >> "$RUN_LOG" 2>&1 &
@@ -1187,7 +1731,6 @@ is_transient_network_failure() {
 run_phase() {
   begin_phase "$1"
   trap on_crash ERR
-  echo "[testing-weekend] $PHASE start $STAMP repo=$REPO cap=${CAP_SECS}s${BILLING_IGNORED:+ ignored=${BILLING_IGNORED// /,}}" | tee -a "$RUN_LOG"
   arm_deliver_record
   # NOT bare. Under `set -Eeuo pipefail` with the ERR trap armed, a failed
   # fetch made on_crash report and then the shell exit anyway — so
@@ -1201,10 +1744,13 @@ run_phase() {
     echo "[testing-weekend] $PHASE done rc=$RC" | tee -a "$RUN_LOG"
     return 0
   fi
+  install_nightly_pr_guard
   # Rail 5b again: the previous phase's agent may have planted a key file
   # or a settings reroute the reset does not remove; refuse before this
   # phase's `claude` launches.
   refuse_billing_reroute_files
+  start_browser_host
+  echo "[testing-weekend] $PHASE start $STAMP repo=$REPO cap=${CAP_SECS}s${BILLING_IGNORED:+ ignored=${BILLING_IGNORED// /,}}${FOREIGN_LOCK:+ foreign-lock=$FOREIGN_LOCK}${BROWSER_HOST_STATUS:+ browser-host=$BROWSER_HOST_STATUS}" | tee -a "$RUN_LOG"
 
   # Attempt clock is per phase: under cycle the remediate phase must not
   # inherit the audit phase's elapsed seconds and insta-timeout.
@@ -1213,7 +1759,7 @@ run_phase() {
   # over it, so every failed or timed-out run posted a false
   # "CRASHED — wrapper died" dead-man comment AND then its real status.
   trap - ERR
-  PHASE_HEAD_BEFORE="$(git rev-parse HEAD 2>/dev/null || true)"
+  PHASE_HEAD_BEFORE="$(git --git-dir="$HOST_GITDIR" --work-tree="$REPO" rev-parse HEAD 2>/dev/null || true)"
   PHASE_START_EPOCH="$(date +%s)"
   local attempt=1 start_ts=$SECONDS remain round_start
   set +e
@@ -1343,6 +1889,7 @@ run_phase() {
     *)
       report "$status" "" ;;
   esac
+  stop_browser_host
   echo "[testing-weekend] $PHASE done rc=$RC" | tee -a "$RUN_LOG"
 }
 
@@ -1357,7 +1904,7 @@ run_phase() {
 # interpreter (-I: no cwd, no clone dir, no user site on sys.path). That stops a
 # planted working-tree scripts/weekend_prune.py and a planted json.py on
 # sys.path. It is NOT a network trust anchor: refs/remotes/origin/main lives in
-# the same agent-writable $REPO/.git, so an agent that rewrites that ref is
+# the host gitdir, so an agent that rewrites the clone gitfile is
 # still ahead of it. Defence in depth, not a boundary.
 # --self "$REPO" makes this clone ignore its OWN runner lock, which it holds for
 # the whole cycle: otherwise the loop that generates the garbage is the one
@@ -1369,7 +1916,7 @@ prune_weekend_root() {
     return 0
   fi
   local rc=0
-  git -C "$REPO" show origin/main:scripts/weekend_prune.py 2>/dev/null \
+  git --git-dir="$HOST_GITDIR" --work-tree="$REPO" show origin/main:scripts/weekend_prune.py 2>/dev/null \
     | "$TIMEOUT_BIN" "${RADON_WEEKEND_PRUNE_TIMEOUT_SECS:-600}" \
       /usr/bin/python3 -I - --root "$WEEKEND_ROOT" --self "$REPO" >> "$RUN_LOG" 2>&1 || rc=$?
   if [[ $rc -ne 0 ]]; then

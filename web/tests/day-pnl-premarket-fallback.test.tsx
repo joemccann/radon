@@ -241,3 +241,16 @@ describe("Day P&L card — pre-market fallback to client-computed aggregate", ()
     expect(cardText).not.toContain("ESTIMATED");
   });
 });
+
+it("withholds an account fallback when one position is unmeasured", () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-06-05T18:30:00Z"));
+  const portfolio = buildPortfolio({ daily_pnl: null });
+  portfolio.positions.push({ ...portfolio.positions[0], id: "missing", ticker: "MSFT" } as typeof portfolio.positions[number]);
+  const { container } = render(React.createElement(MetricCards, {
+    portfolio, prices: buildPrices(), realizedPnl: 0, section: "portfolio",
+  } as unknown as Parameters<typeof MetricCards>[0]));
+  expect(dayPnlCardText(container)).toContain("---");
+  expect(dayPnlCardText(container)).toContain("INCOMPLETE QUOTES");
+  expect(dayPnlCardText(container)).not.toContain("+$1,000");
+});

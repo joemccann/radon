@@ -1,7 +1,29 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildShareCaption, buildXShareUrl, canvasToMp4, canvasToPng, sanitizeShareText, supportsMp4Export, wrapShareText, type SharePost } from "../lib/newsfeedShare";
+import { assembleShareCaption, buildShareCaption, buildXShareUrl, canvasToMp4, canvasToPng, sanitizeShareText, SHARE_CAPTION_SOFT_CAP, supportsMp4Export, wrapShareText, type SharePost } from "../lib/newsfeedShare";
 
 const post: SharePost = { id: "post-123", title: "Yen hedge demand jumps", content: "Positioning is near neutral.", timestamp: "2026-09-07", isoTimestamp: "2026-09-07T18:00:00Z", href: "https://themarketear.com/posts/post-123" };
+const equityIssuance: SharePost = {
+  id: "equity-issuance-252bn",
+  title: "US corporates raised a record $252bn in 2Q; Goldman estimates ~$700bn total equity supply in 2026, significant portion AI-related",
+  content: "US corporates raised a record $252bn in 2Q across IPOs, follow-ons, convertibles, and SPACs, per Goldman's Sarah Herring and Chris Hussey in their September 17, 2026 Midday Market Intelligence. The desk estimates total corporate equity supply will reach ~$700bn in 2026, a significant portion of which is AI-related. The driver here is straightforward: hyperscaler capex has eaten through free cash flow fast enough that companies are turning to public equity markets to fill the gap. This is not just a tech story. The surge in AI infrastructure investment is pulling capital broadly across the equity issuance complex. Goldman references Ben Snider's August 7 note (\"Equity issuance is a headwind but not a gale\") and Richard Ramsden's September 8 note (\"The next phase of capital markets growth and the AI infra impact\") for fuller context. The $700bn figure representing a meaningful supply overhang that competes with existing equity demand, even if the desk characterizes it as a headwind rather than a gale.",
+  timestamp: "2026-09-20T20:06:00Z",
+  isoTimestamp: "2026-09-20T20:06:00Z",
+  href: "https://example.com/equity-issuance",
+  source: {
+    kind: "dropbox", publisher: "Goldman Midday Market Intelligence", documentDate: "2026-09-17",
+    folderDate: "2026-09-20", pages: [1], figures: [], fileId: "id", revision: "r", contentHash: "h", url: "/private.pdf",
+  },
+};
+
+function assertXCaption(caption: string) {
+  const body = caption.split("\n\n").slice(1).filter(line => !/^Source: /.test(line));
+  expect(body.length).toBeGreaterThanOrEqual(1);
+  expect(body.length).toBeLessThanOrEqual(3);
+  expect(caption).not.toMatch(/^[•●▪◦*-]\s/m);
+  for (const line of body) expect(line).toMatch(/[.!?%)"'\u201d]$/);
+  expect(caption).not.toMatch(/—|&(?:mdash|#8212|#x2014);/i);
+  expect(caption.length).toBeLessThanOrEqual(SHARE_CAPTION_SOFT_CAP);
+}
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("social captions", () => {
@@ -26,7 +48,7 @@ describe("social captions", () => {
     const content = `Positioning ${dash} still neutral. Returns: -2.5%.`;
     expect(sanitizeShareText(content)).toBe("Positioning, still neutral. Returns: -2.5%.");
     const caption = buildShareCaption({ ...post, title: `Yen ${dash} the setup`, content });
-    expect(caption).toBe("Yen, the setup\n\nPositioning, still neutral. Returns: -2.5%.");
+    expect(caption).toBe("Yen, the setup\n\nPositioning, still neutral.\n\nReturns: -2.5%.");
     expect(new URL(buildXShareUrl(content)).searchParams.get("text")).toBe("Positioning, still neutral. Returns: -2.5%.");
   });
   it("removes publisher profile links and handles without orphan URLs", () => {
@@ -52,6 +74,7 @@ describe("social captions", () => {
       fileId: "file-private-id", revision: "private-revision", contentHash: "secret", url: "/api/newsfeed/research/files/secret.pdf",
     } };
     const caption = buildShareCaption(privatePost);
+    expect(caption).toBe("Yen hedge demand jumps\n\nPositioning is near neutral.\n\nSource: J.P. Morgan · 2026-09-03");
     expect(caption).toContain("Source: J.P. Morgan");
     expect(caption).not.toMatch(/secret|private|\/api\//);
   });
@@ -60,6 +83,46 @@ describe("social captions", () => {
   });
   it("removes authenticated research paths embedded in post text and strips permalink query secrets", () => {
     expect(buildShareCaption({ ...post, content: "Chart /api/newsfeed/research/files/secret.png", href: `${post.href}?token=secret` })).not.toContain("secret");
+  });
+  it("builds an X-native fallback for the equity-issuance $252bn / $700bn post", () => {
+    const caption = buildShareCaption(equityIssuance);
+    assertXCaption(caption);
+    expect(caption.split("\n")[0]).toMatch(/\$252bn/i);
+    expect(caption.split("\n")[0]).not.toMatch(/\$700bn/i);
+    expect(caption).toContain("$252bn");
+    expect(caption).toContain("$700bn");
+    expect(caption).toMatch(/overhang|headwind|hyperscaler|AI/i);
+    expect(caption).toMatch(/Source: Goldman Midday Market Intelligence · 2026-09-17\s*$/);
+    expect(caption.split("\n\n").pop()).toMatch(/^Source: /);
+    expect(caption).not.toContain("Sarah Herring");
+    expect(caption).not.toContain("Richard Ramsden");
+    expect(caption).not.toMatch(/across IPOs/i);
+    expect(new URL(buildXShareUrl(caption)).searchParams.get("text")).toBe(caption);
+  });
+  it("turns rewritten bullets into sentences and keeps source last", () => {
+    const caption = buildShareCaption({
+      ...equityIssuance,
+      title: "US corps raised a record $252bn in 2Q equity supply",
+      content: "• Goldman sees ~$700bn total equity supply in 2026\n• AI infra / hyperscaler capex is a big slice\n• Supply overhang = headwind, not a gale",
+    });
+    expect(caption).toBe(
+      "US corps raised a record $252bn in 2Q equity supply\n\n"
+      + "Goldman sees ~$700bn total equity supply in 2026.\n\n"
+      + "AI infra / hyperscaler capex is a big slice.\n\n"
+      + "Supply overhang = headwind, not a gale.\n\n"
+      + "Source: Goldman Midday Market Intelligence · 2026-09-17",
+    );
+    assertXCaption(caption);
+  });
+  it("assembles a voice caption as blank-line separated sentences", () => {
+    const caption = assembleShareCaption("Seasonality", "• 104 to 130\n• Year 3, month +9.");
+    expect(caption).toBe("Seasonality\n\n104 to 130.\n\nYear 3, month +9.");
+  });
+  it("drops a line that will not fit rather than cutting a sentence mid word", () => {
+    const quoted = "The Energy Department said the SPR's minimum inventory is determined by \"cavern mechanics\", which the desk says translates to a conservative operational minimum of about 70 million barrels for the reserve overall.";
+    const caption = assembleShareCaption("SPR is down to around 285 million barrels", `The oil buffer is getting thin. ${quoted}`);
+    expect(caption).not.toContain("cavern");
+    expect(caption).toBe("SPR is down to around 285 million barrels\n\nThe oil buffer is getting thin.");
   });
 });
 
@@ -177,6 +240,14 @@ describe("PNG export", () => {
 });
 
 // Rendering is tested independently of browser image codecs; E2E validates real pixels.
+describe("caption sentence splitting", () => {
+  it("does not split a line at a month abbreviation", async () => {
+    const { assembleShareCaption } = await import("../lib/newsfeedShare");
+    const caption = assembleShareCaption("Muse launch", "Meta launched Muse on Sept. 8 and it rattled the internet sector. EXPE fell 5.4%.");
+    expect(caption).toContain("Meta launched Muse on Sept. 8 and it rattled the internet sector.");
+  });
+});
+
 describe("share card rendering", () => {
   function renderHarness(imageFailure = false) {
     const fillText = vi.fn();
@@ -205,49 +276,46 @@ describe("share card rendering", () => {
     expect(harness.fillText).toHaveBeenCalledWith("RADON", 72, 164);
     expect(harness.fillText.mock.calls.flat().join(" ")).not.toMatch(/market.?ear|zero.?hedge/i);
   });
-  it("removes em dashes from every authored canvas surface, including source and figure caption", async () => {
+  it("removes em dashes from every authored canvas surface", async () => {
     const { renderShareCard } = await import("../lib/newsfeedShare");
     const harness = renderHarness();
-    await renderShareCard({ ...post, title: "Flows — still firm", content: "Demand &mdash; unchanged. Range: 10—20%.", source: {
-      kind: "dropbox", publisher: "Synthetic Bank — Research", documentDate: "2026-09-03", folderDate: "2026-09-07", fileId: "id", revision: "r", contentHash: "h", url: "/private.pdf", pages: [2],
-      figures: [{ url: "/chart.png", page: 2, caption: "Distribution &#8212; August" }],
-    } }, "/chart.png");
+    await renderShareCard({ ...post, title: "Flows — still firm", content: "Demand &mdash; unchanged across desks. Range: 10—20%." }, undefined);
     const text = harness.fillText.mock.calls.map(call => call[0]).join(" ");
     expect(text).not.toMatch(/—|&(?:mdash|#8212|#x2014);/i);
     expect(text).toContain("Flows, still firm");
     expect(text).toContain("10 to 20%");
-    expect(text).toContain("Synthetic Bank, Research");
-    expect(text).toContain("Distribution, August");
   });
   it.each(["The Market Ear", "ZeroHedge"])("excludes %s from every rendered text surface", async publisher => {
     const { renderShareCard } = await import("../lib/newsfeedShare");
     const harness = renderHarness();
-    await renderShareCard({ ...post, title: `Outlook via ${publisher}`, content: `Neutral positioning. Source: ${publisher} https://zerohedge.com/test`, source: { kind: "dropbox", publisher, documentDate: "2026-09-03", folderDate: "2026-09-07", fileId: "id", revision: "r", contentHash: "h", url: "/private.pdf", pages: [2], figures: [{ url: "/chart.png", page: 2, caption: `Distribution via ${publisher}` }] } }, "/chart.png");
+    await renderShareCard({ ...post, title: `Outlook via ${publisher}`, content: `Neutral positioning across the desk. Source: ${publisher} https://zerohedge.com/test`, source: { kind: "dropbox", publisher, documentDate: "2026-09-03", folderDate: "2026-09-07", fileId: "id", revision: "r", contentHash: "h", url: "/private.pdf", pages: [2], figures: [{ url: "/chart.png", page: 2, caption: `Distribution via ${publisher}` }] } }, "/chart.png");
     const text = harness.fillText.mock.calls.map(call => call[0]).join(" ");
     expect(text).not.toMatch(/market[\s-]*ear|zero[\s-]*hedge|Source:/i);
-    expect(text).toContain("Neutral positioning.");
-    expect(text).toContain("Distribution");
+    expect(text).toContain("Neutral positioning across the desk");
   });
-  it("fits the whole chart and labels truncated prose as an excerpt", async () => {
-    const { renderShareCard } = await import("../lib/newsfeedShare");
-    const harness = renderHarness();
-    await renderShareCard({ ...post, content: "Market positioning is near neutral. ".repeat(100) }, "/chart.png");
-    const [, x, , width, height] = harness.drawImage.mock.calls[0];
-    expect(width / height).toBeCloseTo(1.5);
-    expect(x).toBeGreaterThanOrEqual(72);
-    expect(height).toBeLessThanOrEqual(576);
-    expect(harness.fillText).toHaveBeenCalledWith("EXCERPT", 72, 1490);
+  it("renders the X caption copy with today's date and no source, excerpt or figure footer", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-21T15:00:00Z"));
+    try {
+      const { renderShareCard, assembleShareCaption } = await import("../lib/newsfeedShare");
+      const harness = renderHarness();
+      const content = "Market positioning is near neutral across the desk. ".repeat(100);
+      await renderShareCard({ ...post, content, source: { kind: "dropbox", publisher: "JPM", documentDate: "2026-09-03", folderDate: "2026-09-07", fileId: "private-id", revision: "r", contentHash: "h", url: "/private.pdf", pages: [2], figures: [{ url: "/chart.png", page: 2, caption: "USD/JPY put distribution" }] } }, "/chart.png");
+      const text = harness.fillText.mock.calls.map(call => call[0]);
+      expect(text).toContain("SEP 21, 2026");
+      expect(text.join(" ")).not.toMatch(/SEP 3|EXCERPT|Source:|p\. 2|radon\.run|private-id/);
+      const [hook, bullets] = assembleShareCaption(post.title, content).split("\n\n");
+      expect(text).toContain(hook);
+      for (const bullet of bullets.split("\n")) expect(text.join(" ")).toContain(bullet);
+      const [, x, , width, height] = harness.drawImage.mock.calls[0];
+      expect(width / height).toBeCloseTo(1.5);
+      expect(x).toBeGreaterThanOrEqual(72);
+      expect(height).toBeLessThanOrEqual(576);
+    } finally { vi.useRealTimers(); }
   });
   it("fails visibly when the selected chart cannot load", async () => {
     const { renderShareCard } = await import("../lib/newsfeedShare");
     renderHarness(true);
     await expect(renderShareCard(post, "/missing.png")).rejects.toThrow("chart could not be loaded");
-  });
-  it("preserves selected figure publisher, page and caption", async () => {
-    const { renderShareCard } = await import("../lib/newsfeedShare");
-    const harness = renderHarness();
-    await renderShareCard({ ...post, source: { kind: "dropbox", publisher: "JPM", documentDate: "2026-09-03", folderDate: "2026-09-07", fileId: "private-id", revision: "r", contentHash: "h", url: "/private.pdf", pages: [2], figures: [{ url: "/chart.png", page: 2, caption: "USD/JPY put distribution" }] } }, "/chart.png");
-    expect(harness.fillText).toHaveBeenCalledWith("p. 2 · USD/JPY put distribution", 72, 1622);
-    expect(harness.fillText.mock.calls.flat().join(" ")).not.toContain("private-id");
   });
 });

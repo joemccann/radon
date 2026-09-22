@@ -6,7 +6,7 @@ Reference implementation to copy throughout: the sibling CREDIT indicator
 `web/lib/creditSpread.ts`, `web/lib/useCreditSpread.ts`,
 `web/components/CreditSpreadPanel.tsx`, `web/tests/credit-spread-*.test.*`,
 `web/e2e/credit-spread-tab.spec.ts`, `scripts/tests/test_credit_spread.py`,
-`cloud/services/radon-credit-spread.*`). Same IB → UW → Robinhood → Yahoo daily-close cascade.
+`cloud/services/radon-credit-spread.*`). Same IB → Robinhood → UW → Yahoo daily-close cascade.
 
 ## Identity
 
@@ -48,7 +48,7 @@ US holidays and has gaps); it never drives `state`.
 
 ## Source (confirmed 2026-08-22)
 
-Priority, never skip ahead (repo rule: IB → UW → Robinhood → Yahoo):
+Priority, never skip ahead (repo rule: IB → Robinhood → UW → Yahoo):
 
 1. **Interactive Brokers** — `Stock('IEI','SMART','USD')`, `Stock('HYG','SMART','USD')`,
    DXY as `Index('DX','NYBOT','USD')` (IB lists the ICE spot index as symbol `DX`,
@@ -57,13 +57,13 @@ Priority, never skip ahead (repo rule: IB → UW → Robinhood → Yahoo):
    `/health` `auth_state` is set and not `authenticated`. Client IDs: reuse the
    credit pair `(56, 69)` — the two jobs run 10 minutes apart and never overlap;
    register the reuse in `scripts/CLAUDE.md` client-ID table.
-2. **Unusual Whales** — `get_stock_ohlc("IEI"|"HYG", "1d")`. UW `1d` returns up to
+2. **Robinhood** (read-only trading MCP, when configured) — equity historicals
+   for IEI/HYG via `fetch_rh_closes`; DXY is skipped (`RH_SKIP`). Unconfigured
+   hosts skip with zero network I/O.
+3. **Unusual Whales** — `get_stock_ohlc("IEI"|"HYG", "1d")`. UW `1d` returns up to
    three rows per date (`market_time` ∈ `pr`/`r`/`po`): **keep only
    `market_time == "r"`** (regular session) — credit's dict comprehension lets the
    post-market row win; this indicator must not. DXY is not on UW (`UW_SKIP`).
-3. **Robinhood** (read-only trading MCP, when configured) — equity historicals
-   for IEI/HYG via `fetch_rh_closes`; DXY is skipped (`RH_SKIP`). Unconfigured
-   hosts skip with zero network I/O.
 4. **Yahoo** — last resort: `IEI`, `HYG`, `DX-Y.NYB` via the chart JSON credit uses
    (UA `Mozilla/5.0`, `period1` = 2007-04-11 epoch for the first backfill).
    Reuse `fetch_credit_spread.fetch_yahoo_chart` / `parse_yahoo_chart` (null closes

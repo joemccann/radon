@@ -60,6 +60,16 @@ def _stub(fake_bin: Path, name: str, log: Path, exit_code: int = 0) -> None:
     )
 
 
+def _gnu_mv(fake_bin: Path) -> bool:
+    """setup-vps.sh targets GNU coreutils; put a GNU mv first on PATH."""
+    for cand in ("mv", "gmv"):
+        found = shutil.which(cand)
+        if found and subprocess.run([found, "--version"], capture_output=True).returncode == 0:
+            (fake_bin / "mv").symlink_to(found)
+            return True
+    pytest.skip("needs GNU mv (coreutils)")
+
+
 def _run_setup_function(
     function: str, fake_bin: Path, extra_env: dict[str, str], cwd: Path | None = None
 ) -> subprocess.CompletedProcess[str]:
@@ -108,6 +118,25 @@ def harness(tmp_path: Path) -> dict[str, Path]:
     for policy in ("radon-deploy", "radon-monitor", "radon-ops"):
         (cloud / "config" / "sudoers.d" / policy).write_text(f"# {policy}\n")
     (cloud / "config" / "polkit" / "50-radon-services.rules").write_text("// rule\n")
+
+    # Provenance: root only installs bytes committed at HEAD, so the fake
+    # checkout must be a git repository with its artifacts committed.
+    subprocess.run(["git", "init", "-q"], cwd=cloud, check=True, capture_output=True)
+    subprocess.run(["git", "add", "."], cwd=cloud, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "seed"],
+        cwd=cloud,
+        check=True,
+        capture_output=True,
+    )
+    # Provenance also requires the blob to be reachable from the deploy
+    # remote, so the fake checkout carries an origin/main matching HEAD.
+    subprocess.run(
+        ["git", "update-ref", "refs/remotes/origin/main", "HEAD"],
+        cwd=cloud,
+        check=True,
+        capture_output=True,
+    )
 
     victim = tmp_path / "root-only"
     victim.write_text("root-only secret\n")
@@ -189,6 +218,100 @@ class TestEnvFileGuard:
         assert result.returncode == 0, result.stderr
         calls = log.read_text().splitlines()
         assert calls[:2] == [f"chmod 0640 {env}", f"chown root:radon {env}"]
+
+    def test_write_mcp_env_refuses_symlinked_destination(
+        self, harness: dict[str, Path]
+    ) -> None:
+        # /etc/radon is radon-writable (root:radon 1770), so the mcp.env
+        # destination can be a radon-planted symlink; root must never
+        # publish through it.
+        self._env_stubs(harness)
+        env = harness["tmp"] / "env"
+        env.write_text("CLERK_ISSUER=https://clerk.example\nSECRET=1\n")
+        dest_dir = harness["tmp"] / "etc-radon"
+        dest_dir.mkdir()
+        dest = dest_dir / "mcp.env"
+        dest.symlink_to(harness["victim"])
+        result = _run_setup_function(
+            "write_mcp_env",
+            harness["bin"],
+            {
+                **_base_env(harness),
+                "RADON_DEPLOY_ENV_FILE": str(env),
+                "RADON_MCP_ENV_FILE": str(dest),
+            },
+        )
+        assert result.returncode != 0
+        assert REFUSAL in result.stdout + result.stderr
+        assert dest.is_symlink(), "destination link was replaced despite refusal"
+        assert list(dest_dir.glob("mcp.env.*")) == [], "staging leftovers remain"
+        _assert_victim_untouched(harness)
+
+    def test_write_mcp_env_rename_never_lands_in_a_raced_directory_link(
+        self, harness: dict[str, Path]
+    ) -> None:
+        # The destination can be swapped for a link to a directory after the
+        # regular-file check; the rename must replace the link, never move the
+        # staged file into whatever directory it points at.
+        gnu_mv = _gnu_mv(harness["bin"])
+        log = self._env_stubs(harness)
+        env = harness["tmp"] / "env"
+        env.write_text("CLERK_ISSUER=https://clerk.example\n")
+        dest_dir = harness["tmp"] / "etc-radon"
+        dest_dir.mkdir()
+        dest = dest_dir / "mcp.env"
+        trusted = harness["tmp"] / "root-trusted"
+        trusted.mkdir()
+        _write_executable(
+            harness["bin"] / "chown",
+            f"#!/bin/sh\nprintf '%s\\n' \"chown $*\" >> {log!s}\nln -s {trusted!s} {dest!s}\n",
+        )
+        result = _run_setup_function(
+            "write_mcp_env",
+            harness["bin"],
+            {
+                **_base_env(harness),
+                "RADON_POLICY_SKIP_CHOWN": "0",
+                "RADON_DEPLOY_ENV_FILE": str(env),
+                "RADON_MCP_ENV_FILE": str(dest),
+            },
+        )
+        assert gnu_mv
+        assert list(trusted.iterdir()) == [], "staged file landed in the linked directory"
+        assert result.returncode == 0, result.stderr
+        assert not dest.is_symlink() and dest.is_file()
+        assert dest.read_text() == "CLERK_ISSUER=https://clerk.example\n"
+
+    def test_write_mcp_env_regular_destination_is_written_0600(
+        self, harness: dict[str, Path]
+    ) -> None:
+        self._env_stubs(harness)
+        env = harness["tmp"] / "env"
+        env.write_text(
+            "CLERK_ISSUER=https://clerk.example\n"
+            "RADON_MCP_LIMIT=5\n"
+            "SECRET=never-exported\n"
+        )
+        dest_dir = harness["tmp"] / "etc-radon"
+        dest_dir.mkdir()
+        dest = dest_dir / "mcp.env"
+        _gnu_mv(harness["bin"])
+        result = _run_setup_function(
+            "write_mcp_env",
+            harness["bin"],
+            {
+                **_base_env(harness),
+                "RADON_DEPLOY_ENV_FILE": str(env),
+                "RADON_MCP_ENV_FILE": str(dest),
+            },
+        )
+        assert result.returncode == 0, result.stderr
+        assert not dest.is_symlink()
+        assert dest.read_text() == (
+            "CLERK_ISSUER=https://clerk.example\nRADON_MCP_LIMIT=5\n"
+        )
+        assert _mode(dest) == "0o600"
+        assert list(dest_dir.glob("mcp.env.*")) == [], "staging leftovers remain"
 
     def test_setup_node_regular_file_is_chmod_then_chown(
         self, harness: dict[str, Path]
@@ -407,6 +530,124 @@ exit 0
         assert _stage_leftovers(harness) == []
 
 
+# ── (c2) root installs committed git blobs, not the working tree ──────
+
+
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", *args],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+
+
+def _run_stage(harness: dict[str, Path], source: Path, target: Path):
+    return _run_setup_function(
+        f'stage_from_checkout "{source}" "{target}" 0644',
+        harness["bin"],
+        _base_env(harness),
+    )
+
+
+class TestCheckoutProvenance:
+    """setup-vps.sh runs as root over a radon-writable checkout: the bytes it
+    installs must come from the committed blob at HEAD (the compose R-636
+    shape), never from a working tree the service account can edit."""
+
+    def test_working_tree_edit_diverging_from_head_is_refused(
+        self, harness: dict[str, Path]
+    ) -> None:
+        source = harness["cloud"] / "config" / "sudoers.d" / "radon-ops"
+        source.write_text("# tampered after commit\n")
+        target = harness["tmp"] / "installed"
+        result = _run_stage(harness, source, target)
+        assert result.returncode != 0
+        assert "differs from the committed blob" in result.stdout + result.stderr
+        assert not target.exists()
+        assert _stage_leftovers(harness) == []
+
+    def test_source_absent_from_head_is_refused(
+        self, harness: dict[str, Path]
+    ) -> None:
+        source = harness["cloud"] / "config" / "sudoers.d" / "radon-extra"
+        source.write_text("# never committed\n")
+        target = harness["tmp"] / "installed"
+        result = _run_stage(harness, source, target)
+        assert result.returncode != 0
+        assert "not committed at HEAD" in result.stdout + result.stderr
+        assert not target.exists()
+
+    def test_source_outside_a_git_checkout_is_refused(
+        self, tmp_path: Path, harness: dict[str, Path]
+    ) -> None:
+        loose = Path("/tmp") / f"radon-loose-{os.getpid()}"
+        loose.mkdir(exist_ok=True)
+        try:
+            source = loose / "artifact"
+            source.write_text("outside any checkout\n")
+            target = harness["tmp"] / "installed"
+            result = _run_stage(harness, source, target)
+            assert result.returncode != 0
+            assert "not inside a git checkout" in result.stdout + result.stderr
+            assert not target.exists()
+        finally:
+            shutil.rmtree(loose, ignore_errors=True)
+
+    def test_committed_source_installs_the_blob(
+        self, harness: dict[str, Path]
+    ) -> None:
+        source = harness["cloud"] / "config" / "sudoers.d" / "radon-ops"
+        target = harness["tmp"] / "installed"
+        result = _run_stage(harness, source, target)
+        assert result.returncode == 0, result.stderr
+        assert target.read_text() == source.read_text()
+        assert _stage_leftovers(harness) == []
+
+
+class TestRemoteAncestryProvenance:
+    """Local HEAD is radon-reachable: an account with commit rights on the
+    checkout can make any body "committed at HEAD". Root only installs blobs
+    that are also reachable from the deploy remote."""
+
+    def test_local_commit_not_on_origin_main_is_refused(
+        self, harness: dict[str, Path]
+    ) -> None:
+        source = harness["cloud"] / "config" / "sudoers.d" / "radon-ops"
+        source.write_text("# committed locally, never pushed\n")
+        _git(harness["cloud"], "add", "config/sudoers.d/radon-ops")
+        _git(harness["cloud"], "commit", "-q", "-m", "local tamper")
+        target = harness["tmp"] / "installed"
+        result = _run_stage(harness, source, target)
+        assert result.returncode != 0
+        assert "not an ancestor of origin/main" in result.stdout + result.stderr
+        assert not target.exists()
+        assert _stage_leftovers(harness) == []
+
+    def test_missing_remote_ref_fails_closed(self, harness: dict[str, Path]) -> None:
+        _git(harness["cloud"], "update-ref", "-d", "refs/remotes/origin/main")
+        source = harness["cloud"] / "config" / "sudoers.d" / "radon-ops"
+        target = harness["tmp"] / "installed"
+        result = _run_stage(harness, source, target)
+        assert result.returncode != 0
+        assert "origin/main is unavailable" in result.stdout + result.stderr
+        assert not target.exists()
+
+    def test_blob_carried_by_origin_main_installs(
+        self, harness: dict[str, Path]
+    ) -> None:
+        # HEAD moved ahead of the remote, but this artifact's blob is the one
+        # origin/main carries, so the install stands.
+        (harness["cloud"] / "unrelated").write_text("later work\n")
+        _git(harness["cloud"], "add", "unrelated")
+        _git(harness["cloud"], "commit", "-q", "-m", "unrelated local work")
+        source = harness["cloud"] / "config" / "sudoers.d" / "radon-ops"
+        target = harness["tmp"] / "installed"
+        result = _run_stage(harness, source, target)
+        assert result.returncode == 0, result.stderr
+        assert target.read_text() == source.read_text()
+
+
 # ── (d) /etc/radon and the radon-replaceable directories ──────────────
 
 
@@ -417,9 +658,33 @@ class TestDirectoryOwnership:
         assert 'install -d -m 1770 "$dir"' in body
         assert '-o radon -g radon "$dir"' not in body
 
-    def test_media_dir_link_is_refused_before_install_d(self) -> None:
+    def test_media_dir_is_created_without_following_a_planted_link(self) -> None:
+        # /var/lib/radon is radon-owned, so a check-then-install pair leaves a
+        # window to swap a link in between. mkdir never follows a link in the
+        # final component: create first, refuse anything that is not a real
+        # directory, then chown without dereferencing.
         body = _function_body(SETUP.read_text(encoding="utf-8"), "create_etc_radon_dir")
-        assert body.index('-L "$media"') < body.index("install -d -m 1770")
+        assert 'mkdir -m 0750 "$media"' in body
+        assert body.index('mkdir -m 0750 "$media"') < body.index('-L "$media"')
+        assert 'chown --no-dereference radon:radon "$media"' in body
+        assert 'install -d' not in body.split('-L "$media"')[1]
+
+    def test_secret_store_key_is_32_raw_bytes(self) -> None:
+        # The store requires a 32-byte raw key; a base64 pass encrypts 45
+        # bytes of text and a fresh host's radon-api cannot open the store.
+        body = _function_body(
+            SETUP.read_text(encoding="utf-8"), "provision_secret_store_credential"
+        )
+        assert "head -c 32 /dev/urandom" in body
+        assert "base64" not in body
+
+    def test_github_host_key_is_pinned_not_keyscanned(self) -> None:
+        script = SETUP.read_text(encoding="utf-8")
+        assert "ssh-keyscan" not in script
+        assert (
+            "github.com ssh-ed25519 "
+            "AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"
+        ) in script
 
     def test_ssh_paths_refuse_links_before_root_writes(self) -> None:
         body = _function_body(SETUP.read_text(encoding="utf-8"), "preflight_checks")
@@ -540,8 +805,16 @@ class TestStaticContract:
         assert 'readonly STAGE_DIR="${RADON_SETUP_STAGE_DIR:-/root/.radon-stage}"' in script
         body = _function_body(script, "stage_from_checkout")
         assert 'install -d -m 0700 "$STAGE_DIR"' in body
-        assert body.index('require_regular_file "$source"') < body.index("cp --")
-        assert body.index("cp --") < body.index("cmp -s")
+        # Provenance: the staged bytes are the committed blob at HEAD, never
+        # a working-tree cp the radon account could have edited.
+        assert "cp --" not in body
+        assert body.index('require_regular_file "$source"') < body.index(
+            'rev-parse "HEAD:${source_rel}"'
+        )
+        assert body.index('rev-parse "HEAD:${source_rel}"') < body.index(
+            'cat-file blob "$blob_sha"'
+        )
+        assert body.index('cat-file blob "$blob_sha"') < body.index("cmp -s")
         assert 'install -m "$mode" "$@" "$staged" "$target"' in body
         # No mapfile / exec {fd} / ${arr[@]} on empty arrays: bash 3.2 runs this.
         assert "mapfile" not in script
@@ -615,6 +888,17 @@ class TestRemoteInstallerPins:
         assert "debian.deb.txt" not in body
         assert "dl.cloudsmith.io/public/caddy/stable/deb/debian" in body
         assert "signed-by=" in body
+
+    def test_caddy_install_skips_only_when_the_pinned_version_matches(self) -> None:
+        # DS-2026-09-20-08: `command -v caddy` alone skipped reinstall on any
+        # already-present binary, so a rerun never converged a stale Caddy
+        # onto CADDY_VERSION.
+        script = SETUP.read_text(encoding="utf-8")
+        body = _function_body(script, "install_caddy")
+        version_check = body.index('"$installed_version" == "${CADDY_VERSION}"*')
+        skip_log = body.index('already installed -- skipping installation')
+        assert version_check < skip_log
+        assert "dpkg-query" in body
 
 
 # ── playbook invariant ────────────────────────────────────────────────
