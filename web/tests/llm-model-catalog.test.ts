@@ -37,6 +37,9 @@ const OPENAI_KEY = "sk-SENTINEL-openai-0003";
 const PROVIDER_ENV_KEYS = [
   "ANTHROPIC_API_KEY",
   "CLAUDE_CODE_API_KEY",
+  "CLAUDE_CODE_OAUTH_TOKEN",
+  "XAI_OAUTH_TOKEN",
+  "CODEX_OAUTH_TOKEN",
   "CLAUDE_API_KEY",
   "XAI_API_KEY",
   "GROK_API_KEY",
@@ -82,6 +85,10 @@ beforeEach(async () => {
   vi.clearAllMocks();
   vi.resetModules();
   for (const key of PROVIDER_ENV_KEYS) vi.stubEnv(key, "");
+  // A developer laptop carries real subscription files; keep them out.
+  vi.stubEnv("CLAUDE_CONFIG_DIR", "/nonexistent/radon-no-claude-config");
+  vi.stubEnv("CODEX_HOME", "/nonexistent/radon-no-codex-home");
+  vi.stubEnv("GROK_AUTH_FILE", "/nonexistent/radon-no-grok-auth.json");
   db = createClient({ url: ":memory:" });
   await seedSchema(db);
   mockGetDb.mockImplementation(() => db);
@@ -100,8 +107,8 @@ async function loadCatalog() {
 
 describe("provider key presence — the honesty contract", () => {
   it("lists only providers whose API key is present in this environment", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", ANTHROPIC_KEY);
-    vi.stubEnv("XAI_API_KEY", XAI_KEY);
+    vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", ANTHROPIC_KEY);
+    vi.stubEnv("XAI_OAUTH_TOKEN", XAI_KEY);
 
     const { resolveModelCatalog } = await loadCatalog();
     const catalog = await resolveModelCatalog();
@@ -110,7 +117,7 @@ describe("provider key presence — the honesty contract", () => {
   });
 
   it("omits a keyless provider entirely rather than disabling it", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", ANTHROPIC_KEY);
+    vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", ANTHROPIC_KEY);
 
     const { resolveModelCatalog } = await loadCatalog();
     const catalog = await resolveModelCatalog();
@@ -122,8 +129,8 @@ describe("provider key presence — the honesty contract", () => {
     expect(JSON.stringify(catalog)).not.toMatch(/disabled|unavailable|"available"/);
   });
 
-  it("honors the xAI key aliases provider.ts already resolves", async () => {
-    vi.stubEnv("GROK_API_KEY", XAI_KEY);
+  it("honors the xAI grant aliases provider.ts already resolves", async () => {
+    vi.stubEnv("GROK_OAUTH_TOKEN", XAI_KEY);
 
     const { resolveModelCatalog } = await loadCatalog();
     const catalog = await resolveModelCatalog();
@@ -142,7 +149,7 @@ describe("provider key presence — the honesty contract", () => {
 
 describe("three-tier resolution", () => {
   it("serves Turso rows over disk and reports source=turso", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", ANTHROPIC_KEY);
+    vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", ANTHROPIC_KEY);
     await insertRow("anthropic", "claude-opus-9", "CLAUDE OPUS 9");
     mockReadFile.mockResolvedValue(
       diskPayload([{ provider: "anthropic", model_id: "claude-from-disk", display_name: "DISK" }]),
@@ -157,7 +164,7 @@ describe("three-tier resolution", () => {
   });
 
   it("serves disk over builtin when Turso has no rows and reports source=disk", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", ANTHROPIC_KEY);
+    vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", ANTHROPIC_KEY);
     mockReadFile.mockResolvedValue(
       diskPayload([{ provider: "anthropic", model_id: "claude-from-disk", display_name: "DISK MODEL" }]),
     );
@@ -171,7 +178,7 @@ describe("three-tier resolution", () => {
   });
 
   it("falls back to the compiled-in builtin when both Turso and disk are empty", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", ANTHROPIC_KEY);
+    vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", ANTHROPIC_KEY);
 
     const { resolveModelCatalog, BUILTIN_FRONTIER } = await loadCatalog();
     const catalog = await resolveModelCatalog();
@@ -181,7 +188,7 @@ describe("three-tier resolution", () => {
   });
 
   it("degrades to disk without throwing when the Turso read fails", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", ANTHROPIC_KEY);
+    vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", ANTHROPIC_KEY);
     mockGetDb.mockImplementation(() => {
       throw new Error("Turso unavailable");
     });
@@ -197,7 +204,7 @@ describe("three-tier resolution", () => {
   });
 
   it("degrades all the way to builtin when Turso throws and disk is unreadable", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", ANTHROPIC_KEY);
+    vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", ANTHROPIC_KEY);
     mockGetDb.mockImplementation(() => {
       throw new Error("Turso unavailable");
     });
@@ -214,8 +221,8 @@ describe("three-tier resolution", () => {
     // A key added to /etc/radon/env is live the moment Next.js restarts, but
     // the catalog job only fires daily. The provider must not be invisible for
     // the rest of the day - "lights up when the key lands" is the whole design.
-    vi.stubEnv("ANTHROPIC_API_KEY", ANTHROPIC_KEY);
-    vi.stubEnv("XAI_API_KEY", XAI_KEY);
+    vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", ANTHROPIC_KEY);
+    vi.stubEnv("XAI_OAUTH_TOKEN", XAI_KEY);
     await insertRow("anthropic", "claude-opus-9", "CLAUDE OPUS 9");
 
     const { resolveModelCatalog, BUILTIN_FRONTIER, BUILTIN_REFRESHED_AT } = await loadCatalog();
@@ -230,8 +237,8 @@ describe("three-tier resolution", () => {
   });
 
   it("fills a Turso gap from disk before reaching for the builtin", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", ANTHROPIC_KEY);
-    vi.stubEnv("XAI_API_KEY", XAI_KEY);
+    vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", ANTHROPIC_KEY);
+    vi.stubEnv("XAI_OAUTH_TOKEN", XAI_KEY);
     await insertRow("anthropic", "claude-opus-9", "CLAUDE OPUS 9");
     mockReadFile.mockResolvedValue(
       diskPayload([{ provider: "xai", model_id: "grok-from-disk", display_name: "DISK GROK" }]),
@@ -246,7 +253,7 @@ describe("three-tier resolution", () => {
   });
 
   it("drops catalogued rows for providers this deployment has no key for", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", ANTHROPIC_KEY);
+    vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", ANTHROPIC_KEY);
     await insertRow("anthropic", "claude-opus-9", "CLAUDE OPUS 9");
     await insertRow("openai", "gpt-9", "GPT 9");
     await insertRow("xai", "grok-9", "GROK 9");
@@ -260,9 +267,9 @@ describe("three-tier resolution", () => {
 
 describe("defaultId", () => {
   it("is always an id present in models[]", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", ANTHROPIC_KEY);
-    vi.stubEnv("XAI_API_KEY", XAI_KEY);
-    vi.stubEnv("OPENAI_API_KEY", OPENAI_KEY);
+    vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", ANTHROPIC_KEY);
+    vi.stubEnv("XAI_OAUTH_TOKEN", XAI_KEY);
+    vi.stubEnv("CODEX_OAUTH_TOKEN", OPENAI_KEY);
 
     const { resolveModelCatalog } = await loadCatalog();
     const catalog = await resolveModelCatalog();
@@ -271,8 +278,8 @@ describe("defaultId", () => {
   });
 
   it("matches provider.ts resolveProvider() precedence — xAI key wins over Anthropic", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", ANTHROPIC_KEY);
-    vi.stubEnv("XAI_API_KEY", XAI_KEY);
+    vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", ANTHROPIC_KEY);
+    vi.stubEnv("XAI_OAUTH_TOKEN", XAI_KEY);
 
     const { resolveModelCatalog } = await loadCatalog();
     const catalog = await resolveModelCatalog();
@@ -286,8 +293,8 @@ describe("defaultId", () => {
     // xAI (resolveProvider auto-prefers a present XAI_API_KEY), so a picker
     // whose default fell through to the Anthropic row would advertise one
     // model and the server would run another.
-    vi.stubEnv("ANTHROPIC_API_KEY", ANTHROPIC_KEY);
-    vi.stubEnv("XAI_API_KEY", XAI_KEY);
+    vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", ANTHROPIC_KEY);
+    vi.stubEnv("XAI_OAUTH_TOKEN", XAI_KEY);
     await insertRow("anthropic", "claude-opus-9", "CLAUDE OPUS 9");
 
     const { resolveModelCatalog } = await loadCatalog();
@@ -298,8 +305,8 @@ describe("defaultId", () => {
   });
 
   it("follows an explicit LLM_PROVIDER override, as an unspecified request would", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", ANTHROPIC_KEY);
-    vi.stubEnv("XAI_API_KEY", XAI_KEY);
+    vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", ANTHROPIC_KEY);
+    vi.stubEnv("XAI_OAUTH_TOKEN", XAI_KEY);
     vi.stubEnv("LLM_PROVIDER", "anthropic");
 
     const { resolveModelCatalog } = await loadCatalog();
@@ -327,7 +334,7 @@ describe("BUILTIN_FRONTIER", () => {
 
 describe("validateModelId", () => {
   it("accepts a catalogued id and returns its provider", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", ANTHROPIC_KEY);
+    vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", ANTHROPIC_KEY);
     await insertRow("anthropic", "claude-opus-9", "CLAUDE OPUS 9");
 
     const { validateModelId } = await loadCatalog();
@@ -338,7 +345,7 @@ describe("validateModelId", () => {
   });
 
   it("rejects an arbitrary client-supplied string", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", ANTHROPIC_KEY);
+    vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", ANTHROPIC_KEY);
     await insertRow("anthropic", "claude-opus-9", "CLAUDE OPUS 9");
 
     const { validateModelId } = await loadCatalog();
@@ -349,7 +356,7 @@ describe("validateModelId", () => {
   });
 
   it("rejects a catalogued id belonging to a provider with no key here", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", ANTHROPIC_KEY);
+    vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", ANTHROPIC_KEY);
     await insertRow("openai", "gpt-9", "GPT 9");
 
     const { validateModelId } = await loadCatalog();
@@ -360,9 +367,9 @@ describe("validateModelId", () => {
 
 describe("GET /api/models", () => {
   it("returns models, defaultId and source, and never key material", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", ANTHROPIC_KEY);
-    vi.stubEnv("XAI_API_KEY", XAI_KEY);
-    vi.stubEnv("OPENAI_API_KEY", OPENAI_KEY);
+    vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", ANTHROPIC_KEY);
+    vi.stubEnv("XAI_OAUTH_TOKEN", XAI_KEY);
+    vi.stubEnv("CODEX_OAUTH_TOKEN", OPENAI_KEY);
     await insertRow("anthropic", "claude-opus-9", "CLAUDE OPUS 9");
     await insertRow("xai", "grok-9", "GROK 9");
     await insertRow("openai", "gpt-9", "GPT 9");

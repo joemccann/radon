@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { installClearFixtures } from "./clear-fixtures";
 import { clearPrimaryNavigation, navItems } from "../lib/data";
 
-for (const width of [360, 390, 768, 1024, 1440]) {
+for (const width of [360, 390, 641, 768, 900, 1024, 1440]) {
   test(`Clear navigation and controls at ${width}px`, async ({ page }, testInfo) => {
     test.setTimeout(120_000);
     await page.setViewportSize({ width, height: 900 });
@@ -11,15 +11,16 @@ for (const width of [360, 390, 768, 1024, 1440]) {
     const mobile = width <= 640;
     const navigation = page.getByRole("navigation", { name: mobile ? "Primary mobile navigation" : "Primary navigation", exact: true });
     await expect(navigation).toBeVisible();
-    await expect(navigation.getByRole("link")).toHaveCount(4);
-    for (const item of clearPrimaryNavigation) {
+    const primaryItems = mobile ? clearPrimaryNavigation.filter((item) => item.label !== "AI Industry") : clearPrimaryNavigation;
+    await expect(navigation.getByRole("link")).toHaveCount(mobile ? 4 : 5);
+    for (const item of primaryItems) {
       const link = navigation.getByRole("link", { name: item.label, exact: true });
       await expect(link).toHaveAttribute("href", item.href);
     }
     await expect(navigation.getByRole("link", { name: "Portfolio", exact: true })).toHaveAttribute("aria-current", "page");
     const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(horizontalOverflow).toBeLessThanOrEqual(1);
-    await page.screenshot({ path: testInfo.outputPath(`clear-shell-${width}.png`), fullPage: false });
+    await page.screenshot({ path: testInfo.outputPath(`instrument-workspace-clear-shell-${width}.png`), fullPage: false });
 
     const more = page.getByRole("button", { name: mobile ? "Open more navigation" : "Open all workspaces", exact: true });
     await more.click();
@@ -51,12 +52,12 @@ for (const width of [360, 390, 768, 1024, 1440]) {
       await page.getByRole("button", { name: "Toggle theme" }).click();
       await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
       await page.getByRole("button", { name: "Toggle theme" }).click();
-      await page.getByRole("button", { name: "Open command palette" }).click();
-      await expect(page.getByRole("dialog", { name: "Command palette" })).toBeVisible();
-      await page.getByRole("textbox", { name: "Search", exact: true }).fill("AAPL");
+      await page.keyboard.press("Meta+k");
+      await expect(page.getByRole("combobox", { name: "Search ticker", exact: true })).toBeFocused();
       await page.keyboard.press("Escape");
-      await expect(page.getByRole("dialog", { name: "Command palette" })).toBeHidden();
     }
+    await expect(page.getByRole("button", { name: "Open command palette" })).toHaveCount(0);
+    await expect(page.getByRole("dialog", { name: "Command palette" })).toHaveCount(0);
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
 
     await more.click();
@@ -66,13 +67,13 @@ for (const width of [360, 390, 768, 1024, 1440]) {
     await page.goBack();
     await expect(page).toHaveURL(/\/dashboard$/);
 
-    for (const item of clearPrimaryNavigation.filter((item) => item.label !== "Portfolio")) {
+    for (const item of primaryItems.filter((item) => item.label !== "Portfolio")) {
       await navigation.getByRole("link", { name: item.label, exact: true }).click();
       await expect(page).toHaveURL(new RegExp(`${item.href}$`));
       await expect(navigation.getByRole("link", { name: item.label, exact: true })).toHaveAttribute("aria-current", "page");
       await expect(page.locator(".clear-workstation")).toBeVisible();
     }
     await page.goBack();
-    await expect(page).toHaveURL(/\/regime\/cri$/);
+    await expect(page).toHaveURL(mobile ? /\/regime\/cri$/ : /\/portfolio$/);
   });
 }

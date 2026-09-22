@@ -84,7 +84,9 @@ function stripDangerousKeys(value: unknown, depth: number, neutralize: boolean):
   const out: Record<string, unknown> = Object.create(null);
   for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
     if (DANGEROUS_KEYS.has(key)) continue;
-    out[key] = stripDangerousKeys(val, depth + 1, neutralize);
+    // F20260917-C09: keys enter the fenced excerpt too, so fence-like markup
+    // in a KEY must be neutralized the same as a value.
+    out[neutralize ? neutralizeMarkup(key) : key] = stripDangerousKeys(val, depth + 1, neutralize);
   }
   return out;
 }
@@ -99,10 +101,11 @@ export function fencePayload(payload: unknown, status = 200): Record<string, unk
       excerpt: `${UNTRUSTED_EXCERPT_OPEN}\n${json.slice(0, MAX_RESULT_CHARS)}\n${UNTRUSTED_EXCERPT_CLOSE}`,
     };
   }
+  // F20260917-C09: no `body` field — it duplicated the payload OUTSIDE the
+  // fence markers. The fenced excerpt is the only copy the model sees.
   return {
     truncated: false,
     status,
-    body: neutralized,
     excerpt: `${UNTRUSTED_EXCERPT_OPEN}\n${json}\n${UNTRUSTED_EXCERPT_CLOSE}`,
   };
 }

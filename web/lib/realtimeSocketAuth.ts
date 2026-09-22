@@ -39,7 +39,7 @@ export async function buildAuthenticatedWebSocketUrl(
     throw new Error("Realtime auth token unavailable");
   }
   const ticket = await withRealtimeDeadline(
-    getWsTicket(token),
+    (signal) => getWsTicket(token, signal),
     "Realtime ticket request",
   );
   const separator = baseUrl.includes("?") ? "&" : "?";

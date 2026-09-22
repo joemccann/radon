@@ -1,5 +1,7 @@
 "use client";
 
+import RequestError from "@/components/RequestError";
+
 /**
  * OrderQuantityInput — Quantity input with label
  *
@@ -44,8 +46,9 @@ export function OrderQuantityInput({
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         disabled={disabled}
+        aria-invalid={Boolean(error)}
       />
-      {error && <span className="order-field-error">{error}</span>}
+      <RequestError error={error} />
     </div>
   );
 }

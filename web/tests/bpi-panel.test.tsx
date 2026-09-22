@@ -149,8 +149,11 @@ describe("BpiPanel", () => {
     useBpiMock.mockReturnValue(hookResult({ error: "BPI upstream unavailable" }));
     render(<BpiPanel />);
 
-    expect(screen.getByText("Bullish percent measurement unavailable")).toBeTruthy();
-    expect(screen.getByText("BPI upstream unavailable")).toBeTruthy();
+    expect(screen.getByText("Bullish percent measurement")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Refresh" })).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain("BPI upstream unavailable");
+    expect(screen.getByRole("alert").closest("[data-toast-viewport]")).toBeTruthy();
+    expect(screen.getByRole("status").textContent).not.toContain("BPI upstream unavailable");
     expect(screen.queryByText(/No bullish percent data yet/)).toBeNull();
   });
 

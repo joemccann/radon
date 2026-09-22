@@ -1,3 +1,4 @@
+import type { FlowSkew } from "@/lib/flowSkew";
 import type { FlowReportData } from "@/lib/useTickerFlowReport";
 import { businessDateKeys } from "./time";
 
@@ -8,6 +9,30 @@ function hashTicker(ticker: string): number {
 function round(value: number, places = 3): number {
   const scale = 10 ** places;
   return Math.round(value * scale) / scale;
+}
+
+/** Six-session 25-delta skew path that agrees with the sample verdict. */
+function buildDemoSkew(direction: "BULLISH" | "BEARISH" | "NEUTRAL", seed: number, dates: string[]): FlowSkew {
+  const drift = direction === "BULLISH" ? -0.18 : direction === "BEARISH" ? 0.22 : 0.02;
+  const start = 2.2 + (seed % 9) / 10;
+  const sessions = dates.slice(-6).map((date, index) => ({
+    date,
+    value: round(start + drift * index + Math.sin(seed + index) * 0.04, 4),
+  }));
+  const value = sessions[sessions.length - 1].value;
+  const prior = sessions[sessions.length - 2].value;
+  const expiry = new Date(`${dates[dates.length - 1]}T00:00:00Z`);
+  expiry.setUTCDate(expiry.getUTCDate() + 29);
+  return {
+    expiry: expiry.toISOString().slice(0, 10),
+    delta: 25,
+    sessions,
+    value,
+    prior,
+    change: round(value - prior, 4),
+    path: direction === "BULLISH" ? "falling" : direction === "BEARISH" ? "rising" : "flat",
+    errors: [],
+  };
 }
 
 /** Fresh deterministic market-structure sample for any route-valid ticker. */
@@ -73,6 +98,7 @@ export function buildDemoFlowReport(rawTicker: string, now: Date = new Date()): 
       put_premium: putPremium,
       total_alerts: 28 + seed % 24,
     },
+    skew: buildDemoSkew(direction, seed, dates),
     combined_signal: `${direction} / ${confidence}% confidence`,
     market_status: "Sample data",
     trading_days_checked: dates,

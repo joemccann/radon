@@ -26,6 +26,8 @@ Applies under `web/`. Mirrors `web/CLAUDE.md`; prefer the Claude file if it is n
 
 ## UI Verification
 
+- Request, refresh, broker, validation and action errors use `RequestError` / `ErrorToast` (or the shared toast system), never inline banners. Preserve retry and retained-data guidance. Fatal framework fallbacks, financial risk conditions and stored diagnostic records are explicit exceptions; see `docs/reviews/2026-09-17-toast-errors.md`.
+
 - UI changes need focused Vitest plus Playwright E2E when behavior changes.
 - Visually verify rendered UI before done. Use `chrome-cdp` if available; otherwise Playwright screenshots.
 - Do not click live submit/place buttons during UI verification. If unavoidable, qty 1 max, far-away limit, immediate cancel, then verify IB open orders.
@@ -65,7 +67,7 @@ Applies under `web/`. Mirrors `web/CLAUDE.md`; prefer the Claude file if it is n
 - Preserve credit/debit signs end to end. Never `Math.abs()` option values where sign matters.
 - Limit-priced ticket max-gain / max-loss are structural at the limit. Do not subtract quoted half-spread or estimated exit. A short put's max gain is the credit.
 - Daily change percent = Daily P&L / `|yesterday close value|`; never entry cost.
-- Same-day positions use entry-cost baseline: Today P&L = Total P&L = `MV - EC`; ignore `ib_daily_pnl`.
+- Same-day positions use entry-cost baseline: Today P&L = Total P&L = `MV - EC`; ignore `ib_daily_pnl`. Mixed-age combos (`basis_source: mixed`, overnight + session_fills legs) are not same-day: overnight vs close, session vs fill. Without an IB total, every leg must have a usable mark and baseline; otherwise Today P&L is unavailable, never a partial sum.
 - Entry-date fallback: blotter per-contract -> trade_log ticker/structure -> IB fills -> previous portfolio ticker/structure/expiry -> today. Never per-ticker blotter fallback.
 - `PortfolioLeg.avg_cost` is per-contract for options and per-share for stocks. Do not multiply option `avg_cost` by 100 again.
 - Journal lot-matched basis overrides IB's drifting VWAP; raw IB value is diagnostic.

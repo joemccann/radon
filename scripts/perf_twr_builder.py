@@ -1219,6 +1219,7 @@ def _shell(
         "series": [],
         "subperiods": [],
         "warnings": list(warnings),
+        "nav_points": [],
     }
 
 
@@ -1287,6 +1288,10 @@ def _suppressed_payload(
         "net_external_flows": None,
         "investment_pnl": None,
     }
+    # Series stays empty so a suppressed curve is not drawn. The dates still
+    # have to reach nav_snapshots or the next duplicate check fails the
+    # flex-pull oneshot (page d3b66eaf).
+    payload["nav_points"] = [{"date": day, "nav": by_date[day]} for day in dates]
     return payload
 
 
@@ -1592,6 +1597,7 @@ def build_payload(
     }
     payload["series"] = series
     payload["subperiods"] = _subperiod_rows(chain)
+    payload["nav_points"] = [{"date": point["date"], "nav": point["nav"]} for point in series]
     return payload
 
 
@@ -1693,9 +1699,12 @@ def persist_payload(payload: Mapping[str, Any]) -> None:
 
 
 def _nav_snapshot_rows(payload: Mapping[str, Any], account_id: str) -> List[Dict[str, Any]]:
+    points = list(payload.get("series") or [])
+    if not points:
+        points = list(payload.get("nav_points") or [])
     return [
         {"account_id": account_id, "report_date": point["date"], "total_net_liq": point["nav"]}
-        for point in payload.get("series") or []
+        for point in points
     ]
 
 

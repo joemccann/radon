@@ -1,0 +1,15 @@
+name: App-plane images (PR)
+
+# Build-only image contract for pull requests. Calls the reusable workflow
+# with a read-only token: the push steps in app-images.yml are gated to
+# main-push events, so a PR build must never hold packages:write.
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  images:
+    uses: ./.github/workflows/app-images.yml

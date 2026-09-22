@@ -239,13 +239,13 @@ describe("AssetCockpit — deck open never occludes the book (flat fixture)", ()
     fireEvent.click(chainGlyph);
     expect(onDeckChange).toHaveBeenCalledWith("c");
 
-    // Re-render in an opened state (parent owns activeDeck). Use the `:` command
-    // palette deck — it renders provider-free static content, so this test stays
+    // Re-render in an opened state (parent owns activeDeck). The flat position
+    // deck renders provider-free static content, so this test stays
     // focused on the layout invariant (deck open ⇒ book not occluded) without
     // pulling the chain's TickerDetailProvider into scope.
     rerender(
       <OrderActionsProvider>
-        <AssetCockpit {...{ ...props, activeDeck: ":" as typeof props.activeDeck }} />
+        <AssetCockpit {...{ ...props, activeDeck: "p" as typeof props.activeDeck }} />
       </OrderActionsProvider>,
     );
 
@@ -266,8 +266,8 @@ describe("AssetCockpit — deck open never occludes the book (flat fixture)", ()
   });
 
   it("(e) the deck close button calls onDeckChange(null)", () => {
-    // `:` (command palette) deck renders provider-free static content.
-    const { container, onDeckChange } = renderCockpit({ activeDeck: ":" });
+    // The flat position deck renders provider-free static content.
+    const { container, onDeckChange } = renderCockpit({ activeDeck: "p" });
     const closeBtn = container.querySelector(".asset-deck-x") as HTMLElement;
     expect(closeBtn).toBeTruthy();
     fireEvent.click(closeBtn);
@@ -275,7 +275,7 @@ describe("AssetCockpit — deck open never occludes the book (flat fixture)", ()
   });
 
   it("(e) Esc (no input focused) calls onDeckChange(null) when a deck is open", () => {
-    const { onDeckChange } = renderCockpit({ activeDeck: ":" });
+    const { onDeckChange } = renderCockpit({ activeDeck: "p" });
     document.body.focus();
     fireEvent.keyDown(document.body, { key: "Escape" });
     expect(onDeckChange).toHaveBeenCalledWith(null);

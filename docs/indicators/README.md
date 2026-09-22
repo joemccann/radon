@@ -19,10 +19,11 @@ Owner specs for regime tabs and the cheap-wing scanner. Add a row here when a sp
 | trin | `/regime/trin` | `trin` | [trin.md](trin.md) (spec; build in flight) |
 | divyield | `/regime/divyield` | `div-yield` | [divyield.md](divyield.md) |
 | ma-ratio | `/regime/ma-ratio` | `ma-ratio` | [ma-ratio.md](ma-ratio.md) |
-| calm-streak | `/regime/calm-streak` | `calm-streak` | [calm-streak.md](calm-streak.md) |
-| hyad | `/regime/hyad` | `hy-ad` | [hyad.md](hyad.md) |
+| calm-streak | `/regime/calm-streak` | `calm-streak` | [calm-streak.md](calm-streak.md) (migration renumbered 0074 to 0076 2026-09-17; `migrate.py` now refuses duplicate version numbers) |
+| hyad | `/regime/hyad` | `hy-ad` | [hyad.md](hyad.md) (SPX history uses stored Cboe closes for dates absent from credit history) |
 | hhlev | `/regime/hhlev` | `hhlev` | [hhlev.md](hhlev.md) |
 | vixts | `/regime/vixts` | `vixts` | [vixts.md](vixts.md) |
+| panic-index | `/regime/panic-index` | `panic-index` | [panic-index.md](panic-index.md) (shipped. Radon proxy of the GS S&T Panic Index, not the GS index) |
 | dispersion | `/regime/dispersion` | `dispersion` | [dispersion.md](dispersion.md) |
 | streaks | `/regime/streaks` | on-demand, no timer | [streaks.md](streaks.md) |
 
@@ -39,7 +40,7 @@ builder `PREFILLED FROM VOL CONE` off that `src`. Any other `src` falls back to
 `PREFILLED FROM THETA HARVESTER`, so a new indicator that prefills the builder
 must add its own `src` value rather than reuse one.
 
-A price-series indicator whose every source (IB, UW, Robinhood when configured, Yahoo) fails must re-serve
+A price-series indicator whose every source (IB, Robinhood when configured, UW, Yahoo) fails must re-serve
 its cache as `status: "stale_source"` with an `error` heartbeat, never a fresh `ok`
 over unconfirmed data: the watchdog gates purely on the 26h heartbeat window, so an
 `ok` here pins it open through a permanent outage. Pattern: `fetch_ivrank._serve_cached`,
@@ -52,3 +53,5 @@ parent, or a spent UW daily cap fails its unit and pages a P1 every run. See
 Every UW-backed indicator shares one daily-cap breaker,
 `scripts/utils/uw_embargo.py`. Give a new writer its own sidecar file through
 `UwEmbargo(service, path_source)`; do not re-implement the reset arithmetic.
+
+The Vol/Skew MR scanner measures 25-delta put-minus-call IV history for one listed expiry nearest 30 DTE. Missing history is shown explicitly and cannot satisfy the skew gate; see [source and comparability rules](vol-skew-mr.md#data-sources-per-ticker). The per-ticker flow report (`/flow-analysis/<TICKER>`) embeds the same snapshot as its `skew` block; see [shared skew snapshot](vol-skew-mr.md#shared-skew-snapshot).

@@ -1,0 +1,12 @@
+[Unit]
+Description=Radon subscription token refresh (every 30 minutes)
+
+[Timer]
+# A 1-hour access token must be refreshed at least once inside its life, so
+# the cadence is half that. Explicit UTC: the schedule is DST-independent.
+OnCalendar=*-*-* *:00,30:00 UTC
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

@@ -105,17 +105,18 @@
   }
 
   :global(.chain-first-cockpit) .chainFirst :global(.chain-anchor-panes .chain-grid) {
-    min-width: 1040px;
+    min-width: 1088px;
     font-size: 13px;
   }
 
   :global(.chain-first-cockpit) .chainFirst :global(.chain-anchor-panes[data-side="calls"] .chain-grid),
   :global(.chain-first-cockpit) .chainFirst :global(.chain-anchor-panes[data-side="puts"] .chain-grid) {
-    min-width: 600px;
+    min-width: 648px;
   }
 
   :global(.chain-first-cockpit) .chainFirst :global(.chain-anchor-strike-col) {
-    width: 72px;
+    width: 7.5rem;
+    min-width: 7.5rem;
   }
 
   :global(.chain-first-cockpit) .chainFirst :global(.chain-cell) {

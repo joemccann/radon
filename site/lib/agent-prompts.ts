@@ -193,7 +193,7 @@ export const capabilityPrompts: Record<string, AgentPrompt> = {
     mcp: MCP_NOT_PUBLIC,
     parameters: [
       "Rule: ≤ 2.5% bankroll.",
-      "Quarter-Kelly from max gain over max loss and the signal odds, then min(that, 2.5%).",
+      "Half-Kelly from max gain over max loss and the signal odds, then min(that, 2.5%). 0.25 is the optional stricter setting.",
     ],
     definitionOfDone: [
       "Reports the Kelly fraction, the cap, and the binding size.",
@@ -288,10 +288,10 @@ export const capabilityPrompts: Record<string, AgentPrompt> = {
     mcp: MCP_NOT_PUBLIC,
     parameters: [
       "Signal odds b = max gain / max loss on the chosen defined-risk structure.",
-      "Quarter-Kelly, then min(that fraction, 2.5% of bankroll). If Kelly is smaller, take the smaller number.",
+      "Half-Kelly, then min(that fraction, 2.5% of bankroll). If Kelly is smaller, take the smaller number. 0.25 is the optional stricter setting.",
     ],
     definitionOfDone: [
-      "Reports b, quarter-Kelly, the 2.5% cap, and which number binds.",
+      "Reports b, half-Kelly, the 2.5% cap, and which number binds.",
       DONE_NO_ORDER,
     ],
   },
@@ -423,10 +423,10 @@ export const developerRecipes: DeveloperRecipe[] = [
         "Size a defined-risk structure from MAX_GAIN and MAX_LOSS with fractional Kelly, hard-capped at 2.5% of bankroll.",
       parameters: [
         "Replace MAX_GAIN and MAX_LOSS with the structure's dollar extremes. Signal odds b = MAX_GAIN / MAX_LOSS.",
-        "Quarter-Kelly, then min(that fraction, 2.5% of bankroll). If Kelly is smaller, take the smaller number.",
+        "Half-Kelly, then min(that fraction, 2.5% of bankroll). If Kelly is smaller, take the smaller number. 0.25 is the optional stricter setting.",
       ],
       definitionOfDone: [
-        "Reports b from MAX_GAIN / MAX_LOSS, quarter-Kelly, the 2.5% cap, and which number binds.",
+        "Reports b from MAX_GAIN / MAX_LOSS, half-Kelly, the 2.5% cap, and which number binds.",
         DONE_NO_ORDER,
       ],
     },

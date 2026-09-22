@@ -1778,6 +1778,19 @@ restart_services
         assert main.find("install_deploy_root_helper") < main.find("configure_sudoers")
 
 
+def _commit_checkout(cloud: Path) -> None:
+    """stage_from_checkout only installs bytes committed at HEAD and reachable
+    from origin/main, so a fake checkout must be a git repository with its
+    artifacts committed and published."""
+    for args in (
+        ["git", "init", "-q"],
+        ["git", "add", "."],
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "seed"],
+        ["git", "update-ref", "refs/remotes/origin/main", "HEAD"],
+    ):
+        subprocess.run(args, cwd=cloud, check=True, capture_output=True)
+
+
 class TestCaddyDeployment:
     def test_caddy_candidate_is_validated_before_atomic_install(self) -> None:
         setup = SETUP.read_text(encoding="utf-8")
@@ -1795,6 +1808,7 @@ class TestCaddyDeployment:
         cloud = tmp_path / "cloud"
         (cloud / "caddy").mkdir(parents=True)
         (cloud / "caddy" / "Caddyfile").write_text("candidate\n", encoding="utf-8")
+        _commit_checkout(cloud)
         live = tmp_path / "etc" / "Caddyfile"
         live.parent.mkdir()
         live.write_text("known-good\n", encoding="utf-8")
@@ -1844,6 +1858,7 @@ configure_caddy
         cloud = tmp_path / "cloud"
         (cloud / "caddy").mkdir(parents=True)
         (cloud / "caddy" / "Caddyfile").write_text("candidate\n", encoding="utf-8")
+        _commit_checkout(cloud)
         live = tmp_path / "etc" / "Caddyfile"
         live.parent.mkdir()
         live.write_text("known-good\n", encoding="utf-8")

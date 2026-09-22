@@ -970,3 +970,213 @@ class TestExactIdSkipSpendsTheFingerprintClaim:
 
         assert [a["status"] for a in actions] == ["skipped"]
         assert len(_journal_rows(conn)) == 1
+
+
+def _ewy_fill(exec_id: str, qty: float, when: str) -> dict:
+    fill = dict(EWY_EXEC_PAYLOAD)
+    fill["execId"] = exec_id
+    fill["quantity"] = qty
+    fill["time"] = when
+    return fill
+
+
+def _flex_aggregate_ewy_row(ib_exec_id: str, contracts: int, **extra) -> dict:
+    row = _flex_rehydrated_ewy_row()
+    row["ib_exec_id"] = ib_exec_id
+    row["contracts"] = contracts
+    row.update(extra)
+    return row
+
+
+class TestFlexAggregateReconcilesOnly:
+    """NF-4: a Flex bucket aggregating several fills under one composite id
+    is a TOTAL, not a fill. The individual executed_orders fills it covers
+    must not be journaled again beside it (that doubles net qty and basis);
+    fills beyond its total are genuine gaps and still land."""
+
+    def _run(self, monkeypatch, journal: dict, fills: list[dict]):
+        conn = _fresh_db()
+        _patch_db(conn, monkeypatch)
+        monkeypatch.setenv("RADON_DB_TEST_WRITE_OK", "1")
+        _insert_journal(conn, journal["ib_exec_id"], journal, journal["date"])
+        for fill in fills:
+            _insert_executed_order(conn, fill["execId"], fill, fill["time"])
+        mod = _import_backfill()
+        actions = mod.backfill(conn, exec_ids=[f["execId"] for f in fills], dry_run=False)
+        return conn, actions
+
+    def test_individual_fills_inside_a_same_day_aggregate_are_not_reinserted(self, monkeypatch):
+        conn, actions = self._run(
+            monkeypatch,
+            _flex_aggregate_ewy_row("7412330991+7412330995", 10),
+            [
+                _ewy_fill("000205d2.6a26a327.01.01", 6.0, "2026-06-08T14:02:11+00:00"),
+                _ewy_fill("000205d2.6a26a999.01.01", 4.0, "2026-06-08T18:31:44+00:00"),
+            ],
+        )
+        assert [a["status"] for a in actions] == ["skipped", "skipped"], actions
+        assert len(_journal_rows(conn)) == 1
+
+    def test_a_fill_beyond_the_aggregate_total_still_lands(self, monkeypatch):
+        conn, actions = self._run(
+            monkeypatch,
+            _flex_aggregate_ewy_row("7412330991+7412330995", 10),
+            [
+                _ewy_fill("000205d2.6a26a327.01.01", 6.0, "2026-06-08T14:02:11+00:00"),
+                _ewy_fill("000205d2.6a26a999.01.01", 4.0, "2026-06-08T18:31:44+00:00"),
+                _ewy_fill("000205d2.6a26aaaa.01.01", 3.0, "2026-06-08T19:00:00+00:00"),
+            ],
+        )
+        assert [a["status"] for a in actions] == ["skipped", "skipped", "inserted_from_eo"]
+        assert len(_journal_rows(conn)) == 2
+
+    def test_multi_day_aggregate_covers_each_day_from_its_breakdown(self, monkeypatch):
+        conn, actions = self._run(
+            monkeypatch,
+            _flex_aggregate_ewy_row(
+                "7412330991+7412339999", 10,
+                fill_breakdown=[
+                    {"date": "2026-06-08", "qty": -6},
+                    {"date": "2026-06-09", "qty": -4},
+                ],
+            ),
+            [
+                _ewy_fill("000205d2.6a26a327.01.01", 6.0, "2026-06-08T14:02:11+00:00"),
+                _ewy_fill("000205d2.6a27b111.01.01", 4.0, "2026-06-09T15:00:00+00:00"),
+            ],
+        )
+        assert [a["status"] for a in actions] == ["skipped", "skipped"], actions
+        assert len(_journal_rows(conn)) == 1
+
+    def test_closed_round_trip_aggregate_covers_both_sides(self, monkeypatch):
+        buy = _ewy_fill("000205d2.6a26a327.01.01", 5.0, "2026-06-08T14:02:11+00:00")
+        buy["side"] = "BOT"
+        sell = _ewy_fill("000205d2.6a26a999.01.01", 5.0, "2026-06-08T18:31:44+00:00")
+        conn, actions = self._run(
+            monkeypatch,
+            _flex_aggregate_ewy_row(
+                "7412330991+7412330995", 5, action="CLOSED", total_round_trip_quantity=5,
+            ),
+            [buy, sell],
+        )
+        assert [a["status"] for a in actions] == ["skipped", "skipped"], actions
+        assert len(_journal_rows(conn)) == 1
+
+    def test_duplicate_exec_id_correction_in_one_batch_lands_once(self, monkeypatch):
+        conn = _fresh_db()
+        _patch_db(conn, monkeypatch)
+        monkeypatch.setenv("RADON_DB_TEST_WRITE_OK", "1")
+        fill = _ewy_fill("000205d2.6a26a327.01.01", 6.0, "2026-06-08T14:02:11+00:00")
+        correction = _ewy_fill("000205d2.6a26a327.01.02", 6.0, "2026-06-08T14:02:11+00:00")
+        _insert_executed_order(conn, fill["execId"], fill, fill["time"])
+        _insert_executed_order(conn, correction["execId"], correction, correction["time"])
+        mod = _import_backfill()
+        actions = mod.backfill(
+            conn, exec_ids=[fill["execId"], correction["execId"]], dry_run=False
+        )
+        assert sorted(a["status"] for a in actions) == ["inserted_from_eo", "skipped"]
+        assert len(_journal_rows(conn)) == 1
+
+
+class TestRel274GrossFlexCoverage:
+    _run = TestFlexAggregateReconcilesOnly._run
+    @pytest.mark.parametrize("sell_qty,next_day", [(3, False), (8, False), (3, True)])
+    def test_rehydrator_round_trip_preserves_coverage(self, monkeypatch, sell_qty, next_day):
+        from datetime import datetime
+        from test_journal_rehydrate import _make_execution
+        from trade_blotter.models import SecurityType, Side
+        from journal_rehydrate import rehydrate_from_executions
+        executions = [
+            _make_execution(exec_id="91001", symbol="EWY", sec_type=SecurityType.OPTION,
+                            side=Side.BUY, quantity=8, price=10, strike=215, right="C",
+                            expiry="20260717", when=datetime(2026, 6, 8, 10)),
+            _make_execution(exec_id="91002", symbol="EWY", sec_type=SecurityType.OPTION,
+                            side=Side.SELL, quantity=sell_qty, price=12, strike=215, right="C",
+                            expiry="20260717", when=datetime(2026, 6, 9 if next_day else 8, 14)),
+        ]
+        updated, imported, _, _ = rehydrate_from_executions(executions, {"trades": []})
+        assert imported == 1
+        aggregate = updated["trades"][0]
+        buy = _ewy_fill("000205d2.6a26a327.01.01", 8, "2026-06-08T14:00:00+00:00")
+        buy.update(side="BOT", avgPrice=10, commission=0)
+        sell = _ewy_fill("000205d2.6a26a999.01.01", sell_qty,
+                         f"2026-06-{9 if next_day else 8:02}T18:00:00+00:00")
+        sell.update(avgPrice=12, commission=0)
+        conn, actions = self._run(monkeypatch, aggregate, [buy, sell])
+        assert [a["status"] for a in actions] == ["skipped", "skipped"], actions
+        rows = _journal_rows(conn)
+        assert len(rows) == 1
+        assert rows[0]["payload"] == aggregate
+        assert aggregate["open_basis"] == (8 - sell_qty) * 1000
+        assert aggregate["realized_pnl"] == sell_qty * 200
+
+    @pytest.mark.parametrize("legacy", [False, True])
+    def test_same_day_legacy_or_gross_budget_keeps_both_sides(self, monkeypatch, legacy):
+        row = _flex_aggregate_ewy_row("91001+91002", 5, action="BUY_OPTION",
+            total_round_trip_quantity=8, fill_breakdown=[{"date": "2026-06-08", "qty": 5}])
+        if not legacy:
+            row["gross_fill_breakdown"] = [
+                {"date": "2026-06-08", "qty": 8}, {"date": "2026-06-08", "qty": -3}]
+        buy = _ewy_fill("000205d2.6a26a327.01.01", 8, "2026-06-08T14:00:00+00:00")
+        buy["side"] = "BOT"
+        sell = _ewy_fill("000205d2.6a26a999.01.01", 3, "2026-06-08T18:00:00+00:00")
+        if legacy:
+            # A later zero-net day is omitted from the old breakdown, so even
+            # a single retained date cannot locate the hidden gross turnover.
+            conn = _fresh_db()
+            _patch_db(conn, monkeypatch)
+            _insert_journal(conn, row["ib_exec_id"], row, row["date"])
+            for fill in [buy, sell]:
+                _insert_executed_order(conn, fill["execId"], fill, fill["time"])
+            with pytest.raises(ValueError, match="gross.*coverage"):
+                _import_backfill().backfill(conn, dry_run=False, exec_ids=[buy["execId"], sell["execId"]])
+            assert [r["payload"] for r in _journal_rows(conn)] == [row]
+        else:
+            conn, actions = self._run(monkeypatch, row, [buy, sell])
+            assert [a["status"] for a in actions] == ["skipped", "skipped"]
+            assert len(_journal_rows(conn)) == 1
+
+    def test_exact_aggregate_member_spends_its_gross_budget(self, monkeypatch):
+        row = _flex_aggregate_ewy_row("000205d2.6a26a327.01.01+91002", 5, action="BUY_OPTION",
+            total_round_trip_quantity=8, gross_fill_breakdown=[
+                {"date": "2026-06-08", "qty": 8}, {"date": "2026-06-08", "qty": -3}])
+        buy = _ewy_fill("000205d2.6a26a327.01.01", 8, "2026-06-08T14:00:00+00:00")
+        buy["side"] = "BOT"
+        sell = _ewy_fill("000205d2.6a26a999.01.01", 3, "2026-06-08T18:00:00+00:00")
+        extra = _ewy_fill("000205d2.6a26aaaa.01.01", 2, "2026-06-08T19:00:00+00:00")
+        extra["side"] = "BOT"
+        conn, actions = self._run(monkeypatch, row, [buy, sell, extra])
+        assert [a["status"] for a in actions] == ["skipped", "skipped", "inserted_from_eo"]
+        assert len(_journal_rows(conn)) == 2
+
+    def test_correction_after_namespace_match_does_not_consume_two_fills(self, monkeypatch):
+        row = _flex_aggregate_ewy_row("91001+91002", 5, action="BUY_OPTION",
+            total_round_trip_quantity=8, gross_fill_breakdown=[
+                {"date": "2026-06-08", "qty": 8}, {"date": "2026-06-08", "qty": -3}])
+        buy = _ewy_fill("000205d2.6a26a327.01.01", 8, "2026-06-08T14:00:00+00:00")
+        buy["side"] = "BOT"
+        correction = dict(buy, execId="000205d2.6a26a327.01.02")
+        sell = _ewy_fill("000205d2.6a26a999.01.01", 3, "2026-06-08T18:00:00+00:00")
+        conn, actions = self._run(monkeypatch, row, [buy, correction, sell])
+        assert [a["status"] for a in actions] == ["skipped", "skipped", "skipped"]
+        assert len(_journal_rows(conn)) == 1
+
+    def test_ambiguous_legacy_multiday_turnover_refuses(self):
+        from clients.journal_basis import flex_aggregate_budget
+        row = _flex_aggregate_ewy_row("91001+91002+91003", 5, action="BUY_OPTION",
+            total_round_trip_quantity=10, fill_breakdown=[
+                {"date": "2026-06-08", "qty": 3}, {"date": "2026-06-09", "qty": 2}])
+        with pytest.raises(ValueError, match="gross.*coverage"):
+            flex_aggregate_budget(row)
+
+
+@pytest.mark.parametrize("gross", [
+    [{"date": "2026-06-08", "qty": float("nan")}],
+    [{"date": "2026-06-08", "qty": float("inf")}],
+    [{"qty": 8}], [], "invalid",
+])
+def test_rel274_malformed_gross_coverage_refuses(gross):
+    from clients.journal_basis import flex_aggregate_budget
+    row = _flex_aggregate_ewy_row("91001+91002", 5, action="BUY_OPTION", gross_fill_breakdown=gross)
+    with pytest.raises(ValueError, match="gross.*coverage"):
+        flex_aggregate_budget(row)

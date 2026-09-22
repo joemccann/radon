@@ -134,6 +134,8 @@ def _runtime_env(tmp_path: Path, fake_docker: Path | None = None) -> dict[str, s
     state_dir = tmp_path / "state"
     for d in (data_dir, media_dir, state_dir):
         d.mkdir(exist_ok=True)
+    (state_dir / "deploy.lock").touch()
+    (state_dir / "last-green").write_text("b" * 40 + "\n")
     credentials_dir = tmp_path / "credentials"
     credentials_dir.mkdir(exist_ok=True)
     (credentials_dir / "radon-secret-store-key").write_bytes(os.urandom(32))
@@ -256,7 +258,14 @@ def test_pull_pulls_only_app_images(tmp_path: Path) -> None:
 _IMAGE_STORE_DOCKER = """#!/bin/bash
 printf '%s\\n' "$*" >> {log}
 case "$1 $2" in
-  "manifest inspect"|"image inspect") exit 0 ;;
+  "manifest inspect") exit 0 ;;
+  "buildx imagetools") printf '{{"digest":"sha256:%064d"}}\\n' 0 ;;
+  "image inspect")
+    if [[ "$4" == "--format" ]]; then
+      ref="$3"
+      printf '["%s@sha256:%064d"]\\n' "${{ref%:*}}" 0
+    fi
+    ;;
   "ps --format")
     printf '%s\\n' ghcr.io/joemccann/radon-node:${{RADON_STUB_PREVIOUS}} ghcr.io/joemccann/radon-python:${{RADON_STUB_PREVIOUS}}
     ;;
@@ -268,8 +277,8 @@ exit 0
 """
 
 
-def test_pull_with_a_local_release_pair_skips_network_and_prunes_stale_pairs(tmp_path: Path) -> None:
-    """A successful parallel prepull makes deploy's exact-SHA check local."""
+def test_pull_with_matching_digests_skips_layer_pulls_and_prunes_stale_pairs(tmp_path: Path) -> None:
+    """Matching registry digests preserve cached layers and remove only stale releases."""
     target = "a" * 40
     previous = "b" * 40
     stale = "c" * 40
@@ -453,7 +462,7 @@ def test_run_allowlisted_unit_uses_host_net_and_radon_user(
     assert "no-new-privileges" in log
     assert "--cgroupns host" in log or "--cgroupns=host" in log
     # Docker's systemd driver accepts a slice only, not a unit path.
-    assert "--cgroup-parent=system.slice --env-file" in log
+    assert "--cgroup-parent=system.slice" in log
     assert f"system.slice/{unit}" not in log
     assert "docker.sock" not in log
     assert "--privileged" not in log
@@ -546,15 +555,37 @@ def _proxy_dir_from(result: subprocess.CompletedProcess[str]) -> str:
 
 def test_run_refuses_to_start_when_the_notify_proxy_cannot_bind(tmp_path: Path) -> None:
     missing = "/nonexistent-radon-proxy-dir"
+    # Directory provisioning also uses Python; fail only the notify proxy.
+    failing_python = tmp_path / "failing-python"
+    lease_dir = shlex.quote(str(tmp_path / 'state' / 'ib-lease'))
+    _write_executable(failing_python,
+        f'#!/bin/bash\nif [[ "${{2:-}}" == {lease_dir} ]]; then exec {shlex.quote(sys.executable)} "$@"; fi\nexit 1\n')
     result = _run(
         tmp_path,
         ["run", "radon-relay.service"],
-        extra_env={"RADON_TEST_NOTIFY_PROXY_DIR": missing, "RADON_TEST_PYTHON": "/bin/false"},
+        extra_env={"RADON_TEST_NOTIFY_PROXY_DIR": missing, "RADON_TEST_PYTHON": str(failing_python)},
     )
     assert result.returncode == 71, result.stderr
     assert "notify proxy" in result.stderr
     log = (tmp_path / "docker.log").read_text(encoding="utf-8")
     assert not [line for line in log.splitlines() if line.startswith("run ")], log
+
+
+def test_notify_proxy_socket_is_chowned_to_the_container_uid(tmp_path: Path) -> None:
+    """The 0600 socket is only usable by the container once start_notify_proxy
+    hands ownership to the radon uid the container runs as."""
+    d = Path(tempfile.mkdtemp(prefix="rdn", dir="/tmp"))
+    upstream = d / "u"
+    upstream.write_bytes(b"")
+    result = _run(
+        tmp_path,
+        ["run", "radon-relay.service"],
+        extra_env={"NOTIFY_SOCKET": str(upstream)},
+    )
+    assert result.returncode == 0, result.stderr
+    listen = Path(_proxy_dir_from(result)) / "radon-relay.service.sock"
+    chowns = (tmp_path / "chown.log").read_text(encoding="utf-8")
+    assert f"-h 1000:1000 {listen}" in chowns
 
 
 def test_notify_proxy_relays_ready_and_watchdog_datagrams() -> None:
@@ -574,7 +605,10 @@ def test_notify_proxy_relays_ready_and_watchdog_datagrams() -> None:
         while not listen_path.exists() and time.monotonic() < deadline:
             time.sleep(0.02)
         assert listen_path.exists(), proc.stderr.read() if proc.poll() is not None else "no socket"
-        assert stat.S_IMODE(listen_path.stat().st_mode) == 0o666
+        # NotifyAccess=all trusts every datagram the proxy relays, so the
+        # socket must never be world-writable: only its owner (chowned to the
+        # container uid by start_notify_proxy) may write READY/WATCHDOG.
+        assert stat.S_IMODE(listen_path.stat().st_mode) == 0o600
         client = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
         client.sendto(b"READY=1\n", str(listen_path))
         client.sendto(b"WATCHDOG=1\n", str(listen_path))
@@ -619,9 +653,56 @@ def test_run_api_mounts_systemd_credential_and_persists_store(tmp_path: Path) ->
     assert stat.S_IMODE((tmp_path / "data" / "secret_store").stat().st_mode) == 0o700
     chowns = (tmp_path / "chown.log").read_text(encoding="utf-8")
     assert f"root:1001 {host_dir} {staged}" in chowns
-    assert f"1000:1000 {tmp_path / 'data' / 'secret_store'}" in chowns
+    # secret_store ownership is applied fd-based in-process (symlink-safe),
+    # so it must never appear in the stubbed chown log.
+    assert str(tmp_path / "data" / "secret_store") not in chowns
     assert "--group-add 1001" in _run_line(result)
     assert "python scripts/secret_store.py && exec uvicorn" in _run_line(result)
+
+
+def test_run_api_refuses_symlinked_secret_store_dir(tmp_path: Path) -> None:
+    target = tmp_path / "elsewhere"
+    target.mkdir()
+    data = tmp_path / "data"
+    data.mkdir(exist_ok=True)
+    (data / "secret_store").symlink_to(target)
+    result = _run(tmp_path, ["run", "radon-api.service"])
+    assert result.returncode == 78, result.stderr
+    assert "secret store" in result.stderr.lower()
+    # The link target must not have been chowned or chmodded.
+    chown_log = tmp_path / "chown.log"
+    if chown_log.exists():
+        assert str(target) not in chown_log.read_text(encoding="utf-8")
+    assert stat.S_IMODE(target.stat().st_mode) != 0o700
+
+
+def test_run_refuses_symlinked_lease_dir(tmp_path: Path) -> None:
+    """The 2FA lease directory gets the same O_NOFOLLOW treatment as the
+    secret store: a pre-planted link at ib-lease must be refused, never
+    followed by the root-privileged ownership pass."""
+    target = tmp_path / "lease-elsewhere"
+    target.mkdir()
+    (tmp_path / "state" / "ib-lease").parent.mkdir(exist_ok=True)
+    (tmp_path / "state" / "ib-lease").symlink_to(target)
+    result = _run(tmp_path, ["run", "radon-monitor.service"])
+    assert result.returncode == 78, result.stderr
+    chown_log = tmp_path / "chown.log"
+    if chown_log.exists():
+        assert str(target) not in chown_log.read_text(encoding="utf-8")
+    assert stat.S_IMODE(target.stat().st_mode) != 0o700
+
+
+def test_run_prepares_lease_dir_symlink_safe(tmp_path: Path) -> None:
+    """Valid path: the lease directory is created 0700 with fd-based
+    ownership, so it never appears in the external chown log."""
+    result = _run(tmp_path, ["run", "radon-monitor.service"])
+    assert result.returncode == 0, result.stderr
+    lease = tmp_path / "state" / "ib-lease"
+    assert lease.is_dir() and not lease.is_symlink()
+    assert stat.S_IMODE(lease.stat().st_mode) == 0o700
+    chown_log = tmp_path / "chown.log"
+    if chown_log.exists():
+        assert str(lease) not in chown_log.read_text(encoding="utf-8")
 
 
 def test_run_api_refuses_when_credential_group_is_absent(tmp_path: Path) -> None:
@@ -780,8 +861,10 @@ def test_run_api_cleans_staged_credential_on_pre_exec_failure(
     # Provisioning also uses Python now. Fail only the notify proxy so this
     # regression continues to exercise its intended cleanup branch.
     private_anchor = shlex.quote(str(tmp_path / 'state' / 'private'))
+    secret_store = shlex.quote(str(tmp_path / 'data' / 'secret_store'))
+    lease_dir = shlex.quote(str(tmp_path / 'state' / 'ib-lease'))
     _write_executable(failing_python,
-        f'#!/bin/bash\nif [[ "${{2:-}}" == {private_anchor} ]]; then exec {shlex.quote(sys.executable)} "$@"; fi\nexit 1\n')
+        f'#!/bin/bash\nif [[ "${{2:-}}" == {private_anchor} || "${{2:-}}" == {secret_store} || "${{2:-}}" == {lease_dir} ]]; then exec {shlex.quote(sys.executable)} "$@"; fi\nexit 1\n')
     result = _run(
         tmp_path,
         ["run", "radon-api.service"],
@@ -885,7 +968,23 @@ def test_run_newsfeed_mounts_host_playwright_browsers(tmp_path: Path) -> None:
     assert "PLAYWRIGHT_BROWSERS_PATH=/ms-playwright" in log
     assert "--ipc host" in log
     assert "PLAYWRIGHT_CHROMIUM_SANDBOX=0" in log
-    assert f"{tmp_path / 'data' / 'newsfeed-scripts'}:/home/radon/radon/scripts/newsfeed" in log, log
+    assert f"{tmp_path / 'data' / 'newsfeed-scripts'}:/home/radon/radon/scripts/newsfeed:ro" in log, log
+
+
+def test_run_newsfeed_source_overlay_is_read_only(tmp_path: Path) -> None:
+    """The newsfeed drives sandbox-disabled Chromium over third-party pages,
+    so its source overlay bind must be read-only; runtime writes go to the
+    data and media mounts, never into scripts/newsfeed."""
+    result = _run(tmp_path, ["run", "radon-newsfeed.service"])
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    scripts_binds = [
+        arg
+        for arg in log.split()
+        if ":/home/radon/radon/scripts/newsfeed" in arg
+    ]
+    assert scripts_binds, log
+    assert all(bind.endswith(":ro") for bind in scripts_binds), scripts_binds
 
 
 @pytest.mark.parametrize("unit", ("radon-api.service", "radon-monitor.service"))
@@ -913,7 +1012,9 @@ def test_run_refuses_unknown_unit(tmp_path: Path) -> None:
 def test_runtime_source_never_mentions_docker_sock() -> None:
     text = RUNTIME.read_text(encoding="utf-8")
     assert "docker.sock" not in text
-    assert "flock" not in text
+    # Cleanup alone serializes with deploy; running a service never takes its lock.
+    run_body = text.split("cmd_run()", 1)[1].split("cmd_stop()", 1)[0]
+    assert "flock" not in run_body
     assert "/run/radon-deploy-root.lock" not in text
 
 
@@ -975,7 +1076,10 @@ def test_image_workflow_exists_and_is_a_deploy_need() -> None:
     assert "docker/app/Dockerfile.node" in wf
     assert "docker/app/.dockerignore" in wf
     assert "--ignorefile" not in wf
-    assert "packages: write" in wf
+    # The GHCR write grant lives on the ci.yml caller; the reusable workflow
+    # itself carries no permissions so the PR caller's read-only token rules.
+    assert "packages: write" not in wf
+    assert "packages: write" in ci
     assert "environment:" not in wf
     assert "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ vars.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}" in wf
     assert "NEXT_PUBLIC_RADON_API_URL=${{ vars.NEXT_PUBLIC_RADON_API_URL }}" in wf
@@ -1067,6 +1171,8 @@ def test_run_newsfeed_env_file_carries_only_its_allowlisted_keys(
         "TURSO_DB_URL=libsql://example.turso.io\n"
         "TURSO_AUTH_TOKEN='tok'\n"
         "ANTHROPIC_API_KEY=k1\n"
+        "CLAUDE_CODE_OAUTH_TOKEN=k-cc\n"
+        "RADON_LADDER_ALLOW_PREPAID=0\n"
         "XAI_API_KEY=k-xai\n"
         "OPENAI_API_KEY=k-oai\n"
         "GEMINI_API_KEY=k-gem\n"
@@ -1100,6 +1206,8 @@ def test_run_newsfeed_env_file_carries_only_its_allowlisted_keys(
         "TURSO_DB_URL",
         "TURSO_AUTH_TOKEN",
         "ANTHROPIC_API_KEY",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "RADON_LADDER_ALLOW_PREPAID",
         "XAI_API_KEY",
         "OPENAI_API_KEY",
         "GEMINI_API_KEY",
@@ -1111,6 +1219,42 @@ def test_run_newsfeed_env_file_carries_only_its_allowlisted_keys(
     } <= keys
     # Quote stripping still applies on the filtered path.
     assert "TURSO_AUTH_TOKEN=tok" in rendered.splitlines()
+
+
+def test_run_newsfeed_env_file_carries_the_themarketear_login(
+    tmp_path: Path,
+) -> None:
+    """The scraper re-authenticates itself when the session cookie dies.
+
+    `scripts/newsfeed/auth.js` reads THEMARKETEAR_EMAIL / THEMARKETEAR_PASSWORD
+    and throws `Missing THEMARKETEAR_EMAIL or THEMARKETEAR_PASSWORD environment
+    variable.` without them. The allowlist omitted both, so the container ran on
+    the cookie it started with and every cycle after the 2026-09-20 15:11 UTC
+    `paywall stubs detected in 25/25 posts - re-auth scheduled` died in
+    pre-cycle. The dashboard feed stopped at 14:00 UTC that day.
+    """
+    host_env = tmp_path / "secrets.env"
+    host_env.write_text(
+        "NODE_ENV=production\n"
+        "THEMARKETEAR_EMAIL=reader@example.invalid\n"
+        "THEMARKETEAR_PASSWORD='pw-with-$dollar'\n"
+        "CLERK_SECRET_KEY=sk\n",
+        encoding="utf-8",
+    )
+    result = _run(
+        tmp_path, ["run", "radon-newsfeed.service"],
+        extra_env={"RADON_TEST_ENV_FILE": str(host_env)},
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    match = re.search(r"--env-file (\S+)", _run_line(result))
+    assert match, _run_line(result)
+    lines = Path(match.group(1)).read_text(encoding="utf-8").splitlines()
+    assert "THEMARKETEAR_EMAIL=reader@example.invalid" in lines, lines
+    # Quote stripping applies here too, or the password reaches the browser
+    # wrapped in the quotes /etc/radon/env needs for its `$`.
+    assert "THEMARKETEAR_PASSWORD=pw-with-$dollar" in lines, lines
+    keys = {line.split("=", 1)[0] for line in lines if "=" in line}
+    assert "CLERK_SECRET_KEY" not in keys
 
 
 def test_run_non_newsfeed_units_keep_the_full_env_file(tmp_path: Path) -> None:
@@ -1211,3 +1355,144 @@ def test_api_private_anchor_rejection_cleans_staged_credentials(tmp_path):
     credential_dir = Path(result.proxy_dir) / 'credentials' / 'radon-api.service'
     assert not credential_dir.exists()
     assert not any(line.startswith('run ') for line in result.docker_log.read_text().splitlines())
+
+
+def test_nextjs_runtime_executes_the_baked_key_guard(tmp_path: Path) -> None:
+    result = _run(tmp_path, ["run", "radon-nextjs.service"])
+    assert result.returncode == 0, result.stderr
+    assert _run_line(result).endswith(" /usr/local/bin/next-clerk-guard")
+
+
+# -- subscription credential binds (2026-09-18) ------------------------------
+#
+# The operator's subscription grants (~/.grok/auth.json, ~/.codex/auth.json,
+# ~/.claude/.credentials.json) are what the model ladders must meter against,
+# never the prepaid API keys. radon-subscription-tokens keeps those files live
+# on the HOST, but no app container could see them, so every container-side
+# ladder rung silently fell back to prepaid keys (the xAI team then ran out of
+# credits and the newsfeed voice rewrite died). Bind each dir read-only when it
+# exists and pin HOME so both Path.home() and os.homedir() land on it. Next.js
+# hosts /api/newsfeed/share and /api/assistant, so it is an LLM consumer too.
+# Relay still gets no binds.
+
+
+def _subscription_home(tmp_path: Path) -> Path:
+    home = tmp_path / "radon-home"
+    (home / ".grok").mkdir(parents=True)
+    (home / ".grok" / "auth.json").write_text("{}", encoding="utf-8")
+    (home / ".codex").mkdir()
+    return home
+
+
+def test_run_api_binds_subscription_credential_dirs_readonly(tmp_path: Path) -> None:
+    home = _subscription_home(tmp_path)
+    result = _run(
+        tmp_path,
+        ["run", "radon-api.service"],
+        extra_env={"RADON_SUBSCRIPTION_HOME": str(home)},
+    )
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    assert f"{home}/.grok:/home/radon/.grok:ro" in log
+    assert f"{home}/.codex:/home/radon/.codex:ro" in log
+    assert ".claude:" not in log  # absent on this host: not mounted
+    assert "HOME=/home/radon" in log
+
+
+def test_run_nextjs_binds_subscription_credential_dirs_readonly(tmp_path: Path) -> None:
+    # 2026-09-19: excluding nextjs produced POST /api/newsfeed/share 502
+    # "Missing Anthropic subscription" while api/newsfeed had the grants.
+    home = _subscription_home(tmp_path)
+    result = _run(
+        tmp_path,
+        ["run", "radon-nextjs.service"],
+        extra_env={"RADON_SUBSCRIPTION_HOME": str(home)},
+    )
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    assert f"{home}/.grok:/home/radon/.grok:ro" in log
+    assert f"{home}/.codex:/home/radon/.codex:ro" in log
+    assert "HOME=/home/radon" in log
+
+
+def test_run_relay_gets_no_subscription_credential_binds(tmp_path: Path) -> None:
+    home = _subscription_home(tmp_path)
+    result = _run(
+        tmp_path,
+        ["run", "radon-relay.service"],
+        extra_env={"RADON_SUBSCRIPTION_HOME": str(home)},
+    )
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    assert ".grok" not in log and ".codex" not in log and ".claude" not in log
+
+
+def test_run_newsfeed_binds_subscription_credential_dirs_readonly(tmp_path: Path) -> None:
+    home = _subscription_home(tmp_path)
+    result = _run(
+        tmp_path,
+        ["run", "radon-newsfeed.service"],
+        extra_env={"RADON_SUBSCRIPTION_HOME": str(home)},
+    )
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    assert f"{home}/.grok:/home/radon/.grok:ro" in log
+
+
+def test_run_skips_subscription_binds_when_no_dir_exists(tmp_path: Path) -> None:
+    home = tmp_path / "empty-home"
+    home.mkdir()
+    result = _run(
+        tmp_path,
+        ["run", "radon-api.service"],
+        extra_env={"RADON_SUBSCRIPTION_HOME": str(home)},
+    )
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    assert ".grok" not in log and ".codex" not in log and ".claude" not in log
+
+
+def test_run_api_mounts_robinhood_token_dir_rw_and_points_the_client_at_it(
+    tmp_path: Path,
+) -> None:
+    """The containerized API could not see /etc/radon/rh-mcp.json, so every
+    Robinhood rung inside it silently fell through to UW. The token lives in
+    its own dir (never /etc/radon), mounted rw so rotation's atomic replace
+    and the flock sidecar work."""
+    rh_dir = tmp_path / "rh-mcp"
+    rh_dir.mkdir()
+    result = _run(
+        tmp_path,
+        ["run", "radon-api.service"],
+        extra_env={"RADON_RH_TOKEN_DIR": str(rh_dir)},
+    )
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    assert f"-v {rh_dir}:{rh_dir} " in log or log.rstrip().endswith(f"-v {rh_dir}:{rh_dir}"), log
+    assert f"{rh_dir}:{rh_dir}:ro" not in log
+    assert f"ROBINHOOD_MCP_TOKEN_FILE={rh_dir}/rh-mcp.json" in log
+    assert ":/etc/radon " not in log and ":/etc/radon:" not in log
+
+
+def test_run_api_skips_robinhood_token_mount_when_absent(tmp_path: Path) -> None:
+    result = _run(
+        tmp_path,
+        ["run", "radon-api.service"],
+        extra_env={"RADON_RH_TOKEN_DIR": str(tmp_path / "no-rh-mcp")},
+    )
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    assert "rh-mcp" not in log
+
+
+def test_run_newsfeed_does_not_mount_robinhood_token_dir(tmp_path: Path) -> None:
+    rh_dir = tmp_path / "rh-mcp"
+    rh_dir.mkdir()
+    result = _run(
+        tmp_path,
+        ["run", "radon-newsfeed.service"],
+        extra_env={"RADON_RH_TOKEN_DIR": str(rh_dir)},
+    )
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    assert "rh-mcp" not in log
