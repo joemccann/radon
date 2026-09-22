@@ -165,6 +165,12 @@ const PUBLISHER_RULES: PublisherRule[] = [
     iconUrl: "/icons/publishers/unicredit.svg",
     pattern: /\b(?:unicredit|hypovereinsbank)\b/i,
   },
+  {
+    id: "westpac",
+    name: "Westpac",
+    iconUrl: "/icons/publishers/westpac.svg",
+    pattern: /\b(?:westpac|westpac\s*banking(?:\s*corp)?)\b/i,
+  },
 ];
 
 /**

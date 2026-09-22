@@ -183,6 +183,18 @@ describe("resolvePublisher", () => {
     expect(resolvePublisher("HypoVereinsbank")?.id).toBe("unicredit");
   });
 
+  it("resolves Westpac and desk variants", () => {
+    expect(resolvePublisher("Westpac")).toEqual({
+      id: "westpac",
+      name: "Westpac",
+      iconUrl: "/icons/publishers/westpac.svg",
+      isFallback: false,
+    });
+    expect(resolvePublisher("Westpac Banking")?.id).toBe("westpac");
+    expect(resolvePublisher("Westpac Banking Corp")?.id).toBe("westpac");
+    expect(resolvePublisher("Westpac Institutional Bank")?.id).toBe("westpac");
+  });
+
   it("falls back to default icon for unrecognized, unknown, or empty publishers", () => {
     const unrec = resolvePublisher("TS Lombard");
     expect(unrec).toEqual({
