@@ -630,6 +630,19 @@ def _run(
             return 0
         _heartbeat("error", note)
         return 1
+    if budget_spent:
+        # Newest-first means a budget stop after progress still applied today;
+        # the 08:30 timer finishes the deferred tail. No progress + budget is
+        # the silent-timeout shape that paged P1 on 2026-09-15.
+        note = {
+            "message": f"wall-clock budget spent; deferred {deferred} file(s)",
+            "class": "budget",
+        }
+        if ingested:
+            _heartbeat("ok", note)
+            return 0
+        _heartbeat("error", note)
+        return 1
     stale_keys = sorted(
         key for key, seen in newest_by_key.items() if delivery_is_stale(seen, now)
     )
