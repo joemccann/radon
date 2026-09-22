@@ -106,12 +106,22 @@ _UPSERT_CHUNK_ROWS = 200
 # SIGTERM'd the oneshot (Result=timeout, NRestarts=0, CPU 734ms) with no
 # service_health row; timeout is not on the exit-code latch so the unit
 # re-pages P1 every cycle until the next Tue 09:15 UTC fire. Must fit
-# inside cloud/services/radon-equibles-ats.service TimeoutStartSec with
-# one in-flight TICKER_FETCH_BUDGET_S of slack.
+# inside cloud/services/radon-equibles-ats.service TimeoutStartSec.
+# The in-flight ticker is capped by `remaining`, so the slack after this
+# budget is the persist window (PERSIST_BUDGET_S), not another 90s fetch.
 SWEEP_BUDGET_S = 780
 # Hard abandon per ticker (thread). requests' idle-read timeout does not
 # bound a slow-drip TLS tarpit; future.result(timeout=) does.
 TICKER_FETCH_BUDGET_S = 90
+# Wall-clock ceiling for the Turso upsert that follows the sweep.
+# 2026-09-22: budget spent at T+780 (849/2487) and sync libsql (no client
+# timeout, holds the GIL) was still running at TimeoutStartSec=900
+# (Result=timeout, NRestarts=0). A thread join cannot abandon that call.
+# SWEEP_BUDGET_S + PERSIST_BUDGET_S must stay <= TimeoutStartSec.
+PERSIST_BUDGET_S = 100
+# One scan_snapshots POST of the full payload. Shorter than the persist
+# budget so a stalled upload still returns inside it.
+SNAPSHOT_TIMEOUT_S = 30.0
 
 CLASSIFICATION_ACCUMULATION = "accumulation"
 CLASSIFICATION_DISTRIBUTION = "distribution"
@@ -584,21 +594,67 @@ def _storage_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _write_db_cache(payload: dict[str, Any], scan_time: str) -> None:
-    """Durable weekly rows plus the snapshot the Next.js route dbFirstReads."""
+    """Durable weekly rows plus the snapshot the Next.js route dbFirstReads.
+
+    Hrana HTTP, not sync libsql. ``libsql_experimental`` has no client
+    timeout and holds the GIL while blocked, so a thread join around
+    ``get_db()`` does not let the oneshot exit before TimeoutStartSec
+    (2026-09-22). Each statement autocommits; a deadline between chunks
+    keeps the rows already accepted and returns so ``run`` can heartbeat.
+    """
     try:
-        from db import writer
-        from db.client import get_db
+        from db.hrana_http import HRANA_TIMEOUT_S, hrana_execute
+        from db.writer import SCAN_SNAPSHOT_KEEP, ensure_no_replica_for_writers
     except ImportError:
         return
+    deadline = time.monotonic() + PERSIST_BUDGET_S
     try:
-        writer.ensure_no_replica_for_writers()
+        ensure_no_replica_for_writers()
         rows = _storage_rows(payload)
-        db = get_db()
+        written = 0
         for start in range(0, len(rows), _UPSERT_CHUNK_ROWS):
-            sql, params = ats_venue_share_upsert(rows[start:start + _UPSERT_CHUNK_ROWS], scan_time)
-            db.execute(sql, params)
-        db.commit()
-        writer.upsert_scan_snapshot(SERVICE, scan_time, payload)
+            if time.monotonic() >= deadline:
+                print(
+                    f"[ats-venue-share] persist budget spent "
+                    f"({written}/{len(rows)} rows)",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                return
+            sql, params = ats_venue_share_upsert(
+                rows[start:start + _UPSERT_CHUNK_ROWS], scan_time
+            )
+            remaining = max(deadline - time.monotonic(), 0.05)
+            hrana_execute(sql, params, timeout=min(HRANA_TIMEOUT_S, remaining))
+            written += len(rows[start:start + _UPSERT_CHUNK_ROWS])
+        remaining = deadline - time.monotonic()
+        if remaining < 1.0:
+            print(
+                "[ats-venue-share] persist budget spent before snapshot",
+                file=sys.stderr,
+                flush=True,
+            )
+            return
+        hrana_execute(
+            "INSERT OR REPLACE INTO scan_snapshots (service, scan_time, payload) "
+            "VALUES (?, ?, ?)",
+            (SERVICE, scan_time, json.dumps(payload)),
+            timeout=min(SNAPSHOT_TIMEOUT_S, remaining),
+        )
+        prune_remaining = max(deadline - time.monotonic(), 0.05)
+        hrana_execute(
+            """
+            DELETE FROM scan_snapshots
+            WHERE service = ? AND scan_time NOT IN (
+              SELECT scan_time FROM scan_snapshots
+              WHERE service = ?
+              ORDER BY scan_time DESC
+              LIMIT ?
+            )
+            """,
+            (SERVICE, SERVICE, SCAN_SNAPSHOT_KEEP),
+            timeout=min(HRANA_TIMEOUT_S, prune_remaining),
+        )
     except Exception as exc:  # noqa: BLE001 — best-effort mirror
         print(f"[ats-venue-share] db cache non-fatal: {exc}", file=sys.stderr)
 
