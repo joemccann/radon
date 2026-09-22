@@ -8,6 +8,24 @@ cannot be checked live (Flex throttle embargo, 2FA push, sigv4 signing).
 
 Field ``secret`` marks how the UI renders the input (password vs text) — every
 field is stored encrypted in the secret store regardless.
+
+Deliberately NOT registered (decisions, not oversights; audited 2026-09-17):
+
+* Provider aliases resolved inside ``scripts/clients/model_ladder.py`` and
+  ``web/lib/llm/provider.ts`` (``CLAUDE_CODE_API_KEY`` / ``CLAUDE_API_KEY`` for
+  Anthropic, ``GROK_API_KEY`` for xAI, ``GEMINI_API_KEY`` / ``GOOGLE_API_KEY``
+  / ``GOOGLE_GENAI_API_KEY`` for Gemini, ``FRED_KEY`` for FRED). Only the
+  canonical name is manageable here; a stale alias in ``/etc/radon/env`` still
+  wins inside those consumers, so rotate the alias too or remove it.
+* ``ROBINHOOD_MCP_*``: a 0600 token FILE the client rewrites on refresh, not a
+  static value the store can own.
+* ``OPENAI_API_KEY`` and the Gemini keys: optional model-ladder fallbacks with
+  no Radon feature that requires them.
+* Deployment / perimeter tokens (``RADON_SERVICE_TOKEN``,
+  ``RADON_PROBE_FRESHNESS_TOKEN``, ``RADON_SETUP_TOKEN``,
+  ``RADON_HEALTH_STATUS_TOKEN``, ``CLERK_WEBHOOK_SECRET``, ``ALLOWED_USER_IDS``,
+  ``CLERK_ISSUER`` / ``CLERK_JWKS_URL``): owned by the deploy contract
+  (``cloud/config/required-env.txt``), never by a signed-in operator.
 """
 
 from __future__ import annotations
@@ -68,13 +86,6 @@ SERVICES: Tuple[CredentialService, ...] = (
         note="Checked with a real browser login. Expect up to a minute.",
     ),
     CredentialService(
-        id="mdw",
-        label="MarketDataWorks",
-        group="Market Data",
-        fields=(CredentialField("MDW_API_KEY", "API key"),),
-        note="No public probe endpoint; the key is verified on first use.",
-    ),
-    CredentialService(
         id="equibles",
         label="Equibles",
         group="Market Data",
@@ -94,6 +105,13 @@ SERVICES: Tuple[CredentialService, ...] = (
             "Never live-validated: a probe is a real Flex request and the "
             "token has already taken a 24h-168h throttle embargo once."
         ),
+    ),
+    CredentialService(
+        id="fred",
+        label="FRED",
+        group="Market Data",
+        fields=(CredentialField("FRED_API_KEY", "API key"),),
+        validator="fred",
     ),
     # -- AI Providers --------------------------------------------------------
     CredentialService(
@@ -116,6 +134,13 @@ SERVICES: Tuple[CredentialService, ...] = (
         group="AI Providers",
         fields=(CredentialField("XAI_API_KEY", "API key", placeholder="xai-..."),),
         validator="xai",
+    ),
+    CredentialService(
+        id="nvidia",
+        label="NVIDIA NIM",
+        group="AI Providers",
+        fields=(CredentialField("NVIDIA_API_KEY", "API key", placeholder="nvapi-..."),),
+        validator="nvidia",
     ),
     CredentialService(
         id="exa",
@@ -186,6 +211,17 @@ SERVICES: Tuple[CredentialService, ...] = (
         note="SEC requires an identifying application name and monitored email; no API key or payment.",
     ),
     # -- Infrastructure ------------------------------------------------------
+    CredentialService(
+        id="mdw",
+        label="MarketDataWorks",
+        group="Infrastructure",
+        fields=(CredentialField("MDW_API_KEY", "Inbound API key"),),
+        note=(
+            "Inbound shared secret: MDW presents it on X-API-Key when pushing "
+            "to FastAPI, so there is nothing of ours to probe. Changing it here "
+            "breaks MDW pushes until the vendor is given the new value."
+        ),
+    ),
     CredentialService(
         id="turso",
         label="Turso",

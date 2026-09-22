@@ -39,6 +39,10 @@ Paths with a REAL socket timeout ride ``scripts/db/hrana_http.py``
   - ``db.retention.run_retention_sweep_http`` — daily snapshot keep-latest.
   - ``host_metrics_sampler`` host_metrics INSERT + service_health heartbeat.
   - ``ib_watchdog`` / ``watchdog.notify`` service_health heartbeats.
+  - ``fetch_equibles_ats_venue_share._write_db_cache`` — weekly oneshot
+    persist. Sync libsql held the GIL past ``TimeoutStartSec`` after the
+    sweep budget (2026-09-22, Result=timeout). Chunked hrana with
+    ``PERSIST_BUDGET_S``.
   - FastAPI: all Turso I/O via ``api.db_http`` (lint: test_no_sync_libsql_in_api).
 
   Process-bound (still use this module / sync libsql)

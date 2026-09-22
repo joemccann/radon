@@ -1,4 +1,5 @@
 "use client";
+import RequestError from "@/components/RequestError";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Share2 } from "lucide-react";
@@ -60,14 +61,15 @@ export function buildTweetText(
   showPct: boolean,
   holdTime?: string | null,
 ): string {
-  const parts: string[] = [];
-  if (showDollar && pnl != null) parts.push(fmtDollar(pnl));
-  if (showPct && pnlPct != null && Number.isFinite(pnlPct)) parts.push(fmtPct(pnlPct));
-  const pnlStr = parts.join(" ");
-  const tagged = cashtagTicker(description);
-  // pnl and hold time join with " · "; either may be empty without a stray separator.
-  const metric = [pnlStr, holdTime ? `Held ${holdTime}` : ""].filter(Boolean).join(" · ");
-  return `💸 ${tagged} ${metric}\n\nExecuted with Radon\n\nhttps://radon.run`;
+  const metricParts: string[] = [];
+  if (showDollar && pnl != null) metricParts.push(fmtDollar(pnl));
+  if (showPct && pnlPct != null && Number.isFinite(pnlPct)) metricParts.push(fmtPct(pnlPct));
+  const blocks = [`💸 ${cashtagTicker(description)}`];
+  const metric = metricParts.join(" ");
+  if (metric) blocks.push(metric);
+  if (holdTime) blocks.push(`Held ${holdTime}`);
+  blocks.push("Executed with Radon", "https://radon.run");
+  return blocks.join("\n\n");
 }
 
 export default function SharePnlButton({ data, size = 13 }: SharePnlButtonProps) {
@@ -77,6 +79,7 @@ export default function SharePnlButton({ data, size = 13 }: SharePnlButtonProps)
   const [showDollar, setShowDollar] = useState(false);
   const [showPct, setShowPct] = useState(true);
   const [copying, setCopying] = useState(false);
+  const [shareError, setShareError] = useState<unknown>(null);
   const [copied, setCopied] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
   const exitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -148,11 +151,12 @@ export default function SharePnlButton({ data, size = 13 }: SharePnlButtonProps)
   const handleCopy = useCallback(async () => {
     if (copying) return;
     setCopying(true);
+    setShareError(null);
     try {
       const blob = await generateImage();
       await copyToClipboard(blob);
     } catch (err) {
-      console.error("Share PnL copy failed:", err);
+      setShareError(err);
     } finally {
       setCopying(false);
       setOpen(false);
@@ -162,6 +166,7 @@ export default function SharePnlButton({ data, size = 13 }: SharePnlButtonProps)
   const handleCopyAndTweet = useCallback(async () => {
     if (copying) return;
     setCopying(true);
+    setShareError(null);
     try {
       const blob = await generateImage();
       await copyToClipboard(blob);
@@ -176,7 +181,7 @@ export default function SharePnlButton({ data, size = 13 }: SharePnlButtonProps)
       const tweetUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`;
       window.open(tweetUrl, "_blank", "noopener,noreferrer");
     } catch (err) {
-      console.error("Share PnL tweet failed:", err);
+      setShareError(err);
     } finally {
       setCopying(false);
       setOpen(false);
@@ -185,6 +190,7 @@ export default function SharePnlButton({ data, size = 13 }: SharePnlButtonProps)
 
   return (
     <div style={{ position: "relative", display: "inline-flex" }} ref={popoverRef}>
+      <RequestError error={shareError} fallback="The P&L image could not be copied. Try again." />
       <button
         type="button"
         className="share-pnl-button"

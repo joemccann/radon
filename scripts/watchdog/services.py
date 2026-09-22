@@ -170,7 +170,14 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     "aa-frontier-basket": {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     "ai-cycle-backfill":  {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     "ai-cycle":         {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+    # liquidcompute — radon-liquidcompute.timer, daily 07:30 UTC homepage
+    # GPU index ticker. Uniform 26h window. Public HTTP only, no IB.
+    "liquidcompute":    {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     "model-catalog":    {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+    # slm-tagger-monitor — radon-slm-tagger-monitor.timer, daily 07:10 UTC.
+    # No-op when RADON_SLM_TAGGER_MODE is off or shadow. 26h window. No IB.
+    # The sidecar itself has no service_health row (unit watchdog only).
+    "slm-tagger-monitor": {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     # yield-curve — radon-yield-curve.timer, daily 22:30 UTC every calendar
     # day (weekend/holiday runs heartbeat with no new Treasury rows). Uniform
     # 26h window: no weekend/holiday gap to widen for. treasury.gov + Yahoo
@@ -186,6 +193,14 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # window: no weekend/holiday gap to widen for. Shared price_history_daily
     # member closes (Yahoo sweep) + Turso — no IB dependency.
     "ma-ratio":         {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+    # calm-streak — radon-calm-streak.timer, daily 02:40 + 14:30 UTC every
+    # calendar day (304 runs heartbeat). Uniform 26h window. Cboe official
+    # SPX daily OHLC — no IB dependency.
+    "calm-streak":      {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+    # bounce-setup — radon-bounce-setup.timer, Mon..Fri 21:10 UTC. Weekday
+    # only, so Friday's run must still read fresh at Monday's 21:10 fire:
+    # uniform 74h (72h Fri->Mon gap + 2h slack). Turso + UW only, no IB.
+    "bounce-setup":     {"open": 74 * _HOUR, "closed": 74 * _HOUR, "requires_ib": False},
     # credit-spread — radon-credit-spread.timer, daily 21:45 UTC every calendar
     # day (weekend/holiday runs heartbeat with no new rows). Uniform
     # 26h window: no weekend/holiday gap to widen for. IB HYG + SPX first,
@@ -236,6 +251,10 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # (weekend/holiday runs are 304 heartbeats). Uniform 26h window mirrors
     # its Cboe siblings. Cboe CDN only — no IB dependency.
     "vixts":            {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+    # panic-index — radon-panic-index.timer, daily 02:50 + 13:15 UTC every
+    # calendar day (Cboe VIX/VIX3M/VVIX/SKEW composite; weekend/holiday runs
+    # are 304 heartbeats). Uniform 26h window mirrors its Cboe siblings.
+    "panic-index":      {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     # dispersion — radon-dispersion.timer, daily 22:20 UTC every calendar day,
     # after the 16:00 ET close year-round (weekend/holiday runs are no-new-
     # session heartbeats). Uniform 26h window matches its daily siblings. IB
@@ -365,6 +384,11 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # 24/7; uniform 10-min window mirrors web/lib/serviceHealthWindows.ts.
     # Reads /proc + systemctl + /health/lite only — no IB dependency.
     "host-metrics":     {"open": 10 * _MIN, "closed": 10 * _MIN, "requires_ib": False},
+    # tv-alerts-drain — 5-minute TradingView alert digest (scripts/
+    # tv_alerts_drain.py via radon-tv-alerts.timer, 24/7). The heartbeat is
+    # the drain's, not the receiver's: a webhook with no fires is dormant,
+    # not down. 20-min window mirrors web/lib/serviceHealthWindows.ts. No IB.
+    "tv-alerts-drain":  {"open": 20 * _MIN, "closed": 20 * _MIN, "requires_ib": False},
     # radon-research.service is a continuous Dropbox/PDF reviewer.  Systemd
     # remains active while a dependency stalls inside the worker, so its own
     # heartbeat must be checked independently of unit state (REL-251).
@@ -421,6 +445,14 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # event-odds — laptop launchd 3x weekday, holiday-aware. Windows
     # match catalysts (7h open / 4d closed). Polymarket only — no IB.
     "event-odds": {"open": 7 * _HOUR, "closed": 4 * _DAY, "requires_ib": False},
+    # subscription-tokens — agent-CLI subscription credential vault + refresh
+    # (scripts/subscription_tokens via radon-subscription-tokens.timer, every
+    # 30 min, 24/7). Heartbeats ok/error every run with the worst provider
+    # state. Uniform 3h window: the daily bucket checks hourly, so anything
+    # tighter cannot be observed sooner, and 3h absorbs five missed fires plus
+    # timer jitter before a dead timer is called stale. Provider token
+    # endpoints + the local secret store — no IB dependency.
+    "subscription-tokens": {"open": 3 * _HOUR, "closed": 3 * _HOUR, "requires_ib": False},
     # disk-cleanup — WEEKLY root-filesystem reclaim on the VPS
     # (cloud/scripts/disk_cleanup.py via radon-disk-cleanup.timer, Sun 03:20
     # UTC). Heartbeats ok/error every run. 8-day window uses the
@@ -497,6 +529,8 @@ BUCKETS: dict[str, list[str]] = {
         # Minute-cadence host sampler heartbeat — the 10-min staleness
         # window flags a dead sampler within one continuous cycle.
         "host-metrics",
+        # 5-minute TradingView alert digest heartbeat (20-min window).
+        "tv-alerts-drain",
         "dropbox-research",
         # Continuous journal gap SLI (5m) — error when missing_exec_id_count > 0.
         "journal-gap-sli",
@@ -542,9 +576,11 @@ BUCKETS: dict[str, list[str]] = {
         # Daily 03:10 UTC LLM provider frontier model list refresh — hourly
         # check surfaces a missed run within 1h of the 26h window expiring.
         "model-catalog",
+        "slm-tagger-monitor",
         "aa-frontier-basket",
         "ai-cycle-backfill",
         "ai-cycle",
+        "liquidcompute",
         # Daily 22:30 UTC Treasury yield-curve pull — hourly check surfaces
         # a missed run within 1h of the 26h window expiring.
         "yield-curve",
@@ -554,6 +590,12 @@ BUCKETS: dict[str, list[str]] = {
         # Daily 22:45 UTC SPX 50d/200d MA breadth-ratio sweep — hourly check
         # surfaces a missed run within 1h of the 26h window expiring.
         "ma-ratio",
+        # Daily 02:40 + 14:30 UTC Cboe SPX intraday-band streak pull — hourly
+        # check surfaces a missed run within 1h of the 26h window expiring.
+        "calm-streak",
+        # Mon..Fri 21:10 UTC BOUNCE SETUP scan — hourly check surfaces a
+        # missed run within 1h of the 74h window expiring.
+        "bounce-setup",
         # Tue..Sat 11:00 UTC FINRA HY bond breadth pull — hourly check
         # surfaces a missed run within 1h of the 120h window expiring.
         "hy-ad",
@@ -576,6 +618,9 @@ BUCKETS: dict[str, list[str]] = {
         # Daily 02:45 UTC Cboe VIX/VIX3M term-structure pull — hourly check
         # surfaces a missed run within 1h of the 26h window expiring.
         "vixts",
+        # Daily 02:50 + 13:15 UTC Cboe Panic Proxy pull — hourly check
+        # surfaces a missed run within 1h of the 26h window expiring.
+        "panic-index",
         # Daily 22:20 UTC IB daily-bar dispersion sweep (post-close, Yahoo
         # fallback) — hourly check surfaces a missed run within 1h of the 26h
         # window expiring.
@@ -633,6 +678,9 @@ BUCKETS: dict[str, list[str]] = {
         "db-retention",
         # Nightly media.radon.run tree backup to B2 — 48h window.
         "media-backup",
+        # Subscription-token vault refresh (every 30 min) — hourly check
+        # surfaces a dead timer within 1h of the 3h window expiring.
+        "subscription-tokens",
         # Weekly weekend disk cleanup on the VPS — hourly check surfaces a
         # missed sweep within 1h of the 8-day window expiring.
         "disk-cleanup",

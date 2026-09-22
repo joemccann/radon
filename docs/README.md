@@ -15,12 +15,15 @@ Archived session artifacts live in [`docs/archive/`](archive/).
 | Operator contributing rules | [`CONTRIBUTING.md`](../CONTRIBUTING.md) |
 | Security reports | [`SECURITY.md`](../SECURITY.md) |
 | Support (proprietary, unsupported clones) | [`SUPPORT.md`](../SUPPORT.md) |
-| External services and signup (incl. Robinhood read-only MCP; host secret locations) | [`docs/external-services.md`](external-services.md) |
+| External services, credential setup, and optional service fallbacks (incl. Robinhood read-only MCP, ranked after IB and before UW for price data and analyst consensus; host secret locations; text JSON model ladder with Cerebras last) | [`docs/external-services.md`](external-services.md) |
+| TradingView integration (alert webhook ingress + operator runbook, read-only MCP client, ladder placement) | [`docs/tradingview-integration.md`](tradingview-integration.md) |
 | CLI commands | [`docs/scripts-reference.md`](scripts-reference.md) |
 | Python script map | [`scripts/README.md`](../scripts/README.md) |
 | Repo layout plan | [`docs/monorepo-legibility-plan.md`](monorepo-legibility-plan.md) |
 
 ## Operations and cloud
+
+- [Dedicated GPU host deployment](gpu-host-deployment.md): GEX45 bootstrap, private vLLM runtime, commissioning and rollback.
 
 | Topic | Doc |
 |-------|-----|
@@ -39,8 +42,9 @@ Archived session artifacts live in [`docs/archive/`](archive/).
 | Topic | Doc |
 |-------|-----|
 | Regime and scanner indicator specs | [`docs/indicators/README.md`](indicators/README.md) |
+| Newsfeed text-tagger SLM v1 build spec (plan; local LoRA rung `slm-tagger` ahead of paid ladder rungs, text tags only) | [`docs/ml/newsfeed-slm-tagger.md`](ml/newsfeed-slm-tagger.md) |
 | AI boom leading indicators | [`docs/ai-boom-leading-indicators.md`](ai-boom-leading-indicators.md) |
-| AI infrastructure evidence, source verification and rollout | [Design](ai-infrastructure-plan.md) · [Collection](ai-infrastructure-operations.md) · [Verification](ai-infrastructure-verification.md). Demand D6 OpenDesign Arena is LLM/model-quality only, never GPU scarcity |
+| AI infrastructure evidence, source verification and rollout | [Design](ai-infrastructure-plan.md) · [Collection](ai-infrastructure-operations.md) · [Verification](ai-infrastructure-verification.md). Demand D6 OpenDesign Arena is LLM/model-quality only, never GPU scarcity. Compute C5 Liquid Compute is a third-venue public GPU index, never the rental book |
 | Social-share voice provenance and export constraints | [`docs/joe-mccann-social-voice.md`](joe-mccann-social-voice.md) |
 | Equibles market-structure API | [`docs/equibles-api.md`](equibles-api.md) |
 | Strategy specs | [`docs/strategies.md`](strategies.md) |
@@ -48,6 +52,7 @@ Archived session artifacts live in [`docs/archive/`](archive/).
 | GARCH convergence | [`docs/strategy-garch-convergence.md`](strategy-garch-convergence.md) |
 | Options structures | [`docs/options-structures.md`](options-structures.md) |
 | Evaluation pipeline | [`docs/evaluation.md`](evaluation.md) |
+| Kelly / Fortune's Formula | [`docs/risk/kelly-fortunes-formula.md`](risk/kelly-fortunes-formula.md) |
 | Unusual Whales API | [`docs/unusual_whales_api.md`](unusual_whales_api.md) |
 
 ## IB and performance
@@ -63,6 +68,7 @@ Archived session artifacts live in [`docs/archive/`](archive/).
 | Chart system | [`docs/chart-system.md`](chart-system.md) |
 | Brand identity | [`docs/brand-identity.md`](brand-identity.md) |
 | Public agent-design surface + eval scenarios | [`docs/design-evals.md`](design-evals.md) |
+| iPhone app direction (foundation; not shipping) | [`docs/mobile/iphone-app-direction.md`](mobile/iphone-app-direction.md) |
 | Short locate / borrow playbook | [`docs/short-locate-borrow.md`](short-locate-borrow.md) |
 | OAuth subscription auth | [`docs/oauth-subscription-auth.md`](oauth-subscription-auth.md) |
 

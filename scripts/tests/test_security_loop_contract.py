@@ -168,7 +168,7 @@ class TestTheTwoMarkerGate:
         )
         # the git clean must preserve it, or the first per-round clean deletes
         # the marker and the next round refuses.
-        clean = next(ln for ln in body.splitlines() if "git clean" in ln)
+        clean = next(ln for ln in body.splitlines() if " clean -fdxq" in ln)
         assert "--exclude=.radon-security-runner" in clean, clean
 
     def _stub_bin(self, tmp_path: Path) -> tuple[Path, Path]:
@@ -390,7 +390,7 @@ class TestTheSetupIsCredentialFree:
         # The setup script refuses a source checkout that does not carry its
         # own loop wrapper (it reads the clone origin from there, never cwd).
         (src / "scripts").mkdir()
-        (src / "scripts" / "security_nightly.sh").write_text("", encoding="utf-8")
+        shutil.copy2(WRAPPER, src / "scripts" / "security_nightly.sh")
         root = tmp_path / "weekend"
         clone = root / CLONE
         (clone / ".git").mkdir(parents=True)
@@ -398,12 +398,22 @@ class TestTheSetupIsCredentialFree:
         (clone / "config").mkdir()
         (clone / "requirements.txt").write_text("", encoding="utf-8")
         shutil.copy(PLIST, clone / "config" / PLIST.name)
-        venv_bin = root / "venv-security" / "bin"
-        venv_bin.mkdir(parents=True)
-        for tool in ("python", "pip"):
-            exe = venv_bin / tool
-            exe.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-            exe.chmod(0o755)
+        shutil.copy(
+            REPO / "config" / "com.radon.security-deepsec.plist",
+            clone / "config" / "com.radon.security-deepsec.plist",
+        )
+        # The same setup provisions the DeepSec loop's clone and venv.
+        deepsec = root / "radon-security-deepsec"
+        (deepsec / ".git").mkdir(parents=True)
+        (deepsec / "web").mkdir()
+        (deepsec / "requirements.txt").write_text("", encoding="utf-8")
+        for venv in ("venv-security", "venv-security-deepsec"):
+            venv_bin = root / venv / "bin"
+            venv_bin.mkdir(parents=True)
+            for tool in ("python", "pip"):
+                exe = venv_bin / tool
+                exe.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+                exe.chmod(0o755)
         (root / ".env").write_text("PUSHOVER_USER=dummy\nPUSHOVER_TOKEN=dummy\n", encoding="utf-8")
         (tmp_path / "home").mkdir()
         env = {

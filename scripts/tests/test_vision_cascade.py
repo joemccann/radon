@@ -7,18 +7,97 @@ Order (do not leave a band early):
 
 Cursor has no vision HTTP path in Radon; it is skipped as unavailable,
 not treated as a reason to leave the subscription band.
+
+Subscription-tier rungs require subscription credentials by default
+(CLAUDE_CODE_OAUTH_TOKEN, ~/.grok/auth.json, CODEX_HOME/auth.json,
+GEMINI_OAUTH_TOKEN). Prepaid console wallets do not wire those rungs
+unless RADON_LADDER_ALLOW_PREPAID=1. NVIDIA / Cerebras API keys remain OK.
 """
 from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+# T-498: file-backed subscriptions are opt-in synthetic fixtures.
+pytestmark = pytest.mark.usefixtures("isolated_model_credentials")
+
+from clients.vision_cascade import (
+    VISION_CASCADE_ORDER,
+    VISION_CASCADE_TIERS,
+    VisionCascadeExhausted,
+    VisionResult,
+    extract_via_vision,
+    wired_vision_providers,
+)
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_auth_home(monkeypatch, tmp_path):
+    # Ladder auth discovery falls back to Path.home(); keep host auth files
+    # (~/.claude, ~/.codex, ~/.grok) out of these hermetic-env tests.
+    monkeypatch.setenv("HOME", str(tmp_path / "hermetic-home"))
+    monkeypatch.setattr(
+        Path, "home", classmethod(lambda cls: tmp_path / "hermetic-home")
+    )
+
+
+ROWS = [{"underlying": "E-Mini S&P 500 Index", "position_today": 0.45}]
+PROMPT = "extract"
+PNG = b"\x89PNG-fake"
+
+# Prepaid wallets alone — must NOT wire subscription rungs by default.
+PREPAID_KEYS = {
+    "ANTHROPIC_API_KEY": "sk-ant-test",
+    "XAI_API_KEY": "xai-test",
+    "OPENAI_API_KEY": "sk-openai-test",
+    "GEMINI_API_KEY": "gem-test",
+    "NVIDIA_API_KEY": "nvapi-test",
+    "CEREBRAS_API_KEY": "csk-test",
+}
+
+
+def _subscription_env(tmp_path: Path, **extra: str) -> dict[str, str]:
+    """Subscription-band credentials for anthropic/grok/codex/gemini + NVIDIA/Cerebras."""
+    home = tmp_path / "home"
+    (home / ".grok").mkdir(parents=True)
+    (home / ".grok" / "auth.json").write_text(
+        json.dumps({"access_token": "grok-sub-token"}),
+        encoding="utf-8",
+    )
+    codex_home = tmp_path / "codex"
+    codex_home.mkdir()
+    (codex_home / "auth.json").write_text(
+        json.dumps({"tokens": {"access_token": "codex-sub-token"}}),
+        encoding="utf-8",
+    )
+    # Google: the Antigravity CLI and its grant under HOME (no HTTP path).
+    (home / ".gemini" / "antigravity-cli").mkdir(parents=True)
+    (home / ".gemini" / "antigravity-cli" / "antigravity-oauth-token").write_text(
+        json.dumps({"token": {"access_token": "a", "refresh_token": "r", "expiry": "2099-01-01T00:00:00Z"}}),
+        encoding="utf-8",
+    )
+    (home / ".local" / "bin").mkdir(parents=True)
+    agy = home / ".local" / "bin" / "agy"
+    agy.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    agy.chmod(0o755)
+    env = {
+        "HOME": str(home),
+        "CODEX_HOME": str(codex_home),
+        "CLAUDE_CODE_OAUTH_TOKEN": "claude-sub-token",
+        "NVIDIA_API_KEY": "nvapi-test",
+        "CEREBRAS_API_KEY": "csk-test",
+    }
+    env.update(extra)
+    return env
+
 
 @pytest.fixture
 def mock_playwright():
+    import clients.menthorq_client  # noqa: F401 — load module before patch target resolve
     with patch("clients.menthorq_client.sync_playwright") as mock_sp, patch(
         "clients.menthorq_client.time.sleep"
     ):
@@ -39,20 +118,6 @@ def mock_playwright():
             "context": mock_context,
             "page": mock_page,
         }
-
-from clients.vision_cascade import (
-    VISION_CASCADE_ORDER,
-    VISION_CASCADE_TIERS,
-    VisionCascadeExhausted,
-    VisionResult,
-    extract_via_vision,
-    wired_vision_providers,
-)
-
-
-ROWS = [{"underlying": "E-Mini S&P 500 Index", "position_today": 0.45}]
-PROMPT = "extract"
-PNG = b"\x89PNG-fake"
 
 
 class _Resp:
@@ -109,14 +174,26 @@ def _http_401():
     return _Resp(401, {"error": {"message": "invalid api key"}})
 
 
-ALL_KEYS = {
-    "ANTHROPIC_API_KEY": "sk-ant-test",
-    "XAI_API_KEY": "xai-test",
-    "OPENAI_API_KEY": "sk-openai-test",
-    "GEMINI_API_KEY": "gem-test",
-    "NVIDIA_API_KEY": "nvapi-test",
-    "CEREBRAS_API_KEY": "csk-test",
-}
+class _SseResp:
+    """chatgpt.com's codex Responses endpoint streams; the ladder folds the SSE."""
+
+    def __init__(self, rows=None, status_code: int = 200):
+        self.status_code = status_code
+        text = json.dumps(rows or ROWS).replace("\\", "\\\\").replace('"', '\\"')
+        self._chunks = [
+            f'data: {{"type":"response.output_text.delta","delta":"{text}"}}\n\n'.encode(),
+            b'data: {"type":"response.completed","response":{"status":"completed"}}\n\n',
+        ]
+
+    def iter_content(self, _chunk_size):
+        return iter(self._chunks)
+
+    def close(self):
+        pass
+
+
+def _chatgpt_ok(rows=None):
+    return _SseResp(rows)
 
 
 class _Router:
@@ -124,7 +201,7 @@ class _Router:
         self.routes = routes
         self.calls: list[str] = []
 
-    def __call__(self, url, *, headers=None, json=None, timeout=None):
+    def __call__(self, url, *, headers=None, json=None, timeout=None, stream=False):
         self.calls.append(url)
         for needle, resp in self.routes.items():
             if needle in url:
@@ -151,21 +228,48 @@ class TestCascadeContract:
         assert VISION_CASCADE_TIERS["nvidia"] == "nvidia"
         assert VISION_CASCADE_TIERS["cerebras"] == "cerebras"
 
-    def test_cursor_is_never_wired(self):
-        assert "cursor" not in wired_vision_providers(ALL_KEYS)
+    def test_cursor_is_never_wired(self, tmp_path):
+        assert "cursor" not in wired_vision_providers(_subscription_env(tmp_path))
+        assert "cursor" not in wired_vision_providers(PREPAID_KEYS)
 
-    def test_wired_follows_env_keys(self):
-        assert wired_vision_providers({"XAI_API_KEY": "x"}) == ("grok",)
-        assert wired_vision_providers({"GROK_API_KEY": "g"}) == ("grok",)
-        assert wired_vision_providers({"OPENAI_API_KEY": "o"}) == ("codex",)
-        assert wired_vision_providers({"GEMINI_API_KEY": "g"}) == ("gemini",)
+    def test_wired_follows_env_keys(self, tmp_path):
+        # Prepaid console wallets do not wire subscription rungs by default.
+        assert wired_vision_providers({"XAI_API_KEY": "x"}) == ()
+        assert wired_vision_providers({"GROK_API_KEY": "g"}) == ()
+        assert wired_vision_providers({"OPENAI_API_KEY": "o"}) == ()
+        assert wired_vision_providers({"GEMINI_API_KEY": "g"}) == ()
+        assert wired_vision_providers({"ANTHROPIC_API_KEY": "a"}) == ()
+        # NVIDIA / Cerebras API keys remain first-class.
         assert wired_vision_providers({"NVIDIA_API_KEY": "n"}) == ("nvidia",)
         assert wired_vision_providers({"CEREBRAS_API_KEY": "c"}) == ("cerebras",)
         assert wired_vision_providers({}) == ()
+        # Subscription credentials wire the matching rungs.
+        home = tmp_path / "home"
+        (home / ".grok").mkdir(parents=True)
+        (home / ".grok" / "auth.json").write_text(
+            json.dumps({"access_token": "grok-sub"}), encoding="utf-8"
+        )
+        assert wired_vision_providers({"HOME": str(home)}) == ("grok",)
+        assert wired_vision_providers({"CLAUDE_CODE_OAUTH_TOKEN": "oauth"}) == (
+            "anthropic",
+        )
+        # Google is Antigravity only: a Gemini OAuth token wires nothing.
+        assert wired_vision_providers({"GEMINI_OAUTH_TOKEN": "gem-oauth"}) == ()
+        codex_home = tmp_path / "codex"
+        codex_home.mkdir()
+        (codex_home / "auth.json").write_text(
+            json.dumps({"tokens": {"access_token": "codex-sub"}}),
+            encoding="utf-8",
+        )
+        assert wired_vision_providers({"CODEX_HOME": str(codex_home)}) == ("codex",)
+        # Escape hatch restores prepaid wiring when explicitly opted in.
+        assert wired_vision_providers(
+            {"XAI_API_KEY": "x", "RADON_LADDER_ALLOW_PREPAID": "1"}
+        ) == ("grok",)
 
 
 class TestCreditFallthrough:
-    def test_anthropic_credit_falls_to_grok_before_nvidia(self):
+    def test_anthropic_credit_falls_to_grok_before_nvidia(self, tmp_path):
         router = _Router(
             {
                 "api.anthropic.com": _credit_low(),
@@ -176,7 +280,7 @@ class TestCreditFallthrough:
             }
         )
         result = extract_via_vision(
-            PNG, PROMPT, env=ALL_KEYS, post=router
+            PNG, PROMPT, env=_subscription_env(tmp_path), post=router
         )
         assert isinstance(result, VisionResult)
         assert result.provider == "grok"
@@ -185,40 +289,80 @@ class TestCreditFallthrough:
         assert any("api.x.ai" in u for u in router.calls)
         assert not any("nvidia" in u for u in router.calls)
 
-    def test_anthropic_quota_falls_to_grok(self):
+    def test_anthropic_quota_falls_to_grok(self, tmp_path):
+        home = tmp_path / "home"
+        (home / ".grok").mkdir(parents=True)
+        (home / ".grok" / "auth.json").write_text(
+            json.dumps({"access_token": "grok-sub"}), encoding="utf-8"
+        )
         router = _Router(
             {"api.anthropic.com": _quota(), "api.x.ai": _openai_ok()}
         )
         result = extract_via_vision(
-            PNG, PROMPT, env={"ANTHROPIC_API_KEY": "a", "XAI_API_KEY": "x"}, post=router
+            PNG,
+            PROMPT,
+            env={
+                "HOME": str(home),
+                "CLAUDE_CODE_OAUTH_TOKEN": "claude-sub",
+            },
+            post=router,
         )
         assert result.provider == "grok"
 
-    def test_anthropic_401_falls_to_grok(self):
+    def test_anthropic_401_falls_to_grok(self, tmp_path):
+        home = tmp_path / "home"
+        (home / ".grok").mkdir(parents=True)
+        (home / ".grok" / "auth.json").write_text(
+            json.dumps({"access_token": "grok-sub"}), encoding="utf-8"
+        )
         router = _Router(
             {"api.anthropic.com": _http_401(), "api.x.ai": _openai_ok()}
         )
         result = extract_via_vision(
-            PNG, PROMPT, env={"ANTHROPIC_API_KEY": "a", "XAI_API_KEY": "x"}, post=router
+            PNG,
+            PROMPT,
+            env={
+                "HOME": str(home),
+                "CLAUDE_CODE_OAUTH_TOKEN": "claude-sub",
+            },
+            post=router,
         )
         assert result.provider == "grok"
 
-    def test_subscription_band_is_exhausted_before_nvidia(self):
+    def test_subscription_band_is_exhausted_before_nvidia(self, tmp_path):
         router = _Router(
             {
                 "api.anthropic.com": _credit_low(),
                 "api.x.ai": _http_401(),
-                "api.openai.com": _http_401(),
-                "generativelanguage.googleapis.com": _http_401(),
+                "chatgpt.com": _http_401(),
                 "integrate.api.nvidia.com": _openai_ok(),
                 "api.cerebras.ai": _openai_ok([{"underlying": "CEREBRAS_SHOULD_WAIT"}]),
             }
         )
-        result = extract_via_vision(PNG, PROMPT, env=ALL_KEYS, post=router)
+        result = extract_via_vision(
+            PNG, PROMPT, env=_subscription_env(tmp_path), post=router
+        )
         assert result.provider == "nvidia"
-        assert any("api.openai.com" in u for u in router.calls)
-        assert any("generativelanguage.googleapis.com" in u for u in router.calls)
+        # The ChatGPT grant goes to chatgpt.com, never api.openai.com (prepaid meter).
+        assert any("chatgpt.com/backend-api/codex/responses" in u for u in router.calls)
+        assert not any("api.openai.com" in u for u in router.calls)
+        # Google never goes over HTTP: the Antigravity CLI skips image input.
+        assert not any("generativelanguage.googleapis.com" in u for u in router.calls)
         assert not any("cerebras" in u for u in router.calls)
+
+    def test_prepaid_only_skips_subscription_band_and_uses_nvidia(self):
+        """Hetzner prepaid-only: do not burn ANTHROPIC/XAI/OpenAI/Gemini wallets."""
+        router = _Router(
+            {
+                "api.anthropic.com": _credit_low(),
+                "api.x.ai": _openai_ok(),
+                "integrate.api.nvidia.com": _openai_ok(),
+            }
+        )
+        result = extract_via_vision(PNG, PROMPT, env=PREPAID_KEYS, post=router)
+        assert result.provider == "nvidia"
+        assert not any("api.anthropic.com" in u for u in router.calls)
+        assert not any("api.x.ai" in u for u in router.calls)
 
     def test_nvidia_is_tried_before_cerebras(self):
         router = _Router(
@@ -232,32 +376,55 @@ class TestCreditFallthrough:
         assert result.provider == "cerebras"
         assert any("nvidia" in u for u in router.calls)
 
-    def test_gemini_wins_inside_subscription_band(self):
+    def test_gemini_skips_image_input_so_nvidia_takes_the_vision_turn(self, tmp_path, monkeypatch):
+        # Antigravity has no image input; the rung yields without HTTP or agy.
+        import clients.model_ladder as ladder
+
+        monkeypatch.setattr(ladder.subprocess, "run", lambda *a, **k: pytest.fail("agy must not run for images"))
         router = _Router(
             {
                 "api.anthropic.com": _credit_low(),
                 "api.x.ai": _http_401(),
-                "api.openai.com": _http_401(),
-                "generativelanguage.googleapis.com": _gemini_ok(),
-                "integrate.api.nvidia.com": _openai_ok(
-                    [{"underlying": "NVIDIA_TOO_LATE"}]
-                ),
+                "chatgpt.com": _http_401(),
+                "integrate.api.nvidia.com": _openai_ok(),
             }
         )
-        result = extract_via_vision(PNG, PROMPT, env=ALL_KEYS, post=router)
-        assert result.provider == "gemini"
-        assert not any("nvidia" in u for u in router.calls)
-
-    def test_codex_uses_openai_key(self):
-        router = _Router({"api.openai.com": _openai_ok()})
         result = extract_via_vision(
-            PNG, PROMPT, env={"OPENAI_API_KEY": "sk-o"}, post=router
+            PNG, PROMPT, env=_subscription_env(tmp_path), post=router
+        )
+        assert result.provider == "nvidia"
+        assert not any("generativelanguage" in u for u in router.calls)
+
+    def test_codex_uses_subscription_auth(self, tmp_path):
+        codex_home = tmp_path / "codex"
+        codex_home.mkdir()
+        (codex_home / "auth.json").write_text(
+            json.dumps({"tokens": {"access_token": "codex-sub"}}),
+            encoding="utf-8",
+        )
+        router = _Router({"chatgpt.com": _chatgpt_ok(), "api.openai.com": _http_401()})
+        result = extract_via_vision(
+            PNG, PROMPT, env={"CODEX_HOME": str(codex_home)}, post=router
         )
         assert result.provider == "codex"
+        assert not any("api.openai.com" in u for u in router.calls)
+
+    def test_codex_prepaid_openai_key_skipped_without_allow(self):
+        router = _Router({"api.openai.com": _openai_ok()})
+        with pytest.raises(VisionCascadeExhausted):
+            extract_via_vision(
+                PNG, PROMPT, env={"OPENAI_API_KEY": "sk-o"}, post=router
+            )
+        assert router.calls == []
 
 
 class TestExhaustedMessaging:
-    def test_exhausted_does_not_tell_ops_to_top_up_anthropic_only(self):
+    def test_exhausted_does_not_tell_ops_to_top_up_anthropic_only(self, tmp_path):
+        home = tmp_path / "home"
+        (home / ".grok").mkdir(parents=True)
+        (home / ".grok" / "auth.json").write_text(
+            json.dumps({"access_token": "grok-sub"}), encoding="utf-8"
+        )
         router = _Router(
             {
                 "api.anthropic.com": _credit_low(),
@@ -268,11 +435,14 @@ class TestExhaustedMessaging:
             extract_via_vision(
                 PNG,
                 PROMPT,
-                env={"ANTHROPIC_API_KEY": "a", "XAI_API_KEY": "x"},
+                env={
+                    "HOME": str(home),
+                    "CLAUDE_CODE_OAUTH_TOKEN": "claude-sub",
+                },
                 post=router,
             )
         msg = str(exc.value).lower()
-        assert "vision cascade exhausted" in msg
+        assert "ladder exhausted" in msg or "exhausted" in msg
         assert "anthropic" in msg
         assert "grok" in msg
         assert "top up" not in msg
@@ -285,11 +455,12 @@ class TestExhaustedMessaging:
             extract_via_vision(
                 PNG,
                 PROMPT,
-                env={"ANTHROPIC_API_KEY": "a", "NVIDIA_API_KEY": "n"},
+                env={
+                    "CLAUDE_CODE_OAUTH_TOKEN": "claude-sub",
+                    "NVIDIA_API_KEY": "n",
+                },
                 post=router,
             )
-        # NVIDIA must have been tried (subscription keys exhausted) — not
-        # left sitting while we tell ops to top up Anthropic.
         assert any("nvidia" in u for u in router.calls)
         assert "nvidia" in str(exc.value).lower()
 
@@ -303,23 +474,32 @@ class TestExhaustedMessaging:
 
 class TestMenthorQClientWiring:
     def test_get_cta_does_not_require_anthropic_when_grok_is_keyed(
-        self, mock_playwright
+        self, mock_playwright, tmp_path
     ):
         from clients.menthorq_client import MenthorQClient, MenthorQExtractionError
 
+        home = tmp_path / "home"
+        (home / ".grok").mkdir(parents=True)
+        (home / ".grok" / "auth.json").write_text(
+            json.dumps({"access_token": "grok-sub"}), encoding="utf-8"
+        )
         env = {
+            "HOME": str(home),
             "MENTHORQ_USER": "u@example.com",
             "MENTHORQ_PASS": "pw",
-            "XAI_API_KEY": "xai-test",
         }
-        for key in (
+        clear_keys = (
             "ANTHROPIC_API_KEY",
             "CLAUDE_CODE_API_KEY",
             "CLAUDE_API_KEY",
-        ):
-            env.setdefault(key, "")
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "XAI_API_KEY",
+            "GROK_API_KEY",
+        )
+        for key in clear_keys:
+            env[key] = ""
         with patch.dict(os.environ, env, clear=False):
-            for key in ("ANTHROPIC_API_KEY", "CLAUDE_CODE_API_KEY", "CLAUDE_API_KEY"):
+            for key in clear_keys:
                 os.environ.pop(key, None)
             client = MenthorQClient(headless=True)
             try:
@@ -337,17 +517,22 @@ class TestMenthorQClientWiring:
                 client.close()
 
     def test_get_cta_surfaces_cascade_exhausted_not_anthropic_topup(
-        self, mock_playwright
+        self, mock_playwright, tmp_path
     ):
         from clients.menthorq_client import MenthorQClient, MenthorQExtractionError
 
+        home = tmp_path / "home"
+        (home / ".grok").mkdir(parents=True)
+        (home / ".grok" / "auth.json").write_text(
+            json.dumps({"access_token": "grok-sub"}), encoding="utf-8"
+        )
         with patch.dict(
             os.environ,
             {
+                "HOME": str(home),
                 "MENTHORQ_USER": "u@example.com",
                 "MENTHORQ_PASS": "pw",
-                "ANTHROPIC_API_KEY": "sk-ant-test",
-                "XAI_API_KEY": "xai-test",
+                "CLAUDE_CODE_OAUTH_TOKEN": "claude-sub",
             },
             clear=False,
         ):
@@ -360,13 +545,13 @@ class TestMenthorQClientWiring:
                 ), patch(
                     "clients.menthorq_client.extract_via_vision",
                     side_effect=VisionCascadeExhausted(
-                        "Vision cascade exhausted. tried=anthropic:credit_balance grok:http_401"
+                        "Model ladder exhausted. tried=anthropic:credit_balance grok:http_401"
                     ),
                 ):
                     with pytest.raises(MenthorQExtractionError) as exc:
                         client.get_cta("2026-03-06")
                 msg = str(exc.value).lower()
-                assert "vision cascade exhausted" in msg
+                assert "ladder exhausted" in msg
                 assert "top up" not in msg
             finally:
                 client.close()
@@ -377,7 +562,7 @@ class TestHealthClassifier:
         from utils.cta_sync_health import classify_sync_error, retry_backoffs_for_error
 
         error_type, message = classify_sync_error(
-            "ERROR: Vision cascade exhausted. tried=anthropic:credit_balance grok:http_401"
+            "ERROR: Model ladder exhausted. tried=anthropic:credit_balance grok:http_401"
         )
         assert error_type == "vision_cascade_exhausted"
         assert retry_backoffs_for_error(error_type) == [0]

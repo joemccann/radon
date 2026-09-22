@@ -43,7 +43,6 @@ const TSX_ROOTS = [join(WEB_ROOT, "components"), join(WEB_ROOT, "app")];
 const KNOWN_UNWRAPPED_T121 = [
   "components/WorkspaceSections.tsx:OrdersSections",
   "components/equibles-cot/EquiblesCotPanel.tsx:CotBoardTable",
-  "components/flow-analysis/DailyDarkPoolHistory.tsx:DailyTable",
   "components/ticker-detail/RatingsTab.tsx:RatingsChangesTable",
   "components/ticker-detail/SeasonalityTab.tsx:SeasonalityDetailTable",
 ];

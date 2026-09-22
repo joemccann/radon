@@ -47,4 +47,31 @@ describe.skipIf(!hasPython313())(python313Label("kelly wrapper (live)"), () => {
       expect(result.data.fraction_used).toBe(0.5);
     }
   }, 10_000);
+
+  it("defaults omitted fraction to half Kelly", async () => {
+    const result = await kelly({ prob: 0.6, odds: 2.0 });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.fraction_used).toBe(0.5);
+    }
+  }, 10_000);
+
+  it("rejects full Kelly at the wrapper bound", async () => {
+    await expect(kelly({ prob: 0.6, odds: 2.0, fraction: 0.51 })).rejects.toThrow(RangeError);
+  });
+
+  it("refuses estimated half Kelly when env is quarter", async () => {
+    const prev = process.env.RADON_KELLY_FRACTION;
+    process.env.RADON_KELLY_FRACTION = "0.25";
+    try {
+      const result = await kelly({ prob: 0.6, odds: 2.0, fraction: 0.5 });
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.stderr.toLowerCase()).toContain("estimated");
+      }
+    } finally {
+      if (prev === undefined) delete process.env.RADON_KELLY_FRACTION;
+      else process.env.RADON_KELLY_FRACTION = prev;
+    }
+  }, 10_000);
 });

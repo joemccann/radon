@@ -32,7 +32,9 @@ VPS timer (30s after last cycle)
     stand_down | ops_only | code_fix
   normal follow-up               → iPhone
 code_fix + AUTOPUSH
-  git push origin main
+  git push -u origin fix/<slug>
+  python3.13 scripts/ir_ensure_pr.py   # open PR against main; never merge
+  Joe / Mac Mini / loops merge after CI green
   CI test gate
   VPS deploy.sh live gate
   radon deploy live              → iPhone
@@ -91,22 +93,75 @@ systemctl is-active radon-grok-page-responder.timer
 journalctl -u radon-grok-page-responder -n 20 --no-pager
 ```
 
+## Open-PR path: the Mac mini picks the branch up
+
+**The VPS holds no GitHub credential.** Pushing a branch and merging a pull
+request need the same GitHub permission, so any token on the host that runs
+`grok --always-approve` over untrusted page text could merge to `main` and
+deploy — the prompt rule and `ir_ensure_pr`'s merge refusal are guards the
+agent's own shell can walk around with `curl`. The responder therefore runs
+with `GROK_PAGE_AUTOPUSH=0`: it edits, tests and commits to `fix/<slug>` in
+its clone, and stops.
+
+`scripts/grok_fix_pickup.py` on the Mac mini (launchd
+`com.radon.grok-fix-pickup`, every 15 min) fetches those branches over the
+existing ssh access, pushes them to GitHub and calls `ir_ensure_pr`. It never
+merges; Joe merges after CI is green. Branch content is still untrusted, so
+pickup refuses:
+
+- refs outside `fix/<slug>` (no refspec, option or path tricks);
+- a diff touching `.github/` — a PR-triggered workflow runs from the PR head,
+  which would execute attacker-authored CI in this repository;
+- a branch that does not descend from `origin/main`, or exceeds the commit cap
+  (default 20).
+
+A pushed branch remains pending until pickup confirms its PR URL. Later
+runs reconcile the PR without pushing the branch again, reuse an open PR,
+and retain a closed or merged PR's terminal disposition. If the source and
+origin heads differ, pickup refuses the branch instead of overwriting it.
+These checks retain the `.github/` refusal on repeated pickup runs.
+
+Fetching from a hostile repository is a supported git operation, and nothing
+in pickup executes code out of the fetched tree. Regressions:
+`scripts/tests/test_grok_fix_pickup.py`.
+
+```bash
+# Mac mini, once: dedicated clone + job
+git clone git@github.com:joemccann/radon.git ~/radon-weekend/radon-grok-pickup
+sed -e "s|__PICKUP_REPO__|$HOME/radon-weekend/radon-grok-pickup|g" \
+    -e "s|__HOME__|$HOME|g" \
+  config/com.radon.grok-fix-pickup.plist \
+  > ~/Library/LaunchAgents/com.radon.grok-fix-pickup.plist
+launchctl load ~/Library/LaunchAgents/com.radon.grok-fix-pickup.plist
+```
+
 ## Kill switches
 
 **Unset means OFF** (REL-030 / R-055). Each switch is an explicit opt-in.
 A missing or renamed `EnvironmentFile` is indistinguishable here from a
 deliberate stand-down, and an agent that runs `grok --always-approve` and can
-`git push origin main` into the production auto-deploy must read that
-ambiguity as "stop". Before this the three flags all defaulted on, so a broken
-env file yielded maximum autonomy.
+push a `fix/*` branch must read that ambiguity as "stop". Before this the
+three flags all defaulted on, so a broken env file yielded maximum autonomy.
 
 | Env | When `1` | When unset or `0` |
 |---|---|---|
 | `GROK_PAGE_RESPONDER` | Claim and launch | Do not claim or launch |
 | `GROK_PAGE_AUTOSHIP` | Edit, test, commit | Diagnose only. No edits or commits |
-| `GROK_PAGE_AUTOPUSH` | Push after a green suite | Commit locally. Do not push |
+| `GROK_PAGE_AUTOPUSH` | Push `fix/*` and ensure an open PR | Commit locally. Do not push |
 
 `GROK_BIN` overrides the `grok` executable.
+
+## Push guard
+
+The prompt tells grok never to push `main` or merge, but prompt text is not
+a control: page excerpts are untrusted input. Every push-capable cycle
+(`GROK_PAGE_AUTOPUSH=1`) reinstalls a `pre-push` hook in the clone that
+refuses any ref outside `refs/heads/fix/*`, including branch deletes and
+tags, before grok is launched. If the hook cannot be installed the cycle
+stands down (exit 1) instead of running push-capable. `ir_ensure_pr.py`
+refuses any merge-shaped `gh` invocation by token scan, and the page-derived
+summary is flattened to one control-free line before it enters PR metadata.
+Regressions: `scripts/tests/test_grok_push_guard.py`.
 
 ## Global daily action cap
 

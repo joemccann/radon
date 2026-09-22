@@ -26,6 +26,8 @@ URLS = {
     "vast": "https://console.vast.ai/api/v0/bundles/",
     "noaa": "https://www.ncei.noaa.gov/access/services/data/v1",
     "open-design-arena": "https://open-design.ai/llm-arena-for-design/",
+    "liquidcompute": "https://liquidcompute.com/api/market/ticker",
+    "ramp": "https://ramp.com/data/ai-index",
 }
 GPU_HISTORY_INDEX = "https://api.github.com/repos/adriannutiu/gpu-rental-prices/contents/data/snapshots"
 NOAA_DOM_STATIONS = (
@@ -513,6 +515,7 @@ def parse_aa(payload, digest, fetched, basket):
 
 def parse_eia(payload, digest, fetched):
     by_day = defaultdict(list)
+    seen = set()
     response = payload["response"]
     if int(response.get("total", len(response["data"]))) > len(response["data"]):
         raise SourceError("EIA window truncated; use a shorter window")
@@ -522,6 +525,9 @@ def parse_eia(payload, digest, fetched):
         # Form EIA-930 General Instructions (p.3): timestamps are hour ENDING UTC.
         # https://www.eia.gov/survey/form/eia_930/instructions.pdf
         end = datetime.strptime(row["period"], "%Y-%m-%dT%H").replace(tzinfo=timezone.utc)
+        if end in seen:
+            raise SourceError("Duplicate EIA hourly interval")
+        seen.add(end)
         start = end - timedelta(hours=1)
         if end > datetime.fromisoformat(fetched.replace("Z", "+00:00")):
             continue
@@ -534,6 +540,8 @@ def parse_eia(payload, digest, fetched):
             "parent": "PJM",
             "subba": "DOM",
             "source_observations": len(values),
+            "expected_observations": 24,
+            "complete": len(values) == 24,
             "definition": "Daily summary of observed one-hour energy; numerically equivalent to interval-average MW. Not AI load.",
             "weather_adjusted": False,
         }
@@ -633,6 +641,42 @@ def _month_bounds(day):
     return start.isoformat(), end.isoformat()
 
 
+def parse_ramp_html(html, digest, fetched):
+    """Read the publisher's embedded public tables; never execute page scripts."""
+    chunks = []
+    for match in re.finditer(r"self\.__next_f\.push\((.*?)\)</script>", html, re.S):
+        try:
+            chunk = json.loads(match[1])
+        except ValueError:
+            continue
+        if isinstance(chunk, list) and len(chunk) == 2 and chunk[0] == 1 and isinstance(chunk[1], str):
+            chunks.append(chunk[1])
+    content = "".join(chunks)
+    tables = {}
+    for key in ("adoptionOverall", "spendPerEmployee"):
+        match = re.search('"' + key + r'"\s*:\s*', content)
+        if not match:
+            raise SourceError("Ramp public table schema changed")
+        try:
+            tables[key], _ = json.JSONDecoder().raw_decode(content[match.end():])
+        except ValueError as exc:
+            raise SourceError("Ramp public table is invalid") from exc
+        if not isinstance(tables[key], list) or not tables[key]:
+            raise SourceError("Ramp public table is empty")
+        if any(_month_bounds(row["date_month"])[1] >= fetched[:10] for row in tables[key]):
+            raise SourceError("Ramp public table contains an incomplete month")
+    for row in tables["spendPerEmployee"]:
+        if any(row.get(field) in (None, "", "$undefined") for field in
+               ("median_pepm", "top_10_percent_median_pepm", "top_1_percent_median_pepm")):
+            raise SourceError("Ramp public spend table is incomplete")
+    return parse_ramp_curated(dict(
+        source_url=URLS["ramp"], methodology_version="ramp-spend-intensity-v2-jun2026",
+        cohort_version="ramp-us-business-panel-70k-v2", published_at=None,
+        adoption_overall=tables["adoptionOverall"], spend_per_employee=tables["spendPerEmployee"],
+        methodology_notes=["Live publisher tables; historical values may be revised. Publication time not disclosed."],
+    ), digest, fetched)
+
+
 def parse_ramp_curated(payload, digest, fetched):
     """Curated published Ramp AI Index tables; no Ramp Data API key required."""
     required = (
@@ -729,6 +773,7 @@ def parse_ramp_curated(payload, digest, fetched):
                 metadata={
                     **common,
                     "label": "Businesses with paid AI transaction",
+                    "definition": "Percentage of businesses with a positive AI transaction in the month; not spend per employee",
                     "entity": "overall_adoption",
                     "month": month[:7],
                     "mom_change_pp": row.get("mom_change_pp"),
@@ -1207,6 +1252,14 @@ def collect_source(source, transport, start, end, *, env=None, basket=()):
     if source == "open-design-arena":
         html, digest, fetched, meta = transport.fetch_html(URLS[source], headers={"User-Agent": OPENDESI_UA})
         return parse_opendesi(html, digest, fetched, published=_http_published(meta.get("last_modified")))
+    if source == "ramp":
+        html, digest, fetched, _meta = transport.fetch_html(URLS[source])
+        return parse_ramp_html(html, digest, fetched)
+    if source == "liquidcompute":
+        from .liquidcompute import fetch_ticker, parse_ticker
+
+        _store_rows, observations = parse_ticker(*fetch_ticker(transport))
+        return observations
     if source == "noaa":
         return parse_noaa(
             *transport.fetch(

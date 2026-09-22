@@ -33,18 +33,32 @@ LOOPS = {
     "ci-performance": REPO / "scripts" / "ci_performance_nightly.sh",
     "documentation": REPO / "scripts" / "documentation_nightly.sh",
     "security": REPO / "scripts" / "security_nightly.sh",
+    "security-deepsec": REPO / "scripts" / "security_deepsec_nightly.sh",
 }
-CREDENTIAL_LOOPS = sorted(loop for loop in LOOPS if loop != "security")
+CREDENTIAL_LOOPS = sorted(loop for loop in LOOPS if loop not in ("security", "security-deepsec"))
 
-# Every var the installed CLI (2.1.258) honors as an off-subscription route:
-# `strings` on the binary, filtered to key / token / base-url / USE_* names.
+# Every var the installed CLI (2.1.272, re-derived 2026-09-15) honors as an
+# off-subscription route: `strings` on the binary, filtered to key / token /
+# base-url / creds-file / USE_* names, then read in context. Versions are
+# not pinned (2026-09-19); re-derive when the installed CLI changes.
 BILLING_REROUTE_KEYS = (
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_AUTH_TOKEN",
     "ANTHROPIC_BASE_URL",
     "CLAUDE_CODE_API_KEY",
+    "CLAUDE_CODE_API_BASE_URL",
+    "CLAUDE_CODE_HFI_BEARER_TOKEN",
     "CLAUDE_API_KEY",
     "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR",
+    # 2.1.270 additions (2026-09-14)
+    "CLAUDE_CODE_GATEWAY_TOKEN",
+    "CLAUDE_CODE_GATEWAY_TOKEN_FILE_DESCRIPTOR",
+    "CLAUDE_CODE_HOST_AUTH_ENV_VAR",
+    "CLAUDE_CODE_HOST_CREDS_FILE",
+    "ANTHROPIC_UNIX_SOCKET",
+    "ANTHROPIC_PROFILE",
+    "ANTHROPIC_FEDERATION_RULE_ID",
+    "ANTHROPIC_ORGANIZATION_ID",
     "AWS_BEARER_TOKEN_BEDROCK",
     "ANTHROPIC_AWS_API_KEY",
     "ANTHROPIC_AWS_BASE_URL",
@@ -67,6 +81,8 @@ BILLING_REROUTE_FLAGS = (
     "CLAUDE_CODE_USE_MANTLE",
     "CLAUDE_CODE_USE_ANTHROPIC_AWS",
     "CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD",
+    # 2.1.270 addition (2026-09-14)
+    "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST",
 )
 BILLING_REROUTE_VARS = BILLING_REROUTE_KEYS + BILLING_REROUTE_FLAGS
 TRUTHY_FLAG_VALUES = ("1", "true", "yes", "TRUE", "Yes")
@@ -74,10 +90,13 @@ FALSY_FLAG_VALUES = ("0", "false", "no")
 
 KEY = "sk-ant-api03-CONTRACT-TEST-NOT-A-REAL-KEY"
 COMPLETION = "SECURITY-NIGHTLY PHASE COMPLETE: audit"
+# The DeepSec wrapper greps its own prefix; the other line is inert noise.
+COMPLETION_DEEPSEC = "SECURITY-DEEPSEC PHASE COMPLETE: audit"
 
 MARKERS = (
     ".radon-weekend-runner",
     ".radon-security-runner",
+    ".radon-security-deepsec-runner",
     ".radon-reliability-runner",
     ".radon-testing-runner",
     ".radon-ci-performance-runner",
@@ -117,6 +136,7 @@ def _stub_bin(tmp_path: Path, env_dump: Path, gh_log: Path) -> Path:
             "#!/bin/sh\n"
             f"env > '{env_dump}'\n"
             f'echo "{COMPLETION}"\n'
+            f'echo "{COMPLETION_DEEPSEC}"\n'
             "exit 0\n"
         ),
         "timeout": (
@@ -214,7 +234,7 @@ class TestTheWrapperNamesEveryBillingReroute:
         for var in BILLING_REROUTE_VARS:
             assert var in listed, (
                 f"{loop}: {var} is not in the reroute list; Claude Code "
-                "2.1.258 prefers it over the claude.ai login"
+                "2.1.270 prefers it over the claude.ai login"
             )
 
     def test_the_wrapper_unsets_from_the_lists(self, loop):
@@ -222,6 +242,25 @@ class TestTheWrapperNamesEveryBillingReroute:
         assert re.search(
             r"^unset \$BILLING_REROUTE_KEYS \$BILLING_REROUTE_FLAGS", body, re.M
         ), f"{loop}: the unset must cover the whole list, not a hand copy"
+
+
+def _reroute_lists(wrapper: Path) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    body = wrapper.read_text(encoding="utf-8")
+    keys = re.search(r'^BILLING_REROUTE_KEYS="([^"]*)"$', body, re.M)
+    flags = re.search(r'^BILLING_REROUTE_FLAGS="([^"]*)"$', body, re.M)
+    assert keys and flags, f"{wrapper.name}: the reroute lists are not declared"
+    return tuple(keys.group(1).split()), tuple(flags.group(1).split())
+
+
+def test_all_five_wrappers_carry_identical_reroute_lists():
+    """One re-derivation, five copies: a drift in any wrapper is a hole."""
+    lists = {loop: _reroute_lists(path) for loop, path in LOOPS.items()}
+    reference = lists["security"]
+    for loop, found in lists.items():
+        assert found == reference, (
+            f"{loop}: reroute lists differ from the security wrapper's: "
+            f"{found} != {reference}"
+        )
 
 
 @pytest.mark.parametrize("loop", sorted(LOOPS))
@@ -301,6 +340,11 @@ class TestABillingRerouteInAnIgnoredEnvFileRefusesTheRun:
             (".env.local", "CLAUDE_CODE_API_KEY=sk-ant-alias\n"),
             (".deepsec/.env.local", f"ANTHROPIC_FOUNDRY_API_KEY={KEY}\n"),
             (".env.local", "CLAUDE_CODE_USE_FOUNDRY=1\n"),
+            # DS-2026-09-21-01: `git clean --exclude=.deepsec/` preserves the
+            # whole tree recursively, not just its top level, so a key file
+            # nested under a subdirectory must be found too.
+            (".deepsec/sub/.env.local", f"ANTHROPIC_API_KEY={KEY}\n"),
+            (".deepsec/a/b/.env", "CLAUDE_CODE_USE_BEDROCK=1\n"),
         ),
     )
     def test_a_key_file_the_agent_would_reload_refuses(self, tmp_path, loop, path, line):
@@ -520,6 +564,7 @@ class TestTheRailsAreReCheckedBeforeEveryPhase:
             f'printf "%s\\n" "$*" >> "{calls}"\n'
             f"{plant}\n"
             f'echo "{COMPLETION}"\n'
+            f'echo "{COMPLETION_DEEPSEC}"\n'
             "exit 0\n"
         )
         proc, _, _ = _audit(tmp_path, loop, mode="cycle", claude_stub=stub)
@@ -533,3 +578,19 @@ class TestTheRailsAreReCheckedBeforeEveryPhase:
         assert proc.returncode == 2, (proc.returncode, out)
         assert "REFUSING" in out, out
         assert KEY not in out, out
+
+
+class TestCredentialFreeLoopsDisableLadderAuthFileDiscovery:
+    """The security loop is credential-free by contract, but the model
+    ladder's default-on auth-file discovery would still read the operator's
+    ~/.claude, ~/.codex, ~/.grok and antigravity grants from any child
+    python. RADON_LADDER_NO_AUTH_FILES=1 must be exported by both security
+    runners so discovery stays env-var-only."""
+
+    @pytest.mark.parametrize(
+        "wrapper",
+        ["scripts/security_nightly.sh", "scripts/security_deepsec_nightly.sh"],
+    )
+    def test_security_wrappers_export_the_flag(self, wrapper):
+        text = (REPO / wrapper).read_text(encoding="utf-8")
+        assert "export RADON_LADDER_NO_AUTH_FILES=1" in text

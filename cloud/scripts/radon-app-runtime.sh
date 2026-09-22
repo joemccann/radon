@@ -2,7 +2,8 @@
 set -euo pipefail
 
 # Root-owned app-plane image runner. systemd ExecStart calls `run <unit>`.
-# Does not take the deploy lifecycle lock. radon is not in group docker.
+# Service starts do not take the deploy lifecycle lock; optional pruning does.
+# radon is not in group docker.
 # Never Gateway, Caddy, health, or the engine socket.
 
 readonly APP_UNITS="radon-api.service radon-nextjs.service radon-relay.service radon-monitor.service radon-newsfeed.service radon-research.service"
@@ -13,6 +14,8 @@ readonly MEDIA_DIR_IN_CONTAINER=/var/lib/radon/media
 
 if [[ "${RADON_APP_RUNTIME_TEST_MODE:-0}" == "1" ]]; then
   DOCKER="${RADON_TEST_DOCKER:?test docker is required}"
+  ENGINE="${RADON_TEST_ENGINE:-docker}"
+  LEGACY_DOCKER="${RADON_TEST_LEGACY_DOCKER:-}"
   ID_BIN="${RADON_TEST_ID:?test id is required}"
   ENV_FILE="${RADON_TEST_ENV_FILE:?test env file is required}"
   DATA_DIR="${RADON_TEST_DATA_DIR:?test data dir is required}"
@@ -23,12 +26,35 @@ if [[ "${RADON_APP_RUNTIME_TEST_MODE:-0}" == "1" ]]; then
   PYTHON="${RADON_TEST_PYTHON:-$(command -v python3)}"
   GETENT="${RADON_TEST_GETENT:?test getent is required}"
   NOTIFY_PROXY_DIR="${RADON_TEST_NOTIFY_PROXY_DIR:-${STATE_DIR}/notify}"
+  DEPLOY_LOCK_FILE="${RADON_TEST_DEPLOY_LOCK:-${STATE_DIR}/deploy.lock}"
+  GREEN_MARKER_FILE="${RADON_TEST_GREEN_MARKER:-${STATE_DIR}/last-green}"
+  TRANSITION_JOURNAL_FILE="${RADON_TEST_TRANSITION_JOURNAL:-${STATE_DIR}/transition.json}"
 else
   if (( EUID != 0 )); then
     echo "radon-app-runtime must run as root" >&2
     exit 77
   fi
-  DOCKER=/usr/bin/docker
+  # REL-087 / R-232: Podman is the engine whenever it is installed, because
+  # `--cgroups=split` keeps conmon and the container inside the unit's own
+  # cgroup. Docker stays as the staged-cutover fallback (podman not installed
+  # yet) and the rollback lever (drop-in Environment=RADON_CONTAINER_ENGINE=docker).
+  ENGINE="${RADON_CONTAINER_ENGINE:-}"
+  if [[ -z "$ENGINE" ]]; then
+    if [[ -x /usr/bin/podman ]]; then ENGINE=podman; else ENGINE=docker; fi
+  fi
+  LEGACY_DOCKER=""
+  case "$ENGINE" in
+    podman)
+      DOCKER=/usr/bin/podman
+      # A docker-era container of the same unit must be reaped too.
+      [[ -x /usr/bin/docker ]] && LEGACY_DOCKER=/usr/bin/docker
+      ;;
+    docker) DOCKER=/usr/bin/docker ;;
+    *)
+      echo "radon-app-runtime: RADON_CONTAINER_ENGINE must be podman or docker" >&2
+      exit 64
+      ;;
+  esac
   ID_BIN=/usr/bin/id
   ENV_FILE=/etc/radon/env
   DATA_DIR=/home/radon/radon/data
@@ -39,6 +65,9 @@ else
   PYTHON=/usr/bin/python3
   GETENT=/usr/bin/getent
   NOTIFY_PROXY_DIR=/run/radon-app-runtime
+  DEPLOY_LOCK_FILE=/home/radon/.radon-deploy.lock
+  GREEN_MARKER_FILE=/home/radon/.radon-last-green-deploy
+  TRANSITION_JOURNAL_FILE=/home/radon/.radon-deploy-transition.json
 fi
 
 readonly SECRET_STORE_CREDENTIAL_NAME=radon-secret-store-key
@@ -178,6 +207,31 @@ image_in_local_store() {
   "$DOCKER" image inspect "$1" >/dev/null 2>&1
 }
 
+# The deploy pre-pull must detect a rebuilt tag even when its old image is local.
+# Runtime starts retain image_available's offline fallback.
+image_matches_registry() {
+  # `buildx imagetools` is docker-only; podman re-pulls, which is layer-incremental.
+  [[ "$ENGINE" == podman ]] && return 1
+  "$PYTHON" - "$DOCKER" "$1" <<'PYCODE'
+import json, re, subprocess, sys
+docker, image = sys.argv[1:]
+def read(args):
+    result = subprocess.run([docker, *args], capture_output=True, text=True,
+                            check=True, timeout=20)
+    return json.loads(result.stdout)
+try:
+    remote = read(["buildx", "imagetools", "inspect", image, "--format", "{{json .Manifest}}"])
+    local = read(["image", "inspect", image, "--format", "{{json .RepoDigests}}"])
+except (OSError, ValueError, subprocess.SubprocessError):
+    sys.exit(1)
+digest = remote.get("digest") if isinstance(remote, dict) else None
+if not isinstance(digest, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+    sys.exit(1)
+expected = image.rsplit(":", 1)[0] + "@" + digest
+sys.exit(0 if isinstance(local, list) and expected in local else 1)
+PYCODE
+}
+
 # A registry probe alone is not a liveness contract. A GHCR 429, an outage or
 # an expired root credential fails BOTH manifest probes under `set -euo
 # pipefail`, resolve_image returns 69 and every ExecStart exits — while the
@@ -240,8 +294,7 @@ refuse_host_plane() {
 # `pull <sha>` is the deploy's pre-teardown step (R-431): it pulls exactly the
 # pair `run` will resolve for that release while the current release still
 # serves, then drops SHA-tagged pairs that are neither the target, the
-# fallback tag, nor in use by a running container (the previous release stays
-# until the deploy after next, so a rollback never pulls). Every deploy since
+# durable rollback SHA, nor in use by a running app container. Every deploy since
 # the drop-ins went live had pulled a 4.8G node image AFTER teardown and
 # failed the ~60s HTTP gate on a container still downloading (2026-08-28
 # 4b332fd8 was the last green deploy; 33265501795 and 33266517375 rolled back
@@ -262,11 +315,13 @@ cmd_pull() {
   node_ref="ghcr.io/joemccann/radon-node:${tag}"
 
   # The gated prepull job and the deploy both call this exact verb. When the
-  # pair is already local, deploy performs only these two fast inspections.
-  # On a miss, pull both independent images concurrently and wait for both.
+  # pair is local and matches registry digests, no layers need pulling.
+  # Missing, changed, or unverified metadata requires a fresh parallel pull.
   if [[ -n "$target" ]] \
     && image_in_local_store "$python_ref" \
-    && image_in_local_store "$node_ref"; then
+    && image_in_local_store "$node_ref" \
+    && image_matches_registry "$python_ref" \
+    && image_matches_registry "$node_ref"; then
     printf 'exact release image pair already local: %s\n' "$tag" >&2
   else
     "$DOCKER" pull "$python_ref" &
@@ -293,17 +348,70 @@ cmd_pull() {
 }
 
 prune_stale_app_images() {
-  local target="$1" in_use image tag repo
-  in_use="$("$DOCKER" ps --format '{{.Image}}' 2>/dev/null || true)"
-  for repo in ghcr.io/joemccann/radon-node ghcr.io/joemccann/radon-python; do
-    while IFS= read -r image; do
-      [[ -n "$image" ]] || continue
-      tag="${image##*:}"
-      [[ "$tag" =~ ^[0-9a-f]{40}$ ]] || continue
-      [[ "$tag" == "$target" ]] && continue
-      grep -qxF -- "$image" <<< "$in_use" && continue
-      "$DOCKER" rmi "$image" >/dev/null 2>&1 || true
-    done < <("$DOCKER" images --format '{{.Repository}}:{{.Tag}}' "$repo" 2>/dev/null || true)
+  "$PYTHON" - "$DOCKER" "$1" "$DEPLOY_LOCK_FILE" "$GREEN_MARKER_FILE" "$TRANSITION_JOURNAL_FILE" <<'PYCODE'
+import fcntl, json, os, re, stat, subprocess, sys
+from pathlib import Path
+
+docker, target, lock_path, green_path, journal_path = sys.argv[1:]
+def skip(reason):
+    print(f"radon-app-runtime: image prune skipped: {reason}", file=sys.stderr)
+    raise SystemExit(0)
+def command(*args):
+    return subprocess.run([docker, *args], capture_output=True, text=True,
+                          check=True, timeout=20).stdout.splitlines()
+def sha(value):
+    return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{40}", value)
+
+try:
+    # Do not create a root-owned lock that would prevent radon from deploying.
+    fd = os.open(lock_path, os.O_RDWR | os.O_NOFOLLOW)
+    with os.fdopen(fd, "r+") as lock:
+        if not stat.S_ISREG(os.fstat(lock.fileno()).st_mode):
+            skip("deploy lock is not a regular file")
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        protected = {target}
+        journal = Path(journal_path)
+        if journal.exists() or journal.is_symlink():
+            state = json.loads(journal.read_text())
+            if not isinstance(state, dict) or state.get("version") != 1 or not all(
+                sha(state.get(key)) for key in ("requested_sha", "previous_sha")
+            ):
+                skip("invalid transition journal")
+            protected.update((state["requested_sha"], state["previous_sha"]))
+        else:
+            previous = Path(green_path).read_text().splitlines()[0]
+            if not sha(previous):
+                skip("invalid green marker")
+            protected.add(previous)
+        repos = ("ghcr.io/joemccann/radon-node", "ghcr.io/joemccann/radon-python")
+        in_use = {image for image in command("ps", "--format", "{{.Image}}", "--filter", "name=radon-")
+                  if any(image.startswith(repo + ":") or image.startswith(repo + "@") for repo in repos)}
+        if not in_use:
+            skip("no running app containers")
+        stale = []
+        for repo in repos:
+            for image in command("images", "--format", "{{.Repository}}:{{.Tag}}", repo):
+                prefix, separator, tag = image.rpartition(":")
+                if prefix == repo and sha(tag) and tag not in protected and image not in in_use:
+                    stale.append(image)
+        for image in stale:
+            command("rmi", image)
+except (OSError, ValueError, IndexError, subprocess.SubprocessError) as exc:
+    skip(f"deploy lock or rollback state unavailable ({type(exc).__name__})")
+PYCODE
+}
+
+# `rm -f` by --name, on the active engine and, under podman, on docker too so
+# a docker-era container never shares data/ with its podman successor.
+reap_container() {
+  local unit="$1" engine
+  for engine in "$DOCKER" ${LEGACY_DOCKER:+"$LEGACY_DOCKER"}; do
+    if ! "$engine" rm -f "$unit" >/dev/null 2>&1; then
+      if "$engine" inspect "$unit" >/dev/null 2>&1; then
+        echo "radon-app-runtime: ${engine##*/} rm -f ${unit} failed and the orphan container is still present; refusing to clear its staged credential" >&2
+        exit 75
+      fi
+    fi
   done
 }
 
@@ -321,12 +429,7 @@ cmd_stop() {
   # open fails on a missing key instead of a clear name conflict. A non-zero
   # rm for a container that does NOT exist is the ordinary first-start case
   # and stays benign; only a SURVIVING container aborts.
-  if ! "$DOCKER" rm -f "$unit" >/dev/null 2>&1; then
-    if "$DOCKER" inspect "$unit" >/dev/null 2>&1; then
-      echo "radon-app-runtime: docker rm -f ${unit} failed and the orphan container is still present; refusing to clear its staged credential" >&2
-      exit 75
-    fi
-  fi
+  reap_container "$unit"
   cleanup_runtime_credential "$unit"
 }
 
@@ -352,7 +455,9 @@ except FileNotFoundError:
     pass
 inbound = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
 inbound.bind(listen)
-os.chmod(listen, 0o666)
+# NotifyAccess=all makes systemd trust whatever this proxy relays, so the
+# socket is owner-only; start_notify_proxy chowns it to the container uid.
+os.chmod(listen, 0o600)
 outbound = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
 # Exit with the ExecStart process (the docker client, which exec'd over the
 # bash parent), so a stopped unit never leaves a forwarder holding fds.
@@ -381,7 +486,7 @@ PY
 # when its parent changes, and a subshell parent is gone the moment it
 # returns, which left a dead socket behind on the first live probe.
 start_notify_proxy() {
-  local unit="$1" upstream="$2" listen attempt
+  local unit="$1" upstream="$2" ids="$3" listen attempt
   listen="${NOTIFY_PROXY_DIR}/${unit}.sock"
   mkdir -p -m 0755 "$NOTIFY_PROXY_DIR" || {
     echo "radon-app-runtime: notify proxy dir is unavailable: ${NOTIFY_PROXY_DIR}" >&2
@@ -390,7 +495,13 @@ start_notify_proxy() {
   rm -f "$listen"
   "$0" notify-proxy "$listen" "$upstream" &
   for attempt in $(seq 1 50); do
-    [[ -S "$listen" ]] && { NOTIFY_PROXY_SOCKET="$listen"; return 0; }
+    if [[ -S "$listen" ]]; then
+      # The proxy binds the socket 0600 as root; hand it to the container
+      # uid so only that uid can write READY/WATCHDOG datagrams.
+      "$CHOWN" -h "$ids" "$listen" || return 71
+      NOTIFY_PROXY_SOCKET="$listen"
+      return 0
+    fi
     sleep 0.1
   done
   echo "radon-app-runtime: notify proxy for ${unit} did not bind ${listen}" >&2
@@ -413,6 +524,14 @@ render_env_file() {
       -e "s/^([A-Za-z_][A-Za-z0-9_]*=)'(.*)'[[:space:]]*\$/\1\2/" \
       -e 's/^([A-Za-z_][A-Za-z0-9_]*=)"(.*)"[[:space:]]*$/\1\2/' \
       "$ENV_FILE" > "$out"
+    # The newsfeed's Chromium renders third-party web content with the
+    # sandbox disabled; hand that unit only the keys its own code reads,
+    # never the full production secret set.
+    if [[ "$unit" == "radon-newsfeed.service" ]]; then
+      grep -E '^(#|$|(NODE_ENV|ANTHROPIC_API_KEY|CLAUDE_CODE_API_KEY|CLAUDE_API_KEY|CLAUDE_CODE_OAUTH_TOKEN|CLAUDE_CONFIG_DIR|CODEX_HOME|GROK_AUTH_FILE|GEMINI_OAUTH_TOKEN|ANTIGRAVITY_CLI|RADON_LADDER_[A-Z0-9_]+|XAI_API_KEY|GROK_API_KEY|OPENAI_API_KEY|GEMINI_API_KEY|NVIDIA_API_KEY|CEREBRAS_API_KEY|RADON_PYTHON_BIN|TURSO_DB_URL|TURSO_AUTH_TOKEN|PLAYWRIGHT_CHROMIUM_SANDBOX|RADON_DB_NO_REPLICA|RADON_DB_USE_REPLICA|RADON_MEDIA_LOCAL|RADON_MEDIA_REMOTE|RADON_NEWSFEED_[A-Z0-9_]+|THEMARKETEAR_EMAIL|THEMARKETEAR_PASSWORD)=)' \
+        "$out" > "${out}.filtered" || true
+      mv "${out}.filtered" "$out"
+    fi
   )
   printf '%s\n' "$out"
 }
@@ -464,6 +583,33 @@ print(child)
 PY_RESEARCH
 }
 
+# These directories live under radon-writable parents, so root must never
+# follow a link while creating or owning them: mkdir refuses a symlink final
+# component and the fd-based fchown/fchmod cannot be retargeted between check
+# and use. Shared chokepoint for the secret store and the 2FA lease dir.
+prepare_private_dir() {
+  local ids="$1" dir="$2" label="$3"
+  "$PYTHON" - "$dir" "$ids" "${RADON_APP_RUNTIME_TEST_MODE:-0}" "$label" <<'PY_PRIVATE_DIR' || exit 78
+import os, sys
+path, ids, test, label = sys.argv[1], sys.argv[2], sys.argv[3] == '1', sys.argv[4]
+uid, gid = (os.getuid(), os.getgid()) if test else tuple(int(part) for part in ids.split(':'))
+try:
+    try:
+        os.mkdir(path, 0o700)
+    except FileExistsError:
+        pass
+    fd = os.open(path, os.O_NOFOLLOW | os.O_DIRECTORY | os.O_RDONLY)
+    try:
+        os.fchown(fd, uid, gid)
+        os.fchmod(fd, 0o700)
+    finally:
+        os.close(fd)
+except OSError:
+    print(f'radon-app-runtime: {label} directory is a symlink or unusable; refusing', file=sys.stderr)
+    raise SystemExit(78)
+PY_PRIVATE_DIR
+}
+
 cmd_run() {
   local unit="${1:-}"
   local ids image workdir
@@ -512,18 +658,11 @@ cmd_run() {
   # open fails on a missing key instead of a clear name conflict. A non-zero
   # rm for a container that does NOT exist is the ordinary first-start case
   # and stays benign; only a SURVIVING container aborts.
-  if ! "$DOCKER" rm -f "$unit" >/dev/null 2>&1; then
-    if "$DOCKER" inspect "$unit" >/dev/null 2>&1; then
-      echo "radon-app-runtime: docker rm -f ${unit} failed and the orphan container is still present; refusing to clear its staged credential" >&2
-      exit 75
-    fi
-  fi
+  reap_container "$unit"
   cleanup_runtime_credential "$unit"
 
   if [[ "$unit" == "radon-api.service" ]]; then
-    local secret_store_dir="${DATA_DIR}/secret_store"
-    install -d -m 0700 "$secret_store_dir"
-    "$CHOWN" "$ids" "$secret_store_dir"
+    prepare_private_dir "$ids" "${DATA_DIR}/secret_store" "secret store"
     stage_api_credential "$unit" "$credential_gid"
   fi
 
@@ -536,13 +675,17 @@ cmd_run() {
   # which now has its own subdirectory. Create it here: the container can no
   # longer mkdir it, because the parent is not mounted. R-381.
   if [[ "$unit" != "radon-research.service" ]]; then
-    mkdir -p "$LEASE_DIR"
-    chown "$ids" "$LEASE_DIR" 2>/dev/null || true
+    prepare_private_dir "$ids" "$LEASE_DIR" "2FA lease"
   fi
+
+  # Newsfeed renders third-party content in a sandbox-disabled Chromium: it
+  # gets an isolated bridge network (egress only), never the host stack.
+  local container_network=host
+  [[ "$unit" == "radon-newsfeed.service" ]] && container_network=bridge
 
   set -- \
     run \
-    --network host \
+    --network "$container_network" \
     --user "$ids" \
     --rm \
     --name "$unit" \
@@ -550,11 +693,21 @@ cmd_run() {
     --cap-drop ALL \
     --security-opt no-new-privileges \
     --cgroupns host \
-    --cgroup-parent=system.slice \
     --env-file "$(render_env_file "$unit")" \
     --env RADON_DB_NO_REPLICA=1 \
     --env PYTHONPATH=/home/radon/radon/scripts \
     -w "$workdir"
+
+  if [[ "$ENGINE" == podman ]]; then
+    # REL-087: conmon and the container join the unit's own cgroup (the unit
+    # delegates it), so KillMode reaches them. Podman must not consume
+    # NOTIFY_SOCKET itself: the notify proxy below stays the one path.
+    set -- "$@" --cgroups=split --sdnotify=ignore
+  else
+    # Docker fallback: its systemd driver accepts a slice, not a unit path,
+    # so the container is outside the unit and only reaping stops it.
+    set -- "$@" --cgroup-parent=system.slice
+  fi
 
   if [[ "$unit" != "radon-research.service" ]]; then
     set -- "$@" \
@@ -562,6 +715,29 @@ cmd_run() {
       -v "${MEDIA_DIR}:${MEDIA_DIR_IN_CONTAINER}" \
       -v "${LEASE_DIR}:/var/lib/radon/ib-lease"
   fi
+
+  # Subscription grants (2026-09-18). The model ladders meter against the
+  # operator's subscriptions, never prepaid keys, and read the CLI credential
+  # files under ~radon (kept live by radon-subscription-tokens on the HOST).
+  # No container could see them, so every container-side rung silently fell
+  # to prepaid credits; when the xAI team ran dry the newsfeed voice rewrite
+  # died. Bind each dir that exists, read-only, and pin HOME so Path.home()
+  # and os.homedir() resolve to the mount. Never the whole home directory.
+  # Next.js hosts /api/newsfeed/share and /api/assistant, so it is an LLM
+  # consumer (2026-09-19: excluding it 502'd every share rewrite with
+  # "Missing Anthropic subscription"). Relay still gets no binds.
+  local subscription_home="${RADON_SUBSCRIPTION_HOME:-/home/radon}"
+  local cred_dir
+  case "$unit" in
+    radon-api.service|radon-newsfeed.service|radon-research.service|radon-nextjs.service)
+      for cred_dir in .grok .codex .claude; do
+        if [[ -d "${subscription_home}/${cred_dir}" ]]; then
+          set -- "$@" -v "${subscription_home}/${cred_dir}:/home/radon/${cred_dir}:ro"
+        fi
+      done
+      ;;
+  esac
+  set -- "$@" --env HOME=/home/radon
   if [[ "$unit" == "radon-research.service" || "$unit" == "radon-api.service" ]]; then
     local research_dir research_mode=ro
     research_dir="$(prepare_research_dir "$ids")" || exit $?
@@ -578,6 +754,15 @@ cmd_run() {
     if [[ -d "$ib_remote_certs" ]]; then
       set -- "$@" -v "${ib_remote_certs}:${ib_remote_certs}:ro"
     fi
+    # Robinhood read-only MCP token store. Its own dir, never /etc/radon, and
+    # read-write: refresh rotates the token by atomic replace plus a .lock
+    # sidecar, which a single-file bind cannot do. Without it every Robinhood
+    # rung inside the API fell through to UW (2026-09-19).
+    local rh_token_dir="${RADON_RH_TOKEN_DIR:-/var/lib/radon/rh-mcp}"
+    if [[ -d "$rh_token_dir" ]]; then
+      set -- "$@" -v "${rh_token_dir}:${rh_token_dir}" \
+        --env "ROBINHOOD_MCP_TOKEN_FILE=${rh_token_dir}/rh-mcp.json"
+    fi
     local credential_host_dir="${SECRET_STORE_CREDENTIAL_STAGE_ROOT}/${unit}"
     set -- "$@" \
       --group-add "$credential_gid" \
@@ -587,7 +772,7 @@ cmd_run() {
   fi
 
   if [[ -n "${NOTIFY_SOCKET:-}" && "${NOTIFY_SOCKET}" == /* ]]; then
-    start_notify_proxy "$unit" "$NOTIFY_SOCKET" || exit $?
+    start_notify_proxy "$unit" "$NOTIFY_SOCKET" "$ids" || exit $?
     set -- "$@" --env "NOTIFY_SOCKET=${NOTIFY_PROXY_SOCKET}" --env WATCHDOG_USEC \
       --mount "type=bind,src=${NOTIFY_PROXY_SOCKET},dst=${NOTIFY_PROXY_SOCKET}"
   fi
@@ -618,7 +803,7 @@ cmd_run() {
       --env PLAYWRIGHT_CHROMIUM_SANDBOX=0 \
       --env PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
       -v "${newsfeed_browsers}:/ms-playwright" \
-      -v "${newsfeed_scripts}:/home/radon/radon/scripts/newsfeed" \
+      -v "${newsfeed_scripts}:/home/radon/radon/scripts/newsfeed:ro" \
       --env "RADON_NEWSFEED_MEDIA_DIR=${MEDIA_DIR_IN_CONTAINER}" \
       --env "RADON_MEDIA_REMOTE=${MEDIA_DIR_IN_CONTAINER}/"
   fi
@@ -635,7 +820,7 @@ cmd_run() {
       set -- "$@" python -m scripts.monitor_daemon.run --daemon
       ;;
     radon-nextjs.service)
-      set -- "$@" bun run start
+      set -- "$@" /usr/local/bin/next-clerk-guard
       ;;
     radon-relay.service)
       set -- "$@" node scripts/ib_realtime_server.js

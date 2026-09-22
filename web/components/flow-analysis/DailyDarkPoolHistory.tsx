@@ -87,35 +87,43 @@ function dailyExtract(row: DailyDarkPoolRow, key: DailySortKey): string | number
 function DailyTable({ rows }: { rows: DailyDarkPoolRow[] }) {
   const { sorted, sort, toggle } = useSort(rows, dailyExtract, "date", "desc");
   return (
-    <table className="ticker-flow-daily">
-      <thead>
-        <tr>
-          <SortTh<DailySortKey> label="Date" sortKey="date" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-          <SortTh<DailySortKey> label="Direction" sortKey="direction" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-          <SortTh<DailySortKey> label="Strength" sortKey="strength" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-          <SortTh<DailySortKey> label="Buy %" sortKey="buy" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-          <SortTh<DailySortKey> label="Prints" sortKey="prints" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-        </tr>
-      </thead>
-      <tbody>
-        {sorted.map((d) => {
-          const pct = buyPct(d);
-          return (
-            <tr key={d.date ?? JSON.stringify(d)}>
-              <td className="mono">{d.date ?? "--"}</td>
-              <td>
-                <span className={`pill ${directionClass(d.flow_direction)}`}>
-                  {(d.flow_direction ?? "NEUTRAL").replace("_", " ")}
-                </span>
-              </td>
-              <td className="mono">{d.flow_strength ?? "--"}</td>
-              <td className="mono">{pct == null ? "--" : `${pct}%`}</td>
-              <td className="mono">{d.num_prints ?? "--"}</td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
+    <div
+      className="table-wrap"
+      data-testid="daily-dp-history-table-wrap"
+      role="region"
+      aria-label="Daily dark pool history, horizontally scrollable"
+      tabIndex={0}
+    >
+      <table className="ticker-flow-daily">
+        <thead>
+          <tr>
+            <SortTh<DailySortKey> label="Date" sortKey="date" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+            <SortTh<DailySortKey> label="Direction" sortKey="direction" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+            <SortTh<DailySortKey> label="Strength" sortKey="strength" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+            <SortTh<DailySortKey> label="Buy %" sortKey="buy" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+            <SortTh<DailySortKey> label="Prints" sortKey="prints" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map((d) => {
+            const pct = buyPct(d);
+            return (
+              <tr key={d.date ?? JSON.stringify(d)}>
+                <td className="mono">{d.date ?? "--"}</td>
+                <td>
+                  <span className={`pill ${directionClass(d.flow_direction)}`}>
+                    {(d.flow_direction ?? "NEUTRAL").replace("_", " ")}
+                  </span>
+                </td>
+                <td className="mono">{d.flow_strength ?? "--"}</td>
+                <td className="mono">{pct == null ? "--" : `${pct}%`}</td>
+                <td className="mono">{d.num_prints ?? "--"}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }
 

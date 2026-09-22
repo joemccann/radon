@@ -1,5 +1,8 @@
 "use client";
 
+import ErrorToast from "@/components/ErrorToast";
+
+import { userErrorMessage } from "@/lib/userError";
 import { useCallback, useEffect, useRef, useState } from "react";
 import ConfirmDialog from "./ConfirmDialog";
 
@@ -25,6 +28,7 @@ export default function TradingKillSwitch() {
   const [status, setStatus] = useState<HaltState | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingAction>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [lastResult, setLastResult] = useState<string | null>(null);
   const [confirmFor, setConfirmFor] = useState<Exclude<PendingAction, null> | null>(null);
   const inflightRef = useRef(false);
@@ -39,7 +43,7 @@ export default function TradingKillSwitch() {
       setStatus(data);
       setStatusError(null);
     } catch (err) {
-      setStatusError(err instanceof Error ? err.message : "status probe failed");
+      setStatusError(userErrorMessage(err, "status probe failed"));
     } finally {
       inflightRef.current = false;
     }
@@ -54,6 +58,7 @@ export default function TradingKillSwitch() {
   const runAction = useCallback(
     async (action: Exclude<PendingAction, null>) => {
       setPending(action);
+      setActionError(null);
       try {
         const needsConfirm = action === "kill" || action === "cancel-all";
         const res = await fetch(`/api/admin/trading/${action}`, {
@@ -68,13 +73,13 @@ export default function TradingKillSwitch() {
             typeof (body.error as { message?: string })?.message === "string"
               ? (body.error as { message: string }).message
               : `HTTP ${res.status}`;
-          setLastResult(`${action} failed: ${detail}`);
+          setActionError(`${action} failed: ${userErrorMessage(detail, "The action could not be completed. Review trading status before retrying.")}`);
         } else {
           setLastResult(actionResultLine(action, body));
         }
       } catch (err) {
-        setLastResult(
-          `${action} failed: ${err instanceof Error ? err.message : "request error"}`,
+        setActionError(
+          `${action} failed: ${userErrorMessage(err, "request error")}`,
         );
       } finally {
         setPending(null);
@@ -104,7 +109,8 @@ export default function TradingKillSwitch() {
           Halt reason: {status.reason}
         </p>
       )}
-      {statusError && <p className="admin-card-note">Status unavailable: {statusError}</p>}
+      {statusError && <ErrorToast message={statusError} onRetry={() => { void fetchStatus(); }} />}
+      {actionError && <ErrorToast message={actionError} />}
 
       <div className="admin-actions-row">
         {halted ? (

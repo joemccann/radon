@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import WorkspaceShell from "@/components/WorkspaceShell";
 import { isTickerRouteSegment } from "@/lib/tickerRoute";
+import { routeMetadata } from "@/lib/pageTitle";
 
 // Static routes that Next.js already handles — defense-in-depth guard
 const RESERVED = new Set([
@@ -14,6 +15,11 @@ type Props = {
   params: Promise<{ ticker: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
+
+export async function generateMetadata({ params }: Props) {
+  const { ticker } = await params;
+  return routeMetadata(`/${ticker}`);
+}
 
 export default async function TickerPage({ params, searchParams }: Props) {
   const { ticker: raw } = await params;

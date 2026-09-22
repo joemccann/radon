@@ -1,0 +1,14 @@
+[Unit]
+Description=Radon CALM STREAK Indicator - Cboe SPX daily OHLC pull, consecutive sessions without a >1% intraday band
+
+[Timer]
+# 02:40 UTC catches an evening Cboe regeneration, 5 min after radon-vixcor.
+# 14:30 UTC catches the observed ~13:02 UTC next-morning regeneration.
+# Daily incl. weekends: 304 runs are heartbeats.
+OnCalendar=*-*-* 02:40:00 UTC
+OnCalendar=*-*-* 14:30:00 UTC
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

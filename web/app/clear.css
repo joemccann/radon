@@ -111,6 +111,10 @@
   color: var(--text-on-accent);
 }
 
+.radon-clear .btn-quick {
+  padding-inline: 8px;
+}
+
 .radon-clear :is(.btn-secondary, .btn-quick, .btn-sync) {
   background: var(--bg-panel);
   border-color: var(--line-grid);
@@ -139,30 +143,23 @@
   border-radius: var(--radius-sm);
 }
 
-.radon-clear :is(.modify-price-input-row, .table-search, .theta-search, .flow-ticker-input-row, .command-palette-input-wrap):has(> input:focus-visible),
+.radon-clear :is(.modify-price-input-row, .table-search, .theta-search, .flow-ticker-input-row):has(> input:focus-visible),
 .radon-clear .modify-price-input-row:has(> select.modify-price-input:focus-visible),
 .radon-clear .ask-composer:has(.ask-composer__input:focus-visible) {
   outline: 2px solid var(--border-focus);
   outline-offset: var(--field-focus-offset, 2px);
 }
 
-.radon-clear :is(.modify-price-input-row, .table-search, .theta-search, .flow-ticker-input-row, .command-palette-input-wrap) > input,
+.radon-clear :is(.modify-price-input-row, .table-search, .theta-search, .flow-ticker-input-row) > input,
 .radon-clear .modify-price-input-row > select.modify-price-input,
 .radon-clear .ask-composer .ask-composer__input {
   border-radius: 0;
 }
 
-.radon-clear :is(.modify-price-input-row, .table-search, .theta-search, .flow-ticker-input-row, .command-palette-input-wrap) > input:focus-visible,
+.radon-clear :is(.modify-price-input-row, .table-search, .theta-search, .flow-ticker-input-row) > input:focus-visible,
 .radon-clear .modify-price-input-row > select.modify-price-input:focus-visible,
 .radon-clear .ask-composer .ask-composer__input:focus-visible {
   outline: none;
-}
-
-/* This field touches an overflow-clipped dialog edge; keep its ring inside.
-   A local value avoids competing with the grouped selector's specificity
-   after the production CSS optimizer combines it into :is(...). */
-.radon-clear .command-palette-input-wrap {
-  --field-focus-offset: -2px;
 }
 
 .radon-clear :is(.pill, .order-status-pill) {
@@ -173,7 +170,7 @@
   border-radius: var(--radius-capsule);
 }
 
-.radon-clear :is(.modal-content, .command-palette) {
+.radon-clear .modal-content {
   border-radius: var(--radius-lg);
   border-color: var(--line-grid);
   background: var(--bg-panel);
@@ -529,8 +526,11 @@ body.radon-clear[data-mobile="true"] :is(
 .chat-starters button span span { color: var(--text-muted); font-size: 12px; }
 .chat-starters svg { flex-shrink: 0; color: var(--text-muted); }
 .chat-starters button:hover strong, .chat-starters button:hover svg { color: var(--signal-core-text); }
-.chat-panel .chat-messages { padding: 28px 40px 24px; scrollbar-gutter: stable; }
-.chat-panel .chat-message { margin-bottom: 28px; min-width: 0; }
+/* Short conversations stay with the composer; overflowing history still scrolls. */
+.chat-panel .chat-messages { display: flex; flex-direction: column; padding: 28px 40px 24px; scrollbar-gutter: stable; }
+.chat-panel .chat-message { flex-shrink: 0; margin-bottom: 28px; min-width: 0; }
+.chat-panel .chat-message:first-child { margin-top: auto; }
+.chat-panel .chat-message:last-child { margin-bottom: 0; }
 .chat-panel .chat-message.user { max-width: 85%; padding: 12px 16px; background: var(--bg-subtle); border-radius: var(--radius-lg); }
 .chat-panel .chat-meta { margin-bottom: 8px; }
 .chat-panel .chat-role { font: 600 12px var(--font-sans); color: var(--text-primary); letter-spacing: 0; text-transform: none; }

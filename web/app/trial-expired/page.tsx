@@ -1,11 +1,10 @@
 import TrialExpiredRedirect from "./TrialExpiredRedirect";
+import { routeMetadata } from "@/lib/pageTitle";
 
 // Public landing page for expired demo trials (middleware isPublicRoute).
 // The demo gate redirects signed-in expired trial users here; it renders
 // outside WorkspaceShell, same bare pattern as /sign-in.
-export const metadata = {
-  title: "Demo ended · Radon",
-};
+export const metadata = routeMetadata("/trial-expired");
 
 export default function TrialExpiredPage() {
   return (

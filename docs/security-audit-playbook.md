@@ -10,6 +10,7 @@ cadence (quarterly + before major releases) and **add to it** as the app grows.
 | `.claude/workflows/security-audit.mjs` | The audit engine. Fans out one finder per dimension, adversarially verifies every finding, runs a completeness + regression critic. Returns structured JSON. |
 | `scripts/security/gen_security_report.py` | Deterministic JSON → HTML report renderer. |
 | `docs/security-audit-playbook.md` | This file — methodology, dimension catalog, regression invariants, audit log. |
+| `docs/security-approved-tools.md` | Tool versions the nightly security loops were last checked against (informational since 2026-09-19; only gitleaks is still pinned, in CI) and how each is re-derived. |
 | `docs/security-audit-<date>.html` | One rendered report per run. **This repo is PUBLIC — the report enumerates the attack surface and quotes secret/topology strings, so it is gitignored (`docs/security-audit-*.html`) and MUST be filed in the private `radon-cloud:security-archive`, never committed here.** |
 
 ## How to run
@@ -152,6 +153,14 @@ line here whenever you ship a security fix.**
   gitignored pattern, so a crash inside the window cannot leave a
   commit-visible secret file in a PR-opening clone. Pinned by
   `cloud/tests/test_env_example.py::TestGitignore`.
+- **A unit that renders third-party content gets least-privilege env and network**
+  — a container whose workload parses or renders untrusted external content
+  (e.g. the newsfeed's sandbox-disabled Chromium) receives only the env keys
+  its own code reads, never the full `/etc/radon/env` set, and runs on an
+  isolated bridge network, never `--network host`. Pinned by
+  `cloud/tests/test_app_runtime.py::test_run_newsfeed_env_file_carries_only_its_allowlisted_keys`
+  and the per-unit network assertions in
+  `test_run_allowlisted_unit_uses_host_net_and_radon_user`.
 - **Root provisioning never dereferences a path an unprivileged account can replace**
   — `cloud/scripts/setup-vps.sh` runs as root; every chmod/chown of the env file passes `require_regular_file` (a symlink is refused, never followed)
   and every unit, drop-in, journald conf, Caddyfile, helper, sudoers and polkit
@@ -177,6 +186,20 @@ line here whenever you ship a security fix.**
   skips a bound); a future with no valid contract multiplier refuses; a stock
   leg in a BAG never nulls the combo loss computation.
   (`scripts/tests/test_order_limits_fail_open_inputs.py`)
+- **Unattended agent push authority is enforced by git, not prompt text** — a
+  push-capable Grok responder cycle installs the `fix/*`-only `pre-push` guard
+  (no deletes, no tags) before launching the agent and stands down when it
+  cannot; the PR helper refuses merge-shaped `gh` invocations by token scan;
+  page-derived summaries are flattened before entering PR metadata.
+  (`scripts/tests/test_grok_push_guard.py`)
+- **Subscription credentials stop at the trust boundary of what consumes them**
+  — an unpinned third-party agent CLI subprocess gets an explicit env
+  allowlist, never `os.environ` (`subscription_tokens.CLI_ENV_ALLOWLIST`,
+  `model_ladder._ANTIGRAVITY_CLI_ENV_ALLOWLIST`); operator credential dirs
+  bind only into containers whose unit actually runs a ladder rung; secrets
+  never ride a subprocess argv.
+  (`scripts/tests/test_model_ladder.py`, `cloud/tests/test_app_runtime.py`,
+  `scripts/tests/test_fetch_x_xai_token.py`)
 
 ## Triage & patch policy
 

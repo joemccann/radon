@@ -9289,6 +9289,70 @@ Delta findings continue the T-### numbering in dated `## Delta audit` sections.
 - Audited through: `fcaa1c67` on 2026-09-08 — **4 new findings** (T-486…T-489: 4 P1) over 101 commits / 539 files. Full gates: pytest 12,392 passed / 2 failed; vitest 9,116 passed / 3 failed; cloud 1,808 passed / 4 failed. Every red reproduced in its owning file; 214 touched tests make scoped 3× reruns equivalent to full gates. No new code skip/only/xfail, exclusion growth, threshold decrease, or unclassified E2E spec.
 - Audited through: `964b6b77` on 2026-09-09 — **1 new finding** (T-490: P1) over 34 commits / 267 files. Full gates: pytest 12,709 passed / 21 failed; vitest 9,276 passed; cloud 1,841 passed / 4 failed. The 98 touched test files make scoped 3× reruns equivalent to full gates. No coverage threshold decrease, exclusion growth, or new `.only`/`xfail`; one new conditional `jq` skip is covered by CI's Ubuntu toolchain.
 - Audited through: `9dce4b3a` on 2026-09-10 — **0 new findings** over 6 commits / 53 paths, with existing deterministic T-490 (21 pytest reds) and T-488 (4 cloud reds) re-confirmed. Vitest green; changed Python, Vitest, and cloud test surfaces deterministic x3. No skip, exclusion, threshold, or CI-reachability drift.
+- Audited through: `3e394792` on 2026-09-12 — **1 new finding** (T-491, P1) over 24 commits / 180 paths. The focused research/model suite was 114 passed / 1 failed; the owning test failed 3/3 in isolation. No full-gate count is claimed: the required detached stage exited with no output and no `DONE` sentinel on this runner. No new executable skip, CI exclusion growth, threshold reduction, coverage-measurement change, or uncurated added E2E spec.
+- Audited through: `3e394792` on 2026-09-12 (**second pass**, wrapper 19:00 fire, same clone) — **0 new findings**; the delta range `3e394792..origin/main` is EMPTY (main unmoved since the 00:13 first pass), so this run's work was the first pass's unclaimed full gates, run serially detached with full PATH. pytest **12880 passed / 19 skipped / 0 failed** (2019s) — T-490's 21 reds are GONE, matching the recorded operator completion. vitest **9479 passed / 4 failed in 2 files**, ALL one environment cause: `exceljs` (declared `web/package.json:39`, added in the first pass's range at `1f0734af`) absent from this clone's `node_modules` — the 2026-09-05 lesson recurring a third time; after `bun install --frozen-lockfile` in `web/` (86 packages, <1s) the failed set re-ran **11 passed / 0 failed ×2**, repo untouched. cloud **5 failed / 1910 passed / 8 skipped**: sorted FAILED list entirely `test_caddy_edge_timeouts.py`, with resolved `bash` 5.3.9 (homebrew) and `caddy` ABSENT recorded per T-484 — same 5-list class as the 2026-09-05 second pass; T-488's 4 reds do not reproduce under this PATH. Focused T-491 owner suite **52 passed ×4** (fix verified green; determinism 3× clean). Post-gate tree clean (T-275); secret sweep vacuous — no wrapper secrets exported in this shell (T-381); no executable skip/`.only`/`xfail` added on the branch (audit-prose grep hits only). Note: `~/radon-weekend/venv-testing` does not exist on this host; `/opt/homebrew/bin/python3.13` carries pytest, pytest-asyncio, and xdist and is what the gates ran.
+- Audited through: `fe96fdac` on 2026-09-15 — 0 new findings over 35 commits / 51 paths; static coverage, gate-drift, and skip sweeps clean; local gates intentionally not run and no CI result exists for this merge head.
+
+## Delta audit 2026-09-17
+
+Range `fe96fdac..0833758b`: 55 commits / 315 paths. Codemap direct-import
+review plus `rg` confirms changed executable money-path, daemon, scanner, and
+route sources have importing tests: `scripts/vol_skew_mr_scanner.py` is covered
+by `scripts/tests/test_vol_skew_mr_scanner.py`, its FastAPI route by
+`scripts/api/tests/test_vol_skew_mr_route.py`, and the scanner panel by
+`web/tests/vol-skew-mr-scanner.test.tsx`. CI curation explicitly lists the new
+chain specs at `.github/workflows/ci.yml:797-800`; the held-out Vol/Skew E2E is
+recorded in `web/e2e/ci-curation-ledger.txt:12`. No new CI exclusion, coverage
+threshold movement, blanket exclude, skip, xfail, or focused test was found.
+
+### T-495 — P2 — a new CI-curated chain E2E reintroduces CSS hooks and a fixed sleep
+
+`web/e2e/chain-anchored-scroll.spec.ts:85,90,100,135-138` selects stateful
+controls and order rows via `.chain-expiry-select`, `.chain-grid`,
+`.chain-row`, `.chain-strike`, and `.chain-mid`, and uses
+`page.waitForTimeout(250)` before snapshots. A behavior-preserving class rename
+or slower render makes this CI-gated test blind or flaky; T-479 is DONE but did
+not cover this newly introduced spec.
+
+### Backlog rows (T-495)
+
+| Task | Severity | Red / green acceptance criteria |
+|---|---|---|
+| T-495 | P2 | Replace the implementation selectors with roles or dedicated testids and replace the 250ms delay with an observable settled-state assertion. Red: rename the presentational classes or delay the render and show the old spec blind/flaky. Green: the new test survives the class rename and synchronizes without wall-clock waiting. |
+
+### Standing sweeps
+
+- Gates serial from repo root: pytest **13,189 passed / 21 failed / 19 skipped / 90 deselected** in 2265.46s; all failures are standing T-490 portable-prompt sync cases. Vitest **956 files / 9,575 passed / 0 failed** in 145.81s. Cloud **1,867 passed / 4 failed / 76 skipped** in 375.01s; all four are standing T-488 GNU-timeout cases at `cloud/tests/test_deploy_corrections.py`.
+- The delta touched 99 test files across Python, cloud, Vitest, and browser roots, which is full-gate-scale; the deterministic-rerun requirement cannot honestly be represented as a small scoped pass. No new failure was observed in the completed serial gates.
+- Post-gate tree sweep is clean except this audit's append-only ledger/task edits.
+
+- Audited through: `0833758b` on 2026-09-17 — 1 new finding (T-495) over 55 commits / 315 paths; static, gate-drift, skip, and coverage-ratchet sweeps clean; gates recorded above with standing T-490/T-488 baseline reds.
+
+## Remediation 2026-09-17
+
+`RADON_WEEKEND_REDUCED=1`: T-495 is P2 and out of scope. Reverification found
+no new source-actionable P0/P1: T-490 is BLOCKED by this runner's prohibition
+on creating `.codex/`, and T-488 remains operator-only after three recorded
+genuine attempts. See the append-only TEST_LOG entry for exact operator
+actions; closing gates are not claimed while T-490 is deterministically red.
+
+## Remediation 2026-09-15
+
+`RADON_WEEKEND_REDUCED=1`: the current-cycle audit filed no P0/P1 finding.
+The standing P1 T-488 remains operator-only after its three recorded genuine
+attempts: reproduce and repair its GNU-timeout process-tree behavior on Linux
+CI without widening the fixed contract timeout. T-493 is P2 and out of scope.
+
+| Task | Status | Evidence |
+|---|---|---|
+| Scope | DONE | Reconciled current-cycle and standing P0/P1 entries; no source-actionable item remains under the reduced rung. |
+| T-488 | operator-only | Reproduce and repair the GNU-timeout process-tree behavior on Linux CI without widening the fixed contract timeout. |
+
+Focused ledger and phase contracts are **117 passed**. Closing gates are
+INCOMPLETE: detached serial stage `/tmp/tw-2026-09-15/remediate-gates.sh`
+prewrote nine result slots, then its process died during `pytest_1` with a
+zero-byte log and no `DONE` sentinel. No full-gate count or green verdict is
+claimed.
 
 ## Remediation 2026-08-29 — PR #140
 
@@ -10193,3 +10257,260 @@ the focused contract is 52 passed / 21 failed and a renderer write fails with
 `PermissionError` creating repository `.codex`. T-490 is therefore
 operator-only here until the generated artifacts can be written and committed;
 full closing gates are not claimed while that deterministic P1 red remains.
+
+## Delta audit 2026-09-12
+
+Range `9dce4b3a..3e394792`: 24 commits / 180 paths. The 63 touched test
+files span Python, Vitest, and browser roots. The required detached full-gate
+stage exited before writing output or its `DONE` sentinel, so no full-suite
+count is claimed.
+
+### T-491 — P1 — research reviewer no-key contract reads ambient provider credentials and is deterministic false-red on keyed runners
+
+`scripts/tests/test_research_runtime.py:68-73` deletes only
+`ANTHROPIC_API_KEY` then asserts `Reviewer()` has no configured provider.
+The delta changes `Reviewer` to accept every ladder provider through
+`wired_providers` (`scripts/research/model.py:27-35`), which scans Grok,
+Codex, Gemini, NVIDIA, and Cerebras credentials (`scripts/clients/model_ladder.py:142-166`).
+With an ambient non-Anthropic key, the assertion fails before the image-limit
+contract runs: **114 passed / 1 failed** in the focused set and **1 failed / 0
+passed** in this test **3/3** in isolation. CI can pass the same test simply
+because its environment has no alternate key, so it no longer proves the
+no-key behavior under the new source contract.
+
+## Delta audit 2026-09-13 (audit mode)
+
+Range 9dce4b3a..9db44a3f: 53 commits, 182 paths, 64 touched test files.
+The changed money-path and daemon surfaces include dark-pool cache completeness,
+IB RT-volume relay wiring, TWR persistence, CTA model fallback, and research
+serving. CI adds three curated E2E specs and an MCP report, retains both
+coverage ratchets, and adds no executable skip, xfail, .only, exclusion, or
+threshold decrease. The 64 touched tests span four collection roots, so a
+scoped three-times determinism pass would substantially duplicate the full
+gates.
+
+### T-493 — P2 — RT-volume relay wiring is tested by source-text inspection, not dispatch behavior
+
+web/tests/ib-rt-volume-relay.test.ts:29-50 reads
+scripts/ib_realtime_server.js and asserts substrings/regexes for
+EventName.tickString, updatePriceFromTickString, and
+hydrateAndBroadcast(symbol). The pure parser assertion at :53-61 is real,
+but it never dispatches a tick through the relay or observes a broadcast. A
+dead event callback, mismatched argument order, or an update on a detached
+state object can retain every asserted string while option volume remains
+null on the order sheet. The production wiring is at
+scripts/ib_realtime_server.js:1954-1985,2550-2556.
+
+**AC:** extract or inject the relay event registration and a broadcast spy;
+dispatch tickSize 8 and RT-volume tickString 48 into a live symbol state and
+assert the emitted payload carries volume. A mutation that removes either
+callback invocation or broadcast must red.
+
+### Standing sweeps
+
+- The detached serial full-gate stage prewrote all three rc placeholders but
+  exited before pytest wrote output and without its required DONE sentinel;
+  therefore no gate count, determinism result, or green verdict is claimed.
+- Post-stage working tree was clean. The preflight interpreter lacks pytest;
+  the dedicated venv-testing interpreter was selected for the stage.
+- Existing operator-only T-488 and T-490 remain standing candidates; neither
+  is in the changed test-quality surface.
+
+### Standing sweeps
+
+- Focused owner set: **114 passed / 1 failed**; all evidence is T-491. The
+  owner test was **1 failed** on each of three isolated runs.
+- Gate drift and ratchet: `.github/workflows/ci.yml:429-441,789-819` adds an
+  MCP artifact and curated E2E entries only. CI invocations, exclusions,
+  `deploy.needs`, coverage thresholds, and measurement inputs are unchanged.
+- Skip sweep: the zero-context delta contains no added executable `test.skip`,
+  `it.skip`, `pytest.mark.skip`, `xfail`, or `.only`; the only matching changed
+  line is prior audit prose. The existing conditional PDF-runtime skip at
+  `scripts/tests/test_research_pdf.py:13` is not introduced here.
+- Reachability: all 21 added unit tests are under CI-discovered roots; added
+  browser specs are either curated in `.github/workflows/ci.yml:789-803` or
+  recorded in `web/e2e/ci-curation-ledger.txt`.
+
+### Backlog rows
+
+| ID | Sev | Acceptance criteria |
+|---|---|---|
+| T-491 | P1 | Construct the no-key case with `Reviewer(env={})` (or explicitly clear every ladder key), while retaining the oversized-image assertion with its explicit test key. Red: poison an alternate provider key and show the old ambient constructor fails; green: the isolated test is independent of all host credentials. |
+
+## Remediation 2026-09-12
+
+`RADON_WEEKEND_REDUCED=1`: T-491 is the only verified source-actionable P0/P1
+finding from this cycle. `Reviewer(env={})` now preserves the injected empty
+environment and falls back to ambient credentials only when `env is None`.
+
+| Task | Status | Evidence |
+|---|---|---|
+| T-491 | DONE | Red: `XAI_API_KEY=ambient-poison` made the old no-key assertion fail (no `ModelError`). Green: poison-key case 1 passed; research runtime plus model ladder 59 passed. |
+
+### Backlog rows (2026-09-13)
+
+| ID | Sev | Acceptance criteria |
+|---|---|---|
+| T-493 | P2 | Exercise registered relay callbacks against a live symbol-state fixture and broadcast spy for tickSize 8 and tickString 48; deleting either update/broadcast invocation must red. |
+
+- Audited through: 9db44a3f on 2026-09-13 — 1 new finding (T-491) over 53 commits / 182 paths; detached full-gate stage INCOMPLETE (no DONE sentinel), so no test counts are claimed.
+
+## Delta audit 2026-09-14
+
+Range `9db44a3f..9b9a65c7`: 48 commits / 76 paths. The codemap names 25 direct
+test importers for the changed source surface; two map candidates
+(`scripts/clients/model_ladder.py`, `cloud/scripts/drift_audit.py`) have
+dedicated tests confirmed by `rg`. CI invocation, coverage thresholds,
+exclusions, and deploy dependencies are unchanged.
+
+### T-492 — P1 — append-only test ledgers accept unresolved merge state and a reused finding ID
+
+`TEST_LOG.md:844,867,878` contains committed `<<<<<<<`, `=======`, and
+`>>>>>>>` markers, so the nightly remediation history has two incompatible
+tails. `TEST_AUDIT.md:10206` and `:10230` both define `### T-491` for distinct
+findings, violating the continuing-ID contract. The only ledger test at
+`scripts/tests/test_docs_contract.py:616-632` checks the header and row count;
+it passes with both corruption forms, so the next audit/remediation can
+mis-deduplicate or lose a verified item.
+
+| ID | Sev | Acceptance criteria |
+|---|---|---|
+| T-492 | P1 | Add a ledger-integrity contract that fails on conflict markers in `TEST_AUDIT.md` or `TEST_LOG.md` and on duplicate `### T-###` finding headings. Red: inject each corruption into a copied ledger and assert rejection. Green: reconcile the committed tails without deleting history, assign the relay finding its next unused ID, and run the focused contract. |
+
+### Standing sweeps
+
+- Serial full-gate stage reached its `DONE 3` sentinel: pytest failed at
+  collection (`76 errors`) because this runner's new Python venv lacked
+  `ib_insync`; a second collection attempt exposed unpinned `mcp` 2.x and a
+  missing Python Playwright package. The corrected pinned toolchain collects
+  **12,959 tests / 90 deselected** in 7.13s, but no clean full-pytest count is
+  claimed in this capped audit. Vitest passed **9,479 / 0 failed** (950 files, 18
+  skipped); cloud was **1,847 passed / 4 failed / 76 skipped** in 404s, with
+  all four failures in the standing T-488 GNU-timeout class at
+  `cloud/tests/test_deploy_corrections.py:1495-1586`.
+- Added-line skip/xfail/`.only` sweep found no executable test skip or focus;
+  coverage configuration and `.github/workflows/ci.yml` invocations are
+  unchanged in the range.
+- `git diff --check 9db44a3f..HEAD` is clean; the committed ledger conflict
+  markers are semantic corruption, not whitespace conflict markers.
+
+- Audited through: 9b9a65c7 on 2026-09-14 — 1 new finding (T-492) over 48 commits / 76 paths; full Python gate remains unclaimed after runner-toolchain correction.
+
+## Remediation 2026-09-13
+
+`RADON_WEEKEND_REDUCED=1`: T-491 is P2 and therefore out of scope. Reconciled
+the standing P0/P1 ledger: T-488 remains operator-only after its three recorded
+GNU-timeout fixture attempts; T-490 remains operator-only in this restricted
+runner because the tracked `.codex` artifacts cannot be materialized here.
+There is no source-actionable P0/P1 finding to implement. Closing gates, if
+completed, are recorded in `TEST_LOG.md`; no result is asserted in advance.
+
+## Delta audit 2026-09-13 (surfaced by remediation)
+
+### T-494 — P1 — `TEST_LOG.md` on `origin/main` shipped unresolved git conflict markers
+
+PR #411 (`testing/2026-09-12`, merge `9b9a65c7`) landed on a tree that already
+carried the 2026-09-13 TEST_LOG section from PR #417. The merge kept both
+sides as conflict markers at `TEST_LOG.md:838` (`<<<<<<< HEAD`), `:861`
+(`=======`), and `:872` (`>>>>>>> 7f31d90c …`). `TestTestLogLedgerIsAppendOnly`
+and `TestRootLedgersAreAppendOnly` stayed green: they count `^\| T-\d+`
+rows, and both sides' rows survived inside the conflict. The testing-loop
+dead-man ledger was therefore unreadable while every gate reported pass.
+
+**AC:** a contract over `TEST_LOG.md` / `TEST_AUDIT.md` / `REMEDIATION_LOG.md`
+reds on `<<<<<<< `, `>>>>>>> `, or a lone `=======` line. Red today at HEAD.
+Green: both 2026-09-12 second-pass and 2026-09-13 sections kept, markers gone.
+
+### Backlog rows (T-494)
+
+| ID | Sev | Acceptance criteria |
+|---|---|---|
+| T-494 | P1 | Conflict-marker scan of the testing ledgers is red against the merged `TEST_LOG.md` at `9b9a65c7` and green after both sides are kept without markers. |
+
+## Remediation 2026-09-13 (second pass)
+
+`RADON_WEEKEND_REDUCED=1`. T-494 is the new source-actionable P1.
+T-491 (P2 RT-volume relay wiring) stays out of scope. T-488 remains
+operator-only. T-490's `.codex` write blocker is gone on this runner.
+
+| Task | Status | Evidence |
+|---|---|---|
+| T-494 | DONE | Red: marker contract 1 failed / 2 passed at lines 838, 861, 872. Green: 3 passed after keeping both ledger sections. `test_docs_contract.py` 55 passed. |
+| T-490 | DONE | `render_loop_prompt.py --write` succeeded; portable-prompt sync plus docs contract 128 passed. |
+
+## Remediation 2026-09-14
+
+`RADON_WEEKEND_REDUCED=1`: T-492 was the sole source-actionable P1. T-488
+remains operator-only after three genuine attempts: reproduce and repair the
+GNU-timeout process-tree behavior on Linux CI without widening its fixed
+contract timeout. T-490 remains operator-only in this runner: render the
+Codex artifacts from a checkout where `.codex/` is writable, run its focused
+contract, and commit generated artifacts.
+
+| Task | Status | Evidence |
+|---|---|---|
+| T-492 | DONE | RED: ledger-integrity contract 2 failed / 2 passed on the committed conflict markers and duplicate T-491 headings. GREEN: copied-ledger marker and duplicate injections reject; real ledgers and append-only contracts 9 passed. Both historical conflict sides remain in `TEST_LOG.md`; only the markers were removed. The relay P2 received the next unused ID, T-493. |
+
+## Delta audit 2026-09-15
+
+Range `9b9a65c7..fe96fdac`: 35 commits / 51 paths. Codemap review finds 26
+test importers for changed money-path and daemon sources, confirmed with
+`rg`: the new stacked-vertical behavior is covered by
+`scripts/tests/test_split_vertical_combos.py:28-69`; the LEAP cache-before-
+report ordering by `scripts/tests/test_leap_scanner.py:457-493`; incident PR
+creation/fail-closed paths by `scripts/tests/test_ir_ensure_pr.py:131-496`; and
+newsfeed bridge-network plus secret allowlist behavior by
+`cloud/tests/test_app_runtime.py:435-460,1057-1121`. The new dependency-floor
+contract parses every matching resolved lockfile entry rather than direct
+manifest ranges at `web/tests/dependency-security-floors.test.ts:34-50`.
+
+### Standing sweeps
+
+- `.github/workflows/ci.yml`, coverage thresholds, collection roots, exclusions,
+  and `deploy.needs` are byte-identical across this range. All new unit tests
+  are under CI-discovered roots; no browser spec was added.
+- The added-line scan found no executable `test.skip`, `it.skip`,
+  `pytest.mark.skip`, `xfail`, or `.only`. The sole changed `pytest.skip` is
+  the pre-existing optional-ledger guard at
+  `scripts/tests/test_docs_contract.py:655-669`, and its absence condition is
+  explicit rather than a test outcome exemption.
+- Per the recorded operator direction, no local full pytest, Vitest, or cloud
+  gate was launched. GitHub records no CI workflow run for merge head
+  `fe96fdac` at audit time, so no green verdict is claimed. The 14 touched
+  test files are below the full-suite threshold, but determinism reruns are
+  likewise deferred to CI under that direction.
+
+- Audited through: `fe96fdac` on 2026-09-15 — 0 new findings over 35 commits / 51 paths; static coverage, gate-drift, and skip sweeps clean; local gates intentionally not run and no CI result exists for this merge head.
+
+## Delta audit 2026-09-16
+
+Range `fe96fdac..8d1d0f52`: 51 commits / 206 paths. The dedicated runner
+markers and clean tree were verified before the audit. Codemap plus `rg`
+confirmed tests for the changed Python and web sources; the three map misses
+are test-covered registry or executable entry points, not gaps. CI, threshold,
+and skip scans found no newly widened CI exclusion, coverage threshold change,
+or executable skip/xfail.
+
+- **T-495 [P2] The new live options-chain browser contract relies on a fixed
+  delay instead of a rendered settle condition.**
+  `web/e2e/chain-anchored-scroll.spec.ts:93-102` scrolls both panes, then
+  uses `page.waitForTimeout(250)` before snapshotting the state asserted after
+  a live quote. A slow renderer can snapshot the pre-scroll layout and fail;
+  a regression that settles after 250 ms can pass. This is distinct from
+  T-309's deck-specific CSS entry point and T-494's relay-source grep.
+  **AC:** replace the sleep with a web-first assertion of the intended stable
+  pane state (for example the two visible-row snapshots or a dedicated
+  `data-testid` state) and prove a deliberately delayed rerender fails.
+
+- Audited through: `8d1d0f52` on 2026-09-16 — 1 new finding (T-495, P2) over
+  51 commits / 206 paths. The detached serial-gate stage ended before writing
+  its required `DONE` sentinel, with `pytest_rc=RUNNING`; no gate count is
+  claimed and the next phase must rerun the gates.
+
+## Remediation 2026-09-16
+
+`RADON_WEEKEND_REDUCED=1`: T-495 is P2 and therefore outside this phase's
+permitted remediation scope. Reconciliation found no verified
+source-actionable P0/P1 finding. T-488 remains operator-only after three
+genuine attempts: reproduce and repair the GNU-timeout process-tree behavior
+on Linux CI without widening its fixed test timeout.

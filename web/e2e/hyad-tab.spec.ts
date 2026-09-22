@@ -9,14 +9,14 @@ function isoDaysAgo(days: number): string {
 
 const DATA_DATE = isoDaysAgo(1);
 
-function buildSeries() {
+function buildSeries(length = SERIES_LENGTH) {
   const points = [];
   let cum = 0;
-  for (let i = 0; i < SERIES_LENGTH; i++) {
+  for (let i = 0; i < length; i++) {
     const net = Math.round(500 * Math.sin(i / 12));
     cum += net;
     points.push({
-      date: i === SERIES_LENGTH - 1 ? DATA_DATE : isoDaysAgo(SERIES_LENGTH - i),
+      date: i === length - 1 ? DATA_DATE : isoDaysAgo(length - i),
       net,
       cum,
       ma21: i >= 20 ? cum - 40 : null,
@@ -121,6 +121,31 @@ test.describe("/regime/hyad - high yield breadth tab", () => {
 
     await expect(section).toContainText("HIGH YIELD BOND CUMULATIVE A-D LINE");
     await expect(section.locator('[data-testid="hyad-brush"]')).toBeVisible();
+  });
+
+  test("plots and inspects SPX before the recent history window", async ({ page }, testInfo) => {
+    // The reported gap hid SPX in the early years of the All range.
+    const history = buildSeries(800);
+    history[0].spx_close = 4700;
+    await setupMocks(page, { ...HYAD_MOCK, series: history });
+    await page.goto("/regime/hyad");
+
+    const section = page.getByTestId("hyad-chart-section");
+    await expect(section.getByRole("button", { name: "All", exact: true })).toHaveAttribute("aria-pressed", "true");
+    const firstSpxPoint = section.locator("circle.dot-spx").first();
+    await expect(firstSpxPoint).toHaveAttribute("cx", "0");
+    await expect(section.locator("circle.dot-spx")).toHaveCount(history.filter((point) => point.spx_close !== null).length);
+
+    const chart = section.getByRole("slider", { name: "Inspect HIGH YIELD BOND CUMULATIVE A-D LINE history" });
+    await chart.press("Home");
+    await expect(chart).toHaveAttribute("aria-valuetext", `${history[0].date}: S&P 500 4700, HY A-D CUM +0`);
+    await expect(section.locator(".chart-tooltip-date")).toHaveText(history[0].date);
+    await expect(section.locator(".chart-tooltip-row").filter({ hasText: "S&P 500" }).locator(".chart-tooltip-value")).toHaveText("4700");
+    await section.screenshot({ path: testInfo.outputPath("hyad-history-early-spx.png") });
+
+    await chart.press("End");
+    await expect(section.locator(".chart-tooltip-date")).toHaveText(DATA_DATE);
+    await expect(section.locator(".chart-tooltip-row").filter({ hasText: "S&P 500" }).locator(".chart-tooltip-value")).toHaveText(String(history.at(-1)!.spx_close));
   });
 
   test("shows the empty state on missing:true without a 4xx", async ({ page }) => {

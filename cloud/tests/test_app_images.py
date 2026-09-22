@@ -75,6 +75,29 @@ def _dropin_for(unit: str) -> Path:
     return CLOUD_ROOT / "services" / f"{unit}.d" / "runtime-container.conf"
 
 
+class TestImageWorkflowTokenScope:
+    """The PR build path must never hold a token that can write GHCR."""
+
+    WF_DIR = CLOUD_ROOT.parent / ".github" / "workflows"
+
+    def test_reusable_workflow_is_call_only_with_no_own_permissions(self) -> None:
+        text = (self.WF_DIR / "app-images.yml").read_text(encoding="utf-8")
+        assert "workflow_call:" in text
+        assert "pull_request:" not in text
+        assert "packages: write" not in text
+
+    def test_pr_caller_grants_read_only(self) -> None:
+        text = (self.WF_DIR / "app-images-pr.yml").read_text(encoding="utf-8")
+        assert "pull_request:" in text
+        assert "contents: read" in text
+        assert ": write" not in text
+        assert "uses: ./.github/workflows/app-images.yml" in text
+
+    def test_main_push_caller_still_grants_publish(self) -> None:
+        text = (self.WF_DIR / "ci.yml").read_text(encoding="utf-8")
+        assert "packages: write" in text
+
+
 class TestAppDockerfilesExist:
     def test_python_dockerfile_exists(self) -> None:
         assert PYTHON_DF.is_file()
@@ -209,7 +232,7 @@ class TestNodeImage:
         assert "/home/radon/radon/web/.next/cache" in text
         assert "/home/radon/radon/web/public/data" in text
 
-    def test_clerk_public_env_is_required_at_build(self) -> None:
+    def test_clerk_public_env_is_required_at_build(self, tmp_path) -> None:
         text = NODE_DF.read_text(encoding="utf-8")
         assert 'ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=""' not in text
         assert "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY" in text
@@ -217,7 +240,13 @@ class TestNodeImage:
         # Runtime env cannot repair a client bundle baked without the key.
         assert ".next/static" in text
         assert "grep -RF" in text
-        assert "next-clerk-guard" in text
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from test_app_runtime import _run
+        result = _run(tmp_path, ["run", "radon-nextjs.service"])
+        assert result.returncode == 0, result.stderr
+        run_line = next(line for line in result.docker_log.read_text().splitlines() if line.startswith("run "))
+        assert run_line.endswith(" /usr/local/bin/next-clerk-guard")
 
 
 class TestImageSafety:

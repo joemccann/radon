@@ -1,31 +1,31 @@
 {
-  "generated_at": "2026-09-11T01:42:04Z",
-  "node_count": 3322,
-  "edge_count": 6734,
+  "generated_at": "2026-09-22T09:00:10Z",
+  "node_count": 3545,
+  "edge_count": 7335,
   "areas": {
-    "web": 1955,
+    "web": 2065,
     "site": 155,
-    "scripts": 1098,
-    "cloud": 66,
+    "scripts": 1204,
+    "cloud": 74,
     "lib": 28,
     "tests": 17,
-    "tools": 3
+    "tools": 2
   },
   "groups": [
     {
       "id": "web/app",
       "area": "web",
-      "count": 211
+      "count": 220
     },
     {
       "id": "web/components",
       "area": "web",
-      "count": 248
+      "count": 262
     },
     {
       "id": "web/e2e",
       "area": "web",
-      "count": 191
+      "count": 203
     },
     {
       "id": "web",
@@ -35,7 +35,7 @@
     {
       "id": "web/lib",
       "area": "web",
-      "count": 387
+      "count": 408
     },
     {
       "id": "web/public",
@@ -50,7 +50,7 @@
     {
       "id": "web/tests",
       "area": "web",
-      "count": 904
+      "count": 958
     },
     {
       "id": "site/app",
@@ -85,12 +85,12 @@
     {
       "id": "scripts",
       "area": "scripts",
-      "count": 151
+      "count": 168
     },
     {
       "id": "scripts/ai_cycle",
       "area": "scripts",
-      "count": 10
+      "count": 12
     },
     {
       "id": "scripts/alerts",
@@ -100,7 +100,7 @@
     {
       "id": "scripts/api",
       "area": "scripts",
-      "count": 115
+      "count": 118
     },
     {
       "id": "scripts/backtest",
@@ -115,7 +115,7 @@
     {
       "id": "scripts/clients",
       "area": "scripts",
-      "count": 21
+      "count": 23
     },
     {
       "id": "scripts/db",
@@ -155,7 +155,7 @@
     {
       "id": "scripts/lib",
       "area": "scripts",
-      "count": 31
+      "count": 33
     },
     {
       "id": "scripts/mcp_hosted",
@@ -175,7 +175,7 @@
     {
       "id": "scripts/newsfeed",
       "area": "scripts",
-      "count": 22
+      "count": 33
     },
     {
       "id": "scripts/paper",
@@ -185,7 +185,7 @@
     {
       "id": "scripts/research",
       "area": "scripts",
-      "count": 12
+      "count": 21
     },
     {
       "id": "scripts/security",
@@ -193,9 +193,14 @@
       "count": 1
     },
     {
+      "id": "scripts/slm",
+      "area": "scripts",
+      "count": 2
+    },
+    {
       "id": "scripts/tests",
       "area": "scripts",
-      "count": 543
+      "count": 608
     },
     {
       "id": "scripts/trade_blotter",
@@ -213,9 +218,9 @@
       "count": 13
     },
     {
-      "id": "scripts/workflow",
-      "area": "scripts",
-      "count": 7
+      "id": "cloud/gpu",
+      "area": "cloud",
+      "count": 1
     },
     {
       "id": "cloud/scripts",
@@ -225,7 +230,7 @@
     {
       "id": "cloud/tests",
       "area": "cloud",
-      "count": 57
+      "count": 64
     },
     {
       "id": "lib/tools",
@@ -245,169 +250,204 @@
     {
       "id": "tools/codemap",
       "area": "tools",
-      "count": 3
+      "count": 2
     }
   ],
   "hubs": [
     {
       "id": "web/lib/types.ts",
       "area": "web",
-      "in": 272,
+      "in": 278,
       "out": 1,
       "test": false
     },
     {
       "id": "web/lib/pricesProtocol.ts",
       "area": "web",
-      "in": 192,
+      "in": 197,
       "out": 0,
       "test": false
     },
     {
       "id": "web/lib/apiContracts.ts",
       "area": "web",
-      "in": 113,
+      "in": 120,
       "out": 0,
-      "test": false
-    },
-    {
-      "id": "web/components/WorkspaceShell.tsx",
-      "area": "web",
-      "in": 53,
-      "out": 42,
-      "test": false
-    },
-    {
-      "id": "scripts/db/writer.py",
-      "area": "scripts",
-      "in": 89,
-      "out": 5,
       "test": false
     },
     {
       "id": "web/components/WorkspaceSections.tsx",
       "area": "web",
-      "in": 19,
-      "out": 75,
+      "in": 20,
+      "out": 81,
       "test": false
     },
     {
       "id": "web/lib/routeAccess.ts",
       "area": "web",
-      "in": 89,
+      "in": 95,
       "out": 4,
+      "test": false
+    },
+    {
+      "id": "scripts/db/writer.py",
+      "area": "scripts",
+      "in": 92,
+      "out": 5,
+      "test": false
+    },
+    {
+      "id": "web/components/WorkspaceShell.tsx",
+      "area": "web",
+      "in": 54,
+      "out": 43,
       "test": false
     },
     {
       "id": "web/lib/radonApi.ts",
       "area": "web",
-      "in": 92,
-      "out": 0,
-      "test": false
-    },
-    {
-      "id": "scripts/api/__init__.py",
-      "area": "scripts",
-      "in": 79,
+      "in": 94,
       "out": 0,
       "test": false
     },
     {
       "id": "scripts/db/__init__.py",
       "area": "scripts",
-      "in": 78,
+      "in": 85,
       "out": 1,
+      "test": false
+    },
+    {
+      "id": "scripts/api/__init__.py",
+      "area": "scripts",
+      "in": 81,
+      "out": 0,
       "test": false
     },
     {
       "id": "web/lib/assistant/nextLoaders.ts",
       "area": "web",
       "in": 2,
-      "out": 73,
+      "out": 78,
       "test": false
     },
     {
       "id": "scripts/db/client.py",
       "area": "scripts",
-      "in": 74,
+      "in": 75,
       "out": 0,
+      "test": false
+    },
+    {
+      "id": "web/lib/pageTitle.ts",
+      "area": "web",
+      "in": 67,
+      "out": 2,
       "test": false
     },
     {
       "id": "scripts/api/server.py",
       "area": "scripts",
       "in": 45,
-      "out": 17,
+      "out": 16,
       "test": false
     },
     {
       "id": "web/lib/positionUtils.ts",
       "area": "web",
-      "in": 55,
+      "in": 58,
       "out": 2,
+      "test": false
+    },
+    {
+      "id": "web/lib/db.ts",
+      "area": "web",
+      "in": 58,
+      "out": 1,
       "test": false
     },
     {
       "id": "web/components/RegimePanel.tsx",
       "area": "web",
       "in": 3,
-      "out": 52,
-      "test": false
-    },
-    {
-      "id": "web/lib/db.ts",
-      "area": "web",
-      "in": 52,
-      "out": 1,
+      "out": 54,
       "test": false
     },
     {
       "id": "web/lib/useSyncHook.ts",
       "area": "web",
-      "in": 45,
-      "out": 4,
+      "in": 50,
+      "out": 5,
       "test": false
     },
     {
       "id": "web/lib/dbFirstRead.ts",
       "area": "web",
-      "in": 43,
+      "in": 47,
+      "out": 5,
+      "test": false
+    },
+    {
+      "id": "web/lib/dbExecute.ts",
+      "area": "web",
+      "in": 45,
       "out": 5,
       "test": false
     },
     {
       "id": "web/components/SectionEmptyState.tsx",
       "area": "web",
-      "in": 45,
-      "out": 0,
-      "test": false
-    },
-    {
-      "id": "web/lib/dbExecute.ts",
-      "area": "web",
-      "in": 40,
-      "out": 4,
-      "test": false
-    },
-    {
-      "id": "web/components/SpectralLoader.tsx",
-      "area": "web",
-      "in": 43,
+      "in": 49,
       "out": 0,
       "test": false
     },
     {
       "id": "web/components/InfoTooltip.tsx",
       "area": "web",
-      "in": 42,
+      "in": 49,
       "out": 0,
+      "test": false
+    },
+    {
+      "id": "web/components/RequestError.tsx",
+      "area": "web",
+      "in": 44,
+      "out": 2,
+      "test": false
+    },
+    {
+      "id": "web/components/SpectralLoader.tsx",
+      "area": "web",
+      "in": 45,
+      "out": 0,
+      "test": false
+    },
+    {
+      "id": "web/components/ErrorToast.tsx",
+      "area": "web",
+      "in": 44,
+      "out": 1,
+      "test": false
+    },
+    {
+      "id": "scripts/db/hrana_http.py",
+      "area": "scripts",
+      "in": 42,
+      "out": 2,
       "test": false
     },
     {
       "id": "web/lib/useViewport.ts",
       "area": "web",
-      "in": 39,
+      "in": 41,
       "out": 1,
+      "test": false
+    },
+    {
+      "id": "web/lib/userError.ts",
+      "area": "web",
+      "in": 40,
+      "out": 0,
       "test": false
     },
     {
@@ -418,10 +458,10 @@
       "test": false
     },
     {
-      "id": "scripts/db/hrana_http.py",
+      "id": "scripts/watchdog/__init__.py",
       "area": "scripts",
-      "in": 35,
-      "out": 2,
+      "in": 37,
+      "out": 0,
       "test": false
     },
     {
@@ -432,8 +472,8 @@
       "test": false
     },
     {
-      "id": "scripts/watchdog/__init__.py",
-      "area": "scripts",
+      "id": "web/lib/chartSystem.ts",
+      "area": "web",
       "in": 36,
       "out": 0,
       "test": false
@@ -453,6 +493,27 @@
       "test": false
     },
     {
+      "id": "web/lib/refreshSchedule.ts",
+      "area": "web",
+      "in": 34,
+      "out": 0,
+      "test": false
+    },
+    {
+      "id": "web/lib/serviceHealthWindows.ts",
+      "area": "web",
+      "in": 33,
+      "out": 0,
+      "test": false
+    },
+    {
+      "id": "web/components/mobile/MetricCell.tsx",
+      "area": "web",
+      "in": 33,
+      "out": 0,
+      "test": false
+    },
+    {
       "id": "scripts/api/auth.py",
       "area": "scripts",
       "in": 33,
@@ -467,66 +528,10 @@
       "test": false
     },
     {
-      "id": "web/lib/refreshSchedule.ts",
-      "area": "web",
-      "in": 32,
-      "out": 0,
-      "test": false
-    },
-    {
-      "id": "web/lib/chartSystem.ts",
-      "area": "web",
-      "in": 32,
-      "out": 0,
-      "test": false
-    },
-    {
-      "id": "site/lib/seo.ts",
-      "area": "site",
-      "in": 31,
-      "out": 1,
-      "test": false
-    },
-    {
       "id": "scripts/perf_twr_builder.py",
       "area": "scripts",
-      "in": 21,
+      "in": 22,
       "out": 11,
-      "test": false
-    },
-    {
-      "id": "web/lib/serviceHealthWindows.ts",
-      "area": "web",
-      "in": 31,
-      "out": 0,
-      "test": false
-    },
-    {
-      "id": "web/components/mobile/MetricCell.tsx",
-      "area": "web",
-      "in": 31,
-      "out": 0,
-      "test": false
-    },
-    {
-      "id": "scripts/clients/uw_client.py",
-      "area": "scripts",
-      "in": 29,
-      "out": 2,
-      "test": false
-    },
-    {
-      "id": "scripts/utils/__init__.py",
-      "area": "scripts",
-      "in": 30,
-      "out": 0,
-      "test": false
-    },
-    {
-      "id": "web/components/RegimeStrip.tsx",
-      "area": "web",
-      "in": 29,
-      "out": 0,
       "test": false
     }
   ],

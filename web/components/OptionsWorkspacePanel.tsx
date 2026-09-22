@@ -1,4 +1,5 @@
 "use client";
+import ErrorToast from "@/components/ErrorToast";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { usePathname, useRouter } from "next/navigation";
@@ -150,7 +151,7 @@ export default function OptionsWorkspacePanel({ symbol }: OptionsWorkspacePanelP
                 />
                 <button type="submit" disabled={!tickerInput.trim()}>Load exposure</button>
               </div>
-              {tickerError ? <p className={styles.entryError} role="alert">{tickerError}</p> : null}
+              {tickerError ? <ErrorToast message={tickerError} /> : null}
             </form>
           </section>
         )}

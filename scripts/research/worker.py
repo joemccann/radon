@@ -10,7 +10,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from research.dropbox import DropboxClient, DropboxError
-from research.state import State, date_scopes
+from research.model import PROVIDER_PARK_SECS, classify_error, is_provider_outage
+from research.state import State, date_scopes, eligible, folder_backlog_gap, should_persist_cursor
 from utils.atomic_io import atomic_save
 
 
@@ -25,7 +26,7 @@ class DiscoveryError(DropboxError):
 def heartbeat(root, state, error=None, stage=None, local_only=False):
     stamp = datetime.now(timezone.utc).isoformat()
     payload = {'service': 'dropbox-research', 'state': state, 'updated_at': stamp,
-               'last_error': {'message': type(error).__name__} if error else None}
+               'last_error': {'message': classify_error(error)} if error else None}
     if isinstance(error, DiscoveryError):
         payload['last_error']['discovery_errors'] = error.failures
     if stage:
@@ -47,7 +48,7 @@ def heartbeat(root, state, error=None, stage=None, local_only=False):
 
 def discover(client, state, now=None, current_only=False, on_page=None):
     dates = date_scopes(now)
-    scopes = dict(dates[-1:] if current_only else dates)
+    scopes = dict(dates)
     if not current_only:
         for scope in state.scopes():
             scopes.setdefault(scope, None)
@@ -57,30 +58,47 @@ def discover(client, state, now=None, current_only=False, on_page=None):
     for scope, folder_date in scopes.items():
         try:
             cursor = state.cursor(scope)
+            if state.work_count(scope=scope, folder_date=folder_date) == 0:
+                if cursor:
+                    state.reset_cursor(scope)
+                cursor = None
             reset = False
+            started = cursor is None
+            eligible_seen = 0
             for _ in range(100):
                 try:
                     page = client.list_page(scope, cursor=cursor)
                 except DropboxError as error:
                     if error.status == 409 and cursor and not reset:
                         state.reset_cursor(scope)
-                        cursor, reset = None, True
+                        cursor, reset, started = None, True, True
                         continue
                     if error.status == 409 and not cursor:
                         # Date folder not yet created or previously watched folder removed.
                         break
                     raise
-                added += state.ingest_page(scope, page, folder_date)
+                page_eligible = sum(1 for entry in page['entries'] if eligible(entry))
+                eligible_seen += page_eligible
+                persist = should_persist_cursor(page, started=started, eligible_count=page_eligible)
+                added += state.ingest_page(scope, page, folder_date, persist_cursor=persist)
                 if on_page is not None:
                     on_page()
                 cursor = page['cursor']
                 if not page.get('has_more'):
+                    gap = folder_backlog_gap(eligible_seen, state.work_count(scope=scope, folder_date=folder_date))
+                    if gap:
+                        failure = {'stage': 'discovery', 'type': gap['type'],
+                                   'scope_id': hashlib.sha256(scope.encode()).hexdigest()[:16],
+                                   'eligible': gap['eligible'], 'work': gap['work']}
+                        if folder_date:
+                            failure['folder_date'] = folder_date
+                        failures.append(failure)
                     break
             else:
                 raise RuntimeError('Dropbox pagination limit exceeded')
         except Exception as error:
             # Failed pages stay unacknowledged for retry; no revision is skipped.
-            failure = {'stage': 'discovery', 'type': type(error).__name__,
+            failure = {'stage': 'discovery', 'type': classify_error(error),
                        'scope_id': hashlib.sha256(scope.encode()).hexdigest()[:16]}
             status = getattr(error, 'status', None)
             if isinstance(status, int):
@@ -135,9 +153,11 @@ def cycle(root, client, state, pipeline, publisher, publish=False, limit=4):
             recent.extend(posts)
             processed += 1
         except Exception as error:
-            errors.append(type(error).__name__)
-            if work['attempts'] >= 5:
-                state.complete(work['key'], {'status': 'held', 'error': type(error).__name__})
+            errors.append(classify_error(error))
+            if is_provider_outage(error):
+                state.park(work['key'], time.time() + PROVIDER_PARK_SECS)
+            elif work['attempts'] >= 5:
+                state.complete(work['key'], {'status': 'held', 'error': classify_error(error)})
             else:
                 delay = max(getattr(error, 'retry_after', 0) or 0, min(3600, 60 * 2 ** work['attempts']))
                 state.retry(work['key'], error, delay=delay)
@@ -191,9 +211,8 @@ def main():
         finally:
             state.close()
         return
-    from research.model import Reviewer
-    from research.pipeline import Pipeline
-    pipeline = Pipeline(root, Reviewer(), publisher)
+    from research.model import build_pipeline
+    pipeline = build_pipeline(root, publisher)
     client = DropboxClient.from_env().connect()
     exit_status = 0
     while not stopping:

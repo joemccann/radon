@@ -7,6 +7,7 @@ import InfoTooltip from "./InfoTooltip";
 import ScannerInstrumentShell from "./ScannerInstrumentShell";
 import ScannerTickerSearch from "./ScannerTickerSearch";
 import SectionEmptyState from "./SectionEmptyState";
+import RequestError from "./RequestError";
 import SpectralLoader from "./SpectralLoader";
 import SortTh from "./SortTh";
 import { useSort } from "@/lib/useSort";
@@ -20,6 +21,7 @@ type GarchConvergenceScannerProps = {
   loading?: boolean;
   scanning?: boolean;
   error?: string | null;
+  onRetry?: () => void;
   lastSync?: string | null;
   onScan?: () => void;
   onTickerScan?: (tickers: string[]) => void;
@@ -101,6 +103,7 @@ export default function GarchConvergenceScanner({
   loading = false,
   scanning = false,
   error = null,
+  onRetry,
   lastSync = null,
   onScan,
   onTickerScan,
@@ -209,16 +212,8 @@ export default function GarchConvergenceScanner({
       )}
 
       <div className="section-body garch-scanner__body">
-        {error ? (
-          <SectionEmptyState
-            icon={GitCompareArrows}
-            tone="danger"
-            headline="GARCH scan failed"
-            secondary={error}
-            action={onScan ? { label: scanning ? "Scanning..." : "Retry scan", onClick: onScan, disabled: scanning } : undefined}
-            testId="garch-scanner-error"
-          />
-        ) : loading && rows.length === 0 ? (
+        {error && <RequestError error={error} onRetry={scanning ? undefined : onRetry} retainedData={rows.length > 0} testId="garch-scanner-error" />}
+        {error && rows.length === 0 ? null : loading && rows.length === 0 ? (
           <div className="p-6">
             <SpectralLoader label="Loading GARCH scan" />
           </div>

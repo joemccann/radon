@@ -1,0 +1,26 @@
+# Base for TRAINING is the 4-bit MLX quantization of the bf16 base:
+#   mlx_lm.convert --hf-path Qwen/Qwen2.5-1.5B-Instruct -q --q-bits 4 --mlx-path models/slm-tagger/v1/base-q4
+# Base for EXPORT is the bf16 original (E.1); the adapter is fused onto it and G0 checks the parity.
+# HR-2: Qwen/Qwen2.5-1.5B-Instruct only.
+model: models/slm-tagger/v1/base-q4
+train: true
+fine_tune_type: lora                      # QLoRA = LoRA adapters over the quantized base above
+data: data/slm/tagger/v1
+adapter_path: models/slm-tagger/v1/adapter   # local only; gitignored (section E)
+num_layers: 16
+lora_parameters:
+  rank: 16
+  scale: 20.0
+  dropout: 0.05
+  keys: [self_attn.q_proj, self_attn.k_proj, self_attn.v_proj, self_attn.o_proj,
+         mlp.gate_proj, mlp.up_proj, mlp.down_proj]
+batch_size: 8
+iters: 1200                 # about 2.5 to 3 epochs at 2,500 to 3,000 train rows
+learning_rate: 1.0e-4
+max_seq_length: 1024        # system + 1500-char body + answer fits with margin
+mask_prompt: true           # loss on the assistant JSON only
+steps_per_eval: 100
+val_batches: 50
+save_every: 200
+grad_checkpoint: false      # set true on a 16 GB Mini if memory is tight
+seed: 20260919

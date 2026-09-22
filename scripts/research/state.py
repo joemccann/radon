@@ -13,17 +13,69 @@ import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from research.model import ModelError, safe_error_message as _safe_model_message
+
+
+def _persist_error(error: BaseException) -> str:
+    if isinstance(error, ModelError):
+        return _safe_model_message(error)
+    return type(error).__name__
+
 ROOT = '/joe mccann/current'
 MONTHS = ('January February March April May June July August September October November December').split()
+DEFAULT_LOOKBACK_DAYS = 7
+MAX_LOOKBACK_DAYS = 31
 
 
-def date_scopes(now=None, timezone='America/New_York'):
+def lookback_days(env=None):
+    env = os.environ if env is None else env
+    raw = env.get('RADON_RESEARCH_LOOKBACK_DAYS', str(DEFAULT_LOOKBACK_DAYS))
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_LOOKBACK_DAYS
+    return max(1, min(value, MAX_LOOKBACK_DAYS))
+
+
+def date_scopes(now=None, timezone='America/New_York', days=None):
     now = now or datetime.now(ZoneInfo(timezone))
     if now.tzinfo is None:
         raise ValueError('An aware timestamp is required')
     today = now.astimezone(ZoneInfo(timezone)).date()
+    if days is None:
+        span = lookback_days()
+    else:
+        try:
+            span = int(days)
+        except (TypeError, ValueError):
+            raise ValueError('Lookback days must be an integer') from None
+        if span < 1:
+            raise ValueError('Lookback days must be at least 1')
+        span = min(span, MAX_LOOKBACK_DAYS)
+    dates = [today - timedelta(days=offset) for offset in range(span - 1, -1, -1)]
     return [(f'{d.year}/{MONTHS[d.month-1]}/{MONTHS[d.month-1][:3]} {d.day:02}'.lower(), d.isoformat())
-            for d in (today - timedelta(days=1), today)]
+            for d in dates]
+
+
+def should_persist_cursor(page, *, started, eligible_count):
+    if eligible_count > 0:
+        return True
+    return bool(started) and page.get('has_more') is False
+
+
+def folder_backlog_gap(eligible_count, work_count):
+    try:
+        eligible_count = int(eligible_count)
+        work_count = int(work_count)
+    except (TypeError, ValueError):
+        return None
+    if eligible_count < 0 or work_count < 0:
+        return None
+    if eligible_count > 0 and work_count == 0:
+        return {'type': 'dropbox_work_gap', 'eligible': eligible_count, 'work': work_count}
+    if eligible_count >= 10 and eligible_count >= 2 * work_count:
+        return {'type': 'dropbox_work_gap', 'eligible': eligible_count, 'work': work_count}
+    return None
 
 
 def eligible(entry):
@@ -64,7 +116,11 @@ class State:
         CREATE TABLE IF NOT EXISTS outbox(
           id TEXT PRIMARY KEY, work_key TEXT NOT NULL, payload TEXT NOT NULL,
           status TEXT NOT NULL DEFAULT 'pending');
+        CREATE TABLE IF NOT EXISTS feedback_handled(id TEXT PRIMARY KEY, handled_at REAL NOT NULL);
         ''')
+        # Operator note carried into the next review of a re-queued document (research.feedback).
+        if 'note' not in {row[1] for row in self.db.execute('PRAGMA table_info(work)')}:
+            self.db.execute('ALTER TABLE work ADD COLUMN note TEXT')
 
         # Dropbox paths are case-insensitive. Collapse old display-case aliases;
         # ambiguous cursors trigger an idempotent relist, preserving folder dates.
@@ -94,7 +150,16 @@ class State:
         with self.db:
             self.db.execute("UPDATE cursors SET cursor='' WHERE scope=?", (scope.lower(),))
 
-    def ingest_page(self, scope, page, folder_date=None):
+    def work_count(self, scope=None, folder_date=None):
+        if folder_date:
+            row = self.db.execute('SELECT COUNT(*) FROM work WHERE folder_date=?', (folder_date,)).fetchone()
+        elif scope:
+            row = self.db.execute('SELECT COUNT(*) FROM work WHERE scope=?', (scope.lower(),)).fetchone()
+        else:
+            raise ValueError('scope or folder_date required')
+        return int(row[0])
+
+    def ingest_page(self, scope, page, folder_date=None, persist_cursor=None):
         if (not isinstance(scope, str) or scope.startswith('/') or ':' in scope or '\\' in scope
                 or any(p in ('', '.', '..') for p in scope.split('/'))):
             raise ValueError('Invalid scope')
@@ -103,6 +168,7 @@ class State:
         if not isinstance(page.get('cursor'), str) or not page['cursor']:
             raise ValueError('Missing cursor')
         added = 0
+        eligible_count = 0
         with self.db:
             previous = self.db.execute('SELECT folder_date FROM cursors WHERE scope=?', (scope.lower(),)).fetchone()
             folder_date = folder_date or (previous[0] if previous else None)
@@ -120,6 +186,7 @@ class State:
                     continue
                 if not eligible(entry):
                     continue
+                eligible_count += 1
                 if not all(isinstance(entry.get(k), str) and entry[k] for k in ('id','rev','content_hash')):
                     raise ValueError('Incomplete file revision')
                 key = work_key(entry)
@@ -130,7 +197,10 @@ class State:
                 self.db.execute("UPDATE work SET status='superseded' WHERE file_id=? AND rev!=? AND status NOT IN ('published','deleted')", (entry['id'], entry['rev']))
                 added += self.db.execute('''INSERT OR IGNORE INTO work(key,file_id,rev,path,scope,folder_date,metadata)
                   VALUES(?,?,?,?,?,?,?)''', (key,entry['id'],entry['rev'],path,scope,folder_date,json.dumps(entry))).rowcount
-            self.db.execute('INSERT INTO cursors VALUES(?,?,?) ON CONFLICT(scope) DO UPDATE SET cursor=excluded.cursor,folder_date=excluded.folder_date', (scope,page['cursor'],folder_date))
+            if persist_cursor is None:
+                persist_cursor = eligible_count > 0
+            if persist_cursor:
+                self.db.execute('INSERT INTO cursors VALUES(?,?,?) ON CONFLICT(scope) DO UPDATE SET cursor=excluded.cursor,folder_date=excluded.folder_date', (scope,page['cursor'],folder_date))
         return added
 
     def unparsed(self, limit=20):
@@ -156,15 +226,15 @@ class State:
         with self.db:
             self.db.execute("""UPDATE ingestion SET status=CASE WHEN attempts>=6 THEN 'held' ELSE 'pending' END,
                 error=?,available_at=? WHERE work_key=? AND status='parsing'""",
-                (type(error).__name__,time.time()+max(0,delay),key))
+                (_persist_error(error),time.time()+max(0,delay),key))
             self.db.execute('''UPDATE work SET status='complete',result=?,error=? WHERE key=? AND status='pending'
                 AND EXISTS(SELECT 1 FROM ingestion WHERE work_key=? AND status='held')''',
-                (json.dumps({'status':'held','stage':'extraction','error':type(error).__name__}),type(error).__name__,key,key))
+                (json.dumps({'status':'held','stage':'extraction','error':_persist_error(error)}),_persist_error(error),key,key))
 
     def ready(self, limit=20):
         rows = self.db.execute("""SELECT w.*,i.pdf FROM work w JOIN ingestion i ON i.work_key=w.key
             WHERE w.status='pending' AND i.status='ready' AND w.available_at<=?
-            ORDER BY w.attempts>0,w.folder_date DESC,w.rowid DESC LIMIT ?""", (time.time(),limit))
+            ORDER BY w.note IS NULL,w.attempts>0,w.folder_date DESC,w.rowid DESC LIMIT ?""", (time.time(),limit))
         return [{**dict(r), 'metadata':json.loads(r['metadata'])} for r in rows]
 
     def pending(self, limit=20):
@@ -188,7 +258,10 @@ class State:
                 publication_id = payload['id']
                 existing = self.db.execute('SELECT work_key,payload FROM outbox WHERE id=?', (publication_id,)).fetchone()
                 encoded = json.dumps(payload, sort_keys=True)
-                if existing and (existing[0] != key or existing[1] != encoded):
+                if existing and existing[0] == key and existing[1] != encoded:
+                    # The same document re-reviewed (operator "want more"): the revised payload replaces the old one.
+                    self.db.execute("UPDATE outbox SET payload=?,status='pending' WHERE id=?", (encoded, publication_id))
+                elif existing and (existing[0] != key or existing[1] != encoded):
                     previous = self.db.execute('SELECT file_id,rev,status FROM work WHERE key=?', (existing[0],)).fetchone()
                     current = self.db.execute('SELECT file_id,rev FROM work WHERE key=?', (key,)).fetchone()
                     if not (previous and previous['file_id'] == current['file_id']
@@ -198,13 +271,39 @@ class State:
                     self.db.execute("UPDATE outbox SET work_key=?,payload=?,status='pending' WHERE id=?", (key,encoded,publication_id))
                 else:
                     self.db.execute('INSERT OR IGNORE INTO outbox(id,work_key,payload) VALUES(?,?,?)', (publication_id,key,encoded))
-            self.db.execute("UPDATE work SET status='complete',result=?,error=NULL WHERE key=?", (json.dumps(result),key))
+            self.db.execute("UPDATE work SET status='complete',result=?,error=NULL,note=NULL WHERE key=?", (json.dumps(result),key))
 
     def retry(self, key, error, delay=60):
         # Error must be a safe classification, never an HTTP body or credentials.
-        safe_error = type(error).__name__ if isinstance(error, BaseException) else 'processing_failed'
+        safe_error = _persist_error(error) if isinstance(error, BaseException) else 'processing_failed'
         with self.db:
             self.db.execute("UPDATE work SET status='pending',error=?,available_at=? WHERE key=? AND status='processing'", (safe_error,time.time()+max(0,delay),key))
+
+    def feedback_handled(self):
+        return {row[0] for row in self.db.execute('SELECT id FROM feedback_handled')}
+
+    def mark_feedback_handled(self, feedback_id):
+        with self.db:
+            self.db.execute('INSERT OR IGNORE INTO feedback_handled VALUES(?,?)', (feedback_id, time.time()))
+
+    def work_key_for_file(self, file_id):
+        if not file_id:
+            return None
+        row = self.db.execute("""SELECT key FROM work WHERE file_id=? AND status IN ('complete','published')
+            ORDER BY rowid DESC LIMIT 1""", (file_id,)).fetchone()
+        return row[0] if row else None
+
+    def requeue_with_note(self, key, note):
+        # Only finished work is re-queued; a document still in flight keeps its current review.
+        with self.db:
+            return bool(self.db.execute("""UPDATE work SET status='pending',attempts=0,available_at=0,result=NULL,error=NULL,note=?
+                WHERE key=? AND status IN ('complete','published')""", (note, key)).rowcount)
+
+    def park(self, key, retry_at):
+        # A provider outage is not a document failure: give the attempt back and wait for the provider.
+        with self.db:
+            self.db.execute("""UPDATE work SET status='pending',attempts=MAX(0,attempts-1),error='provider_outage',available_at=?
+                WHERE key=? AND status='processing'""", (max(time.time(), retry_at), key))
 
     def recover(self):
         with self.db:
