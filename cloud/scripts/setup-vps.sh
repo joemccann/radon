@@ -1469,7 +1469,8 @@ write_mcp_env() {
       return 1
     fi
   fi
-  mv -f "$mcp_env_tmp" "$mcp_env_target"
+  # -T: a directory link raced into the destination is replaced, not entered.
+  mv -T -f "$mcp_env_tmp" "$mcp_env_target"
   log_success "Hosted MCP env written to ${mcp_env_target}"
 }
 
