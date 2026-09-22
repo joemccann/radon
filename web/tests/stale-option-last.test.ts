@@ -83,28 +83,27 @@ describe("resolveRealtimePrice — stale option last trade", () => {
 });
 
 describe("resolveRealtimePrice — close fallback", () => {
-  // Scenario: morning sync at 9:50 ET fetched no marketPrice/bid/ask/close for
-  // less-liquid options, so leg.market_price is null. WS later streams the
-  // previous-session close (or backfills from the disk cache). The row should
-  // surface that close so MV / P&L stop rendering "—".
-  it("uses close when last/bid/ask and fallbackPrice are all unusable", () => {
+  // Options: previous-session close is not a last trade or a last bid/offer.
+  // Stocks still use close so a halted equity is not blank.
+  it("does not use option close when last/bid/ask and fallbackPrice are all unusable", () => {
     const pd = makePriceData({
       symbol: "AAOI_20260515_105_C",
       last: null, bid: null, ask: null, close: 35.50,
     });
     const result = resolveRealtimePrice(pd, null, false);
-    expect(result.price).toBe(35.50);
-    expect(result.isCalculated).toBe(true);
+    expect(result.price).toBe(null);
+    expect(result.isPreviousClose).toBe(false);
   });
 
-  it("uses close when fallbackPrice is undefined", () => {
+  it("uses stock close when fallbackPrice is undefined", () => {
     const pd = makePriceData({
-      symbol: "IGV_20260515_90_C",
+      symbol: "IGV",
       last: null, bid: null, ask: null, close: 1.10,
     });
     const result = resolveRealtimePrice(pd);
     expect(result.price).toBe(1.10);
     expect(result.isCalculated).toBe(true);
+    expect(result.isPreviousClose).toBe(true);
   });
 
   it("prefers fallbackPrice over close when both available", () => {
