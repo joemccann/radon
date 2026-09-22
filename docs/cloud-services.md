@@ -887,7 +887,7 @@ newest statement period is more than `MAX_DELIVERY_LAG_DAYS` (1) behind the
 last session AND an empty remote is not expected for the date, R-389 + R-448;
 never on `cash-flow-sync`; once any file heartbeats `error`, later `ok`
 heartbeats in the same run are suppressed, so the row reports the batch's
-worst outcome, REL-210). A transient sFTP `get` failure (peer reset, kex drop, connect timeout; `_is_transient_sftp_get`) is suppressed only when a strictly newer statement from the same account and query was successfully applied or confirmed duplicate in this sweep. Missing or unparseable delivery dates are not suppressed. Failures name the affected query/account keys in the final error heartbeat, including on repeated runs. A TWR build that returns `degraded` / `unavailable` after the cash-flow persist is not an ingest failure (perf-twr owns that page), page 5a2eb828, 2026-09-16. Stripped env
+worst outcome, REL-210). A transient sFTP `get` failure (peer reset, kex drop, connect timeout; `_is_transient_sftp_get`) is suppressed only when a strictly newer statement from the same account and query was successfully applied or confirmed duplicate in this sweep. Missing or unparseable delivery dates are not suppressed. A reset on a different query is not covered. Failures name the affected query/account keys in the final error heartbeat, including on repeated runs. A TWR build that returns `degraded` / `unavailable` after the cash-flow persist is not an ingest failure (perf-twr owns that page), page 5a2eb828, 2026-09-16. Stripped env
 `/var/lib/radon/flex-secrets/env` (no `TWS_PASSWORD`). Units on
 `auto-sync-units.txt`.
 
