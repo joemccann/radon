@@ -1136,20 +1136,20 @@ resolve_green_main_sha() {
 }
 
 ground_truth() {
-  fetch_origin_with_retry
+  fetch_origin_with_retry || return 1
   # T-490: a hand-set sparse checkout (`/*` + `!/.codex/`, radon-testing,
   # 2026-09-08) hid the tracked `.codex/skills/**` render from every audit
   # while `git status` stayed clean. Ground truth is the WHOLE tree.
   git --git-dir="$HOST_GITDIR" --work-tree="$REPO" sparse-checkout disable 2>/dev/null || true
-  git --git-dir="$HOST_GITDIR" --work-tree="$REPO" checkout -f --quiet main
-  git --git-dir="$HOST_GITDIR" --work-tree="$REPO" reset --hard --quiet origin/main
+  git --git-dir="$HOST_GITDIR" --work-tree="$REPO" checkout -f --quiet main || return 1
+  git --git-dir="$HOST_GITDIR" --work-tree="$REPO" reset --hard --quiet origin/main || return 1
   local green_sha
   green_sha="$(resolve_green_main_sha)"
   if [[ -n "$green_sha" ]] && git --git-dir="$HOST_GITDIR" --work-tree="$REPO" rev-parse --verify --quiet "${green_sha}^{commit}" >/dev/null; then
     if [[ "$green_sha" != "$(git --git-dir="$HOST_GITDIR" --work-tree="$REPO" rev-parse origin/main)" ]]; then
       echo "[weekend] origin/main tip is not CI-green; pinning to $green_sha" | tee -a "${RUN_LOG:-/dev/null}" >/dev/null 2>&1 || true
     fi
-    git --git-dir="$HOST_GITDIR" --work-tree="$REPO" reset --hard --quiet "$green_sha"
+    git --git-dir="$HOST_GITDIR" --work-tree="$REPO" reset --hard --quiet "$green_sha" || return 1
   fi
   git --git-dir="$HOST_GITDIR" --work-tree="$REPO" clean -fdxq --exclude=.radon-weekend-runner --exclude=.radon-security-deepsec-runner --exclude=.weekend-runner.lock --exclude=logs/ --exclude=.env --exclude=.env.ib-mode --exclude=web/.env --exclude=node_modules/ --exclude=.next/ --exclude=.deepsec/ --exclude=data/radon/
 }

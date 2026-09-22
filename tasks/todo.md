@@ -8150,3 +8150,10 @@ Dependency graph: T1 -> T2 -> T3 -> T4 -> T5; T1 -> T1b -> T4.
 - [ ] T4 depends_on: [T1b,T3] Execute saved-Flex rebuild and legacy cleanup dry-runs; perform safe runner/host acceptance steps and record blockers.
 - [ ] T5 depends_on: [T4] Record operational evidence and remaining actions.
 Review: pending. No local suites. PR next steps specify dry-runs; destructive cleanup and any unproven data repair remain gated by evidence. Original workspace edits untouched.
+
+## Runner trust follow-up (2026-09-22)
+- [x] T1 depends_on: []: Inspect merged #638 and private residual findings.
+- [ ] T2 depends_on: [T1]: Fail closed on runner refresh, keep host browsers stopped for Codex, preserve separate DeepSec gitdirs on setup reruns.
+- [ ] T3 depends_on: [T2]: Add behavioral regressions, publish PR, verify every applicable exact-head CI check.
+
+Dependency graph: T1 -> T2 -> T3.

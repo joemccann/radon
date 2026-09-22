@@ -198,7 +198,7 @@ check "no shared-parent lock" test ! -e "$WEEKEND_ROOT/.weekend-runner.lock"
 # with "fatal: 'main' is already used by worktree"). Convert in place,
 # keeping the operator-bootstrapped .deepsec/ workspace and DeepSec's
 # untracked data/radon/ state.
-if [[ -f "$DEEPSEC_REPO/.git" ]]; then
+if [[ -f "$DEEPSEC_REPO/.git" && ! -d "$DEEPSEC_GITDIR" ]]; then
   OLD_WT="$DEEPSEC_REPO.worktree-$(date +%Y%m%d%H%M%S)"
   mv "$DEEPSEC_REPO" "$OLD_WT"
   git --git-dir="$HOST_GITDIR" --work-tree="$WEEKEND_REPO" worktree prune
