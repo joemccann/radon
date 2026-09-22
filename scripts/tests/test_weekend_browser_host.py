@@ -472,7 +472,7 @@ class TestCodexRungHidesHostBrowser:
     """R01-A: the workspace-write rung does not receive the host browser endpoint."""
 
     @pytest.mark.parametrize("name", sorted(HOST_LOOPS))
-    def test_codex_env_has_no_endpoint_when_host_is_ready(self, name, tmp_path):
+    def test_codex_has_no_host_browser_or_logged_endpoint(self, name, tmp_path):
         repo = _runner_clone(tmp_path, name)
         home = tmp_path / "home"
         home.mkdir()
@@ -508,7 +508,8 @@ class TestCodexRungHidesHostBrowser:
             timeout=60,
         )
         combined = _combined(proc, repo)
-        assert "browser-host=ready" in combined, combined
+        assert "browser-host=ready" not in combined, combined
+        assert not list(repo.glob("logs/**/browser-host-*.log"))
         assert env_dump.exists(), (proc.stdout, proc.stderr, combined)
         dumped = env_dump.read_text(encoding="utf-8")
         assert "PW_TEST_CONNECT_WS_ENDPOINT=" not in dumped, dumped

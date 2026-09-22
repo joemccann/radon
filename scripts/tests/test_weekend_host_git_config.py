@@ -181,3 +181,58 @@ def test_wrapper_host_git_uses_gitdirs_not_clone(name, tmp_path):
             assert host_dir in line, line
             assert clone_git not in line.split(), line
     assert saw_host, lines
+
+
+@pytest.mark.parametrize("plist", PLISTS, ids=lambda p: p.stem)
+@pytest.mark.parametrize("failed_step", ["fetch", "checkout", "reset"])
+def test_launchd_never_executes_clone_after_failed_refresh(plist, failed_step, tmp_path):
+    clone = tmp_path / "clone"
+    (clone / "scripts").mkdir(parents=True)
+    program = plistlib.loads(plist.read_bytes())["ProgramArguments"][2]
+    script = re.sub(r"__[A-Z]+_REPO__", str(clone), program)
+    target = script.rsplit('"$C/', 1)[1].split('"', 1)[0]
+    canary = tmp_path / "wrapper-ran"
+    (clone / target).write_text(f'touch "{canary}"\n', encoding="utf-8")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    git = bin_dir / "git"
+    git.write_text(f'#!/bin/sh\nfor arg do [ "$arg" = "{failed_step}" ] && exit 1; done\nexit 0\n')
+    git.chmod(0o755)
+    proc = subprocess.run([BASH, "-c", script], env={"PATH": f"{bin_dir}:/usr/bin:/bin"}, timeout=30)
+    assert proc.returncode == 70
+    assert not canary.exists()
+
+
+@pytest.mark.parametrize("name", sorted(LOOPS))
+@pytest.mark.parametrize("failed_step", ["fetch", "checkout", "reset"])
+def test_ground_truth_propagates_failure_inside_conditional(name, failed_step, tmp_path):
+    source = LOOPS[name].read_text()
+    start = source.index("ground_truth() {")
+    function = source[start:source.index("\n}", start) + 2]
+    # Bash suppresses errexit throughout functions used as conditions.
+    script = '''set -e
+HOST_GITDIR=/unused
+REPO=/unused
+fetch_origin_with_retry() { [[ "$FAIL_STEP" != fetch ]]; }
+resolve_green_main_sha() { :; }
+git() { for arg do [[ "$arg" == "$FAIL_STEP" ]] && return 1; done; return 0; }
+''' + function + '\nif ! ground_truth; then exit 70; fi\nexit 0\n'
+    proc = subprocess.run([BASH, "-c", script], cwd=tmp_path, env={**os.environ, "FAIL_STEP": failed_step}, timeout=10)
+    assert proc.returncode == 70
+
+
+def test_deepsec_setup_preserves_existing_separate_gitdir(tmp_path):
+    source = (REPO / "scripts/setup_security_nightly.sh").read_text()
+    start = source.index('if [[ -f "$DEEPSEC_REPO/.git"')
+    block = source[start:source.index('\nfi', start) + 3]
+    clone = tmp_path / "deepsec"
+    clone.mkdir()
+    gitdir = tmp_path / "gitdirs/security-deepsec.git"
+    gitdir.mkdir(parents=True)
+    (clone / ".git").write_text(f"gitdir: {gitdir}\n")
+    canary = clone / "operator-state"
+    canary.write_text("preserve")
+    proc = subprocess.run([BASH, "-c", 'set -e\n' + block], env={**os.environ, "DEEPSEC_REPO": str(clone), "DEEPSEC_GITDIR": str(gitdir)}, timeout=10)
+    assert proc.returncode == 0
+    assert canary.read_text() == "preserve"
+    assert not list(tmp_path.glob("deepsec.worktree-*"))
