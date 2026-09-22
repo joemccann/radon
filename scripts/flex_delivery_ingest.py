@@ -113,15 +113,23 @@ def delivery_rows_present(kind: str, xml_text: str) -> bool:
         return True
     if kind == TRADES:
         from trade_blotter.flex_query import FlexQueryFetcher
-        from journal_rehydrate import _existing_exec_ids, _existing_exec_roots, _root_already_journaled
+        from journal_rehydrate import (
+            _existing_exec_ids,
+            _existing_exec_roots,
+            _reconcile_against_individual_fills,
+            _root_already_journaled,
+        )
 
         executions, dropped = FlexQueryFetcher(token="x", query_id="x").parse_xml_with_drops(xml_text)
         if dropped:
             return False
         pending = {str(execution.exec_id) for execution in executions}
         cursor = ""
-        # Bound both each page and the complete verification walk. Exhaustion
-        # means unknown coverage, never evidence that missing rows were written.
+        seen: List[Dict[str, Any]] = []
+        exhausted = False
+        # Bound both each page and the complete verification walk. Hitting the
+        # page cap with ids still pending is unknown coverage, never evidence
+        # that the missing rows were written.
         for _ in range(100):
             if not pending:
                 return True
@@ -130,12 +138,26 @@ def delivery_rows_present(kind: str, xml_text: str) -> bool:
                 "ORDER BY trade_id LIMIT 200", (cursor,),
             )
             if not rows:
-                return False
-            ids = _existing_exec_ids([json.loads(row[1]) for row in rows])
+                exhausted = True
+                break
+            payloads = [json.loads(row[1]) for row in rows]
+            seen.extend(payloads)
+            ids = _existing_exec_ids(payloads)
             roots = _existing_exec_roots(ids)
             pending = {eid for eid in pending if eid not in ids and not _root_already_journaled(eid, roots)}
             cursor = rows[-1][0]
-        return not pending
+        if not pending:
+            return True
+        if not exhausted:
+            return False
+        # NF-4: individual IB fills are canonical. rehydrate marks the delivery
+        # applied and stores no Flex tradeID when those fills already match the
+        # contract-day quantity and gross notional. Requiring the Flex id here
+        # failed the oneshot on every re-pull (2026-09-22 page e1297eea).
+        # A quantity or notional disagreement stays unverified.
+        remaining = [execution for execution in executions if str(execution.exec_id) in pending]
+        uncovered, _groups, disagreements = _reconcile_against_individual_fills(remaining, seen)
+        return not uncovered and not disagreements
     return False
 
 

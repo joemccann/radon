@@ -2084,7 +2084,9 @@ Peak: 2026-09-16 11:35Z, page `5a2eb828…`.
   ExecMainStart→Inactive ~2 min, not `TimeoutStartSec`.
 - **Discriminating check:** `cash_exit=0` with `twr_status=degraded`
   (this case). `Result=timeout` with no terminal heartbeat is
-  `flex-pull-ingest-timeout`. Host-key / auth abort is still
+  `flex-pull-ingest-timeout`. `ingest_failed` with
+  `outcome=coverage_unverified` and `classified_as=trades` is
+  `flex-pull-trade-coverage`. Host-key / auth abort is still
   `Result=exit-code` with no ingest. If `/health/lite` is down too →
   API, stand down.
 - **Remediation (code):** activity ingest is `ok` after cash exit 0;
@@ -2102,6 +2104,47 @@ Peak: 2026-09-16 11:35Z, page `5a2eb828…`.
   `test_flex_sftp_pull.py::test_sftp_rst_on_the_newest_statement_still_fails_the_oneshot`.
 - **Code:** `scripts/flex_delivery_ingest.py` (`_apply_classified`),
   `scripts/flex_sftp_pull.py` (`_is_transient_sftp_get`).
+
+---
+
+## flex-pull-trade-coverage
+
+**`radon-flex-pull.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
+after today's Activity statement is applied, on a historical Trade_History
+duplicate.** Peak: 2026-09-22 11:35Z, page `e1297eea…`.
+
+- **Mechanism:** newest-first applied the 2026-09-21 Equity_Summary
+  (`perf_twr` wrote, cash exit 0). `Trade_History.20260904` was already
+  an applied claim. `delivery_rows_present` required every Flex tradeID
+  in `journal.payload.ib_exec_id`. 106 of 127 matched. The other 21 were
+  absent because rehydrate's individual-fill path books nothing when
+  those fills already match the contract-day quantity and notional, and
+  the claim was still marked applied. `ingest_xml` returned
+  `coverage_unverified`, the puller exited 1, and older files then hit
+  IBKR kex RST. `Type=oneshot` has no `Restart=`, so `NRestarts=0`.
+  Span was about 3 min, not `TimeoutStartSec`. `:8321/health/lite` stayed up.
+- **Detection:** journal `ingest_failed:{… 'outcome': 'coverage_unverified',
+  'classified_as': 'trades' …}` then historical `sftp_get_failed` /
+  `kex_exchange_identification`. `systemctl show` → `exit-code` / `0`.
+- **Discriminating check:** `classified_as=trades` and
+  `outcome=coverage_unverified` on an applied duplicate whose missing
+  Flex tradeIDs are covered by individual IB fills (this case).
+  `twr_status=degraded` is `flex-pull-twr-degraded-exit`.
+  `Result=timeout` is `flex-pull-ingest-timeout`. An uncovered exec, or
+  a quantity or notional disagreement, stays unverified and is operator
+  reconciliation, not this fix. If `/health/lite` is down too → API, stand down.
+- **Remediation (code):** after the bounded journal walk exhausts, pending
+  Flex executions are covered when individual-fill reconciliation returns
+  no uncovered executions and no disagreements. Disagreements and truly
+  missing execs still fail the oneshot. Do not replay the delivery. Do not
+  restart-flap; the 08:30 ET timer retries. After deploy,
+  `systemctl reset-failed radon-flex-pull.service` if that retry has not
+  yet fired.
+- **Regression:**
+  `test_rel226_delivery_coverage.py::test_applied_trade_duplicate_covered_by_individual_fills_is_confirmed`,
+  `test_rel226_delivery_coverage.py::test_trade_duplicate_disagreement_stays_unverified`,
+  `test_rel226_delivery_coverage.py::test_trade_duplicate_uncovered_day_stays_unverified`.
+- **Code:** `scripts/flex_delivery_ingest.py` (`delivery_rows_present`).
 
 ---
 
