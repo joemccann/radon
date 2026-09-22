@@ -598,7 +598,7 @@ class TestTheRunnerLockIsTakenOnce:
     def test_no_loop_cleans_away_the_runner_lock(self, loop: str) -> None:
         src = (REPO / "scripts" / LOOPS[loop][0]).read_text(encoding="utf-8")
         for line in src.splitlines():
-            if "git clean" in line and not line.strip().startswith("#"):
+            if " clean -fdxq" in line and not line.strip().startswith("#"):
                 assert "--exclude=.weekend-runner.lock" in line, line
 
     @pytest.mark.parametrize("loop", LOOP_IDS)
@@ -607,11 +607,11 @@ class TestTheRunnerLockIsTakenOnce:
         src = (REPO / "scripts" / LOOPS[loop][0]).read_text(encoding="utf-8")
         cleans = [
             line for line in src.splitlines()
-            if "git clean" in line and not line.strip().startswith("#")
+            if " clean -fdxq" in line and not line.strip().startswith("#")
         ]
         assert cleans, f"{loop} wrapper lost git clean"
         for line in cleans:
-            assert "git clean -fdxq" in line, line
+            assert "clean -fdxq" in line, line
             for kept in (
                 "--exclude=.env",
                 "--exclude=.env.ib-mode",

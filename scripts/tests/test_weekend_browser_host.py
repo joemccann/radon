@@ -468,8 +468,55 @@ class TestWeekendBrowserHost:
         assert "PW_TEST_CONNECT_WS_ENDPOINT=" not in dumped
 
 
+class TestCodexRungHidesHostBrowser:
+    """R01-A: the workspace-write rung does not receive the host browser endpoint."""
+
+    @pytest.mark.parametrize("name", sorted(HOST_LOOPS))
+    def test_codex_env_has_no_endpoint_when_host_is_ready(self, name, tmp_path):
+        repo = _runner_clone(tmp_path, name)
+        home = tmp_path / "home"
+        home.mkdir()
+        _plant_host(home)
+        _plant_client(repo)
+        prompts = repo / ".claude" / "portable-prompts"
+        prompts.mkdir(parents=True)
+        skill = "testing-weekend" if name == "testing" else "reliability-weekend"
+        (prompts / f"{skill}.audit.md").write_text("audit\n", encoding="utf-8")
+        (home / ".codex").mkdir()
+        (home / ".codex" / "auth.json").write_text("{}\n", encoding="utf-8")
+        env_dump = tmp_path / "agent.env"
+        bin_dir, _gh, _py = _stub_bin(
+            tmp_path,
+            claude_body="#!/bin/sh\nexit 0\n",
+        )
+        _plant_node(bin_dir, home)
+        codex = bin_dir / "codex"
+        codex.write_text(
+            f"#!/bin/sh\nenv > {env_dump}\nexit 0\n",
+            encoding="utf-8",
+        )
+        codex.chmod(0o755)
+        env = _env(tmp_path, repo, bin_dir)
+        env.pop("RADON_WEEKEND_PROVIDER_LADDER", None)
+        env["RADON_WEEKEND_PROVIDER_LADDER"] = "codex"
+        env["RADON_WEEKEND_CODEX_BIN"] = str(codex)
+        proc = subprocess.run(
+            [BASH, str(_cloned_wrapper(repo, name)), "audit"],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        combined = _combined(proc, repo)
+        assert "browser-host=ready" in combined, combined
+        assert env_dump.exists(), (proc.stdout, proc.stderr, combined)
+        dumped = env_dump.read_text(encoding="utf-8")
+        assert "PW_TEST_CONNECT_WS_ENDPOINT=" not in dumped, dumped
+        assert "RADON_WEEKEND_BROWSER_HOST=unavailable:codex-rung" in dumped, dumped
+
+
 class TestBrowserHostFixedLaunch:
-    """The agent holds the endpoint; it must not choose how the host browser launches."""
+    """The host browser launches with fixed options; the write rung does not hold the endpoint."""
 
     @pytest.mark.parametrize("name", sorted(HOST_LOOPS))
     def test_no_client_launch_path_and_no_weak_token(self, name):

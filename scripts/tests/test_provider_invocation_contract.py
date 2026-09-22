@@ -120,28 +120,22 @@ class TestTheWrapperSource:
 
 @pytest.mark.parametrize("loop", sorted(LOOPS))
 class TestTheAgentCanReachGit:
-    """Every phase is scored on a COMMIT to the dated branch.
+    """Host git lives outside the clone. Codex must not write that gitdir.
 
-    2026-09-07: codex's own workspace-write policy protects version-control
-    metadata, so every codex phase died with
-
-      fatal: cannot lock ref 'refs/heads/<loop>/<date>': Unable to create
-      '.../.git/refs/heads/....lock': Operation not permitted
-
-    and then scored INCOMPLETE for having no commit — silently, on all four
-    fallback loops, every run. A rung that cannot write .git can never satisfy
-    the contract, so the grant is asserted here rather than discovered at 00:00.
+    2026-09-22 R02-A: a workspace-write grant on `$REPO/.git` let the agent
+    plant exec-capable repo config that host fetch/checkout then honoured.
+    The host gitdir is `$WEEKEND_ROOT/.gitdirs/<loop>.git`. Codex keeps
+    network and deliver/scratch roots; it does not get the gitdir.
     """
 
-    def test_codex_names_the_clone_git_dir_as_a_writable_root(self, loop):
+    def test_codex_cannot_write_host_or_clone_gitdir(self, loop):
         body = LOOPS[loop].read_text(encoding="utf-8")
         start = body.index("launch_round() {")
         fn = body[start : body.index("\n}", start)]
-        assert "sandbox_workspace_write" in fn, (
-            "codex cannot create a branch under the default workspace-write "
-            "policy, so the phase can never commit and is scored INCOMPLETE"
-        )
-        assert "$REPO/.git" in fn, fn
+        assert "sandbox_workspace_write" in fn, fn
+        roots = fn[fn.index("writable_roots=") : fn.index("]", fn.index("writable_roots=")) + 1]
+        assert "$REPO/.git" not in roots, roots
+        assert ".gitdirs" not in roots, roots
 
     def test_codex_can_write_the_deliver_record(self, loop):
         """It lives one level ABOVE the clone, outside the workspace.

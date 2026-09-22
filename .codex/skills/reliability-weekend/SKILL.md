@@ -91,6 +91,8 @@ artificial commit or PR, and follows the no-op contract below.
    of anything and must not become a `lock-owner-unverified` INCOMPLETE.
 6. **Do not launch Chromium in the sandbox.** The wrapper exports
    `PW_TEST_CONNECT_WS_ENDPOINT` when `RADON_WEEKEND_BROWSER_HOST=ready`.
+   The workspace-write (codex) rung does not receive the endpoint
+   (`unavailable:codex-rung`); treat UI as operator-only on that rung.
    When that variable is not `ready`, do not attempt a local Chromium
    launch: it dies on `bootstrap_check_in … Permission denied (1100)`.
    Record the UI check as operator-only with
