@@ -340,6 +340,11 @@ class TestABillingRerouteInAnIgnoredEnvFileRefusesTheRun:
             (".env.local", "CLAUDE_CODE_API_KEY=sk-ant-alias\n"),
             (".deepsec/.env.local", f"ANTHROPIC_FOUNDRY_API_KEY={KEY}\n"),
             (".env.local", "CLAUDE_CODE_USE_FOUNDRY=1\n"),
+            # DS-2026-09-21-01: `git clean --exclude=.deepsec/` preserves the
+            # whole tree recursively, not just its top level, so a key file
+            # nested under a subdirectory must be found too.
+            (".deepsec/sub/.env.local", f"ANTHROPIC_API_KEY={KEY}\n"),
+            (".deepsec/a/b/.env", "CLAUDE_CODE_USE_BEDROCK=1\n"),
         ),
     )
     def test_a_key_file_the_agent_would_reload_refuses(self, tmp_path, loop, path, line):

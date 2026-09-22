@@ -174,7 +174,7 @@ class TestTheLoopOwnsItsOwnLane:
         assert 'audit) CAP_SECS="${RADON_WEEKEND_AUDIT_CAP_SECS:-28800}"' in body, body
 
     def test_the_per_round_clean_keeps_deepsec_state(self):
-        clean = next(ln for ln in _uncommented(WRAPPER).splitlines() if "git clean" in ln)
+        clean = next(ln for ln in _uncommented(WRAPPER).splitlines() if " clean -fdxq" in ln)
         assert "--exclude=.deepsec/" in clean, clean
         assert "--exclude=data/radon/" in clean, (
             "DeepSec keeps its untracked project state under data/radon/; the "
@@ -287,12 +287,14 @@ class TestTheSetupInstallsThisLoop:
         # both fail. The loop needs a clone of its own.
         body = _uncommented(SETUP)
         assert "worktree add" not in body, "the DeepSec clone must not be a worktree"
-        assert 'git clone "$ORIGIN_URL" "$DEEPSEC_REPO"' in body, body
+        assert 'git clone --separate-git-dir="$DEEPSEC_GITDIR" "$ORIGIN_URL" "$DEEPSEC_REPO"' in body, body
         # While the old worktree still holds `main`, the security clone's own
         # `checkout main` dies with that same fatal, so the conversion must
         # run BEFORE the setup resets the security clone (Mini, 2026-09-19).
         convert = body.index('if [[ -f "$DEEPSEC_REPO/.git" ]]; then')
-        sec_checkout = body.index('git -C "$WEEKEND_REPO" checkout -f --quiet main')
+        sec_checkout = body.index(
+            'git --git-dir="$HOST_GITDIR" --work-tree="$WEEKEND_REPO" checkout -f --quiet main'
+        )
         assert convert < sec_checkout, 'convert the DeepSec worktree before checking out main in the security clone'
 
 

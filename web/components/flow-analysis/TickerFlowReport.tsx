@@ -61,7 +61,13 @@ export default function TickerFlowReport({ ticker }: Props) {
         />
       )}
 
-      {data && <ReportSections data={data} isAnalyzing={isAnalyzing} cachedAge={cachedAge} />}
+      {data && (
+        <ReportSections
+          data={data}
+          isAnalyzing={isAnalyzing}
+          cachedAge={status === "scanning" ? null : cachedAge}
+        />
+      )}
     </div>
   );
 }
@@ -70,14 +76,19 @@ type Verdict = ReturnType<typeof classifyFlowSignal>;
 
 type FlowReportStatus = ReturnType<typeof useTickerFlowReport>["status"];
 
-/** The hook preserves the previous report on any failed scan, and holds it
- * while a server-side scan is still running (R-464), so these statuses render
- * real figures that did not come from a completed scan. */
+/** The hook preserves the previous report on any failed scan, holds it while
+ * a server-side scan is still running (R-464), and keeps it on screen for the
+ * whole client POST (`scanning`). Those figures are the last cache. */
 function isServingCachedReport(status: FlowReportStatus): boolean {
-  return status === "error" || status === "stale" || status === "pending";
+  return status === "error" || status === "stale" || status === "pending" || status === "scanning";
 }
 
 const PENDING_NOTE = "Scan still running on the server. Figures update when it lands.";
+
+function cachedScanDetail(ageLabel: string | null): string {
+  if (ageLabel) return `Cached report, ${ageLabel}. Figures update when the scan lands.`;
+  return "Cached report on screen. Figures update when the scan lands.";
+}
 
 /* ── Mobile ticker flow report ── */
 
@@ -194,6 +205,7 @@ function MobileTickerFlowReport({
           className="tap-target"
           onClick={onRefresh}
           disabled={isAnalyzing}
+          aria-busy={isAnalyzing}
           aria-label="Refresh flow report"
           style={{
             display: "flex",
@@ -202,21 +214,29 @@ function MobileTickerFlowReport({
             fontFamily: "var(--font-mono)",
             fontSize: "var(--text-meta)",
             fontWeight: 600,
-            color: isAnalyzing ? "var(--text-muted)" : "var(--signal-core)",
+            color: isAnalyzing ? "var(--warn-text)" : "var(--signal-core)",
             background: "none",
             border: "none",
-            cursor: isAnalyzing ? "default" : "pointer",
+            cursor: isAnalyzing ? "progress" : "pointer",
             padding: "0 4px",
           }}
         >
-          <RefreshCw size={12} style={{ opacity: isAnalyzing ? 0.5 : 1 }} />
-          {status === "scanning" || status === "pending" ? "Analyzing" : "Refresh"}
+          {isAnalyzing
+            ? <ThinkingWait kind="flow" label="Scan running" size={20} />
+            : <RefreshCw size={12} />}
+          {status === "scanning" || status === "pending" ? "Analyzing" : status === "loading" ? "Loading" : "Refresh"}
         </button>
       </div>
 
       {error && <ErrorToast message={flowReportErrorCopy(error)} onRetry={() => void onRefresh()} />}
 
-      {cachedAge && (
+      {data && isAnalyzing && (
+        <div style={{ padding: "8px 16px 0" }}>
+          <CachedScanProgress ageLabel={cachedAge} />
+        </div>
+      )}
+
+      {cachedAge && status !== "scanning" && (
         <div style={{ padding: "8px 16px" }}>
           <div className="alert-item bearish" role="status" data-testid="flow-stale-age">
             Last good scan {cachedAge}. Every figure below is from that scan, not from live flow.
@@ -387,7 +407,7 @@ function MobileTickerFlowReport({
           style={{ padding: "0 16px 12px", margin: 0, fontSize: "var(--text-meta)" }}
         >
           {new Date(data.fetched_at).toLocaleString()}
-          {isAnalyzing ? " · Refreshing..." : ""}
+          {isAnalyzing ? " · Scan running. Figures update when it lands." : ""}
         </div>
       )}
     </div>
@@ -469,15 +489,32 @@ function SignalBadge({
         </div>
         <button
           type="button"
-          className="ticker-flow-refresh"
+          className={`ticker-flow-refresh${
+            status === "loading" || status === "scanning" || status === "pending"
+              ? " ticker-flow-refresh--busy"
+              : ""
+          }`}
           onClick={onRefresh}
           disabled={status === "loading" || status === "scanning" || status === "pending"}
+          aria-busy={status === "loading" || status === "scanning" || status === "pending"}
           aria-label="Refresh flow report"
         >
-          <RefreshCw size={12} />
-          <span>{status === "scanning" || status === "pending" ? "Analyzing" : "Refresh"}</span>
+          {status === "loading" || status === "scanning" || status === "pending"
+            ? <ThinkingWait kind="flow" label="Scan running" size={20} />
+            : <RefreshCw size={12} />}
+          <span>
+            {status === "scanning" || status === "pending"
+              ? "Analyzing"
+              : status === "loading"
+                ? "Loading"
+                : "Refresh"}
+          </span>
         </button>
       </div>
+
+      {verdict && (status === "scanning" || status === "pending" || status === "loading") && (
+        <CachedScanProgress ageLabel={cachedAge} />
+      )}
 
       <div
         className={`ticker-flow-badge ticker-flow-badge-${meta.className}`}
@@ -525,6 +562,25 @@ function SignalBadge({
 
 function PulseDot() {
   return <span className="ticker-flow-pulse" aria-hidden="true" />;
+}
+
+function CachedScanProgress({ ageLabel }: { ageLabel: string | null }) {
+  return (
+    <div
+      className="ticker-flow-scan-progress"
+      data-testid="flow-scan-progress"
+      role="status"
+      aria-live="polite"
+    >
+      <div className="ticker-flow-scan-progress-copy">
+        <div className="ticker-flow-scan-progress-kicker">Scan running</div>
+        <p>{cachedScanDetail(ageLabel)}</p>
+      </div>
+      <div className="ticker-flow-scan-progress-meter" aria-hidden="true">
+        <SpectralLoader height={28} bars={24} tone="warn" label="Scan running" />
+      </div>
+    </div>
+  );
 }
 
 function AnalyzingPanel({
@@ -672,7 +728,7 @@ function ReportSections({
           {data.fetched_at
             ? `Report Generated: ${new Date(data.fetched_at).toLocaleString()} - Source: UW API - Dark Pool Lookback: ${data.lookback_days ?? DEFAULT_LOOKBACK_DAYS} Trading Days`
             : "No report timestamp available"}
-          {isAnalyzing ? " - Refreshing in background..." : ""}
+          {isAnalyzing ? " - Scan running. Figures update when it lands." : ""}
         </div>
       </section>
     </>

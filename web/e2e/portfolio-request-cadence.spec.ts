@@ -69,7 +69,7 @@ const ORDERS = {
   }],
 };
 
-test("portfolio shell owns one initial read and shares its symbols with the command palette", async ({ page }, testInfo) => {
+test("portfolio shell retains one initial read owner after the search shortcut", async ({ page }, testInfo) => {
   test.setTimeout(90_000);
   let portfolioReads = 0;
 
@@ -104,8 +104,8 @@ test("portfolio shell owns one initial read and shares its symbols with the comm
   const settled = portfolioReads;
   expect(settled, "the portfolio shell must issue its own read").toBeGreaterThan(0);
   // next dev intentionally exercises React's development remount path. It may
-  // issue the shell's mount read twice; opening the always-mounted palette must
-  // not create a third request owner.
+  // issue the shell's mount read twice; focusing ticker search must not create
+  // a third request owner.
   expect(settled, "one read owner, plus at most one dev remount").toBeLessThanOrEqual(2);
 
   const watchDeadline = Date.now() + 2_500;
@@ -116,14 +116,12 @@ test("portfolio shell owns one initial read and shares its symbols with the comm
     ).toBe(settled);
     await page.waitForTimeout(100);
   }
-  const readsBeforePalette = portfolioReads;
+  const readsBeforeSearch = portfolioReads;
 
   await page.keyboard.press("Meta+k");
-  const palette = page.getByRole("dialog", { name: "Command palette" });
-  await expect(palette).toBeVisible();
-  await palette.getByRole("textbox", { name: "Search" }).fill("AAPL");
-  await expect(palette.getByText("AAPL", { exact: true })).toBeVisible();
-  expect(portfolioReads).toBe(readsBeforePalette);
+  await expect(page.getByRole("combobox", { name: "Search ticker", exact: true })).toBeFocused();
+  await expect(page.getByRole("dialog", { name: "Command palette" })).toHaveCount(0);
+  expect(portfolioReads).toBe(readsBeforeSearch);
 
   const screenshotPath = testInfo.outputPath("portfolio-request-cadence.png");
   await page.screenshot({ path: screenshotPath, fullPage: true });

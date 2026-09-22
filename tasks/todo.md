@@ -1,3 +1,20 @@
+# Task: Runner trust (R01-A / R02-A)
+
+Operator 2026-09-22: R01-A (no host browser endpoint on the codex write rung), R02-A (host-owned gitdir the agent cannot write).
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests: codex env has no PW_TEST_CONNECT_WS_ENDPOINT; host git uses $WEEKEND_ROOT/.gitdirs/<loop>.git; codex writable_roots omit .git
+- T2 depends_on: [T1] - Wrappers, plists, setup scripts, prune protection, operations.md
+- T3 depends_on: [T2] - Focused pytest green; PR; Mac mini setup_* after merge
+
+## Checklist
+
+- [x] T1 Failing tests
+- [x] T2 Implementation
+- [ ] T3 Verify and ship
+
+# Task: After-hours option last is last trade or last bid/offer, not previous close
 # Task: flex-pull activity coverage page d3b66eaf
 
 08:30 ET retry exits 1. Applied Equity_Summary claims, NAV dates absent.
@@ -8079,3 +8096,39 @@ Review: plan PR #576 was design only. This implement PR adds the host run-server
 - [ ] T5 depends_on: [T4] Persist complete dispositions, acceptance and operator actions on issue #81.
 Dependency graph: T1 -> T2 -> T3 -> T4 -> T5.
 Review: pending. P2 acceptance remains in the authoritative checkpoint, outside reduced scope.
+
+## Reliability remediate 2026-09-22 (reduced P0/P1)
+- [x] T1 depends_on: [] Reconcile issue checkpoint and establish full baseline.
+- [x] T2 depends_on: [T1] REL-277 snapshot-bound repair red/green with transactional conflict tests.
+- [x] T3 depends_on: [T2] Permanent drills and three full gates; review and commit substantive work.
+- [ ] T4 depends_on: [T3] Persist complete checkpoint and guarded publication.
+Review: 151 focused tests pass; 12 red regressions recorded. Complete snapshot comparison is intentionally conservative. 107 permanent drills passed. Three full gate pairs finished; Vitest 9993 passed each, Python retains 31 baseline process failures (one extra timing failure only in run 1, isolated green). Publication and durable final checkpoint pending. Inherited operator acceptance and all P2 findings remain open.
+## Documentation remediate 2026-09-22 (reduced P0/P1)
+- [x] T1 depends_on: [] Read complete issue #202 checkpoint and reverify DOC-121/122 against origin/main.
+- [x] T2 depends_on: [T1] Reproduce DOC-122, consolidate gross rebuild recovery in existing Flex owner, extend ownership and safety contract.
+- [x] T3 depends_on: [T2] Run focused and full gates, compare failures on clean main, review substantive diff.
+- [x] T4 depends_on: [T3] Prepare complete finding checkpoint and formatter-generated publication handoff; publication receipts belong on issue #202.
+Review: DOC-122 red/green demonstrated; 108 docs/path and 14 isolated rebuild tests pass. Full Python: 14827 passed, 31 failed, 2 skipped. Cloud: 2169 passed, 6 failed, 6 skipped initially; pinned-environment failure rerun 2 passed/4 failed. All remaining 31 Python and 4 cloud failures reproduce on clean 5bb91597, zero failure delta. Full Vitest: 9993 passed. Changed links/anchors (4), owners JSON, offline help, diff whitespace and secret scan pass. DOC-121 remains operator-only; DOC-110/120/123 retain their complete acceptance in issue #202 outside reduced scope. No live mutation or runtime behavior change. CI delivery belongs to the separate deliver phase.
+
+## 2026-09-22 Remove Command Palette
+Dependency graph: T1 -> {T2,T3} -> T4 -> T5.
+- [x] T1 depends_on: [] Isolate latest main, inspect instructions and map palette dependencies.
+- [x] T2 depends_on: [T1] Remove global palette, trigger, hotkey, styles and obsolete tests; preserve instrument search.
+- [x] T3 depends_on: [T1] Remove instrument Commands deck and shortcut; update cockpit regressions.
+- [x] T4 depends_on: [T2,T3] Review integration and browser regressions; publish PR.
+- [ ] T5 depends_on: [T4] Verify exact-head GitHub checks and screenshots, send Pushover receipt.
+Validation: no local test suites. GitHub owns unit, build and browser checks. Preserve unrelated workspace edits in original checkout.
+
+Review: removed global dialog/trigger/recent-history storage and instrument Commands deck/colon handler; retained direct instrument search and Cmd/Ctrl+K focus. Unit and curated browser regressions cover search navigation, remaining decks, Escape and responsive absence. No local test suites. GitHub checks and visual artifacts pending.
+
+Review update: PR #630 published; independent review preserved the shared asset empty-state style while deleting palette-specific styles. TypeScript and ESLint passed. Exact-head GitHub verification pending.
+
+## 2026-09-22 PR628 delivery and saved-trade follow-through
+Dependency graph: T1 -> T2 -> T3 -> T4 -> T5; T1 -> T1b -> T4.
+- [x] T1 depends_on: [] Isolate PR branch and reconcile conflicts with current main, preserving central recovery documentation.
+- [ ] T1b depends_on: [T1] Validate supplied saved XML and inspect runner/host acceptance prerequisites.
+- [ ] T2 depends_on: [T1] Push conflict resolution and verify every applicable exact-head GitHub CI check.
+- [ ] T3 depends_on: [T2] Notify green, merge, and verify production deployment.
+- [ ] T4 depends_on: [T1b,T3] Execute saved-Flex rebuild and legacy cleanup dry-runs; perform safe runner/host acceptance steps and record blockers.
+- [ ] T5 depends_on: [T4] Record operational evidence and remaining actions.
+Review: pending. No local suites. PR next steps specify dry-runs; destructive cleanup and any unproven data repair remain gated by evidence. Original workspace edits untouched.

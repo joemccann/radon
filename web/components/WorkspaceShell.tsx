@@ -57,7 +57,6 @@ import OfflineBanner from "@/components/OfflineBanner";
 import { useOfflineStatus } from "@/lib/offline/OfflineStatusContext";
 import { deriveLiveDataError } from "@/lib/offline/offlineStatus";
 import { useTheme } from "@/lib/ThemeContext";
-import CommandPalette from "@/components/CommandPalette";
 
 type WorkspaceShellProps = {
   section?: WorkspaceSection;
@@ -68,7 +67,6 @@ type WorkspaceShellProps = {
 export default function WorkspaceShell({ section, tickerParam, initialPortfolio }: WorkspaceShellProps) {
   const { theme: resolvedTheme, toggleTheme } = useTheme();
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [paletteOpen, setPaletteOpen] = useState(false);
   const pathname = usePathname();
   const { isMobile, hasMounted } = useViewport();
   const showMobileChrome = isMobile && hasMounted;
@@ -582,7 +580,6 @@ export default function WorkspaceShell({ section, tickerParam, initialPortfolio 
           futuresStrip={futuresQuotes.length > 0 ? <FuturesStrip quotes={futuresQuotes} /> : null}
           onSearchUnavailable={handleSearchUnavailable}
           lastSync={lastSync}
-          onOpenPalette={() => setPaletteOpen(true)}
           isStale={isStale}
           staleAgeMinutes={staleAgeMinutes}
           onSyncNow={syncNow}
@@ -649,11 +646,6 @@ export default function WorkspaceShell({ section, tickerParam, initialPortfolio 
       <ToastContainer toasts={toasts} exitingIds={exitingIds} onDismiss={dismissToast} />
       <ChatLauncher activeSection={activeSection} portfolio={portfolio} prices={prices} />
       <DemoWelcomeModal />
-      <CommandPalette
-        open={paletteOpen}
-        onClose={() => setPaletteOpen(false)}
-        portfolioSymbols={portfolioSymbols}
-      />
     </div>
   );
 }

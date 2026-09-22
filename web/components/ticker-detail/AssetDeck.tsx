@@ -24,12 +24,11 @@ const DECK_TITLE: Record<DeckKey, string> = {
   i: "Info / Company",
   h: "13F Smart Money",
   f: "Filing Forensics",
-  ":": "Command Palette",
   o: "Order Ticket",
 };
 
 /** Keys that open a deck via single-keystroke. */
-const OPEN_KEYS = new Set<string>(["c", "p", "n", "r", "s", "i", "h", "f", ":"]);
+const OPEN_KEYS = new Set<string>(["c", "p", "n", "r", "s", "i", "h", "f"]);
 
 /**
  * Decks whose content is too wide for the 36% act column and so fly out across
@@ -158,15 +157,6 @@ export default function AssetDeck({
             priceData={prices[ticker] ?? null}
             fundamentals={fundamentals[ticker] ?? null}
           />
-        )}
-        {activeDeck === ":" && (
-          <div className="asset-deck-palette">
-            <div className="asset-deck-ph">Command Palette</div>
-            <p>
-              Accelerator only: jump-to-ticker, quick orders, :chart. Never the sole path to
-              any surface.
-            </p>
-          </div>
         )}
       </div>
     </div>

@@ -880,8 +880,12 @@ setup_node() {
 # -- Caddy -------------------------------------------------------------------
 
 install_caddy() {
+  local installed_version=""
   if command -v caddy &>/dev/null; then
-    log_warn "Caddy already installed -- skipping installation"
+    installed_version="$(dpkg-query -W -f='${Version}' caddy 2>/dev/null || true)"
+  fi
+  if [[ -n "$installed_version" && "$installed_version" == "${CADDY_VERSION}"* ]]; then
+    log_warn "Caddy ${installed_version} already installed -- skipping installation"
   else
     log_info "Installing Caddy from official repos..."
     apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl
@@ -1469,7 +1473,8 @@ write_mcp_env() {
       return 1
     fi
   fi
-  mv -f "$mcp_env_tmp" "$mcp_env_target"
+  # -T: a directory link raced into the destination is replaced, not entered.
+  mv -T -f "$mcp_env_tmp" "$mcp_env_target"
   log_success "Hosted MCP env written to ${mcp_env_target}"
 }
 

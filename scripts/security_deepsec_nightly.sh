@@ -53,7 +53,7 @@ set -Eeuo pipefail
 
 # One writer per runner clone. The daily fire, a hand-run smoke test and the
 # setup script all drive the SAME tree, and every entry point runs
-# `git clean -fdxq`, so a second run would delete the live agent's uncommitted
+# `git --git-dir="$HOST_GITDIR" --work-tree="$REPO" clean -fdxq`, so a second run would delete the live agent's uncommitted
 # work mid-write with both runs reporting success. The plist pre-reset and
 # setup_security_nightly.sh both stand down on this lock, so it has to exist.
 # mkdir is the atomic primitive here: flock(1) does not exist on macOS.
@@ -293,6 +293,11 @@ GIT_SSH_BOUNDED="ssh -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAli
 # initial parse itself, before main is defined.
 main() {
 
+# Host git uses $WEEKEND_ROOT/.gitdirs/<loop>.git, not the clone .git.
+# Hooks and fsmonitor stay pinned off for the launchd pre-reset and helpers.
+export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null \
+  GIT_CONFIG_KEY_1=core.fsmonitor GIT_CONFIG_VALUE_1=false
+
 MODE="${1:?usage: security_deepsec_nightly.sh audit|remediate|deliver|cycle}"
 [[ "$MODE" == "audit" || "$MODE" == "remediate" || "$MODE" == "deliver" || "$MODE" == "cycle" ]] || {
   echo "unknown mode: $MODE" >&2; exit 2;
@@ -343,6 +348,22 @@ DEADMAN_TITLE="Nightly DeepSec runner"
 DEADMAN_LABEL="security-deepsec"
 ISSUE_SANITIZE=1
 LOOP_SLUG="security-deepsec"
+
+HOST_GITDIR="$WEEKEND_ROOT/.gitdirs/${LOOP_SLUG}.git"
+# Host git never reads the clone .git. The agent can rewrite a gitfile.
+ensure_host_gitdir() {
+  mkdir -p "$(dirname "$HOST_GITDIR")"
+  chmod 700 "$(dirname "$HOST_GITDIR")" 2>/dev/null || true
+  if [[ -d "$HOST_GITDIR" ]]; then
+    return 0
+  fi
+  if [[ -d "$REPO/.git" ]]; then
+    git -C "$REPO" init --separate-git-dir="$HOST_GITDIR" >/dev/null 2>&1 || true
+    return 0
+  fi
+  git init --separate-git-dir="$HOST_GITDIR" "$REPO" >/dev/null 2>&1 || true
+}
+ensure_host_gitdir
 DEADMAN_CREATE_BODY="Rolling dead-man for the nightly ${LOOP_SLUG} loop. Sanitized status only. Never a route, file, attack, secret, or account. A missing daily comment means the runner did not fire."
 # Branch prefix the skill opens/updates its PR from. Matched on the head
 # ref, not the title: the title is now `DeepSec <date>`, which a
@@ -377,6 +398,10 @@ publish_private_report() {
   REPORT_URL=""
   local src="$PRIVATE_SCRATCH/latest-report-${PHASE:-}.md" day rel dst ssh_cmd
   [[ -n "${PHASE:-}" && -f "$src" && -f "$REPORTS_KEY" ]] || return 0
+  # $PRIVATE_SCRATCH is agent-writable, so both the report this reads and the
+  # host-key pin this writes could be a planted symlink. Refuse rather than
+  # follow before either touches the path.
+  refuse_symlink "$src" || return 0
   # Only a report written during THIS phase; a stale one would be re-linked.
   [[ -n "${PHASE_START_MARK:-}" && "$src" -nt "$PHASE_START_MARK" ]] || return 0
   day="${STAMP:0:4}-${STAMP:4:2}-${STAMP:6:2}"
@@ -384,6 +409,7 @@ publish_private_report() {
   # Pin GitHub's published ed25519 host key (docs.github.com "GitHub's SSH
   # key fingerprints") instead of trusting whatever answers first contact.
   local pinned_hosts="$PRIVATE_SCRATCH/.github-known-hosts"
+  refuse_symlink "$pinned_hosts" || return 0
   printf '%s\n' 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' >"$pinned_hosts"
   ssh_cmd="ssh -i $REPORTS_KEY -o IdentitiesOnly=yes -o UserKnownHostsFile=$pinned_hosts -o StrictHostKeyChecking=yes -o ConnectTimeout=20"
   if [[ ! -d "$REPORTS_DIR/.git" ]]; then
@@ -585,7 +611,7 @@ prune_deadman_comments() {
   if [[ ! "$keep" =~ ^[0-9]+$ ]]; then return 0; fi
   if [[ "${RADON_WEEKEND_SKIP_ISSUE_PRUNE:-0}" == "1" ]]; then return 0; fi
   if [[ -z "${TIMEOUT_BIN:-}" || -z "$GH_BIN" ]]; then return 0; fi
-  git -C "$REPO" show origin/main:scripts/nightly_issue_prune.py 2>/dev/null \
+  git --git-dir="$HOST_GITDIR" --work-tree="$REPO" show origin/main:scripts/nightly_issue_prune.py 2>/dev/null \
     | "$TIMEOUT_BIN" "${RADON_WEEKEND_ISSUE_PRUNE_TIMEOUT_SECS:-30}" \
       /usr/bin/python3 -I - --gh-bin "$GH_BIN" --issue "$issue" \
       --branch-prefix "$PR_BRANCH_PREFIX" ${keep:+--keep "$keep"} >/dev/null 2>&1 || true
@@ -633,7 +659,7 @@ DELIVER_INCOMPLETE_MARKER="NIGHTLY DELIVER INCOMPLETE:"
 arm_deliver_record() {
   [[ "$PHASE" == "deliver" ]] || return 0
   [[ -n "${TIMEOUT_BIN:-}" ]] || return 0
-  git -C "$REPO" show origin/main:scripts/nightly_deliver.py 2>/dev/null \
+  git --git-dir="$HOST_GITDIR" --work-tree="$REPO" show origin/main:scripts/nightly_deliver.py 2>/dev/null \
     | "$TIMEOUT_BIN" 30 /usr/bin/python3 -I - record --loop "$LOOP_SLUG" \
       --branch "${PR_BRANCH_PREFIX}$(date +%F)" --status launched >/dev/null 2>&1 || true
   return 0
@@ -665,7 +691,7 @@ deliver_status() {
   # all. The log grep survives only as the fallback for a record-less run.
   local from_record=""
   if [[ -n "${TIMEOUT_BIN:-}" ]]; then
-    from_record="$(git -C "$REPO" show origin/main:scripts/nightly_deliver.py 2>/dev/null \
+    from_record="$(git --git-dir="$HOST_GITDIR" --work-tree="$REPO" show origin/main:scripts/nightly_deliver.py 2>/dev/null \
       | "$TIMEOUT_BIN" 30 /usr/bin/python3 -I - deliver-status --loop "$LOOP_SLUG" 2>/dev/null || true)"
   fi
   case "$from_record" in
@@ -787,7 +813,7 @@ kill_round_group() {
   # process-group leader, so the negative pid reaches claude and anything it
   # left behind. --foreground would signal only timeout's direct child, which
   # is the opposite of what reaping orphaned subagents needs — they would keep
-  # writing into the clone while the next round runs `git clean -fdxq`. R-386.
+  # writing into the clone while the next round runs `git --git-dir="$HOST_GITDIR" --work-tree="$REPO" clean -fdxq`. R-386.
   kill -TERM -- "-$ROUND_PID" 2>/dev/null || kill -TERM "$ROUND_PID" 2>/dev/null || true
   ROUND_PID=""
 }
@@ -962,6 +988,18 @@ refuse_billing_reroute_files() {
       exit 2
     fi
   done
+  # `--exclude=.deepsec/` preserves the WHOLE tree recursively, not just its
+  # top level, so a key file at a nested path (.deepsec/<subdir>/.env.local)
+  # survives every git clean unchecked by the flat glob above. Walk the tree.
+  local nested_key_file
+  while IFS= read -r nested_key_file; do
+    [[ -f "$nested_key_file" ]] || continue
+    if grep -qE "$BILLING_REROUTE_KEY_ASSIGN" "$nested_key_file" || grep -qiE "$BILLING_REROUTE_FLAG_ASSIGN" "$nested_key_file"; then
+      echo "REFUSING: $nested_key_file holds billing-reroute credentials; this loop bills the claude.ai subscription only, remove the key line" >&2
+      report "REFUSED" "$nested_key_file holds billing-reroute credentials; the agent would bill metered API usage instead of the claude.ai subscription, remove the key line" || true
+      exit 2
+    fi
+  done < <(find .deepsec -mindepth 2 -type f -name ".env*" 2>/dev/null || true)
 
   # web/.env is provisioned into the Radon-credential clones for the Next dev
   # server and pytest's load_dotenv, and the product copy carries
@@ -1074,7 +1112,7 @@ FETCH_PAUSE_SECS="${RADON_WEEKEND_FETCH_PAUSE_SECS:-60}"
 fetch_origin_with_retry() {
   local attempt
   for (( attempt = 1; attempt <= FETCH_ATTEMPTS; attempt++ )); do
-    net_bounded git -c "core.sshCommand=$GIT_SSH_BOUNDED" fetch origin --quiet && return 0
+    net_bounded git ${HOST_GITDIR:+--git-dir="$HOST_GITDIR"} ${REPO:+--work-tree="$REPO"} -c "core.sshCommand=$GIT_SSH_BOUNDED" fetch origin --quiet && return 0
     echo "[weekend] git fetch origin failed — attempt $attempt/$FETCH_ATTEMPTS" >&2
     if (( attempt < FETCH_ATTEMPTS )); then sleep "$FETCH_PAUSE_SECS"; fi
   done
@@ -1090,7 +1128,7 @@ fetch_origin_with_retry() {
 # Isolated origin/main pipe, same defence as prune_deadman_comments.
 resolve_green_main_sha() {
   [[ -n "${TIMEOUT_BIN:-}" && -n "$GH_BIN" ]] || return 0
-  git -C "$REPO" show origin/main:scripts/nightly_green_base.py 2>/dev/null \
+  git --git-dir="$HOST_GITDIR" --work-tree="$REPO" show origin/main:scripts/nightly_green_base.py 2>/dev/null \
     | "$TIMEOUT_BIN" "${RADON_WEEKEND_GREEN_BASE_TIMEOUT_SECS:-60}" \
       /usr/bin/python3 -I - --repo "${RADON_WEEKEND_GH_REPO:-joemccann/radon}" \
       --repo-dir "$REPO" --head origin/main --gh-bin "$GH_BIN" 2>/dev/null || true
@@ -1102,18 +1140,18 @@ ground_truth() {
   # T-490: a hand-set sparse checkout (`/*` + `!/.codex/`, radon-testing,
   # 2026-09-08) hid the tracked `.codex/skills/**` render from every audit
   # while `git status` stayed clean. Ground truth is the WHOLE tree.
-  git sparse-checkout disable 2>/dev/null || true
-  git checkout -f --quiet main
-  git reset --hard --quiet origin/main
+  git --git-dir="$HOST_GITDIR" --work-tree="$REPO" sparse-checkout disable 2>/dev/null || true
+  git --git-dir="$HOST_GITDIR" --work-tree="$REPO" checkout -f --quiet main
+  git --git-dir="$HOST_GITDIR" --work-tree="$REPO" reset --hard --quiet origin/main
   local green_sha
   green_sha="$(resolve_green_main_sha)"
-  if [[ -n "$green_sha" ]] && git -C "$REPO" rev-parse --verify --quiet "${green_sha}^{commit}" >/dev/null; then
-    if [[ "$green_sha" != "$(git -C "$REPO" rev-parse origin/main)" ]]; then
+  if [[ -n "$green_sha" ]] && git --git-dir="$HOST_GITDIR" --work-tree="$REPO" rev-parse --verify --quiet "${green_sha}^{commit}" >/dev/null; then
+    if [[ "$green_sha" != "$(git --git-dir="$HOST_GITDIR" --work-tree="$REPO" rev-parse origin/main)" ]]; then
       echo "[weekend] origin/main tip is not CI-green; pinning to $green_sha" | tee -a "${RUN_LOG:-/dev/null}" >/dev/null 2>&1 || true
     fi
-    git reset --hard --quiet "$green_sha"
+    git --git-dir="$HOST_GITDIR" --work-tree="$REPO" reset --hard --quiet "$green_sha"
   fi
-  git clean -fdxq --exclude=.radon-weekend-runner --exclude=.radon-security-deepsec-runner --exclude=.weekend-runner.lock --exclude=logs/ --exclude=.env --exclude=.env.ib-mode --exclude=web/.env --exclude=node_modules/ --exclude=.next/ --exclude=.deepsec/ --exclude=data/radon/
+  git --git-dir="$HOST_GITDIR" --work-tree="$REPO" clean -fdxq --exclude=.radon-weekend-runner --exclude=.radon-security-deepsec-runner --exclude=.weekend-runner.lock --exclude=logs/ --exclude=.env --exclude=.env.ib-mode --exclude=web/.env --exclude=node_modules/ --exclude=.next/ --exclude=.deepsec/ --exclude=data/radon/
 }
 
 # The agent commits per completed task and the skill resumes from the
@@ -1385,6 +1423,7 @@ install_nightly_pr_guard() {
     printf '#!/bin/bash\nset -euo pipefail\n'
     printf 'export RADON_NIGHTLY_REAL_GH=%q\n' "$GH_BIN"
     printf 'export RADON_NIGHTLY_GUARD_REPO=%q\n' "$REPO"
+    printf 'export RADON_NIGHTLY_HOST_GITDIR=%q\n' "${HOST_GITDIR:-}"
     printf 'export RADON_NIGHTLY_GUARD_PYTHON=%q\n' "$guard_python"
     cat <<'GUARD'
 case " $* " in
@@ -1392,7 +1431,7 @@ case " $* " in
     guard_dir="$(mktemp -d "${TMPDIR:-/tmp}/radon-pr-check.XXXXXX")"
     trap 'rm -rf -- "$guard_dir"' EXIT
     for helper in nightly_publish.py nightly_pr_guard.py; do
-      git -C "$RADON_NIGHTLY_GUARD_REPO" show "origin/main:scripts/$helper" > "$guard_dir/$helper"
+      git --git-dir="$RADON_NIGHTLY_HOST_GITDIR" --work-tree="$RADON_NIGHTLY_GUARD_REPO" show "origin/main:scripts/$helper" > "$guard_dir/$helper"
       [[ -s "$guard_dir/$helper" ]] || exit 1
     done
     "$RADON_NIGHTLY_GUARD_PYTHON" -I "$guard_dir/nightly_pr_guard.py" "$@"
@@ -1408,6 +1447,20 @@ launch_round() {
   local PATH="$NIGHTLY_PR_GUARD_DIR:$PATH"
   export PATH
   local remain="$1" prompt_file="$PORTABLE_PROMPT_DIR/$LOOP_SKILL.$PHASE.md"
+  unset PW_TEST_CONNECT_WS_ENDPOINT
+  case "$RUNG_PROVIDER" in
+    codex)
+      if [[ "${BROWSER_HOST_STATUS:-}" == "ready" ]]; then
+        export RADON_WEEKEND_BROWSER_HOST="unavailable:codex-rung"
+      fi
+      ;;
+    *)
+      if [[ -n "${BROWSER_HOST_ENDPOINT:-}" && "${BROWSER_HOST_STATUS:-}" == "ready" ]]; then
+        export PW_TEST_CONNECT_WS_ENDPOINT="$BROWSER_HOST_ENDPOINT"
+        export RADON_WEEKEND_BROWSER_HOST="ready"
+      fi
+      ;;
+  esac
   # A bare rung names no model on purpose: the CLI/account default is what runs
   # and the vendor migrates it forward. An empty --model is NOT the same thing,
   # so the flag is omitted entirely. `${a[@]+"${a[@]}"}` because bash 3.2 (the
@@ -1441,11 +1494,8 @@ launch_round() {
       # codex's workspace-write sandbox is narrower than the phase contract in
       # three ways, each of which silently produced an INCOMPLETE on 2026-09-07:
       #
-      #   .git                 protected by default, so `git checkout -b
-      #                        <loop>/<date>` failed with "Unable to create
-      #                        '.../refs/heads/....lock': Operation not
-      #                        permitted" and a phase scored on a COMMIT could
-      #                        never make one.
+      #   .git                 host-owned at $WEEKEND_ROOT/.gitdirs/<loop>.git.
+      #                        Codex does not get a writable gitdir (R02-A).
       #   deliver record       lives one level ABOVE the clone at
       #                        $WEEKEND_ROOT/.<loop>-deliver, so arming it raised
       #                        "PermissionError: [Errno 1] Operation not
@@ -1469,7 +1519,7 @@ launch_round() {
       "$TIMEOUT_BIN" -k "$KILL_AFTER_SECS" "$remain" \
         "$RUNG_BIN" exec ${model_flag[@]+"${model_flag[@]}"} \
         -c model_reasoning_effort="medium" \
-        -c "sandbox_workspace_write={network_access=true,writable_roots=[\"$REPO/.git\",\"$WEEKEND_ROOT/.$LOOP_SLUG-deliver\",\"$PRIVATE_SCRATCH\"]}" \
+        -c "sandbox_workspace_write={network_access=true,writable_roots=[\"$WEEKEND_ROOT/.$LOOP_SLUG-deliver\",\"$PRIVATE_SCRATCH\"]}" \
         -C "$REPO" --color never \
         --sandbox workspace-write --skip-git-repo-check \
         - < "$prompt_file" >> "$RUN_LOG" 2>&1 &
@@ -1751,7 +1801,7 @@ run_phase() {
 # interpreter (-I: no cwd, no clone dir, no user site on sys.path). That stops a
 # planted working-tree scripts/weekend_prune.py and a planted json.py on
 # sys.path. It is NOT a network trust anchor: refs/remotes/origin/main lives in
-# the same agent-writable $REPO/.git, so an agent that rewrites that ref is
+# the host gitdir, so an agent that rewrites the clone gitfile is
 # still ahead of it. Defence in depth, not a boundary.
 # --self "$REPO" makes this clone ignore its OWN runner lock, which it holds for
 # the whole cycle: otherwise the loop that generates the garbage is the one
@@ -1763,7 +1813,7 @@ prune_weekend_root() {
     return 0
   fi
   local rc=0
-  git -C "$REPO" show origin/main:scripts/weekend_prune.py 2>/dev/null \
+  git --git-dir="$HOST_GITDIR" --work-tree="$REPO" show origin/main:scripts/weekend_prune.py 2>/dev/null \
     | "$TIMEOUT_BIN" "${RADON_WEEKEND_PRUNE_TIMEOUT_SECS:-600}" \
       /usr/bin/python3 -I - --root "$WEEKEND_ROOT" --self "$REPO" >> "$RUN_LOG" 2>&1 || rc=$?
   if [[ $rc -ne 0 ]]; then

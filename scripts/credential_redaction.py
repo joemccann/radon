@@ -9,6 +9,11 @@ from typing import Any
 _SECRET_SCRUB_PATTERNS = [
     (re.compile(r"libsql://[^\s'\"]+", re.IGNORECASE), "[redacted-db-url]"),
     (re.compile(r"https://[a-z0-9.-]+\.turso\.io[^\s'\"]*", re.IGNORECASE), "[redacted-db-url]"),
+    # "Bearer <token>" is the literal HTTP header value shape (space, not an
+    # "=" / ":" assignment) and must run before the assignment pattern below,
+    # which would otherwise treat the word "Bearer" itself as the value and
+    # leave the real token in "authorization: bearer <token>" untouched.
+    (re.compile(r"\bbearer\s+\S+", re.IGNORECASE), "bearer [redacted]"),
     (
         re.compile(r"(auth[_-]?token|authorization|bearer)(\s*[=:]\s*)\S+", re.IGNORECASE),
         r"\1\2[redacted]",

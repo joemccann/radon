@@ -88,8 +88,9 @@ member's own session axis), `aggregate_ma_ratio(member_flags, sessions)`
   persists nothing (never cache an empty/degenerate result).
 - A session row exists only when `eligible_200 >= 0.8 * member_count` — early
   sessions where too few members carry a full 200-close window are not emitted.
-- `install_sigterm_unwind()` (bpi R-225): systemd SIGTERM unwinds instead of
-  killing mid-write.
+- `install_sigterm_unwind()` (shared with bpi): SIGTERM calls `os._exit(143)`
+  so a stuck chart-fallback worker cannot hold the oneshot past TimeoutStopSec.
+  systemd records exit-code 143, not Result=timeout.
 - Writes, in order, every cycle: `ensure_no_replica_for_writers()` →
   `upsert_ma_ratio_rows(rows, recorded_at=scan_time)` (full computed window,
   idempotent per date) → `upsert_scan_snapshot("ma-ratio", scan_time, payload)` →
