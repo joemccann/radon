@@ -69,20 +69,27 @@ class ResetOnNamedSftp(FakeSftp):
         stdin = kwargs.get("input") or ""
         if isinstance(stdin, bytes):
             stdin = stdin.decode()
-        for line in stdin.splitlines():
-            line = line.strip()
-            if line.startswith("get "):
-                key = line.split()[1].split("/")[-1]
-                if key in self.reset_names:
-                    self.calls.append(list(args))
-                    self.inputs.append(stdin)
-                    return SimpleNamespace(
-                        args=args,
-                        returncode=255,
-                        stdout="",
-                        stderr=KEX_RST,
-                    )
-        return super().__call__(args, **kwargs)
+        lines = [ln.strip() for ln in stdin.splitlines() if ln.strip()]
+        get_lines = [ln for ln in lines if ln.startswith("get ")]
+        if not get_lines or not any(
+            ln.split()[1].split("/")[-1] in self.reset_names for ln in get_lines
+        ):
+            return super().__call__(args, **kwargs)
+        # One `sftp -b` session runs gets in order. A reset on a later file
+        # leaves the earlier files on disk; aborting the script with nothing
+        # written does not match that, or the 12:30Z tail reset.
+        self.calls.append(list(args))
+        self.inputs.append(stdin)
+        completed = SimpleNamespace(args=args, returncode=0, stdout="", stderr="")
+        for line in get_lines:
+            _, remote, local = line.split(maxsplit=2)
+            key = remote.split("/")[-1]
+            if key in self.reset_names:
+                completed.returncode = 255
+                completed.stderr = KEX_RST
+                return completed
+            Path(local).write_bytes(self.files[key])
+        return completed
 
 
 def _drive(tmp_path, monkeypatch, files, reset_names, now=RETRY_NOW):

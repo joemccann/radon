@@ -873,7 +873,9 @@ Install dependency: IBKR-hosted sFTP, not Flex Web Service. Full recipe:
 `SWEEP_BUDGET_S=780` with newest-first ordering and SIGTERM unwind; must stay
 under the 07:30→08:30 ET gap). A budget stop after at least one ingest
 heartbeats `flex-pull` `ok` with `class=budget` and leaves the rest for the
-08:30 retry. A stop with nothing ingested heartbeats `error`. The effective
+08:30 retry. A stop with nothing ingested heartbeats `error`. Gets run in one sFTP
+session (`pull_gpg_batch`, `SFTP_TIMEOUT_SECS=90`) so a per-file SSH storm
+does not reset kex on the tail. The effective
 `ssh_config` is validated before
 connecting: global directives above the first `Host` block count toward the
 alias (first-match-wins), and `Include` / `Match` — which pull in
