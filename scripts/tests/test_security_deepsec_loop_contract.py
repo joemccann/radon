@@ -291,7 +291,7 @@ class TestTheSetupInstallsThisLoop:
         # While the old worktree still holds `main`, the security clone's own
         # `checkout main` dies with that same fatal, so the conversion must
         # run BEFORE the setup resets the security clone (Mini, 2026-09-19).
-        convert = body.index('if [[ -f "$DEEPSEC_REPO/.git" ]]; then')
+        convert = body.index('if [[ -f "$DEEPSEC_REPO/.git" && ! -d "$DEEPSEC_GITDIR" ]]; then')
         sec_checkout = body.index(
             'git --git-dir="$HOST_GITDIR" --work-tree="$WEEKEND_REPO" checkout -f --quiet main'
         )

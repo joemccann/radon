@@ -1034,20 +1034,20 @@ resolve_green_main_sha() {
 }
 
 ground_truth() {
-  fetch_origin_with_retry
+  fetch_origin_with_retry || return 1
   # T-490: a hand-set sparse checkout (`/*` + `!/.codex/`, radon-testing,
   # 2026-09-08) hid the tracked `.codex/skills/**` render from every audit
   # while `git status` stayed clean. Ground truth is the WHOLE tree.
   git --git-dir="$HOST_GITDIR" --work-tree="$REPO" sparse-checkout disable 2>/dev/null || true
-  git --git-dir="$HOST_GITDIR" --work-tree="$REPO" checkout -f --quiet main
-  git --git-dir="$HOST_GITDIR" --work-tree="$REPO" reset --hard --quiet origin/main
+  git --git-dir="$HOST_GITDIR" --work-tree="$REPO" checkout -f --quiet main || return 1
+  git --git-dir="$HOST_GITDIR" --work-tree="$REPO" reset --hard --quiet origin/main || return 1
   local green_sha
   green_sha="$(resolve_green_main_sha)"
   if [[ -n "$green_sha" ]] && git --git-dir="$HOST_GITDIR" --work-tree="$REPO" rev-parse --verify --quiet "${green_sha}^{commit}" >/dev/null; then
     if [[ "$green_sha" != "$(git --git-dir="$HOST_GITDIR" --work-tree="$REPO" rev-parse origin/main)" ]]; then
       echo "[weekend] origin/main tip is not CI-green; pinning to $green_sha" | tee -a "${RUN_LOG:-/dev/null}" >/dev/null 2>&1 || true
     fi
-    git --git-dir="$HOST_GITDIR" --work-tree="$REPO" reset --hard --quiet "$green_sha"
+    git --git-dir="$HOST_GITDIR" --work-tree="$REPO" reset --hard --quiet "$green_sha" || return 1
   fi
   git --git-dir="$HOST_GITDIR" --work-tree="$REPO" clean -fdxq --exclude=.radon-weekend-runner --exclude=.radon-ci-performance-runner --exclude=.weekend-runner.lock --exclude=logs/ --exclude=.env --exclude=.env.ib-mode --exclude=web/.env --exclude=node_modules/ --exclude=.next/ --exclude=.deepsec/
 }
@@ -1328,19 +1328,8 @@ launch_round() {
   export PATH
   local remain="$1" prompt_file="$PORTABLE_PROMPT_DIR/$LOOP_SKILL.$PHASE.md"
   unset PW_TEST_CONNECT_WS_ENDPOINT
-  case "$RUNG_PROVIDER" in
-    codex)
-      if [[ "${BROWSER_HOST_STATUS:-}" == "ready" ]]; then
-        export RADON_WEEKEND_BROWSER_HOST="unavailable:codex-rung"
-      fi
-      ;;
-    *)
-      if [[ -n "${BROWSER_HOST_ENDPOINT:-}" && "${BROWSER_HOST_STATUS:-}" == "ready" ]]; then
-        export PW_TEST_CONNECT_WS_ENDPOINT="$BROWSER_HOST_ENDPOINT"
-        export RADON_WEEKEND_BROWSER_HOST="ready"
-      fi
-      ;;
-  esac
+  export RADON_WEEKEND_BROWSER_HOST="unavailable:disabled"
+
   # A bare rung names no model on purpose: the CLI/account default is what runs
   # and the vendor migrates it forward. An empty --model is NOT the same thing,
   # so the flag is omitted entirely. `${a[@]+"${a[@]}"}` because bash 3.2 (the
