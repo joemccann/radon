@@ -250,12 +250,21 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // Homepage-public GPU index ticker. Uniform 26h window. HTTP only, no IB.
   "liquidcompute": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
   "model-catalog": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+  // ``slm-tagger-monitor``: radon-slm-tagger-monitor.timer fires daily 07:10 UTC.
+  // No-op when RADON_SLM_TAGGER_MODE is off or shadow. Uniform 26h window. No IB.
+  // The llama-server sidecar has no service_health row (unit watchdog only).
+  "slm-tagger-monitor": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
   // ``vixts`` — radon-vixts.timer fires daily 02:45 UTC every calendar day,
   // ten minutes behind radon-vixcor so the Cboe CDN hits stay staggered
   // (weekend and holiday runs are 304 heartbeats), so a uniform 26h window
   // matches its cor / vixcor / straddle siblings. Cboe CDN CSVs only — no IB.
   "vixts": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+
+  // ``panic-index`` — radon-panic-index.timer fires 02:50 and 13:15 UTC every
+  // calendar day (weekend and holiday runs are 304 heartbeats). Uniform 26h
+  // window matches its vixts sibling. Cboe CDN CSVs only — no IB.
+  "panic-index": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
   // ``dispersion`` — radon-dispersion.timer fires daily 22:20 UTC every calendar day (weekend runs are no-new-session heartbeats); the Yahoo rung keeps the writer alive through an IB outage, so requires_ib stays false. A sweep IB served nothing on is ``ok`` with last_error class ``ib_rung_dead`` (R-434).
   "dispersion": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
@@ -374,6 +383,10 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // UW vol/skew surface as strength/leap. On-demand so a quiet day does not
   // page; closed window bridges a weekend like the other UW scanners.
   "vol-skew-mr": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },
+  // ``bounce-setup``: radon-bounce-setup.timer fires Mon-Fri 21:10 UTC, so a
+  // Friday run must still read fresh on Monday evening: 74h, mirrored in
+  // scripts/watchdog/services.py.
+  "bounce-setup": { open: 74 * HOUR, extended: 74 * HOUR, closed: 74 * HOUR, category: "scheduled", requires_ib: false },
   "discover": { open: 4 * DAY, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
   "flow-analysis": { open: 4 * DAY, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
   "analyst-ratings": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },
@@ -513,6 +526,12 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // /health/lite only — no IB dependency.
   "host-metrics": { open: 10 * MIN, extended: 10 * MIN, closed: 10 * MIN, category: "scheduled", requires_ib: false },
 
+  // ``tv-alerts-drain`` digests TradingView webhook rows every 5 minutes,
+  // 24/7 (scripts/tv_alerts_drain.py via radon-tv-alerts.timer). Heartbeats
+  // ok every cycle even with no fires, so a quiet webhook reads dormant, not
+  // down. 20-min window absorbs a few missed firings. No IB.
+  "tv-alerts-drain": { open: 20 * MIN, extended: 20 * MIN, closed: 20 * MIN, category: "scheduled", requires_ib: false },
+
   // The Dropbox/PDF research worker is a continuous daemon.  A dependency
   // stall leaves systemd active, so its 15-minute heartbeat is the stale
   // signal that makes an in-process stop visible (REL-251).
@@ -614,6 +633,16 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // preset-rebalance weekly precedent: weekly cadence plus timer jitter, so
   // one missed Sunday surfaces before the second. Docker + local disk only.
   "disk-cleanup": { open: 8 * DAY, extended: 8 * DAY, closed: 8 * DAY, category: "scheduled", requires_ib: false },
+
+  // ``subscription-tokens`` is the agent-CLI subscription credential vault
+  // and autonomous refresh (scripts/subscription_tokens via
+  // radon-subscription-tokens.timer, every 30 min, 24/7). Heartbeats ok or
+  // error on every run, carrying the worst provider state. Uniform 3h window:
+  // the watchdog's daily bucket checks hourly, so a tighter window buys no
+  // earlier detection, and 3h absorbs five missed fires plus timer jitter
+  // before the row is called stale. Provider token endpoints plus the local
+  // encrypted secret store only — no IB dependency.
+  "subscription-tokens": { open: 3 * HOUR, extended: 3 * HOUR, closed: 3 * HOUR, category: "scheduled", requires_ib: false },
 
 };
 

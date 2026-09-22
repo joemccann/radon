@@ -1,0 +1,51 @@
+### LLaMA-Factory QLoRA (train only). Serve stays GGUF / llama.cpp.
+### HR-2: Qwen/Qwen2.5-1.5B-Instruct only.
+### HR-4: eval_dataset is the time-split valid.jsonl. Never a random holdout.
+### HR-5: train_on_prompt false = loss on assistant JSON only (mask_prompt).
+
+### model
+model_name_or_path: Qwen/Qwen2.5-1.5B-Instruct
+quantization_bit: 4
+quantization_method: bnb
+trust_remote_code: true
+
+### method
+stage: sft
+do_train: true
+finetuning_type: lora
+lora_rank: 16
+lora_alpha: 32
+lora_dropout: 0.05
+lora_target: q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj
+train_on_prompt: false
+
+### dataset
+dataset_dir: data/slm/tagger/v1
+dataset: radon_slm_tagger
+eval_dataset: radon_slm_tagger_valid
+template: qwen
+cutoff_len: 1024
+preprocessing_num_workers: 4
+dataloader_num_workers: 2
+
+### output
+output_dir: models/slm-tagger/v1/adapter
+logging_steps: 10
+save_steps: 200
+eval_strategy: steps
+eval_steps: 100
+plot_loss: true
+overwrite_output_dir: true
+save_only_model: false
+report_to: none
+
+### train
+per_device_train_batch_size: 8
+gradient_accumulation_steps: 1
+learning_rate: 1.0e-4
+num_train_epochs: 3.0
+lr_scheduler_type: cosine
+warmup_ratio: 0.05
+bf16: true
+ddp_timeout: 180000000
+seed: 20260919

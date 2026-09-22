@@ -108,6 +108,20 @@ class TestRouting:
             "/api/ib/* must use handle_path (not handle) for prefix stripping"
         )
 
+    def test_api_ib_bounds_the_request_body(self, caddy_dir):
+        """/api/ib/* is reachable pre-auth (FastAPI authenticates after Caddy
+        forwards), so the edge must reject oversized bodies (<= 1MB) before
+        they buffer in the trading API process."""
+        active = strip_comments(read_caddyfile(caddy_dir))
+        match = re.search(r"handle_path\s+/api/ib/\*\s*\{", active)
+        assert match is not None, "/api/ib/* route must exist"
+        block = _balanced_block(active, match.end() - 1)
+        cap = re.search(r"request_body\s*\{[^}]*max_size\s+(\d+)(KB|MB)", block)
+        assert cap, "/api/ib/* block must set request_body { max_size ... }"
+        size, unit = int(cap.group(1)), cap.group(2)
+        size_bytes = size * (1024 if unit == "KB" else 1024 * 1024)
+        assert size_bytes <= 1024 * 1024, "/api/ib/* max_size must be <= 1MB"
+
     def test_reverse_proxy_does_not_dial_localhost_hostname(self, caddy_dir):
         # `localhost` prefers ::1. Relay binds 127.0.0.1:8765 only, so
         # reverse_proxy localhost:8765 502s with connection refused. Same
@@ -164,20 +178,43 @@ class TestRouting:
         """Issue #232 dedicated host: mcp.radon.run is its own site, not a
         path on the app.radon.run catch-all (which would leak Next.js)."""
         content = strip_comments(read_caddyfile(caddy_dir))
-        assert re.search(r"(?m)^http://mcp\.radon\.run\s*\{", content)
-        assert not re.search(r"(?m)^mcp\.radon\.run\s*\{", content), (
-            "HTTPS mcp.radon.run must not exist until HTTP is live; load-time "
-            "ACME hangs reload and rolls the candidate back"
+        assert re.search(r"(?m)^mcp\.radon\.run\s*\{", content), (
+            "mcp.radon.run must be served over HTTPS: Clerk bearer tokens "
+            "cross the internet on this host"
+        )
+        assert re.search(r"(?m)^http://mcp\.radon\.run\s*\{", content), (
+            "an explicit http:// site must exist to answer :80 for ACME "
+            "HTTP-01 and redirect everything else to HTTPS"
         )
 
-    def test_mcp_site_proxies_only_to_the_mcp_process(self, caddy_dir):
+    def test_mcp_http_site_only_redirects_to_https(self, caddy_dir):
+        """The cleartext :80 site must be a 308 redirect shell — no proxying,
+        no headers — so no credential-bearing request is ever served plain."""
         block = site_block(read_caddyfile(caddy_dir), "http://mcp.radon.run")
+        assert re.search(r"redir\s+https://mcp\.radon\.run\{uri\}\s+308", block), (
+            "http://mcp.radon.run must 308-redirect to https://mcp.radon.run{uri}"
+        )
+        assert "reverse_proxy" not in block, "cleartext mcp site must not proxy"
+        assert "Strict-Transport-Security" not in block
+
+    def test_no_hsts_over_cleartext(self, caddy_dir):
+        """HSTS is meaningless (and spec-noncompliant) on an http:// site;
+        its presence marks a host that is serving real traffic in the clear."""
+        active = strip_comments(read_caddyfile(caddy_dir))
+        for match in re.finditer(r"(?m)^http://\S+\s*\{", active):
+            block = _balanced_block(active, match.end() - 1)
+            assert "Strict-Transport-Security" not in block, (
+                f"HSTS set inside cleartext site {match.group(0).strip()}"
+            )
+
+    def test_mcp_site_proxies_only_to_the_mcp_process(self, caddy_dir):
+        block = site_block(read_caddyfile(caddy_dir), "mcp.radon.run")
         assert "127.0.0.1:8334" in block
         assert "127.0.0.1:8321" not in block, "mcp.radon.run must never proxy to FastAPI"
         assert "127.0.0.1:3000" not in block, "mcp.radon.run must never proxy to Next.js"
 
     def test_mcp_site_keeps_the_path_prefix(self, caddy_dir):
-        block = site_block(read_caddyfile(caddy_dir), "http://mcp.radon.run")
+        block = site_block(read_caddyfile(caddy_dir), "mcp.radon.run")
         match = re.search(r"(handle_path|handle)\s+/mcp\*", block)
         assert match is not None, "mcp.radon.run must handle /mcp*"
         assert match.group(1) == "handle", (
@@ -186,7 +223,7 @@ class TestRouting:
 
     def test_mcp_site_bounds_the_request_body(self, caddy_dir):
         block = handle_block(
-            site_block(read_caddyfile(caddy_dir), "http://mcp.radon.run"), "/mcp*"
+            site_block(read_caddyfile(caddy_dir), "mcp.radon.run"), "/mcp*"
         )
         match = re.search(r"request_body\s*\{[^}]*max_size\s+(\d+)(KB|MB)", block)
         assert match, "mcp.radon.run /mcp* must set request_body { max_size ... }"
@@ -196,7 +233,7 @@ class TestRouting:
 
     def test_mcp_site_has_no_retry_loop(self, caddy_dir):
         block = reverse_proxy_block(
-            site_block(read_caddyfile(caddy_dir), "http://mcp.radon.run"), "127.0.0.1:8334"
+            site_block(read_caddyfile(caddy_dir), "mcp.radon.run"), "127.0.0.1:8334"
         )
         assert "lb_try_duration" not in block
 
@@ -204,12 +241,12 @@ class TestRouting:
         """Root `caddy validate` created /var/log/caddy/mcp.log as root:root.
         The caddy user then could not start (8628705d took app.radon.run
         down). Reuse an existing caddy-owned log or none."""
-        block = site_block(read_caddyfile(caddy_dir), "http://mcp.radon.run")
+        block = site_block(read_caddyfile(caddy_dir), "mcp.radon.run")
         assert "/var/log/caddy/mcp.log" not in block
 
     def test_mcp_root_rewrites_to_mcp_path(self, caddy_dir):
         """https://mcp.radon.run (no path) is a valid connector URL."""
-        block = site_block(read_caddyfile(caddy_dir), "http://mcp.radon.run")
+        block = site_block(read_caddyfile(caddy_dir), "mcp.radon.run")
         assert re.search(r"rewrite\s+\*\s+/mcp\b", block), (
             "mcp.radon.run / must rewrite to /mcp so the hostname itself is "
             "the Streamable HTTP endpoint"
@@ -708,3 +745,45 @@ class TestRestartWindowMechanism:
                     stop_serving(server)
                 caddy.terminate()
                 caddy.wait(timeout=10)
+
+
+# --------------------------------------------------------------------------
+# Issue #457: TradingView webhook ingress edge (docs/tradingview-integration.md)
+# --------------------------------------------------------------------------
+TV_MATCHER = "/api/webhooks/tradingview/*"
+TV_SENDER_IPS = {"52.89.214.238", "34.212.75.30", "54.218.53.128", "52.32.178.7"}
+
+
+class TestTradingViewWebhookEdge:
+    def _block(self, caddy_dir):
+        return handle_block(read_caddyfile(caddy_dir), TV_MATCHER)
+
+    def test_allowlists_exactly_the_four_tradingview_sender_ips(self, caddy_dir):
+        block = self._block(caddy_dir)
+        matcher = re.search(r"@(\w+)\s+not\s+remote_ip\s+([^\n]+)", block)
+        assert matcher, "need a `@name not remote_ip ...` matcher in the TV handle"
+        assert set(matcher.group(2).split()) == TV_SENDER_IPS
+        assert re.search(r"respond\s+@" + matcher.group(1) + r"\s+403", block), (
+            "non-TradingView senders must get 403 inside the webhook handle"
+        )
+
+    def test_caps_the_body_at_16kb(self, caddy_dir):
+        block = self._block(caddy_dir)
+        assert re.search(r"request_body\s*\{[^}]*max_size\s+16KB", block)
+
+    def test_proxies_to_the_nextjs_upstream(self, caddy_dir):
+        block = self._block(caddy_dir)
+        assert re.search(r"reverse_proxy\s+" + re.escape(APP_UPSTREAM) + r"\b", block)
+        assert IB_UPSTREAM not in block
+        assert re.search(r"dial_timeout\s+5s", block)
+        assert re.search(r"response_header_timeout\s+30s", block)
+
+    def test_has_no_retry_loop(self, caddy_dir):
+        """POST with no idempotency key: a replay would double-log an alert."""
+        assert "lb_try_duration" not in self._block(caddy_dir)
+
+    def test_sits_before_the_catch_all(self, caddy_dir):
+        active = strip_comments(read_caddyfile(caddy_dir))
+        tv = active.index("handle " + TV_MATCHER)
+        catch_all = re.search(r"(?m)^\s*handle\s*\{", active).start()
+        assert tv < catch_all

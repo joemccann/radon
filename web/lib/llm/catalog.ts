@@ -31,7 +31,7 @@ import { join } from "path";
 
 import { dbExecute } from "@/lib/dbExecute";
 import { DEFAULT_MODELS } from "./frontier";
-import { resolveProvider, resolveXaiApiKey } from "./provider";
+import { hasAnthropicAuth, hasOpenAiAuth, resolveProvider, resolveXaiAuth } from "./provider";
 
 export type LlmModelProvider = "anthropic" | "openai" | "xai";
 
@@ -80,25 +80,16 @@ export const BUILTIN_REFRESHED_AT = "2026-08-29";
 const CATALOG_PATH = join(process.cwd(), "..", "data", "llm_models.json");
 
 /**
- * Anthropic's key aliases. provider.ts owns the canonical list but does not
- * export its Anthropic resolver, and this module must not reach a key value —
- * only its presence. Keep in lockstep with ANTHROPIC_ENV_KEYS there.
- */
-const ANTHROPIC_ENV_KEYS = ["ANTHROPIC_API_KEY", "CLAUDE_CODE_API_KEY", "CLAUDE_API_KEY"];
-
-function hasEnvValue(key: string): boolean {
-  return Boolean(process.env[key]?.trim());
-}
-
-/**
  * Which providers this deployment can serve. Returns presence only — no key
  * material crosses this boundary, so nothing downstream can leak one.
+ * Presence means a subscription grant (or a prepaid key under
+ * RADON_LADDER_ALLOW_PREPAID); see lib/llm/subscriptionAuth.ts.
  */
 export function availableProviders(): LlmModelProvider[] {
   const available: LlmModelProvider[] = [];
-  if (ANTHROPIC_ENV_KEYS.some(hasEnvValue)) available.push("anthropic");
-  if (hasEnvValue("OPENAI_API_KEY")) available.push("openai");
-  if (resolveXaiApiKey()) available.push("xai");
+  if (hasAnthropicAuth()) available.push("anthropic");
+  if (hasOpenAiAuth()) available.push("openai");
+  if (resolveXaiAuth()) available.push("xai");
   return available;
 }
 

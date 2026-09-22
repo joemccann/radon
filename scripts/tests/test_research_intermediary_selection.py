@@ -3,8 +3,6 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-
 from research.pipeline import (
     DATE_EVIDENCE_ROLES,
     SELECT_SCHEMA,
@@ -128,8 +126,7 @@ def test_zh_goldman_desk_recap_publishes_instead_of_provenance_hold(tmp_path):
     assert audit[-1]['date_evidence_passed'] is True
 
 
-def test_zh_name_in_publisher_still_cannot_render():
+def test_zh_name_in_publisher_is_not_a_hold():
     item = dict(ZH_CANDIDATE)
     item['publisher'] = 'Goldman Sachs via ZERO HEDGE'
-    with pytest.raises(Exception, match='original provider'):
-        validate_candidate(item, 1, '2026-09-11')
+    assert validate_candidate(item, 1, '2026-09-11')['publisher'] == 'Goldman Sachs via ZERO HEDGE'

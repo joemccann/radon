@@ -191,10 +191,10 @@ describe("ChatPanel order-confirm card", () => {
     await sendNonCommandMessage("/portfolio");
 
     await waitFor(() => {
-      expect(screen.getByText(/PI command failed to run in this session/i)).toBeTruthy();
+      expect(screen.getByRole("alert").textContent).toContain("network down");
     });
     expect(screen.queryByText("No output.")).toBeNull();
-    expect(screen.queryAllByText(/PI command failed to run in this session/i)).toHaveLength(1);
+    expect(screen.queryAllByRole("alert")).toHaveLength(1);
     expect(calls.some((c) => c.url.includes("/api/pi"))).toBe(true);
   });
 });

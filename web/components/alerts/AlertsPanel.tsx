@@ -1,5 +1,8 @@
 "use client";
+import RequestError from "@/components/RequestError";
+import ErrorToast from "@/components/ErrorToast";
 
+import { userErrorMessage } from "@/lib/userError";
 import { useState } from "react";
 import { useAlerts, type AlertRule } from "@/lib/useAlerts";
 import { formatRelativeTime } from "@/lib/adminFormat";
@@ -94,7 +97,7 @@ export function AlertsPanel() {
       setTicker("");
       setThreshold("");
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : "Failed to create alert rule");
+      setFormError(userErrorMessage(err, "Failed to create alert rule"));
     } finally {
       setSubmitting(false);
     }
@@ -105,7 +108,7 @@ export function AlertsPanel() {
     try {
       await deleteRule(id);
     } catch (err) {
-      setDeleteError(err instanceof Error ? err.message : "Failed to delete alert rule");
+      setDeleteError(userErrorMessage(err, "Failed to delete alert rule"));
     }
   }
 
@@ -180,26 +183,15 @@ export function AlertsPanel() {
       </form>
 
       {formError ? (
-        <div className="snapshot-card__error" role="alert">
-          {formError}
-        </div>
+        <ErrorToast message={formError} />
       ) : null}
 
       <div role="status" aria-live="polite" aria-atomic="true">
-        {deleteError ? <div className="snapshot-card__error">{deleteError}</div> : null}
+        {deleteError ? <ErrorToast message={deleteError} /> : null}
         {isLoading ? (
           <div className="snapshot-card__empty">Loading rules</div>
         ) : error ? (
-          <div className="snapshot-card__error">
-            {error}
-            <button
-              type="button"
-              className="snapshot-card__see-all snapshot-card__see-all--action alerts-error__retry"
-              onClick={() => void retry()}
-            >
-              Retry
-            </button>
-          </div>
+          <RequestError error={error} onRetry={() => void retry()} />
         ) : rules.length === 0 ? (
           <div className="snapshot-card__empty">No alert rules yet. Add one above, e.g. AAPL Flow Strength &gt; 70.</div>
         ) : (

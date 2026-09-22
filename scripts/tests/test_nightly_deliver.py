@@ -227,6 +227,7 @@ class TestEveryLoopIsAccepted:
             "ci-performance": "ci_performance_nightly.sh",
             "documentation": "documentation_nightly.sh",
             "security": "security_nightly.sh",
+            "security-deepsec": "security_deepsec_nightly.sh",
         }
         text = (REPO / "scripts" / wrappers[loop]).read_text(encoding="utf-8")
         assert f'LOOP_SLUG="{loop}"' in text
@@ -422,7 +423,7 @@ class TestDeliverStatusFromTheRecord:
 WRAPPERS = tuple(
     REPO / "scripts" / n for n in (
         "reliability_weekend.sh", "testing_weekend.sh", "ci_performance_nightly.sh",
-        "documentation_nightly.sh", "security_nightly.sh",
+        "documentation_nightly.sh", "security_nightly.sh", "security_deepsec_nightly.sh",
     )
 )
 

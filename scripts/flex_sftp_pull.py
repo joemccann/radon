@@ -81,6 +81,26 @@ class FlexSftpError(RuntimeError):
     """Fail-closed sFTP / PGP / period error. Never a token fetch."""
 
 
+# OpenSSH kex RST / idle drop on a later `get`. IBKR never removes files from
+# `outgoing`, so a morning ls re-gets the full history; a peer reset on an
+# already-processed older file must not fail the oneshot after today's
+# statement landed (2026-09-16 page 5a2eb828).
+_TRANSIENT_SFTP_GET_MARKERS = (
+    "kex_exchange_identification",
+    "connection reset",
+    "connection timed out",
+)
+
+
+def _is_transient_sftp_get(exc: BaseException) -> bool:
+    if not isinstance(exc, FlexSftpError):
+        return False
+    text = str(exc).lower()
+    if not text.startswith("sftp_get_failed:"):
+        return False
+    return any(marker in text for marker in _TRANSIENT_SFTP_GET_MARKERS)
+
+
 _INSECURE_HOST_KEY = {"no", "off", "accept-new"}
 
 
@@ -220,14 +240,7 @@ def is_transient_sftp_error(exc: BaseException) -> bool:
     text = str(exc).lower()
     if not text.startswith("sftp_get_failed:"):
         return False
-    return any(
-        needle in text
-        for needle in (
-            "connection reset by peer",
-            "kex_exchange_identification",
-            "connection timed out",
-        )
-    )
+    return _is_transient_sftp_get(exc)
 
 
 def _gpg_decrypt(data: bytes, *, gnupg_home: Path) -> str:
@@ -307,6 +320,18 @@ def _delivery_key(name: str) -> str:
     if len(parts) >= 4:
         return ".".join(parts[:2])
     return base
+
+
+def _covered_historical_delivery(name: str, covered: Dict[str, date]) -> bool:
+    """A failed download is historical only within its own applied stream."""
+    latest = covered.get(_delivery_key(name))
+    if latest is None:
+        return False
+    try:
+        period = date.fromisoformat(_period_end_from_name(name))
+    except ValueError:
+        return False
+    return period < latest
 
 
 def delivery_is_stale(period_end: Optional[date], now: Optional[datetime] = None) -> bool:
@@ -533,8 +558,10 @@ def _run(
 
     _ensure_inbox(inbox)
     failed = False
+    failed_keys: set[str] = set()
     ingested = 0
     transient_gets = 0
+    covered_by_key: Dict[str, date] = {}
     newest_period_end: Optional[date] = None
     newest_by_key: Dict[str, date] = {}
     deadline = time.monotonic() + SWEEP_BUDGET_S
@@ -586,22 +613,27 @@ def _run(
             # run then re-pulls the same statement, each returning
             # `outcome: "duplicate"`, which passed `ok` and counted as progress.
             # Only a NEW statement is progress. R-389.
+            if result.get("outcome") == "duplicate" and result.get("persistence_confirmed") is not True:
+                raise FlexSftpError("duplicate ingest lacks independent persistence confirmation")
             if result.get("outcome") != "duplicate":
                 ingested += 1
+            if period_end is not None:
+                covered_by_key[key] = max(period_end, covered_by_key.get(key, period_end))
         except Exception as exc:  # noqa: BLE001 — one bad file must not abort the batch
             # Was `(FlexSftpError, FlexClassifyError, OSError)`, which covered
             # neither a `TimeoutExpired` from the decrypt nor anything out of
             # `ingest_xml`. R-400.
             print(f"[flex-pull] {name}: {type(exc).__name__}: {exc}", file=sys.stderr)
-            if is_transient_sftp_error(exc):
+            if _is_transient_sftp_get(exc) and _covered_historical_delivery(name, covered_by_key):
                 transient_gets += 1
                 continue
             failed = True
+            failed_keys.add(_delivery_key(name))
             continue
 
     retain_newest_gpg(inbox)
     if failed:
-        _heartbeat("error", "one or more files rejected")
+        _heartbeat("error", "one or more files rejected: " + ", ".join(sorted(failed_keys)))
         return 1
     if budget_spent:
         # Newest-first means a budget stop after progress still applied today;

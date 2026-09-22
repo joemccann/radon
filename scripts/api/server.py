@@ -2074,9 +2074,28 @@ async def get_ws_ticket(payload: dict = Depends(verify_clerk_jwt)):
     return {"ticket": ticket}
 
 
+# Auth-exempt handlers parse the body before any credential check, so an
+# anonymous caller must never be able to stream an unbounded body into this
+# process. Checked against Content-Length BEFORE the body is read; the edge
+# (Caddy request_body 1MB) is the outer layer of the same bound.
+AUTH_EXEMPT_BODY_MAX_BYTES = 64 * 1024
+
+
+def _require_bounded_body(request: Request) -> None:
+    """413 an oversized body, 411 a length-less one, without reading it."""
+    content_length = request.headers.get("content-length")
+    try:
+        size = int(content_length)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=411, detail="Content-Length required")
+    if size > AUTH_EXEMPT_BODY_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Request body too large")
+
+
 @app.post("/ws-ticket/validate")
 async def validate_ws_ticket(request: Request):
     """Validate a WebSocket ticket (called by the Node.js relay). Internal only."""
+    _require_bounded_body(request)
     body = await request.json()
     ticket = body.get("ticket", "")
     user_id = validate_ticket(ticket)
@@ -2097,6 +2116,7 @@ async def demo_trial_expiry(request: Request):
     """
     from utils.demo_trial import DEFAULT_TRADING_DAYS, trial_expiry_handler
 
+    _require_bounded_body(request)
     body = await request.json()
     start_iso_et = body.get("start_iso_et")
     if not start_iso_et:
@@ -2363,7 +2383,7 @@ async def _run_flow_tab(
 @app.post("/scan")
 async def scan(force: bool = False):
     """Run watchlist scanner (scanner.py --top 25)."""
-    workers = _bounded_env_int("RADON_SCANNER_WORKERS", 24)
+    workers = app_preferences.get_int("RADON_SCANNER_WORKERS")
     return await _run_flow_tab(
         "scanner",
         "scanner.json",
@@ -3777,7 +3797,7 @@ async def leap_scan(preset: str = "largecaps", min_gap: float = 10.0, tickers: s
             if _scan_cache_matches_preset(cached, preset):
                 return cached
             raise _preset_cooldown_429("leap", _leap_last_scan, LEAP_COOLDOWN_S)
-        workers = _bounded_env_int("RADON_LEAP_SCANNER_WORKERS", 16)
+        workers = app_preferences.get_int("RADON_LEAP_SCANNER_WORKERS")
         if is_ticker_scan:
             args = [
                 "--tickers", ",".join(requested),
@@ -3925,7 +3945,7 @@ async def theta_harvester_scan(
             cached = _read_cache(DATA_DIR / "theta_harvester.json")
             if _theta_cache_matches(cached, preset, min_dte, max_dte, min_credit):
                 return cached
-        workers = _bounded_env_int("RADON_THETA_SCANNER_WORKERS", 24)
+        workers = app_preferences.get_int("RADON_THETA_SCANNER_WORKERS")
         args = ["--json", "--workers", str(workers)]
         if is_ticker_scan:
             args.append(ticker)
@@ -4017,7 +4037,7 @@ async def strength_confirmation_scan(preset: str = "ndx100", limit: int = 0, tic
             cached = _read_cache(DATA_DIR / "strength_confirmation.json")
             if _strength_cache_matches_preset(cached, preset):
                 return cached
-        workers = _bounded_env_int("RADON_STRENGTH_SCANNER_WORKERS", 24)
+        workers = app_preferences.get_int("RADON_STRENGTH_SCANNER_WORKERS")
         args = ["--json", "--workers", str(workers)]
         if is_ticker_scan:
             args.append(ticker)
@@ -4106,7 +4126,7 @@ async def vol_skew_mr_scan(preset: str = "ndx100", limit: int = 0, ticker: str =
             cached = _read_cache(DATA_DIR / "vol_skew_mr.json")
             if _vol_skew_mr_cache_matches_preset(cached, preset):
                 return cached
-        workers = _bounded_env_int("RADON_VOL_SKEW_MR_WORKERS", 24)
+        workers = app_preferences.get_int("RADON_VOL_SKEW_MR_WORKERS")
         args = ["--json", "--workers", str(workers)]
         if is_ticker_scan:
             args.extend(requested)
@@ -4134,6 +4154,78 @@ async def vol_skew_mr_scan(preset: str = "ndx100", limit: int = 0, ticker: str =
             "actionable_count": 0,
             "results": [],
         }
+
+
+# ── BOUNCE SETUP scanner (docs/bounce-setup.md) ───────────────────
+
+_bounce_setup_last_scan: float = 0.0
+_bounce_setup_scan_lock: Optional[asyncio.Lock] = None
+BOUNCE_SETUP_COOLDOWN_S = 3600
+
+
+def _bounce_setup_empty(universe: str) -> dict:
+    return {
+        "scan_time": None,
+        "as_of": None,
+        "window": 20,
+        "universe": universe,
+        "coverage": {"tickers": 0, "ranked": 0, "excluded_short_history": 0, "stage2": 0},
+        "bounce_count": 0,
+        "results": [],
+    }
+
+
+@app.post("/bounce-setup/scan")
+async def bounce_setup_scan(preset: str = "largecaps", limit: int = 0, tickers: str = ""):
+    """Run bounce_setup_scanner.py against a preset or explicit tickers.
+
+    Preset scans write data/bounce_setup.json and mirror scan_snapshots
+    service bounce-setup. Ticker scans bypass the cooldown and return the
+    subprocess payload without touching the cache.
+    """
+    global _bounce_setup_last_scan, _bounce_setup_scan_lock
+    preset = preset.strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,32}", preset):
+        raise HTTPException(status_code=400, detail="preset must be 1-32 chars [A-Za-z0-9_-]")
+    requested = _parse_scan_tickers(tickers) if tickers.strip() else []
+    if test_mode:
+        return await demo_scan_response("bounce-setup", _bounce_setup_empty(preset))
+    if _bounce_setup_scan_lock is None:
+        _bounce_setup_scan_lock = asyncio.Lock()
+    is_ticker_scan = bool(requested)
+    cache_path = DATA_DIR / "bounce_setup.json"
+
+    def _cached_for_preset() -> Optional[dict]:
+        cached = _read_cache(cache_path)
+        if isinstance(cached, dict) and str(cached.get("universe") or "").lower() == preset.lower():
+            return cached
+        return None
+
+    if not is_ticker_scan and time.monotonic() - _bounce_setup_last_scan < BOUNCE_SETUP_COOLDOWN_S:
+        cached = _cached_for_preset()
+        if cached:
+            return cached
+    async with _bounce_setup_scan_lock:
+        if not is_ticker_scan and time.monotonic() - _bounce_setup_last_scan < BOUNCE_SETUP_COOLDOWN_S:
+            cached = _cached_for_preset()
+            if cached:
+                return cached
+        args = ["--json"]
+        if is_ticker_scan:
+            args.extend(requested)
+        else:
+            args.extend(["--preset", preset])
+            if limit and limit > 0:
+                args.extend(["--limit", str(limit)])
+        result = await run_script("bounce_setup_scanner.py", args, timeout=600)
+        if not result.ok:
+            raise HTTPException(status_code=502, detail=result.error)
+        payload = result.data if isinstance(result.data, dict) else None
+        scan_status = (payload or {}).get("scan_status")
+        if is_ticker_scan or scan_status:
+            return payload or _bounce_setup_empty("explicit" if is_ticker_scan else preset)
+        _bounce_setup_last_scan = time.monotonic()
+        return _read_cache(cache_path) or payload or _bounce_setup_empty(preset)
 
 
 # ── Market calendar (IBKR-sourced trading schedule) ─────────────────
@@ -4474,7 +4566,7 @@ async def garch_convergence_scan(preset: str = "largecaps", tickers: str = ""):
             if _scan_cache_matches_preset(cached, preset):
                 return cached
             raise _preset_cooldown_429("garch", _garch_last_scan, GARCH_COOLDOWN_S)
-        workers = _bounded_env_int("RADON_GARCH_SCANNER_WORKERS", 16)
+        workers = app_preferences.get_int("RADON_GARCH_SCANNER_WORKERS")
         if is_ticker_scan:
             args = [
                 "--tickers", ",".join(requested),
@@ -5500,7 +5592,8 @@ async def pi_exec(payload: dict, request: Request):
 async def ticker_ratings(ticker: str):
     """Analyst ratings + targets for a single ticker.
 
-    Thin passthrough to scripts/fetch_analyst_ratings.py with --json. The
+    Thin passthrough to scripts/fetch_analyst_ratings_rh.py (IB -> Robinhood
+    consensus -> UW) with --json. The
     script outputs a JSON array (one entry per ticker requested); for the
     single-ticker case we unwrap and return the first element so the Next.js
     route can render it directly.
@@ -5509,7 +5602,7 @@ async def ticker_ratings(ticker: str):
     if not upper:
         raise HTTPException(status_code=400, detail="ticker is required")
     result = await run_script(
-        "fetch_analyst_ratings.py", [upper, "--json"], timeout=60
+        "fetch_analyst_ratings_rh.py", [upper, "--json"], timeout=60
     )
     if not result.ok:
         raise HTTPException(status_code=502, detail=result.error)

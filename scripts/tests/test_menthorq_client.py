@@ -31,11 +31,11 @@ from clients.menthorq_client import (
 
 @pytest.fixture
 def mock_env_creds():
-    """Provide mock MenthorQ credentials and Anthropic key in environment."""
+    """Provide mock MenthorQ credentials and Claude subscription OAuth in environment."""
     with patch.dict(os.environ, {
         "MENTHORQ_USER": "test@example.com",
         "MENTHORQ_PASS": "testpass123",
-        "ANTHROPIC_API_KEY": "sk-ant-test-key",
+        "CLAUDE_CODE_OAUTH_TOKEN": "oauth-sub-test-token",
     }):
         yield
 

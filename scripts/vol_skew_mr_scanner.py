@@ -21,7 +21,7 @@ import os
 import sys
 from concurrent.futures import CancelledError, ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -66,6 +66,9 @@ RSI_HIGH = 70.0
 RSI_LOW = 30.0
 PATH_FLAT_EPS = 0.25
 SKEW_DECIMAL_CEILING = 1.0
+SKEW_DELTA = 25
+SKEW_TIMEFRAME = "1M"
+SKEW_SESSIONS = 6
 DEFAULT_MAX_WORKERS = 24
 RATE_LIMIT_ABORT = 8
 SERVICE_NAME = "vol-skew-mr"
@@ -307,6 +310,119 @@ def _dated_series(payload: Any, keys: Sequence[str], convert=_to_float) -> List[
     return values[-6:]
 
 
+def _skew_expiry(payload: Any, as_of: date) -> Optional[str]:
+    """Use one actual listed expiry nearest 30 DTE for the entire history."""
+    expiries: set[date] = set()
+    for row in _as_rows(payload):
+        try:
+            expiry = date.fromisoformat(str(row.get("expiry") or row.get("expires") or ""))
+        except ValueError:
+            continue
+        if expiry > as_of:
+            expiries.add(expiry)
+    selected = min(
+        expiries,
+        key=lambda expiry: (abs((expiry - as_of).days - 30), expiry),
+        default=None,
+    )
+    return selected.isoformat() if selected is not None else None
+
+
+def _risk_reversal_sessions(payload: Any, expiry: str, as_of: date) -> List[Tuple[date, float]]:
+    """UW's signed put-minus-call IV difference, in vol points per session.
+
+    The historical endpoint's risk_reversal field is decimal IV. Never infer
+    units from its magnitude or append a current chain with another maturity.
+    """
+    sessions: Dict[date, float] = {}
+    for row in _as_rows(payload):
+        try:
+            session = date.fromisoformat(str(row.get("date") or ""))
+        except ValueError:
+            continue
+        if session > as_of:
+            continue
+        row_expiry = row.get("expiry", row.get("expires"))
+        if row_expiry is not None and row_expiry != expiry:
+            continue
+        if row.get("delta") is not None and _to_float(row["delta"]) != 25:
+            continue
+        value = _to_float(row.get("risk_reversal"))
+        if value is not None:
+            sessions[session] = value * 100
+    return [(session, sessions[session]) for session in sorted(sessions)[-SKEW_SESSIONS:]]
+
+
+def _risk_reversal_history(payload: Any, expiry: str, as_of: date) -> List[float]:
+    return [value for _, value in _risk_reversal_sessions(payload, expiry, as_of)]
+
+
+def unavailable_skew(errors: Sequence[str]) -> Dict[str, Any]:
+    """The skew block when no comparable history could be read."""
+    return {
+        "expiry": None,
+        "delta": SKEW_DELTA,
+        "sessions": [],
+        "value": None,
+        "prior": None,
+        "change": None,
+        "path": "unknown",
+        "errors": list(errors),
+    }
+
+
+def fetch_skew_snapshot(client: Any, ticker: str, as_of: Optional[date] = None) -> Dict[str, Any]:
+    """Current 25-delta put-minus-call skew for one ticker, with its recent path.
+
+    One listed expiry nearest 30 DTE, `SKEW_SESSIONS` most recent sessions in
+    vol points. `path` is the scanner's series_path over those sessions;
+    `change` is the latest session against the one before it. Rate limits
+    propagate; every other failure lands in `errors` and degrades the block.
+    """
+    ticker = ticker.upper()
+    as_of = as_of or datetime.now(timezone.utc).date()
+    errors: List[str] = []
+
+    def fetch(label: str, func, default: Any) -> Any:
+        try:
+            return func()
+        except UWRateLimitError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - degrade the skew block, not the caller
+            errors.append(f"{label}:{exc}")
+            return default
+
+    empty: Dict[str, Any] = {"data": []}
+    expiry = _skew_expiry(fetch("skew_expiry", lambda: client.get_expiry_breakdown(ticker), empty), as_of)
+    if expiry is None:
+        errors.append("skew_history:no_future_listed_expiry")
+        return unavailable_skew(errors)
+
+    history = fetch(
+        "risk_reversal",
+        lambda: client.get_historical_risk_reversal_skew(
+            ticker, expiry=expiry, delta=SKEW_DELTA, timeframe=SKEW_TIMEFRAME
+        ),
+        empty,
+    )
+    sessions = _risk_reversal_sessions(history, expiry, as_of)
+    if len(sessions) < 2:
+        errors.append(f"skew_history:insufficient_distinct_sessions:{len(sessions)}")
+    values = [value for _, value in sessions]
+    latest = values[-1] if values else None
+    prior = values[-2] if len(values) >= 2 else None
+    return {
+        "expiry": expiry,
+        "delta": SKEW_DELTA,
+        "sessions": [{"date": session.isoformat(), "value": round(value, 4)} for session, value in sessions],
+        "value": None if latest is None else round(latest, 4),
+        "prior": None if prior is None else round(prior, 4),
+        "change": None if latest is None or prior is None else round(latest - prior, 4),
+        "path": series_path(values),
+        "errors": errors,
+    }
+
+
 def _parse_option_symbol(symbol: str) -> Tuple[Optional[str], Optional[float], Optional[str]]:
     text = str(symbol or "").strip().upper()
     for idx in range(1, len(text) - 7):
@@ -389,23 +505,9 @@ def scan_ticker(
             ("volatility", "iv"),
             _vol_pct,
         )
-        rr = fetch(
-            "risk_reversal",
-            lambda: client.get_historical_risk_reversal_skew(ticker),
-            empty,
-        )
-        skew_series = _as_vol_points(_dated_series(rr, ("value", "skew", "risk_reversal")))
-        if len(skew_series) < 2:
-            contracts = fetch(
-                "contracts",
-                lambda: client.get_option_contracts(
-                    ticker, exclude_zero_vol_chains=True, maybe_otm_only=True
-                ),
-                empty,
-            )
-            current = _current_put_call_skew(contracts)
-            if current is not None:
-                skew_series = skew_series + [current] if skew_series else [current]
+        skew = fetch_skew_snapshot(client, ticker)
+        errors.extend(skew["errors"])
+        skew_series = [row["value"] for row in skew["sessions"]]
 
         classified = classify_from_series(prices, iv_series, skew_series)
         return VolSkewCandidate(

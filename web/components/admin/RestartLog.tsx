@@ -1,5 +1,6 @@
 "use client";
 
+import { userErrorMessage } from "@/lib/userError";
 import type { RestartLogEntry } from "@/lib/adminTypes";
 
 type RestartLogProps = {
@@ -41,7 +42,7 @@ export default function RestartLog({ entries }: RestartLogProps) {
             <span className="admin-log-time">{formatTime(entry.at)}</span>
             <span className="admin-log-action">{entry.action}</span>
             <span className="admin-log-target">{entry.target}</span>
-            <span className="admin-log-detail">{entry.detail}</span>
+            <span className="admin-log-detail">{entry.ok ? entry.detail : userErrorMessage(entry.detail, "The action could not be completed. Review service status and try again.")}</span>
           </li>
         ))}
       </ul>

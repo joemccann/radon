@@ -1,6 +1,6 @@
 # CALM STREAK: consecutive SPX sessions without a >1% intraday band
 
-Route `/regime/calm-streak` · service `calm-streak` · component `CalmStreakPanel` · tab label `CALM STREAK` · migration `0074`
+Route `/regime/calm-streak` · service `calm-streak` · component `CalmStreakPanel` · tab label `CALM STREAK` · migration `0076`
 
 ## Signal
 
@@ -116,7 +116,7 @@ is empty) → `writer.upsert_scan_snapshot("calm-streak", scan_time, payload)` �
 `writer.record_service_health("calm-streak", "ok", finished_at=scan_time)` → atomic
 JSON fallback. CLI: `--json` payload to stdout, progress to stderr; `--no-db`.
 
-## Storage: `scripts/db/migrations/0074_calm_streak.sql`
+## Storage: `scripts/db/migrations/0076_calm_streak.sql`
 
 ```sql
 CREATE TABLE IF NOT EXISTS calm_streak_history (
@@ -130,7 +130,7 @@ CREATE TABLE IF NOT EXISTS calm_streak_history (
     recorded_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_calm_streak_history_date_desc ON calm_streak_history (date DESC);
-INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (74, datetime('now'));
+INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (76, datetime('now'));
 ```
 
 Writer `scripts/db/writer.py:upsert_calm_streak_rows(rows, recorded_at)`: chunked

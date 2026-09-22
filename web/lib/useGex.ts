@@ -133,7 +133,7 @@ export function needsGexRetry(data: GexData | null | undefined): boolean {
 const GEX_SYNC_CONFIG = {
   endpoint: "/api/gex",
   interval: 60_000,
-  hasPost: true,
+  hasPost: false,
   extractTimestamp: (d: GexData) => d.scan_time || null,
   shouldRetry: (d: GexData) => needsGexRetry(d),
   retryIntervalMs: 5000,

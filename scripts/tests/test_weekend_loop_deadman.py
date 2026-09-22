@@ -52,12 +52,14 @@ TESTING = REPO / "scripts" / "testing_weekend.sh"
 CI_PERFORMANCE = REPO / "scripts" / "ci_performance_nightly.sh"
 DOCUMENTATION = REPO / "scripts" / "documentation_nightly.sh"
 SECURITY = REPO / "scripts" / "security_nightly.sh"
+SECURITY_DEEPSEC = REPO / "scripts" / "security_deepsec_nightly.sh"
 PLISTS = {
     "reliability": REPO / "config" / "com.radon.reliability-daily.plist",
     "testing": REPO / "config" / "com.radon.testing-daily.plist",
     "ci-performance": REPO / "config" / "com.radon.ci-performance-daily.plist",
     "documentation": REPO / "config" / "com.radon.documentation-daily.plist",
     "security": REPO / "config" / "com.radon.security-daily.plist",
+    "security-deepsec": REPO / "config" / "com.radon.security-deepsec.plist",
 }
 # Every nightly loop wrapper. A new loop that is not registered here inherits
 # none of the dead-man contract below, which is the whole reason the two
@@ -68,6 +70,7 @@ LOOPS = {
     "ci-performance": CI_PERFORMANCE,
     "documentation": DOCUMENTATION,
     "security": SECURITY,
+    "security-deepsec": SECURITY_DEEPSEC,
 }
 
 
@@ -96,7 +99,7 @@ def _fake_runner_clone(tmp_path: Path, name: str) -> Path:
     (repo / ".radon-weekend-runner").write_text("", encoding="utf-8")
     # REL-180 (R-504): every wrapper requires its OWN loop marker as well; a
     # generic clone carries all five so each wrapper finds its own.
-    for marker in (".radon-security-runner", ".radon-reliability-runner", ".radon-testing-runner",
+    for marker in (".radon-security-runner", ".radon-security-deepsec-runner", ".radon-reliability-runner", ".radon-testing-runner",
                    ".radon-ci-performance-runner", ".radon-documentation-runner"):
         (repo / marker).write_text("", encoding="utf-8")
     lock = repo / ".weekend-runner.lock"
@@ -326,6 +329,7 @@ class TestSetupGuardsPerLoopVenvs:
         "ci-performance": REPO / "scripts" / "ci_performance_nightly.sh",
         "documentation": REPO / "scripts" / "documentation_nightly.sh",
         "security": REPO / "scripts" / "security_nightly.sh",
+        "security-deepsec": REPO / "scripts" / "security_deepsec_nightly.sh",
     }
     VENV_DIR = {
         "reliability": "$WEEKEND_ROOT/venv-reliability",
@@ -333,6 +337,8 @@ class TestSetupGuardsPerLoopVenvs:
         "ci-performance": "$WEEKEND_ROOT/venv-ci-performance",
         "documentation": "$WEEKEND_ROOT/venv-documentation",
         "security": "$WEEKEND_ROOT/venv-security",
+        # Provisioned by setup_security_nightly.sh alongside venv-security.
+        "security-deepsec": "$WEEKEND_ROOT/venv-security-deepsec",
     }
 
     def test_each_setup_writes_a_distinct_venv(self):
@@ -340,7 +346,7 @@ class TestSetupGuardsPerLoopVenvs:
             name: re.search(r'WEEKEND_VENV="([^"]+)"', path.read_text(encoding="utf-8")).group(1)
             for name, path in self.SETUPS.items()
         }
-        assert venvs == self.VENV_DIR, venvs
+        assert venvs == {name: self.VENV_DIR[name] for name in self.SETUPS}, venvs
         assert len(set(venvs.values())) == len(venvs)
         assert "$WEEKEND_ROOT/venv" not in venvs.values()
 
