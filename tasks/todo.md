@@ -2704,7 +2704,7 @@ delay notice; playful error copy; operator-only CRUD.
 
 ## Dependency graph
 
-- P1 depends_on: [] - Secret store module: AES-256-GCM-encrypted values (existing
+- P1 depends_on: [] - Credential store module: values encrypted with AES-256-GCM (existing
   `cryptography` dep) in local SQLite on host; master key auto-generated on first
   run, systemd-creds `LoadCredential` on VPS / 0600 file fallback for dev.
   CRUD + audit events. Red tests first.
