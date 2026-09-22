@@ -8072,3 +8072,10 @@ Review: plan PR #576 was design only. This implement PR adds the host run-server
 - [ ] T5 depends_on: [T4] Persist complete dispositions, acceptance and operator actions on issue #81.
 Dependency graph: T1 -> T2 -> T3 -> T4 -> T5.
 Review: pending. P2 acceptance remains in the authoritative checkpoint, outside reduced scope.
+
+## Documentation remediate 2026-09-22 (reduced P0/P1)
+- [x] T1 depends_on: [] Read complete issue #202 checkpoint and reverify DOC-121/122 against origin/main.
+- [x] T2 depends_on: [T1] Reproduce DOC-122, consolidate gross rebuild recovery in existing Flex owner, extend ownership and safety contract.
+- [x] T3 depends_on: [T2] Run focused and full gates, compare failures on clean main, review substantive diff.
+- [x] T4 depends_on: [T3] Prepare complete finding checkpoint and formatter-generated publication handoff; publication receipts belong on issue #202.
+Review: DOC-122 red/green demonstrated; 108 docs/path and 14 isolated rebuild tests pass. Full Python: 14827 passed, 31 failed, 2 skipped. Cloud: 2169 passed, 6 failed, 6 skipped initially; pinned-environment failure rerun 2 passed/4 failed. All remaining 31 Python and 4 cloud failures reproduce on clean 5bb91597, zero failure delta. Full Vitest: 9993 passed. Changed links/anchors (4), owners JSON, offline help, diff whitespace and secret scan pass. DOC-121 remains operator-only; DOC-110/120/123 retain their complete acceptance in issue #202 outside reduced scope. No live mutation or runtime behavior change. CI delivery belongs to the separate deliver phase.
