@@ -25,10 +25,15 @@ from test_rel137_weekend_wrapper_survivability import (
 )
 
 REPO = Path(__file__).resolve().parents[2]
+def _plist_text(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
+
+
 PLISTS = sorted(
     p
     for p in (REPO / "config").glob("com.radon.*.plist")
-    if 'git -C "$C"' in p.read_text(encoding="utf-8")
+    if "git " in _plist_text(p)
+    and ("__WEEKEND_REPO__" in _plist_text(p) or "__DEEPSEC_REPO__" in _plist_text(p))
 )
 PINNED = ("core.hooksPath=/dev/null", "core.fsmonitor=false")
 
@@ -127,3 +132,52 @@ def test_setup_pins_hooks_off_before_any_git(setup):
     assert "GIT_CONFIG_KEY_1=core.fsmonitor GIT_CONFIG_VALUE_1=false" in text[pin : pin + 200]
     first_git = min(i for i in (text.find("git -C"), text.find("\ngit ")) if i >= 0)
     assert pin < first_git
+
+
+def test_every_clone_plist_uses_host_gitdir():
+    assert PLISTS, "no runner plists matched"
+    for plist in PLISTS:
+        text = plist.read_text(encoding="utf-8")
+        assert ".gitdirs/" in text, plist.name
+        assert 'git -C "$C"' not in text, plist.name
+
+
+@pytest.mark.parametrize("name", sorted(LOOPS))
+def test_wrapper_host_git_uses_gitdirs_not_clone(name, tmp_path):
+    repo = _runner_clone(tmp_path, name)
+    bin_dir, _gh, _py = _stub_bin(tmp_path, claude_body="#!/bin/sh\nexit 0\n")
+    log = tmp_path / "git.log"
+    git = bin_dir / "git"
+    git.write_text(
+        "#!/bin/sh\n"
+        f'printf "%s\\n" "$*" >> "{log}"\n'
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    git.chmod(0o755)
+    subprocess.run(
+        [BASH, str(_cloned_wrapper(repo, name)), "audit"],
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+            "HOME": str(tmp_path / "home"),
+            "RADON_WEEKEND_REPO": str(repo),
+            "RADON_WEEKEND_PROVIDER_LADDER": CLAUDE_RUNG_LADDER,
+            "RADON_WEEKEND_MODEL_LADDER": "claude-opus-5",
+            "RADON_WEEKEND_SKIP_PRUNE": "1",
+        },
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    lines = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+    assert lines, "no git invocation recorded"
+    host_dir = str(tmp_path / ".gitdirs" / f"{name}.git")
+    clone_git = str(repo / ".git")
+    saw_host = False
+    for line in lines:
+        if "--git-dir=" in line or line.startswith("--git-dir"):
+            saw_host = True
+            assert host_dir in line, line
+            assert clone_git not in line.split(), line
+    assert saw_host, lines
