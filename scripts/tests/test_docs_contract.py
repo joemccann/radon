@@ -1043,3 +1043,27 @@ class TestOperatorSafetyOwners:
             assert required in section
         rules = {r["id"]: r for r in _load_owners()["rules"]}
         assert "scripts/cleanup_legacy_flex_aggregates.py" in rules["flex-pull"]["globs"]
+
+
+    def test_flex_gross_rebuild_has_one_recovery_procedure(self):
+        doc = (_ROOT / "docs/cloud-services.md").read_text()
+        section = _section(doc, "Legacy Flex aggregate cleanup")
+        for required in ("rebuild_flex_gross_breakdown", "saved", "execution-level",
+                         "target database", "maintenance window", "concurrent journal",
+                         "affected rows", "backup", "scratch", "#restore-runbook",
+                         "--help", "dry-run", "--apply", "recomputes", "refused",
+                         "out of statement period", "post-commit", "partial-table",
+                         "Stop", "Escalate"):
+            assert required in section, f"Flex recovery owner omits {required}"
+        ops = _section((_ROOT / "docs/operations.md").read_text(),
+                       "Legacy Flex aggregate gross coverage")
+        assert "cloud-services.md#legacy-flex-aggregate-cleanup" in ops
+        assert "--apply" not in ops, "Keep mutation instructions in the recovery owner"
+        rules = {r["id"]: r for r in _load_owners()["rules"]}
+        assert "scripts/rebuild_flex_gross_breakdown.py" in rules["flex-pull"]["globs"]
+        source = (_ROOT / "scripts/rebuild_flex_gross_breakdown.py").read_text()
+        main = source.split("def main(", 1)[1]
+        assert main.index("parser.parse_args") < main.index("db = _connect()")
+        assert main.index("plan = plan_rebuild") < main.index("if not args.apply:")
+        apply = source.split("def _apply(", 1)[1].split("def main(", 1)[0]
+        assert apply.index("db.commit()") < apply.index("verified = 0")

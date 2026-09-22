@@ -98,9 +98,9 @@
     },
     {
       "id": "flex-pull",
-      "globs": ["scripts/flex_sftp_pull.py", "scripts/cleanup_legacy_flex_aggregates.py"],
+      "globs": ["scripts/flex_sftp_pull.py", "scripts/cleanup_legacy_flex_aggregates.py", "scripts/rebuild_flex_gross_breakdown.py"],
       "owners": ["docs/cloud-services.md"],
-      "note": "Duplicate-delivery outcomes and destructive legacy aggregate reconciliation share the Flex recovery owner (DOC-078/119)."
+      "note": "Duplicate-delivery outcomes and legacy aggregate cleanup and gross-coverage rebuilding share the Flex recovery owner (DOC-078/119/122)."
     },
     {
       "id": "factory",
