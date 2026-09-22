@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { installClearFixtures } from "./clear-fixtures";
 import { clearPrimaryNavigation, navItems } from "../lib/data";
 
-for (const width of [360, 390, 768, 1024, 1440]) {
+for (const width of [360, 390, 641, 768, 900, 1024, 1440]) {
   test(`Clear navigation and controls at ${width}px`, async ({ page }, testInfo) => {
     test.setTimeout(120_000);
     await page.setViewportSize({ width, height: 900 });
