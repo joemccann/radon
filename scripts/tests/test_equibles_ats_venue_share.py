@@ -790,6 +790,75 @@ class TestSweepBudget:
         assert SWEEP_BUDGET_S + TICKER_FETCH_BUDGET_S <= unit_timeout
 
 
+class TestPersistBudget:
+    """2026-09-22 09:16:37Z → 09:31:37Z: Result=timeout, NRestarts=0,
+    ExecMainStatus=15. The sweep logged `wall-clock budget spent (849/2487)`
+    at T+780. Sync libsql (no client timeout, holds the GIL) was still in
+    `_write_db_cache` at TimeoutStartSec, so the oneshot never reached
+    `_record_health`. A thread join around `get_db()` cannot abandon that
+    call."""
+
+    def test_tarpitted_turso_persist_returns_inside_the_persist_budget(self, monkeypatch):
+        import time
+
+        import fetch_equibles_ats_venue_share as mod
+
+        monkeypatch.setattr(mod, "PERSIST_BUDGET_S", 0.2, raising=False)
+
+        def hang_sync_libsql(*_args, **_kwargs):
+            time.sleep(2.0)
+            raise AssertionError("sync libsql returned")
+
+        monkeypatch.setattr("db.client.get_db", hang_sync_libsql)
+
+        calls = {"n": 0}
+
+        def slow_hrana(_sql, _args=(), timeout=4.0):
+            calls["n"] += 1
+            time.sleep(0.05)
+
+        monkeypatch.setattr("db.hrana_http.hrana_execute", slow_hrana)
+
+        chunk = mod._UPSERT_CHUNK_ROWS
+        payload = {
+            "series": {
+                f"T{i:04d}": [{
+                    "ticker": f"T{i:04d}",
+                    "week_start_date": "2026-01-05",
+                    "classification": "neutral",
+                }]
+                for i in range(chunk * 8)
+            }
+        }
+        started = time.monotonic()
+        mod._write_db_cache(payload, "2026-09-22T09:16:37Z")
+        elapsed = time.monotonic() - started
+
+        assert elapsed < 1.0
+        assert calls["n"] >= 1
+        assert calls["n"] < 8
+
+    def test_persist_budget_fits_inside_the_unit_slack(self):
+        service = (
+            Path(__file__).resolve().parents[2]
+            / "cloud"
+            / "services"
+            / "radon-equibles-ats.service"
+        )
+        timeout_line = next(
+            line for line in service.read_text().splitlines()
+            if line.startswith("TimeoutStartSec=")
+        )
+        unit_timeout = int(timeout_line.split("=", 1)[1])
+        from fetch_equibles_ats_venue_share import PERSIST_BUDGET_S, SWEEP_BUDGET_S
+
+        # In-flight ticker time is already capped by the sweep deadline
+        # (`min(TICKER_FETCH_BUDGET_S, remaining)`). The slack after
+        # SWEEP_BUDGET_S is the persist window, and it has to end before
+        # systemd SIGTERM.
+        assert SWEEP_BUDGET_S + PERSIST_BUDGET_S <= unit_timeout
+
+
 # ── migration + upsert (sqlite3 stand-in for libsql) ───────────────
 
 
