@@ -149,6 +149,34 @@ async function renderPanel() {
   );
 }
 
+describe("credentials panel store bootstrap failure (R-621)", () => {
+  it("says the store did not open instead of reading every field as a deliberate .env choice", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          ...PAYLOAD,
+          bootstrap_error: "secret_store.key is missing",
+          services: PAYLOAD.services.map((service) => ({
+            ...service,
+            fields: service.fields.map((field) => ({ ...field, configured: false, env_fallback: true })),
+          })),
+        }),
+      ),
+    );
+    await renderPanel();
+    const notice = screen.getByTestId("credentials-bootstrap-error");
+    expect(notice.textContent).toContain("did not open at boot");
+    expect(notice.textContent).toContain("secret_store.key is missing");
+    expect(notice.textContent).toContain("next FastAPI restart");
+  });
+
+  it("renders no notice when the store opened", async () => {
+    await renderPanel();
+    expect(screen.queryByTestId("credentials-bootstrap-error")).toBeNull();
+  });
+});
+
 describe("credentials panel wire contract", () => {
   it("loads via GET /api/credentials and fires nothing else", async () => {
     await renderPanel();

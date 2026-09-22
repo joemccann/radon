@@ -198,6 +198,14 @@ describe("Options chain URL deep-link", () => {
     expect(sellButtons.length).toBe(2);
   });
 
+  it("labels bounce-setup prefills as PREFILLED FROM BOUNCE SETUP", async () => {
+    searchParamsString = `deck=c&expiry=${NEAR_EXPIRY.dashed}&strikes=100&legs=BUY:1x950C,SELL:1x970C&src=bounce`;
+    renderChain();
+
+    await screen.findByText("PREFILLED FROM BOUNCE SETUP");
+    expect(screen.queryByText("PREFILLED FROM LINK")).toBeNull();
+  });
+
   it("labels vol-cone prefills as PREFILLED FROM VOL CONE", async () => {
     searchParamsString = `deck=c&expiry=${NEAR_EXPIRY.dashed}&strikes=100&legs=BUY:1x950P,BUY:1x970C&src=vol-cone`;
     renderChain();

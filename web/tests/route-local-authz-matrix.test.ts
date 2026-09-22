@@ -13,7 +13,7 @@ const ROUTES = [
   "orders/cancel", "orders/modify", "orders/place", "orders", "orders/whatif",
   "paper/place", "performance", "pi", "portfolio", "preferences", "previous-close",
   "regime", "scanner", "scanner/strength", "scanner/strength/scan",
-  "scanner/theta", "scanner/theta/scan", "scanner/vol-skew-mr", "scanner/vol-skew-mr/scan",
+  "scanner/theta", "scanner/theta/scan", "scanner/vol-skew-mr", "scanner/vol-skew-mr/scan", "scanner/bounce", "scanner/bounce/scan",
   "short-availability/[ticker]", "streaks",
   "ticker/info", "ticker/news", "ticker/ratings", "ticker/seasonality", "vcg",
   "service-health",
@@ -37,6 +37,8 @@ const GUARDED_ADMIN_ACTION_ROUTES = [
   "ib/ws-ticket",
   // Subscription research bytes require the operator allowlist on every read.
   "newsfeed/research/files/[asset]",
+  // Operator ground-truth labels on research items: requireRouteAccess operatorOnly on the only verb.
+  "newsfeed/research/feedback", "newsfeed/research/held", "newsfeed/research/rules",
   // Original-page evidence and account/assistant audit exports are operator-only.
   "research/evidence/[asset]", "research/governance",
   // R-180: this POST SPAWNS garch_convergence.py. Its leap/scan sibling has
@@ -84,7 +86,7 @@ const MIDDLEWARE_PERIMETER_ONLY_ROUTES = [
   // are present in this deployment, never any key material — same posture as
   // its llm-token-index sibling, so the middleware perimeter is the only layer.
   "models", "prices",
-  "risk-free-rate", "skew", "skew2d", "straddle", "vixcor", "vixts",
+  "risk-free-rate", "skew", "skew2d", "straddle", "vixcor", "vixts", "panic-index",
   "vol-cone", "watchlist", "watchlist/[symbol]", "yield-curve",
   "yield-curve/live",
 ] as const;
@@ -95,7 +97,7 @@ const MIDDLEWARE_PERIMETER_ONLY_ROUTES = [
 const PINNED_ELSEWHERE_ROUTES = [
   "gex/share/content", "internals/share/content", "menthorq/cta/share/content",
   "probe/freshness", "regime/share/content", "share/pnl", "vcg/share/content",
-  "webhooks/clerk",
+  "webhooks/clerk", "webhooks/tradingview/[token]",
 ] as const;
 
 const WEB_ROOT = fileURLToPath(new URL("..", import.meta.url));

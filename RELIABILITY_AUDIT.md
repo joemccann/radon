@@ -226,6 +226,8 @@ Delta findings continue the R-### numbering in dated `## Delta audit` sections.
 - Audited through: `3e394792` on 2026-09-12 — 1 new finding (R-675; P1), backlog REL-254. Anchor `9dce4b3a` verified (`rev-parse --verify` resolves; ancestor of HEAD); range is 20 commits / 180 changed files. Serial review covered the shared model ladder, AI-cycle archive, research persistence, flow/TWR, quote relay, systemd changes, and web surfaces. Standing money-path and watchdog sweeps hold; `NEW_FINDINGS` and REL-021b have no changed-surface instance.
 - Audited through: `9b9a65c7` on 2026-09-14 — 1 new finding (R-676; P1), backlog REL-255. Anchor `3e394792` verified (`rev-parse --verify` resolves; ancestor of HEAD); range is 53 commits / 78 changed paths. Serial review covered control-plane provenance, model-ladder/research, DeepSec security-loop state, codemap scheduling, assistant P&L, and the codemap caller blast radius. Standing money-path and watchdog sweeps hold; `NEW_FINDINGS` and REL-021b have no changed-surface instance.
 - Audited through: `eb5b8cb0` on 2026-09-15 — 1 new finding (R-677; P1), backlog REL-256. Anchor `9b9a65c7` verified (`rev-parse --verify` resolves to `9b9a65c7156f1b9d705db5cf6f659590b15297d9`; ancestor of HEAD); range is 29 commits / 51 changed paths. Serial review covered incident-response PR delivery, Grok responder state, order reconstruction, control-plane isolation, DeepSec evidence, wrapper subscription rails, and codemap callers. Standing money-path and watchdog sweeps hold; `NEW_FINDINGS` and REL-021b have no changed-surface instance.
+- Audited through: `0833758b` on 2026-09-17 — 1 new finding (R-678; P2), backlog REL-257. Anchor `eb5b8cb0` verified (`rev-parse --verify` resolves to `eb5b8cb0e65622c8377022508a06db3c6b545294`; ancestor of HEAD); range is 92 commits / 139 changed source paths. Serial review covered new scanner and indicator persistence, TWR history extension, position reconstruction, app-runtime isolation, and their codemap callers. Standing money-path and watchdog sweeps hold; `NEW_FINDINGS` and REL-021b have no changed-surface instance.
+- Audited through: `8d1d0f52` on 2026-09-16 — 1 new finding (R-678; P2), backlog REL-257. Anchor `eb5b8cb0` verified (`rev-parse --verify` resolves to `eb5b8cb0e65622c8377022508a06db3c6b545294`; ancestor of HEAD); range is 81 commits / 228 changed paths, with 627 codemap importers reviewed by subsystem. Standing halt/order-limit chokepoints, `_NON_IDEMPOTENT_IB_SCRIPTS`, exit-order acknowledgement, daemon-state Hrana writes, whole-repo placement scan, and both watchdog catalogs hold. `NEW_FINDINGS` and REL-021b have no changed-surface instance.
 
 ## 7. Exit criteria check (A5)
 
@@ -2629,3 +2631,58 @@ standing P2 candidates with no changed-surface instance.
 | ID | Sev | Findings | Task | Acceptance |
 |---|---|---|---|---|
 | REL-256 | P1 | R-677 | **Keep an incident page actionable until its pushed code fix has a verified open PR.** On `IrEnsurePrError`, record a bounded failed attempt/pending state instead of `done`, report degraded responder health, and retain the PR error without discarding the branch. | Red first: a `code_fix` fixture whose PR ensure raises leaves the page pending with an incremented attempt and emits non-`ok` health; a later ensure returning a PR URL completes it once with that URL; the third PR failure follows the existing bounded-attempt terminal policy and remains operator-visible. |
+
+---
+
+## Delta audit 2026-09-17
+
+Anchor `eb5b8cb0` verified (`git rev-parse --verify` resolves to
+`eb5b8cb0e65622c8377022508a06db3c6b545294`; `git merge-base --is-ancestor`
+confirms it is an ancestor). Range `eb5b8cb0..0833758b` is 92 commits / 139
+changed source paths. Serial review covered the vol/skew and Cboe indicator
+paths, Liquid Compute collection and persistence, TWR history extension,
+position reconstruction, runtime isolation, and direct codemap callers.
+Standing sweeps HOLD: halt/order-limit chokepoints
+(`scripts/ib_place_order.py:239-255`; `scripts/api/server.py:2805-2899`),
+`_NON_IDEMPOTENT_IB_SCRIPTS` (`scripts/api/server.py:5545-5547`), exit-order
+acknowledgement (`scripts/monitor_daemon/handlers/exit_orders.py:196-222,766-780`),
+and daemon-state Hrana writes (`scripts/db/writer.py:35-46,2415-2437`) remain
+wired. No delta placement site bypasses the controls. New scheduled writers
+are in both watchdog catalogs: `liquidcompute` (`scripts/watchdog/services.py:173-175,555`)
+and `calm-streak` (`scripts/watchdog/services.py:192-195,567`); mirror-fed
+`vol-skew-mr` retains its snapshot/heartbeat chokepoint
+(`scripts/db/scan_mirror.py:40-53,84-142`). `NEW_FINDINGS` and REL-021b have
+no changed-surface instance.
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-678 | P2 | `scripts/ai_cycle/liquidcompute.py:182-209`; `scripts/ai_cycle/store.py:114-139,141-166` | **The new daily Liquid Compute writer can delete the prior canonical observation before replacing it, then exit without an error health row.** `persist_ticker()` first upserts the index and then calls `upsert_observations_by_identity()`, which commits a `DELETE` at `:134` before its replacement `INSERT` at `:135-138`; neither operation shares a transaction. A transient Hrana failure or process death between those commits loses the prior AI-cycle observation while the index row presents the newer datum. The production handler catches only `SourceError`, schema/local exceptions at `liquidcompute.py:205`; `HranaHttpError` from either write escapes, so the newly-added `liquidcompute` watchdog row receives neither `ok` nor `error` for the failed cycle. This is a scheduled third-venue research source, not an execution path, hence P2; it is a silent provenance hole until the 26-hour stale alert. |
+## Delta audit 2026-09-16
+
+Anchor `eb5b8cb0` verified (`git rev-parse --verify` resolves to
+`eb5b8cb0e65622c8377022508a06db3c6b545294`; `git merge-base --is-ancestor`
+confirms it is an ancestor). Range `eb5b8cb0..8d1d0f52` is 81 commits / 228
+changed paths. Serial review covered Flex ingestion recovery, new CALM STREAK
+and Liquid Compute writers, incident-response PR handoff, model-ladder
+consumers, the removed workflow order bridge, order reconstruction, control
+plane lifecycle, and codemap callers. Standing sweeps HOLD: halt/order-limit
+chokepoints (`scripts/ib_place_order.py:239-255`; `scripts/api/server.py:2798-2819`),
+`_NON_IDEMPOTENT_IB_SCRIPTS` (`scripts/api/server.py:5460,5569`), exit-order
+acknowledgement (`scripts/monitor_daemon/handlers/exit_orders.py:198-222,764-780`),
+and daemon-state Hrana writes (`scripts/db/writer.py:35-46,2561-2587`) remain
+wired. Whole-repo placement scan adds no bypass, and the new `calm-streak` and
+`liquidcompute` writers are present in both watchdog catalogs
+(`scripts/watchdog/services.py:173-195,555-567`; `web/lib/serviceHealthWindows.ts:186-187,249-251`).
+`NEW_FINDINGS` and REL-021b remain standing P2 candidates with no
+changed-surface instance.
+
+| ID | Sev | Where | Finding |
+|---|---|---|---|
+| R-678 | P2 | `scripts/flex_sftp_pull.py:579-590`; `scripts/watchdog/check.py:260-273`; `scripts/db/service_health_sql.py:25-32` | **A recurring Flex ingest budget exhaustion is recorded as healthy and can defer the same historical tail forever.** When at least one newest-first statement applies before `SWEEP_BUDGET_S`, `_run()` writes `state="ok"` with a `class:"budget"` payload and returns 0. The shared upsert replaces `last_error`, but `_check_error()` returns `state ok` without inspecting it, so repeated budget stops reset the error cooldown and never page. The 08:30 retry repeats newest-first work; if its arrival rate remains above the budget, oldest statements have no durable retry/debt signal despite being deferred indefinitely. This is P2 because the newest statement remains current, but historical portfolio reconciliation can remain incomplete without an operator-visible condition. |
+
+### Backlog (continuing)
+
+| ID | Sev | Findings | Task | Acceptance |
+|---|---|---|---|---|
+| REL-257 | P2 | R-678 | **Make Liquid Compute observation replacement atomic and report every persistence failure.** Replace an observation identity without a committed delete-before-insert gap, and translate every production collection/persistence exception into the existing bounded error heartbeat before non-zero exit. | Red first: seed a valid old observation, inject a failure into its replacement write, and assert the old row remains queryable; inject `HranaHttpError` from each persistence step and assert exactly one `liquidcompute` error health write plus non-zero exit; a successful replacement still updates both index and observation records. |
+| REL-257 | P2 | R-678 | **Make repeated Flex budget exhaustion durable and operator-visible without misclassifying one successful newest-first partial run.** Persist a bounded consecutive-budget/deferred-tail signal keyed to the delivery population; after the configured bound write a non-healthy state (or an explicitly watchdog-evaluated degraded state), and clear it only after a full catch-up. Preserve newest-first priority and the successful fresh-statement path. | Fault injection, red first: two consecutive runs with an applied newest statement and a forced expired budget produce an operator-visible degraded/error watchdog outcome; a complete next run clears it. Assert a single partial run remains distinguishable but does not page, and that repeated partial runs do not reset the watchdog failure sequence. |

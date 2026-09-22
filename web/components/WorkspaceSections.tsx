@@ -25,6 +25,8 @@ import {
 import { ScannerModeTabs, type ScannerMode } from "./ScannerModeTabs";
 import { SigMeter } from "./SigMeter";
 import SectionEmptyState from "./SectionEmptyState";
+import RequestError from "./RequestError";
+import { readErrorResponse, userErrorMessage } from "@/lib/userError";
 import type { BlotterTrade, DiscoverCandidate, ExecutedOrder, FlowAnalysisPosition, OpenOrder, OrdersData, PortfolioData, PortfolioPosition, ScannerSignal, TradeEntry, WorkspaceSection } from "@/lib/types";
 import { useOrderActions } from "@/lib/OrderActionsContext";
 import type { DepthBook, PriceData, Trade } from "@/lib/pricesProtocol";
@@ -43,6 +45,7 @@ import { useScanner } from "@/lib/useScanner";
 import { useThetaHarvester } from "@/lib/useThetaHarvester";
 import { useStrengthConfirmation } from "@/lib/useStrengthConfirmation";
 import { useVolSkewMr } from "@/lib/useVolSkewMr";
+import { useBounceSetup } from "@/lib/useBounceSetup";
 import { useLeap } from "@/lib/useLeap";
 import { useGarchConvergence } from "@/lib/useGarchConvergence";
 import { useVolCone } from "@/lib/useVolCone";
@@ -124,6 +127,7 @@ import CancelOrderDialog from "./CancelOrderDialog";
 import ModifyOrderModal from "./ModifyOrderModal";
 import type { ModifyOrderRequest } from "@/lib/orderModify";
 import RegimePanel from "./RegimePanel";
+import AiInfrastructurePanel from "./AiInfrastructurePanel";
 import CtaPage from "./CtaPage";
 import AdminWorkspace from "./admin/AdminWorkspace";
 import PreferencesSection from "./PreferencesSection";
@@ -139,6 +143,7 @@ import TickerFlowReport from "./flow-analysis/TickerFlowReport";
 import ThetaHarvesterScanner, { type ThetaScanParams } from "./ThetaHarvesterScanner";
 import StrengthConfirmationScanner from "./StrengthConfirmationScanner";
 import VolSkewMrScanner from "./VolSkewMrScanner";
+import BounceSetupScanner from "./BounceSetupScanner";
 import LeapScanner from "./LeapScanner";
 import GarchConvergenceScanner from "./GarchConvergenceScanner";
 import VolConePanel from "./VolConePanel";
@@ -464,10 +469,13 @@ export function positionGroupShareData(
           const onlyLeg = matchingPosition.legs[0];
           entryPrice = onlyLeg.avg_cost / legMultiplier(onlyLeg);
         } else if (matchingPosition.legs.length > 1 && matchingPosition.contracts > 0) {
-          // Net entry price for combo = sum of (direction-adjusted per-share avg_cost per leg)
+          // Debit positive / credit negative — same polarity as
+          // resolveOpeningLegBasis and closedGroupOpenCash. avg_cost may already
+          // be signed on shorts, so take magnitude and apply direction.
           const netCost = matchingPosition.legs.reduce((sum, leg) => {
-            const sign = leg.direction === "LONG" ? -1 : 1; // Long = paid, Short = received
-            return sum + sign * (leg.avg_cost / legMultiplier(leg));
+            const premium = Math.abs(leg.avg_cost) / legMultiplier(leg);
+            const sign = leg.direction === "LONG" ? 1 : -1;
+            return sum + sign * premium;
           }, 0);
           entryPrice = netCost;
         }
@@ -1138,7 +1146,7 @@ function FlowSectionsBody() {
       <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
         {error && (
           <div style={{ padding: "8px 16px" }}>
-            <div className="alert-item bearish">{error}</div>
+            <RequestError error={error} />
           </div>
         )}
         {actionItems.length > 0 && (
@@ -1224,7 +1232,7 @@ function FlowSectionsBody() {
 
       {error && (
         <div className="section">
-          <div className="section-body"><div className="alert-item bearish">{error}</div></div>
+          <RequestError error={error} />
         </div>
       )}
 
@@ -1404,24 +1412,34 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
             ? "vol-cone"
             : queryModeParam === "vol-skew-mr"
               ? "vol-skew-mr"
-              : "flow";
+              : queryModeParam === "bounce"
+                ? "bounce"
+                : "flow";
   const queryMode = defaultMode ?? parsedQueryMode;
   const [mode, setModeState] = useState<ScannerMode>(queryMode);
   const { data, syncing, error, lastSync, syncNow } = useScanner(mode === "flow");
   const theta = useThetaHarvester(mode === "theta");
   const strength = useStrengthConfirmation(mode === "strength");
   const volSkewMr = useVolSkewMr(mode === "vol-skew-mr");
+  const bounce = useBounceSetup(mode === "bounce");
   const leap = useLeap(mode === "leap");
   const garch = useGarchConvergence(mode === "garch");
   const volCone = useVolCone(mode === "vol-cone");
+  const thetaLastRequest = useRef<[string | undefined, ThetaScanParams | undefined]>([undefined, undefined]);
   const [thetaScanning, setThetaScanning] = useState(false);
   const [thetaScanError, setThetaScanError] = useState<string | null>(null);
+  const strengthLastRequest = useRef<[string | undefined]>([undefined]);
   const [strengthScanning, setStrengthScanning] = useState(false);
   const [strengthScanError, setStrengthScanError] = useState<string | null>(null);
+  const volSkewMrLastRequest = useRef<[string[] | undefined]>([undefined]);
   const [volSkewMrScanning, setVolSkewMrScanning] = useState(false);
   const [volSkewMrScanError, setVolSkewMrScanError] = useState<string | null>(null);
+  const [bounceScanning, setBounceScanning] = useState(false);
+  const [bounceScanError, setBounceScanError] = useState<string | null>(null);
+  const leapLastRequest = useRef<[string[] | undefined]>([undefined]);
   const [leapScanning, setLeapScanning] = useState(false);
   const [leapScanError, setLeapScanError] = useState<string | null>(null);
+  const garchLastRequest = useRef<[string[] | undefined]>([undefined]);
   const [garchScanning, setGarchScanning] = useState(false);
   const [garchScanError, setGarchScanError] = useState<string | null>(null);
   const signals = data?.top_signals ?? [];
@@ -1447,6 +1465,7 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
 
   const runThetaScan = async (ticker?: string, params?: ThetaScanParams) => {
     if (thetaScanning) return;
+    thetaLastRequest.current = [ticker, params];
     const normalizedTicker = ticker?.trim().toUpperCase();
     setThetaScanError(null);
     setThetaScanning(true);
@@ -1466,12 +1485,15 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
         cache: "no-store",
       });
       if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        throw new Error(text || `Theta scan failed (${res.status})`);
+        throw new Error(await readErrorResponse(res, "The scan could not be completed. Please try again."));
+      }
+      const outcome = await res.json();
+      if (outcome?.scan_succeeded === false) {
+        throw new Error(userErrorMessage(outcome.error, "The scan could not be completed. Please try again."));
       }
       theta.syncNow();
     } catch (err) {
-      setThetaScanError(err instanceof Error ? err.message : "Theta scan failed");
+      setThetaScanError(userErrorMessage(err, "The scan could not be completed. Please try again."));
     } finally {
       setThetaScanning(false);
     }
@@ -1479,6 +1501,7 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
 
   const runStrengthScan = async (ticker?: string) => {
     if (strengthScanning) return;
+    strengthLastRequest.current = [ticker];
     const normalizedTicker = ticker?.trim().toUpperCase();
     setStrengthScanError(null);
     setStrengthScanning(true);
@@ -1490,12 +1513,15 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
         cache: "no-store",
       });
       if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        throw new Error(text || `Strength scan failed (${res.status})`);
+        throw new Error(await readErrorResponse(res, "The scan could not be completed. Please try again."));
+      }
+      const outcome = await res.json();
+      if (outcome?.scan_succeeded === false) {
+        throw new Error(userErrorMessage(outcome.error, "The scan could not be completed. Please try again."));
       }
       strength.syncNow();
     } catch (err) {
-      setStrengthScanError(err instanceof Error ? err.message : "Strength scan failed");
+      setStrengthScanError(userErrorMessage(err, "The scan could not be completed. Please try again."));
     } finally {
       setStrengthScanning(false);
     }
@@ -1503,6 +1529,7 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
 
   const runVolSkewMrScan = async (tickers?: string[]) => {
     if (volSkewMrScanning) return;
+    volSkewMrLastRequest.current = [tickers];
     setVolSkewMrScanError(null);
     setVolSkewMrScanning(true);
     try {
@@ -1513,19 +1540,49 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
         cache: "no-store",
       });
       if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        throw new Error(text || `Vol/skew MR scan failed (${res.status})`);
+        throw new Error(await readErrorResponse(res, "The scan could not be completed. Please try again."));
+      }
+      const outcome = await res.json();
+      if (outcome?.scan_succeeded === false) {
+        throw new Error(userErrorMessage(outcome.error, "The scan could not be completed. Please try again."));
       }
       volSkewMr.syncNow();
     } catch (err) {
-      setVolSkewMrScanError(err instanceof Error ? err.message : "Vol/skew MR scan failed");
+      setVolSkewMrScanError(userErrorMessage(err, "The scan could not be completed. Please try again."));
     } finally {
       setVolSkewMrScanning(false);
     }
   };
 
+  const runBounceScan = async () => {
+    if (bounceScanning) return;
+    setBounceScanError(null);
+    setBounceScanning(true);
+    try {
+      const res = await fetch("/api/scanner/bounce/scan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+        cache: "no-store",
+      });
+      if (!res.ok) {
+        throw new Error(await readErrorResponse(res, "The scan could not be completed. Please try again."));
+      }
+      const outcome = await res.json();
+      if (outcome?.scan_succeeded === false) {
+        throw new Error(userErrorMessage(outcome.error, "The scan could not be completed. Please try again."));
+      }
+      bounce.syncNow();
+    } catch (err) {
+      setBounceScanError(userErrorMessage(err, "The scan could not be completed. Please try again."));
+    } finally {
+      setBounceScanning(false);
+    }
+  };
+
   const runLeapScan = async (tickers?: string[]) => {
     if (leapScanning) return;
+    leapLastRequest.current = [tickers];
     setLeapScanError(null);
     setLeapScanning(true);
     try {
@@ -1536,12 +1593,15 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
         cache: "no-store",
       });
       if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        throw new Error(text || `LEAP scan failed (${res.status})`);
+        throw new Error(await readErrorResponse(res, "The scan could not be completed. Please try again."));
+      }
+      const outcome = await res.json();
+      if (outcome?.scan_succeeded === false) {
+        throw new Error(userErrorMessage(outcome.error, "The scan could not be completed. Please try again."));
       }
       leap.syncNow();
     } catch (err) {
-      setLeapScanError(err instanceof Error ? err.message : "LEAP scan failed");
+      setLeapScanError(userErrorMessage(err, "The scan could not be completed. Please try again."));
     } finally {
       setLeapScanning(false);
     }
@@ -1549,6 +1609,7 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
 
   const runGarchScan = async (tickers?: string[]) => {
     if (garchScanning) return;
+    garchLastRequest.current = [tickers];
     setGarchScanError(null);
     setGarchScanning(true);
     try {
@@ -1559,12 +1620,15 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
         cache: "no-store",
       });
       if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        throw new Error(text || `GARCH scan failed (${res.status})`);
+        throw new Error(await readErrorResponse(res, "The scan could not be completed. Please try again."));
+      }
+      const outcome = await res.json();
+      if (outcome?.scan_succeeded === false) {
+        throw new Error(userErrorMessage(outcome.error, "The scan could not be completed. Please try again."));
       }
       garch.syncNow();
     } catch (err) {
-      setGarchScanError(err instanceof Error ? err.message : "GARCH scan failed");
+      setGarchScanError(userErrorMessage(err, "The scan could not be completed. Please try again."));
     } finally {
       setGarchScanning(false);
     }
@@ -1579,6 +1643,7 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
         theta: theta.data ? theta.data.theta_harvest_count ?? 0 : undefined,
         strength: strength.data ? strength.data.confirmed_strength_count ?? 0 : undefined,
         "vol-skew-mr": volSkewMr.data ? volSkewMr.data.actionable_count ?? 0 : undefined,
+        bounce: bounce.data && !bounce.data.missing ? bounce.data.bounce_count ?? 0 : undefined,
         leap: leap.data ? (leap.data.results ?? []).filter((r) => r.is_mispriced).length : undefined,
         garch: garch.data ? (garch.data.pairs ?? []).filter((p) => p.gates_passed).length : undefined,
         "vol-cone": volCone.data && !volCone.data.missing ? volCone.data.hit_count : undefined,
@@ -1615,6 +1680,7 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
           scanning={thetaScanning}
           error={thetaScanError || theta.error}
           lastSync={theta.lastSync}
+          onRetry={() => { void runThetaScan(...thetaLastRequest.current); }}
           onScan={(params) => { void runThetaScan(undefined, params); }}
           onTickerScan={(ticker) => { void runThetaScan(ticker); }}
         />
@@ -1632,6 +1698,7 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
           scanning={strengthScanning}
           error={strengthScanError || strength.error}
           lastSync={strength.lastSync}
+          onRetry={() => { void runStrengthScan(...strengthLastRequest.current); }}
           onScan={() => { void runStrengthScan(); }}
           onTickerScan={(ticker) => { void runStrengthScan(ticker); }}
         />
@@ -1649,8 +1716,26 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
           scanning={volSkewMrScanning}
           error={volSkewMrScanError || volSkewMr.error}
           lastSync={volSkewMr.lastSync}
+          onRetry={() => { void runVolSkewMrScan(...volSkewMrLastRequest.current); }}
           onScan={() => { void runVolSkewMrScan(); }}
           onTickerScan={(tickers) => { void runVolSkewMrScan(tickers); }}
+        />
+      </div>
+    );
+  }
+
+  if (mode === "bounce") {
+    return (
+      <div className="scanner-page-shell">
+        {modeTabs}
+        <BounceSetupScanner
+          data={bounce.data ?? null}
+          loading={bounce.loading}
+          scanning={bounceScanning}
+          error={bounceScanError || bounce.error}
+          lastSync={bounce.lastSync}
+          onRetry={() => { void runBounceScan(); }}
+          onScan={() => { void runBounceScan(); }}
         />
       </div>
     );
@@ -1666,6 +1751,7 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
           scanning={leapScanning}
           error={leapScanError || leap.error}
           lastSync={leap.lastSync}
+          onRetry={() => { void runLeapScan(...leapLastRequest.current); }}
           onScan={() => { void runLeapScan(); }}
           onTickerScan={(tickers) => { void runLeapScan(tickers); }}
         />
@@ -1683,6 +1769,7 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
           scanning={garchScanning}
           error={garchScanError || garch.error}
           lastSync={garch.lastSync}
+          onRetry={() => { void runGarchScan(...garchLastRequest.current); }}
           onScan={() => { void runGarchScan(); }}
           onTickerScan={(tickers) => { void runGarchScan(tickers); }}
         />
@@ -1778,7 +1865,7 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
 
         {error && (
           <div style={{ padding: "8px 16px" }}>
-            <div className="alert-item bearish">{error}</div>
+            <RequestError error={error} />
           </div>
         )}
 
@@ -1896,7 +1983,7 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
             </span>
           </div>
         </div>
-        {error && <div className="section-body"><div className="alert-item bearish">{error}</div></div>}
+        {error && <RequestError error={error} />}
         {signals.length === 0 && !syncing && !error && (
           <div className="section-body">
             <SectionEmptyState
@@ -2088,7 +2175,7 @@ function DiscoverSections() {
       <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
         {error && (
           <div style={{ padding: "8px 16px" }}>
-            <div className="alert-item bearish">{error}</div>
+            <RequestError error={error} />
           </div>
         )}
 
@@ -2191,7 +2278,7 @@ function DiscoverSections() {
             </span>
           </div>
         </div>
-        {error && <div className="section-body"><div className="alert-item bearish">{error}</div></div>}
+        {error && <RequestError error={error} />}
         {candidates.length === 0 && !syncing && !error && (
           <div className="section-body">
             <SectionEmptyState
@@ -2340,7 +2427,7 @@ function JournalSections() {
     try {
       await syncWithIB();
     } catch (e) {
-      setSyncError(e instanceof Error ? e.message : "Sync failed");
+      setSyncError(userErrorMessage(e, "The journal could not be synced. Please try again."));
     }
   }, [syncWithIB]);
 
@@ -2506,8 +2593,8 @@ function JournalSections() {
           </div>
         )}
 
-        {error && <div className="section-body"><div className="alert-item bearish">{error}</div></div>}
-        {syncError && <div className="section-body"><div className="alert-item bearish">IB Sync: {syncError}</div></div>}
+        {error && <RequestError error={error} />}
+        {syncError && <RequestError error={syncError} fallback="IB sync could not be completed. Try again." />}
         {loading && <div className="section-body p-6"><SpectralLoader label="Loading journal" /></div>}
         {!loading && trades.length === 0 && !error && (
           <div className="section-body">
@@ -4091,14 +4178,7 @@ export function HistoricalTradesSection({
       {expanded && (
       <div id="historical-trades-body" className="section-body">
         {error && (
-          <SectionEmptyState
-            icon={TriangleAlert}
-            tone="danger"
-            headline="Couldn't load historical trades"
-            secondary={error}
-            action={{ label: syncing ? "Refreshing…" : "Refresh", onClick: syncNow, disabled: syncing }}
-            testId="historical-trades-error"
-          />
+          <RequestError error={error} onRetry={syncNow} testId="historical-trades-error" />
         )}
         {loading && <div className="p-6"><SpectralLoader label="Loading historical trades" /></div>}
         {!loading && !error && totalCount === 0 && (
@@ -4305,6 +4385,8 @@ function WorkspaceSections({ section, portfolio, orders, prices, depths, tape, t
       return <ScannerSections defaultMode="discover" />;
     case "journal":
       return <JournalSections />;
+    case "ai-industry":
+      return <AiInfrastructurePanel />;
     case "regime":
       return <RegimePanel prices={prices ?? {}} marketState={marketState} />;
     case "cta":

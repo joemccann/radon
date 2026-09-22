@@ -27,6 +27,8 @@ type UseDialogChrome<T extends HTMLElement> = {
   panelRef: React.RefObject<T | null>;
 };
 
+const activeFocusTraps: HTMLElement[] = [];
+
 const FOCUSABLE_SELECTOR = [
   "a[href]",
   "button:not([disabled])",
@@ -68,8 +70,16 @@ export function useDialogChrome<T extends HTMLElement = HTMLElement>({
     if (!open) return;
 
     const previouslyFocused = document.activeElement as HTMLElement | null;
+    const focusPanel = panelRef.current;
+    const dialog = focusPanel?.closest<HTMLElement>('[role="dialog"]') ?? focusPanel;
+    const previousOwns = dialog?.getAttribute("aria-owns");
+    if (trapFocus && focusPanel) {
+      activeFocusTraps.push(focusPanel);
+      dialog?.setAttribute("aria-owns", [previousOwns, "radon-toast-viewport"].filter(Boolean).join(" "));
+    }
 
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (trapFocus && focusPanel && activeFocusTraps.at(-1) !== focusPanel) return;
       if (closeOnEscape && event.key === "Escape") {
         onCloseRef.current?.();
         return;
@@ -77,26 +87,24 @@ export function useDialogChrome<T extends HTMLElement = HTMLElement>({
       if (!trapFocus || event.key !== "Tab") return;
       const panel = panelRef.current;
       if (!panel) return;
-      const focusable = Array.from(
-        panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
-      ).filter((element) => element.offsetParent !== null || element === panel);
+      const viewport = document.getElementById("radon-toast-viewport");
+      const focusable = [
+        ...panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+        ...(viewport?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR) ?? []),
+      ].filter((element) => element.offsetParent !== null || element === panel);
       if (focusable.length === 0) {
         event.preventDefault();
         panel.focus();
         return;
       }
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      const active = document.activeElement;
-      if (event.shiftKey) {
-        if (active === first || active === panel) {
-          event.preventDefault();
-          last.focus();
-        }
-      } else if (active === last) {
-        event.preventDefault();
-        first.focus();
-      }
+      // The viewport is a body portal, so native Tab order cannot bridge the
+      // panel and its toast actions. Own the complete cycle in both directions.
+      const index = focusable.indexOf(document.activeElement as HTMLElement);
+      const next = event.shiftKey
+        ? (index <= 0 ? focusable.length - 1 : index - 1)
+        : (index + 1) % focusable.length;
+      event.preventDefault();
+      focusable[next].focus();
     };
 
     // Listen on `window` (not `document`): a window listener catches both real
@@ -110,12 +118,18 @@ export function useDialogChrome<T extends HTMLElement = HTMLElement>({
 
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
+      if (trapFocus && focusPanel) {
+        const index = activeFocusTraps.lastIndexOf(focusPanel);
+        if (index !== -1) activeFocusTraps.splice(index, 1);
+        if (previousOwns) dialog?.setAttribute("aria-owns", previousOwns);
+        else dialog?.removeAttribute("aria-owns");
+      }
       document.body.style.overflow = previousOverflow;
       if (trapFocus && previouslyFocused && typeof previouslyFocused.focus === "function") {
         previouslyFocused.focus();
       }
     };
-  }, [open, closeOnEscape, trapFocus]);
+  }, [open, closeOnEscape, trapFocus, portalTarget]);
 
   return { portalTarget, panelRef };
 }

@@ -21,10 +21,11 @@ Router: vision tagger for posts with images; text tagger otherwise.
 
 - **Vision tagger:** `claude-haiku-4-5`, ~$0.003 / post.
 - **Text tagger:** shared model ladder (`complete_text_json`) via `scripts/clients/model_ladder_cli.py`. Order: anthropic -> grok -> cursor -> codex -> gemini -> nvidia -> cerebras last. Soft-fail when no keyed provider works.
-- Exactly **3 tags per post**, free-form.
+- Optional local rung `slm-tagger` (ahead of paid/subscription rungs) behind `RADON_SLM_TAGGER_MODE` (default `off`). Closed vocabulary: exactly 3 uppercase kebab tags validated against live taxonomy; invalid or unknown tags abstain and fall through. Does not coin tags. Distill/reviewer never see the rung.
+- Exactly **3 tags per post**, free-form on the ladder; SLM is closed-vocabulary.
 - **Naming** (`__normaliseTags`): UPPERCASE, multi-word `UPPERCASE-KEBAB-CASE` (`PUT-CALL-RATIO`), allowed `A-Z 0-9 - &`, case-insensitive dedup.
 - `hydrateTags` skips posts with `tags.length >= 3` unless `force=true`.
-- `data/tag_taxonomy.json` force-tracked. Filter chips on the dashboard auto-derive from it.
+- `data/tag_taxonomy.json` is untracked and runtime-owned (Turso `tag_taxonomy` is canonical). Filter chips on the dashboard auto-derive from it.
 - Any keyed ladder provider is sufficient for text tagging.
 
 ---

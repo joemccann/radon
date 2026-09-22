@@ -66,8 +66,8 @@ describe("InfoTooltip flip", () => {
 
     const popup = openTooltip();
 
-    expect(popup.style.top).toBe(`${600 - 6}px`);
-    expect(popup.style.transform).toContain("translateY(-100%)");
+    expect(popup.style.top).toBe(`${600 - 6 - POPUP_HEIGHT}px`);
+    expect(popup.style.transform).not.toContain("translateY(-100%)");
   });
 
   it("is visible once measured", () => {

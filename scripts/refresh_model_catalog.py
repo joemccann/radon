@@ -137,9 +137,35 @@ def _first_env(names: tuple[str, ...]) -> Optional[str]:
     return None
 
 
+_LADDER_PROVIDER = {"anthropic": "anthropic", "openai": "codex", "xai": "grok"}
+
+
+def _ladder():
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from clients import model_ladder
+
+    return model_ladder
+
+
+def provider_auth(provider: str):
+    """Resolved subscription credential for ``provider`` (subscriptions only).
+
+    The ChatGPT grant cannot list models (api.openai.com answers 403 "Missing
+    scopes: api.model.read"), so OpenAI only lights up on a prepaid key under
+    RADON_LADDER_ALLOW_PREPAID=1.
+    """
+    auth = _ladder().subscription_auth(_LADDER_PROVIDER[provider])
+    if auth is None:
+        return None
+    if provider == "openai" and auth.kind == "subscription":
+        return None
+    return auth
+
+
 def provider_key(provider: str) -> Optional[str]:
-    """API key for ``provider``, or None when this deployment has none."""
-    return _first_env(PROVIDER_KEY_ENV[provider])
+    """Credential token for ``provider``, or None when this deployment has none."""
+    auth = provider_auth(provider)
+    return auth.token if auth is not None else None
 
 
 def provider_override(provider: str) -> Optional[str]:
@@ -189,7 +215,11 @@ def _provider_budget() -> Iterator[None]:
 
 def fetch_anthropic_models(api_key: str) -> list[dict[str, Any]]:
     """Every page of GET /v1/models - the list is cursor-paginated."""
-    headers = {"x-api-key": api_key, "anthropic-version": ANTHROPIC_VERSION}
+    auth = provider_auth("anthropic")
+    if auth is not None and auth.token == api_key:
+        headers = _ladder().anthropic_request_headers(auth)
+    else:
+        headers = {"x-api-key": api_key, "anthropic-version": ANTHROPIC_VERSION}
     models: list[dict[str, Any]] = []
     url = f"{ANTHROPIC_MODELS_URL}?limit=100"
     for _ in range(ANTHROPIC_MAX_PAGES):

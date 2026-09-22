@@ -1,4 +1,6 @@
 "use client";
+import ErrorToast from "@/components/ErrorToast";
+import { userErrorMessage } from "@/lib/userError";
 import {useState} from 'react';
 import type {PortfolioData} from '@/lib/types';
 import type {ResearchWorkspace,ResearchAnalysis} from '@/lib/researchWorkbench';
@@ -20,18 +22,18 @@ export default function ResearchLabs({workspace,portfolio,asOf}:{workspace:Resea
   const [notes,setNotes]=useState('');
   const [peerText,setPeerText]=useState('');
   let peerMedian:number|null=null;let peerError='';let peers:ComparableCompany[]=[];
-  if(peerText.trim()){try{peers=peerText.trim().split('\n').map(line=>{const parts=line.split('|').map(v=>v.trim());if(parts.length!==3)throw new Error('Use Company | Enterprise value | EBITDA, one company per line.');return {name:parts[0],enterpriseValue:Number(parts[1]),ebitda:Number(parts[2])};});peerMedian=medianMultiple(peers);}catch(e){peerError=e instanceof Error?e.message:'Invalid comparables.';}}
+  if(peerText.trim()){try{peers=peerText.trim().split('\n').map(line=>{const parts=line.split('|').map(v=>v.trim());if(parts.length!==3)throw new Error('Use Company | Enterprise value | EBITDA, one company per line.');return {name:parts[0],enterpriseValue:Number(parts[1]),ebitda:Number(parts[2])};});peerMedian=medianMultiple(peers);}catch(e){peerError=userErrorMessage(e, 'Invalid comparables.');}}
   const complete=fields.every(f=>values[f.key].trim()!=='')&&ticker.trim()!=='';
   const input={ticker,...Object.fromEntries(fields.map(f=>[f.key,Number(values[f.key])]))} as ValuationInputs;
   const errors=complete?valuationErrors(input):[];
   let result:ReturnType<typeof calculateValuation>|null=null;
-  if(complete&&!errors.length){try{result=calculateValuation(input);}catch(e){errors.push(e instanceof Error?e.message:'Invalid scenario.');}}
+  if(complete&&!errors.length){try{result=calculateValuation(input);}catch(e){errors.push(userErrorMessage(e, 'Invalid scenario.'));}}
   async function exportFile(kind:'scenario'|'xlsx'|'pptx') {
     setBusy(true);setError('');
     try {
       const artifact=buildInvestorArtifactInput({workspace,asOf:asOf??new Date().toISOString().slice(0,10),ticker,notes,portfolio});
       if(kind==='scenario')await downloadValuation(input,artifact.sources,peers);else await downloadInvestorArtifacts(artifact,kind);
-    }catch(e){setError(e instanceof Error?e.message:'Export failed. Retry the download.');}finally{setBusy(false);}
+    }catch(e){setError(userErrorMessage(e, 'Export failed. Retry the download.'));}finally{setBusy(false);}
   }
   return <div className="research-labs">
     <section aria-labelledby="valuation-heading">
@@ -39,7 +41,7 @@ export default function ResearchLabs({workspace,portfolio,asOf}:{workspace:Resea
       <p className="research-muted">Enter a company and consistent units: if cash flow is in millions, enter debt, EBITDA and shares in millions. Rates use decimals: 0.10 means 10%. Defaults are editable assumptions.</p>
       <label className="research-field">Ticker or company<input value={ticker} onChange={e=>setTicker(e.target.value)} maxLength={100}/></label>
       <div className="research-form-grid">{fields.map(f=><label key={f.key} className="research-field">{f.label}<input type="number" step="any" value={values[f.key]} onChange={e=>setValues(v=>({...v,[f.key]:e.target.value}))}/></label>)}</div>
-      {errors.length?<div role="alert">{errors.join(' ')}</div>:null}
+      {errors.length?<ErrorToast message={errors.join(' ')} />:null}
       {!complete?<p className="research-muted">Enter all financial inputs to calculate a scenario.</p>:null}
       {result?<dl className="research-valuation-results">
         <div><dt>DCF enterprise value</dt><dd>{number(result.enterpriseValue)}</dd></div>
@@ -52,7 +54,7 @@ export default function ResearchLabs({workspace,portfolio,asOf}:{workspace:Resea
       <h3 style={{marginTop:24}}>Comparable companies</h3>
       <label className="research-field">Operator-supplied peers: Company | Enterprise value | EBITDA<textarea value={peerText} onChange={e=>setPeerText(e.target.value)} rows={4} maxLength={6000}/></label>
       <p className="research-muted">Use consistent units and comparable fiscal periods. Peer selection and values are operator assumptions; source passages remain in the workbook.</p>
-      {peerError?<p role="alert">{peerError}</p>:null}
+      {peerError?<ErrorToast message={peerError} />:null}
       {peerMedian!==null?<p>Median EV / EBITDA: {number(peerMedian)}× <button type="button" className="btn-secondary" onClick={()=>setValues(v=>({...v,exitMultiple:String(peerMedian)}))}>Use peer median as exit multiple</button></p>:null}
       <details><summary>Model assumptions and limits</summary><p>DCF uses annual unlevered cash flow and a perpetual terminal value. The simplified LBO assumes a debt-free acquisition, explicit annual debt repayment and no interim distributions, fees, interest schedule or tax shield. One growth assumption applies to cash flow and EBITDA. The multiple view uses the entered exit multiple; it does not claim a retrieved peer set.</p></details>
       <button type="button" className="btn-secondary" disabled={!result||Boolean(peerError)||busy} onClick={()=>void exportFile('scenario')}>Download scenario XLSX</button>
@@ -63,6 +65,6 @@ export default function ResearchLabs({workspace,portfolio,asOf}:{workspace:Resea
       <label className="research-field">Headwinds and operator assessment<textarea value={notes} onChange={e=>setNotes(e.target.value)} rows={4} maxLength={12000}/></label>
       <div className="research-actions"><button type="button" className="btn-secondary" disabled={!workspace.facts.length||busy} onClick={()=>void exportFile('xlsx')}>Download update XLSX</button><button type="button" className="btn-secondary" disabled={!workspace.facts.length||busy} onClick={()=>void exportFile('pptx')}>Download update PPTX</button></div>
     </section>
-    {busy?<p role="status">Preparing artifact…</p>:null}{error?<p role="alert">{error}</p>:null}
+    {busy?<p role="status">Preparing artifact…</p>:null}{error?<ErrorToast message={error} />:null}
   </div>;
 }

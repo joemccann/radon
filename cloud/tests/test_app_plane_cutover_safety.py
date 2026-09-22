@@ -213,11 +213,14 @@ class TestImageBuildCarriesPublicEnv:
         for name in NEXT_PUBLIC_ARGS:
             assert f"ARG {name}" in text
 
-    def test_the_client_bundle_must_contain_the_clerk_key(self):
+    def test_the_client_bundle_must_contain_the_clerk_key(self, tmp_path):
         text = DOCKERFILE_NODE.read_text(encoding="utf-8")
         assert "grep -RF" in text
         assert ".next/static" in text
-        assert "next-clerk-guard" in text
+        result = _run_runtime(tmp_path, ["run", "radon-nextjs.service"])
+        assert result.returncode == 0, result.stderr
+        run_line = next(line for line in result.docker_log.read_text().splitlines() if line.startswith("run "))
+        assert run_line.endswith(" /usr/local/bin/next-clerk-guard")
 
     def test_the_workflow_pushes_latest_only_after_the_node_image_bakes(self):
         jobs = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]

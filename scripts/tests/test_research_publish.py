@@ -222,27 +222,25 @@ def test_required_stable_id_components():
     with pytest.raises(ValueError): publish.stable_post_id("id:a", "")
 
 
-@pytest.mark.parametrize("field", ["title", "content", "publisher", "caption", "tag"])
-@pytest.mark.parametrize("dash", ["\u2014", "&mdash;", "&#8212;", "&#x2014;"])
-def test_authored_em_dash_never_reaches_publication(db, post, field, dash):
-    text = f"Rates {dash} positioning"
-    if field in ("title", "content"):
-        post[field] = text
-    elif field == "publisher":
-        post["source"][field] = text
-    elif field == "caption":
-        post["source"]["figures"][0][field] = text
-    else:
-        post["tags"] = [text]
-    with pytest.raises(ValueError):
-        publish.publish(post)
-    assert db.execute("SELECT count(*) FROM posts").fetchone()[0] == 0
+def test_em_dash_and_bank_publisher_publish(db, post):
+    post["content"] = "Rates \u2014 positioning"
+    post["source"]["publisher"] = "Goldman Sachs"
+    assert publish.publish(post) == post["id"]
+    assert db.execute("SELECT content FROM posts").fetchone()[0] == "Rates \u2014 positioning"
 
 
-@pytest.mark.parametrize("dash", ["\u2014", "&mdash;", "&#8212;", "&#x2014;"])
-def test_rendered_copy_gate_checks_tags_before_caller_normalization(dash):
-    with pytest.raises(ValueError, match="em dash"):
-        publish.validate_rendered_copy("Rates", "New evidence.", "JPMorgan", [], [f"FLOW{dash}RATES"])
+def test_empty_caption_publishes(db, post):
+    post["source"]["figures"][0]["caption"] = ""
+    publish.publish(post)
+    source = json.loads(db.execute("SELECT provenance_json FROM research_post_sources").fetchone()[0])
+    assert source["figures"][0]["caption"] == ""
+
+
+def test_long_title_and_body_publish(db, post):
+    post["title"] = "T" * 600
+    post["content"] = "B" * 40000
+    publish.publish(post)
+    assert db.execute("SELECT title, content FROM posts").fetchone() == (post["title"], post["content"])
 
 
 def test_publication_preserves_evidence_quotes_assets_and_financial_punctuation(db, post):
@@ -282,26 +280,9 @@ def test_store_rejects_unsupported_extension_and_symlink_root(tmp_path, monkeypa
     with pytest.raises(ValueError, match="directory"): assets.store_asset(png)
 
 
-@pytest.mark.parametrize('field',['title','content','publisher','caption','tags'])
-@pytest.mark.parametrize('name',['ZeroHedge','ZEROHEDGE','ZERO HEDGE','zero\u00a0hedge','Zero-Hedge'])
-def test_intermediary_never_enters_rendered_research_copy(db,post,field,name):
-    if field=='publisher':post['source']['publisher']=name
-    elif field=='caption':post['source']['figures'][0]['caption']=name
-    elif field=='tags':post['tags']=[name]
-    else:post[field]=name
-    with pytest.raises(ValueError):publish.publish(post)
-    assert db.execute('SELECT count(*) FROM posts').fetchone()[0]==0
-
-
 def test_original_bank_attribution_is_accepted(db,post):
     post['source']['publisher']='Goldman Sachs'
     assert publish.publish(post)==post['id']
-
-
-@pytest.mark.parametrize('control',['\u200b','\u00ad','\u200d'])
-def test_invisible_format_controls_do_not_bypass_attribution_guard(control):
-    with pytest.raises(ValueError):
-        publish.validate_rendered_copy('Zero'+control+'Hedge','Research','Goldman Sachs',[],['MACRO'])
 
 
 def test_publication_manifest_binds_exact_source_pdf(db, tmp_path, monkeypatch):

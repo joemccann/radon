@@ -1,5 +1,7 @@
 "use client";
+import ErrorToast from "@/components/ErrorToast";
 
+import { userErrorMessage } from "@/lib/userError";
 import { useState } from "react";
 import Link from "next/link";
 
@@ -91,7 +93,7 @@ export default function ScannerHero() {
         theta.loading && !theta.data ? (
           <div className="news-feed-empty">Loading theta harvester…</div>
         ) : theta.error ? (
-          <div className="news-feed-error" role="alert">{theta.error}</div>
+          <ErrorToast message={userErrorMessage(theta.error, 'Scanner data could not be loaded. Try again.')} />
         ) : !theta.data?.results?.length ? (
           <div className="news-feed-empty">No theta candidates in the last scan.</div>
         ) : (
@@ -139,11 +141,9 @@ export default function ScannerHero() {
       ) : cone.loading && !cone.data ? (
         <div className="news-feed-empty">Loading vol cone…</div>
       ) : cone.error ? (
-        <div className="news-feed-error" role="alert">{cone.error}</div>
+        <ErrorToast message={userErrorMessage(cone.error, 'Scanner data could not be loaded. Try again.')} />
       ) : coneMissing ? (
-        <div className="news-feed-error" role="alert">
-          Vol cone data unavailable — the last scan produced no payload. This is an outage, not an empty result.
-        </div>
+        <ErrorToast message="Vol cone data is unavailable. The last scan produced no payload. Try refreshing the scan." />
       ) : !cone.data?.hits?.length ? (
         <div className="news-feed-empty">No cheap vol cones in the last scan.</div>
       ) : (

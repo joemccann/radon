@@ -40,6 +40,7 @@ export interface BrushMinimapProps {
   /** Prefix for data-testid attrs (default "brush-minimap"). */
   testIdPrefix?: string;
   ariaLabel?: string;
+  formatIndex?: (index: number) => string;
 }
 
 export default function BrushMinimap({
@@ -50,6 +51,7 @@ export default function BrushMinimap({
   height = 40,
   testIdPrefix = "brush-minimap",
   ariaLabel = "Range brush minimap",
+  formatIndex,
 }: BrushMinimapProps) {
   const brushRef = useRef<HTMLDivElement>(null);
   const dragStateRef = useRef<BrushDragState | null>(null);
@@ -184,7 +186,14 @@ export default function BrushMinimap({
         role="slider"
         aria-label="Start of visible range"
         aria-valuemin={0}
-        aria-valuemax={total - 1}
+        aria-valuemax={visibleEnd - 1}
+        aria-valuetext={formatIndex?.(visibleStart)}
+        onKeyDown={event => {
+          if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+          event.preventDefault();
+          const next = event.key === "Home" ? 0 : event.key === "End" ? visibleEnd - 1 : Math.max(0, Math.min(visibleEnd - 1, visibleStart + (event.key === "ArrowRight" ? 1 : -1)));
+          onCustom?.(); onRangeChange([next, visibleEnd]);
+        }}
         aria-valuenow={visibleStart}
         tabIndex={0}
       />
@@ -195,8 +204,15 @@ export default function BrushMinimap({
         onPointerDown={handlePointerDown("right")}
         role="slider"
         aria-label="End of visible range"
-        aria-valuemin={0}
+        aria-valuemin={visibleStart + 1}
         aria-valuemax={total - 1}
+        aria-valuetext={formatIndex?.(visibleEnd)}
+        onKeyDown={event => {
+          if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+          event.preventDefault();
+          const next = event.key === "Home" ? visibleStart + 1 : event.key === "End" ? total - 1 : Math.max(visibleStart + 1, Math.min(total - 1, visibleEnd + (event.key === "ArrowRight" ? 1 : -1)));
+          onCustom?.(); onRangeChange([visibleStart, next]);
+        }}
         aria-valuenow={visibleEnd}
         tabIndex={0}
       />

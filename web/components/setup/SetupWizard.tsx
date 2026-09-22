@@ -1,5 +1,7 @@
 "use client";
 
+import ErrorToast from "@/components/ErrorToast";
+
 /**
  * First-run setup wizard (setup mode only — no Clerk keys configured yet).
  *
@@ -11,6 +13,7 @@
  * the operator pastes keys from the vendor dashboards they already have.
  */
 
+import { userErrorMessage } from "@/lib/userError";
 import { useCallback, useMemo, useState } from "react";
 import type { CredentialServiceEntry, CredentialsPayload } from "@/lib/credentials";
 import {
@@ -82,7 +85,7 @@ export default function SetupWizard() {
       setRegistry(status.credentials);
       setStep("collect");
     } catch (error) {
-      setTokenError(error instanceof Error ? error.message : "token check failed");
+      setTokenError(userErrorMessage(error, "token check failed"));
     } finally {
       setTokenBusy(false);
     }
@@ -132,7 +135,7 @@ export default function SetupWizard() {
           ...current,
           [service.id]: {
             status: "error",
-            message: error instanceof Error ? error.message : "check failed",
+            message: userErrorMessage(error, "check failed"),
           },
         }));
       } finally {
@@ -163,7 +166,7 @@ export default function SetupWizard() {
       setResult(data);
       setStep("done");
     } catch (error) {
-      setCompleteError(error instanceof Error ? error.message : "setup failed");
+      setCompleteError(userErrorMessage(error, "setup failed"));
     } finally {
       setCompleting(false);
     }
@@ -220,9 +223,7 @@ export default function SetupWizard() {
             </button>
           </div>
           {tokenError ? (
-            <p className="admin-card-note admin-card-error" role="alert" data-testid="setup-token-error">
-              {tokenError}
-            </p>
+            <ErrorToast message={tokenError} testId="setup-token-error" />
           ) : null}
         </section>
       </main>
@@ -240,7 +241,9 @@ export default function SetupWizard() {
             {result.outcomes.map((outcome) => (
               <li key={outcome.service}>
                 {outcome.service}: {outcome.stored ? "stored" : "NOT stored"}
-                {outcome.validation.message ? ` (${outcome.validation.message})` : ""}
+                {outcome.validation.status === "invalid" || outcome.validation.status === "error" ? (
+                  <ErrorToast message={`${outcome.service}: ${userErrorMessage(outcome.validation.message, "Credential validation did not complete. Try again.")}`} />
+                ) : outcome.validation.message ? ` (${userErrorMessage(outcome.validation.message, "Credential validation did not complete. Try again.")})` : ""}
               </li>
             ))}
           </ul>
@@ -261,17 +264,12 @@ export default function SetupWizard() {
   return (
     <main className="preferences-shell" data-testid="setup-wizard" style={{ maxWidth: 720, margin: "48px auto", padding: "0 16px" }}>
       {!backendUp ? (
-        <p className="admin-card-note preferences-store-banner" role="status">
-          The FastAPI backend is not answering yet, so live vendor checks are
-          offline. You can still paste values and finish; they land in .env.
-        </p>
+        <ErrorToast message="Live credential checks are unavailable. You can still save values and finish setup." />
       ) : null}
       {!registry ? (
         <section className="admin-card preferences-group">
-          <p className="preferences-row__description">
-            The credential registry is unavailable (backend offline). Start the
-            stack and reload, or finish later from the profile page.
-          </p>
+          <ErrorToast message="The credential registry is unavailable. Start the stack and reload, or finish later from the profile page." />
+          <button type="button" className="btn-secondary" onClick={() => window.location.reload()}>Reload setup</button>
         </section>
       ) : (
         grouped.map(({ group, services }) => (
@@ -339,17 +337,13 @@ export default function SetupWizard() {
                       </button>
                     </div>
                   ) : null}
-                  {verdict ? (
+                  {verdict && (verdict.status === "invalid" || verdict.status === "error") ? <ErrorToast message={userErrorMessage(verdict.message, "Credential validation failed. Check the value and try again.")} testId={`setup-verdict-${service.id}`} /> : verdict ? (
                     <p
-                      className={
-                        verdict.status === "invalid" || verdict.status === "error"
-                          ? "admin-card-note admin-card-error"
-                          : "admin-card-note"
-                      }
-                      role={verdict.status === "invalid" ? "alert" : "status"}
+                      className="admin-card-note"
+                      role="status"
                       data-testid={`setup-verdict-${service.id}`}
                     >
-                      {verdict.message || verdict.status}
+                      {userErrorMessage(verdict.message, verdict.status)}
                     </p>
                   ) : null}
                 </div>
@@ -374,9 +368,7 @@ export default function SetupWizard() {
           </button>
         </div>
         {completeError ? (
-          <p className="admin-card-note admin-card-error" role="alert" data-testid="setup-complete-error">
-            {completeError}
-          </p>
+          <ErrorToast message={completeError} testId="setup-complete-error" />
         ) : null}
       </section>
     </main>

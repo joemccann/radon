@@ -191,6 +191,11 @@ Operator commands after the cut:
   Reversal: `systemctl disable --now radon-ib-gateway-remote.service` on
   the broker and unset `RADON_IB_REMOTE_URL` on the app (controls go
   read-only, no error).
+- The API image has no `systemctl`. App-plane rows on `/admin` therefore
+  come from the host health daemon (`127.0.0.1:8330/status`) with
+  `load_state=host-health` and `can_control=false`. Gateway status stays
+  on the remote ladder above. Start, stop, and restart of app units stay
+  unavailable from that container.
 - App `Restart All Services` stays app-plane. It does not cycle Gateway.
 
 Do not put the broker in Falkenstein. Do not run two Gateways. Do not

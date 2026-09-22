@@ -1,14 +1,8 @@
 "use client";
 
-import { useEffect } from "react";
-
 type AppError = Error & { digest?: string };
 
 export default function ErrorBoundary({ error, reset }: { error: AppError; reset: () => void }) {
-  useEffect(() => {
-    console.error("[radon] route error boundary:", error);
-  }, [error]);
-
   return (
     <div
       style={{

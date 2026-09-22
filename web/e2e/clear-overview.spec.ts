@@ -19,7 +19,7 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 1000 }, { name: 
     expect(requests.some((request) => /POST \/api\/orders\/(place|cancel|modify)/.test(request))).toBe(false);
   });
 
-  test(`Clear overview ${viewport.name}: account, history, risk, positions and research`, async ({ page }, testInfo) => {
+  test(`Clear overview ${viewport.name}: account, history, risk and positions`, async ({ page }, testInfo) => {
     await page.setViewportSize(viewport);
     const requests = await installClearFixtures(page);
     await page.goto("/dashboard");
@@ -54,7 +54,8 @@ for (const viewport of [{ name: "desktop", width: 1440, height: 1000 }, { name: 
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath(`clear-${viewport.name}.png`), fullPage: false });
-    await overview.getByRole("link", { name: /News, signals/ }).click();
+    await expect(overview.getByText("Research workspace")).toHaveCount(0);
+    await page.locator("#clear-market-intelligence").scrollIntoViewIfNeeded();
     await expect(page.getByRole("heading", { name: "Market intelligence", exact: true })).toBeInViewport();
     for (const section of ["feed", "signals", "catalysts", "engine"]) await expect(page.getByTestId(`dashboard-section-${section}`)).toBeVisible();
     expect(requests.filter((request) => request === "GET /api/performance")).toHaveLength(1);

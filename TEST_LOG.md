@@ -869,6 +869,12 @@ no new skips; no threshold or CI-reachability drift. 0 new findings.
 |---|---|---|
 | T-493 | OPEN | Delta audit: web/tests/ib-rt-volume-relay.test.ts:29-50 source-greps relay callbacks instead of dispatching tickSize 8 / tickString 48 and observing a broadcast. Full-gate detached stage has no DONE sentinel; no result claimed. |
 
+## Audit 2026-09-16 (testing/2026-09-16)
+
+| Task | Status | Evidence |
+|---|---|---|
+| T-495 | OPEN | `web/e2e/chain-anchored-scroll.spec.ts:93-102` uses `page.waitForTimeout(250)` between two scroll assertions and its post-scroll snapshot. The contract can sample before rendering settles and cannot catch a regression that renders after the arbitrary window. AC: replace the delay with a web-first settled-pane assertion; a deliberately delayed rerender must fail. Detached full-gate stage ended without `DONE` at `pytest_rc=RUNNING`; no count claimed. |
+
 ## Remediation 2026-09-13 (testing/2026-09-13)
 
 | Task | Status | Evidence |
@@ -924,3 +930,76 @@ Closing gates: INCOMPLETE. Detached serial stage prewrote `pytest`, `vitest`,
 and `cloud` slots for rounds 1-3, then died in `pytest_1`; its log is zero-byte
 and `/tmp/tw-2026-09-15/remediate-gates.rc` has no `DONE` sentinel. No gate
 counts or green verdict are claimed.
+
+## Remediation 2026-09-16 (testing/2026-09-16)
+
+| Task | Status | Evidence |
+|---|---|---|
+| Scope | DONE | `RADON_WEEKEND_REDUCED=1`: this cycle's sole verified finding, T-495, is P2; no source-actionable P0/P1 is open. Full gates are recorded only if their detached stage writes `DONE`. |
+| T-488 | operator-only | Reproduce and repair GNU-timeout process-tree behavior on Linux CI without widening the fixed test timeout. |
+
+Closing gates: INCOMPLETE. `/tmp/tw-2026-09-16/remediate-gates.rc` prewrote all
+nine slots, then the detached process died during `pytest_1` with a zero-byte
+log and no `DONE` sentinel. No full-gate count or green verdict is claimed.
+## Remediation 2026-09-17 (testing/2026-09-17)
+
+`RADON_WEEKEND_REDUCED=1`: this cycle's T-495 is P2 and out of scope. The
+standing P1s were reverified before closing gates: T-490 is deterministically
+blocked by the runner's filesystem policy, and T-488 remains operator-only
+after its three recorded fixture attempts.
+
+| Task | Status | Evidence |
+|---|---|---|
+| T-490 | BLOCKED / operator-only | RED: `render_loop_prompt.py --check` listed all eight absent `.codex` artifacts and `test_portable_prompt_sync.py` was 21 failed / 52 passed. Attempt: `render_loop_prompt.py --write` reached `.codex/skills/ci-performance` then failed `PermissionError`. Operator: run `python3.13 scripts/render_loop_prompt.py --write` in a checkout permitted to create repository `.codex/`, then run `python3.13 -m pytest scripts/tests/test_portable_prompt_sync.py -q` and commit the generated artifacts. |
+| T-488 | operator-only | Reproduce and repair the GNU-timeout process-tree behavior on Linux CI without widening the fixed test timeout. |
+
+Closing gates: not run. The focused P1 blocker is deterministic, so three
+full-gate runs cannot honestly be claimed.
+
+## Remediation 2026-09-18 (testing/2026-09-18, reduced P0/P1)
+
+| Task | Status | Evidence |
+|---|---|---|
+| T-498 | Focused GREEN; full gates pending | Synthetic outer `.codex/auth.json`: unchanged suites 15 failed / 102 passed. Scoped home/env fixture: same suites 117 passed with outer canary present, 117 passed absent. Real subscription-file precedence tests retained; production code unchanged. Local preservation commit before long gates per unattended phase contract. |
+
+| T-496 | Focused GREEN; browser BLOCKED by sandbox | RED: mixed-age suite 4 failed / 6 passed (missing overnight baseline, either missing leg mark, missing session basis); GREEN: 10 passed including complete -550, IB override and no-leg cases. Real Chromium launch exits SIGTRAP, `bootstrap_check_in: Permission denied (1100)`, before any assertion. Added mocked curated browser case for unavailable row and screenshot capture; not claimed executed. Operator: run `cd web && npx playwright test e2e/portfolio-defined-combo-pnl.spec.ts --project=chromium` on a runner permitting Chromium Mach bootstrap and inspect its screenshot. Local preservation commit before full gates. |
+
+Round 1: root pytest 13,425 passed / 21 failed / 19 skipped (all standing
+T-490); Vitest 9,737 passed / 2 failed. Both Vitest failures were existing
+assertions pinning the T-496 partial sum (+$1,000 with no overnight close).
+Replaced those exact-value bug pins with exact null/unavailable assertions,
+retaining lifetime +$3,500 and adding rendered authoritative IB +$1,250.
+No assertion was loosened or skipped. Subsequent full rounds verify these
+corrected tests; round 1 is not a green final-tree result.
+
+Final verification for 2026-09-18 (all detached stages terminal):
+
+| Gate | Round 1 | Round 2 | Round 3 |
+|---|---|---|---|
+| Root pytest | 13,425 passed / 21 failed / 19 skipped | 13,425 passed / 21 failed / 19 skipped | 13,425 passed / 21 failed / 19 skipped |
+| Vitest | 9,737 passed / 2 failed (old T-496 bug pins, corrected afterward) | 9,739 passed / 979 files | 9,739 passed / 979 files |
+| Cloud | 1,870 passed / 4 failed / 76 skipped | 1,870 passed / 4 failed / 76 skipped | 1,870 passed / 4 failed / 76 skipped |
+
+Additional full Vitest after the correction: 9,739 passed / 979 files; this
+makes three consecutive full Vitest greens on the corrected test assertions.
+Pytest failure lists are identical across all three runs (T-490 portable
+prompt artifacts); cloud failure lists are identical across all three runs
+(T-488 process-tree timeouts). These are red gates, not a passing baseline.
+No gate or timeout threshold was widened.
+
+T-496 final mutation proof: an in-memory transform restoring the skipped-leg
+partial sum produced 6 failed / 26 passed; the unchanged correct source
+passed 37 focused tests across three files. Browser discovery collected both
+curated spec cases; Chromium execution and screenshot verification remain
+blocked by the sandbox. T-498 remains 117 passed with synthetic outer
+subscription credentials present and 117 passed absent.
+
+Phase INCOMPLETE. Reduced scope was P0/P1. T-247 remains verified and
+unimplemented; the complete legacy inventory is retained on issue #83, not
+silently closed or labeled BLOCKED without three attempts. T-496 browser
+acceptance remains operator-only on a Chromium-capable runner. T-488 and
+T-490 retain their prior exact operator actions. No PR/push or live Gateway
+action occurred. All gate sentinels are terminal, post-gate worktree was
+clean, and 21 logs contained zero matches for exported/Pushover credentials.
+Evidence and a verified Git bundle are preserved outside the disposable
+checkout at `.testing-deliver/remediate-2026-09-18/`.

@@ -28,7 +28,7 @@ Every decision must satisfy ALL THREE. Any fails → do not trade.
 
 ### 3. RISK MANAGEMENT (Size Last)
 - **Fractional Kelly criterion** for every position.
-- Process: Estimate P(ITM) > implied P → conditional value → EV → odds ratio → Kelly `f* = p - (q/b)` → apply 0.25x-0.5x fractional Kelly.
+- Process: Estimate P(ITM) > implied P → conditional value → EV → odds ratio → Kelly `f* = p - (q/b)` → apply half Kelly (0.5) default; 0.25 optional stricter; full Kelly banned.
 - **Hard constraints:** Max 2.5% bankroll per position. If Kelly says >20% → restructure. If Kelly says don't bet → don't bet.
 - Acknowledge probability estimates for tail events are unreliable — use fixed 2.5% sizes, let Kelly govern total exposure.
 

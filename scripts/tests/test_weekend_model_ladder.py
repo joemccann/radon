@@ -47,13 +47,13 @@ LOOPS = {
     "ci-performance": REPO / "scripts" / "ci_performance_nightly.sh",
     "documentation": REPO / "scripts" / "documentation_nightly.sh",
     "security": REPO / "scripts" / "security_nightly.sh",
+    "security-deepsec": REPO / "scripts" / "security_deepsec_nightly.sh",
 }
 
-# Best first. The top rung is the operator's own default; the next is the same
-# family one tier down, which is what 2026-09-01 needed and never got.
+# Documented SAFETY ladder when catalog discovery fails. Live policy is
+# skip-newest from the Mini catalog (see test_security_claude_ladder.py).
+# Other weekend loops keep their own ladders. Do not put fable back.
 LADDER = [
-    "claude-fable-5[1m]",
-    "claude-opus-5[1m]",
     "claude-opus-5",
     "claude-sonnet-5",
 ]
@@ -64,6 +64,14 @@ QUOTA_LINE = (
 )
 RATE_LIMIT_LINE = "Request rejected (429)"
 CAPACITY_LINE = "API Error: Repeated 529 Overloaded errors"
+# 2026-09-21: the claude CLI's per-model cap for Fable. It matched no
+# pattern, so security + DeepSec exited 1 on every phase instead of dropping
+# to the next rung.
+MODEL_LIMIT_LINE = (
+    "You've reached your Fable limit. Switch to another model, or manage "
+    "usage credits at claude.ai/settings/usage?from=cc_cli_limit_message, "
+    "to continue."
+)
 # Claude Code tool-skip categories. Official docs say retry the SAME model.
 # Bare `overloaded` / `rate.limit` in is_quota_exhausted treated these as a
 # dead rung and walked the ladder, including on timeout 124 whose log merely
@@ -74,10 +82,13 @@ CASUAL_RATE_LIMITS = "the 500 mentioned rate limits in a timeout log"
 # The security wrapper refuses to call a phase OK without this; harmless noise
 # for the other four.
 COMPLETION = "SECURITY-NIGHTLY PHASE COMPLETE: audit"
+# The DeepSec wrapper greps its own prefix; each line is inert for the other.
+COMPLETION_DEEPSEC = "SECURITY-DEEPSEC PHASE COMPLETE: audit"
 
 MARKERS = (
     ".radon-weekend-runner",
     ".radon-security-runner",
+    ".radon-security-deepsec-runner",
     ".radon-reliability-runner",
     ".radon-testing-runner",
     ".radon-ci-performance-runner",
@@ -90,7 +101,7 @@ MARKERS = (
 # loop — and run codex, then grok, then NVIDIA, then Cerebras. Their ladder
 # behaviour is asserted in test_provider_failover.py; what stays here is the
 # claude-rung behaviour, against the loop that still has claude rungs.
-CLAUDE_LOOPS = ["security"]
+CLAUDE_LOOPS = ["security", "security-deepsec"]
 
 
 def _clone(tmp_path: Path, wrapper: Path) -> Path:
@@ -100,6 +111,10 @@ def _clone(tmp_path: Path, wrapper: Path) -> Path:
     (repo / "scripts" / wrapper.name).chmod(0o755)
     for helper in ("weekend_notify.py", "weekend_redact.py"):
         (repo / "scripts" / helper).write_text("# stub\n", encoding="utf-8")
+    for helper in ("security_claude_ladder.py", "security_claude_ladder.sh"):
+        src = REPO / "scripts" / helper
+        if src.exists():
+            shutil.copy2(src, repo / "scripts" / helper)
     for marker in MARKERS:
         (repo / marker).write_text("", encoding="utf-8")
     return repo
@@ -130,6 +145,7 @@ def _stub_bin(
         # quota for that model is (or is not) gone.
         "claude": (
             "#!/bin/bash\n"
+            'if [ "$1" = "models" ]; then exit 1; fi\n'
             'model=""\n'
             "while [ $# -gt 0 ]; do\n"
             '  if [ "$1" = "--model" ]; then model="$2"; shift 2; continue; fi\n'
@@ -142,6 +158,7 @@ def _stub_bin(
             f"  exit {exhausted_exit}\n"
             "fi\n"
             f'echo "{COMPLETION}"\n'
+            f'echo "{COMPLETION_DEEPSEC}"\n'
             "exit 0\n"
         ),
         "timeout": (
@@ -161,6 +178,20 @@ def _stub_bin(
         exe = bin_dir / name
         exe.write_text(body, encoding="utf-8")
         exe.chmod(0o755)
+    host_py = shutil.which("python3.13")
+    if not host_py:
+        for candidate in (
+            Path("/home/ubuntu/.local/bin/python3.13"),
+            Path("/usr/bin/python3.13"),
+            REPO / ".venv" / "bin" / "python3.13",
+        ):
+            if candidate.exists():
+                host_py = str(candidate)
+                break
+    if host_py:
+        dest = bin_dir / "python3.13"
+        if not dest.exists():
+            dest.symlink_to(host_py)
     return bin_dir
 
 
@@ -170,9 +201,11 @@ def _audit(
     exhausted_models,
     ladder: str | None = None,
     exhausted_line: str = QUOTA_LINE,
+    catalog: str | None = None,
 ):
     return _run(
-        tmp_path, loop, "audit", exhausted_models, ladder, exhausted_line=exhausted_line
+        tmp_path, loop, "audit", exhausted_models, ladder,
+        exhausted_line=exhausted_line, catalog=catalog,
     )
 
 
@@ -184,6 +217,7 @@ def _run(
     ladder: str | None = None,
     exhausted_line: str = QUOTA_LINE,
     exhausted_exit: int = 1,
+    catalog: str | None = None,
 ):
     wrapper = LOOPS[loop]
     models_log = tmp_path / "models.txt"
@@ -202,6 +236,10 @@ def _run(
     }
     if ladder is not None:
         env["RADON_WEEKEND_MODEL_LADDER"] = ladder
+    if catalog is not None:
+        cat = tmp_path / "claude-catalog.txt"
+        cat.write_text(catalog, encoding="utf-8")
+        env["RADON_WEEKEND_CLAUDE_CATALOG"] = str(cat)
     proc = subprocess.run(
         [BASH, str(repo / "scripts" / wrapper.name), phase],
         cwd=repo, env=env, capture_output=True, text=True, timeout=180,
@@ -225,16 +263,49 @@ class TestTheLoopPinsItsModel:
             "on that default kills the loop outright"
         )
 
-    def test_the_default_ladder_is_the_agreed_order(self, loop):
+    def test_the_wrapper_sources_the_shared_skip_newest_helper(self, loop):
         body = LOOPS[loop].read_text(encoding="utf-8")
-        start = body.index("RADON_WEEKEND_MODEL_LADDER:-")
-        default = body[start + len("RADON_WEEKEND_MODEL_LADDER:-"):body.index("}", start)]
-        assert default.split() == LADDER, (default.split(), LADDER)
+        assert ". \"$REPO/scripts/security_claude_ladder.sh\"" in body, (
+            f"{loop}: DeepSec and security must source the same helper, "
+            "not copy a hardcoded MODEL_LADDER"
+        )
+        assert not re.search(
+            r'^MODEL_LADDER="\$\{RADON_WEEKEND_MODEL_LADDER:-claude-',
+            body,
+            re.M,
+        ), f"{loop}: a static MODEL_LADDER default is the pin Joe rejected"
+
+    def test_a_stubbed_catalog_skips_newest_and_does_not_lead_with_fable(
+        self, tmp_path, loop
+    ):
+        # Second-newest is sonnet, not the safety primary opus, so a failed
+        # discovery cannot accidentally satisfy this assertion.
+        catalog = (
+            "claude-fable-5-1\nclaude-sonnet-5\nclaude-haiku-4-5\n"
+        )
+        proc, models, _calls = _audit(tmp_path, loop, [], catalog=catalog)
+        assert models[:1] == ["claude-sonnet-5"], (
+            f"{loop}: primary must be catalog index 1 (newest skipped); "
+            f"got {models!r}\n{proc.stdout}{proc.stderr}"
+        )
+        assert "claude-fable-5-1" not in models, (
+            f"{loop}: newest/fable must not be the default primary: {models!r}"
+        )
+        assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
+
+    def test_the_claude_arm_passes_effort_medium(self, loop):
+        body = LOOPS[loop].read_text(encoding="utf-8")
+        arm_start = body.index("    claude)\n", body.index("launch_round() {"))
+        arm = body[arm_start:body.index(";;", arm_start)]
+        assert "--effort medium" in arm, (
+            f"{loop}: Mini ~/.claude/settings.json has effortLevel: low; "
+            f"unattended launches must pin --effort medium: {arm}"
+        )
 
 
 @pytest.mark.parametrize("loop", CLAUDE_LOOPS)
 class TestAnExhaustedQuotaDropsARung:
-    def test_it_drops_to_opus_1m_when_the_default_model_is_out(self, tmp_path, loop):
+    def test_it_drops_to_sonnet_when_opus_is_out(self, tmp_path, loop):
         proc, models, _calls = _audit(tmp_path, loop, [LADDER[0]])
         assert models[:2] == LADDER[:2], (
             f"{loop}: expected a drop to {LADDER[1]!r} after {LADDER[0]!r} "
@@ -243,11 +314,22 @@ class TestAnExhaustedQuotaDropsARung:
         )
         assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
 
-    def test_it_walks_the_whole_ladder(self, tmp_path, loop):
+    def test_it_walks_the_default_ladder(self, tmp_path, loop):
         proc, models, _calls = _audit(tmp_path, loop, LADDER[:-1])
         assert models == LADDER, (models, proc.stdout, proc.stderr)
-        # Four attempts is more than MAX_ATTEMPTS=3: a quota drop is not one of
-        # the three transient-network retries and must not consume one.
+        assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
+
+    def test_it_walks_a_four_rung_override_without_consuming_retries(
+        self, tmp_path, loop
+    ):
+        # Default is two rungs. A 4-rung operator override must still walk
+        # all four: more than MAX_ATTEMPTS=3, so a quota drop is not one of
+        # the three transient-network retries.
+        long = ["stub-a", "stub-b", "stub-c", "stub-d"]
+        proc, models, _calls = _audit(
+            tmp_path, loop, long[:-1], ladder=" ".join(long)
+        )
+        assert models == long, (models, proc.stdout, proc.stderr)
         assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
 
     def test_an_operator_ladder_overrides_the_default(self, tmp_path, loop):
@@ -289,6 +371,17 @@ class TestAnExhaustedQuotaDropsARung:
         )
         assert models[:2] == LADDER[:2], (
             f"{loop}: a 529 overload on {LADDER[0]!r} must drop to "
+            f"{LADDER[1]!r}, not exit 1; models attempted: {models!r}\n"
+            f"{proc.stdout}{proc.stderr}"
+        )
+        assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
+
+    def test_a_model_limit_drops_a_rung_instead_of_exit_1(self, tmp_path, loop):
+        proc, models, _calls = _audit(
+            tmp_path, loop, [LADDER[0]], exhausted_line=MODEL_LIMIT_LINE
+        )
+        assert models[:2] == LADDER[:2], (
+            f"{loop}: a model limit on {LADDER[0]!r} must drop to "
             f"{LADDER[1]!r}, not exit 1; models attempted: {models!r}\n"
             f"{proc.stdout}{proc.stderr}"
         )
@@ -412,6 +505,12 @@ class TestTheSecurityScanInheritsTheWrappersRung:
         assert f"${assign.group(1)}" in invocation, (
             "the model argument is built but never handed to the scan:\n"
             f"{invocation}"
+        )
+        cli_flags = invocation.split(" -p ", 1)[0]
+        assert "--effort medium" in cli_flags, (
+            "the Stage 4 nested claude inherits ~/.claude/settings.json "
+            "effortLevel: low unless the CLI flag is pinned (the plugin "
+            f"prompt already says --effort medium as scan text):\n{invocation}"
         )
 
 

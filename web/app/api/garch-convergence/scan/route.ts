@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
+import { getRequestId, setNoStoreResponseHeaders, scrubSecrets } from "@/lib/apiContracts";
 import { radonFetch, RadonApiError } from "@/lib/radonApi";
 import { tickersBodyToRaw, validateTickerList } from "@/lib/scanTickerList";
 import { requireRouteAccess } from "@/lib/routeAccess";
@@ -63,7 +63,7 @@ export async function POST(request: Request): Promise<Response> {
     return setNoStoreResponseHeaders(NextResponse.json(data), requestId);
   } catch (err) {
     const status = err instanceof RadonApiError ? err.status : 502;
-    const message = err instanceof Error ? err.message : "GARCH scan failed";
+    const message = scrubSecrets(err instanceof Error ? err.message : "GARCH scan failed");
     return setNoStoreResponseHeaders(
       NextResponse.json({ error: message }, { status }),
       requestId,
