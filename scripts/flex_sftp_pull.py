@@ -227,6 +227,22 @@ def pull_gpg(
         os.chmod(dest, 0o600)
 
 
+def is_transient_sftp_error(exc: BaseException) -> bool:
+    """OpenSSH RST / kex drop on a single GET. Not host-key, not ingest.
+
+    IBKR never removes `outgoing`, so the 08:30 ET retry re-GETs the full
+    history after 07:30 already applied today. A connection reset on that
+    tail used to set `failed` and page P1 (`one or more files rejected`)
+    until the next calendar fire. 2026-09-17 page e8da0c53.
+    """
+    if not isinstance(exc, FlexSftpError):
+        return False
+    text = str(exc).lower()
+    if not text.startswith("sftp_get_failed:"):
+        return False
+    return _is_transient_sftp_get(exc)
+
+
 def _gpg_decrypt(data: bytes, *, gnupg_home: Path) -> str:
     result = subprocess.run(
         [
@@ -544,6 +560,7 @@ def _run(
     failed = False
     failed_keys: set[str] = set()
     ingested = 0
+    transient_gets = 0
     covered_by_key: Dict[str, date] = {}
     newest_period_end: Optional[date] = None
     newest_by_key: Dict[str, date] = {}
@@ -608,6 +625,7 @@ def _run(
             # `ingest_xml`. R-400.
             print(f"[flex-pull] {name}: {type(exc).__name__}: {exc}", file=sys.stderr)
             if _is_transient_sftp_get(exc) and _covered_historical_delivery(name, covered_by_key):
+                transient_gets += 1
                 continue
             failed = True
             failed_keys.add(_delivery_key(name))
@@ -616,19 +634,6 @@ def _run(
     retain_newest_gpg(inbox)
     if failed:
         _heartbeat("error", "one or more files rejected: " + ", ".join(sorted(failed_keys)))
-        return 1
-    if budget_spent:
-        # Newest-first means a budget stop after progress still applied today;
-        # the 08:30 timer finishes the deferred tail. No progress + budget is
-        # the silent-timeout shape that paged P1 on 2026-09-15.
-        note = {
-            "message": f"wall-clock budget spent; deferred {deferred} file(s)",
-            "class": "budget",
-        }
-        if ingested:
-            _heartbeat("ok", note)
-            return 0
-        _heartbeat("error", note)
         return 1
     if budget_spent:
         # Newest-first means a budget stop after progress still applied today;
@@ -656,7 +661,13 @@ def _run(
             + " (IBKR has stopped delivering them, or every file is already ingested)",
         )
         return 1
-    _heartbeat("ok")
+    note = None
+    if transient_gets:
+        note = {
+            "message": f"transient sftp get failed for {transient_gets} file(s)",
+            "class": "sftp_transient",
+        }
+    _heartbeat("ok", note)
     return 0
 
 
