@@ -578,3 +578,45 @@ class TestBrowserHostFixedLaunch:
         assert "browser-host=ready" in combined, combined
         dumped = env_dump.read_text(encoding="utf-8")
         assert re.search(r"PW_TEST_CONNECT_WS_ENDPOINT=ws://127\.0\.0\.1:4711/[0-9a-f]{32}\n", dumped), dumped
+
+
+@pytest.mark.parametrize("name", sorted(HOST_LOOPS))
+@pytest.mark.parametrize("first", ["claude", "codex"])
+def test_browser_lifetime_follows_provider_transition(name, first, tmp_path):
+    repo = _runner_clone(tmp_path, name)
+    home = tmp_path / "home"
+    home.mkdir()
+    host_pid = tmp_path / "host.pid"
+    _plant_host(home, body=f'#!/bin/sh\necho $$ > "{host_pid}"\necho "Listening on {ENDPOINT}"\nsleep 60\n')
+    _plant_client(repo)
+    prompts = repo / ".claude" / "portable-prompts"
+    prompts.mkdir(parents=True)
+    skill = "testing-weekend" if name == "testing" else "reliability-weekend"
+    (prompts / f"{skill}.audit.md").write_text("audit\n")
+    (home / ".codex").mkdir()
+    (home / ".codex/auth.json").write_text("{}\n")
+    claude_env = tmp_path / "claude.env"
+    codex_env = tmp_path / "codex.env"
+    alive = tmp_path / "host-alive-during-codex"
+    claude_body = f'#!/bin/sh\nenv > "{claude_env}"\n'
+    if first == "claude":
+        claude_body += 'echo "You\x27ve hit your session limit resets tomorrow"\nexit 1\n'
+    else:
+        claude_body += 'exit 0\n'
+    bin_dir, _gh, _py = _stub_bin(tmp_path, claude_body=claude_body)
+    _plant_node(bin_dir, home)
+    codex = bin_dir / "codex"
+    codex_body = f'#!/bin/sh\nenv > "{codex_env}"\nif test -f "{host_pid}" && kill -0 "$(cat "{host_pid}")" 2>/dev/null; then touch "{alive}"; fi\n'
+    if first == "codex":
+        codex_body += 'echo "You\x27ve hit your usage limit. try again tomorrow"\nexit 1\n'
+    else:
+        codex_body += 'exit 0\n'
+    codex.write_text(codex_body)
+    codex.chmod(0o755)
+    ladder = "claude,codex" if first == "claude" else "codex,claude"
+    proc = subprocess.run([BASH, str(_cloned_wrapper(repo, name)), "audit"], env=_env(tmp_path, repo, bin_dir, {"RADON_WEEKEND_PROVIDER_LADDER": ladder, "RADON_WEEKEND_CODEX_BIN": str(codex)}), capture_output=True, text=True, timeout=90)
+    combined = _combined(proc, repo)
+    assert codex_env.exists() and claude_env.exists(), combined
+    assert not alive.exists(), combined
+    assert "PW_TEST_CONNECT_WS_ENDPOINT=" not in codex_env.read_text()
+    assert f"PW_TEST_CONNECT_WS_ENDPOINT={ENDPOINT}" in claude_env.read_text()
