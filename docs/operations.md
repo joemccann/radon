@@ -42,6 +42,8 @@ doc (root `CLAUDE.md` "Credentials").
 
 `scripts/cta_sync_service.py` and `scripts/run_cta_sync.sh` parse `.env` values literally instead of shell-sourcing them, so unquoted secrets containing shell metacharacters (`$`, backticks, etc.) survive the scheduled CTA path.
 
+**Service token.** `RADON_SERVICE_TOKEN` is the shared Next.js to FastAPI bearer. When set, `radonFetch` (`web/lib/radonApi.ts`) sends it as `X-Radon-Service-Token` and `is_trusted_service_request` (`scripts/api/auth.py`) admits the caller as a trusted service. It is set only on the demo deployment (Vercel `radon-demo` project plus the demo VM `.env`, same value in both; see `docs/demo-environment.md`). Leave it unset on prod: there the header is never sent and the API stays loopback/Clerk JWT gated.
+
 `.env.ib-mode` overlays `.env` and stores the IB mode toggle from `scripts/ib mode local|cloud`.
 
 ### Encrypted credential store (profile Credentials tab)
