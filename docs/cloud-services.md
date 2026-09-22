@@ -1250,7 +1250,11 @@ exclusive maintenance window or recoverable pre-change rows cannot be verified.
    identity or totals. Escalate unresolved refusals to journal reconciliation
    rather than forcing metadata or replaying an applied delivery.
 3. Only after approving that review, the operator may repeat with `--apply`.
-   Each invocation recomputes the plan; it does not apply a saved plan. If the
+   Each invocation recomputes the plan; it does not apply a saved plan. The plan
+   freezes the complete journal snapshot. Apply acquires a write transaction
+   before checking that snapshot and refuses any intervening row change,
+   insertion or deletion, including competing aggregate claims. Per-row guards
+   roll back the entire batch on conflict; rebuild the plan after a refusal. If the
    statements or journal changed, stop and repeat backup and dry-run review.
    The helper commits updates before re-reading them: post-commit verification
    is not rollback, and a verification failure can leave committed changes.

@@ -8073,6 +8073,12 @@ Review: plan PR #576 was design only. This implement PR adds the host run-server
 Dependency graph: T1 -> T2 -> T3 -> T4 -> T5.
 Review: pending. P2 acceptance remains in the authoritative checkpoint, outside reduced scope.
 
+## Reliability remediate 2026-09-22 (reduced P0/P1)
+- [x] T1 depends_on: [] Reconcile issue checkpoint and establish full baseline.
+- [x] T2 depends_on: [T1] REL-277 snapshot-bound repair red/green with transactional conflict tests.
+- [x] T3 depends_on: [T2] Permanent drills and three full gates; review and commit substantive work.
+- [ ] T4 depends_on: [T3] Persist complete checkpoint and guarded publication.
+Review: 151 focused tests pass; 12 red regressions recorded. Complete snapshot comparison is intentionally conservative. 107 permanent drills passed. Three full gate pairs finished; Vitest 9993 passed each, Python retains 31 baseline process failures (one extra timing failure only in run 1, isolated green). Publication and durable final checkpoint pending. Inherited operator acceptance and all P2 findings remain open.
 ## Documentation remediate 2026-09-22 (reduced P0/P1)
 - [x] T1 depends_on: [] Read complete issue #202 checkpoint and reverify DOC-121/122 against origin/main.
 - [x] T2 depends_on: [T1] Reproduce DOC-122, consolidate gross rebuild recovery in existing Flex owner, extend ownership and safety contract.
@@ -8092,3 +8098,13 @@ Validation: no local test suites. GitHub owns unit, build and browser checks. Pr
 Review: removed global dialog/trigger/recent-history storage and instrument Commands deck/colon handler; retained direct instrument search and Cmd/Ctrl+K focus. Unit and curated browser regressions cover search navigation, remaining decks, Escape and responsive absence. No local test suites. GitHub checks and visual artifacts pending.
 
 Review update: PR #630 published; independent review preserved the shared asset empty-state style while deleting palette-specific styles. TypeScript and ESLint passed. Exact-head GitHub verification pending.
+
+## 2026-09-22 PR628 delivery and saved-trade follow-through
+Dependency graph: T1 -> T2 -> T3 -> T4 -> T5; T1 -> T1b -> T4.
+- [x] T1 depends_on: [] Isolate PR branch and reconcile conflicts with current main, preserving central recovery documentation.
+- [ ] T1b depends_on: [T1] Validate supplied saved XML and inspect runner/host acceptance prerequisites.
+- [ ] T2 depends_on: [T1] Push conflict resolution and verify every applicable exact-head GitHub CI check.
+- [ ] T3 depends_on: [T2] Notify green, merge, and verify production deployment.
+- [ ] T4 depends_on: [T1b,T3] Execute saved-Flex rebuild and legacy cleanup dry-runs; perform safe runner/host acceptance steps and record blockers.
+- [ ] T5 depends_on: [T4] Record operational evidence and remaining actions.
+Review: pending. No local suites. PR next steps specify dry-runs; destructive cleanup and any unproven data repair remain gated by evidence. Original workspace edits untouched.
