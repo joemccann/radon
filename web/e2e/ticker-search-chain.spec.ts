@@ -2,7 +2,7 @@
  * E2E: Ticker Search → Chain Tab → Order Builder flow.
  *
  * Tests the full user journey:
- * 1. CMD+K focuses search, typing filters results
+ * 1. CMD/CTRL+K focuses ticker search, typing filters results
  * 2. Selecting a ticker opens the detail modal
  * 3. Book tab shows L1 order book
  * 4. Chain tab loads expirations and strikes
@@ -169,9 +169,18 @@ function installMockWebSocket(
       send(raw: string) {
         const message = JSON.parse(raw) as {
           action?: string;
+          pattern?: string;
           symbols?: string[];
           contracts?: Array<{ symbol: string; expiry: string; strike: number; right: "C" | "P" }>;
         };
+        if (message.action === "search") {
+          this.emit({
+            type: "searchResults",
+            pattern: message.pattern,
+            results: [{ conId: 265598, symbol: "AAPL", secType: "STK", primaryExchange: "NASDAQ", currency: "USD" }],
+          });
+          return;
+        }
         if (message.action !== "subscribe") return;
 
         const updates: Record<string, unknown> = {};
@@ -205,16 +214,28 @@ function installMockWebSocket(
 }
 
 test.describe("Ticker Search → Detail Page → Chain", () => {
-  test("CMD+K opens instrument search in the command palette", async ({ page }) => {
-    await page.unrouteAll({ behavior: "ignoreErrors" });
-    await stubApis(page);
-    await page.goto("http://127.0.0.1:3000/portfolio");
+  for (const shortcut of ["Meta+k", "Control+k"]) {
+    test(`${shortcut} focuses ticker search and opens an instrument without a palette`, async ({ page }, testInfo) => {
+      await page.unrouteAll({ behavior: "ignoreErrors" });
+      await stubApis(page);
+      await page.goto("/portfolio");
 
-    // Focus search via keyboard shortcut
-    await page.keyboard.press("Meta+k");
-    const searchInput = page.getByTestId("command-palette-input");
-    await expect(searchInput).toBeFocused();
-  });
+      await expect(page.getByRole("button", { name: "Open command palette" })).toHaveCount(0);
+      await page.keyboard.press(shortcut);
+      const searchInput = page.getByRole("combobox", { name: "Search ticker", exact: true });
+      await expect(searchInput).toBeFocused();
+      await expect(page.getByRole("dialog", { name: "Command palette" })).toHaveCount(0);
+      await searchInput.fill("AAPL");
+      await expect(page.getByRole("option")).toContainText("AAPL");
+      await page.keyboard.press("ArrowDown");
+      await page.keyboard.press("Enter");
+      await expect(page).toHaveURL(/\/AAPL(?:\?.*)?$/);
+      await expect(page.locator(".ticker-detail-page").last()).toBeVisible();
+      const screenshotPath = testInfo.outputPath("instrument-workspace-search-without-palette.png");
+      await page.screenshot({ path: screenshotPath });
+      await testInfo.attach("search-without-palette", { path: screenshotPath, contentType: "image/png" });
+    });
+  }
 
   test("Book tab shows L1 order book with bid/ask/spread", async ({ page }) => {
     await page.unrouteAll({ behavior: "ignoreErrors" });

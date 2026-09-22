@@ -75,7 +75,6 @@ vi.mock("@/components/dashboard/DashboardSurface", () => stub("dashboard-surface
 vi.mock("@/components/ChatLauncher", () => stub("chat-launcher"));
 vi.mock("@/components/DemoWelcomeModal", () => stub("demo-welcome"));
 vi.mock("@/components/mobile/MobileShell", () => stub("mobile-shell"));
-vi.mock("@/components/CommandPalette", () => stub("command-palette"));
 vi.mock("@/components/FooterTelemetryStrip", () => stub("footer-telemetry"));
 vi.mock("@/components/FuturesStrip", () => stub("futures-strip"));
 vi.mock("@/components/OfflineBanner", () => stub("offline-banner"));
