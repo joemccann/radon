@@ -110,3 +110,20 @@ def test_wrapper_host_git_pins_hooks_off(name, tmp_path):
         timeout=120,
     )
     _assert_pinned(log)
+
+
+SETUPS = sorted((REPO / "scripts").glob("setup_*.sh"))
+CLONE_SETUPS = [p for p in SETUPS if "WEEKEND_REPO" in p.read_text(encoding="utf-8")]
+
+
+def test_every_runner_setup_is_covered():
+    assert len(CLONE_SETUPS) >= 5, CLONE_SETUPS
+
+
+@pytest.mark.parametrize("setup", CLONE_SETUPS, ids=lambda p: p.stem)
+def test_setup_pins_hooks_off_before_any_git(setup):
+    text = setup.read_text(encoding="utf-8")
+    pin = text.index("export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null")
+    assert "GIT_CONFIG_KEY_1=core.fsmonitor GIT_CONFIG_VALUE_1=false" in text[pin : pin + 200]
+    first_git = min(i for i in (text.find("git -C"), text.find("\ngit ")) if i >= 0)
+    assert pin < first_git
