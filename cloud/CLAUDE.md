@@ -86,7 +86,9 @@ since whichever mechanism the current host lacks would abort the promote that
 installs it (`deploy.sh:204-231`, bd7d7e4c). Note the
 narrowing: preflight now renders the INSTALLED compose body, not the incoming
 release's. The incoming body is gated at install time instead, by provenance
-(git blob at the deployed commit) plus `compose_body_is_valid`.
+(git blob at the deployed commit, which must also be reachable from
+`origin/main` - a local-only commit is refused, as is a missing remote ref)
+plus `compose_body_is_valid`.
 
 **`publish-caddy` stages from the trusted tip too.** The edge config decides
 which proxy and fetch-metadata headers survive on the way to the API's
@@ -141,6 +143,11 @@ is dropped by systemd regardless of `NotifyAccess=`, so `Type=notify` +
 `WatchdogSec=` work only through the proxy (R-429).
 
 ## Canonical Host Paths
+
+`radon-nextjs.service` starts `/usr/local/bin/next-clerk-guard` inside its
+container. The guard requires an exact publishable-key token in the baked
+client assets before executing `bun run start`; an environment key that is
+only a prefix of a baked key is rejected.
 
 - Monorepo checkout: `/home/radon/radon`
 - Cloud source: `/home/radon/radon/cloud`
@@ -198,7 +205,7 @@ The journal helper is loaded from the immutable runner so rollback to a commit
 that predates `cloud/` cannot delete its own recovery implementation. Root
 topology state is durable across reboot under `/var/lib/radon/deploy`.
 
-**Auto-deploy mechanics (moved from root `CLAUDE.md`).** `.github/workflows/ci.yml` runs the Vitest + pytest gate (including `cloud/tests`) then deploys on green: it SSHes to Hetzner, materializes an immutable `cloud/` runner from the release SHA under `~/.radon-deploy-runners/`, and runs that runner's `deploy.sh '$SHA'`. The deploy job remains bound to the GitHub Environment `Production` for deployment history, URL metadata, environment-scoped configuration, and a main-only deployment branch policy; it has no required-reviewer rule, so no manual approval is needed after the automated gates pass. Host secrets stay at `~/radon-cloud/.env` (`RADON_DEPLOY_ENV_FILE`). After root bootstrap publishes `/var/lib/radon/control-plane-ready`, legacy dual-checkout deploy is retired for new releases; pre-ready SHAs still use the compatibility path. Before `deploy.sh`, the deploy job runs `cloud/scripts/sync-control-plane.sh` → `radon-deploy-root sync-control-plane`, which installs the GitHub-main-tip control-plane bundle (helper, sudoers, polkit, control-plane units, drop-ins) via that tip's own bootstrap, so control-plane edits and root hot-patches need no manual bootstrap (R-430, 2026-08-29). Confirm: `gh run list --workflow=ci.yml --limit 1`. Migration/rollback: `docs/monorepo-cloud-migration.md`. `deploy.sh` then `publish-caddy`: stage, `caddy validate`, atomic install, `systemctl reload caddy` (30s), then `systemctl restart caddy` (60s) if reload is TERMed. The helper supervisor budget for publish-caddy is 300s so reload+restart both fit; 180s was consumed by a wedged reload and restart never ran (`11a0575d`, `868ee0f2`). `mcp.radon.run` is `http://mcp.radon.run` until HTTPS ACME can run against a process that already answers that Host on :80. Do not add a new `/var/log/caddy/*.log` path: root `caddy validate` creates that file as root:root and the caddy user cannot start (`mcp.log` took the edge down on 8628705d). Cutover lessons: `tasks/lessons.md` (2026-07-11). The deploy health-gates the relay restart: before tearing services down (while the current radon-api still serves `/health`), `wait_for_gateway_ready` confirms the IB gateway is authenticated + port_listening (bounded 60s, warn-and-proceed). The relay self-heals on reconnect and raises a `service_health` row (`ib-realtime-relay`) instead of looping silently on no-ticks.
+**Auto-deploy mechanics (moved from root `CLAUDE.md`).** `.github/workflows/ci.yml` runs the Vitest + pytest gate (including `cloud/tests`) then deploys on green: it SSHes to Hetzner, materializes an immutable `cloud/` runner from the release SHA under `~/.radon-deploy-runners/`, and runs that runner's `deploy.sh '$SHA'`. The deploy job remains bound to the GitHub Environment `Production` for deployment history, URL metadata, environment-scoped configuration, and a main-only deployment branch policy; it has no required-reviewer rule, so no manual approval is needed after the automated gates pass. Host secrets stay at `~/radon-cloud/.env` (`RADON_DEPLOY_ENV_FILE`). After root bootstrap publishes `/var/lib/radon/control-plane-ready`, legacy dual-checkout deploy is retired for new releases; pre-ready SHAs still use the compatibility path. The SSH script first waits a bounded time (`RADON_DEPLOY_LOCK_WAIT_SECS`, default 480s) for a still-finishing previous release to free `~/.radon-deploy.lock`, so back-to-back green merges queue instead of failing on the lock (2026-09-19, run 35463319654); `deploy.sh` itself stays non-blocking and still refuses with exit 75 if the lock is held after the wait. Before `deploy.sh`, the deploy job runs `cloud/scripts/sync-control-plane.sh` → `radon-deploy-root sync-control-plane`, which installs the GitHub-main-tip control-plane bundle (helper, sudoers, polkit, control-plane units, drop-ins) via that tip's own bootstrap, so control-plane edits and root hot-patches need no manual bootstrap (R-430, 2026-08-29). Confirm: `gh run list --workflow=ci.yml --limit 1`. Migration/rollback: `docs/monorepo-cloud-migration.md`. `deploy.sh` then `publish-caddy`: stage, `caddy validate`, atomic install, `systemctl reload caddy` (30s), then `systemctl restart caddy` (60s) if reload is TERMed. The helper supervisor budget for publish-caddy is 300s so reload+restart both fit; 180s was consumed by a wedged reload and restart never ran (`11a0575d`, `868ee0f2`). Checked-in Caddy configuration provides HTTPS with an HTTP redirect for the dedicated MCP host; follow the [hosted-MCP owner](../docs/cloud-services.md#hosted-mcp-radon-mcpservice-issue-232-chunk-1) for operator TLS verification before changing the published consumer URL. Do not add a new `/var/log/caddy/*.log` path: root `caddy validate` creates that file as root:root and the caddy user cannot start (`mcp.log` took the edge down on 8628705d). Cutover lessons: `tasks/lessons.md` (2026-07-11). The deploy health-gates the relay restart: before tearing services down (while the current radon-api still serves `/health`), `wait_for_gateway_ready` confirms the IB gateway is authenticated + port_listening (bounded 60s, warn-and-proceed). The relay self-heals on reconnect and raises a `service_health` row (`ib-realtime-relay`) instead of looping silently on no-ticks.
 
 The root helper normally polls service state for 60 seconds. Production stops
 of `radon-research.service` instead allow 150 seconds: its canonical unit has
@@ -295,6 +302,18 @@ successfully, and the stated schema and core-service checks were green.
 It must not start, stop, restart, or enable Radon services, Docker, IB Gateway,
 Caddy, polkit, or journald. Do not use the full `setup-vps.sh` as a live upgrade
 shortcut; setup also provisions packages, firewall, Caddy, and service state.
+Setup pins GitHub's published ed25519 SSH host key (no first-contact keyscan),
+provisions the secret-store credential as 32 raw bytes, and prepares the
+radon-replaceable media directory with create-then-verify + `chown
+--no-dereference` rather than a check-then-install pair.
+Setup stages root-installed artifacts from committed git blobs
+(`git cat-file` at the checkout's HEAD), never from working-tree files, and
+publishes `mcp.env` only through a regular-file destination via temp-write +
+atomic `mv -T` rename, so a destination swapped after the check is replaced,
+not entered (contract: `cloud/tests/test_setup_vps_privileged_paths.py`).
+`install_caddy` skips reinstall only when the installed dpkg version already
+matches the pinned `CADDY_VERSION`, not merely on `command -v caddy`
+(2026-09-22), so a rerun on a host with a stale Caddy converges it.
 
 ## Privilege Boundary
 
@@ -358,8 +377,8 @@ Immutable runners under `~/.radon-deploy-runners/` are extracted `a-w`.
 ## Systemd And Drift
 
 `setup-vps.sh` includes the `radon-aa-frontier-refresh`, `radon-ai-cycle-backfill`,
-`radon-ai-cycle` and `radon-liquidcompute` service/timer pairs in the full-host
-installation inventory.
+`radon-ai-cycle`, `radon-liquidcompute`, `radon-subscription-tokens` and
+`radon-panic-index` service/timer pairs in the full-host installation inventory.
 Setup installs those pairs and enables only their timers; existing hosts receive
 them through the hash-pinned `install-units` path. Historical collection resumes
 at 05:30 UTC, the frontier timer updates the fixed Artificial Analysis cohort at
@@ -368,6 +387,20 @@ GPU index ticker runs at 07:30 UTC, each with up to five minutes of jitter. Prov
 entitlements; missing keys leave those measurements unavailable. Collection,
 reviewed disclosures and source limits are documented in
 [`docs/ai-infrastructure-operations.md`](../docs/ai-infrastructure-operations.md).
+`radon-subscription-tokens.timer` runs every 30 minutes UTC (`Persistent=true`)
+and heals the agent-CLI subscription credentials (claude, codex, grok,
+Antigravity `agy`) from the encrypted secret store, with a daily keepalive
+probe; a dead codex or grok grant pages a one-tap login link. Runbook:
+[`docs/subscription-tokens.md`](../docs/subscription-tokens.md).
+`radon-tv-alerts.timer` runs every 5 minutes, 24/7 (`Persistent=false`), and
+drains TradingView webhook rows into one digest Pushover per cycle. Caddy bounds
+`/api/webhooks/tradingview/*` to TradingView's four sender IPs and a 16KB body.
+Spec: [`docs/tradingview-integration.md`](../docs/tradingview-integration.md).
+
+`setup-vps.sh` also inventories `radon-slm-tagger.service` plus
+`radon-slm-tagger-monitor.{service,timer}` so a fresh host has the unit files.
+`enable_services` skips all three until Joe enables them after bakeoff `C WINS`.
+`RADON_SLM_TAGGER_MODE` stays `off`. Spec: [`docs/ml/newsfeed-slm-tagger.md`](../docs/ml/newsfeed-slm-tagger.md).
 
 
 Canonical unit files are copied root-owned to `/etc/systemd/system`; they are
@@ -434,3 +467,5 @@ git diff --check
 Deployment, rollback, locking, bootstrap, and unit-path changes require
 adversarial regression coverage. Tests must use isolated roots and must never
 write host `/etc`, `/usr/local`, `/var/lib`, production data, or real secrets.
+
+Image pre-pull compares each cached release tag with its registry manifest digest before skipping layer downloads. App-image pruning takes the existing deploy lock nonblockingly, preserves the target and durable transition/last-green rollback SHAs plus running images, and skips cleanup when rollback evidence or the running app population is unavailable. Runtime starts still allow the exact local image during registry outages.

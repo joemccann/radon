@@ -93,6 +93,59 @@ class TestListMigrations:
         versions = [r[0] for r in rows]
         assert versions == sorted(versions)
 
+    def test_real_migration_version_prefixes_are_unique(self, migrate_module):
+        """Two files sharing 00NN means apply_pending skips the later one
+        once that version is in schema_migrations. 2026-09-16/17 P1:
+        0074_liquidcompute_index applied at 17:53Z; 0074_calm_streak
+        then never created calm_streak_history."""
+        rows = migrate_module._list_migrations()
+        versions = [r[0] for r in rows]
+        colliding = sorted({v for v in versions if versions.count(v) > 1})
+        names = {v: [r[1] for r in rows if r[0] == v] for v in colliding}
+        assert colliding == [], f"duplicate migration versions: {names}"
+
+    def test_a_second_file_reusing_an_applied_version_aborts_instead_of_skipping(
+        self, migrate_module, monkeypatch, tmp_path
+    ):
+        """Production topology: liquidcompute took 74; a later 0074_calm_streak
+        was pending by filename and skipped by version. Fail closed."""
+        import sqlite3
+
+        d = tmp_path / "migrations"
+        d.mkdir()
+        (d / "0074_liquidcompute_index.sql").write_text(
+            "CREATE TABLE IF NOT EXISTS liquidcompute_index (id INTEGER);\n"
+            "INSERT OR IGNORE INTO schema_migrations (version, applied_at) "
+            "VALUES (74, datetime('now'));\n"
+        )
+        monkeypatch.setattr(migrate_module, "MIGRATIONS_DIR", d)
+        db = sqlite3.connect(":memory:")
+        db.execute(
+            "CREATE TABLE schema_migrations "
+            "(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"
+        )
+        db.execute(
+            "INSERT INTO schema_migrations VALUES (74, '2026-09-15 17:53:41')"
+        )
+        db.commit()
+        assert migrate_module.apply_pending_migrations(db) == 0
+
+        (d / "0074_calm_streak.sql").write_text(
+            "CREATE TABLE IF NOT EXISTS calm_streak_history "
+            "(date TEXT PRIMARY KEY);\n"
+            "INSERT OR IGNORE INTO schema_migrations (version, applied_at) "
+            "VALUES (74, datetime('now'));\n"
+        )
+        with pytest.raises(SystemExit, match="duplicate version 74"):
+            migrate_module.apply_pending_migrations(db)
+        names = {
+            r[0]
+            for r in db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        assert "calm_streak_history" not in names
+
 
 DNS_BLIP = ValueError(
     "Hrana: dns error: failed to lookup address information: Try again"

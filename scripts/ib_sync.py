@@ -59,8 +59,17 @@ from clients.ib_client import (
     ticker_has_quote,
 )
 from clients.ib_timing import PhaseTimer
+from option_session_mark import (
+    last_traded_bar_price,
+    load_session_marks,
+    option_mark_key,
+    poll_contract_mark,
+    resolve_polled_mark,
+    save_session_marks,
+)
 from clients.journal_basis import (
     compute_open_basis_and_net_qty_for_tickers,
+    con_id_of,
 )
 from db.client import get_db
 from db.readers import (
@@ -561,6 +570,48 @@ def _split_stacked_verticals(legs: list) -> list:
     return pairs
 
 
+def _split_stacked_risk_reversals(legs: list) -> list:
+    """Split two calls + two puts into two independent risk reversals.
+
+    Applies when every call carries one sign and every put the opposite sign
+    (bullish: long calls / short puts, bearish: long puts / short calls). Each
+    call is paired with the put whose contract count matches it; the pairing
+    with the most size-matched pairs wins, and a tie (all four legs the same
+    size) or no match at all returns the group whole so nothing is guessed.
+    """
+    if len(legs) != 4 or any(l['secType'] != 'OPT' for l in legs):
+        return [legs]
+    calls = [l for l in legs if l.get('right') == 'C']
+    puts = [l for l in legs if l.get('right') == 'P']
+    if len(calls) != 2 or len(puts) != 2:
+        return [legs]
+    call_sign = {l['position'] > 0 for l in calls}
+    put_sign = {l['position'] > 0 for l in puts}
+    if len(call_sign) != 1 or len(put_sign) != 1 or call_sign == put_sign:
+        return [legs]
+
+    def _size_matches(pairing):
+        return sum(abs(c['position']) == abs(p['position']) for c, p in pairing)
+
+    pairings = [
+        [(calls[0], puts[0]), (calls[1], puts[1])],
+        [(calls[0], puts[1]), (calls[1], puts[0])],
+    ]
+    scores = [_size_matches(pairing) for pairing in pairings]
+    best = max(scores)
+    if best == 0 or scores.count(best) != 1:
+        return [legs]
+    return [list(pair) for pair in pairings[scores.index(best)]]
+
+
+def _split_stacked_structures(legs: list) -> list:
+    """Break a same-expiry group into the independent structures it stacks."""
+    parts = _split_stacked_verticals(legs)
+    if len(parts) > 1:
+        return parts
+    return _split_stacked_risk_reversals(legs)
+
+
 def _position_basis_source(formatted_legs: list) -> Optional[str]:
     """`session_fills` only when EVERY leg is; `mixed` when they disagree."""
     if not formatted_legs:
@@ -596,7 +647,7 @@ def collapse_positions(positions: list) -> list:
     position_id = 1
 
     split_groups = [
-        (key, part) for key, legs in groups.items() for part in _split_stacked_verticals(legs)
+        (key, part) for key, legs in groups.items() for part in _split_stacked_structures(legs)
     ]
 
     for (account_id, symbol, expiry), legs in split_groups:
@@ -770,20 +821,100 @@ def _normalize_market_price(raw_price) -> Optional[float]:
     return price
 
 
-def _resolve_market_price(market_price: Optional[float], bid: Optional[float], ask: Optional[float], close: Optional[float] = None) -> Tuple[Optional[float], bool]:
+def _resolve_market_price(
+    market_price: Optional[float],
+    bid: Optional[float],
+    ask: Optional[float],
+    close: Optional[float] = None,
+    *,
+    sec_type: Optional[str] = None,
+    session_mark: Optional[dict] = None,
+) -> Tuple[Optional[float], bool]:
     """Return a usable price and whether it was calculated.
 
-    Fallback chain: marketPrice → midpoint(bid, ask) → close.
-    The close fallback handles degraded gateway states where live/delayed
-    data is unavailable but the previous session's close is still cached.
+    Fallback chain: marketPrice → midpoint(bid, ask) → session last/mid
+    → history (via poll_contract_mark) → close for non-options.
+    Option previous-session CLOSE is never a mark.
     """
-    if market_price is not None:
-        return market_price, False
-    if bid is not None and ask is not None:
-        return round((bid + ask) / 2, 4), True
-    if close is not None:
-        return close, True
-    return None, False
+    return resolve_polled_mark(
+        market_price,
+        bid,
+        ask,
+        close,
+        sec_type=sec_type,
+        session_mark=session_mark,
+        session_is_fresh=True,
+    )
+
+
+def _et_today() -> str:
+    return datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+
+
+def _safe_option_history(client: IBClient, contract, what_to_show: str):
+    try:
+        return client.get_historical_data(
+            contract,
+            duration="1 D",
+            bar_size="1 min",
+            what_to_show=what_to_show,
+            use_rth=True,
+            timeout=5.0,
+        )
+    except Exception as exc:
+        label = getattr(contract, "localSymbol", None) or getattr(contract, "symbol", "?")
+        print(f"  Warning: option {what_to_show} history failed for {label}: {exc}")
+        return None
+
+
+def _option_history_bars(client: IBClient, contract):
+    trade_bars = _safe_option_history(client, contract, "TRADES")
+    if last_traded_bar_price(trade_bars) is not None:
+        return trade_bars, None
+    return trade_bars, _safe_option_history(client, contract, "MIDPOINT")
+
+
+def _stamp_position_price(pos: dict, ticker, session_marks: dict, client: IBClient, today: str) -> bool:
+    """Write marketPrice fields from the live ticker, session cache, or history."""
+    sec_type = pos.get("secType")
+    key = None
+    if str(sec_type or "").upper() == "OPT":
+        key = option_mark_key(
+            pos.get("symbol"),
+            pos.get("expiry"),
+            pos.get("strike"),
+            pos.get("right"),
+        )
+    contract = pos.get("contract")
+
+    def fetch():
+        return _option_history_bars(client, contract)
+
+    price, is_calculated, updated = poll_contract_mark(
+        sec_type=sec_type,
+        market_price=_normalize_market_price(ticker.marketPrice()),
+        bid=_normalize_market_price(ticker.bid),
+        ask=_normalize_market_price(ticker.ask),
+        close=_normalize_market_price(ticker.close),
+        trade=_normalize_market_price(getattr(ticker, "last", None)),
+        session_mark=session_marks.get(key) if key else None,
+        today=today,
+        fetch_history=fetch if key and contract is not None else None,
+    )
+    dirty = False
+    if key and updated is not None:
+        session_marks[key] = updated
+        dirty = True
+    if price is not None:
+        multiplier = 100 if str(sec_type or "").upper() == "OPT" else 1
+        pos["marketPrice"] = price
+        pos["marketValue"] = round(price * abs(pos["position"]) * multiplier, 2)
+        pos["marketPriceIsCalculated"] = is_calculated
+    else:
+        pos["marketPrice"] = None
+        pos["marketValue"] = None
+        pos["marketPriceIsCalculated"] = False
+    return dirty
 
 
 def _journal_basis_key(symbol: str, expiry, right, strike) -> Optional[str]:
@@ -844,6 +975,7 @@ def build_journal_basis_lookup(client: IBClient, db=None) -> dict[str, float]:
 
     tickers = sorted({str(pos.contract.symbol).strip().upper() for pos in option_positions})
     journal_keys: set[str] = set()
+    conid_keys: dict[str, str] = {}
     for pos in option_positions:
         contract = pos.contract
         journal_key = _journal_basis_key(
@@ -854,12 +986,16 @@ def build_journal_basis_lookup(client: IBClient, db=None) -> dict[str, float]:
         )
         if journal_key:
             journal_keys.add(journal_key)
+            con_id = con_id_of({"conId": getattr(contract, "conId", None)})
+            if con_id is not None:
+                conid_keys[con_id] = journal_key
 
     try:
         lookup, net_qty_lookup = compute_open_basis_and_net_qty_for_tickers(
             db,
             tickers=tickers,
             contract_keys=sorted(journal_keys),
+            conid_keys=conid_keys,
         )
     except Exception as exc:
         joined_tickers = ", ".join(tickers)
@@ -1150,28 +1286,18 @@ def fetch_market_prices(client: IBClient, positions: list) -> list:
         ]
         print(
             f"  Warning: no two-sided quote within 3.0s for {len(missing)} "
-            f"position(s): {missing[:8]} — marked off close"
+            f"position(s): {missing[:8]} — last trade or last bid/offer used if known"
         )
 
-    # Read results and cancel
+    session_marks = load_session_marks()
+    today = _et_today()
+    dirty = False
     for pos, ticker in zip(positions, tickers):
-        market_price = _normalize_market_price(ticker.marketPrice())
-        bid = _normalize_market_price(ticker.bid)
-        ask = _normalize_market_price(ticker.ask)
-        close = _normalize_market_price(ticker.close)
-        price, is_calculated = _resolve_market_price(market_price, bid, ask, close)
-
-        if price is not None:
-            multiplier = 100 if pos['secType'] == 'OPT' else 1
-            pos['marketPrice'] = price
-            pos['marketValue'] = round(price * abs(pos['position']) * multiplier, 2)
-            pos['marketPriceIsCalculated'] = is_calculated
-        else:
-            pos['marketPrice'] = None
-            pos['marketValue'] = None
-            pos['marketPriceIsCalculated'] = False
+        dirty = _stamp_position_price(pos, ticker, session_marks, client, today) or dirty
         client.cancel_market_data(pos['contract'])
         del pos['contract']  # Remove non-serializable contract object
+    if dirty:
+        save_session_marks(session_marks)
 
     return positions
 
@@ -1543,6 +1669,20 @@ def build_fill_dates(client, fills=None) -> dict:
     return fill_dates
 
 
+def _option_contract_key(ticker, expiry, leg) -> Optional[str]:
+    """ticker|YYYY-MM-DD|R|strike for a collapsed Call/Put leg, or None."""
+    leg_type = leg.get("type")
+    strike = leg.get("strike")
+    if leg_type not in ("Call", "Put") or strike in (None, 0):
+        return None
+    right = "C" if leg_type == "Call" else "P"
+    try:
+        strike_key = float(strike)
+    except (TypeError, ValueError):
+        return None
+    return f"{ticker}|{expiry}|{right}|{strike_key}"
+
+
 def _basis_carry_key(ticker, structure, expiry) -> str:
     """Size-independent key for same-side basis carry-forward. A stock's
     `structure` embeds the share count ("Stock (-1000.0 shares)"), which changes
@@ -1592,6 +1732,7 @@ def convert_to_portfolio_format(account: dict, collapsed_positions: list, pnl_da
 
     # Previous portfolio dates + per-unit basis (fallback)
     prev_dates: dict[str, str] = {}
+    prev_contract_dates: dict[str, str] = {}
     prev_basis: dict[str, dict] = {}
     try:
         prev = read_latest_portfolio_snapshot() or {}
@@ -1602,6 +1743,12 @@ def convert_to_portfolio_format(account: dict, collapsed_positions: list, pnl_da
             # the old bug where every sync set entry_date = today)
             if ed and ed != today:
                 prev_dates[key] = ed
+                for prev_leg in p.get("legs") or []:
+                    ck = _option_contract_key(p.get("ticker"), p.get("expiry"), prev_leg)
+                    if not ck:
+                        continue
+                    if ck not in prev_contract_dates or ed < prev_contract_dates[ck]:
+                        prev_contract_dates[ck] = ed
             # Per-unit basis for same-side reduce carry-forward (a partial close
             # must NOT change per-unit basis; IB drifts pos.avgCost on a reduce
             # and assignment-originated stock has no journal opener).
@@ -1624,42 +1771,30 @@ def convert_to_portfolio_format(account: dict, collapsed_positions: list, pnl_da
         structure = pos.get("structure", "")
         expiry = pos.get("expiry", "")
 
-        # Build per-contract blotter keys from collapsed option legs.
-        # Collapsed portfolio legs use the UI-facing `type` field ("Call"/"Put"),
-        # not the raw IB `secType`/`right` shape, so derive the contract keys
-        # from those normalized fields.
-        blotter_contract_date = None
+        # Per-leg dates from THIS combo's contracts only (never per-ticker).
+        # A new short against an overnight long must not stamp the combo
+        # today just because the new leg has a same-session fill.
         legs = pos.get("legs", [])
-        contract_dates = []
+        per_leg_dates = []
+        n_option_legs = 0
         for leg in legs:
-            leg_type = leg.get("type")
-            strike = leg.get("strike")
-            if leg_type not in ("Call", "Put") or strike in (None, 0):
+            contract_key = _option_contract_key(ticker, expiry, leg)
+            if not contract_key:
                 continue
-            right = "C" if leg_type == "Call" else "P"
-            contract_key = f"{ticker}|{expiry}|{right}|{float(strike)}"
-            contract_date = blotter_dates.get(contract_key)
-            if contract_date:
-                contract_dates.append(contract_date)
-        if contract_dates and len(contract_dates) == len([
-            leg for leg in legs
-            if leg.get("type") in ("Call", "Put") and leg.get("strike") not in (None, 0)
-        ]):
-            blotter_contract_date = min(contract_dates)
-
-        # IB fill dates (same-session trades not yet in journal)
-        fill_contract_date = None
-        if fill_dates:
-            for leg in legs:
-                leg_type = leg.get("type")
-                strike = leg.get("strike")
-                if leg_type not in ("Call", "Put") or strike in (None, 0):
-                    continue
-                right = "C" if leg_type == "Call" else "P"
-                fill_key = f"{ticker}|{expiry}|{right}|{float(strike)}"
-                fd = fill_dates.get(fill_key)
-                if fd:
-                    fill_contract_date = min(fill_contract_date, fd) if fill_contract_date else fd
+            n_option_legs += 1
+            leg_date = (
+                blotter_dates.get(contract_key)
+                or (fill_dates or {}).get(contract_key)
+                or prev_contract_dates.get(contract_key)
+            )
+            if leg_date:
+                per_leg_dates.append(leg_date)
+        combo_contract_date = None
+        if per_leg_dates and (
+            len(per_leg_dates) == n_option_legs
+            or any(d < today for d in per_leg_dates)
+        ):
+            combo_contract_date = min(per_leg_dates)
 
         # Fallback chain — ORDERED FROM MOST → LEAST SPECIFIC. Anything weaker
         # than per-contract risks attributing a brand-new contract to an
@@ -1670,18 +1805,18 @@ def convert_to_portfolio_format(account: dict, collapsed_positions: list, pnl_da
         #   0. session fills that account for the WHOLE live position — the
         #      contract was flat at the session open, so nothing older can be
         #      this lot's entry (see `_session_fill_open_date`)
-        #   1. journal (per-contract: ticker|expiry|right|strike)
+        #   1. per-leg journal / fill / prev-contract dates (min). Incomplete
+        #      coverage still wins when any resolved date is overnight, so
+        #      adding a same-day hedge does not mark the structure same-day.
         #   2. journal (ticker|structure)
-        #   3. IB fills (per-contract, same-session)
-        #   4. prev portfolio (ticker|structure|expiry, excluding today)
-        #   5. today  ← brand-new positions default here so the frontend's
+        #   3. prev portfolio (ticker|structure|expiry, excluding today)
+        #   4. today  ← brand-new positions default here so the frontend's
         #              same-day P&L branch fires correctly. We deliberately
         #              do NOT use a per-ticker blotter fallback or "unknown".
         pos['entry_date'] = (
             pos.get("session_fill_date")
-            or blotter_contract_date
+            or combo_contract_date
             or trade_log_dates.get(f"{ticker}|{structure}")
-            or fill_contract_date
             or prev_dates.get(key)
             or today
         )
@@ -2031,24 +2166,15 @@ def main():
 
             # ── Phase 5: Read all results ──
             # Market prices
+            session_marks = load_session_marks()
+            today = _et_today()
+            dirty = False
             for pos, ticker in zip(positions, tickers):
-                market_price = _normalize_market_price(ticker.marketPrice())
-                bid = _normalize_market_price(ticker.bid)
-                ask = _normalize_market_price(ticker.ask)
-                close = _normalize_market_price(ticker.close)
-                price, is_calculated = _resolve_market_price(market_price, bid, ask, close)
-
-                if price is not None:
-                    multiplier = 100 if pos['secType'] == 'OPT' else 1
-                    pos['marketPrice'] = price
-                    pos['marketValue'] = round(price * abs(pos['position']) * multiplier, 2)
-                    pos['marketPriceIsCalculated'] = is_calculated
-                else:
-                    pos['marketPrice'] = None
-                    pos['marketValue'] = None
-                    pos['marketPriceIsCalculated'] = False
+                dirty = _stamp_position_price(pos, ticker, session_marks, client, today) or dirty
                 client.ib.cancelMktData(pos['contract'])
                 del pos['contract']
+            if dirty:
+                save_session_marks(session_marks)
 
             # Per-position PnL
             def _valid_daily(val):

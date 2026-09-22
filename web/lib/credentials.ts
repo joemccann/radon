@@ -34,6 +34,9 @@ export type CredentialServiceEntry = {
 };
 
 export type CredentialsPayload = {
+  /** R-621: set when the encrypted store failed to open at boot, so every
+   *  `env_fallback` below is a failure, not a configuration. */
+  bootstrap_error?: string | null;
   services: CredentialServiceEntry[];
   groups: string[];
   generated_at: string;

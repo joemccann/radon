@@ -11,6 +11,7 @@ import {
 } from "@/lib/apiContracts";
 import { enforceDemoAiQuota } from "@/lib/demo/enforceAiQuota";
 import { countedUwFetch } from "@/lib/uwCountedFetch";
+import { anthropicRequestAuth } from "@/lib/llm/provider";
 
 export const runtime = "nodejs";
 
@@ -31,14 +32,8 @@ type CacheEntry = {
   data: MonthData[];
 };
 
-const ANTHROPIC_ENV_KEYS = ["ANTHROPIC_API_KEY", "CLAUDE_CODE_API_KEY", "CLAUDE_API_KEY"];
-const resolveApiKey = () => {
-  for (const key of ANTHROPIC_ENV_KEYS) {
-    const value = process.env[key]?.trim();
-    if (value) return value;
-  }
-  return undefined;
-};
+// Subscription-only Anthropic auth (Claude Max grant); see lib/llm/subscriptionAuth.ts.
+const resolveAnthropic = () => anthropicRequestAuth();
 
 /** Cache dir: data/seasonality_cache/ relative to project root */
 function cacheDir(): string {
@@ -88,8 +83,8 @@ Rules:
 - Return ONLY the JSON array, no markdown, no explanation`;
 
 async function extractViaVision(ticker: string, requestId: string): Promise<MonthData[] | null> {
-  const apiKey = resolveApiKey();
-  if (!apiKey) return null;
+  const anthropic = resolveAnthropic();
+  if (!anthropic) return null;
 
   const imageUrl = `https://charts.equityclock.com/seasonal_charts/${encodeURIComponent(ticker)}_sheet.png`;
 
@@ -105,14 +100,11 @@ async function extractViaVision(ticker: string, requestId: string): Promise<Mont
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       cache: "no-store",
-      headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-      },
+      headers: anthropic.headers,
       body: JSON.stringify({
         model: "claude-haiku-4-5-20251001",
         max_tokens: 1024,
+        ...(anthropic.system() ? { system: anthropic.system() } : {}),
         messages: [
           {
             role: "user",

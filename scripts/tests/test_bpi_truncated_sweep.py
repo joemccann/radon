@@ -148,22 +148,31 @@ class TestPersistPhaseHasBudget:
         )
 
     def test_a_sigterm_during_the_write_still_writes_an_error_row(self, monkeypatch):
-        """SIGTERM's default disposition terminates without unwinding, so the
-        service_cycle `finally` never ran and there was no error row at all."""
+        """The handler must os._exit(143). SystemExit leaves the executor
+        join in place, so a stuck chart worker holds the process until
+        systemd SIGKILLs it and records Result=timeout."""
+        import os
         import signal
 
         installed: dict = {}
+        exited: dict = {}
 
         def fake_signal(sig, handler):
             installed[sig] = handler
 
+        def fake_exit(code):
+            exited["code"] = code
+            raise SystemExit(code)
+
         monkeypatch.setattr(signal, "signal", fake_signal)
+        monkeypatch.setattr(os, "_exit", fake_exit)
         bpi.install_sigterm_unwind()
         assert signal.SIGTERM in installed, (
             "no SIGTERM handler, so a systemd kill skips the cycle's finally"
         )
         with pytest.raises(SystemExit):
             installed[signal.SIGTERM](signal.SIGTERM, None)
+        assert exited["code"] == 143
 
     def test_run_scan_itself_installs_the_handler(self, monkeypatch, tmp_path):
         """T-231(a): the test above calls `install_sigterm_unwind()` directly,
@@ -171,12 +180,20 @@ class TestPersistPhaseHasBudget:
         systemd `Result=timeout` again killed the process without unwinding
         `service_cycle`'s finally. Pin the CALL SITE: spy `signal.signal` and
         assert the handler lands as part of run_scan's own execution."""
+        import os
         import signal
 
         installed: dict = {}
+        exited: dict = {}
+
+        def fake_exit(code):
+            exited["code"] = code
+            raise SystemExit(code)
+
         monkeypatch.setattr(
             signal, "signal", lambda sig, handler: installed.__setitem__(sig, handler)
         )
+        monkeypatch.setattr(os, "_exit", fake_exit)
         monkeypatch.setenv(bpi.DATA_DIR_ENV, str(tmp_path))
 
         bpi.run_scan([], backfill=False, no_db=True)
@@ -187,6 +204,56 @@ class TestPersistPhaseHasBudget:
         )
         with pytest.raises(SystemExit):
             installed[signal.SIGTERM](signal.SIGTERM, None)
+        assert exited["code"] == 143
+
+
+class TestSigtermDuringChartFallbackExits:
+    """Deploy stop-clean SIGTERMs the oneshot while chart-fallback workers
+    are blocked in Yahoo. `shutdown(wait=True)` plus CPython's executor
+    atexit join hold the process past TimeoutStopSec, systemd SIGKILLs,
+    and Result=timeout is not deploy collateral (page 9964f6e0). Exit 143
+    while the worker is still blocked."""
+
+    def test_sigterm_during_stuck_chart_fetch_exits_143(self):
+        import os
+        import subprocess
+
+        code = r"""
+import os, signal, sys, threading, time
+sys.path.insert(0, os.environ["BPI_SCRIPTS"])
+import bpi_scan as bpi
+
+def hang(symbol, range_str):
+    time.sleep(3600)
+    return {}
+
+bpi._fetch_yahoo_daily = hang
+bpi.install_sigterm_unwind()
+
+def killer():
+    time.sleep(0.2)
+    os.kill(os.getpid(), signal.SIGTERM)
+
+threading.Thread(target=killer, daemon=True).start()
+bpi._fetch_members(["AAA"], "1mo", deadline=time.monotonic() + 60)
+print("fetch returned", file=sys.stderr)
+"""
+        env = os.environ.copy()
+        env["BPI_SCRIPTS"] = str(_SCRIPTS_DIR)
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-c", code],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+        except subprocess.TimeoutExpired as exc:
+            pytest.fail(
+                "process still alive 5s after SIGTERM during a stuck chart "
+                f"fetch (stdout={exc.stdout!r} stderr={exc.stderr!r})"
+            )
+        assert proc.returncode == 143, (proc.returncode, proc.stderr)
 
 
 class _FakeClock:

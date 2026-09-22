@@ -54,8 +54,10 @@ describe("skill-stack shell chrome", () => {
     expect(shell).toContain('type="button"');
 
     const toast = src("components/Toast.tsx");
-    expect(toast).toContain('role="status"');
-    expect(toast).toContain('aria-live="polite"');
+    // Each item owns its live-region semantics: status implies polite,
+    // alert implies assertive. A wrapping status would double-announce errors.
+    expect(toast).toContain('role={toast.type === "error" ? "alert" : "status"}');
+    expect(toast).toContain("ToastViewport");
 
     const sidebar = src("components/Sidebar.tsx");
     expect(sidebar).toContain('aria-current={item.route === activeSection ? "page" : undefined}');
@@ -83,6 +85,98 @@ describe("skill-stack shell chrome", () => {
     expect(feed).toContain("panel-meta-rail");
     expect(feed).toContain("capture.basis");
     expect(feed).not.toMatch(/from "lucide-react".*Radio|Radio size=/);
+  });
+
+  it("feed rail polish stays scoped and leaves the shared rail bytes unchanged", () => {
+    const css = src("app/globals.css");
+    const feedRail = css.indexOf(".dashboard-news .dashboard-news__rail {");
+    expect(feedRail).toBeGreaterThan(0);
+    const nextBlock = css.indexOf("\n.news-feed-actions {", feedRail);
+    expect(nextBlock).toBeGreaterThan(feedRail);
+    const chunk = css.slice(feedRail, nextBlock);
+    expect(chunk).toContain("display: flex");
+    expect(chunk).toContain("flex: 0 1 auto");
+    expect(chunk).toContain("white-space: nowrap");
+    expect(chunk).toContain("tabular-nums");
+    expect(chunk).toContain("border-radius: 0 0 3px 3px");
+    expect(chunk).not.toContain("grid-template-columns");
+    expect(chunk).not.toContain("min-width: 16ch");
+    expect(chunk).not.toContain("justify-content: space-between");
+
+    const globalStart = css.indexOf("\n.panel-meta-rail {");
+    expect(globalStart).toBeGreaterThan(0);
+    const globalEnd = css.indexOf("\n}", globalStart);
+    expect(css.slice(globalStart + 1, globalEnd + 2)).toBe(
+      [
+        ".panel-meta-rail {",
+        "  display: flex;",
+        "  flex-wrap: wrap;",
+        "  align-items: center;",
+        "  gap: 18px;",
+        "  padding: 10px 16px;",
+        "  border-top: 1px solid var(--line-grid);",
+        "  font-family: var(--font-mono);",
+        "  font-size: 11px;",
+        "  letter-spacing: 0.04em;",
+        "  color: var(--text-secondary);",
+        "}",
+      ].join("\n"),
+    );
+
+    const itemStart = css.indexOf("\n.panel-meta-rail-item {");
+    const itemEnd = css.indexOf("\n}", itemStart);
+    expect(css.slice(itemStart + 1, itemEnd + 2)).toBe(
+      [
+        ".panel-meta-rail-item {",
+        "  display: inline-flex;",
+        "  align-items: baseline;",
+        "  gap: 8px;",
+        "  white-space: nowrap;",
+        "}",
+      ].join("\n"),
+    );
+
+    const keyStart = css.indexOf("\n.panel-meta-rail-item .k {");
+    const keyEnd = css.indexOf("\n}", keyStart);
+    expect(css.slice(keyStart + 1, keyEnd + 2)).toBe(
+      [
+        ".panel-meta-rail-item .k {",
+        "  font-size: 9px;",
+        "  text-transform: uppercase;",
+        "  letter-spacing: 0.14em;",
+        "  color: var(--text-muted);",
+        "}",
+      ].join("\n"),
+    );
+
+    const valueStart = css.indexOf("\n.panel-meta-rail-item .v {");
+    const valueEnd = css.indexOf("\n}", valueStart);
+    expect(css.slice(valueStart + 1, valueEnd + 2)).toBe(
+      [
+        ".panel-meta-rail-item .v {",
+        "  color: var(--text-secondary);",
+        "}",
+      ].join("\n"),
+    );
+
+    const clear = src("app/clear.css");
+    expect(clear).toContain(
+      [
+        ".radon-clear :is(.panel-meta-rail, .instrument-section__rail, .performance-chart-meta) {",
+        "  background: var(--bg-subtle);",
+        "  border-color: var(--line-grid);",
+        "  font-family: var(--font-sans);",
+        "  font-size: var(--text-meta);",
+        "  letter-spacing: 0;",
+        "}",
+        "",
+        ".radon-clear :is(.panel-meta-rail-item .k, .performance-meta-label) {",
+        "  font-size: var(--text-meta);",
+        "  letter-spacing: 0;",
+        "  text-transform: none;",
+        "}",
+      ].join("\n"),
+    );
   });
 
   it("T4: dashboard panels expose meta rails", () => {

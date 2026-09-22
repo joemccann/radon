@@ -111,7 +111,7 @@ function autoInput(path: string, method: HttpMethod): string {
 }
 
 export function compilePath(template: string): RegExp {
-  const source = template.replace(/\{ticker\}/g, TICKER).replace(/\{[^}]+\}/g, "[^/]+");
+  const source = template.replace(/\{ticker\}/g, TICKER).replace(/\{[^}]+\}/g, "[A-Za-z0-9._-]+");
   return new RegExp(`^${source}$`);
 }
 

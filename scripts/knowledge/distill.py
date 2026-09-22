@@ -1,11 +1,12 @@
 """LLM distillation of knowledge docs into normalized searchable summaries.
 
 Uses the shared model ladder (``clients.model_ladder.complete_text_json``):
-subscription providers, then NVIDIA, then Cerebras last. Distillation is
-best-effort by contract: any failure returns None and never raises. The raw
-content is FTS-searchable regardless, and a stored row without a summary is
-re-attempted on the next ingest run (ingest.py's pre-filter only skips
-unchanged docs that already HAVE one).
+subscription credentials only for Anthropic/Grok/Codex/Gemini (prepaid wallets
+skipped unless ``RADON_LADDER_ALLOW_PREPAID=1``), then NVIDIA, then Cerebras
+last. Distillation is best-effort by contract: any failure returns None and
+never raises. The raw content is FTS-searchable regardless, and a stored row
+without a summary is re-attempted on the next ingest run (ingest.py's
+pre-filter only skips unchanged docs that already HAVE one).
 
 Keys come from process env first, then root .env, then web/.env. Never logged.
 """
@@ -22,6 +23,7 @@ from clients.model_ladder import (
     accept_distill_payload,
     complete_text_json,
 )
+from credential_redaction import scrub_credential_text
 
 MAX_CONTENT_CHARS = 6000
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -41,15 +43,10 @@ _SYSTEM_PROMPT = (
 # account id (U\d{6,}), a Turso URL, or a token; none of it helps distillation,
 # and the operator's data-handling rule is to never ship account ids/secrets to
 # third parties. The raw content still lives in the LOCAL operator-only corpus —
-# this only scrubs the copy that leaves the box. Mirrors server.py's
-# _SECRET_SCRUB_PATTERNS.
+# this only scrubs the copy that leaves the box. The base pattern set is the
+# canonical scripts/credential_redaction.py (reused, not duplicated); the
+# patterns below are distill-only supplements for header/assignment shapes.
 _EGRESS_SCRUB_PATTERNS = (
-    (re.compile(r"libsql://[^\s'\"]+", re.IGNORECASE), "[redacted-db-url]"),
-    (re.compile(r"https://[a-z0-9.-]+\.turso\.io[^\s'\"]*", re.IGNORECASE), "[redacted-db-url]"),
-    (re.compile(r"eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]*"), "[redacted-jwt]"),
-    (re.compile(r"sk-ant-[A-Za-z0-9_-]{6,}"), "[redacted-key]"),
-    (re.compile(r"\bsk_(?:live|test)_[A-Za-z0-9]{6,}\b"), "[redacted-key]"),
-    (re.compile(r"\bU\d{6,}\b"), "[redacted-account]"),
     (
         re.compile(
             r"(\bauthorization\s*[:=]\s*(?:bearer\s+)?)[^\s,;]+",
@@ -69,9 +66,11 @@ _EGRESS_SCRUB_PATTERNS = (
 
 
 def _scrub_for_egress(text: str) -> str:
+    # Distill-only header/assignment shapes first (they consume the full
+    # value), then the canonical credential scrubber.
     for pattern, repl in _EGRESS_SCRUB_PATTERNS:
         text = pattern.sub(repl, text)
-    return text
+    return scrub_credential_text(text)
 
 
 def distill(
@@ -87,7 +86,9 @@ def distill(
     (no keyed provider, exhausted ladder, unparseable model output)."""
     src = dict(env) if env is not None else _ladder_env()
     document = f"Title: {title}\n\n{content}" if title else content
-    instruction = _scrub_for_egress(document[:MAX_CONTENT_CHARS])
+    # Scrub BEFORE truncating: a token straddling the truncation boundary must
+    # never leave the box half-redacted.
+    instruction = _scrub_for_egress(document)[:MAX_CONTENT_CHARS]
     runner = complete or complete_text_json
     try:
         result = runner(

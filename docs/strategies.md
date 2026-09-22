@@ -246,15 +246,15 @@ When fetching any market data, **ALWAYS** use sources in this priority order:
 | Priority | Source | Best For | Limitations |
 |----------|--------|----------|-------------|
 | **1st** | Interactive Brokers | Real-time quotes, options chains, analyst ratings, fundamentals | Requires TWS/Gateway connection |
-| **2nd** | Unusual Whales | Dark pool flow, options activity, institutional signals, analyst ratings | API key required |
-| **3rd** | Exa (web search) | Company research, news, data not in IB/UW | API key required |
-| **4th** | agent-browser | Interactive pages, JS-rendered content | Slow, fallback only |
-| **5th** | Cboe official index feeds | COR1M historical fallback before Yahoo; official VIX/VVIX daily close verification after market close + 20 minutes ET | COR1M delayed historical feed; VIX_History.csv and VVIX_History.csv official daily close files |
-| **6th** | Robinhood (official trading MCP, READ-ONLY) | Equity quote/historicals failover before Yahoo; popular-watchlist / scan retail-crowding overlay | OAuth token required (~3 day access-token expiry, auto-refreshed); options probed live 2026-08-30 — `get_option_quotes` takes `instrument_ids` (UUIDs), real-time quotes + official prior-session close only, no greeks/IV/OI, never a vol-surface source; no dark pool, OTC, sweeps, or GEX; never used for orders — execution stays on IB |
+| **2nd** | Robinhood (official trading MCP, READ-ONLY) | Equity quote/historicals source after IB and before UW; popular-watchlist / scan retail-crowding overlay | OAuth token required (~3 day access-token expiry, auto-refreshed); options probed live 2026-08-30 — `get_option_quotes` takes `instrument_ids` (UUIDs), real-time quotes + official prior-session close only, no greeks/IV/OI, never a vol-surface source; no dark pool, OTC, sweeps, or GEX; never used for orders — execution stays on IB |
+| **3rd** | Unusual Whales | Dark pool flow, options activity, institutional signals, analyst ratings | API key required |
+| **4th** | Exa (web search) | Company research, news, data not in IB/UW | API key required |
+| **5th** | agent-browser | Interactive pages, JS-rendered content | Slow, fallback only |
+| **6th** | Cboe official index feeds | COR1M historical fallback before Yahoo; official VIX/VVIX daily close verification after market close + 20 minutes ET | COR1M delayed historical feed; VIX_History.csv and VVIX_History.csv official daily close files |
 | **7th ⚠️** | Yahoo Finance | **ABSOLUTE LAST RESORT** — only if ALL above fail | Rate limited, unreliable, delayed |
 
 **For COR1M, use the official Cboe dashboard historical feed before Yahoo Finance.**
-**Robinhood ranks after IB, UW and the official Cboe feeds and before Yahoo, and is read-only: Radon never places or cancels an order through it.**
+**Robinhood ranks right after IB for commodity price data (daily closes, quotes, chains) and ahead of UW, so UW calls go to what only UW serves (flow, dark pool, GEX, surface). It is read-only: Radon never places or cancels an order through it.**
 **Yahoo Finance is the ABSOLUTE LAST RESORT. Never use it if IB, UW, Exa, agent-browser, an official Cboe feed, or Robinhood can provide the data.**
 
 ### Scripts
@@ -773,7 +773,7 @@ All three must fire simultaneously:
 ### COR1M Implied Correlation Signal
 
 The Cboe 1-Month Implied Correlation Index (COR1M) measures the market's expectation of how tightly the 50 largest stocks in the S&P 500 will move together over the next month.
-Implementation rule: `scripts/cri_scan.py` must fetch COR1M from IB first, then the official Cboe dashboard historical feed, and only then fall back to Yahoo Finance if both fail — COR1M never uses Robinhood (the RH rung is scoped to equities so it cannot shadow the official feed). SPY gaps try Robinhood after IB/UW and before Yahoo; the scan's current-quote fallback is IB, then Robinhood, then Yahoo.
+Implementation rule: `scripts/cri_scan.py` must fetch COR1M from IB first, then the official Cboe dashboard historical feed, and only then fall back to Yahoo Finance if both fail — COR1M never uses Robinhood (the RH rung is scoped to equities so it cannot shadow the official feed). SPY gaps try Robinhood after IB and before UW; the scan's current-quote fallback is IB, then Robinhood, then Yahoo.
 
 **What it captures**:
 - **Market herding**: Higher COR1M means the market expects the largest SPX names to trade in lockstep.
@@ -848,8 +848,8 @@ python3.13 scripts/cri_scan.py
 # JSON output
 python3.13 scripts/cri_scan.py --json
 
-# Don't open browser
-python3.13 scripts/cri_scan.py --no-open
+# Open the HTML report in a browser (default: just print the path)
+python3.13 scripts/cri_scan.py --open
 
 # Fetch MenthorQ CTA data (requires login, ~40s)
 python3.13 scripts/fetch_menthorq_cta.py

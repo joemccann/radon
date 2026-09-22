@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { radonFetch } from "@/lib/radonApi";
-import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
+import { getRequestId, setNoStoreResponseHeaders, scrubSecrets } from "@/lib/apiContracts";
 
 // Disable Next.js static caching: the index updates once per day via the
 // systemd timer, but the underlying Turso read is cheap and we never want
@@ -21,7 +21,7 @@ export async function GET(req: NextRequest): Promise<Response> {
     setNoStoreResponseHeaders(res, requestId);
     return res;
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
+    const message = scrubSecrets(err instanceof Error ? err.message : "Unknown error");
     const res = NextResponse.json(
       { rows: [], count: 0, days: Number(days) || 180, error: message },
       { status: 502 },

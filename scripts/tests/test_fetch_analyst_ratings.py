@@ -232,3 +232,117 @@ class TestFormatRatingsTable:
     def test_no_changes_message(self):
         output = format_ratings_table([], changes_only=True)
         assert "No analyst rating changes" in output
+
+
+
+# ── Robinhood rung: IB -> RH -> UW ──────────────────────────────────
+
+import fetch_analyst_ratings as far  # noqa: E402
+import fetch_analyst_ratings_rh as far_rh  # noqa: E402
+
+RH_RAW = {
+    "num_buy_ratings": 60,
+    "num_hold_ratings": 6,
+    "num_sell_ratings": 0,
+    "high_price_target": "1000.0000",
+    "low_price_target": "580.0000",
+    "mean_price_target": "751.0493",
+}
+
+
+class TestRobinhoodRung:
+    def _wire(self, monkeypatch, rh=RH_RAW, uw=None):
+        calls = []
+        monkeypatch.setattr(
+            "clients.robinhood_client.fetch_robinhood_analyst_ratings",
+            lambda t: calls.append(("rh", t)) or rh,
+        )
+        monkeypatch.setattr(
+            far, "fetch_from_uw", lambda t: calls.append(("uw", t)) or uw
+        )
+        return calls
+
+    def _fetch(self, ticker, **kw):
+        return far.fetch_analyst_ratings(
+            ticker, use_cache=False, consensus_rung=far_rh.fetch_from_rh, **kw
+        )
+
+    def test_rh_consensus_spares_the_uw_call(self, monkeypatch):
+        calls = self._wire(monkeypatch)
+        result = self._fetch("meta")
+        assert result["source"] == "rh"
+        assert result["ratings"]["buy"] == 60
+        assert result["ratings"]["total"] == 66
+        assert result["ratings"]["buy_pct"] == 90.9
+        assert result["recommendation"] == "buy"
+        assert result["target_price"]["mean"] == 751.05
+        assert result["target_price"]["high"] == 1000.0
+        assert calls == [("rh", "META")]
+
+    def test_need_history_skips_rh_and_goes_to_uw(self, monkeypatch):
+        uw = {"ticker": "META", "source": "uw", "ratings": {"total": 1}, "error": None}
+        calls = self._wire(monkeypatch, uw=uw)
+        result = self._fetch("META", need_history=True)
+        assert result["source"] == "uw"
+        assert calls == [("uw", "META")]
+
+    def test_rh_miss_falls_through_to_uw(self, monkeypatch):
+        uw = {"ticker": "META", "source": "uw", "ratings": {"total": 1}, "error": None}
+        calls = self._wire(monkeypatch, rh=None, uw=uw)
+        result = self._fetch("META")
+        assert result["source"] == "uw"
+        assert calls == [("rh", "META"), ("uw", "META")]
+
+    def test_zero_coverage_is_a_miss(self, monkeypatch):
+        self._wire(monkeypatch, rh={"num_buy_ratings": 0})
+        assert far_rh.fetch_from_rh("META") is None
+
+    def test_absent_targets_keep_the_counts(self, monkeypatch):
+        self._wire(monkeypatch, rh={"num_buy_ratings": 3, "num_hold_ratings": 1})
+        result = far_rh.fetch_from_rh("META")
+        assert result["ratings"]["total"] == 4
+        assert result["target_price"] is None
+
+    def test_forced_uw_never_touches_rh(self, monkeypatch):
+        calls = self._wire(monkeypatch, uw=None)
+        self._fetch("META", force_source="uw")
+        assert ("rh", "META") not in calls
+
+    def test_without_the_rung_the_ladder_is_ib_then_uw(self, monkeypatch):
+        # evaluate.py (a gate file) passes no rung: Robinhood is never asked.
+        calls = self._wire(monkeypatch, uw=None)
+        far.fetch_analyst_ratings("META", use_cache=False)
+        assert calls == [("uw", "META")]
+
+    def test_ib_hit_never_reaches_rh(self, monkeypatch):
+        calls = self._wire(monkeypatch)
+        monkeypatch.setattr(
+            far, "fetch_from_ib", lambda c, t: {"source": "IB", "error": None}
+        )
+        result = self._fetch("META", client=object())
+        assert result["source"] == "IB"
+        assert calls == []
+
+
+class TestRobinhoodClientRatings:
+    def test_unconfigured_is_a_networkless_none(self):
+        from clients import robinhood_client as rh
+        assert rh.fetch_robinhood_analyst_ratings("META") is None
+
+    def test_tool_is_allowlisted(self):
+        from clients import robinhood_client as rh
+        assert "get_equity_analyst_ratings" in rh.READ_ONLY_TOOLS
+
+    def test_parses_the_live_payload_shape(self, monkeypatch):
+        from clients import robinhood_client as rh
+
+        class Fake:
+            def call_tool(self, name, args):
+                assert name == "get_equity_analyst_ratings"
+                assert args == {"symbols": ["META"]}
+                return {"data": {"results": [{"symbol": "META", "ratings": RH_RAW}]}}
+
+        monkeypatch.setattr(rh, "robinhood_configured", lambda: True)
+        monkeypatch.setattr(rh, "robinhood_available", lambda: True)
+        monkeypatch.setattr(rh, "_client", lambda: Fake())
+        assert rh.fetch_robinhood_analyst_ratings("meta") == RH_RAW

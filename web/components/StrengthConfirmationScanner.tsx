@@ -1,4 +1,5 @@
 "use client";
+import ErrorToast from "@/components/ErrorToast";
 
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
@@ -6,6 +7,7 @@ import { CheckCircle2, Loader2, Search, ShieldCheck, XCircle } from "lucide-reac
 import InfoTooltip from "./InfoTooltip";
 import ScannerInstrumentShell from "./ScannerInstrumentShell";
 import SectionEmptyState from "./SectionEmptyState";
+import RequestError from "./RequestError";
 import SortTh from "./SortTh";
 import TickerLink from "./TickerLink";
 import { useSort } from "@/lib/useSort";
@@ -18,6 +20,7 @@ type StrengthConfirmationScannerProps = {
   loading?: boolean;
   scanning?: boolean;
   error?: string | null;
+  onRetry?: () => void;
   lastSync?: string | null;
   onScan?: () => void;
   onTickerScan?: (ticker: string) => void;
@@ -215,6 +218,7 @@ export default function StrengthConfirmationScanner({
   loading = false,
   scanning = false,
   error = null,
+  onRetry,
   lastSync = null,
   onScan,
   onTickerScan,
@@ -271,7 +275,6 @@ export default function StrengthConfirmationScanner({
                 spellCheck={false}
                 aria-label="Strength ticker symbol"
                 aria-invalid={tickerError ? "true" : "false"}
-                aria-describedby={tickerError ? "strength-ticker-search-error" : undefined}
               />
               <button
                 type="submit"
@@ -282,9 +285,7 @@ export default function StrengthConfirmationScanner({
                 Scan
               </button>
               {tickerError && (
-                <span id="strength-ticker-search-error" className="theta-search__error" role="alert">
-                  {tickerError}
-                </span>
+                <ErrorToast message={tickerError} />
               )}
             </form>
           )}
@@ -310,15 +311,12 @@ export default function StrengthConfirmationScanner({
       className="strength-confirmation"
       testId="strength-confirmation-section"
     >
-      {loading ? (
+      {error && <RequestError error={error} onRetry={scanning ? undefined : onRetry} retainedData={rows.length > 0} />}
+      {loading && rows.length === 0 ? (
         <div className="section-body">
           <div className="snapshot-card__empty">Measuring seven strength factors...</div>
         </div>
-      ) : error ? (
-        <div className="section-body">
-          <div className="alert-item bearish">{error}</div>
-        </div>
-      ) : rows.length === 0 ? (
+      ) : error && rows.length === 0 ? null : rows.length === 0 ? (
         <div className="section-body">
           <SectionEmptyState
             icon={ShieldCheck}

@@ -28,6 +28,9 @@ RETRYABLE_ERRORS = {
     "navigation_failure",
 }
 DEFAULT_RETRY_BACKOFFS_SECONDS = [0, 120, 600]
+# Hung Playwright already spent FETCH_TIMEOUT_S; a third 600s wait overflows
+# TimeoutStartSec=1800. Fast auth/challenge failures keep the 3-attempt ladder.
+TIMEOUT_RETRY_BACKOFFS_SECONDS = [0, 120]
 
 
 def _load_json(path: Path) -> Optional[dict[str, Any]]:
@@ -110,7 +113,7 @@ def classify_sync_error(stderr: str) -> tuple[str, str]:
         return "auth_rejected", message
     if "captcha" in lowered or "verify you are human" in lowered or "cloudflare" in lowered:
         return "challenge_page", message
-    if "timeout" in lowered:
+    if "timeout" in lowered or "timed out" in lowered:
         return "timeout", message
     if "field" in lowered and "not found" in lowered:
         return "selector_failure", message
@@ -128,6 +131,8 @@ def is_retryable_error(error_type: str | None) -> bool:
 
 
 def retry_backoffs_for_error(error_type: str | None) -> list[int]:
+    if error_type == "timeout":
+        return TIMEOUT_RETRY_BACKOFFS_SECONDS.copy()
     if is_retryable_error(error_type):
         return DEFAULT_RETRY_BACKOFFS_SECONDS.copy()
     return [0]

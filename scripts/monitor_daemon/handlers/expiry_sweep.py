@@ -42,6 +42,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from .base import BaseHandler
+from utils.exec_ids import exec_id_root
 
 try:
     from db.writer import upsert_journal_entry  # type: ignore
@@ -349,7 +350,11 @@ def _executed_orders_since(db: Any, since_date: str) -> list[dict[str, Any]]:
             payload = json.loads(row[2]) if isinstance(row[2], str) else row[2] or {}
         except Exception:
             payload = {}
-        items.append({"payload": payload, "fill_date": str(row[3] or "")[:10]})
+        items.append({
+            "exec_id": str(row[0] or ""),
+            "payload": payload,
+            "fill_date": str(row[3] or "")[:10],
+        })
     return items
 
 
@@ -461,23 +466,37 @@ class ExpirySweepHandler(BaseHandler):
         if close_id in candidate["exec_ids"]:
             return True
 
-        # Inclusive of the expiration date itself: an assignment, exercise or
-        # closing fill booked ON expiry day demonstrably handled this contract,
-        # and a strict > skipped that guard entirely (R-074). R-155: only a
-        # REDUCING fill counts — the opener of a 0DTE also lands on expiry day.
+        # NF-7: a REDUCING journal fill ON expiry day is already in `net`, so
+        # the sweep writes only the residual those fills did not close (the
+        # close is counted once, from the fill). Only a reducing fill AFTER
+        # expiry (assignment/exercise trace) guards. R-155: openers never do.
         expiry_iso = expiry_date.strftime("%Y-%m-%d")
-        if candidate.get("last_reducing_date", "") >= expiry_iso:
+        if candidate.get("net", 0) == 0:
+            return True  # flat: every fill already accounted for
+        if candidate.get("last_reducing_date", "") > expiry_iso:
             return True
 
         key = _contract_key(payload)
         net = candidate.get("net", 0)
+        journaled = candidate.get("exec_ids") or set()
+        journaled_roots = {exec_id_root(e)[0] for e in journaled}
         for item in executed:
             if _executed_contract_key(item["payload"]) != key:
                 continue
             if item["fill_date"] < expiry_iso:
                 continue
-            if _executed_reduces_position(item["payload"], net):
-                return True
+            if not _executed_reduces_position(item["payload"], net):
+                continue
+            if item["fill_date"] == expiry_iso:
+                # An expiry-day close already journaled (exact execId or a
+                # correction of its root) is netted; one not yet journaled is
+                # not, and writing the residual now would double-book it.
+                exec_id = str(item.get("exec_id") or item["payload"].get("execId") or "")
+                if exec_id and (
+                    exec_id in journaled or exec_id_root(exec_id)[0] in journaled_roots
+                ):
+                    continue
+            return True
         return False
 
     @staticmethod

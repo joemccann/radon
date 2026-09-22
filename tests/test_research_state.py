@@ -1,7 +1,9 @@
 from datetime import datetime, timezone
 import sqlite3
 import pytest
-from scripts.research.state import State, date_scopes
+from scripts.research.state import (
+    State, date_scopes, folder_backlog_gap, lookback_days, should_persist_cursor,
+)
 
 SCOPE='2026/September/Sep 07'
 ROOT='/joe mccann/current/' + SCOPE.lower()
@@ -17,9 +19,62 @@ def state(tmp_path):
     s=State(tmp_path/'state.sqlite');yield s;s.close()
 
 def test_dates_midnight_and_year_rollover():
-    assert date_scopes(datetime(2026,1,1,4,59,tzinfo=timezone.utc)) == [('2025/december/dec 30','2025-12-30'),('2025/december/dec 31','2025-12-31')]
+    before = date_scopes(datetime(2026,1,1,4,59,tzinfo=timezone.utc))
+    assert before[0] == ('2025/december/dec 25','2025-12-25')
+    assert before[-1] == ('2025/december/dec 31','2025-12-31')
+    assert len(before) == 7
     assert date_scopes(datetime(2026,1,1,5,tzinfo=timezone.utc))[-1] == ('2026/january/jan 01','2026-01-01')
+    assert date_scopes(datetime(2026,1,1,5,tzinfo=timezone.utc), days=2) == [('2025/december/dec 31','2025-12-31'),('2026/january/jan 01','2026-01-01')]
     with pytest.raises(ValueError):date_scopes(datetime(2026,1,1))
+
+
+def test_lookback_days_env_default_and_clamp(monkeypatch):
+    monkeypatch.delenv('RADON_RESEARCH_LOOKBACK_DAYS', raising=False)
+    assert lookback_days() == 7
+    monkeypatch.setenv('RADON_RESEARCH_LOOKBACK_DAYS', '3')
+    now = datetime(2026,9,21,16,tzinfo=timezone.utc)
+    scopes = date_scopes(now)
+    assert [d for _, d in scopes] == ['2026-09-19','2026-09-20','2026-09-21']
+    assert scopes[0][0] == '2026/september/sep 19'
+    monkeypatch.setenv('RADON_RESEARCH_LOOKBACK_DAYS', 'nope')
+    assert lookback_days() == 7
+    monkeypatch.setenv('RADON_RESEARCH_LOOKBACK_DAYS', '99')
+    assert lookback_days() == 31
+    monkeypatch.setenv('RADON_RESEARCH_LOOKBACK_DAYS', '0')
+    assert lookback_days() == 1
+
+
+def test_should_persist_cursor_requires_eligible_or_proven_empty():
+    empty = {'cursor':'next','entries':[],'has_more':False}
+    partial = {'cursor':'next','entries':[],'has_more':True}
+    missing = {'cursor':'next','entries':[]}
+    assert should_persist_cursor(empty, started=True, eligible_count=0) is True
+    assert should_persist_cursor(empty, started=False, eligible_count=0) is False
+    assert should_persist_cursor(partial, started=True, eligible_count=0) is False
+    assert should_persist_cursor(missing, started=True, eligible_count=0) is False
+    assert should_persist_cursor(empty, started=False, eligible_count=1) is True
+
+
+def test_folder_backlog_gap_flags_empty_work_and_ratio():
+    assert folder_backlog_gap(261, 0) == {'type':'dropbox_work_gap','eligible':261,'work':0}
+    assert folder_backlog_gap(1, 0) == {'type':'dropbox_work_gap','eligible':1,'work':0}
+    assert folder_backlog_gap(20, 5) == {'type':'dropbox_work_gap','eligible':20,'work':5}
+    assert folder_backlog_gap(0, 0) is None
+    assert folder_backlog_gap(5, 5) is None
+    assert folder_backlog_gap(9, 4) is None
+    assert folder_backlog_gap('x', 0) is None
+
+
+def test_ingest_does_not_advance_cursor_without_eligible_pdfs(state):
+    assert state.ingest_page(SCOPE, page(), '2026-09-18') == 0
+    assert state.cursor(SCOPE) is None
+    assert state.scopes() == []
+    assert state.work_count(scope=SCOPE, folder_date='2026-09-18') == 0
+    assert state.ingest_page(SCOPE, page(item()), '2026-09-18') == 1
+    assert state.cursor(SCOPE) == 'c1'
+    assert state.work_count(folder_date='2026-09-18') == 1
+    assert state.ingest_page(SCOPE, page(cursor='c2'), persist_cursor=True) == 0
+    assert state.cursor(SCOPE) == 'c2'
 
 def test_ingest_exclusion_replay_and_atomic_rollback(state):
     assert state.ingest_page(SCOPE,page(item(),item(id='t',path=ROOT+'/The Market Ear/x.pdf'),item(id='x',path=ROOT+'/x.txt')),'2026-09-07')==1

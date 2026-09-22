@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.radon.grok-fix-pickup</string>
+
+    <!-- __PICKUP_REPO__ / __HOME__ are substituted at install time.
+         The VPS responder holds NO GitHub credential: pushing a branch and
+         merging a PR need the same permission, and that host runs an agent
+         over untrusted page text. It commits to fix/<slug> locally; this job
+         fetches those branches over ssh, pushes them and opens the PR with
+         the operator credential that already lives here. It never merges. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/env</string>
+        <string>python3.13</string>
+        <string>__PICKUP_REPO__/scripts/grok_fix_pickup.py</string>
+        <string>--repo</string>
+        <string>__PICKUP_REPO__</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__PICKUP_REPO__</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:__HOME__/.local/bin</string>
+        <key>HOME</key>
+        <string>__HOME__</string>
+    </dict>
+
+    <!-- Pages are rare and never urgent by the time a fix exists; a quarter
+         hour keeps the PR waiting on the phone without polling the VPS hard. -->
+    <key>StartInterval</key>
+    <integer>900</integer>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>__PICKUP_REPO__/logs/grok-fix-pickup/pickup.log</string>
+    <key>StandardErrorPath</key>
+    <string>__PICKUP_REPO__/logs/grok-fix-pickup/pickup.err</string>
+</dict>
+</plist>

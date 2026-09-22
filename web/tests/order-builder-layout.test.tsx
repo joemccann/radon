@@ -83,4 +83,28 @@ describe("OrderBuilder source contract", () => {
     expect(legBlock).not.toMatch(/\dfr/);
     expect(css).toMatch(/\.order-builder\s*\{[^}]*max-width:\s*560px/s);
   });
+
+  it("keeps the full strike and right readable in the 384px ticket rail", () => {
+    const css = readFileSync(join(__dirname, "../app/globals.css"), "utf8");
+    const src = readFileSync(
+      join(__dirname, "../components/ticker-detail/OptionsChainTab.tsx"),
+      "utf8",
+    );
+    const legBlock = css.slice(
+      css.indexOf(".order-builder-leg {"),
+      css.indexOf(".order-builder-leg-action {"),
+    );
+    const contractBlock = css.slice(
+      css.indexOf(".order-builder-leg-contract {"),
+      css.indexOf(".order-builder-leg-expiry"),
+    );
+
+    expect(src).toMatch(/\{leg\.quantity\}x \$\{leg\.strike\} \{leg\.right === "C" \? "Call" : "Put"\}/);
+    expect(legBlock).toMatch(/flex-wrap:\s*wrap/);
+    expect(contractBlock).toMatch(/flex:\s*0 0 auto/);
+    expect(contractBlock).not.toMatch(/text-overflow:\s*ellipsis/);
+    expect(contractBlock).not.toMatch(/overflow:\s*hidden/);
+    expect(contractBlock).not.toMatch(/min-width:\s*0/);
+    expect(contractBlock).not.toMatch(/max-width:\s*11rem/);
+  });
 });

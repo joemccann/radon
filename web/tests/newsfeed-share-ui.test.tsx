@@ -1,18 +1,32 @@
 /** @vitest-environment jsdom */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import React from "react";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import NewsfeedShare from "@/components/NewsfeedShare";
+import NewsfeedShare, { resetNewsfeedShareVoiceCache } from "@/components/NewsfeedShare";
 
 const engine = vi.hoisted(() => ({ buildShareCaption: vi.fn(), renderShareCard: vi.fn(), canvasToPng: vi.fn(), canvasToMp4: vi.fn(), supportsMp4Export: vi.fn() }));
 vi.mock("@/lib/newsfeedShare", async importOriginal => ({ ...await importOriginal<typeof import("@/lib/newsfeedShare")>(), ...engine }));
 const post = { id: "fixture", title: "Yen hedge demand", content: "Hedge demand increased.", timestamp: "2026-09-07T16:00:00Z", isoTimestamp: "2026-09-07T16:00:00Z", href: "https://example.com/source", images: ["/chart-1.png", "/chart-2.png"], tags: ["JPY"] };
+const equityIssuance = {
+  id: "equity-issuance-252bn",
+  title: "US corporates raised a record $252bn in 2Q; Goldman estimates ~$700bn total equity supply in 2026, significant portion AI-related",
+  content: "US corporates raised a record $252bn in 2Q across IPOs, follow-ons, convertibles, and SPACs. The desk estimates total corporate equity supply will reach ~$700bn in 2026. Hyperscaler capex is a big slice. Supply overhang is a headwind, not a gale.",
+  timestamp: "2026-09-20T20:06:00Z",
+  isoTimestamp: "2026-09-20T20:06:00Z",
+  href: "https://example.com/equity-issuance",
+  images: ["/chart-1.png"],
+  tags: ["EQUITY-ISSUANCE"],
+  source: { kind: "dropbox" as const, publisher: "Goldman Midday Market Intelligence", documentDate: "2026-09-17", folderDate: "2026-09-20", pages: [1], figures: [], fileId: "id", revision: "r", contentHash: "h", url: "/private.pdf" },
+};
 let createUrl: ReturnType<typeof vi.fn>;
 let revokeUrl: ReturnType<typeof vi.fn>;
 let clipboard: ReturnType<typeof vi.fn>;
 
 beforeEach(async () => {
   vi.resetAllMocks();
+  resetNewsfeedShareVoiceCache();
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ title: post.title, content: post.content, caption: `${post.title}\n\n${post.content}` }) }));
   const actual = await vi.importActual<typeof import("@/lib/newsfeedShare")>("@/lib/newsfeedShare");
   engine.buildShareCaption.mockImplementation(actual.buildShareCaption);
@@ -33,6 +47,7 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 async function openShare() {
   fireEvent.click(screen.getByRole("button", { name: "Share", exact: true }));
   await screen.findByAltText("Portrait share preview: Yen hedge demand");
+  await waitFor(() => expect((screen.getByRole("textbox") as HTMLTextAreaElement).disabled).toBe(false));
 }
 
 describe("news feed sharing", () => {
@@ -40,7 +55,7 @@ describe("news feed sharing", () => {
     vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ title: "Hedge demand is back.", content: "Positioning is neutral. Source: ZeroHedge" }) } as Response);
     render(<NewsfeedShare post={post} />);
     await openShare();
-    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Hedge demand is back.\n\nPositioning is neutral.");
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Hedge demand is back\n\nPositioning is neutral.");
     expect(engine.renderShareCard).toHaveBeenCalledWith(expect.objectContaining({ title: "Hedge demand is back.", content: "Positioning is neutral." }), undefined);
     expect(fetch).toHaveBeenCalledWith("/api/newsfeed/share", expect.objectContaining({ method: "POST", cache: "no-store" }));
   });
@@ -60,7 +75,7 @@ describe("news feed sharing", () => {
     render(<NewsfeedShare post={attributed} imageUrl={imageUrl} />);
     await openShare();
     const caption = (screen.getByRole("textbox", { name: "Post caption" }) as HTMLTextAreaElement).value;
-    expect(caption).toContain("Hedge demand is back.");
+    expect(caption).toContain("Hedge demand is back");
     expect(caption).toContain("Positioning remains neutral.");
     expect(caption).toContain(`Source: ${provider}`);
     expect(caption).not.toContain(otherProvider);
@@ -85,7 +100,8 @@ describe("news feed sharing", () => {
     expect(compose.getAttribute("target")).toBe("_blank");
     expect((screen.getByRole("button", { name: "Download Story image" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Download Reels / TikTok video" }) as HTMLButtonElement).disabled).toBe(true);
-    expect(engine.renderShareCard).not.toHaveBeenCalled();
+    // The preview renders from the original copy immediately; the rewrite never blocks it.
+    await waitFor(() => expect(engine.renderShareCard).toHaveBeenCalledWith(post, undefined));
     await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
     const signal = vi.mocked(fetch).mock.calls[0][1]?.signal;
     fireEvent.click(screen.getByRole("button", { name: "Share", exact: true }));
@@ -104,19 +120,43 @@ describe("news feed sharing", () => {
     await act(async () => {
       resolveRewrite({ ok: true, json: async () => ({ title: "Hedge demand is back.", content: "Positioning remains neutral." }) } as Response);
     });
-    await waitFor(() => expect(engine.renderShareCard).toHaveBeenCalledOnce());
-    expect(new URL(compose.getAttribute("href")!).searchParams.get("text")).toBe("Hedge demand is back.\n\nPositioning remains neutral.");
+    await waitFor(() => expect(engine.renderShareCard).toHaveBeenLastCalledWith(expect.objectContaining({ title: "Hedge demand is back." }), undefined));
+    expect(new URL(compose.getAttribute("href")!).searchParams.get("text")).toBe("Hedge demand is back\n\nPositioning remains neutral.");
     expect(compose.getAttribute("aria-disabled")).not.toBe("true");
     expect(screen.getByText("Preparing preview…")).not.toBeNull();
     expect((screen.getByRole("button", { name: "Download Story image" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("composes the equity-issuance fallback on X while rewrite is pending", async () => {
+    vi.mocked(fetch).mockImplementation(() => new Promise(() => {}));
+    render(<NewsfeedShare post={equityIssuance} />);
+    fireEvent.click(screen.getByRole("button", { name: "Share", exact: true }));
+    const compose = screen.getByRole("link", { name: "Compose on X" });
+    const caption = (screen.getByRole("textbox") as HTMLTextAreaElement).value;
+    const text = new URL(compose.getAttribute("href")!).searchParams.get("text")!;
+    expect(text).toBe(caption);
+    expect(caption.split("\n")[0]).toMatch(/\$252bn/i);
+    expect(caption).toContain("$700bn");
+    expect(caption).not.toMatch(/^[•●▪◦*-]\s/m);
+    expect(caption.split("\n\n").length).toBeGreaterThan(1);
+    expect(caption).toMatch(/Source: Goldman Midday Market Intelligence · 2026-09-17\s*$/);
+    expect(caption.length).toBeLessThanOrEqual(400);
+    expect(compose.getAttribute("aria-disabled")).not.toBe("true");
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).disabled).toBe(true);
+    await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+    const sent = JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body));
+    expect(sent.title).toContain("$252bn");
+    expect(sent.content).toContain("$700bn");
+    expect(sent.content).toContain("Supply overhang is a headwind, not a gale.");
   });
 
   it("shows original copy on failure and retries voice generation", async () => {
     vi.mocked(fetch).mockRejectedValueOnce(new Error("offline"));
     render(<NewsfeedShare post={post} />);
     await openShare();
-    expect(screen.getByRole("alert").textContent).toContain("Showing the original copy");
-    fireEvent.click(screen.getByRole("button", { name: "Retry voice rewrite" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Showing the original copy");
+    expect(screen.getByRole("alert").closest("[data-toast-viewport]")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
     await screen.findByAltText("Portrait share preview: Yen hedge demand");
@@ -168,12 +208,15 @@ describe("news feed sharing", () => {
   });
 
   it("retries failed chart loading without discarding caption edits", async () => {
-    engine.renderShareCard.mockRejectedValueOnce(new Error("Chart could not be loaded"));
+    // Original-copy render and post-rewrite render both fail; the retry succeeds.
+    engine.renderShareCard.mockRejectedValueOnce(new Error("Chart could not be loaded")).mockRejectedValueOnce(new Error("Chart could not be loaded"));
     render(<NewsfeedShare post={post} imageUrl="/chart-2.png" />);
     fireEvent.click(screen.getByRole("button", { name: "Share", exact: true }));
+    await waitFor(() => expect((screen.getByRole("textbox") as HTMLTextAreaElement).disabled).toBe(false));
     expect((await screen.findByRole("alert")).textContent).toContain("Chart could not be loaded");
+    expect(screen.getByRole("alert").closest("[data-toast-viewport]")).toBeTruthy();
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "My edited caption" } });
-    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await screen.findByAltText("Portrait share preview: Yen hedge demand");
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("My edited caption");
     expect(screen.queryByRole("alert")).toBeNull();
@@ -247,5 +290,21 @@ describe("news feed sharing", () => {
     fireEvent.click(screen.getByRole("button", { name: "Download Story image" }));
     await waitFor(() => expect(engine.canvasToPng).toHaveBeenLastCalledWith(newCanvas));
   });
+});
 
+describe("newsfeed share better-ui layout", () => {
+  const css = readFileSync(join(__dirname, "..", "components", "NewsfeedShare.module.css"), "utf8");
+
+  it("separates the share root with 14px margin to balance article border and footer", () => {
+    expect(css).toMatch(/\.root\s*\{[^}]*margin-top:\s*14px/);
+  });
+
+  it("resets root margin-top on mobile shell where item flex gap provides spacing", () => {
+    expect(css).toMatch(/:global\(body\[data-mobile="true"\]\)\s+\.root\s*\{[^}]*margin-top:\s*0/);
+  });
+
+  it("applies better-ui press scale and transition to interactive buttons", () => {
+    expect(css).toMatch(/transition:\s*var\(--transition-press\)/);
+    expect(css).toMatch(/transform:\s*scale\(var\(--press-scale\)\)/);
+  });
 });

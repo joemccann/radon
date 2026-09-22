@@ -45,7 +45,7 @@ describe("REGIME_RAIL_GROUPS — grouped registry covers every tab exactly once"
     expect(REGIME_TABS).toHaveLength(31);
     expect(new Set(REGIME_TABS).size).toBe(31);
     expect([...REGIME_TABS].sort()).toEqual(
-      ["cri", "vcg", "gex", "grg", "breadth", "ma-ratio", "trin", "divyield", "hyad", "hhlev", "bpi", "margin", "credit", "iei-hyg", "straddle", "cor", "streaks", "vixcor", "vixts", "dispersion", "ivrank", "iv-spread", "skew", "skew2d", "curve", "calm-streak", "cot", "ats", "short", "llm", "backtest"].sort(),
+      ["cri", "vcg", "gex", "grg", "breadth", "ma-ratio", "trin", "divyield", "hyad", "hhlev", "bpi", "margin", "credit", "iei-hyg", "straddle", "cor", "streaks", "vixcor", "vixts", "panic-index", "dispersion", "ivrank", "iv-spread", "skew", "skew2d", "curve", "calm-streak", "cot", "ats", "short", "backtest"].sort(),
     );
   });
 
@@ -58,6 +58,7 @@ describe("REGIME_RAIL_GROUPS — grouped registry covers every tab exactly once"
     expect(groupOf.vcg).toBe("Composite");
     expect(groupOf.vixcor).toBe("Volatility");
     expect(groupOf.vixts).toBe("Volatility");
+    expect(groupOf["panic-index"]).toBe("Volatility");
     expect(groupOf.dispersion).toBe("Volatility");
     expect(groupOf.ivrank).toBe("Volatility");
     expect(groupOf["iv-spread"]).toBe("Volatility");
@@ -78,7 +79,7 @@ describe("REGIME_RAIL_GROUPS — grouped registry covers every tab exactly once"
     expect(groupOf.bpi).toBe("Breadth & sentiment");
     expect(groupOf.cor).toBe("Breadth & sentiment");
     expect(groupOf.streaks).toBe("Breadth & sentiment");
-    expect(groupOf.llm).toBe("Models");
+    expect(groupOf.llm).toBeUndefined();
     expect(groupOf.backtest).toBe("Models");
   });
 
@@ -90,6 +91,7 @@ describe("REGIME_RAIL_GROUPS — grouped registry covers every tab exactly once"
     expect(REGIME_TAB_LABEL.skew2d).toBe("SKEW 2D");
     expect(REGIME_TAB_LABEL.vixcor).toBe("VIX-COR");
     expect(REGIME_TAB_LABEL.vixts).toBe("VIX TS");
+    expect(REGIME_TAB_LABEL["panic-index"]).toBe("PANIC");
     expect(REGIME_TAB_LABEL.dispersion).toBe("DISPERSION");
     expect(REGIME_TAB_LABEL.ivrank).toBe("IV RANK");
     expect(REGIME_TAB_LABEL["iv-spread"]).toBe("IV SPREAD");

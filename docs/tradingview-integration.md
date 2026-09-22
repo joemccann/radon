@@ -56,16 +56,42 @@ Radon log **plus a digested Pushover**, never one push per fire; MCP stays read-
 on(POST)
   1. path token or body secret mismatch     -> 401, write nothing      (fail closed)
   2. Content-Length or read length > 16 KiB -> 413, write nothing
-  3. INSERT raw body + received_at + source_ip        <- BEFORE any parse
+  3. redact configured secrets; INSERT sanitized body + received_at + source_ip
   4. parse application/json, else text/plain
        success -> fill symbol, exchange, price, interval, alert_name, bar_time, sent_at
-       failure -> leave parsed columns NULL, keep the raw row
+       failure -> leave parsed columns NULL, keep the sanitized row
   5. return 200                          (never 4xx/5xx past step 1: TradingView never retries)
 ```
 
 No Pushover, no FastAPI call, no symbol resolution inside the handler.
 
 ### Storage
+
+The retained `raw_body` is sanitized, not an exact copy of the original input.
+The [route](../web/app/api/webhooks/tradingview/[token]/route.ts) calls
+[`redactSecret`](../web/lib/tvWebhook.ts) before INSERT; parsed alert fields
+are extracted from the incoming body separately. Do not rely on stored bodies
+for byte-for-byte replay or recovery of the original request.
+
+[Migration 0084](../scripts/db/migrations/0084_redact_tv_alert_raw_body.sql)
+redacts the JSON secret member in older rows and replaces an entire non-JSON
+body when it matches the migration's secret-token patterns. Other JSON fields
+and already-parsed columns survive; replaced text cannot be reconstructed
+from that row. The drain consumes parsed columns, and the existing retention
+window still applies. Migration is not credential rotation and is not proof
+that historical copies outside this table were scrubbed.
+
+Deployment and credential follow-up are operator-only: through the approved
+authenticated database interface, check
+`SELECT version FROM schema_migrations WHERE version = 84`, then verify that
+the migration-required `TV_WEBHOOK_SECRET` rotation was completed. If not,
+follow **Rotate a secret** below, verify every alert uses the replacement,
+and only then remove the old value. Stop if migration or alert coverage cannot
+be established; escalate to the credential operator without a blind rerun or
+restoring an unsanitized body. Keep the overlap until coverage is proven and
+record completion evidence without secret values. Source review cannot
+confirm deployed migration or rotation state.
+
 
 Migration `scripts/db/migrations/00NN_tv_alert_events.sql`:
 
@@ -79,6 +105,7 @@ CREATE TABLE IF NOT EXISTS tv_alert_events (
     price REAL, interval TEXT, alert_name TEXT,
     bar_time TEXT, sent_at TEXT,
     parse_error TEXT,
+    duplicate_of INTEGER,
     processed_at TEXT,
     digest_sent_at TEXT
 );
@@ -90,7 +117,8 @@ CREATE INDEX IF NOT EXISTS idx_tv_alert_events_received_desc ON tv_alert_events 
 - **Dedupe is deliberately weak**: only an exact repeat of
   `(alert_name, symbol, interval, bar_time, price)` inside 5s is marked duplicate. A
   genuine second fire in the same bar is indistinguishable from a network echo, and
-  dropping it silently is worse than keeping it.
+  dropping it silently is worse than keeping it. The drain records a repeat in
+  `duplicate_of` (the first fire's id) and leaves it out of the digest.
 - **Retention**: the drain job prunes rows older than 180 days. Do not copy
   `demo_webhook_events`, which has no prune and grows unbounded.
 - Writes go through the `dbExecute` chokepoint
@@ -172,6 +200,44 @@ value containing `$`.
   placement and no broker routing, ever** — enforced in code, not prose.
 - One live smoke alert fired from a chart, end to end, evidence in the PR.
 
+### Operator runbook
+
+**Create an alert** (TradingView web or desktop):
+
+1. Get the URL: `grep TV_WEBHOOK_PATH_TOKEN web/.env` gives
+   `https://app.radon.run/api/webhooks/tradingview/<token>`. Never paste it into an
+   issue, PR or chat.
+2. Open a chart and press `Alt+A` (or the alarm-clock icon).
+3. **Settings**: pick the condition. Choose the trigger frequency deliberately:
+   `Once per bar close` for indicator alerts, `Only once` for a smoke test.
+4. **Message**: paste the template above and replace `…` with the `TV_WEBHOOK_SECRET`
+   value. Keep every placeholder quoted.
+5. **Notifications**: tick **Webhook URL** and paste the URL. Webhooks require 2FA on
+   the TradingView account.
+6. Click **Create**.
+
+**Verify a fire**:
+
+- Row: `SELECT id, received_at, source_ip, symbol, ticker, price, parse_error,
+  duplicate_of, processed_at, digest_sent_at FROM tv_alert_events ORDER BY id DESC LIMIT 5`.
+- Digest: one Pushover titled `TradingView alerts` within 5 minutes of the fire.
+- Drain health: `service_health` row `tv-alerts-drain` (20-minute window), or
+  `journalctl -u radon-tv-alerts.service -n 20` on the VPS.
+
+**Troubleshooting**:
+
+| Symptom | Cause |
+|---|---|
+| TradingView alert log shows a failed webhook, no row | Caddy 403 (sender IP not in the allowlist: TradingView changed IPs) or 401 (wrong path token or body secret) |
+| Row with `parse_error` and NULL symbol | message is not valid JSON, usually an unquoted placeholder |
+| Row with NULL `ticker` | symbol not resolvable (crypto, FX, unknown exchange); counted as unresolved in the digest |
+| Rows with NULL `digest_sent_at` | Pushover credentials missing or the push failed; `tv-alerts-drain` reads `error` |
+| No row, no TradingView error | the alert did not fire; TradingView never retries, so the fire is gone |
+
+**Rotate a secret**: set the env var to `old,new` in `/etc/radon/env` and `web/.env`,
+restart `radon-nextjs.service`, re-point every alert (message secret or URL), then set
+it to `new` alone and restart again. Both values pass during the overlap.
+
 ---
 
 ## Phase 2 — alert lifecycle
@@ -202,7 +268,7 @@ Ladder placement, per the operator review of 2026-09-15:
   (`/screener/analysts`: firm, analyst, upgrade or downgrade, target, timestamp), which
   TradingView has no equivalent for.
 - **TradingView below the official feeds and above Yahoo** for any price series:
-  IB > UW > Cboe/Treasury/FINRA > TradingView > Robinhood > Yahoo.
+  IB > Robinhood > UW > Cboe/Treasury/FINRA > TradingView > Yahoo.
 - **Never** for greeks, implied vol, option chains or open interest, dark pool, sweeps,
   GEX, depth, or execution. TradingView serves none of it, and no Gate 1-3 input may
   come from TradingView.

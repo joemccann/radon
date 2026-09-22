@@ -2,6 +2,7 @@ import { ImageResponse } from "next/og";
 import { loadFonts } from "@/lib/og-fonts";
 import { OG } from "@/lib/og-theme";
 import { rateLimit, clientIp, SHARE_PNL_LIMIT, SHARE_WINDOW_MS } from "@/lib/rateLimit";
+import { sharePnlHeroLayout } from "@/lib/sharePnlHero";
 
 export const runtime = "nodejs";
 // A satori render holding the whole bitmap must not run unbounded (R-310).
@@ -87,6 +88,10 @@ export async function GET(request: Request) {
     // Build hero text parts
     const heroDollar = pnl != null && Number.isFinite(pnl) ? fmtDollar(pnl) : null;
     const heroPct = pnlPct != null && Number.isFinite(pnlPct) ? fmtPct(pnlPct) : null;
+    const heroLayout = sharePnlHeroLayout({
+      dollar: heroDollar != null,
+      pct: heroPct != null,
+    });
 
     const fmtSignedPrice = (v: number): string =>
       v < 0 ? `-$${Math.abs(v).toFixed(2)}` : `$${v.toFixed(2)}`;
@@ -175,15 +180,15 @@ export async function GET(request: Request) {
               <div
                 style={{
                   display: "flex",
-                  flexDirection: "row",
-                  alignItems: "baseline",
+                  flexDirection: heroLayout.direction,
+                  alignItems: "center",
                   justifyContent: "center",
                 }}
               >
                 {heroDollar ? (
                   <span
                     style={{
-                      fontSize: heroPct ? "92px" : "192px",
+                      fontSize: `${heroLayout.dollarFontSizePx}px`,
                       fontWeight: 700,
                       color: accentColor,
                       lineHeight: "1",
@@ -195,12 +200,11 @@ export async function GET(request: Request) {
                 {heroPct ? (
                   <span
                     style={{
-                      fontSize: heroDollar ? "86px" : "192px",
+                      fontSize: `${heroLayout.pctFontSizePx}px`,
                       fontWeight: 700,
                       color: accentColor,
-                      opacity: heroDollar ? 0.75 : 1,
                       lineHeight: "1",
-                      marginLeft: heroDollar ? "18px" : "0",
+                      marginTop: heroDollar ? "8px" : "0",
                     }}
                   >
                     {heroPct}

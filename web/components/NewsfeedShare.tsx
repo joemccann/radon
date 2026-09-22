@@ -1,9 +1,14 @@
 "use client";
+import ErrorToast from "@/components/ErrorToast";
 
+import { userErrorMessage } from "@/lib/userError";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Share2 } from "lucide-react";
 import { buildShareCaption, buildXShareUrl, sanitizeShareText, renderShareCard, canvasToPng, canvasToMp4, supportsMp4Export, type SharePost } from "@/lib/newsfeedShare";
 import styles from "./NewsfeedShare.module.css";
+
+const voiceDrafts = new Map<string, { title: string; content: string }>();
+export function resetNewsfeedShareVoiceCache() { voiceDrafts.clear(); }
 
 export default function NewsfeedShare({ post, imageUrl }: { post: SharePost; imageUrl?: string }) {
   const [open, setOpen] = useState(false);
@@ -21,11 +26,12 @@ export default function NewsfeedShare({ post, imageUrl }: { post: SharePost; ima
 
 function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: string; panelId: string }) {
   const id = useId();
-  const [caption, setCaption] = useState(() => buildShareCaption(post, imageUrl));
+  const cached = voiceDrafts.get(post.id);
+  const [caption, setCaption] = useState(() => buildShareCaption(cached ? { ...post, ...cached } : post, imageUrl));
   const original = useRef(post);
   const originalImage = useRef(imageUrl);
-  const [rewrite, setRewrite] = useState<{ title: string; content: string }>();
-  const [rewriting, setRewriting] = useState(true);
+  const [rewrite, setRewrite] = useState<{ title: string; content: string } | undefined>(cached);
+  const [rewriting, setRewriting] = useState(!cached);
   const [voiceError, setVoiceError] = useState("");
   const [voiceAttempt, setVoiceAttempt] = useState(0);
   const sharePost = useMemo(() => rewrite ? { ...post, ...rewrite } : post, [post, rewrite]);
@@ -47,13 +53,23 @@ function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: s
   useEffect(() => {
     const abort = new AbortController();
     let cancelled = false;
+    const hit = voiceAttempt === 0 ? voiceDrafts.get(original.current.id) : undefined;
+    if (hit) {
+      setRewrite(hit);
+      setCaption(buildShareCaption({ ...original.current, ...hit }, originalImage.current));
+      setRewriting(false);
+      return;
+    }
     setRewriting(true);
     setVoiceError("");
     // Defer past StrictMode's setup/cleanup probe to avoid duplicate paid requests.
     const start = setTimeout(() => { void fetch("/api/newsfeed/share", {
       method: "POST", cache: "no-store", signal: AbortSignal.any([abort.signal, AbortSignal.timeout(30_000)]),
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: sanitizeShareText(original.current.title), content: buildShareCaption({ ...original.current, title: "" }, originalImage.current) }),
+      body: JSON.stringify({
+        title: sanitizeShareText(original.current.title),
+        content: sanitizeShareText(original.current.content || ""),
+      }),
     }).then(async response => {
       if (!response.ok) throw new Error("Voice rewrite unavailable. Showing the original copy.");
       const draft: unknown = await response.json();
@@ -64,6 +80,7 @@ function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: s
       }
       if (cancelled) return;
       const next = { title: sanitizeShareText(draft.title), content: sanitizeShareText(draft.content) };
+      voiceDrafts.set(original.current.id, next);
       setRewrite(next);
       setCaption(buildShareCaption({ ...original.current, ...next }, originalImage.current));
     }).catch(() => {
@@ -79,16 +96,15 @@ function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: s
     setPreview(undefined);
     controller.current?.abort();
     setError("");
-    if (rewriting) return;
     void renderShareCard(sharePost, imageUrl).then(async rendered => {
       const blob = await canvasToPng(rendered);
       if (cancelled) return;
       canvas.current = rendered;
       url = URL.createObjectURL(blob);
       setPreview(url);
-    }).catch(err => { if (!cancelled) setError(err instanceof Error ? err.message : "Could not prepare the image. Retry to export."); });
+    }).catch(err => { if (!cancelled) setError(userErrorMessage(err, "Could not prepare the image. Retry to export.")); });
     return () => { cancelled = true; if (url) URL.revokeObjectURL(url); };
-  }, [sharePost, imageUrl, attempt, rewriting]);
+  }, [sharePost, imageUrl, attempt]);
 
   async function download(video: boolean) {
     if (!canvas.current || busy || rewriting) return;
@@ -106,7 +122,7 @@ function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: s
       setMessage(video ? "Video downloaded. Upload it in Instagram or TikTok and paste your caption." : "Image downloaded. Add it to your Story or attach it to your X post.");
     } catch (err) {
       if (active.current && !(err instanceof DOMException && err.name === "AbortError")) {
-        setError(err instanceof Error ? err.message : "Export failed. Try again.");
+        setError(userErrorMessage(err, "Export failed. Try again."));
       }
     } finally { if (active.current) setBusy(false); }
   }
@@ -122,7 +138,7 @@ function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: s
       <div className={styles.preview}>
         {/* Local blob generated on demand; next/image cannot optimize it. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        {preview ? <img src={preview} alt={`Portrait share preview: ${sanitizeShareText(post.title)}`} /> : <span>{error ? "Preview unavailable" : "Preparing preview…"}</span>}
+        {preview ? <img src={preview} alt={`Portrait share preview: ${sanitizeShareText(post.title)}`} /> : <span>{error ? "" : "Preparing preview…"}</span>}
       </div>
       <div className={styles.actions}>
         <a className={styles.action} href={buildXShareUrl(caption)} target="_blank" rel="noopener noreferrer">Compose on X</a>
@@ -136,8 +152,8 @@ function SharePanel({ post, imageUrl, panelId }: { post: SharePost; imageUrl?: s
     <textarea id={id} disabled={rewriting} value={caption} onChange={event => setCaption(event.target.value)} rows={4} />
     <div className={styles.captionActions}><button type="button" disabled={rewriting} onClick={() => void copyCaption()}>Copy caption</button><span>{Array.from(caption).length} characters · edit to fit X</span></div>
     <p className={styles.note}>The image and video use the preview copy. Caption edits apply only to your post.</p>
-    {voiceError ? <div role="alert" className={styles.error}>{voiceError} <button type="button" disabled={busy || rewriting} onClick={() => setVoiceAttempt(value => value + 1)}>Retry voice rewrite</button></div> : null}
-    {error ? <div role="alert" className={styles.error}>{error} <button type="button" disabled={busy} onClick={() => { setError(""); setAttempt(value => value + 1); }}>Retry</button></div> : null}
+    {voiceError ? <ErrorToast message={voiceError} onRetry={busy || rewriting ? undefined : () => setVoiceAttempt(value => value + 1)} /> : null}
+    {error ? <ErrorToast message={error} onRetry={busy ? undefined : () => { setError(""); setAttempt(value => value + 1); }} /> : null}
     <p role="status" className={styles.status}>{rewriting ? "Writing in your voice…" : message || (busy ? "Creating your video. Keep this panel open." : "")}</p>
   </section>;
 }

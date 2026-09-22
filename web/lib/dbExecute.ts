@@ -16,6 +16,7 @@ import type { InStatement, ResultSet } from "@libsql/client";
 import { scrubSecrets } from "./apiContracts";
 import { getDb, resetDb, getPoolStats } from "./db";
 import { withTimeout } from "./asyncTimeout";
+import { assertDemoDbIsolation } from "./demo/demoDbIsolation";
 import {
   createDbOperationIdentity,
   currentDbOperationIdentity,
@@ -43,6 +44,10 @@ export async function dbExecute(
   opts: { timeoutMs?: number; label?: string } = {},
 ): Promise<ResultSet> {
   const { timeoutMs = DEFAULT_DB_READ_TIMEOUT_MS, label = "db" } = opts;
+  // REL-245 / F20260917-C04: demo-scoped callers must never read a
+  // prod-marked DB. Enforced here so every dbExecute caller inherits it;
+  // throws BEFORE the client is touched (no pool reset needed).
+  assertDemoDbIsolation();
   const identity = currentDbOperationIdentity() ?? createDbOperationIdentity();
   identity.label ??= label;
   try {

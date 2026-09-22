@@ -42,6 +42,10 @@ CANONICAL = {
 }
 LOOP_MARKERS = {loop: f".radon-{loop}-runner" for loop in WRAPPERS}
 PLISTS = {loop: REPO / "config" / f"com.radon.{loop}-daily.plist" for loop in WRAPPERS}
+# The DeepSec loop (2026-09-18) shares setup_security_nightly.sh, so it is not
+# in WRAPPERS/SETUPS; its launcher still has to obey the fetch-timeout and
+# stagger contracts.
+PLISTS["security-deepsec"] = REPO / "config" / "com.radon.security-deepsec.plist"
 TAIL_POSTERS = ["reliability", "testing", "ci-performance", "documentation"]
 
 
@@ -53,7 +57,7 @@ def _plist(loop: str) -> dict:
 
 
 class TestPlistFetchIsBounded:
-    @pytest.mark.parametrize("loop", sorted(WRAPPERS))
+    @pytest.mark.parametrize("loop", sorted(PLISTS))
     def test_the_pre_lock_fetch_runs_under_a_timeout(self, loop: str) -> None:
         program = " ".join(_plist(loop)["ProgramArguments"])
         assert "fetch" in program, program
@@ -71,7 +75,7 @@ class TestPlistFetchIsBounded:
 class TestStaggeredFires:
     def test_five_calendar_slots_are_pairwise_distinct(self) -> None:
         slots = {}
-        for loop in WRAPPERS:
+        for loop in PLISTS:
             cal = _plist(loop)["StartCalendarInterval"]
             slots[loop] = (int(cal["Hour"]), int(cal["Minute"]))
         assert len(set(slots.values())) == len(slots), slots

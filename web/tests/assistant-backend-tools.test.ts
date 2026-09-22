@@ -115,10 +115,15 @@ describe("assistant backend tools", () => {
       quantity: 10,
     }, PRINCIPAL);
     expect(result.ok).toBe(true);
-    // RC-B7: non-knowledge tool results are fenced; the payload lives in body.
-    const fenced = result.data as { body: { spreads: Array<{ buyStrike: number; maxPayoutDollars: number }> } };
-    expect(fenced.body.spreads[0].buyStrike).toBe(480);
-    expect(fenced.body.spreads[0].maxPayoutDollars).toBeCloseTo(13_000, 0);
+    // RC-B7/C09: non-knowledge tool results are fenced; the ONLY copy of the
+    // payload is the fenced excerpt's JSON.
+    const fenced = result.data as { excerpt: string };
+    const lines = fenced.excerpt.split("\n");
+    const body = JSON.parse(lines.slice(1, -1).join("\n")) as {
+      spreads: Array<{ buyStrike: number; maxPayoutDollars: number }>;
+    };
+    expect(body.spreads[0].buyStrike).toBe(480);
+    expect(body.spreads[0].maxPayoutDollars).toBeCloseTo(13_000, 0);
   });
 
   it("run_evaluate posts evaluate.py to /pi/exec without mutating", async () => {

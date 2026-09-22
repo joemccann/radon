@@ -1,0 +1,22 @@
+{
+  "adapter_sha256": null,
+  "base": "Qwen/Qwen2.5-1.5B-Instruct",
+  "dataset_manifest_sha256": null,
+  "eval": {
+    "arena": "fixture-limited",
+    "verdict": "C FAILS G0,G1,G2,G3,G4,G5,G6,G7,G8",
+    "note": "Live GGUF / gold_human / serve-host latency unmeasured. Rung stays off."
+  },
+  "gguf": {
+    "Q4_K_M": {
+      "b2_key": "radon-models/slm-tagger/v1/radon-slm-tagger-v1.Q4_K_M.gguf",
+      "bytes": null,
+      "sha256": null
+    }
+  },
+  "honesty": "Radon SLM tagger: internal specialist, not a SotA replacement for open research.",
+  "llama_cpp_pin": "b6504",
+  "prompt_contract_sha256": "e5e4316c02ce0385de4a2f44683bbac6f98b9cc170dd3ec12712571aa6fd2317",
+  "trained_at": null,
+  "version": "1.0.0"
+}

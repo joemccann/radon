@@ -26,8 +26,24 @@ except ImportError:
     import urllib.error
     HAS_REQUESTS = False
 
-XAI_API_KEY = os.environ.get("XAI_API_KEY")
 XAI_BASE_URL = "https://api.x.ai/v1"
+
+
+def _xai_token() -> str:
+    """SuperGrok subscription grant (subscriptions only, 2026-09-18).
+
+    Resolved through the shared ladder: ~/.grok/auth.json, or a prepaid
+    XAI_API_KEY only under RADON_LADDER_ALLOW_PREPAID=1.
+    """
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from clients import model_ladder
+
+    auth = model_ladder.subscription_auth("grok")
+    return auth.token if auth is not None else ""
+
+
+# Resolved lazily at call time so an import never reads a credential.
+XAI_API_KEY = None
 
 # Known ticker patterns
 COMMON_TICKERS = {
@@ -150,9 +166,10 @@ def xai_search(account: str, days: int = 3) -> Dict:
     Uses curl subprocess for reliable HTTPS handling.
     """
     import subprocess
-    
-    if not XAI_API_KEY:
-        raise ValueError("XAI_API_KEY environment variable not set")
+
+    token = _xai_token()
+    if not token:
+        raise ValueError("Grok subscription is not available (no ~/.grok/auth.json grant)")
     
     # Calculate date range
     end_date = datetime.now()
@@ -181,17 +198,21 @@ def xai_search(account: str, days: int = 3) -> Dict:
     
     # Use curl for reliable HTTPS - Python's SSL on this machine has issues
     # Note: xAI x_search can take 2-3 minutes for comprehensive account searches
+    # The Authorization header goes in via a stdin config file, never argv:
+    # argv is world-readable through ps for the whole 2-3 minute call.
     cmd = [
         "curl", "-s", "-X", "POST",
         f"{XAI_BASE_URL}/responses",
-        "-H", f"Authorization: Bearer {XAI_API_KEY}",
+        "--config", "-",
         "-H", "Content-Type: application/json",
         "--max-time", "300",  # 5 minute timeout
         "-d", json.dumps(payload)
     ]
-    
+    curl_config = f'header = "Authorization: Bearer {token}"\n'
+
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=320)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=320,
+                                input=curl_config)
         if result.returncode == 28:  # curl timeout
             raise RuntimeError("API request timed out (300s). The xAI API may be slow for this account.")
         if result.returncode != 0:
@@ -452,9 +473,9 @@ def main():
     
     args = parser.parse_args()
     
-    if not XAI_API_KEY:
-        print("❌ Error: XAI_API_KEY environment variable not set")
-        print("   Set it with: export XAI_API_KEY=your-api-key")
+    if not _xai_token():
+        print("❌ Error: Grok subscription is not available")
+        print("   Log the grok CLI in (~/.grok/auth.json); see docs/subscription-tokens.md")
         sys.exit(1)
     
     print(f"🔍 Searching X for @{args.account} (last {args.days} days)...")
