@@ -1,0 +1,203 @@
+.title,
+.recenter {
+  display: none;
+}
+
+/* Chain first uses the existing quote panes and ticket. Only desktop layout
+   changes here; the mobile ladder and its touch controls retain their sizing. */
+@media (min-width: 1024px) {
+  :global(.chain-first-cockpit) .chainFirst {
+    display: flex;
+    padding: 0;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  :global(.chain-first-cockpit) .chainFirst :global(.chain-rail) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+    min-height: 0;
+  }
+
+  :global(.chain-first-cockpit) .chainFirst :global(.chain-rail[data-docked="true"]) {
+    grid-template-columns: minmax(0, 1fr) 384px;
+  }
+
+  :global(.chain-first-cockpit) .chainFirst :global(.chain-rail-main) {
+    display: flex;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  :global(.chain-first-cockpit) .chainFirst :global(.chain-first-toolbar) {
+    flex: none;
+    height: 56px;
+    padding: 0 12px;
+    margin: 0;
+    gap: 8px;
+    white-space: nowrap;
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+
+  :global(.chain-first-cockpit) .title {
+    display: block;
+    flex: none;
+    margin-right: 8px;
+    color: var(--text-primary);
+    font: 600 14px var(--font-sans);
+  }
+
+  :global(.chain-first-cockpit) .chainFirst :global(.chain-first-toolbar) label {
+    font: 400 12px var(--font-sans) !important;
+    letter-spacing: 0 !important;
+  }
+
+  :global(.chain-first-cockpit) .chainFirst :global(.chain-expiry-select) {
+    min-height: 32px;
+    font-family: var(--font-sans);
+  }
+
+  :global(.chain-first-cockpit) .chainFirst :global(.chain-side-toggle-btn) {
+    min-height: 30px;
+    font: 500 12px var(--font-sans);
+    padding-inline: 10px;
+    letter-spacing: 0;
+  }
+
+  :global(.chain-first-cockpit) .recenter {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: none;
+    min-height: 32px;
+    padding: 0 10px;
+    background: var(--bg-panel);
+    color: var(--text-primary);
+    border: 1px solid var(--line-grid);
+    border-radius: var(--radius);
+    font: 500 12px var(--font-sans);
+    cursor: pointer;
+  }
+
+  :global(.chain-first-cockpit) .recenter:hover:not(:disabled) {
+    background: var(--bg-hover);
+  }
+
+  :global(.chain-first-cockpit) .recenter:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  :global(.chain-first-cockpit) .recenter:focus-visible {
+    outline: 2px solid var(--signal-core);
+    outline-offset: 2px;
+  }
+
+  :global(.chain-first-cockpit) .chainFirst :global(.chain-grid-wrapper.chain-anchor-panes) {
+    flex: 1 1 0;
+    min-height: 0;
+    height: auto;
+    max-height: none;
+    border: 0;
+    border-radius: 0;
+  }
+
+  :global(.chain-first-cockpit) .chainFirst :global(.chain-anchor-panes .chain-grid) {
+    min-width: 1088px;
+    font-size: 13px;
+  }
+
+  :global(.chain-first-cockpit) .chainFirst :global(.chain-anchor-panes[data-side="calls"] .chain-grid),
+  :global(.chain-first-cockpit) .chainFirst :global(.chain-anchor-panes[data-side="puts"] .chain-grid) {
+    min-width: 648px;
+  }
+
+  :global(.chain-first-cockpit) .chainFirst :global(.chain-anchor-strike-col) {
+    width: 7.5rem;
+    min-width: 7.5rem;
+  }
+
+  :global(.chain-first-cockpit) .chainFirst :global(.chain-cell) {
+    height: 40px;
+    padding: 0 6px;
+    font: 400 13px var(--font-sans);
+    font-variant-numeric: tabular-nums;
+  }
+
+  :global(.chain-first-cockpit) .chainFirst :global(.chain-strike),
+  :global(.chain-first-cockpit) .chainFirst :global(.chain-mid) {
+    font-weight: 600;
+  }
+
+  :global(.chain-first-cockpit) .chainFirst :global(.chain-header),
+  :global(.chain-first-cockpit) .chainFirst :global(.chain-side-label) {
+    height: 28px;
+    padding: 0 6px;
+    font-size: 12px;
+    line-height: 1;
+  }
+
+  :global(.chain-first-cockpit) .chainFirst :global(.chain-side-label) {
+    top: 28px;
+    height: 24px;
+  }
+
+  :global(.chain-first-cockpit) .chainFirst :global(.chain-spot-bar) {
+    min-height: 26px;
+    height: 26px;
+    padding: 0 12px;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  :global(.chain-first-cockpit) .chainFirst :global(.chain-spot-bar__quote) {
+    flex-wrap: nowrap;
+    white-space: nowrap;
+    align-items: center;
+    gap: 6px;
+  }
+
+  :global(.chain-first-cockpit) .chainFirst :global(.chain-spot-bar__quote strong) {
+    font-size: 13px;
+  }
+
+  :global(.chain-first-cockpit) .chainFirst :global(.chain-spot-bar__symbol),
+  :global(.chain-first-cockpit) .chainFirst :global(.chain-spot-bar__source),
+  :global(.chain-first-cockpit) .chainFirst :global(.chain-spot-bar__anchor) {
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  :global(.chain-first-cockpit) .chainFirst :global(.chain-spot-bar__recenter) {
+    display: none;
+  }
+
+  :global(.chain-first-cockpit) .chainFirst :global(.order-builder--rail) {
+    margin: 0;
+    max-height: 100%;
+    overflow-y: auto;
+    border-radius: 0;
+    border-block: 0;
+    border-right: 0;
+  }
+
+  :global(.chain-first-cockpit) .chainFirst :global(.chain-rail-hint) {
+    padding: 6px 12px;
+    font: 400 12px var(--font-sans);
+    letter-spacing: 0;
+    flex-wrap: wrap;
+  }
+
+  :global(.chain-first-cockpit) .chainFirst :global(.chain-rail[data-docked="true"] .chain-first-toolbar) {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 56px;
+    padding-block: 8px;
+  }
+
+  :global(.chain-first-cockpit) .chainFirst :global(.chain-rail[data-docked="true"]) .title {
+    display: none;
+  }
+}

@@ -227,6 +227,12 @@ CROSS_TREE_CONTRACTS = (
         tests=("scripts/tests/test_setup_service_id_parity.py",),
     ),
     CrossTreeContract(
+        patterns=("web/lib/setup/envFiles.ts",),
+        tests=(
+            "scripts/tests/test_credentials_registry.py::TestExpectedSurface::test_setup_wizard_web_env_keys_are_a_subset_of_the_registry",
+        ),
+    ),
+    CrossTreeContract(
         patterns=("web/lib/ieiHyg.ts",),
         tests=(
             "scripts/tests/test_silent_degradation_bounds.py::TestIeiHygNeedsAFullWindow::test_the_web_type_knows_the_unknown_state",

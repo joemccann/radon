@@ -241,16 +241,17 @@ describe("CashFlowsSection sync lozenge", () => {
 
     render(<CashFlowsSection />);
     const lozenge = screen.getByTestId("cash-flows-sync-lozenge");
-    expect(lozenge.textContent).toMatch(/Flex throttled/i);
-    expect(lozenge.textContent).toMatch(/retry/i);
+    expect(lozenge.textContent).toMatch(/STALE/);
+    expect(screen.getByRole("alert").textContent).toMatch(/throttle/i);
+    expect(screen.getByRole("alert").textContent).toMatch(/Next attempt/i);
     // Wall-clock ET retry hint when more than 6h out.
-    expect(lozenge.textContent).toMatch(/ET/);
+    expect(screen.getByRole("alert").textContent).toMatch(/ET/);
     // Warn-tone classname so the operator's eye gets pulled to it.
     expect(lozenge.getAttribute("data-state")).toBe("warn");
     expect(lozenge.className).toContain("cash-flows-sync-lozenge--warn");
     // Tooltip explains the throttle pattern, not the generic T+1 lag.
     const title = lozenge.getAttribute("title") ?? "";
-    expect(title.toLowerCase()).toMatch(/throttle/);
+    expect(title).toMatch(/T\+1/);
     // No em dashes in the user-visible copy (CLAUDE.md rule 6).
     expect(lozenge.textContent?.includes("—")).toBe(false);
     expect(title.includes("—")).toBe(false);
@@ -291,7 +292,7 @@ describe("CashFlowsSection sync lozenge", () => {
 
     render(<CashFlowsSection />);
     const lozenge = screen.getByTestId("cash-flows-sync-lozenge");
-    expect(lozenge.textContent).toMatch(/timed out/i);
+    expect(screen.getByRole("alert").textContent).toMatch(/took too long/i);
     expect(lozenge.textContent).not.toMatch(/throttled/i);
     expect(lozenge.getAttribute("data-state")).toBe("fault");
     expect(lozenge.className).toContain("cash-flows-sync-lozenge--fault");
@@ -401,8 +402,8 @@ describe("CashFlowsSection sync lozenge", () => {
 
     render(<CashFlowsSection />);
     const lozenge = screen.getByTestId("cash-flows-sync-lozenge");
-    expect(lozenge.textContent).toMatch(/Flex lockout/i);
-    expect(lozenge.textContent).toMatch(/Do not retry/i);
+    expect(screen.getByRole("alert").textContent).toMatch(/Flex lockout/i);
+    expect(screen.getByRole("alert").textContent).toMatch(/Do not retry/i);
     expect(lozenge.textContent).not.toMatch(/retry.*tomorrow/i);
     expect(lozenge.textContent?.includes("—")).toBe(false);
   });

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.radon.claude-cli-env-drift</string>
+
+    <!-- __REPO__ / __HOME__ are substituted by scripts/setup_claude_cli_env_drift.sh.
+         __REPO__ is the security runner clone, reset to origin/main nightly. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>-I</string>
+        <string>__REPO__/scripts/claude_cli_env_drift.py</string>
+        <string>--notify</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>__HOME__/.local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>__HOME__</string>
+    </dict>
+
+    <!-- Daily 23:50 local, ahead of the 00:00-00:50 nightly loops. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>23</integer>
+        <key>Minute</key>
+        <integer>50</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/radon-weekend/logs/claude-cli-env-drift.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/radon-weekend/logs/claude-cli-env-drift.err</string>
+</dict>
+</plist>

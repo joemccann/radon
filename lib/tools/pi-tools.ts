@@ -8,6 +8,7 @@
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
+import { KellyInput } from "./schemas/kelly";
 import { kelly as kellyWrapper } from "./wrappers/kelly";
 import { fetchTicker } from "./wrappers/fetch-ticker";
 import { scanner as scannerWrapper } from "./wrappers/scanner";
@@ -18,21 +19,18 @@ export function registerTradingTools(pi: ExtensionAPI) {
   pi.registerTool({
     name: "kelly_calc",
     label: "Kelly Calculator",
-    description: "Calculate fractional Kelly bet size given probability and odds",
-    parameters: Type.Object({
-      prob_win: Type.Number({ minimum: 0, maximum: 1, description: "Probability of winning (0-1)" }),
-      odds: Type.Number({ exclusiveMinimum: 0, maximum: 1_000, description: "Win/loss ratio" }),
-      fraction: Type.Optional(Type.Number({ exclusiveMinimum: 0, maximum: 1, description: "Kelly fraction, default 0.25" })),
-      bankroll: Type.Optional(Type.Number({ minimum: 0, maximum: 1_000_000_000_000, description: "Current bankroll in dollars" })),
-    }),
+    description: "Calculate half-Kelly bet size given probability and odds. Default fraction 0.5; 0.25 optional stricter; full Kelly banned.",
+    parameters: KellyInput,
     async execute(_toolCallId: string, params: any) {
       try {
-        const { prob_win, odds, fraction, bankroll } = params ?? {};
+        const { prob, odds, fraction, bankroll, p_haircut, p_source } = params ?? {};
         const result = await kellyWrapper({
-          prob: prob_win,
+          prob,
           odds,
           fraction,
           bankroll,
+          p_haircut,
+          p_source,
         });
 
         if (!result.ok) {

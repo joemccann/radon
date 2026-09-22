@@ -38,9 +38,9 @@ describe("Clear mobile instrument navigation", () => {
     expect(onDeckChange).not.toHaveBeenCalled();
   });
 
-  it("preserves every desktop glyph and keyboard hint", () => {
+  it("preserves reference desktop glyphs without a command palette entry", () => {
     const { container } = render(<GlyphRail activeDeck="f" onDeckChange={vi.fn()} />);
-    expect(container.querySelectorAll(".glyph")).toHaveLength(9);
-    expect([...container.querySelectorAll(".glyph-k")].map((node) => node.textContent)).toEqual(["c", "p", "n", "r", "s", "i", "h", "f", ":"]);
+    expect(container.querySelectorAll(".glyph")).toHaveLength(8);
+    expect([...container.querySelectorAll(".glyph-k")].map((node) => node.textContent)).toEqual(["c", "p", "n", "r", "s", "i", "h", "f"]);
   });
 });

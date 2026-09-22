@@ -159,12 +159,14 @@ describe("route-change fresh sync", () => {
       { initialProps: { active: true } },
     );
 
-    await waitFor(() => expect(fetchMock.mock.calls.map(methodOf)).toEqual(["GET", "POST"]));
-    expect(result.current.data?.value).toBe(1);
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.map(methodOf)).toEqual(["GET"]);
+      expect(result.current.data?.value).toBe(1);
+    });
 
     rerender({ active: false });
     rerender({ active: true });
 
-    await waitFor(() => expect(fetchMock.mock.calls.map(methodOf)).toEqual(["GET", "POST", "POST"]));
+    await waitFor(() => expect(fetchMock.mock.calls.map(methodOf)).toEqual(["GET", "POST"]));
   });
 });

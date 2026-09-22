@@ -37,6 +37,8 @@ THEMARKETEAR_PASSWORD=<…>
 # Optional: RADON_NEWSFEED_HEADLESS=0   # to launch a visible browser for debugging
 ```
 
+In production both keys must also survive `render_env_file`'s newsfeed allowlist in `cloud/scripts/radon-app-runtime.sh`: the container is handed only the keys the scraper's own code reads. Without them the cycle runs on whatever cookie the container started with and dies in pre-cycle with `Missing THEMARKETEAR_EMAIL or THEMARKETEAR_PASSWORD environment variable.` the moment the ~6h re-auth or a paywall-stub detection fires (2026-09-20: the dashboard feed stopped publishing at 14:00 UTC). Pinned by `cloud/tests/test_app_runtime.py::test_run_newsfeed_env_file_carries_the_themarketear_login`.
+
 **Operating procedure:**
 
 1. **Laptop dev stack** — `npm run dev` keeps including the scraper as the 4th child and polls every 120s. No more "must keep Chrome Debug.app open" requirement.
@@ -317,6 +319,10 @@ does not mean Turso necessarily failed.
 
 `scripts/host_metrics_sampler.py` (main repo, stdlib-only) runs every minute on the VPS via `radon-host-metrics.timer` (`cloud/services/`) and writes one row per run to the Turso `host_metrics` table (migration 0012): CPU % from a 1s `/proc/stat` delta, memory + swap from `/proc/meminfo`, `load1`, per-`radon-*`-unit ActiveState/NRestarts, and the FastAPI event-loop lag exposed as `loop_lag_ms` on `/health/lite`. Writes ride the bounded hrana path (`scripts/db/hrana_http.py`) with a capped JSONL fallback at `data/host_metrics_fallback.jsonl`; every run heartbeats `service_health[host-metrics]` (10-min freshness window). Retention is 14 days, pruned hourly by the sampler. The `/admin` page renders the latest values + 1h sparkline via `GET /api/admin/host-metrics`.
 
+### TradingView alerts
+
+TradingView alert fires `POST` to `app.radon.run/api/webhooks/tradingview/<TV_WEBHOOK_PATH_TOKEN>`. Caddy admits only TradingView's four sender IPs and caps the body at 16KB. The route checks the path token and the body `secret` (`TV_WEBHOOK_SECRET`) in constant time, then persists the alert under the [sanitized-body retention and migration contract](tradingview-integration.md#storage). `scripts/tv_alerts_drain.py` runs every 5 minutes via `radon-tv-alerts.timer`. It resolves tickers, marks 5-second exact repeats in `duplicate_of`, sends one normal-priority Pushover digest per cycle (none when there are no new rows), prunes rows older than 180 days, and heartbeats `service_health[tv-alerts-drain]` (20-min window). Both secrets live in `/etc/radon/env`. Spec: [`tradingview-integration.md`](tradingview-integration.md).
+
 ### Bounded vs process-bound Turso writes (R5 partial)
 
 `libsql_experimental` has **no client timeouts** and holds the GIL while blocked. Prefer `scripts/db/hrana_http.py` (real `urllib` socket timeout) for hang-risk writers; leave bulk/oneshot scan writers on sync libsql under process supervision. Full inventory: module docstring of `scripts/db/client.py`.
@@ -343,7 +349,7 @@ journald on the VPS is on-box only (capped at 1G). A laptop launchd job (`~/Libr
 off. A `code_fix` + AUTOPUSH ships a `fix/**` branch and
 `scripts/ir_ensure_pr.py` opens a PR against `main` (never merges).
 Spec: [`grok-page-responder.md`](grok-page-responder.md).
-Do not install this on any clone under `~/radon-weekend/` (the five nightly loops hard-reset them every phase; table in [`operations.md`](operations.md#background-services)).
+Do not install this on any clone under `~/radon-weekend/` (the six nightly loops hard-reset them every phase; table in [`operations.md`](operations.md#background-services)).
 
 ### Error tracking — Sentry (not wired; recommended next step)
 
@@ -557,6 +563,12 @@ Re-check with `turso plan show` after any plan change. Nightly dumps remain mand
 | `radon-db-backup.timer` | **09:00** | Full Turso dump after archive + retention. |
 | `radon-media-backup.timer` | **10:15** | Mirror `media.radon.run` tree (`/home/radon/radon-cloud/media`) → B2 prefix `media/`. Heartbeat: `media-backup`. `TimeoutStartSec=3600`. |
 
+## Subscription tokens (agent CLIs)
+
+`radon-subscription-tokens.timer` fires every 30 minutes (explicit UTC, `Persistent=true`), so a one-hour access token is always refreshed at least once inside its life. The oneshot seals, refreshes and restores the anthropic / codex / grok / gemini (Antigravity `agy`) credential files through the existing encrypted secret store, proves each login with one real model call a day (the keepalive), and heartbeats the `subscription-tokens` row on every run. When a codex or grok grant is dead it starts the CLI's own device login and pages the link, so the fix is one tap; claude and agy page the SSH command. Runbook and per-provider re-auth commands: [subscription-tokens.md](subscription-tokens.md).
+
+---
+
 ## Disk cleanup (weekly)
 
 2026-08-27: the watchdog `root-disk-usage` check paged P1 at 98% of the 75G
@@ -660,6 +672,34 @@ unchanged-data heartbeats. Heartbeat `ma-ratio`. Installed by the deploy's
 `install-units` verb from `installed-units.sha256`. Spec:
 [`indicators/ma-ratio.md`](indicators/ma-ratio.md).
 
+### CALM STREAK (`radon-calm-streak.timer`)
+
+Daily `02:40 UTC` and `14:30 UTC` (`RandomizedDelaySec=120`), oneshot
+`scripts/fetch_calm_streak.py`, `TimeoutStartSec=300`. Pulls Cboe's official
+`_SPX.json` daily OHLC history with a conditional GET, counts consecutive
+completed sessions whose `(high - low) / prior close` stays at or under 1%,
+and writes `calm_streak_history` (only new sessions; an empty table backfills
+from 1985) plus the `calm-streak` snapshot. The regeneration time of the Cboe
+file is not published, so the evening slot and the morning slot (after the
+observed ~13:02 UTC regeneration) both run; unchanged runs are 304
+heartbeats. Heartbeat `calm-streak`. Installed by the deploy's
+`install-units` verb from `installed-units.sha256`. Spec:
+[`indicators/calm-streak.md`](indicators/calm-streak.md).
+
+### BOUNCE SETUP (`radon-bounce-setup.timer`)
+
+`Mon..Fri 21:10 UTC` (`RandomizedDelaySec=120`, `Persistent=true`), oneshot
+`scripts/bounce_setup_scanner.py --preset largecaps` on the venv python,
+`RADON_UW_CALLER=bounce-setup`, `TimeoutStartSec=900`. Stage 1 ranks the
+universe from Turso `price_history_daily` (no UW calls); stage 2 reads UW
+fixed-strike put vol and 25-delta skew for the 30 most stretched names.
+Writes `data/bounce_setup.json` plus the `scan_snapshots` row for service
+`bounce-setup`. A UW budget block or coverage failure records a degraded
+`bounce-setup` heartbeat and keeps the last good cache. Heartbeat
+`bounce-setup` (74h window: Friday's run covers the weekend). Installed by
+the deploy's `install-units` verb from `installed-units.sha256`. Spec:
+[`bounce-setup.md`](bounce-setup.md).
+
 ### HY AD (`radon-hyad.timer`)
 
 `Tue..Sat 11:00 UTC` (`RandomizedDelaySec=300`), oneshot `scripts/fetch_hyad.py`,
@@ -701,6 +741,25 @@ plausibility guard raises rather than latching `ok` over a truncated or
 implausible series. Installed by the deploy's `install-units` verb from
 `installed-units.sha256`. Spec: [`indicators/vixts.md`](indicators/vixts.md).
 
+### Panic Proxy (`radon-panic-index.timer`)
+
+Twice daily `02:50` and `13:15 UTC` (`RandomizedDelaySec=120`), oneshot
+`scripts/fetch_panic_index.py`, `TimeoutStartSec=300`. Equal-weight mean of
+252-session z-scores of Cboe VIX, VVIX, VIX/VIX3M and SKEW. This is Radon's
+reconstruction of the four inputs Goldman names for its Panic Index; it is
+not the Goldman index and is not scaled to match it. Four Cboe CDN files
+pulled through the shared `CboeClient` with per-file `If-Modified-Since`;
+when all four return 304 the run restates the cached payload and refreshes
+only the snapshot and heartbeat. UW 25d skew is an overlay only. 02:50 sits
+after vixts 02:45; 13:15 is kept pending a three-session VVIX/SKEW append
+measurement (only 2026-09-18 was observable at spec time: VIX/VIX3M 01:51,
+VVIX 12:01, SKEW 21:01, last row still 09/17). Runs every calendar day;
+weekend and holiday runs are 304 heartbeats that keep `panic-index` inside
+its 26h window. Installed by the deploy's `install-units` verb from
+`installed-units.sha256`. Spec:
+[`indicators/panic-index.md`](indicators/panic-index.md). First production
+run after merge must use `--no-alert`.
+
 ### DISPERSION (`radon-dispersion.timer`)
 
 Daily `22:20 UTC` (`RandomizedDelaySec=120`), oneshot `scripts/fetch_dispersion.py`,
@@ -722,13 +781,44 @@ the incremental window raises and asks for `--backfill`. Installed by the deploy
 `install-units` verb from `installed-units.sha256`. Spec:
 [`indicators/dispersion.md`](indicators/dispersion.md).
 
+### Liquid Compute GPU index (`radon-liquidcompute.timer`)
+
+Daily `07:30 UTC` (`RandomizedDelaySec=300`), oneshot
+`python -m scripts.ai_cycle.liquidcompute --record`, `TimeoutStartSec=180`.
+Fetches the public homepage GPU index ticker
+(`GET https://liquidcompute.com/api/market/ticker`), identifies as Radon,
+and backs off on non-200. Host-tagged rows land in Turso/SQLite
+`liquidcompute_index` (`source=liquidcompute`, `series_id` = index id,
+`date`/`vintage` = publisher `asOf`, `unit=usd_per_gpu_per_hr`), idempotent
+on `(source, series_id, asOf)`. Compute pane `C5` on `/regime/llm`. Third
+venue versus the rental book; methodology opaque until licensed. Never
+spliced onto gpurentalprices or Silicon Data. robots.txt Disallows `/api/`
+but the public homepage loads this ticker; do not scrape `/auth/` or
+`/ingest/`. Heartbeat `liquidcompute`. Enable:
+`systemctl enable --now radon-liquidcompute.timer`. The same source is also
+collected by `radon-ai-cycle.timer`.
+
+### SLM tagger monitor (`radon-slm-tagger-monitor.timer`)
+
+Daily `07:10 UTC` (`RandomizedDelaySec=300`), oneshot
+`scripts/newsfeed/slm/monitor.py`, `TimeoutStartSec=120`. No-op exit 0 when
+`RADON_SLM_TAGGER_MODE` is `off` or `shadow`. In `prefer` / `primary` it
+reads `slm_tagger_shadow` (7d / 28d), prints one JSON object, writes
+`service_health[slm-tagger-monitor]` (26h scheduled window) and exits 3 on
+an I.3 breach. The llama-server sidecar (`radon-slm-tagger.service`,
+127.0.0.1:8331) has no `service_health` row; the unit watchdog covers
+`failed` / `start-limit-hit`. Spec: [`ml/newsfeed-slm-tagger.md`](ml/newsfeed-slm-tagger.md).
+Rung stays `off` until Joe enables it.
+
 ### Model catalog (`radon-model-catalog.timer`)
 
 Daily `03:10 UTC` (`RandomizedDelaySec=300`), oneshot
 `scripts/refresh_model_catalog.py`, `TimeoutStartSec=300`. Picks ONE frontier
-chat model per LLM provider whose API key is present in the unit env
-(`ANTHROPIC_API_KEY` today; `XAI_API_KEY` / `GROK_API_KEY` and `OPENAI_API_KEY`
-light up automatically when added to `/etc/radon/env`) by listing that
+chat model per LLM provider whose subscription grant is present on the host
+(the Claude Max grant in `~/.claude/.credentials.json` and the SuperGrok grant
+in `~/.grok/auth.json`, both kept live by `radon-subscription-tokens`; OpenAI
+only under `RADON_LADDER_ALLOW_PREPAID=1` with `OPENAI_API_KEY`, because the
+ChatGPT grant cannot list models) by listing that
 provider's own models endpoint and applying a deterministic filter, sort, head:
 dated snapshots lose to the undated alias they pin, cheap and preview tiers and
 non-chat modalities are dropped, and versions are compared as floats so
@@ -794,7 +884,7 @@ newest statement period is more than `MAX_DELIVERY_LAG_DAYS` (1) behind the
 last session AND an empty remote is not expected for the date, R-389 + R-448;
 never on `cash-flow-sync`; once any file heartbeats `error`, later `ok`
 heartbeats in the same run are suppressed, so the row reports the batch's
-worst outcome, REL-210). Stripped env
+worst outcome, REL-210). A transient sFTP `get` failure (peer reset, kex drop, connect timeout; `_is_transient_sftp_get`) is suppressed only when a strictly newer statement from the same account and query was successfully applied or confirmed duplicate in this sweep. Missing or unparseable delivery dates are not suppressed. Failures name the affected query/account keys in the final error heartbeat, including on repeated runs. A TWR build that returns `degraded` / `unavailable` after the cash-flow persist is not an ingest failure (perf-twr owns that page), page 5a2eb828, 2026-09-16. Stripped env
 `/var/lib/radon/flex-secrets/env` (no `TWS_PASSWORD`). Units on
 `auto-sync-units.txt`.
 
@@ -1092,3 +1182,87 @@ aws s3 ls "s3://radon-archive/db_backups/" --endpoint-url "$RADON_ARCHIVE_S3_END
 
 Restore is unchanged: pull the object, then follow the "Restore runbook"
 above against the downloaded `radon-<stamp>.sql.gz`.
+
+A duplicate Flex ingest confirms cash-flow row IDs and NAV dates, or journal execution coverage through bounded read-only Hrana queries before reporting persistence. Flex trade IDs that were not stored because individual IB fills already match that contract-day's quantity and gross notional count as covered. A quantity or notional disagreement does not. Missing or unreadable coverage retains the applied claim, returns an error, and requires operator reconciliation; the puller rejects duplicate results without this explicit confirmation. It never automatically replays an applied delivery to repair missing rows.
+
+
+## Legacy Flex aggregate cleanup
+
+For the journal reconciliation operator investigating legacy aggregate rows
+alongside individual fills, use
+[`cleanup_legacy_flex_aggregates.py`](../scripts/cleanup_legacy_flex_aggregates.py)
+only after reviewing authoritative execution history. Contract, account,
+execution identity, date and gross quantity coverage must prove an exclusive
+duplicate; similar quantities across Flex and API execution-ID namespaces do
+not prove equivalence. Partial or ambiguous coverage is left for reconciliation.
+
+This is operator-only database maintenance. Before any production run, confirm
+the target database, arrange a maintenance window without concurrent journal
+writers, retain the affected rows and a fresh backup, and verify that backup
+in scratch using the [restore runbook](#restore-runbook). Stop if a recoverable
+backup or stable input cannot be established.
+
+1. Inspect `python3.13 -m scripts.cleanup_legacy_flex_aggregates --help` locally;
+   help does not connect. Running without `--help` connects to the configured
+   database even though it defaults to dry-run.
+2. The authorized operator runs the dry-run without `--apply` and reviews
+   every proposed deletion against authoritative constituent executions and
+   the backup. Stop on unproven identity, overlapping claims, inconsistent
+   gross coverage or an unexpected target. Escalate unreconstructable rows
+   to journal reconciliation; do not force a metadata repair or replay an
+   already-applied Flex delivery.
+3. Only after approval, the operator may repeat with `--apply`. It recomputes
+   the plan and can delete journal rows; it is not an apply of a saved plan
+   and has no built-in rollback. Keep inputs stable between review and apply.
+4. Compare remaining constituent rows and lot-matched journal basis with the
+   reviewed plan and authoritative history, then repeat the dry-run to check
+   that no approved duplicate remains. On an unexpected result, stop further
+   maintenance and use the restore runbook's scratch comparison and
+   partial-table recovery procedure with the retained rows. Do not overwrite
+   unrelated post-backup activity with a blind full restore.
+
+The cleanup's isolated tests own the exact matching behavior; this sequence
+supplies the backup, stop and recovery decisions that CLI help cannot prove.
+
+### Rebuild missing gross coverage
+
+For a legacy aggregate whose gross coverage cannot be recovered from journal
+rows, the journal reconciliation operator can use
+[`rebuild_flex_gross_breakdown.py`](../scripts/rebuild_flex_gross_breakdown.py)
+with stable saved execution-level Flex trade statements. This helper does not
+call the Flex Web Service or delete rows; it stamps only `gross_fill_breakdown`
+when the statements prove the aggregate's recorded totals. Its source and
+[isolated tests](../scripts/tests/test_rebuild_flex_gross_breakdown.py) own the
+exact matching and refusal rules.
+
+The operator-only target database, maintenance window, retained affected rows
+and scratch-verified backup prerequisites above apply to this repair too.
+Keep the saved statements unchanged and prevent concurrent journal writers
+through review, apply and verification. Stop if the target, input provenance,
+exclusive maintenance window or recoverable pre-change rows cannot be verified.
+
+1. Inspect `python3.13 -m scripts.rebuild_flex_gross_breakdown --help` locally;
+   help is offline. A normal dry-run with `--xml` connects to the configured
+   database, so only the authorized operator may run it against production.
+2. Review every planned stamp, refused row and row reported as out of statement period
+   against the saved authoritative executions and retained rows. An out-of-period
+   row is not evidence of a successful repair. Stop on unexpected coverage,
+   identity or totals. Escalate unresolved refusals to journal reconciliation
+   rather than forcing metadata or replaying an applied delivery.
+3. Only after approving that review, the operator may repeat with `--apply`.
+   Each invocation recomputes the plan; it does not apply a saved plan. The plan
+   freezes the complete journal snapshot. Apply acquires a write transaction
+   before checking that snapshot and refuses any intervening row change,
+   insertion or deletion, including competing aggregate claims. Per-row guards
+   roll back the entire batch on conflict; rebuild the plan after a refusal. If the
+   statements or journal changed, stop and repeat backup and dry-run review.
+   The helper commits updates before re-reading them: post-commit verification
+   is not rollback, and a verification failure can leave committed changes.
+4. Require the reported stamped and verified counts to agree, compare each
+   stamped row's dated gross coverage with authoritative executions, and rerun
+   the dry-run to confirm approved rows are already stamped. A zero exit code
+   alone does not resolve refused or out-of-period rows. On an unexpected result,
+   stop further maintenance and reconcile with the retained pre-change rows
+   using the [restore runbook](#restore-runbook)'s scratch comparison and
+   partial-table recovery. Do not perform a blind full restore over newer
+   journal activity; escalate recovery decisions to the database operator.

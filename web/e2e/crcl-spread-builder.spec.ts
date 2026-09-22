@@ -295,7 +295,7 @@ test.describe("CRCL chain — auto-focus existing-position expiry + positive sin
 
     const detail = page.locator(".ticker-detail-page");
     await detail.waitFor({ timeout: 10_000 });
-    await detail.locator(".chain-grid").waitFor();
+    await detail.locator(".chain-grid").first().waitFor();
 
     // The chain should be on 06-18 (matching position), NOT 06-12.
     // Inspect a strike row that exists in both to confirm we got 06-18 prices.
@@ -313,7 +313,7 @@ test.describe("CRCL chain — auto-focus existing-position expiry + positive sin
 
     const detail = page.locator(".ticker-detail-page");
     await detail.waitFor({ timeout: 10_000 });
-    await detail.locator(".chain-grid").waitFor();
+    await detail.locator(".chain-grid").first().waitFor();
 
     // Find the $140 row and click its mid (or any clickable cell that adds
     // the leg — chain-held-leg-prices uses .chain-mid.chain-clickable).

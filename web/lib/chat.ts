@@ -552,6 +552,8 @@ export function resolveSectionFromPath(pathname: string | null, fallback: Worksp
     return "journal";
   }
 
+  if (pathname === "/ai-industry" || pathname.startsWith("/ai-industry/")) return "ai-industry";
+
   if (pathname.startsWith("/regime")) {
     return "regime";
   }
@@ -561,10 +563,6 @@ export function resolveSectionFromPath(pathname: string | null, fallback: Worksp
   }
 
   if (pathname.startsWith("/research-workbench")) return "research-workbench";
-  if (pathname.startsWith("/workflow")) {
-    return "workflow";
-  }
-
   if (pathname.startsWith("/admin")) {
     return "admin";
   }

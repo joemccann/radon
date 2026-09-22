@@ -143,6 +143,7 @@ def _add_worktree(root: Path, name: str, *, pushed: bool, age_days: float = 30.0
         ("radon-security-deepsec", "deepsec"),
         (".security-deepsec.lock", "deepsec"),
         (".security-nightly-scratch", "scratch"),
+        (".gitdirs", "gitdir"),
         ("radon", "loop clone"),
     ],
 )
@@ -321,6 +322,7 @@ LOOPS = {
     "ci-performance": "ci_performance_nightly.sh",
     "documentation": "documentation_nightly.sh",
     "security": "security_nightly.sh",
+    "security-deepsec": "security_deepsec_nightly.sh",
 }
 LOOP_IDS = sorted(LOOPS)
 
@@ -339,7 +341,7 @@ def _stage(tmp_path: Path, loop: str, *, agent_rc: int = 0,
     shutil.copy2(REPO / "scripts" / script, wrapper)
     wrapper.chmod(wrapper.stat().st_mode | stat.S_IXUSR)
     (clone / ".radon-weekend-runner").touch()
-    for marker in (".radon-security-runner", ".radon-reliability-runner",
+    for marker in (".radon-security-runner", ".radon-security-deepsec-runner", ".radon-reliability-runner",
                    ".radon-testing-runner", ".radon-ci-performance-runner",
                    ".radon-documentation-runner"):
         (clone / marker).touch()
@@ -384,7 +386,7 @@ def _stage(tmp_path: Path, loop: str, *, agent_rc: int = 0,
     _executable(curl_stub, "#!/bin/bash\nexit 0\n")
 
     complete_line = ""
-    if loop == "security":
+    if loop in ("security", "security-deepsec"):
         src = (REPO / "scripts" / script).read_text(encoding="utf-8")
         marker = re.search(r'PHASE_COMPLETE_MARKER="([^"]+)"', src).group(1)
         complete_line = f"echo '{marker} stub run_id=stub'\n"
@@ -506,14 +508,15 @@ def test_the_prune_never_execs_a_python_file_from_the_agent_writable_clone(loop:
     """Rail 5: the clone and the venv are agent-writable after a phase, so the
     prune is piped out of origin/main into an ISOLATED system interpreter.
 
-    This is defence in depth, NOT a trust boundary: refs/remotes/origin/main
-    lives in the same agent-writable $REPO/.git. What it does buy is that a
-    planted WORKING-TREE scripts/weekend_prune.py is never the file that runs,
-    and -I keeps cwd, the clone dir and user site off sys.path so a planted
-    json.py cannot be imported either. The wrapper comment says exactly this.
+    This is defence in depth, NOT a trust boundary: origin/main lives in the
+    host gitdir. What it does buy is that a planted WORKING-TREE
+    scripts/weekend_prune.py is never the file that runs, and -I keeps cwd,
+    the clone dir and user site off sys.path so a planted json.py cannot be
+    imported either. The wrapper comment says exactly this.
     """
     body = (REPO / "scripts" / LOOPS[loop]).read_text(encoding="utf-8")
-    assert 'git -C "$REPO" show origin/main:scripts/weekend_prune.py' in body
+    assert 'show origin/main:scripts/weekend_prune.py' in body
+    assert '--git-dir="$HOST_GITDIR"' in body
     assert "/usr/bin/python3 -I -" in body
     assert 'python3 "$REPO/scripts/weekend_prune.py"' not in body
     assert "python3 $REPO/scripts/weekend_prune.py" not in body

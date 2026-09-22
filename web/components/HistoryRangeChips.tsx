@@ -1,9 +1,10 @@
 "use client";
 
-import { RANGE_PRESETS, type RangePresetSlug } from "@/lib/historyRange";
+import { RANGE_PRESETS, type RangePreset, type RangePresetSlug } from "@/lib/historyRange";
 
 interface HistoryRangeChipsProps {
   /** Currently active preset slug, or "custom" when a brush selection drives the view. */
+  presets?: ReadonlyArray<RangePreset>;
   active: RangePresetSlug | "custom";
   /** Fired when the user picks a different preset. */
   onChange: (slug: RangePresetSlug) => void;
@@ -18,6 +19,7 @@ interface HistoryRangeChipsProps {
 }
 
 export default function HistoryRangeChips({
+  presets = RANGE_PRESETS,
   active,
   onChange,
   maxSessions,
@@ -25,7 +27,7 @@ export default function HistoryRangeChips({
   className,
   dataTestId,
 }: HistoryRangeChipsProps) {
-  const visible = RANGE_PRESETS.filter((preset) => {
+  const visible = presets.filter((preset) => {
     if (preset.slug === "all") return true;
     if (maxSessions == null) return true;
     // Hide presets that don't change the view (e.g. "1Y" on 30 sessions).

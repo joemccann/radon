@@ -5,12 +5,13 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { useTickerDetail } from "@/lib/TickerDetailContext";
 import { isDeckKey, legacyTabToDeck, type DeckKey } from "@/lib/legacyTabToDeck";
-import type { DepthBook, Trade } from "@/lib/pricesProtocol";
+import type { DepthBook, PriceData, Trade } from "@/lib/pricesProtocol";
 import TickerDetailContent from "./TickerDetailContent";
 
 type TickerWorkspaceProps = {
   ticker: string;
   theme: "dark" | "light";
+  prices?: Record<string, PriceData>;
   depths?: Record<string, DepthBook>;
   tape?: Record<string, Trade[]>;
 };
@@ -18,6 +19,7 @@ type TickerWorkspaceProps = {
 export default function TickerWorkspace({
   ticker,
   theme,
+  prices: pricesProp,
   depths: depthsProp,
   tape: tapeProp,
 }: TickerWorkspaceProps) {
@@ -35,7 +37,7 @@ export default function TickerWorkspace({
     setDepthSymbols,
   } = useTickerDetail();
 
-  const prices = getPrices();
+  const prices = pricesProp ?? getPrices();
   const fundamentals = getFundamentals();
   const depths = depthsProp ?? getDepths();
   const tape = tapeProp ?? getTape();

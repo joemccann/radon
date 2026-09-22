@@ -479,6 +479,17 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
     expect(requiresIb("ma-ratio")).toBe(false);
   });
 
+  // ``calm-streak``: radon-calm-streak.timer fires 02:40 and 14:30 UTC every
+  // calendar day; uniform 26h window. Cboe SPX HTTP + Turso only.
+  it("calm-streak is registered as scheduled with a uniform 26h window", () => {
+    expect(SERVICE_FRESHNESS_WINDOWS["calm-streak"]).toBeDefined();
+    expect(getServiceCategory("calm-streak")).toBe("scheduled");
+    for (const state of ["open", "extended", "closed"] as MarketState[]) {
+      expect(getFreshnessWindowMs("calm-streak", state)).toBe(26 * HOUR);
+    }
+    expect(requiresIb("calm-streak")).toBe(false);
+  });
+
   // ``hy-ad`` — radon-hyad.timer fires Tue..Sat 11:00 UTC, the morning after
   // FINRA TRACE end-of-day finalization (T+1). Uniform 120h window covers the
   // T+1 lag plus 3-day weekends and bond-market-only holidays; older means
@@ -523,6 +534,15 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
     expect(requiresIb("model-catalog")).toBe(false);
   });
 
+  it("slm-tagger-monitor is registered as scheduled with a uniform 26h window", () => {
+    expect(SERVICE_FRESHNESS_WINDOWS["slm-tagger-monitor"]).toBeDefined();
+    expect(getServiceCategory("slm-tagger-monitor")).toBe("scheduled");
+    for (const state of ["open", "extended", "closed"] as MarketState[]) {
+      expect(getFreshnessWindowMs("slm-tagger-monitor", state)).toBe(26 * HOUR);
+    }
+    expect(requiresIb("slm-tagger-monitor")).toBe(false);
+  });
+
   it("aa-frontier-basket is monitored on its daily non-IB cadence", () => {
     expect(SERVICE_FRESHNESS_WINDOWS["aa-frontier-basket"]).toBeDefined();
     expect(getServiceCategory("aa-frontier-basket")).toBe("scheduled");
@@ -546,6 +566,17 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
       );
     }
     expect(requiresIb("vixts")).toBe(false);
+  });
+
+  // ``panic-index`` — radon-panic-index.timer fires 02:50 and 13:15 UTC every
+  // calendar day (weekend and holiday runs are 304 heartbeats). Uniform 26h.
+  it("panic-index is registered as scheduled with a uniform 26h window", () => {
+    expect(SERVICE_FRESHNESS_WINDOWS["panic-index"]).toBeDefined();
+    expect(getServiceCategory("panic-index")).toBe("scheduled");
+    for (const state of ["open", "extended", "closed"] as const) {
+      expect(getFreshnessWindowMs("panic-index", state)).toBe(26 * HOUR);
+    }
+    expect(requiresIb("panic-index")).toBe(false);
   });
 
   // ``dispersion`` — radon-dispersion.timer fires daily 22:20 UTC every
@@ -1005,5 +1036,16 @@ describe("vol-cone-intraday freshness window", () => {
     expect(getFreshnessWindowMs("vol-cone-intraday", "extended")).toBe(4 * DAY);
     expect(getFreshnessWindowMs("vol-cone-intraday", "closed")).toBe(4 * DAY);
     expect(requiresIb("vol-cone-intraday")).toBe(false);
+  });
+});
+
+describe("bounce-setup freshness window", () => {
+  it("is a scheduled weekday timer window matching scripts/watchdog/services.py", () => {
+    const HOUR = 60 * 60_000;
+    expect(getServiceCategory("bounce-setup")).toBe("scheduled");
+    expect(getFreshnessWindowMs("bounce-setup", "open")).toBe(74 * HOUR);
+    expect(getFreshnessWindowMs("bounce-setup", "extended")).toBe(74 * HOUR);
+    expect(getFreshnessWindowMs("bounce-setup", "closed")).toBe(74 * HOUR);
+    expect(requiresIb("bounce-setup")).toBe(false);
   });
 });

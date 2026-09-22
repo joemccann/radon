@@ -1,5 +1,7 @@
 "use client";
+import ErrorToast from "@/components/ErrorToast";
 
+import { userErrorMessage } from "@/lib/userError";
 import { useMemo } from "react";
 import { Activity } from "lucide-react";
 import ShareReportModal from "./ShareReportModal";
@@ -211,9 +213,9 @@ export default function CtaPage() {
   if (syncState === "syncing" || syncState === "running") {
     syncDetail = `Refresh in progress${syncStartedAt ? ` · STARTED ${formatSyncStamp(syncStartedAt)}` : ""}`;
   } else if (syncState === "degraded") {
-    syncDetail = syncErrorMessage ?? "Last refresh attempt failed.";
+    syncDetail = userErrorMessage(syncErrorMessage, "The last refresh could not be completed. Try again.");
   } else if (error) {
-    syncDetail = error;
+    syncDetail = userErrorMessage(error, "CTA data could not be refreshed. Try again.");
   }
 
   const statusBannerClass = syncState === "degraded" || error
@@ -371,11 +373,13 @@ export default function CtaPage() {
           )}
         </div>
 
+        {syncDetail && syncState !== "syncing" && syncState !== "running" && <ErrorToast message={syncDetail} />}
         {!loading && ctaIsStale && (
-          <div className={statusBannerClass} data-testid="cta-stale-banner" role="alert">
+          <div className={statusBannerClass} data-testid="cta-stale-banner" role="status">
             <div className="cta-status-title">CTA CACHE STALE</div>
             <div className="cta-status-copy">{staleCopy}</div>
-            {syncDetail && <div className="cta-status-meta">{syncDetail}</div>}
+            {(syncState === "syncing" || syncState === "running") && <div className="cta-status-meta">{syncDetail}</div>}
+
           </div>
         )}
 

@@ -1,15 +1,15 @@
 /**
  * @vitest-environment jsdom
  *
- * REL-238 (R-643 + R-660): scan-trigger POST routes must not swallow an
- * upstream failure into HTTP 200 + cached body signalled only by an
- * X-Sync-Warning header nobody reads. Mirror the theta scan shape
- * (web/app/api/scanner/theta/scan/route.ts): status preserved, body stamped
- * `is_stale: true, scan_succeeded: false`. useSyncHook must surface a
- * body-level failure. GET /api/gex must not mark a stale snapshot HIT-fresh.
+ * REL-238 (R-643 + R-660): a failed regime/gex scan that still has a snapshot
+ * answers 200 with `is_stale: true, scan_succeeded: false`. The body flag is
+ * what useSyncHook reads; a 5xx status was a console error on every page
+ * return. A miss, and every 4xx, still preserves the upstream status.
+ * Gamma rotation keeps the non-2xx shape. GET /api/gex must not mark a stale
+ * snapshot HIT-fresh and must not wait on the background scan.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 
 const mockReadFile = vi.fn();
 const mockStat = vi.fn().mockResolvedValue({ mtimeMs: Date.now() });
@@ -61,7 +61,7 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("POST /api/gex upstream failure (R-643)", () => {
-  it("serves the cached fallback with a non-2xx status and body-level markers", async () => {
+  it("serves the cached fallback as 200 with body-level failure markers", async () => {
     mockRadonFetch.mockRejectedValue(new Error("upstream down"));
     mockReadFile.mockResolvedValue(JSON.stringify({
       scan_time: "2026-09-05T13:00:00Z",
@@ -72,7 +72,7 @@ describe("POST /api/gex upstream failure (R-643)", () => {
 
     const { POST } = await import("../app/api/gex/route");
     const res = await POST();
-    expect(res.status).toBeGreaterThanOrEqual(500);
+    expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.net_gex).toBe(321);
     expect(body.is_stale).toBe(true);
@@ -95,7 +95,7 @@ describe("POST /api/gex upstream failure (R-643)", () => {
 });
 
 describe("POST /api/regime upstream failure (R-643)", () => {
-  it("serves the cached fallback with a non-2xx status and body-level markers", async () => {
+  it("serves the cached fallback as 200 with body-level failure markers", async () => {
     mockRadonFetch.mockRejectedValue(new Error("upstream down"));
     mockReadFile.mockResolvedValue(JSON.stringify({
       scan_time: "2026-09-05T13:00:00Z",
@@ -108,7 +108,7 @@ describe("POST /api/regime upstream failure (R-643)", () => {
 
     const { POST } = await import("../app/api/regime/route");
     const res = await POST();
-    expect(res.status).toBeGreaterThanOrEqual(500);
+    expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.cri.score).toBe(18);
     expect(body.is_stale).toBe(true);
@@ -180,6 +180,8 @@ describe("useSyncHook body-level failure (R-643)", () => {
     const { result } = renderHook(() =>
       useSyncHook<typeof fresh>({ endpoint: "/api/gex" }, true),
     );
+    await waitFor(() => expect(result.current.data).toEqual(fresh));
+    act(() => result.current.syncNow());
     await waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(2));
     await waitFor(() => expect(result.current.error).toBeTruthy());
     expect(result.current.data).toEqual(fresh);
@@ -189,6 +191,59 @@ describe("useSyncHook body-level failure (R-643)", () => {
 // ---------------------------------------------------------------------------
 // R-660: GET /api/gex must not mark a stale snapshot HIT-fresh
 // ---------------------------------------------------------------------------
+
+describe("GET /api/gex does not wait on the background scan", () => {
+  it("returns the snapshot while the scan is still in flight", async () => {
+    mockRadonFetch.mockImplementation(() => new Promise(() => {}));
+    mockReadFile.mockResolvedValue(JSON.stringify({
+      scan_time: "2026-01-02T15:00:00Z",
+      market_open: true,
+      ticker: "SPX",
+      net_gex: 111,
+      history: [],
+    }));
+    const { GET } = await import("../app/api/gex/route");
+    const res = await Promise.race([
+      GET(),
+      new Promise<Response>((_resolve, reject) => {
+        setTimeout(() => reject(new Error("GET waited on the scan")), 50);
+      }),
+    ]);
+    expect(res.status).toBe(200);
+  });
+});
+
+describe("POST /api/gex aborts when the client disconnects", () => {
+  it("forwards the request signal and still answers from cache", async () => {
+    const controller = new AbortController();
+    let seen: AbortSignal | undefined;
+    mockRadonFetch.mockImplementation((_path: unknown, opts?: { signal?: AbortSignal }) => {
+      seen = opts?.signal;
+      if (opts?.signal?.aborted) return Promise.reject(new Error("aborted"));
+      return new Promise((_resolve, reject) => {
+        opts?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+      });
+    });
+    mockReadFile.mockResolvedValue(JSON.stringify({
+      scan_time: "2026-09-05T13:00:00Z",
+      ticker: "SPX",
+      net_gex: 321,
+      history: [],
+    }));
+    const { POST } = await import("../app/api/gex/route");
+    const request = new Request("https://app.radon.run/api/gex", {
+      method: "POST",
+      signal: controller.signal,
+    });
+    controller.abort();
+    const res = await POST(request);
+    expect(seen?.aborted).toBe(true);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.scan_succeeded).toBe(false);
+    expect(body.net_gex).toBe(321);
+  });
+});
 
 describe("GET /api/gex staleness (R-660)", () => {
   it("marks a stale snapshot STALE in X-Cache-State and stamps is_stale in the body", async () => {

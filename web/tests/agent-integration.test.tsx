@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 //
-// Wiring tests for the four agent primitives at their real integration points.
+// Wiring tests for the agent primitives at their real integration points.
 // The derivations are unit-tested in agent-derivations.test.ts; this file pins
 // that each surface actually renders them, and that the ask-bus handoff from
 // the newsfeed lightbox reaches the chat overlay.
@@ -12,8 +12,6 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { emitAsk, subscribeAsk } from "../lib/agent/askBus";
 import AnalysisSources from "../components/agent/AnalysisSources";
 import { buildAnalysisSources, buildFollowUps } from "../lib/agent/analysisSources";
-import TaskRuns from "../components/agent/TaskRuns";
-import { runReportToTasks } from "../lib/agent/workflowTasks";
 import ProposalCard from "../components/agent/ProposalCard";
 import { buildScannerProposal } from "../lib/agent/scannerProposal";
 import type { ThetaHarvesterResult, ThetaHarvesterStructure } from "../lib/types";
@@ -81,29 +79,6 @@ describe("AnalysisSources — newsfeed wiring", () => {
       <AnalysisSources sources={buildAnalysisSources({})} followUps={buildFollowUps({})} />,
     );
     expect(container.querySelector(".analysis-sources__label")).toBeNull();
-  });
-});
-
-describe("TaskRuns — workflow wiring", () => {
-  it("renders one row per executed node with its real row counts", () => {
-    const tasks = runReportToTasks({
-      ok: false,
-      blocked_by: "n2",
-      blocked_gate: "convexity",
-      requires_confirmation: false,
-      steps: [
-        { node_id: "n1", node_type: "universe", rows_in: 0, rows_out: 34, blocked: false, info: {} },
-        { node_id: "n2", node_type: "order", rows_in: 34, rows_out: 0, blocked: true, info: { gate: "convexity" } },
-      ],
-      final_rows: [],
-    });
-
-    render(<TaskRuns tasks={tasks} />);
-    expect(screen.getByText("Universe · n1")).toBeTruthy();
-    expect(screen.getByText("34 ROWS")).toBeTruthy();
-    expect(screen.getByText("COMPLETED")).toBeTruthy();
-    expect(screen.getByText("QUEUED")).toBeTruthy();
-    expect(screen.getByText("CONVEXITY")).toBeTruthy();
   });
 });
 

@@ -168,6 +168,8 @@ def provisioned_repo(tmp_path: Path) -> dict[str, Path]:
     _git(repo, "config", "user.name", "t")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "seed")
+    # Provenance requires the blob to be reachable from the deploy remote.
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
     (tmp_path / "sbin").mkdir()  # /usr/local/sbin exists on the host
     return {
         "repo": repo,
@@ -220,8 +222,25 @@ def test_install_docker_gw_validates_even_a_committed_body(provisioned_repo) -> 
     compose.write_text(POISONS["cap-add"], encoding="utf-8")
     _git(provisioned_repo["repo"], "add", "-A")
     _git(provisioned_repo["repo"], "commit", "-qm", "poison")
+    # Published, so only the validator can be what refuses it.
+    _git(provisioned_repo["repo"], "update-ref", "refs/remotes/origin/main", "HEAD")
     result = _run_install_docker_gw(provisioned_repo)
     assert result.returncode != 0
+    assert not provisioned_repo["compose_target"].exists()
+
+
+def test_install_docker_gw_refuses_a_body_absent_from_origin_main(
+    provisioned_repo,
+) -> None:
+    """Commit access to the checkout is not publication: a local-only compose
+    body is refused even though it is committed at HEAD."""
+    compose = provisioned_repo["cloud"] / "docker-compose.yml"
+    compose.write_text(GOOD_BODY + "# local only\n", encoding="utf-8")
+    _git(provisioned_repo["repo"], "add", "-A")
+    _git(provisioned_repo["repo"], "commit", "-qm", "local only")
+    result = _run_install_docker_gw(provisioned_repo)
+    assert result.returncode != 0
+    assert "not an ancestor of origin/main" in result.stdout + result.stderr
     assert not provisioned_repo["compose_target"].exists()
 
 

@@ -96,10 +96,44 @@ def test_deploy_time_budgets_cover_supervisor_and_recovery() -> None:
     # 190s once for an orphan root action to release the lifecycle lock.
     root_recovery_seconds = 190 + (2 * 180) + 30 + 30
     worst_case_seconds = (2 * root_recovery_seconds) + 900 + 30
+    # 2026-09-19: the SSH script first waits a bounded time for the previous
+    # release to free the production deploy lock; that wait is part of the
+    # SSH budget too.
+    worst_case_seconds += _deploy_lock_wait_seconds()
     ssh_seconds = int(command_timeout.removesuffix("m")) * 60
     job_seconds = int(deploy["timeout-minutes"]) * 60
     assert ssh_seconds >= worst_case_seconds + 600
     assert job_seconds >= ssh_seconds + 300
+
+
+def _deploy_script() -> str:
+    deploy = _workflow()["jobs"]["deploy"]
+    ssh_step = next(step for step in deploy["steps"] if step.get("name") == "Deploy via SSH")
+    return ssh_step["with"]["script"]
+
+
+def _deploy_lock_wait_seconds() -> int:
+    match = re.search(r"RADON_DEPLOY_LOCK_WAIT_SECS:-(\d+)", _deploy_script())
+    assert match, "the deploy script lost its bounded lock wait"
+    return int(match.group(1))
+
+
+def test_deploy_waits_for_the_finishing_release_before_refusing() -> None:
+    """2026-09-19: three merges in four minutes. deploy-production serializes the
+    GitHub jobs, but the previous release was still inside deploy.sh on the VPS
+    when the next job's SSH began, so deploy.sh refused the held lock (exit
+    75) and a green commit never shipped until a manual re-run. deploy.sh stays
+    non-blocking (cloud/tests pin `flock -n`); the SSH script queues behind the
+    lock for a bounded time first."""
+    script = _deploy_script()
+    assert "wait_for_deploy_lock()" in script
+    assert 'flock -n "$DEPLOY_LOCK_FILE" true' in script
+    assert ".radon-deploy.lock" in script
+    assert 0 < _deploy_lock_wait_seconds() <= 600
+    # The wait runs before EVERY deploy.sh invocation, including the legacy
+    # runner and the recover-only pass.
+    assert script.index("wait_for_deploy_lock\n") < script.index("deploy_with_legacy_runner() {")
+    assert script.index("wait_for_deploy_lock\n") < script.index("RADON_DEPLOY_RECOVER_ONLY")
 
 
 def test_deploy_passes_the_explicit_workflow_sha() -> None:

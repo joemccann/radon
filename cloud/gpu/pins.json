@@ -1,0 +1,9 @@
+{
+  "image": "vllm/vllm-openai@sha256:2286e8533ca8b6bc777594bae30524f1426ba46ca21797524e06df6a94b06635",
+  "image_version": "v0.28.0",
+  "platform": "linux/amd64",
+  "cuda": "13.0.2",
+  "minimum_driver_major": 580,
+  "model": "Qwen/Qwen2.5-1.5B-Instruct",
+  "model_revision": "989aa7980e4cf806f80c7fef2b1adb7bc71aa306"
+}

@@ -52,7 +52,19 @@ _PAT_MARKERS = (
     "403 forbidden",
 )
 
+SUMMARY_MAX_CHARS = 300
+_CONTROL_RUN = re.compile(r"[\x00-\x1f\x7f]+")
+
 Runner = Callable[..., object]
+
+
+def sanitize_summary(text: str) -> str:
+    """Flatten page-derived grok output to one control-free line.
+
+    The summary comes from untrusted incident-page text; it may not carry
+    newlines or control characters into a PR title or body.
+    """
+    return _CONTROL_RUN.sub(" ", text or "").strip()[:SUMMARY_MAX_CHARS]
 
 
 class IrEnsurePrError(Exception):
@@ -110,7 +122,9 @@ def format_ir_pr_body(
 
 
 def _default_runner(argv: list[str], **kwargs) -> subprocess.CompletedProcess:
-    if len(argv) >= 3 and argv[1] == "pr" and argv[2] == "merge":
+    # Token scan, not positional: flag-shuffled subcommand spellings and
+    # `gh api .../pulls/N/merge` are merges too.
+    if any(tok == "merge" or tok.endswith("/merge") for tok in argv[1:]):
         raise IrEnsurePrError("IR automation never merges")
     return subprocess.run(
         argv,
@@ -172,14 +186,15 @@ def _list_open_pr(
     head: str,
     base: str,
     repo: str,
+    include_terminal: bool = False,
 ) -> dict | None:
     proc = runner([
         binary, "pr", "list",
         "--repo", repo,
         "--head", head,
         "--base", base,
-        "--state", "open",
-        "--json", "number,url,title",
+        "--state", "all" if include_terminal else "open",
+        "--json", "number,url,title,state" if include_terminal else "number,url,title",
     ])
     if getattr(proc, "returncode", 1) != 0:
         _raise_from_gh(proc)
@@ -255,6 +270,7 @@ def ensure_pr(
     runner: Runner | None = None,
     gh_bin: str | None = None,
     which: Callable[[str], str | None] | None = None,
+    include_terminal: bool = False,
 ) -> dict:
     """Create the IR PR if missing. Never merge. Fail closed on gh/PAT."""
     if not is_ir_branch(head):
@@ -266,11 +282,11 @@ def ensure_pr(
     binary = _resolve_gh(gh_bin, which)
     _require_auth(run, binary)
     existing = _list_open_pr(
-        run, binary, head=head, base=base, repo=repo
+        run, binary, head=head, base=base, repo=repo, include_terminal=include_terminal
     )
     if existing:
         return {
-            "action": "exists",
+            "action": existing["state"].lower() if include_terminal and existing.get("state") in {"CLOSED", "MERGED"} else "exists",
             "url": existing["url"],
             "number": existing.get("number"),
             "head": head,
@@ -344,6 +360,7 @@ def ensure_after_code_fix(
             "no fix/** branch found after code_fix; grok must push "
             f"{IR_BRANCH_PREFIX}<slug>. Branch-only is not a ship."
         )
+    summary = sanitize_summary(summary)
     issue = summary or f"{page.get('service') or 'service'} P1"
     fix_text = summary or issue
     return ensure_pr(

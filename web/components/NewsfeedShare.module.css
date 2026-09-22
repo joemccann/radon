@@ -1,7 +1,9 @@
-.root { min-width: 0; }
-.trigger, .panel button, .action { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 44px; padding: 8px 12px; border: 1px solid var(--line-grid); border-radius: 6px; background: var(--bg-panel); color: var(--text-primary); font: inherit; font-size: 12px; text-decoration: none; cursor: pointer; }
+.root { min-width: 0; margin-top: 14px; }
+:global(body[data-mobile="true"]) .root { margin-top: 0; }
+.trigger, .panel button, .action { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 44px; padding: 8px 12px; border: 1px solid var(--line-grid); border-radius: 6px; background: var(--bg-panel); color: var(--text-primary); font: inherit; font-size: 12px; text-decoration: none; cursor: pointer; transition: var(--transition-press); }
 .trigger { color: var(--signal-core-text); }
 .trigger:hover, .panel button:hover, .action:hover { background: var(--bg-panel-raised); }
+.trigger:active:not(:disabled), .panel button:active:not(:disabled), .action:active:not(:disabled) { transform: scale(var(--press-scale)); }
 .root :is(button,a,textarea):focus-visible { outline: 2px solid var(--border-focus); outline-offset: 3px; }
 .panel { margin-top: 12px; padding: 16px; border: 1px solid var(--line-grid); border-radius: 8px; background: var(--bg-subtle); color: var(--text-primary); font-family: var(--font-sans); text-transform: none; letter-spacing: normal; }
 .heading { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin-bottom: 16px; font-size: 14px; }

@@ -263,7 +263,7 @@ test("WULF close-position order tab does not show a false naked-short warning", 
   await page.getByRole("button", { name: "SELL", exact: true }).click();
   await page.locator(".order-input").fill("77");
   await page.locator(".modify-price-input").fill("4.47");
-  await expect(page.locator(".order-error").filter({ hasText: /Naked short call/i })).toHaveCount(0);
+  await expect(page.locator(".toast-error:has(.order-error-summary)").filter({ hasText: /Naked short call/i })).toHaveCount(0);
 
   const placeButton = page.getByRole("button", { name: "Place Order" });
   await expect(placeButton).toBeEnabled();
@@ -278,5 +278,5 @@ test("WULF close-position order tab does not show a false naked-short warning", 
   // than the bare `.toast-success` class (now ambiguous — two may be mounted).
   const orderToast = page.locator(".toast-success").filter({ hasText: /Order placed/i });
   await expect(orderToast).toContainText(/Order placed: SELL 77 WULF/i);
-  await expect(page.locator(".order-error").filter({ hasText: /Naked short call/i })).toHaveCount(0);
+  await expect(page.locator(".toast-error:has(.order-error-summary)").filter({ hasText: /Naked short call/i })).toHaveCount(0);
 });

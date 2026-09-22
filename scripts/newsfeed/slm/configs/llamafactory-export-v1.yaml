@@ -1,0 +1,9 @@
+### Merge LLaMA-Factory LoRA onto the bf16 base, then export.sh quantizes GGUF.
+model_name_or_path: Qwen/Qwen2.5-1.5B-Instruct
+adapter_name_or_path: models/slm-tagger/v1/adapter
+template: qwen
+finetuning_type: lora
+export_dir: models/slm-tagger/v1/fused
+export_size: 5
+export_device: cpu
+export_legacy_format: false

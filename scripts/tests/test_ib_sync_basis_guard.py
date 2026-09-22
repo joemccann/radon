@@ -385,3 +385,51 @@ def test_zero_journal_net_with_open_position_rejects_override(capsys):
 
     assert pos["avgCost"] == pytest.approx(999.99, abs=0.0001)
     assert "SKIPPED" in capsys.readouterr().out
+
+
+# ── REL-109 (R-320): IB conId is the authoritative contract identity. ──
+_SLV_IB_AVG_COST = 222.22
+
+
+def _slv_c60_position():
+    # conId 1060 (see _make_position); 20 long.
+    return _make_position(
+        symbol="SLV", sec_type="OPT", position=20, avg_cost=_SLV_IB_AVG_COST,
+        strike=60, right="C", expiry="20261016",
+    )
+
+
+def _slv_open(total_cost, *, strike=60, con_id=None):
+    payload = {
+        "ticker": "SLV", "action": "BUY_TO_OPEN", "contracts": 10,
+        "total_cost": total_cost, "right": "C", "strike": strike, "expiry": "20261016",
+    }
+    if con_id is not None:
+        payload["con_id"] = con_id
+    return _journal_row(payload, "2026-08-10T14:00:00Z")
+
+
+def test_row_whose_conid_is_another_contract_does_not_join_the_live_basis():
+    """A C70 fill (conId 1070) whose strike field was corrupted to 60 nets to
+    the live size, so the qty guard passes and publishes a basis built from a
+    foreign contract's fill. A conId disagreement must poison the key."""
+    db = _FakeDb([_slv_open(1000.0), _slv_open(9000.0, con_id=1070)])
+    client = SimpleNamespace(get_positions=lambda: [_slv_c60_position()])
+
+    lookup = ib_sync.build_journal_basis_lookup(client, db=db)
+    pos = ib_sync.fetch_positions(client, journal_basis_lookup=lookup)[0]
+
+    assert pos["avgCost"] == pytest.approx(_SLV_IB_AVG_COST, abs=0.0001)
+    assert pos["entry_cost"] != pytest.approx(10000.0, abs=0.01)
+
+
+def test_row_conid_beats_a_corrupted_strike_on_the_live_basis():
+    """The live contract's conId (1060) keys the row even though its strike
+    field reads 600, so the journal holds the full 20 and its basis wins."""
+    db = _FakeDb([_slv_open(1000.0), _slv_open(3000.0, strike=600, con_id=1060)])
+    client = SimpleNamespace(get_positions=lambda: [_slv_c60_position()])
+
+    lookup = ib_sync.build_journal_basis_lookup(client, db=db)
+    pos = ib_sync.fetch_positions(client, journal_basis_lookup=lookup)[0]
+
+    assert pos["entry_cost"] == pytest.approx(4000.0, abs=0.01)

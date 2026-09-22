@@ -8,8 +8,8 @@ fastapi==0.135.2
 uvicorn==0.42.0
 
 # Auth
-PyJWT==2.12.1
-cryptography==46.0.6
+PyJWT==2.13.0
+cryptography==50.0.1
 
 # HTTP requests
 requests==2.33.0

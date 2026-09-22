@@ -1,6 +1,8 @@
 "use client";
 
-import { AlertTriangle } from "lucide-react";
+import ErrorToast from "@/components/ErrorToast";
+
+import { userErrorMessage } from "@/lib/userError";
 import { getConnectionBannerState } from "@/lib/ibConnectionAlert";
 
 type ConnectionBannerProps = {
@@ -27,13 +29,6 @@ export default function ConnectionBanner({
   if (!banner) return null;
 
   return (
-    <div
-      className="connection-banner"
-      role="alert"
-      data-testid="ib-connection-banner"
-    >
-      <AlertTriangle size={14} />
-      <span>{banner.message}</span>
-    </div>
+    <ErrorToast message={userErrorMessage(banner.message, "The broker connection is unavailable. Check connection status before trading.")} testId="ib-connection-banner" />
   );
 }

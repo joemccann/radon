@@ -223,7 +223,7 @@ class TestWeekendRunnerMutualExclusion:
     def test_the_wrapper_takes_a_lock_before_it_resets_the_tree(self):
         text = WRAPPER.read_text()
         lock_at = text.index("acquire_runner_lock")
-        reset_at = text.index("git reset --hard --quiet origin/main")
+        reset_at = text.index("reset --hard --quiet origin/main")
         assert lock_at < reset_at, "the tree is reset before the lock is taken"
 
     def test_the_lock_is_a_portable_mkdir_not_flock(self):
@@ -264,3 +264,4 @@ class TestWeekendRunnerMutualExclusion:
         )
         assert rc.returncode == 0, rc.stderr
         assert (lock / "pid").exists()
+        assert (lock / "start").exists()

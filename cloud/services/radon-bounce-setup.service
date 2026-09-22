@@ -1,0 +1,22 @@
+[Unit]
+Description=Radon BOUNCE SETUP scanner (Turso stretch rank, UW fixed-strike vol and skew on the top 30)
+After=network.target
+
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+User=radon
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/etc/radon/env
+Environment=RADON_DB_NO_REPLICA=1
+Environment=RADON_UW_CALLER=bounce-setup
+ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/bounce_setup_scanner.py --preset largecaps
+StandardOutput=journal
+StandardError=journal
+# Stage 1 is one chunked Turso read; stage 2 is about 150 sequential UW calls.
+TimeoutStartSec=900
+
+[Install]
+WantedBy=multi-user.target

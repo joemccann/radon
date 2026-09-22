@@ -1,6 +1,6 @@
 ---
 name: security-nightly
-description: Nightly security auditor and authorized local penetration tester - daily audit that scans the source delta since the last audited SHA with pinned deterministic tools plus harvest of whatever Vercel DeepSec sibling export is already ready and the official Claude Security plugin, independently verifies every candidate against current code, then remediates every independently verified source-actionable finding with a durable regression, then a deliver phase that pushes P2/P3 (and operator-released P0/P1) fixes as one sanitized PR, gets CI green and tells the operator what to merge. DeepSec is a sibling worker (scripts/security_deepsec_worker.sh, own launchd/cap/dead-man), not a second remediate/deliver loop. Runs unattended and CREDENTIAL-FREE in ~/radon-weekend/radon-security via scripts/security_nightly.sh, one daily cycle at 00:40 local (audit, remediate, then deliver); invoke as /security-nightly audit, /security-nightly remediate or /security-nightly deliver. Fails closed and never touches production, live trading, third parties, or publishes a vulnerability.
+description: Nightly security auditor and authorized local penetration tester - daily audit that scans the source delta since the last audited SHA with pinned deterministic tools and the official Claude Security plugin, independently verifies every candidate against current code, then remediates every independently verified source-actionable finding with a durable regression, then a deliver phase that pushes P2/P3 (and operator-released P0/P1) fixes as one sanitized PR, gets CI green and tells the operator what to merge. Vercel DeepSec is its own nightly loop (/security-deepsec, scripts/security_deepsec_nightly.sh) and is neither run nor harvested here. Runs unattended and CREDENTIAL-FREE in ~/radon-weekend/radon-security via scripts/security_nightly.sh, one daily cycle at 00:40 local (audit, remediate, then deliver); invoke as /security-nightly audit, /security-nightly remediate or /security-nightly deliver. Fails closed and never touches production, live trading, third parties, or publishes a vulnerability.
 ---
 
 # Nightly Security Auditor and Authorized Penetration Tester
@@ -18,16 +18,59 @@ source-actionable risk, and convert every valid fix into a durable regression.
 The first argument is the mode: `audit`, `remediate` or `deliver`. The
 launchd job fires daily at 00:40 local and runs `audit`, then `remediate`,
 then `deliver` in this loop's dedicated clone. The loop never merges.
-DeepSec is a sibling worker (`com.radon.security-deepsec`) with its own
-lock, cap, and dead-man; audit harvests whatever verified export is already
-ready and does not wait for DeepSec to finish. Claude Security still runs
-inside the audit phase. A budgeted full-repository refresh runs on the first
+DeepSec is its own loop (`com.radon.security-deepsec`,
+`scripts/security_deepsec_nightly.sh`, skill `security-deepsec`) with the
+same three phases, its own clone, lock, cap, dead-man and PR branch; this
+loop neither runs nor consumes it. Claude Security still runs inside the
+audit phase. A budgeted full-repository refresh runs on the first
 Sunday of each month and after a material auth, order, topology, workflow,
 dependency, or threat-model change.
 
+## Substantive publication gate (all phases)
+
+Publish only a substantive net change against current `origin/main`: source,
+tests, maintained product/operator documentation, configuration, or an actual
+CI experiment. A real experiment remains eligible while `VALIDATING` or
+`INSUFFICIENT_SAMPLE`; status words do not decide whether its diff has value.
+Known nightly audit/log ledgers, `tasks/`, runner-only reports, checkpoint
+dates and lessons alone are bookkeeping, not a reason for a commit, push or
+PR. Maintained product reports, documentation and real generated-content
+changes remain eligible; never exclude `docs/` or `reports/` wholesale. Never
+manufacture a change to satisfy a completion check. Inspect the diff before
+committing; keep report-only security work in durable private runner scratch
+and the private archive; the wrapper alone reports sanitized issue health. This rule governs every commit/push instruction and historical
+lesson below.
+
+After a substantive task is committed, run
+`python3.13 scripts/nightly_publish.py check --base origin/main --head HEAD`.
+Exit 0 means substantive; 3 means no-op; 1 means error and must stop publication.
+The publisher rechecks current main before any push. All new PR creation goes
+through `python3.13 scripts/nightly_publish.py publish --base main --head <branch> --title <title> --body-file <body-file>`.
+It owns the push; do not push a new nightly branch first or bypass the guard.
+Read JSON `status`: `published` (exit 0) includes `pr_url` and `head_sha`;
+`noop` exits 3 without publication; `error` exits 1 and must stop. Never invent a URL. Existing
+substantive PRs still resume through the deliver record and CI watch.
+
+Security disclosure rails still take precedence: keep findings and audited
+SHAs in the durable private run-record/archive outside the clone; only the
+wrapper posts sanitized health to the existing rolling issue. Never copy a
+private checkpoint or finding into a public report. A zero-finding, unreleased
+or no-safe-public-change run creates no artificial commit or PR and retains
+the security completion marker.
+
 ## Runner integration and fail-closed default
 
-The wrapper (`scripts/security_nightly.sh`) owns the runner mechanics: it
+The wrapper (`scripts/security_nightly.sh`) and DeepSec share
+`scripts/security_claude_ladder.sh`. At run time the helper lists the Mini
+Claude Code catalog (`claude models`, subscription CLI only), skips the
+newest generation, and runs the prior / second-newest first, then deeper
+Claude fallbacks. Every Claude launch uses `--effort medium` so Mini
+`~/.claude/settings.json` cannot win with low effort or a fable default.
+`RADON_WEEKEND_MODEL_LADDER` / `RADON_WEEKEND_PROVIDER_LADDER` skip
+discovery when set. If discovery fails (CLI missing, empty list, parse
+error), the helper logs and uses the safety ladder `claude-opus-5` then
+`claude-sonnet-5` (newest / fable excluded). Never silently restore fable.
+It owns the runner mechanics: it
 refuses unless BOTH `.radon-weekend-runner` and `.radon-security-runner` exist
 (so it can never run in a sibling loop's clone or the operator checkout), takes
 the exclusive `.weekend-runner.lock`, hard-resets to `origin/main` before each
@@ -37,11 +80,11 @@ attack path, exploit, secret, account, or log pointer) plus a Pushover page.
 You never author that comment: do not run `gh issue comment`, `gh issue
 create`, or `gh issue edit`. Wrapper-only. It does NOT scrub the environment
 for you and it does NOT
-provide the private archive or DeepSec/Claude-Security tooling.
+provide the private archive or Claude-Security tooling.
 
 **Fail closed is the default, not an error.** Most of the pipeline below is
-gated on operator bootstrap that has not happened yet (DeepSec pinned
-workspace + lockfile, the official Claude Security plugin, the canonical
+gated on operator bootstrap that has not happened yet (the official Claude
+Security plugin, the canonical
 private archive `radon-cloud:security-archive`, a dedicated sanitized dead-man
 credential). When a prerequisite is missing, ambiguous, or unverifiable,
 record `OPERATOR_REQUIRED` or `BLOCKED` with the exact operator action, run
@@ -117,18 +160,22 @@ on a background task" is an INCOMPLETE phase, never a completed one, and
 the completion marker must not be printed while any stage is still in
 flight (see §Completion marker, INCOMPLETE, and resume above; this is the
 same rule, extended to every long-running stage this phase started, such as
-the full pytest suite, not DeepSec, which is a sibling worker).
+the full pytest suite).
 
-DeepSec is not an in-session wait. The sibling worker owns process,
-revalidate, and export; this audit harvests a ready export and continues.
-Do not start DeepSec inside the 2h audit cap, and do not hold the
-completion marker for a DeepSec pid that is still chewing.
+DeepSec is not a stage of this loop. Do not start `deepsec process` inside
+the 2h audit cap; the DeepSec loop owns process, revalidate, export,
+verification, remediation and delivery of its own findings.
 
 Any other stage expected to exceed a couple of minutes (a full
 pytest/vitest suite, a CI watch) is launched DETACHED from the agent
 harness so a harness timeout cannot kill it:
-`nohup env -i <minimal env> bash <stage-script.sh> </dev/null >stage.out
-2>&1 & disown` (macOS has no `setsid`). The stage script writes per-step
+`nohup env -i PATH="$PATH" HOME="$HOME" USER="$USER" LOGNAME="$LOGNAME"
+LANG="$LANG" TMPDIR="$TMPDIR" DISABLE_AUTOUPDATER=1 bash <stage-script.sh>
+</dev/null >stage.out 2>&1 & disown` (macOS has no `setsid`). Pass `PATH`
+exactly as the wrapper handed it and never rebuild it by hand: on the
+runner `node` lives only under `~/.local/bin`, which the plist PATH
+carries, and a hand-built `/usr/bin:/bin` PATH made every
+`deepsec` invocation exit 127 on 2026-09-19. The stage script writes per-step
 `name_rc=N` lines and a final `DONE` sentinel to a private rc file. The stage
 script pre-writes a `name_rc=` placeholder for every planned step BEFORE it
 runs any of them, so a killed stage is legible step by step rather than as an
@@ -196,7 +243,6 @@ This prompt authorizes only:
   and test inspection in the dedicated security clone;
 - deterministic static analysis and advisory checks using already installed,
   pinned tools;
-- DeepSec source review using its locked local package;
 - Claude Security scan-only review using the installed official plugin;
 - bounded, non-destructive tests against loopback-only Radon processes using
   fake credentials, fake upstreams, synthetic identities, disposable files,
@@ -219,10 +265,15 @@ Violating any rail is a failed run.
    `.radon-weekend-runner` and `.radon-security-runner` exist at the repository
    root. A generic marker alone is insufficient. Never use the operator clone
    or the reliability, testing, documentation, or CI-performance loop clones.
-2. **Take an exclusive security-loop lock.** Use namespaced scratch and state
-   outside the repository. Never reset, clean, modify, or kill work owned by
-   another process. Serialize CPU-, memory-, and model-heavy work with the
-   shared Mac mini heavy-work semaphore.
+2. **The wrapper owns the runner lock.** `$REPO/.weekend-runner.lock` is the
+   lock; never create, reclaim, move, `kill -0`, or otherwise verify it,
+   and never create or read `~/radon-weekend/.weekend-runner.lock`. A
+   sandboxed `kill -0` returning `Operation not permitted` must not be read as evidence
+   of anything and must not become a `lock-owner-unverified` INCOMPLETE.
+   Use namespaced scratch and state outside the repository. Never reset,
+   clean, modify, or kill work owned by another process. Serialize CPU-,
+   memory-, and model-heavy work with the shared Mac mini heavy-work
+   semaphore.
 3. **Never test production or third parties.** Do not scan, crawl, fuzz, brute
    force, spray, load test, port scan, or exploit `app.radon.run`, a VPS,
    Tailscale peers, IB, Turso, Clerk, Unusual Whales, Vercel, Cloudflare,
@@ -304,6 +355,20 @@ Before every run:
    trap. A timeout or spend stop is incomplete, not a clean scan. Preserve
    private resumable state and do not advance the audited SHA.
 
+**Subscription only.** Claude Security and `claude -p` prefer an Anthropic
+API key over the machine's claude.ai login whenever one is visible. This loop
+bills the operator's subscription only: never provision `ANTHROPIC_API_KEY` /
+`ANTHROPIC_AUTH_TOKEN` / `CLAUDE_CODE_API_KEY` / `CLAUDE_API_KEY` / Bedrock /
+Vertex reroutes into the launch environment or any env file the clone reads,
+and treat this stderr line as a FAILED stage, not a warning: "claude.ai
+connectors are disabled because ANTHROPIC_API_KEY or another auth source is
+set and takes precedence over your claude.ai login". The wrapper ignores any
+of those variables in the launch environment (names it on stderr, unsets it,
+runs on the subscription), scrubs reroute lines out of a provisioned
+`web/.env`, and refuses only a key file or a Claude Code settings-level
+`apiKeyHelper` / `env` reroute that `unset` cannot reach. A stage that reports
+API-key auth therefore means the wrapper was bypassed.
+
 ## Ground truth and change selection
 
 Use `docs/security-audit-playbook.md` as the canonical Radon threat and
@@ -379,87 +444,16 @@ version, vulnerable feature, runtime/development exposure, existing
 mitigation, and upstream fix are established. Never blind-bump a framework or
 transitive dependency from a scanner score.
 
-### Stage 3: harvest the DeepSec sibling (do not wait)
+### Stage 3: DeepSec (owned by the DeepSec loop)
 
-DeepSec is a sibling worker (`scripts/security_deepsec_worker.sh`, launchd
-`com.radon.security-deepsec`, dead-man label `security-deepsec`), not a stage
-you run inside this 2h audit cap. The wrapper already harvests a ready
-export into the shared private queue at audit/remediate start. In this
-stage, record the sibling's public status (`still running` / `failed` /
-`export ready` / `harvested`), write `fast_engines: complete` and the
-`fast-engines.complete` marker after Stages 1-2 finish, and fold any
-already-harvested verified findings into this run's private record. Do not
-start `deepsec process`. Do not wait on a DeepSec pid. Do not hold the
-completion marker because DeepSec is still chewing. Advance last-audited
-SHAs for the fast engines independently; leave the DeepSec engine SHA
-untouched until harvest records it.
-
-Use only the unscoped npm package `deepsec` from `vercel-labs/deepsec`. It is
-an AI source-code reviewer with privileged shell capability, not a DAST tool
-or a substitute for penetration testing. **Initialization and upgrades are not
-part of the unattended run** (rail 8). At this prompt's creation the official
-package was `deepsec@2.3.8` while Radon's ignored workspace pinned `2.3.4`, and
-that workspace lacks a pnpm lockfile: until a human reviews and records the npm
-lock and installed-package integrity, DeepSec is `OPERATOR_REQUIRED` on the
-sibling worker, not a reason to stall this audit.
-
-DeepSec drives Claude through the Claude Agent SDK, and both it and `claude -p`
-prefer an Anthropic API key over the machine's claude.ai login whenever one is
-visible. This loop bills the operator's subscription only. Keep the model route
-at `ai: {mode: "local", provider: "local"}` in `deepsec.config.ts`, never
-provision `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` / `CLAUDE_CODE_API_KEY`
-/ `CLAUDE_API_KEY` / Bedrock / Vertex reroutes into `.deepsec/.env*` or the
-launch environment, and treat this stderr line as a FAILED stage, not a
-warning: "claude.ai connectors are disabled because ANTHROPIC_API_KEY or
-another auth source is set and takes precedence over your claude.ai login".
-The wrapper ignores any of those variables in the launch environment (names
-it on stderr, unsets it, runs on the subscription), scrubs reroute lines out
-of a provisioned `web/.env`, and refuses only a key file or a Claude Code
-settings-level `apiKeyHelper` / `env` reroute that `unset` cannot reach. A
-stage that reports API-key auth therefore means the wrapper was bypassed.
-
-The sibling worker, not this audit phase, invokes the already installed
-binary from the DeepSec worktree (never install during the nightly run).
-Its command shape, kept here so the contracts stay in one place:
-
-```sh
-umask 077
-./node_modules/.bin/deepsec --version >"$PRIVATE_RUN_DIR/deepsec-version.log" 2>&1
-set +e
-./node_modules/.bin/deepsec process --project-id radon \
-  --diff "$LAST_AUDITED_SHA..$HEAD_SHA" --concurrency 2 \
-  --comment-out "$PRIVATE_RUN_DIR/deepsec-findings.md" \
-  >"$PRIVATE_RUN_DIR/deepsec-process.log" 2>&1
-DEEPSEC_RC=$?
-set -e
-case "$DEEPSEC_RC" in 0|1) ;; *) exit "$DEEPSEC_RC" ;; esac
-./node_modules/.bin/deepsec revalidate --project-id radon --min-severity MEDIUM --concurrency 2 \
-  >"$PRIVATE_RUN_DIR/deepsec-revalidate.log" 2>&1
-./node_modules/.bin/deepsec export --project-id radon --format json --since "$RUN_STARTED_AT" \
-  --out "$PRIVATE_RUN_DIR/deepsec-current-run-findings.json" >"$PRIVATE_RUN_DIR/deepsec-export.log" 2>&1
-./node_modules/.bin/deepsec export --project-id radon --format json --min-severity MEDIUM \
-  --only-true-positive --since "$RUN_STARTED_AT" \
-  --out "$PRIVATE_RUN_DIR/deepsec-verified-findings.json" >>"$PRIVATE_RUN_DIR/deepsec-export.log" 2>&1
-```
-
-`RUN_STARTED_AT` is an ISO timestamp recorded before DeepSec starts. Preserve
-the associated private run state so every current-run finding is accounted for,
-including findings that do not survive MEDIUM+ revalidation.
-
-Interpret direct-diff exit codes correctly: `0` = completed, no net-new
-finding; `1` = completed and found at least one net-new finding (NOT a crash);
-any other nonzero = runtime/config failure — preserve resumable state and do
-NOT advance the DeepSec audited SHA. `process` has no per-command cost/duration
-cap: enforce the outer deadline and provider spend limit; `--limit N` bounds
-files while `--batch-size` does not cap total files/cost/duration. A monthly or
-threat-model-triggered full refresh runs `scan`, then repeated bounded
-`process --reinvestigate <wave-marker> --limit N` passes with one newly
-recorded wave marker, then `revalidate MEDIUM`. Reuse the marker while resuming
-the same refresh; increment only for a genuinely new refresh. Never run an
-uncontrolled whole-repository AI pass. Maintain precise project matchers for
-uncovered entry points only after human review; broad/unbounded noisy globs,
-silent exclusions, and auto-generated suppression are defects. Preserve
-DeepSec's incremental data in the clone but never commit or publish it.
+Vercel DeepSec runs in its own nightly loop (`/security-deepsec`, wrapper
+`scripts/security_deepsec_nightly.sh`, clone
+`~/radon-weekend/radon-security-deepsec`, dead-man label `security-deepsec`,
+branch `security-deepsec/<YYYY-MM-DD>`). It runs `deepsec process`,
+`revalidate` and `export`, verifies, remediates and delivers its own
+findings under the same rails as this skill. This audit does not start,
+wait on, read, or harvest it, and never advances a DeepSec audited SHA.
+Record only `deepsec: owned by security-deepsec loop` in the run-record.
 
 ### Stage 4: Anthropic Claude Security
 
@@ -469,9 +463,11 @@ codebase-scan skill or agents). Claude Security performs nondeterministic
 source review and independently panel-verifies candidates; it does not isolate
 the repository or apply patches. **Install/preflight is one-time operator
 bootstrap** (rail 8): a human installs `claude plugin install
-claude-security@claude-plugins-official --scope user`, records approved
-`claude --version` and `claude plugin list --json` values, and freezes updates
-with `DISABLE_AUTOUPDATER=1` (set in the security plist). If the plugin, the
+claude-security@claude-plugins-official --scope user`. The installed Claude
+Code and plugin versions are NOT pinned (operator decision 2026-09-19: the
+CLI updates faster than a recorded pin can follow, and a version mismatch
+kept blocking the scan stage); record the observed `claude --version` in the
+run-record and proceed. If the plugin, the
 dedicated agent `claude-security:claude-security`, the `Workflow` tool,
 Dynamic Workflows, or `auto`-mode permission is unavailable, the stage is
 `OPERATOR_REQUIRED` — never fall back to `bypassPermissions` or an improvised
@@ -519,14 +515,14 @@ fi
 CLAUDE_MODEL_ARG=""
 [ -n "${RADON_WEEKEND_MODEL:-}" ] && CLAUDE_MODEL_ARG="--model $RADON_WEEKEND_MODEL"
 claude --agent claude-security:claude-security --permission-mode auto \
-  --output-format stream-json --verbose $CLAUDE_MODEL_ARG $CLAUDE_BUDGET \
+  --output-format stream-json --verbose $CLAUDE_MODEL_ARG --effort medium $CLAUDE_BUDGET \
   -p "Scan changes with --base $LAST_AUDITED_SHA --effort medium. I understand it may take a while and use a significant number of tokens. Do not suggest patches or modify tracked files. Write only the standard ignored CLAUDE-SECURITY report." \
   >"$PRIVATE_RUN_DIR/claude-stream.jsonl" 2>"$PRIVATE_RUN_DIR/claude-stderr.log"
 ```
 
 For the budgeted monthly refresh, replace the first sentence with a
 whole-repository medium-effort scan. Treat a missing `Workflow` tool,
-unavailable agent/`auto` mode, interactive question, version mismatch,
+unavailable agent/`auto` mode, interactive question,
 incomplete inventory, timeout, provider budget/spend stop, or missing
 revision stamp as an INCOMPLETE scan; do not downgrade to a weaker mode. Keep the timestamped `CLAUDE-SECURITY-*/`
 Markdown/JSONL/SARIF/revision artifacts private (relocate to the mode-0700 run
@@ -645,15 +641,16 @@ are not security severities. Classify them as `BLOCKED`, `INCOMPLETE`, or
 (independently verified against current code) from this cycle's audit,
 highest severity first, not the first one and not one per night. Group fixes
 by root cause into separate commits on one dated branch `security/<YYYY-MM-DD>` (one
-branch per loop per day; the deliver phase turns it into one PR). Red/green
+branch per loop per day; the deliver phase publishes its substantive diff as one PR). Red/green
 per fix; the full project gates before every commit. Independent fixes may
 run in parallel as subagents in separate worktrees of this clone
 (`git worktree add ../wt-<id> -b security/<date>-<id> security/<date>`), each
 committing to its own branch; this phase merges them back onto the dated
 branch, reruns the gates on the merged result, and removes the worktrees
-(`git worktree remove`, `git branch -d`). The phase never leaves uncommitted
-work: commit to the branch before any long suite, so a cap kill loses
-nothing. A finding is done only as DONE, BLOCKED (root-cause hypothesis
+(`git worktree remove`, `git branch -d`). Preserve substantive work with a local
+commit before any long suite. Keep
+report-only state in durable private scratch and the private archive; it does not
+require a commit. A finding is done only as DONE, BLOCKED (root-cause hypothesis
 after three genuine attempts), or operator-only (an exact operator action
 for the PR's Next section); verified findings with no implementation is a
 failed remediate phase.
@@ -673,8 +670,7 @@ branch the deliver phase pushes.
 4. Run focused tests, the relevant security contracts, gitleaks, type/static
    checks, build gates, and then every full project suite required for the
    touched languages before committing.
-5. Rerun the repository-native focused workflow, DeepSec diff and MEDIUM+
-   revalidation, Claude Security scan-changes, and the local reproduction
+5. Rerun the repository-native focused workflow, Claude Security scan-changes, and the local reproduction
    against the exact fixed SHA. A scanner disagreement requires source
    adjudication; it is not silently ignored.
 6. Add a durable invariant to `docs/security-audit-playbook.md` only when it
@@ -697,7 +693,7 @@ approaches, record `BLOCKED` privately and stop modifying that finding.
 
 ## Mode: deliver (third phase of the daily cycle)
 
-Goal: every commit the remediate phase landed on `security/<YYYY-MM-DD>` reaches the
+Goal: every substantive net change the remediate phase landed on `security/<YYYY-MM-DD>` reaches the
 operator as ONE pull request with CI green, in this same cycle, and the
 operator is told exactly what is ready to merge. The loop never merges.
 The wrapper caps this phase at 3h (`RADON_WEEKEND_DELIVER_CAP_SECS`,
@@ -725,9 +721,17 @@ Security rails for this phase, in addition to every hard rail above:
    and PR number are the run to finish: check the branch out, make its CI
    green (step 4), record the outcome, then continue with today's branch.
    Never open a second PR for a branch that already has one.
-2. Push the dated branch. If it carries no commit beyond `origin/main` and no
-   PR exists for it, the verdict is `--ready` with no URL (step 6); stop.
-3. Open ONE PR for the branch via §Pull request output (`--loop security`);
+2. Classify the dated branch with
+   `python3.13 scripts/nightly_publish.py check --base origin/main --head HEAD`.
+   Exit 3 means no substantive diff, even when ledger-only commits exist.
+   If this phase has no substantive PR to resume or report, record
+   `python3.13 scripts/nightly_deliver.py record --loop security --branch "" --status green`
+   with no PR number or URL, then emit the step 6 verdict with no URLs:
+   `NIGHTLY DELIVER READY: loop=security prs=0`. Do not push or create a PR.
+   Keep any resumed substantive PR's record and URL in the final verdict even
+   when today's branch is no-op; do not erase it with an empty record.
+   Exit 1 is INCOMPLETE, never no-op. Exit 0 continues to guarded publication.
+3. Publish ONE substantive PR through the guarded publisher in §Pull request output (`--loop security`);
    update the existing PR when one is already open for the branch (`gh api
    -X PATCH`). Every operator-only finding from this cycle's audit (external
    state, credential rotation, host policy, a `BLOCKED` item) goes into the
@@ -743,9 +747,9 @@ Security rails for this phase, in addition to every hard rail above:
    until green or the cap. Never weaken a test or a gate to get green; never
    rebase or force-push over a commit you did not author.
 5. Record the outcome (`record ... --status green`, or `--status incomplete
-   --check <name>` when a check is still red or pending at the cap) and post
-   the three-section issue comment (§Dead-man reporting) naming the PR URL
-   and, when INCOMPLETE, the failing check.
+   --check <name>` when a check is still red or pending at the cap) in the
+   private run-record. The wrapper alone posts sanitized issue health;
+   never post the private findings or checkpoint to the rolling issue.
 6. Print the verdict line from
    `python3.13 scripts/nightly_deliver.py verdict --loop security --ready <url>...`
    (or `--incomplete <check> --pr-url <url>`). The wrapper greps it:
@@ -775,15 +779,14 @@ The body has exactly three sections, in this order: **Issue discovered**,
 **What was done to fix it**, **Next**. The public PR stays sanitized: no
 route, file, attack, secret, topology, or vulnerability detail (rail 7).
 Title shape: `Security <YYYY-MM-DD>`. The plain-language issue goes only
-in the body. Create a new dated branch, or a new remediation PR after the
-audit PR merged, with
-`gh pr create --title <title> --body <body> --head <branch> --base main`
-(or `POST /repos/{owner}/{repo}/pulls` with `head`, `base`, `title`, and
-`body`). Formatter `--json` is `{title, body}` only; do not POST it as the
-create payload. Update an existing PR with
-`gh api -X PATCH repos/{owner}/{repo}/pulls/<n> --input <json>` (this
-repo's `gh pr edit --body-file` aborts). Verify with a grep for a phrase
-you just wrote.
+in the body. Publish a substantive dated branch, including a new remediation after an
+older PR merged, only through
+`python3.13 scripts/nightly_publish.py publish --base main --head <branch> --title <title> --body-file <body-file>`.
+Write the formatter's exact body to that file. The publisher owns the guarded
+push and PR lookup/creation; inspect its JSON result. A no-op result publishes
+nothing. Update the body of an existing substantive PR with
+`gh api -X PATCH repos/{owner}/{repo}/pulls/<n> --input <json>` when needed
+(this repo's `gh pr edit --body-file` aborts), then verify the resulting body.
 
 A zero-finding night still creates no public PR (rail: no public audit
 artifact). P0/P1 stay private until the operator coordinates disclosure.
@@ -792,9 +795,7 @@ artifact). P0/P1 stay private until the operator coordinates disclosure.
 
 A completed audit requires: exact source range and threat-model delta recorded
 privately; secret preflight complete before any model received source;
-deterministic controls complete or explicitly marked incomplete; DeepSec
-sibling recorded as still running, failed, export ready, or harvested (a
-still-running sibling does not make this audit INCOMPLETE); Claude Security completed
+deterministic controls complete or explicitly marked incomplete; Claude Security completed
 the same immutable scope/effort with a valid revision stamp (or
 `OPERATOR_REQUIRED`); applicable bounded local active tests completed against
 synthetic fixtures; every candidate independently verified or rejected,
@@ -822,6 +823,39 @@ Next section; the deliver record and run-record carrying the branch, PR
 number and CI outcome; and the verdict line printed before the completion
 marker. CI still red or pending at the cap is INCOMPLETE, never OK.
 
+## Private operator report (every phase)
+
+The operator does not read runner logs. Before printing the completion
+marker of EVERY phase (audit, remediate, deliver, including a clean
+`OPERATOR_REQUIRED` or zero-finding night), write one complete Markdown
+report to `~/radon-weekend/.security-nightly-scratch/latest-report-<phase>.md`
+(write to a temp file in the same directory, then `mv` it into place; mode
+0600). The wrapper, not you, publishes it to the PRIVATE repository
+`joemccann/radon-security-reports` at `reports/security/<YYYY-MM-DD>/<phase>.md`
+with a write-only deploy key you never see, and links it from the Pushover
+page. Never push to that repository yourself, never put the report in the
+public repository, a PR, a commit, or the rolling issue, and never link it
+from a public surface.
+
+The report is for a reader who was not there and reads it on GitHub. Its
+structure and formatting are the contract in `docs/security-report-template.md`:
+copy that template verbatim (Summary table first, then Operator actions,
+Stages, Findings, Rejected, Fixes, Gate results, Resume state) and obey its
+formatting rules. In particular: tabular facts in GFM tables with header and
+separator rows, never `key: value` line dumps or `stage:` lines; raw tool
+output only in trimmed fenced code blocks; identifiers (`DS-…`, short SHAs,
+`path:line`, branches, commands) as code spans; sentence-case headings; no
+emoji; blank lines around every heading, table, list and code block; ISO
+dates and UTC times. A report that pastes the run-record or a scanner's
+own Markdown is a defect.
+
+Complete beats short: every candidate the engines produced this phase
+appears in Findings or Rejected with its reason; routes, `path:line`,
+attack preconditions and scanner verdicts belong here. Secret LITERALS never
+do (rail 6): name the variable or secret class and location only. The
+wrapper additionally redacts known secret shapes, which is a backstop, not
+permission.
+
 ## Private reporting and notifications
 
 The private run record contains: run ID, immutable SHAs, range, trigger, mode,
@@ -846,11 +880,9 @@ only; a missing daily comment means the runner did not fire) and does not
 edit the issue body after that. Run history stays in comments.
 
 Operators read two dead-men. `security-nightly` is this loop
-(audit/remediate/deliver). `security-deepsec` is the sibling worker:
-still running, failed, export ready, or harvested. A quiet DeepSec issue
-plus a live `~/radon-weekend/.security-deepsec.lock` means still running,
-not failed. Neither comment may name a route, file, attack, secret, or
-account.
+(audit/remediate/deliver). `security-deepsec` is the DeepSec loop's, with
+the same PHASE STAMP status shape. Neither comment may name a route, file,
+attack, secret, or account.
 
 The wrapper keeps it sanitized: no routes, file attack paths, exploits,
 secrets, or account identifiers. Put raw findings only in the private
@@ -875,9 +907,7 @@ job; send a source tree containing a possible secret to a model; use
 verification into a live curl/port scan/console action; publish a red
 regression that teaches exploitation before the fix is coordinated; advance the
 audited SHA after a timeout/incomplete inventory/failed archive/runtime error
-(DeepSec still running is not that timeout, and must not freeze non-DeepSec
-engine SHAs); wait in-session for the DeepSec sibling; open a second
-DeepSec remediate/deliver loop;
+; run, wait on, or consume the DeepSec loop's engine from this loop;
 invent a Claude Security spend cap ($25 or any other number) when
 `claude auth status` cannot prove the auth method; print the phase-completion
 marker while work is parked in a background task or a suite is still running

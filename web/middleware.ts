@@ -170,7 +170,12 @@ export { AUTHENTICATED_SHARE_GENERATOR_ROUTES, PUBLIC_SHARE_API_ROUTES };
 // filesystem pin (web/tests/middleware-share-allowlist.test.ts), same
 // default-deny discipline as the share + probe scopes: a new webhook route
 // must be added here deliberately, never auto-published by a pattern.
-export const PUBLIC_WEBHOOK_API_ROUTES = ["/api/webhooks/clerk"] as const;
+// Entries are route-file paths; a `[param]` segment matches exactly one path
+// segment (the TradingView path token is its auth, checked in-handler).
+export const PUBLIC_WEBHOOK_API_ROUTES = [
+  "/api/webhooks/clerk",
+  "/api/webhooks/tradingview/[token]",
+] as const;
 
 // Public allowlist. Every other route — pages AND /api/* — requires a Clerk
 // session. The narrow exemptions:
@@ -212,7 +217,7 @@ export const isPublicRoute = createRouteMatcher([
   // needs an explicit exemption. Serves brand guidance only; no account data.
   "/design.md",
   ...PUBLIC_SHARE_API_ROUTES,
-  ...PUBLIC_WEBHOOK_API_ROUTES,
+  ...PUBLIC_WEBHOOK_API_ROUTES.map((route) => route.replace(/\[(\w+)\]/g, ":$1")),
   "/api/health",
 ]);
 

@@ -25,7 +25,8 @@ Pipeline for converting a ticker into a trade decision. Stop on failure at any g
    - Generate the trade-spec HTML report at this milestone (mandatory) — see `docs/reports.md`.
 
 6. **Kelly sizing**
-   - Enforce 2.5% bankroll cap per position. Hard cap, not advisory.
+   - Half Kelly (0.5) default; 0.25 optional stricter; full Kelly banned.
+   - Enforce 2.5% bankroll cap per position. Hard cap, not advisory. Fail closed without a structure.
 
 7. **Log**
    - Executed → `data/trade_log.json` (append-only).
@@ -80,7 +81,7 @@ Methodology gates (from project root `CLAUDE.md`):
 |---|---|
 | 1. Convexity | Gain ≥ 2× loss. Defined-risk only. |
 | 2. Edge | Specific, data-backed dark-pool / OTC signal that hasn't moved price. |
-| 3. Risk | Fractional Kelly. Hard cap 2.5% bankroll / position. |
+| 3. Risk | Half Kelly (0.5) default, 0.25 optional stricter, full Kelly banned. Hard cap 2.5% bankroll / position. |
 | 4. ~~No naked shorts~~ | **DISABLED 2026-04-30.** Re-enable: `docs/naked-short-reenable.md`. |
 
 A milestone-5 structure must satisfy gate 1. A milestone-4 PASS must satisfy gate 2. Milestone 6 enforces gate 3.

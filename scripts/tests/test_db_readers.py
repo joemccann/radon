@@ -193,6 +193,35 @@ def test_derives_structure_and_contract_dates_from_journal(readers, conn):
     assert "AMD|2026-05-08|C|330.0" not in contract_dates
 
 
+def test_occ_journal_ticker_maps_to_underlying_contract_key(readers, conn):
+    """Flex rehydrate stores the OCC symbol as ticker. Entry-date lookup
+    keys off the underlying root (SPY|expiry|P|740), so an OCC-stamped
+    long put must still resolve — otherwise adding a same-day short
+    stamps the combo as today."""
+    conn.execute(
+        "INSERT INTO journal (trade_id, payload, filled_at, written_at) VALUES (?, ?, ?, ?)",
+        (
+            "spy-740",
+            json.dumps(
+                {
+                    "ticker": "SPY   260918P00740000",
+                    "date": "2026-05-01",
+                    "structure": "Long Put $740 2026-09-18",
+                    "expiry": "20260918",
+                    "right": "P",
+                    "strike": 740,
+                }
+            ),
+            "2026-05-01",
+            "2026-05-01T10:00:00Z",
+        ),
+    )
+    conn.commit()
+
+    _structure_dates, contract_dates = readers.read_journal_entry_date_maps(conn)
+    assert contract_dates["SPY|2026-09-18|P|740.0"] == "2026-05-01"
+
+
 def test_next_journal_numeric_id_comes_from_journal_payloads(readers, conn):
     for idx in [2, 7, "bad"]:
         conn.execute(

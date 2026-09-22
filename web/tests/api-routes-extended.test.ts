@@ -186,6 +186,8 @@ function saveEnv() {
     ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
     CLAUDE_CODE_API_KEY: process.env.CLAUDE_CODE_API_KEY,
     CLAUDE_API_KEY: process.env.CLAUDE_API_KEY,
+    CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN,
+    CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR,
   };
 }
 
@@ -209,7 +211,9 @@ describe("GET /api/ticker/seasonality — extended", () => {
     mockFetch.mockReset();
     saveEnv();
     process.env.UW_TOKEN = "test-uw-token";
-    process.env.ANTHROPIC_API_KEY = "test-anthropic-key";
+    // Subscriptions only: the Claude Max grant, never a prepaid key.
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "test-anthropic-grant";
+    process.env.CLAUDE_CONFIG_DIR = "/nonexistent/radon-no-claude-config";
   });
 
   afterEach(() => {
@@ -309,6 +313,7 @@ describe("GET /api/ticker/seasonality — extended", () => {
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.CLAUDE_CODE_API_KEY;
     delete process.env.CLAUDE_API_KEY;
+    delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
 
     // UW returns empty data
     mockFetch.mockResolvedValueOnce({
@@ -1575,7 +1580,8 @@ describe("POST /api/assistant — extended", () => {
 
   it("calls Anthropic API and returns response", async () => {
     process.env.ASSISTANT_MOCK = "0";
-    process.env.ANTHROPIC_API_KEY = "test-key";
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "test-grant";
+    process.env.CLAUDE_CONFIG_DIR = "/nonexistent/radon-no-claude-config";
     process.env.LLM_PROVIDER = "anthropic";
 
     mockFetch.mockResolvedValueOnce({

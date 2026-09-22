@@ -6,6 +6,7 @@ import {
   setNoStoreResponseHeaders,
 } from "@/lib/apiContracts";
 import { requireRouteAccess } from "@/lib/routeAccess";
+import { applyLiveWebCredentials } from "@/lib/setup/envFiles";
 
 /**
  * Per-service credential mutations, proxied to FastAPI `/credentials/{id}`.
@@ -93,6 +94,11 @@ export async function PUT(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ values, updated_by: operatorId }),
       timeout: MUTATE_TIMEOUT_MS,
+    });
+    // FastAPI stored and exported the save; mirror the per-request web keys
+    // into this process so Next picks them up without a restart.
+    await applyLiveWebCredentials(values as Record<string, unknown>).catch((error) => {
+      console.warn("[credentials] live web env apply failed:", error);
     });
     return setNoStoreResponseHeaders(NextResponse.json(data), requestId);
   } catch (error) {

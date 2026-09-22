@@ -373,6 +373,8 @@ def test_ramp_bundled_fixture_loads_into_snapshot(tmp_path):
                 str(db),
                 "--sources",
                 "ramp",
+                "--import-ramp",
+                str(Path(__file__).resolve().parents[1] / "ai_cycle" / "fixtures" / "ramp_ai_index_curated.json"),
                 "--end",
                 "2026-08-31",
                 "--archive",
@@ -384,7 +386,7 @@ def test_ramp_bundled_fixture_loads_into_snapshot(tmp_path):
     snapshot = build_snapshot(ObservationStore(db), "2026-12-31T00:00:00Z")
     panel = next(item for item in snapshot["indicators"] if item["id"] == "D5")
     assert panel["pane"] == "demand"
-    assert panel["status"] == "available"
+    assert panel["status"] == "stale"
     assert any(metric["id"] == "spend.top_1_percent_median_pepm" for metric in panel["metrics"])
     assert len(panel["history"]) >= 32
 
@@ -465,7 +467,7 @@ def test_opendesi_explicit_dated_import_loads_into_demand_snapshot(tmp_path, mon
     snapshot = build_snapshot(ObservationStore(db), "2026-09-10T16:00:00Z")
     panel = next(item for item in snapshot["indicators"] if item["id"] == "D6")
     assert panel["pane"] == "demand"
-    assert panel["status"] == "experimental"
+    assert panel["status"] == "stale"
     assert panel["title"] == "OpenDesign Arena model quality"
     assert "never GPU scarcity" in panel["methodology"]
     assert panel["source_ids"] == ["open-design-arena"]
@@ -752,6 +754,31 @@ def test_production_heartbeat_on_failure(monkeypatch):
     assert calls[0][1]["timeout"] == 8
 
 
+def test_production_health_write_timeout_does_not_mask_collection_failure(monkeypatch):
+    """Telemetry must not replace the collection exception (trin pattern).
+
+    2026-09-17 07:22Z: archive import timed out, then _write_health also
+    timed out and became the oneshot's raised error via 'During handling'.
+    """
+    from scripts.ai_cycle import collect
+    from scripts.db.hrana_http import HranaHttpError
+
+    monkeypatch.delenv("RADON_AI_CYCLE_DB_PATH", raising=False)
+
+    def boom(_flags):
+        raise RuntimeError("archive import failed")
+
+    monkeypatch.setattr(collect, "_main", boom)
+    import scripts.db.hrana_http as db
+
+    def health_boom(*_a, **_k):
+        raise HranaHttpError("TimeoutError: The read operation timed out")
+
+    monkeypatch.setattr(db, "write_service_health_http", health_boom)
+    with pytest.raises(RuntimeError, match="archive import failed"):
+        collect.main(["--record"])
+
+
 def test_production_backfill_uses_separate_health_identity(monkeypatch):
     from scripts.ai_cycle import collect
 
@@ -767,7 +794,7 @@ def test_production_backfill_uses_separate_health_identity(monkeypatch):
 
 @pytest.mark.parametrize(
     "source",
-    ["openrouter", "artificial-analysis", "eia", "vast", "sec", "portkey", "ramp", "lambda", "issuer-disclosures"],
+    ["openrouter", "artificial-analysis", "eia", "vast", "sec", "portkey", "lambda", "issuer-disclosures"],
 )
 def test_missing_entitlements_never_calls_provider(source, tmp_path):
     from scripts.ai_cycle.collectors import collect_source
