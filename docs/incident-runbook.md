@@ -267,6 +267,18 @@ Incident: 2026-07-08, P1.
   sight paged P1. Edge and `:8321/health/lite` stayed up. Classifier
   now treats exit-code 143 as graceful-SIGTERM collateral inside a
   deploy window; other exit-codes still stay P1.
+- **2026-09-22 00:05Z:** page `9964f6e0`. Deploy stop-clean SIGTERM'd BPI
+  at 00:00:09Z during SPX chart fallback (NDX already upserted). The
+  handler logged `received signal 15; unwinding` and raised SystemExit,
+  but `ThreadPoolExecutor.shutdown(wait=True)` joined Yahoo workers that
+  did not return. TimeoutStopSec=90s later systemd SIGKILL'd
+  (ExecMainStatus=9, InactiveEnter 00:01:39Z) and recorded
+  `Result=timeout`, which this case does not downgrade. Sibling
+  long-running units restarted in that same minute. Edge stayed up.
+  Next BPI timer was 11:01Z. Handler now `os._exit(143)` so the join
+  cannot outlive the stop timeout. Do not widen the classifier to
+  `Result=timeout`: a real start-budget kill has the same Result and
+  must stay P1.
 - **Discriminating check:** `InactiveEnterTimestamp` before a later
   green-marker mtime (within the 24h oneshot horizon) or within
   60 min after the last green (cancelled stack / not-yet-green);
@@ -275,8 +287,10 @@ Incident: 2026-07-08, P1.
   `Result=exit-code` + `ExecMainStatus=143` is graceful SIGTERM
   unwind (same class as `signal`). A fresh successor journal does
   not override kill-before-green.
-- **Remediation:** classifier only, do not restart. Non-143 exit-code
-  and start-limit-hit stay P1.
+- **Remediation:** classifier downgrades `signal` and exit 143 only.
+  A chart-fallback hang that would have been `Result=timeout` exits
+  143 via `os._exit` before TimeoutStopSec. Do not restart. Non-143
+  exit-code, `Result=timeout`, and start-limit-hit stay P1.
 - **Regression:** `test_units.py::TestDeployCollateralSignalKill`
   (`test_stacked_deploy_signal_kill_34min_before_green_is_p3`,
   `test_signal_kill_after_last_green_during_cancelled_stack_is_p3`,
@@ -284,9 +298,12 @@ Incident: 2026-07-08, P1.
   `test_stacked_successor_green_158min_after_kill_is_p3`,
   `test_latched_kill_before_green_not_repaged_by_successor_inflight_journal`,
   `test_graceful_sigterm_exit_143_before_green_is_p3`,
-  `test_graceful_sigterm_exit_143_without_deploy_evidence_stays_p1`).
+  `test_graceful_sigterm_exit_143_without_deploy_evidence_stays_p1`),
+  `test_bpi_truncated_sweep.py::TestSigtermDuringChartFallbackExits`
+  (`test_sigterm_during_stuck_chart_fetch_exits_143`).
 - **Code:** `scripts/watchdog/units.py` (`DEPLOY_COLLATERAL_WINDOW_SECS=3600`,
-  `KILL_BEFORE_GREEN_FROZEN_CAP_SECS=86400`, `GRACEFUL_SIGTERM_EXIT_STATUS=143`).
+  `KILL_BEFORE_GREEN_FROZEN_CAP_SECS=86400`, `GRACEFUL_SIGTERM_EXIT_STATUS=143`),
+  `scripts/bpi_scan.py` (`install_sigterm_unwind`).
 
 ---
 
