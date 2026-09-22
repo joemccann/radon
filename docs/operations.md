@@ -175,7 +175,10 @@ than the working tree, and refuses to publish `mcp.env` through a
 non-regular destination (writes to a temp file, then atomic rename). The
 nightly-loop wrappers refuse symlinks in their privileged file operations
 (log dirs/files, private state) and provision the 2FA lease directory
-through the fd-based `O_NOFOLLOW` helper. Contracts:
+through the fd-based `O_NOFOLLOW` helper. The security and security-deepsec
+loops' `publish_private_report()` also refuses a symlink at the phase report
+path before reading it and at the pinned-GitHub-known-hosts scratch path
+before writing it (2026-09-22). Contracts:
 `cloud/tests/test_setup_vps_privileged_paths.py`,
 `scripts/tests/test_wrapper_symlink_refusal.py`.
 
