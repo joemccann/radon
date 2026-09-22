@@ -8085,8 +8085,10 @@ Dependency graph: T1 -> {T2,T3} -> T4 -> T5.
 - [x] T1 depends_on: [] Isolate latest main, inspect instructions and map palette dependencies.
 - [x] T2 depends_on: [T1] Remove global palette, trigger, hotkey, styles and obsolete tests; preserve instrument search.
 - [x] T3 depends_on: [T1] Remove instrument Commands deck and shortcut; update cockpit regressions.
-- [ ] T4 depends_on: [T2,T3] Review integration and browser regressions; publish PR.
+- [x] T4 depends_on: [T2,T3] Review integration and browser regressions; publish PR.
 - [ ] T5 depends_on: [T4] Verify exact-head GitHub checks and screenshots, send Pushover receipt.
 Validation: no local test suites. GitHub owns unit, build and browser checks. Preserve unrelated workspace edits in original checkout.
 
 Review: removed global dialog/trigger/recent-history storage and instrument Commands deck/colon handler; retained direct instrument search and Cmd/Ctrl+K focus. Unit and curated browser regressions cover search navigation, remaining decks, Escape and responsive absence. No local test suites. GitHub checks and visual artifacts pending.
+
+Review update: PR #630 published; independent review preserved the shared asset empty-state style while deleting palette-specific styles. TypeScript and ESLint passed. Exact-head GitHub verification pending.

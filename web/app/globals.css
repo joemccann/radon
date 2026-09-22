@@ -8632,7 +8632,14 @@ body[data-mobile="true"] .orders-command-strip__jump:active {
   padding: 16px;
   min-height: 0;
 }
-.asset-deck-empty,
+.asset-deck-empty {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
 /* Tab shared */
 .tab-loading { padding: 24px 0; text-align: center; }
 .tab-loading-text { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
