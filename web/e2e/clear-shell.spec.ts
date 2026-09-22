@@ -20,7 +20,7 @@ for (const width of [360, 390, 641, 768, 900, 1024, 1440]) {
     await expect(navigation.getByRole("link", { name: "Portfolio", exact: true })).toHaveAttribute("aria-current", "page");
     const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(horizontalOverflow).toBeLessThanOrEqual(1);
-    await page.screenshot({ path: testInfo.outputPath(`clear-shell-${width}.png`), fullPage: false });
+    await page.screenshot({ path: testInfo.outputPath(`instrument-workspace-clear-shell-${width}.png`), fullPage: false });
 
     const more = page.getByRole("button", { name: mobile ? "Open more navigation" : "Open all workspaces", exact: true });
     await more.click();
