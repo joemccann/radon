@@ -158,7 +158,6 @@ performance-page.spec.ts
 pltr-chain-position-focus.spec.ts
 portfolio-leg-row-runtime.spec.ts
 portfolio-market-closed.spec.ts
-portfolio-mixed-combo-today-pnl.spec.ts
 portfolio-ratio-risk-reversal-label.spec.ts
 portfolio-request-cadence.spec.ts
 portfolio-return-capital.spec.ts
@@ -368,3 +367,4 @@ ws-connection-stability.spec.ts
 # and recovery request-count assertions are unchanged. Shortcut/search behavior
 # runs in curated clear-shell.spec.ts and ticker-search-chain.spec.ts, with
 # instrument workspace screenshots uploaded by CI. Timing suite remains held out.
+# CURATED 2026-09-22 portfolio-mixed-combo-today-pnl.spec.ts - GitHub desktop/mobile acceptance and mixed-coverage screenshots replace blocked local browser verification.

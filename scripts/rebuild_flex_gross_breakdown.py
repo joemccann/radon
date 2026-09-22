@@ -137,6 +137,11 @@ def _check_totals(payload: dict[str, Any], group: list[Any]) -> None:
             raise disagree
 
 
+def _journal_snapshot(rows: Iterable[tuple[str, Any]]) -> list[tuple[str, str]]:
+    """Freeze every row, including rows that could acquire competing claims."""
+    return sorted((trade_id, json.dumps(_payload(raw), sort_keys=True)) for trade_id, raw in rows)
+
+
 def plan_rebuild(rows: Iterable[tuple[str, Any]], executions: list[Any]) -> dict[str, Any]:
     """Plan gross_fill_breakdown stamps; refuse anything not exactly proven."""
     survivors = rehydrate._drop_superseded_executions(executions)
@@ -160,6 +165,7 @@ def plan_rebuild(rows: Iterable[tuple[str, Any]], executions: list[Any]) -> dict
     plan: dict[str, Any] = {
         "stamp": [], "refuse": [], "out_of_period": [], "already_stamped": 0,
         "coverage": (days[0], days[-1]) if days else None,
+        "snapshot": _journal_snapshot(parsed),
     }
     for trade_id, payload in aggregates:
         if FIELD in payload:
@@ -225,14 +231,18 @@ def render_plan(plan: dict[str, Any]) -> str:
 
 def _apply(db: Any, plan: dict[str, Any]) -> int:
     """Stamp every planned row in one transaction; roll back on any conflict."""
+    if not plan["stamp"]:
+        return 0
     try:
+        # Serialize validation and writes, including absence of competing claims.
+        # A guard on only the target row cannot detect a newly inserted aggregate.
+        db.execute("BEGIN IMMEDIATE")
+        rows = db.execute("SELECT trade_id, payload FROM journal").fetchall()
+        if _journal_snapshot(rows) != plan["snapshot"]:
+            raise RuntimeError("journal changed since planning; rebuild the plan")
+        originals = dict(rows)
         for item in plan["stamp"]:
-            current = db.execute(
-                "SELECT payload FROM journal WHERE trade_id = ?", (item["trade_id"],)
-            ).fetchall()
-            if len(current) != 1:
-                raise RuntimeError(f"{item['trade_id']}: row vanished")
-            raw = current[0][0]
+            raw = originals[item["trade_id"]]
             payload = _payload(raw)
             if FIELD in payload:
                 raise RuntimeError(f"{item['trade_id']}: row gained {FIELD} since planning")
