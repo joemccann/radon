@@ -15,18 +15,26 @@ Operator 2026-09-22: R01-A (no host browser endpoint on the codex write rung), R
 - [ ] T3 Verify and ship
 
 # Task: After-hours option last is last trade or last bid/offer, not previous close
+# Task: flex-pull activity coverage page d3b66eaf
+
+08:30 ET retry exits 1. Applied Equity_Summary claims, NAV dates absent.
 
 ## Dependency graph
 
-- T1 depends_on: [] - Adversarial tests: META 665P CLOSE 26.70 vs print 8.10
-- T2 depends_on: [T1] - Retain session last in tick handler, relay cache, sync history, UI
-- T3 depends_on: [T2] - Focused green; draft PR; hold merge
+- T1 depends_on: [] - Red: duplicate repair inserts missing NAV; suppressed persist still records NAV
+- T2 depends_on: [T1] - Insert-only NAV repair plus suppressed nav_points mirror
+- T3 depends_on: [T2] - Focused pytest green; runbook case; commit on the local fix branch; no push
 
 ## Checklist
 
-- [x] T1 Tests
+- [x] T1 Failing tests
 - [x] T2 Implementation
-- [ ] T3 Draft PR; hold merge
+- [x] T3 Focused tests, runbook, commit
+
+## Review
+
+- Applied activity duplicate with cash covered inserts only missing NAV (`DO NOTHING`) and does not call `_apply_classified`. Missing cash stays `coverage_unverified`. Suppressed payload still has an empty `series` and now mirrors five NAV dates. Focused pytest 84 passed. Not pushed.
+
 # Task: Operator page on the app container
 
 The API image has no systemctl, so /admin marked every app unit Unknown and said the browser was not on the VPS.
