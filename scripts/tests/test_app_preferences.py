@@ -53,14 +53,13 @@ class TestRegistryIntegrity:
             if pref.value_type in {"int", "float"}:
                 assert pref.hard_min <= pref.default <= pref.hard_max
 
-    def test_registry_contains_all_five_order_limit_keys(self):
+    def test_registry_contains_all_four_order_limit_keys(self):
         keys = {pref.key for pref in app_preferences.registry()}
         assert {
             "RADON_MAX_ORDER_QTY",
             "RADON_MAX_STOCK_ORDER_QTY",
             "RADON_MAX_ORDER_NOTIONAL",
             "RADON_MAX_ORDERS_PER_MIN",
-            "RADON_WORKFLOW_MAX_ORDERS",
         } <= keys
 
     def test_no_em_dash_in_labels_or_descriptions(self):
@@ -82,6 +81,7 @@ class TestRegistryIntegrity:
             "unit",
             "description",
             "applies_immediately",
+            "risk_gated",
             "source",
             "db_rejected",
             "updated_at",
@@ -89,6 +89,7 @@ class TestRegistryIntegrity:
         ]
         assert entry["value"] == 500
         assert entry["applies_immediately"] is True
+        assert entry["risk_gated"] is True
         assert entry["db_rejected"] is False
         assert entry["updated_at"] is None
 
@@ -423,12 +424,10 @@ class TestOrderLimitsDelegation:
             "RADON_MAX_STOCK_ORDER_QTY": "2000",
             "RADON_MAX_ORDER_NOTIONAL": "50000.0",
             "RADON_MAX_ORDERS_PER_MIN": "4",
-            "RADON_WORKFLOW_MAX_ORDERS": "2",
         })
         assert order_limits.max_stock_order_qty() == 2000
         assert order_limits.max_order_notional() == 50000.0
         assert order_limits.max_orders_per_min() == 4
-        assert order_limits.workflow_max_orders() == 2
 
     def test_check_order_limits_uses_stored_cap(self):
         app_preferences.seed_snapshot_for_tests({"RADON_MAX_ORDER_QTY": "100"})
@@ -469,12 +468,45 @@ class TestRegistryIsHonest:
 
     def test_order_limit_bands_stay_within_a_small_multiple_of_the_default(self):
         for pref in app_preferences.registry():
-            if pref.group != "Order Limits":
+            if pref.group != "Order Limits" or pref.value_type == "bool":
                 continue
             assert pref.hard_max <= pref.default * 6, (
                 f"{pref.key} band lets one click widen the cap "
                 f"{pref.hard_max / pref.default:.0f}x past the default"
             )
+
+    def test_every_key_is_read_through_the_registry_by_radon_api(self):
+        """The Preferences tab promises a live effect for every key it shows.
+
+        A key nobody reads is a false control; a key read through a second
+        hand-written band (`_bounded_env_int("RADON_X", 24)`) is a control
+        whose allowed range on screen can differ from the one enforced. Both
+        are the same lie, so both are pinned: every registry key must appear
+        as `app_preferences.get_int(...)` / `get_float(...)` or via the
+        `order_limits` delegates, and never as a raw env read in radon-api.
+        """
+        scripts_dir = Path(__file__).parent.parent
+        server_src = (scripts_dir / "api" / "server.py").read_text()
+        order_limits_src = (scripts_dir / "order_limits.py").read_text()
+        bankroll_guard_src = (scripts_dir / "bankroll_guard.py").read_text()
+        for pref in app_preferences.registry():
+            through_registry = (
+                f'get_int("{pref.key}")' in server_src
+                or f'get_float("{pref.key}")' in server_src
+                or f'"{pref.key}"' in order_limits_src
+                or f'"{pref.key}"' in bankroll_guard_src
+            )
+            assert through_registry, f"{pref.key} has no reader that resolves through app_preferences"
+            assert f'_bounded_env_int("{pref.key}"' not in server_src, (
+                f"{pref.key} is read with a hand-written band in server.py; "
+                "the registry band must be the only one"
+            )
+
+    def test_risk_gate_is_declared_by_the_registry_not_the_ui(self):
+        for pref in app_preferences.registry():
+            assert pref.risk_gated is (pref.group == "Order Limits"), pref.key
+        assert all(entry.to_dict()["risk_gated"] is (entry.preference.group == "Order Limits")
+                   for entry in app_preferences.resolve_all())
 
 
 class TestRefreshSpawnFailureIsContained:

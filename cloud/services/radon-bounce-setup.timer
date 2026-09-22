@@ -1,0 +1,12 @@
+[Unit]
+Description=Radon BOUNCE SETUP scanner - weekdays after the close and the price-history sweeps
+
+[Timer]
+# 21:10 UTC Mon..Fri: after the 16:00 ET close (EDT and EST) so the latest
+# session in price_history_daily is complete. Heartbeat `bounce-setup`.
+OnCalendar=Mon..Fri *-*-* 21:10:00 UTC
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

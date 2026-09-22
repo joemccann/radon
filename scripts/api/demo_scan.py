@@ -34,6 +34,8 @@ _SNAPSHOT_SQL: dict[str, str] = {
     "flow-analysis": "SELECT payload FROM flow_analysis_snapshots ORDER BY scan_time DESC LIMIT 1",
     "theta-harvester": "SELECT payload FROM theta_harvester_snapshots ORDER BY scan_time DESC LIMIT 1",
     "strength-confirmation": "SELECT payload FROM strength_confirmation_snapshots ORDER BY scan_time DESC LIMIT 1",
+    "vol-skew-mr": "SELECT payload FROM vol_skew_mr_snapshots ORDER BY scan_time DESC LIMIT 1",
+    "bounce-setup": "SELECT payload FROM scan_snapshots WHERE service = 'bounce-setup' ORDER BY scan_time DESC LIMIT 1",
     "leap-scan": "SELECT payload FROM scan_snapshots WHERE service = 'leap-scan' ORDER BY scan_time DESC LIMIT 1",
     "garch-scan": "SELECT payload FROM scan_snapshots WHERE service = 'garch-scan' ORDER BY scan_time DESC LIMIT 1",
     "vcg-scan": "SELECT payload FROM vcg_snapshots ORDER BY scan_time DESC LIMIT 1",

@@ -68,6 +68,9 @@ export const IV_SPREAD_REFRESH: RefreshSchedule = [daily(22, 15)];
 /** cloud/services/radon-ma-ratio.timer */
 export const MA_RATIO_REFRESH: RefreshSchedule = [daily(22, 45)];
 
+/** cloud/services/radon-calm-streak.timer */
+export const CALM_STREAK_REFRESH: RefreshSchedule = [daily(2, 40), daily(14, 30)];
+
 /** cloud/services/radon-equibles-cot.timer */
 export const COT_POSITIONING_REFRESH: RefreshSchedule = [weekly(6, 1, 0)];
 
@@ -113,6 +116,9 @@ export const VIXCOR_REFRESH: RefreshSchedule = [daily(2, 35)];
 
 /** cloud/services/radon-vixts.timer */
 export const VIXTS_REFRESH: RefreshSchedule = [daily(2, 45)];
+
+/** cloud/services/radon-panic-index.timer */
+export const PANIC_INDEX_REFRESH: RefreshSchedule = [daily(2, 50), daily(13, 15)];
 
 /** cloud/services/radon-dispersion.timer */
 export const DISPERSION_REFRESH: RefreshSchedule = [daily(22, 20)];

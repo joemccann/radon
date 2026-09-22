@@ -5,16 +5,18 @@
     <key>Label</key>
     <string>com.radon.security-deepsec</string>
 
-    <!-- Sibling of com.radon.security-daily. This job runs DeepSec only.
-         It does not remediate, deliver, or merge. __DEEPSEC_REPO__ is the
-         dedicated worktree; the security clone's nightly reset must not
-         reach it. Stand down on the DeepSec lock so a resume-friendly
-         fire cannot reset the tree under a live worker. -->
+    <!-- The DeepSec nightly loop: the same audit -> remediate -> deliver
+         cycle as com.radon.security-daily, in its OWN standalone clone
+         (__DEEPSEC_REPO__, substituted by scripts/setup_security_nightly.sh).
+         Not a worktree: `checkout main` in a worktree fails while the
+         security clone holds main. The clone is restored BEFORE the wrapper
+         is read, and skipped while a live run holds the runner lock so the
+         fire cannot reset the tree under a running agent. -->
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
         <string>-c</string>
-        <string>C=__DEEPSEC_REPO__; W=__WEEKEND_ROOT__; kill -0 "$(cat "$W/.security-deepsec.lock/pid" 2&gt;/dev/null)" 2&gt;/dev/null || { T="$(command -v timeout || true)"; ${T:+"$T" -k 15 180} git -C "$C" -c core.sshCommand="ssh -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4" fetch -q origin &amp;&amp; git -C "$C" checkout -f -q main &amp;&amp; git -C "$C" reset --hard -q origin/main; }; exec /bin/bash "$C/scripts/security_deepsec_worker.sh" run</string>
+        <string>export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null GIT_CONFIG_KEY_1=core.fsmonitor GIT_CONFIG_VALUE_1=false; C=__DEEPSEC_REPO__; G="$(dirname "$C")/.gitdirs/security-deepsec.git"; kill -0 "$(cat "$C/.weekend-runner.lock/pid" 2&gt;/dev/null)" 2&gt;/dev/null || { T="$(command -v timeout || true)"; ${T:+"$T" -k 15 180} git --git-dir="$G" --work-tree="$C" -c core.sshCommand="ssh -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4" fetch -q origin &amp;&amp; git --git-dir="$G" --work-tree="$C" checkout -f -q main &amp;&amp; git --git-dir="$G" --work-tree="$C" reset --hard -q origin/main; }; exec /bin/bash "$C/scripts/security_deepsec_nightly.sh" cycle</string>
     </array>
 
     <key>WorkingDirectory</key>
@@ -24,32 +26,32 @@
     <dict>
         <key>PATH</key>
         <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:__HOME__/.local/bin:__HOME__/.bun/bin</string>
-        <key>RADON_WEEKEND_DEEPSEC_REPO</key>
-        <string>__DEEPSEC_REPO__</string>
         <key>RADON_WEEKEND_REPO</key>
         <string>__DEEPSEC_REPO__</string>
         <key>HOME</key>
         <string>__HOME__</string>
+        <!-- Rail 8: freeze Claude Code so no scanner/plugin/model upgrade
+             happens in an unattended run. -->
         <key>DISABLE_AUTOUPDATER</key>
         <string>1</string>
     </dict>
 
-    <!-- Same 00:40 slot as security-daily. DeepSec is a sibling, not a
-         sixth staggered loop; the 2h audit cap does not bind this job. -->
+    <!-- Daily 00:50 local, ten minutes after security-daily; the audit
+         phase carries the 8h DeepSec cap the sibling worker used to own. -->
     <key>StartCalendarInterval</key>
     <dict>
         <key>Hour</key>
         <integer>0</integer>
         <key>Minute</key>
-        <integer>40</integer>
+        <integer>50</integer>
     </dict>
 
     <key>RunAtLoad</key>
     <false/>
 
     <key>StandardOutPath</key>
-    <string>__DEEPSEC_REPO__/logs/security-deepsec/launchd-deepsec.log</string>
+    <string>__DEEPSEC_REPO__/logs/security-deepsec/launchd-cycle.log</string>
     <key>StandardErrorPath</key>
-    <string>__DEEPSEC_REPO__/logs/security-deepsec/launchd-deepsec.err</string>
+    <string>__DEEPSEC_REPO__/logs/security-deepsec/launchd-cycle.err</string>
 </dict>
 </plist>

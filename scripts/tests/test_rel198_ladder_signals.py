@@ -18,6 +18,7 @@ LOOPS = {
     "reliability": SCRIPTS / "reliability_weekend.sh",
     "testing": SCRIPTS / "testing_weekend.sh",
     "security": SCRIPTS / "security_nightly.sh",
+    "security-deepsec": SCRIPTS / "security_deepsec_nightly.sh",
     "documentation": SCRIPTS / "documentation_nightly.sh",
     "ci-performance": SCRIPTS / "ci_performance_nightly.sh",
 }
@@ -25,6 +26,7 @@ PLISTS = {
     "reliability": REPO / "config" / "com.radon.reliability-daily.plist",
     "testing": REPO / "config" / "com.radon.testing-daily.plist",
     "security": REPO / "config" / "com.radon.security-daily.plist",
+    "security-deepsec": REPO / "config" / "com.radon.security-deepsec.plist",
     "documentation": REPO / "config" / "com.radon.documentation-daily.plist",
     "ci-performance": REPO / "config" / "com.radon.ci-performance-daily.plist",
 }
@@ -107,6 +109,7 @@ class TestQuoteInACrashIsNotQuota:
         # Replace the claude stub: quote the pattern, pad 60 lines, crash.
         (bin_dir / "claude").write_text(
             "#!/bin/bash\n"
+            'if [ "$1" = "models" ]; then exit 1; fi\n'
             'model=""\n'
             "while [ $# -gt 0 ]; do\n"
             '  if [ "$1" = "--model" ]; then model="$2"; shift 2; continue; fi\n'
@@ -134,7 +137,8 @@ class TestQuoteInACrashIsNotQuota:
             models_log.read_text(encoding="utf-8").splitlines()
             if models_log.exists() else []
         )
-        first_rung = "claude-fable-5[1m]"
+        # Discovery fails against the stub `claude models`; safety first rung.
+        first_rung = "claude-opus-5"
         assert models == [first_rung], (
             f"a crash quoting the quota pattern walked the ladder: {models!r}\n"
             f"{proc.stdout}{proc.stderr}"

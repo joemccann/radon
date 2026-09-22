@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import views from "./InstrumentViews.module.css";
 import type { OpenOrder, PortfolioData, PortfolioPosition } from "@/lib/types";
 import type { PriceData, FundamentalsData } from "@/lib/pricesProtocol";
 import type { DeckKey } from "./AssetCockpit";
@@ -23,12 +24,11 @@ const DECK_TITLE: Record<DeckKey, string> = {
   i: "Info / Company",
   h: "13F Smart Money",
   f: "Filing Forensics",
-  ":": "Command Palette",
   o: "Order Ticket",
 };
 
 /** Keys that open a deck via single-keystroke. */
-const OPEN_KEYS = new Set<string>(["c", "p", "n", "r", "s", "i", "h", "f", ":"]);
+const OPEN_KEYS = new Set<string>(["c", "p", "n", "r", "s", "i", "h", "f"]);
 
 /**
  * Decks whose content is too wide for the 36% act column and so fly out across
@@ -102,12 +102,13 @@ export default function AssetDeck({
 
   return (
     <div
-      className={`asset-deck ${open ? "open" : ""} ${wide ? "asset-deck--wide" : ""}`}
+      className={`asset-deck ${views.views} ${open ? "open" : ""} ${wide ? "asset-deck--wide" : ""}`}
+      data-deck={activeDeck ?? "book"}
       aria-hidden={!open}
     >
       <div className="asset-deck-hd">
-        <span>{title}</span>
-        <button type="button" className="asset-deck-x" onClick={() => onDeckChange(null)}>
+        <span role="heading" aria-level={2}>{title}</span>
+        <button type="button" className="asset-deck-x" aria-label="Return to book and trade" onClick={() => onDeckChange(null)}>
           esc ✕
         </button>
       </div>
@@ -156,15 +157,6 @@ export default function AssetDeck({
             priceData={prices[ticker] ?? null}
             fundamentals={fundamentals[ticker] ?? null}
           />
-        )}
-        {activeDeck === ":" && (
-          <div className="asset-deck-palette">
-            <div className="asset-deck-ph">Command Palette</div>
-            <p>
-              Accelerator only: jump-to-ticker, quick orders, :chart. Never the sole path to
-              any surface.
-            </p>
-          </div>
         )}
       </div>
     </div>

@@ -3,8 +3,8 @@
 Runs against a LOCAL libsql :memory: database with the real 0028 migration
 (same harness as test_knowledge_store.py). Connectors are FAKE modules
 (SimpleNamespace with SOURCE/SCOPE/fetch) — scripts.knowledge.sources is
-never imported. No network, no model downloads, no real Cerebras calls:
-requests is monkeypatched in distill tests and the distill/embed seams are
+never imported. No network, no model downloads, no live model-ladder calls:
+distill tests inject `complete`/`post`/`env`, and the distill/embed seams are
 monkeypatched on the ingest module in ingest tests.
 """
 from __future__ import annotations
@@ -24,6 +24,7 @@ _SCRIPTS_DIR = _PROJECT_ROOT / "scripts"
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
+from clients.model_ladder import LadderResult, ModelLadderExhausted  # noqa: E402
 from knowledge import distill as distill_mod  # noqa: E402
 from knowledge import embed as embed_mod  # noqa: E402
 from knowledge import ingest as ingest_mod  # noqa: E402
@@ -65,6 +66,7 @@ class _FakeResponse:
     def __init__(self, status_code: int, payload: dict):
         self.status_code = status_code
         self._payload = payload
+        self.text = json.dumps(payload)
 
     def json(self) -> dict:
         return self._payload
@@ -82,45 +84,81 @@ _GOOD_DISTILLATION = json.dumps(
 )
 
 
+def _distill_ok(**kwargs):
+    return LadderResult(
+        data={
+            "summary": "What fixed the relay farm-down? A bounded reconnect ladder.",
+            "tickers": ["spy"],
+        },
+        text=_GOOD_DISTILLATION,
+        provider=kwargs.get("provider", "anthropic"),
+        model="claude-sonnet-4-6",
+    )
+
+
 class TestDistill:
-    @pytest.fixture(autouse=True)
-    def _key(self, monkeypatch):
-        monkeypatch.setattr(distill_mod, "_load_key", lambda: "test-key")
+    def test_success_returns_summary_and_uppercased_tickers(self):
+        captured = {}
 
-    def test_success_returns_summary_and_uppercased_tickers(self, monkeypatch):
-        calls = []
+        def complete(instruction, **kwargs):
+            captured["instruction"] = instruction
+            captured.update(kwargs)
+            return _distill_ok()
 
-        def fake_post(url, **kwargs):
-            calls.append((url, kwargs))
-            return _FakeResponse(200, _chat_response(_GOOD_DISTILLATION))
-
-        monkeypatch.setattr(distill_mod.requests, "post", fake_post)
-
-        result = distill_mod.distill("Relay", "the relay farm-down fix")
+        result = distill_mod.distill(
+            "Relay", "the relay farm-down fix", complete=complete, env={"CLAUDE_CODE_OAUTH_TOKEN": "oauth-a"}
+        )
 
         assert result == {
             "summary": "What fixed the relay farm-down? A bounded reconnect ladder.",
             "tickers": ["SPY"],
         }
-        assert len(calls) == 1
-        assert calls[0][0] == distill_mod.CEREBRAS_CHAT_COMPLETIONS_URL
+        assert captured["accept"] is distill_mod.accept_distill_payload
+        assert captured["log_prefix"] == "knowledge-distill"
 
-    def test_account_id_and_secrets_scrubbed_before_egress(self, monkeypatch):
-        # Eval/journal content carries the real IB account id + secret shapes;
-        # none of it may reach the third-party Cerebras API.
+    def test_cerebras_is_not_first_when_earlier_providers_are_keyed(self):
+        calls = []
+
+        def post(url, **kwargs):
+            calls.append(url)
+            if "api.anthropic.com" in url:
+                return _FakeResponse(
+                    200,
+                    {
+                        "stop_reason": "end_turn",
+                        "content": [{"type": "text", "text": _GOOD_DISTILLATION}],
+                    },
+                )
+            if "api.cerebras.ai" in url:
+                raise AssertionError("cerebras must not be called while anthropic is keyed")
+            return _FakeResponse(599, {"error": {"message": f"unmocked {url}"}})
+
+        result = distill_mod.distill(
+            "Relay",
+            "the relay farm-down fix",
+            env={
+                "CLAUDE_CODE_OAUTH_TOKEN": "oauth-ant-test",
+                "CEREBRAS_API_KEY": "csk-test",
+            },
+            post=post,
+        )
+        assert result["tickers"] == ["SPY"]
+        assert any("api.anthropic.com" in url for url in calls)
+        assert not any("cerebras" in url for url in calls)
+
+    def test_account_id_and_secrets_scrubbed_before_egress(self):
         sent = {}
 
-        def fake_post(url, **kwargs):
-            sent["content"] = kwargs["json"]["messages"][1]["content"]
-            return _FakeResponse(200, _chat_response(_GOOD_DISTILLATION))
+        def complete(instruction, **kwargs):
+            sent["content"] = instruction
+            return _distill_ok()
 
-        monkeypatch.setattr(distill_mod.requests, "post", fake_post)
-
-        # All fabricated placeholder values — never a real account/token/host.
         distill_mod.distill(
             "Portfolio",
             "Account U1234567 held libsql://example-test.turso.io token "
             "sk-ant-PLACEHOLDER00 and a NVDA call.",
+            complete=complete,
+            env={"CLAUDE_CODE_OAUTH_TOKEN": "oauth-a"},
         )
 
         body = sent["content"]
@@ -128,24 +166,22 @@ class TestDistill:
         assert "[redacted-account]" in body
         assert "turso.io" not in body
         assert "sk-ant-PLACEHOLDER00" not in body
-        # Non-secret substance survives so distillation still works.
         assert "NVDA call" in body
 
-    def test_structured_and_header_credentials_are_scrubbed_before_egress(
-        self, monkeypatch
-    ):
+    def test_structured_and_header_credentials_are_scrubbed_before_egress(self):
         sent = {}
 
-        def fake_post(url, **kwargs):
-            sent["content"] = kwargs["json"]["messages"][1]["content"]
-            return _FakeResponse(200, _chat_response(_GOOD_DISTILLATION))
+        def complete(instruction, **kwargs):
+            sent["content"] = instruction
+            return _distill_ok()
 
-        monkeypatch.setattr(distill_mod.requests, "post", fake_post)
         distill_mod.distill(
             "Incident",
             'Authorization: Bearer opaque-value-123\n'
             '"client_secret": "super-secret-value"\n'
             "https://provider.invalid/v1?api_key=query-secret&symbol=SPY",
+            complete=complete,
+            env={"CLAUDE_CODE_OAUTH_TOKEN": "oauth-a"},
         )
 
         body = sent["content"]
@@ -154,65 +190,128 @@ class TestDistill:
         assert "query-secret" not in body
         assert "symbol=SPY" in body
 
-    def test_code_fenced_json_is_parsed(self, monkeypatch):
-        fenced = f"```json\n{_GOOD_DISTILLATION}\n```"
-        monkeypatch.setattr(
-            distill_mod.requests, "post",
-            lambda url, **kw: _FakeResponse(200, _chat_response(fenced)),
+    def test_bare_provider_tokens_are_redacted_before_egress(self):
+        sent = {}
+
+        def complete(instruction, **kwargs):
+            sent["content"] = instruction
+            return _distill_ok()
+
+        distill_mod.distill(
+            "Incident",
+            "Saw ghp_FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE in logs, "
+            "aws key AKIAFAKEFAKEFAKEFAKE, openai sk-proj-FAKEFAKEFAKEFAKEFAKE "
+            "and xai-FAKEFAKEFAKEFAKEFAKEFAKE alongside a routine SPY put.",
+            complete=complete,
+            env={"CLAUDE_CODE_OAUTH_TOKEN": "oauth-a"},
         )
 
-        result = distill_mod.distill("Relay", "content")
+        body = sent["content"]
+        assert "ghp_FAKE" not in body
+        assert "AKIAFAKE" not in body
+        assert "sk-proj-FAKE" not in body
+        assert "xai-FAKE" not in body
+        assert "routine SPY put" in body
 
+    def test_token_straddling_truncation_boundary_is_fully_redacted(self):
+        sent = {}
+
+        def complete(instruction, **kwargs):
+            sent["content"] = instruction
+            return _distill_ok()
+
+        token = "ghp_FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE"
+        title = "Boundary"
+        prefix_len = len(f"Title: {title}\n\n")
+        # Place the token so it straddles the 6000-char truncation boundary.
+        pad = "x" * (distill_mod.MAX_CONTENT_CHARS - prefix_len - len(token) // 2 - 1) + " "
+        distill_mod.distill(
+            title,
+            pad + token + " trailing",
+            complete=complete,
+            env={"CLAUDE_CODE_OAUTH_TOKEN": "oauth-a"},
+        )
+
+        body = sent["content"]
+        assert "ghp_" not in body
+        assert len(body) <= distill_mod.MAX_CONTENT_CHARS
+
+    def test_code_fenced_json_is_parsed(self):
+        fenced = f"```json\n{_GOOD_DISTILLATION}\n```"
+
+        def post(url, **kwargs):
+            return _FakeResponse(
+                200,
+                {
+                    "stop_reason": "end_turn",
+                    "content": [{"type": "text", "text": fenced}],
+                },
+            )
+
+        result = distill_mod.distill(
+            "Relay", "content", env={"CLAUDE_CODE_OAUTH_TOKEN": "oauth-a"}, post=post
+        )
         assert result is not None
         assert result["tickers"] == ["SPY"]
 
-    def test_persistent_failure_returns_none_after_one_retry(self, monkeypatch):
+    def test_exhausted_ladder_returns_none(self):
+        def complete(*_args, **_kwargs):
+            raise ModelLadderExhausted("tried=anthropic:http_500")
+
+        assert distill_mod.distill("Relay", "content", complete=complete, env={"CLAUDE_CODE_OAUTH_TOKEN": "oauth-a"}) is None
+
+    def test_next_provider_wins_after_anthropic_failure(self, tmp_path):
+        # Subscription-band failover: Claude OAuth then Grok device-auth (not prepaid XAI).
+        home = tmp_path / "home"
+        (home / ".grok").mkdir(parents=True)
+        (home / ".grok" / "auth.json").write_text(
+            json.dumps({"access_token": "grok-sub-token"}),
+            encoding="utf-8",
+        )
         calls = []
 
-        def always_fails(url, **kwargs):
+        def post(url, **kwargs):
             calls.append(url)
-            raise distill_mod.requests.RequestException("connection refused")
+            if "api.anthropic.com" in url:
+                return _FakeResponse(500, {})
+            if "api.x.ai" in url:
+                return _FakeResponse(200, _chat_response(_GOOD_DISTILLATION))
+            raise AssertionError(f"unexpected {url}")
 
-        monkeypatch.setattr(distill_mod.requests, "post", always_fails)
-
-        assert distill_mod.distill("Relay", "content") is None
-        assert len(calls) == 2  # first attempt + one retry
-
-    def test_retry_once_then_success(self, monkeypatch):
-        responses = [
-            _FakeResponse(500, {}),
-            _FakeResponse(200, _chat_response(_GOOD_DISTILLATION)),
-        ]
-        calls = []
-
-        def flaky_post(url, **kwargs):
-            calls.append(url)
-            return responses[len(calls) - 1]
-
-        monkeypatch.setattr(distill_mod.requests, "post", flaky_post)
-
-        result = distill_mod.distill("Relay", "content")
-
+        result = distill_mod.distill(
+            "Relay",
+            "content",
+            env={
+                "HOME": str(home),
+                "CLAUDE_CODE_OAUTH_TOKEN": "oauth-a",
+            },
+            post=post,
+        )
         assert result is not None
-        assert len(calls) == 2
+        assert any("api.anthropic.com" in url for url in calls)
+        assert any("api.x.ai" in url for url in calls)
+        assert not any("cerebras" in url for url in calls)
 
-    def test_unparseable_content_returns_none(self, monkeypatch):
-        monkeypatch.setattr(
-            distill_mod.requests, "post",
-            lambda url, **kw: _FakeResponse(200, _chat_response("not json at all")),
+    def test_unparseable_content_returns_none(self):
+        def post(url, **kwargs):
+            return _FakeResponse(
+                200,
+                {
+                    "stop_reason": "end_turn",
+                    "content": [{"type": "text", "text": "not json at all"}],
+                },
+            )
+
+        assert (
+            distill_mod.distill("Relay", "content", env={"CLAUDE_CODE_OAUTH_TOKEN": "oauth-a"}, post=post)
+            is None
         )
 
-        assert distill_mod.distill("Relay", "content") is None
-
-    def test_no_key_returns_none_without_network(self, monkeypatch):
-        monkeypatch.setattr(distill_mod, "_load_key", lambda: None)
-
+    def test_no_key_returns_none_without_network(self):
         def must_not_be_called(url, **kwargs):
             raise AssertionError("network call without an API key")
 
-        monkeypatch.setattr(distill_mod.requests, "post", must_not_be_called)
-
-        assert distill_mod.distill("Relay", "content") is None
+        assert distill_mod.distill("Relay", "content", env={}, post=must_not_be_called) is None
 
 
 # ── embed ────────────────────────────────────────────────────────────

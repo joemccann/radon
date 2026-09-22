@@ -7,6 +7,7 @@ import type { PortfolioData, PortfolioPosition } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
 import {
   getTodayPnlDollars,
+  isMixedAgeCombo,
   isSameDay,
   legPriceKey,
   positionDirectionSign,
@@ -114,7 +115,7 @@ export function computeDayMoveBreakdown(
     // 1. IB per-position daily is authoritative — never gate on live quotes.
     //    Missing bid/ask/last used to drop the row or fall through to prior-
     //    close math and blow up ESTIMATED (LIVE) Day P&L during RTH.
-    if (pos.ib_daily_pnl != null) {
+    if (pos.ib_daily_pnl != null && Number.isFinite(pos.ib_daily_pnl)) {
       total += pos.ib_daily_pnl;
       const labels = quoteLabelsForPosition(pos, prices);
       rows.push({
@@ -129,20 +130,20 @@ export function computeDayMoveBreakdown(
       continue;
     }
 
-    // 2. Same-day positions: entry baseline (shared with position-table Today
-    //    P&L). Equities included — a stock opened today has no prior close of
-    //    its own either, and a stock-only exception here made the Day P&L card
-    //    disagree with the Today P&L column it summarises.
-    if (isSameDay(pos)) {
+    // 2. Same-day positions and mixed-age combos: share getTodayPnlDollars
+    //    with the table column. Mixed-age (overnight + session add) is not
+    //    same-day; the helper uses close on overnight legs and fill on the add.
+    if (isMixedAgeCombo(pos) || isSameDay(pos)) {
       const todayPnl = getTodayPnlDollars(pos, prices);
       if (todayPnl == null) continue;
       total += todayPnl;
+      const mixed = isMixedAgeCombo(pos);
       rows.push({
         id: pos.id,
         ticker: pos.ticker,
         structure: pos.structure,
-        col1: "entry",
-        col2: "same-day",
+        col1: mixed ? "legs" : "entry",
+        col2: mixed ? "mixed-age" : "same-day",
         pnl: todayPnl,
         pnlPct: null,
       });

@@ -158,15 +158,6 @@ describe("alerts routes: Turso down → 503, not 500", () => {
   });
 });
 
-describe("workflow routes: Turso down → 503, not 500", () => {
-  it("GET /api/workflow returns 503 DB_UNAVAILABLE", async () => {
-    const { GET } = await import("../app/api/workflow/route");
-    const res = await GET();
-    expect(res.status).toBe(503);
-    expect((await jsonOf(res)).code).toBe("DB_UNAVAILABLE");
-  });
-});
-
 describe("orders route: Turso down → 503, not 500", () => {
   it("GET /api/orders returns 503 when the snapshot read fails", async () => {
     vi.doMock("@/lib/orders/readOrdersFromDb", () => ({

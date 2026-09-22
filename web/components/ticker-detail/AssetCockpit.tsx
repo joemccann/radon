@@ -15,12 +15,14 @@ import ActHeldSummary from "./ActHeldSummary";
 import CockpitHeader from "./CockpitHeader";
 import GlyphRail from "./GlyphRail";
 import AssetDeck from "./AssetDeck";
+import ChainInstrumentSidebar, { type HeldChainQuote } from "./ChainInstrumentSidebar";
+import chainStyles from "./ChainInstrumentSidebar.module.css";
 
 /** Deck keys map 1:1 to the glyph rail + URL deck param.
- *  `:` (command palette) and `o` (order ticket) are local-only — not in
- *  VALID_DECKS, so they never reach the URL. `o` is the mobile entry to the
- *  order ticket, which on desktop lives in the always-visible act column. */
-export type DeckKey = "c" | "p" | "n" | "r" | "s" | "i" | "h" | "f" | ":" | "o";
+ *  `o` (order ticket) is local-only — not in
+ *  VALID_DECKS, so it never reaches the URL. `o` is the mobile entry to the
+ *  order ticket, which on desktop lives in the Book & trade act column. */
+export type DeckKey = "c" | "p" | "n" | "r" | "s" | "i" | "h" | "f" | "o";
 
 export type AssetCockpitProps = {
   ticker: string;
@@ -36,6 +38,7 @@ export type AssetCockpitProps = {
   bookPriceData?: PriceData | null;
   /** Depth-NBBO-corrected quote; single source for the header scalars. */
   quotePriceData: PriceData | null;
+  heldQuote?: HeldChainQuote;
   /** Resolved option/underlying price data threaded to the ticket + book. */
   priceData: PriceData | null;
   isSpreadNet?: boolean;
@@ -94,6 +97,7 @@ export default function AssetCockpit({
   bookKind,
   bookPriceData,
   quotePriceData,
+  heldQuote,
   priceData,
   isSpreadNet,
   tickerOrders,
@@ -134,7 +138,15 @@ export default function AssetCockpit({
   };
 
   return (
-    <div className={`cockpit cockpit-host ${mobile ? "cockpit--mobile" : ""}`} data-testid="cockpit-host">
+    <div className={`cockpit cockpit-host instrument-workspace ${chainStyles.workspace} ${mobile ? "cockpit--mobile" : ""} ${activeDeck === "c" ? "chain-first-cockpit" : ""}`} data-active-deck={activeDeck ?? "book"} data-testid="cockpit-host">
+      <ChainInstrumentSidebar
+        ticker={ticker}
+        position={position}
+        underlyingQuote={prices[ticker] ?? null}
+        heldQuote={heldQuote ?? { priceData: null }}
+        onDeckChange={onDeckChange}
+        activeDeck={activeDeck}
+      />
       <CockpitHeader
         ticker={ticker}
         kind={bookKind}

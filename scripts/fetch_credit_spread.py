@@ -7,9 +7,9 @@ while HYG is down.
 
 Sources, in order (never skip ahead):
   1. Interactive Brokers — Stock('HYG','SMART','USD'), Index('SPX','CBOE')
-  2. Unusual Whales — OHLC for HYG. Does not serve the SPX index.
-  3. Robinhood (official trading MCP, read-only) — equity historicals for
+  2. Robinhood (official trading MCP, read-only) — equity historicals for
      HYG when configured. Does not serve the SPX index.
+  3. Unusual Whales — OHLC for HYG. Does not serve the SPX index.
   4. Yahoo Finance — ABSOLUTE LAST RESORT for remaining gaps.
 
 ICE CCC OAS is not stored.
@@ -282,7 +282,7 @@ def _robinhood_degradation(sources: dict[str, str]) -> Optional[dict[str, Any]]:
 def fetch_rh_closes(tickers: list[str]) -> dict[str, dict[str, float]]:
     """Robinhood daily closes (read-only MCP). Indices (SPX) are skipped.
 
-    Ranked after IB and UW, before Yahoo. Unconfigured hosts return {}
+    Ranked after IB, before UW and Yahoo. Unconfigured hosts return {}
     without any network I/O so the ladder falls through to Yahoo.
     """
     fetchable = [t for t in tickers if t not in RH_SKIP]
@@ -303,7 +303,7 @@ def fetch_closes(
     fetch_rh: Optional[FetchCloses] = None,
     fetch_yahoo: Optional[FetchCloses] = None,
 ) -> tuple[dict[str, dict[str, float]], dict[str, str]]:
-    """IB first, then UW for gaps, then Robinhood, then Yahoo.
+    """IB first, then Robinhood for gaps, then UW, then Yahoo.
 
     Yahoo is never called on a hit from any higher rung.
     """
@@ -323,17 +323,17 @@ def fetch_closes(
 
     missing = [t for t in wanted if t not in closes]
     if missing:
-        for ticker, series in uw_fn(missing).items():
-            if series:
-                closes[ticker] = series
-                sources[ticker] = "uw"
-
-    missing = [t for t in wanted if t not in closes]
-    if missing:
         for ticker, series in rh_fn(missing).items():
             if series:
                 closes[ticker] = series
                 sources[ticker] = "rh"
+
+    missing = [t for t in wanted if t not in closes]
+    if missing:
+        for ticker, series in uw_fn(missing).items():
+            if series:
+                closes[ticker] = series
+                sources[ticker] = "uw"
 
     missing = [t for t in wanted if t not in closes]
     if missing:

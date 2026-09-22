@@ -15,7 +15,8 @@ scripts/clients/finra_client.py) and a self-minted double-submit CSRF
 pair (matching XSRF-TOKEN cookie + X-XSRF-TOKEN header). The response
 envelope nests returnBody.data as a JSON STRING requiring a second
 json.loads. The SPX overlay is read from Turso
-credit_spread_history.spx_close and never refetched here.
+credit_spread_history.spx_close, with older dates filled from the official
+Cboe closes in calm_streak_history. SPX is never refetched here.
 
 Output is dual-written to Turso hyad_history + scan_snapshots and
 data/hyad.json.
@@ -276,25 +277,36 @@ def build_output(
 # -- Turso reads (SPX join + stored history) -----------------------
 
 def _spx_by_date() -> dict[str, float]:
-    """Ascending credit_spread_history spx_close map, keyset-paginated
-    (Hrana I/O bounding). SPX is never refetched here."""
+    """Join durable SPX closes across the full HYAD window.
+
+    Credit spread's IB-first closes win on overlap. Its shorter rolling
+    history is supplemented by official Cboe closes already persisted by
+    calm streak. Never interpolate equity holidays in the bond calendar.
+    Both reads are keyset-paginated to bound Hrana response sizes.
+    """
     from db.client import get_db
 
     db = get_db()
-    cursor = ""
     closes: dict[str, float] = {}
-    while True:
-        page = db.execute(
-            "SELECT date, spx_close FROM credit_spread_history "
-            "WHERE spx_close IS NOT NULL AND date > ? ORDER BY date LIMIT ?",
-            (cursor, HISTORY_READ_PAGE_ROWS),
-        ).fetchall()
-        if not page:
-            break
-        closes.update({row[0]: float(row[1]) for row in page})
-        cursor = page[-1][0]
-        if len(page) < HISTORY_READ_PAGE_ROWS:
-            break
+    # Read fallback first so the existing preferred source overwrites it.
+    for table, column in (
+        ("calm_streak_history", "close"),
+        ("credit_spread_history", "spx_close"),
+    ):
+        cursor = ""
+        while True:
+            page = db.execute(
+                f"SELECT date, {column} FROM {table} "
+                f"WHERE {column} IS NOT NULL AND date >= ? AND date > ? "
+                "ORDER BY date LIMIT ?",
+                (BACKFILL_START, cursor, HISTORY_READ_PAGE_ROWS),
+            ).fetchall()
+            if not page:
+                break
+            closes.update({row[0]: float(row[1]) for row in page})
+            cursor = page[-1][0]
+            if len(page) < HISTORY_READ_PAGE_ROWS:
+                break
     return closes
 
 

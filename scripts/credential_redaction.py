@@ -9,6 +9,11 @@ from typing import Any
 _SECRET_SCRUB_PATTERNS = [
     (re.compile(r"libsql://[^\s'\"]+", re.IGNORECASE), "[redacted-db-url]"),
     (re.compile(r"https://[a-z0-9.-]+\.turso\.io[^\s'\"]*", re.IGNORECASE), "[redacted-db-url]"),
+    # "Bearer <token>" is the literal HTTP header value shape (space, not an
+    # "=" / ":" assignment) and must run before the assignment pattern below,
+    # which would otherwise treat the word "Bearer" itself as the value and
+    # leave the real token in "authorization: bearer <token>" untouched.
+    (re.compile(r"\bbearer\s+\S+", re.IGNORECASE), "bearer [redacted]"),
     (
         re.compile(r"(auth[_-]?token|authorization|bearer)(\s*[=:]\s*)\S+", re.IGNORECASE),
         r"\1\2[redacted]",
@@ -17,6 +22,11 @@ _SECRET_SCRUB_PATTERNS = [
     (re.compile(r"\bU\d{6,}\b"), "[redacted-account]"),
     (re.compile(r"sk-ant-[A-Za-z0-9_-]{6,}"), "[redacted-key]"),
     (re.compile(r"\bsk_(?:live|test)_[A-Za-z0-9]{6,}\b"), "[redacted-key]"),
+    (re.compile(r"\bsk-[A-Za-z0-9_-]{16,}\b"), "[redacted-key]"),
+    (re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{16,}\b"), "[redacted-key]"),
+    (re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}\b"), "[redacted-key]"),
+    (re.compile(r"\bxai-[A-Za-z0-9_-]{16,}\b"), "[redacted-key]"),
+    (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "[redacted-key]"),
     (re.compile(r"([?&](?:t|token|api[_-]?key)=)[^\s&'\"]+", re.IGNORECASE), r"\1[redacted]"),
 ]
 

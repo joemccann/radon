@@ -24,8 +24,8 @@ export const VALID_DECKS: ReadonlySet<DeckKey> = new Set<DeckKey>([
  * Single source of truth for "is this string a URL-addressable deck key?".
  * Shared by TickerWorkspace (reads `?deck=`) and TickerDetailContent (derives
  * the active deck from the threaded prop) so the two never disagree on the
- * deck-key contract again. Note `":"` (command palette) is deliberately NOT a
- * deck key here: it is local-only state, never URL-addressable.
+ * deck-key contract again. The mobile order ticket remains local-only state,
+ * never URL-addressable.
  */
 export function isDeckKey(value: string | null | undefined): value is DeckKey {
   return value != null && VALID_DECKS.has(value as DeckKey);

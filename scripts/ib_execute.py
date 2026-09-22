@@ -463,6 +463,22 @@ def main():
             print(f"✗ ORDER REFUSED — {violation['message']}")
             sys.exit(4)
 
+        # Gate 3 (NF-1), when RADON_BANKROLL_CAP_ENFORCE_ALL_PATHS is On.
+        from bankroll_guard import check_if_enforced_on_all_paths
+        bankroll_violation = check_if_enforced_on_all_paths({
+            "type": args.type,
+            "symbol": args.symbol,
+            "action": args.side,
+            "quantity": args.qty,
+            "limitPrice": limit_price,
+            "expiry": args.expiry,
+            "strike": args.strike,
+            "right": args.right,
+        })
+        if bankroll_violation:
+            print(f"✗ ORDER REFUSED — {bankroll_violation['message']}")
+            sys.exit(4)
+
         # Confirm
         if not args.yes:
             print(f"\n" + "=" * 50)
