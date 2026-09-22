@@ -74,7 +74,7 @@ def test_ground_truth_undoes_a_sparse_checkout_that_hides_codex(tmp_path, wrappe
         ]
     )
     proc = subprocess.run(
-        ["bash", "-c", driver], cwd=clone, env={"PATH": "/usr/bin:/bin:/opt/homebrew/bin", "REPO": str(clone), "HOME": str(tmp_path)},
+        ["bash", "-c", driver], cwd=clone, env={"PATH": "/usr/bin:/bin:/opt/homebrew/bin", "REPO": str(clone), "HOST_GITDIR": str(clone / ".git"), "HOME": str(tmp_path)},
         capture_output=True, text=True, timeout=60,
     )
     assert proc.returncode == 0, proc.stderr

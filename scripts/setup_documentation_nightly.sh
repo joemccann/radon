@@ -15,8 +15,15 @@
 # (2026-08-16 incident).
 set -euo pipefail
 
+# Runner clones' .git is agent-writable; host git here never runs its hooks
+# or fsmonitor (same pin as the loop wrappers and their launchd pre-reset).
+export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null \
+  GIT_CONFIG_KEY_1=core.fsmonitor GIT_CONFIG_VALUE_1=false
+
 WEEKEND_ROOT="${RADON_WEEKEND_ROOT:-$HOME/radon-weekend}"
 WEEKEND_REPO="$WEEKEND_ROOT/radon-documentation"
+
+HOST_GITDIR="$WEEKEND_ROOT/.gitdirs/documentation.git"
 # Per-loop venv. The legacy $WEEKEND_ROOT/venv is not deleted here
 # (operator follow-up after this ships).
 WEEKEND_VENV="$WEEKEND_ROOT/venv-documentation"
@@ -84,8 +91,12 @@ fi
 
 echo "[2/4] dedicated runner clone at $WEEKEND_REPO"
 mkdir -p "$WEEKEND_ROOT"
-if [[ ! -d "$WEEKEND_REPO/.git" ]]; then
-  git clone "$ORIGIN_URL" "$WEEKEND_REPO"
+mkdir -p "$(dirname "$HOST_GITDIR")"
+chmod 700 "$(dirname "$HOST_GITDIR")" 2>/dev/null || true
+if [[ ! -d "$HOST_GITDIR" && ! -e "$WEEKEND_REPO/.git" ]]; then
+  git clone --separate-git-dir="$HOST_GITDIR" "$ORIGIN_URL" "$WEEKEND_REPO"
+elif [[ -d "$WEEKEND_REPO/.git" && ! -d "$HOST_GITDIR" ]]; then
+  git -C "$WEEKEND_REPO" init --separate-git-dir="$HOST_GITDIR"
 fi
 
 # Host-bash lock hygiene (L1-L2). Source the trusted operator checkout, never
@@ -158,9 +169,9 @@ check "no shared-parent lock" test ! -e "$WEEKEND_ROOT/.weekend-runner.lock"
 # An already-provisioned clone must carry the current config/ and scripts/
 # before the job is installed from it. main is force-reset; any weekend
 # branch and its commits survive.
-git -C "$WEEKEND_REPO" fetch origin --quiet
-git -C "$WEEKEND_REPO" checkout -f --quiet main
-git -C "$WEEKEND_REPO" reset --hard --quiet origin/main
+git --git-dir="$HOST_GITDIR" --work-tree="$WEEKEND_REPO" fetch origin --quiet
+git --git-dir="$HOST_GITDIR" --work-tree="$WEEKEND_REPO" checkout -f --quiet main
+git --git-dir="$HOST_GITDIR" --work-tree="$WEEKEND_REPO" reset --hard --quiet origin/main
 touch "$WEEKEND_REPO/.radon-weekend-runner"
 touch "$WEEKEND_REPO/.radon-documentation-runner"  # REL-180 (R-504): this loop's own marker
 mkdir -p "$WEEKEND_REPO/logs/documentation-nightly"

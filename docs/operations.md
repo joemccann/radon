@@ -42,6 +42,8 @@ doc (root `CLAUDE.md` "Credentials").
 
 `scripts/cta_sync_service.py` and `scripts/run_cta_sync.sh` parse `.env` values literally instead of shell-sourcing them, so unquoted secrets containing shell metacharacters (`$`, backticks, etc.) survive the scheduled CTA path.
 
+**Service token.** `RADON_SERVICE_TOKEN` is the shared Next.js to FastAPI bearer. When set, `radonFetch` (`web/lib/radonApi.ts`) sends it as `X-Radon-Service-Token` and `is_trusted_service_request` (`scripts/api/auth.py`) admits the caller as a trusted service. It is set only on the demo deployment (Vercel `radon-demo` project plus the demo VM `.env`, same value in both; see `docs/demo-environment.md`). Leave it unset on prod: there the header is never sent and the API stays loopback/Clerk JWT gated.
+
 `.env.ib-mode` overlays `.env` and stores the IB mode toggle from `scripts/ib mode local|cloud`.
 
 ### Encrypted credential store (profile Credentials tab)
@@ -66,11 +68,12 @@ key in `.env` alone does nothing while a
 stored value exists: rotate in the Credentials tab, or delete the stored
 value first. Exception: the IB Gateway password. Saving it in the tab does
 not rotate what the Gateway reads (`TWS_PASSWORD_FILE` / docker secrets).
-Second exception: the Next.js process reads `UW_TOKEN` and the Anthropic /
-xAI keys from its own `web/.env` (ticker info, seasonality, news, chat), so a
-value rotated in the tab reaches FastAPI and its subprocesses immediately but
-reaches Next.js only at its next restart. Rotate `web/.env` alongside the tab
-for those names.
+The Next.js process that proxies a save also applies the per-request web keys
+(`UW_TOKEN`, `ANTHROPIC_API_KEY`, `CEREBRAS_API_KEY`, `XAI_API_KEY`,
+`EXA_API_KEY`; `LIVE_WEB_ENV_KEYS` in `web/lib/setup/envFiles.ts`) to its own
+`process.env` and `web/.env`, so they take effect without a restart. Another
+Next.js instance (laptop vs Hetzner) still picks a change up only at its next
+restart, and the boot-read Clerk / Turso keys always need one.
 The tab also refuses a `TURSO_DB_URL` that is not `libsql://` or `https://`,
 whose host is not under `*.turso.io`, or whose host differs from the
 `TURSO_DB_URL` already in the environment;
@@ -175,7 +178,10 @@ than the working tree, and refuses to publish `mcp.env` through a
 non-regular destination (writes to a temp file, then atomic rename). The
 nightly-loop wrappers refuse symlinks in their privileged file operations
 (log dirs/files, private state) and provision the 2FA lease directory
-through the fd-based `O_NOFOLLOW` helper. Contracts:
+through the fd-based `O_NOFOLLOW` helper. The security and security-deepsec
+loops' `publish_private_report()` also refuses a symlink at the phase report
+path before reading it and at the pinned-GitHub-known-hosts scratch path
+before writing it (2026-09-22). Contracts:
 `cloud/tests/test_setup_vps_privileged_paths.py`,
 `scripts/tests/test_wrapper_symlink_refusal.py`.
 
@@ -338,7 +344,7 @@ Hetzner host systemd is the production surface. Laptop dev uses launchd plists i
 
 **Nightly loops on the Mac mini** (six launchd jobs, staggered 10 minutes apart; each cycle runs three phases in order: audit, remediate, deliver). Each runs in its own clone under `~/radon-weekend/` that hard-resets to `origin/main` every phase, uses a per-loop venv (`~/radon-weekend/venv-<loop>`) plus the shared `~/radon-weekend/.env`, and holds a per-clone `.weekend-runner.lock`. A wrapper refuses the clone unless it carries BOTH `.radon-weekend-runner` and that loop's own `.radon-<loop>-runner` marker, so pointing one loop at another's clone is a `REFUSED`, not a cross-run collision. The shared `.env` is not imported wholesale: each wrapper's `_notify_curl` reads only `PUSHOVER_USER` and `PUSHOVER_TOKEN` from it in bash and pages via `/usr/bin/curl` (never python). Model spend rides the claude.ai subscription only: every wrapper unsets each API-key / auth-token / base-URL / Bedrock / Vertex / Foundry / gateway variable the installed Claude Code honors (the list is re-derived against the installed binary, not trusted from a pin: on 2026-09-07 that added `CLAUDE_CODE_API_BASE_URL` and `CLAUDE_CODE_HFI_BEARER_TOKEN` for 2.1.263; on 2026-09-14 the approved pin moved to 2.1.270 and the pass added the gateway token descriptor, host-auth env var and creds file, `ANTHROPIC_UNIX_SOCKET`, `ANTHROPIC_PROFILE` plus its federation ids, and the `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST` flag; on 2026-09-15 the pin moved to 2.1.272 and the pass added no name, with the per-name decision recorded in each wrapper's comment block and the approved tool pins in `docs/security-approved-tools.md`; `CLAUDE_CODE_OAUTH_TOKEN` is deliberately left alone because it is the subscription credential itself) (naming it on stderr and as `ignored=` on the phase-start line, never the value) and runs anyway, scrubs those lines out of a provisioned `web/.env` in place (except the security loop, whose clone is credential-free: any `.env` / `.env.ib-mode` / `web/.env` present there is `REFUSED`, not scrubbed), and `REFUSED`s only what `unset` cannot reach: a `.deepsec/.env*` / `.env.local` key line or a Claude Code settings-level `apiKeyHelper` / `env` reroute. Those file checks (and the security clone's credential-file check) run again at the start of every phase and continuation round, after the reset and before `claude` launches, so a file an in-phase agent plants cannot be inherited by the next phase. The `setup_*` scripts read the clone origin from their own checkout (`git -C "$SRC_REPO"`), never the caller's cwd, and `REFUSE` when that is not a Radon checkout. Never point another job, worktree, or responder at these clones. Per-phase run logs under `$REPO/logs/<loop>` are owner-only (the wrappers create the directory `0700` and the log files `0600`, so agent transcripts are not world-readable), each loop's deliver tooling only resolves and renders PRs whose head lives in this repository, and a ready-to-merge URL is verified against the recorded PR before it is rendered into a notification. The `Fires` column is generated from each plist's `StartCalendarInterval`. Loop semantics live in `.claude/skills/<loop>/SKILL.md`; wrapper mechanics in the wrapper script; state on the rolling GitHub issue carrying the label.
 
-Host browser and lock shapes (2026-09-20). Testing and reliability wrappers start `playwright run-server` from `~/.radon/agent-cli/browser-host/` (never the clone's `web/node_modules`) and export `PW_TEST_CONNECT_WS_ENDPOINT` plus `RADON_WEEKEND_BROWSER_HOST=ready|unavailable:<reason>`. The phase-start line carries `browser-host=` and `foreign-lock=`. A valid runner lock is only the per-clone directory `$REPO/.weekend-runner.lock/` with `pid` then `start` (`ps -o lstart=`). `~/radon-weekend/.weekend-runner.lock` as a plain file is never valid: every wrapper and `setup_*` sweeps it to `~/radon-weekend/.stale-locks/`. Host bash reclaims a lock when `pid_alive` proves death (ESRCH or start-fingerprint mismatch). Empty/unpublished pid is not stale. `EPERM` / `PermissionError` is not death. Sandboxed agents must never `kill -0`, reclaim, or create a runner lock. `_browser_host_bin_ok` and both setup scripts refuse a symlink at `browser-host` or any parent down to `AGENT_CLI_ROOT`, and resolve the playwright bin with `pwd -P` so a logical in-tree path whose physical target is out-of-tree fails. Provision with `bash scripts/setup_testing_weekend.sh` (and `setup_reliability_weekend.sh` when that loop is included). The runner is macOS: the `@playwright/test` pin is read with portable BRE (BSD `sed` has no `\?`), the smoke requires the browser host's own `playwright` by absolute path (Node resolves the CWD's `node_modules` first, and a client-vs-run-server version skew fails with `428 Precondition Required`), and the run-server is stopped with SIGTERM then SIGKILL after 5s (a bare `wait` on a server that outlives SIGTERM blocks setup before the launchd step). Setup ends with `ok  browser host (playwright <version>)` and `ok  playwright run-server (host)`; `browser-host=ready` is host smoke only and does not prove a sandboxed loopback connect.
+Host browser and lock shapes (2026-09-20, trust model 2026-09-22). Testing and reliability wrappers start a fixed-option `chromium.launchServer` from `~/.radon/agent-cli/browser-host/` (never the clone's `web/node_modules`). Host smoke sets `RADON_WEEKEND_BROWSER_HOST=ready`. The workspace-write (codex) rung does not receive `PW_TEST_CONNECT_WS_ENDPOINT` (`unavailable:codex-rung`); unsandboxed rungs still get the endpoint. The phase-start line carries `browser-host=` and `foreign-lock=`. Host git for every loop uses `$WEEKEND_ROOT/.gitdirs/<loop>.git` with `--work-tree` on the clone, not the clone `.git`. Codex sandbox writable roots omit the gitdir. Provision with `bash scripts/setup_testing_weekend.sh` (and the other `setup_*` scripts after merge). The runner is macOS: the `@playwright/test` pin is read with portable BRE (BSD `sed` has no `\\?`), the smoke requires the browser host's own `playwright` by absolute path (Node resolves the CWD's `node_modules` first, and a client-vs-run-server version skew fails with `428 Precondition Required`), and the run-server is stopped with SIGTERM then SIGKILL after 5s (a bare `wait` on a server that outlives SIGTERM blocks setup before the launchd step). Setup ends with `ok  browser host (playwright <version>)` and `ok  playwright run-server (host)`; `browser-host=ready` is host smoke only and does not prove a sandboxed loopback connect. A valid runner lock is only the per-clone directory `$REPO/.weekend-runner.lock/` with `pid` then `start` (`ps -o lstart=`). `~/radon-weekend/.weekend-runner.lock` as a plain file is never valid: every wrapper and `setup_*` sweeps it to `~/radon-weekend/.stale-locks/`. Host bash reclaims a lock when `pid_alive` proves death (ESRCH or start-fingerprint mismatch). Empty/unpublished pid is not stale. `EPERM` / `PermissionError` is not death. Sandboxed agents must never `kill -0`, reclaim, or create a runner lock. `_browser_host_bin_ok` and both setup scripts refuse a symlink at `browser-host` or any parent down to `AGENT_CLI_ROOT`, and resolve the playwright bin with `pwd -P` so a logical in-tree path whose physical target is out-of-tree fails.
 
 **A phase is OK only on evidence (REL-187 / REL-188).** `ground_truth` resets the clone to the newest `ci.yml` push run that concluded success and that the tip descends from, not the raw tip, so a loop firing minutes after a red push does not spend its cycle on a tree CI already rejected; GitHub unreachable keeps the checked-out tip with a logged warning. `ground_truth` also runs `git sparse-checkout disable` before the checkout (T-490): on 2026-09-08 the testing clone was hand-set to exclude `/.codex/`, so the tracked `.codex/skills/**` render never reached disk while `git status` stayed clean, and `test_portable_prompt_sync.py` failed 21 tests on every audit from 2026-09-17. Ground truth is the whole tracked tree. In the four fallback loops, an `audit` or `remediate` phase whose agent exits 0 without commit evidence or a valid completed no-op declaration reports `INCOMPLETE` and exits 75 rather than `OK`. A completed audit with no findings, or remediation with no safe source-actionable change, needs a durable checkpoint and report, not an artificial commit. Deliver is keyed on its verdict line instead, since a PR green first time needs no new commit.
 
@@ -591,12 +597,9 @@ Staleness windows live in `web/lib/serviceHealthWindows.ts`. Cycle-driven writer
 
 ## Legacy Flex aggregate gross coverage
 
-`scripts/rebuild_flex_gross_breakdown.py` stamps `gross_fill_breakdown` on legacy `+`-joined / `CLOSED` journal rows from saved Flex trade statements (execution level). It never calls the Flex Web Service. A row is stamped only when every tradeID part appears exactly once (after superseded corrections are dropped), no other aggregate claims it, the contract matches and the executions reproduce the row's recorded totals. Everything else is refused with a reason; rows with no part in the files are reported as out of statement period. Dry run by default; `--apply` writes only that field in one transaction, guarded on the unchanged payload, then re-reads every stamped row.
-
-```bash
-python -m scripts.rebuild_flex_gross_breakdown --xml path/to/trades.xml           # dry run
-python -m scripts.rebuild_flex_gross_breakdown --xml path/to/trades.xml --apply   # operator only
-```
+For operator-only rebuilding from saved execution-level statements, follow the
+[Flex recovery procedure](cloud-services.md#legacy-flex-aggregate-cleanup),
+including backup, review, stop conditions and post-commit recovery.
 
 ## Deployment
 

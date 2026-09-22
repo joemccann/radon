@@ -787,6 +787,7 @@ jobs:
           e2e/wulf-close-order-naked-short.spec.ts
           e2e/portfolio-defined-combo-pnl.spec.ts
           e2e/portfolio-same-day-combo-pnl.spec.ts
+          e2e/portfolio-mixed-combo-today-pnl.spec.ts
           e2e/portfolio-same-day-equity-pnl.spec.ts
           e2e/stop-order-desktop.spec.ts
           e2e/modify-order-correlation-risk.spec.ts
@@ -821,6 +822,13 @@ jobs:
           e2e/flow-analysis-ticker.spec.ts
           e2e/scanner-ticker-scan.spec.ts
           e2e/ticker-search-chain.spec.ts
+      - name: Upload mixed-position coverage screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mixed-position-coverage-screenshots
+          path: web/test-results/**/mixed-coverage-*.png
+          retention-days: 7
       - name: Upload toast error screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

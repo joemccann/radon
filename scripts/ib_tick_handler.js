@@ -32,11 +32,70 @@ export function normalizePrice(value) {
   return price === 0 ? null : price;
 }
 
+function isOptionSymbol(symbol) {
+  return typeof symbol === "string" && symbol.includes("_");
+}
+
+function rememberOptionSessionMark(data) {
+  if (!isOptionSymbol(data.symbol)) return;
+  if (data.last != null && data.last > 0 && data.lastIsCalculated === false) {
+    data.sessionLast = data.last;
+  }
+  if (data.bid != null && data.ask != null && data.bid > 0 && data.ask > 0) {
+    data.sessionBid = data.bid;
+    data.sessionAsk = data.ask;
+  }
+}
+
+function restoreOptionSessionMark(data) {
+  if (!isOptionSymbol(data.symbol)) return;
+  const bookLive = data.bid != null && data.ask != null;
+  if (data.last != null || bookLive) return;
+  if (data.sessionLast != null && data.sessionLast > 0) {
+    data.last = data.sessionLast;
+    data.lastIsCalculated = false;
+    return;
+  }
+  if (data.sessionBid != null && data.sessionAsk != null && data.sessionBid > 0 && data.sessionAsk > 0) {
+    data.last = Number(((data.sessionBid + data.sessionAsk) / 2).toFixed(4));
+    data.lastIsCalculated = true;
+    return;
+  }
+  if (data.sessionMid != null && data.sessionMid > 0) {
+    data.last = data.sessionMid;
+    data.lastIsCalculated = true;
+  }
+}
+
+export function seedOptionSessionMark(data, cached) {
+  if (!data || !cached || !isOptionSymbol(data.symbol)) return;
+  const last = typeof cached.last === "number" && cached.last > 0 ? cached.last : null;
+  const bid = typeof cached.bid === "number" && cached.bid > 0 ? cached.bid : null;
+  const ask = typeof cached.ask === "number" && cached.ask > 0 ? cached.ask : null;
+  const mid = typeof cached.mid === "number" && cached.mid > 0 ? cached.mid : null;
+  if (data.sessionLast == null && last != null) data.sessionLast = last;
+  if (data.sessionBid == null && bid != null) data.sessionBid = bid;
+  if (data.sessionAsk == null && ask != null) data.sessionAsk = ask;
+  if (data.sessionMid == null && mid != null) data.sessionMid = mid;
+  restoreOptionSessionMark(data);
+}
+
+function applyLastTrade(data, value) {
+  const price = normalizePrice(value);
+  if (price == null) return;
+  data.last = price;
+  data.lastIsCalculated = false;
+}
+
 export function createPriceData(symbol) {
   return {
     symbol,
     last: null,
     lastIsCalculated: false,
+    sessionLast: null,
+    sessionBid: null,
+    sessionAsk: null,
+    sessionMid: null,
     bid: null,
     ask: null,
     bidSize: null,
@@ -105,8 +164,7 @@ export function updatePriceFromTickPrice(data, tickType, value) {
       data.lastIsCalculated = false;
       break;
     case TICK_TYPE.LAST:
-      data.last = normalizePrice(value);
-      data.lastIsCalculated = false;
+      applyLastTrade(data, value);
       break;
     case TICK_TYPE.HIGH:
       data.high = normalizePrice(value);
@@ -150,8 +208,7 @@ export function updatePriceFromTickPrice(data, tickType, value) {
       data.lastIsCalculated = false;
       break;
     case TICK_TYPE.DELAYED_LAST:        // 68
-      data.last = normalizePrice(value);
-      data.lastIsCalculated = false;
+      applyLastTrade(data, value);
       break;
     case TICK_TYPE.DELAYED_HIGH:        // 72
       data.high = normalizePrice(value);
@@ -173,6 +230,8 @@ export function updatePriceFromTickPrice(data, tickType, value) {
       break;
   }
 
+  rememberOptionSessionMark(data);
+
   if (data.last == null) {
     updateDerivedLast(data);
   }
@@ -188,16 +247,18 @@ export function updatePriceFromTickPrice(data, tickType, value) {
     data.last === data.close &&
     data.bid != null &&
     data.ask != null &&
-    data.symbol.includes("_") // options only (keyed as SYMBOL_EXPIRY_STRIKE_RIGHT)
+    isOptionSymbol(data.symbol)
   ) {
     const mid = (data.bid + data.ask) / 2;
     const divergence = Math.abs(mid - data.last) / data.last;
     if (divergence > 0.20) {
+      if (data.sessionLast === data.close) data.sessionLast = null;
       data.last = Number(mid.toFixed(4));
       data.lastIsCalculated = true;
     }
   }
 
+  restoreOptionSessionMark(data);
   data.timestamp = new Date().toISOString();
 }
 

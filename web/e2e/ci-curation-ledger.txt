@@ -158,7 +158,6 @@ performance-page.spec.ts
 pltr-chain-position-focus.spec.ts
 portfolio-leg-row-runtime.spec.ts
 portfolio-market-closed.spec.ts
-portfolio-mixed-combo-today-pnl.spec.ts
 portfolio-ratio-risk-reversal-label.spec.ts
 portfolio-request-cadence.spec.ts
 portfolio-return-capital.spec.ts
@@ -363,3 +362,9 @@ ws-connection-stability.spec.ts
 #   Remaining mobile polish cases are unchanged (no new mobile behavior).
 #   Held out of e2e-financial-smoke; not curated because the edit is a
 #   deletion of a removed-page test, not new browser behavior.
+# REVIEWED 2026-09-22 portfolio-request-cadence.spec.ts - statically reviewed
+# palette-only assertions replaced with direct ticker search focus; initial-read
+# and recovery request-count assertions are unchanged. Shortcut/search behavior
+# runs in curated clear-shell.spec.ts and ticker-search-chain.spec.ts, with
+# instrument workspace screenshots uploaded by CI. Timing suite remains held out.
+# CURATED 2026-09-22 portfolio-mixed-combo-today-pnl.spec.ts - GitHub desktop/mobile acceptance and mixed-coverage screenshots replace blocked local browser verification.

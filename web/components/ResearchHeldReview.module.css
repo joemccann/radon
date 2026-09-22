@@ -12,13 +12,30 @@
 .draftReason { margin: 8px 0 0; font-size: 12px; color: var(--text-secondary); }
 .detail { font-family: var(--font-mono); color: var(--negative); }
 .draftBody { margin: 8px 0 0; font-size: 13px; line-height: 1.5; color: var(--text-secondary); overflow-wrap: anywhere; }
-.rules { display: grid; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--line-grid); }
-.rulesTitle { margin: 0; font-size: 12px; font-weight: 600; color: var(--text-secondary); }
-.ruleActions { display: flex; flex-wrap: wrap; gap: 8px; }
-.ruleButton { display: inline-flex; align-items: center; min-height: 44px; padding: 8px 12px; border: 1px solid var(--line-grid); border-radius: 4px; background: var(--bg-panel); color: var(--text-primary); font: inherit; font-size: 12px; cursor: pointer; }
+.rules { display: grid; gap: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--line-grid); }
+.ruleGroup { display: grid; gap: 8px; }
+.rulesTitle { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-secondary); }
+.ruleList { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.ruleItem { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 16px; padding: 8px 8px 8px 12px; border: 1px solid var(--line-grid); border-radius: 4px; background: var(--bg-panel); min-width: 0; }
+.ruleItemActive { border-left: 2px solid var(--signal-core); padding-left: 10px; }
+.ruleItemRejected { background: transparent; }
+.ruleCopy { display: grid; gap: 2px; min-width: 0; }
+.ruleActions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.ruleButton { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 0 12px; border: 1px solid var(--line-grid); border-radius: 4px; background: transparent; color: var(--text-primary); font: inherit; font-size: 12px; cursor: pointer; transition-property: background-color, transform; transition-duration: 150ms; transition-timing-function: cubic-bezier(0.2, 0, 0, 1); }
 .ruleButton:hover { background: var(--bg-panel-raised); }
+.ruleButton:active:not(:disabled) { transform: scale(0.96); }
 .ruleButton:disabled { cursor: default; opacity: .5; }
-.ruleButton:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 3px; }
+.ruleButton:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
+.ruleButtonPrimary { background: var(--signal-core); color: var(--text-on-accent); border-color: transparent; }
+.ruleButtonPrimary:hover { background: var(--signal-strong); }
+@media (prefers-reduced-motion: reduce) {
+  .ruleButton { transition-property: background-color; }
+  .ruleButton:active:not(:disabled) { transform: none; }
+}
+@media (max-width: 640px) {
+  .ruleItem { grid-template-columns: minmax(0, 1fr); align-items: stretch; row-gap: 8px; }
+  .ruleActions { justify-content: flex-start; }
+}
 .reason { margin: 0; font-size: 13px; line-height: 1.5; color: var(--text-secondary); overflow-wrap: anywhere; max-height: min(50dvh, 320px); overflow-y: auto; min-height: 0; overscroll-behavior: contain; }
 @media (max-width: 640px) {
   .item { scroll-margin-bottom: calc(var(--mobile-tab-bar-height) + var(--safe-bottom) + 12px); }

@@ -191,3 +191,156 @@ def test_apply_writes_only_gross_field_and_is_idempotent(tmp_path, monkeypatch, 
     assert "APPLIED: stamped 1, verified 1" in capsys.readouterr().out
     assert rebuild.main(["--xml", str(path), "--apply"]) == 0
     assert "stamp: 0" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("change", [
+    {"ticker": "QQQ"}, {"strike": 505}, {"contracts": 99},
+    {"ib_exec_id": "other.1+other.2"}, {"date": "2026-08-11"},
+    {"gross_fill_breakdown": [{"date": "2026-08-10", "qty": 99}]},
+    {"fill_breakdown": [{"date": "2026-08-10", "qty": 99}]},
+])
+def test_apply_refuses_changed_validated_payload(change):
+    original = _agg(["101", "102", "103", "104"], contracts=12)
+    plan = _plan([("agg", original)], FULL)
+    db = _db([("agg", {**original, **change})])
+    before = _snapshot(db)
+    with pytest.raises(RuntimeError, match="changed since planning"):
+        rebuild._apply(db, plan)
+    assert _snapshot(db) == before
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_apply_refuses_new_competing_claim(existing):
+    rows = [("agg", _agg(["101", "102", "103", "104"], contracts=12))]
+    if existing:
+        rows.append(("competitor", _agg(["7", "8"])))
+    plan = _plan(rows, FULL)
+    db = _db(rows)
+    competitor = _agg(["101", "105"])
+    db.execute("INSERT OR REPLACE INTO journal VALUES (?, ?)",
+               ("competitor", json.dumps(competitor)))
+    db.commit()
+    before = _snapshot(db)
+    with pytest.raises(RuntimeError, match="changed since planning"):
+        rebuild._apply(db, plan)
+    assert _snapshot(db) == before
+    assert rebuild.FIELD not in json.loads(before["agg"])
+
+
+def test_apply_refuses_deleted_snapshot_row():
+    rows = [("agg", _agg(["101", "102", "103", "104"], contracts=12)),
+            ("old", _agg(["7", "8"]))]
+    plan = _plan(rows, FULL)
+    db = _db(rows[:1])
+    before = _snapshot(db)
+    with pytest.raises(RuntimeError, match="changed since planning"):
+        rebuild._apply(db, plan)
+    assert _snapshot(db) == before
+
+
+def test_apply_rolls_back_prior_stamp_on_mid_batch_conflict():
+    rows = [("first", _agg(["101", "102", "103", "104"], contracts=12)),
+            ("second", _agg(["201", "202"]))]
+    xml = _xml(_trade("201", "20260810;100000", "BUY", 10),
+               _trade("202", "20260811;100000", "SELL", 10))
+    plan = _plan(rows, FULL, xml)
+    assert len(plan["stamp"]) == 2
+    db = _db(rows)
+    # A real transactional side effect changes the second row after the first write.
+    db.execute("""CREATE TRIGGER conflict AFTER UPDATE ON journal
+                  WHEN NEW.trade_id = 'first' BEGIN
+                  UPDATE journal SET payload = '{}' WHERE trade_id = 'second'; END""")
+    before = _snapshot(db)
+    with pytest.raises(RuntimeError):
+        rebuild._apply(db, plan)
+    assert _snapshot(db) == before
+
+
+def test_apply_serializes_snapshot_validation_against_competing_writer(tmp_path):
+    path = tmp_path / "journal.db"
+    db = sqlite3.connect(path)
+    db.execute("CREATE TABLE journal (trade_id TEXT PRIMARY KEY, payload TEXT)")
+    payload = _agg(["101", "102", "103", "104"], contracts=12)
+    db.execute("INSERT INTO journal VALUES (?, ?)", ("agg", json.dumps(payload)))
+    db.commit()
+    plan = _plan([("agg", payload)], FULL)
+    competitor = sqlite3.connect(path, timeout=0)
+    attempts = []
+
+    class RacingConnection:
+        def execute(self, sql, params=()):
+            if sql.startswith("SELECT") and not attempts:
+                attempts.append(True)
+                with pytest.raises(sqlite3.OperationalError, match="locked"):
+                    competitor.execute("INSERT INTO journal VALUES (?, ?)",
+                                       ("competing", json.dumps(_agg(["101", "105"]))))
+                competitor.rollback()
+            return db.execute(sql, params)
+
+        def commit(self):
+            db.commit()
+
+        def rollback(self):
+            db.rollback()
+
+    try:
+        assert rebuild._apply(RacingConnection(), plan) == 1
+        assert attempts == [True]
+        assert set(_snapshot(db)) == {"agg"}
+    finally:
+        competitor.close()
+        db.close()
+
+
+@pytest.mark.parametrize("changed", [False, True])
+def test_apply_uses_native_libsql_transaction(changed):
+    import subprocess
+    import sys
+
+    # The suite's global fixture replaces libsql.connect. An isolated interpreter
+    # exercises the installed driver against an in-memory database only.
+    code = r"""
+import json
+import sys
+import libsql_experimental as libsql
+from scripts import rebuild_flex_gross_breakdown as rebuild
+from scripts.tests.test_rebuild_flex_gross_breakdown import _agg, _plan, _snapshot, FULL
+
+db = libsql.connect(":memory:")
+db.execute("CREATE TABLE journal (trade_id TEXT PRIMARY KEY, payload TEXT)")
+payload = _agg(["101", "102", "103", "104"], contracts=12)
+db.execute("INSERT INTO journal VALUES (?, ?)", ("agg", json.dumps(payload)))
+db.commit()
+plan = _plan([("agg", payload)], FULL)
+if sys.argv[1] == "True":
+    db.execute("UPDATE journal SET payload = ?", (json.dumps({**payload, "contracts": 99}),))
+    db.commit()
+    before = _snapshot(db)
+    try:
+        rebuild._apply(db, plan)
+    except RuntimeError as exc:
+        assert "changed since planning" in str(exc)
+    else:
+        raise AssertionError("changed snapshot was accepted")
+    assert _snapshot(db) == before
+else:
+    assert rebuild._apply(db, plan) == 1
+    actual = json.loads(_snapshot(db)["agg"])
+    assert actual.pop(rebuild.FIELD) == plan["stamp"][0][rebuild.FIELD]
+    assert actual == payload
+db.close()
+"""
+    result = subprocess.run([sys.executable, "-c", code, str(changed)],
+                            capture_output=True, text=True, timeout=15)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_plan_freezes_mutable_input():
+    payload = _agg(["101", "102", "103", "104"], contracts=12)
+    plan = rebuild.plan_rebuild([("agg", payload)], rebuild.load_statement_executions([FULL]))
+    payload["contracts"] = 99
+    db = _db([("agg", payload)])
+    before = _snapshot(db)
+    with pytest.raises(RuntimeError, match="changed since planning"):
+        rebuild._apply(db, plan)
+    assert _snapshot(db) == before

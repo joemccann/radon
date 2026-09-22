@@ -1219,6 +1219,7 @@ def _shell(
         "series": [],
         "subperiods": [],
         "warnings": list(warnings),
+        "nav_points": [],
     }
 
 
@@ -1596,6 +1597,7 @@ def build_payload(
     }
     payload["series"] = series
     payload["subperiods"] = _subperiod_rows(chain)
+    payload["nav_points"] = [{"date": point["date"], "nav": point["nav"]} for point in series]
     return payload
 
 

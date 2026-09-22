@@ -19,10 +19,10 @@ import ChainInstrumentSidebar, { type HeldChainQuote } from "./ChainInstrumentSi
 import chainStyles from "./ChainInstrumentSidebar.module.css";
 
 /** Deck keys map 1:1 to the glyph rail + URL deck param.
- *  `:` (command palette) and `o` (order ticket) are local-only — not in
- *  VALID_DECKS, so they never reach the URL. `o` is the mobile entry to the
+ *  `o` (order ticket) is local-only — not in
+ *  VALID_DECKS, so it never reaches the URL. `o` is the mobile entry to the
  *  order ticket, which on desktop lives in the Book & trade act column. */
-export type DeckKey = "c" | "p" | "n" | "r" | "s" | "i" | "h" | "f" | ":" | "o";
+export type DeckKey = "c" | "p" | "n" | "r" | "s" | "i" | "h" | "f" | "o";
 
 export type AssetCockpitProps = {
   ticker: string;

@@ -87,6 +87,13 @@ export function resolveRealtimePrice(
     };
   }
 
+  // Options: IB's CLOSE tick stays on the previous session after 16:00 ET
+  // (META 16 Oct 2026 665P: CLOSE 26.70 vs last print 8.10). That is not a
+  // last trade or a last bid/offer. Stocks and cash indexes still use close.
+  if (priceData?.symbol?.includes("_")) {
+    return { price: null, isCalculated: false, isPreviousClose: false };
+  }
+
   // Final fallback: previous-session close. WS broadcasts close on every tick
   // (with disk-cache backfill in scripts/ib_realtime_server.js), so even on a
   // dead market or a sync that fetched no live quote we still surface the most

@@ -22,8 +22,16 @@
 #     installed here (rail 8); this script only checks and reports them.
 set -euo pipefail
 
+# Runner clones' .git is agent-writable; host git here never runs its hooks
+# or fsmonitor (same pin as the loop wrappers and their launchd pre-reset).
+export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null \
+  GIT_CONFIG_KEY_1=core.fsmonitor GIT_CONFIG_VALUE_1=false
+
 WEEKEND_ROOT="${RADON_WEEKEND_ROOT:-$HOME/radon-weekend}"
 WEEKEND_REPO="$WEEKEND_ROOT/radon-security"
+
+HOST_GITDIR="$WEEKEND_ROOT/.gitdirs/security.git"
+DEEPSEC_GITDIR="$WEEKEND_ROOT/.gitdirs/security-deepsec.git"
 DEEPSEC_REPO="$WEEKEND_ROOT/radon-security-deepsec"
 # Per-loop venv. The legacy $WEEKEND_ROOT/venv is not deleted here
 # (operator follow-up after this ships).
@@ -107,8 +115,12 @@ fi
 
 echo "[2/4] dedicated runner clone at $WEEKEND_REPO"
 mkdir -p "$WEEKEND_ROOT"
-if [[ ! -d "$WEEKEND_REPO/.git" ]]; then
-  git clone "$ORIGIN_URL" "$WEEKEND_REPO"
+mkdir -p "$(dirname "$HOST_GITDIR")"
+chmod 700 "$(dirname "$HOST_GITDIR")" 2>/dev/null || true
+if [[ ! -d "$HOST_GITDIR" && ! -e "$WEEKEND_REPO/.git" ]]; then
+  git clone --separate-git-dir="$HOST_GITDIR" "$ORIGIN_URL" "$WEEKEND_REPO"
+elif [[ -d "$WEEKEND_REPO/.git" && ! -d "$HOST_GITDIR" ]]; then
+  git -C "$WEEKEND_REPO" init --separate-git-dir="$HOST_GITDIR"
 fi
 
 # Host-bash lock hygiene (L1-L2). Source the trusted operator checkout, never
@@ -189,8 +201,9 @@ check "no shared-parent lock" test ! -e "$WEEKEND_ROOT/.weekend-runner.lock"
 if [[ -f "$DEEPSEC_REPO/.git" ]]; then
   OLD_WT="$DEEPSEC_REPO.worktree-$(date +%Y%m%d%H%M%S)"
   mv "$DEEPSEC_REPO" "$OLD_WT"
-  git -C "$WEEKEND_REPO" worktree prune
-  git clone "$ORIGIN_URL" "$DEEPSEC_REPO"
+  git --git-dir="$HOST_GITDIR" --work-tree="$WEEKEND_REPO" worktree prune
+  mkdir -p "$(dirname "$DEEPSEC_GITDIR")"
+  git clone --separate-git-dir="$DEEPSEC_GITDIR" "$ORIGIN_URL" "$DEEPSEC_REPO"
   [[ -d "$OLD_WT/.deepsec" ]] && mv "$OLD_WT/.deepsec" "$DEEPSEC_REPO/.deepsec"
   if [[ -d "$OLD_WT/data/radon" ]]; then
     mkdir -p "$DEEPSEC_REPO/data" && mv "$OLD_WT/data/radon" "$DEEPSEC_REPO/data/radon"
@@ -198,12 +211,15 @@ if [[ -f "$DEEPSEC_REPO/.git" ]]; then
   rm -rf "$OLD_WT"
   echo "  converted $DEEPSEC_REPO from a worktree into a standalone clone"
 fi
-if [[ ! -d "$DEEPSEC_REPO/.git" ]]; then
-  git clone "$ORIGIN_URL" "$DEEPSEC_REPO"
+mkdir -p "$(dirname "$DEEPSEC_GITDIR")"
+if [[ ! -d "$DEEPSEC_GITDIR" && ! -e "$DEEPSEC_REPO/.git" ]]; then
+  git clone --separate-git-dir="$DEEPSEC_GITDIR" "$ORIGIN_URL" "$DEEPSEC_REPO"
+elif [[ -d "$DEEPSEC_REPO/.git" && ! -d "$DEEPSEC_GITDIR" ]]; then
+  git -C "$DEEPSEC_REPO" init --separate-git-dir="$DEEPSEC_GITDIR"
 fi
-git -C "$DEEPSEC_REPO" fetch origin --quiet
-git -C "$DEEPSEC_REPO" checkout -f --quiet main
-git -C "$DEEPSEC_REPO" reset --hard --quiet origin/main
+git --git-dir="$DEEPSEC_GITDIR" --work-tree="$DEEPSEC_REPO" fetch origin --quiet
+git --git-dir="$DEEPSEC_GITDIR" --work-tree="$DEEPSEC_REPO" checkout -f --quiet main
+git --git-dir="$DEEPSEC_GITDIR" --work-tree="$DEEPSEC_REPO" reset --hard --quiet origin/main
 mkdir -p "$DEEPSEC_REPO/logs/security-deepsec"
 touch "$DEEPSEC_REPO/.radon-weekend-runner"
 touch "$DEEPSEC_REPO/.radon-security-deepsec-runner"
@@ -212,9 +228,9 @@ echo "  rail 5: web/.env and Radon credentials are NOT provisioned into the Deep
 # An already-provisioned clone must carry the current config/ and scripts/
 # before the job is installed from it. main is force-reset; any weekend
 # branch and its commits survive.
-git -C "$WEEKEND_REPO" fetch origin --quiet
-git -C "$WEEKEND_REPO" checkout -f --quiet main
-git -C "$WEEKEND_REPO" reset --hard --quiet origin/main
+git --git-dir="$HOST_GITDIR" --work-tree="$WEEKEND_REPO" fetch origin --quiet
+git --git-dir="$HOST_GITDIR" --work-tree="$WEEKEND_REPO" checkout -f --quiet main
+git --git-dir="$HOST_GITDIR" --work-tree="$WEEKEND_REPO" reset --hard --quiet origin/main
 touch "$WEEKEND_REPO/.radon-weekend-runner"
 # Rail 1: the security marker the wrapper additionally requires. Without
 # it the wrapper refuses, so a stray RADON_WEEKEND_REPO can never run

@@ -30,6 +30,7 @@ import {
   createPriceData,
   createFundamentalsData,
   parseFundamentalRatios,
+  seedOptionSessionMark,
   updatePriceFromTickPrice,
   updatePriceFromTickSize,
   updatePriceFromTickString,
@@ -603,6 +604,114 @@ function applyCachedClose(data) {
 
 loadCloseCache();
 
+/* ─── Option session last / last bid-offer ────────────────────────────────
+ * After hours IB drops last/bid/ask and keeps CLOSE on the previous session.
+ * Persist the last trade (and last two-sided book) so a restart still has
+ * a mark that is not that close. File: data/option_session_mark_cache.json
+ */
+const SESSION_CACHE_PATH = path.resolve(process.cwd(), "data", "option_session_mark_cache.json");
+const optionSessionCache = new Map();
+
+function etDateString(date = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+function positiveSessionPrice(value) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 && value < 1e307
+    ? value
+    : null;
+}
+
+function loadSessionCache() {
+  try {
+    if (!fs.existsSync(SESSION_CACHE_PATH)) return;
+    const raw = JSON.parse(fs.readFileSync(SESSION_CACHE_PATH, "utf8"));
+    for (const [key, val] of Object.entries(raw || {})) {
+      if (!val || typeof val !== "object") continue;
+      const entry = {};
+      const last = positiveSessionPrice(val.last);
+      const bid = positiveSessionPrice(val.bid);
+      const ask = positiveSessionPrice(val.ask);
+      const mid = positiveSessionPrice(val.mid);
+      if (last) entry.last = last;
+      if (bid) entry.bid = bid;
+      if (ask) entry.ask = ask;
+      if (mid) entry.mid = mid;
+      if (typeof val.checked_on === "string" && val.checked_on) entry.checked_on = val.checked_on;
+      if (entry.last || (entry.bid && entry.ask) || entry.mid || entry.checked_on) {
+        optionSessionCache.set(key, entry);
+      }
+    }
+    if (optionSessionCache.size) {
+      console.log(`Loaded ${optionSessionCache.size} cached option session marks`);
+    }
+  } catch (err) {
+    console.warn("Failed to load option session mark cache:", err.message);
+  }
+}
+
+let sessionCacheDirty = false;
+let sessionCacheTimer = null;
+
+function persistSessionCache() {
+  if (!sessionCacheDirty) return;
+  sessionCacheDirty = false;
+  try {
+    const dir = path.dirname(SESSION_CACHE_PATH);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const obj = Object.fromEntries(optionSessionCache);
+    fs.writeFileSync(SESSION_CACHE_PATH, JSON.stringify(obj), "utf8");
+  } catch (err) {
+    console.warn("Failed to persist option session mark cache:", err.message);
+  }
+}
+
+function scheduleSessionCachePersist() {
+  sessionCacheDirty = true;
+  if (sessionCacheTimer) return;
+  sessionCacheTimer = setTimeout(() => {
+    sessionCacheTimer = null;
+    persistSessionCache();
+  }, 5000);
+}
+
+function updateOptionSessionCache(data) {
+  if (!data || !String(data.symbol || "").includes("_")) return;
+  const prev = optionSessionCache.get(data.symbol) || {};
+  const next = { ...prev };
+  let changed = false;
+  const memoryLast = positiveSessionPrice(data.sessionLast);
+  const prevLast = positiveSessionPrice(prev.last);
+  if (memoryLast !== prevLast) {
+    if (memoryLast == null) delete next.last;
+    else next.last = memoryLast;
+    changed = true;
+  }
+  const memoryBid = positiveSessionPrice(data.sessionBid);
+  const memoryAsk = positiveSessionPrice(data.sessionAsk);
+  if (memoryBid != null && memoryAsk != null && (next.bid !== memoryBid || next.ask !== memoryAsk)) {
+    next.bid = memoryBid;
+    next.ask = memoryAsk;
+    changed = true;
+  }
+  const memoryMid = positiveSessionPrice(data.sessionMid);
+  if (memoryMid != null && next.last == null && next.mid !== memoryMid) {
+    next.mid = memoryMid;
+    changed = true;
+  }
+  if (!changed) return;
+  next.checked_on = etDateString();
+  optionSessionCache.set(data.symbol, next);
+  scheduleSessionCachePersist();
+}
+
+loadSessionCache();
+
 /* ─── Keep-Alive State ──────────────────────────────────────────────────── */
 const clientLastPong = new Map(); // client → timestamp (ms)
 let pingIntervalTimer = null;
@@ -999,6 +1108,7 @@ function ensureSymbolState(key, ibContract) {
     data: createPriceData(key),
     lastTickAt: Date.now(),
   };
+  seedOptionSessionMark(state.data, optionSessionCache.get(key));
   symbolStates.set(key, state);
   return state;
 }
@@ -1941,6 +2051,7 @@ function onTickPrice(tickerId, tickType, price) {
     updatePriceFromTickPrice(liveState.data, tickType, price);
     // Cache option close prices to disk for after-hours availability
     updateOptionCloseCache(symbol, liveState.data.close);
+    updateOptionSessionCache(liveState.data);
     verbose(`tick ${symbol} type=${tickType} price=${price}`);
     hydrateAndBroadcast(symbol);
     // Forward-priced index: route the front-month future tick into index.fwd.
