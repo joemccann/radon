@@ -1,9 +1,11 @@
-"""Weekend wrapper-owned Playwright run-server (plan browser cases 1-6)."""
+"""Weekend wrapper-owned Playwright browser server (plan browser cases 1-6)."""
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import time
@@ -53,6 +55,19 @@ def _plant_host(home: Path, *, version: str = "1.58.2", body: str | None = None)
     return bin_path
 
 
+def _plant_node(bin_dir: Path, home: Path) -> None:
+    """Fake node: the launcher runs the planted host body, the smoke passes."""
+    host_bin = home / ".radon" / "agent-cli" / "browser-host" / "node_modules" / ".bin" / "playwright"
+    node = bin_dir / "node"
+    node.write_text(
+        "#!/bin/sh\n"
+        f'case "$*" in *launchServer*) exec "{host_bin}" ;; esac\n'
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    node.chmod(0o755)
+
+
 def _plant_client(repo: Path, version: str = "1.58.2") -> None:
     _plant_pkg(
         repo / "web" / "node_modules" / "@playwright" / "test" / "package.json",
@@ -68,7 +83,9 @@ def _env(tmp_path: Path, repo: Path, bin_dir: Path, extra: dict | None = None) -
         "RADON_WEEKEND_REPO": str(repo),
         "RADON_WEEKEND_PROVIDER_LADDER": CLAUDE_RUNG_LADDER,
         "RADON_WEEKEND_SKIP_PRUNE": "1",
-        "RADON_WEEKEND_BROWSER_HOST_WAIT_SECS": "3",
+        # Each wait tick shells out to ps; under a loaded xdist run 3 ticks
+        # can pass before a stub that prints at once is read.
+        "RADON_WEEKEND_BROWSER_HOST_WAIT_SECS": "10",
         "RADON_WEEKEND_BROWSER_HOST_SMOKE_SECS": "3",
     }
     if extra:
@@ -98,9 +115,7 @@ class TestWeekendBrowserHost:
             tmp_path,
             claude_body=f"#!/bin/sh\nenv > {env_dump}\nexit 0\n",
         )
-        node = bin_dir / "node"
-        node.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-        node.chmod(0o755)
+        _plant_node(bin_dir, home)
         proc = subprocess.run(
             [BASH, str(_cloned_wrapper(repo, name)), "audit"],
             env=_env(tmp_path, repo, bin_dir),
@@ -135,8 +150,7 @@ class TestWeekendBrowserHost:
             tmp_path,
             claude_body=f"#!/bin/sh\nenv > {env_dump}\nexit 0\n",
         )
-        (bin_dir / "node").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-        (bin_dir / "node").chmod(0o755)
+        _plant_node(bin_dir, home)
         proc = subprocess.run(
             [BASH, str(_cloned_wrapper(repo, name)), "audit"],
             env=_env(tmp_path, repo, bin_dir),
@@ -178,8 +192,7 @@ class TestWeekendBrowserHost:
             tmp_path,
             claude_body=f"#!/bin/sh\nenv > {env_dump}\nexit 0\n",
         )
-        (bin_dir / "node").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-        (bin_dir / "node").chmod(0o755)
+        _plant_node(bin_dir, home)
         proc = subprocess.run(
             [BASH, str(_cloned_wrapper(repo, name)), "audit"],
             env=_env(tmp_path, repo, bin_dir),
@@ -221,8 +234,7 @@ class TestWeekendBrowserHost:
             tmp_path,
             claude_body=f"#!/bin/sh\ntouch {started}\nsleep 60\n",
         )
-        (bin_dir / "node").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-        (bin_dir / "node").chmod(0o755)
+        _plant_node(bin_dir, home)
         proc = subprocess.Popen(
             [BASH, str(_cloned_wrapper(repo, name)), "audit"],
             env=_env(tmp_path, repo, bin_dir),
@@ -301,8 +313,7 @@ class TestWeekendBrowserHost:
             tmp_path,
             claude_body=f"#!/bin/sh\nenv > {env_dump}\nexit 0\n",
         )
-        (bin_dir / "node").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-        (bin_dir / "node").chmod(0o755)
+        _plant_node(bin_dir, home)
         for tool, body in (
             ("grep", f'#!/bin/sh\necho "Listening on ws://127.0.0.1:9/evil"\n'),
             ("tail", f'#!/bin/sh\necho "Listening on ws://127.0.0.1:9/evil"\n'),
@@ -345,8 +356,7 @@ class TestWeekendBrowserHost:
             tmp_path,
             claude_body=f"#!/bin/sh\nenv > {env_dump}\nexit 0\n",
         )
-        (bin_dir / "node").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-        (bin_dir / "node").chmod(0o755)
+        _plant_node(bin_dir, home)
         proc = subprocess.run(
             [BASH, str(_cloned_wrapper(repo, name)), "audit"],
             env=_env(tmp_path, repo, bin_dir),
@@ -381,8 +391,7 @@ class TestWeekendBrowserHost:
             tmp_path,
             claude_body=f"#!/bin/sh\nenv > {env_dump}\nexit 0\n",
         )
-        (bin_dir / "node").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-        (bin_dir / "node").chmod(0o755)
+        _plant_node(bin_dir, home)
         proc = subprocess.run(
             [BASH, str(_cloned_wrapper(repo, name)), "audit"],
             env=_env(tmp_path, repo, bin_dir),
@@ -411,8 +420,7 @@ class TestWeekendBrowserHost:
             tmp_path,
             claude_body=f"#!/bin/sh\nenv > {env_dump}\nexit 0\n",
         )
-        (bin_dir / "node").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-        (bin_dir / "node").chmod(0o755)
+        _plant_node(bin_dir, home)
         proc = subprocess.run(
             [BASH, str(_cloned_wrapper(repo, name)), "audit"],
             env=_env(tmp_path, repo, bin_dir),
@@ -441,8 +449,7 @@ class TestWeekendBrowserHost:
             tmp_path,
             claude_body=f"#!/bin/sh\nenv > {env_dump}\nexit 0\n",
         )
-        (bin_dir / "node").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-        (bin_dir / "node").chmod(0o755)
+        _plant_node(bin_dir, home)
         (bin_dir / "readlink").write_text(
             "#!/bin/sh\necho /spoofed/in-tree/playwright\n",
             encoding="utf-8",
@@ -459,3 +466,67 @@ class TestWeekendBrowserHost:
         assert "unavailable:" in combined, combined
         dumped = env_dump.read_text(encoding="utf-8") if env_dump.exists() else ""
         assert "PW_TEST_CONNECT_WS_ENDPOINT=" not in dumped
+
+
+class TestBrowserHostFixedLaunch:
+    """The agent holds the endpoint; it must not choose how the host browser launches."""
+
+    @pytest.mark.parametrize("name", sorted(HOST_LOOPS))
+    def test_no_client_launch_path_and_no_weak_token(self, name):
+        text = HOST_LOOPS[name].read_text(encoding="utf-8")
+        start = text[text.index("start_browser_host() {") : text.index("\non_signal()")]
+        assert "run-server" not in start
+        assert "launchServer" in start
+        assert "tok$$" not in start
+        assert "unavailable:no-token" in start
+        assert 'require("playwright")' not in start
+
+    @pytest.mark.skipif(shutil.which("node") is None, reason="needs a real node")
+    @pytest.mark.parametrize("name", sorted(HOST_LOOPS))
+    def test_fixed_launch_options_and_host_module_only(self, name, tmp_path):
+        repo = _runner_clone(tmp_path, name)
+        home = tmp_path / "home"
+        home.mkdir()
+        _plant_host(home)
+        _plant_client(repo)
+        record = tmp_path / "launch.json"
+        canary = tmp_path / "clone-module-loaded"
+        host_mod = home / ".radon" / "agent-cli" / "browser-host" / "node_modules" / "playwright" / "index.js"
+        host_mod.write_text(
+            "const fs=require('fs');module.exports={chromium:{"
+            f"launchServer:async(o)=>{{fs.writeFileSync({str(record)!r},JSON.stringify(o));"
+            "setInterval(()=>{},1000);return {wsEndpoint:()=>'ws://127.0.0.1:4711'+o.wsPath};},"
+            "connect:async()=>({newPage:async()=>({setContent:async()=>{}}),close:async()=>{}})}};\n",
+            encoding="utf-8",
+        )
+        clone_mod = repo / "node_modules" / "playwright" / "index.js"
+        clone_mod.parent.mkdir(parents=True)
+        clone_mod.write_text(
+            f"require('fs').writeFileSync({str(canary)!r},'x');"
+            "module.exports={chromium:{connect:async()=>({newPage:async()=>({setContent:async()=>{}}),close:async()=>{}})}};\n",
+            encoding="utf-8",
+        )
+        env_dump = tmp_path / "agent.env"
+        bin_dir, _gh, _py = _stub_bin(
+            tmp_path,
+            claude_body=f"#!/bin/sh\nenv > {env_dump}\nexit 0\n",
+        )
+        node_dir = str(Path(shutil.which("node")).parent)
+        env = _env(tmp_path, repo, bin_dir)
+        env["PATH"] = f"{bin_dir}{os.pathsep}{node_dir}{os.pathsep}{os.environ['PATH']}"
+        proc = subprocess.run(
+            [BASH, str(_cloned_wrapper(repo, name)), "audit"],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        combined = _combined(proc, repo)
+        assert not canary.exists(), combined
+        assert record.exists(), combined
+        opts = json.loads(record.read_text(encoding="utf-8"))
+        assert re.fullmatch(r"/[0-9a-f]{32}", opts.pop("wsPath")), opts
+        assert opts == {"headless": True, "host": "127.0.0.1", "port": 0}, opts
+        assert "browser-host=ready" in combined, combined
+        dumped = env_dump.read_text(encoding="utf-8")
+        assert re.search(r"PW_TEST_CONNECT_WS_ENDPOINT=ws://127\.0\.0\.1:4711/[0-9a-f]{32}\n", dumped), dumped

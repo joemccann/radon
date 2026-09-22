@@ -435,7 +435,7 @@ how this loop improves as the codebase grows.
   Seatbelt (`mach-register` for
   `org.chromium.Chromium.MachPortRendezvousServer.<pid>` dies
   `Permission denied (1100)` / SIGTRAP). The wrapper owns
-  `playwright run-server` on the host and exports
+  a fixed-option Playwright `launchServer` on the host and exports
   `PW_TEST_CONNECT_WS_ENDPOINT`. Never reclaim or `kill -0` a runner lock
   from the sandbox: EPERM is not death. Operator repair is
   `bash scripts/setup_testing_weekend.sh`.
