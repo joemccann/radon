@@ -137,9 +137,25 @@ class TestNonSystemdHost:
         assert "radon-ib-gateway.service" in units
 
     def test_show_unit_reports_unsupported(self) -> None:
-        with patch.object(admin_services, "is_systemd_available", return_value=False):
+        with patch.object(admin_services, "is_systemd_available", return_value=False), \
+             patch.object(admin_services, "read_host_unit_states", return_value={}):
             status = asyncio.run(admin_services.show_unit("radon-api.service"))
         assert status.load_state == "unsupported"
+        assert status.can_control is False
+
+    def test_show_unit_uses_host_health_when_systemctl_is_absent(self) -> None:
+        observed = {
+            "radon-api.service": {
+                "active_state": "active",
+                "sub_state": "running",
+            },
+        }
+        with patch.object(admin_services, "is_systemd_available", return_value=False), \
+             patch.object(admin_services, "read_host_unit_states", return_value=observed):
+            status = asyncio.run(admin_services.show_unit("radon-api.service"))
+        assert status.load_state == "host-health"
+        assert status.active_state == "active"
+        assert status.sub_state == "running"
         assert status.can_control is False
 
     def test_app_gateway_status_does_not_need_systemctl(self, tmp_path: Path, monkeypatch) -> None:
@@ -174,7 +190,8 @@ class TestNonSystemdHost:
         assert "systemctl" in result.detail.lower()
 
     def test_list_units_with_status_returns_full_payload(self) -> None:
-        with patch.object(admin_services, "is_systemd_available", return_value=False):
+        with patch.object(admin_services, "is_systemd_available", return_value=False), \
+             patch.object(admin_services, "read_host_unit_states", return_value={}):
             statuses = asyncio.run(admin_services.list_units_with_status())
         assert len(statuses) > 0
         for s in statuses:

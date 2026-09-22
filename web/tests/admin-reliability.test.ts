@@ -50,7 +50,11 @@ describe("unitVerdict", () => {
   it("failed job rc!=0", () => expect(unitVerdict(jobFailed)).toEqual({ label: "Failed", tone: "negative" }));
   it("starting", () => expect(unitVerdict(starting)).toEqual({ label: "Starting", tone: "warning" }));
   it("oneshot active+exited reads idle/positive", () => expect(unitVerdict(oneshotExited)).toEqual({ label: "Idle", tone: "positive" }));
-  it("uncontrollable is unknown", () => expect(unitVerdict(uncontrollable)).toEqual({ label: "Unknown", tone: "neutral" }));
+  it("known state is shown even when the API container cannot systemctl", () =>
+    expect(unitVerdict(uncontrollable)).toEqual({ label: "Running", tone: "positive" }));
+  it("no evidence stays unknown", () =>
+    expect(unitVerdict(unit({ can_control: false, active_state: "unknown", sub_state: "unknown" })))
+      .toEqual({ label: "Unknown", tone: "neutral" }));
 });
 
 describe("unitDependents / cascade map", () => {
@@ -64,9 +68,13 @@ describe("unitDependents / cascade map", () => {
 });
 
 describe("serviceControlDisabledReason", () => {
-  it("read-only when unsupported", () =>
+  it("read-only when unsupported off the VPS", () =>
     expect(serviceControlDisabledReason({ unit: daemonRunning, action: "restart", supported: false, pending: false }))
       .toMatch(/Read-only/));
+  it("app container names the real limit instead of blaming the browser", () =>
+    expect(serviceControlDisabledReason({
+      unit: daemonRunning, action: "restart", supported: false, pending: false, hostRole: "app",
+    })).toMatch(/API container/));
   it("allowlist when not controllable", () =>
     expect(serviceControlDisabledReason({ unit: uncontrollable, action: "restart", supported: true, pending: false }))
       .toMatch(/allowlist/));
@@ -84,7 +92,7 @@ describe("serviceControlDisabledReason", () => {
 describe("livenessSummary", () => {
   it("counts healthy controllable units", () => {
     expect(livenessSummary([daemonRunning, daemonStopped, jobIdleOk, uncontrollable]))
-      .toEqual({ ok: 2, total: 3 }); // running + idle-ok healthy; stopped not; uncontrollable excluded
+      .toEqual({ ok: 3, total: 4 }); // running daemon, idle job, observed-but-uncontrollable; stopped is not ok
   });
 });
 
