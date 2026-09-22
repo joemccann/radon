@@ -181,7 +181,6 @@ for (const theme of ["light", "dark"] as const) {
         { label: "Company", deck: "i", content: ".company-tab" },
         { label: "13F holdings", deck: "h", text: "No 13F positioning yet" },
         { label: "Filings", deck: "f", text: "No dossier yet" },
-        { label: "Commands", deck: null, content: ".asset-deck-palette" },
       ]) {
         await sidebar.locator("summary").click();
         await sidebar.getByRole("button", { name: view.label, exact: true }).click();
@@ -194,8 +193,12 @@ for (const theme of ["light", "dark"] as const) {
         expect(await sidebar.boundingBox()).toEqual(originalSidebar);
       }
 
-      // Commands has no URL form; Escape restores book+trade without changing
-      // instrument identity, and the keyboard shortcuts reopen reference views.
+      await sidebar.locator("summary").click();
+      await expect(sidebar.getByRole("button", { name: "Commands", exact: true })).toHaveCount(0);
+      await sidebar.locator("summary").click();
+
+      // Escape restores book+trade without changing instrument identity, and
+      // the remaining keyboard shortcuts reopen reference views.
       await page.keyboard.press("Escape");
       await expect(page.locator(".asset-deck.open")).toHaveCount(0);
       await expect(page.locator(".book-region")).toBeVisible();
@@ -204,6 +207,12 @@ for (const theme of ["light", "dark"] as const) {
       await expectDesktopCanvas(page);
       await expect(sidebar.getByRole("button", { name: /^Book & trade/ }).last()).toHaveAttribute("aria-current", "page");
       await screenshot(page, testInfo, `${theme}-${viewport.width}-book`);
+      await page.keyboard.press(":");
+      await expect(page.locator(".asset-deck.open")).toHaveCount(0);
+      await expect(page.getByText("Command Palette", { exact: true })).toHaveCount(0);
+      await page.keyboard.press("p");
+      await expectDeckUrl(page, "p");
+      await expect(page.locator(".pos-legs-table tbody tr")).toHaveCount(2);
       await page.keyboard.press("n");
       await expectDeckUrl(page, "n");
       await expect(page.locator(".news-item")).toHaveCount(30);
