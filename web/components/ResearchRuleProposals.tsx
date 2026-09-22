@@ -65,42 +65,46 @@ export default function ResearchRuleProposals() {
 
   if (!proposed.length && !approved.length && !rejected.length && !error) return null;
   return <section className={styles.rules} aria-label="Triage rules">
-    {proposed.length ? <>
+    {proposed.length ? <div className={styles.ruleGroup}>
       <h4 className={styles.rulesTitle}>Proposed rules</h4>
-      <ul className={styles.list} aria-label="Proposed rules">
-        {proposed.map(rule => <li key={rule.id} className={styles.item}>
-          <p className={styles.file}>{describe(rule)}</p>
-          <p className={styles.note}>{`You rejected ${rule.downs} of its items and approved none.`}</p>
+      <ul className={styles.ruleList} aria-label="Proposed rules">
+        {proposed.map(rule => <li key={rule.id} className={styles.ruleItem}>
+          <div className={styles.ruleCopy}>
+            <p className={styles.file}>{describe(rule)}</p>
+            <p className={styles.note}>{`You rejected ${rule.downs} of its items and approved none.`}</p>
+          </div>
           <div className={styles.ruleActions}>
-            <button type="button" className={styles.ruleButton} disabled={busy === rule.id} onClick={() => decide(rule, "approve")}>Approve rule</button>
+            <button type="button" className={`${styles.ruleButton} ${styles.ruleButtonPrimary}`} disabled={busy === rule.id} onClick={() => decide(rule, "approve")}>Approve rule</button>
             <button type="button" className={styles.ruleButton} disabled={busy === rule.id} onClick={() => decide(rule, "reject")}>Reject</button>
           </div>
         </li>)}
       </ul>
-    </> : null}
-    {approved.length ? <>
+    </div> : null}
+    {approved.length ? <div className={styles.ruleGroup}>
       <h4 className={styles.rulesTitle}>Active rules</h4>
-      <ul className={styles.list} aria-label="Active rules">
-        {approved.map(rule => <li key={rule.id} className={styles.item}>
+      <ul className={styles.ruleList} aria-label="Active rules">
+        {approved.map(rule => <li key={rule.id} className={`${styles.ruleItem} ${styles.ruleItemActive}`}>
           <p className={styles.file}>{describe(rule)}</p>
           <div className={styles.ruleActions}>
             <button type="button" className={styles.ruleButton} disabled={busy === rule.id} onClick={() => decide(rule, "revoke")}>Revoke</button>
           </div>
         </li>)}
       </ul>
-    </> : null}
-    {rejected.length ? <>
+    </div> : null}
+    {rejected.length ? <div className={styles.ruleGroup}>
       <h4 className={styles.rulesTitle}>Rejected rules</h4>
-      <ul className={styles.list} aria-label="Rejected rules">
-        {rejected.map(rule => <li key={rule.id} className={styles.item}>
-          <p className={styles.file}>{describe(rule)}</p>
-          <p className={styles.note}>Rejected. Approve to make it active.</p>
+      <ul className={styles.ruleList} aria-label="Rejected rules">
+        {rejected.map(rule => <li key={rule.id} className={`${styles.ruleItem} ${styles.ruleItemRejected}`}>
+          <div className={styles.ruleCopy}>
+            <p className={styles.file}>{describe(rule)}</p>
+            <p className={styles.note}>Rejected. Approve to make it active.</p>
+          </div>
           <div className={styles.ruleActions}>
-            <button type="button" className={styles.ruleButton} disabled={busy === rule.id} onClick={() => decide(rule, "approve")}>Approve rule</button>
+            <button type="button" className={`${styles.ruleButton} ${styles.ruleButtonPrimary}`} disabled={busy === rule.id} onClick={() => decide(rule, "approve")}>Approve rule</button>
           </div>
         </li>)}
       </ul>
-    </> : null}
+    </div> : null}
     {error ? <ErrorToast message={error} /> : null}
   </section>;
 }
